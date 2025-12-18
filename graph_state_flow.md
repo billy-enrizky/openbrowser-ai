@@ -1,3 +1,4 @@
+```mermaid
 graph LR
     subgraph "State Flow Through Graph"
         S1["`**Initial State**
@@ -39,4 +40,4 @@ graph LR
     %% Styling
     classDef stateNode fill:#e1bee7,stroke:#7b1fa2,stroke-width:2px
     class S1,S2,S3,S4,S5,S6 stateNode
-
+```
