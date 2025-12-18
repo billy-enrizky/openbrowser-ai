@@ -1,3 +1,4 @@
+```mermaid
 graph TB
     subgraph "Browser-Use LangGraph Execution Flow"
         START([START]) --> prepare_context
@@ -82,4 +83,4 @@ graph TB
     class prepare_context,get_next_action,execute_actions,post_process,finalize processNode
     class should_continue decisionNode
     class handle_error errorNode
-
+```

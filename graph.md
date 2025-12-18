@@ -1,3 +1,4 @@
+```mermaid
 graph TD
     START([START]) --> prepare_context[prepare_context<br/>Prepare browser state and context]
     
@@ -32,4 +33,4 @@ graph TD
     class prepare_context,get_next_action,execute_actions,post_process,finalize processNode
     class should_continue decisionNode
     class handle_error errorNode
-
+```
