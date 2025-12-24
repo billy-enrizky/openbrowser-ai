@@ -5,3 +5,4 @@ __pycache__
 *.csv
 *.json
 test*
+.env
