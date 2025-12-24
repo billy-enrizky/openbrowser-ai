@@ -362,43 +362,27 @@ class BrowserToolKit:
         Returns:
             List of StructuredTool instances for navigate, click_element, and type_text
         """
-        # Create tool wrappers that handle async execution
+        # Define the async functions
         async def navigate_tool(url: str) -> str:
-            """Navigate to a URL.
-            
-            Args:
-                url: The URL to navigate to
-            """
             return await self.navigate(url)
 
         async def click_element_tool(index: int) -> str:
-            """Click an element by its index.
-            
-            Args:
-                index: The element index from the selector map
-            """
             return await self.click_element(index)
 
         async def type_text_tool(index: int, text: str) -> str:
-            """Type text into an element by its index.
-            
-            Args:
-                index: The element index from the selector map
-                text: The text to type
-            """
             return await self.type_text(index, text)
 
-        # Wrap async functions as LangChain tools
-        # LangChain tools can handle async functions, but we need to ensure
-        # they're properly wrapped
+        # CRITICAL FIX: Use 'coroutine=' for async functions
         tools = [
             StructuredTool.from_function(
-                func=navigate_tool,
+                func=None,  # No synchronous fallback
+                coroutine=navigate_tool,  # Explicitly assign async handler
                 name="navigate",
                 description="Navigate to a URL. Use this to go to a webpage.",
             ),
             StructuredTool.from_function(
-                func=click_element_tool,
+                func=None,
+                coroutine=click_element_tool,
                 name="click_element",
                 description=(
                     "Click an element by its index. The index corresponds to "
@@ -407,7 +391,8 @@ class BrowserToolKit:
                 ),
             ),
             StructuredTool.from_function(
-                func=type_text_tool,
+                func=None,
+                coroutine=type_text_tool,
                 name="type_text",
                 description=(
                     "Type text into an input element by its index. The element "
