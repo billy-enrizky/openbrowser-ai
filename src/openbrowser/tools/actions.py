@@ -1,5 +1,6 @@
 """Browser action tools for LangChain integration."""
 
+import asyncio
 import logging
 from typing import Optional
 
@@ -36,6 +37,61 @@ class BrowserToolKit:
         """
         self._selector_map = dom_state.selector_map
         logger.info(f"Updated selector map with {len(self._selector_map)} elements")
+
+    async def _highlight_element(
+        self,
+        client: CDPClient,
+        session_id: str,
+        backend_node_id: int,
+    ) -> None:
+        """Highlight an element with a red outline and scroll it into view.
+        
+        Args:
+            client: CDP client instance
+            session_id: CDP session ID
+            backend_node_id: Backend node ID of the element to highlight
+        """
+        try:
+            # Enable required domains
+            try:
+                await client.send.DOM.enable(session_id=session_id)
+                await client.send.Runtime.enable(session_id=session_id)
+            except Exception:
+                # Domains might already be enabled
+                pass
+
+            # Resolve backend_node_id to JavaScript object
+            resolve_result = await client.send.DOM.resolveNode(
+                params={"backendNodeId": backend_node_id}, session_id=session_id
+            )
+
+            if "object" not in resolve_result or "objectId" not in resolve_result["object"]:
+                logger.warning(f"Failed to resolve node {backend_node_id} to JavaScript object")
+                return
+
+            object_id = resolve_result["object"]["objectId"]
+
+            # Apply highlighting via JavaScript
+            await client.send.Runtime.callFunctionOn(
+                params={
+                    "objectId": object_id,
+                    "functionDeclaration": """
+                    function() {
+                        this.style.outline = "3px solid red";
+                        this.style.transition = "outline 0.3s";
+                        this.scrollIntoView({behavior: "smooth", block: "center", inline: "nearest"});
+                    }
+                    """,
+                    "returnByValue": False,
+                },
+                session_id=session_id,
+            )
+
+            logger.debug(f"Highlighted element with backend_node_id {backend_node_id}")
+
+        except Exception as e:
+            # Don't crash the agent if highlighting fails
+            logger.warning(f"Failed to highlight element {backend_node_id}: {e}")
 
     async def navigate(
         self,
@@ -182,6 +238,10 @@ class BrowserToolKit:
 
             logger.info(f"Clicking at coordinates ({x:.1f}, {y:.1f})")
 
+            # Highlight element before clicking
+            await self._highlight_element(client, session_id, backend_node_id)
+            await asyncio.sleep(0.5)  # Allow time for visual feedback
+
             # Dispatch mouse press event
             await client.send.Input.dispatchMouseEvent(
                 params={
@@ -260,6 +320,19 @@ class BrowserToolKit:
                 )
 
         try:
+            # Validate index exists
+            if index not in self._selector_map:
+                raise ValueError(
+                    f"Element index {index} not found in selector_map. "
+                    f"Available indices: {list(self._selector_map.keys())}"
+                )
+
+            backend_node_id = self._selector_map[index]
+
+            # Highlight element before typing
+            await self._highlight_element(client, session_id, backend_node_id)
+            await asyncio.sleep(0.5)  # Allow time for visual feedback
+
             # First click to focus (reusing the session)
             await self.click_element(index, client=client, session_id=session_id)
 
