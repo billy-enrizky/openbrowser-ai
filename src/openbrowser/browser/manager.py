@@ -116,10 +116,17 @@ class BrowserManager:
             "--no-first-run",
             "--no-default-browser-check",
             "--disable-extensions",
+            # --- ANTI-BOT EVASION FLAGS ---
+            # Note: --disable-blink-features=AutomationControlled removed due to Chrome deprecation
+            # Using alternative anti-detection methods instead
+            "--start-maximized",
+            "--window-size=1920,1080",
+            # FIX: Ensure User-Agent is a single string without accidental line breaks
+            "--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         ]
 
         if self.headless:
-            launch_args.extend(["--headless", "--disable-gpu"])
+            launch_args.extend(["--headless=new"])  # Use new headless mode (better detection evasion)
 
         # Launch Chrome process
         self._process = await asyncio.create_subprocess_exec(
