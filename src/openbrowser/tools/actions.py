@@ -446,6 +446,11 @@ class BrowserToolKit:
             )
 
             logger.info(f"Successfully pressed key: {key}")
+            
+            # If pressing Enter, wait a bit for navigation to start
+            if key == "Enter":
+                await asyncio.sleep(1.0)  # Give time for form submission/navigation
+            
             return f"Pressed key: {key}"
 
         finally:
@@ -512,4 +517,12 @@ class BrowserToolKit:
         ]
 
         return tools
+
+    def get_tools_map(self) -> dict[str, StructuredTool]:
+        """Get a dictionary mapping tool names to tool instances.
+        
+        Returns:
+            Dictionary mapping tool names to StructuredTool instances
+        """
+        return {tool.name: tool for tool in self.get_tools()}
 
