@@ -6,15 +6,16 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "langgraph",
-    "langchain-core",
-    "langchain-openai", 
-    "pydantic",
+    "langchain-core>=0.3.0",
+    "langchain-openai>=0.2.0", 
+    "pydantic>=2.0.0",
     "playwright",
     "python-dotenv",
     "httpx>=0.28.1",
     "websockets>=15.0.1",
     "aiofiles",
-    "cdp-use"
+    "cdp-use",
+    "google-genai>=0.2.0",
 ]
 
 [build-system]
