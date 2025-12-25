@@ -117,10 +117,11 @@ class BrowserManager:
             "--no-default-browser-check",
             "--disable-extensions",
             # --- ANTI-BOT EVASION FLAGS ---
-            "--disable-blink-features=AutomationControlled",
+            # Note: --disable-blink-features=AutomationControlled removed due to Chrome deprecation
+            # Using alternative anti-detection methods instead
             "--start-maximized",
             "--window-size=1920,1080",
-            # Use a real Mac User-Agent to fool Google
+            # FIX: Ensure User-Agent is a single string without accidental line breaks
             "--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         ]
 
