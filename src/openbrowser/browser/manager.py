@@ -71,6 +71,8 @@ class BrowserManager:
         self._process: Optional[asyncio.subprocess.Process] = None
         self._cdp_url: Optional[str] = None
         self._browser_executable: Optional[str] = None
+        self._cdp_client: Optional[CDPClient] = None
+        self._session_id: Optional[str] = None
 
     async def start(self) -> None:
         """Start the Chrome browser process and wait for CDP to be ready."""
@@ -172,6 +174,9 @@ class BrowserManager:
 
         logger.info(f"CDP connection ready at {self._cdp_url}")
 
+        # Create persistent CDP client connection
+        await self._create_persistent_connection()
+
     async def _wait_for_cdp_ready(self, timeout: int = 20) -> str:
         """Wait for Chrome CDP to be ready and return websocket URL.
         
@@ -206,54 +211,106 @@ class BrowserManager:
 
         raise RuntimeError(f"CDP not ready after {timeout} seconds")
 
-    async def get_session(self) -> tuple[CDPClient, str]:
-        """Get a CDP client connected to the browser with an attached session.
+    async def _create_persistent_connection(self) -> None:
+        """Create and store a persistent CDP client connection.
         
-        Returns:
-            Tuple of (CDPClient, session_id) where session_id is from attaching
-            to the first page target.
-            
-        Raises:
-            RuntimeError: If browser is not started or no page targets found
+        This connection is created once in start() and reused throughout
+        the browser session until stop() is called.
         """
         if self._cdp_url is None:
-            raise RuntimeError("Browser not started. Call start() first.")
+            raise RuntimeError("CDP URL not available. Call start() first.")
 
-        logger.info("Creating CDP client connection")
+        if self._cdp_client is not None:
+            logger.warning("Persistent CDP connection already exists")
+            return
+
+        logger.info("Creating persistent CDP client connection")
 
         # Create and start CDP client
-        client = CDPClient(self._cdp_url)
-        await client.start()
+        self._cdp_client = CDPClient(self._cdp_url)
+        await self._cdp_client.start()
 
-        logger.info("CDP client connected")
+        logger.info("Persistent CDP client connected")
 
         # Get all targets
         logger.info("Fetching browser targets")
-        targets_result = await client.send.Target.getTargets()
+        targets_result = await self._cdp_client.send.Target.getTargets()
         page_targets = [
             t for t in targets_result["targetInfos"] if t["type"] == "page"
         ]
 
         if not page_targets:
-            await client.stop()
+            await self._cdp_client.stop()
+            self._cdp_client = None
             raise RuntimeError("No page targets found in browser")
 
         target_id = page_targets[0]["targetId"]
         logger.info(f"Attaching to target: {target_id}")
 
         # Attach to the first page target
-        attach_result = await client.send.Target.attachToTarget(
+        attach_result = await self._cdp_client.send.Target.attachToTarget(
             params={"targetId": target_id, "flatten": True}
         )
-        session_id = attach_result["sessionId"]
+        self._session_id = attach_result["sessionId"]
 
-        if not session_id:
-            await client.stop()
+        if not self._session_id:
+            await self._cdp_client.stop()
+            self._cdp_client = None
             raise RuntimeError("Failed to attach to target: no session ID returned")
 
-        logger.info(f"Attached to target with session_id: {session_id}")
+        logger.info(f"Attached to target with session_id: {self._session_id}")
 
-        return client, session_id
+    @property
+    def cdp_client(self) -> CDPClient:
+        """Get the persistent CDP client.
+        
+        Returns:
+            The persistent CDPClient instance
+            
+        Raises:
+            RuntimeError: If browser is not started or connection not established
+        """
+        if self._cdp_client is None:
+            raise RuntimeError(
+                "CDP client not initialized. Call start() first to establish connection."
+            )
+        return self._cdp_client
+
+    @property
+    def session_id(self) -> str:
+        """Get the persistent session ID.
+        
+        Returns:
+            The session ID for the attached target
+            
+        Raises:
+            RuntimeError: If browser is not started or session not established
+        """
+        if self._session_id is None:
+            raise RuntimeError(
+                "Session ID not initialized. Call start() first to establish connection."
+            )
+        return self._session_id
+
+    async def get_session(self) -> tuple[CDPClient, str]:
+        """Get the persistent CDP client and session ID.
+        
+        Returns the cached persistent connection created in start().
+        This method now returns the same connection for the lifetime
+        of the browser session, eliminating connection overhead.
+        
+        Returns:
+            Tuple of (CDPClient, session_id) from the persistent connection
+            
+        Raises:
+            RuntimeError: If browser is not started or connection not established
+        """
+        if self._cdp_client is None or self._session_id is None:
+            raise RuntimeError(
+                "Persistent CDP connection not established. Call start() first."
+            )
+
+        return self._cdp_client, self._session_id
 
     async def take_screenshot(
         self,
@@ -286,12 +343,12 @@ class BrowserManager:
                 "or neither to create a new session."
             )
 
-        # If no client/session provided, create a temporary session
+        # If no client/session provided, use persistent connection
         if client is None:
             client, session_id = await self.get_session()
-            should_close = True
+            should_close = False  # Don't close persistent connection
         else:
-            # Using existing client - don't close it
+            # Using provided client - don't close it
             should_close = False
             if session_id is None:
                 raise RuntimeError(
@@ -382,6 +439,17 @@ class BrowserManager:
         except Exception as e:
             # Ignore errors during pipe cleanup - process is already terminated
             logger.debug(f"Error during pipe cleanup: {e}")
+
+        # Close persistent CDP connection
+        if self._cdp_client is not None:
+            try:
+                logger.info("Closing persistent CDP connection")
+                await self._cdp_client.stop()
+            except Exception as e:
+                logger.warning(f"Error closing CDP client: {e}")
+            finally:
+                self._cdp_client = None
+                self._session_id = None
 
         self._cdp_url = None
         logger.info("Chrome process stopped")
