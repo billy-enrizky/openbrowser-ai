@@ -12,6 +12,16 @@ from src.openbrowser.browser.manager import BrowserManager
 
 logger = logging.getLogger(__name__)
 
+# Key definitions for CDP Input.dispatchKeyEvent
+KEY_DEFINITIONS = {
+    "Enter": {"key": "Enter", "code": "Enter", "windowsVirtualKeyCode": 13},
+    "Tab": {"key": "Tab", "code": "Tab", "windowsVirtualKeyCode": 9},
+    "Backspace": {"key": "Backspace", "code": "Backspace", "windowsVirtualKeyCode": 8},
+    "Escape": {"key": "Escape", "code": "Escape", "windowsVirtualKeyCode": 27},
+    "ArrowDown": {"key": "ArrowDown", "code": "ArrowDown", "windowsVirtualKeyCode": 40},
+    "ArrowUp": {"key": "ArrowUp", "code": "ArrowUp", "windowsVirtualKeyCode": 38},
+}
+
 
 class BrowserToolKit:
     """Toolkit for browser actions with LangChain integration.
@@ -356,6 +366,92 @@ class BrowserToolKit:
             if should_close:
                 await client.stop()
 
+    async def press_key(
+        self,
+        key: str,
+        client: Optional[CDPClient] = None,
+        session_id: Optional[str] = None,
+    ) -> str:
+        """Press a specific key (Enter, Tab, Escape, ArrowDown, ArrowUp).
+        
+        Args:
+            key: Key name (Enter, Tab, Escape, ArrowDown, ArrowUp)
+            client: Optional CDP client. If not provided, creates temporary session
+            session_id: Optional session ID. Must be provided with client
+            
+        Returns:
+            Success message
+            
+        Raises:
+            ValueError: If key not found in KEY_DEFINITIONS
+            RuntimeError: If browser is not started or key press fails
+        """
+        if key not in KEY_DEFINITIONS:
+            available_keys = ", ".join(KEY_DEFINITIONS.keys())
+            raise ValueError(
+                f"Key '{key}' not found. Available keys: {available_keys}"
+            )
+
+        if self.browser_manager._cdp_url is None:
+            raise RuntimeError("Browser not started. Call browser_manager.start() first.")
+
+        # Validate parameters
+        if session_id is not None and client is None:
+            raise RuntimeError(
+                "session_id provided without client. Provide both or neither."
+            )
+
+        # Create temporary session if needed
+        if client is None:
+            client, session_id = await self.browser_manager.get_session()
+            should_close = True
+        else:
+            should_close = False
+            if session_id is None:
+                raise RuntimeError(
+                    "client provided without session_id. Provide both or neither."
+                )
+
+        try:
+            key_def = KEY_DEFINITIONS[key]
+            logger.info(f"Pressing key: {key}")
+
+            # Enable Input domain
+            try:
+                await client.send.Input.enable(session_id=session_id)
+            except Exception:
+                # Domain might already be enabled
+                pass
+
+            # Dispatch keyDown event
+            await client.send.Input.dispatchKeyEvent(
+                params={
+                    "type": "keyDown",
+                    "key": key_def["key"],
+                    "code": key_def["code"],
+                    "windowsVirtualKeyCode": key_def["windowsVirtualKeyCode"],
+                },
+                session_id=session_id,
+            )
+
+            # Dispatch keyUp event
+            await client.send.Input.dispatchKeyEvent(
+                params={
+                    "type": "keyUp",
+                    "key": key_def["key"],
+                    "code": key_def["code"],
+                    "windowsVirtualKeyCode": key_def["windowsVirtualKeyCode"],
+                },
+                session_id=session_id,
+            )
+
+            logger.info(f"Successfully pressed key: {key}")
+            return f"Pressed key: {key}"
+
+        finally:
+            if should_close:
+                await client.stop()
+
     def get_tools(self) -> list[StructuredTool]:
         """Get LangChain tool wrappers for all browser actions.
         
@@ -371,6 +467,9 @@ class BrowserToolKit:
 
         async def type_text_tool(index: int, text: str) -> str:
             return await self.type_text(index, text)
+
+        async def press_key_tool(key: str) -> str:
+            return await self.press_key(key)
 
         # CRITICAL FIX: Use 'coroutine=' for async functions
         tools = [
@@ -398,6 +497,16 @@ class BrowserToolKit:
                     "Type text into an input element by its index. The element "
                     "will be clicked first to focus it, then the text will be "
                     "typed character by character. Use this to fill in text fields."
+                ),
+            ),
+            StructuredTool.from_function(
+                func=None,
+                coroutine=press_key_tool,
+                name="press_key",
+                description=(
+                    "Press a specific key (Enter, Tab, Escape, ArrowDown, ArrowUp). "
+                    "Use this to submit forms or navigate. After typing in a search box, "
+                    "press Enter to submit the search."
                 ),
             ),
         ]
