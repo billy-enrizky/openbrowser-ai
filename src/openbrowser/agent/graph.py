@@ -1,16 +1,18 @@
-"""LangGraph workflow for browser automation agent."""
+"""LangGraph workflow for browser automation agent with Planning and Memory."""
 
 import base64
 import json
 import logging
-from typing import Annotated, Literal, TypedDict
+from typing import Annotated, Literal, TypedDict, List
 
 # CRITICAL FIX: Import add_messages
 from langgraph.graph.message import add_messages
+from langgraph.checkpoint.memory import MemorySaver
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_openai import ChatOpenAI
 from langgraph.graph import END, StateGraph
+from pydantic import BaseModel, Field
 
 from src.openbrowser.browser.dom import DomService
 from src.openbrowser.browser.manager import BrowserManager
@@ -26,6 +28,12 @@ if not OPENAI_API_KEY:
 logger = logging.getLogger(__name__)
 
 
+# --- Data Models for Planning ---
+class TaskPlan(BaseModel):
+    """The broken-down tasks."""
+    steps: List[str] = Field(description="List of sequential steps to achieve the goal")
+
+
 class AgentState(TypedDict):
     """State for the browser automation agent."""
 
@@ -33,6 +41,10 @@ class AgentState(TypedDict):
     messages: Annotated[list[BaseMessage], add_messages]
     screenshot: str  # Base64 encoded screenshot
     dom_tree: str  # Text representation of DOM for LLM
+    # --- New Memory Fields ---
+    root_goal: str  # Original user goal
+    plan: List[str]  # List of decomposed subtasks
+    current_step_index: int  # Current step being executed
 
 
 class BrowserAgent:
@@ -62,6 +74,10 @@ class BrowserAgent:
         self.tools = self.toolkit.get_tools()
         self.llm_with_tools = self.llm.bind_tools(self.tools)
         
+        # --- Initialize Memory ---
+        # This keeps the state in RAM during execution
+        self.memory = MemorySaver()
+        
         # Build and compile the graph
         self.app = self._build_graph(self.tools)
         
@@ -80,14 +96,16 @@ class BrowserAgent:
         workflow = StateGraph(AgentState)
         
         # Add nodes
+        workflow.add_node("decompose", self.decompose_node)
         workflow.add_node("perceive", self.perceive_node)
         workflow.add_node("plan", self.plan_node)
         workflow.add_node("execute", self.execute_node)
         
-        # Set entry point
-        workflow.set_entry_point("perceive")
+        # Start at Decomposition
+        workflow.set_entry_point("decompose")
         
-        # Add edges
+        # Flow: Decompose -> Perceive -> Plan -> Execute/Loop
+        workflow.add_edge("decompose", "perceive")
         workflow.add_edge("perceive", "plan")
         workflow.add_conditional_edges(
             "plan",
@@ -99,8 +117,8 @@ class BrowserAgent:
         )
         workflow.add_edge("execute", "perceive")
         
-        # Compile the graph
-        return workflow.compile()
+        # Compile with checkpointer for memory retrieval
+        return workflow.compile(checkpointer=self.memory)
 
     async def perceive_node(self, state: AgentState) -> dict:
         """Perceive the current browser state.
@@ -150,104 +168,107 @@ class BrowserAgent:
         finally:
             await client.stop()
 
+    async def decompose_node(self, state: AgentState) -> dict:
+        """Break the user's high-level goal into smaller steps.
+        
+        Uses structured output to generate a plan with sequential subtasks.
+        
+        Args:
+            state: Current agent state with user goal in messages
+            
+        Returns:
+            State updates with root_goal, plan, and current_step_index
+        """
+        logger.info("Decomposing task...")
+        goal = state["messages"][0].content
+        
+        # Use structured output to force a JSON list
+        planner_llm = self.llm.with_structured_output(TaskPlan)
+        
+        prompt = (
+            f"Break this browser automation goal into clear, sequential steps.\n"
+            f"Goal: {goal}\n\n"
+            f"Keep steps atomic (e.g., 'Navigate to X', 'Click Y', 'Type Z')."
+        )
+        
+        plan_result = await planner_llm.ainvoke(prompt)
+        
+        logger.info(f"Generated Plan: {plan_result.steps}")
+        
+        return {
+            "root_goal": goal,
+            "plan": plan_result.steps,
+            "current_step_index": 0,
+            # We add a system message to the history to set the stage
+            "messages": [AIMessage(content=f"I have created a plan with {len(plan_result.steps)} steps.")]
+        }
+
     async def plan_node(self, state: AgentState) -> dict:
         """Plan the next action based on current state.
         
-        Constructs messages with screenshot and DOM tree, calls LLM.
+        Decides next action based on the CURRENT subtask. Focuses the agent
+        on one step at a time to prevent context bloat and maintain goal focus.
         
         Args:
             state: Current agent state
             
         Returns:
-            State updates with LLM response messages
+            State updates with LLM response messages or step advancement
         """
-        logger.info("Planning next action")
+        current_idx = state.get("current_step_index", 0)
+        plan = state.get("plan", [])
         
-        # Get all messages from state
-        messages = list(state["messages"])
+        # Safety check if plan is done
+        if current_idx >= len(plan):
+            return {"messages": [AIMessage(content="DONE")]}
+
+        current_task = plan[current_idx]
+        logger.info(f"Processing Step {current_idx + 1}/{len(plan)}: {current_task}")
+
+        # --- Dynamic System Prompt ---
+        # We inject ONLY the current task context to keep the LLM focused
+        system_prompt = (
+            "You are a precise browser automation agent.\n"
+            f"OVERALL GOAL: {state.get('root_goal')}\n"
+            f"YOUR CURRENT TASK: {current_task} (Step {current_idx+1} of {len(plan)})\n\n"
+            "Interact with the page using the provided DOM tree [12].\n"
+            "RULES:\n"
+            "1. Focus ONLY on the Current Task.\n"
+            "2. If the Current Task is finished, respond with 'NEXT STEP'.\n"
+            "3. Only perform ONE action per turn.\n"
+        )
+
+        messages = [SystemMessage(content=system_prompt)]
         
-        # Check if system message already exists
-        has_system_message = any(isinstance(msg, SystemMessage) for msg in messages)
-        
-        # Build messages for LLM call
-        llm_messages = []
-        
-        # Add system message if not present
-        if not has_system_message:
-            system_message = SystemMessage(
-                content=(
-                    "You are a precise browser automation agent. "
-                    "Interact with the page using the provided DOM tree where elements are numbered like [12]. "
-                    "Use tools to navigate, click, and type. "
-                    "\n\nRULES:\n"
-                    "1. CRITICAL: Only perform ONE action per turn. Never call multiple tools at once.\n"
-                    "2. If you click a link that changes the page, stop and wait for the next turn.\n"
-                    "3. If the goal is achieved, simply respond with 'DONE'.\n"
-                    "4. If you encounter an error, try a different approach."
-                )
-            )
-            llm_messages.append(system_message)
-        else:
-            # Include existing system message
-            for msg in messages:
-                if isinstance(msg, SystemMessage):
-                    llm_messages.append(msg)
-                    break
-        
-        # Build conversation history, ensuring ToolMessages follow their AIMessage
-        # OpenAI API requires: AIMessage (with tool_calls) -> ToolMessage(s)
-        # Process messages in order, pairing AIMessages with their ToolMessages
-        i = 0
-        while i < len(messages):
-            msg = messages[i]
-            
-            # Skip system messages (already added)
-            if isinstance(msg, SystemMessage):
-                i += 1
-                continue
-            
-            # If it's an AIMessage, check if it has tool_calls
-            if isinstance(msg, AIMessage):
-                llm_messages.append(msg)
-                i += 1
-                # If it has tool_calls, include all following ToolMessages
-                if hasattr(msg, "tool_calls") and msg.tool_calls:
-                    while i < len(messages) and isinstance(messages[i], ToolMessage):
-                        llm_messages.append(messages[i])
-                        i += 1
-            # Include HumanMessages
-            elif isinstance(msg, HumanMessage):
-                llm_messages.append(msg)
-                i += 1
-            # Skip orphaned ToolMessages (shouldn't happen in normal flow)
-            elif isinstance(msg, ToolMessage):
-                logger.warning(f"Skipping orphaned ToolMessage at index {i} (no preceding AIMessage with tool_calls)")
-                i += 1
-            else:
-                # Include other message types
-                llm_messages.append(msg)
-                i += 1
-        
-        # Add current perception (screenshot + DOM tree) as a new human message
+        # Add recent history (Limit context window if needed, or rely on MemorySaver)
+        # We filter the history to remove old DOM trees to keep it light
+        for m in state["messages"]:
+            if isinstance(m, (HumanMessage, AIMessage, ToolMessage)):
+                # Hack: Don't re-send the huge DOM tree text in history, just the action
+                if isinstance(m, HumanMessage) and "DOM Tree" in m.content:
+                     # Only keep the latest perception (added below)
+                     continue 
+                messages.append(m)
+
+        # Add current perception
         perception_content = f"Current page state:\n\nDOM Tree:\n{state['dom_tree']}"
-        perception_message = HumanMessage(
+        messages.append(HumanMessage(
             content=[
                 {"type": "text", "text": perception_content},
-                {
-                    "type": "image_url",
-                    "image_url": {"url": f"data:image/png;base64,{state['screenshot']}"},
-                },
+                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{state['screenshot']}"}},
             ]
-        )
-        llm_messages.append(perception_message)
+        ))
         
-        # Call LLM with tools
-        response = await self.llm_with_tools.ainvoke(llm_messages)
+        response = await self.llm_with_tools.ainvoke(messages)
         
-        logger.info(f"LLM response: {response.content}")
-        if hasattr(response, "tool_calls") and response.tool_calls:
-            logger.info(f"Tool calls: {len(response.tool_calls)}")
-        
+        # Check if the LLM thinks it's done with this subtask
+        if "NEXT STEP" in str(response.content).upper():
+            logger.info(f"Completed step: {current_task}")
+            return {
+                "current_step_index": current_idx + 1,
+                "messages": [AIMessage(content=f"Completed: {current_task}. Moving to next step.")]
+            }
+            
         return {"messages": [response]}
 
     async def execute_node(self, state: AgentState) -> dict:
@@ -344,27 +365,32 @@ class BrowserAgent:
     def _should_continue(self, state: AgentState) -> Literal["continue", "end"]:
         """Determine if we should continue or end.
         
-        Checks if the last message is an AIMessage with tool calls.
+        Checks if the last message is an AIMessage with tool calls, or if we
+        need to move to the next step in the plan.
         
         Args:
             state: Current agent state
             
         Returns:
-            "continue" if tool calls exist, "end" otherwise
+            "continue" if tool calls exist or moving to next step, "end" otherwise
         """
         messages = state["messages"]
         if not messages:
-            logger.info("No messages, ending workflow")
             return "end"
-            
+        
         last_message = messages[-1]
         
-        # Check if last message is an AIMessage with tool calls
-        if isinstance(last_message, AIMessage) and hasattr(last_message, "tool_calls") and last_message.tool_calls:
-            logger.info("Tool calls detected, continuing to execute")
+        # If we just moved to the next step (AIMessage with text only)
+        if "Moving to next step" in str(last_message.content):
+            # Check if we are actually done
+            if state.get("current_step_index", 0) >= len(state.get("plan", [])):
+                return "end"
+            return "continue"  # Go back to perceive -> plan for the new task
+
+        # If tool calls, execute them
+        if isinstance(last_message, AIMessage) and last_message.tool_calls:
             return "continue"
-        
-        logger.info("No tool calls, ending workflow")
+            
         return "end"
 
     async def run(self, goal: str) -> dict:
@@ -388,16 +414,22 @@ class BrowserAgent:
             client, session_id = await self.browser_manager.get_session()
             
             try:
+                # Configuration for the checkpointer
+                config = {"configurable": {"thread_id": "1"}}
+                
                 # Create initial state
                 initial_state: AgentState = {
                     "messages": [HumanMessage(content=goal)],
                     "screenshot": "",
                     "dom_tree": "",
+                    "root_goal": "",
+                    "plan": [],
+                    "current_step_index": 0
                 }
                 
-                # Run the graph
+                # Pass config to ainvoke to use memory
                 logger.info("Starting graph execution")
-                final_state = await self.app.ainvoke(initial_state)
+                final_state = await self.app.ainvoke(initial_state, config=config)
                 
                 logger.info("Graph execution completed")
                 return final_state
