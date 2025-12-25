@@ -41,6 +41,7 @@ class AgentState(TypedDict):
     messages: Annotated[list[BaseMessage], add_messages]
     screenshot: str  # Base64 encoded screenshot
     dom_tree: str  # Text representation of DOM for LLM
+    url: str  # Current page URL
     # --- New Memory Fields ---
     root_goal: str  # Original user goal
     plan: List[str]  # List of decomposed subtasks
@@ -158,11 +159,27 @@ class BrowserAgent:
             # CRITICAL: Update toolkit state to sync IDs
             self.toolkit.update_state(dom_state)
             
+            # Get current URL from navigation history
+            logger.info("Extracting current URL")
+            try:
+                nav_history = await client.send.Page.getNavigationHistory(session_id=session_id)
+                current_index = nav_history.get("currentIndex", 0)
+                entries = nav_history.get("entries", [])
+                if entries and current_index < len(entries):
+                    current_url = entries[current_index].get("url", "")
+                else:
+                    current_url = ""
+                logger.info(f"Current URL: {current_url}")
+            except Exception as e:
+                logger.warning(f"Failed to get navigation history: {e}")
+                current_url = ""
+            
             logger.info(f"Perception complete: {len(dom_state.selector_map)} interactive elements found")
             
             return {
                 "screenshot": screenshot_b64,
                 "dom_tree": dom_state.element_tree,
+                "url": current_url,
             }
             
         finally:
@@ -225,17 +242,32 @@ class BrowserAgent:
         current_task = plan[current_idx]
         logger.info(f"Processing Step {current_idx + 1}/{len(plan)}: {current_task}")
 
+        # --- Context-Aware Shortcuts ---
+        # Generate hints based on the current URL
+        current_url = state.get("url", "")
+        shortcut_context = ""
+        
+        if "google.com" in current_url.lower():
+            shortcut_context = "HINT: Press 'Enter' after typing in the search box to submit."
+        elif "github.com" in current_url.lower():
+            shortcut_context = "HINT: Press 's' to focus search bar (if not focused). Press 'Enter' to submit searches."
+        else:
+            shortcut_context = "HINT: Use 'Enter' to submit forms after typing. Use 'Tab' to navigate between fields."
+
         # --- Dynamic System Prompt ---
         # We inject ONLY the current task context to keep the LLM focused
         system_prompt = (
             "You are a precise browser automation agent.\n"
             f"OVERALL GOAL: {state.get('root_goal')}\n"
-            f"YOUR CURRENT TASK: {current_task} (Step {current_idx+1} of {len(plan)})\n\n"
+            f"YOUR CURRENT TASK: {current_task} (Step {current_idx+1} of {len(plan)})\n"
+            f"CURRENT URL: {current_url}\n"
+            f"{shortcut_context}\n\n"
             "Interact with the page using the provided DOM tree [12].\n"
             "RULES:\n"
             "1. Focus ONLY on the Current Task.\n"
             "2. If the Current Task is finished, respond with 'NEXT STEP'.\n"
             "3. Only perform ONE action per turn.\n"
+            "4. After typing text into a search box or form field, press 'Enter' to submit.\n"
         )
 
         messages = [SystemMessage(content=system_prompt)]
@@ -422,6 +454,7 @@ class BrowserAgent:
                     "messages": [HumanMessage(content=goal)],
                     "screenshot": "",
                     "dom_tree": "",
+                    "url": "",
                     "root_goal": "",
                     "plan": [],
                     "current_step_index": 0
