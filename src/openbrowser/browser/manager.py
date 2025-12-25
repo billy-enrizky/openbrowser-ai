@@ -116,10 +116,16 @@ class BrowserManager:
             "--no-first-run",
             "--no-default-browser-check",
             "--disable-extensions",
+            # --- ANTI-BOT EVASION FLAGS ---
+            "--disable-blink-features=AutomationControlled",
+            "--start-maximized",
+            "--window-size=1920,1080",
+            # Use a real Mac User-Agent to fool Google
+            "--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         ]
 
         if self.headless:
-            launch_args.extend(["--headless", "--disable-gpu"])
+            launch_args.extend(["--headless=new"])  # Use new headless mode (better detection evasion)
 
         # Launch Chrome process
         self._process = await asyncio.create_subprocess_exec(
