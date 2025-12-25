@@ -395,6 +395,7 @@ class BrowserAgent:
         
         # Add filtered history - preserve AIMessage-ToolMessage pairs
         # OpenAI requires ToolMessages to immediately follow their AIMessage with tool_calls
+        # CRITICAL: ALL tool_call_ids in an AIMessage must have corresponding ToolMessages
         history = state["messages"]
         filtered_history = []
         
@@ -408,15 +409,53 @@ class BrowserAgent:
                 i -= 1
                 continue
             
-            # If it's a ToolMessage, include it and its preceding AIMessage
+            # If it's a ToolMessage, collect all consecutive ToolMessages and check if they match an AIMessage
             if isinstance(msg, ToolMessage):
-                filtered_history.insert(0, msg)
+                # Collect all consecutive ToolMessages starting from current position
+                tool_messages = []
+                j = i
+                while j >= 0 and isinstance(history[j], ToolMessage):
+                    tool_messages.insert(0, history[j])  # Insert at beginning to maintain order
+                    j -= 1
+                
+                # Check if the message before the ToolMessages is an AIMessage with tool_calls
+                if j >= 0 and isinstance(history[j], AIMessage):
+                    ai_msg = history[j]
+                    if ai_msg.tool_calls:
+                        # Get all tool_call_ids from the AIMessage
+                        ai_tool_call_ids = {tc.get("id") if isinstance(tc, dict) else getattr(tc, "id", None) for tc in ai_msg.tool_calls}
+                        ai_tool_call_ids = {tid for tid in ai_tool_call_ids if tid is not None}
+                        
+                        # Get all tool_call_ids from the ToolMessages
+                        tool_msg_ids = {tm.tool_call_id for tm in tool_messages if hasattr(tm, "tool_call_id")}
+                        
+                        # Only include if ALL tool_call_ids have corresponding ToolMessages
+                        if ai_tool_call_ids == tool_msg_ids and len(ai_tool_call_ids) > 0:
+                            # All tool calls have responses - include both AIMessage and all ToolMessages
+                            # Insert AIMessage at position 0, then insert ToolMessages right after it
+                            filtered_history.insert(0, ai_msg)  # AIMessage first
+                            for idx, tm in enumerate(tool_messages):
+                                filtered_history.insert(1 + idx, tm)  # Insert ToolMessages right after AIMessage
+                            i = j - 1  # Skip the AIMessage and all ToolMessages
+                        else:
+                            # Not all tool calls have responses - skip the entire AIMessage and ToolMessages
+                            # This prevents OpenAI API error about missing tool responses
+                            i = j - 1
+                    else:
+                        # AIMessage doesn't have tool_calls - orphaned ToolMessages, skip them
+                        i = j
+                else:
+                    # No preceding AIMessage - orphaned ToolMessages, skip them
+                    i = j
+            elif isinstance(msg, AIMessage) and msg.tool_calls:
+                # This is an AIMessage with tool_calls, but we haven't seen ToolMessages yet
+                # Check if there are ToolMessages after this (forward in history)
+                # Since we're going backwards, if we hit an AIMessage with tool_calls,
+                # we should have already processed its ToolMessages above
+                # If we're here, it means the ToolMessages are missing - skip this AIMessage
                 i -= 1
-                # Include the AIMessage that this ToolMessage responds to
-                if i >= 0 and isinstance(history[i], AIMessage):
-                    filtered_history.insert(0, history[i])
-                    i -= 1
             else:
+                # Regular message (AIMessage without tool_calls, HumanMessage, SystemMessage, etc.)
                 filtered_history.insert(0, msg)
                 i -= 1
         
