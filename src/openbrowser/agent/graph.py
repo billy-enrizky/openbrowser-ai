@@ -48,7 +48,9 @@ class AgentState(TypedDict):
     plan: List[str] 
     current_step_index: int
     step_attempt_count: int  # Track retries on same step to detect loops
-    recent_urls: List[str]  # Track recent URLs to detect loops 
+    recent_urls: List[str]  # Track recent URLs to detect loops
+    last_action: str  # Track last action taken to detect repeated actions without state change
+    last_action_count: int  # Count how many times the same action was taken 
 
 class BrowserAgent:
     """Browser automation agent using LangGraph workflow."""
@@ -114,76 +116,85 @@ class BrowserAgent:
 
     async def perceive_node(self, state: AgentState) -> dict:
         logger.info("Perceiving browser state")
+        # Use persistent CDP connection (no need to close it)
         client, session_id = await self.browser_manager.get_session()
+        
+        try: await client.send.Page.enable(session_id=session_id)
+        except Exception: pass
+        
+        # Wait for page to stabilize after potential navigation
+        # Check if page is still loading and wait if needed
         try:
-            try: await client.send.Page.enable(session_id=session_id)
-            except Exception: pass
-            
-            # Wait for page to stabilize after potential navigation
-            # Check if page is still loading and wait if needed
+            # Get current frame tree to check loading state
+            frame_tree = await client.send.Page.getFrameTree(session_id=session_id)
+            # Small delay to ensure DOM is stable after navigation
+            await asyncio.sleep(0.8)
+        except Exception:
+            # If check fails, just wait a bit
+            await asyncio.sleep(0.8)
+        
+        screenshot_result = await client.send.Page.captureScreenshot(params={"format": "png"}, session_id=session_id)
+        dom_state = await DomService.get_clickable_elements(client, session_id)
+        self.toolkit.update_state(dom_state)
+        
+        current_url = ""
+        try:
+            nav_history = await client.send.Page.getNavigationHistory(session_id=session_id)
+            idx = nav_history.get("currentIndex", 0)
+            entries = nav_history.get("entries", [])
+            if entries and idx < len(entries):
+                current_url = entries[idx].get("url", "")
+        except Exception: pass
+        
+        previous_url = state.get("url", "")
+        recent_urls = state.get("recent_urls", [])
+        # Track last 5 URLs to detect loops
+        url_changed = current_url and current_url != previous_url
+        if url_changed:
+            recent_urls = (recent_urls + [current_url])[-5:]
+        
+        # Early goal completion detection: If we navigated from search page to result page
+        root_goal = state.get("root_goal", "").lower()
+        if url_changed and previous_url and ("click" in root_goal and "result" in root_goal):
             try:
-                # Get current frame tree to check loading state
-                frame_tree = await client.send.Page.getFrameTree(session_id=session_id)
-                # Small delay to ensure DOM is stable after navigation
-                await asyncio.sleep(0.8)
-            except Exception:
-                # If check fails, just wait a bit
-                await asyncio.sleep(0.8)
-            
-            screenshot_result = await client.send.Page.captureScreenshot(params={"format": "png"}, session_id=session_id)
-            dom_state = await DomService.get_clickable_elements(client, session_id)
-            self.toolkit.update_state(dom_state)
-            
-            current_url = ""
-            try:
-                nav_history = await client.send.Page.getNavigationHistory(session_id=session_id)
-                idx = nav_history.get("currentIndex", 0)
-                entries = nav_history.get("entries", [])
-                if entries and idx < len(entries):
-                    current_url = entries[idx].get("url", "")
-            except Exception: pass
-            
-            previous_url = state.get("url", "")
-            recent_urls = state.get("recent_urls", [])
-            # Track last 5 URLs to detect loops
-            if current_url and current_url != previous_url:
-                recent_urls = (recent_urls + [current_url])[-5:]
-            
-            # Early goal completion detection: If we navigated from search page to result page
-            root_goal = state.get("root_goal", "").lower()
-            if current_url != previous_url and previous_url and ("click" in root_goal and "result" in root_goal):
-                try:
-                    from urllib.parse import urlparse
-                    prev_domain = urlparse(previous_url).netloc.lower() if previous_url else ""
-                    curr_domain = urlparse(current_url).netloc.lower() if current_url else ""
-                    search_domains = ["duckduckgo.com", "google.com", "bing.com", "yahoo.com"]
-                    
-                    # If navigated from search domain to non-search domain, goal is likely complete
-                    if prev_domain and curr_domain and prev_domain != curr_domain:
-                        if any(sd in prev_domain for sd in search_domains):
-                            if not any(sd in curr_domain for sd in search_domains):
-                                logger.info(f"Early goal completion in perceive: Navigated from {prev_domain} to {curr_domain}")
-                                # Return a special marker that will be detected in plan_node
-                                return {
-                                    "screenshot": screenshot_result["data"],
-                                    "dom_tree": dom_state.element_tree,
-                                    "url": current_url,
-                                    "previous_url": previous_url,
-                                    "recent_urls": recent_urls,
-                                    "messages": [AIMessage(content="GOAL_COMPLETE_NAVIGATION_DETECTED")]
-                                }
-                except Exception as e:
-                    logger.debug(f"Error in perceive goal completion detection: {e}")
-            
-            return {
-                "screenshot": screenshot_result["data"],
-                "dom_tree": dom_state.element_tree,
-                "url": current_url,
-                "previous_url": previous_url,
-                "recent_urls": recent_urls,
-            }
-        finally:
-            await client.stop()
+                from urllib.parse import urlparse
+                prev_domain = urlparse(previous_url).netloc.lower() if previous_url else ""
+                curr_domain = urlparse(current_url).netloc.lower() if current_url else ""
+                search_domains = ["duckduckgo.com", "google.com", "bing.com", "yahoo.com"]
+                
+                # If navigated from search domain to non-search domain, goal is likely complete
+                if prev_domain and curr_domain and prev_domain != curr_domain:
+                    if any(sd in prev_domain for sd in search_domains):
+                        if not any(sd in curr_domain for sd in search_domains):
+                            logger.info(f"Early goal completion in perceive: Navigated from {prev_domain} to {curr_domain}")
+                            # Return a special marker that will be detected in plan_node
+                            return {
+                                "screenshot": screenshot_result["data"],
+                                "dom_tree": dom_state.element_tree,
+                                "url": current_url,
+                                "previous_url": previous_url,
+                                "recent_urls": recent_urls,
+                                "last_action": "",  # Reset action tracking
+                                "last_action_count": 0,  # Reset action count
+                                "messages": [AIMessage(content="GOAL_COMPLETE_NAVIGATION_DETECTED")]
+                            }
+            except Exception as e:
+                logger.debug(f"Error in perceive goal completion detection: {e}")
+        
+        # Reset action tracking if URL changed (action succeeded)
+        update_dict = {
+            "screenshot": screenshot_result["data"],
+            "dom_tree": dom_state.element_tree,
+            "url": current_url,
+            "previous_url": previous_url,
+            "recent_urls": recent_urls,
+        }
+        if url_changed:
+            # URL changed means action succeeded - reset action tracking
+            update_dict["last_action"] = ""
+            update_dict["last_action_count"] = 0
+        
+        return update_dict
 
     def _is_google_traffic_verification(self, url: str, dom_tree: str) -> bool:
         """Check if we're on a Google traffic verification page."""
@@ -249,6 +260,8 @@ class BrowserAgent:
                 "step_attempt_count": 0,
                 "previous_url": state.get("url", ""),
                 "recent_urls": [],
+                "last_action": "",
+                "last_action_count": 0,
                 "messages": [AIMessage(content=f"Plan updated: {plan_result.steps}")]
             }
         except Exception as e:
@@ -294,6 +307,8 @@ class BrowserAgent:
                     "step_attempt_count": 0,
                     "previous_url": state.get("url", ""),
                     "recent_urls": [],
+                    "last_action": "",
+                    "last_action_count": 0,
                     "messages": [AIMessage(content=f"Plan updated (fallback): {steps}")]
                 }
             except Exception as fallback_error:
@@ -310,6 +325,8 @@ class BrowserAgent:
                     "step_attempt_count": 0,
                     "previous_url": state.get("url", ""),
                     "recent_urls": [],
+                    "last_action": "",
+                    "last_action_count": 0,
                     "messages": [AIMessage(content=f"Plan created (minimal fallback): {steps}")]
                 }
 
@@ -339,15 +356,12 @@ class BrowserAgent:
         # If we hit Google traffic verification, switch to DuckDuckGo immediately
         if is_google_verification and is_on_google and not is_on_duckduckgo:
             logger.warning("Detected Google traffic verification page. Switching to DuckDuckGo immediately.")
-            # Navigate to DuckDuckGo
+            # Navigate to DuckDuckGo using persistent connection
             client, session_id = await self.browser_manager.get_session()
-            try:
-                await self.toolkit.navigate("https://duckduckgo.com", client=client, session_id=session_id)
-                logger.info("Navigated to DuckDuckGo as fallback")
-                # Wait for navigation to complete
-                await asyncio.sleep(1.5)
-            finally:
-                await client.stop()
+            await self.toolkit.navigate("https://duckduckgo.com", client=client, session_id=session_id)
+            logger.info("Navigated to DuckDuckGo as fallback")
+            # Wait for navigation to complete
+            await asyncio.sleep(1.5)
             
             # Update plan to use DuckDuckGo instead of Google
             updated_plan = []
@@ -372,6 +386,8 @@ class BrowserAgent:
                 "plan": updated_plan,
                 "current_step_index": new_step_index,  # Skip navigation steps since we're already on DuckDuckGo
                 "step_attempt_count": 0,  # Reset step attempts since we're switching strategy
+                "last_action": "",  # Reset action tracking
+                "last_action_count": 0,  # Reset action count
                 "messages": [AIMessage(content=f"Switched to DuckDuckGo after Google traffic verification. Plan updated. Skipped navigation steps and continuing from step {new_step_index + 1}.")]
             }
         
@@ -420,6 +436,41 @@ class BrowserAgent:
         logger.info(f"Processing Step {current_idx + 1}/{len(plan)}: {current_task} (Attempt {attempts + 1})")
         logger.debug(f"Current URL: {current_url}, Previous URL: {previous_url}")
 
+        # Detect repeated actions without state change (following browser-use pattern)
+        last_action = state.get("last_action", "")
+        last_action_count = state.get("last_action_count", 0)
+        repeated_action_warning = ""
+        
+        # Check if we're repeating the same action without URL/DOM change
+        if last_action and not url_changed and attempts > 0:
+            # Extract last action from recent messages
+            recent_tool_calls = []
+            for msg in reversed(state.get("messages", [])[-10:]):
+                if isinstance(msg, AIMessage) and msg.tool_calls:
+                    for tc in msg.tool_calls:
+                        tool_name = tc.get("name") if isinstance(tc, dict) else getattr(tc, "name", "")
+                        tool_args = tc.get("args") if isinstance(tc, dict) else getattr(tc, "args", {})
+                        action_str = f"{tool_name}({tool_args})"
+                        recent_tool_calls.append(action_str)
+            
+            # Check if current action matches last action
+            if recent_tool_calls and recent_tool_calls[0] == last_action:
+                new_count = last_action_count + 1
+                if new_count >= 3:
+                    # Same action repeated 3+ times without state change - force step advancement
+                    logger.warning(f"Detected repeated action '{last_action}' {new_count} times without state change. Auto-advancing step.")
+                    new_idx = current_idx + 1
+                    if new_idx >= len(plan):
+                        return {"messages": [AIMessage(content="DONE")]}
+                    return {
+                        "current_step_index": new_idx,
+                        "step_attempt_count": 0,
+                        "last_action": "",
+                        "last_action_count": 0,
+                        "messages": [AIMessage(content=f"Auto-advanced from step {current_idx + 1} due to repeated action without state change. Moving to step {new_idx + 1}.")]
+                    }
+                repeated_action_warning = f"\nWARNING: You have repeated the same action '{last_action}' {new_count} times without the page state changing. VERIFY using the screenshot if the action succeeded. If the action already worked, reply 'NEXT STEP'. If it failed, try a different approach or reply 'REPLAN'."
+
         # 2. Refined Prompt to prevent "Skipping Ahead" and force step completion validation
         url_context = ""
         if url_changed:
@@ -435,20 +486,25 @@ class BrowserAgent:
         system_prompt = (
             f"ROOT GOAL: {state.get('root_goal')}\n"
             f"CURRENT PLAN STEP {current_idx + 1}/{len(plan)}: {current_task}\n"
-            f"CURRENT URL: {current_url}{url_context}{loop_warning}\n\n"
+            f"CURRENT URL: {current_url}{url_context}{loop_warning}{repeated_action_warning}\n\n"
             "INSTRUCTIONS:\n"
             "0. CRITICAL: FIRST check if the ROOT GOAL is already COMPLETE. Look at the current page state and verify if the goal has been achieved (e.g., if goal is 'click the first result' and you're now on a result page, the goal is DONE).\n"
             "   - If ROOT GOAL is COMPLETE: Reply exactly 'GOAL COMPLETE' or 'DONE'. Do not use tools. Do not continue with steps.\n"
-            "1. LOOK at the screenshot and URL.\n"
+            "1. LOOK at the screenshot and URL. The screenshot is your GROUND TRUTH - use it to verify if actions succeeded.\n"
             "2. IS THIS STEP ALREADY COMPLETED? (e.g., if step is 'Go to Google' and you are on Google, or if step is 'Type text' and text is already typed, or if step is 'Click first result' and you just clicked it).\n"
+            "   - VERIFY using the screenshot - never assume an action succeeded just because you executed it.\n"
             "   - If YES: Reply exactly 'NEXT STEP'. Do not use tools.\n"
             "3. IF NOT completed: Generate the correct Tool Call to perform it.\n"
             "4. IF stuck (same step > 3 times) or CAPTCHA appears: Reply 'REPLAN'.\n"
-            "5. AFTER EXECUTING A TOOL: Check if the tool execution completed the current step OR the ROOT GOAL. If the ROOT GOAL is complete, reply 'GOAL COMPLETE'. If only the step is complete, reply 'NEXT STEP'.\n"
+            "5. AFTER EXECUTING A TOOL: ALWAYS verify success using the screenshot in the next step. Check if the tool execution completed the current step OR the ROOT GOAL.\n"
+            "   - If the ROOT GOAL is complete, reply 'GOAL COMPLETE'.\n"
+            "   - If only the step is complete (verified by screenshot/state), reply 'NEXT STEP'.\n"
+            "   - If the action failed or had no effect (same state after action), try a different approach or reply 'REPLAN'.\n"
             "6. UNEXPECTED PAGES: If you encounter an unexpected page state (CAPTCHA, login page, error page, cookie consent, pop-up, etc.), handle it directly using tools. Do not wait for the plan to address it.\n"
             "7. GOOGLE FAILURES: If you encounter Google traffic verification pages, the agent will automatically switch to DuckDuckGo. You can also proactively use DuckDuckGo if Google is blocking access.\n"
             "8. DO NOT combine steps. Finish the current step before moving to the next.\n"
             "9. DO NOT repeat actions you've already done. If you've already clicked a link and navigated, do not click it again.\n"
+            "10. CRITICAL: If you press Enter or click a button and the page state doesn't change (same URL, same DOM), the action may have already succeeded or failed. Check the screenshot to verify. Do not repeat the same action multiple times.\n"
             "DOM Tree elements are numbered [1], [2], [3], etc. starting from 1. Use these numbers to interact with elements via the tools."
         )
 
@@ -553,13 +609,34 @@ class BrowserAgent:
             return {
                 "current_step_index": new_idx,
                 "step_attempt_count": 0,  # Reset attempt count for new step
+                "last_action": "",  # Reset action tracking for new step
+                "last_action_count": 0,  # Reset action count for new step
                 "messages": [AIMessage(content=f"Completed step {current_idx + 1}. Moving to {new_idx + 1}.")]
             }
         
-        # Handle tool calls - increment attempt count
+        # Handle tool calls - track action and increment attempt count
+        # Extract action string from tool calls for tracking
+        action_str = ""
+        if isinstance(response, AIMessage) and response.tool_calls:
+            # Get the first tool call as the action identifier
+            first_tc = response.tool_calls[0]
+            tool_name = first_tc.get("name") if isinstance(first_tc, dict) else getattr(first_tc, "name", "")
+            tool_args = first_tc.get("args") if isinstance(first_tc, dict) else getattr(first_tc, "args", {})
+            action_str = f"{tool_name}({tool_args})"
+        
+        # Check if this is the same action as last time
+        if action_str and action_str == last_action and not url_changed:
+            # Same action repeated - increment count
+            new_action_count = last_action_count + 1
+        else:
+            # New action or URL changed - reset count
+            new_action_count = 1 if action_str else 0
+        
         return {
             "messages": [response],
-            "step_attempt_count": attempts + 1
+            "step_attempt_count": attempts + 1,
+            "last_action": action_str if action_str else last_action,
+            "last_action_count": new_action_count
         }
 
     async def execute_node(self, state: AgentState) -> dict:
@@ -655,27 +732,21 @@ class BrowserAgent:
 
     async def run(self, goal: str) -> dict:
         logger.info(f"Starting agent run: {goal}")
-        client = None
         try:
+            # Start browser and establish persistent CDP connection
             await self.browser_manager.start()
-            client, session_id = await self.browser_manager.get_session()
-            try:
-                config = {"configurable": {"thread_id": "1"}}
-                initial_state = {
-                    "messages": [HumanMessage(content=goal)],
-                    "screenshot": "", "dom_tree": "", "url": "", "previous_url": "",
-                    "root_goal": goal, "plan": [], "current_step_index": 0, "step_attempt_count": 0,
-                    "recent_urls": []
-                }
-                result = await self.app.ainvoke(initial_state, config={**config, "recursion_limit": 100})
-                return result
-            finally:
-                if client:
-                    try:
-                        await client.stop()
-                    except Exception as e:
-                        logger.warning(f"Error stopping CDP client: {e}")
+            
+            config = {"configurable": {"thread_id": "1"}}
+            initial_state = {
+                "messages": [HumanMessage(content=goal)],
+                "screenshot": "", "dom_tree": "", "url": "", "previous_url": "",
+                "root_goal": goal, "plan": [], "current_step_index": 0, "step_attempt_count": 0,
+                "recent_urls": [], "last_action": "", "last_action_count": 0
+            }
+            result = await self.app.ainvoke(initial_state, config={**config, "recursion_limit": 100})
+            return result
         finally:
+            # Stop browser (this will also close the persistent CDP connection)
             try:
                 await self.browser_manager.stop()
             except Exception as e:
