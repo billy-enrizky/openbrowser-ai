@@ -333,10 +333,10 @@ class BrowserAgent:
                 updated_plan.append(updated_step)
             
             # Route to perceive to get fresh state after navigation
-            # Don't return early - let the normal flow continue but skip Google check
-            # We'll update the plan and let perceive get the new DuckDuckGo state
+            # Preserve current_step_index to continue from current step, not restart from beginning
             return {
                 "plan": updated_plan,
+                "current_step_index": current_idx,  # Preserve current step - continue from where we were
                 "google_failure_count": 0,  # Reset counter after switching
                 "step_attempt_count": 0,  # Reset step attempts since we're switching strategy
                 "messages": [AIMessage(content="Switched to DuckDuckGo after 3 Google failures. Plan updated.")]
