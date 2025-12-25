@@ -4,26 +4,25 @@ import asyncio
 import base64
 import json
 import logging
+import re
 from typing import Annotated, Literal, TypedDict, List, Optional
 
 from langgraph.graph.message import add_messages
 from langgraph.checkpoint.memory import MemorySaver
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
-from langchain_openai import ChatOpenAI
 from langgraph.graph import END, StateGraph
 from pydantic import BaseModel, Field
 
 from src.openbrowser.browser.dom import DomService
 from src.openbrowser.browser.manager import BrowserManager
 from src.openbrowser.tools.actions import BrowserToolKit
+from src.openbrowser.llm.google import ChatGoogle
+from src.openbrowser.llm.openai import ChatOpenAI
 
 from dotenv import load_dotenv
 import os
 load_dotenv(override=True)
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-if not OPENAI_API_KEY:
-    raise ValueError("OPENAI_API_KEY is not set")
 
 logger = logging.getLogger(__name__)
 
@@ -54,13 +53,35 @@ class AgentState(TypedDict):
 class BrowserAgent:
     """Browser automation agent using LangGraph workflow."""
 
-    def __init__(self, headless: bool = True, model_name: str = "gpt-4o"):
-        logger.info(f"Initializing BrowserAgent with model: {model_name}, headless: {headless}")
+    def __init__(
+        self,
+        headless: bool = True,
+        model_name: str = "gpt-4o",
+        llm_provider: str = "openai",
+        api_key: str | None = None,
+    ):
+        """
+        Initialize BrowserAgent.
+
+        Args:
+            headless: Whether to run browser in headless mode
+            model_name: Name of the model to use (e.g., "gpt-4o", "gemini-flash-latest")
+            llm_provider: LLM provider to use ("openai" or "google")
+            api_key: API key for the LLM provider (defaults to environment variables)
+        """
+        logger.info(f"Initializing BrowserAgent with provider: {llm_provider}, model: {model_name}, headless: {headless}")
         
         self.browser_manager = BrowserManager(headless=headless)
         self.toolkit = BrowserToolKit(self.browser_manager)
         
-        self.llm = ChatOpenAI(model=model_name, temperature=0, api_key=OPENAI_API_KEY)
+        if llm_provider == "google":
+            if api_key:
+                self.llm = ChatGoogle(model=model_name, temperature=0, api_key=api_key)
+            else:
+                self.llm = ChatGoogle(model=model_name, temperature=0)
+        else:
+            self.llm = ChatOpenAI(model=model_name, temperature=0, api_key=api_key)
+        
         self.tools = self.toolkit.get_tools()
         self.llm_with_tools = self.llm.bind_tools(self.tools)
         self.memory = MemorySaver()
@@ -167,27 +188,98 @@ class BrowserAgent:
         goal = state.get("root_goal") or state["messages"][0].content
         
         logger.info(f"Decomposing/Replanning goal: {goal}")
-        planner_llm = self.llm.with_structured_output(TaskPlan)
         
-        prompt = (
-            f"You are a Browser Automation Strategist.\n"
-            f"GOAL: {goal}\n\n"
-            f"Create a step-by-step plan. Assume the browser is OPEN.\n"
-            f"Note: The agent can handle unexpected pages (CAPTCHA, login, errors, etc.) dynamically during execution, so you don't need to pre-plan for every possible obstacle."
-        )
-        
-        plan_result = await planner_llm.ainvoke(prompt)
-        logger.info(f"New Plan: {plan_result.steps}")
-        
-        return {
-            "root_goal": goal,
-            "plan": plan_result.steps,
-            "current_step_index": 0,
-            "step_attempt_count": 0,
-            "google_failure_count": state.get("google_failure_count", 0),
-            "previous_url": state.get("url", ""),
-            "messages": [AIMessage(content=f"Plan updated: {plan_result.steps}")]
-        }
+        try:
+            planner_llm = self.llm.with_structured_output(TaskPlan)
+            
+            prompt = (
+                f"You are a Browser Automation Strategist.\n"
+                f"GOAL: {goal}\n\n"
+                f"Create a step-by-step plan. Assume the browser is OPEN.\n"
+                f"Note: The agent can handle unexpected pages (CAPTCHA, login, errors, etc.) dynamically during execution, so you don't need to pre-plan for every possible obstacle."
+            )
+            
+            plan_result = await planner_llm.ainvoke(prompt)
+            
+            # Validate plan_result
+            if plan_result is None:
+                raise ValueError("Structured output returned None")
+            
+            if not hasattr(plan_result, 'steps') or not plan_result.steps:
+                raise ValueError(f"Invalid plan result: {plan_result}")
+            
+            logger.info(f"New Plan: {plan_result.steps}")
+            
+            return {
+                "root_goal": goal,
+                "plan": plan_result.steps,
+                "current_step_index": 0,
+                "step_attempt_count": 0,
+                "google_failure_count": state.get("google_failure_count", 0),
+                "previous_url": state.get("url", ""),
+                "messages": [AIMessage(content=f"Plan updated: {plan_result.steps}")]
+            }
+        except Exception as e:
+            logger.error(f"Failed to get structured output: {e}. Falling back to text-based planning.")
+            
+            # Fallback: Use regular LLM call and parse response
+            prompt = (
+                f"You are a Browser Automation Strategist.\n"
+                f"GOAL: {goal}\n\n"
+                f"Create a step-by-step plan. Assume the browser is OPEN.\n"
+                f"Respond with a JSON object containing a 'steps' array of strings.\n"
+                f"Example: {{\"steps\": [\"Step 1\", \"Step 2\", \"Step 3\"]}}\n"
+                f"Note: The agent can handle unexpected pages (CAPTCHA, login, errors, etc.) dynamically during execution, so you don't need to pre-plan for every possible obstacle."
+            )
+            
+            try:
+                response = await self.llm.ainvoke([HumanMessage(content=prompt)])
+                content = response.content if hasattr(response, 'content') else str(response)
+                
+                # Try to extract JSON from response
+                json_match = re.search(r'\{[^{}]*"steps"[^{}]*\[[^\]]*\][^{}]*\}', content, re.DOTALL)
+                if json_match:
+                    json_str = json_match.group(0)
+                    parsed = json.loads(json_str)
+                    steps = parsed.get("steps", [])
+                else:
+                    # Fallback: try to parse as simple list
+                    lines = [line.strip() for line in content.split('\n') if line.strip() and not line.strip().startswith('#')]
+                    steps = [line for line in lines if line and not line.startswith('{') and not line.startswith('[')]
+                    if not steps:
+                        # Last resort: create a simple plan
+                        steps = [
+                            f"Navigate to the website mentioned in the goal",
+                            f"Complete the task: {goal}",
+                        ]
+                
+                logger.info(f"Fallback Plan: {steps}")
+                
+                return {
+                    "root_goal": goal,
+                    "plan": steps,
+                    "current_step_index": 0,
+                    "step_attempt_count": 0,
+                    "google_failure_count": state.get("google_failure_count", 0),
+                    "previous_url": state.get("url", ""),
+                    "messages": [AIMessage(content=f"Plan updated (fallback): {steps}")]
+                }
+            except Exception as fallback_error:
+                logger.error(f"Fallback planning also failed: {fallback_error}")
+                # Last resort: create a minimal plan
+                steps = [
+                    f"Navigate to complete the goal: {goal}",
+                    "Complete the required actions",
+                ]
+                return {
+                    "root_goal": goal,
+                    "plan": steps,
+                    "current_step_index": 0,
+                    "step_attempt_count": 0,
+                    "google_failure_count": state.get("google_failure_count", 0),
+                    "previous_url": state.get("url", ""),
+                    "messages": [AIMessage(content=f"Plan created (minimal fallback): {steps}")]
+                }
 
     async def plan_node(self, state: AgentState) -> dict:
         """Dynamic Decision Node."""
@@ -385,10 +477,24 @@ class BrowserAgent:
         
         tool_messages = []
         
+        # Tool calls are in LangChain format: {"id": "...", "name": "...", "args": {...}}
+        # This matches the format produced by both ChatOpenAI and ChatGoogle
         for tool_call in last_message.tool_calls:
-            tool_name = tool_call["name"]
-            tool_args = tool_call["args"]
-            tool_id = tool_call["id"]
+            # Handle both flat format (new) and nested format (old) for backward compatibility
+            if "function" in tool_call and isinstance(tool_call["function"], dict):
+                # Old nested format: {"id": "...", "type": "function", "function": {"name": "...", "arguments": "..."}}
+                tool_name = tool_call["function"]["name"]
+                tool_args_str = tool_call["function"].get("arguments", "{}")
+                try:
+                    tool_args = json.loads(tool_args_str) if isinstance(tool_args_str, str) else tool_args_str
+                except (json.JSONDecodeError, TypeError):
+                    tool_args = {}
+                tool_id = tool_call["id"]
+            else:
+                # New flat format: {"id": "...", "name": "...", "args": {...}}
+                tool_name = tool_call["name"]
+                tool_args = tool_call["args"]
+                tool_id = tool_call["id"]
             
             logger.info(f"Executing: {tool_name} {tool_args}")
             
