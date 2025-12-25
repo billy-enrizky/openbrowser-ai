@@ -113,7 +113,7 @@ class BrowserToolKit:
         
         Args:
             url: URL to navigate to
-            client: Optional CDP client. If not provided, creates temporary session
+            client: Optional CDP client. If not provided, uses persistent connection
             session_id: Optional session ID. Must be provided with client
             
         Returns:
@@ -131,38 +131,32 @@ class BrowserToolKit:
                 "session_id provided without client. Provide both or neither."
             )
 
-        # Create temporary session if needed
+        # Use persistent connection if no client provided
         if client is None:
             client, session_id = await self.browser_manager.get_session()
-            should_close = True
+            # Don't close persistent connection - it's managed by BrowserManager lifecycle
         else:
-            should_close = False
             if session_id is None:
                 raise RuntimeError(
                     "client provided without session_id. Provide both or neither."
                 )
 
+        logger.info(f"Navigating to {url}")
+
+        # Enable Page domain
         try:
-            logger.info(f"Navigating to {url}")
+            await client.send.Page.enable(session_id=session_id)
+        except Exception:
+            # Domain might already be enabled
+            pass
 
-            # Enable Page domain
-            try:
-                await client.send.Page.enable(session_id=session_id)
-            except Exception:
-                # Domain might already be enabled
-                pass
+        # Navigate
+        await client.send.Page.navigate(
+            params={"url": url}, session_id=session_id
+        )
 
-            # Navigate
-            await client.send.Page.navigate(
-                params={"url": url}, session_id=session_id
-            )
-
-            logger.info(f"Navigation initiated to {url}")
-            return f"Navigated to {url}"
-
-        finally:
-            if should_close:
-                await client.stop()
+        logger.info(f"Navigation initiated to {url}")
+        return f"Navigated to {url}"
 
     async def click_element(
         self,
@@ -174,7 +168,7 @@ class BrowserToolKit:
         
         Args:
             index: Element index from selector_map
-            client: Optional CDP client. If not provided, creates temporary session
+            client: Optional CDP client. If not provided, uses persistent connection
             session_id: Optional session ID. Must be provided with client
             
         Returns:
@@ -203,85 +197,79 @@ class BrowserToolKit:
                 "session_id provided without client. Provide both or neither."
             )
 
-        # Create temporary session if needed
+        # Use persistent connection if no client provided
         if client is None:
             client, session_id = await self.browser_manager.get_session()
-            should_close = True
+            # Don't close persistent connection - it's managed by BrowserManager lifecycle
         else:
-            should_close = False
             if session_id is None:
                 raise RuntimeError(
                     "client provided without session_id. Provide both or neither."
                 )
 
+        # Enable required domains
         try:
-            # Enable required domains
-            try:
-                await client.send.DOM.enable(session_id=session_id)
-                await client.send.Input.enable(session_id=session_id)
-            except Exception:
-                # Domains might already be enabled
-                pass
+            await client.send.DOM.enable(session_id=session_id)
+            await client.send.Input.enable(session_id=session_id)
+        except Exception:
+            # Domains might already be enabled
+            pass
 
-            # Get element box model
-            try:
-                box_model_result = await client.send.DOM.getBoxModel(
-                    params={"backendNodeId": backend_node_id}, session_id=session_id
-                )
-            except Exception as e:
-                raise RuntimeError(
-                    f"Element {index} is not visible. DOM.getBoxModel failed: {e}"
-                ) from e
-
-            # Extract content quad and calculate center
-            if "model" not in box_model_result or "content" not in box_model_result["model"]:
-                raise RuntimeError(f"Element {index} is not visible. Invalid box model response.")
-
-            content_quad = box_model_result["model"]["content"]
-            if len(content_quad) < 8:
-                raise RuntimeError(f"Element {index} is not visible. Invalid content quad.")
-
-            # Calculate center coordinates
-            # Quad format: [x1, y1, x2, y2, x3, y3, x4, y4]
-            x = (content_quad[0] + content_quad[2] + content_quad[4] + content_quad[6]) / 4
-            y = (content_quad[1] + content_quad[3] + content_quad[5] + content_quad[7]) / 4
-
-            logger.info(f"Clicking at coordinates ({x:.1f}, {y:.1f})")
-
-            # Highlight element before clicking
-            await self._highlight_element(client, session_id, backend_node_id)
-            await asyncio.sleep(0.5)  # Allow time for visual feedback
-
-            # Dispatch mouse press event
-            await client.send.Input.dispatchMouseEvent(
-                params={
-                    "type": "mousePressed",
-                    "button": "left",
-                    "x": x,
-                    "y": y,
-                    "clickCount": 1,
-                },
-                session_id=session_id,
+        # Get element box model
+        try:
+            box_model_result = await client.send.DOM.getBoxModel(
+                params={"backendNodeId": backend_node_id}, session_id=session_id
             )
+        except Exception as e:
+            raise RuntimeError(
+                f"Element {index} is not visible. DOM.getBoxModel failed: {e}"
+            ) from e
 
-            # Dispatch mouse release event
-            await client.send.Input.dispatchMouseEvent(
-                params={
-                    "type": "mouseReleased",
-                    "button": "left",
-                    "x": x,
-                    "y": y,
-                    "clickCount": 1,
-                },
-                session_id=session_id,
-            )
+        # Extract content quad and calculate center
+        if "model" not in box_model_result or "content" not in box_model_result["model"]:
+            raise RuntimeError(f"Element {index} is not visible. Invalid box model response.")
 
-            logger.info(f"Successfully clicked element {index}")
-            return f"Clicked element {index}"
+        content_quad = box_model_result["model"]["content"]
+        if len(content_quad) < 8:
+            raise RuntimeError(f"Element {index} is not visible. Invalid content quad.")
 
-        finally:
-            if should_close:
-                await client.stop()
+        # Calculate center coordinates
+        # Quad format: [x1, y1, x2, y2, x3, y3, x4, y4]
+        x = (content_quad[0] + content_quad[2] + content_quad[4] + content_quad[6]) / 4
+        y = (content_quad[1] + content_quad[3] + content_quad[5] + content_quad[7]) / 4
+
+        logger.info(f"Clicking at coordinates ({x:.1f}, {y:.1f})")
+
+        # Highlight element before clicking
+        await self._highlight_element(client, session_id, backend_node_id)
+        await asyncio.sleep(0.5)  # Allow time for visual feedback
+
+        # Dispatch mouse press event
+        await client.send.Input.dispatchMouseEvent(
+            params={
+                "type": "mousePressed",
+                "button": "left",
+                "x": x,
+                "y": y,
+                "clickCount": 1,
+            },
+            session_id=session_id,
+        )
+
+        # Dispatch mouse release event
+        await client.send.Input.dispatchMouseEvent(
+            params={
+                "type": "mouseReleased",
+                "button": "left",
+                "x": x,
+                "y": y,
+                "clickCount": 1,
+            },
+            session_id=session_id,
+        )
+
+        logger.info(f"Successfully clicked element {index}")
+        return f"Clicked element {index}"
 
     async def type_text(
         self,
@@ -297,7 +285,7 @@ class BrowserToolKit:
         Args:
             index: Element index from selector_map
             text: Text to type
-            client: Optional CDP client. If not provided, creates temporary session
+            client: Optional CDP client. If not provided, uses persistent connection
             session_id: Optional session ID. Must be provided with client
             
         Returns:
@@ -318,53 +306,47 @@ class BrowserToolKit:
                 "session_id provided without client. Provide both or neither."
             )
 
-        # Create temporary session if needed (before calling click_element to reuse it)
+        # Use persistent connection if no client provided
         if client is None:
             client, session_id = await self.browser_manager.get_session()
-            should_close = True
+            # Don't close persistent connection - it's managed by BrowserManager lifecycle
         else:
-            should_close = False
             if session_id is None:
                 raise RuntimeError(
                     "client provided without session_id. Provide both or neither."
                 )
 
+        # Validate index exists
+        if index not in self._selector_map:
+            raise ValueError(
+                f"Element index {index} not found in selector_map. "
+                f"Available indices: {list(self._selector_map.keys())}"
+            )
+
+        backend_node_id = self._selector_map[index]
+
+        # Highlight element before typing
+        await self._highlight_element(client, session_id, backend_node_id)
+        await asyncio.sleep(0.5)  # Allow time for visual feedback
+
+        # First click to focus (reusing the persistent connection)
+        await self.click_element(index, client=client, session_id=session_id)
+
+        # Enable Input domain
         try:
-            # Validate index exists
-            if index not in self._selector_map:
-                raise ValueError(
-                    f"Element index {index} not found in selector_map. "
-                    f"Available indices: {list(self._selector_map.keys())}"
-                )
+            await client.send.Input.enable(session_id=session_id)
+        except Exception:
+            # Domain might already be enabled
+            pass
 
-            backend_node_id = self._selector_map[index]
+        # Type each character
+        for char in text:
+            await client.send.Input.dispatchKeyEvent(
+                params={"type": "char", "text": char}, session_id=session_id
+            )
 
-            # Highlight element before typing
-            await self._highlight_element(client, session_id, backend_node_id)
-            await asyncio.sleep(0.5)  # Allow time for visual feedback
-
-            # First click to focus (reusing the session)
-            await self.click_element(index, client=client, session_id=session_id)
-
-            # Enable Input domain
-            try:
-                await client.send.Input.enable(session_id=session_id)
-            except Exception:
-                # Domain might already be enabled
-                pass
-
-            # Type each character
-            for char in text:
-                await client.send.Input.dispatchKeyEvent(
-                    params={"type": "char", "text": char}, session_id=session_id
-                )
-
-            logger.info(f"Successfully typed text into element {index}")
-            return f"Typed text into element {index}"
-
-        finally:
-            if should_close:
-                await client.stop()
+        logger.info(f"Successfully typed text into element {index}")
+        return f"Typed text into element {index}"
 
     async def press_key(
         self,
@@ -376,7 +358,7 @@ class BrowserToolKit:
         
         Args:
             key: Key name (Enter, Tab, Escape, ArrowDown, ArrowUp)
-            client: Optional CDP client. If not provided, creates temporary session
+            client: Optional CDP client. If not provided, uses persistent connection
             session_id: Optional session ID. Must be provided with client
             
         Returns:
@@ -401,61 +383,55 @@ class BrowserToolKit:
                 "session_id provided without client. Provide both or neither."
             )
 
-        # Create temporary session if needed
+        # Use persistent connection if no client provided
         if client is None:
             client, session_id = await self.browser_manager.get_session()
-            should_close = True
+            # Don't close persistent connection - it's managed by BrowserManager lifecycle
         else:
-            should_close = False
             if session_id is None:
                 raise RuntimeError(
                     "client provided without session_id. Provide both or neither."
                 )
 
+        key_def = KEY_DEFINITIONS[key]
+        logger.info(f"Pressing key: {key}")
+
+        # Enable Input domain
         try:
-            key_def = KEY_DEFINITIONS[key]
-            logger.info(f"Pressing key: {key}")
+            await client.send.Input.enable(session_id=session_id)
+        except Exception:
+            # Domain might already be enabled
+            pass
 
-            # Enable Input domain
-            try:
-                await client.send.Input.enable(session_id=session_id)
-            except Exception:
-                # Domain might already be enabled
-                pass
+        # Dispatch keyDown event
+        await client.send.Input.dispatchKeyEvent(
+            params={
+                "type": "keyDown",
+                "key": key_def["key"],
+                "code": key_def["code"],
+                "windowsVirtualKeyCode": key_def["windowsVirtualKeyCode"],
+            },
+            session_id=session_id,
+        )
 
-            # Dispatch keyDown event
-            await client.send.Input.dispatchKeyEvent(
-                params={
-                    "type": "keyDown",
-                    "key": key_def["key"],
-                    "code": key_def["code"],
-                    "windowsVirtualKeyCode": key_def["windowsVirtualKeyCode"],
-                },
-                session_id=session_id,
-            )
+        # Dispatch keyUp event
+        await client.send.Input.dispatchKeyEvent(
+            params={
+                "type": "keyUp",
+                "key": key_def["key"],
+                "code": key_def["code"],
+                "windowsVirtualKeyCode": key_def["windowsVirtualKeyCode"],
+            },
+            session_id=session_id,
+        )
 
-            # Dispatch keyUp event
-            await client.send.Input.dispatchKeyEvent(
-                params={
-                    "type": "keyUp",
-                    "key": key_def["key"],
-                    "code": key_def["code"],
-                    "windowsVirtualKeyCode": key_def["windowsVirtualKeyCode"],
-                },
-                session_id=session_id,
-            )
-
-            logger.info(f"Successfully pressed key: {key}")
-            
-            # If pressing Enter, wait a bit for navigation to start
-            if key == "Enter":
-                await asyncio.sleep(1.0)  # Give time for form submission/navigation
-            
-            return f"Pressed key: {key}"
-
-        finally:
-            if should_close:
-                await client.stop()
+        logger.info(f"Successfully pressed key: {key}")
+        
+        # If pressing Enter, wait a bit for navigation to start
+        if key == "Enter":
+            await asyncio.sleep(1.0)  # Give time for form submission/navigation
+        
+        return f"Pressed key: {key}"
 
     def get_tools(self) -> list[StructuredTool]:
         """Get LangChain tool wrappers for all browser actions.
