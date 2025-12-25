@@ -14,6 +14,36 @@ from cdp_use.client import CDPClient
 
 logger = logging.getLogger(__name__)
 
+# Monkeypatch BaseSubprocessTransport.__del__ to handle closed event loops gracefully
+# This prevents "RuntimeError: Event loop is closed" errors during garbage collection on macOS
+# The error occurs when BaseSubprocessTransport.__del__ tries to close pipes after the event loop is closed
+from asyncio import base_subprocess
+
+_original_del = base_subprocess.BaseSubprocessTransport.__del__
+
+
+def _patched_del(self):
+    """Patched __del__ that handles closed event loops without throwing errors.
+    
+    This prevents RuntimeError: Event loop is closed errors during garbage collection
+    when the subprocess transport tries to clean up after the event loop has closed.
+    """
+    try:
+        # Check if the event loop is closed before calling the original
+        if hasattr(self, '_loop') and self._loop and self._loop.is_closed():
+            # Event loop is closed, skip cleanup that requires the loop
+            return
+        _original_del(self)
+    except RuntimeError as e:
+        if 'Event loop is closed' in str(e):
+            # Silently ignore this specific error - it's harmless during GC
+            pass
+        else:
+            raise
+
+
+base_subprocess.BaseSubprocessTransport.__del__ = _patched_del
+
 
 class BrowserManager:
     """Manages Chrome browser process and CDP connections.
@@ -306,19 +336,53 @@ class BrowserManager:
 
         logger.info(f"Stopping Chrome process (PID {self._process.pid})")
 
+        process = self._process
+        self._process = None  # Clear reference early to prevent reuse
+        
         try:
-            self._process.terminate()
-            try:
-                await asyncio.wait_for(self._process.wait(), timeout=5.0)
-            except asyncio.TimeoutError:
-                logger.warning("Process did not terminate gracefully, killing")
-                self._process.kill()
-                await self._process.wait()
+            # Terminate the process
+            if process.returncode is None:
+                process.terminate()
+                try:
+                    await asyncio.wait_for(process.wait(), timeout=5.0)
+                except asyncio.TimeoutError:
+                    logger.warning("Process did not terminate gracefully, killing")
+                    if process.returncode is None:
+                        process.kill()
+                        await process.wait()
         except ProcessLookupError:
             # Process already terminated
             pass
+        except Exception as e:
+            # Log but don't fail on cleanup errors
+            logger.warning(f"Error during process cleanup: {e}")
 
-        self._process = None
+        # Explicitly close subprocess pipes while event loop is still active
+        # The monkeypatch above handles cases where pipes are closed during GC
+        # after the event loop is closed, but we still close them here for proper cleanup
+        try:
+            if process.stdout:
+                try:
+                    process.stdout.close()
+                except (OSError, ValueError, RuntimeError):
+                    # Pipe may already be closed or transport may be cleaning up
+                    pass
+            if process.stderr:
+                try:
+                    process.stderr.close()
+                except (OSError, ValueError, RuntimeError):
+                    # Pipe may already be closed or transport may be cleaning up
+                    pass
+            if process.stdin:
+                try:
+                    process.stdin.close()
+                except (OSError, ValueError, RuntimeError):
+                    # Pipe may already be closed or transport may be cleaning up
+                    pass
+        except Exception as e:
+            # Ignore errors during pipe cleanup - process is already terminated
+            logger.debug(f"Error during pipe cleanup: {e}")
+
         self._cdp_url = None
         logger.info("Chrome process stopped")
 
