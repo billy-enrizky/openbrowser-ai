@@ -47,8 +47,7 @@ class AgentState(TypedDict):
     root_goal: str 
     plan: List[str] 
     current_step_index: int
-    step_attempt_count: int  # Track retries on same step to detect loops
-    google_failure_count: int  # Track consecutive failures on Google to trigger DuckDuckGo fallback 
+    step_attempt_count: int  # Track retries on same step to detect loops 
 
 class BrowserAgent:
     """Browser automation agent using LangGraph workflow."""
@@ -215,7 +214,6 @@ class BrowserAgent:
                 "plan": plan_result.steps,
                 "current_step_index": 0,
                 "step_attempt_count": 0,
-                "google_failure_count": state.get("google_failure_count", 0),
                 "previous_url": state.get("url", ""),
                 "messages": [AIMessage(content=f"Plan updated: {plan_result.steps}")]
             }
@@ -260,7 +258,6 @@ class BrowserAgent:
                     "plan": steps,
                     "current_step_index": 0,
                     "step_attempt_count": 0,
-                    "google_failure_count": state.get("google_failure_count", 0),
                     "previous_url": state.get("url", ""),
                     "messages": [AIMessage(content=f"Plan updated (fallback): {steps}")]
                 }
@@ -276,7 +273,6 @@ class BrowserAgent:
                     "plan": steps,
                     "current_step_index": 0,
                     "step_attempt_count": 0,
-                    "google_failure_count": state.get("google_failure_count", 0),
                     "previous_url": state.get("url", ""),
                     "messages": [AIMessage(content=f"Plan created (minimal fallback): {steps}")]
                 }
@@ -288,7 +284,6 @@ class BrowserAgent:
         current_url = state.get("url", "")
         previous_url = state.get("previous_url", "")
         attempts = state.get("step_attempt_count", 0)
-        google_failures = state.get("google_failure_count", 0)
         dom_tree = state.get("dom_tree", "")
         
         # Check if we're on DuckDuckGo - if so, skip Google verification checks
@@ -301,20 +296,9 @@ class BrowserAgent:
             is_google_verification = self._is_google_traffic_verification(current_url, dom_tree)
             is_on_google = "google.com" in current_url.lower() if current_url else False
         
-        # Reset Google failure count if we're no longer on Google (successful navigation away)
-        new_failure_count = google_failures
-        if not is_on_google and google_failures > 0:
-            new_failure_count = 0
-            logger.info("No longer on Google, resetting failure count")
-        
-        # Increment Google failure count if we hit verification page (only check if on Google)
+        # If we hit Google traffic verification, switch to DuckDuckGo immediately
         if is_google_verification and is_on_google and not is_on_duckduckgo:
-            new_failure_count = google_failures + 1
-            logger.warning(f"Detected Google traffic verification page (failure {new_failure_count}/3)")
-        
-        # If we hit Google traffic verification 3 times, switch to DuckDuckGo
-        if is_google_verification and is_on_google and new_failure_count >= 3 and not is_on_duckduckgo:
-            logger.warning(f"Google failed {new_failure_count} times. Switching to DuckDuckGo.")
+            logger.warning("Detected Google traffic verification page. Switching to DuckDuckGo immediately.")
             # Navigate to DuckDuckGo
             client, session_id = await self.browser_manager.get_session()
             try:
@@ -337,9 +321,8 @@ class BrowserAgent:
             return {
                 "plan": updated_plan,
                 "current_step_index": current_idx,  # Preserve current step - continue from where we were
-                "google_failure_count": 0,  # Reset counter after switching
                 "step_attempt_count": 0,  # Reset step attempts since we're switching strategy
-                "messages": [AIMessage(content="Switched to DuckDuckGo after 3 Google failures. Plan updated.")]
+                "messages": [AIMessage(content="Switched to DuckDuckGo after Google traffic verification. Plan updated.")]
             }
         
         # 1. Handle End of Plan
@@ -364,20 +347,10 @@ class BrowserAgent:
         if attempts >= 3:
             loop_warning = f"\nWARNING: You have attempted this step {attempts + 1} times. If you are stuck, reply 'REPLAN' to regenerate the plan."
         
-        # Google failure warning
-        google_warning = ""
-        if is_google_verification and is_on_google:
-            google_warning = f"\nWARNING: Google traffic verification detected (failure {new_failure_count}/3). If this persists, the agent will automatically switch to DuckDuckGo."
-        
-        # DuckDuckGo fallback instruction
-        fallback_note = ""
-        if new_failure_count >= 3:
-            fallback_note = "\nNOTE: After 3 consecutive failures on Google, the agent will automatically switch to DuckDuckGo for searches."
-        
         system_prompt = (
             f"ROOT GOAL: {state.get('root_goal')}\n"
             f"CURRENT PLAN STEP {current_idx + 1}/{len(plan)}: {current_task}\n"
-            f"CURRENT URL: {current_url}{url_context}{loop_warning}{google_warning}{fallback_note}\n\n"
+            f"CURRENT URL: {current_url}{url_context}{loop_warning}\n\n"
             "INSTRUCTIONS:\n"
             "1. LOOK at the screenshot and URL.\n"
             "2. IS THIS STEP ALREADY COMPLETED? (e.g., if step is 'Go to Google' and you are on Google, or if step is 'Type text' and text is already typed, or if step is 'Click first result' and you just clicked it).\n"
@@ -386,7 +359,7 @@ class BrowserAgent:
             "4. IF stuck (same step > 3 times) or CAPTCHA appears: Reply 'REPLAN'.\n"
             "5. AFTER EXECUTING A TOOL: Check if the tool execution completed the current step. If yes, reply 'NEXT STEP' in your next response.\n"
             "6. UNEXPECTED PAGES: If you encounter an unexpected page state (CAPTCHA, login page, error page, cookie consent, pop-up, etc.), handle it directly using tools. Do not wait for the plan to address it.\n"
-            "7. GOOGLE FAILURES: If you encounter Google traffic verification pages 3 times in a row, the agent will automatically switch to DuckDuckGo. You can also proactively use DuckDuckGo if Google is blocking access.\n"
+            "7. GOOGLE FAILURES: If you encounter Google traffic verification pages, the agent will automatically switch to DuckDuckGo. You can also proactively use DuckDuckGo if Google is blocking access.\n"
             "8. DO NOT combine steps. Finish the current step before moving to the next.\n"
             "DOM Tree elements are numbered [1], [2], [3], etc. starting from 1. Use these numbers to interact with elements via the tools."
         )
@@ -480,24 +453,17 @@ class BrowserAgent:
         if "NEXT STEP" in content:
             new_idx = current_idx + 1
             logger.info(f"Step {current_idx + 1} marked complete by Agent. Advancing to step {new_idx + 1}")
-            # Reset Google failure count on successful step completion
             return {
                 "current_step_index": new_idx,
                 "step_attempt_count": 0,  # Reset attempt count for new step
-                "google_failure_count": 0,  # Reset Google failures on successful step
                 "messages": [AIMessage(content=f"Completed step {current_idx + 1}. Moving to {new_idx + 1}.")]
             }
         
-        # Update Google failure count if we're on Google verification page
-        update_dict = {
+        # Handle tool calls - increment attempt count
+        return {
             "messages": [response],
             "step_attempt_count": attempts + 1
         }
-        if is_google_verification and is_on_google:
-            update_dict["google_failure_count"] = new_failure_count
-            
-        # Handle tool calls - increment attempt count
-        return update_dict
 
     async def execute_node(self, state: AgentState) -> dict:
         """Execute tools with Error Handling."""
@@ -590,8 +556,7 @@ class BrowserAgent:
                 initial_state = {
                     "messages": [HumanMessage(content=goal)],
                     "screenshot": "", "dom_tree": "", "url": "", "previous_url": "",
-                    "root_goal": goal, "plan": [], "current_step_index": 0, "step_attempt_count": 0,
-                    "google_failure_count": 0
+                    "root_goal": goal, "plan": [], "current_step_index": 0, "step_attempt_count": 0
                 }
                 return await self.app.ainvoke(initial_state, config={**config, "recursion_limit": 100})
             finally:
