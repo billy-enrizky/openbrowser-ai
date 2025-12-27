@@ -6,3 +6,4 @@ __pycache__
 *.json
 test*
 .env
+*.yml

@@ -1,13 +1,13 @@
 [project]
 name = "openbrowser"
-version = "0.1.0"
+version = "0.1.41"
 description = "Agentic browser automation using LangGraph and raw CDP"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "langgraph",
     "langchain-core>=0.3.0",
-    "langchain-openai>=0.2.0", 
+    "langchain-openai>=0.2.0",
     "pydantic>=2.0.0",
     "playwright",
     "python-dotenv",
@@ -16,7 +16,40 @@ dependencies = [
     "aiofiles",
     "cdp-use",
     "google-genai>=0.2.0",
+    "bubus>=1.5.6",
+    "litellm[proxy]>=1.80.11",
+    "pillow>=11.0.0",
+    "rich>=13.0.0",
+    "click>=8.1.8",
+    "psutil>=7.2.0",
+    "markdownify>=0.11.6",
 ]
+
+[project.optional-dependencies]
+cli = ["textual>=3.2.0"]
+video = ["imageio[ffmpeg]", "numpy"]
+anthropic = ["anthropic>=0.68.0"]
+groq = ["groq>=0.30.0"]
+ollama = ["ollama>=0.5.1"]
+aws = ["boto3"]
+azure = ["openai"]
+telemetry = ["posthog>=3.7.0"]
+pdf = ["pypdf", "reportlab"]
+all = [
+    "textual>=3.2.0",
+    "imageio[ffmpeg]",
+    "numpy",
+    "anthropic>=0.68.0",
+    "groq>=0.30.0",
+    "ollama>=0.5.1",
+    "boto3",
+    "posthog>=3.7.0",
+    "pypdf",
+    "reportlab",
+]
+
+[project.scripts]
+openbrowser = "src.openbrowser.cli:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -24,3 +57,7 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/openbrowser"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
