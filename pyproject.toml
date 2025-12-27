@@ -23,6 +23,7 @@ dependencies = [
     "click>=8.1.8",
     "psutil>=7.2.0",
     "markdownify>=0.11.6",
+    "pytest>=9.0.2",
 ]
 
 [project.optional-dependencies]
