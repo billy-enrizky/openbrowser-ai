@@ -96,7 +96,7 @@ class ChatOllama(BaseChatModel):
 
         message = AIMessage(
             content=content,
-            tool_calls=tool_calls if tool_calls else None,
+            tool_calls=tool_calls,  # Always pass list, never None (Pydantic validation)
         )
 
         return ChatResult(generations=[ChatGeneration(message=message)])

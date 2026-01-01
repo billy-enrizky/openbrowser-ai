@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 from typing import Any, List, Optional, Type, TypeVar
@@ -15,6 +16,42 @@ from pydantic import BaseModel, Field, PrivateAttr
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T", bound=BaseModel)
+
+
+class StructuredOutputWrapper:
+    """Wrapper that parses tool call responses into Pydantic models."""
+    
+    def __init__(self, llm: "ChatGroq", schema: Type[BaseModel]):
+        self.llm = llm
+        self.schema = schema
+    
+    async def ainvoke(self, messages: List[BaseMessage], **kwargs: Any) -> BaseModel:
+        """Invoke the model and parse the response into the schema."""
+        result = await self.llm.ainvoke(messages, **kwargs)
+        
+        # Check if we got tool calls
+        if hasattr(result, 'tool_calls') and result.tool_calls:
+            for tool_call in result.tool_calls:
+                try:
+                    # Get the args from the tool call
+                    args = tool_call.get('args', {}) if isinstance(tool_call, dict) else tool_call.args
+                    # Handle string args (JSON) by parsing them
+                    if isinstance(args, str):
+                        args = json.loads(args)
+                    return self.schema.model_validate(args)
+                except Exception as e:
+                    logger.warning("Failed to parse tool call: %s", e)
+                    continue
+        
+        # If no valid tool calls, try to parse content as JSON
+        if hasattr(result, 'content') and result.content:
+            try:
+                data = json.loads(result.content)
+                return self.schema.model_validate(data)
+            except (json.JSONDecodeError, Exception) as e:
+                logger.warning("Failed to parse content as JSON: %s", e)
+        
+        raise ValueError(f"Failed to get structured output from Groq. Response: {result}")
 
 
 class ChatGroq(BaseChatModel):
@@ -98,29 +135,84 @@ class ChatGroq(BaseChatModel):
 
         if choice.message.tool_calls:
             for tc in choice.message.tool_calls:
+                # Parse args from JSON string to dict (Groq returns args as string)
+                try:
+                    args = json.loads(tc.function.arguments) if tc.function.arguments else {}
+                except json.JSONDecodeError:
+                    args = {}
+                    logger.warning("Failed to parse tool call arguments: %s", tc.function.arguments)
+                
                 tool_calls.append({
                     "id": tc.id,
                     "name": tc.function.name,
-                    "args": tc.function.arguments,
+                    "args": args,
                 })
 
         message = AIMessage(
             content=content,
-            tool_calls=tool_calls if tool_calls else None,
+            tool_calls=tool_calls,  # Always pass list, never None (Pydantic validation)
         )
 
         return ChatResult(generations=[ChatGeneration(message=message)])
 
     def _convert_messages(self, messages: List[BaseMessage]) -> List[dict]:
-        """Convert LangChain messages to OpenAI format."""
+        """Convert LangChain messages to OpenAI/Groq format.
+        
+        Groq supports both string content and multi-part content (for vision models).
+        For non-vision models, we extract text from multi-part content.
+        """
         result = []
         for msg in messages:
             if isinstance(msg, SystemMessage):
-                result.append({"role": "system", "content": msg.content})
+                # System message content should always be a string
+                content = msg.content
+                if isinstance(content, list):
+                    # Extract text from multi-part content
+                    content = " ".join(
+                        part.get("text", "") if isinstance(part, dict) else str(part)
+                        for part in content
+                        if isinstance(part, (str, dict))
+                    )
+                result.append({"role": "system", "content": content})
             elif isinstance(msg, HumanMessage):
-                result.append({"role": "user", "content": msg.content})
+                content = msg.content
+                if isinstance(content, list):
+                    # Check if model supports vision (llama-3.2-vision models)
+                    if "vision" in self.model_name.lower():
+                        # Convert to OpenAI-style multi-part content
+                        parts = []
+                        for part in content:
+                            if isinstance(part, str):
+                                parts.append({"type": "text", "text": part})
+                            elif isinstance(part, dict):
+                                if part.get("type") == "text":
+                                    parts.append({"type": "text", "text": part.get("text", "")})
+                                elif part.get("type") == "image_url":
+                                    parts.append({
+                                        "type": "image_url",
+                                        "image_url": part.get("image_url", {})
+                                    })
+                        content = parts
+                    else:
+                        # For non-vision models, extract text only
+                        text_parts = []
+                        for part in content:
+                            if isinstance(part, str):
+                                text_parts.append(part)
+                            elif isinstance(part, dict) and part.get("type") == "text":
+                                text_parts.append(part.get("text", ""))
+                        content = " ".join(text_parts)
+                result.append({"role": "user", "content": content})
             elif isinstance(msg, AIMessage):
-                result.append({"role": "assistant", "content": msg.content})
+                # AI message content should be a string
+                content = msg.content
+                if isinstance(content, list):
+                    content = " ".join(
+                        part.get("text", "") if isinstance(part, dict) else str(part)
+                        for part in content
+                        if isinstance(part, (str, dict))
+                    )
+                result.append({"role": "assistant", "content": content})
         return result
 
     def bind_tools(self, tools: List[Any], **kwargs: Any) -> ChatGroq:
@@ -158,8 +250,11 @@ class ChatGroq(BaseChatModel):
         self,
         schema: Type[T],
         **kwargs: Any,
-    ) -> ChatGroq:
-        """Configure for structured output."""
+    ) -> StructuredOutputWrapper:
+        """Configure for structured output.
+        
+        Returns a wrapper that invokes the model and parses responses into the schema.
+        """
         tool = {
             "type": "function",
             "function": {
@@ -168,5 +263,6 @@ class ChatGroq(BaseChatModel):
                 "parameters": schema.model_json_schema(),
             },
         }
-        return self.bind_tools([tool])
+        bound_llm = self.bind_tools([tool])
+        return StructuredOutputWrapper(bound_llm, schema)
 
