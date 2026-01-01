@@ -10,6 +10,7 @@ from typing import Any, Generic, Optional, TypeVar, TYPE_CHECKING
 
 from pydantic import BaseModel, Field
 
+from src.openbrowser.agent.views import ActionResult
 from src.openbrowser.browser.dom import DomState
 from src.openbrowser.browser.session import BrowserSession
 from src.openbrowser.observability import observe_debug
@@ -18,21 +19,9 @@ from src.openbrowser.tools.registry import Registry, ActionModel
 T = TypeVar('T', bound=BaseModel)
 
 if TYPE_CHECKING:
-    from src.openbrowser.agent.views import ActionResult as ActionResultType
     from src.openbrowser.browser.views import BrowserError
 
 logger = logging.getLogger(__name__)
-
-
-# Define ActionResult here to avoid circular import
-class ActionResult(BaseModel):
-    """Result of executing an action."""
-    is_done: bool | None = Field(default=False, description="True if the task is completed")
-    success: bool | None = Field(default=None, description="True if the action was successful")
-    error: str | None = Field(default=None, description="Error message if the action failed")
-    extracted_content: str | None = Field(default=None, description="Content extracted by the action")
-    include_extracted_content_only_once: bool = Field(default=False, description="Only include extracted content once")
-    metadata: dict[str, Any] = Field(default_factory=dict, description="Additional metadata from the action")
 
 KEY_DEFINITIONS = {
     "Enter": {"key": "Enter", "code": "Enter", "windowsVirtualKeyCode": 13},
@@ -45,6 +34,67 @@ KEY_DEFINITIONS = {
     "ArrowRight": {"key": "ArrowRight", "code": "ArrowRight", "windowsVirtualKeyCode": 39},
     "Space": {"key": " ", "code": "Space", "windowsVirtualKeyCode": 32},
 }
+
+# CAPTCHA detection patterns
+CAPTCHA_INDICATORS = [
+    "captcha",
+    "recaptcha",
+    "i'm not a robot",
+    "unusual traffic",
+    "verify you're human",
+    "robot verification",
+    "security check",
+    "please verify",
+    "automated queries",
+]
+
+
+async def detect_captcha(browser_session: BrowserSession) -> bool:
+    """Detect if the current page shows a CAPTCHA.
+    
+    Returns:
+        True if CAPTCHA is detected, False otherwise.
+    """
+    if not browser_session.agent_focus:
+        return False
+    
+    try:
+        cdp_session = browser_session.agent_focus
+        client = cdp_session.cdp_client
+        session_id = cdp_session.session_id
+        
+        # Get the page content
+        result = await client.send.Runtime.evaluate(
+            params={"expression": "document.body ? document.body.innerText.toLowerCase() : ''"},
+            session_id=session_id,
+        )
+        
+        if result and "result" in result and "value" in result["result"]:
+            page_text = result["result"]["value"]
+            
+            # Check for CAPTCHA indicators in page text
+            for indicator in CAPTCHA_INDICATORS:
+                if indicator in page_text:
+                    logger.info(f"CAPTCHA detected: found '{indicator}' in page content")
+                    return True
+        
+        # Also check URL for CAPTCHA patterns
+        url_result = await client.send.Runtime.evaluate(
+            params={"expression": "window.location.href.toLowerCase()"},
+            session_id=session_id,
+        )
+        
+        if url_result and "result" in url_result and "value" in url_result["result"]:
+            url = url_result["result"]["value"]
+            if "captcha" in url or "sorry" in url or "recaptcha" in url:
+                logger.info(f"CAPTCHA detected: URL contains CAPTCHA pattern: {url}")
+                return True
+        
+        return False
+        
+    except Exception as e:
+        logger.debug(f"Error detecting CAPTCHA: {e}")
+        return False
 
 
 class NavigateParams(ActionModel):
@@ -169,6 +219,7 @@ class Tools:
         self._selector_map: dict[int, int] = {}
         self.display_files_in_done_text = display_files_in_done_text
         self.registry = Registry(exclude_actions=exclude_actions)
+        self._google_blocked = False  # Track if Google is blocked due to CAPTCHA
         self._register_done_action(output_model)
         self._register_default_actions()
 
@@ -377,6 +428,45 @@ class Tools:
         except Exception as e:
             logger.warning(f"Failed to highlight element: {e}")
 
+    def _convert_google_to_bing(self, google_url: str) -> str:
+        """Convert a Google URL to equivalent Bing URL.
+        
+        Args:
+            google_url: The Google URL to convert
+            
+        Returns:
+            The equivalent Bing URL
+        """
+        from urllib.parse import urlparse, parse_qs, quote_plus, unquote
+        
+        parsed = urlparse(google_url)
+        
+        # If it's a Google search URL, extract the query and build Bing URL
+        if "google.com" in parsed.netloc:
+            query_params = parse_qs(parsed.query)
+            
+            search_query = None
+            
+            # For Google sorry/CAPTCHA pages, the original search is in the 'continue' parameter
+            if 'continue' in query_params:
+                continue_url = unquote(query_params['continue'][0])
+                continue_parsed = urlparse(continue_url)
+                continue_params = parse_qs(continue_parsed.query)
+                if 'q' in continue_params:
+                    search_query = continue_params['q'][0]
+            
+            # Fallback to direct 'q' parameter (for regular Google search pages)
+            if not search_query and 'q' in query_params:
+                search_query = query_params['q'][0]
+            
+            if search_query:
+                return f"https://www.bing.com/search?q={quote_plus(search_query)}&setlang=en&cc=US"
+            
+            # If it's just google.com without search, redirect to bing.com
+            return "https://www.bing.com?setlang=en&cc=US"
+        
+        return google_url
+
     def _register_default_actions(self) -> None:
         tools_instance = self
 
@@ -385,10 +475,43 @@ class Tools:
             session = browser_session or tools_instance.browser_session
             if not session.agent_focus:
                 raise RuntimeError("Browser not started")
-            logger.info(f"Navigating to {params.url}")
+            
+            target_url = params.url
+            
+            # If Google is blocked due to CAPTCHA, redirect to Bing automatically
+            if tools_instance._google_blocked and "google.com" in target_url.lower():
+                logger.warning("Google is blocked due to CAPTCHA, redirecting to Bing")
+                target_url = tools_instance._convert_google_to_bing(target_url)
+                logger.info(f"Converted Google URL to Bing: {target_url}")
+            
+            logger.info(f"Navigating to {target_url}")
             from src.openbrowser.browser.events import NavigateToUrlEvent
-            await session.event_bus.dispatch(NavigateToUrlEvent(url=params.url, new_tab=False))
-            return ActionResult(extracted_content=f"Navigated to {params.url}")
+            await session.event_bus.dispatch(NavigateToUrlEvent(url=target_url, new_tab=False))
+            
+            # Wait for page to load before checking for CAPTCHA
+            await asyncio.sleep(1.5)
+            
+            # Check for CAPTCHA on Google pages (only if not already blocked)
+            if not tools_instance._google_blocked and "google.com" in target_url.lower():
+                if await detect_captcha(session):
+                    logger.warning("CAPTCHA detected on Google, falling back to Bing")
+                    
+                    # Mark Google as blocked
+                    tools_instance._google_blocked = True
+                    
+                    # Convert Google URL to Bing URL
+                    fallback_url = tools_instance._convert_google_to_bing(target_url)
+                    logger.info(f"Redirecting to Bing: {fallback_url}")
+                    
+                    await session.event_bus.dispatch(NavigateToUrlEvent(url=fallback_url, new_tab=False))
+                    return ActionResult(
+                        extracted_content=f"CAPTCHA detected on Google. Google is now blocked. Automatically redirected to Bing: {fallback_url}. Use Bing for all future searches."
+                    )
+            
+            if tools_instance._google_blocked and "google.com" in params.url.lower():
+                return ActionResult(extracted_content=f"Google is blocked due to CAPTCHA. Navigated to Bing instead: {target_url}")
+            
+            return ActionResult(extracted_content=f"Navigated to {target_url}")
 
         @self.registry.action("Click on an element by index", param_model=ClickParams)
         async def click(params: ClickParams, browser_session: BrowserSession = None) -> ActionResult:
@@ -407,21 +530,111 @@ class Tools:
                 await client.send.Input.enable(session_id=session_id)
             except Exception:
                 pass
+            
+            # Try to scroll element into view first
             try:
-                box_model_result = await client.send.DOM.getBoxModel(
+                await client.send.DOM.scrollIntoViewIfNeeded(
                     params={"backendNodeId": backend_node_id}, session_id=session_id
                 )
-            except Exception as e:
-                return ActionResult(error=f"Element {params.index} is not visible: {e}")
-            if "model" not in box_model_result or "content" not in box_model_result["model"]:
-                return ActionResult(error=f"Element {params.index} is not visible")
-            content_quad = box_model_result["model"]["content"]
-            if len(content_quad) < 8:
-                return ActionResult(error=f"Element {params.index} has invalid box model")
-            x = (content_quad[0] + content_quad[2] + content_quad[4] + content_quad[6]) / 4
-            y = (content_quad[1] + content_quad[3] + content_quad[5] + content_quad[7]) / 4
+                await asyncio.sleep(0.1)
+            except Exception:
+                pass
+            
+            # Try multiple methods to get element coordinates (following browser-use pattern)
+            x, y = None, None
+            
+            # Method 1: Try DOM.getContentQuads first (best for inline elements)
+            try:
+                content_quads_result = await client.send.DOM.getContentQuads(
+                    params={"backendNodeId": backend_node_id}, session_id=session_id
+                )
+                if "quads" in content_quads_result and content_quads_result["quads"]:
+                    quad = content_quads_result["quads"][0]
+                    if len(quad) >= 8:
+                        x = sum(quad[i] for i in range(0, 8, 2)) / 4
+                        y = sum(quad[i] for i in range(1, 8, 2)) / 4
+            except Exception:
+                pass
+            
+            # Method 2: Fall back to DOM.getBoxModel
+            if x is None:
+                try:
+                    box_model_result = await client.send.DOM.getBoxModel(
+                        params={"backendNodeId": backend_node_id}, session_id=session_id
+                    )
+                    if "model" in box_model_result and "content" in box_model_result["model"]:
+                        content_quad = box_model_result["model"]["content"]
+                        if len(content_quad) >= 8:
+                            x = (content_quad[0] + content_quad[2] + content_quad[4] + content_quad[6]) / 4
+                            y = (content_quad[1] + content_quad[3] + content_quad[5] + content_quad[7]) / 4
+                except Exception:
+                    pass
+            
+            # Method 3: Fall back to JavaScript getBoundingClientRect
+            if x is None:
+                try:
+                    resolve_result = await client.send.DOM.resolveNode(
+                        params={"backendNodeId": backend_node_id}, session_id=session_id
+                    )
+                    if "object" in resolve_result and "objectId" in resolve_result["object"]:
+                        object_id = resolve_result["object"]["objectId"]
+                        bounds_result = await client.send.Runtime.callFunctionOn(
+                            params={
+                                "functionDeclaration": """
+                                    function() {
+                                        const rect = this.getBoundingClientRect();
+                                        return {
+                                            x: rect.left + rect.width / 2,
+                                            y: rect.top + rect.height / 2,
+                                            width: rect.width,
+                                            height: rect.height
+                                        };
+                                    }
+                                """,
+                                "objectId": object_id,
+                                "returnByValue": True,
+                            },
+                            session_id=session_id,
+                        )
+                        if "result" in bounds_result and "value" in bounds_result["result"]:
+                            rect = bounds_result["result"]["value"]
+                            if rect.get("width", 0) > 0 and rect.get("height", 0) > 0:
+                                x = rect["x"]
+                                y = rect["y"]
+                except Exception:
+                    pass
+            
+            # Method 4: Fall back to JavaScript click if we still don't have coordinates
+            if x is None:
+                try:
+                    resolve_result = await client.send.DOM.resolveNode(
+                        params={"backendNodeId": backend_node_id}, session_id=session_id
+                    )
+                    if "object" in resolve_result and "objectId" in resolve_result["object"]:
+                        object_id = resolve_result["object"]["objectId"]
+                        await client.send.Runtime.callFunctionOn(
+                            params={
+                                "functionDeclaration": "function() { this.click(); }",
+                                "objectId": object_id,
+                            },
+                            session_id=session_id,
+                        )
+                        logger.info(f"Clicked element {params.index} via JavaScript fallback")
+                        return ActionResult(extracted_content=f"Clicked element {params.index} (via JS)")
+                except Exception as js_e:
+                    return ActionResult(error=f"Element {params.index} could not be clicked: {js_e}")
+                return ActionResult(error=f"Element {params.index} is not visible or clickable")
+            
             await tools_instance._highlight_element(client, session_id, backend_node_id)
             await asyncio.sleep(0.3)
+            
+            # Move mouse to element first
+            await client.send.Input.dispatchMouseEvent(
+                params={"type": "mouseMoved", "x": x, "y": y},
+                session_id=session_id,
+            )
+            await asyncio.sleep(0.05)
+            
             await client.send.Input.dispatchMouseEvent(
                 params={"type": "mousePressed", "button": "left", "x": x, "y": y, "clickCount": 1},
                 session_id=session_id,
@@ -587,7 +800,7 @@ class Tools:
             engine_urls = {
                 "duckduckgo": f"https://duckduckgo.com/?q={params.query.replace(' ', '+')}",
                 "google": f"https://www.google.com/search?q={params.query.replace(' ', '+')}",
-                "bing": f"https://www.bing.com/search?q={params.query.replace(' ', '+')}",
+                "bing": f"https://www.bing.com/search?q={params.query.replace(' ', '+')}&setlang=en&cc=US",
             }
             url = engine_urls.get(params.engine.lower(), engine_urls["duckduckgo"])
             logger.info(f"Searching for '{params.query}' using {params.engine}")
