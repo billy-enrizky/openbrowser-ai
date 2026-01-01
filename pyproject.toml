@@ -1,6 +1,6 @@
 [project]
 name = "openbrowser"
-version = "0.1.41"
+version = "0.1.66"
 description = "Agentic browser automation using LangGraph and raw CDP"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -24,6 +24,7 @@ dependencies = [
     "psutil>=7.2.0",
     "markdownify>=0.11.6",
     "pytest>=9.0.2",
+    "pytest-asyncio>=1.0.0",
 ]
 
 [project.optional-dependencies]
@@ -61,3 +62,10 @@ packages = ["src/openbrowser"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+asyncio_default_test_loop_scope = "function"
+markers = [
+    "asyncio: mark tests as async tests",
+]
