@@ -48,7 +48,7 @@ class SystemPrompt:
             elif self.use_thinking:
                 template_filename = 'system_prompt.md'
             else:
-                template_filename = 'system_prompt.md'
+                template_filename = 'system_prompt_no_thinking.md'
 
             # Load from the same directory as this module
             with importlib.resources.files('src.openbrowser.agent').joinpath(template_filename).open('r', encoding='utf-8') as f:
