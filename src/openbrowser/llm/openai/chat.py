@@ -78,9 +78,9 @@ class ChatOpenAI(BaseChatModel):
         wrapped._llm = bound_llm
         return wrapped
 
-    def with_structured_output(self, output_schema: type[Any]) -> Any:
+    def with_structured_output(self, output_schema: type[Any], **kwargs: Any) -> Any:
         """Get structured output from the model."""
-        return self._llm.with_structured_output(output_schema)
+        return self._llm.with_structured_output(output_schema, **kwargs)
 
     async def agenerate(
         self,

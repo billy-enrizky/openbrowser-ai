@@ -131,7 +131,7 @@ Interactive elements{truncated_text}:
         """Get the agent state description."""
         step_info_description = ''
         if self.step_info:
-            step_info_description = f'Step {self.step_info.step_number + 1}/{self.step_info.max_steps}\n'
+            step_info_description = f'Step {self.step_info.step_number + 1}\n'
 
         time_str = datetime.now().strftime('%Y-%m-%d')
         step_info_description += f'Today: {time_str}'
