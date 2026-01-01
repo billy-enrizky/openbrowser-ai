@@ -61,6 +61,90 @@ class ModelProviderError(Exception):
         self.model = model
 
 
+def _create_gemini_optimized_schema(model: type[BaseModel]) -> dict[str, Any]:
+    """
+    Create Gemini-optimized schema that removes unsupported fields.
+    
+    Google Gemini API doesn't support 'additionalProperties', 'title', 'default',
+    and '$ref' references in the response schema. This function creates a clean
+    schema that Gemini can process.
+    
+    Args:
+        model: The Pydantic model to create schema for
+        
+    Returns:
+        Optimized schema compatible with Gemini API
+    """
+    original_schema = model.model_json_schema()
+    
+    # Extract $defs for reference resolution
+    defs_lookup = original_schema.get('$defs', {})
+    
+    def resolve_refs(obj: Any) -> Any:
+        """Resolve $ref references by inlining definitions."""
+        if isinstance(obj, dict):
+            if '$ref' in obj:
+                ref_path = obj['$ref'].split('/')[-1]
+                if ref_path in defs_lookup:
+                    # Get the referenced definition and resolve it
+                    resolved = defs_lookup[ref_path].copy()
+                    # Merge any additional properties from the reference object
+                    for key, value in obj.items():
+                        if key != '$ref':
+                            resolved[key] = value
+                    return resolve_refs(resolved)
+                return obj
+            else:
+                return {k: resolve_refs(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [resolve_refs(item) for item in obj]
+        return obj
+    
+    def clean_schema(obj: Any) -> Any:
+        """Remove unsupported properties from schema."""
+        if isinstance(obj, dict):
+            cleaned = {}
+            for key, value in obj.items():
+                # Skip unsupported fields
+                if key in ['additionalProperties', 'additional_properties', 'title', 'default', '$defs']:
+                    continue
+                
+                cleaned_value = clean_schema(value)
+                
+                # Handle empty object properties - Gemini doesn't allow empty OBJECT types
+                if (
+                    key == 'properties'
+                    and isinstance(cleaned_value, dict)
+                    and len(cleaned_value) == 0
+                    and isinstance(obj.get('type', ''), str)
+                    and obj.get('type', '').upper() == 'OBJECT'
+                ):
+                    cleaned['properties'] = {'_placeholder': {'type': 'string'}}
+                else:
+                    cleaned[key] = cleaned_value
+            
+            # If this is an object type with empty properties, add a placeholder
+            if (
+                isinstance(cleaned.get('type', ''), str)
+                and cleaned.get('type', '').upper() == 'OBJECT'
+                and 'properties' in cleaned
+                and isinstance(cleaned['properties'], dict)
+                and len(cleaned['properties']) == 0
+            ):
+                cleaned['properties'] = {'_placeholder': {'type': 'string'}}
+            
+            return cleaned
+        elif isinstance(obj, list):
+            return [clean_schema(item) for item in obj]
+        return obj
+    
+    # First resolve all $ref references
+    resolved_schema = resolve_refs(original_schema)
+    
+    # Then clean up unsupported fields
+    return clean_schema(resolved_schema)
+
+
 def _convert_langchain_to_google_messages(
     messages: list[BaseMessage],
 ) -> tuple[types.ContentListUnion, str | None]:
@@ -265,8 +349,8 @@ class ChatGoogle(BaseChatModel):
                 else:
                     messages = [HumanMessage(content=str(input))]
                 
-                # Get the schema JSON
-                schema_json = self.schema.model_json_schema()
+                # Get the schema JSON - use optimized schema for Gemini compatibility
+                schema_json = _create_gemini_optimized_schema(self.schema)
                 
                 # Add schema instruction to system message or first message
                 system_instruction = (
