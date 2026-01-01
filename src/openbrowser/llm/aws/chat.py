@@ -18,6 +18,39 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T", bound=BaseModel)
 
 
+class StructuredOutputWrapper:
+    """Wrapper that parses tool call responses into Pydantic models."""
+    
+    def __init__(self, llm: ChatAWSBedrock, schema: Type[BaseModel]):
+        self.llm = llm
+        self.schema = schema
+    
+    async def ainvoke(self, messages: List[BaseMessage], **kwargs: Any) -> BaseModel:
+        """Invoke the model and parse the response into the schema."""
+        result = await self.llm.ainvoke(messages, **kwargs)
+        
+        # Check if we got tool calls
+        if hasattr(result, 'tool_calls') and result.tool_calls:
+            for tool_call in result.tool_calls:
+                try:
+                    # Get the args from the tool call
+                    args = tool_call.get('args', {}) if isinstance(tool_call, dict) else tool_call.args
+                    return self.schema.model_validate(args)
+                except Exception as e:
+                    logger.warning("Failed to parse tool call: %s", e)
+                    continue
+        
+        # If no valid tool calls, try to parse content as JSON
+        if hasattr(result, 'content') and result.content:
+            try:
+                data = json.loads(result.content)
+                return self.schema.model_validate(data)
+            except (json.JSONDecodeError, Exception) as e:
+                logger.warning("Failed to parse content as JSON: %s", e)
+        
+        raise ValueError(f"Failed to get structured output from Bedrock. Response: {result}")
+
+
 class ChatAWSBedrock(BaseChatModel):
     """
     LangChain-compatible wrapper for AWS Bedrock (Claude models).
@@ -34,10 +67,12 @@ class ChatAWSBedrock(BaseChatModel):
 
     _client: Any = PrivateAttr(default=None)
     _bound_tools: List[Any] = PrivateAttr(default_factory=list)
+    _output_schema: Optional[Type[BaseModel]] = PrivateAttr(default=None)
 
     def __init__(self, **kwargs: Any):
         super().__init__(**kwargs)
         self._bound_tools = []
+        self._output_schema = None
         self._init_client()
 
     def _init_client(self) -> None:
@@ -101,6 +136,9 @@ class ChatAWSBedrock(BaseChatModel):
 
         if self._bound_tools:
             request_body["tools"] = self._bound_tools
+            # Force tool use when structured output is expected
+            if self._output_schema is not None:
+                request_body["tool_choice"] = {"type": "any"}
 
         if stop:
             request_body["stop_sequences"] = stop
@@ -132,7 +170,7 @@ class ChatAWSBedrock(BaseChatModel):
 
         message = AIMessage(
             content=content,
-            tool_calls=tool_calls if tool_calls else None,
+            tool_calls=tool_calls,  # Always pass list (empty or with items)
         )
 
         return ChatResult(generations=[ChatGeneration(message=message)])
@@ -188,6 +226,7 @@ class ChatAWSBedrock(BaseChatModel):
             aws_session_token=self.aws_session_token,
         )
         new_instance._bound_tools = self._convert_tools(tools)
+        new_instance._output_schema = self._output_schema
         return new_instance
 
     def _convert_tools(self, tools: List[Any]) -> List[dict]:
@@ -211,12 +250,30 @@ class ChatAWSBedrock(BaseChatModel):
         self,
         schema: Type[T],
         **kwargs: Any,
-    ) -> ChatAWSBedrock:
-        """Configure for structured output."""
+    ) -> StructuredOutputWrapper:
+        """Configure for structured output.
+        
+        Returns a wrapper that invokes the model and parses the response
+        into the specified Pydantic schema.
+        """
+        # Create a new instance with the tool bound
+        new_instance = ChatAWSBedrock(
+            model=self.model_name,
+            temperature=self.temperature,
+            max_tokens=self.max_tokens,
+            region_name=self.region_name,
+            aws_access_key_id=self.aws_access_key_id,
+            aws_secret_access_key=self.aws_secret_access_key,
+            aws_session_token=self.aws_session_token,
+        )
+        
         tool = {
             "name": schema.__name__,
-            "description": f"Output structured data as {schema.__name__}",
+            "description": f"Output structured data as {schema.__name__}. You MUST use this tool to respond.",
             "input_schema": schema.model_json_schema(),
         }
-        return self.bind_tools([tool])
+        new_instance._bound_tools = [tool]
+        new_instance._output_schema = schema
+        
+        return StructuredOutputWrapper(new_instance, schema)
 
