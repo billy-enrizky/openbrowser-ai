@@ -118,8 +118,6 @@ class BrowserAgent:
             register_done_callback: Callback called when agent completes.
             register_should_stop_callback: Async callback to check if agent should stop.
         """
-        logger.info("Initializing BrowserAgent with provider: %s, model: %s", llm_provider, model_name)
-        
         # Store the task
         self.task = task
 
@@ -132,43 +130,59 @@ class BrowserAgent:
         # Use provided LLM or create one based on provider
         if llm is not None:
             self.llm = llm
+            # Try to get model info from the provided LLM
+            llm_class_name = type(llm).__name__
+            llm_model = getattr(llm, 'model', getattr(llm, 'model_name', 'unknown'))
+            logger.info("Initializing BrowserAgent with custom LLM: %s, model: %s", llm_class_name, llm_model)
         elif llm_provider == "google":
             from src.openbrowser.llm.google import ChatGoogle
             self.llm = ChatGoogle(model=model_name, temperature=0, api_key=api_key) if api_key else ChatGoogle(model=model_name, temperature=0)
+            logger.info("Initializing BrowserAgent with provider: %s, model: %s", llm_provider, model_name)
         elif llm_provider == "anthropic":
             from src.openbrowser.llm.anthropic import ChatAnthropic
             self.llm = ChatAnthropic(model=model_name, temperature=0, api_key=api_key) if api_key else ChatAnthropic(model=model_name, temperature=0)
+            logger.info("Initializing BrowserAgent with provider: %s, model: %s", llm_provider, model_name)
         elif llm_provider == "groq":
             from src.openbrowser.llm.groq import ChatGroq
             self.llm = ChatGroq(model=model_name, temperature=0, api_key=api_key) if api_key else ChatGroq(model=model_name, temperature=0)
+            logger.info("Initializing BrowserAgent with provider: %s, model: %s", llm_provider, model_name)
         elif llm_provider == "ollama":
             from src.openbrowser.llm.ollama import ChatOllama
             self.llm = ChatOllama(model=model_name, temperature=0)
+            logger.info("Initializing BrowserAgent with provider: %s, model: %s", llm_provider, model_name)
         elif llm_provider == "openrouter":
             from src.openbrowser.llm.openrouter import ChatOpenRouter
             self.llm = ChatOpenRouter(model=model_name, temperature=0, api_key=api_key) if api_key else ChatOpenRouter(model=model_name, temperature=0)
+            logger.info("Initializing BrowserAgent with provider: %s, model: %s", llm_provider, model_name)
         elif llm_provider == "aws":
             from src.openbrowser.llm.aws import ChatAWSBedrock
             self.llm = ChatAWSBedrock(model=model_name, temperature=0)
+            logger.info("Initializing BrowserAgent with provider: %s, model: %s", llm_provider, model_name)
         elif llm_provider == "azure":
             from src.openbrowser.llm.azure import ChatAzureOpenAI
             self.llm = ChatAzureOpenAI(model=model_name, temperature=0, api_key=api_key) if api_key else ChatAzureOpenAI(model=model_name, temperature=0)
+            logger.info("Initializing BrowserAgent with provider: %s, model: %s", llm_provider, model_name)
         elif llm_provider == "oci":
             from src.openbrowser.llm.oci import ChatOCI
             self.llm = ChatOCI(model=model_name, temperature=0)
+            logger.info("Initializing BrowserAgent with provider: %s, model: %s", llm_provider, model_name)
         elif llm_provider == "cerebras":
             from src.openbrowser.llm.cerebras import ChatCerebras
             self.llm = ChatCerebras(model=model_name, temperature=0, api_key=api_key) if api_key else ChatCerebras(model=model_name, temperature=0)
+            logger.info("Initializing BrowserAgent with provider: %s, model: %s", llm_provider, model_name)
         elif llm_provider == "deepseek":
             from src.openbrowser.llm.deepseek import ChatDeepSeek
             self.llm = ChatDeepSeek(model=model_name, temperature=0, api_key=api_key) if api_key else ChatDeepSeek(model=model_name, temperature=0)
+            logger.info("Initializing BrowserAgent with provider: %s, model: %s", llm_provider, model_name)
         elif llm_provider == "browser_use":
             from src.openbrowser.llm.browser_use import ChatBrowserUse
             self.llm = ChatBrowserUse(model=model_name, temperature=0, api_key=api_key) if api_key else ChatBrowserUse(model=model_name, temperature=0)
+            logger.info("Initializing BrowserAgent with provider: %s, model: %s", llm_provider, model_name)
         else:
             # Default to OpenAI
             from src.openbrowser.llm.openai import ChatOpenAI
             self.llm = ChatOpenAI(model=model_name, temperature=0, api_key=api_key)
+            logger.info("Initializing BrowserAgent with provider: openai, model: %s", model_name)
 
         self.settings = AgentSettings(
             use_vision=use_vision,
@@ -224,7 +238,15 @@ class BrowserAgent:
                 "end": END,
             },
         )
-        workflow.add_edge("execute", "perceive")
+        # Add conditional routing after execute to check is_done
+        workflow.add_conditional_edges(
+            "execute",
+            self._route_after_execute,
+            {
+                "continue": "perceive",
+                "end": END,
+            },
+        )
 
         return workflow.compile(checkpointer=self.memory)
 
@@ -525,7 +547,12 @@ class BrowserAgent:
         }
 
     def _route_step(self, state: GraphState) -> Literal["execute", "end"]:
-        """Route after step node."""
+        """Route after step node.
+        
+        Note: Always route to execute first so history is recorded,
+        even for done actions. The execute node will set is_done=True
+        which will be checked on the next routing decision.
+        """
         if state.get("is_done"):
             logger.info("Task completed")
             return "end"
@@ -538,14 +565,25 @@ class BrowserAgent:
         if not model_output or not model_output.action:
             if state.get("consecutive_failures", 0) >= self.settings.max_failures:
                 return "end"
+            # Even with no action, route to execute to record history
             return "execute"
 
-        for action in model_output.action:
-            action_dict = action.model_dump(exclude_none=True)
-            if "done" in action_dict:
-                return "end"
-
+        # Always route to execute - let execute_node handle the action
+        # and record history. execute_node will set is_done=True for
+        # done actions, which will be checked after execute completes.
         return "execute"
+
+    def _route_after_execute(self, state: GraphState) -> Literal["continue", "end"]:
+        """Route after execute node - check if task is done."""
+        if state.get("is_done"):
+            logger.info("Task completed after execute")
+            return "end"
+        
+        if state.get("n_steps", 0) >= self.max_steps:
+            logger.info("Max steps reached after execute")
+            return "end"
+        
+        return "continue"
 
     async def _check_should_stop(self) -> bool:
         """Check if the agent should stop via the callback."""

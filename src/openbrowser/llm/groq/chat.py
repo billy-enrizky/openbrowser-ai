@@ -177,8 +177,15 @@ class ChatGroq(BaseChatModel):
             elif isinstance(msg, HumanMessage):
                 content = msg.content
                 if isinstance(content, list):
-                    # Check if model supports vision (llama-3.2-vision models)
-                    if "vision" in self.model_name.lower():
+                    # Check if model supports vision
+                    # Vision models: llama-4-scout, llama-4-maverick, or legacy llama-3.2-*-vision
+                    model_lower = self.model_name.lower()
+                    is_vision_model = (
+                        "vision" in model_lower or
+                        "llama-4-scout" in model_lower or
+                        "llama-4-maverick" in model_lower
+                    )
+                    if is_vision_model:
                         # Convert to OpenAI-style multi-part content
                         parts = []
                         for part in content:
