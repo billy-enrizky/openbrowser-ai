@@ -60,6 +60,8 @@ class BrowserAgent:
 
     def __init__(
         self,
+        task: str,
+        llm: Any = None,
         headless: bool = True,
         model_name: str = "gpt-4o",
         llm_provider: str = "openai",
@@ -83,6 +85,8 @@ class BrowserAgent:
         """Initialize BrowserAgent.
         
         Args:
+            task: The task/goal for the agent to accomplish.
+            llm: Pre-configured LLM instance. If provided, llm_provider and model_name are ignored.
             headless: Run browser in headless mode. Default True.
             model_name: Name of the LLM model to use. Default "gpt-4o".
             llm_provider: LLM provider to use. Supported providers:
@@ -114,7 +118,10 @@ class BrowserAgent:
             register_done_callback: Callback called when agent completes.
             register_should_stop_callback: Async callback to check if agent should stop.
         """
-        logger.info(f"Initializing BrowserAgent with provider: {llm_provider}, model: {model_name}")
+        logger.info("Initializing BrowserAgent with provider: %s, model: %s", llm_provider, model_name)
+        
+        # Store the task
+        self.task = task
 
         if browser_profile is None:
             browser_profile = BrowserProfile(headless=headless)
@@ -122,8 +129,10 @@ class BrowserAgent:
         self.browser_session = BrowserSession(browser_profile=browser_profile)
         self.tools = Tools(self.browser_session)
 
-        # Initialize LLM based on provider
-        if llm_provider == "google":
+        # Use provided LLM or create one based on provider
+        if llm is not None:
+            self.llm = llm
+        elif llm_provider == "google":
             from src.openbrowser.llm.google import ChatGoogle
             self.llm = ChatGoogle(model=model_name, temperature=0, api_key=api_key) if api_key else ChatGoogle(model=model_name, temperature=0)
         elif llm_provider == "anthropic":
@@ -544,12 +553,21 @@ class BrowserAgent:
             try:
                 return await self.register_should_stop_callback()
             except Exception as e:
-                logger.warning(f"should_stop_callback failed: {e}")
+                logger.warning("should_stop_callback failed: %s", e)
         return False
 
-    async def run(self, goal: str, max_steps: int | None = None) -> AgentHistoryList:
-        """Run the agent to complete a goal."""
-        logger.info(f"Starting agent run: {goal}")
+    async def run(self, goal: str | None = None, max_steps: int | None = None) -> AgentHistoryList:
+        """Run the agent to complete a goal.
+        
+        Args:
+            goal: The goal/task to accomplish. If None, uses the task from __init__.
+            max_steps: Maximum steps. If None, uses the max_steps from __init__.
+        """
+        # Use stored task if goal not provided
+        if goal is None:
+            goal = self.task
+        
+        logger.info("Starting agent run: %s", goal)
         
         if max_steps:
             self.max_steps = max_steps
