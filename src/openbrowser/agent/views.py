@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Generic, Literal, TypeVar
 
-from pydantic import BaseModel, ConfigDict, Field, create_model, model_validator
+from pydantic import BaseModel, ConfigDict, Field, create_model, field_validator, model_validator
 
 logger = logging.getLogger(__name__)
 
@@ -189,13 +189,40 @@ class BrowserStateHistory(BaseModel):
 class AgentHistory(BaseModel):
     """History item for agent actions."""
 
+    model_config = ConfigDict(arbitrary_types_allowed=True, protected_namespaces=())
+
     model_output: AgentOutput | None
     result: list[ActionResult]
     state: BrowserStateHistory
     metadata: StepMetadata | None = None
     state_message: str | None = None
 
-    model_config = ConfigDict(arbitrary_types_allowed=True, protected_namespaces=())
+    @field_validator('result', mode='before')
+    @classmethod
+    def validate_result_list(cls, v: Any) -> list[ActionResult]:
+        """Ensure result list contains ActionResult instances."""
+        if not isinstance(v, list):
+            raise ValueError('result must be a list')
+        validated_results = []
+        for item in v:
+            # Check if it's an ActionResult by checking class name and module
+            # This handles cases where isinstance fails due to import path issues
+            item_type = type(item)
+            is_action_result = (
+                item_type.__name__ == "ActionResult" and
+                "openbrowser" in item_type.__module__
+            )
+
+            if is_action_result:
+                validated_results.append(item)
+            elif isinstance(item, dict):
+                # Convert dict to ActionResult
+                validated_results.append(ActionResult(**item))
+            else:
+                raise ValueError(
+                    f"result items must be ActionResult instances or dicts, got {item_type}"
+                )
+        return validated_results
 
     def model_dump(self, **kwargs) -> dict[str, Any]:
         """Custom serialization."""
