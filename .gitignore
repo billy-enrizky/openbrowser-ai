@@ -10,3 +10,4 @@ __pycache__
 test*
 .env
 *.yml
+.DS_Store
