@@ -6,11 +6,24 @@ import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Generic, Literal, TypeVar
+from typing import Any, Generic, Literal, TypeVar, TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field, create_model, field_validator, model_validator
+from uuid_extensions import uuid7str
+
+if TYPE_CHECKING:
+    from src.openbrowser.llm.base import BaseChatModel
+    from src.openbrowser.agent.message_manager.views import MessageManagerState
+    from src.openbrowser.filesystem.views import FileSystemState
 
 logger = logging.getLogger(__name__)
+
+# Default include attributes for DOM serialization
+DEFAULT_INCLUDE_ATTRIBUTES = [
+    'title', 'type', 'name', 'role', 'aria-label', 'aria-expanded',
+    'aria-haspopup', 'aria-selected', 'aria-checked', 'placeholder',
+    'value', 'alt', 'href', 'src', 'data-testid', 'data-id',
+]
 
 
 class AgentSettings(BaseModel):
@@ -19,12 +32,46 @@ class AgentSettings(BaseModel):
     use_vision: bool | Literal['auto'] = 'auto'
     vision_detail_level: Literal['auto', 'low', 'high'] = 'auto'
     save_conversation_path: str | Path | None = None
+    save_conversation_path_encoding: str | None = 'utf-8'
     max_failures: int = 3
-    max_actions_per_step: int = 4
+    max_actions_per_step: int = 10
     use_thinking: bool = True
     flash_mode: bool = False
     max_history_items: int | None = None
     step_timeout: int = 180
+    llm_timeout: int = 60
+    # Additional settings from browser-use
+    generate_gif: bool | str = False
+    override_system_message: str | None = None
+    extend_system_message: str | None = None
+    include_attributes: list[str] | None = DEFAULT_INCLUDE_ATTRIBUTES
+    page_extraction_llm: Any | None = None  # BaseChatModel but avoiding import cycle
+    calculate_cost: bool = False
+    include_tool_call_examples: bool = False
+    final_response_after_failure: bool = True
+
+
+class AgentState(BaseModel):
+    """Holds all state information for an Agent - serializable for checkpointing."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    agent_id: str = Field(default_factory=uuid7str)
+    n_steps: int = 1
+    consecutive_failures: int = 0
+    last_result: list[Any] | None = None  # list[ActionResult]
+    last_plan: str | None = None
+    last_model_output: Any | None = None  # AgentOutput
+
+    # Pause/resume state
+    paused: bool = False
+    stopped: bool = False
+    session_initialized: bool = False
+    follow_up_task: bool = False
+
+    # State containers (lazy imported types)
+    message_manager_state: Any | None = None  # MessageManagerState
+    file_system_state: Any | None = None  # FileSystemState
 
 
 class ActionResult(BaseModel):
