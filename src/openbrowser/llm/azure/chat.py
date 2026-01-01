@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 from typing import Any, List, Optional, Type, TypeVar
@@ -15,6 +16,42 @@ from pydantic import BaseModel, Field, PrivateAttr
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T", bound=BaseModel)
+
+
+class StructuredOutputWrapper:
+    """Wrapper that parses tool call responses into Pydantic models."""
+    
+    def __init__(self, llm: ChatAzureOpenAI, schema: Type[BaseModel]):
+        self.llm = llm
+        self.schema = schema
+    
+    async def ainvoke(self, messages: List[BaseMessage], **kwargs: Any) -> BaseModel:
+        """Invoke the model and parse the response into the schema."""
+        result = await self.llm.ainvoke(messages, **kwargs)
+        
+        # Check if we got tool calls
+        if hasattr(result, 'tool_calls') and result.tool_calls:
+            for tool_call in result.tool_calls:
+                try:
+                    # Get the args from the tool call
+                    args = tool_call.get('args', {}) if isinstance(tool_call, dict) else tool_call.args
+                    # Parse JSON if args is a string
+                    if isinstance(args, str):
+                        args = json.loads(args)
+                    return self.schema.model_validate(args)
+                except Exception as e:
+                    logger.warning("Failed to parse tool call: %s", e)
+                    continue
+        
+        # If no valid tool calls, try to parse content as JSON
+        if hasattr(result, 'content') and result.content:
+            try:
+                data = json.loads(result.content)
+                return self.schema.model_validate(data)
+            except (json.JSONDecodeError, Exception) as e:
+                logger.warning("Failed to parse content as JSON: %s", e)
+        
+        raise ValueError(f"Failed to get structured output from Azure OpenAI. Response: {result}")
 
 
 class ChatAzureOpenAI(BaseChatModel):
@@ -118,7 +155,7 @@ class ChatAzureOpenAI(BaseChatModel):
 
         message = AIMessage(
             content=content,
-            tool_calls=tool_calls if tool_calls else None,
+            tool_calls=tool_calls,  # Always pass list (empty or with items) - Pydantic requires list type
         )
 
         return ChatResult(generations=[ChatGeneration(message=message)])
@@ -186,15 +223,32 @@ class ChatAzureOpenAI(BaseChatModel):
         self,
         schema: Type[T],
         **kwargs: Any,
-    ) -> ChatAzureOpenAI:
-        """Configure for structured output."""
+    ) -> StructuredOutputWrapper:
+        """Configure for structured output.
+        
+        Returns a wrapper that invokes the model and parses the response
+        into the specified Pydantic schema.
+        """
+        # Create a new instance with the tool bound
+        new_instance = ChatAzureOpenAI(
+            model=self.model_name,
+            deployment_name=self.deployment_name,
+            temperature=self.temperature,
+            max_tokens=self.max_tokens,
+            api_key=self.api_key,
+            azure_endpoint=self.azure_endpoint,
+            api_version=self.api_version,
+        )
+        
         tool = {
             "type": "function",
             "function": {
                 "name": schema.__name__,
-                "description": f"Output structured data as {schema.__name__}",
+                "description": f"Output structured data as {schema.__name__}. You MUST use this tool to respond.",
                 "parameters": schema.model_json_schema(),
             },
         }
-        return self.bind_tools([tool])
+        new_instance._bound_tools = [tool]
+        
+        return StructuredOutputWrapper(new_instance, schema)
 
