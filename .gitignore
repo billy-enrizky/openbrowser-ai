@@ -4,10 +4,12 @@ __pycache__
 *.py[cod]
 *.pyc
 *.md
+!README.md
 *.png
 *.csv
 *.json
 test*
 .env
 *.yml
+!.github/workflows/*.yml
 .DS_Store
