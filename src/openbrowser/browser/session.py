@@ -253,11 +253,15 @@ class BrowserSession(BaseModel):
         await start_event
         await start_event.event_result(raise_if_any=True, raise_if_none=False)
 
-    async def stop(self) -> None:
-        """Stop the browser session without killing the browser process."""
+    async def stop(self, force: bool = False) -> None:
+        """Stop the browser session.
+        
+        Args:
+            force: If True, kill the browser process. If False, keep browser alive.
+        """
         from src.openbrowser.browser.events import BrowserStopEvent
 
-        await self.event_bus.dispatch(BrowserStopEvent(force=False))
+        await self.event_bus.dispatch(BrowserStopEvent(force=force))
         await self.event_bus.stop(clear=True, timeout=5)
         await self.reset()
         self.event_bus = EventBus()

@@ -28,7 +28,7 @@ from src.openbrowser.agent.views import (
 from src.openbrowser.browser.dom import DomService
 from src.openbrowser.browser.profile import BrowserProfile
 from src.openbrowser.browser.session import BrowserSession
-from src.openbrowser.tools.actions import Tools
+from src.openbrowser.tools.actions import Tools, detect_captcha
 
 from dotenv import load_dotenv
 
@@ -48,9 +48,11 @@ class AgentState(TypedDict):
     n_steps: int
     max_steps: int
     consecutive_failures: int
+    consecutive_empty_dom: int  # Track consecutive empty DOM states (browser disconnection)
     model_output: AgentOutput | None
     last_result: list[ActionResult] | None
     is_done: bool
+    google_blocked: bool  # Track if Google is blocked due to CAPTCHA
 
 
 class BrowserAgent:
@@ -72,6 +74,7 @@ class BrowserAgent:
         max_history_items: int | None = None,
         override_system_message: str | None = None,
         extend_system_message: str | None = None,
+        close_browser_on_completion: bool = True,
         # Callback support
         register_new_step_callback: Any | None = None,
         register_done_callback: Any | None = None,
@@ -117,6 +120,12 @@ class BrowserAgent:
         self.message_manager: MessageManager | None = None
         self.history = AgentHistoryList()
         
+        # Google CAPTCHA tracking - prevents infinite loop
+        self._google_blocked = False
+        
+        # Browser lifecycle
+        self.close_browser_on_completion = close_browser_on_completion
+        
         # Callback support
         self.register_new_step_callback = register_new_step_callback
         self.register_done_callback = register_done_callback
@@ -161,18 +170,30 @@ class BrowserAgent:
 
         try:
             await client.send.Page.enable(session_id=session_id)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"Failed to enable Page domain: {e}")
 
-        await asyncio.sleep(0.5)
+        # Wait for page to stabilize after previous action
+        await asyncio.sleep(1.0)
 
-        screenshot_result = await client.send.Page.captureScreenshot(
-            params={"format": "png"}, session_id=session_id
-        )
-        screenshot = screenshot_result.get("data", "")
+        try:
+            screenshot_result = await client.send.Page.captureScreenshot(
+                params={"format": "png"}, session_id=session_id
+            )
+            screenshot = screenshot_result.get("data", "")
+        except Exception as e:
+            logger.warning(f"Failed to capture screenshot: {e}")
+            screenshot = ""
 
-        dom_state = await DomService.get_clickable_elements(client, session_id)
-        self.tools.update_state(dom_state)
+        try:
+            dom_state = await DomService.get_clickable_elements(client, session_id)
+            self.tools.update_state(dom_state)
+        except Exception as e:
+            logger.warning(f"Failed to get clickable elements: {e}")
+            # Return empty state if we can't get DOM
+            from src.openbrowser.browser.dom import DomState
+            dom_state = DomState(element_tree="", selector_map={})
+            self.tools.update_state(dom_state)
 
         current_url = ""
         try:
@@ -184,17 +205,108 @@ class BrowserAgent:
         except Exception:
             pass
 
+        # Check for CAPTCHA on Google pages and redirect to Bing if detected
+        logger.debug(f"Checking for CAPTCHA on URL: {current_url}")
+        google_blocked = state.get("google_blocked", False) or self._google_blocked
+        
+        if "google.com" in current_url.lower():
+            logger.info(f"Google page detected, checking for CAPTCHA on: {current_url}")
+            captcha_detected = await detect_captcha(self.browser_session)
+            logger.info(f"CAPTCHA detection result: {captcha_detected}")
+            if captcha_detected:
+                logger.warning("CAPTCHA detected on Google during perceive, redirecting to Bing")
+                
+                # Mark Google as blocked to prevent future navigation attempts
+                self._google_blocked = True
+                self.tools._google_blocked = True  # Also set on tools to prevent navigate action
+                google_blocked = True
+                
+                # Convert Google URL to Bing URL
+                from urllib.parse import urlparse, parse_qs, urlencode, unquote
+                parsed = urlparse(current_url)
+                query_params = parse_qs(parsed.query)
+                
+                search_query = None
+                
+                # For Google sorry/CAPTCHA pages, the original search is in the 'continue' parameter
+                if 'continue' in query_params:
+                    continue_url = unquote(query_params['continue'][0])
+                    continue_parsed = urlparse(continue_url)
+                    continue_params = parse_qs(continue_parsed.query)
+                    if 'q' in continue_params:
+                        search_query = continue_params['q'][0]
+                
+                # Fallback to direct 'q' parameter (for regular Google search pages)
+                if not search_query and 'q' in query_params:
+                    search_query = query_params['q'][0]
+                
+                if search_query:
+                    # URL encode the search query properly
+                    from urllib.parse import quote_plus
+                    fallback_url = f"https://www.bing.com/search?q={quote_plus(search_query)}&setlang=en&cc=US"
+                else:
+                    fallback_url = "https://www.bing.com?setlang=en&cc=US"
+                
+                logger.info(f"Redirecting to Bing: {fallback_url}")
+                from src.openbrowser.browser.events import NavigateToUrlEvent
+                await self.browser_session.event_bus.dispatch(NavigateToUrlEvent(url=fallback_url, new_tab=False))
+                
+                # Wait for new page to load and re-fetch state
+                await asyncio.sleep(1.5)
+                
+                # Re-capture screenshot
+                screenshot_result = await client.send.Page.captureScreenshot(
+                    params={"format": "png"}, session_id=session_id
+                )
+                screenshot = screenshot_result.get("data", "")
+                
+                # Re-fetch DOM
+                dom_state = await DomService.get_clickable_elements(client, session_id)
+                self.tools.update_state(dom_state)
+                
+                # Update URL
+                try:
+                    nav_history = await client.send.Page.getNavigationHistory(session_id=session_id)
+                    idx = nav_history.get("currentIndex", 0)
+                    entries = nav_history.get("entries", [])
+                    if entries and idx < len(entries):
+                        current_url = entries[idx].get("url", "")
+                except Exception:
+                    current_url = fallback_url
+
+        # Track consecutive empty DOM states (indicates browser disconnection)
+        prev_empty_dom = state.get("consecutive_empty_dom", 0)
+        if not dom_state.element_tree or dom_state.element_tree.strip() == "":
+            consecutive_empty_dom = prev_empty_dom + 1
+            logger.warning(f"Empty DOM detected ({consecutive_empty_dom} consecutive)")
+            
+            # If we have 3+ consecutive empty DOM states, browser is likely disconnected
+            if consecutive_empty_dom >= 3:
+                logger.error("Browser connection lost (3 consecutive empty DOM states). Stopping agent.")
+                return {
+                    "screenshot": screenshot,
+                    "dom_tree": dom_state.element_tree,
+                    "url": current_url,
+                    "google_blocked": google_blocked,
+                    "consecutive_empty_dom": consecutive_empty_dom,
+                    "is_done": True,
+                }
+        else:
+            consecutive_empty_dom = 0
+
         return {
             "screenshot": screenshot,
             "dom_tree": dom_state.element_tree,
             "url": current_url,
+            "google_blocked": google_blocked,
+            "consecutive_empty_dom": consecutive_empty_dom,
         }
 
     async def step_node(self, state: AgentState) -> dict:
         """Single LLM call with unified AgentOutput."""
         step_number = state.get("n_steps", 0)
         
-        logger.info(f"Step {step_number + 1}/{self.max_steps}")
+        logger.info(f"Step {step_number + 1}")
 
         if self.message_manager is None:
             raise RuntimeError("Message manager not initialized")
@@ -218,6 +330,12 @@ class BrowserAgent:
             use_vision=self.settings.use_vision,
             action_descriptions=action_descriptions,
         )
+
+        # Add context message if Google is blocked
+        if state.get("google_blocked", False) or self._google_blocked:
+            self.message_manager.add_context_message(
+                HumanMessage(content="IMPORTANT: Google is BLOCKED due to CAPTCHA. You MUST use Bing (bing.com) for all searches. Do NOT navigate to Google. If the original goal mentioned Google, use Bing instead.")
+            )
 
         messages = self.message_manager.get_messages()
         action_model = self.tools.create_action_model()
@@ -381,6 +499,10 @@ class BrowserAgent:
         )
 
         self.history = AgentHistoryList()
+        
+        # Reset google blocked flag for each run
+        self._google_blocked = False
+        self.tools._google_blocked = False
 
         try:
             await self.browser_session.start()
@@ -395,9 +517,11 @@ class BrowserAgent:
                 "n_steps": 0,
                 "max_steps": self.max_steps,
                 "consecutive_failures": 0,
+                "consecutive_empty_dom": 0,
                 "model_output": None,
                 "last_result": None,
                 "is_done": False,
+                "google_blocked": False,
             }
 
             await self.app.ainvoke(
@@ -416,7 +540,7 @@ class BrowserAgent:
 
         finally:
             try:
-                await self.browser_session.stop()
+                await self.browser_session.stop(force=self.close_browser_on_completion)
             except Exception as e:
                 logger.warning(f"Error stopping browser session: {e}")
 
