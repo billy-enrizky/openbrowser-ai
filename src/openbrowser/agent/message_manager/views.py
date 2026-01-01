@@ -11,6 +11,8 @@ from pydantic import BaseModel, ConfigDict, Field
 class HistoryItem(BaseModel):
     """A single item in agent history."""
     
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+    
     step_number: int | None = None
     evaluation_previous_goal: str | None = None
     memory: str | None = None
@@ -19,30 +21,33 @@ class HistoryItem(BaseModel):
     error: str | None = None
     system_message: str | None = None
 
+    def model_post_init(self, __context) -> None:
+        """Validate that error and system_message are not both provided."""
+        if self.error is not None and self.system_message is not None:
+            raise ValueError('Cannot have both error and system_message at the same time')
+
     def to_string(self) -> str:
         """Convert history item to string format."""
-        if self.system_message:
-            return f'<sys>{self.system_message}</sys>'
+        step_str = f'step_{self.step_number}' if self.step_number is not None else 'step_unknown'
         
-        if self.step_number is None:
-            return ''
-            
-        parts = [f'<step_{self.step_number}>']
-        
-        if self.evaluation_previous_goal:
-            parts.append(f'Evaluation: {self.evaluation_previous_goal}')
-        if self.memory:
-            parts.append(f'Memory: {self.memory}')
-        if self.next_goal:
-            parts.append(f'Next Goal: {self.next_goal}')
-        if self.action_results:
-            parts.append(f'{self.action_results}')
         if self.error:
-            parts.append(f'Error: {self.error}')
-            
-        parts.append(f'</step_{self.step_number}>')
-        
-        return '\n'.join(parts)
+            return f'<{step_str}>\n{self.error}'
+        elif self.system_message:
+            return self.system_message
+        else:
+            content_parts = []
+
+            if self.evaluation_previous_goal:
+                content_parts.append(f'{self.evaluation_previous_goal}')
+            if self.memory:
+                content_parts.append(f'{self.memory}')
+            if self.next_goal:
+                content_parts.append(f'{self.next_goal}')
+            if self.action_results:
+                content_parts.append(self.action_results)
+
+            content = '\n'.join(content_parts)
+            return f'<{step_str}>\n{content}'
 
 
 class MessageHistory(BaseModel):
@@ -66,11 +71,13 @@ class MessageHistory(BaseModel):
 
 
 class MessageManagerState(BaseModel):
-    """Serializable state for message manager."""
+    """Serializable state for message manager - holds all message manager state for checkpointing."""
     
     model_config = ConfigDict(arbitrary_types_allowed=True)
     
-    agent_history_items: list[HistoryItem] = Field(default_factory=list)
-    read_state_description: str = ''
     history: MessageHistory = Field(default_factory=MessageHistory)
-
+    tool_id: int = 1
+    agent_history_items: list[HistoryItem] = Field(
+        default_factory=lambda: [HistoryItem(step_number=0, system_message='Agent initialized')]
+    )
+    read_state_description: str = ''

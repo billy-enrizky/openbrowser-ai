@@ -261,6 +261,58 @@ class SimplifiedNode:
 DOMSelectorMap = dict[int, EnhancedDOMTreeNode]
 
 
+@dataclass(slots=True)
+class DOMInteractedElement:
+    """
+    Represents a DOM element that has been interacted with.
+    Used to track which elements were clicked/typed during agent execution.
+    """
+
+    node_id: int
+    backend_node_id: int
+    frame_id: str | None
+
+    node_type: NodeType
+    node_value: str
+    node_name: str
+    attributes: dict[str, str] | None
+
+    bounds: DOMRect | None
+
+    x_path: str
+
+    element_hash: int
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            'node_id': self.node_id,
+            'backend_node_id': self.backend_node_id,
+            'frame_id': self.frame_id,
+            'node_type': self.node_type.value,
+            'node_value': self.node_value,
+            'node_name': self.node_name,
+            'attributes': self.attributes,
+            'x_path': self.x_path,
+            'element_hash': self.element_hash,
+            'bounds': self.bounds.to_dict() if self.bounds else None,
+        }
+
+    @classmethod
+    def load_from_enhanced_dom_tree(cls, enhanced_dom_tree: EnhancedDOMTreeNode) -> 'DOMInteractedElement':
+        return cls(
+            node_id=enhanced_dom_tree.node_id,
+            backend_node_id=enhanced_dom_tree.backend_node_id,
+            frame_id=enhanced_dom_tree.frame_id,
+            node_type=enhanced_dom_tree.node_type,
+            node_value=enhanced_dom_tree.node_value,
+            node_name=enhanced_dom_tree.node_name,
+            attributes=enhanced_dom_tree.attributes,
+            bounds=enhanced_dom_tree.snapshot_node.bounds if enhanced_dom_tree.snapshot_node else None,
+            x_path=enhanced_dom_tree.xpath,
+            element_hash=hash(enhanced_dom_tree),
+        )
+
+
 class SerializedDOMState(BaseModel):
     """Serialized DOM state for agent consumption."""
     
