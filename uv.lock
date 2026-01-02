@@ -1879,7 +1879,7 @@ wheels = [
 
 [[package]]
 name = "openbrowser-ai"
-version = "0.1.82"
+version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "aiofiles" },
