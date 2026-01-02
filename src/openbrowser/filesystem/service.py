@@ -1,4 +1,9 @@
-"""File system service for agent file operations."""
+"""File system service for agent file operations.
+
+This module provides the FileSystem class for controlled file system access
+during browser automation. It includes security features like path validation
+and extension filtering to prevent unauthorized access.
+"""
 
 from __future__ import annotations
 
@@ -14,9 +19,39 @@ logger = logging.getLogger(__name__)
 
 
 class FileSystem:
-    """
-    File system service for agent file operations.
-    Supports reading, writing, and replacing file content.
+    """File system service for agent file operations.
+
+    Provides controlled file system access for browser automation agents,
+    supporting reading, writing, and replacing file content. Includes
+    security features to prevent unauthorized access.
+
+    Security Features:
+        - Path validation to prevent directory traversal attacks
+        - Configurable base path confinement
+        - Extension allowlist to limit file types
+        - File size limits for read operations
+
+    Attributes:
+        base_path: Resolved absolute path to the working directory.
+        state: FileSystemState tracking created/modified files.
+        extracted_content_count: Counter for auto-numbered extracted files.
+
+    Example:
+        ```python
+        fs = FileSystem(
+            base_path="./output",
+            allowed_extensions=[".json", ".csv", ".txt"]
+        )
+
+        # Write data
+        fs.write_file("results.json", json.dumps(data))
+
+        # Read file
+        content = fs.read_file("config.txt")
+
+        # List files
+        files = fs.list_files(recursive=True)
+        ```
     """
 
     def __init__(
@@ -24,6 +59,27 @@ class FileSystem:
         base_path: str | Path = ".",
         allowed_extensions: list[str] | None = None,
     ):
+        """Initialize the FileSystem service.
+
+        Args:
+            base_path: Base directory path for file operations. All file
+                paths are resolved relative to this directory. Defaults
+                to the current working directory.
+            allowed_extensions: List of permitted file extensions (with dots).
+                Defaults to common text and code formats.
+
+        Example:
+            ```python
+            # Use current directory
+            fs = FileSystem()
+
+            # Use specific directory with limited extensions
+            fs = FileSystem(
+                base_path="/tmp/agent_workspace",
+                allowed_extensions=[".txt", ".json"]
+            )
+            ```
+        """
         self.base_path = Path(base_path).resolve()
         self.state = FileSystemState(
             base_path=str(self.base_path),
@@ -32,7 +88,20 @@ class FileSystem:
         self.extracted_content_count = 0
 
     def _validate_path(self, file_path: str | Path) -> Path:
-        """Validate and resolve file path."""
+        """Validate and resolve a file path.
+
+        Ensures the path is within the allowed base directory to prevent
+        directory traversal attacks.
+
+        Args:
+            file_path: Path to validate (relative or absolute).
+
+        Returns:
+            Resolved absolute Path object.
+
+        Raises:
+            ValueError: If the resolved path is outside the base directory.
+        """
         path = Path(file_path)
         if not path.is_absolute():
             path = self.base_path / path
@@ -47,21 +116,42 @@ class FileSystem:
         return path
 
     def _validate_extension(self, path: Path) -> None:
-        """Validate file extension is allowed."""
+        """Validate that a file extension is allowed.
+
+        Args:
+            path: Path object with extension to validate.
+
+        Raises:
+            ValueError: If the file extension is not in the allowed list.
+        """
         suffix = path.suffix.lower()
         if suffix and suffix not in self.state.allowed_extensions:
             raise ValueError(f"File extension {suffix} is not allowed. Allowed: {self.state.allowed_extensions}")
 
     def read_file(self, file_path: str | Path, max_size: int = 1_000_000) -> str:
-        """
-        Read file content.
+        """Read file content.
+
+        Reads the content of a file, with special handling for different
+        file types (PDF, JSON, text).
 
         Args:
-            file_path: Path to the file
-            max_size: Maximum file size in bytes (default 1MB)
+            file_path: Path to the file (relative to base_path or absolute).
+            max_size: Maximum file size in bytes. Defaults to 1MB.
 
         Returns:
-            File content as string
+            File content as a string. For JSON files, returns formatted JSON.
+            For PDF files, returns extracted text.
+
+        Raises:
+            FileNotFoundError: If the file does not exist.
+            ValueError: If the file exceeds max_size or has disallowed extension.
+            ImportError: If reading PDF files without pypdf installed.
+
+        Example:
+            ```python
+            content = fs.read_file("data/config.json")
+            pdf_text = fs.read_file("documents/report.pdf")
+            ```
         """
         path = self._validate_path(file_path)
         self._validate_extension(path)
@@ -86,7 +176,19 @@ class FileSystem:
                 return f.read()
 
     def _read_pdf(self, path: Path) -> str:
-        """Read PDF file content."""
+        """Read text content from a PDF file.
+
+        Extracts text from all pages of a PDF document.
+
+        Args:
+            path: Path to the PDF file.
+
+        Returns:
+            Extracted text from all pages, separated by double newlines.
+
+        Raises:
+            ImportError: If pypdf is not installed.
+        """
         try:
             import pypdf
         except ImportError:
@@ -101,15 +203,31 @@ class FileSystem:
         return "\n\n".join(text_parts)
 
     def write_file(self, file_path: str | Path, content: str) -> str:
-        """
-        Write content to a file.
+        """Write content to a file.
+
+        Creates a new file or overwrites an existing file. Parent
+        directories are created automatically if they don't exist.
 
         Args:
-            file_path: Path to the file
-            content: Content to write
+            file_path: Path to the file (relative to base_path or absolute).
+            content: Content to write to the file.
 
         Returns:
-            Success message
+            Success message indicating the number of characters written.
+
+        Raises:
+            ValueError: If the file extension is not allowed.
+
+        Note:
+            - JSON files are validated and pretty-printed
+            - PDF files are created using reportlab (if installed)
+            - Created files are tracked in state.created_files
+
+        Example:
+            ```python
+            fs.write_file("output.json", json.dumps({"key": "value"}))
+            fs.write_file("notes.txt", "Some notes here")
+            ```
         """
         path = self._validate_path(file_path)
         self._validate_extension(path)
@@ -144,7 +262,21 @@ class FileSystem:
         return f"Successfully wrote {len(content)} characters to {path}"
 
     def _write_pdf(self, path: Path, content: str) -> str:
-        """Write content as PDF using markdown conversion."""
+        """Write content as a PDF file using markdown conversion.
+
+        Creates a simple PDF document with the text content. Lines are
+        wrapped at 80 characters and automatically paginated.
+
+        Args:
+            path: Path where the PDF should be saved.
+            content: Text content to write to the PDF.
+
+        Returns:
+            Success message with the file path.
+
+        Raises:
+            ImportError: If reportlab is not installed.
+        """
         try:
             from reportlab.lib.pagesizes import letter
             from reportlab.pdfgen import canvas
@@ -174,17 +306,36 @@ class FileSystem:
         new_text: str,
         replace_all: bool = False,
     ) -> str:
-        """
-        Replace text in a file.
+        """Replace text in a file.
+
+        Finds and replaces text content within an existing file.
 
         Args:
-            file_path: Path to the file
-            old_text: Text to find
-            new_text: Replacement text
-            replace_all: Replace all occurrences (default: first only)
+            file_path: Path to the file (relative to base_path or absolute).
+            old_text: Text to find in the file.
+            new_text: Replacement text.
+            replace_all: If True, replace all occurrences. If False (default),
+                replace only the first occurrence.
 
         Returns:
-            Success message
+            Success message indicating the number of replacements made.
+
+        Raises:
+            FileNotFoundError: If the file does not exist.
+            ValueError: If old_text is not found in the file, or if the
+                file extension is not allowed.
+
+        Note:
+            Modified files are tracked in state.modified_files.
+
+        Example:
+            ```python
+            # Replace first occurrence
+            fs.replace_in_file("config.json", '"debug": false', '"debug": true')
+
+            # Replace all occurrences
+            fs.replace_in_file("template.html", "{{name}}", "John", replace_all=True)
+            ```
         """
         path = self._validate_path(file_path)
         self._validate_extension(path)
@@ -221,15 +372,33 @@ class FileSystem:
         directory: str | Path = ".",
         recursive: bool = False,
     ) -> list[FileInfo]:
-        """
-        List files in a directory.
+        """List files in a directory.
+
+        Returns information about files and subdirectories within the
+        specified directory.
 
         Args:
-            directory: Directory path
-            recursive: Include subdirectories
+            directory: Directory path to list (relative to base_path or
+                absolute). Defaults to base_path.
+            recursive: If True, include files in subdirectories. If False
+                (default), only list immediate children.
 
         Returns:
-            List of FileInfo objects
+            List of FileInfo objects with file metadata.
+
+        Raises:
+            ValueError: If the path is not a directory or is outside base_path.
+
+        Example:
+            ```python
+            # List current directory
+            files = fs.list_files()
+
+            # List subdirectory recursively
+            all_files = fs.list_files("data", recursive=True)
+            for f in all_files:
+                print(f"{f.path}: {f.size} bytes")
+            ```
         """
         path = self._validate_path(directory)
 
@@ -248,7 +417,14 @@ class FileSystem:
         return files
 
     def _get_file_info(self, path: Path) -> FileInfo:
-        """Get file information."""
+        """Get file information for a path.
+
+        Args:
+            path: Absolute path to the file or directory.
+
+        Returns:
+            FileInfo object with path, size, modification time, and type.
+        """
         stat = path.stat()
         return FileInfo(
             path=str(path.relative_to(self.base_path)),
@@ -258,7 +434,14 @@ class FileSystem:
         )
 
     def exists(self, file_path: str | Path) -> bool:
-        """Check if file exists."""
+        """Check if a file exists.
+
+        Args:
+            file_path: Path to check (relative to base_path or absolute).
+
+        Returns:
+            True if the file exists and is within base_path, False otherwise.
+        """
         try:
             path = self._validate_path(file_path)
             return path.exists()
@@ -266,21 +449,39 @@ class FileSystem:
             return False
 
     def get_state(self) -> FileSystemState:
-        """Get current file system state."""
+        """Get the current file system state.
+
+        Returns:
+            FileSystemState object with base_path, created_files,
+            modified_files, and allowed_extensions.
+        """
         return self.state
 
     def get_dir(self) -> Path:
-        """Get the base directory path."""
+        """Get the base directory path.
+
+        Returns:
+            The resolved base directory Path object.
+        """
         return self.base_path
 
     async def save_extracted_content(self, content: str) -> str:
         """Save extracted content to a numbered markdown file.
 
+        Creates files with auto-incrementing names (extracted_content_0.md,
+        extracted_content_1.md, etc.) for storing extracted data.
+
         Args:
-            content: Content to save
+            content: The content to save.
 
         Returns:
-            Filename of the saved file
+            The filename of the saved file (e.g., "extracted_content_0.md").
+
+        Example:
+            ```python
+            filename = await fs.save_extracted_content("# Results\n...")
+            # Returns "extracted_content_0.md"
+            ```
         """
         filename = f'extracted_content_{self.extracted_content_count}.md'
         file_path = self.base_path / filename
@@ -305,11 +506,22 @@ class FileSystem:
     def display_file(self, full_filename: str) -> str | None:
         """Display file content for inclusion in done action.
 
+        Reads and returns file content, intended for displaying results
+        to the user or including in agent responses.
+
         Args:
-            full_filename: Filename (relative to base_path or absolute)
+            full_filename: Filename relative to base_path or absolute path.
 
         Returns:
-            File content as string, or None if file not found
+            File content as a string, or None if the file doesn't exist
+            or cannot be read.
+
+        Example:
+            ```python
+            content = fs.display_file("extracted_content_0.md")
+            if content:
+                print(content)
+            ```
         """
         try:
             path = self._validate_path(full_filename)

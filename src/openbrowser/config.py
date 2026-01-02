@@ -24,9 +24,24 @@ logger = logging.getLogger(__name__)
 
 @cache
 def is_running_in_docker() -> bool:
-    """Detect if we are running in a docker container.
+    """Detect if we are running in a Docker container.
     
-    Used for optimizing chrome launch flags (dev shm usage, gpu settings, etc.)
+    Uses multiple detection strategies to determine if the current process
+    is running inside a Docker container. This information is used for
+    optimizing Chrome launch flags (dev shm usage, GPU settings, etc.).
+    
+    Detection strategies (in order):
+        1. Check for /.dockerenv file existence
+        2. Check /proc/1/cgroup for 'docker' string
+        3. Check if PID 1 is python/uvicorn/uv (using psutil)
+        4. Check if total process count < 10 (using psutil)
+    
+    Returns:
+        True if running in Docker, False otherwise.
+        
+    Note:
+        The psutil-based checks only run if psutil is installed.
+        Results are cached using functools.cache for performance.
     """
     try:
         if Path('/.dockerenv').exists():
@@ -58,7 +73,29 @@ def is_running_in_docker() -> bool:
 
 
 class EnvConfig(BaseSettings):
-    """Environment variable configuration using pydantic-settings."""
+    """Environment variable configuration using pydantic-settings.
+    
+    This class reads configuration from environment variables and .env files,
+    providing type-safe access to all configuration options. It supports
+    automatic type conversion and validation.
+    
+    Attributes:
+        OPENBROWSER_LOGGING_LEVEL: Logging level (default: 'info').
+        CDP_LOGGING_LEVEL: Chrome DevTools Protocol logging level (default: 'WARNING').
+        ANONYMIZED_TELEMETRY: Enable anonymized telemetry (default: True).
+        XDG_CACHE_HOME: Cache directory path (default: '~/.cache').
+        XDG_CONFIG_HOME: Config directory path (default: '~/.config').
+        OPENBROWSER_CONFIG_DIR: Override config directory location.
+        OPENAI_API_KEY: OpenAI API key.
+        ANTHROPIC_API_KEY: Anthropic API key.
+        GOOGLE_API_KEY: Google API key.
+        GROQ_API_KEY: Groq API key.
+        IN_DOCKER: Override Docker detection.
+        
+    Example:
+        >>> config = EnvConfig()
+        >>> print(config.OPENAI_API_KEY)
+    """
 
     model_config = SettingsConfigDict(
         env_file='.env',
@@ -114,7 +151,16 @@ class EnvConfig(BaseSettings):
 
 
 class DBStyleEntry(BaseModel):
-    """Database-style entry with UUID and metadata."""
+    """Database-style entry with UUID and metadata.
+    
+    Base class for configuration entries that need unique identification
+    and tracking. Each entry gets a UUID and creation timestamp.
+    
+    Attributes:
+        id: Unique identifier (auto-generated UUIDv4).
+        default: Whether this is the default entry of its type.
+        created_at: ISO format timestamp of creation.
+    """
 
     id: str = Field(default_factory=lambda: str(uuid4()))
     default: bool = Field(default=False)
@@ -122,7 +168,21 @@ class DBStyleEntry(BaseModel):
 
 
 class BrowserProfileEntry(DBStyleEntry):
-    """Browser profile configuration entry."""
+    """Browser profile configuration entry.
+    
+    Stores configuration for a browser profile including window settings,
+    security options, and proxy configuration.
+    
+    Attributes:
+        headless: Run browser without visible window.
+        user_data_dir: Path to browser user data directory.
+        allowed_domains: List of domains the browser can access.
+        downloads_path: Directory for downloaded files.
+        disable_security: Disable browser security features (not recommended).
+        window_width: Browser window width in pixels.
+        window_height: Browser window height in pixels.
+        proxy: Proxy server configuration dict.
+    """
 
     model_config = ConfigDict(extra='allow')
 
@@ -138,7 +198,19 @@ class BrowserProfileEntry(DBStyleEntry):
 
 
 class LLMEntry(DBStyleEntry):
-    """LLM configuration entry."""
+    """LLM configuration entry.
+    
+    Stores configuration for a language model including provider details,
+    authentication, and model parameters.
+    
+    Attributes:
+        provider: LLM provider name (openai, anthropic, google, etc.).
+        api_key: API key for authentication.
+        model: Model name/identifier.
+        temperature: Sampling temperature (0.0-2.0).
+        max_tokens: Maximum tokens in response.
+        base_url: Custom API endpoint URL.
+    """
 
     provider: str | None = None
     api_key: str | None = None
@@ -149,7 +221,18 @@ class LLMEntry(DBStyleEntry):
 
 
 class AgentEntry(DBStyleEntry):
-    """Agent configuration entry."""
+    """Agent configuration entry.
+    
+    Stores configuration for a browser automation agent including
+    behavior settings and references to other configuration entries.
+    
+    Attributes:
+        max_steps: Maximum steps before agent stops.
+        use_vision: Enable screenshot analysis.
+        system_prompt: Custom system prompt for the agent.
+        llm: Reference to LLM entry ID.
+        browser_profile: Reference to browser profile entry ID.
+    """
 
     max_steps: int | None = None
     use_vision: bool | None = None
@@ -159,7 +242,20 @@ class AgentEntry(DBStyleEntry):
 
 
 class ConfigJSON(BaseModel):
-    """Configuration file format."""
+    """Configuration file format.
+    
+    Represents the structure of the config.json file that stores
+    all persistent configuration for OpenBrowser.
+    
+    Attributes:
+        browser_profiles: Dict of browser profile entries keyed by ID.
+        llms: Dict of LLM configuration entries keyed by ID.
+        agents: Dict of agent configuration entries keyed by ID.
+        
+    Example:
+        >>> config = ConfigJSON()
+        >>> config.browser_profiles['uuid'] = BrowserProfileEntry(headless=True)
+    """
 
     browser_profiles: dict[str, BrowserProfileEntry] = Field(default_factory=dict)
     llms: dict[str, LLMEntry] = Field(default_factory=dict)
@@ -167,7 +263,21 @@ class ConfigJSON(BaseModel):
 
 
 def create_default_config() -> ConfigJSON:
-    """Create a fresh default configuration."""
+    """Create a fresh default configuration.
+    
+    Generates a new ConfigJSON with default browser profile, LLM, and agent
+    entries. Each entry is assigned a new UUID and the default flag is set.
+    
+    Returns:
+        A ConfigJSON instance with default entries for:
+            - Browser profile: headless=False, no user data dir
+            - LLM: OpenAI provider with gpt-4o-mini model
+            - Agent: References the default LLM and browser profile
+            
+    Example:
+        >>> config = create_default_config()
+        >>> print(len(config.browser_profiles))  # 1
+    """
     logger.debug('Creating fresh default config.json')
 
     new_config = ConfigJSON()
@@ -206,7 +316,22 @@ def create_default_config() -> ConfigJSON:
 
 
 def load_and_migrate_config(config_path: Path) -> ConfigJSON:
-    """Load config.json or create fresh one if old format detected."""
+    """Load config.json or create fresh one if old format detected.
+    
+    Attempts to load the configuration file at the given path. If the file
+    doesn't exist, uses an old format, or is corrupted, a fresh default
+    configuration is created and saved.
+    
+    Args:
+        config_path: Path to the config.json file.
+        
+    Returns:
+        A valid ConfigJSON instance, either loaded from file or freshly created.
+        
+    Note:
+        This function handles migration from older config formats by detecting
+        the format and replacing with a new default configuration if needed.
+    """
     if not config_path.exists():
         # Create fresh config with defaults
         config_path.parent.mkdir(parents=True, exist_ok=True)
@@ -252,8 +377,29 @@ def load_and_migrate_config(config_path: Path) -> ConfigJSON:
 
 class Config:
     """Configuration class that merges environment and file config.
-
-    Re-reads environment variables on every access for flexibility.
+    
+    Singleton class that provides unified access to all configuration
+    settings. Re-reads environment variables on every property access
+    for flexibility in dynamic environments.
+    
+    This class:
+        - Provides type-safe access to environment variables
+        - Manages configuration file loading and caching
+        - Creates necessary directories on first access
+        - Merges file-based and environment-based settings
+        
+    Attributes:
+        LOGGING_LEVEL: Current logging level from environment.
+        CONFIG_DIR: Path to configuration directory.
+        CONFIG_FILE: Path to config.json file.
+        PROFILES_DIR: Path to browser profiles directory.
+        OPENAI_API_KEY: OpenAI API key from environment.
+        IN_DOCKER: Whether running in Docker container.
+        
+    Example:
+        >>> config = Config()
+        >>> print(config.OPENAI_API_KEY)
+        >>> print(config.CONFIG_DIR)
     """
 
     _instance: 'Config | None' = None
@@ -309,7 +455,15 @@ class Config:
         return path
 
     def _ensure_dirs(self) -> None:
-        """Create directories if they don't exist (only once)"""
+        """Create directories if they don't exist (only once).
+        
+        Creates the configuration directory structure including:
+            - Main config directory
+            - Profiles subdirectory
+            - Extensions subdirectory
+            
+        This method is idempotent - directories are only created on first call.
+        """
         if not self._dirs_created:
             config_dir = Path(
                 os.getenv('OPENBROWSER_CONFIG_DIR', str(self.XDG_CONFIG_HOME / 'openbrowser'))
@@ -390,7 +544,16 @@ class Config:
         return os.getenv('WIN_FONT_DIR', 'C:\\Windows\\Fonts')
 
     def _get_config_path(self) -> Path:
-        """Get config path from env config."""
+        """Get config path from env config.
+        
+        Determines the configuration file path using the following priority:
+            1. OPENBROWSER_CONFIG_PATH environment variable
+            2. OPENBROWSER_CONFIG_DIR/config.json
+            3. XDG_CONFIG_HOME/openbrowser/config.json
+            
+        Returns:
+            Path to the configuration JSON file.
+        """
         env_config = EnvConfig()
         if env_config.OPENBROWSER_CONFIG_PATH:
             return Path(env_config.OPENBROWSER_CONFIG_PATH).expanduser()
@@ -401,12 +564,26 @@ class Config:
             return xdg_config / 'openbrowser' / 'config.json'
 
     def _get_db_config(self) -> ConfigJSON:
-        """Load and migrate config.json."""
+        """Load and migrate config.json.
+        
+        Loads the configuration file, handling migration from old formats
+        and creation of new config if needed.
+        
+        Returns:
+            ConfigJSON instance with all configuration entries.
+        """
         config_path = self._get_config_path()
         return load_and_migrate_config(config_path)
 
     def get_default_profile(self) -> dict[str, Any]:
-        """Get the default browser profile configuration."""
+        """Get the default browser profile configuration.
+        
+        Retrieves the browser profile marked as default from the config file.
+        Falls back to the first profile if no default is set.
+        
+        Returns:
+            Dict with browser profile settings, or empty dict if none exist.
+        """
         db_config = self._get_db_config()
         for profile in db_config.browser_profiles.values():
             if profile.default:
@@ -419,7 +596,14 @@ class Config:
         return {}
 
     def get_default_llm(self) -> dict[str, Any]:
-        """Get the default LLM configuration."""
+        """Get the default LLM configuration.
+        
+        Retrieves the LLM entry marked as default from the config file.
+        Falls back to the first LLM entry if no default is set.
+        
+        Returns:
+            Dict with LLM settings (provider, model, etc.), or empty dict if none exist.
+        """
         db_config = self._get_db_config()
         for llm in db_config.llms.values():
             if llm.default:
@@ -432,7 +616,14 @@ class Config:
         return {}
 
     def get_default_agent(self) -> dict[str, Any]:
-        """Get the default agent configuration."""
+        """Get the default agent configuration.
+        
+        Retrieves the agent entry marked as default from the config file.
+        Falls back to the first agent entry if no default is set.
+        
+        Returns:
+            Dict with agent settings (max_steps, use_vision, etc.), or empty dict if none exist.
+        """
         db_config = self._get_db_config()
         for agent in db_config.agents.values():
             if agent.default:
@@ -445,7 +636,22 @@ class Config:
         return {}
 
     def load_config(self) -> dict[str, Any]:
-        """Load configuration with env var overrides."""
+        """Load configuration with env var overrides.
+        
+        Loads the complete configuration by merging file-based settings
+        with environment variable overrides. Environment variables take
+        precedence over file settings.
+        
+        Returns:
+            Dict containing:
+                - browser_profile: Browser settings with env overrides
+                - llm: LLM settings with API key overrides
+                - agent: Agent configuration
+                
+        Note:
+            MCP-specific environment variables (OPENBROWSER_HEADLESS,
+            OPENBROWSER_ALLOWED_DOMAINS, etc.) are applied as overrides.
+        """
         config = {
             'browser_profile': self.get_default_profile(),
             'llm': self.get_default_llm(),
@@ -495,22 +701,75 @@ CONFIG = Config()
 
 # Helper functions
 def load_openbrowser_config() -> dict[str, Any]:
-    """Load openbrowser configuration."""
+    """Load openbrowser configuration.
+    
+    Convenience function that loads the complete configuration using
+    the singleton Config instance.
+    
+    Returns:
+        Dict containing browser_profile, llm, and agent configuration.
+        
+    Example:
+        >>> config = load_openbrowser_config()
+        >>> headless = config['browser_profile'].get('headless', False)
+    """
     return CONFIG.load_config()
 
 
 def get_default_profile(config: dict[str, Any]) -> dict[str, Any]:
-    """Get default browser profile from config dict."""
+    """Get default browser profile from config dict.
+    
+    Extracts the browser profile section from a loaded configuration.
+    
+    Args:
+        config: Configuration dict from load_openbrowser_config().
+        
+    Returns:
+        Browser profile settings dict, or empty dict if not present.
+    """
     return config.get('browser_profile', {})
 
 
 def get_default_llm(config: dict[str, Any]) -> dict[str, Any]:
-    """Get default LLM config from config dict."""
+    """Get default LLM config from config dict.
+    
+    Extracts the LLM section from a loaded configuration.
+    
+    Args:
+        config: Configuration dict from load_openbrowser_config().
+        
+    Returns:
+        LLM settings dict (provider, model, etc.), or empty dict if not present.
+    """
     return config.get('llm', {})
 
 
 def get_api_key_for_provider(provider: str) -> str:
-    """Get API key for a specific LLM provider."""
+    """Get API key for a specific LLM provider.
+    
+    Retrieves the appropriate API key from environment variables
+    based on the provider name.
+    
+    Args:
+        provider: LLM provider name (case-insensitive). Supported values:
+            - 'openai': Returns OPENAI_API_KEY
+            - 'anthropic' or 'claude': Returns ANTHROPIC_API_KEY
+            - 'google': Returns GOOGLE_API_KEY
+            - 'groq': Returns GROQ_API_KEY
+            - 'deepseek': Returns DEEPSEEK_API_KEY
+            - 'openrouter': Returns OPENROUTER_API_KEY
+            - 'azure' or 'azure_openai': Returns AZURE_OPENAI_KEY
+            - 'oci': Returns OCI_API_KEY
+            - 'cerebras': Returns CEREBRAS_API_KEY
+            
+    Returns:
+        API key string, or empty string if provider not found or key not set.
+        
+    Example:
+        >>> key = get_api_key_for_provider('openai')
+        >>> if key:
+        ...     llm = ChatOpenAI(api_key=key)
+    """
     provider_lower = provider.lower()
     
     if provider_lower == 'openai':

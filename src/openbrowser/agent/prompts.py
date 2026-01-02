@@ -14,7 +14,25 @@ if TYPE_CHECKING:
 
 
 class SystemPrompt:
-    """System prompt loaded from markdown template."""
+    """System prompt loaded from markdown template.
+    
+    Manages the system prompt that defines the agent's behavior and
+    instructions. Loads from markdown templates with support for
+    customization via override or extension.
+    
+    Attributes:
+        max_actions_per_step: Maximum actions allowed per step.
+        use_thinking: Whether thinking mode is enabled.
+        flash_mode: Whether flash mode (minimal output) is enabled.
+        system_message: The compiled SystemMessage instance.
+        
+    Example:
+        >>> prompt = SystemPrompt(
+        ...     max_actions_per_step=4,
+        ...     override_system_message="Custom instructions..."
+        ... )
+        >>> message = prompt.get_system_message()
+    """
 
     def __init__(
         self,
@@ -41,7 +59,11 @@ class SystemPrompt:
         self.system_message = SystemMessage(content=prompt)
 
     def _load_prompt_template(self) -> None:
-        """Load the prompt template from the markdown file."""
+        """Load the prompt template from the markdown file.
+        
+        Loads the appropriate template based on use_thinking and flash_mode
+        settings. Falls back to a basic prompt if the file is not found.
+        """
         try:
             if self.flash_mode:
                 template_filename = 'system_prompt_flash.md'
@@ -58,7 +80,14 @@ class SystemPrompt:
             self.prompt_template = self._get_fallback_prompt()
 
     def _get_fallback_prompt(self) -> str:
-        """Return a fallback prompt if template file is not found."""
+        """Return a fallback prompt if template file is not found.
+        
+        Provides a basic but functional system prompt when the template
+        files are not available.
+        
+        Returns:
+            Basic system prompt string with {max_actions} placeholder.
+        """
         return """You are an AI agent designed to automate browser tasks.
 
 Your goal is to complete the user's request by interacting with web pages.
@@ -81,12 +110,40 @@ Only use numeric indexes that are explicitly provided.
 When done, use the done action with your result."""
 
     def get_system_message(self) -> SystemMessage:
-        """Get the system prompt message."""
+        """Get the system prompt message.
+        
+        Returns:
+            SystemMessage instance with the compiled prompt.
+        """
         return self.system_message
 
 
 class AgentMessagePrompt:
-    """Builds user message with browser state, history, and task."""
+    """Builds user message with browser state, history, and task.
+    
+    Constructs the user message sent to the LLM at each step, combining
+    the current browser state, agent history, task description, and
+    optionally a screenshot.
+    
+    Attributes:
+        task: The current task description.
+        dom_state: Current DOM state with interactive elements.
+        url: Current page URL.
+        screenshot: Optional base64 screenshot.
+        agent_history_description: Summary of previous steps.
+        step_info: Current step number and max steps.
+        action_descriptions: Available actions documentation.
+        vision_detail_level: Screenshot detail level.
+        
+    Example:
+        >>> prompt = AgentMessagePrompt(
+        ...     task="Find contact info",
+        ...     dom_state=dom_state,
+        ...     url="https://example.com",
+        ...     screenshot=screenshot_b64
+        ... )
+        >>> message = prompt.get_user_message(use_vision=True)
+    """
 
     def __init__(
         self,
@@ -109,7 +166,14 @@ class AgentMessagePrompt:
         self.vision_detail_level = vision_detail_level
 
     def _get_browser_state_description(self) -> str:
-        """Get the browser state description."""
+        """Get the browser state description.
+        
+        Formats the current browser state including URL and interactive
+        elements for inclusion in the prompt.
+        
+        Returns:
+            Formatted browser state string.
+        """
         elements_text = self.dom_state.element_tree if self.dom_state else 'empty page'
         
         # Truncate if too long
@@ -128,7 +192,14 @@ Interactive elements{truncated_text}:
         return browser_state
 
     def _get_agent_state_description(self) -> str:
-        """Get the agent state description."""
+        """Get the agent state description.
+        
+        Formats the agent's current state including task, step info,
+        and current date.
+        
+        Returns:
+            Formatted agent state string.
+        """
         step_info_description = ''
         if self.step_info:
             step_info_description = f'Step {self.step_info.step_number + 1}\n'
@@ -145,7 +216,17 @@ Interactive elements{truncated_text}:
         return agent_state
 
     def get_user_message(self, use_vision: bool = True) -> HumanMessage:
-        """Get complete state as a user message."""
+        """Get complete state as a user message.
+        
+        Builds the final user message combining all state information.
+        Optionally includes the screenshot for vision-enabled models.
+        
+        Args:
+            use_vision: Whether to include screenshot in the message.
+            
+        Returns:
+            HumanMessage with text content and optional image.
+        """
         # Build state description
         state_description = ''
         

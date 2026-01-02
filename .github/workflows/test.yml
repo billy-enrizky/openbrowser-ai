@@ -1,0 +1,136 @@
+# GitHub Actions Workflow for Running Tests
+#
+# This workflow runs the openbrowser test suite on push and pull requests.
+# It tests against multiple Python versions and operating systems.
+#
+# Tests are run using pytest with coverage reporting.
+# The workflow uses uv for fast dependency installation.
+
+name: Tests
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'src/**'
+      - 'tests/**'
+      - 'pyproject.toml'
+      - '.github/workflows/test.yml'
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'src/**'
+      - 'tests/**'
+      - 'pyproject.toml'
+      - '.github/workflows/test.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test Python ${{ matrix.python-version }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python-version: ["3.12"]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          uv pip install --system -e ".[all]"
+          uv pip install --system pytest pytest-cov pytest-asyncio
+
+      - name: Install Playwright browsers
+        run: |
+          uv run playwright install chromium
+        continue-on-error: true
+
+      - name: Run tests with coverage
+        run: |
+          uv run pytest tests/ -v --tb=short --cov=src/openbrowser --cov-report=xml --cov-report=term-missing
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
+        with:
+          files: ./coverage.xml
+          fail_ci_if_error: false
+          verbose: true
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          uv pip install --system ruff
+
+      - name: Run Ruff linter
+        run: |
+          ruff check src/ tests/ --output-format=github
+        continue-on-error: true
+
+      - name: Run Ruff formatter check
+        run: |
+          ruff format --check src/ tests/
+        continue-on-error: true
+
+  type-check:
+    name: Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          uv pip install --system -e ".[all]"
+          uv pip install --system pyright
+
+      - name: Run Pyright type checker
+        run: |
+          pyright src/openbrowser
+        continue-on-error: true

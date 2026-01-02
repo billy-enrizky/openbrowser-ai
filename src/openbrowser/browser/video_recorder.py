@@ -1,4 +1,29 @@
-"""Video Recording Service for Browser Use Sessions."""
+"""Video Recording Service for Browser Use Sessions.
+
+This module provides video recording functionality for browser sessions using
+CDP screencast capabilities and ffmpeg for encoding. It captures individual
+frames from the browser and compiles them into a video file.
+
+Requirements:
+    Optional dependencies: imageio, imageio-ffmpeg, numpy
+    Install with: pip install imageio imageio-ffmpeg numpy
+
+Classes:
+    VideoRecorderService: Handles frame capture and video encoding.
+
+Functions:
+    _get_padded_size: Calculates codec-compatible dimensions.
+
+Example:
+    >>> recorder = VideoRecorderService(
+    ...     output_path=Path('/tmp/session.mp4'),
+    ...     size=ViewportSize(width=1920, height=1080),
+    ...     framerate=30
+    ... )
+    >>> recorder.start()
+    >>> recorder.add_frame(base64_png_data)
+    >>> recorder.stop_and_save()
+"""
 
 import base64
 import logging
@@ -23,29 +48,73 @@ logger = logging.getLogger(__name__)
 
 
 def _get_padded_size(size: ViewportSize, macro_block_size: int = 16) -> ViewportSize:
-    """Calculates the dimensions padded to the nearest multiple of macro_block_size."""
+    """Calculate dimensions padded to the nearest multiple of macro_block_size.
+
+    Video codecs like H.264 require dimensions that are multiples of the
+    macro block size (typically 16 pixels). This function rounds up.
+
+    Args:
+        size: Original viewport size.
+        macro_block_size: Block size for codec compatibility (default: 16).
+
+    Returns:
+        ViewportSize with dimensions rounded up to nearest macro block multiple.
+
+    Example:
+        >>> _get_padded_size(ViewportSize(width=1920, height=1080))
+        ViewportSize(width=1920, height=1088)  # 1080 rounds up to 1088
+    """
     width = int(math.ceil(size['width'] / macro_block_size)) * macro_block_size
     height = int(math.ceil(size['height'] / macro_block_size)) * macro_block_size
     return ViewportSize(width=width, height=height)
 
 
 class VideoRecorderService:
-    """
-    Handles the video encoding process for a browser session using imageio.
+    """Handles video encoding for browser sessions using imageio.
 
-    This service captures individual frames from the CDP screencast, decodes them,
+    This service captures individual frames from CDP screencast, decodes them,
     and appends them to a video file using a pip-installable ffmpeg backend.
-    It automatically resizes frames to match the target video dimensions.
+    It automatically resizes and pads frames to match codec requirements.
+
+    The recording workflow is:
+    1. Create instance with output path, size, and framerate
+    2. Call start() to initialize the video writer
+    3. Call add_frame() for each captured frame (base64 PNG)
+    4. Call stop_and_save() to finalize the video file
+
+    Attributes:
+        output_path: Path where the video will be saved.
+        size: Target video dimensions.
+        framerate: Video framerate (frames per second).
+        padded_size: Codec-compatible dimensions (multiple of 16).
+
+    Example:
+        >>> recorder = VideoRecorderService(
+        ...     output_path=Path('/tmp/video.mp4'),
+        ...     size=ViewportSize(width=1920, height=1080),
+        ...     framerate=30
+        ... )
+        >>> recorder.start()
+        >>> for frame_b64 in frames:
+        ...     recorder.add_frame(frame_b64)
+        >>> recorder.stop_and_save()
     """
 
     def __init__(self, output_path: Path, size: ViewportSize, framerate: int):
-        """
-        Initializes the video recorder.
+        """Initialize the video recorder.
 
         Args:
             output_path: The full path where the video will be saved.
-            size: A ViewportSize object specifying the width and height of the video.
-            framerate: The desired framerate for the output video.
+                Parent directories will be created if needed.
+            size: A ViewportSize specifying the width and height of the video.
+            framerate: The desired framerate for the output video (fps).
+
+        Example:
+            >>> recorder = VideoRecorderService(
+            ...     output_path=Path('/tmp/session.mp4'),
+            ...     size=ViewportSize(width=1920, height=1080),
+            ...     framerate=30
+            ... )
         """
         self.output_path = output_path
         self.size = size
@@ -55,11 +124,18 @@ class VideoRecorderService:
         self.padded_size = _get_padded_size(self.size)
 
     def start(self) -> None:
-        """
-        Prepares and starts the video writer.
+        """Prepare and start the video writer.
 
-        If the required optional dependencies are not installed, this method will
-        log an error and do nothing.
+        Initializes the imageio video writer with H.264 codec and yuv420p
+        pixel format for maximum compatibility. Creates parent directories
+        if needed.
+
+        If required dependencies (imageio, imageio-ffmpeg, numpy) are not
+        installed, logs an error and returns without starting.
+
+        Note:
+            Call this before add_frame(). The recorder is active after
+            this method returns successfully (_is_active will be True).
         """
         if not IMAGEIO_AVAILABLE:
             logger.error(
@@ -85,12 +161,21 @@ class VideoRecorderService:
             self._is_active = False
 
     def add_frame(self, frame_data_b64: str) -> None:
-        """
-        Decodes a base64-encoded PNG frame, resizes it, pads it to be codec-compatible,
-        and appends it to the video.
+        """Decode, resize, pad, and append a frame to the video.
+
+        Processes a base64-encoded PNG frame from CDP screencast:
+        1. Decodes base64 to PNG bytes
+        2. Scales to target video dimensions
+        3. Pads to codec-compatible dimensions (macro block alignment)
+        4. Appends to video file
 
         Args:
-            frame_data_b64: A base64-encoded string of the PNG frame data.
+            frame_data_b64: A base64-encoded string of PNG frame data
+                from CDP Page.screencastFrame.
+
+        Note:
+            Silently returns if recorder is not active. Logs warnings
+            for individual frame processing failures without raising.
         """
         if not self._is_active or not self._writer:
             return
@@ -144,10 +229,17 @@ class VideoRecorderService:
             logger.warning(f'[VideoRecorderService] Could not process and add video frame: {e}')
 
     def stop_and_save(self) -> None:
-        """
-        Finalizes the video file by closing the writer.
+        """Finalize the video file by closing the writer.
 
-        This method should be called when the recording session is complete.
+        Writes any buffered frames and closes the video file. Should be
+        called when the recording session is complete.
+
+        After calling this method, the recorder is no longer active and
+        add_frame() will have no effect.
+
+        Note:
+            This method is idempotent - safe to call multiple times.
+            Logs success message with output path on completion.
         """
         if not self._is_active or not self._writer:
             return
