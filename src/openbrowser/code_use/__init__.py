@@ -1,4 +1,33 @@
-"""Code-use agent module - Jupyter notebook-like code execution for browser automation."""
+"""Code-use agent module - Jupyter notebook-like code execution for browser automation.
+
+This module provides a Jupyter notebook-like interface for browser automation where
+an LLM writes and executes Python code in a persistent namespace with browser control
+functions available.
+
+Key Components:
+    CodeAgent: The main agent class that orchestrates code execution and browser control.
+    NotebookSession: Represents a session of executed code cells.
+    CodeCell: Individual code cell with source, output, and execution status.
+    create_namespace: Creates the execution namespace with browser tools.
+    export_to_ipynb: Exports session to Jupyter notebook format.
+
+Example:
+    ```python
+    from src.openbrowser.code_use import CodeAgent
+    from src.openbrowser.browser.session import BrowserSession
+
+    async def main():
+        browser = BrowserSession()
+        await browser.start()
+
+        agent = CodeAgent(
+            task="Navigate to google.com and search for 'Python'",
+            llm=my_llm,
+            browser=browser,
+        )
+        session = await agent.run()
+    ```
+"""
 
 from src.openbrowser.code_use.namespace import create_namespace
 from src.openbrowser.code_use.notebook_export import export_to_ipynb, session_to_python_script

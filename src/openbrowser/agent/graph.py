@@ -38,7 +38,26 @@ logger = logging.getLogger(__name__)
 
 
 class GraphState(TypedDict):
-    """Internal LangGraph state for the browser automation agent workflow."""
+    """Internal LangGraph state for the browser automation agent workflow.
+    
+    Contains all state data passed between nodes in the LangGraph workflow.
+    This state is used for coordinating the perceive-step-execute loop.
+    
+    Attributes:
+        messages: Conversation message history.
+        screenshot: Current page screenshot as base64.
+        dom_tree: Serialized DOM tree with interactive elements.
+        url: Current page URL.
+        root_goal: The original task/goal.
+        n_steps: Current step number.
+        max_steps: Maximum allowed steps.
+        consecutive_failures: Count of consecutive failures.
+        consecutive_empty_dom: Count of consecutive empty DOM states.
+        model_output: Latest AgentOutput from LLM.
+        last_result: Results from last action execution.
+        is_done: Whether the task is complete.
+        google_blocked: Whether Google is blocked due to CAPTCHA.
+    """
     
     messages: Annotated[list[BaseMessage], add_messages]
     screenshot: str
@@ -56,7 +75,36 @@ class GraphState(TypedDict):
 
 
 class BrowserAgent:
-    """Browser automation agent using LangGraph workflow with browser-use patterns."""
+    """Browser automation agent using LangGraph workflow with browser-use patterns.
+    
+    The main agent class that orchestrates browser automation tasks. Uses a
+    LangGraph workflow with perceive-step-execute nodes to navigate web pages
+    and complete user-specified goals.
+    
+    The agent workflow:
+        1. Perceive: Capture screenshot and DOM state
+        2. Step: Call LLM to decide actions
+        3. Execute: Perform actions on the page
+        4. Loop until done or max_steps reached
+    
+    Attributes:
+        task: The task/goal to accomplish.
+        browser_session: Browser session for page interaction.
+        tools: Tools registry for action execution.
+        llm: Language model for decision making.
+        settings: Agent configuration settings.
+        max_steps: Maximum steps before stopping.
+        history: Execution history.
+        
+    Example:
+        >>> agent = BrowserAgent(
+        ...     task="Search for Python tutorials",
+        ...     llm_provider="openai",
+        ...     headless=True
+        ... )
+        >>> history = await agent.run()
+        >>> print(history.is_successful())
+    """
 
     def __init__(
         self,
@@ -220,7 +268,14 @@ class BrowserAgent:
         self.app = self._build_graph()
 
     def _build_graph(self) -> StateGraph:
-        """Build the LangGraph workflow."""
+        """Build the LangGraph workflow.
+        
+        Constructs the state machine with perceive, step, and execute nodes.
+        Sets up the conditional routing between nodes.
+        
+        Returns:
+            Compiled StateGraph workflow with checkpointing.
+        """
         workflow = StateGraph(GraphState)
         
         workflow.add_node("perceive", self.perceive_node)
@@ -251,7 +306,20 @@ class BrowserAgent:
         return workflow.compile(checkpointer=self.memory)
 
     async def perceive_node(self, state: GraphState) -> dict:
-        """Perceive current browser state - capture screenshot and DOM."""
+        """Perceive current browser state - capture screenshot and DOM.
+        
+        Captures the current page screenshot and DOM state. Handles CAPTCHA
+        detection on Google and automatic redirection to Bing.
+        
+        Args:
+            state: Current graph state.
+            
+        Returns:
+            Dict with updated screenshot, dom_tree, url, and state flags.
+            
+        Raises:
+            RuntimeError: If browser is not started.
+        """
         logger.info(f"Perceive: Step {state.get('n_steps', 0) + 1}")
         
         if not self.browser_session.agent_focus:
@@ -396,7 +464,20 @@ class BrowserAgent:
         }
 
     async def step_node(self, state: GraphState) -> dict:
-        """Single LLM call with unified AgentOutput."""
+        """Single LLM call with unified AgentOutput.
+        
+        Calls the LLM with current state to determine next actions.
+        Handles LLM errors and tracks consecutive failures.
+        
+        Args:
+            state: Current graph state with browser state.
+            
+        Returns:
+            Dict with model_output, updated n_steps, and failure tracking.
+            
+        Raises:
+            RuntimeError: If message manager is not initialized.
+        """
         step_number = state.get("n_steps", 0)
         
         logger.info(f"Step {step_number + 1}")
@@ -475,7 +556,17 @@ class BrowserAgent:
             }
 
     async def execute_node(self, state: GraphState) -> dict:
-        """Execute actions from the model output."""
+        """Execute actions from the model output.
+        
+        Executes each action from the LLM output and records results.
+        Updates the history with the step's execution details.
+        
+        Args:
+            state: Current graph state with model_output.
+            
+        Returns:
+            Dict with last_result list and is_done flag.
+        """
         logger.info("Executing actions")
         
         model_output = state.get("model_output")
@@ -549,9 +640,14 @@ class BrowserAgent:
     def _route_step(self, state: GraphState) -> Literal["execute", "end"]:
         """Route after step node.
         
-        Note: Always route to execute first so history is recorded,
-        even for done actions. The execute node will set is_done=True
-        which will be checked on the next routing decision.
+        Determines whether to execute actions or end the workflow.
+        Always routes to execute first so history is recorded.
+        
+        Args:
+            state: Current graph state.
+            
+        Returns:
+            'execute' to run actions, 'end' to finish workflow.
         """
         if state.get("is_done"):
             logger.info("Task completed")
@@ -574,7 +670,16 @@ class BrowserAgent:
         return "execute"
 
     def _route_after_execute(self, state: GraphState) -> Literal["continue", "end"]:
-        """Route after execute node - check if task is done."""
+        """Route after execute node - check if task is done.
+        
+        Checks if the agent should continue to the next step or end.
+        
+        Args:
+            state: Current graph state after execution.
+            
+        Returns:
+            'continue' to perceive again, 'end' to finish workflow.
+        """
         if state.get("is_done"):
             logger.info("Task completed after execute")
             return "end"
@@ -586,7 +691,13 @@ class BrowserAgent:
         return "continue"
 
     async def _check_should_stop(self) -> bool:
-        """Check if the agent should stop via the callback."""
+        """Check if the agent should stop via the callback.
+        
+        Calls the registered should_stop callback if available.
+        
+        Returns:
+            True if agent should stop, False otherwise.
+        """
         if self.register_should_stop_callback:
             try:
                 return await self.register_should_stop_callback()
@@ -597,9 +708,20 @@ class BrowserAgent:
     async def run(self, goal: str | None = None, max_steps: int | None = None) -> AgentHistoryList:
         """Run the agent to complete a goal.
         
+        Starts the browser, initializes the workflow, and executes steps
+        until the task is complete or max_steps is reached.
+        
         Args:
             goal: The goal/task to accomplish. If None, uses the task from __init__.
             max_steps: Maximum steps. If None, uses the max_steps from __init__.
+            
+        Returns:
+            AgentHistoryList containing the complete execution history.
+            
+        Example:
+            >>> history = await agent.run("Find contact information")
+            >>> if history.is_successful():
+            ...     print(history.final_result())
         """
         # Use stored task if goal not provided
         if goal is None:
@@ -663,7 +785,17 @@ class BrowserAgent:
                 logger.warning(f"Error stopping browser session: {e}")
 
     async def run_step(self, state: GraphState) -> GraphState:
-        """Run a single step (for external control)."""
+        """Run a single step (for external control).
+        
+        Allows external code to control the agent step-by-step instead
+        of running the full workflow.
+        
+        Args:
+            state: Current graph state to continue from.
+            
+        Returns:
+            Updated graph state after one step.
+        """
         result = await self.app.ainvoke(state, config={"configurable": {"thread_id": "1"}})
         return result
 
@@ -674,17 +806,22 @@ class BrowserAgent:
         skip_failures: bool = True,
         delay_between_actions: float = 2.0,
     ) -> list[ActionResult]:
-        """
-        Rerun a saved history of actions with error handling and retry logic.
+        """Rerun a saved history of actions with error handling and retry logic.
+        
+        Replays a previously recorded execution history, useful for
+        reproducing issues or automating repetitive tasks.
 
         Args:
-            history: The history to replay
-            max_retries: Maximum number of retries per action
-            skip_failures: Whether to skip failed actions or stop execution
-            delay_between_actions: Delay between actions in seconds
+            history: The AgentHistoryList to replay.
+            max_retries: Maximum number of retries per action. Default 3.
+            skip_failures: Whether to skip failed actions or stop execution. Default True.
+            delay_between_actions: Delay between actions in seconds. Default 2.0.
 
         Returns:
-            List of action results
+            List of ActionResult from replaying the history.
+            
+        Raises:
+            RuntimeError: If skip_failures=False and an action fails after max_retries.
         """
         # Initialize browser session
         await self.browser_session.start()
@@ -733,7 +870,20 @@ class BrowserAgent:
         history_item: AgentHistory,
         delay: float
     ) -> list[ActionResult]:
-        """Execute a single step from history."""
+        """Execute a single step from history.
+        
+        Replays all actions from a single history item.
+        
+        Args:
+            history_item: The history item containing actions to replay.
+            delay: Delay after executing all actions.
+            
+        Returns:
+            List of ActionResult from executing the actions.
+            
+        Raises:
+            ValueError: If the history item has invalid model output.
+        """
         if not history_item.model_output:
             raise ValueError('Invalid model output')
 
@@ -772,12 +922,16 @@ class BrowserAgent:
         history_file: str | Path | None = None,
         **kwargs
     ) -> list[ActionResult]:
-        """
-        Load history from file and rerun it.
+        """Load history from file and rerun it.
+        
+        Convenience method that loads a saved history file and replays it.
 
         Args:
-            history_file: Path to the history file
-            **kwargs: Additional arguments passed to rerun_history
+            history_file: Path to the history file. Default 'AgentHistory.json'.
+            **kwargs: Additional arguments passed to rerun_history.
+            
+        Returns:
+            List of ActionResult from replaying the history.
         """
         if not history_file:
             history_file = 'AgentHistory.json'
@@ -785,7 +939,14 @@ class BrowserAgent:
         return await self.rerun_history(history, **kwargs)
 
     def save_history(self, file_path: str | Path | None = None) -> None:
-        """Save the history to a file."""
+        """Save the history to a file.
+        
+        Saves the current execution history to a JSON file for later
+        analysis or replay.
+        
+        Args:
+            file_path: Path to save the history. Default 'AgentHistory.json'.
+        """
         if not file_path:
             file_path = 'AgentHistory.json'
         self.history.save_to_file(file_path)
