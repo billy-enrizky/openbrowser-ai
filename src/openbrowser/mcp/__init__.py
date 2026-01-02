@@ -1,4 +1,4 @@
-"""MCP (Model Context Protocol) server for openbrowser.
+"""MCP (Model Context Protocol) server for openbrowser-ai.
 
 This module provides MCP server and client integration for browser automation.
 """
