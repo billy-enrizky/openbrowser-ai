@@ -1,4 +1,11 @@
-"""Downloads watchdog for monitoring and handling file downloads."""
+"""Downloads watchdog for monitoring and handling file downloads.
+
+This module provides the DownloadsWatchdog which monitors CDP download
+events and emits FileDownloadedEvent when downloads complete.
+
+Classes:
+    DownloadsWatchdog: Monitors downloads and emits completion events.
+"""
 
 import asyncio
 import logging
@@ -24,7 +31,24 @@ logger = logging.getLogger(__name__)
 
 
 class DownloadsWatchdog(BaseWatchdog):
-    """Monitors downloads and handles file download events."""
+    """Monitors downloads and handles file download events.
+
+    Sets up CDP download behavior and listens for download events.
+    Tracks download progress and emits FileDownloadedEvent on completion.
+
+    Listens to:
+        BrowserConnectedEvent: Sets up download listeners.
+        BrowserStoppedEvent: Cleans up download state.
+        TabCreatedEvent: Monitors new tabs for downloads.
+        TabClosedEvent: Handles closed tab cleanup.
+        NavigationCompleteEvent: Checks for downloads after navigation.
+
+    Emits:
+        FileDownloadedEvent: When a file download completes.
+
+    Note:
+        Requires downloads_path to be configured in BrowserProfile.
+    """
 
     # Events this watchdog listens to
     LISTENS_TO: ClassVar[list[type[BaseEvent[Any]]]] = [
@@ -46,7 +70,11 @@ class DownloadsWatchdog(BaseWatchdog):
     _cdp_event_tasks: set[asyncio.Task] = PrivateAttr(default_factory=set)
 
     def attach_to_session(self) -> None:
-        """Register event handlers."""
+        """Register event handlers.
+
+        Subscribes to browser lifecycle and tab events for
+        download monitoring.
+        """
         self.event_bus.on(BrowserConnectedEvent, self.on_BrowserConnectedEvent)
         self.event_bus.on(BrowserStoppedEvent, self.on_BrowserStoppedEvent)
         self.event_bus.on(TabCreatedEvent, self.on_TabCreatedEvent)
@@ -54,20 +82,44 @@ class DownloadsWatchdog(BaseWatchdog):
         self.event_bus.on(NavigationCompleteEvent, self.on_NavigationCompleteEvent)
 
     async def on_BrowserConnectedEvent(self, event: BrowserConnectedEvent) -> None:
-        """Set up download monitoring when browser connects."""
+        """Set up download monitoring when browser connects.
+
+        Initializes CDP download listeners and behavior.
+
+        Args:
+            event: BrowserConnectedEvent from session.
+        """
         await self._setup_download_listeners()
 
     async def on_TabCreatedEvent(self, event: TabCreatedEvent) -> None:
-        """Monitor new tabs for downloads."""
+        """Monitor new tabs for downloads.
+
+        Ensures download listeners are set up for new tabs.
+
+        Args:
+            event: TabCreatedEvent with target info.
+        """
         if event.target_id:
             await self._setup_download_listeners()
 
     async def on_TabClosedEvent(self, event: TabClosedEvent) -> None:
-        """Stop monitoring closed tabs."""
+        """Stop monitoring closed tabs.
+
+        No cleanup needed as browser context handles target lifecycle.
+
+        Args:
+            event: TabClosedEvent with target info.
+        """
         pass  # No cleanup needed, browser context handles target lifecycle
 
     async def on_BrowserStoppedEvent(self, event: BrowserStoppedEvent) -> None:
-        """Clean up when browser stops."""
+        """Clean up when browser stops.
+
+        Cancels pending CDP event tasks and clears download state.
+
+        Args:
+            event: BrowserStoppedEvent from session.
+        """
         # Cancel all CDP event handler tasks
         for task in list(self._cdp_event_tasks):
             if not task.done():
@@ -82,12 +134,22 @@ class DownloadsWatchdog(BaseWatchdog):
         self._cdp_downloads_info.clear()
 
     async def on_NavigationCompleteEvent(self, event: NavigationCompleteEvent) -> None:
-        """Check for downloads after navigation completes."""
+        """Check for downloads after navigation completes.
+
+        Downloads are handled via CDP events, no action needed here.
+
+        Args:
+            event: NavigationCompleteEvent with URL info.
+        """
         # Downloads are handled via CDP events, no action needed here
         pass
 
     async def _setup_download_listeners(self) -> None:
-        """Set up CDP download listeners."""
+        """Set up CDP download listeners.
+
+        Configures Browser.setDownloadBehavior and registers handlers
+        for DownloadWillBegin and DownloadProgress events.
+        """
         if self._download_cdp_session_setup:
             return
 

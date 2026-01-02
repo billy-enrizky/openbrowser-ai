@@ -1,6 +1,6 @@
 [project]
 name = "openbrowser"
-version = "0.1.66"
+version = "0.1.82"
 description = "Agentic browser automation using LangGraph and raw CDP"
 readme = "README.md"
 requires-python = ">=3.12"

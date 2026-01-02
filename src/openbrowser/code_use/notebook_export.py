@@ -1,4 +1,16 @@
-"""Export code-use session to Jupyter notebook format."""
+"""Export code-use session to Jupyter notebook format.
+
+This module provides utilities to export CodeAgent sessions to Jupyter
+notebook (.ipynb) files or Python scripts. This allows users to:
+
+- Review and replay browser automation sessions
+- Modify and re-run automation code
+- Share automation workflows with others
+- Debug and refine automation scripts
+
+The exported notebooks include setup code for the openbrowser environment
+and all code cells from the session with their outputs.
+"""
 
 import json
 import logging
@@ -17,22 +29,42 @@ logger = logging.getLogger(__name__)
 
 
 def export_to_ipynb(agent: "CodeAgent", output_path: str | Path) -> Path:
-    """
-    Export a CodeAgent session to a Jupyter notebook (.ipynb) file.
-    Includes JavaScript code blocks that were stored in the namespace.
+    """Export a CodeAgent session to a Jupyter notebook (.ipynb) file.
+
+    Creates a complete Jupyter notebook containing:
+    - A setup cell that initializes the openbrowser environment
+    - JavaScript code block variables defined during the session
+    - All Python code cells executed during the session
+    - Outputs and errors from each cell execution
+    - Browser state snapshots where available
+
+    The exported notebook can be opened in JupyterLab or VS Code and
+    re-executed to replay the automation session.
 
     Args:
-        agent: The CodeAgent instance to export
-        output_path: Path where to save the notebook file
+        agent: The CodeAgent instance whose session should be exported.
+            Must have already run (session.cells populated).
+        output_path: File path where the notebook should be saved.
+            Parent directories are created if they don't exist.
 
     Returns:
-        Path to the saved notebook file
+        Path object pointing to the saved notebook file.
+
+    Raises:
+        OSError: If the file cannot be written.
 
     Example:
         ```python
+        agent = CodeAgent(task="Search Google", llm=llm)
         session = await agent.run()
+
+        # Export to notebook
         notebook_path = export_to_ipynb(agent, 'my_automation.ipynb')
         logger.info(f'Notebook saved to {notebook_path}')
+
+        # Can also use Path objects
+        from pathlib import Path
+        export_to_ipynb(agent, Path('output') / 'session.ipynb')
         ```
     """
     output_path = Path(output_path)
@@ -183,22 +215,48 @@ logging.info("Available functions: navigate, click, input, evaluate, search, ext
 
 
 def session_to_python_script(agent: "CodeAgent") -> str:
-    """
-    Convert a CodeAgent session to a Python script.
-    Includes JavaScript code blocks that were stored in the namespace.
+    """Convert a CodeAgent session to a standalone Python script.
+
+    Creates an async Python script that can be run independently to
+    replay the browser automation session. The script includes:
+    - Import statements for required modules
+    - Browser session initialization
+    - Namespace creation and function extraction
+    - JavaScript code block variables
+    - All code cells from the session
+    - Browser cleanup on completion
+
+    The generated script uses asyncio.run() to execute the async main()
+    function, making it directly runnable with `python script.py`.
 
     Args:
-        agent: The CodeAgent instance to convert
+        agent: The CodeAgent instance whose session should be converted.
+            Must have already run (session.cells populated).
 
     Returns:
-        Python script as a string
+        Complete Python script as a string, ready to be saved to a file
+        or executed.
 
     Example:
         ```python
+        agent = CodeAgent(task="Scrape data", llm=llm)
         await agent.run()
+
+        # Convert to script
         script = session_to_python_script(agent)
-        logging.info(script)
+
+        # Save to file
+        with open('automation.py', 'w') as f:
+            f.write(script)
+
+        # Or print for review
+        print(script)
         ```
+
+    Note:
+        The generated script extracts common functions from the namespace
+        for direct access (navigate, click, input_text, evaluate, etc.).
+        Additional functions can be accessed via the namespace dictionary.
     """
     lines = []
 

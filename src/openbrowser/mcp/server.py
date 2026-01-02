@@ -52,9 +52,43 @@ except ImportError:
 
 
 class OpenBrowserServer:
-    """MCP Server for openbrowser capabilities."""
+    """MCP Server for openbrowser capabilities.
+    
+    This class implements a Model Context Protocol (MCP) server that exposes
+    browser automation capabilities to MCP clients like Claude Desktop.
+    
+    The server provides tools for:
+        - Browser navigation and interaction (navigate, click, type, scroll)
+        - Page state inspection (get DOM elements, take screenshots)
+        - Tab management (list, switch, close tabs)
+        - Autonomous agent execution (run_browser_agent)
+        - Session management (multiple concurrent sessions)
+    
+    Attributes:
+        server: The MCP Server instance.
+        browser_session: Currently active browser session.
+        tools: Browser tools instance for direct browser control.
+        active_sessions: Dict mapping session IDs to session data.
+        session_timeout_minutes: Timeout for inactive sessions.
+    
+    Example:
+        >>> server = OpenBrowserServer(session_timeout_minutes=15)
+        >>> await server.run()  # Start the MCP server
+    
+    Note:
+        Requires the MCP SDK to be installed: pip install mcp
+    """
 
     def __init__(self, session_timeout_minutes: int = 10):
+        """Initialize the OpenBrowser MCP server.
+        
+        Args:
+            session_timeout_minutes: Time in minutes before inactive sessions
+                are automatically cleaned up. Defaults to 10 minutes.
+        
+        Raises:
+            ImportError: If the MCP SDK is not installed.
+        """
         if not MCP_AVAILABLE:
             raise ImportError("MCP SDK not installed. Install with: pip install mcp")
 
@@ -626,7 +660,15 @@ class OpenBrowserServer:
         return f"Closed {closed_count} sessions"
 
     async def run(self):
-        """Run the MCP server."""
+        """Run the MCP server using stdio transport.
+        
+        This method starts the MCP server and handles incoming requests
+        from MCP clients. It runs until the connection is closed.
+        
+        The server uses stdin/stdout for communication, making it suitable
+        for use with MCP clients like Claude Desktop that spawn the server
+        as a subprocess.
+        """
         async with mcp.server.stdio.stdio_server() as (read_stream, write_stream):
             await self.server.run(
                 read_stream,
@@ -643,7 +685,22 @@ class OpenBrowserServer:
 
 
 async def main(session_timeout_minutes: int = 10):
-    """Main entry point for MCP server."""
+    """Main entry point for the OpenBrowser MCP server.
+    
+    This function initializes and runs the OpenBrowser MCP server,
+    which exposes browser automation capabilities via the Model Context Protocol.
+    
+    Args:
+        session_timeout_minutes: Time in minutes before inactive browser
+            sessions are automatically cleaned up. Defaults to 10.
+    
+    Example:
+        Run as a module:
+            python -m src.openbrowser.mcp
+        
+        Or in code:
+            asyncio.run(main(session_timeout_minutes=15))
+    """
     if not MCP_AVAILABLE:
         print("MCP SDK is required. Install with: pip install mcp", file=sys.stderr)
         sys.exit(1)

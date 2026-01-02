@@ -1,4 +1,12 @@
-"""DOM watchdog for browser DOM tree management using CDP."""
+"""DOM watchdog for browser DOM tree management using CDP.
+
+This module provides the DOMWatchdog which maintains cached DOM state
+and selector maps for the browser session. Acts as a bridge between
+the event-driven architecture and DomService implementation.
+
+Classes:
+    DOMWatchdog: Handles DOM tree caching and element access.
+"""
 
 import logging
 from typing import TYPE_CHECKING, ClassVar
@@ -17,13 +25,25 @@ logger = logging.getLogger(__name__)
 
 class DOMWatchdog(BaseWatchdog):
     """Handles DOM tree building and element access via CDP.
-    
-    This watchdog acts as a bridge between the event-driven browser session
-    and the DomService implementation, maintaining cached state and providing
-    helper methods for other watchdogs.
-    
-    Following browser-use pattern, this watchdog caches DOM state and provides
-    access to selector maps for other watchdogs and tools.
+
+    Acts as a bridge between the event-driven browser session and the
+    DomService implementation. Maintains cached DOM state and provides
+    helper methods for other watchdogs and tools.
+
+    Following browser-use pattern, caches DOM state and provides access
+    to selector maps for element interaction.
+
+    Attributes:
+        current_dom_state: Cached DomState from last update.
+        selector_map: Mapping from distinct_id to backend_node_id.
+
+    Listens to:
+        TabCreatedEvent: Handles new tab creation.
+
+    Example:
+        >>> watchdog = DOMWatchdog(event_bus=bus, browser_session=session)
+        >>> watchdog.update_dom_state(new_dom_state)
+        >>> backend_id = watchdog.selector_map[1]
     """
 
     LISTENS_TO: ClassVar[list[type[BaseEvent]]] = [TabCreatedEvent]
@@ -34,18 +54,30 @@ class DOMWatchdog(BaseWatchdog):
     selector_map: dict[int, int] | None = None
 
     def attach_to_session(self) -> None:
-        """Register event handlers."""
+        """Register event handlers.
+
+        Subscribes to TabCreatedEvent for new tab handling.
+        """
         self.event_bus.on(TabCreatedEvent, self.on_TabCreatedEvent)
 
     async def on_TabCreatedEvent(self, event: TabCreatedEvent) -> None:
-        """Handle tab creation - no special setup needed."""
+        """Handle tab creation.
+
+        Currently no special setup needed for new tabs.
+
+        Args:
+            event: TabCreatedEvent with target info.
+        """
         return None
 
     def update_dom_state(self, dom_state: DomState) -> None:
         """Update cached DOM state.
-        
+
+        Updates the watchdog's cached state and propagates to browser
+        session if it supports cached selector maps.
+
         Args:
-            dom_state: The new DOM state to cache
+            dom_state: New DomState to cache.
         """
         self.current_dom_state = dom_state
         self.selector_map = dom_state.selector_map
