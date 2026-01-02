@@ -1,4 +1,4 @@
-"""CLI module for OpenBrowser."""
+"""CLI module for openbrowser-ai."""
 
 from __future__ import annotations
 
@@ -68,14 +68,14 @@ def run(
         save_gif: Optional path to save execution recording as GIF.
         
     Example:
-        >>> openbrowser run "Search for Python tutorials" --provider openai --headless
+        >>> openbrowser-ai run "Search for Python tutorials" --provider openai --headless
     """
     # Configure logging
     log_level = logging.DEBUG if verbose else logging.INFO
     logging.basicConfig(level=log_level, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 
     console.print(Panel.fit(
-        f"[bold blue]OpenBrowser[/bold blue]\n"
+        f"[bold blue]openbrowser-ai[/bold blue]\n"
         f"Task: {task}\n"
         f"Provider: {provider}\n"
         f"Headless: {headless}",
@@ -152,7 +152,7 @@ def run(
 
 @cli.command()
 def init():
-    """Initialize OpenBrowser configuration.
+    """Initialize openbrowser-ai configuration.
     
     Checks for available LLM provider API keys in environment variables
     and displays their configuration status. This helps users verify
@@ -166,7 +166,7 @@ def init():
         - OPENROUTER_API_KEY: OpenRouter provider
         - AZURE_OPENAI_API_KEY: Azure OpenAI provider
     """
-    console.print("[blue]Initializing OpenBrowser configuration...[/blue]")
+    console.print("[blue]Initializing openbrowser-ai configuration...[/blue]"))
 
     # Check for environment variables
     import os
@@ -264,7 +264,7 @@ def _get_default_model(provider: str) -> str:
 def main():
     """Main entry point for CLI.
     
-    This function serves as the primary entry point for the OpenBrowser
+    This function serves as the primary entry point for the openbrowser-ai
     command-line interface. It initializes the Click command group and
     handles command routing.
     
@@ -275,9 +275,9 @@ def main():
     
     Example:
         >>> # From command line:
-        >>> openbrowser run "Search Google for Python tutorials"
-        >>> openbrowser init
-        >>> openbrowser models
+        >>> openbrowser-ai run "Search Google for Python tutorials"
+        >>> openbrowser-ai init
+        >>> openbrowser-ai models
     """
     cli()
 

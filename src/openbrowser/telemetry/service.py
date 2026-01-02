@@ -28,7 +28,7 @@ class ProductTelemetry:
 
         Args:
             api_key: PostHog API key (or POSTHOG_API_KEY env var)
-            enabled: Whether telemetry is enabled (or OPENBROWSER_TELEMETRY_ENABLED env var)
+            enabled: Whether telemetry is enabled (or OPENBROWSER_AI_TELEMETRY_ENABLED env var)
         """
         self._enabled = enabled if enabled is not None else self._is_enabled()
         self._api_key = api_key or os.environ.get("POSTHOG_API_KEY")
@@ -40,13 +40,13 @@ class ProductTelemetry:
 
     def _is_enabled(self) -> bool:
         """Check if telemetry is enabled via environment variable."""
-        env_value = os.environ.get("OPENBROWSER_TELEMETRY_ENABLED", "true").lower()
+        env_value = os.environ.get("OPENBROWSER_AI_TELEMETRY_ENABLED", "true").lower()
         return env_value not in ("false", "0", "no", "off")
 
     def _get_user_id(self) -> str:
         """Get or generate a unique user ID."""
         # Try to get from environment or generate a new one
-        user_id = os.environ.get("OPENBROWSER_USER_ID")
+        user_id = os.environ.get("OPENBROWSER_AI_USER_ID")
         if not user_id:
             user_id = str(uuid.uuid4())
         return user_id
