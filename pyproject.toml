@@ -1,5 +1,5 @@
 [project]
-name = "openbrowser"
+name = "openbrowser-ai"
 version = "0.1.82"
 description = "Agentic browser automation using LangGraph and raw CDP"
 readme = "README.md"
