@@ -13,3 +13,4 @@ test_*
 *.yml
 !.github/workflows/*.yml
 .DS_Store
+.vscode
