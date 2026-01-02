@@ -486,6 +486,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Contact
 
+- **Email**: billy.suharno@gmail.com
 - **GitHub**: [@billy-enrizky](https://github.com/billy-enrizky)
 - **Repository**: [github.com/billy-enrizky/openbrowser-ai](https://github.com/billy-enrizky/openbrowser-ai)
 
