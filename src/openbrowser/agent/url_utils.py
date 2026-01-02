@@ -158,7 +158,17 @@ class URLShortener:
     """Stateful URL shortener that tracks replacements.
     
     Useful for agent sessions where URLs need to be tracked across
-    multiple messages.
+    multiple messages. Maintains a mapping of shortened to original URLs
+    for later restoration.
+    
+    Attributes:
+        limit: Maximum URL length before shortening.
+        replacements: Dictionary mapping shortened URLs to originals.
+        
+    Example:
+        >>> shortener = URLShortener(limit=50)
+        >>> text = shortener.shorten_in_text("Visit https://example.com/very/long/path")
+        >>> original = shortener.restore_in_text(text)
     """
     
     def __init__(self, limit: int = DEFAULT_URL_LIMIT):
@@ -168,39 +178,51 @@ class URLShortener:
     def shorten_in_text(self, text: str) -> str:
         """Shorten URLs in text and track replacements.
         
+        Processes text to shorten any URLs exceeding the limit,
+        storing mappings for later restoration.
+        
         Args:
-            text: Text to process
+            text: Text to process for URL shortening.
             
         Returns:
-            Text with shortened URLs
+            Text with long URLs replaced by shortened versions.
         """
         modified, new_replacements = replace_urls_in_text(text, self.limit)
         self.replacements.update(new_replacements)
         return modified
     
     def restore_in_text(self, text: str) -> str:
-        """Restore shortened URLs in text.
+        """Restore shortened URLs in text to their original form.
+        
+        Uses the tracked replacements to restore any shortened URLs
+        back to their original full versions.
         
         Args:
-            text: Text with shortened URLs
+            text: Text containing shortened URLs.
             
         Returns:
-            Text with original URLs
+            Text with original URLs restored.
         """
         return restore_shortened_urls(text, self.replacements)
     
     def clear(self) -> None:
-        """Clear all tracked replacements."""
+        """Clear all tracked URL replacements.
+        
+        Resets the internal replacements dictionary, useful when
+        starting a new session or conversation.
+        """
         self.replacements.clear()
     
     def get_original_url(self, shortened: str) -> str | None:
         """Get the original URL for a shortened version.
         
+        Looks up the original URL from the tracked replacements.
+        
         Args:
-            shortened: Shortened URL
+            shortened: The shortened URL to look up.
             
         Returns:
-            Original URL or None if not found
+            Original full URL, or None if not found in replacements.
         """
         return self.replacements.get(shortened)
 

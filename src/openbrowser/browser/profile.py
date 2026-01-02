@@ -1,4 +1,15 @@
-"""Browser profile configuration following browser-use pattern."""
+"""Browser profile configuration following browser-use pattern.
+
+This module provides configuration classes for browser launch parameters,
+proxy settings, viewport dimensions, and other browser-related settings.
+It follows the browser-use pattern for structured configuration management.
+
+Classes:
+    ProxySettings: HTTP/SOCKS proxy configuration for browser traffic.
+    ViewportSize: Browser viewport/window size configuration.
+    BrowserProfile: Complete browser configuration including launch args,
+        security settings, video recording, and DOM processing options.
+"""
 
 import tempfile
 from pathlib import Path
@@ -8,7 +19,25 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class ProxySettings(BaseModel):
-    """Typed proxy settings for Chromium traffic."""
+    """Typed proxy settings for Chromium browser traffic routing.
+
+    Configures HTTP or SOCKS proxy for all browser network requests.
+    Supports authentication and bypass rules for specific hosts.
+
+    Attributes:
+        server: Proxy URL (e.g., 'http://host:8080' or 'socks5://host:1080').
+        bypass: Comma-separated hosts to bypass (e.g., 'localhost,127.0.0.1').
+        username: Proxy authentication username.
+        password: Proxy authentication password.
+
+    Example:
+        >>> proxy = ProxySettings(
+        ...     server="http://proxy.example.com:8080",
+        ...     bypass="localhost,*.internal",
+        ...     username="user",
+        ...     password="pass"
+        ... )
+    """
 
     server: str | None = Field(default=None, description='Proxy URL, e.g. http://host:8080 or socks5://host:1080')
     bypass: str | None = Field(default=None, description='Comma-separated hosts to bypass, e.g. localhost,127.0.0.1,*.internal')
@@ -17,23 +46,87 @@ class ProxySettings(BaseModel):
 
 
 class ViewportSize(BaseModel):
-    """Viewport size configuration."""
+    """Viewport size configuration for browser windows and videos.
+
+    Represents width and height dimensions in pixels. Supports both
+    attribute access and dict-like access for compatibility with
+    various APIs.
+
+    Attributes:
+        width: Width in pixels (must be >= 0).
+        height: Height in pixels (must be >= 0).
+
+    Example:
+        >>> size = ViewportSize(width=1920, height=1080)
+        >>> size['width']  # Dict-like access
+        1920
+        >>> size.height  # Attribute access
+        1080
+    """
 
     width: int = Field(ge=0)
     height: int = Field(ge=0)
 
     def __getitem__(self, key: str) -> int:
+        """Get dimension by key for dict-like access.
+
+        Args:
+            key: Either 'width' or 'height'.
+
+        Returns:
+            The dimension value as an integer.
+        """
         return dict(self)[key]
 
     def __setitem__(self, key: str, value: int) -> None:
+        """Set dimension by key for dict-like access.
+
+        Args:
+            key: Either 'width' or 'height'.
+            value: The new dimension value.
+        """
         setattr(self, key, value)
 
 
 class BrowserProfile(BaseModel):
     """Browser profile configuration following browser-use pattern.
-    
-    This class manages browser settings including user data directory,
-    proxy settings, window size, and other browser launch parameters.
+
+    Comprehensive configuration class that manages all browser settings including:
+    - User data directory for persistent profiles
+    - Proxy settings for network traffic routing
+    - Window and viewport size configuration
+    - Browser launch arguments and executable path
+    - Downloads and video recording configuration
+    - Security settings (allowed/prohibited domains)
+    - DOM processing and element highlighting options
+
+    The profile generates Chrome CLI arguments via get_args() for browser launch.
+
+    Attributes:
+        user_data_dir: Path to Chrome user data directory for profile persistence.
+        proxy: ProxySettings instance for network proxy configuration.
+        window_size: Browser window dimensions when not headless.
+        viewport: Viewport size for headless mode.
+        headless: Whether to run browser without visible UI.
+        executable_path: Custom path to browser executable.
+        args: Additional CLI arguments to pass to browser.
+        downloads_path: Directory for downloaded files.
+        record_video_dir: Directory for session video recordings.
+        storage_state: Path or dict for cookie/localStorage persistence.
+        disable_security: Disable browser security features (for testing).
+        allowed_domains: Whitelist of allowed navigation domains.
+        prohibited_domains: Blacklist of blocked navigation domains.
+        cross_origin_iframes: Enable cross-origin iframe processing.
+        highlight_elements: Highlight interactive elements on page.
+
+    Example:
+        >>> profile = BrowserProfile(
+        ...     headless=False,
+        ...     window_size=ViewportSize(width=1920, height=1080),
+        ...     downloads_path="/tmp/downloads",
+        ...     allowed_domains=["*.example.com"],
+        ... )
+        >>> args = profile.get_args()
     """
 
     model_config = ConfigDict(
@@ -159,7 +252,20 @@ class BrowserProfile(BaseModel):
     )
 
     def __init__(self, **kwargs):
-        """Initialize BrowserProfile with defaults."""
+        """Initialize BrowserProfile with defaults.
+
+        Creates a temporary user data directory if not provided.
+        Resolves and expands any path strings to absolute Path objects.
+
+        Args:
+            **kwargs: Profile configuration parameters. See class attributes
+                for available options.
+
+        Example:
+            >>> profile = BrowserProfile(headless=True)
+            >>> profile.user_data_dir  # Auto-generated temp directory
+            PosixPath('/tmp/openbrowser-user-data-dir-xyz123')
+        """
         # Set default user_data_dir if not provided
         if 'user_data_dir' not in kwargs or kwargs.get('user_data_dir') is None:
             kwargs['user_data_dir'] = tempfile.mkdtemp(prefix='openbrowser-user-data-dir-')
@@ -171,10 +277,19 @@ class BrowserProfile(BaseModel):
             self.user_data_dir = Path(self.user_data_dir).expanduser().resolve()
 
     def get_args(self) -> list[str]:
-        """Get the list of all Chrome CLI launch args for this profile.
-        
+        """Get the list of all Chrome CLI launch arguments for this profile.
+
+        Constructs command-line arguments based on profile configuration including
+        user data directory, headless mode, window size, proxy, and security settings.
+
         Returns:
-            List of Chrome CLI arguments
+            List of Chrome CLI argument strings ready to pass to subprocess.
+
+        Example:
+            >>> profile = BrowserProfile(headless=True, window_size=ViewportSize(width=1920, height=1080))
+            >>> args = profile.get_args()
+            >>> '--headless=new' in args
+            True
         """
         args = []
 

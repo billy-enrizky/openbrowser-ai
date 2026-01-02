@@ -1,4 +1,23 @@
-"""Event-driven browser session following browser-use pattern."""
+"""Event-driven browser session following browser-use pattern.
+
+This module provides the core browser session management using Chrome DevTools
+Protocol (CDP) for direct communication with Chromium-based browsers. It implements
+an event-driven architecture with watchdogs for handling various browser behaviors.
+
+Key Components:
+    CDPSession: Manages a single CDP session bound to a specific browser target.
+    BrowserSession: Main orchestrator for browser lifecycle, navigation, and state.
+
+The module uses bubus EventBus for event-driven communication between components
+and cdp-use for type-safe CDP interactions.
+
+Example:
+    >>> session = BrowserSession(headless=True, debug_port=9222)
+    >>> await session.start()
+    >>> await session.navigate_to("https://example.com")
+    >>> tabs = await session.get_tabs()
+    >>> await session.stop()
+"""
 
 import asyncio
 import logging
@@ -13,7 +32,24 @@ logger = logging.getLogger(__name__)
 
 
 class CDPSession(BaseModel):
-    """Info about a single CDP session bound to a specific target."""
+    """Info about a single CDP session bound to a specific browser target.
+
+    Manages the connection to a specific browser target (page, iframe, worker)
+    via the Chrome DevTools Protocol. Handles session attachment, domain
+    enabling, and provides target info access.
+
+    Attributes:
+        cdp_client: Shared CDPClient for WebSocket communication.
+        target_id: The CDP target ID this session is attached to.
+        session_id: The CDP session ID for this attachment.
+        title: Current page/target title.
+        url: Current URL of the target.
+
+    Example:
+        >>> session = await CDPSession.for_target(cdp_client, target_id)
+        >>> info = await session.get_target_info()
+        >>> print(session.title, session.url)
+    """
 
     model_config = ConfigDict(arbitrary_types_allowed=True, revalidate_instances='never')
 
@@ -32,10 +68,27 @@ class CDPSession(BaseModel):
     ):
         """Create a CDP session for a target using the shared WebSocket.
 
+        Factory method that creates and attaches a CDP session to a browser target.
+        Enables specified CDP domains for the session.
+
         Args:
-            cdp_client: The shared CDP client (root WebSocket connection)
-            target_id: Target ID to attach to
-            domains: List of CDP domains to enable. If None, enables default domains.
+            cdp_client: The shared CDP client (root WebSocket connection).
+            target_id: Target ID to attach to (page, iframe, worker).
+            domains: List of CDP domains to enable (e.g., ['Page', 'DOM']).
+                If None, enables default domains: Page, DOM, DOMSnapshot,
+                Accessibility, Runtime, Inspector.
+
+        Returns:
+            Attached CDPSession instance ready for use.
+
+        Raises:
+            RuntimeError: If domain enabling fails.
+
+        Example:
+            >>> session = await CDPSession.for_target(
+            ...     cdp_client, target_id,
+            ...     domains=['Page', 'DOM', 'Network']
+            ... )
         """
         cdp_session = cls(
             cdp_client=cdp_client,
@@ -45,7 +98,21 @@ class CDPSession(BaseModel):
         return await cdp_session.attach(domains=domains)
 
     async def attach(self, domains: list[str] | None = None):
-        """Attach to target and enable domains."""
+        """Attach to target and enable CDP domains.
+
+        Establishes a CDP session with the target and enables the specified
+        domains for interacting with the target.
+
+        Args:
+            domains: List of CDP domain names to enable (e.g., ['Page', 'DOM']).
+                If None, uses default domains.
+
+        Returns:
+            Self for method chaining.
+
+        Raises:
+            RuntimeError: If any domain fails to enable.
+        """
         result = await self.cdp_client.send.Target.attachToTarget(
             params={
                 'targetId': self.target_id,
@@ -86,13 +153,51 @@ class CDPSession(BaseModel):
         return self
 
     async def get_target_info(self) -> dict:
-        """Get target info."""
+        """Get target info from CDP.
+
+        Retrieves current information about the attached target including
+        URL, title, type, and other metadata.
+
+        Returns:
+            Dictionary containing target info from CDP Target.getTargetInfo.
+            Keys include 'targetId', 'type', 'title', 'url', etc.
+        """
         result = await self.cdp_client.send.Target.getTargetInfo(params={'targetId': self.target_id})
         return result['targetInfo']
 
 
 class BrowserSession(BaseModel):
-    """Event-driven browser session following browser-use pattern."""
+    """Event-driven browser session following browser-use pattern.
+
+    Main orchestrator for browser lifecycle management using CDP. Handles:
+    - Browser process launch and termination
+    - CDP connection establishment and session management
+    - Tab/target creation, navigation, and switching
+    - Watchdog attachment for downloads, popups, security, etc.
+    - DOM state caching and element selection
+
+    Uses bubus EventBus for event-driven architecture, allowing watchdogs
+    and other components to react to browser events.
+
+    Attributes:
+        event_bus: EventBus for dispatching and handling browser events.
+        agent_focus: Currently focused CDPSession for agent interactions.
+        debug_port: Chrome remote debugging port.
+        headless: Whether browser runs without visible UI.
+        user_data_dir: Path to Chrome user data directory.
+        browser_profile: Full BrowserProfile configuration.
+        downloaded_files: List of files downloaded during session.
+
+    Example:
+        >>> session = BrowserSession(
+        ...     browser_profile=BrowserProfile(headless=True),
+        ...     debug_port=9222
+        ... )
+        >>> await session.start()
+        >>> await session.navigate_to("https://example.com")
+        >>> url = await session.get_current_page_url()
+        >>> await session.stop()
+    """
 
     model_config = ConfigDict(
         arbitrary_types_allowed=True,
@@ -141,13 +246,26 @@ class BrowserSession(BaseModel):
         browser_profile: Optional[Any] = None,
         **kwargs
     ):
-        """Initialize BrowserSession with optional browser launch parameters.
-        
+        """Initialize BrowserSession with browser launch parameters.
+
+        Creates a new browser session with the specified configuration.
+        Either provide a full BrowserProfile or individual parameters.
+
         Args:
-            debug_port: Port for Chrome remote debugging
-            headless: Whether to run Chrome in headless mode
-            user_data_dir: Optional user data directory for Chrome profile
-            browser_profile: Optional BrowserProfile instance for advanced configuration
+            debug_port: Port for Chrome remote debugging protocol.
+            headless: Whether to run Chrome in headless mode (no UI).
+            user_data_dir: Path to Chrome user data directory for profile
+                persistence. If None, uses a temporary directory.
+            browser_profile: Optional BrowserProfile instance for advanced
+                configuration. If provided, overrides other parameters.
+            **kwargs: Additional Pydantic model arguments.
+
+        Example:
+            >>> # Simple initialization
+            >>> session = BrowserSession(headless=True)
+            >>> # With full profile
+            >>> profile = BrowserProfile(headless=False, downloads_path='/tmp')
+            >>> session = BrowserSession(browser_profile=profile)
         """
         super().__init__(**kwargs)
         import tempfile
@@ -172,54 +290,98 @@ class BrowserSession(BaseModel):
     
     @property
     def debug_port(self) -> int:
-        """Get debug port."""
+        """Get the Chrome remote debugging port.
+
+        Returns:
+            The port number used for CDP connections.
+        """
         return self._debug_port
     
     @property
     def headless(self) -> bool:
-        """Get headless mode."""
+        """Get whether browser runs in headless mode.
+
+        Returns:
+            True if browser runs without visible UI, False otherwise.
+        """
         return self._headless
     
     @property
     def user_data_dir(self) -> Optional[str]:
-        """Get user data directory."""
+        """Get the Chrome user data directory path.
+
+        Returns:
+            Path to user data directory, or None if using default.
+        """
         return self._user_data_dir
     
     @property
     def browser_profile(self) -> Any:
-        """Get browser profile."""
+        """Get the BrowserProfile configuration.
+
+        Returns:
+            BrowserProfile instance with all browser settings.
+        """
         return self._browser_profile
     
     @property
     def downloaded_files(self) -> list[str]:
-        """Get list of downloaded files."""
+        """Get list of files downloaded during this session.
+
+        Returns:
+            Copy of list containing paths to downloaded files.
+        """
         return self._downloaded_files.copy()
 
     @property
     def logger(self) -> logging.Logger:
-        """Get instance-specific logger."""
+        """Get instance-specific logger for this session.
+
+        Returns:
+            Logger instance for this browser session.
+        """
         if self._logger is None:
             self._logger = logging.getLogger(f'openbrowser.browser_session')
         return self._logger
 
     @property
     def cdp_url(self) -> str | None:
-        """Get CDP URL."""
+        """Get the CDP WebSocket URL.
+
+        Returns:
+            WebSocket URL for CDP connection, or None if not connected.
+        """
         return self._cdp_url
 
     @cdp_url.setter
     def cdp_url(self, value: str | None) -> None:
-        """Set CDP URL."""
+        """Set the CDP WebSocket URL.
+
+        Args:
+            value: WebSocket URL for CDP connection.
+        """
         self._cdp_url = value
 
     @property
     def cdp_client(self) -> CDPClient:
-        """Get the cached root CDP client."""
+        """Get the cached root CDP client.
+
+        Returns:
+            The CDPClient instance for sending CDP commands.
+
+        Raises:
+            AssertionError: If CDP client is not initialized (browser not connected).
+        """
         assert self._cdp_client_root is not None, 'CDP client not initialized - browser may not be connected yet'
         return self._cdp_client_root
 
     async def reset(self) -> None:
-        """Clear all cached CDP sessions with proper cleanup."""
+        """Clear all cached CDP sessions with proper cleanup.
+
+        Resets the session state by clearing the session pool,
+        disconnecting from CDP, and clearing agent focus.
+        Call this when reconnecting or before starting a new session.
+        """
         # Clear session pool
         self._cdp_session_pool.clear()
         self._cdp_client_root = None
@@ -227,7 +389,14 @@ class BrowserSession(BaseModel):
         self._cdp_url = None
 
     def model_post_init(self, __context) -> None:
-        """Register event handlers after model initialization."""
+        """Register event handlers after model initialization.
+
+        Sets up event bus subscriptions for core browser events including
+        start, stop, navigation, tab switching, and downloads.
+
+        Args:
+            __context: Pydantic model context (unused).
+        """
         from src.openbrowser.browser.events import (
             BrowserStartEvent,
             BrowserStopEvent,
@@ -246,7 +415,19 @@ class BrowserSession(BaseModel):
         self.event_bus.on(FileDownloadedEvent, self.on_FileDownloadedEvent)
 
     async def start(self) -> None:
-        """Start the browser session."""
+        """Start the browser session.
+
+        Launches the browser process (if local), establishes CDP connection,
+        attaches all watchdogs, and sets up initial page focus.
+
+        Raises:
+            RuntimeError: If browser launch or CDP connection fails.
+
+        Example:
+            >>> session = BrowserSession(headless=True)
+            >>> await session.start()
+            >>> # Browser is now ready for navigation
+        """
         from src.openbrowser.browser.events import BrowserStartEvent
 
         start_event = self.event_bus.dispatch(BrowserStartEvent())
@@ -255,9 +436,17 @@ class BrowserSession(BaseModel):
 
     async def stop(self, force: bool = False) -> None:
         """Stop the browser session.
-        
+
+        Cleanly shuts down the browser session, stops watchdogs, and
+        optionally terminates the browser process.
+
         Args:
-            force: If True, kill the browser process. If False, keep browser alive.
+            force: If True, kill the browser process immediately.
+                If False, keep browser alive (for reattachment).
+
+        Example:
+            >>> await session.stop()  # Keep browser alive
+            >>> await session.stop(force=True)  # Kill browser
         """
         from src.openbrowser.browser.events import BrowserStopEvent
 
@@ -269,8 +458,17 @@ class BrowserSession(BaseModel):
     async def on_BrowserStartEvent(self, event) -> dict[str, str]:
         """Handle browser start request.
 
+        Initializes watchdogs, launches browser if needed, establishes
+        CDP connection, and sets up initial session state.
+
+        Args:
+            event: BrowserStartEvent with optional launch options.
+
         Returns:
-            Dict with 'cdp_url' key containing the CDP URL
+            Dict with 'cdp_url' key containing the CDP WebSocket URL.
+
+        Raises:
+            Exception: If browser launch or CDP connection fails.
         """
         # Initialize and attach all watchdogs FIRST so LocalBrowserWatchdog can handle BrowserLaunchEvent
         await self.attach_all_watchdogs()
@@ -320,7 +518,14 @@ class BrowserSession(BaseModel):
             raise
 
     async def on_BrowserStopEvent(self, event) -> None:
-        """Handle browser stop request."""
+        """Handle browser stop request.
+
+        Clears CDP session cache, resets state, and dispatches
+        BrowserStoppedEvent to notify watchdogs.
+
+        Args:
+            event: BrowserStopEvent with force flag.
+        """
         try:
             # Clear CDP session cache before stopping
             await self.reset()
@@ -346,7 +551,18 @@ class BrowserSession(BaseModel):
             )
 
     async def on_NavigateToUrlEvent(self, event) -> None:
-        """Handle navigation requests - core browser functionality."""
+        """Handle navigation requests - core browser functionality.
+
+        Navigates to the specified URL, optionally in a new tab.
+        Reuses existing about:blank tabs when opening new tabs.
+        Dispatches NavigationStartedEvent and NavigationCompleteEvent.
+
+        Args:
+            event: NavigateToUrlEvent with url, new_tab, and wait_until options.
+
+        Raises:
+            Exception: If navigation fails.
+        """
         self.logger.debug(f'[on_NavigateToUrlEvent] Received NavigateToUrlEvent: url={event.url}, new_tab={event.new_tab}')
         if not self.agent_focus:
             self.logger.warning('Cannot navigate - browser not connected')
@@ -452,7 +668,18 @@ class BrowserSession(BaseModel):
             raise
 
     async def connect(self, cdp_url: str | None = None) -> None:
-        """Connect to a remote chromium-based browser via CDP using cdp-use."""
+        """Connect to a remote chromium-based browser via CDP using cdp-use.
+
+        Establishes WebSocket connection to browser, enables auto-attach for
+        new targets, attaches to existing targets, and sets initial agent focus.
+
+        Args:
+            cdp_url: WebSocket URL for CDP connection. If HTTP URL provided,
+                fetches WebSocket URL from /json/version endpoint.
+
+        Raises:
+            RuntimeError: If CDP URL is not provided or connection fails.
+        """
         self._cdp_url = cdp_url or self._cdp_url
         if not self._cdp_url:
             raise RuntimeError('Cannot setup CDP connection without CDP URL')
@@ -637,12 +864,24 @@ class BrowserSession(BaseModel):
     async def get_or_create_cdp_session(self, target_id: TargetID | None = None, focus: bool = True) -> CDPSession:
         """Get CDP session for a target from the pool or create it.
 
+        Retrieves an existing session from the pool or creates a new one
+        for the specified target. Optionally switches agent focus to the target.
+
         Args:
-            target_id: Target ID to get session for. If None, uses current agent focus.
-            focus: If True, switches agent focus to this target.
+            target_id: Target ID to get session for. If None, uses current
+                agent focus target.
+            focus: If True, switches agent_focus to this target.
 
         Returns:
             CDPSession for the specified target.
+
+        Raises:
+            ValueError: If target_id is None and agent_focus is not set.
+            AssertionError: If root CDP client is not initialized.
+
+        Example:
+            >>> session = await browser.get_or_create_cdp_session(target_id)
+            >>> await session.cdp_client.send.DOM.enable(session_id=session.session_id)
         """
         assert self._cdp_client_root is not None, 'Root CDP client not initialized'
 
@@ -680,7 +919,21 @@ class BrowserSession(BaseModel):
         return session
 
     async def on_SwitchTabEvent(self, event) -> TargetID:
-        """Handle tab switching requests."""
+        """Handle tab switching requests.
+
+        Switches agent focus to the specified target and activates it
+        visually in the browser.
+
+        Args:
+            event: SwitchTabEvent with optional target_id. If None,
+                switches to the most recently opened tab.
+
+        Returns:
+            The target_id of the newly focused tab.
+
+        Raises:
+            RuntimeError: If browser not connected or no tabs available.
+        """
         if not self._cdp_client_root:
             raise RuntimeError('Browser not connected')
 
@@ -710,7 +963,17 @@ class BrowserSession(BaseModel):
         return target_id
 
     async def on_CloseTabEvent(self, event) -> None:
-        """Handle tab close requests."""
+        """Handle tab close requests.
+
+        Closes the specified tab and switches focus to another tab
+        if the closed tab was the current focus.
+
+        Args:
+            event: CloseTabEvent with target_id of tab to close.
+
+        Raises:
+            RuntimeError: If browser not connected.
+        """
         if not self._cdp_client_root:
             raise RuntimeError('Browser not connected')
 
@@ -732,7 +995,14 @@ class BrowserSession(BaseModel):
                 await self.get_or_create_cdp_session(target_id=new_target_id, focus=True)
 
     async def on_FileDownloadedEvent(self, event) -> None:
-        """Track downloaded files during this session."""
+        """Track downloaded files during this session.
+
+        Adds the downloaded file path to the session's download list
+        for later reference.
+
+        Args:
+            event: FileDownloadedEvent with file_name and path.
+        """
         self.logger.debug(f'FileDownloadedEvent received: {event.file_name} at {event.path}')
         if event.path and event.path not in self._downloaded_files:
             self._downloaded_files.append(event.path)
@@ -749,16 +1019,25 @@ class BrowserSession(BaseModel):
         include_workers: bool = False,
     ) -> list[dict]:
         """Get all browser pages/tabs using CDP Target.getTargets.
-        
+
+        Retrieves target info for all matching browser targets based on
+        filter criteria.
+
         Args:
-            include_http: Include HTTP/HTTPS pages
-            include_about: Include about: pages
-            include_pages: Include page targets
-            include_iframes: Include iframe targets
-            include_workers: Include worker targets
-            
+            include_http: Include HTTP/HTTPS pages in results.
+            include_about: Include about: pages (e.g., about:blank).
+            include_pages: Include page/tab type targets.
+            include_iframes: Include iframe type targets.
+            include_workers: Include worker type targets.
+
         Returns:
-            List of target info dictionaries
+            List of target info dictionaries with keys like 'targetId',
+            'url', 'title', 'type', etc.
+
+        Example:
+            >>> pages = await session._cdp_get_all_pages(include_iframes=True)
+            >>> for page in pages:
+            ...     print(page['url'])
         """
         if not self._cdp_client_root:
             return []
@@ -792,14 +1071,22 @@ class BrowserSession(BaseModel):
         self, url: str = 'about:blank', background: bool = False, new_window: bool = False
     ) -> TargetID:
         """Create a new page/tab using CDP Target.createTarget.
-        
+
+        Creates a new browser tab or window and optionally navigates to a URL.
+
         Args:
-            url: URL to navigate to
-            background: Whether to open in background
-            new_window: Whether to open in new window
-            
+            url: Initial URL for the new page (default: 'about:blank').
+            background: If True, open tab in background without focusing.
+            new_window: If True, open in new browser window instead of tab.
+
         Returns:
-            Target ID of the new page
+            Target ID of the newly created page.
+
+        Raises:
+            RuntimeError: If browser not connected.
+
+        Example:
+            >>> target_id = await session._cdp_create_new_page('https://example.com')
         """
         if not self._cdp_client_root:
             raise RuntimeError('Browser not connected')
@@ -811,9 +1098,15 @@ class BrowserSession(BaseModel):
 
     async def _cdp_close_page(self, target_id: TargetID) -> None:
         """Close a page/tab using CDP Target.closeTarget.
-        
+
+        Closes the specified browser target. Does not switch focus if
+        the closed target was focused - caller must handle that.
+
         Args:
-            target_id: Target ID to close
+            target_id: Target ID of the page to close.
+
+        Raises:
+            RuntimeError: If browser not connected.
         """
         if not self._cdp_client_root:
             raise RuntimeError('Browser not connected')
@@ -822,9 +1115,15 @@ class BrowserSession(BaseModel):
 
     async def _cdp_get_storage_state(self) -> dict:
         """Get browser storage state (cookies, localStorage, etc.) using CDP.
-        
+
+        Retrieves current browser storage state for persistence or analysis.
+
         Returns:
-            Dictionary with cookies and origins
+            Dictionary with 'cookies' list and 'origins' list.
+            Each cookie contains name, value, domain, path, etc.
+
+        Raises:
+            RuntimeError: If no active session.
         """
         if not self.agent_focus:
             raise RuntimeError('No active session')
@@ -855,21 +1154,24 @@ class BrowserSession(BaseModel):
         include_pages: bool = True,
         include_workers: bool = False,
     ) -> bool:
-        """Check if a target should be processed.
-        
+        """Check if a target should be processed based on filter criteria.
+
+        Static method that evaluates whether a CDP target matches the
+        specified inclusion filters.
+
         Args:
-            target_info: Target info dict from CDP
-            include_http: Include HTTP/HTTPS pages
-            include_chrome: Include chrome:// pages
-            include_chrome_extensions: Include chrome-extension:// pages
-            include_chrome_error: Include chrome-error:// pages
-            include_about: Include about: pages
-            include_iframes: Include iframe targets
-            include_pages: Include page/tab targets
-            include_workers: Include worker targets
-            
+            target_info: Target info dict from CDP Target.getTargets.
+            include_http: Include HTTP/HTTPS URLs.
+            include_chrome: Include chrome:// URLs.
+            include_chrome_extensions: Include chrome-extension:// URLs.
+            include_chrome_error: Include chrome-error:// URLs.
+            include_about: Include about: URLs (only about:blank).
+            include_iframes: Include iframe/webview type targets.
+            include_pages: Include page/tab type targets.
+            include_workers: Include worker type targets.
+
         Returns:
-            True if target should be processed, False if it should be skipped
+            True if target matches filters and should be processed.
         """
         target_type = target_info.get('type', '')
         url = target_info.get('url', '')
@@ -909,10 +1211,16 @@ class BrowserSession(BaseModel):
         return url_allowed and type_allowed
 
     async def _cdp_get_cookies(self) -> list[dict]:
-        """Get all cookies using CDP.
-        
+        """Get all cookies from the browser using CDP.
+
+        Retrieves all cookies accessible to the current page.
+
         Returns:
-            List of cookie dictionaries
+            List of cookie dictionaries with keys: name, value, domain,
+            path, secure, httpOnly, sameSite, expires, etc.
+
+        Raises:
+            RuntimeError: If no active session.
         """
         if not self.agent_focus:
             raise RuntimeError('No active session')
@@ -923,10 +1231,17 @@ class BrowserSession(BaseModel):
         return cookies_result.get('cookies', [])
 
     async def _cdp_set_cookies(self, cookies: list[dict]) -> None:
-        """Set cookies using CDP.
-        
+        """Set cookies in the browser using CDP.
+
+        Sets cookies one by one. Silently logs failures for individual
+        cookies without raising exceptions.
+
         Args:
-            cookies: List of cookie dictionaries to set
+            cookies: List of cookie dictionaries to set. Each should have
+                'name', 'value', 'domain' at minimum.
+
+        Raises:
+            RuntimeError: If no active session.
         """
         if not self.agent_focus:
             raise RuntimeError('No active session')
@@ -952,8 +1267,22 @@ class BrowserSession(BaseModel):
 
     async def attach_all_watchdogs(self) -> None:
         """Attach all watchdogs to the browser session.
-        
-        This method initializes and attaches all watchdogs following browser-use pattern.
+
+        Initializes and attaches all watchdog components following the
+        browser-use pattern. Watchdogs handle various browser behaviors:
+
+        - LocalBrowserWatchdog: Browser process lifecycle
+        - DownloadsWatchdog: File download monitoring
+        - PopupsWatchdog: JavaScript dialog handling
+        - SecurityWatchdog: URL access policy enforcement
+        - StorageStateWatchdog: Cookie/localStorage persistence
+        - PermissionsWatchdog: Browser permission grants
+        - RecordingWatchdog: Video recording (if enabled)
+        - ScreenshotWatchdog: Screenshot capture
+        - DOMWatchdog: DOM tree management
+
+        Called automatically during session start. Prevents duplicate
+        attachment if called multiple times.
         """
         # Prevent duplicate watchdog attachment
         if self._watchdogs_attached:
@@ -1052,9 +1381,12 @@ class BrowserSession(BaseModel):
 
     async def get_current_target_info(self) -> dict | None:
         """Get info about the current active target using CDP.
-        
+
+        Retrieves full target information for the currently focused target.
+
         Returns:
-            Target info dict or None if no agent focus
+            Target info dict with 'targetId', 'type', 'title', 'url', etc.
+            Returns None if no agent focus is set.
         """
         if not self.agent_focus or not self.agent_focus.target_id:
             return None
@@ -1067,9 +1399,13 @@ class BrowserSession(BaseModel):
 
     async def get_current_page_url(self) -> str:
         """Get the URL of the current page using CDP.
-        
+
         Returns:
-            Current page URL or 'about:blank' if not available
+            Current page URL string. Returns 'about:blank' if not available.
+
+        Example:
+            >>> url = await session.get_current_page_url()
+            >>> print(url)  # 'https://example.com'
         """
         target = await self.get_current_target_info()
         if target:
@@ -1078,9 +1414,10 @@ class BrowserSession(BaseModel):
 
     async def get_current_page_title(self) -> str:
         """Get the title of the current page using CDP.
-        
+
         Returns:
-            Current page title or 'Unknown page title' if not available
+            Current page title string. Returns 'Unknown page title'
+            if not available.
         """
         target_info = await self.get_current_target_info()
         if target_info:
@@ -1089,10 +1426,20 @@ class BrowserSession(BaseModel):
 
     async def navigate_to(self, url: str, new_tab: bool = False) -> None:
         """Navigate to a URL using the standard event system.
-        
+
+        High-level navigation method that dispatches NavigateToUrlEvent
+        and waits for completion.
+
         Args:
-            url: URL to navigate to
-            new_tab: Whether to open in a new tab
+            url: URL to navigate to.
+            new_tab: Whether to open in a new tab.
+
+        Raises:
+            Exception: If navigation fails or is blocked by security policy.
+
+        Example:
+            >>> await session.navigate_to('https://example.com')
+            >>> await session.navigate_to('https://other.com', new_tab=True)
         """
         from src.openbrowser.browser.events import NavigateToUrlEvent
 
@@ -1101,10 +1448,18 @@ class BrowserSession(BaseModel):
         await event.event_result(raise_if_any=True, raise_if_none=False)
 
     async def get_tabs(self) -> list[Any]:
-        """Get information about all open tabs using CDP Target.getTargetInfo for speed.
-        
+        """Get information about all open tabs using CDP Target.getTargetInfo.
+
+        Retrieves TabInfo for each open browser tab with URL and title.
+
         Returns:
-            List of TabInfo objects
+            List of TabInfo objects with target_id, url, title, and
+            parent_target_id (for popups/iframes).
+
+        Example:
+            >>> tabs = await session.get_tabs()
+            >>> for tab in tabs:
+            ...     print(f"{tab.title}: {tab.url}")
         """
         from src.openbrowser.browser.views import TabInfo
 
@@ -1169,11 +1524,21 @@ class BrowserSession(BaseModel):
 
     async def get_all_frames(self) -> tuple[dict[str, dict], dict[str, str]]:
         """Get a complete frame hierarchy from all browser targets.
-        
+
+        Collects frame information including cross-origin iframes (OOPIFs)
+        if enabled in the browser profile.
+
         Returns:
             Tuple of (all_frames, target_sessions) where:
-            - all_frames: dict mapping frame_id -> frame info dict with all metadata
-            - target_sessions: dict mapping target_id -> session_id for active sessions
+            - all_frames: Dict mapping frame_id to frame info dict with
+              'url', 'parentFrameId', 'childFrameIds', 'isCrossOrigin', etc.
+            - target_sessions: Dict mapping target_id to session_id for
+              targets with active sessions.
+
+        Example:
+            >>> frames, sessions = await session.get_all_frames()
+            >>> for frame_id, info in frames.items():
+            ...     print(f"{frame_id}: {info['url']}")
         """
         all_frames = {}  # frame_id -> FrameInfo dict
         target_sessions = {}  # target_id -> session_id (keep sessions alive during collection)
@@ -1285,22 +1650,32 @@ class BrowserSession(BaseModel):
 
     def update_cached_selector_map(self, selector_map: dict[int, Any]) -> None:
         """Update the cached selector map with new DOM state.
-        
-        This should be called by the DOM watchdog after rebuilding the DOM.
-        
+
+        Called by the DOM watchdog after rebuilding the DOM tree to
+        cache element indices for quick lookup during interactions.
+
         Args:
-            selector_map: The new selector map from DOM serialization
+            selector_map: Dict mapping element index to EnhancedDOMTreeNode
+                or backend_node_id for element resolution.
         """
         self._cached_selector_map = selector_map
 
     @property
     def current_target_id(self) -> str | None:
-        """Get current target ID from agent focus."""
+        """Get current target ID from agent focus.
+
+        Returns:
+            Target ID of the currently focused target, or None if not set.
+        """
         return self.agent_focus.target_id if self.agent_focus else None
 
     @property
     def current_session_id(self) -> str | None:
-        """Get current session ID from agent focus."""
+        """Get current session ID from agent focus.
+
+        Returns:
+            CDP session ID for the currently focused target, or None if not set.
+        """
         return self.agent_focus.session_id if self.agent_focus else None
 
     # endregion - ========== Helper Methods ==========

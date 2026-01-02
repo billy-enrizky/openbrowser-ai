@@ -1,4 +1,31 @@
-"""Code-use agent service - Jupyter notebook-like code execution for browser automation."""
+"""Code-use agent service - Jupyter notebook-like code execution for browser automation.
+
+This module provides the CodeAgent class, which orchestrates an LLM to write
+and execute Python code for browser automation. The agent operates in a
+Jupyter notebook-like environment where code is executed in a persistent
+namespace with browser control functions available.
+
+Key Features:
+    - LLM-driven Python code generation and execution
+    - Persistent namespace across execution steps
+    - Browser state awareness with screenshots and DOM
+    - Automatic URL extraction and navigation
+    - Error recovery and retry logic
+    - Session export to Jupyter notebooks
+
+Example:
+    ```python
+    from src.openbrowser.code_use import CodeAgent
+    from langchain_openai import ChatOpenAI
+
+    llm = ChatOpenAI(model="gpt-4")
+    agent = CodeAgent(
+        task="Go to amazon.com and search for 'laptop'",
+        llm=llm,
+    )
+    session = await agent.run()
+    ```
+"""
 
 import ast
 import asyncio
@@ -33,11 +60,44 @@ logger = logging.getLogger(__name__)
 
 
 class CodeAgent:
-    """
-    Agent that executes Python code in a notebook-like environment for browser automation.
+    """Agent that executes Python code in a notebook-like environment for browser automation.
 
     This agent provides a Jupyter notebook-like interface where the LLM writes Python code
     that gets executed in a persistent namespace with browser control functions available.
+    The agent maintains conversation history with the LLM, provides browser state updates,
+    and handles error recovery.
+
+    The execution flow is:
+    1. Agent receives a task description
+    2. Browser session is initialized (if not provided)
+    3. Initial URL is extracted from task and navigated to (if present)
+    4. Main loop: LLM generates code -> Code executes -> Results fed back
+    5. Loop continues until done() is called or limits are reached
+
+    Attributes:
+        task: The task description for the agent to complete.
+        llm: The language model instance for code generation.
+        browser_session: The browser session for automation.
+        tools: Tools instance containing available browser actions.
+        sensitive_data: Dictionary of sensitive data for secure injection.
+        max_steps: Maximum number of execution steps allowed.
+        max_failures: Maximum consecutive errors before termination.
+        use_vision: Whether to include screenshots in LLM messages.
+        session: The NotebookSession containing all executed cells.
+        namespace: The execution namespace with browser tools.
+        complete_history: List of CodeAgentHistory items for each step.
+        id: Unique identifier for this agent instance.
+        agent_directory: Temporary directory for screenshots and artifacts.
+
+    Example:
+        ```python
+        async with CodeAgent(
+            task="Search for Python tutorials on Google",
+            llm=ChatOpenAI(model="gpt-4"),
+        ) as agent:
+            session = await agent.run(max_steps=20)
+            print(f"Completed in {len(session.cells)} steps")
+        ```
     """
 
     def __init__(
@@ -56,21 +116,56 @@ class CodeAgent:
         use_vision: bool = True,
         **kwargs,
     ):
-        """
-        Initialize the code-use agent.
+        """Initialize the code-use agent.
+
+        Creates a new CodeAgent instance configured to complete the given task.
+        The agent will use the provided LLM to generate Python code and execute
+        it in a browser automation environment.
 
         Args:
-            task: The task description for the agent
-            llm: Optional LLM instance
-            browser_session: Optional browser session (will be created if not provided)
-            browser: Optional browser session (cleaner API)
-            tools: Optional Tools instance (will create default if not provided)
-            controller: Optional Tools instance
-            sensitive_data: Optional sensitive data dictionary
-            max_steps: Maximum number of execution steps
-            max_failures: Maximum consecutive errors before termination (default: 8)
-            use_vision: Whether to include screenshots in LLM messages (default: True)
-            **kwargs: Additional keyword arguments for compatibility (ignored)
+            task: The task description for the agent to complete. May contain
+                URLs which will be automatically extracted and navigated to.
+            llm: LLM instance (required). Must support ainvoke() method.
+                Compatible with LangChain chat models.
+            browser_session: Optional pre-configured browser session.
+                If not provided, a new session is created automatically.
+            browser: Alias for browser_session (cleaner API). Cannot be used
+                together with browser_session.
+            tools: Optional Tools instance with custom action registry.
+                If not provided, CodeAgentTools are created automatically.
+            controller: Alias for tools parameter. Cannot be used together
+                with tools.
+            sensitive_data: Optional dictionary of sensitive data (passwords,
+                API keys, etc.) to inject into the namespace securely.
+            max_steps: Maximum number of execution steps. Defaults to 100.
+            max_failures: Maximum consecutive errors before automatic
+                termination. Defaults to 8.
+            use_vision: Whether to include screenshots in LLM messages for
+                visual understanding. Defaults to True.
+            **kwargs: Additional keyword arguments are logged and ignored
+                for forward compatibility.
+
+        Raises:
+            ValueError: If llm is None, or if both browser/browser_session
+                or both controller/tools are specified.
+
+        Example:
+            ```python
+            # Minimal usage
+            agent = CodeAgent(
+                task="Go to google.com",
+                llm=ChatOpenAI(model="gpt-4")
+            )
+
+            # With custom browser
+            browser = BrowserSession(headless=False)
+            agent = CodeAgent(
+                task="Fill out form",
+                llm=llm,
+                browser=browser,
+                sensitive_data={"password": "secret"}
+            )
+            ```
         """
         # Log and ignore unknown kwargs for compatibility
         if kwargs:
@@ -117,14 +212,45 @@ class CodeAgent:
         self.agent_directory = base_tmp / f"browser_use_code_agent_{self.id}_{timestamp}"
 
     async def run(self, max_steps: int | None = None) -> NotebookSession:
-        """
-        Run the agent to complete the task.
+        """Run the agent to complete the task.
+
+        Executes the main agent loop: getting code from the LLM, executing it,
+        providing feedback, and repeating until the task is complete or limits
+        are reached. The browser is automatically started if not already running.
 
         Args:
-            max_steps: Optional override for maximum number of steps
+            max_steps: Optional override for maximum number of steps.
+                If provided, overrides the value set in __init__.
 
         Returns:
-            The notebook session with all executed cells
+            The NotebookSession containing all executed code cells, their
+            outputs, and execution status.
+
+        Raises:
+            Exception: Various exceptions may be raised during execution.
+                The agent attempts to handle errors gracefully and continue.
+
+        Note:
+            The agent will automatically:
+            - Start a browser session if not provided
+            - Extract and navigate to URLs in the task
+            - Warn the LLM when approaching step/error limits
+            - Close the browser session when complete
+
+        Example:
+            ```python
+            agent = CodeAgent(task="Search Google", llm=llm)
+
+            # Run with default max_steps
+            session = await agent.run()
+
+            # Run with custom limit
+            session = await agent.run(max_steps=10)
+
+            # Check results
+            for cell in session.cells:
+                print(f"[{cell.status}] {cell.source[:50]}...")
+            ```
         """
         # Use override if provided
         steps_to_run = max_steps if max_steps is not None else self.max_steps
@@ -367,8 +493,20 @@ class CodeAgent:
     async def _get_code_from_llm(self) -> tuple[str, str]:
         """Get Python code from the LLM.
 
+        Sends the current conversation history and browser state to the LLM
+        and extracts Python code from the response. Also handles:
+        - Token limit detection and recovery
+        - Code block extraction (Python, JavaScript, bash)
+        - Injecting non-Python blocks into the namespace
+
         Returns:
-            Tuple of (extracted_code, full_llm_response)
+            A tuple of (extracted_code, full_llm_response) where:
+            - extracted_code: The Python code to execute (may be empty)
+            - full_llm_response: The complete LLM response text
+
+        Raises:
+            Exception: If the LLM call fails. The caller should handle
+                this and increment the error counter.
         """
         # Prepare messages for this request
         messages_to_send = self._llm_messages.copy()
@@ -457,14 +595,27 @@ class CodeAgent:
         return code, full_response
 
     async def _execute_code(self, code: str) -> tuple[str | None, str | None, str | None]:
-        """
-        Execute Python code in the namespace.
+        """Execute Python code in the namespace.
+
+        Creates a new code cell, executes the provided Python code in the
+        agent's namespace, and captures any output or errors. Handles both
+        sync and async code, properly managing await expressions.
 
         Args:
-            code: The Python code to execute
+            code: The Python code to execute. Can contain await expressions
+                which will be automatically wrapped in an async function.
 
         Returns:
-            Tuple of (output, error, browser_state)
+            A tuple of (output, error, browser_state) where:
+            - output: Captured stdout from the execution, or None
+            - error: Error message if execution failed, or None
+            - browser_state: Always None (reserved for future use)
+
+        Note:
+            - Variables defined in the code are added to the namespace
+            - Global declarations are properly handled
+            - EvaluateError from JavaScript stops execution immediately
+            - The cell is recorded in the session with its status
         """
         # Create new cell
         cell = self.session.add_cell(source=code)
@@ -608,10 +759,19 @@ __code_exec_coro__ = __code_exec__()
         return output, error, None
 
     async def _get_browser_state(self) -> tuple[str, str | None]:
-        """Get the current browser state as text.
+        """Get the current browser state as formatted text.
+
+        Retrieves the current page URL, title, DOM structure, and optionally
+        a screenshot, then formats them for LLM consumption.
 
         Returns:
-            Tuple of (browser_state_text, screenshot_base64)
+            A tuple of (browser_state_text, screenshot_base64) where:
+            - browser_state_text: Markdown-formatted browser state
+            - screenshot_base64: Base64-encoded JPEG screenshot, or None
+
+        Note:
+            Screenshot capture only occurs if use_vision is True.
+            DOM structure is simplified for token efficiency.
         """
         if not self.browser_session:
             return "Browser state not available", None
@@ -691,7 +851,21 @@ __code_exec_coro__ = __code_exec__()
             return f"Error getting browser state: {e}", None
 
     def _format_execution_result(self, code: str, output: str | None, error: str | None, current_step: int | None = None) -> str:
-        """Format the execution result for the LLM."""
+        """Format the execution result for the LLM.
+
+        Creates a summary message of the code execution outcome to be
+        added to the conversation history for the next LLM call.
+
+        Args:
+            code: The executed Python code (for context).
+            output: Standard output from execution, if any.
+            error: Error message from execution, if any.
+            current_step: Current step number for progress display.
+
+        Returns:
+            Formatted string containing step progress, errors, and output.
+            Output is truncated to 10000 characters if too long.
+        """
         result = []
 
         if current_step is not None:
@@ -712,11 +886,28 @@ __code_exec_coro__ = __code_exec__()
         return "\n".join(result)
 
     def _is_task_done(self) -> bool:
-        """Check if the task is marked as done in the namespace."""
+        """Check if the task is marked as done in the namespace.
+
+        The task is considered done when the done() action has been called
+        successfully, which sets the _task_done flag in the namespace.
+
+        Returns:
+            True if done() has been called, False otherwise.
+        """
         return self.namespace.get("_task_done", False)
 
     async def _capture_screenshot(self, step_number: int) -> str | None:
-        """Capture and store screenshot for tracking."""
+        """Capture and store a screenshot for tracking.
+
+        Takes a screenshot of the current browser state and saves it to
+        the agent's temporary directory for later review.
+
+        Args:
+            step_number: The current step number, used in the filename.
+
+        Returns:
+            The file path to the saved screenshot, or None if capture failed.
+        """
         if not self.browser_session:
             return None
 
@@ -753,7 +944,18 @@ __code_exec_coro__ = __code_exec__()
         error: str | None,
         screenshot_path: str | None,
     ) -> None:
-        """Add a step to complete_history using type-safe models."""
+        """Add a step to the complete_history using type-safe models.
+
+        Records a complete step of the agent's execution, including the
+        LLM's response, execution results, and browser state.
+
+        Args:
+            model_output_code: The extracted Python code from the LLM.
+            full_llm_response: The complete LLM response text.
+            output: Standard output from code execution, if any.
+            error: Error message from execution, if any.
+            screenshot_path: Path to the captured screenshot, if any.
+        """
         # Get current browser URL and title for state
         url: str | None = None
         title: str | None = None
@@ -822,13 +1024,17 @@ __code_exec_coro__ = __code_exec__()
         self.complete_history.append(history_entry)
 
     def screenshot_paths(self, n_last: int | None = None) -> list[str | None]:
-        """Get screenshot paths from complete_history.
+        """Get screenshot paths from the complete history.
+
+        Retrieves file paths to screenshots captured during agent execution.
 
         Args:
-            n_last: Optional number of last screenshots to return
+            n_last: Optional limit to return only the last N screenshots.
+                If None, returns all screenshot paths.
 
         Returns:
-            List of screenshot file paths
+            List of screenshot file paths. May contain None values for
+            steps where screenshot capture failed.
         """
         paths = [step.screenshot_path for step in self.complete_history]
 
@@ -839,7 +1045,14 @@ __code_exec_coro__ = __code_exec__()
 
     @property
     def history(self) -> Any:
-        """Compatibility property - returns complete_history."""
+        """Compatibility property for accessing execution history.
+
+        Provides backward compatibility with code expecting a history
+        object with a .history attribute containing the step list.
+
+        Returns:
+            A mock object with a .history attribute containing complete_history.
+        """
 
         class MockAgentHistoryList:
             def __init__(self, complete_history: list[CodeAgentHistory]):
@@ -848,7 +1061,12 @@ __code_exec_coro__ = __code_exec__()
         return MockAgentHistoryList(self.complete_history)
 
     async def close(self) -> None:
-        """Close the browser session."""
+        """Close the browser session and clean up resources.
+
+        Should be called when the agent is no longer needed. This is
+        automatically called by the run() method and the async context
+        manager exit.
+        """
         if self.browser_session:
             try:
                 await self.browser_session.stop()
@@ -856,10 +1074,22 @@ __code_exec_coro__ = __code_exec__()
                 logger.warning(f"Error closing browser session: {e}")
 
     async def __aenter__(self) -> "CodeAgent":
-        """Async context manager entry."""
+        """Async context manager entry.
+
+        Returns:
+            The CodeAgent instance for use in the async with block.
+        """
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
-        """Async context manager exit."""
+        """Async context manager exit.
+
+        Ensures the browser session is closed even if an exception occurred.
+
+        Args:
+            exc_type: Exception type if an exception was raised.
+            exc_val: Exception value if an exception was raised.
+            exc_tb: Exception traceback if an exception was raised.
+        """
         await self.close()
 

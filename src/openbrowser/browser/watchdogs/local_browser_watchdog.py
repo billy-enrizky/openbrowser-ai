@@ -1,4 +1,11 @@
-"""Local browser watchdog for managing browser subprocess lifecycle."""
+"""Local browser watchdog for managing browser subprocess lifecycle.
+
+This module provides the LocalBrowserWatchdog which launches and manages
+local Chrome/Chromium browser processes with CDP debugging enabled.
+
+Classes:
+    LocalBrowserWatchdog: Manages local browser subprocess lifecycle.
+"""
 
 import asyncio
 import logging
@@ -25,7 +32,25 @@ logger = logging.getLogger(__name__)
 
 
 class LocalBrowserWatchdog(BaseWatchdog):
-    """Manages local browser subprocess lifecycle."""
+    """Manages local browser subprocess lifecycle.
+
+    Handles launching Chrome/Chromium with CDP debugging enabled,
+    process termination, and cleanup. Uses Playwright for browser
+    executable discovery.
+
+    Listens to:
+        BrowserLaunchEvent: Launches a new browser process.
+        BrowserKillEvent: Terminates the browser process.
+        BrowserStopEvent: Graceful shutdown handling.
+
+    Example:
+        >>> watchdog = LocalBrowserWatchdog(
+        ...     event_bus=bus,
+        ...     browser_session=session
+        ... )
+        >>> result = await bus.dispatch(BrowserLaunchEvent())
+        >>> print(result.cdp_url)  # ws://localhost:9222/devtools/...
+    """
 
     # Events this watchdog listens to
     LISTENS_TO: ClassVar[list[type[BaseEvent[Any]]]] = [
@@ -38,13 +63,29 @@ class LocalBrowserWatchdog(BaseWatchdog):
     EMITS: ClassVar[list[type[BaseEvent[Any]]]] = []
 
     def attach_to_session(self) -> None:
-        """Register event handlers."""
+        """Register event handlers.
+
+        Subscribes to browser lifecycle events for process management.
+        """
         self.event_bus.on(BrowserLaunchEvent, self.on_BrowserLaunchEvent)
         self.event_bus.on(BrowserKillEvent, self.on_BrowserKillEvent)
         self.event_bus.on(BrowserStopEvent, self.on_BrowserStopEvent)
 
     async def on_BrowserLaunchEvent(self, event: BrowserLaunchEvent) -> BrowserLaunchResult:
-        """Launch a local browser process."""
+        """Launch a local browser process.
+
+        Creates a new Chrome/Chromium subprocess with CDP debugging
+        enabled. Returns the CDP WebSocket URL for connection.
+
+        Args:
+            event: BrowserLaunchEvent triggering the launch.
+
+        Returns:
+            BrowserLaunchResult with cdp_url for CDP connection.
+
+        Raises:
+            Exception: If browser launch fails.
+        """
         try:
             self.logger.debug('[LocalBrowserWatchdog] Received BrowserLaunchEvent, launching local browser...')
 
@@ -57,7 +98,14 @@ class LocalBrowserWatchdog(BaseWatchdog):
             raise
 
     async def on_BrowserKillEvent(self, event: BrowserKillEvent) -> None:
-        """Kill the browser process."""
+        """Kill the browser process.
+
+        Terminates the browser subprocess gracefully, falling back
+        to forceful kill if needed. Cleans up pipe handles.
+
+        Args:
+            event: BrowserKillEvent triggering the kill.
+        """
         process = getattr(self.browser_session, '_process', None)
         if process is None:
             self.logger.warning('[LocalBrowserWatchdog] No browser process to kill')

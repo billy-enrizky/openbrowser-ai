@@ -1,4 +1,12 @@
-"""Storage state watchdog for managing browser cookies and storage persistence."""
+"""Storage state watchdog for managing browser cookies and storage persistence.
+
+This module provides the StorageStateWatchdog which persists cookies and
+localStorage to a JSON file, enabling session persistence across browser
+restarts.
+
+Classes:
+    StorageStateWatchdog: Monitors and persists browser storage state.
+"""
 
 import asyncio
 import json
@@ -24,7 +32,33 @@ logger = logging.getLogger(__name__)
 
 
 class StorageStateWatchdog(BaseWatchdog):
-    """Monitors and persists browser storage state including cookies and localStorage."""
+    """Monitors and persists browser storage state including cookies and localStorage.
+
+    Automatically loads storage state on browser connect and saves on stop.
+    Optionally monitors for cookie changes and auto-saves periodically.
+
+    Listens to:
+        BrowserConnectedEvent: Loads storage state and starts monitoring.
+        BrowserStopEvent: Saves final state and stops monitoring.
+        SaveStorageStateEvent: Manual save trigger.
+        LoadStorageStateEvent: Manual load trigger.
+
+    Emits:
+        StorageStateSavedEvent: After successful save.
+        StorageStateLoadedEvent: After successful load.
+
+    Configuration (in BrowserProfile):
+        storage_state: Path to storage state JSON file.
+
+    Attributes:
+        auto_save_interval: Seconds between auto-saves (default: 30).
+        save_on_change: Save immediately when cookies change (default: True).
+
+    Example:
+        >>> profile = BrowserProfile(
+        ...     storage_state='./auth_state.json'
+        ... )
+    """
 
     # Events this watchdog listens to
     LISTENS_TO: ClassVar[list[type[BaseEvent[Any]]]] = [
@@ -50,14 +84,23 @@ class StorageStateWatchdog(BaseWatchdog):
     _save_lock: asyncio.Lock = PrivateAttr(default_factory=asyncio.Lock)
 
     def attach_to_session(self) -> None:
-        """Register event handlers."""
+        """Register event handlers.
+
+        Subscribes to browser lifecycle and storage events.
+        """
         self.event_bus.on(BrowserConnectedEvent, self.on_BrowserConnectedEvent)
         self.event_bus.on(BrowserStopEvent, self.on_BrowserStopEvent)
         self.event_bus.on(SaveStorageStateEvent, self.on_SaveStorageStateEvent)
         self.event_bus.on(LoadStorageStateEvent, self.on_LoadStorageStateEvent)
 
     async def on_BrowserConnectedEvent(self, event: BrowserConnectedEvent) -> None:
-        """Start monitoring when browser starts."""
+        """Start monitoring when browser starts.
+
+        Initializes storage monitoring and loads existing storage state.
+
+        Args:
+            event: BrowserConnectedEvent from session.
+        """
         self.logger.debug('[StorageStateWatchdog] Initializing auth/cookies sync with storage_state.json file')
 
         # Start monitoring
@@ -67,12 +110,25 @@ class StorageStateWatchdog(BaseWatchdog):
         await self.event_bus.dispatch(LoadStorageStateEvent())
 
     async def on_BrowserStopEvent(self, event: BrowserStopEvent) -> None:
-        """Stop monitoring when browser stops."""
+        """Stop monitoring when browser stops.
+
+        Stops the monitoring task and saves final state.
+
+        Args:
+            event: BrowserStopEvent from session.
+        """
         self.logger.debug('[StorageStateWatchdog] Stopping storage_state monitoring')
         await self._stop_monitoring()
 
     async def on_SaveStorageStateEvent(self, event: SaveStorageStateEvent) -> None:
-        """Handle storage state save request."""
+        """Handle storage state save request.
+
+        Saves current cookies and storage to the specified path
+        or the default path from browser_profile.
+
+        Args:
+            event: SaveStorageStateEvent with optional path override.
+        """
         path = event.path
         if path is None:
             if self.browser_session.browser_profile.storage_state:
@@ -80,7 +136,14 @@ class StorageStateWatchdog(BaseWatchdog):
         await self._save_storage_state(path)
 
     async def on_LoadStorageStateEvent(self, event: LoadStorageStateEvent) -> None:
-        """Handle storage state load request."""
+        """Handle storage state load request.
+
+        Loads cookies and storage from the specified path or
+        the default path from browser_profile.
+
+        Args:
+            event: LoadStorageStateEvent with optional path override.
+        """
         path = event.path
         if path is None:
             if self.browser_session.browser_profile.storage_state:
@@ -88,14 +151,20 @@ class StorageStateWatchdog(BaseWatchdog):
         await self._load_storage_state(path)
 
     async def _start_monitoring(self) -> None:
-        """Start the monitoring task."""
+        """Start the monitoring task.
+
+        Creates async task for periodic storage change monitoring.
+        """
         if self._monitoring_task and not self._monitoring_task.done():
             return
 
         self._monitoring_task = asyncio.create_task(self._monitor_storage_changes())
 
     async def _stop_monitoring(self) -> None:
-        """Stop the monitoring task."""
+        """Stop the monitoring task.
+
+        Cancels the async monitoring task if running.
+        """
         if self._monitoring_task and not self._monitoring_task.done():
             self._monitoring_task.cancel()
             try:

@@ -1,4 +1,11 @@
-"""Watchdog for handling JavaScript dialogs (alert, confirm, prompt) automatically."""
+"""Watchdog for handling JavaScript dialogs (alert, confirm, prompt) automatically.
+
+This module provides the PopupsWatchdog which automatically handles JavaScript
+dialogs without requiring user interaction, enabling unattended automation.
+
+Classes:
+    PopupsWatchdog: Automatically accepts/dismisses JavaScript dialogs.
+"""
 
 import asyncio
 import logging
@@ -14,7 +21,26 @@ logger = logging.getLogger(__name__)
 
 
 class PopupsWatchdog(BaseWatchdog):
-    """Handles JavaScript dialogs (alert, confirm, prompt) by automatically accepting them immediately."""
+    """Handles JavaScript dialogs by automatically accepting them immediately.
+
+    Registers CDP Page.javascriptDialogOpening handlers for each tab and
+    automatically responds to dialogs:
+    - alert: Accept (click OK)
+    - confirm: Accept (click OK - safer for automation)
+    - prompt: Dismiss (click Cancel - can't provide input)
+    - beforeunload: Accept (allow navigation)
+
+    Stores dialog messages in browser_session._closed_popup_messages
+    for inclusion in browser state.
+
+    Listens to:
+        TabCreatedEvent: Registers dialog handlers for new tabs.
+
+    Example:
+        >>> # Dialogs are handled automatically
+        >>> await browser.navigate_to('https://example.com')
+        >>> # Any alert() calls are auto-dismissed
+    """
 
     # Events this watchdog listens to
     LISTENS_TO: ClassVar[list[type[BaseEvent[Any]]]] = [
@@ -28,11 +54,21 @@ class PopupsWatchdog(BaseWatchdog):
     _dialog_listeners_registered: set[str] = PrivateAttr(default_factory=set)
 
     def attach_to_session(self) -> None:
-        """Register event handlers."""
+        """Register event handlers.
+
+        Subscribes to TabCreatedEvent for dialog handler registration.
+        """
         self.event_bus.on(TabCreatedEvent, self.on_TabCreatedEvent)
 
     async def on_TabCreatedEvent(self, event: TabCreatedEvent) -> None:
-        """Set up JavaScript dialog handling when a new tab is created."""
+        """Set up JavaScript dialog handling when a new tab is created.
+
+        Enables Page domain and registers Page.javascriptDialogOpening
+        handler for the tab. Skips if already registered for this target.
+
+        Args:
+            event: TabCreatedEvent with target_id.
+        """
         target_id = event.target_id
         self.logger.debug(f'[PopupsWatchdog] Received TabCreatedEvent for target {target_id}')
 

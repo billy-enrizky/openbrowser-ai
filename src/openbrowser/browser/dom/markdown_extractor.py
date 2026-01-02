@@ -1,8 +1,25 @@
-"""
-Shared markdown extraction utilities for browser content processing.
+"""Shared markdown extraction utilities for browser content processing.
 
-This module provides a unified interface for extracting clean markdown from browser content,
-used by both the tools service and page actor.
+This module provides a unified interface for extracting clean markdown from
+browser content, used by both the tools service and page actor. It converts
+the enhanced DOM tree to HTML, then to markdown using markdownify.
+
+The extraction pipeline:
+1. Get enhanced DOM tree (from browser session or DOM service)
+2. Serialize to HTML using HTMLSerializer
+3. Convert to markdown using markdownify
+4. Clean up whitespace, remove JSON blobs, filter artifacts
+
+Functions:
+    extract_clean_markdown: Main entry point for markdown extraction.
+
+Requirements:
+    markdownify: Install with `pip install markdownify`
+
+Example:
+    >>> content, stats = await extract_clean_markdown(browser_session)
+    >>> print(content[:500])
+    >>> print(f"Extracted {stats['final_filtered_chars']} chars")
 """
 
 import re
@@ -24,20 +41,41 @@ async def extract_clean_markdown(
 ) -> tuple[str, dict[str, Any]]:
     """Extract clean markdown from browser content using enhanced DOM tree.
 
-    This unified function can extract markdown using either a browser session (for tools service)
-    or a DOM service with target ID (for page actor).
+    Unified function for markdown extraction supporting two paths:
+    1. Browser session path (tools service): Uses browser_session directly
+    2. DOM service path (page actor): Uses dom_service + target_id
+
+    The extraction process:
+    1. Get enhanced DOM tree from DOMWatchdog cache or build it
+    2. Serialize to clean HTML using HTMLSerializer
+    3. Convert HTML to markdown using markdownify
+    4. Clean up: remove URL encoding, JSON blobs, excessive whitespace
 
     Args:
-        browser_session: Browser session to extract content from (tools service path)
-        dom_service: DOM service instance (page actor path)
-        target_id: Target ID for the page (required when using dom_service)
-        extract_links: Whether to preserve links in markdown
+        browser_session: Browser session for extraction (tools service path).
+            Mutually exclusive with dom_service/target_id.
+        dom_service: DOM service instance (page actor path).
+        target_id: Target ID for the page (required with dom_service).
+        extract_links: Whether to preserve hyperlinks in markdown output.
 
     Returns:
-        tuple: (clean_markdown_content, content_statistics)
+        Tuple of (markdown_content, statistics_dict) where statistics include:
+            - method: Extraction method used
+            - original_html_chars: HTML length before conversion
+            - initial_markdown_chars: Markdown length before filtering
+            - filtered_chars_removed: Characters removed by filtering
+            - final_filtered_chars: Final markdown length
+            - url: Current page URL (if available)
 
     Raises:
-        ValueError: If neither browser_session nor (dom_service + target_id) are provided
+        ValueError: If neither browser_session nor (dom_service + target_id)
+            are provided, or if conflicting arguments are given.
+        ImportError: If markdownify is not installed.
+        NotImplementedError: If dom_service path is used (not yet implemented).
+
+    Example:
+        >>> content, stats = await extract_clean_markdown(browser_session)
+        >>> print(f"Extracted {stats['final_filtered_chars']} chars from {stats['url']}")
     """
     # Validate input parameters
     if browser_session is not None:
@@ -109,7 +147,23 @@ async def extract_clean_markdown(
 
 
 async def _get_enhanced_dom_tree_from_browser_session(browser_session: 'BrowserSession'):
-    """Get enhanced DOM tree from browser session via DOMWatchdog."""
+    """Get enhanced DOM tree from browser session via DOMWatchdog.
+
+    Attempts to use cached enhanced DOM tree from DOMWatchdog for
+    performance. Falls back to building the tree via CDP if not cached.
+
+    Args:
+        browser_session: Active browser session with agent focus.
+
+    Returns:
+        EnhancedDOMTreeNode representing the document root.
+
+    Raises:
+        RuntimeError: If browser session not started (no agent_focus).
+
+    Note:
+        The result is cached in DOMWatchdog for subsequent calls.
+    """
     # Get the enhanced DOM tree from DOMWatchdog
     # This captures the current state of the page including dynamic content, shadow roots, etc.
     dom_watchdog: 'DOMWatchdog | None' = getattr(browser_session, '_dom_watchdog', None)
@@ -147,15 +201,23 @@ async def _get_enhanced_dom_tree_from_browser_session(browser_session: 'BrowserS
 
 
 def _preprocess_markdown_content(content: str, max_newlines: int = 3) -> tuple[str, int]:
-    """
-    Light preprocessing of markdown output - minimal cleanup with JSON blob removal.
+    """Light preprocessing of markdown output with JSON blob removal.
+
+    Cleans up markdown output by:
+    1. Removing JSON blobs (common in SPAs like LinkedIn, Facebook)
+    2. Compressing excessive newlines (4+ becomes max_newlines)
+    3. Filtering lines that are too short or look like JSON artifacts
 
     Args:
-        content: Markdown content to lightly filter
-        max_newlines: Maximum consecutive newlines to allow
+        content: Raw markdown content from markdownify.
+        max_newlines: Maximum consecutive newlines to preserve (default: 3).
 
     Returns:
-        tuple: (filtered_content, chars_filtered)
+        Tuple of (filtered_content, chars_removed).
+
+    Note:
+        JSON detection targets objects >100 chars to avoid removing
+        small legitimate inline JSON snippets.
     """
     original_length = len(content)
 
