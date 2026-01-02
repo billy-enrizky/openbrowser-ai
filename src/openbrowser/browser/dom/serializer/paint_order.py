@@ -1,6 +1,22 @@
 """Paint order filtering to remove hidden/overlapping elements.
 
-Helper class for maintaining a union of rectangles (used for order of elements calculation).
+This module provides algorithms for determining element visibility based
+on paint order (z-index stacking). Elements covered by higher paint order
+elements with opaque backgrounds are filtered out.
+
+The algorithm processes elements in reverse paint order (highest first),
+building a union of covered rectangles. Elements fully covered by the
+union are marked as hidden.
+
+Classes:
+    Rect: Axis-aligned rectangle for geometry operations.
+    RectUnionPure: Maintains disjoint set of rectangles.
+    PaintOrderRemover: Marks elements hidden by paint order.
+
+Example:
+    >>> remover = PaintOrderRemover(simplified_root)
+    >>> remover.calculate_paint_order()
+    >>> # Nodes now have ignored_by_paint_order=True if hidden
 """
 
 from collections import defaultdict
@@ -11,7 +27,25 @@ from src.openbrowser.browser.dom.views import SimplifiedNode
 
 @dataclass(frozen=True, slots=True)
 class Rect:
-    """Closed axis-aligned rectangle with (x1,y1) bottom-left, (x2,y2) top-right."""
+    """Closed axis-aligned rectangle with (x1,y1) bottom-left, (x2,y2) top-right.
+
+    Immutable rectangle used for paint order visibility calculations.
+    Coordinates follow screen convention (y increases downward).
+
+    Attributes:
+        x1: Left edge x-coordinate.
+        y1: Top edge y-coordinate.
+        x2: Right edge x-coordinate (must be >= x1).
+        y2: Bottom edge y-coordinate (must be >= y1).
+
+    Raises:
+        ValueError: If x1 > x2 or y1 > y2.
+
+    Example:
+        >>> rect = Rect(0, 0, 100, 50)
+        >>> rect.area()
+        5000.0
+    """
 
     x1: float
     y1: float
@@ -19,27 +53,60 @@ class Rect:
     y2: float
 
     def __post_init__(self):
-        """Validate rectangle coordinates."""
+        """Validate rectangle coordinates.
+
+        Raises:
+            ValueError: If coordinates are invalid (x1 > x2 or y1 > y2).
+        """
         if not (self.x1 <= self.x2 and self.y1 <= self.y2):
             raise ValueError(f"Invalid rectangle: x1={self.x1}, y1={self.y1}, x2={self.x2}, y2={self.y2}")
 
     def area(self) -> float:
-        """Calculate rectangle area."""
+        """Calculate rectangle area.
+
+        Returns:
+            Area in square units (width * height).
+        """
         return (self.x2 - self.x1) * (self.y2 - self.y1)
 
     def intersects(self, other: 'Rect') -> bool:
-        """Check if this rectangle intersects with another."""
+        """Check if this rectangle intersects with another.
+
+        Rectangles touching at edges only do not intersect.
+
+        Args:
+            other: Rectangle to check intersection with.
+
+        Returns:
+            True if rectangles have overlapping area.
+        """
         return not (self.x2 <= other.x1 or other.x2 <= self.x1 or self.y2 <= other.y1 or other.y2 <= self.y1)
 
     def contains(self, other: 'Rect') -> bool:
-        """Check if this rectangle fully contains another."""
+        """Check if this rectangle fully contains another.
+
+        Args:
+            other: Rectangle to check containment of.
+
+        Returns:
+            True if other is entirely inside this rectangle.
+        """
         return self.x1 <= other.x1 and self.y1 <= other.y1 and self.x2 >= other.x2 and self.y2 >= other.y2
 
 
 class RectUnionPure:
-    """
-    Maintains a *disjoint* set of rectangles.
-    No external dependencies - fine for a few thousand rectangles.
+    """Maintains a disjoint set of rectangles for coverage tracking.
+
+    Pure Python implementation without external dependencies.
+    Suitable for a few thousand rectangles.
+
+    Used to track which screen areas are covered by opaque elements
+    during paint order processing.
+
+    Example:
+        >>> union = RectUnionPure()
+        >>> union.add(Rect(0, 0, 100, 100))  # Returns True (grew)
+        >>> union.contains(Rect(10, 10, 50, 50))  # Returns True (covered)
     """
 
     __slots__ = ('_rects',)
@@ -48,9 +115,17 @@ class RectUnionPure:
         self._rects: list[Rect] = []
 
     def _split_diff(self, a: Rect, b: Rect) -> list[Rect]:
-        r"""
-        Return list of up to 4 rectangles = a \ b.
+        r"""Return list of up to 4 rectangles representing a \ b.
+
+        Computes the set difference of rectangle a minus rectangle b.
         Assumes a intersects b.
+
+        Args:
+            a: Rectangle to subtract from.
+            b: Rectangle to subtract.
+
+        Returns:
+            List of up to 4 rectangles covering a but not b.
         """
         parts = []
 
@@ -75,8 +150,13 @@ class RectUnionPure:
         return parts
 
     def contains(self, r: Rect) -> bool:
-        """
-        True iff r is fully covered by the current union.
+        """Check if rectangle r is fully covered by the current union.
+
+        Args:
+            r: Rectangle to check coverage of.
+
+        Returns:
+            True if r is completely covered by existing rectangles.
         """
         if not self._rects:
             return False
@@ -98,9 +178,15 @@ class RectUnionPure:
         return False  # something survived
 
     def add(self, r: Rect) -> bool:
-        """
-        Insert r unless it is already covered.
-        Returns True if the union grew.
+        """Insert rectangle r unless it is already covered.
+
+        If r is partially covered, only the uncovered portions are added.
+
+        Args:
+            r: Rectangle to add to the union.
+
+        Returns:
+            True if the union grew (r was not fully covered).
         """
         if self.contains(r):
             return False
@@ -130,15 +216,40 @@ class RectUnionPure:
 
 
 class PaintOrderRemover:
-    """
-    Calculates which elements should be removed based on the paint order parameter.
+    """Calculates which elements should be removed based on paint order.
+
+    Processes elements in reverse paint order (highest first), tracking
+    covered screen areas. Elements fully covered by opaque higher-order
+    elements are marked with ignored_by_paint_order=True.
+
+    Transparency handling:
+        - Elements with opacity < 0.8 don't block visibility
+        - Elements with transparent backgrounds don't block visibility
+
+    Attributes:
+        root: Root SimplifiedNode of the tree to process.
+
+    Example:
+        >>> remover = PaintOrderRemover(simplified_root)
+        >>> remover.calculate_paint_order()
+        >>> for node in get_all_nodes(simplified_root):
+        ...     if node.ignored_by_paint_order:
+        ...         print(f'{node.original_node.tag_name} is hidden')
     """
 
     def __init__(self, root: SimplifiedNode):
         self.root = root
 
     def calculate_paint_order(self) -> None:
-        """Calculate paint order and mark elements that should be ignored."""
+        """Calculate paint order and mark elements that should be ignored.
+
+        Traverses the tree, groups nodes by paint order, then processes
+        from highest to lowest. Elements covered by the accumulated
+        opaque area are marked with ignored_by_paint_order=True.
+
+        Note:
+            Modifies nodes in place. Does not remove nodes, only marks them.
+        """
         all_simplified_nodes_with_paint_order: list[SimplifiedNode] = []
 
         def collect_paint_order(node: SimplifiedNode) -> None:

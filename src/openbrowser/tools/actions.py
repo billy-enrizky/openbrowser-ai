@@ -50,10 +50,29 @@ CAPTCHA_INDICATORS = [
 
 
 async def detect_captcha(browser_session: BrowserSession) -> bool:
-    """Detect if the current page shows a CAPTCHA.
+    """Detect if the current page shows a CAPTCHA challenge.
+    
+    This function checks the page content and URL for common CAPTCHA indicators
+    such as reCAPTCHA, "unusual traffic" warnings, and robot verification prompts.
+    When a CAPTCHA is detected, the agent can take alternative actions like
+    switching to a different search engine.
+    
+    Args:
+        browser_session: The browser session to check for CAPTCHA.
     
     Returns:
-        True if CAPTCHA is detected, False otherwise.
+        bool: True if a CAPTCHA is detected on the current page, False otherwise.
+    
+    Example:
+        >>> if await detect_captcha(session):
+        ...     logger.info("CAPTCHA detected, switching to Bing")
+        ...     await navigate_to_bing(session)
+    
+    Note:
+        This is a heuristic-based detection and may not catch all CAPTCHA types.
+        It specifically checks for:
+        - Common CAPTCHA-related text in page content
+        - CAPTCHA-related patterns in the URL
     """
     if not browser_session.agent_focus:
         return False
@@ -206,7 +225,37 @@ class StructuredOutputAction(BaseModel, Generic[T]):
 
 
 class Tools:
-    """Tools service following browser-use pattern with registry."""
+    """Browser automation tools service following browser-use pattern with registry.
+    
+    This class provides the complete set of browser automation actions that the
+    BrowserAgent uses to interact with web pages. It uses a registry pattern to
+    register actions that can be dynamically invoked by the LLM.
+    
+    The Tools class supports:
+        - Navigation: search, navigate, go_back
+        - Interaction: click, input_text, send_keys, scroll
+        - Content: extract, find_text, screenshot
+        - Forms: select_dropdown, dropdown_options, upload_file
+        - Tabs: switch_tab, close_tab
+        - Advanced: evaluate (run JavaScript), read_file, write_file
+        - Completion: done (mark task as complete)
+    
+    Attributes:
+        browser_session: The browser session to perform actions on.
+        registry: Action registry containing all registered actions.
+        display_files_in_done_text: Whether to include file contents in done message.
+    
+    Example:
+        >>> from openbrowser.browser.session import BrowserSession
+        >>> session = BrowserSession()
+        >>> await session.start()
+        >>> tools = Tools(session)
+        >>> result = await tools.execute_action('navigate', {'url': 'https://example.com'})
+    
+    Note:
+        This class is typically used internally by BrowserAgent. For direct
+        browser control, consider using BrowserSession methods directly.
+    """
 
     def __init__(
         self,
@@ -215,6 +264,18 @@ class Tools:
         output_model: type[T] | None = None,
         display_files_in_done_text: bool = True,
     ):
+        """Initialize the Tools service.
+        
+        Args:
+            browser_session: The browser session to perform actions on.
+            exclude_actions: List of action names to exclude from registration.
+                Useful for limiting available actions for specific use cases.
+            output_model: Optional Pydantic model for structured output.
+                When provided, the 'done' action will return data matching
+                this schema instead of free-form text.
+            display_files_in_done_text: If True, file contents are included
+                in the done message. If False, only file paths are returned.
+        """
         self.browser_session = browser_session
         self._selector_map: dict[int, int] = {}
         self.display_files_in_done_text = display_files_in_done_text

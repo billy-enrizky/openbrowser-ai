@@ -1,7 +1,20 @@
 """Namespace initialization for code-use mode.
 
 This module creates a namespace with all browser tools available as functions,
-similar to a Jupyter notebook environment.
+similar to a Jupyter notebook environment. The namespace provides a sandboxed
+execution context where LLM-generated Python code can safely interact with
+the browser.
+
+Key Components:
+    create_namespace: Creates the execution namespace with all browser tools.
+    evaluate: Executes JavaScript in the browser and returns results.
+    EvaluateError: Exception raised when JavaScript execution fails.
+
+Security Considerations:
+    - The namespace is isolated but runs arbitrary Python code
+    - JavaScript execution happens in the browser's security context
+    - File system access is controlled by the FileSystem service
+    - Sensitive data can be injected via the sensitive_data parameter
 """
 
 import asyncio
@@ -20,15 +33,28 @@ logger = logging.getLogger(__name__)
 
 
 def _strip_js_comments(js_code: str) -> str:
-    """
-    Remove JavaScript comments before CDP evaluation.
-    CDP's Runtime.evaluate doesn't handle comments in all contexts.
+    """Remove JavaScript comments before CDP evaluation.
+
+    CDP's Runtime.evaluate doesn't handle comments in all contexts,
+    so we strip them before sending code to the browser.
 
     Args:
-        js_code: JavaScript code potentially containing comments
+        js_code: JavaScript code potentially containing comments.
 
     Returns:
-        JavaScript code with comments stripped
+        JavaScript code with single-line (//) and multi-line (/* */)
+        comments removed. Only removes single-line comments that start
+        at the beginning of a line (after optional whitespace).
+
+    Example:
+        ```python
+        code = '''/* comment */
+        // line comment
+        return 42; // inline - NOT removed
+        '''
+        clean = _strip_js_comments(code)
+        # Returns: "\n\nreturn 42; // inline - NOT removed\n"
+        ```
     """
     # Remove multi-line comments (/* ... */)
     js_code = re.sub(r"/\*.*?\*/", "", js_code, flags=re.DOTALL)
@@ -40,25 +66,53 @@ def _strip_js_comments(js_code: str) -> str:
 
 
 class EvaluateError(Exception):
-    """Special exception raised by evaluate() to stop Python execution immediately."""
+    """Exception raised by evaluate() when JavaScript execution fails.
+
+    This exception immediately stops Python code execution when raised,
+    allowing the agent to handle JavaScript errors gracefully and
+    provide feedback to the LLM about what went wrong.
+
+    The error message contains details about the JavaScript failure,
+    including the original error text and any exception details from
+    the browser.
+
+    Example:
+        ```python
+        try:
+            result = await evaluate("nonexistent.property")
+        except EvaluateError as e:
+            print(f"JS failed: {e}")
+            # Handle the error or report to LLM
+        ```
+    """
 
     pass
 
 
 async def evaluate(code: str, browser_session: BrowserSession) -> Any:
-    """
-    Execute JavaScript code in the browser and return the result.
+    """Execute JavaScript code in the browser and return the result.
+
+    Sends JavaScript code to the browser for execution via CDP
+    (Chrome DevTools Protocol) and returns the result as a Python object.
+    Complex objects are automatically deserialized.
 
     Args:
-        code: JavaScript code to execute (must be wrapped in IIFE)
+        code: JavaScript code to execute. Should be wrapped in an IIFE
+            (Immediately Invoked Function Expression) for proper scoping.
 
     Returns:
-        The result of the JavaScript execution
+        The result of the JavaScript execution. Can be:
+            - Primitive values (str, int, float, bool, None)
+            - Complex objects (dict, list) - automatically deserialized
+            - "undefined" if the code returns undefined
 
     Raises:
-        EvaluateError: If JavaScript execution fails. This stops Python execution immediately.
+        EvaluateError: If JavaScript execution fails. This exception stops
+            Python execution immediately to signal the error to the agent.
 
     Example:
+        ```python
+        # Extract data from the page
         result = await evaluate('''
         (function(){
             return Array.from(document.querySelectorAll('.product')).map(p => ({
@@ -67,6 +121,16 @@ async def evaluate(code: str, browser_session: BrowserSession) -> Any:
             }))
         })()
         ''')
+        # result is a list of dicts
+
+        # Get a simple value
+        title = await evaluate('document.title')
+        ```
+
+    Note:
+        JavaScript comments are automatically stripped before execution.
+        The code is executed with returnByValue=True and awaitPromise=True,
+        so async operations and Promises are automatically awaited.
     """
     # Strip JavaScript comments before CDP evaluation
     code = _strip_js_comments(code)
@@ -130,24 +194,43 @@ def create_namespace(
     tools: Tools | None = None,
     sensitive_data: dict[str, str | dict[str, str]] | None = None,
 ) -> dict[str, Any]:
-    """
-    Create a namespace with all browser tools available as functions.
+    """Create a namespace with all browser tools available as functions.
 
     This function creates a dictionary of functions that can be used to interact
-    with the browser, similar to a Jupyter notebook environment.
+    with the browser, similar to a Jupyter notebook environment. The namespace
+    includes browser control functions, standard library modules, and any
+    injected sensitive data.
 
     Args:
-        browser_session: The browser session to use
-        tools: Optional Tools instance (will create default if not provided)
-        sensitive_data: Optional sensitive data dictionary
+        browser_session: The active browser session to control.
+        tools: Optional Tools instance containing action registry.
+            Creates default tools if not provided.
+        sensitive_data: Optional dictionary of sensitive data to inject.
+            Can contain strings or nested dictionaries of strings.
 
     Returns:
-        Dictionary containing all available functions and objects
+        Dictionary containing:
+            - Browser control functions (navigate, click, input_text, etc.)
+            - The evaluate() function for JavaScript execution
+            - Standard library modules (json, asyncio, Path, csv, re, datetime)
+            - The browser session object as 'browser'
+            - Any sensitive data values
 
     Example:
+        ```python
         namespace = create_namespace(browser_session)
+
+        # Use the namespace functions
         await namespace['navigate'](url='https://google.com')
         result = await namespace['evaluate']('document.title')
+
+        # Access standard library
+        data = namespace['json'].dumps({'key': 'value'})
+        ```
+
+    Note:
+        The 'input' action is renamed to 'input_text' in the namespace
+        to avoid shadowing Python's built-in input() function.
     """
     if tools is None:
         tools = Tools(browser_session)
@@ -336,14 +419,29 @@ def create_namespace(
 
 
 def get_namespace_documentation(namespace: dict[str, Any]) -> str:
-    """
-    Generate documentation for all available functions in the namespace.
+    """Generate documentation for all available functions in the namespace.
+
+    Creates a Markdown-formatted documentation string listing all callable
+    functions in the namespace with their docstrings.
 
     Args:
-        namespace: The namespace dictionary
+        namespace: The namespace dictionary created by create_namespace().
 
     Returns:
-        Markdown-formatted documentation string
+        Markdown-formatted string with function names and their docstrings.
+        Functions starting with underscore are excluded.
+
+    Example:
+        ```python
+        namespace = create_namespace(browser_session)
+        docs = get_namespace_documentation(namespace)
+        print(docs)
+        # Output:
+        # # Available Functions
+        #
+        # ## click
+        # Click on an element...
+        ```
     """
     docs = ["# Available Functions\n"]
 

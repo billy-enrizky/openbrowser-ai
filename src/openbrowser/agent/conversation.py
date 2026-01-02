@@ -21,7 +21,21 @@ logger = logging.getLogger(__name__)
 
 
 class ConversationMetadata(BaseModel):
-    """Metadata for a saved conversation."""
+    """Metadata for a saved conversation.
+    
+    Stores information about a conversation including task details,
+    timestamps, and outcome information for later analysis.
+    
+    Attributes:
+        task: The task description for this conversation.
+        created_at: ISO format timestamp when conversation was saved.
+        total_messages: Total number of messages in conversation.
+        total_steps: Number of agent steps taken.
+        is_successful: Whether the task completed successfully.
+        final_result: Final result or output message.
+        llm_provider: Provider name (e.g., 'anthropic', 'openai').
+        llm_model: Model name used for the conversation.
+    """
 
     task: str
     created_at: str
@@ -34,7 +48,15 @@ class ConversationMetadata(BaseModel):
 
 
 class SavedConversation(BaseModel):
-    """Saved conversation with messages and metadata."""
+    """Saved conversation with messages and metadata.
+    
+    Container for a complete conversation that can be serialized
+    to JSON for persistence or sharing.
+    
+    Attributes:
+        metadata: Conversation metadata including task and outcome.
+        messages: List of serialized message dictionaries.
+    """
 
     metadata: ConversationMetadata
     messages: list[dict[str, Any]]
@@ -140,7 +162,17 @@ def load_conversation(
 
 
 def _serialize_message(message: BaseMessage) -> Optional[dict[str, Any]]:
-    """Serialize a LangChain message to a dictionary."""
+    """Serialize a LangChain message to a dictionary.
+    
+    Converts a LangChain message to a JSON-serializable dictionary,
+    stripping image data to reduce file size.
+    
+    Args:
+        message: LangChain BaseMessage to serialize.
+        
+    Returns:
+        Dictionary representation of the message, or None if serialization fails.
+    """
     try:
         msg_type = type(message).__name__
 
@@ -179,7 +211,17 @@ def _serialize_message(message: BaseMessage) -> Optional[dict[str, Any]]:
 
 
 def _deserialize_message(data: dict[str, Any]) -> Optional[BaseMessage]:
-    """Deserialize a dictionary to a LangChain message."""
+    """Deserialize a dictionary to a LangChain message.
+    
+    Reconstructs a LangChain message from a serialized dictionary
+    representation.
+    
+    Args:
+        data: Dictionary containing message type and content.
+        
+    Returns:
+        LangChain BaseMessage instance, or None if deserialization fails.
+    """
     try:
         msg_type = data.get("type", "")
         content = data.get("content", "")

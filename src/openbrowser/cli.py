@@ -51,7 +51,25 @@ def run(
     verbose: bool,
     save_gif: Optional[str],
 ):
-    """Run a browser automation task."""
+    """Run a browser automation task.
+    
+    Executes a browser automation task using the specified LLM provider and
+    configuration options. The agent will navigate web pages and interact
+    with elements to accomplish the given task.
+    
+    Args:
+        task: Natural language description of the task to accomplish.
+        provider: LLM provider to use (openai, anthropic, google, groq, ollama, openrouter, aws, azure).
+        model: Model name to use. If not specified, uses the provider's default model.
+        headless: Whether to run the browser in headless mode (no visible window).
+        max_steps: Maximum number of steps the agent can take before stopping.
+        vision: Whether to enable vision capabilities for screenshot analysis.
+        verbose: Enable verbose logging output for debugging.
+        save_gif: Optional path to save execution recording as GIF.
+        
+    Example:
+        >>> openbrowser run "Search for Python tutorials" --provider openai --headless
+    """
     # Configure logging
     log_level = logging.DEBUG if verbose else logging.INFO
     logging.basicConfig(level=log_level, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -134,7 +152,20 @@ def run(
 
 @cli.command()
 def init():
-    """Initialize OpenBrowser configuration."""
+    """Initialize OpenBrowser configuration.
+    
+    Checks for available LLM provider API keys in environment variables
+    and displays their configuration status. This helps users verify
+    which providers are properly configured before running tasks.
+    
+    The following environment variables are checked:
+        - OPENAI_API_KEY: OpenAI provider
+        - ANTHROPIC_API_KEY: Anthropic provider
+        - GOOGLE_API_KEY: Google provider
+        - GROQ_API_KEY: Groq provider
+        - OPENROUTER_API_KEY: OpenRouter provider
+        - AZURE_OPENAI_API_KEY: Azure OpenAI provider
+    """
     console.print("[blue]Initializing OpenBrowser configuration...[/blue]")
 
     # Check for environment variables
@@ -164,7 +195,22 @@ def init():
 
 @cli.command()
 def models():
-    """List available models for each provider."""
+    """List available models for each provider.
+    
+    Displays a formatted list of commonly used models organized by
+    LLM provider. This serves as a quick reference for selecting
+    the appropriate model for different use cases.
+    
+    Providers and example models:
+        - OpenAI: gpt-4o, gpt-4o-mini, gpt-4-turbo
+        - Anthropic: claude-sonnet-4-20250514, claude-3-5-sonnet
+        - Google: gemini-2.0-flash, gemini-1.5-pro
+        - Groq: llama-3.3-70b-versatile, mixtral-8x7b
+        - Ollama: llama3.2, mistral, codellama
+        - OpenRouter: Various models from multiple providers
+        - AWS Bedrock: Anthropic Claude models
+        - Azure OpenAI: Microsoft-hosted OpenAI models
+    """
     models_info = {
         "OpenAI": ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo"],
         "Anthropic": ["claude-sonnet-4-20250514", "claude-3-5-sonnet-20241022", "claude-3-opus-20240229"],
@@ -184,7 +230,24 @@ def models():
 
 
 def _get_default_model(provider: str) -> str:
-    """Get default model for a provider."""
+    """Get default model for a provider.
+    
+    Returns the recommended default model for a given LLM provider.
+    These defaults are chosen for a balance of capability and cost.
+    
+    Args:
+        provider: The LLM provider name (case-insensitive).
+        
+    Returns:
+        The default model name for the provider. Falls back to 'gpt-4o'
+        if the provider is not recognized.
+        
+    Example:
+        >>> _get_default_model('anthropic')
+        'claude-sonnet-4-20250514'
+        >>> _get_default_model('unknown')
+        'gpt-4o'
+    """
     defaults = {
         "openai": "gpt-4o",
         "anthropic": "claude-sonnet-4-20250514",
@@ -199,7 +262,23 @@ def _get_default_model(provider: str) -> str:
 
 
 def main():
-    """Main entry point for CLI."""
+    """Main entry point for CLI.
+    
+    This function serves as the primary entry point for the OpenBrowser
+    command-line interface. It initializes the Click command group and
+    handles command routing.
+    
+    The CLI provides the following commands:
+        - run: Execute a browser automation task
+        - init: Initialize configuration and check API keys
+        - models: List available models by provider
+    
+    Example:
+        >>> # From command line:
+        >>> openbrowser run "Search Google for Python tutorials"
+        >>> openbrowser init
+        >>> openbrowser models
+    """
     cli()
 
 

@@ -99,7 +99,19 @@ def create_history_gif(
 
 
 def _add_step_annotation(image: "Image.Image", step_number: int, font_size: int = 24) -> "Image.Image":
-    """Add step number annotation to image."""
+    """Add step number annotation to an image.
+    
+    Overlays a step number label on the top-left corner of the image
+    with a semi-transparent background for visibility.
+    
+    Args:
+        image: PIL Image to annotate.
+        step_number: Step number to display.
+        font_size: Font size for the annotation text.
+        
+    Returns:
+        New PIL Image with the step annotation overlay.
+    """
     from PIL import ImageDraw, ImageFont
 
     # Create a copy to avoid modifying original

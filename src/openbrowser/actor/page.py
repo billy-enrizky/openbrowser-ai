@@ -25,6 +25,30 @@ class Page:
     """Page operations (tab or iframe).
     
     Provides page-level interactions using Chrome DevTools Protocol.
+    Represents a browser tab or iframe and offers methods for navigation,
+    JavaScript evaluation, element interaction, and content extraction.
+    
+    The Page class provides:
+        - Navigation (goto, reload, back, forward)
+        - JavaScript evaluation
+        - Screenshot capture
+        - Element retrieval by selector or LLM prompt
+        - Keyboard input
+        - Viewport configuration
+        - Content extraction with LLM
+    
+    Attributes:
+        _browser_session: The browser session for CDP communication.
+        _target_id: CDP target ID for this page.
+        _session_id: CDP session ID (created on first use).
+        _mouse: Mouse interface for this page.
+        _llm: Optional LLM for element/content extraction.
+        
+    Example:
+        >>> page = Page(browser_session, target_id)
+        >>> await page.goto("https://example.com")
+        >>> await page.press("Enter")
+        >>> element = await page.get_element(backend_node_id=123)
     """
 
     def __init__(
@@ -46,7 +70,14 @@ class Page:
         return self._browser_session.cdp_client
 
     async def _ensure_session(self) -> str:
-        """Ensure we have a session ID for this target."""
+        """Ensure we have a session ID for this target.
+        
+        Attaches to the target if not already attached and enables
+        necessary CDP domains (Page, DOM, Runtime, Network).
+        
+        Returns:
+            The CDP session ID for this target.
+        """
         if not self._session_id:
             result = await self._client.send(
                 'Target.attachToTarget',
@@ -66,12 +97,25 @@ class Page:
 
     @property
     async def session_id(self) -> str:
-        """Get the session ID for this target."""
+        """Get the session ID for this target.
+        
+        Ensures a session exists and returns its ID.
+        
+        Returns:
+            The CDP session ID string.
+        """
         return await self._ensure_session()
 
     @property
     async def mouse(self) -> 'Mouse':
-        """Get the mouse interface for this target."""
+        """Get the mouse interface for this target.
+        
+        Creates a Mouse instance on first access, connected to this page's
+        CDP session.
+        
+        Returns:
+            Mouse instance for mouse operations on this page.
+        """
         if not self._mouse:
             session_id = await self._ensure_session()
             from src.openbrowser.actor.mouse import Mouse
@@ -79,18 +123,29 @@ class Page:
         return self._mouse
 
     async def reload(self) -> None:
-        """Reload the page."""
+        """Reload the page.
+        
+        Refreshes the current page, equivalent to pressing F5 or
+        clicking the browser reload button.
+        """
         session_id = await self._ensure_session()
         await self._client.send('Page.reload', session_id=session_id)
 
     async def get_element(self, backend_node_id: int) -> 'Element':
         """Get an element by its backend node ID.
         
+        Creates an Element instance for interacting with a specific
+        DOM node identified by its CDP backend node ID.
+        
         Args:
-            backend_node_id: CDP backend node ID
+            backend_node_id: CDP backend node ID from DOM serialization.
             
         Returns:
-            Element instance
+            Element instance for the specified node.
+            
+        Example:
+            >>> element = await page.get_element(backend_node_id=123)
+            >>> await element.click()
         """
         session_id = await self._ensure_session()
         from src.openbrowser.actor.element import Element
@@ -99,12 +154,23 @@ class Page:
     async def evaluate(self, page_function: str, *args) -> str:
         """Execute JavaScript in the page context.
         
+        Runs a JavaScript arrow function in the page's global context.
+        The function can access the DOM, window object, and any page variables.
+        
         Args:
-            page_function: JavaScript arrow function (must start with (...args) =>)
-            *args: Arguments to pass to the function
+            page_function: JavaScript arrow function (must start with (...args) =>).
+            *args: Arguments to pass to the function. Will be JSON-serialized.
             
         Returns:
-            String representation of the result
+            String representation of the result. Objects are JSON-stringified.
+            
+        Raises:
+            ValueError: If the function is not a valid arrow function.
+            RuntimeError: If JavaScript evaluation fails.
+            
+        Example:
+            >>> title = await page.evaluate('() => document.title')
+            >>> await page.evaluate('(x, y) => x + y', 1, 2)  # Returns '3'
         """
         session_id = await self._ensure_session()
 
@@ -151,7 +217,20 @@ class Page:
                 return str(value)
 
     def _fix_javascript_string(self, js_code: str) -> str:
-        """Fix common JavaScript string parsing issues."""
+        """Fix common JavaScript string parsing issues.
+        
+        Cleans up JavaScript code that may have been incorrectly quoted
+        or escaped, such as when parsed from LLM output.
+        
+        Args:
+            js_code: JavaScript code string to clean.
+            
+        Returns:
+            Cleaned JavaScript code ready for evaluation.
+            
+        Raises:
+            ValueError: If the code is empty after cleaning.
+        """
         js_code = js_code.strip()
 
         # Remove obvious Python string wrapper quotes if they exist
@@ -177,12 +256,18 @@ class Page:
     async def screenshot(self, format: str = 'jpeg', quality: int | None = None) -> str:
         """Take a screenshot of the page.
         
+        Captures the current viewport as an image.
+        
         Args:
-            format: Image format ('jpeg', 'png', 'webp')
-            quality: Quality 0-100 for JPEG format
+            format: Image format ('jpeg', 'png', 'webp'). Default 'jpeg'.
+            quality: Quality 0-100 for JPEG format. Ignored for other formats.
             
         Returns:
-            Base64-encoded image data
+            Base64-encoded image data string.
+            
+        Example:
+            >>> screenshot = await page.screenshot()
+            >>> png_shot = await page.screenshot(format='png')
         """
         session_id = await self._ensure_session()
 
@@ -201,8 +286,19 @@ class Page:
     async def press(self, key: str) -> None:
         """Press a key on the page.
         
+        Sends keyboard input to the page. Supports single keys and
+        key combinations with modifiers.
+        
         Args:
-            key: Key name or combination (e.g., 'Enter', 'Control+A')
+            key: Key name or combination. Examples:
+                - Single key: 'Enter', 'Tab', 'Escape', 'a'
+                - With modifiers: 'Control+A', 'Shift+Tab', 'Meta+C'
+                - Function keys: 'F1', 'F12'
+                
+        Example:
+            >>> await page.press('Enter')
+            >>> await page.press('Control+A')  # Select all
+            >>> await page.press('Meta+C')  # Copy (Mac)
         """
         session_id = await self._ensure_session()
 
@@ -271,9 +367,16 @@ class Page:
     async def set_viewport_size(self, width: int, height: int) -> None:
         """Set the viewport size.
         
+        Configures the browser viewport dimensions. Affects how pages
+        render and what's visible in screenshots.
+        
         Args:
-            width: Viewport width
-            height: Viewport height
+            width: Viewport width in pixels.
+            height: Viewport height in pixels.
+            
+        Example:
+            >>> await page.set_viewport_size(1920, 1080)  # Full HD
+            >>> await page.set_viewport_size(375, 812)  # iPhone X
         """
         session_id = await self._ensure_session()
         await self._client.send(
@@ -288,7 +391,13 @@ class Page:
         )
 
     async def get_target_info(self) -> dict:
-        """Get target information."""
+        """Get target information.
+        
+        Retrieves CDP target metadata including URL, title, and type.
+        
+        Returns:
+            Dict with target info including 'url', 'title', 'type' keys.
+        """
         result = await self._client.send(
             'Target.getTargetInfo',
             {'targetId': self._target_id}
@@ -296,20 +405,34 @@ class Page:
         return result['targetInfo']
 
     async def get_url(self) -> str:
-        """Get the current URL."""
+        """Get the current URL.
+        
+        Returns:
+            The current page URL as a string.
+        """
         info = await self.get_target_info()
         return info.get('url', '')
 
     async def get_title(self) -> str:
-        """Get the current page title."""
+        """Get the current page title.
+        
+        Returns:
+            The page title from the <title> element.
+        """
         info = await self.get_target_info()
         return info.get('title', '')
 
     async def goto(self, url: str) -> None:
         """Navigate to a URL.
         
+        Loads the specified URL in this page. Does not wait for
+        page load to complete.
+        
         Args:
-            url: Target URL
+            url: Target URL (must include protocol, e.g., 'https://').
+            
+        Example:
+            >>> await page.goto("https://example.com")
         """
         session_id = await self._ensure_session()
         await self._client.send(
@@ -319,11 +442,22 @@ class Page:
         )
 
     async def navigate(self, url: str) -> None:
-        """Alias for goto."""
+        """Alias for goto.
+        
+        Args:
+            url: Target URL to navigate to.
+        """
         await self.goto(url)
 
     async def go_back(self) -> None:
-        """Navigate back in history."""
+        """Navigate back in history.
+        
+        Equivalent to clicking the browser's back button. Uses the
+        navigation history to go to the previous page.
+        
+        Raises:
+            RuntimeError: If there is no previous entry in history.
+        """
         session_id = await self._ensure_session()
 
         try:
@@ -347,7 +481,14 @@ class Page:
             raise RuntimeError(f'Failed to navigate back: {e}')
 
     async def go_forward(self) -> None:
-        """Navigate forward in history."""
+        """Navigate forward in history.
+        
+        Equivalent to clicking the browser's forward button. Uses the
+        navigation history to go to the next page.
+        
+        Raises:
+            RuntimeError: If there is no next entry in history.
+        """
         session_id = await self._ensure_session()
 
         try:
@@ -373,11 +514,19 @@ class Page:
     async def get_elements_by_css_selector(self, selector: str) -> list['Element']:
         """Get elements by CSS selector.
         
+        Queries the DOM for all elements matching the given CSS selector
+        and returns Element instances for each.
+        
         Args:
-            selector: CSS selector
+            selector: CSS selector string (e.g., 'button.submit', '#main a').
             
         Returns:
-            List of matching Element instances
+            List of Element instances matching the selector. Empty list if none found.
+            
+        Example:
+            >>> buttons = await page.get_elements_by_css_selector('button')
+            >>> for btn in buttons:
+            ...     await btn.click()
         """
         session_id = await self._ensure_session()
         from src.openbrowser.actor.element import Element
@@ -413,12 +562,25 @@ class Page:
     ) -> 'Element | None':
         """Get an element by natural language prompt using LLM.
         
+        Uses an LLM to find an element on the page based on a natural
+        language description. The LLM analyzes the DOM and returns
+        the index of the matching element.
+        
         Args:
             prompt: Natural language description of the element
-            llm: LLM to use (defaults to instance LLM)
+                (e.g., "the login button", "email input field").
+            llm: LLM instance to use. Defaults to the page's configured LLM.
             
         Returns:
-            Element if found, None otherwise
+            Element instance if found, None if no matching element.
+            
+        Raises:
+            ValueError: If no LLM is provided or configured.
+            
+        Example:
+            >>> btn = await page.get_element_by_prompt("the submit button")
+            >>> if btn:
+            ...     await btn.click()
         """
         from src.openbrowser.agent.views import SystemMessage, UserMessage
         from src.openbrowser.browser.dom.service import DomService
@@ -491,15 +653,18 @@ Return the element index that best matches the prompt, or null if not found.
     ) -> 'Element':
         """Get an element by prompt, raising error if not found.
         
+        Like get_element_by_prompt but raises an exception instead of
+        returning None when the element is not found.
+        
         Args:
-            prompt: Natural language description
-            llm: LLM to use
+            prompt: Natural language description of the element.
+            llm: LLM instance to use for element detection.
             
         Returns:
-            Element instance
+            Element instance for the matched element.
             
         Raises:
-            ValueError: If element not found
+            ValueError: If no element matches the prompt.
         """
         element = await self.get_element_by_prompt(prompt, llm)
         if element is None:
@@ -514,13 +679,30 @@ Return the element index that best matches the prompt, or null if not found.
     ) -> T:
         """Extract structured content from the page using LLM.
         
+        Uses an LLM to extract specific information from the page content
+        and return it as a structured Pydantic model instance.
+        
         Args:
             prompt: Description of what content to extract
-            structured_output: Pydantic model for output structure
-            llm: LLM to use
+                (e.g., "Extract product name and price").
+            structured_output: Pydantic model class defining the output structure.
+            llm: LLM instance to use. Defaults to the page's configured LLM.
             
         Returns:
-            Structured data as specified model instance
+            Instance of the structured_output model with extracted data.
+            
+        Raises:
+            ValueError: If no LLM is provided or configured.
+            RuntimeError: If extraction fails or times out.
+            
+        Example:
+            >>> class Product(BaseModel):
+            ...     name: str
+            ...     price: float
+            >>> product = await page.extract_content(
+            ...     "Extract product details",
+            ...     Product
+            ... )
         """
         from src.openbrowser.agent.views import SystemMessage, UserMessage
 
@@ -559,7 +741,14 @@ Instructions:
             raise RuntimeError(str(e))
 
     async def _extract_page_text(self) -> str:
-        """Extract text content from the page."""
+        """Extract text content from the page.
+        
+        Retrieves the visible text content of the page by accessing
+        document.body.innerText via JavaScript evaluation.
+        
+        Returns:
+            The page's visible text content as a string.
+        """
         session_id = await self._ensure_session()
 
         result = await self._client.send(

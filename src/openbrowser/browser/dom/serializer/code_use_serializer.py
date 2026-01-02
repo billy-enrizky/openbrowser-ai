@@ -1,6 +1,24 @@
 """Ultra-compact serializer optimized for code-use agents.
 
-Focuses on minimal token usage while preserving essential interactive context.
+This serializer focuses on minimal token usage while preserving essential
+interactive context for code generation agents. Key optimizations:
+
+- Keep only top 2 CSS classes for querySelector compatibility
+- Show div/span/p elements only if they have useful attributes or text
+- Inline text up to 80 chars
+- Collapse pointless wrapper elements
+- Skip invisible elements (except iframes)
+
+Constants:
+    CODE_USE_KEY_ATTRIBUTES: Minimal attribute list for code agents.
+    INTERACTIVE_ELEMENTS: Elements agents can interact with.
+    SEMANTIC_STRUCTURE: Semantic elements always shown.
+
+Classes:
+    DOMCodeAgentSerializer: Token-efficient DOM serializer.
+
+Example:
+    >>> html = DOMCodeAgentSerializer.serialize_tree(root, [], 0)
 """
 
 from src.openbrowser.browser.dom.serializer.utils import cap_text_length
@@ -59,18 +77,45 @@ SEMANTIC_STRUCTURE = {
 
 
 class DOMCodeAgentSerializer:
-    """Optimized DOM serializer for code-use agents - balances token efficiency with context."""
+    """Optimized DOM serializer for code-use agents.
+
+    Balances token efficiency with context preservation. Designed for
+    agents that generate code to interact with web pages.
+
+    Key features:
+        - Minimal attribute output (top 2 classes only)
+        - Inline text for compact representation
+        - Collapsing of wrapper elements
+        - Shadow DOM markers (#shadow)
+        - Smart visibility filtering
+
+    Example:
+        >>> html = DOMCodeAgentSerializer.serialize_tree(
+        ...     node=simplified_root,
+        ...     include_attributes=['id', 'class', 'type'],
+        ...     depth=0
+        ... )
+    """
 
     @staticmethod
     def serialize_tree(node: SimplifiedNode | None, include_attributes: list[str], depth: int = 0) -> str:
-        """
-        Serialize DOM tree with smart token optimization.
+        """Serialize DOM tree with smart token optimization.
 
         Strategy:
         - Keep top 2 CSS classes for querySelector compatibility
         - Show div/span/p elements with useful attributes or text
         - Show all interactive + semantic elements
         - Inline text up to 80 chars for better context
+        - Skip invisible elements (except iframes)
+        - Collapse single-child wrappers without attributes
+
+        Args:
+            node: SimplifiedNode to serialize (or None).
+            include_attributes: Attributes to consider including.
+            depth: Current indentation depth.
+
+        Returns:
+            Multi-line string representation.
         """
         if not node:
             return ''
@@ -152,7 +197,16 @@ class DOMCodeAgentSerializer:
 
     @staticmethod
     def _serialize_children(node: SimplifiedNode, include_attributes: list[str], depth: int) -> str:
-        """Serialize children."""
+        """Serialize children of a node.
+
+        Args:
+            node: Parent SimplifiedNode.
+            include_attributes: Attributes to include.
+            depth: Current indentation depth.
+
+        Returns:
+            Newline-joined serialized children.
+        """
         children_output = []
         for child in node.children:
             child_text = DOMCodeAgentSerializer.serialize_tree(child, include_attributes, depth)
@@ -162,7 +216,17 @@ class DOMCodeAgentSerializer:
 
     @staticmethod
     def _build_minimal_attributes(node: EnhancedDOMTreeNode) -> str:
-        """Build minimal but useful attributes - keep top 2 classes for selectors."""
+        """Build minimal but useful attributes string.
+
+        Keeps only top 2 CSS classes for querySelector compatibility.
+        Caps attribute values at 25 chars.
+
+        Args:
+            node: DOM tree node to extract attributes from.
+
+        Returns:
+            Space-separated attribute string (e.g., 'id="x" class="a b"').
+        """
         attrs = []
 
         if node.attributes:

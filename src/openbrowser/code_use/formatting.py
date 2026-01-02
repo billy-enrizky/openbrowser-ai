@@ -1,4 +1,10 @@
-"""Browser state formatting helpers for code-use agent."""
+"""Browser state formatting helpers for code-use agent.
+
+This module provides utilities for formatting browser state information
+into a text representation suitable for LLM consumption. The formatted
+output includes URL, title, scroll position, available variables, and
+a simplified DOM structure.
+"""
 
 import logging
 from typing import Any
@@ -17,20 +23,45 @@ async def format_browser_state_for_llm(
     screenshot: str | None = None,
     page_info: dict | None = None,
 ) -> str:
-    """
-    Format browser state summary for LLM consumption in code-use mode.
+    """Format browser state summary for LLM consumption in code-use mode.
+
+    Creates a structured text representation of the current browser state
+    that helps the LLM understand the page context and available actions.
+    The output includes Markdown formatting for readability.
 
     Args:
-        url: Current page URL
-        title: Current page title
-        dom_html: DOM representation
-        namespace: The code execution namespace (for showing available variables)
-        browser_session: Browser session for additional checks
-        screenshot: Optional screenshot base64 string
-        page_info: Optional page scroll/size information
+        url: Current page URL.
+        title: Current page title.
+        dom_html: Simplified DOM representation of the visible page.
+        namespace: The code execution namespace containing available
+            functions and variables.
+        browser_session: The active browser session (used for additional checks).
+        screenshot: Optional base64-encoded screenshot (not included in text output).
+        page_info: Optional dictionary with scroll/viewport information:
+            - pixels_above: Pixels scrolled from top
+            - pixels_below: Pixels remaining below viewport
+            - viewport_height: Height of the visible viewport
+            - page_height: Total page height
 
     Returns:
-        Formatted browser state text for LLM
+        Markdown-formatted string containing:
+            - Browser State header
+            - Current URL and title
+            - Page scroll position (if page_info provided)
+            - Available code block variables and namespace variables
+            - DOM structure (possibly truncated)
+
+    Example:
+        ```python
+        state_text = await format_browser_state_for_llm(
+            url="https://example.com/products",
+            title="Products - Example Store",
+            dom_html="<div>...</div>",
+            namespace=agent.namespace,
+            browser_session=agent.browser_session,
+            page_info={"pixels_above": 500, "pixels_below": 1000, "viewport_height": 800}
+        )
+        ```
     """
     if dom_html == "":
         dom_html = "Empty DOM tree (you might have to wait for the page to load)"
