@@ -1,1 +1,1 @@
-# openbrowser
+# openbrowser-ai

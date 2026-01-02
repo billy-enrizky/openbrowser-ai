@@ -39,7 +39,7 @@ class AgentTelemetryEvent(BaseModel):
     # Metadata
     browser_headless: bool = Field(default=True, description="Whether browser was in headless mode")
     use_vision: bool = Field(default=True, description="Whether vision was enabled")
-    version: str = Field(default="0.1.0", description="OpenBrowser version")
+    version: str = Field(default="0.1.0", description="openbrowser-ai version")
 
 
 class StepTelemetryEvent(BaseModel):

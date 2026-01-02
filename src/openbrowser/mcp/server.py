@@ -1,4 +1,4 @@
-"""MCP Server for openbrowser - exposes browser automation capabilities via Model Context Protocol.
+"""MCP Server for openbrowser-ai - exposes browser automation capabilities via Model Context Protocol.
 
 This server provides tools for:
 - Running autonomous browser tasks with an AI agent
@@ -11,7 +11,7 @@ Usage:
 Or as an MCP server in Claude Desktop or other MCP clients:
     {
         "mcpServers": {
-            "openbrowser": {
+            "openbrowser-ai": {
                 "command": "python",
                 "args": ["-m", "src.openbrowser.mcp"],
                 "env": {
@@ -52,7 +52,7 @@ except ImportError:
 
 
 class OpenBrowserServer:
-    """MCP Server for openbrowser capabilities.
+    """MCP Server for openbrowser-ai capabilities.
     
     This class implements a Model Context Protocol (MCP) server that exposes
     browser automation capabilities to MCP clients like Claude Desktop.
@@ -92,7 +92,7 @@ class OpenBrowserServer:
         if not MCP_AVAILABLE:
             raise ImportError("MCP SDK not installed. Install with: pip install mcp")
 
-        self.server = Server("openbrowser")
+        self.server = Server("openbrowser-ai")
         self.browser_session = None
         self.tools = None
         self._start_time = time.time()
@@ -110,7 +110,7 @@ class OpenBrowserServer:
 
         @self.server.list_tools()
         async def handle_list_tools() -> list[types.Tool]:
-            """List all available openbrowser tools."""
+            """List all available openbrowser-ai tools."""
             return [
                 # Browser navigation
                 types.Tool(
@@ -269,7 +269,7 @@ class OpenBrowserServer:
                 return [types.TextContent(type="text", text=f"Error: {str(e)}")]
 
     async def _execute_tool(self, tool_name: str, arguments: dict[str, Any]) -> str:
-        """Execute an openbrowser tool."""
+        """Execute an openbrowser-ai tool."""
 
         # Agent-based tools
         if tool_name == "run_browser_agent":
@@ -335,7 +335,7 @@ class OpenBrowserServer:
         # Create browser profile
         profile = BrowserProfile(
             headless=False,
-            downloads_path=str(Path.home() / "Downloads" / "openbrowser-mcp"),
+            downloads_path=str(Path.home() / "Downloads" / "openbrowser-ai-mcp"),
         )
 
         # Create browser session
@@ -674,7 +674,7 @@ class OpenBrowserServer:
                 read_stream,
                 write_stream,
                 InitializationOptions(
-                    server_name="openbrowser",
+                    server_name="openbrowser-ai",
                     server_version="0.1.0",
                     capabilities=self.server.get_capabilities(
                         notification_options=NotificationOptions(),
@@ -685,9 +685,9 @@ class OpenBrowserServer:
 
 
 async def main(session_timeout_minutes: int = 10):
-    """Main entry point for the OpenBrowser MCP server.
+    """Main entry point for the openbrowser-ai MCP server.
     
-    This function initializes and runs the OpenBrowser MCP server,
+    This function initializes and runs the openbrowser-ai MCP server,
     which exposes browser automation capabilities via the Model Context Protocol.
     
     Args:

@@ -1,6 +1,6 @@
 # GitHub Actions Workflow for Running Tests
 #
-# This workflow runs the openbrowser test suite on push and pull requests.
+# This workflow runs the openbrowser-ai test suite on push and pull requests.
 # It tests against multiple Python versions and operating systems.
 #
 # Tests are run using pytest with coverage reporting.

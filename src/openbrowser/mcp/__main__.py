@@ -1,4 +1,4 @@
-"""Entry point for running openbrowser MCP server.
+"""Entry point for running openbrowser-ai MCP server.
 
 Usage:
     python -m src.openbrowser.mcp
