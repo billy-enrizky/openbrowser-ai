@@ -1,4 +1,23 @@
-"""HTML serializer for enhanced DOM trees following browser-use pattern."""
+"""HTML serializer for enhanced DOM trees following browser-use pattern.
+
+This module provides HTMLSerializer for reconstructing HTML from enhanced
+DOM trees, including shadow DOM content that is not captured by standard
+getOuterHTML calls.
+
+Key features:
+- Shadow DOM serialization (both open and closed)
+- Iframe content document handling
+- Base64 image filtering (tracking pixels, placeholders)
+- SPA JSON state filtering (hidden code blocks)
+- Proper void element handling
+
+Classes:
+    HTMLSerializer: Converts EnhancedDOMTreeNode to HTML string.
+
+Example:
+    >>> serializer = HTMLSerializer(extract_links=True)
+    >>> html = serializer.serialize(enhanced_dom_tree)
+"""
 
 from src.openbrowser.browser.dom.views import EnhancedDOMTreeNode, NodeType
 
@@ -6,33 +25,55 @@ from src.openbrowser.browser.dom.views import EnhancedDOMTreeNode, NodeType
 class HTMLSerializer:
     """Serializes enhanced DOM trees back to HTML format.
 
-    This serializer reconstructs HTML from the enhanced DOM tree, including:
-    - Shadow DOM content (both open and closed)
+    Reconstructs HTML from the enhanced DOM tree, including:
+    - Shadow DOM content (both open and closed, as declarative shadow DOM)
     - Iframe content documents
     - All attributes and text nodes
     - Proper HTML structure
 
     Unlike getOuterHTML which only captures light DOM, this captures the full
     enhanced tree including shadow roots that are crucial for modern SPAs.
+
+    Filtering applied:
+    - Skips script, style, head, meta, link, title tags
+    - Skips hidden code blocks (SPA JSON state)
+    - Skips base64 inline images (tracking pixels)
+
+    Attributes:
+        extract_links: Whether to preserve href attributes.
+
+    Example:
+        >>> serializer = HTMLSerializer(extract_links=False)
+        >>> html = serializer.serialize(enhanced_root)
     """
 
     def __init__(self, extract_links: bool = False):
         """Initialize the HTML serializer.
 
         Args:
-            extract_links: If True, preserves all links. If False, removes href attributes.
+            extract_links: If True, preserves all href attributes.
+                If False, removes href attributes from output.
         """
         self.extract_links = extract_links
 
     def serialize(self, node: EnhancedDOMTreeNode, depth: int = 0) -> str:
         """Serialize an enhanced DOM tree node to HTML.
 
+        Recursively converts the DOM tree to HTML string, handling:
+        - Document nodes (root)
+        - Document fragment nodes (shadow DOM)
+        - Element nodes (regular HTML elements)
+        - Text nodes
+        - Iframe content documents
+
         Args:
-            node: The enhanced DOM tree node to serialize
-            depth: Current depth for indentation (internal use)
+            node: The enhanced DOM tree node to serialize.
+            depth: Current depth for internal tracking (not used for
+                indentation in output).
 
         Returns:
-            HTML string representation of the node and its descendants
+            HTML string representation of the node and its descendants.
+            Empty string for filtered/skipped elements.
         """
         if node.node_type == NodeType.DOCUMENT_NODE:
             # Process document root - serialize all children

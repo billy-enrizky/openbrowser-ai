@@ -46,6 +46,28 @@ class Element:
     """Element operations using BackendNodeId.
     
     Provides low-level DOM element interactions using Chrome DevTools Protocol.
+    This class wraps CDP operations for interacting with specific DOM elements
+    identified by their backend node ID.
+    
+    The Element class provides methods for:
+        - Clicking elements with multiple fallback strategies
+        - Filling input fields with text
+        - Hovering and focusing elements
+        - Selecting options in dropdowns
+        - Drag and drop operations
+        - Getting element attributes and bounding boxes
+        - Taking element screenshots
+        - Evaluating JavaScript in element context
+    
+    Attributes:
+        _browser_session: The browser session for CDP communication.
+        _backend_node_id: CDP backend node ID for this element.
+        _session_id: Optional CDP session ID for target-specific operations.
+        
+    Example:
+        >>> element = await page.get_element(backend_node_id=123)
+        >>> await element.click()
+        >>> await element.fill("Hello World")
     """
 
     def __init__(
@@ -64,7 +86,17 @@ class Element:
         return self._browser_session.cdp_client
 
     async def _get_node_id(self) -> int:
-        """Get DOM node ID from backend node ID."""
+        """Get DOM node ID from backend node ID.
+        
+        Converts the backend node ID to a DOM node ID using CDP's
+        pushNodesByBackendIdsToFrontend command.
+        
+        Returns:
+            The DOM node ID for this element.
+            
+        Raises:
+            RuntimeError: If the element cannot be found in the DOM.
+        """
         result = await self._client.send(
             'DOM.pushNodesByBackendIdsToFrontend',
             {'backendNodeIds': [self._backend_node_id]},
@@ -73,7 +105,14 @@ class Element:
         return result['nodeIds'][0]
 
     async def _get_remote_object_id(self) -> str | None:
-        """Get remote object ID for this element."""
+        """Get remote object ID for this element.
+        
+        Resolves the DOM node to a Runtime remote object, which is needed
+        for JavaScript evaluation and certain CDP operations.
+        
+        Returns:
+            The remote object ID string, or None if resolution fails.
+        """
         node_id = await self._get_node_id()
         result = await self._client.send(
             'DOM.resolveNode',
@@ -90,10 +129,22 @@ class Element:
     ) -> None:
         """Click the element using multiple fallback strategies.
         
+        Attempts to click the element using CDP mouse events. If that fails,
+        falls back to JavaScript click. The method handles scrolling the
+        element into view and calculating the correct click coordinates.
+        
         Args:
-            button: Mouse button to use ('left', 'right', 'middle')
-            click_count: Number of clicks
-            modifiers: Modifier keys to hold during click
+            button: Mouse button to use ('left', 'right', 'middle').
+            click_count: Number of clicks (1 for single, 2 for double).
+            modifiers: Modifier keys to hold during click ('Alt', 'Control', 'Meta', 'Shift').
+            
+        Raises:
+            RuntimeError: If both CDP and JavaScript click methods fail.
+            
+        Example:
+            >>> await element.click()  # Simple left click
+            >>> await element.click(button='right')  # Right click
+            >>> await element.click(modifiers=['Control'])  # Ctrl+click
         """
         try:
             # Get viewport dimensions for visibility checks
@@ -142,7 +193,18 @@ class Element:
                 raise RuntimeError(f'Failed to click element: {e}, JS fallback also failed: {js_e}')
 
     async def _get_element_quads(self) -> list:
-        """Get element geometry quads using multiple methods."""
+        """Get element geometry quads using multiple methods.
+        
+        Attempts to retrieve the element's screen coordinates using
+        multiple CDP methods in order of reliability:
+            1. DOM.getContentQuads
+            2. DOM.getBoxModel
+            3. JavaScript getBoundingClientRect
+            
+        Returns:
+            List of quad arrays (each quad is 8 floats: x1,y1,x2,y2,x3,y3,x4,y4).
+            Empty list if no geometry information is available.
+        """
         quads = []
 
         # Method 1: Try DOM.getContentQuads
@@ -208,7 +270,19 @@ class Element:
     def _calculate_click_point(
         self, quads: list, viewport_width: float, viewport_height: float
     ) -> tuple[float, float]:
-        """Calculate the best click point from quads."""
+        """Calculate the best click point from quads.
+        
+        Analyzes the element's geometry quads to find the optimal click
+        point, preferring the most visible portion of the element.
+        
+        Args:
+            quads: List of quad arrays from _get_element_quads.
+            viewport_width: Current viewport width in pixels.
+            viewport_height: Current viewport height in pixels.
+            
+        Returns:
+            Tuple of (x, y) coordinates for the click point.
+        """
         best_quad = None
         best_area = 0
 
@@ -246,7 +320,17 @@ class Element:
         return center_x, center_y
 
     def _calculate_modifiers(self, modifiers: list[ModifierType] | None) -> int:
-        """Calculate modifier bitmask for CDP."""
+        """Calculate modifier bitmask for CDP.
+        
+        Converts a list of modifier key names to the bitmask format
+        expected by CDP Input events.
+        
+        Args:
+            modifiers: List of modifier names ('Alt'=1, 'Control'=2, 'Meta'=4, 'Shift'=8).
+            
+        Returns:
+            Integer bitmask combining all specified modifiers.
+        """
         if not modifiers:
             return 0
         modifier_map = {'Alt': 1, 'Control': 2, 'Meta': 4, 'Shift': 8}
@@ -260,7 +344,21 @@ class Element:
         click_count: int,
         modifiers: int,
     ) -> None:
-        """Perform click using CDP Input events."""
+        """Perform click using CDP Input events.
+        
+        Sends mouse move, press, and release events to the browser
+        at the specified coordinates.
+        
+        Args:
+            x: X coordinate for the click.
+            y: Y coordinate for the click.
+            button: Mouse button to use.
+            click_count: Number of clicks.
+            modifiers: Modifier bitmask from _calculate_modifiers.
+            
+        Raises:
+            RuntimeError: If the click operation fails.
+        """
         try:
             # Move mouse to element
             await self._client.send(
@@ -315,7 +413,15 @@ class Element:
             raise RuntimeError(f'Failed to perform click: {e}')
 
     async def _js_click(self) -> None:
-        """Perform click using JavaScript."""
+        """Perform click using JavaScript.
+        
+        Fallback click method that uses JavaScript's element.click()
+        when CDP mouse events fail. This is more reliable for hidden
+        or overlapped elements.
+        
+        Raises:
+            RuntimeError: If the element cannot be found or clicked.
+        """
         result = await self._client.send(
             'DOM.resolveNode',
             {'backendNodeId': self._backend_node_id},
@@ -338,9 +444,20 @@ class Element:
     async def fill(self, value: str, clear: bool = True) -> None:
         """Fill the input element with text.
         
+        Types text into an input element character by character, simulating
+        real keyboard input. Handles scrolling, focusing, and clearing
+        existing text.
+        
         Args:
-            value: Text to type into the element
-            clear: Whether to clear existing text first
+            value: Text to type into the element.
+            clear: Whether to clear existing text first (default: True).
+            
+        Raises:
+            RuntimeError: If the element cannot be focused or typed into.
+            
+        Example:
+            >>> await input_element.fill("user@example.com")
+            >>> await input_element.fill("append this", clear=False)
         """
         try:
             # Scroll element into view
@@ -381,7 +498,18 @@ class Element:
             raise RuntimeError(f'Failed to fill element: {str(e)}')
 
     async def _get_element_coordinates(self, object_id: str) -> dict | None:
-        """Get element center coordinates."""
+        """Get element center coordinates.
+        
+        Uses JavaScript getBoundingClientRect to find the element's
+        center point for click-to-focus operations.
+        
+        Args:
+            object_id: CDP remote object ID for the element.
+            
+        Returns:
+            Dict with 'input_x' and 'input_y' keys, or None if coordinates
+            cannot be determined.
+        """
         try:
             result = await self._client.send(
                 'Runtime.callFunctionOn',
@@ -403,7 +531,20 @@ class Element:
         return None
 
     async def _focus_element(self, object_id: str, coordinates: dict | None) -> bool:
-        """Focus element using multiple strategies."""
+        """Focus element using multiple strategies.
+        
+        Attempts to focus the element using multiple approaches:
+            1. CDP DOM.focus command
+            2. JavaScript element.focus()
+            3. Click at element center
+            
+        Args:
+            object_id: CDP remote object ID for the element.
+            coordinates: Optional center coordinates for click fallback.
+            
+        Returns:
+            True if focus was successful, False otherwise.
+        """
         # Strategy 1: CDP focus
         try:
             await self._client.send(
@@ -461,7 +602,17 @@ class Element:
         return False
 
     async def _clear_text_field(self, object_id: str) -> bool:
-        """Clear text field using JavaScript."""
+        """Clear text field using JavaScript.
+        
+        Clears the input field by selecting all text and setting value
+        to empty string, then dispatches input and change events.
+        
+        Args:
+            object_id: CDP remote object ID for the input element.
+            
+        Returns:
+            True if clearing was successful, False otherwise.
+        """
         try:
             await self._client.send(
                 'Runtime.callFunctionOn',
@@ -485,7 +636,15 @@ class Element:
             return False
 
     async def _type_text(self, text: str) -> None:
-        """Type text character by character."""
+        """Type text character by character.
+        
+        Simulates keyboard input by sending keyDown, char, and keyUp
+        events for each character. Handles special characters and
+        shift modifiers automatically.
+        
+        Args:
+            text: The text to type.
+        """
         for char in text:
             if char == '\n':
                 await self._send_key_event('Enter', 13)
@@ -530,7 +689,15 @@ class Element:
             await asyncio.sleep(0.018)
 
     async def _send_key_event(self, key: str, vk_code: int) -> None:
-        """Send a key event."""
+        """Send a key event.
+        
+        Dispatches a complete key press cycle (keyDown, char, keyUp)
+        for a single key.
+        
+        Args:
+            key: Key name (e.g., 'Enter', 'Tab').
+            vk_code: Windows virtual key code.
+        """
         await self._client.send(
             'Input.dispatchKeyEvent',
             {'type': 'keyDown', 'key': key, 'code': key, 'windowsVirtualKeyCode': vk_code},
@@ -549,7 +716,18 @@ class Element:
         )
 
     def _get_char_info(self, char: str) -> tuple[int, int, str]:
-        """Get modifiers, virtual key code, and base key for a character."""
+        """Get modifiers, virtual key code, and base key for a character.
+        
+        Determines the keyboard input parameters needed to type a
+        specific character, including shift modifier for uppercase
+        and special characters.
+        
+        Args:
+            char: Single character to analyze.
+            
+        Returns:
+            Tuple of (modifiers_bitmask, virtual_key_code, base_key_name).
+        """
         shift_chars = {
             '!': ('1', 49), '@': ('2', 50), '#': ('3', 51), '$': ('4', 52),
             '%': ('5', 53), '^': ('6', 54), '&': ('7', 55), '*': ('8', 56),
@@ -584,7 +762,16 @@ class Element:
         return (0, ord(char.upper()) if char.isalpha() else ord(char), char)
 
     def _get_key_code(self, char: str) -> str:
-        """Get the proper key code for a character."""
+        """Get the proper key code for a character.
+        
+        Maps a character to its CDP key code string (e.g., 'KeyA', 'Digit1').
+        
+        Args:
+            char: Single character to get key code for.
+            
+        Returns:
+            CDP key code string.
+        """
         key_codes = {
             ' ': 'Space', '.': 'Period', ',': 'Comma', '-': 'Minus',
             '/': 'Slash', '=': 'Equal', '[': 'BracketLeft', ']': 'BracketRight',
@@ -601,7 +788,14 @@ class Element:
             return 'Unidentified'
 
     async def hover(self) -> None:
-        """Hover over the element."""
+        """Hover over the element.
+        
+        Moves the mouse cursor to the center of the element, triggering
+        any hover-related events (mouseover, mouseenter, CSS :hover).
+        
+        Raises:
+            RuntimeError: If the element is not visible or has no bounding box.
+        """
         box = await self.get_bounding_box()
         if not box:
             raise RuntimeError('Element is not visible or has no bounding box')
@@ -616,7 +810,11 @@ class Element:
         )
 
     async def focus(self) -> None:
-        """Focus the element."""
+        """Focus the element.
+        
+        Sets keyboard focus to this element using CDP's DOM.focus command.
+        This is useful for input elements before typing.
+        """
         await self._client.send(
             'DOM.focus',
             {'backendNodeId': self._backend_node_id},
@@ -624,14 +822,29 @@ class Element:
         )
 
     async def check(self) -> None:
-        """Check a checkbox or radio button."""
+        """Check a checkbox or radio button.
+        
+        Toggles the checked state of a checkbox or selects a radio button
+        by clicking on the element.
+        """
         await self.click()
 
     async def select_option(self, values: str | list[str]) -> None:
         """Select option(s) in a select element.
         
+        Selects one or more options in a <select> dropdown by matching
+        either the option value or visible text.
+        
         Args:
-            values: Value(s) to select
+            values: Single value or list of values to select. Can match
+                either the 'value' attribute or the option text content.
+                
+        Raises:
+            RuntimeError: If the element is not a select or cannot be accessed.
+            
+        Example:
+            >>> await select.select_option("option1")
+            >>> await select.select_option(["option1", "option2"])  # Multi-select
         """
         if isinstance(values, str):
             values = [values]
@@ -680,7 +893,19 @@ class Element:
         source_position: Position | None = None,
         target_position: Position | None = None,
     ) -> None:
-        """Drag this element to another element or position."""
+        """Drag this element to another element or position.
+        
+        Performs a drag and drop operation from this element to a target.
+        Uses mouse events to simulate the complete drag gesture.
+        
+        Args:
+            target: Destination Element or Position dict with x/y coordinates.
+            source_position: Optional offset from this element's top-left corner.
+            target_position: Optional offset from target element's top-left corner.
+            
+        Raises:
+            RuntimeError: If source or target elements are not visible.
+        """
         # Get source coordinates
         if source_position:
             source_x = source_position['x']
@@ -725,7 +950,20 @@ class Element:
         )
 
     async def get_attribute(self, name: str) -> str | None:
-        """Get an attribute value."""
+        """Get an attribute value.
+        
+        Retrieves the value of a specified attribute from this element.
+        
+        Args:
+            name: The attribute name to retrieve (e.g., 'href', 'class', 'data-id').
+            
+        Returns:
+            The attribute value as a string, or None if the attribute doesn't exist.
+            
+        Example:
+            >>> href = await link.get_attribute('href')
+            >>> class_name = await element.get_attribute('class')
+        """
         node_id = await self._get_node_id()
         result = await self._client.send(
             'DOM.getAttributes',
@@ -740,7 +978,15 @@ class Element:
         return None
 
     async def get_bounding_box(self) -> BoundingBox | None:
-        """Get the bounding box of the element."""
+        """Get the bounding box of the element.
+        
+        Returns the element's position and dimensions relative to the
+        viewport. Uses CDP's DOM.getBoxModel command.
+        
+        Returns:
+            BoundingBox TypedDict with x, y, width, height keys,
+            or None if the element is not visible.
+        """
         try:
             node_id = await self._get_node_id()
             result = await self._client.send(
@@ -772,12 +1018,18 @@ class Element:
     async def screenshot(self, format: str = 'jpeg', quality: int | None = None) -> str:
         """Take a screenshot of this element.
         
+        Captures an image of just this element by using the element's
+        bounding box as the clip region.
+        
         Args:
-            format: Image format ('jpeg', 'png', 'webp')
-            quality: Quality 0-100 for JPEG format
+            format: Image format ('jpeg', 'png', 'webp'). Default 'jpeg'.
+            quality: Quality 0-100 for JPEG format. Ignored for other formats.
             
         Returns:
-            Base64-encoded image data
+            Base64-encoded image data string.
+            
+        Raises:
+            RuntimeError: If the element is not visible or has no bounding box.
         """
         box = await self.get_bounding_box()
         if not box:
@@ -808,12 +1060,23 @@ class Element:
     async def evaluate(self, page_function: str, *args) -> str:
         """Execute JavaScript in the context of this element.
         
+        Runs a JavaScript arrow function with 'this' bound to the element.
+        The function can access and manipulate the element directly.
+        
         Args:
-            page_function: JavaScript arrow function
-            *args: Arguments to pass to the function
+            page_function: JavaScript arrow function (e.g., '() => this.innerText').
+            *args: Arguments to pass to the function.
             
         Returns:
-            String representation of the result
+            String representation of the result. Objects are JSON-stringified.
+            
+        Raises:
+            ValueError: If the function is not a valid arrow function.
+            RuntimeError: If JavaScript evaluation fails.
+            
+        Example:
+            >>> text = await element.evaluate('() => this.innerText')
+            >>> await element.evaluate('(value) => this.value = value', 'new text')
         """
         import json
         import re
@@ -879,7 +1142,22 @@ class Element:
                 return str(value)
 
     async def get_basic_info(self) -> ElementInfo:
-        """Get basic information about the element."""
+        """Get basic information about the element.
+        
+        Retrieves comprehensive information about the element including
+        its type, attributes, and geometry.
+        
+        Returns:
+            ElementInfo TypedDict containing:
+                - backendNodeId: CDP backend node ID
+                - nodeId: DOM node ID (may be None)
+                - nodeName: HTML tag name (e.g., 'DIV', 'INPUT')
+                - nodeType: DOM node type constant
+                - nodeValue: Text content for text nodes
+                - attributes: Dict of element attributes
+                - boundingBox: Position and size, or None
+                - error: Error message if info retrieval failed
+        """
         try:
             node_id = await self._get_node_id()
             result = await self._client.send(

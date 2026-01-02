@@ -1,4 +1,15 @@
-"""Recording Watchdog for Browser Use Sessions."""
+"""Recording Watchdog for Browser Use Sessions.
+
+This module provides the RecordingWatchdog which manages video recording
+of browser sessions using CDP screencasting and the VideoRecorderService.
+
+Classes:
+    RecordingWatchdog: Manages video recording via CDP screencast.
+
+Requirements:
+    - record_video_dir set in BrowserProfile
+    - Optional: imageio, imageio-ffmpeg, numpy for encoding
+"""
 
 import asyncio
 from pathlib import Path
@@ -16,8 +27,27 @@ from src.openbrowser.browser.watchdogs.base import BaseWatchdog
 
 
 class RecordingWatchdog(BaseWatchdog):
-    """
-    Manages video recording of a browser session using CDP screencasting.
+    """Manages video recording of a browser session using CDP screencasting.
+
+    Captures frames via CDP Page.startScreencast and encodes them using
+    VideoRecorderService. Automatically detects viewport size if not
+    specified in profile.
+
+    Listens to:
+        BrowserConnectedEvent: Starts recording if configured.
+        BrowserStopEvent: Stops recording and saves video.
+
+    Configuration (in BrowserProfile):
+        record_video_dir: Output directory for video files.
+        record_video_size: Optional ViewportSize for video dimensions.
+        record_video_framerate: Frames per second (default varies).
+        record_video_format: Output format (default: 'mp4').
+
+    Example:
+        >>> profile = BrowserProfile(
+        ...     record_video_dir='/tmp/videos',
+        ...     record_video_framerate=30
+        ... )
     """
 
     LISTENS_TO: ClassVar[list[type[BaseEvent[Any]]]] = [BrowserConnectedEvent, BrowserStopEvent]
@@ -26,13 +56,22 @@ class RecordingWatchdog(BaseWatchdog):
     _recorder: VideoRecorderService | None = PrivateAttr(default=None)
 
     def attach_to_session(self) -> None:
-        """Register event handlers."""
+        """Register event handlers.
+
+        Subscribes to browser lifecycle events for recording control.
+        """
         self.event_bus.on(BrowserConnectedEvent, self.on_BrowserConnectedEvent)
         self.event_bus.on(BrowserStopEvent, self.on_BrowserStopEvent)
 
     async def on_BrowserConnectedEvent(self, event: BrowserConnectedEvent) -> None:
-        """
-        Starts video recording if it is configured in the browser profile.
+        """Starts video recording if configured in the browser profile.
+
+        Initializes VideoRecorderService, registers screencast handler,
+        and starts CDP screencast. Auto-detects viewport size if not
+        specified.
+
+        Args:
+            event: BrowserConnectedEvent from session.
         """
         profile = self.browser_session.browser_profile
         if not profile.record_video_dir:
@@ -81,7 +120,13 @@ class RecordingWatchdog(BaseWatchdog):
                 self._recorder = None
 
     async def _get_current_viewport_size(self) -> ViewportSize | None:
-        """Gets the current viewport size directly from the browser via CDP."""
+        """Gets the current viewport size directly from the browser via CDP.
+
+        Uses Page.getLayoutMetrics to get accurate visible area dimensions.
+
+        Returns:
+            ViewportSize with current dimensions, or None on failure.
+        """
         try:
             cdp_session = await self.browser_session.get_or_create_cdp_session()
             metrics = await cdp_session.cdp_client.send.Page.getLayoutMetrics(session_id=cdp_session.session_id)
@@ -100,8 +145,13 @@ class RecordingWatchdog(BaseWatchdog):
         return None
 
     def on_screencastFrame(self, event: ScreencastFrameEvent, session_id: str | None) -> None:
-        """
-        Synchronous handler for incoming screencast frames.
+        """Synchronous handler for incoming screencast frames.
+
+        Adds frame to recorder and schedules async acknowledgment.
+
+        Args:
+            event: ScreencastFrameEvent with frame data.
+            session_id: CDP session ID for acknowledgment.
         """
         if not self._recorder:
             return
@@ -109,8 +159,13 @@ class RecordingWatchdog(BaseWatchdog):
         asyncio.create_task(self._ack_screencast_frame(event, session_id))
 
     async def _ack_screencast_frame(self, event: ScreencastFrameEvent, session_id: str | None) -> None:
-        """
-        Asynchronously acknowledges a screencast frame.
+        """Asynchronously acknowledges a screencast frame.
+
+        Required by CDP to continue receiving frames.
+
+        Args:
+            event: ScreencastFrameEvent with sessionId for ack.
+            session_id: CDP session ID.
         """
         try:
             await self.browser_session.cdp_client.send.Page.screencastFrameAck(

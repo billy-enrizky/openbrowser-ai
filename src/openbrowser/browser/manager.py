@@ -1,7 +1,20 @@
 """Browser manager for spawning Chrome and managing CDP connections.
 
-This class is a compatibility wrapper around BrowserSession that maintains
-the original API while using the event-driven architecture internally.
+This module provides a compatibility wrapper around BrowserSession that maintains
+the original API while using the event-driven architecture internally. It handles
+browser process lifecycle and provides a simpler interface for basic browser operations.
+
+Note:
+    This module also includes a monkeypatch for BaseSubprocessTransport.__del__
+    to handle closed event loops gracefully during garbage collection on macOS.
+
+Classes:
+    BrowserManager: High-level wrapper for browser lifecycle management.
+
+Example:
+    >>> async with BrowserManager(headless=True) as manager:
+    ...     client, session_id = await manager.get_session()
+    ...     await manager.take_screenshot('/tmp/screenshot.png')
 """
 
 import asyncio
@@ -29,9 +42,15 @@ _original_del = base_subprocess.BaseSubprocessTransport.__del__
 
 def _patched_del(self):
     """Patched __del__ that handles closed event loops without throwing errors.
-    
-    This prevents RuntimeError: Event loop is closed errors during garbage collection
-    when the subprocess transport tries to clean up after the event loop has closed.
+
+    This monkeypatch prevents RuntimeError: Event loop is closed errors during
+    garbage collection when the subprocess transport tries to clean up pipes
+    after the event loop has already closed. This is particularly common on
+    macOS when Python is shutting down.
+
+    The patch checks if the event loop is closed before calling the original
+    __del__ method, and silently ignores the specific 'Event loop is closed'
+    error if it occurs.
     """
     try:
         # Check if the event loop is closed before calling the original
@@ -52,9 +71,30 @@ base_subprocess.BaseSubprocessTransport.__del__ = _patched_del
 
 class BrowserManager:
     """Manages Chrome browser process and CDP connections.
-    
-    This class is a compatibility wrapper around BrowserSession that maintains
-    the original API while using the event-driven architecture internally.
+
+    Compatibility wrapper around BrowserSession that provides a simpler API
+    for browser lifecycle management. Internally uses the event-driven
+    BrowserSession architecture.
+
+    This class is suitable for simple use cases where full event-driven
+    control is not needed. For advanced usage, use BrowserSession directly.
+
+    Attributes:
+        debug_port: Chrome remote debugging port.
+        headless: Whether browser runs in headless mode.
+        user_data_dir: Path to Chrome user data directory.
+        cdp_client: CDPClient for sending CDP commands.
+        session_id: Current CDP session ID.
+
+    Example:
+        >>> manager = BrowserManager(headless=True)
+        >>> await manager.start()
+        >>> client, session_id = await manager.get_session()
+        >>> await manager.stop()
+
+        # Or use as async context manager:
+        >>> async with BrowserManager() as manager:
+        ...     await manager.take_screenshot('screenshot.png')
     """
 
     def __init__(
@@ -64,11 +104,19 @@ class BrowserManager:
         user_data_dir: Optional[str] = None,
     ):
         """Initialize BrowserManager.
-        
+
         Args:
-            debug_port: Port for Chrome remote debugging
-            headless: Whether to run Chrome in headless mode
-            user_data_dir: Optional user data directory for Chrome profile
+            debug_port: Port for Chrome remote debugging (default: 9222).
+            headless: Whether to run Chrome in headless mode (default: True).
+            user_data_dir: Optional path to Chrome user data directory for
+                profile persistence. If None, uses a temporary directory.
+
+        Example:
+            >>> manager = BrowserManager(
+            ...     debug_port=9223,
+            ...     headless=False,
+            ...     user_data_dir='/path/to/profile'
+            ... )
         """
         self.debug_port = debug_port
         self.headless = headless
@@ -88,7 +136,18 @@ class BrowserManager:
         self._session_id: Optional[str] = None
 
     async def start(self) -> None:
-        """Start the Chrome browser process and wait for CDP to be ready."""
+        """Start the Chrome browser process and wait for CDP to be ready.
+
+        Launches a Chrome browser process and establishes CDP connection.
+        Updates backward compatibility attributes for direct access to
+        CDP client and session.
+
+        Raises:
+            RuntimeError: If browser fails to start or CDP connection fails.
+
+        Note:
+            Logs a warning if browser is already started.
+        """
         if self._browser_session._cdp_client_root is not None:
             logger.warning("Browser already started")
             return
@@ -107,24 +166,29 @@ class BrowserManager:
     @property
     def cdp_client(self) -> CDPClient:
         """Get the persistent CDP client.
-        
+
+        Provides access to the underlying CDPClient for sending raw
+        CDP commands.
+
         Returns:
-            The persistent CDPClient instance
-            
+            The persistent CDPClient instance.
+
         Raises:
-            RuntimeError: If browser is not started or connection not established
+            RuntimeError: If browser is not started or connection not established.
         """
         return self._browser_session.cdp_client
 
     @property
     def session_id(self) -> str:
         """Get the persistent session ID.
-        
+
+        Provides the CDP session ID for the currently attached target.
+
         Returns:
-            The session ID for the attached target
-            
+            The session ID string for CDP commands.
+
         Raises:
-            RuntimeError: If browser is not started or session not established
+            RuntimeError: If browser is not started or session not established.
         """
         if not self._browser_session.agent_focus:
             raise RuntimeError(
@@ -134,16 +198,20 @@ class BrowserManager:
 
     async def get_session(self) -> tuple[CDPClient, str]:
         """Get the persistent CDP client and session ID.
-        
+
         Returns the cached persistent connection created in start().
-        This method now returns the same connection for the lifetime
-        of the browser session, eliminating connection overhead.
-        
+        This method returns the same connection for the lifetime of the
+        browser session, eliminating connection overhead.
+
         Returns:
-            Tuple of (CDPClient, session_id) from the persistent connection
-            
+            Tuple of (CDPClient, session_id) from the persistent connection.
+
         Raises:
-            RuntimeError: If browser is not started or connection not established
+            RuntimeError: If browser is not started or connection not established.
+
+        Example:
+            >>> client, session_id = await manager.get_session()
+            >>> await client.send.DOM.enable(session_id=session_id)
         """
         if not self._browser_session.agent_focus:
             raise RuntimeError(
@@ -162,17 +230,23 @@ class BrowserManager:
         client: Optional[CDPClient] = None,
     ) -> None:
         """Take a screenshot of the current page.
-        
+
+        Captures the visible viewport and saves it as a PNG file.
+
         Args:
-            path: File path to save the screenshot
+            path: File path to save the screenshot (creates parent directories).
             session_id: Optional session ID. Must be provided with client if
-                reusing an existing session.
-            client: Optional CDPClient. If provided with session_id, will use
-                the existing connection. If not provided, uses persistent connection.
-                
+                reusing an existing session. If not provided, uses persistent
+                connection.
+            client: Optional CDPClient. If provided with session_id, uses that
+                connection. If not provided, uses persistent connection.
+
         Raises:
             RuntimeError: If browser is not started, screenshot fails, or
                 session_id is provided without client.
+
+        Example:
+            >>> await manager.take_screenshot('/tmp/screenshot.png')
         """
         if not self._browser_session.agent_focus:
             raise RuntimeError("Browser not started. Call start() first.")
@@ -211,7 +285,14 @@ class BrowserManager:
             logger.info(f"Screenshot saved to {path}")
 
     async def stop(self) -> None:
-        """Stop the Chrome browser process."""
+        """Stop the Chrome browser process.
+
+        Cleanly shuts down the browser session and clears all connection
+        state. The browser process will be terminated.
+
+        Example:
+            >>> await manager.stop()
+        """
         # Use BrowserSession's event-driven stop
         await self._browser_session.stop()
         
@@ -222,21 +303,48 @@ class BrowserManager:
         self._process = None
 
     async def __aenter__(self):
-        """Async context manager entry."""
+        """Async context manager entry.
+
+        Starts the browser and returns the manager instance.
+
+        Returns:
+            Self for use in async with statement.
+
+        Example:
+            >>> async with BrowserManager() as manager:
+            ...     await manager.take_screenshot('screenshot.png')
+        """
         await self.start()
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """Async context manager exit."""
+        """Async context manager exit.
+
+        Stops the browser when exiting the context. Any exceptions from
+        the context body are not suppressed.
+
+        Args:
+            exc_type: Exception type if an exception was raised.
+            exc_val: Exception value if an exception was raised.
+            exc_tb: Exception traceback if an exception was raised.
+        """
         await self.stop()
     
     @property
     def _cdp_url(self) -> Optional[str]:
-        """Backward compatibility: expose _cdp_url."""
+        """Backward compatibility: expose _cdp_url.
+
+        Returns:
+            CDP WebSocket URL from the underlying browser session.
+        """
         return self._browser_session._cdp_url
-    
+
     @_cdp_url.setter
     def _cdp_url(self, value: Optional[str]) -> None:
-        """Set CDP URL (updates browser session)."""
+        """Set CDP URL (updates browser session).
+
+        Args:
+            value: New CDP WebSocket URL.
+        """
         self._browser_session._cdp_url = value
 

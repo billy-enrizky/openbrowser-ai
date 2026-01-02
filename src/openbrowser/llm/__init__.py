@@ -1,4 +1,24 @@
-"""LLM integrations for OpenBrowser."""
+"""LLM integrations for OpenBrowser.
+
+This module provides a unified interface for interacting with various Large Language Model
+(LLM) providers. It includes support for OpenAI, Anthropic, Google, Groq, AWS Bedrock,
+Azure OpenAI, Ollama, OpenRouter, OCI, Cerebras, DeepSeek, and browser-use's cloud service.
+
+The module uses lazy loading for provider-specific implementations to minimize import
+time and memory usage when only specific providers are needed.
+
+Example:
+    >>> from src.openbrowser.llm import get_llm_by_name
+    >>> llm = get_llm_by_name('openai', model='gpt-4o')
+    >>> response = await llm.ainvoke([HumanMessage(content="Hello!")])
+
+Attributes:
+    BaseChatModel: Abstract base class for all chat models.
+    LangChainChatModelWrapper: Wrapper for LangChain chat models.
+    LLMException: Generic exception for LLM errors.
+    ModelAuthenticationError: Exception for authentication failures.
+    ModelRateLimitError: Exception for rate limit errors.
+"""
 
 from typing import TYPE_CHECKING
 
@@ -38,7 +58,26 @@ _LAZY_IMPORTS = {
 
 
 def __getattr__(name: str):
-    """Lazy import mechanism for heavy chat model imports."""
+    """Lazy import mechanism for heavy chat model imports.
+    
+    This function enables lazy loading of provider-specific chat model classes.
+    When a chat model class is accessed (e.g., `ChatOpenAI`), it is dynamically
+    imported from its respective module.
+    
+    Args:
+        name: The name of the attribute being accessed. Should be one of the
+            registered chat model class names (e.g., 'ChatOpenAI', 'ChatAnthropic').
+    
+    Returns:
+        The requested chat model class.
+    
+    Raises:
+        AttributeError: If the requested attribute is not a known chat model class.
+    
+    Example:
+        >>> from src.openbrowser.llm import ChatOpenAI
+        >>> llm = ChatOpenAI(model='gpt-4o')
+    """
     if name in _LAZY_IMPORTS:
         module_path, class_name = _LAZY_IMPORTS[name]
         import importlib
@@ -48,16 +87,43 @@ def __getattr__(name: str):
 
 
 def get_llm_by_name(provider: str, model: str | None = None, **kwargs) -> BaseChatModel:
-    """
-    Factory function to get an LLM instance by provider name.
+    """Factory function to get an LLM instance by provider name.
+    
+    This is the recommended way to instantiate LLM providers when the provider
+    name is determined at runtime (e.g., from configuration). It handles the
+    mapping between provider names and their corresponding chat model classes.
     
     Args:
-        provider: Provider name (openai, google, anthropic, groq, ollama, openrouter, aws, azure, oci, cerebras, deepseek, browser_use)
-        model: Model name (optional, uses provider default if not specified)
-        **kwargs: Additional arguments passed to the LLM constructor
-        
+        provider: The provider name. Supported values are:
+            - 'openai': OpenAI GPT models
+            - 'anthropic': Anthropic Claude models
+            - 'google': Google Gemini models
+            - 'groq': Groq-hosted models (fast inference)
+            - 'ollama': Local Ollama models
+            - 'openrouter': OpenRouter multi-provider gateway
+            - 'aws': AWS Bedrock (Claude models)
+            - 'azure': Azure OpenAI
+            - 'oci': Oracle Cloud Infrastructure GenAI
+            - 'cerebras': Cerebras fast inference
+            - 'deepseek': DeepSeek models with reasoning
+            - 'browser_use': Browser-use cloud service
+        model: Optional model name. If not specified, uses the provider's default.
+        **kwargs: Additional keyword arguments passed to the LLM constructor.
+            Common arguments include:
+            - temperature (float): Controls randomness (0.0 to 1.0)
+            - max_tokens (int): Maximum tokens in response
+            - api_key (str): API key (overrides environment variable)
+    
     Returns:
-        BaseChatModel instance
+        BaseChatModel: An initialized chat model instance for the specified provider.
+    
+    Raises:
+        ValueError: If the provider name is not recognized.
+        ImportError: If the provider's dependencies are not installed.
+    
+    Example:
+        >>> llm = get_llm_by_name('openai', model='gpt-4o', temperature=0.7)
+        >>> llm = get_llm_by_name('anthropic')  # Uses default claude model
     """
     provider = provider.lower()
     

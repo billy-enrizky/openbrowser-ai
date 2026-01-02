@@ -9,7 +9,20 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class HistoryItem(BaseModel):
-    """A single item in agent history."""
+    """A single item in agent history.
+    
+    Represents one step or event in the agent's execution history,
+    including goals, memory, and action results.
+    
+    Attributes:
+        step_number: The step number (None if not a numbered step).
+        evaluation_previous_goal: Evaluation of the previous goal.
+        memory: Agent's memory or notes from this step.
+        next_goal: The next goal to pursue.
+        action_results: Results from executed actions.
+        error: Error message if the step failed.
+        system_message: System-level message (mutually exclusive with error).
+    """
     
     model_config = ConfigDict(arbitrary_types_allowed=True)
     
@@ -22,12 +35,23 @@ class HistoryItem(BaseModel):
     system_message: str | None = None
 
     def model_post_init(self, __context) -> None:
-        """Validate that error and system_message are not both provided."""
+        """Validate that error and system_message are not both provided.
+        
+        Raises:
+            ValueError: If both error and system_message are set.
+        """
         if self.error is not None and self.system_message is not None:
             raise ValueError('Cannot have both error and system_message at the same time')
 
     def to_string(self) -> str:
-        """Convert history item to string format."""
+        """Convert history item to formatted string.
+        
+        Formats the history item with step tags and content for
+        inclusion in the agent's history description.
+        
+        Returns:
+            Formatted string representation of the history item.
+        """
         step_str = f'step_{self.step_number}' if self.step_number is not None else 'step_unknown'
         
         if self.error:
@@ -51,7 +75,16 @@ class HistoryItem(BaseModel):
 
 
 class MessageHistory(BaseModel):
-    """Message history container."""
+    """Message history container for LLM conversations.
+    
+    Holds the different types of messages that make up the
+    conversation context sent to the LLM.
+    
+    Attributes:
+        system_message: The system prompt message.
+        state_message: Current browser/agent state message.
+        context_messages: Additional context messages for current step.
+    """
     
     model_config = ConfigDict(arbitrary_types_allowed=True)
     
@@ -60,7 +93,14 @@ class MessageHistory(BaseModel):
     context_messages: list[BaseMessage] = Field(default_factory=list)
 
     def get_messages(self) -> list[BaseMessage]:
-        """Get all messages in order."""
+        """Get all messages in order for sending to LLM.
+        
+        Assembles messages in the correct order: system, state,
+        then context messages.
+        
+        Returns:
+            Ordered list of all messages.
+        """
         messages = []
         if self.system_message:
             messages.append(self.system_message)
@@ -71,7 +111,17 @@ class MessageHistory(BaseModel):
 
 
 class MessageManagerState(BaseModel):
-    """Serializable state for message manager - holds all message manager state for checkpointing."""
+    """Serializable state for message manager.
+    
+    Holds all message manager state for checkpointing and persistence,
+    enabling conversation state to be saved and restored.
+    
+    Attributes:
+        history: The message history container.
+        tool_id: Counter for generating unique tool IDs.
+        agent_history_items: List of history items from agent execution.
+        read_state_description: Accumulated read content description.
+    """
     
     model_config = ConfigDict(arbitrary_types_allowed=True)
     

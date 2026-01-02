@@ -1,4 +1,22 @@
-"""Registry service for action registration and execution."""
+"""Registry service for action registration and execution.
+
+This module provides the Registry class for registering and managing browser
+automation actions. It enables dynamic action registration using decorators,
+automatic parameter model creation from function signatures, and action execution
+with proper parameter validation.
+
+The registry pattern allows:
+    - Clean separation between action definition and execution
+    - Dynamic action model generation for LLM structured output
+    - Domain-based action filtering for context-aware tools
+    - Uniform action execution with validation
+
+Example:
+    >>> registry = Registry()
+    >>> @registry.action("Search the web", param_model=SearchParams)
+    ... async def search(params: SearchParams):
+    ...     return ActionResult(extracted_content="Results...")
+"""
 
 from __future__ import annotations
 
@@ -23,14 +41,56 @@ logger = logging.getLogger(__name__)
 
 
 class Registry(Generic[Context]):
-    """Service for registering and managing actions."""
+    """Service for registering and managing browser automation actions.
+    
+    The Registry provides a decorator-based system for registering actions
+    that can be executed by the browser automation agent. It handles:
+        - Action registration with metadata (description, parameters, domains)
+        - Automatic parameter model creation from function signatures
+        - Dynamic action model generation for LLM structured output
+        - Action execution with parameter validation
+    
+    Attributes:
+        registry: The underlying ActionRegistry containing registered actions.
+        exclude_actions: List of action names to exclude from registration.
+    
+    Example:
+        >>> registry = Registry(exclude_actions=['dangerous_action'])
+        >>> 
+        >>> @registry.action("Navigate to a URL", param_model=NavigateParams)
+        ... async def navigate(params: NavigateParams, browser_session=None):
+        ...     await browser_session.goto(params.url)
+        ...     return ActionResult(success=True)
+        >>> 
+        >>> # Execute the action
+        >>> result = await registry.execute_action(
+        ...     'navigate',
+        ...     {'url': 'https://example.com'},
+        ...     browser_session=session
+        ... )
+    """
 
     def __init__(self, exclude_actions: list[str] | None = None):
+        """Initialize the action registry.
+        
+        Args:
+            exclude_actions: List of action names to exclude from registration.
+                When an excluded action is decorated with @registry.action,
+                it will not be added to the registry.
+        """
         self.registry = ActionRegistry()
         self.exclude_actions = exclude_actions if exclude_actions is not None else []
 
     def _get_special_param_types(self) -> dict[str, type | None]:
-        """Get the expected types for special parameters."""
+        """Get the expected types for special (injected) parameters.
+        
+        Special parameters are automatically injected by the execution context
+        and should not be included in the action's parameter model.
+        
+        Returns:
+            dict: Mapping of special parameter names to their expected types.
+                A None type means any type is accepted.
+        """
         return {
             'context': None,
             'browser_session': None,  # BrowserSession
@@ -39,7 +99,18 @@ class Registry(Generic[Context]):
         }
 
     def _create_param_model(self, function: Callable) -> type[BaseModel]:
-        """Create a Pydantic model from function signature."""
+        """Create a Pydantic model from a function's signature.
+        
+        Inspects the function signature and creates a Pydantic BaseModel
+        with fields matching the non-special parameters.
+        
+        Args:
+            function: The function to create a parameter model for.
+        
+        Returns:
+            type[BaseModel]: A dynamically created Pydantic model class
+                with fields for each parameter.
+        """
         sig = signature(function)
         special_param_names = set(self._get_special_param_types().keys())
         params = {
@@ -60,7 +131,24 @@ class Registry(Generic[Context]):
         description: str,
         param_model: type[BaseModel] | None = None,
     ) -> tuple[Callable, type[BaseModel]]:
-        """Normalize action function to accept kwargs with params object."""
+        """Normalize an action function to accept kwargs with a params object.
+        
+        This method wraps the original function to provide a consistent interface
+        where action parameters are passed as a validated Pydantic model and
+        special parameters (browser_session, cdp_client, etc.) are injected
+        from kwargs.
+        
+        Args:
+            func: The original action function to wrap.
+            description: Description of the action (for documentation).
+            param_model: Optional pre-defined Pydantic model for parameters.
+                If not provided, one is created from the function signature.
+        
+        Returns:
+            tuple: A tuple of (wrapped_function, param_model) where:
+                - wrapped_function: Async function accepting params and special kwargs
+                - param_model: The Pydantic model for validating parameters
+        """
         sig = signature(func)
         parameters = list(sig.parameters.values())
         special_param_types = self._get_special_param_types()
@@ -137,7 +225,31 @@ class Registry(Generic[Context]):
         param_model: type[BaseModel] | None = None,
         domains: list[str] | None = None,
     ):
-        """Decorator for registering actions."""
+        """Decorator for registering actions with the registry.
+        
+        This decorator registers a function as an action that can be invoked
+        by the browser automation agent. The action is added to the registry
+        with its metadata and can be executed via execute_action().
+        
+        Args:
+            description: Human-readable description of what the action does.
+                This is shown to the LLM to help it decide when to use the action.
+            param_model: Optional Pydantic model class for action parameters.
+                If not provided, a model is automatically created from the
+                function's signature.
+            domains: Optional list of domain patterns (e.g., ['google.com']).
+                If provided, the action is only available on matching pages.
+        
+        Returns:
+            Callable: Decorator function that registers and wraps the action.
+        
+        Example:
+            >>> @registry.action("Click on an element", param_model=ClickParams)
+            ... async def click(params: ClickParams, browser_session=None):
+            ...     element = await browser_session.get_element(params.index)
+            ...     await element.click()
+            ...     return ActionResult(success=True)
+        """
         def decorator(func: Callable):
             if func.__name__ in self.exclude_actions:
                 return func
@@ -167,7 +279,34 @@ class Registry(Generic[Context]):
         cdp_client: Any = None,
         context: Any = None,
     ) -> Any:
-        """Execute a registered action."""
+        """Execute a registered action by name.
+        
+        This method looks up the action in the registry, validates the
+        parameters against the action's param model, and invokes the
+        action function with the validated parameters and special context.
+        
+        Args:
+            action_name: Name of the action to execute (e.g., 'click', 'navigate').
+            params: Dictionary of action parameters to validate and pass.
+            browser_session: Optional browser session for actions that need it.
+            page_url: Optional current page URL for domain filtering.
+            cdp_client: Optional CDP client for low-level browser operations.
+            context: Optional additional context for custom actions.
+        
+        Returns:
+            Any: The result returned by the action function, typically an ActionResult.
+        
+        Raises:
+            ValueError: If the action is not found in the registry.
+            RuntimeError: If action execution fails.
+        
+        Example:
+            >>> result = await registry.execute_action(
+            ...     'navigate',
+            ...     {'url': 'https://example.com'},
+            ...     browser_session=session
+            ... )
+        """
         if action_name not in self.registry.actions:
             raise ValueError(f'Action {action_name} not found')
 
