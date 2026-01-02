@@ -251,6 +251,7 @@ class Tools:
         >>> await session.start()
         >>> tools = Tools(session)
         >>> result = await tools.execute_action('navigate', {'url': 'https://example.com'})
+        >>> result.extracted_content
     
     Note:
         This class is typically used internally by BrowserAgent. For direct
