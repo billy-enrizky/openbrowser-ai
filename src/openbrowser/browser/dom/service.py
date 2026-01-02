@@ -1,4 +1,23 @@
-"""Enhanced DOM service following browser-use pattern."""
+"""Enhanced DOM service following browser-use pattern.
+
+This module provides the primary DOM extraction and processing service,
+combining CDP DOM tree traversal with interactive element detection and
+LLM-friendly serialization.
+
+Constants:
+    INTERACTIVE_TAGS: Set of HTML tags considered interactive.
+
+Classes:
+    DomService: Main service for DOM extraction and processing.
+
+Example:
+    >>> service = DomService(
+    ...     browser_session=session,
+    ...     paint_order_filtering=True
+    ... )
+    >>> state = await service.get_dom_state(cdp_session)
+    >>> print(state.element_tree)
+"""
 
 from __future__ import annotations
 
@@ -29,9 +48,25 @@ INTERACTIVE_TAGS = {"a", "button", "input", "textarea", "select", "option", "lab
 
 
 class DomService:
-    """
-    Service for getting the DOM tree and other DOM-related information.
-    Enhanced version following browser-use pattern.
+    """Service for getting the DOM tree and related information.
+
+    Enhanced version following browser-use pattern. Supports:
+    - Cross-origin iframe handling
+    - Paint order visibility filtering
+    - Shadow DOM traversal
+    - Interactive element detection
+    - LLM-friendly serialization
+
+    Attributes:
+        browser_session: Optional browser session reference.
+        cross_origin_iframes: Whether to traverse cross-origin iframes.
+        paint_order_filtering: Whether to filter by paint order.
+        max_iframes: Maximum number of iframes to process.
+        max_iframe_depth: Maximum iframe nesting depth.
+
+    Example:
+        >>> service = DomService(paint_order_filtering=True)
+        >>> state = await service.get_dom_state(cdp_session)
     """
 
     def __init__(
@@ -42,6 +77,17 @@ class DomService:
         max_iframes: int = 100,
         max_iframe_depth: int = 5,
     ):
+        """Initialize the DOM service.
+
+        Args:
+            browser_session: Optional browser session for context.
+            cross_origin_iframes: If True, attempt to traverse cross-origin
+                iframes (requires appropriate CDP permissions).
+            paint_order_filtering: If True, filter elements by paint order
+                to exclude hidden or covered elements.
+            max_iframes: Maximum number of iframes to process (default: 100).
+            max_iframe_depth: Maximum iframe nesting depth (default: 5).
+        """
         self.browser_session = browser_session
         self.cross_origin_iframes = cross_origin_iframes
         self.paint_order_filtering = paint_order_filtering
@@ -49,7 +95,17 @@ class DomService:
         self.max_iframe_depth = max_iframe_depth
 
     async def get_dom_state(self, cdp_session: CDPSession) -> DomState:
-        """Get DOM state using the CDPSession."""
+        """Get DOM state using the CDPSession.
+
+        Convenience method that extracts CDP client and session ID
+        from the CDPSession wrapper.
+
+        Args:
+            cdp_session: CDPSession with active connection.
+
+        Returns:
+            DomState with element_tree and selector_map.
+        """
         return await self.get_clickable_elements(
             client=cdp_session.cdp_client,
             session_id=cdp_session.session_id,
@@ -57,7 +113,16 @@ class DomService:
 
     @staticmethod
     def _parse_attributes(attributes_list: Optional[list[str]]) -> dict[str, str]:
-        """Parse CDP attributes array into a dictionary."""
+        """Parse CDP attributes array into a dictionary.
+
+        CDP returns attributes as: [name1, value1, name2, value2, ...]
+
+        Args:
+            attributes_list: Flat list of alternating names and values.
+
+        Returns:
+            Dictionary mapping attribute names to values.
+        """
         if not attributes_list:
             return {}
         attrs = {}
@@ -68,7 +133,20 @@ class DomService:
 
     @staticmethod
     def _is_interactive(node: dict) -> bool:
-        """Check if a node is interactive."""
+        """Check if a node is interactive.
+
+        An element is interactive if:
+        1. It's an ELEMENT_NODE with an interactive tag name
+        2. Has event handler attributes (onclick, etc.)
+        3. Has an interactive ARIA role
+        4. Has tabindex (except -1)
+
+        Args:
+            node: CDP DOM node dictionary.
+
+        Returns:
+            True if the node is interactive.
+        """
         if node.get("nodeType") != NodeType.ELEMENT_NODE:
             return False
 
@@ -97,7 +175,14 @@ class DomService:
 
     @staticmethod
     def _extract_text(node: dict) -> str:
-        """Extract text content from a node and its children recursively."""
+        """Extract text content from a node and its children recursively.
+
+        Args:
+            node: CDP DOM node with children and nodeValue.
+
+        Returns:
+            Combined text content, space-separated.
+        """
         text_parts = []
 
         if node.get("nodeType") == NodeType.TEXT_NODE:
@@ -121,7 +206,22 @@ class DomService:
         frame_id: str | None = None,
         session_id: str | None = None,
     ) -> EnhancedDOMTreeNode:
-        """Build an enhanced DOM tree node from a raw CDP node."""
+        """Build an enhanced DOM tree node from a raw CDP node.
+
+        Recursively converts a CDP DOM node dictionary into an
+        EnhancedDOMTreeNode tree, including children, content documents
+        (iframes), and shadow roots.
+
+        Args:
+            node: Raw CDP DOM node dictionary.
+            parent: Parent EnhancedDOMTreeNode (None for root).
+            target_id: CDP target ID for this frame.
+            frame_id: CDP frame ID.
+            session_id: CDP session ID.
+
+        Returns:
+            EnhancedDOMTreeNode with populated children/shadow roots.
+        """
         node_type_value = node.get("nodeType", 1)
         try:
             node_type = NodeType(node_type_value)
@@ -186,7 +286,19 @@ class DomService:
     def _traverse_and_filter(
         node: dict, interactive_elements: list[DomNode], distinct_id_counter: int
     ) -> int:
-        """Recursively traverse DOM tree and collect interactive elements."""
+        """Recursively traverse DOM tree and collect interactive elements.
+
+        Performs depth-first traversal including iframes and shadow roots.
+        Interactive elements are appended with sequential distinct IDs.
+
+        Args:
+            node: CDP DOM node to process.
+            interactive_elements: List to append found elements.
+            distinct_id_counter: Current ID counter.
+
+        Returns:
+            Updated distinct_id_counter after processing.
+        """
         if DomService._is_interactive(node):
             attributes = DomService._parse_attributes(node.get("attributes"))
             text = DomService._extract_text(node)
@@ -225,7 +337,17 @@ class DomService:
 
     @staticmethod
     def _format_element_for_llm(node: DomNode) -> str:
-        """Format a DOM node as a string for LLM consumption."""
+        """Format a DOM node as a string for LLM consumption.
+
+        Produces: [ID] <tag attr="value">text</tag>
+        Truncates long attribute values (>50 chars) and text (>100 chars).
+
+        Args:
+            node: DomNode to format.
+
+        Returns:
+            Formatted string for LLM display.
+        """
         tag = node.tag_name or "unknown"
         text = node.text if node.text else ""
 
@@ -252,7 +374,19 @@ class DomService:
 
     @staticmethod
     async def get_clickable_elements(client: CDPClient, session_id: str) -> DomState:
-        """Get all clickable/interactive elements from the current page."""
+        """Get all clickable/interactive elements from the current page.
+
+        Main entry point for DOM extraction. Enables DOM domain, fetches
+        the complete DOM tree with shadow DOM piercing, and extracts
+        interactive elements.
+
+        Args:
+            client: CDP client for sending commands.
+            session_id: CDP session ID.
+
+        Returns:
+            DomState with element_tree and selector_map.
+        """
         logger.info("Enabling DOM domain")
         try:
             await client.send.DOM.enable(session_id=session_id)
@@ -295,11 +429,24 @@ class DomService:
         serializer_mode: str = "default",
     ) -> SerializedDOMState:
         """Get serialized DOM state with enhanced processing.
-        
+
+        Extends basic DOM extraction with serializer support for
+        different agent modes.
+
         Args:
-            cdp_session: CDP session to use
-            include_attributes: List of attributes to include in serialization
-            serializer_mode: Serializer mode - 'default', 'code_use', or 'eval'
+            cdp_session: CDP session to use.
+            include_attributes: Attributes to include in serialization.
+                Defaults to DEFAULT_INCLUDE_ATTRIBUTES.
+            serializer_mode: Serializer mode:
+                - 'default': Standard interactive element format.
+                - 'code_use': Format optimized for code generation.
+                - 'eval': Format for evaluation/testing.
+
+        Returns:
+            SerializedDOMState with element_tree and selector_map.
+
+        Note:
+            Full serializer pipeline integration is pending.
         """
         from src.openbrowser.browser.dom.serializer.service import (
             DOMTreeSerializer,

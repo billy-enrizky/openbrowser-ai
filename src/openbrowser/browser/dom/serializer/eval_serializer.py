@@ -1,4 +1,25 @@
-"""Concise evaluation serializer for DOM trees - optimized for LLM query writing."""
+"""Concise evaluation serializer for DOM trees - optimized for LLM query writing.
+
+This serializer preserves complete DOM structure while maintaining conciseness.
+Optimized for evaluation scenarios where LLMs need to write precise queries
+or understand full page structure.
+
+Key features:
+- Shows ALL elements to preserve DOM structure
+- Non-interactive elements show just tag name
+- Interactive elements show full attributes + [index]
+- Self-closing tags only (no closing tags for brevity)
+- Form validation attributes included for smart interaction
+
+Constants:
+    EVAL_KEY_ATTRIBUTES: Attributes critical for query writing.
+    SEMANTIC_ELEMENTS: Elements always shown.
+    COLLAPSIBLE_CONTAINERS: Containers that can be collapsed.
+    SVG_ELEMENTS: SVG child elements to skip.
+
+Classes:
+    DOMEvalSerializer: Verbose DOM serializer for evaluation.
+"""
 
 from src.openbrowser.browser.dom.serializer.utils import cap_text_length
 from src.openbrowser.browser.dom.views import (
@@ -107,18 +128,45 @@ SVG_ELEMENTS = {
 
 
 class DOMEvalSerializer:
-    """Ultra-concise DOM serializer for quick LLM query writing."""
+    """Ultra-concise DOM serializer for quick LLM query writing.
+
+    Designed for evaluation and testing scenarios where complete DOM
+    structure visibility is important. Shows all elements but uses
+    minimal formatting.
+
+    Strategy:
+    - Show ALL elements to preserve DOM structure
+    - Non-interactive elements: just tag name
+    - Interactive elements: full attributes + [index]
+    - Self-closing tags only (no </tag>)
+    - Container elements shown even if invisible (may have visible children)
+
+    Example:
+        >>> html = DOMEvalSerializer.serialize_tree(
+        ...     node=simplified_root,
+        ...     include_attributes=EVAL_KEY_ATTRIBUTES,
+        ...     depth=0
+        ... )
+    """
 
     @staticmethod
     def serialize_tree(node: SimplifiedNode | None, include_attributes: list[str], depth: int = 0) -> str:
-        """
-        Serialize complete DOM tree structure for LLM understanding.
+        """Serialize complete DOM tree structure for LLM understanding.
 
         Strategy:
         - Show ALL elements to preserve DOM structure
         - Non-interactive elements show just tag name
         - Interactive elements show full attributes + [index]
         - Self-closing tags only (no closing tags)
+        - Container elements shown even if invisible
+
+        Args:
+            node: SimplifiedNode to serialize (or None).
+            include_attributes: Attributes to include for interactive elements.
+            depth: Current indentation depth (uses tabs).
+
+        Returns:
+            Multi-line string with complete DOM structure.
         """
         if not node:
             return ''

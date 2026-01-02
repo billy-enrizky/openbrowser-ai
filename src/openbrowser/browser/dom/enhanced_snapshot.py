@@ -1,8 +1,30 @@
-"""
-Enhanced snapshot processing for openbrowser DOM tree extraction.
+"""Enhanced snapshot processing for openbrowser DOM tree extraction.
 
-This module provides stateless functions for parsing Chrome DevTools Protocol (CDP) DOMSnapshot data
-to extract visibility, clickability, cursor styles, and other layout information.
+This module provides stateless functions for parsing Chrome DevTools Protocol
+(CDP) DOMSnapshot data to extract visibility, clickability, cursor styles,
+and other layout information.
+
+The DOMSnapshot API provides a complete snapshot of the DOM including:
+- Bounding boxes for all elements
+- Computed styles
+- Paint order for visibility determination
+- Clickability markers
+
+Constants:
+    REQUIRED_COMPUTED_STYLES: CSS properties extracted from snapshots.
+
+Functions:
+    build_snapshot_lookup: Create backend_node_id -> EnhancedSnapshotNode map.
+    is_element_visible: Check visibility from snapshot data.
+    is_element_interactive: Check interactivity from snapshot data.
+    get_computed_style_value: Extract specific CSS property values.
+
+Example:
+    >>> snapshot = await cdp.DOMSnapshot.captureSnapshot(...)
+    >>> lookup = build_snapshot_lookup(snapshot, device_pixel_ratio=2.0)
+    >>> node_data = lookup.get(backend_node_id)
+    >>> if node_data and is_element_visible(node_data):
+    ...     print('Element is visible')
 """
 
 import logging
@@ -29,14 +51,25 @@ REQUIRED_COMPUTED_STYLES = [
 
 
 def _parse_rare_boolean_data(rare_data: dict, index: int) -> bool | None:
-    """Parse rare boolean data from snapshot.
-    
+    """Parse rare boolean data from CDP snapshot.
+
+    CDP uses 'rare boolean data' format for sparse boolean arrays where
+    only indices with True values are stored.
+
     Args:
-        rare_data: RareBooleanData dict with 'index' key
-        index: Index to check
-        
+        rare_data: RareBooleanData dict with 'index' key containing
+            list of indices that are True.
+        index: Snapshot node index to check.
+
     Returns:
-        True if index is in the rare data, None otherwise
+        True if index is in the rare data indices, None otherwise.
+
+    Example:
+        >>> rare = {'index': [0, 5, 10]}  # Indices 0, 5, 10 are True
+        >>> _parse_rare_boolean_data(rare, 5)
+        True
+        >>> _parse_rare_boolean_data(rare, 3)
+        None
     """
     indices = rare_data.get('index', [])
     return index in indices if indices else None
@@ -44,13 +77,20 @@ def _parse_rare_boolean_data(rare_data: dict, index: int) -> bool | None:
 
 def _parse_computed_styles(strings: list[str], style_indices: list[int]) -> dict[str, str]:
     """Parse computed styles from layout tree using string indices.
-    
+
+    CDP stores computed styles as indices into a shared string table.
+    This function resolves those indices to actual style values.
+
     Args:
-        strings: List of strings from snapshot
-        style_indices: Indices into the strings list for each style
-        
+        strings: String table from snapshot (snapshot.strings).
+        style_indices: Indices into strings for each REQUIRED_COMPUTED_STYLES.
+
     Returns:
-        Dict mapping style name to value
+        Dict mapping CSS property name to its computed value.
+
+    Note:
+        Only REQUIRED_COMPUTED_STYLES properties are extracted to
+        minimize memory usage and processing time.
     """
     styles = {}
     for i, style_index in enumerate(style_indices):
@@ -64,17 +104,34 @@ def build_snapshot_lookup(
     device_pixel_ratio: float = 1.0,
 ) -> dict[int, EnhancedSnapshotNode]:
     """Build a lookup table of backend node ID to enhanced snapshot data.
-    
-    This function parses CDP DOMSnapshot data and creates a lookup table that maps
-    backend node IDs to enhanced snapshot information including bounding boxes,
-    computed styles, paint order, and clickability.
-    
+
+    Parses CDP DOMSnapshot.captureSnapshot result and creates a lookup table
+    mapping backend node IDs to EnhancedSnapshotNode objects containing:
+    - Bounding boxes (converted from device pixels to CSS pixels)
+    - Computed styles (display, visibility, opacity, cursor, etc.)
+    - Paint order for visibility filtering
+    - Clickability markers
+    - Client and scroll rects
+
     Args:
-        snapshot: CDP DOMSnapshot.captureSnapshot result
+        snapshot: CDP DOMSnapshot.captureSnapshot result dict.
         device_pixel_ratio: Device pixel ratio for coordinate conversion
-        
+            (e.g., 2.0 for Retina displays).
+
     Returns:
-        Dict mapping backend node ID to EnhancedSnapshotNode
+        Dict mapping backend_node_id to EnhancedSnapshotNode.
+
+    Performance:
+        Uses pre-built layout index map to achieve O(n) complexity
+        instead of O(n^2) double lookups.
+
+    Example:
+        >>> snapshot = await cdp.DOMSnapshot.captureSnapshot(
+        ...     computedStyles=REQUIRED_COMPUTED_STYLES,
+        ...     includePaintOrder=True
+        ... )
+        >>> lookup = build_snapshot_lookup(snapshot, device_pixel_ratio=2.0)
+        >>> node = lookup.get(123)  # Get data for backend_node_id 123
     """
     snapshot_lookup: dict[int, EnhancedSnapshotNode] = {}
 
@@ -197,14 +254,23 @@ def is_element_visible(
     viewport_height: float = 1080,
 ) -> bool:
     """Check if an element is visible based on snapshot data.
-    
+
+    Determines visibility by checking:
+    1. Computed styles (display:none, visibility:hidden, opacity:0)
+    2. Bounding box existence and size (>0 width/height)
+    3. Position relative to viewport (not completely off-screen)
+
     Args:
-        snapshot_node: Enhanced snapshot node data
-        viewport_width: Viewport width
-        viewport_height: Viewport height
-        
+        snapshot_node: Enhanced snapshot node data, or None.
+        viewport_width: Viewport width in CSS pixels.
+        viewport_height: Viewport height in CSS pixels.
+
     Returns:
-        True if element appears to be visible
+        True if element appears to be visible, False otherwise.
+
+    Note:
+        This is a heuristic check. Elements may be visually hidden
+        by other means (z-index, clipping) not detected here.
     """
     if snapshot_node is None:
         return False
@@ -248,12 +314,22 @@ def is_element_visible(
 
 def is_element_interactive(snapshot_node: EnhancedSnapshotNode | None) -> bool:
     """Check if an element is interactive based on snapshot data.
-    
+
+    Determines interactivity by checking:
+    1. CDP isClickable marker (from event listeners)
+    2. cursor:pointer style (visual interactivity hint)
+    3. pointer-events CSS property (not 'none')
+
     Args:
-        snapshot_node: Enhanced snapshot node data
-        
+        snapshot_node: Enhanced snapshot node data, or None.
+
     Returns:
-        True if element appears to be interactive
+        True if element appears to be interactive, False otherwise.
+
+    Note:
+        This supplements tag-based interactivity detection. An element
+        may be interactive even if this returns False (e.g., JavaScript
+        event handlers not detected by CDP).
     """
     if snapshot_node is None:
         return False
@@ -280,14 +356,21 @@ def get_computed_style_value(
     default: str | None = None,
 ) -> str | None:
     """Get a computed style value from snapshot node.
-    
+
+    Safe accessor for computed styles that handles None nodes and
+    missing style properties.
+
     Args:
-        snapshot_node: Enhanced snapshot node data
-        style_name: CSS property name
-        default: Default value if not found
-        
+        snapshot_node: Enhanced snapshot node data, or None.
+        style_name: CSS property name (e.g., 'display', 'cursor').
+        default: Default value if style not found.
+
     Returns:
-        Style value or default
+        Computed style value, or default if not available.
+
+    Example:
+        >>> display = get_computed_style_value(node, 'display', 'block')
+        >>> cursor = get_computed_style_value(node, 'cursor')
     """
     if snapshot_node is None or snapshot_node.computed_styles is None:
         return default
