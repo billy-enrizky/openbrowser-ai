@@ -166,7 +166,7 @@ def init():
         - OPENROUTER_API_KEY: OpenRouter provider
         - AZURE_OPENAI_API_KEY: Azure OpenAI provider
     """
-    console.print("[blue]Initializing openbrowser-ai configuration...[/blue]"))
+    console.print("[blue]Initializing openbrowser-ai configuration...[/blue]")
 
     # Check for environment variables
     import os
