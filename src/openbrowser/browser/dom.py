@@ -1,4 +1,24 @@
-"""DOM processing service for extracting and filtering interactive elements."""
+"""DOM processing service for extracting and filtering interactive elements.
+
+This module provides a lightweight DOM extraction service that identifies
+interactive elements (links, buttons, inputs, etc.) from a page via CDP.
+It produces a simplified element tree suitable for LLM consumption.
+
+Constants:
+    ELEMENT_NODE: DOM element node type (1).
+    TEXT_NODE: DOM text node type (3).
+    INTERACTIVE_TAGS: Set of interactive HTML tag names.
+
+Classes:
+    DomNode: Simplified representation of an interactive DOM element.
+    DomState: Container for element tree string and selector mapping.
+    DomService: Service for DOM traversal and interactive element extraction.
+
+Example:
+    >>> dom_state = await DomService.get_clickable_elements(client, session_id)
+    >>> print(dom_state.element_tree)  # Human-readable element list
+    >>> backend_id = dom_state.selector_map[1]  # Get backend node ID
+"""
 
 import logging
 from typing import Optional
@@ -17,7 +37,27 @@ INTERACTIVE_TAGS = {"a", "button", "input", "textarea", "select"}
 
 
 class DomNode(BaseModel):
-    """Represents a simplified DOM node."""
+    """Represents a simplified DOM node for interactive elements.
+
+    This is a lightweight representation of an interactive DOM element,
+    containing only the information needed for LLM-based interaction.
+
+    Attributes:
+        tag_name: The lowercase HTML tag name (e.g., 'button', 'input').
+        attributes: Dictionary of element attributes.
+        text: Combined text content from the element and its children.
+        backend_node_id: CDP backend node ID for targeting the element.
+        distinct_id: Unique identifier assigned during DOM traversal.
+
+    Example:
+        >>> node = DomNode(
+        ...     tag_name='button',
+        ...     attributes={'class': 'submit-btn'},
+        ...     text='Submit',
+        ...     backend_node_id=123,
+        ...     distinct_id=1
+        ... )
+    """
 
     tag_name: Optional[str] = None
     attributes: dict[str, str] = {}
@@ -27,20 +67,72 @@ class DomNode(BaseModel):
 
 
 class DomState(BaseModel):
-    """Contains the DOM state for LLM consumption."""
+    """Contains the DOM state for LLM consumption.
+
+    Encapsulates both the human-readable element tree string and
+    the mapping from distinct IDs to CDP backend node IDs.
+
+    Attributes:
+        element_tree: Formatted string listing interactive elements
+            with IDs, suitable for LLM consumption.
+        selector_map: Mapping from distinct_id to backend_node_id,
+            used to resolve LLM element references for CDP commands.
+
+    Example:
+        >>> state = DomState(
+        ...     element_tree='[1] <button>Submit</button>',
+        ...     selector_map={1: 123}
+        ... )
+        >>> backend_id = state.selector_map[1]  # 123
+    """
 
     element_tree: str
     selector_map: dict[int, int]  # distinct_id -> backend_node_id
 
 
 class DomService:
-    """Service for processing DOM and extracting interactive elements."""
+    """Service for processing DOM and extracting interactive elements.
+
+    Provides static methods for traversing the CDP DOM tree, identifying
+    interactive elements, and formatting them for LLM consumption.
+
+    The main entry point is `get_clickable_elements()`, which:
+    1. Enables the DOM domain via CDP
+    2. Fetches the full DOM tree with shadow DOM piercing
+    3. Traverses and filters for interactive elements
+    4. Formats elements into an LLM-readable string
+    5. Returns a mapping for resolving element references
+
+    Interactive elements include:
+        - Links (<a>)
+        - Buttons (<button>)
+        - Form controls (<input>, <textarea>, <select>)
+        - Elements with event handlers (onclick, etc.)
+
+    Example:
+        >>> dom_state = await DomService.get_clickable_elements(client, session_id)
+        >>> print(dom_state.element_tree)
+        [1] <a href="/home">Home</a>
+        [2] <button type="submit">Submit</button>
+    """
 
     @staticmethod
     def _parse_attributes(attributes_list: Optional[list[str]]) -> dict[str, str]:
         """Parse CDP attributes array into a dictionary.
-        
+
         CDP returns attributes as a flat array: [name1, value1, name2, value2, ...]
+        This method converts it to a standard dictionary.
+
+        Args:
+            attributes_list: Flat list of alternating attribute names and values,
+                or None if no attributes present.
+
+        Returns:
+            Dictionary mapping attribute names to values.
+
+        Example:
+            >>> DomService._parse_attributes(['id', 'submit-btn', 'class', 'primary'])
+            {'id': 'submit-btn', 'class': 'primary'}
         """
         if not attributes_list:
             return {}
@@ -54,11 +146,25 @@ class DomService:
     @staticmethod
     def _is_interactive(node: dict) -> bool:
         """Check if a node is interactive.
-        
-        A node is interactive if:
+
+        A node is considered interactive if all conditions are met:
         1. It's an element node (nodeType == 1)
-        2. It has an interactive tag name (a, button, input, textarea, select)
-        3. OR it has an onclick attribute (or other event handlers)
+        2. It has an interactive tag name OR has event handler attributes
+
+        Interactive tags: a, button, input, textarea, select.
+        Event handlers: onclick, onmousedown, onmouseup, onkeydown, onkeyup, ontouchstart.
+
+        Args:
+            node: CDP DOM node dictionary with nodeType, nodeName, attributes.
+
+        Returns:
+            True if the node is interactive, False otherwise.
+
+        Example:
+            >>> DomService._is_interactive({'nodeType': 1, 'nodeName': 'BUTTON'})
+            True
+            >>> DomService._is_interactive({'nodeType': 3, 'nodeName': '#text'})
+            False
         """
         # Must be an element node
         if node.get("nodeType") != ELEMENT_NODE:
@@ -88,7 +194,22 @@ class DomService:
 
     @staticmethod
     def _extract_text(node: dict) -> str:
-        """Extract text content from a node and its children recursively."""
+        """Extract text content from a node and its children recursively.
+
+        Collects all text node values from the subtree and joins them
+        with spaces. Text is stripped of leading/trailing whitespace.
+
+        Args:
+            node: CDP DOM node dictionary with children and nodeValue.
+
+        Returns:
+            Combined text content, space-separated and stripped.
+
+        Example:
+            >>> # Node tree: <span>Hello <b>World</b></span>
+            >>> DomService._extract_text(span_node)
+            'Hello World'
+        """
         text_parts = []
         
         # Add node's own text value if it's a text node
@@ -111,14 +232,25 @@ class DomService:
         node: dict, interactive_elements: list[DomNode], distinct_id_counter: int
     ) -> int:
         """Recursively traverse DOM tree and collect interactive elements.
-        
+
+        Performs depth-first traversal of the DOM tree, including:
+        - Regular child nodes
+        - Iframe content documents (pierce: True)
+        - Shadow DOM roots
+
+        Interactive elements are appended to the provided list with
+        sequentially assigned distinct IDs.
+
         Args:
-            node: The current DOM node to process
-            interactive_elements: List to append interactive elements to
-            distinct_id_counter: Current counter for assigning distinct IDs
-            
+            node: Current CDP DOM node to process.
+            interactive_elements: List to append found interactive elements.
+            distinct_id_counter: Current ID counter for assigning distinct IDs.
+
         Returns:
-            Updated distinct_id_counter after processing this node and its children
+            Updated distinct_id_counter after processing this subtree.
+
+        Note:
+            This method modifies interactive_elements in place.
         """
         # Check if current node is interactive
         if DomService._is_interactive(node):
@@ -163,8 +295,24 @@ class DomService:
     @staticmethod
     def _format_element_for_llm(node: DomNode) -> str:
         """Format a DOM node as a string for LLM consumption.
-        
-        Format: [ID] <tag>text</tag>
+
+        Produces a human-readable representation with:
+        - Distinct ID in brackets: [ID]
+        - Tag name with key attributes: <tag attr="value">
+        - Text content if present: >text</tag>
+
+        Key attributes included: id, name, type, class, aria-label, role.
+
+        Args:
+            node: DomNode to format.
+
+        Returns:
+            Formatted string like '[1] <button class="primary">Submit</button>'.
+
+        Example:
+            >>> node = DomNode(distinct_id=1, tag_name='button', text='Submit', ...)
+            >>> DomService._format_element_for_llm(node)
+            '[1] <button>Submit</button>'
         """
         tag = node.tag_name or "unknown"
         text = node.text if node.text else ""
@@ -193,13 +341,26 @@ class DomService:
         client: CDPClient, session_id: str
     ) -> DomState:
         """Get all clickable/interactive elements from the current page.
-        
+
+        Main entry point for DOM extraction. Enables the DOM domain,
+        fetches the complete DOM tree (with shadow DOM piercing), and
+        extracts interactive elements.
+
         Args:
-            client: CDP client instance
-            session_id: CDP session ID
-            
+            client: CDP client instance for sending commands.
+            session_id: CDP session ID for the target page.
+
         Returns:
-            DomState containing element_tree string and selector_map
+            DomState containing:
+                - element_tree: Formatted string of interactive elements.
+                - selector_map: Dict mapping distinct_id to backend_node_id.
+
+        Example:
+            >>> state = await DomService.get_clickable_elements(client, session_id)
+            >>> print(state.element_tree)
+            [1] <a href="/">Home</a>
+            [2] <button>Login</button>
+            >>> backend_id = state.selector_map[2]  # Get backend ID for button
         """
         logger.info("Enabling DOM domain")
         try:

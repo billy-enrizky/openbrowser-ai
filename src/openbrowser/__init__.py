@@ -2,7 +2,7 @@
 
 from typing import TYPE_CHECKING
 
-__version__ = "0.1.68"
+__version__ = "0.1.84"
 
 # Core browser components - always available
 from src.openbrowser.browser.profile import BrowserProfile
@@ -96,7 +96,25 @@ _LAZY_IMPORTS = {
 
 
 def __getattr__(name: str):
-    """Lazy import mechanism for heavy modules."""
+    """Lazy import mechanism for heavy modules.
+    
+    This function enables lazy loading of resource-intensive modules like LLM
+    providers, code execution tools, and telemetry. Modules are only imported
+    when first accessed, reducing startup time and memory usage.
+    
+    Args:
+        name: The name of the attribute being accessed.
+        
+    Returns:
+        The requested module attribute.
+        
+    Raises:
+        AttributeError: If the attribute is not found in the module.
+        
+    Example:
+        >>> from src.openbrowser import ChatOpenAI  # Only imports when accessed
+        >>> llm = ChatOpenAI(model="gpt-4o")
+    """
     if name in _LAZY_IMPORTS:
         module_path, attr_name = _LAZY_IMPORTS[name]
         import importlib

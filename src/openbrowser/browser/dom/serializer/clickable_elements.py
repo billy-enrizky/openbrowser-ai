@@ -1,14 +1,68 @@
-"""Enhanced clickable element detection following browser-use pattern."""
+"""Enhanced clickable element detection following browser-use pattern.
+
+This module provides sophisticated detection of interactive/clickable elements
+using multiple signals: tag names, ARIA roles, accessibility properties,
+event handlers, and visual indicators.
+
+The detection algorithm uses a tiered approach:
+1. Skip non-element nodes and html/body
+2. Check iframe sizing for scrollability
+3. Detect search-related elements
+4. Check accessibility properties (focusable, editable, etc.)
+5. Check interactive tag names
+6. Check event handlers and ARIA roles
+7. Check accessibility tree roles
+8. Check icon-sized elements with interactive attributes
+9. Fallback to cursor:pointer style
+
+Classes:
+    ClickableElementDetector: Static methods for interactivity detection.
+"""
 
 from src.openbrowser.browser.dom.views import EnhancedDOMTreeNode, NodeType
 
 
 class ClickableElementDetector:
-    """Detector for interactive/clickable elements with enhanced detection logic."""
+    """Detector for interactive/clickable elements with enhanced detection logic.
+
+    Uses multiple signals to determine if an element is interactive:
+    - HTML tag name (button, input, a, etc.)
+    - ARIA roles and properties
+    - Accessibility tree data
+    - Event handler attributes
+    - Cursor styles
+    - Element sizing (for icons)
+
+    Example:
+        >>> if ClickableElementDetector.is_interactive(node):
+        ...     print(f'{node.tag_name} is clickable')
+    """
 
     @staticmethod
     def is_interactive(node: EnhancedDOMTreeNode) -> bool:
-        """Check if this node is clickable/interactive using enhanced scoring."""
+        """Check if this node is clickable/interactive using enhanced scoring.
+
+        Uses a tiered detection approach:
+        1. Filter out non-elements and html/body
+        2. Check iframe sizing (>100x100 for potential scrolling)
+        3. Search element detection (class/id/data attributes)
+        4. Accessibility properties (focusable, editable, checked, etc.)
+        5. Interactive tag names (button, input, a, select, etc.)
+        6. Event handlers (onclick, onkeydown, etc.)
+        7. ARIA roles (button, link, checkbox, etc.)
+        8. Icon detection (10-50px elements with interactive attrs)
+        9. Cursor:pointer fallback
+
+        Args:
+            node: EnhancedDOMTreeNode to evaluate.
+
+        Returns:
+            True if the element should be considered interactive.
+
+        Note:
+            Labels are excluded to avoid destroying real clickable elements
+            when the label has a 'for' attribute.
+        """
 
         # Skip non-element nodes
         if node.node_type != NodeType.ELEMENT_NODE:
