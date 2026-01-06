@@ -9,6 +9,7 @@ dependencies = [
     "langchain-core>=0.3.0",
     "langchain-openai>=0.2.0",
     "pydantic>=2.0.0",
+    "pydantic-settings>=2.0.0",
     "playwright",
     "python-dotenv",
     "httpx>=0.28.1",
@@ -17,18 +18,17 @@ dependencies = [
     "cdp-use",
     "google-genai>=0.2.0",
     "bubus>=1.5.6",
-    "litellm[proxy]>=1.80.11",
+    "litellm==1.80.0",
     "pillow>=11.0.0",
     "rich>=13.0.0",
     "click>=8.1.8",
     "psutil>=7.2.0",
     "markdownify>=0.11.6",
-    "pytest>=9.0.2",
-    "pytest-asyncio>=1.0.0",
-    "pytest-cov>=6.0.0",
     "imageio>=2.37.2",
     "imageio-ffmpeg>=0.6.0",
     "numpy>=2.4.0",
+    "openai>=1.99.5,<2.0.0",
+    "browser-use==0.9.5",
 ]
 
 [project.optional-dependencies]
@@ -41,6 +41,11 @@ aws = ["boto3"]
 azure = ["openai"]
 telemetry = ["posthog>=3.7.0"]
 pdf = ["pypdf", "reportlab"]
+dev = [
+    "pytest>=9.0.2",
+    "pytest-asyncio>=1.0.0",
+    "pytest-cov>=6.0.0",
+]
 all = [
     "textual>=3.2.0",
     "imageio[ffmpeg]",
