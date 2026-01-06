@@ -7,7 +7,7 @@ from typing import Any, TypeVar
 
 from pydantic import BaseModel
 
-from src.openbrowser.agent.views import (
+from openbrowser.agent.views import (
     AssistantMessage,
     BaseMessage,
     ContentPartImageParam,

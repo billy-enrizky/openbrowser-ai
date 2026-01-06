@@ -17,7 +17,7 @@ from cdp_use.cdp.browser import DownloadProgressEvent, DownloadWillBeginEvent
 from cdp_use.cdp.target import SessionID, TargetID
 from pydantic import PrivateAttr
 
-from src.openbrowser.browser.events import (
+from openbrowser.browser.events import (
     BrowserConnectedEvent,
     BrowserStoppedEvent,
     FileDownloadedEvent,
@@ -25,7 +25,7 @@ from src.openbrowser.browser.events import (
     TabClosedEvent,
     TabCreatedEvent,
 )
-from src.openbrowser.browser.watchdogs.base import BaseWatchdog
+from openbrowser.browser.watchdogs.base import BaseWatchdog
 
 logger = logging.getLogger(__name__)
 

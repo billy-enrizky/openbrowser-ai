@@ -15,7 +15,7 @@ Security Features:
 
 Example:
     ```python
-    from src.openbrowser.filesystem import FileSystem
+    from openbrowser.filesystem import FileSystem
 
     fs = FileSystem(base_path="./output")
     fs.write_file("data.json", json.dumps(scraped_data))

@@ -28,7 +28,7 @@ import httpx
 from playwright.async_api import async_playwright
 
 from cdp_use.client import CDPClient
-from src.openbrowser.browser.session import BrowserSession
+from openbrowser.browser.session import BrowserSession
 
 logger = logging.getLogger(__name__)
 

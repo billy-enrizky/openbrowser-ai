@@ -10,10 +10,10 @@ Classes:
 import logging
 from typing import TYPE_CHECKING
 
-from src.openbrowser.browser.watchdogs.base import BaseWatchdog
+from openbrowser.browser.watchdogs.base import BaseWatchdog
 
 if TYPE_CHECKING:
-    from src.openbrowser.browser.session import BrowserSession
+    from openbrowser.browser.session import BrowserSession
 
 logger = logging.getLogger(__name__)
 

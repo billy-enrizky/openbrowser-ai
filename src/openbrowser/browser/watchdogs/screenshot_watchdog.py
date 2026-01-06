@@ -13,8 +13,8 @@ from typing import Any, ClassVar
 from bubus import BaseEvent
 from cdp_use.cdp.page import CaptureScreenshotParameters
 
-from src.openbrowser.browser.events import ScreenshotEvent
-from src.openbrowser.browser.watchdogs.base import BaseWatchdog
+from openbrowser.browser.events import ScreenshotEvent
+from openbrowser.browser.watchdogs.base import BaseWatchdog
 
 logger = logging.getLogger(__name__)
 

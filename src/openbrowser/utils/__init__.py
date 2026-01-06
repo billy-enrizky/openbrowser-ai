@@ -1,6 +1,6 @@
 """Utility modules for openbrowser-ai."""
 
-from src.openbrowser.utils.signal_handler import SignalHandler, AsyncSignalHandler
+from openbrowser.utils.signal_handler import SignalHandler, AsyncSignalHandler
 
 __all__ = [
     "SignalHandler",

@@ -15,7 +15,7 @@ Key Features:
 
 Example:
     ```python
-    from src.openbrowser.code_use import CodeAgent
+    from openbrowser.code_use import CodeAgent
     from langchain_openai import ChatOpenAI
 
     llm = ChatOpenAI(model="gpt-4")
@@ -39,9 +39,9 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from src.openbrowser.browser.profile import BrowserProfile
-from src.openbrowser.browser.session import BrowserSession
-from src.openbrowser.tools.actions import CodeAgentTools, Tools
+from openbrowser.browser.profile import BrowserProfile
+from openbrowser.browser.session import BrowserSession
+from openbrowser.tools.actions import CodeAgentTools, Tools
 
 from .formatting import format_browser_state_for_llm
 from .namespace import EvaluateError, create_namespace

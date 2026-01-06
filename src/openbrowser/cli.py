@@ -16,11 +16,11 @@ try:
 except ImportError:
     raise ImportError("Please install CLI dependencies: pip install click rich")
 
-from src.openbrowser.agent import BrowserAgent
-from src.openbrowser.agent.views import AgentSettings
-from src.openbrowser.browser.session import BrowserSession
-from src.openbrowser.browser.profile import BrowserProfile
-from src.openbrowser.llm import get_llm_by_name
+from openbrowser.agent import BrowserAgent
+from openbrowser.agent.views import AgentSettings
+from openbrowser.browser.session import BrowserSession
+from openbrowser.browser.profile import BrowserProfile
+from openbrowser.llm import get_llm_by_name
 
 console = Console()
 
@@ -131,7 +131,7 @@ def run(
             # Save GIF if requested
             if save_gif:
                 try:
-                    from src.openbrowser.agent.gif import create_gif_from_screenshots
+                    from openbrowser.agent.gif import create_gif_from_screenshots
                     screenshots = result.get("screenshots", [])
                     if screenshots:
                         gif_path = create_gif_from_screenshots(screenshots, save_gif)

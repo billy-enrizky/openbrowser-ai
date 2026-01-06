@@ -21,7 +21,7 @@ Each event class inherits from bubus.BaseEvent and may specify:
 Timeouts can be overridden via environment variables (e.g., TIMEOUT_NavigateToUrlEvent).
 
 Example:
-    >>> from src.openbrowser.browser.events import NavigateToUrlEvent
+    >>> from openbrowser.browser.events import NavigateToUrlEvent
     >>> event = NavigateToUrlEvent(url='https://example.com', new_tab=True)
     >>> await event_bus.dispatch(event)
 """

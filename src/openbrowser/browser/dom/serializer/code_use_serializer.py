@@ -21,8 +21,8 @@ Example:
     >>> html = DOMCodeAgentSerializer.serialize_tree(root, [], 0)
 """
 
-from src.openbrowser.browser.dom.serializer.utils import cap_text_length
-from src.openbrowser.browser.dom.views import (
+from openbrowser.browser.dom.serializer.utils import cap_text_length
+from openbrowser.browser.dom.views import (
     EnhancedDOMTreeNode,
     NodeType,
     SimplifiedNode,

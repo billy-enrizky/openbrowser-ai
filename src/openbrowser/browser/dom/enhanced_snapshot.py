@@ -30,7 +30,7 @@ Example:
 import logging
 from typing import Any
 
-from src.openbrowser.browser.dom.views import DOMRect, EnhancedSnapshotNode
+from openbrowser.browser.dom.views import DOMRect, EnhancedSnapshotNode
 
 logger = logging.getLogger(__name__)
 
