@@ -12,8 +12,8 @@ from typing import Any, ClassVar
 
 from bubus import BaseEvent
 
-from src.openbrowser.browser.events import BrowserConnectedEvent
-from src.openbrowser.browser.watchdogs.base import BaseWatchdog
+from openbrowser.browser.events import BrowserConnectedEvent
+from openbrowser.browser.watchdogs.base import BaseWatchdog
 
 logger = logging.getLogger(__name__)
 

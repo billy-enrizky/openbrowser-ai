@@ -13,9 +13,9 @@ from typing import TYPE_CHECKING, ClassVar
 
 from bubus import BaseEvent
 
-from src.openbrowser.browser.dom import DomState
-from src.openbrowser.browser.events import TabCreatedEvent
-from src.openbrowser.browser.watchdogs.base import BaseWatchdog
+from openbrowser.browser.dom import DomState
+from openbrowser.browser.events import TabCreatedEvent
+from openbrowser.browser.watchdogs.base import BaseWatchdog
 
 if TYPE_CHECKING:
     pass

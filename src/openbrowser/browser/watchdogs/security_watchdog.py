@@ -13,8 +13,8 @@ from urllib.parse import urlparse
 
 from bubus import BaseEvent
 
-from src.openbrowser.browser.events import BrowserErrorEvent, NavigateToUrlEvent, NavigationCompleteEvent, TabCreatedEvent
-from src.openbrowser.browser.watchdogs.base import BaseWatchdog
+from openbrowser.browser.events import BrowserErrorEvent, NavigateToUrlEvent, NavigationCompleteEvent, TabCreatedEvent
+from openbrowser.browser.watchdogs.base import BaseWatchdog
 
 logger = logging.getLogger(__name__)
 

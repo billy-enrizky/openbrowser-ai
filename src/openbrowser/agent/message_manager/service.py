@@ -7,15 +7,15 @@ from typing import TYPE_CHECKING, Literal
 
 from langchain_core.messages import BaseMessage, SystemMessage
 
-from src.openbrowser.agent.message_manager.views import (
+from openbrowser.agent.message_manager.views import (
     HistoryItem,
     MessageManagerState,
 )
-from src.openbrowser.agent.prompts import AgentMessagePrompt
+from openbrowser.agent.prompts import AgentMessagePrompt
 
 if TYPE_CHECKING:
-    from src.openbrowser.agent.views import ActionResult, AgentOutput, AgentStepInfo
-    from src.openbrowser.browser.dom import DomState
+    from openbrowser.agent.views import ActionResult, AgentOutput, AgentStepInfo
+    from openbrowser.browser.dom import DomState
 
 logger = logging.getLogger(__name__)
 

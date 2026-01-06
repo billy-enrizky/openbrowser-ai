@@ -269,7 +269,7 @@ class BrowserSession(BaseModel):
         """
         super().__init__(**kwargs)
         import tempfile
-        from src.openbrowser.browser.profile import BrowserProfile
+        from openbrowser.browser.profile import BrowserProfile
         
         self._debug_port = debug_port
         
@@ -397,7 +397,7 @@ class BrowserSession(BaseModel):
         Args:
             __context: Pydantic model context (unused).
         """
-        from src.openbrowser.browser.events import (
+        from openbrowser.browser.events import (
             BrowserStartEvent,
             BrowserStopEvent,
             NavigateToUrlEvent,
@@ -428,7 +428,7 @@ class BrowserSession(BaseModel):
             >>> await session.start()
             >>> # Browser is now ready for navigation
         """
-        from src.openbrowser.browser.events import BrowserStartEvent
+        from openbrowser.browser.events import BrowserStartEvent
 
         start_event = self.event_bus.dispatch(BrowserStartEvent())
         await start_event
@@ -448,7 +448,7 @@ class BrowserSession(BaseModel):
             >>> await session.stop()  # Keep browser alive
             >>> await session.stop(force=True)  # Kill browser
         """
-        from src.openbrowser.browser.events import BrowserStopEvent
+        from openbrowser.browser.events import BrowserStopEvent
 
         await self.event_bus.dispatch(BrowserStopEvent(force=force))
         await self.event_bus.stop(clear=True, timeout=5)
@@ -476,7 +476,7 @@ class BrowserSession(BaseModel):
         try:
             # If no CDP URL, launch local browser
             if not self._cdp_url:
-                from src.openbrowser.browser.events import BrowserLaunchEvent, BrowserLaunchResult
+                from openbrowser.browser.events import BrowserLaunchEvent, BrowserLaunchResult
 
                 launch_event = self.event_bus.dispatch(BrowserLaunchEvent())
                 await launch_event
@@ -497,7 +497,7 @@ class BrowserSession(BaseModel):
                 assert self._session_manager is not None, 'SessionManager should be initialized in connect()'
 
                 # Notify that browser is connected (this triggers watchdogs that listen to BrowserConnectedEvent)
-                from src.openbrowser.browser.events import BrowserConnectedEvent
+                from openbrowser.browser.events import BrowserConnectedEvent
 
                 self.event_bus.dispatch(BrowserConnectedEvent(cdp_url=self._cdp_url))
             else:
@@ -506,7 +506,7 @@ class BrowserSession(BaseModel):
             return {'cdp_url': self._cdp_url}
 
         except Exception as e:
-            from src.openbrowser.browser.events import BrowserErrorEvent
+            from openbrowser.browser.events import BrowserErrorEvent
 
             self.event_bus.dispatch(
                 BrowserErrorEvent(
@@ -534,13 +534,13 @@ class BrowserSession(BaseModel):
             self._cdp_url = None
 
             # Notify stop
-            from src.openbrowser.browser.events import BrowserStoppedEvent
+            from openbrowser.browser.events import BrowserStoppedEvent
 
             stop_event = self.event_bus.dispatch(BrowserStoppedEvent(reason='Stopped by request'))
             await stop_event
 
         except Exception as e:
-            from src.openbrowser.browser.events import BrowserErrorEvent
+            from openbrowser.browser.events import BrowserErrorEvent
 
             self.event_bus.dispatch(
                 BrowserErrorEvent(
@@ -601,7 +601,7 @@ class BrowserSession(BaseModel):
                         self.logger.debug(f'[on_NavigateToUrlEvent] Created new page with target_id: {target_id}')
 
                         # Dispatch TabCreatedEvent for new tab
-                        from src.openbrowser.browser.events import TabCreatedEvent
+                        from openbrowser.browser.events import TabCreatedEvent
 
                         await self.event_bus.dispatch(TabCreatedEvent(target_id=target_id, url='about:blank'))
                     except Exception as e:
@@ -620,7 +620,7 @@ class BrowserSession(BaseModel):
                     f'(current: {self.agent_focus.target_id[-4:] if self.agent_focus else "none"})'
                 )
                 # Activate target (bring to foreground)
-                from src.openbrowser.browser.events import SwitchTabEvent
+                from openbrowser.browser.events import SwitchTabEvent
 
                 await self.event_bus.dispatch(SwitchTabEvent(target_id=target_id))
             else:
@@ -635,7 +635,7 @@ class BrowserSession(BaseModel):
             )
 
             # Dispatch navigation started
-            from src.openbrowser.browser.events import NavigationStartedEvent
+            from openbrowser.browser.events import NavigationStartedEvent
 
             await self.event_bus.dispatch(NavigationStartedEvent(target_id=target_id, url=event.url))
 
@@ -652,7 +652,7 @@ class BrowserSession(BaseModel):
             await asyncio.sleep(1)
 
             # Dispatch navigation complete
-            from src.openbrowser.browser.events import NavigationCompleteEvent
+            from openbrowser.browser.events import NavigationCompleteEvent
 
             self.logger.debug(f'[on_NavigateToUrlEvent] Dispatching NavigationCompleteEvent for {event.url}')
             await self.event_bus.dispatch(
@@ -709,7 +709,7 @@ class BrowserSession(BaseModel):
 
             # Initialize SessionManager FIRST (before enabling autoAttach)
             # This ensures session manager is ready to handle attach/detach events
-            from src.openbrowser.browser.session_manager import SessionManager
+            from openbrowser.browser.session_manager import SessionManager
             
             self._session_manager = SessionManager(self)
             await self._session_manager.start_monitoring()
@@ -839,14 +839,14 @@ class BrowserSession(BaseModel):
             for idx, target in enumerate(page_targets):
                 target_url = target.get('url', '')
                 self.logger.debug(f'[connect] Dispatching TabCreatedEvent for initial tab {idx}: {target_url}')
-                from src.openbrowser.browser.events import TabCreatedEvent
+                from openbrowser.browser.events import TabCreatedEvent
 
                 self.event_bus.dispatch(TabCreatedEvent(url=target_url, target_id=target['targetId']))
 
             # Dispatch initial focus event
             if page_targets:
                 initial_url = page_targets[0].get('url', '')
-                from src.openbrowser.browser.events import AgentFocusChangedEvent
+                from openbrowser.browser.events import AgentFocusChangedEvent
 
                 self.event_bus.dispatch(AgentFocusChangedEvent(target_id=page_targets[0]['targetId'], url=initial_url))
                 self.logger.debug(f'[connect] Initial agent focus set to tab 0: {initial_url}')
@@ -956,7 +956,7 @@ class BrowserSession(BaseModel):
             self.logger.debug(f'Failed to activate tab visually: {e}')
 
         # Dispatch focus changed event
-        from src.openbrowser.browser.events import AgentFocusChangedEvent
+        from openbrowser.browser.events import AgentFocusChangedEvent
 
         self.event_bus.dispatch(AgentFocusChangedEvent(target_id=target_id, url=session.url))
 
@@ -1290,14 +1290,14 @@ class BrowserSession(BaseModel):
             return
 
         # Initialize LocalBrowserWatchdog FIRST (needs to handle BrowserLaunchEvent)
-        from src.openbrowser.browser.watchdogs.local_browser_watchdog import LocalBrowserWatchdog
+        from openbrowser.browser.watchdogs.local_browser_watchdog import LocalBrowserWatchdog
 
         LocalBrowserWatchdog.model_rebuild()
         self._local_browser_watchdog = LocalBrowserWatchdog(event_bus=self.event_bus, browser_session=self)
         self._local_browser_watchdog.attach_to_session()
 
         # Initialize DownloadsWatchdog
-        from src.openbrowser.browser.watchdogs.downloads_watchdog import DownloadsWatchdog
+        from openbrowser.browser.watchdogs.downloads_watchdog import DownloadsWatchdog
 
         DownloadsWatchdog.model_rebuild()
         self._downloads_watchdog = DownloadsWatchdog(event_bus=self.event_bus, browser_session=self)
@@ -1306,14 +1306,14 @@ class BrowserSession(BaseModel):
             self.logger.debug('PDF auto-download enabled for this session')
 
         # Initialize PopupsWatchdog
-        from src.openbrowser.browser.watchdogs.popups_watchdog import PopupsWatchdog
+        from openbrowser.browser.watchdogs.popups_watchdog import PopupsWatchdog
 
         PopupsWatchdog.model_rebuild()
         self._popups_watchdog = PopupsWatchdog(event_bus=self.event_bus, browser_session=self)
         self._popups_watchdog.attach_to_session()
 
         # Initialize SecurityWatchdog
-        from src.openbrowser.browser.watchdogs.security_watchdog import SecurityWatchdog
+        from openbrowser.browser.watchdogs.security_watchdog import SecurityWatchdog
 
         SecurityWatchdog.model_rebuild()
         self._security_watchdog = SecurityWatchdog(event_bus=self.event_bus, browser_session=self)
@@ -1326,7 +1326,7 @@ class BrowserSession(BaseModel):
         )
 
         if should_enable_storage_state:
-            from src.openbrowser.browser.watchdogs.storage_state_watchdog import StorageStateWatchdog
+            from openbrowser.browser.watchdogs.storage_state_watchdog import StorageStateWatchdog
 
             StorageStateWatchdog.model_rebuild()
             self._storage_state_watchdog = StorageStateWatchdog(
@@ -1344,7 +1344,7 @@ class BrowserSession(BaseModel):
             self.logger.debug('StorageStateWatchdog disabled (no storage_state or user_data_dir configured)')
 
         # Initialize PermissionsWatchdog
-        from src.openbrowser.browser.watchdogs.permissions_watchdog import PermissionsWatchdog
+        from openbrowser.browser.watchdogs.permissions_watchdog import PermissionsWatchdog
 
         PermissionsWatchdog.model_rebuild()
         self._permissions_watchdog = PermissionsWatchdog(event_bus=self.event_bus, browser_session=self)
@@ -1352,21 +1352,21 @@ class BrowserSession(BaseModel):
 
         # Initialize RecordingWatchdog if video recording is enabled
         if self.browser_profile.record_video_dir:
-            from src.openbrowser.browser.watchdogs.recording_watchdog import RecordingWatchdog
+            from openbrowser.browser.watchdogs.recording_watchdog import RecordingWatchdog
 
             RecordingWatchdog.model_rebuild()
             self._recording_watchdog = RecordingWatchdog(event_bus=self.event_bus, browser_session=self)
             self._recording_watchdog.attach_to_session()
 
         # Initialize ScreenshotWatchdog
-        from src.openbrowser.browser.watchdogs.screenshot_watchdog import ScreenshotWatchdog
+        from openbrowser.browser.watchdogs.screenshot_watchdog import ScreenshotWatchdog
 
         ScreenshotWatchdog.model_rebuild()
         self._screenshot_watchdog = ScreenshotWatchdog(event_bus=self.event_bus, browser_session=self)
         self._screenshot_watchdog.attach_to_session()
 
         # Initialize DOMWatchdog
-        from src.openbrowser.browser.watchdogs.dom_watchdog import DOMWatchdog
+        from openbrowser.browser.watchdogs.dom_watchdog import DOMWatchdog
 
         DOMWatchdog.model_rebuild()
         self._dom_watchdog = DOMWatchdog(event_bus=self.event_bus, browser_session=self)
@@ -1441,7 +1441,7 @@ class BrowserSession(BaseModel):
             >>> await session.navigate_to('https://example.com')
             >>> await session.navigate_to('https://other.com', new_tab=True)
         """
-        from src.openbrowser.browser.events import NavigateToUrlEvent
+        from openbrowser.browser.events import NavigateToUrlEvent
 
         event = self.event_bus.dispatch(NavigateToUrlEvent(url=url, new_tab=new_tab))
         await event
@@ -1461,7 +1461,7 @@ class BrowserSession(BaseModel):
             >>> for tab in tabs:
             ...     print(f"{tab.title}: {tab.url}")
         """
-        from src.openbrowser.browser.views import TabInfo
+        from openbrowser.browser.views import TabInfo
 
         tabs = []
 

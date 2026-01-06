@@ -17,13 +17,13 @@ import httpx
 from bubus import BaseEvent
 from playwright.async_api import async_playwright
 
-from src.openbrowser.browser.events import (
+from openbrowser.browser.events import (
     BrowserKillEvent,
     BrowserLaunchEvent,
     BrowserLaunchResult,
     BrowserStopEvent,
 )
-from src.openbrowser.browser.watchdogs.base import BaseWatchdog
+from openbrowser.browser.watchdogs.base import BaseWatchdog
 
 if TYPE_CHECKING:
     pass

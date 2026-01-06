@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
-    from src.openbrowser.agent.views import AgentHistoryList
+    from openbrowser.agent.views import AgentHistoryList
 
 logger = logging.getLogger(__name__)
 

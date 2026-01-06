@@ -12,9 +12,9 @@ from pydantic import BaseModel, ConfigDict, Field, create_model, field_validator
 from uuid_extensions import uuid7str
 
 if TYPE_CHECKING:
-    from src.openbrowser.llm.base import BaseChatModel
-    from src.openbrowser.agent.message_manager.views import MessageManagerState
-    from src.openbrowser.filesystem.views import FileSystemState
+    from openbrowser.llm.base import BaseChatModel
+    from openbrowser.agent.message_manager.views import MessageManagerState
+    from openbrowser.filesystem.views import FileSystemState
 
 logger = logging.getLogger(__name__)
 

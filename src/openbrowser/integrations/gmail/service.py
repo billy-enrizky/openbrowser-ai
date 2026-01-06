@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Optional
 from pydantic import BaseModel, Field
 
 if TYPE_CHECKING:
-    from src.openbrowser.browser.session import BrowserSession
+    from openbrowser.browser.session import BrowserSession
 
 logger = logging.getLogger(__name__)
 
@@ -110,7 +110,7 @@ class GmailIntegration:
             True if navigation was dispatched successfully,
             False if an error occurred.
         """
-        from src.openbrowser.browser.events import NavigateToUrlEvent
+        from openbrowser.browser.events import NavigateToUrlEvent
 
         try:
             await self.browser_session.event_bus.dispatch(

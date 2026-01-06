@@ -25,12 +25,12 @@ Example:
 import re
 from typing import TYPE_CHECKING, Any
 
-from src.openbrowser.browser.dom.serializer.html_serializer import HTMLSerializer
-from src.openbrowser.browser.dom.service import DomService
+from openbrowser.browser.dom.serializer.html_serializer import HTMLSerializer
+from openbrowser.browser.dom.service import DomService
 
 if TYPE_CHECKING:
-    from src.openbrowser.browser.session import BrowserSession
-    from src.openbrowser.browser.watchdogs.dom_watchdog import DOMWatchdog
+    from openbrowser.browser.session import BrowserSession
+    from openbrowser.browser.watchdogs.dom_watchdog import DOMWatchdog
 
 
 async def extract_clean_markdown(

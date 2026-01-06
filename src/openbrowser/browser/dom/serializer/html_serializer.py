@@ -19,7 +19,7 @@ Example:
     >>> html = serializer.serialize(enhanced_dom_tree)
 """
 
-from src.openbrowser.browser.dom.views import EnhancedDOMTreeNode, NodeType
+from openbrowser.browser.dom.views import EnhancedDOMTreeNode, NodeType
 
 
 class HTMLSerializer:

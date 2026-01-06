@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from src.openbrowser.tokens.views import ModelPricing, TokenUsage, CumulativeTokenUsage
+from openbrowser.tokens.views import ModelPricing, TokenUsage, CumulativeTokenUsage
 
 logger = logging.getLogger(__name__)
 

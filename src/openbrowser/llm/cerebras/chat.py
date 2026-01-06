@@ -15,7 +15,7 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, System
 from langchain_core.outputs import ChatGeneration, ChatResult
 from pydantic import BaseModel, Field, PrivateAttr
 
-from src.openbrowser.llm.exceptions import ModelProviderError
+from openbrowser.llm.exceptions import ModelProviderError
 
 logger = logging.getLogger(__name__)
 

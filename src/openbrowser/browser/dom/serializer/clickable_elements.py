@@ -19,7 +19,7 @@ Classes:
     ClickableElementDetector: Static methods for interactivity detection.
 """
 
-from src.openbrowser.browser.dom.views import EnhancedDOMTreeNode, NodeType
+from openbrowser.browser.dom.views import EnhancedDOMTreeNode, NodeType
 
 
 class ClickableElementDetector:

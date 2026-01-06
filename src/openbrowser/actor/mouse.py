@@ -4,7 +4,7 @@ import logging
 from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
-    from src.openbrowser.browser.session import BrowserSession
+    from openbrowser.browser.session import BrowserSession
 
 logger = logging.getLogger(__name__)
 

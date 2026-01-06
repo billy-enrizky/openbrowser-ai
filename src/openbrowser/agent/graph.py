@@ -13,9 +13,9 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, StateGraph
 from langgraph.graph.message import add_messages
 
-from src.openbrowser.agent.message_manager import MessageManager, MessageManagerState
-from src.openbrowser.agent.prompts import SystemPrompt
-from src.openbrowser.agent.views import (
+from openbrowser.agent.message_manager import MessageManager, MessageManagerState
+from openbrowser.agent.prompts import SystemPrompt
+from openbrowser.agent.views import (
     ActionResult,
     AgentHistory,
     AgentHistoryList,
@@ -25,10 +25,10 @@ from src.openbrowser.agent.views import (
     BrowserStateHistory,
     StepMetadata,
 )
-from src.openbrowser.browser.dom import DomService
-from src.openbrowser.browser.profile import BrowserProfile
-from src.openbrowser.browser.session import BrowserSession
-from src.openbrowser.tools.actions import Tools, detect_captcha
+from openbrowser.browser.dom import DomService
+from openbrowser.browser.profile import BrowserProfile
+from openbrowser.browser.session import BrowserSession
+from openbrowser.tools.actions import Tools, detect_captcha
 
 from dotenv import load_dotenv
 
@@ -183,52 +183,52 @@ class BrowserAgent:
             llm_model = getattr(llm, 'model', getattr(llm, 'model_name', 'unknown'))
             logger.info("Initializing BrowserAgent with custom LLM: %s, model: %s", llm_class_name, llm_model)
         elif llm_provider == "google":
-            from src.openbrowser.llm.google import ChatGoogle
+            from openbrowser.llm.google import ChatGoogle
             self.llm = ChatGoogle(model=model_name, temperature=0, api_key=api_key) if api_key else ChatGoogle(model=model_name, temperature=0)
             logger.info("Initializing BrowserAgent with provider: %s, model: %s", llm_provider, model_name)
         elif llm_provider == "anthropic":
-            from src.openbrowser.llm.anthropic import ChatAnthropic
+            from openbrowser.llm.anthropic import ChatAnthropic
             self.llm = ChatAnthropic(model=model_name, temperature=0, api_key=api_key) if api_key else ChatAnthropic(model=model_name, temperature=0)
             logger.info("Initializing BrowserAgent with provider: %s, model: %s", llm_provider, model_name)
         elif llm_provider == "groq":
-            from src.openbrowser.llm.groq import ChatGroq
+            from openbrowser.llm.groq import ChatGroq
             self.llm = ChatGroq(model=model_name, temperature=0, api_key=api_key) if api_key else ChatGroq(model=model_name, temperature=0)
             logger.info("Initializing BrowserAgent with provider: %s, model: %s", llm_provider, model_name)
         elif llm_provider == "ollama":
-            from src.openbrowser.llm.ollama import ChatOllama
+            from openbrowser.llm.ollama import ChatOllama
             self.llm = ChatOllama(model=model_name, temperature=0)
             logger.info("Initializing BrowserAgent with provider: %s, model: %s", llm_provider, model_name)
         elif llm_provider == "openrouter":
-            from src.openbrowser.llm.openrouter import ChatOpenRouter
+            from openbrowser.llm.openrouter import ChatOpenRouter
             self.llm = ChatOpenRouter(model=model_name, temperature=0, api_key=api_key) if api_key else ChatOpenRouter(model=model_name, temperature=0)
             logger.info("Initializing BrowserAgent with provider: %s, model: %s", llm_provider, model_name)
         elif llm_provider == "aws":
-            from src.openbrowser.llm.aws import ChatAWSBedrock
+            from openbrowser.llm.aws import ChatAWSBedrock
             self.llm = ChatAWSBedrock(model=model_name, temperature=0)
             logger.info("Initializing BrowserAgent with provider: %s, model: %s", llm_provider, model_name)
         elif llm_provider == "azure":
-            from src.openbrowser.llm.azure import ChatAzureOpenAI
+            from openbrowser.llm.azure import ChatAzureOpenAI
             self.llm = ChatAzureOpenAI(model=model_name, temperature=0, api_key=api_key) if api_key else ChatAzureOpenAI(model=model_name, temperature=0)
             logger.info("Initializing BrowserAgent with provider: %s, model: %s", llm_provider, model_name)
         elif llm_provider == "oci":
-            from src.openbrowser.llm.oci import ChatOCI
+            from openbrowser.llm.oci import ChatOCI
             self.llm = ChatOCI(model=model_name, temperature=0)
             logger.info("Initializing BrowserAgent with provider: %s, model: %s", llm_provider, model_name)
         elif llm_provider == "cerebras":
-            from src.openbrowser.llm.cerebras import ChatCerebras
+            from openbrowser.llm.cerebras import ChatCerebras
             self.llm = ChatCerebras(model=model_name, temperature=0, api_key=api_key) if api_key else ChatCerebras(model=model_name, temperature=0)
             logger.info("Initializing BrowserAgent with provider: %s, model: %s", llm_provider, model_name)
         elif llm_provider == "deepseek":
-            from src.openbrowser.llm.deepseek import ChatDeepSeek
+            from openbrowser.llm.deepseek import ChatDeepSeek
             self.llm = ChatDeepSeek(model=model_name, temperature=0, api_key=api_key) if api_key else ChatDeepSeek(model=model_name, temperature=0)
             logger.info("Initializing BrowserAgent with provider: %s, model: %s", llm_provider, model_name)
         elif llm_provider == "browser_use":
-            from src.openbrowser.llm.browser_use import ChatBrowserUse
+            from openbrowser.llm.browser_use import ChatBrowserUse
             self.llm = ChatBrowserUse(model=model_name, temperature=0, api_key=api_key) if api_key else ChatBrowserUse(model=model_name, temperature=0)
             logger.info("Initializing BrowserAgent with provider: %s, model: %s", llm_provider, model_name)
         else:
             # Default to OpenAI
-            from src.openbrowser.llm.openai import ChatOpenAI
+            from openbrowser.llm.openai import ChatOpenAI
             self.llm = ChatOpenAI(model=model_name, temperature=0, api_key=api_key)
             logger.info("Initializing BrowserAgent with provider: openai, model: %s", model_name)
 
@@ -352,7 +352,7 @@ class BrowserAgent:
         except Exception as e:
             logger.warning(f"Failed to get clickable elements: {e}")
             # Return empty state if we can't get DOM
-            from src.openbrowser.browser.dom import DomState
+            from openbrowser.browser.dom import DomState
             dom_state = DomState(element_tree="", selector_map={})
             self.tools.update_state(dom_state)
 
@@ -409,7 +409,7 @@ class BrowserAgent:
                     fallback_url = "https://www.bing.com?setlang=en&cc=US"
                 
                 logger.info(f"Redirecting to Bing: {fallback_url}")
-                from src.openbrowser.browser.events import NavigateToUrlEvent
+                from openbrowser.browser.events import NavigateToUrlEvent
                 await self.browser_session.event_bus.dispatch(NavigateToUrlEvent(url=fallback_url, new_tab=False))
                 
                 # Wait for new page to load and re-fetch state
@@ -485,7 +485,7 @@ class BrowserAgent:
         if self.message_manager is None:
             raise RuntimeError("Message manager not initialized")
 
-        from src.openbrowser.browser.dom import DomState
+        from openbrowser.browser.dom import DomState
         dom_state = DomState(
             element_tree=state.get("dom_tree", ""),
             selector_map=self.tools._selector_map,

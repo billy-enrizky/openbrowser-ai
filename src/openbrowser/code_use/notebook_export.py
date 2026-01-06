@@ -90,8 +90,8 @@ def export_to_ipynb(agent: "CodeAgent", output_path: str | Path) -> Path:
 import json
 import logging
 from typing import Any
-from src.openbrowser.browser.session import BrowserSession
-from src.openbrowser.code_use.namespace import create_namespace
+from openbrowser.browser.session import BrowserSession
+from openbrowser.code_use.namespace import create_namespace
 
 # Initialize browser and namespace
 browser = BrowserSession()
@@ -264,8 +264,8 @@ def session_to_python_script(agent: "CodeAgent") -> str:
     lines.append("import asyncio\n")
     lines.append("import json\n")
     lines.append("import logging\n")
-    lines.append("from src.openbrowser.browser.session import BrowserSession\n")
-    lines.append("from src.openbrowser.code_use.namespace import create_namespace\n\n")
+    lines.append("from openbrowser.browser.session import BrowserSession\n")
+    lines.append("from openbrowser.code_use.namespace import create_namespace\n\n")
 
     lines.append("async def main():\n")
     lines.append("\t# Initialize browser and namespace\n")

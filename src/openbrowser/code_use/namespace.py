@@ -26,8 +26,8 @@ import re
 from pathlib import Path
 from typing import Any
 
-from src.openbrowser.browser.session import BrowserSession
-from src.openbrowser.tools.actions import Tools
+from openbrowser.browser.session import BrowserSession
+from openbrowser.tools.actions import Tools
 
 logger = logging.getLogger(__name__)
 

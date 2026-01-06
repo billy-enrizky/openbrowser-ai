@@ -13,7 +13,7 @@ import os
 from pathlib import Path
 from typing import Optional
 
-from src.openbrowser.filesystem.views import FileInfo, FileSystemState
+from openbrowser.filesystem.views import FileInfo, FileSystemState
 
 logger = logging.getLogger(__name__)
 

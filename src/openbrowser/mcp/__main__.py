@@ -6,7 +6,7 @@ Usage:
 
 import asyncio
 
-from src.openbrowser.mcp.server import main
+from openbrowser.mcp.server import main
 
 if __name__ == "__main__":
     asyncio.run(main())

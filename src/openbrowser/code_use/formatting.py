@@ -9,7 +9,7 @@ a simplified DOM structure.
 import logging
 from typing import Any
 
-from src.openbrowser.browser.session import BrowserSession
+from openbrowser.browser.session import BrowserSession
 
 logger = logging.getLogger(__name__)
 

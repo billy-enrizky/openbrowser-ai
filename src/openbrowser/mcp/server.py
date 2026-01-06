@@ -13,7 +13,7 @@ Or as an MCP server in Claude Desktop or other MCP clients:
         "mcpServers": {
             "openbrowser-ai": {
                 "command": "python",
-                "args": ["-m", "src.openbrowser.mcp"],
+                "args": ["-m", "openbrowser.mcp"],
                 "env": {
                     "OPENAI_API_KEY": "sk-..."
                 }
@@ -328,9 +328,9 @@ class OpenBrowserServer:
 
         logger.debug("Initializing browser session...")
 
-        from src.openbrowser.browser.profile import BrowserProfile
-        from src.openbrowser.browser.session import BrowserSession
-        from src.openbrowser.tools.actions import Tools
+        from openbrowser.browser.profile import BrowserProfile
+        from openbrowser.browser.session import BrowserSession
+        from openbrowser.tools.actions import Tools
 
         # Create browser profile
         profile = BrowserProfile(
@@ -359,7 +359,7 @@ class OpenBrowserServer:
         """Run an autonomous browser agent task."""
         logger.debug(f"Running agent task: {task}")
 
-        from src.openbrowser.agent.graph import BrowserAgent
+        from openbrowser.agent.graph import BrowserAgent
 
         # Get API key from environment
         api_key = os.getenv("OPENAI_API_KEY")

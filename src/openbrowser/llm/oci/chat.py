@@ -9,7 +9,7 @@ import httpx
 from langchain_core.language_models.chat_models import BaseChatModel
 from pydantic import PrivateAttr
 
-from src.openbrowser.llm.exceptions import ModelProviderError
+from openbrowser.llm.exceptions import ModelProviderError
 
 logger = logging.getLogger(__name__)
 

@@ -8,13 +8,13 @@ from typing import TYPE_CHECKING, TypeVar
 
 from pydantic import BaseModel
 
-from src.openbrowser.actor.utils import get_key_info
+from openbrowser.actor.utils import get_key_info
 
 if TYPE_CHECKING:
-    from src.openbrowser.actor.element import Element
-    from src.openbrowser.actor.mouse import Mouse
-    from src.openbrowser.browser.session import BrowserSession
-    from src.openbrowser.llm.base import BaseChatModel
+    from openbrowser.actor.element import Element
+    from openbrowser.actor.mouse import Mouse
+    from openbrowser.browser.session import BrowserSession
+    from openbrowser.llm.base import BaseChatModel
 
 logger = logging.getLogger(__name__)
 
@@ -118,7 +118,7 @@ class Page:
         """
         if not self._mouse:
             session_id = await self._ensure_session()
-            from src.openbrowser.actor.mouse import Mouse
+            from openbrowser.actor.mouse import Mouse
             self._mouse = Mouse(self._browser_session, session_id, self._target_id)
         return self._mouse
 
@@ -148,7 +148,7 @@ class Page:
             >>> await element.click()
         """
         session_id = await self._ensure_session()
-        from src.openbrowser.actor.element import Element
+        from openbrowser.actor.element import Element
         return Element(self._browser_session, backend_node_id, session_id)
 
     async def evaluate(self, page_function: str, *args) -> str:
@@ -529,7 +529,7 @@ class Page:
             ...     await btn.click()
         """
         session_id = await self._ensure_session()
-        from src.openbrowser.actor.element import Element
+        from openbrowser.actor.element import Element
 
         # Get document
         doc_result = await self._client.send('DOM.getDocument', session_id=session_id)
@@ -582,8 +582,8 @@ class Page:
             >>> if btn:
             ...     await btn.click()
         """
-        from src.openbrowser.agent.views import SystemMessage, UserMessage
-        from src.openbrowser.browser.dom.service import DomService
+        from openbrowser.agent.views import SystemMessage, UserMessage
+        from openbrowser.browser.dom.service import DomService
 
         llm = llm or self._llm
         if not llm:
@@ -639,7 +639,7 @@ Return the element index that best matches the prompt, or null if not found.
             return None
 
         element_info = selector_map[element_index]
-        from src.openbrowser.actor.element import Element
+        from openbrowser.actor.element import Element
         return Element(
             self._browser_session,
             element_info.get('backend_node_id', 0),
@@ -704,7 +704,7 @@ Return the element index that best matches the prompt, or null if not found.
             ...     Product
             ... )
         """
-        from src.openbrowser.agent.views import SystemMessage, UserMessage
+        from openbrowser.agent.views import SystemMessage, UserMessage
 
         llm = llm or self._llm
         if not llm:

@@ -21,8 +21,8 @@ Classes:
     DOMEvalSerializer: Verbose DOM serializer for evaluation.
 """
 
-from src.openbrowser.browser.dom.serializer.utils import cap_text_length
-from src.openbrowser.browser.dom.views import (
+from openbrowser.browser.dom.serializer.utils import cap_text_length
+from openbrowser.browser.dom.views import (
     EnhancedDOMTreeNode,
     NodeType,
     SimplifiedNode,

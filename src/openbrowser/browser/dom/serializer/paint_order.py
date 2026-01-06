@@ -22,7 +22,7 @@ Example:
 from collections import defaultdict
 from dataclasses import dataclass
 
-from src.openbrowser.browser.dom.views import SimplifiedNode
+from openbrowser.browser.dom.views import SimplifiedNode
 
 
 @dataclass(frozen=True, slots=True)

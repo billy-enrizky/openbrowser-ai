@@ -20,10 +20,10 @@ from bubus import BaseEvent
 from cdp_use.cdp.page.events import ScreencastFrameEvent
 from pydantic import PrivateAttr
 
-from src.openbrowser.browser.events import BrowserConnectedEvent, BrowserStopEvent
-from src.openbrowser.browser.profile import ViewportSize
-from src.openbrowser.browser.video_recorder import VideoRecorderService
-from src.openbrowser.browser.watchdogs.base import BaseWatchdog
+from openbrowser.browser.events import BrowserConnectedEvent, BrowserStopEvent
+from openbrowser.browser.profile import ViewportSize
+from openbrowser.browser.video_recorder import VideoRecorderService
+from openbrowser.browser.watchdogs.base import BaseWatchdog
 
 
 class RecordingWatchdog(BaseWatchdog):

@@ -9,7 +9,7 @@ from typing import Any, TypeVar
 
 from pydantic import BaseModel
 
-from src.openbrowser.agent.views import (
+from openbrowser.agent.views import (
     AssistantMessage,
     BaseMessage,
     ContentPartImageParam,
@@ -17,7 +17,7 @@ from src.openbrowser.agent.views import (
     SystemMessage,
     UserMessage,
 )
-from src.openbrowser.llm.serializer import BaseMessageSerializer
+from openbrowser.llm.serializer import BaseMessageSerializer
 
 logger = logging.getLogger(__name__)
 

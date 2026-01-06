@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from cdp_use.cdp.target import AttachedToTargetEvent, DetachedFromTargetEvent, SessionID, TargetID
 
 if TYPE_CHECKING:
-    from src.openbrowser.browser.session import BrowserSession, CDPSession
+    from openbrowser.browser.session import BrowserSession, CDPSession
 
 logger = logging.getLogger(__name__)
 
@@ -163,7 +163,7 @@ class SessionManager:
 
             # Create CDPSession wrapper and add to pool
             if target_id not in self.browser_session._cdp_session_pool:
-                from src.openbrowser.browser.session import CDPSession
+                from openbrowser.browser.session import CDPSession
 
                 # Guard against race condition during browser shutdown/restart
                 if self.browser_session._cdp_client_root is None:
@@ -285,7 +285,7 @@ class SessionManager:
         # Dispatch TabClosedEvent only for page/tab targets that are fully removed
         if target_fully_removed:
             if target_type in ('page', 'tab'):
-                from src.openbrowser.browser.events import TabClosedEvent
+                from openbrowser.browser.events import TabClosedEvent
 
                 self.browser_session.event_bus.dispatch(TabClosedEvent(target_id=target_id))
                 self.logger.debug(f'[SessionManager] Dispatched TabClosedEvent for page target {target_id[:8]}...')
@@ -344,7 +344,7 @@ class SessionManager:
                 self.logger.info(f'[SessionManager] Created new tab {new_target_id[:8]}... for agent')
 
                 # Dispatch TabCreatedEvent so watchdogs can initialize
-                from src.openbrowser.browser.events import TabCreatedEvent
+                from openbrowser.browser.events import TabCreatedEvent
 
                 self.browser_session.event_bus.dispatch(TabCreatedEvent(url='about:blank', target_id=new_target_id))
 
@@ -372,7 +372,7 @@ class SessionManager:
                         self.logger.debug(f'[SessionManager] Failed to activate tab visually: {e}')
 
                 # Dispatch focus changed event
-                from src.openbrowser.browser.events import AgentFocusChangedEvent
+                from openbrowser.browser.events import AgentFocusChangedEvent
 
                 self.browser_session.event_bus.dispatch(
                     AgentFocusChangedEvent(target_id=new_target_id, url=new_session.url)
@@ -398,7 +398,7 @@ class SessionManager:
                         f'[SessionManager] Agent focus set to emergency fallback: {fallback_target_id[:8]}...'
                     )
 
-                    from src.openbrowser.browser.events import AgentFocusChangedEvent, TabCreatedEvent
+                    from openbrowser.browser.events import AgentFocusChangedEvent, TabCreatedEvent
 
                     self.browser_session.event_bus.dispatch(
                         TabCreatedEvent(url='about:blank', target_id=fallback_target_id)

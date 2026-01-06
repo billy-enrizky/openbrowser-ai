@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING, Optional
 
 from cdp_use.client import CDPClient
 
-from src.openbrowser.browser.dom.views import (
+from openbrowser.browser.dom.views import (
     DomNode,
     DomState,
     DOMRect,
@@ -36,10 +36,10 @@ from src.openbrowser.browser.dom.views import (
     SimplifiedNode,
     SerializedDOMState,
 )
-from src.openbrowser.browser.dom.serializer.service import DOMTreeSerializer
+from openbrowser.browser.dom.serializer.service import DOMTreeSerializer
 
 if TYPE_CHECKING:
-    from src.openbrowser.browser.session import BrowserSession, CDPSession
+    from openbrowser.browser.session import BrowserSession, CDPSession
 
 logger = logging.getLogger(__name__)
 
@@ -448,7 +448,7 @@ class DomService:
         Note:
             Full serializer pipeline integration is pending.
         """
-        from src.openbrowser.browser.dom.serializer.service import (
+        from openbrowser.browser.dom.serializer.service import (
             DOMTreeSerializer,
         )
         

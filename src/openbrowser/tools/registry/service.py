@@ -29,7 +29,7 @@ from typing import Any, Generic, Optional, TypeVar, Union, get_args, get_origin
 
 from pydantic import BaseModel, Field, RootModel, create_model
 
-from src.openbrowser.tools.registry.views import (
+from openbrowser.tools.registry.views import (
     ActionModel,
     ActionRegistry,
     RegisteredAction,

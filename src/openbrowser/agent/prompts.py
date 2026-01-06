@@ -9,8 +9,8 @@ from typing import TYPE_CHECKING, Literal
 from langchain_core.messages import HumanMessage, SystemMessage
 
 if TYPE_CHECKING:
-    from src.openbrowser.agent.views import AgentStepInfo
-    from src.openbrowser.browser.dom import DomState
+    from openbrowser.agent.views import AgentStepInfo
+    from openbrowser.browser.dom import DomState
 
 
 class SystemPrompt:
@@ -73,7 +73,7 @@ class SystemPrompt:
                 template_filename = 'system_prompt_no_thinking.md'
 
             # Load from the same directory as this module
-            with importlib.resources.files('src.openbrowser.agent').joinpath(template_filename).open('r', encoding='utf-8') as f:
+            with importlib.resources.files('openbrowser.agent').joinpath(template_filename).open('r', encoding='utf-8') as f:
                 self.prompt_template = f.read()
         except Exception as e:
             # Fallback to a basic prompt if file not found

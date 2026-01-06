@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Literal, Union
 from typing_extensions import TypedDict
 
 if TYPE_CHECKING:
-    from src.openbrowser.browser.session import BrowserSession
+    from openbrowser.browser.session import BrowserSession
 
 logger = logging.getLogger(__name__)
 

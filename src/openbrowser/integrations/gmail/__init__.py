@@ -5,7 +5,7 @@ for common Gmail operations like composing, searching, and reading emails.
 
 Example:
     ```python
-    from src.openbrowser.integrations.gmail import GmailIntegration
+    from openbrowser.integrations.gmail import GmailIntegration
 
     gmail = GmailIntegration(browser_session)
     await gmail.navigate_to_gmail()
