@@ -1879,7 +1879,6 @@ wheels = [
 
 [[package]]
 name = "openbrowser-ai"
-version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "aiofiles" },
@@ -1999,7 +1998,7 @@ requires-dist = [
     { name = "textual", marker = "extra == 'cli'", specifier = ">=3.2.0" },
     { name = "websockets", specifier = ">=15.0.1" },
 ]
-provides-extras = ["cli", "video", "anthropic", "groq", "ollama", "aws", "azure", "telemetry", "pdf", "all"]
+provides-extras = ["all", "anthropic", "aws", "azure", "cli", "groq", "ollama", "pdf", "telemetry", "video"]
 
 [[package]]
 name = "orjson"
