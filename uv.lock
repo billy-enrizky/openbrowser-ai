@@ -1746,9 +1746,6 @@ dependencies = [
     { name = "psutil" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-    { name = "pytest-cov" },
     { name = "python-dotenv" },
     { name = "rich" },
     { name = "websockets" },
@@ -1778,6 +1775,11 @@ azure = [
 ]
 cli = [
     { name = "textual" },
+]
+dev = [
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "pytest-cov" },
 ]
 groq = [
     { name = "groq" },
@@ -1837,9 +1839,9 @@ requires-dist = [
     { name = "pydantic-settings", specifier = ">=2.0.0" },
     { name = "pypdf", marker = "extra == 'all'" },
     { name = "pypdf", marker = "extra == 'pdf'" },
-    { name = "pytest", specifier = ">=9.0.2" },
-    { name = "pytest-asyncio", specifier = ">=1.0.0" },
-    { name = "pytest-cov", specifier = ">=6.0.0" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=9.0.2" },
+    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=1.0.0" },
+    { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=6.0.0" },
     { name = "python-dotenv" },
     { name = "reportlab", marker = "extra == 'all'" },
     { name = "reportlab", marker = "extra == 'pdf'" },
@@ -1848,7 +1850,7 @@ requires-dist = [
     { name = "textual", marker = "extra == 'cli'", specifier = ">=3.2.0" },
     { name = "websockets", specifier = ">=15.0.1" },
 ]
-provides-extras = ["all", "anthropic", "aws", "azure", "cli", "groq", "ollama", "pdf", "telemetry", "video"]
+provides-extras = ["all", "anthropic", "aws", "azure", "cli", "dev", "groq", "ollama", "pdf", "telemetry", "video"]
 
 [[package]]
 name = "orjson"
