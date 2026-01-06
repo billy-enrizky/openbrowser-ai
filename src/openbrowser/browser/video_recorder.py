@@ -32,7 +32,7 @@ import subprocess
 from pathlib import Path
 from typing import Optional
 
-from src.openbrowser.browser.profile import ViewportSize
+from openbrowser.browser.profile import ViewportSize
 
 try:
     import imageio.v2 as iio  # type: ignore[import-not-found]

@@ -8,7 +8,7 @@ The module uses lazy loading for provider-specific implementations to minimize i
 time and memory usage when only specific providers are needed.
 
 Example:
-    >>> from src.openbrowser.llm import get_llm_by_name
+    >>> from openbrowser.llm import get_llm_by_name
     >>> llm = get_llm_by_name('openai', model='gpt-4o')
     >>> response = await llm.ainvoke([HumanMessage(content="Hello!")])
 
@@ -22,38 +22,38 @@ Attributes:
 
 from typing import TYPE_CHECKING
 
-from src.openbrowser.llm.base import BaseChatModel, LangChainChatModelWrapper
-from src.openbrowser.llm.exceptions import LLMException, ModelAuthenticationError, ModelRateLimitError
+from openbrowser.llm.base import BaseChatModel, LangChainChatModelWrapper
+from openbrowser.llm.exceptions import LLMException, ModelAuthenticationError, ModelRateLimitError
 
 # Type stubs for lazy imports
 if TYPE_CHECKING:
-    from src.openbrowser.llm.anthropic.chat import ChatAnthropic
-    from src.openbrowser.llm.aws.chat import ChatAWSBedrock
-    from src.openbrowser.llm.azure.chat import ChatAzureOpenAI
-    from src.openbrowser.llm.browser_use.chat import ChatBrowserUse
-    from src.openbrowser.llm.cerebras.chat import ChatCerebras
-    from src.openbrowser.llm.deepseek.chat import ChatDeepSeek
-    from src.openbrowser.llm.google.chat import ChatGoogle
-    from src.openbrowser.llm.groq.chat import ChatGroq
-    from src.openbrowser.llm.oci.chat import ChatOCI
-    from src.openbrowser.llm.ollama.chat import ChatOllama
-    from src.openbrowser.llm.openai.chat import ChatOpenAI
-    from src.openbrowser.llm.openrouter.chat import ChatOpenRouter
+    from openbrowser.llm.anthropic.chat import ChatAnthropic
+    from openbrowser.llm.aws.chat import ChatAWSBedrock
+    from openbrowser.llm.azure.chat import ChatAzureOpenAI
+    from openbrowser.llm.browser_use.chat import ChatBrowserUse
+    from openbrowser.llm.cerebras.chat import ChatCerebras
+    from openbrowser.llm.deepseek.chat import ChatDeepSeek
+    from openbrowser.llm.google.chat import ChatGoogle
+    from openbrowser.llm.groq.chat import ChatGroq
+    from openbrowser.llm.oci.chat import ChatOCI
+    from openbrowser.llm.ollama.chat import ChatOllama
+    from openbrowser.llm.openai.chat import ChatOpenAI
+    from openbrowser.llm.openrouter.chat import ChatOpenRouter
 
 # Lazy imports mapping for heavy chat models
 _LAZY_IMPORTS = {
-    'ChatAnthropic': ('src.openbrowser.llm.anthropic.chat', 'ChatAnthropic'),
-    'ChatAWSBedrock': ('src.openbrowser.llm.aws.chat', 'ChatAWSBedrock'),
-    'ChatAzureOpenAI': ('src.openbrowser.llm.azure.chat', 'ChatAzureOpenAI'),
-    'ChatBrowserUse': ('src.openbrowser.llm.browser_use.chat', 'ChatBrowserUse'),
-    'ChatCerebras': ('src.openbrowser.llm.cerebras.chat', 'ChatCerebras'),
-    'ChatDeepSeek': ('src.openbrowser.llm.deepseek.chat', 'ChatDeepSeek'),
-    'ChatGoogle': ('src.openbrowser.llm.google.chat', 'ChatGoogle'),
-    'ChatGroq': ('src.openbrowser.llm.groq.chat', 'ChatGroq'),
-    'ChatOCI': ('src.openbrowser.llm.oci.chat', 'ChatOCI'),
-    'ChatOllama': ('src.openbrowser.llm.ollama.chat', 'ChatOllama'),
-    'ChatOpenAI': ('src.openbrowser.llm.openai.chat', 'ChatOpenAI'),
-    'ChatOpenRouter': ('src.openbrowser.llm.openrouter.chat', 'ChatOpenRouter'),
+    'ChatAnthropic': ('openbrowser.llm.anthropic.chat', 'ChatAnthropic'),
+    'ChatAWSBedrock': ('openbrowser.llm.aws.chat', 'ChatAWSBedrock'),
+    'ChatAzureOpenAI': ('openbrowser.llm.azure.chat', 'ChatAzureOpenAI'),
+    'ChatBrowserUse': ('openbrowser.llm.browser_use.chat', 'ChatBrowserUse'),
+    'ChatCerebras': ('openbrowser.llm.cerebras.chat', 'ChatCerebras'),
+    'ChatDeepSeek': ('openbrowser.llm.deepseek.chat', 'ChatDeepSeek'),
+    'ChatGoogle': ('openbrowser.llm.google.chat', 'ChatGoogle'),
+    'ChatGroq': ('openbrowser.llm.groq.chat', 'ChatGroq'),
+    'ChatOCI': ('openbrowser.llm.oci.chat', 'ChatOCI'),
+    'ChatOllama': ('openbrowser.llm.ollama.chat', 'ChatOllama'),
+    'ChatOpenAI': ('openbrowser.llm.openai.chat', 'ChatOpenAI'),
+    'ChatOpenRouter': ('openbrowser.llm.openrouter.chat', 'ChatOpenRouter'),
 }
 
 
@@ -75,7 +75,7 @@ def __getattr__(name: str):
         AttributeError: If the requested attribute is not a known chat model class.
     
     Example:
-        >>> from src.openbrowser.llm import ChatOpenAI
+        >>> from openbrowser.llm import ChatOpenAI
         >>> llm = ChatOpenAI(model='gpt-4o')
     """
     if name in _LAZY_IMPORTS:

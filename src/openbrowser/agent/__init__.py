@@ -1,7 +1,7 @@
 """Agent module for LangGraph orchestration logic."""
 
-from src.openbrowser.agent.graph import BrowserAgent
-from src.openbrowser.agent.views import (
+from openbrowser.agent.graph import BrowserAgent
+from openbrowser.agent.views import (
     ActionResult,
     AgentBrain,
     AgentError,
@@ -15,8 +15,8 @@ from src.openbrowser.agent.views import (
     StepMetadata,
     DEFAULT_INCLUDE_ATTRIBUTES,
 )
-from src.openbrowser.agent.prompts import SystemPrompt, AgentMessagePrompt
-from src.openbrowser.agent.message_manager import MessageManager, MessageManagerState
+from openbrowser.agent.prompts import SystemPrompt, AgentMessagePrompt
+from openbrowser.agent.message_manager import MessageManager, MessageManagerState
 
 __all__ = [
     'BrowserAgent',

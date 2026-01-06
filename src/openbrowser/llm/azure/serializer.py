@@ -8,7 +8,7 @@ from typing import Any, TypeVar
 
 from pydantic import BaseModel
 
-from src.openbrowser.llm.openai.serializer import OpenAIMessageSerializer
+from openbrowser.llm.openai.serializer import OpenAIMessageSerializer
 
 logger = logging.getLogger(__name__)
 

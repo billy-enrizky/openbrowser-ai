@@ -20,9 +20,9 @@ import logging
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from src.openbrowser.browser.dom.views import SimplifiedNode, EnhancedDOMTreeNode
+    from openbrowser.browser.dom.views import SimplifiedNode, EnhancedDOMTreeNode
 
-from src.openbrowser.browser.dom.views import (
+from openbrowser.browser.dom.views import (
     DEFAULT_INCLUDE_ATTRIBUTES,
     NodeType,
 )

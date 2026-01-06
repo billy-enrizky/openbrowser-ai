@@ -10,16 +10,16 @@ from typing import Any, Generic, Optional, TypeVar, TYPE_CHECKING
 
 from pydantic import BaseModel, Field
 
-from src.openbrowser.agent.views import ActionResult
-from src.openbrowser.browser.dom import DomState
-from src.openbrowser.browser.session import BrowserSession
-from src.openbrowser.observability import observe_debug
-from src.openbrowser.tools.registry import Registry, ActionModel
+from openbrowser.agent.views import ActionResult
+from openbrowser.browser.dom import DomState
+from openbrowser.browser.session import BrowserSession
+from openbrowser.observability import observe_debug
+from openbrowser.tools.registry import Registry, ActionModel
 
 T = TypeVar('T', bound=BaseModel)
 
 if TYPE_CHECKING:
-    from src.openbrowser.browser.views import BrowserError
+    from openbrowser.browser.views import BrowserError
 
 logger = logging.getLogger(__name__)
 
@@ -547,7 +547,7 @@ class Tools:
                 logger.info(f"Converted Google URL to Bing: {target_url}")
             
             logger.info(f"Navigating to {target_url}")
-            from src.openbrowser.browser.events import NavigateToUrlEvent
+            from openbrowser.browser.events import NavigateToUrlEvent
             await session.event_bus.dispatch(NavigateToUrlEvent(url=target_url, new_tab=False))
             
             # Wait for page to load before checking for CAPTCHA
@@ -866,7 +866,7 @@ class Tools:
             }
             url = engine_urls.get(params.engine.lower(), engine_urls["duckduckgo"])
             logger.info(f"Searching for '{params.query}' using {params.engine}")
-            from src.openbrowser.browser.events import NavigateToUrlEvent
+            from openbrowser.browser.events import NavigateToUrlEvent
             await session.event_bus.dispatch(NavigateToUrlEvent(url=url, new_tab=False))
             return ActionResult(extracted_content=f"Searched for '{params.query}' using {params.engine}")
 
@@ -892,7 +892,7 @@ class Tools:
 
             # Extract clean markdown using the unified method
             try:
-                from src.openbrowser.browser.dom.markdown_extractor import extract_clean_markdown
+                from openbrowser.browser.dom.markdown_extractor import extract_clean_markdown
 
                 content, content_stats = await extract_clean_markdown(
                     browser_session=session, extract_links=extract_links
@@ -972,7 +972,7 @@ You will be given a query and the markdown of a webpage that has been filtered t
             try:
                 # Use page_extraction_llm if provided, otherwise fall back to simple text extraction
                 if page_extraction_llm is not None:
-                    from src.openbrowser.agent.views import SystemMessage, UserMessage
+                    from openbrowser.agent.views import SystemMessage, UserMessage
                     from langchain_core.messages import AIMessage
                     
                     response = await asyncio.wait_for(
@@ -1245,7 +1245,7 @@ You will be given a query and the markdown of a webpage that has been filtered t
             if not session.agent_focus:
                 raise RuntimeError("Browser not started")
             try:
-                from src.openbrowser.browser.events import SwitchTabEvent
+                from openbrowser.browser.events import SwitchTabEvent
                 tabs = await session.get_tabs()
                 if params.tab_id < 0 or params.tab_id >= len(tabs):
                     return ActionResult(error=f"Tab index {params.tab_id} out of range (0-{len(tabs)-1})")
@@ -1261,7 +1261,7 @@ You will be given a query and the markdown of a webpage that has been filtered t
             if not session.agent_focus:
                 raise RuntimeError("Browser not started")
             try:
-                from src.openbrowser.browser.events import CloseTabEvent
+                from openbrowser.browser.events import CloseTabEvent
                 tabs = await session.get_tabs()
                 if params.tab_id is not None:
                     if params.tab_id < 0 or params.tab_id >= len(tabs):
@@ -1399,7 +1399,7 @@ You will be given a query and the markdown of a webpage that has been filtered t
         file_system: Any | None = None,
     ) -> ActionResult:
         """Execute an action with unified error handling."""
-        from src.openbrowser.browser.views import BrowserError  # noqa: F401
+        from openbrowser.browser.views import BrowserError  # noqa: F401
 
         for action_name, params in action.model_dump(exclude_unset=True).items():
             if params is not None:

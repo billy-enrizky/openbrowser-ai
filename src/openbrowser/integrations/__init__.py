@@ -8,14 +8,14 @@ Available Integrations:
 
 Example:
     ```python
-    from src.openbrowser.integrations import GmailIntegration
+    from openbrowser.integrations import GmailIntegration
 
     gmail = GmailIntegration(browser_session)
     await gmail.navigate_to_gmail()
     ```
 """
 
-from src.openbrowser.integrations.gmail import GmailIntegration
+from openbrowser.integrations.gmail import GmailIntegration
 
 __all__ = ["GmailIntegration"]
 

@@ -12,7 +12,7 @@ Key Components:
 The module uses lazy imports to avoid loading heavy browser components until needed.
 
 Example:
-    >>> from src.openbrowser.browser import BrowserSession, BrowserProfile
+    >>> from openbrowser.browser import BrowserSession, BrowserProfile
     >>> profile = BrowserProfile(headless=True)
     >>> session = BrowserSession(browser_profile=profile)
     >>> await session.start()
@@ -24,14 +24,14 @@ from typing import TYPE_CHECKING
 
 # Type stubs for lazy imports
 if TYPE_CHECKING:
-    from src.openbrowser.browser.profile import BrowserProfile, ProxySettings
-    from src.openbrowser.browser.session import BrowserSession
+    from openbrowser.browser.profile import BrowserProfile, ProxySettings
+    from openbrowser.browser.session import BrowserSession
 
 # Lazy imports mapping for heavy browser components
 _LAZY_IMPORTS = {
-    'ProxySettings': ('src.openbrowser.browser.profile', 'ProxySettings'),
-    'BrowserProfile': ('src.openbrowser.browser.profile', 'BrowserProfile'),
-    'BrowserSession': ('src.openbrowser.browser.session', 'BrowserSession'),
+    'ProxySettings': ('openbrowser.browser.profile', 'ProxySettings'),
+    'BrowserProfile': ('openbrowser.browser.profile', 'BrowserProfile'),
+    'BrowserSession': ('openbrowser.browser.session', 'BrowserSession'),
 }
 
 

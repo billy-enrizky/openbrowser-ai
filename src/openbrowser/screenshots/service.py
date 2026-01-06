@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
-    from src.openbrowser.browser.session import BrowserSession, CDPSession
+    from openbrowser.browser.session import BrowserSession, CDPSession
 
 logger = logging.getLogger(__name__)
 

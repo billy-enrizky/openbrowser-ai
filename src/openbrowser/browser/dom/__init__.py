@@ -18,7 +18,7 @@ Submodules:
     serializer: Serialization utilities for different agent modes.
 
 Example:
-    >>> from src.openbrowser.browser.dom import DomService, DomState
+    >>> from openbrowser.browser.dom import DomService, DomState
     >>> service = DomService(browser_session)
     >>> state = await service.get_dom_state(cdp_session)
     >>> print(state.element_tree)

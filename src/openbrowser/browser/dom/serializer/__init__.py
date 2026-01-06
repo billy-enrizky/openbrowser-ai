@@ -15,7 +15,7 @@ Utilities:
     RectUnionPure: Disjoint rectangle union for visibility tracking.
 
 Example:
-    >>> from src.openbrowser.browser.dom.serializer import DOMTreeSerializer
+    >>> from openbrowser.browser.dom.serializer import DOMTreeSerializer
     >>> html = DOMTreeSerializer.serialize_tree(simplified_root)
 """
 

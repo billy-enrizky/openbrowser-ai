@@ -18,7 +18,7 @@ from typing import Any, ClassVar
 from bubus import BaseEvent
 from pydantic import Field, PrivateAttr
 
-from src.openbrowser.browser.events import (
+from openbrowser.browser.events import (
     BrowserConnectedEvent,
     BrowserStopEvent,
     LoadStorageStateEvent,
@@ -26,7 +26,7 @@ from src.openbrowser.browser.events import (
     StorageStateLoadedEvent,
     StorageStateSavedEvent,
 )
-from src.openbrowser.browser.watchdogs.base import BaseWatchdog
+from openbrowser.browser.watchdogs.base import BaseWatchdog
 
 logger = logging.getLogger(__name__)
 

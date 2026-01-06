@@ -7,7 +7,7 @@ import os
 import uuid
 from typing import Optional
 
-from src.openbrowser.telemetry.views import AgentTelemetryEvent, StepTelemetryEvent
+from openbrowser.telemetry.views import AgentTelemetryEvent, StepTelemetryEvent
 
 logger = logging.getLogger(__name__)
 
