@@ -1,4 +1,5 @@
 import pytest
+from unittest.mock import MagicMock
 from openbrowser.browser.profile import BrowserProfile
 from openbrowser.agent.graph import BrowserAgent
 
@@ -16,6 +17,7 @@ def test_wait_for_network_idle_page_load_time_configurable():
 async def test_agent_uses_configured_wait_time():
     """Test that the agent uses the configured wait time."""
     profile = BrowserProfile(wait_for_network_idle_page_load_time=0.7)
-    agent = BrowserAgent(task="test", browser_profile=profile)
+    mock_llm = MagicMock()
+    agent = BrowserAgent(task="test", browser_profile=profile, llm=mock_llm)
     
     assert agent.browser_session.browser_profile.wait_for_network_idle_page_load_time == 0.7
