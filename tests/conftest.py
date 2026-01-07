@@ -1,7 +1,7 @@
 """Pytest configuration and fixtures for openbrowser test suite.
 
 This module provides shared configuration and fixtures used across the entire
-test suite. It sets up the Python path to allow importing from src.openbrowser
+test suite. It sets up the Python path to allow importing from openbrowser
 and defines common fixtures for browser sessions, mock objects, and test data.
 
 Configuration:
@@ -17,18 +17,18 @@ Fixtures:
 Example:
     To use shared imports in tests::
 
-        from src.openbrowser import BrowserAgent, BrowserSession
-        from src.openbrowser.browser.profile import BrowserProfile
+        from openbrowser import BrowserAgent, BrowserSession
+        from openbrowser.browser.profile import BrowserProfile
 
 Path Setup:
     The src directory is added to sys.path to enable imports like:
-    ``from src.openbrowser.browser.session import BrowserSession``
+    ``from openbrowser.browser.session import BrowserSession``
 """
 
 import sys
 from pathlib import Path
 
-# Add the src directory to the path so tests can import using src.openbrowser
+# Add the src directory to the path so tests can import using openbrowser
 # This allows consistent import paths across all test modules
 src_path = Path(__file__).parent.parent / "src"
 if str(src_path) not in sys.path:

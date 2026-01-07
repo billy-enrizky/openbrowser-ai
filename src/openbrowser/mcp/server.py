@@ -6,7 +6,7 @@ This server provides tools for:
 - Content extraction from web pages
 
 Usage:
-    python -m src.openbrowser.mcp
+    python -m openbrowser.mcp
 
 Or as an MCP server in Claude Desktop or other MCP clients:
     {
@@ -696,7 +696,7 @@ async def main(session_timeout_minutes: int = 10):
     
     Example:
         Run as a module:
-            python -m src.openbrowser.mcp
+            python -m openbrowser.mcp
         
         Or in code:
             asyncio.run(main(session_timeout_minutes=15))

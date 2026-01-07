@@ -18,7 +18,7 @@ import sys
 
 import pytest
 
-from src.openbrowser import mcp as mcp_module
+from openbrowser import mcp as mcp_module
 
 
 def test_main_exits_when_mcp_missing(monkeypatch, capsys):

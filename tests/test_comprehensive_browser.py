@@ -51,7 +51,7 @@ async def test_browser_profile():
     logger.info("TEST: BrowserProfile Configuration")
     logger.info("=" * 80)
 
-    from src.openbrowser.browser.profile import BrowserProfile, ProxySettings, ViewportSize
+    from openbrowser.browser.profile import BrowserProfile, ProxySettings, ViewportSize
 
     # Test default profile creation
     profile = BrowserProfile()
@@ -119,9 +119,9 @@ async def test_browser_session_events():
     logger.info("TEST: BrowserSession Event-Driven Architecture")
     logger.info("=" * 80)
 
-    from src.openbrowser.browser.session import BrowserSession
-    from src.openbrowser.browser.profile import BrowserProfile
-    from src.openbrowser.browser.events import (
+    from openbrowser.browser.session import BrowserSession
+    from openbrowser.browser.profile import BrowserProfile
+    from openbrowser.browser.events import (
         BrowserStartEvent,
         BrowserStopEvent,
         NavigateToUrlEvent,
@@ -174,8 +174,8 @@ async def test_browser_session_lifecycle():
     logger.info("TEST: BrowserSession Start/Stop Lifecycle")
     logger.info("=" * 80)
 
-    from src.openbrowser.browser.session import BrowserSession
-    from src.openbrowser.browser.profile import BrowserProfile
+    from openbrowser.browser.session import BrowserSession
+    from openbrowser.browser.profile import BrowserProfile
 
     profile = BrowserProfile(headless=True)
     session = BrowserSession(browser_profile=profile)
@@ -229,8 +229,8 @@ async def test_session_manager():
     logger.info("TEST: SessionManager CDP Session Lifecycle")
     logger.info("=" * 80)
 
-    from src.openbrowser.browser.session import BrowserSession
-    from src.openbrowser.browser.profile import BrowserProfile
+    from openbrowser.browser.session import BrowserSession
+    from openbrowser.browser.profile import BrowserProfile
 
     profile = BrowserProfile(headless=True)
     session = BrowserSession(browser_profile=profile)
@@ -275,8 +275,8 @@ async def test_multiple_tab_support():
     logger.info("TEST: Multiple Tab Support")
     logger.info("=" * 80)
 
-    from src.openbrowser.browser.session import BrowserSession
-    from src.openbrowser.browser.profile import BrowserProfile
+    from openbrowser.browser.session import BrowserSession
+    from openbrowser.browser.profile import BrowserProfile
 
     profile = BrowserProfile(headless=True)
     session = BrowserSession(browser_profile=profile)
@@ -303,7 +303,7 @@ async def test_multiple_tab_support():
         logger.info(f"  Tab count after creation: {len(current_tabs)}")
 
         # Switch to new tab
-        from src.openbrowser.browser.events import SwitchTabEvent
+        from openbrowser.browser.events import SwitchTabEvent
         await session.event_bus.dispatch(SwitchTabEvent(target_id=new_target_id))
         await asyncio.sleep(0.3)
 
@@ -334,8 +334,8 @@ async def test_navigation_events():
     logger.info("TEST: Navigation with Event System")
     logger.info("=" * 80)
 
-    from src.openbrowser.browser.session import BrowserSession
-    from src.openbrowser.browser.profile import BrowserProfile
+    from openbrowser.browser.session import BrowserSession
+    from openbrowser.browser.profile import BrowserProfile
 
     profile = BrowserProfile(headless=True)
     session = BrowserSession(browser_profile=profile)
@@ -376,8 +376,8 @@ async def test_watchdogs_initialization():
     logger.info("TEST: Watchdogs Initialization")
     logger.info("=" * 80)
 
-    from src.openbrowser.browser.session import BrowserSession
-    from src.openbrowser.browser.profile import BrowserProfile
+    from openbrowser.browser.session import BrowserSession
+    from openbrowser.browser.profile import BrowserProfile
 
     # Create profile with video recording to enable RecordingWatchdog
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -432,9 +432,9 @@ async def test_screenshot_event():
     logger.info("TEST: Screenshot via Event System")
     logger.info("=" * 80)
 
-    from src.openbrowser.browser.session import BrowserSession
-    from src.openbrowser.browser.profile import BrowserProfile
-    from src.openbrowser.browser.events import ScreenshotEvent
+    from openbrowser.browser.session import BrowserSession
+    from openbrowser.browser.profile import BrowserProfile
+    from openbrowser.browser.events import ScreenshotEvent
 
     profile = BrowserProfile(headless=True)
     session = BrowserSession(browser_profile=profile)
@@ -472,9 +472,9 @@ async def test_security_watchdog():
     logger.info("TEST: SecurityWatchdog URL Validation")
     logger.info("=" * 80)
 
-    from src.openbrowser.browser.watchdogs.security_watchdog import SecurityWatchdog
-    from src.openbrowser.browser.session import BrowserSession
-    from src.openbrowser.browser.profile import BrowserProfile
+    from openbrowser.browser.watchdogs.security_watchdog import SecurityWatchdog
+    from openbrowser.browser.session import BrowserSession
+    from openbrowser.browser.profile import BrowserProfile
     from bubus import EventBus
 
     # Create profile with domain restrictions
@@ -514,8 +514,8 @@ async def test_cookie_management():
     logger.info("TEST: Cookie Management")
     logger.info("=" * 80)
 
-    from src.openbrowser.browser.session import BrowserSession
-    from src.openbrowser.browser.profile import BrowserProfile
+    from openbrowser.browser.session import BrowserSession
+    from openbrowser.browser.profile import BrowserProfile
 
     profile = BrowserProfile(headless=True)
     session = BrowserSession(browser_profile=profile)
@@ -578,7 +578,7 @@ async def test_views_and_models():
     logger.info("TEST: Views and TabInfo Model")
     logger.info("=" * 80)
 
-    from src.openbrowser.browser.views import TabInfo
+    from openbrowser.browser.views import TabInfo
 
     # Test TabInfo creation
     tab = TabInfo(
@@ -620,7 +620,7 @@ async def test_event_definitions():
     logger.info("TEST: Event Definitions")
     logger.info("=" * 80)
 
-    from src.openbrowser.browser.events import (
+    from openbrowser.browser.events import (
         # Lifecycle events
         BrowserStartEvent,
         BrowserStopEvent,
@@ -702,8 +702,8 @@ async def test_agent_integration():
     logger.info("TEST: Agent Integration with BrowserSession")
     logger.info("=" * 80)
 
-    from src.openbrowser.agent.graph import BrowserAgent
-    from src.openbrowser.browser.profile import BrowserProfile
+    from openbrowser.agent.graph import BrowserAgent
+    from openbrowser.browser.profile import BrowserProfile
 
     # Check for API key
     api_key = os.getenv("OPENAI_API_KEY") or os.getenv("GOOGLE_API_KEY")
