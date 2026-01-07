@@ -335,7 +335,7 @@ class BrowserAgent:
             logger.warning(f"Failed to enable Page domain: {e}")
 
         # Wait for page to stabilize after previous action
-        await asyncio.sleep(1.0)
+        await asyncio.sleep(self.browser_session.browser_profile.wait_for_network_idle_page_load_time)
 
         try:
             screenshot_result = await client.send.Page.captureScreenshot(

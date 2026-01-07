@@ -251,6 +251,12 @@ class BrowserProfile(BaseModel):
         description='Duration in seconds to show interaction highlights.',
     )
 
+    # --- Page load/wait timings ---
+    wait_for_network_idle_page_load_time: float = Field(
+        default=0.3, 
+        description='Time to wait for network idle.',
+    )
+
     def __init__(self, **kwargs):
         """Initialize BrowserProfile with defaults.
 
