@@ -1,7 +1,7 @@
 """Entry point for running openbrowser-ai MCP server.
 
 Usage:
-    python -m src.openbrowser.mcp
+    python -m openbrowser.mcp
 """
 
 import asyncio

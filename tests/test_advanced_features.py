@@ -39,7 +39,7 @@ class TestLLMExceptions:
 
     def test_llm_exception(self):
         """Test base LLM exception."""
-        from src.openbrowser.llm.exceptions import LLMException
+        from openbrowser.llm.exceptions import LLMException
 
         exc = LLMException("Test error")
         assert str(exc) == "Test error"
@@ -47,7 +47,7 @@ class TestLLMExceptions:
 
     def test_model_provider_error(self):
         """Test model provider error."""
-        from src.openbrowser.llm.exceptions import ModelProviderError
+        from openbrowser.llm.exceptions import ModelProviderError
 
         exc = ModelProviderError("Provider error", status_code=500, model="gpt-4")
         assert "Provider error" in str(exc)
@@ -56,7 +56,7 @@ class TestLLMExceptions:
 
     def test_model_rate_limit_error(self):
         """Test rate limit error."""
-        from src.openbrowser.llm.exceptions import ModelRateLimitError
+        from openbrowser.llm.exceptions import ModelRateLimitError
 
         exc = ModelRateLimitError("Rate limited", retry_after=60)
         assert "Rate limited" in str(exc)
@@ -77,7 +77,7 @@ class TestObservability:
 
     def test_observe_decorator_sync(self):
         """Test observe decorator on sync function."""
-        from src.openbrowser.observability import observe
+        from openbrowser.observability import observe
 
         @observe()
         def sync_function(x):
@@ -89,7 +89,7 @@ class TestObservability:
     @pytest.mark.asyncio
     async def test_observe_decorator_async(self):
         """Test observe decorator on async function."""
-        from src.openbrowser.observability import observe
+        from openbrowser.observability import observe
 
         @observe()
         async def async_function(x):
@@ -100,7 +100,7 @@ class TestObservability:
 
     def test_observe_debug_decorator(self):
         """Test observe_debug decorator."""
-        from src.openbrowser.observability import observe_debug
+        from openbrowser.observability import observe_debug
 
         @observe_debug()
         def debug_function(x):
@@ -111,7 +111,7 @@ class TestObservability:
 
     def test_is_debug_mode(self):
         """Test debug mode detection."""
-        from src.openbrowser.observability import is_debug_mode
+        from openbrowser.observability import is_debug_mode
 
         # Default should be False unless environment is set
         result = is_debug_mode()
@@ -132,13 +132,13 @@ class TestConfig:
 
     def test_config_singleton(self):
         """Test config is a singleton."""
-        from src.openbrowser.config import CONFIG
+        from openbrowser.config import CONFIG
 
         assert CONFIG is not None
 
     def test_is_running_in_docker(self):
         """Test docker detection function."""
-        from src.openbrowser.config import is_running_in_docker
+        from openbrowser.config import is_running_in_docker
 
         result = is_running_in_docker()
         assert isinstance(result, bool)
@@ -147,7 +147,7 @@ class TestConfig:
 
     def test_browser_profile_entry(self):
         """Test browser profile entry model."""
-        from src.openbrowser.config import BrowserProfileEntry
+        from openbrowser.config import BrowserProfileEntry
 
         entry = BrowserProfileEntry(
             name="test",
@@ -160,7 +160,7 @@ class TestConfig:
 
     def test_llm_entry(self):
         """Test LLM entry model."""
-        from src.openbrowser.config import LLMEntry
+        from openbrowser.config import LLMEntry
 
         entry = LLMEntry(
             provider="openai",
@@ -186,7 +186,7 @@ class TestURLUtils:
 
     def test_replace_urls_basic(self):
         """Test basic URL replacement with long URL."""
-        from src.openbrowser.agent.url_utils import replace_urls_in_text
+        from openbrowser.agent.url_utils import replace_urls_in_text
 
         # URL must be longer than 50 chars to be shortened
         long_url = "https://example.com/very/long/path/to/resource/with/more/segments/to/exceed/limit"
@@ -199,7 +199,7 @@ class TestURLUtils:
 
     def test_replace_urls_multiple(self):
         """Test multiple long URL replacement."""
-        from src.openbrowser.agent.url_utils import replace_urls_in_text
+        from openbrowser.agent.url_utils import replace_urls_in_text
 
         url1 = "https://example.com/very/long/path/to/resource/one/that/exceeds/limit"
         url2 = "https://example.com/very/long/path/to/resource/two/that/exceeds/limit"
@@ -211,7 +211,7 @@ class TestURLUtils:
 
     def test_restore_urls(self):
         """Test URL restoration."""
-        from src.openbrowser.agent.url_utils import (
+        from openbrowser.agent.url_utils import (
             replace_urls_in_text,
             restore_shortened_urls,
         )
@@ -224,7 +224,7 @@ class TestURLUtils:
 
     def test_short_urls_not_replaced(self):
         """Test that short URLs are not replaced."""
-        from src.openbrowser.agent.url_utils import replace_urls_in_text
+        from openbrowser.agent.url_utils import replace_urls_in_text
 
         text = "Go to https://x.co"
         shortened, mapping = replace_urls_in_text(text)
@@ -247,7 +247,7 @@ class TestSignalHandler:
 
     def test_signal_handler_init(self):
         """Test signal handler initialization."""
-        from src.openbrowser.utils.signal_handler import SignalHandler
+        from openbrowser.utils.signal_handler import SignalHandler
 
         handler = SignalHandler()
         assert handler is not None
@@ -256,7 +256,7 @@ class TestSignalHandler:
 
     def test_signal_handler_with_callbacks(self):
         """Test signal handler with callbacks."""
-        from src.openbrowser.utils.signal_handler import SignalHandler
+        from openbrowser.utils.signal_handler import SignalHandler
 
         pause_called = False
         resume_called = False
@@ -291,7 +291,7 @@ class TestEnhancedDOMSnapshot:
 
     def test_required_computed_styles(self):
         """Test required computed styles list."""
-        from src.openbrowser.browser.dom.enhanced_snapshot import (
+        from openbrowser.browser.dom.enhanced_snapshot import (
             REQUIRED_COMPUTED_STYLES,
         )
 
@@ -301,7 +301,7 @@ class TestEnhancedDOMSnapshot:
 
     def test_build_snapshot_lookup_empty(self):
         """Test building lookup from empty snapshot."""
-        from src.openbrowser.browser.dom.enhanced_snapshot import build_snapshot_lookup
+        from openbrowser.browser.dom.enhanced_snapshot import build_snapshot_lookup
 
         # Empty snapshot data
         snapshot = {"documents": []}
@@ -326,8 +326,8 @@ class TestLLMSerializers:
 
     def test_openai_serializer_user_message(self):
         """Test OpenAI serializer with user message."""
-        from src.openbrowser.agent.views import UserMessage
-        from src.openbrowser.llm.openai.serializer import OpenAIMessageSerializer
+        from openbrowser.agent.views import UserMessage
+        from openbrowser.llm.openai.serializer import OpenAIMessageSerializer
 
         serializer = OpenAIMessageSerializer()
         message = UserMessage(content="Hello, world!")
@@ -338,8 +338,8 @@ class TestLLMSerializers:
 
     def test_openai_serializer_system_message(self):
         """Test OpenAI serializer with system message."""
-        from src.openbrowser.agent.views import SystemMessage
-        from src.openbrowser.llm.openai.serializer import OpenAIMessageSerializer
+        from openbrowser.agent.views import SystemMessage
+        from openbrowser.llm.openai.serializer import OpenAIMessageSerializer
 
         serializer = OpenAIMessageSerializer()
         message = SystemMessage(content="You are a helpful assistant.")
@@ -350,8 +350,8 @@ class TestLLMSerializers:
 
     def test_openai_serializer_assistant_message(self):
         """Test OpenAI serializer with assistant message."""
-        from src.openbrowser.agent.views import AssistantMessage
-        from src.openbrowser.llm.openai.serializer import OpenAIMessageSerializer
+        from openbrowser.agent.views import AssistantMessage
+        from openbrowser.llm.openai.serializer import OpenAIMessageSerializer
 
         serializer = OpenAIMessageSerializer()
         message = AssistantMessage(content="I am an assistant.")
@@ -362,8 +362,8 @@ class TestLLMSerializers:
 
     def test_anthropic_serializer(self):
         """Test Anthropic serializer."""
-        from src.openbrowser.agent.views import UserMessage
-        from src.openbrowser.llm.anthropic.serializer import AnthropicMessageSerializer
+        from openbrowser.agent.views import UserMessage
+        from openbrowser.llm.anthropic.serializer import AnthropicMessageSerializer
 
         serializer = AnthropicMessageSerializer()
         message = UserMessage(content="Test message")
@@ -373,8 +373,8 @@ class TestLLMSerializers:
 
     def test_google_serializer(self):
         """Test Google serializer."""
-        from src.openbrowser.agent.views import UserMessage
-        from src.openbrowser.llm.google.serializer import GoogleMessageSerializer
+        from openbrowser.agent.views import UserMessage
+        from openbrowser.llm.google.serializer import GoogleMessageSerializer
 
         serializer = GoogleMessageSerializer()
         message = UserMessage(content="Test message")
@@ -384,8 +384,8 @@ class TestLLMSerializers:
 
     def test_serializer_serialize_messages(self):
         """Test serializing multiple messages."""
-        from src.openbrowser.agent.views import AssistantMessage, SystemMessage, UserMessage
-        from src.openbrowser.llm.openai.serializer import OpenAIMessageSerializer
+        from openbrowser.agent.views import AssistantMessage, SystemMessage, UserMessage
+        from openbrowser.llm.openai.serializer import OpenAIMessageSerializer
 
         serializer = OpenAIMessageSerializer()
         messages = [
@@ -416,25 +416,25 @@ class TestNewLLMProviders:
 
     def test_chat_oci_import(self):
         """Test ChatOCI can be imported."""
-        from src.openbrowser.llm.oci import ChatOCI
+        from openbrowser.llm.oci import ChatOCI
 
         assert ChatOCI is not None
 
     def test_chat_cerebras_import(self):
         """Test ChatCerebras can be imported."""
-        from src.openbrowser.llm.cerebras import ChatCerebras
+        from openbrowser.llm.cerebras import ChatCerebras
 
         assert ChatCerebras is not None
 
     def test_chat_deepseek_import(self):
         """Test ChatDeepSeek can be imported."""
-        from src.openbrowser.llm.deepseek import ChatDeepSeek
+        from openbrowser.llm.deepseek import ChatDeepSeek
 
         assert ChatDeepSeek is not None
 
     def test_chat_browser_use_import(self):
         """Test ChatBrowserUse can be imported."""
-        from src.openbrowser.llm.browser_use import ChatBrowserUse
+        from openbrowser.llm.browser_use import ChatBrowserUse
 
         assert ChatBrowserUse is not None
 
@@ -445,7 +445,7 @@ class TestNewLLMProviders:
         new providers. The instances may fail on actual API calls
         without valid API keys, but creation should succeed.
         """
-        from src.openbrowser.llm import get_llm_by_name
+        from openbrowser.llm import get_llm_by_name
 
         # These should not raise on creation - they're valid providers
         # They may fail later when used without proper API keys
@@ -477,7 +477,7 @@ class TestCodeUseModule:
 
     def test_code_cell_model(self):
         """Test CodeCell model."""
-        from src.openbrowser.code_use.views import CodeCell, ExecutionStatus
+        from openbrowser.code_use.views import CodeCell, ExecutionStatus
 
         cell = CodeCell(
             source="print('hello')",
@@ -488,7 +488,7 @@ class TestCodeUseModule:
 
     def test_notebook_session(self):
         """Test NotebookSession model."""
-        from src.openbrowser.code_use.views import NotebookSession
+        from openbrowser.code_use.views import NotebookSession
 
         session = NotebookSession()
         assert len(session.cells) == 0
@@ -496,7 +496,7 @@ class TestCodeUseModule:
 
     def test_extract_code_blocks(self):
         """Test extracting code blocks from markdown."""
-        from src.openbrowser.code_use.utils import extract_code_blocks
+        from openbrowser.code_use.utils import extract_code_blocks
 
         text = """
 Here is some code:
@@ -519,7 +519,7 @@ console.log("world");
 
     def test_extract_url_from_task(self):
         """Test extracting URL from task description."""
-        from src.openbrowser.code_use.utils import extract_url_from_task
+        from openbrowser.code_use.utils import extract_url_from_task
 
         task = "Navigate to https://example.com and click the button"
         url = extract_url_from_task(task)
@@ -527,7 +527,7 @@ console.log("world");
 
     def test_extract_url_from_task_no_url(self):
         """Test extracting URL when none present."""
-        from src.openbrowser.code_use.utils import extract_url_from_task
+        from openbrowser.code_use.utils import extract_url_from_task
 
         task = "Click the submit button"
         url = extract_url_from_task(task)
@@ -536,7 +536,7 @@ console.log("world");
     @pytest.mark.asyncio
     async def test_format_browser_state(self):
         """Test formatting browser state for LLM."""
-        from src.openbrowser.code_use.formatting import format_browser_state_for_llm
+        from openbrowser.code_use.formatting import format_browser_state_for_llm
 
         # Create a mock browser session
         browser_session = MagicMock()
@@ -569,13 +569,13 @@ class TestMCPModule:
 
     def test_openbrowser_server_import(self):
         """Test OpenBrowserServer can be imported."""
-        from src.openbrowser.mcp import OpenBrowserServer
+        from openbrowser.mcp import OpenBrowserServer
 
         assert OpenBrowserServer is not None
 
     def test_mcp_main_import(self):
         """Test MCP main function can be imported."""
-        from src.openbrowser.mcp import main
+        from openbrowser.mcp import main
 
         assert main is not None
 
@@ -594,25 +594,25 @@ class TestActorModule:
 
     def test_element_class_import(self):
         """Test Element class import."""
-        from src.openbrowser.actor.element import Element
+        from openbrowser.actor.element import Element
 
         assert Element is not None
 
     def test_mouse_class_import(self):
         """Test Mouse class import."""
-        from src.openbrowser.actor.mouse import Mouse
+        from openbrowser.actor.mouse import Mouse
 
         assert Mouse is not None
 
     def test_page_class_import(self):
         """Test Page class import."""
-        from src.openbrowser.actor.page import Page
+        from openbrowser.actor.page import Page
 
         assert Page is not None
 
     def test_get_key_info(self):
         """Test get_key_info utility."""
-        from src.openbrowser.actor.utils import get_key_info
+        from openbrowser.actor.utils import get_key_info
 
         # Test common keys
         key_info = get_key_info("Enter")
@@ -637,7 +637,7 @@ class TestMessageTypes:
 
     def test_system_message(self):
         """Test SystemMessage model."""
-        from src.openbrowser.agent.views import SystemMessage
+        from openbrowser.agent.views import SystemMessage
 
         msg = SystemMessage(content="You are helpful")
         assert msg.role == "system"
@@ -645,7 +645,7 @@ class TestMessageTypes:
 
     def test_user_message(self):
         """Test UserMessage model."""
-        from src.openbrowser.agent.views import UserMessage
+        from openbrowser.agent.views import UserMessage
 
         msg = UserMessage(content="Hello")
         assert msg.role == "user"
@@ -653,7 +653,7 @@ class TestMessageTypes:
 
     def test_assistant_message(self):
         """Test AssistantMessage model."""
-        from src.openbrowser.agent.views import AssistantMessage
+        from openbrowser.agent.views import AssistantMessage
 
         msg = AssistantMessage(content="Hi there")
         assert msg.role == "assistant"
@@ -661,7 +661,7 @@ class TestMessageTypes:
 
     def test_assistant_message_with_tool_calls(self):
         """Test AssistantMessage with tool calls."""
-        from src.openbrowser.agent.views import (
+        from openbrowser.agent.views import (
             AssistantMessage,
             FunctionCall,
             ToolCall,
@@ -678,7 +678,7 @@ class TestMessageTypes:
 
     def test_tool_message(self):
         """Test ToolMessage model."""
-        from src.openbrowser.agent.views import ToolMessage
+        from openbrowser.agent.views import ToolMessage
 
         msg = ToolMessage(content="Button clicked", tool_call_id="call_123")
         assert msg.role == "tool"
@@ -686,7 +686,7 @@ class TestMessageTypes:
 
     def test_content_part_text(self):
         """Test ContentPartTextParam model."""
-        from src.openbrowser.agent.views import ContentPartTextParam
+        from openbrowser.agent.views import ContentPartTextParam
 
         part = ContentPartTextParam(text="Hello")
         assert part.type == "text"
@@ -694,7 +694,7 @@ class TestMessageTypes:
 
     def test_content_part_image(self):
         """Test ContentPartImageParam model."""
-        from src.openbrowser.agent.views import (
+        from openbrowser.agent.views import (
             ContentPartImageParam,
             ImageURLDetail,
         )
@@ -719,12 +719,12 @@ class TestIntegration:
 
     def test_full_serialization_roundtrip(self):
         """Test full message serialization roundtrip."""
-        from src.openbrowser.agent.views import (
+        from openbrowser.agent.views import (
             AssistantMessage,
             SystemMessage,
             UserMessage,
         )
-        from src.openbrowser.llm.openai.serializer import OpenAIMessageSerializer
+        from openbrowser.llm.openai.serializer import OpenAIMessageSerializer
 
         serializer = OpenAIMessageSerializer()
 
@@ -745,7 +745,7 @@ class TestIntegration:
 
     def test_url_shortening_integration(self):
         """Test URL shortening with realistic content."""
-        from src.openbrowser.agent.url_utils import (
+        from openbrowser.agent.url_utils import (
             replace_urls_in_text,
             restore_shortened_urls,
         )
