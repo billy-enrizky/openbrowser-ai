@@ -167,6 +167,21 @@ class LocalBrowserWatchdog(BaseWatchdog):
         if user_data_dir is None:
             user_data_dir = tempfile.mkdtemp(prefix="openbrowser_chrome_")
 
+        # Kill any existing Chrome instances using the same debug port
+        # This prevents stale sessions from interfering with new launches
+        try:
+            kill_proc = await asyncio.create_subprocess_exec(
+                'pkill', '-f', f'remote-debugging-port={debug_port}',
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL
+            )
+            await kill_proc.wait()
+            # Wait a moment for processes to fully terminate
+            await asyncio.sleep(0.5)
+            self.logger.debug(f'[LocalBrowserWatchdog] Killed any existing Chrome on port {debug_port}')
+        except Exception as e:
+            self.logger.debug(f'[LocalBrowserWatchdog] pkill not available or failed: {e}')
+
         self.logger.info(f'[LocalBrowserWatchdog] Starting Chrome browser on port {debug_port}')
 
         # Get Chrome executable from playwright
