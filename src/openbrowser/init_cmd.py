@@ -1,8 +1,8 @@
 """
-Standalone init command for browser-use template generation.
+Standalone init command for openbrowser template generation.
 
 This module provides a minimal command-line interface for generating
-browser-use templates without requiring heavy TUI dependencies.
+openbrowser templates without requiring heavy TUI dependencies.
 """
 
 import json
@@ -100,7 +100,7 @@ def _get_template_content(file_path: str) -> str:
 	raise FileNotFoundError(f'Could not fetch template from GitHub: {file_path}')
 
 
-# InquirerPy style for template selection (browser-use orange theme)
+# InquirerPy style for template selection (openbrowser theme)
 inquirer_style = InquirerPyStyle(
 	{
 		'pointer': '#fe750e bold',
@@ -133,7 +133,7 @@ def _write_init_file(output_path: Path, content: str, force: bool = False) -> bo
 		return False
 
 
-@click.command('browser-use-init')
+@click.command('openbrowser-init')
 @click.option(
 	'--template',
 	'-t',
@@ -166,26 +166,26 @@ def main(
 	list_templates: bool,
 ):
 	"""
-	Generate a browser-use template file to get started quickly.
+	Generate an openbrowser template file to get started quickly.
 
 	Examples:
 
 	\b
 	# Interactive mode - prompts for template selection
-	uvx browser-use init
-	uvx browser-use init --template
+	uvx openbrowser init
+	uvx openbrowser init --template
 
 	\b
 	# Generate default template
-	uvx browser-use init --template default
+	uvx openbrowser init --template default
 
 	\b
 	# Generate advanced template with custom filename
-	uvx browser-use init --template advanced --output my_script.py
+	uvx openbrowser init --template advanced --output my_script.py
 
 	\b
 	# List available templates
-	uvx browser-use init --list
+	uvx openbrowser init --list
 	"""
 
 	# Fetch template list at runtime
@@ -351,12 +351,12 @@ def main(
 			next_steps.append(f'   cd {template}\n\n', style='dim')
 			next_steps.append('2. Initialize uv project:\n', style='bold')
 			next_steps.append('   uv init\n\n', style='dim')
-			next_steps.append('3. Install browser-use:\n', style='bold')
-			next_steps.append('   uv add browser-use\n\n', style='dim')
+			next_steps.append('3. Install openbrowser:\n', style='bold')
+			next_steps.append('   uv add openbrowser-ai\n\n', style='dim')
 			next_steps.append('4. Set up your API key in .env file or environment:\n', style='bold')
-			next_steps.append('   BROWSER_USE_API_KEY=your-key\n', style='dim')
+			next_steps.append('   OPENAI_API_KEY=your-key\n', style='dim')
 			next_steps.append(
-				'   (Get your key at https://cloud.browser-use.com/dashboard/settings?tab=api-keys&new)\n\n',
+				'   (Get your key at https://github.com/billy-enrizky/openbrowser-ai)\n\n',
 				style='dim italic',
 			)
 			next_steps.append('5. Run your script:\n', style='bold')

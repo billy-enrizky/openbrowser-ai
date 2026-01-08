@@ -1,5 +1,5 @@
 """
-Enhanced snapshot processing for browser-use DOM tree extraction.
+Enhanced snapshot processing for openbrowser DOM tree extraction.
 
 This module provides stateless functions for parsing Chrome DevTools Protocol (CDP) DOMSnapshot data
 to extract visibility, clickability, cursor styles, and other layout information.

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Playground script to test the browser-use actor API.
+Playground script to test the openbrowser actor API.
 
 This script demonstrates:
 - Starting a browser session

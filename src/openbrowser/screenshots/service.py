@@ -1,4 +1,4 @@
-"""Screenshot storage service for browser-use agents.
+"""Screenshot storage service for openbrowser agents.
 
 Performance optimizations:
 - Added __slots__ to ScreenshotService class

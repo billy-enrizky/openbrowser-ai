@@ -1,4 +1,4 @@
-"""MCP (Model Context Protocol) support for browser-use.
+"""MCP (Model Context Protocol) support for openbrowser.
 
 This module provides integration with MCP servers and clients for browser automation.
 """

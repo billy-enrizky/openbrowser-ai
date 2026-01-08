@@ -1,7 +1,7 @@
-"""MCP (Model Context Protocol) tool wrapper for browser-use.
+"""MCP (Model Context Protocol) tool wrapper for openbrowser.
 
-This module provides integration between MCP tools and browser-use's action registry system.
-MCP tools are dynamically discovered and registered as browser-use actions.
+This module provides integration between MCP tools and openbrowser's action registry system.
+MCP tools are dynamically discovered and registered as openbrowser actions.
 """
 
 import asyncio
@@ -27,7 +27,7 @@ except ImportError:
 
 
 class MCPToolWrapper:
-	"""Wrapper to integrate MCP tools as browser-use actions."""
+	"""Wrapper to integrate MCP tools as openbrowser actions."""
 
 	def __init__(self, registry: Registry, mcp_command: str, mcp_args: list[str] | None = None):
 		"""Initialize MCP tool wrapper.
@@ -89,7 +89,7 @@ class MCPToolWrapper:
 			pass
 
 	def _register_tool_as_action(self, tool_name: str, tool: Tool):
-		"""Register an MCP tool as a browser-use action.
+		"""Register an MCP tool as an openbrowser action.
 
 		Args:
 			tool_name: Name of the MCP tool
@@ -187,7 +187,7 @@ class MCPToolWrapper:
 		mcp_action_wrapper.__name__ = tool_name
 		mcp_action_wrapper.__qualname__ = f'mcp.{tool_name}'
 
-		# Register the action with browser-use
+		# Register the action with openbrowser
 		description = tool.description or f'MCP tool: {tool_name}'
 
 		# Use the decorator to register the action
@@ -236,7 +236,7 @@ class MCPToolWrapper:
 
 # Convenience function for easy integration
 async def register_mcp_tools(registry: Registry, mcp_command: str, mcp_args: list[str] | None = None) -> MCPToolWrapper:
-	"""Register MCP tools with a browser-use registry.
+	"""Register MCP tools with an openbrowser registry.
 
 	Args:
 		registry: Browser-use action registry
@@ -256,7 +256,7 @@ async def register_mcp_tools(registry: Registry, mcp_command: str, mcp_args: lis
 	        # Register Playwright MCP tools
 	        mcp = await register_mcp_tools(tools.registry, 'npx', ['@playwright/mcp@latest', '--headless'])
 
-	        # Now all MCP tools are available as browser-use actions
+	        # Now all MCP tools are available as openbrowser actions
 		```
 	"""
 	wrapper = MCPToolWrapper(registry, mcp_command, mcp_args)

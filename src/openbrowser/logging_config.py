@@ -145,7 +145,7 @@ class BrowserUseFormatter(logging.Formatter):
 
 
 def setup_logging(stream=None, log_level=None, force_setup=False, debug_log_file=None, info_log_file=None):
-	"""Setup logging configuration for browser-use.
+	"""Setup logging configuration for openbrowser.
 
 	Args:
 		stream: Output stream for logs (default: sys.stdout). Can be sys.stderr for MCP mode.
@@ -323,7 +323,7 @@ def setup_log_pipes(session_id: str, base_dir: str | None = None):
 	"""Setup named pipes for log streaming.
 
 	Usage:
-		# In browser-use:
+		# In openbrowser:
 		setup_log_pipes(session_id="abc123")
 
 		# In consumer process:

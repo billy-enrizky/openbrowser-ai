@@ -17,7 +17,7 @@ MessageDict = dict[str, Any]
 
 
 class DeepSeekMessageSerializer:
-	"""Serializer for converting browser-use messages to DeepSeek messages."""
+	"""Serializer for converting openbrowser messages to DeepSeek messages."""
 
 	# -------- content 处理 --------------------------------------------------
 	@staticmethod

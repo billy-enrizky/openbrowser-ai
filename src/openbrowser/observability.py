@@ -1,4 +1,4 @@
-"""Observability module for browser-use.
+"""Observability module for openbrowser.
 
 This module provides observability decorators that optionally integrate with lmnr (Laminar) for tracing.
 If lmnr is not installed, it provides no-op wrappers that accept the same parameters.

@@ -125,14 +125,14 @@ class AboutBlankWatchdog(BaseWatchdog):
 
 	async def _show_dvd_screensaver_loading_animation_cdp(self, target_id: TargetID, browser_session_label: str) -> None:
 		"""
-		Injects a DVD screensaver-style bouncing logo loading animation overlay into the target using CDP.
+		Injects a DVD screensaver-style bouncing text animation overlay into the target using CDP.
 		This is used to visually indicate that the browser is setting up or waiting.
 		"""
 		try:
 			# Create temporary session for this target without switching focus
 			temp_session = await self.browser_session.get_or_create_cdp_session(target_id, focus=False)
 
-			# Inject the DVD screensaver script (from main branch with idempotency added)
+			# Inject the DVD screensaver script with OpenBrowser text instead of external logo
 			script = f"""
 				(function(browser_session_label) {{
 					// Idempotency check
@@ -165,28 +165,31 @@ class AboutBlankWatchdog(BaseWatchdog):
 					loadingOverlay.style.left = '0';
 					loadingOverlay.style.width = '100vw';
 					loadingOverlay.style.height = '100vh';
-					loadingOverlay.style.background = '#000';
+					loadingOverlay.style.background = '#0a0a0a';
 					loadingOverlay.style.zIndex = '99999';
 					loadingOverlay.style.overflow = 'hidden';
 
-					// Create the image element
-					const img = document.createElement('img');
-					img.src = 'https://cf.browser-use.com/logo.svg';
-					img.alt = 'Browser-Use';
-					img.style.width = '200px';
-					img.style.height = 'auto';
-					img.style.position = 'absolute';
-					img.style.left = '0px';
-					img.style.top = '0px';
-					img.style.zIndex = '2';
-					img.style.opacity = '0.8';
+					// Create the text element instead of image
+					const textEl = document.createElement('div');
+					textEl.textContent = 'OpenBrowser';
+					textEl.style.fontFamily = 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+					textEl.style.fontSize = '48px';
+					textEl.style.fontWeight = '700';
+					textEl.style.color = '#fff';
+					textEl.style.position = 'absolute';
+					textEl.style.left = '0px';
+					textEl.style.top = '0px';
+					textEl.style.zIndex = '2';
+					textEl.style.opacity = '0.9';
+					textEl.style.letterSpacing = '-1px';
+					textEl.style.textShadow = '0 0 20px rgba(59, 130, 246, 0.5)';
 
-					loadingOverlay.appendChild(img);
+					loadingOverlay.appendChild(textEl);
 					document.body.appendChild(loadingOverlay);
 
 					// DVD screensaver bounce logic
 					let x = Math.random() * (window.innerWidth - 300);
-					let y = Math.random() * (window.innerHeight - 300);
+					let y = Math.random() * (window.innerHeight - 100);
 					let dx = 1.2 + Math.random() * 0.4; // px per frame
 					let dy = 1.2 + Math.random() * 0.4;
 					// Randomize direction
@@ -194,28 +197,28 @@ class AboutBlankWatchdog(BaseWatchdog):
 					if (Math.random() > 0.5) dy = -dy;
 
 					function animate() {{
-						const imgWidth = img.offsetWidth || 300;
-						const imgHeight = img.offsetHeight || 300;
+						const elWidth = textEl.offsetWidth || 300;
+						const elHeight = textEl.offsetHeight || 60;
 						x += dx;
 						y += dy;
 
 						if (x <= 0) {{
 							x = 0;
 							dx = Math.abs(dx);
-						}} else if (x + imgWidth >= window.innerWidth) {{
-							x = window.innerWidth - imgWidth;
+						}} else if (x + elWidth >= window.innerWidth) {{
+							x = window.innerWidth - elWidth;
 							dx = -Math.abs(dx);
 						}}
 						if (y <= 0) {{
 							y = 0;
 							dy = Math.abs(dy);
-						}} else if (y + imgHeight >= window.innerHeight) {{
-							y = window.innerHeight - imgHeight;
+						}} else if (y + elHeight >= window.innerHeight) {{
+							y = window.innerHeight - elHeight;
 							dy = -Math.abs(dy);
 						}}
 
-						img.style.left = `${{x}}px`;
-						img.style.top = `${{y}}px`;
+						textEl.style.left = `${{x}}px`;
+						textEl.style.top = `${{y}}px`;
 
 						requestAnimationFrame(animate);
 					}}
@@ -223,17 +226,14 @@ class AboutBlankWatchdog(BaseWatchdog):
 
 					// Responsive: update bounds on resize
 					window.addEventListener('resize', () => {{
-						x = Math.min(x, window.innerWidth - img.offsetWidth);
-						y = Math.min(y, window.innerHeight - img.offsetHeight);
+						x = Math.min(x, window.innerWidth - textEl.offsetWidth);
+						y = Math.min(y, window.innerHeight - textEl.offsetHeight);
 					}});
 
 					// Add a little CSS for smoothness
 					const style = document.createElement('style');
 					style.textContent = `
-						#pretty-loading-animation {{
-							/*backdrop-filter: blur(2px) brightness(0.9);*/
-						}}
-						#pretty-loading-animation img {{
+						#pretty-loading-animation div {{
 							user-select: none;
 							pointer-events: none;
 						}}

@@ -1,5 +1,5 @@
 """
-OCI Raw API integration for browser-use.
+OCI Raw API integration for openbrowser.
 
 This module provides direct integration with Oracle Cloud Infrastructure's
 Generative AI service using the raw API endpoints, without Langchain dependencies.

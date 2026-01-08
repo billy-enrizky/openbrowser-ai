@@ -192,7 +192,7 @@ def __getattr__(name: str) -> 'BaseChatModel':
 		return ChatGoogle  # type: ignore
 	elif name == 'ChatOCIRaw':
 		if not OCI_AVAILABLE:
-			raise ImportError('OCI integration not available. Install with: pip install "browser-use[oci]"')
+			raise ImportError('OCI integration not available. Install with: pip install "openbrowser-ai[oci]"')
 		return ChatOCIRaw  # type: ignore
 	elif name == 'ChatCerebras':
 		return ChatCerebras  # type: ignore
@@ -268,4 +268,4 @@ __all__ += [
 ]
 
 # NOTE: OCI backend is optional. The try/except ImportError and conditional __all__ are required
-# so this module can be imported without browser-use[oci] installed.
+# so this module can be imported without openbrowser-ai[oci] installed.
