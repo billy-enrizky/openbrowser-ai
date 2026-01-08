@@ -30,7 +30,7 @@ def register_gmail_actions(tools: Tools, gmail_service: GmailService | None = No
 	"""
 	Register Gmail actions with the provided tools
 	Args:
-	    tools: The browser-use tools to register actions with
+	    tools: The openbrowser tools to register actions with
 	    gmail_service: Optional pre-configured Gmail service instance
 	    access_token: Optional direct access token (alternative to file-based auth)
 	"""

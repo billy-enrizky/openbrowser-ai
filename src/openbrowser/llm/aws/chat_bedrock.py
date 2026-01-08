@@ -66,7 +66,7 @@ class ChatAWSBedrock(BaseChatModel):
 			from boto3 import client as AwsClient  # type: ignore
 		except ImportError:
 			raise ImportError(
-				'`boto3` not installed. Please install using `pip install browser-use[aws] or pip install browser-use[all]`'
+				'`boto3` not installed. Please install using `pip install openbrowser-ai[aws] or pip install openbrowser-ai[all]`'
 			)
 
 		if self.session:
@@ -179,7 +179,7 @@ class ChatAWSBedrock(BaseChatModel):
 			from botocore.exceptions import ClientError  # type: ignore
 		except ImportError:
 			raise ImportError(
-				'`boto3` not installed. Please install using `pip install browser-use[aws] or pip install browser-use[all]`'
+				'`boto3` not installed. Please install using `pip install openbrowser-ai[aws] or pip install openbrowser-ai[all]`'
 			)
 
 		bedrock_messages, system_message = AWSBedrockMessageSerializer.serialize_messages(messages)

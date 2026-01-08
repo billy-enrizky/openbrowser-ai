@@ -1,4 +1,4 @@
-"""MCP Server for browser-use - exposes browser automation capabilities via Model Context Protocol.
+"""MCP Server for openbrowser - exposes browser automation capabilities via Model Context Protocol.
 
 This server provides tools for:
 - Running autonomous browser tasks with an AI agent
@@ -7,14 +7,14 @@ This server provides tools for:
 - File system operations
 
 Usage:
-    uvx browser-use --mcp
+    uvx openbrowser --mcp
 
 Or as an MCP server in Claude Desktop or other MCP clients:
     {
         "mcpServers": {
-            "browser-use": {
+            "openbrowser": {
                 "command": "uvx",
-                "args": ["browser-use[cli]", "--mcp"],
+                "args": ["openbrowser-ai[cli]", "--mcp"],
                 "env": {
                     "OPENAI_API_KEY": "sk-proj-1234567890",
                 }
@@ -51,7 +51,7 @@ try:
 except ImportError:
 	PSUTIL_AVAILABLE = False
 
-# Add browser-use to path if running from source
+# Add openbrowser to path if running from source
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # Import and configure logging to use stderr before other imports
@@ -60,7 +60,7 @@ from openbrowser.logging_config import setup_logging
 
 def _configure_mcp_server_logging():
 	"""Configure logging for MCP server mode - redirect all logs to stderr to prevent JSON RPC interference."""
-	# Set environment to suppress browser-use logging during server mode
+	# Set environment to suppress openbrowser logging during server mode
 	os.environ['OPENBROWSER_LOGGING_LEVEL'] = 'warning'
 	os.environ['OPENBROWSER_SETUP_LOGGING'] = 'false'  # Prevent automatic logging setup
 
@@ -185,13 +185,13 @@ def get_parent_process_cmdline() -> str | None:
 
 
 class BrowserUseServer:
-	"""MCP Server for browser-use capabilities."""
+	"""MCP Server for openbrowser capabilities."""
 
 	def __init__(self, session_timeout_minutes: int = 10):
 		# Ensure all logging goes to stderr (in case new loggers were created)
 		_ensure_all_loggers_use_stderr()
 
-		self.server = Server('browser-use')
+		self.server = Server('openbrowser')
 		self.config = load_openbrowser_config()
 		self.agent: Agent | None = None
 		self.browser_session: BrowserSession | None = None
@@ -214,7 +214,7 @@ class BrowserUseServer:
 
 		@self.server.list_tools()
 		async def handle_list_tools() -> list[types.Tool]:
-			"""List all available browser-use tools."""
+			"""List all available openbrowser tools."""
 			return [
 				# Agent tools
 				# Direct browser control tools
@@ -346,7 +346,7 @@ class BrowserUseServer:
 				# ),
 				types.Tool(
 					name='retry_with_openbrowser_agent',
-					description='Retry a task using the browser-use agent. Only use this as a last resort if you fail to interact with a page multiple times.',
+					description='Retry a task using the openbrowser agent. Only use this as a last resort if you fail to interact with a page multiple times.',
 					inputSchema={
 						'type': 'object',
 						'properties': {
@@ -408,12 +408,12 @@ class BrowserUseServer:
 
 		@self.server.list_resources()
 		async def handle_list_resources() -> list[types.Resource]:
-			"""List available resources (none for browser-use)."""
+			"""List available resources (none for openbrowser)."""
 			return []
 
 		@self.server.list_prompts()
 		async def handle_list_prompts() -> list[types.Prompt]:
-			"""List available prompts (none for browser-use)."""
+			"""List available prompts (none for openbrowser)."""
 			return []
 
 		@self.server.call_tool()
@@ -442,7 +442,7 @@ class BrowserUseServer:
 				)
 
 	async def _execute_tool(self, tool_name: str, arguments: dict[str, Any]) -> str:
-		"""Execute a browser-use tool."""
+		"""Execute an openbrowser tool."""
 
 		# Agent-based tools
 		if tool_name == 'retry_with_openbrowser_agent':
@@ -520,7 +520,7 @@ class BrowserUseServer:
 
 		# Merge profile config with defaults and overrides
 		profile_data = {
-			'downloads_path': str(Path.home() / 'Downloads' / 'browser-use-mcp'),
+			'downloads_path': str(Path.home() / 'Downloads' / 'openbrowser-mcp'),
 			'wait_between_actions': 0.5,
 			'keep_alive': True,
 			'user_data_dir': '~/.config/browseruse/profiles/default',
@@ -562,7 +562,7 @@ class BrowserUseServer:
 			)
 
 		# Initialize FileSystem for extraction actions
-		file_system_path = profile_config.get('file_system_path', '~/.browser-use-mcp')
+		file_system_path = profile_config.get('file_system_path', '~/.openbrowser-mcp')
 		self.file_system = FileSystem(base_dir=Path(file_system_path).expanduser())
 
 		logger.debug('Browser session initialized')
@@ -1071,7 +1071,7 @@ class BrowserUseServer:
 				read_stream,
 				write_stream,
 				InitializationOptions(
-					server_name='browser-use',
+					server_name='openbrowser',
 					server_version='0.1.0',
 					capabilities=self.server.get_capabilities(
 						notification_options=NotificationOptions(),

@@ -60,7 +60,7 @@ class OllamaMessageSerializer:
 
 	@staticmethod
 	def _serialize_tool_calls(tool_calls: list[ToolCall]) -> list[Message.ToolCall]:
-		"""Convert browser-use ToolCalls to Ollama ToolCalls."""
+		"""Convert openbrowser ToolCalls to Ollama ToolCalls."""
 		ollama_tool_calls: list[Message.ToolCall] = []
 
 		for tool_call in tool_calls:
