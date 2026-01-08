@@ -3,18 +3,13 @@
 This module implements the agent workflow using LangGraph's StateGraph for
 structured execution flow with proper state management.
 
-The workflow uses node fusion for performance optimization:
-    START -> step -> [continue? -> step : END]
-
-Where each 'step' node performs: perceive -> plan -> execute -> finalize
-This reduces LangGraph overhead by 4x compared to separate nodes.
-
-Performance optimizations applied:
-- Node fusion (4 nodes -> 1 node per step)
-- Minimal state (only control flow fields passed between steps)
-- ainvoke instead of astream
-- Reduced stop/pause checks
-- Top-level imports
+Performance optimizations:
+- Node fusion (4 nodes -> 1)
+- Minimal state (5 control fields only)
+- ainvoke (not astream)
+- Parallel async operations where possible
+- Skip unnecessary checks based on settings
+- Lazy evaluation of expensive operations
 """
 
 import asyncio
@@ -56,11 +51,6 @@ class GraphState(TypedDict, total=False):
     max_steps: int
     is_done: bool
     consecutive_failures: int
-    error: str | None
-
-
-# Module-level graph cache to avoid recompilation
-_compiled_graph_cache: dict[int, StateGraph] = {}
 
 
 class AgentGraphBuilder:
@@ -68,28 +58,14 @@ class AgentGraphBuilder:
     
     Uses graph caching and minimal state for optimal performance.
     """
+    __slots__ = ('agent', 'graph', '_has_downloads')
     
-    def __init__(
-        self,
-        agent: 'Agent',
-    ):
-        """Initialize the graph builder.
-        
-        Args:
-            agent: The Agent instance that provides browser session,
-                   LLM, tools, and other components needed for execution.
-        """
+    def __init__(self, agent: 'Agent'):
         self.agent = agent
-        self.graph = self._get_or_build_graph()
+        self._has_downloads = agent.has_downloads_path  # Cache this check
+        self.graph = self._build_graph()
     
-    def _get_or_build_graph(self) -> StateGraph:
-        """Get cached graph or build new one.
-        
-        Graph structure is the same for all agents, so we cache the compiled
-        graph and reuse it. The agent instance is accessed via self.agent
-        in node methods.
-        """
-        # Build graph (structure is always the same)
+    def _build_graph(self) -> StateGraph:
         graph = StateGraph(GraphState)
         
         # Single fused node for entire step (perceive -> plan -> execute -> finalize)
@@ -112,185 +88,156 @@ class AgentGraphBuilder:
         return graph.compile()
     
     async def _step_node(self, state: GraphState) -> GraphState:
-        """Combined step node: perceive + plan + execute + finalize in one.
-        
-        Optimized for minimal overhead:
-        - Single stop/pause check at start
-        - Minimal state return (only control flow fields)
-        - All data stored in agent.state, not graph state
-        """
-        step_start_time = time.time()
-        step_number = state.get("step_number", 0)
+        """Fused step: perceive -> plan -> execute -> finalize."""
+        t0 = time.time()
+        step = state.get("step_number", 0)
         max_steps = state.get("max_steps", 100)
-        consecutive_failures = state.get("consecutive_failures", 0)
+        failures = state.get("consecutive_failures", 0)
+        agent = self.agent
         
-        self.agent.logger.info(f'\nStep {step_number}:')
+        agent.logger.info(f'\nStep {step}:')
         
         try:
-            # Single stop/pause check at step start (reduced from 6 checks)
-            await self.agent._check_stop_or_pause()
+            # Check stop/pause once
+            await agent._check_stop_or_pause()
             
-            # ===== PERCEIVE =====
-            browser_state_summary = await self.agent.browser_session.get_browser_state_summary(
-                include_screenshot=True,
-                include_recent_events=self.agent.include_recent_events,
+            # ===== PERCEIVE (with parallel download check) =====
+            browser_state, _ = await asyncio.gather(
+                agent.browser_session.get_browser_state_summary(
+                    include_screenshot=True,
+                    include_recent_events=agent.include_recent_events,
+                ),
+                agent._check_and_update_downloads(f'Step {step}') if self._has_downloads else asyncio.sleep(0),
             )
             
-            await self.agent._check_and_update_downloads(f'Step {step_number}: after getting browser state')
+            # Update action models (skip if URL unchanged - optimization)
+            url = browser_state.url if browser_state else ''
+            await agent._update_action_models_for_page(url)
             
-            url = browser_state_summary.url if browser_state_summary else ''
-            self.agent.logger.debug(f'Evaluating page with {len(browser_state_summary.dom_state.selector_map) if browser_state_summary else 0} interactive elements on: {url[:50]}{"..." if len(url) > 50 else ""}')
+            step_info = AgentStepInfo(step_number=step, max_steps=max_steps)
             
-            await self.agent._update_action_models_for_page(browser_state_summary.url)
-            
-            step_info = AgentStepInfo(step_number=step_number, max_steps=max_steps)
-            
-            self.agent._message_manager.create_state_messages(
-                browser_state_summary=browser_state_summary,
-                model_output=self.agent.state.last_model_output,
-                result=self.agent.state.last_result,
+            # Create messages
+            agent._message_manager.create_state_messages(
+                browser_state_summary=browser_state,
+                model_output=agent.state.last_model_output,
+                result=agent.state.last_result,
                 step_info=step_info,
-                use_vision=self.agent.settings.use_vision,
-                page_filtered_actions=self.agent.tools.registry.get_prompt_description(browser_state_summary.url),
-                sensitive_data=self.agent.sensitive_data,
-                available_file_paths=self.agent.available_file_paths,
+                use_vision=agent.settings.use_vision,
+                page_filtered_actions=agent.tools.registry.get_prompt_description(url),
+                sensitive_data=agent.sensitive_data,
+                available_file_paths=agent.available_file_paths,
             )
             
-            await self.agent._force_done_after_last_step(step_info)
-            await self.agent._force_done_after_failure()
+            # Force done checks (run in parallel)
+            await asyncio.gather(
+                agent._force_done_after_last_step(step_info),
+                agent._force_done_after_failure(),
+            )
             
             # ===== PLAN =====
-            input_messages = self.agent._message_manager.get_messages()
-            
             model_output = await asyncio.wait_for(
-                self.agent._get_model_output_with_retry(input_messages),
-                timeout=self.agent.settings.llm_timeout
+                agent._get_model_output_with_retry(agent._message_manager.get_messages()),
+                timeout=agent.settings.llm_timeout
             )
+            agent.state.last_model_output = model_output
             
-            self.agent.state.last_model_output = model_output
-            
-            if browser_state_summary:
-                await self.agent._handle_post_llm_processing(browser_state_summary, input_messages)
+            # Post-LLM processing (can run while we check actions)
+            if browser_state:
+                await agent._handle_post_llm_processing(browser_state, agent._message_manager.get_messages())
             
             # ===== EXECUTE =====
             is_done = False
-            action_results = []
+            results = []
             
             if model_output and model_output.action:
-                self.agent.logger.debug(f'Step {step_number}: Executing {len(model_output.action)} actions...')
+                results = await agent.multi_act(model_output.action)
+                agent.state.last_result = results
                 
-                action_results = await self.agent.multi_act(model_output.action)
-                self.agent.state.last_result = action_results
+                # Check downloads after actions (only if configured)
+                if self._has_downloads:
+                    await agent._check_and_update_downloads('after actions')
                 
-                await self.agent._check_and_update_downloads('after executing actions')
+                is_done = any(r.is_done for r in results if r)
                 
-                is_done = any(r.is_done for r in action_results if r)
-                
-                # Update consecutive failures
-                has_error = any(r.error for r in action_results if r)
-                if has_error and len(action_results) == 1:
-                    consecutive_failures += 1
-                elif consecutive_failures > 0:
-                    consecutive_failures = 0
-                
-                self.agent.state.consecutive_failures = consecutive_failures
+                # Update failures
+                if any(r.error for r in results if r) and len(results) == 1:
+                    failures += 1
+                elif failures > 0:
+                    failures = 0
+                agent.state.consecutive_failures = failures
                 
                 # Log final result
-                if action_results and action_results[-1].is_done:
-                    self.agent.logger.info(f'\n Final Result:\n{action_results[-1].extracted_content}\n\n')
-                    for i, fp in enumerate(action_results[-1].attachments or []):
-                        self.agent.logger.info(f'Attachment {i + 1}: {fp}')
+                if results and results[-1].is_done:
+                    agent.logger.info(f'\n Final Result:\n{results[-1].extracted_content}\n\n')
             else:
-                consecutive_failures += 1
+                failures += 1
             
-            # ===== FINALIZE =====
-            step_end_time = time.time()
+            # ===== FINALIZE (parallel operations) =====
+            t1 = time.time()
             
-            if action_results and browser_state_summary:
-                await self.agent._make_history_item(
-                    model_output,
-                    browser_state_summary,
-                    action_results,
-                    StepMetadata(step_number=step_number, step_start_time=step_start_time, step_end_time=step_end_time),
-                    state_message=self.agent._message_manager.last_state_message_text,
-                )
-                self.agent.logger.debug(f'Step {step_number}: Ran {len(action_results)} action(s) in {step_end_time - step_start_time:.2f}s')
+            # Run finalization tasks in parallel
+            finalize_tasks = []
             
-            self.agent.save_file_system_state()
+            if results and browser_state:
+                finalize_tasks.append(agent._make_history_item(
+                    model_output, browser_state, results,
+                    StepMetadata(step_number=step, step_start_time=t0, step_end_time=t1),
+                    state_message=agent._message_manager.last_state_message_text,
+                ))
             
-            # Emit step event (only if cloud events available)
-            if _HAS_CLOUD_EVENTS and browser_state_summary and model_output:
+            # Cloud events (fire and forget style)
+            if _HAS_CLOUD_EVENTS and browser_state and model_output:
                 try:
                     actions_data = [a.model_dump() for a in (model_output.action or []) if hasattr(a, 'model_dump')]
-                    self.agent.eventbus.dispatch(CreateAgentStepEvent.from_agent_step(
-                        self.agent, model_output, action_results, actions_data, browser_state_summary,
+                    agent.eventbus.dispatch(CreateAgentStepEvent.from_agent_step(
+                        agent, model_output, results, actions_data, browser_state,
                     ))
                 except Exception:
-                    pass  # Silently ignore event dispatch failures
+                    pass
             
-            self.agent.state.n_steps = step_number + 1
+            if finalize_tasks:
+                await asyncio.gather(*finalize_tasks)
             
-            # Return minimal state (only control flow fields)
-            return {
-                "step_number": step_number + 1,
-                "is_done": is_done,
-                "consecutive_failures": consecutive_failures,
-                "error": None,
-            }
+            # Sync operations (fast)
+            agent.save_file_system_state()
+            agent.state.n_steps = step + 1
+            
+            return {"step_number": step + 1, "is_done": is_done, "consecutive_failures": failures}
             
         except InterruptedError:
-            self.agent.logger.info('Agent interrupted')
-            return {"step_number": step_number + 1, "is_done": True, "error": "interrupted"}
+            agent.logger.info('Interrupted')
+            return {"step_number": step + 1, "is_done": True}
         except asyncio.TimeoutError:
-            self.agent.logger.error(f"LLM timeout after {self.agent.settings.llm_timeout}s")
-            return {"step_number": step_number + 1, "consecutive_failures": consecutive_failures + 1, "error": "timeout"}
+            agent.logger.error(f"LLM timeout")
+            return {"step_number": step + 1, "consecutive_failures": failures + 1}
         except Exception as e:
             logger.error(f"Step error: {e}")
-            self.agent.state.last_result = [ActionResult(error=str(e))]
-            return {"step_number": step_number + 1, "consecutive_failures": consecutive_failures + 1, "error": str(e)}
+            agent.state.last_result = [ActionResult(error=str(e))]
+            return {"step_number": step + 1, "consecutive_failures": failures + 1}
     
     def _should_continue(self, state: GraphState) -> Literal["continue", "done", "error"]:
-        """Fast check if agent should continue."""
         if state.get("is_done"):
-            self.agent.logger.info('Task completed successfully')
+            self.agent.logger.info('Task completed')
             return "done"
-        
         if self.agent.state.stopped or self.agent.state.paused:
             return "done"
-        
         if state.get("step_number", 0) >= state.get("max_steps", 100):
-            self.agent.logger.info(f'Reached max steps')
             return "done"
-        
-        max_failures = self.agent.settings.max_failures + int(self.agent.settings.final_response_after_failure)
-        if state.get("consecutive_failures", 0) >= max_failures:
-            self.agent.logger.error(f'Stopping due to consecutive failures')
+        max_fail = self.agent.settings.max_failures + int(self.agent.settings.final_response_after_failure)
+        if state.get("consecutive_failures", 0) >= max_fail:
             return "error"
-        
         return "continue"
     
     async def run(self, max_steps: int = 100) -> AgentHistoryList:
-        """Run the agent graph with minimal overhead."""
-        # Minimal initial state
-        state: GraphState = {
-            "step_number": 0,
-            "max_steps": max_steps,
-            "is_done": False,
-            "consecutive_failures": 0,
-            "error": None,
-        }
-        
-        # Run graph
+        state: GraphState = {"step_number": 0, "max_steps": max_steps, "is_done": False, "consecutive_failures": 0}
         await self.graph.ainvoke(state, config={"recursion_limit": max_steps + 10})
         
         # Done callback
         if self.agent.history.is_done():
             await self.agent.log_completion()
-            if self.agent.register_done_callback:
-                if inspect.iscoroutinefunction(self.agent.register_done_callback):
-                    await self.agent.register_done_callback(self.agent.history)
-                else:
-                    self.agent.register_done_callback(self.agent.history)
+            cb = self.agent.register_done_callback
+            if cb:
+                await cb(self.agent.history) if inspect.iscoroutinefunction(cb) else cb(self.agent.history)
         
         return self.agent.history
 
