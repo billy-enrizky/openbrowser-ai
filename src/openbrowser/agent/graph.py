@@ -1,15 +1,14 @@
 """LangGraph-based Agent implementation for browser automation.
 
-This module implements the agent workflow using LangGraph's StateGraph for
-structured execution flow with proper state management.
-
 Performance optimizations:
-- Node fusion (4 nodes -> 1)
-- Minimal state (5 control fields only)
+- Single fused node (perceive + plan + execute + finalize)
+- Minimal state (4 control fields only)
 - ainvoke (not astream)
-- Parallel async operations where possible
-- Skip unnecessary checks based on settings
-- Lazy evaluation of expensive operations
+- Parallel async operations
+- Cached checks
+- __slots__ for class
+- Local variable optimization
+- Module-level imports
 """
 
 import asyncio
@@ -30,7 +29,7 @@ from openbrowser.agent.views import (
     StepMetadata,
 )
 
-# Import at module level for performance
+# Module-level import for performance
 try:
     from openbrowser.agent.cloud_events import CreateAgentStepEvent
     _HAS_CLOUD_EVENTS = True
@@ -41,12 +40,10 @@ logger = logging.getLogger(__name__)
 
 
 class GraphState(TypedDict, total=False):
-    """Minimal state for the LangGraph agent workflow.
+    """Minimal state for LangGraph workflow.
     
-    Only contains control flow fields - actual data is stored in agent.state
-    to minimize state copying overhead between steps.
+    Only control flow fields - actual data in agent.state to minimize copying.
     """
-    # Control flow (minimal state for performance)
     step_number: int
     max_steps: int
     is_done: bool
@@ -54,63 +51,70 @@ class GraphState(TypedDict, total=False):
 
 
 class AgentGraphBuilder:
-    """Builds a LangGraph StateGraph for the browser automation agent.
+    """Optimized LangGraph agent with minimal overhead.
     
-    Uses graph caching and minimal state for optimal performance.
+    Performance features:
+    - Single fused step node
+    - __slots__ for faster attribute access
+    - Cached downloads check
+    - Parallel async operations
+    - Local variable optimization
     """
-    __slots__ = ('agent', 'graph', '_has_downloads')
+    
+    __slots__ = ('agent', 'graph', '_has_downloads', '_max_failures')
     
     def __init__(self, agent: 'Agent'):
         self.agent = agent
-        self._has_downloads = agent.has_downloads_path  # Cache this check
+        # Cache these checks at init time
+        self._has_downloads = agent.has_downloads_path
+        self._max_failures = agent.settings.max_failures + int(agent.settings.final_response_after_failure)
         self.graph = self._build_graph()
     
     def _build_graph(self) -> StateGraph:
+        """Build minimal StateGraph: START -> step -> [continue/done/error]."""
         graph = StateGraph(GraphState)
-        
-        # Single fused node for entire step (perceive -> plan -> execute -> finalize)
         graph.add_node("step", self._step_node)
-        
-        # Simple flow: START -> step -> [continue? -> step : END]
         graph.add_edge(START, "step")
-        
-        # Conditional edge from step to decide next action
         graph.add_conditional_edges(
             "step",
             self._should_continue,
-            {
-                "continue": "step",   # Continue to next step
-                "done": END,          # Task completed
-                "error": END,         # Too many failures
-            }
+            {"continue": "step", "done": END, "error": END}
         )
-        
         return graph.compile()
     
     async def _step_node(self, state: GraphState) -> GraphState:
-        """Fused step: perceive -> plan -> execute -> finalize."""
+        """Fused step: perceive -> plan -> execute -> finalize.
+        
+        All phases combined into single node for minimal LangGraph overhead.
+        """
         t0 = time.time()
         step = state.get("step_number", 0)
         max_steps = state.get("max_steps", 100)
         failures = state.get("consecutive_failures", 0)
-        agent = self.agent
         
+        # Local variable for faster access
+        agent = self.agent
         agent.logger.info(f'\nStep {step}:')
         
         try:
-            # Check stop/pause once
+            # Single stop/pause check
             await agent._check_stop_or_pause()
             
-            # ===== PERCEIVE (with parallel download check) =====
-            browser_state, _ = await asyncio.gather(
-                agent.browser_session.get_browser_state_summary(
+            # === PERCEIVE (parallel browser state + downloads) ===
+            if self._has_downloads:
+                browser_state, _ = await asyncio.gather(
+                    agent.browser_session.get_browser_state_summary(
+                        include_screenshot=True,
+                        include_recent_events=agent.include_recent_events,
+                    ),
+                    agent._check_and_update_downloads(f'Step {step}'),
+                )
+            else:
+                browser_state = await agent.browser_session.get_browser_state_summary(
                     include_screenshot=True,
                     include_recent_events=agent.include_recent_events,
-                ),
-                agent._check_and_update_downloads(f'Step {step}') if self._has_downloads else asyncio.sleep(0),
-            )
+                )
             
-            # Update action models (skip if URL unchanged - optimization)
             url = browser_state.url if browser_state else ''
             await agent._update_action_models_for_page(url)
             
@@ -128,24 +132,24 @@ class AgentGraphBuilder:
                 available_file_paths=agent.available_file_paths,
             )
             
-            # Force done checks (run in parallel)
+            # Parallel force done checks
             await asyncio.gather(
                 agent._force_done_after_last_step(step_info),
                 agent._force_done_after_failure(),
             )
             
-            # ===== PLAN =====
+            # === PLAN ===
             model_output = await asyncio.wait_for(
                 agent._get_model_output_with_retry(agent._message_manager.get_messages()),
                 timeout=agent.settings.llm_timeout
             )
             agent.state.last_model_output = model_output
             
-            # Post-LLM processing (can run while we check actions)
+            # Post-LLM processing (parallel with action check)
             if browser_state:
                 await agent._handle_post_llm_processing(browser_state, agent._message_manager.get_messages())
             
-            # ===== EXECUTE =====
+            # === EXECUTE ===
             is_done = False
             results = []
             
@@ -153,7 +157,7 @@ class AgentGraphBuilder:
                 results = await agent.multi_act(model_output.action)
                 agent.state.last_result = results
                 
-                # Check downloads after actions (only if configured)
+                # Download check after actions (only if configured)
                 if self._has_downloads:
                     await agent._check_and_update_downloads('after actions')
                 
@@ -172,20 +176,18 @@ class AgentGraphBuilder:
             else:
                 failures += 1
             
-            # ===== FINALIZE (parallel operations) =====
+            # === FINALIZE ===
             t1 = time.time()
             
-            # Run finalization tasks in parallel
-            finalize_tasks = []
-            
+            # History item creation
             if results and browser_state:
-                finalize_tasks.append(agent._make_history_item(
+                await agent._make_history_item(
                     model_output, browser_state, results,
                     StepMetadata(step_number=step, step_start_time=t0, step_end_time=t1),
                     state_message=agent._message_manager.last_state_message_text,
-                ))
+                )
             
-            # Cloud events (fire and forget style)
+            # Cloud events (fire and forget)
             if _HAS_CLOUD_EVENTS and browser_state and model_output:
                 try:
                     actions_data = [a.model_dump() for a in (model_output.action or []) if hasattr(a, 'model_dump')]
@@ -195,10 +197,7 @@ class AgentGraphBuilder:
                 except Exception:
                     pass
             
-            if finalize_tasks:
-                await asyncio.gather(*finalize_tasks)
-            
-            # Sync operations (fast)
+            # Fast sync operations
             agent.save_file_system_state()
             agent.state.n_steps = step + 1
             
@@ -208,7 +207,7 @@ class AgentGraphBuilder:
             agent.logger.info('Interrupted')
             return {"step_number": step + 1, "is_done": True}
         except asyncio.TimeoutError:
-            agent.logger.error(f"LLM timeout")
+            agent.logger.error("LLM timeout")
             return {"step_number": step + 1, "consecutive_failures": failures + 1}
         except Exception as e:
             logger.error(f"Step error: {e}")
@@ -216,6 +215,7 @@ class AgentGraphBuilder:
             return {"step_number": step + 1, "consecutive_failures": failures + 1}
     
     def _should_continue(self, state: GraphState) -> Literal["continue", "done", "error"]:
+        """Fast routing decision."""
         if state.get("is_done"):
             self.agent.logger.info('Task completed')
             return "done"
@@ -223,25 +223,32 @@ class AgentGraphBuilder:
             return "done"
         if state.get("step_number", 0) >= state.get("max_steps", 100):
             return "done"
-        max_fail = self.agent.settings.max_failures + int(self.agent.settings.final_response_after_failure)
-        if state.get("consecutive_failures", 0) >= max_fail:
+        if state.get("consecutive_failures", 0) >= self._max_failures:
             return "error"
         return "continue"
     
     async def run(self, max_steps: int = 100) -> AgentHistoryList:
-        state: GraphState = {"step_number": 0, "max_steps": max_steps, "is_done": False, "consecutive_failures": 0}
+        """Execute agent workflow via LangGraph."""
+        state: GraphState = {
+            "step_number": 0,
+            "max_steps": max_steps,
+            "is_done": False,
+            "consecutive_failures": 0
+        }
         await self.graph.ainvoke(state, config={"recursion_limit": max_steps + 10})
         
-        # Done callback
         if self.agent.history.is_done():
             await self.agent.log_completion()
             cb = self.agent.register_done_callback
             if cb:
-                await cb(self.agent.history) if inspect.iscoroutinefunction(cb) else cb(self.agent.history)
+                if inspect.iscoroutinefunction(cb):
+                    await cb(self.agent.history)
+                else:
+                    cb(self.agent.history)
         
         return self.agent.history
 
 
 def create_agent_graph(agent: 'Agent') -> AgentGraphBuilder:
-    """Factory function to create an agent graph."""
+    """Factory function to create agent graph builder."""
     return AgentGraphBuilder(agent)
