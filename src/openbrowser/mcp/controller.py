@@ -33,7 +33,7 @@ class MCPToolWrapper:
 		"""Initialize MCP tool wrapper.
 
 		Args:
-			registry: Browser-use action registry to register MCP tools
+			registry: OpenBrowser action registry to register MCP tools
 			mcp_command: Command to start MCP server (e.g., "npx")
 			mcp_args: Arguments for MCP command (e.g., ["@playwright/mcp@latest"])
 		"""
@@ -239,7 +239,7 @@ async def register_mcp_tools(registry: Registry, mcp_command: str, mcp_args: lis
 	"""Register MCP tools with an openbrowser registry.
 
 	Args:
-		registry: Browser-use action registry
+		registry: OpenBrowser action registry
 		mcp_command: Command to start MCP server
 		mcp_args: Arguments for MCP command
 

@@ -1,4 +1,4 @@
-"""Telemetry for Browser Use.
+"""Telemetry for OpenBrowser.
 
 Performance optimizations:
 - Added import cache for lazy imports

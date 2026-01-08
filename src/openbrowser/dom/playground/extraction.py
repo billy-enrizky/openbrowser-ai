@@ -97,7 +97,7 @@ async def test_focus_vs_all_elements():
 	await browser_session.start()
 
 	# Show startup info
-	print('\n🌐 BROWSER-USE DOM EXTRACTION TESTER')
+	print('\nOPENBROWSER DOM EXTRACTION TESTER')
 	print(f'📊 {len(websites)} websites total: {len(sample_websites)} standard + {len(difficult_websites)} complex')
 	print('🔧 Controls: Type 1-15 to jump | Enter to re-run | "n" next | "q" quit')
 	print('💾 Outputs: tmp/user_message.txt & tmp/element_tree.json\n')

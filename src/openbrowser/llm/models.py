@@ -168,7 +168,7 @@ def get_llm_by_name(model_name: str):
 		api_key = os.getenv('CEREBRAS_API_KEY')
 		return ChatCerebras(model=model, api_key=api_key)
 
-	# Browser Use Models
+	# ChatBrowserUse Models (external cloud service)
 	elif provider == 'bu':
 		# Handle bu_latest -> bu-latest conversion (need to prepend 'bu-' back)
 		model = f'bu-{model_part.replace("_", "-")}'
@@ -262,7 +262,7 @@ __all__ += [
 	'cerebras_qwen_3_235b_a22b_instruct_2507',
 	'cerebras_qwen_3_235b_a22b_thinking_2507',
 	'cerebras_qwen_3_coder_480b',
-	# Browser Use instances - created on demand
+	# ChatBrowserUse instances - created on demand
 	'bu_latest',
 	'bu_1_0',
 ]

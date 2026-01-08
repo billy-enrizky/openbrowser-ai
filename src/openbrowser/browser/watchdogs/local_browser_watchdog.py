@@ -175,7 +175,7 @@ class LocalBrowserWatchdog(BaseWatchdog):
 
 					if attempt < max_retries - 1:
 						# Create a temporary directory for next attempt
-						tmp_dir = Path(tempfile.mkdtemp(prefix='browseruse-tmp-'))
+						tmp_dir = Path(tempfile.mkdtemp(prefix='openbrowser-tmp-'))
 						self._temp_dirs_to_cleanup.append(tmp_dir)
 
 						# Update profile to use temp directory
@@ -427,7 +427,7 @@ class LocalBrowserWatchdog(BaseWatchdog):
 		try:
 			temp_path = Path(temp_dir)
 			# Only remove if it's actually a temp directory we created
-			if 'browseruse-tmp-' in str(temp_path):
+			if 'openbrowser-tmp-' in str(temp_path):
 				shutil.rmtree(temp_path, ignore_errors=True)
 		except Exception as e:
 			self.logger.debug(f'Failed to cleanup temp dir {temp_dir}: {e}')

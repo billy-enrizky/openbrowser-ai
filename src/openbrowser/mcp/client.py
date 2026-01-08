@@ -216,7 +216,7 @@ class MCPClient:
 		"""Register MCP tools as actions in the openbrowser tools.
 
 		Args:
-			tools: Browser-use tools to register actions to
+			tools: OpenBrowser tools to register actions to
 			tool_filter: Optional list of tool names to register (None = all tools)
 			prefix: Optional prefix to add to action names (e.g., "playwright_")
 		"""
@@ -247,7 +247,7 @@ class MCPClient:
 		"""Register a single MCP tool as an openbrowser action.
 
 		Args:
-			registry: Browser-use registry to register action to
+			registry: OpenBrowser registry to register action to
 			action_name: Name for the registered action
 			tool: MCP Tool object with schema information
 		"""

@@ -299,7 +299,7 @@ class DeviceAuthClient:
 			terminal_width, _terminal_height = shutil.get_terminal_size((80, 20))
 			if show_instructions and CONFIG.BROWSER_USE_CLOUD_SYNC:
 				logger.info('─' * max(terminal_width - 40, 20))
-				logger.info('🌐  View the details of this run in Browser Use Cloud:')
+				logger.info('View the details of this run in OpenBrowser Cloud:')
 				logger.info(f'    👉  {verification_uri_complete}')
 				logger.info('─' * max(terminal_width - 40, 20) + '\n')
 

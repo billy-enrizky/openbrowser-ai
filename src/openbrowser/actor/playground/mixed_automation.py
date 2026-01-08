@@ -24,9 +24,9 @@ llm = ChatOpenAI('gpt-4.1-mini')
 
 async def main():
 	"""
-	Main function demonstrating mixed automation with Browser-Use and Playwright.
+	Main function demonstrating mixed automation with OpenBrowser and Playwright.
 	"""
-	print('🚀 Mixed Automation with Browser-Use and Actor API')
+	print('Mixed Automation with OpenBrowser and Actor API')
 
 	browser = Browser(keep_alive=True)
 	await browser.start()

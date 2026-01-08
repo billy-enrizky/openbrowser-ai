@@ -1,4 +1,4 @@
-"""Cloud sync service for sending events to the Browser Use cloud.
+"""Cloud sync service for sending events to the OpenBrowser cloud.
 
 Performance optimizations:
 - Added __slots__ to CloudSync class
@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 class CloudSync:
-	"""Service for syncing events to the Browser Use cloud.
+	"""Service for syncing events to the OpenBrowser cloud.
 	
 	Performance optimizations:
 	- __slots__ for faster attribute access

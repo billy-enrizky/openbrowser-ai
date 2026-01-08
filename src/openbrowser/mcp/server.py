@@ -184,7 +184,7 @@ def get_parent_process_cmdline() -> str | None:
 		return None
 
 
-class BrowserUseServer:
+class OpenBrowserServer:
 	"""MCP Server for openbrowser capabilities."""
 
 	def __init__(self, session_timeout_minutes: int = 10):
@@ -523,7 +523,7 @@ class BrowserUseServer:
 			'downloads_path': str(Path.home() / 'Downloads' / 'openbrowser-mcp'),
 			'wait_between_actions': 0.5,
 			'keep_alive': True,
-			'user_data_dir': '~/.config/browseruse/profiles/default',
+			'user_data_dir': '~/.config/openbrowser/profiles/default',
 			'device_scale_factor': 1.0,
 			'disable_security': False,
 			'headless': False,
@@ -1086,7 +1086,7 @@ async def main(session_timeout_minutes: int = 10):
 		print('MCP SDK is required. Install with: pip install mcp', file=sys.stderr)
 		sys.exit(1)
 
-	server = BrowserUseServer(session_timeout_minutes=session_timeout_minutes)
+	server = OpenBrowserServer(session_timeout_minutes=session_timeout_minutes)
 	server._telemetry.capture(
 		MCPServerTelemetryEvent(
 			version=get_openbrowser_version(),
