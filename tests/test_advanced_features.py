@@ -1,8 +1,7 @@
-"""Comprehensive tests for new features implemented from browser-use.
+"""Comprehensive tests for advanced openbrowser features.
 
-This module provides extensive test coverage for features ported from or
-inspired by the browser-use project. It validates the core functionality
-of various subsystems including:
+This module provides extensive test coverage for advanced features. 
+It validates the core functionality of various subsystems including:
 
     - LLM exception handling (LLMException, ModelProviderError, ModelRateLimitError)
     - Observability decorators for function tracing and debugging
@@ -11,10 +10,9 @@ of various subsystems including:
     - Signal handler functionality for pause/resume operations
     - Enhanced DOM snapshot processing
     - LLM message serializers for multiple providers (OpenAI, Anthropic, Google)
-    - New LLM provider integrations (OCI, Cerebras, DeepSeek, BrowserUse)
+    - New LLM provider integrations (OCI, Cerebras, DeepSeek, ChatBrowserUse)
 
-The tests ensure compatibility with browser-use patterns while maintaining
-the openbrowser-specific implementation details.
+The tests ensure compatibility with openbrowser patterns and implementation details.
 """
 
 import asyncio
@@ -411,7 +409,7 @@ class TestNewLLMProviders:
 
     Validates that new LLM provider integrations can be imported and
     are accessible through the get_llm_by_name factory function.
-    Covers OCI, Cerebras, DeepSeek, and BrowserUse providers.
+    Covers OCI, Cerebras, DeepSeek, and ChatBrowserUse providers.
     """
 
     def test_chat_oci_import(self):

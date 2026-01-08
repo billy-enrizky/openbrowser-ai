@@ -1,0 +1,685 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Individual Browser Challenges</title>
+    <style>
+        :root {
+            --primary-color: #4a6bff;
+            --secondary-color: #ff4a6b;
+            --background-color: #f8f9fa;
+            --card-bg-color: #ffffff;
+            --text-color: #333;
+            --box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: var(--text-color);
+            background-color: var(--background-color);
+            padding: 0;
+            margin: 0;
+        }
+
+        header {
+            background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+            color: white;
+            text-align: center;
+            padding: 2rem 1rem;
+            box-shadow: var(--box-shadow);
+        }
+
+        h1 {
+            margin: 0;
+            font-size: 2.5rem;
+            letter-spacing: -0.5px;
+        }
+
+        .subtitle {
+            font-size: 1.2rem;
+            margin-top: 0.5rem;
+            opacity: 0.9;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 2rem auto;
+            padding: 0 1rem;
+        }
+
+        .back-link {
+            display: inline-block;
+            background-color: var(--primary-color);
+            color: white;
+            text-decoration: none;
+            padding: 0.6rem 1.2rem;
+            border-radius: 4px;
+            font-weight: 500;
+            transition: background-color 0.3s ease, transform 0.2s ease;
+            margin-bottom: 2rem;
+        }
+
+        .back-link:hover {
+            background-color: #3755d8;
+            transform: translateY(-2px);
+        }
+
+        .challenges-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 1.5rem;
+            margin: 2rem 0;
+        }
+
+        .challenge-card {
+            background-color: var(--card-bg-color);
+            border-radius: 8px;
+            box-shadow: var(--box-shadow);
+            overflow: hidden;
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .challenge-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 15px rgba(0, 0, 0, 0.1);
+        }
+
+        .challenge-card-header {
+            background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+            color: white;
+            padding: 1rem;
+            font-weight: bold;
+            font-size: 1.1rem;
+        }
+
+        .challenge-card-content {
+            padding: 1.5rem;
+        }
+
+        .challenge-card-content h3 {
+            margin: 0 0 0.5rem 0;
+            color: var(--primary-color);
+        }
+
+        .challenge-card-content p {
+            margin: 0 0 1rem 0;
+            color: #666;
+            font-size: 0.9rem;
+        }
+
+        .challenge-link {
+            display: inline-block;
+            background-color: var(--primary-color);
+            color: white;
+            text-decoration: none;
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
+            font-weight: 500;
+            transition: background-color 0.3s ease;
+        }
+
+        .challenge-link:hover {
+            background-color: #3755d8;
+        }
+
+        .full-challenge {
+            background-color: var(--card-bg-color);
+            border-radius: 8px;
+            box-shadow: var(--box-shadow);
+            padding: 2rem;
+            margin: 2rem 0;
+            text-align: center;
+        }
+
+        .full-challenge h2 {
+            color: var(--primary-color);
+            margin-bottom: 1rem;
+        }
+
+        .full-challenge-link {
+            display: inline-block;
+            background-color: var(--secondary-color);
+            color: white;
+            text-decoration: none;
+            padding: 1rem 2rem;
+            border-radius: 4px;
+            font-weight: 500;
+            font-size: 1.1rem;
+            transition: background-color 0.3s ease;
+        }
+
+        .full-challenge-link:hover {
+            background-color: #e43456;
+        }
+
+        footer {
+            text-align: center;
+            padding: 2rem;
+            margin-top: 2rem;
+            background-color: var(--card-bg-color);
+            border-top: 1px solid #eee;
+        }
+
+        @media (max-width: 768px) {
+            .challenges-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <header>
+        <h1>Individual Browser Challenges</h1>
+        <div class="subtitle">Practice specific browser automation tasks one at a time</div>
+    </header>
+
+    <div class="container">
+        <a href="index.html" class="back-link">← Back to Main Page</a>
+
+        <div class="full-challenge">
+            <h2>Full Challenge Suite</h2>
+            <p>Take on all 58 challenges in sequence for the complete experience</p>
+            <a href="challenge.html" class="full-challenge-link">Complete All Challenges</a>
+        </div>
+
+        <div class="challenges-grid">
+            <div class="challenge-card">
+                <div class="challenge-card-header">simple-button</div>
+                <div class="challenge-card-content">
+                    <h3>Simple Button Click</h3>
+                    <p>Click the button to start - the most basic browser interaction</p>
+                    <a href="challenges/simple-button.html" class="challenge-link">Try Challenge</a>
+                </div>
+            </div>
+
+            <div class="challenge-card">
+                <div class="challenge-card-header">radio-selection</div>
+                <div class="challenge-card-content">
+                    <h3>Radio Button Selection</h3>
+                    <p>Select one of the radio buttons, handling disabled options</p>
+                    <a href="challenges/radio-selection.html" class="challenge-link">Try Challenge</a>
+                </div>
+            </div>
+
+            <div class="challenge-card">
+                <div class="challenge-card-header">checkbox-check</div>
+                <div class="challenge-card-content">
+                    <h3>Checkbox Checking</h3>
+                    <p>Check all the required checkboxes while handling disabled ones</p>
+                    <a href="challenges/checkbox-check.html" class="challenge-link">Try Challenge</a>
+                </div>
+            </div>
+
+            <div class="challenge-card">
+                <div class="challenge-card-header">search-squash</div>
+                <div class="challenge-card-content">
+                    <h3>Search Field</h3>
+                    <p>Use the search field to search for a specific term</p>
+                    <a href="challenges/search-squash.html" class="challenge-link">Try Challenge</a>
+                </div>
+            </div>
+
+            <div class="challenge-card">
+                <div class="challenge-card-header">date-time-input</div>
+                <div class="challenge-card-content">
+                    <h3>Date & Time Input</h3>
+                    <p>Fill in date and time picker fields</p>
+                    <a href="challenges/date-time-input.html" class="challenge-link">Try Challenge</a>
+                </div>
+            </div>
+
+            <div class="challenge-card">
+                <div class="challenge-card-header">slider-drag</div>
+                <div class="challenge-card-content">
+                    <h3>Slider Drag</h3>
+                    <p>Drag a slider to a specific position</p>
+                    <a href="challenges/slider-drag.html" class="challenge-link">Try Challenge</a>
+                </div>
+            </div>
+
+            <div class="challenge-card">
+                <div class="challenge-card-header">hover-element</div>
+                <div class="challenge-card-content">
+                    <h3>Hover Element</h3>
+                    <p>Hover over an element to trigger an action</p>
+                    <a href="challenges/hover-element.html" class="challenge-link">Try Challenge</a>
+                </div>
+            </div>
+
+            <div class="challenge-card">
+                <div class="challenge-card-header">canvas-captcha</div>
+                <div class="challenge-card-content">
+                    <h3>Canvas CAPTCHA</h3>
+                    <p>Complete a visual CAPTCHA using canvas elements</p>
+                    <a href="challenges/canvas-captcha.html" class="challenge-link">Try Challenge</a>
+                </div>
+            </div>
+
+            <div class="challenge-card">
+                <div class="challenge-card-header">iframe-slider</div>
+                <div class="challenge-card-content">
+                    <h3>IFrame Slider</h3>
+                    <p>Interact with elements inside an iframe</p>
+                    <a href="challenges/iframe-slider.html" class="challenge-link">Try Challenge</a>
+                </div>
+            </div>
+
+            <div class="challenge-card">
+                <div class="challenge-card-header">scroll-accept</div>
+                <div class="challenge-card-content">
+                    <h3>Scroll to Accept</h3>
+                    <p>Scroll to the bottom of content to enable acceptance</p>
+                    <a href="challenges/scroll-accept.html" class="challenge-link">Try Challenge</a>
+                </div>
+            </div>
+
+            <div class="challenge-card">
+                <div class="challenge-card-header">arrow-key-presses</div>
+                <div class="challenge-card-content">
+                    <h3>Arrow Key Navigation</h3>
+                    <p>Use arrow keys to navigate and interact with elements</p>
+                    <a href="challenges/arrow-key-presses.html" class="challenge-link">Try Challenge</a>
+                </div>
+            </div>
+
+            <div class="challenge-card">
+                <div class="challenge-card-header">file-upload</div>
+                <div class="challenge-card-content">
+                    <h3>File Upload</h3>
+                    <p>Upload files using file input elements</p>
+                    <a href="challenges/file-upload.html" class="challenge-link">Try Challenge</a>
+                </div>
+            </div>
+
+            <div class="challenge-card">
+                <div class="challenge-card-header">expand-details</div>
+                <div class="challenge-card-content">
+                    <h3>Expand Details</h3>
+                    <p>Expand collapsible details/summary elements</p>
+                    <a href="challenges/expand-details.html" class="challenge-link">Try Challenge</a>
+                </div>
+            </div>
+
+            <div class="challenge-card">
+                <div class="challenge-card-header">dropdown-selections</div>
+                <div class="challenge-card-content">
+                    <h3>Dropdown Selections</h3>
+                    <p>Make specific selections from dropdown menus</p>
+                    <a href="challenges/dropdown-selections.html" class="challenge-link">Try Challenge</a>
+                </div>
+            </div>
+
+            <div class="challenge-card">
+                <div class="challenge-card-header">contenteditable-div</div>
+                <div class="challenge-card-content">
+                    <h3>Contenteditable Div</h3>
+                    <p>Type specific text into contenteditable elements</p>
+                    <a href="challenges/contenteditable-div.html" class="challenge-link">Try Challenge</a>
+                </div>
+            </div>
+
+            <!-- Form Challenges -->
+            <div class="challenge-card">
+                <div class="challenge-card-header">vanilla-form</div>
+                <div class="challenge-card-content">
+                    <h3>Vanilla HTML Form</h3>
+                    <p>Test autofill with a basic HTML form using vanilla JavaScript</p>
+                    <a href="challenges/vanilla-form.html" class="challenge-link">Try Challenge</a>
+                </div>
+            </div>
+
+            <div class="challenge-card">
+                <div class="challenge-card-header">reference-number-form</div>
+                <div class="challenge-card-content">
+                    <h3>Reference Number Form</h3>
+                    <p>Generate a reference number by submitting a form with various inputs</p>
+                    <a href="challenges/reference-number-form.html" class="challenge-link">Try Challenge</a>
+                </div>
+            </div>
+
+            <div class="challenge-card">
+                <div class="challenge-card-header">jquery-bootstrap-form</div>
+                <div class="challenge-card-content">
+                    <h3>jQuery Bootstrap Form</h3>
+                    <p>Fill out a jQuery + Bootstrap form with Select2 components</p>
+                    <a href="challenges/jquery-bootstrap-form.html" class="challenge-link">Try Challenge</a>
+                </div>
+            </div>
+
+            <div class="challenge-card">
+                <div class="challenge-card-header">angularjs-form</div>
+                <div class="challenge-card-content">
+                    <h3>AngularJS Form</h3>
+                    <p>Complete an AngularJS (v1) form with two-way data binding</p>
+                    <a href="challenges/angularjs-form.html" class="challenge-link">Try Challenge</a>
+                </div>
+            </div>
+
+            <div class="challenge-card">
+                <div class="challenge-card-header">angular-form</div>
+                <div class="challenge-card-content">
+                    <h3>Angular Form</h3>
+                    <p>Fill out a modern Angular (v2+) reactive form</p>
+                    <a href="challenges/angular-form.html" class="challenge-link">Try Challenge</a>
+                </div>
+            </div>
+
+            <div class="challenge-card">
+                <div class="challenge-card-header">react-hook-form</div>
+                <div class="challenge-card-content">
+                    <h3>React Hook Form</h3>
+                    <p>Complete a React form built with React Hook Form library</p>
+                    <a href="challenges/react-hook-form.html" class="challenge-link">Try Challenge</a>
+                </div>
+            </div>
+
+            <div class="challenge-card">
+                <div class="challenge-card-header">formik-form</div>
+                <div class="challenge-card-content">
+                    <h3>Formik Form</h3>
+                    <p>Fill out a React form built with Formik library</p>
+                    <a href="challenges/formik-form.html" class="challenge-link">Try Challenge</a>
+                </div>
+            </div>
+
+            <div class="challenge-card">
+                <div class="challenge-card-header">react-final-form</div>
+                <div class="challenge-card-content">
+                    <h3>React Final Form</h3>
+                    <p>Complete a React Final Form with validation</p>
+                    <a href="challenges/react-final-form.html" class="challenge-link">Try Challenge</a>
+                </div>
+            </div>
+
+            <div class="challenge-card">
+                <div class="challenge-card-header">svelte-form</div>
+                <div class="challenge-card-content">
+                    <h3>Svelte Form</h3>
+                    <p>Test form autofill with Svelte and Svelte Forms Lib</p>
+                    <a href="challenges/svelte-form.html" class="challenge-link">Try Challenge</a>
+                </div>
+            </div>
+
+            <div class="challenge-card">
+                <div class="challenge-card-header">ember-form</div>
+                <div class="challenge-card-content">
+                    <h3>Ember Form</h3>
+                    <p>Complete an Ember form with ember-changeset-validations</p>
+                    <a href="challenges/ember-form.html" class="challenge-link">Try Challenge</a>
+                </div>
+            </div>
+
+            <div class="challenge-card">
+                <div class="challenge-card-header">vue-form</div>
+                <div class="challenge-card-content">
+                    <h3>Vue.js Form</h3>
+                    <p>Fill out a Vue.js form with Vuelidate validation</p>
+                    <a href="challenges/vue-form.html" class="challenge-link">Try Challenge</a>
+                </div>
+            </div>
+
+            <div class="challenge-card">
+                <div class="challenge-card-header">material-ui-form</div>
+                <div class="challenge-card-content">
+                    <h3>Material UI Form</h3>
+                    <p>Test autofill with Material UI form components</p>
+                    <a href="challenges/material-ui-form.html" class="challenge-link">Try Challenge</a>
+                </div>
+            </div>
+
+            <div class="challenge-card">
+                <div class="challenge-card-header">wufoo-style-form</div>
+                <div class="challenge-card-content">
+                    <h3>Wufoo Style Form</h3>
+                    <p>Handle a challenging Wufoo-style form designed to be hard to autofill</p>
+                    <a href="challenges/wufoo-style-form.html" class="challenge-link">Try Challenge</a>
+                </div>
+            </div>
+
+            <div class="challenge-card">
+                <div class="challenge-card-header">shadow-dom-form</div>
+                <div class="challenge-card-content">
+                    <h3>Shadow DOM Form</h3>
+                    <p>Fill out a form inside Shadow DOM elements</p>
+                    <a href="challenges/shadow-dom-form.html" class="challenge-link">Try Challenge</a>
+                </div>
+            </div>
+
+            <div class="challenge-card">
+                <div class="challenge-card-header">dynamic-form</div>
+                <div class="challenge-card-content">
+                    <h3>Dynamic Form</h3>
+                    <p>Complete a dynamically generated form with changing fields</p>
+                    <a href="challenges/dynamic-form.html" class="challenge-link">Try Challenge</a>
+                </div>
+            </div>
+
+            <div class="challenge-card">
+                <div class="challenge-card-header">progressive-form</div>
+                <div class="challenge-card-content">
+                    <h3>Progressive Form</h3>
+                    <p>Navigate through a multi-step progressive form</p>
+                    <a href="challenges/progressive-form.html" class="challenge-link">Try Challenge</a>
+                </div>
+            </div>
+
+            <div class="challenge-card">
+                <div class="challenge-card-header">react-native-web-form</div>
+                <div class="challenge-card-content">
+                    <h3>React Native Web Form</h3>
+                    <p>Fill out a React Native Web form with custom components</p>
+                    <a href="challenges/react-native-web-form.html" class="challenge-link">Try Challenge</a>
+                </div>
+            </div>
+
+            <div class="challenge-card">
+                <div class="challenge-card-header">iframe-inception-form</div>
+                <div class="challenge-card-content">
+                    <h3>Nested Iframes Form</h3>
+                    <p>Complete a form inside nested iframe elements</p>
+                    <a href="challenges/iframe-inception-form.html" class="challenge-link">Try Challenge</a>
+                </div>
+            </div>
+
+            <div class="challenge-card">
+                <div class="challenge-card-header">iframe-inception-level1</div>
+                <div class="challenge-card-content">
+                    <h3>Iframe Level 1</h3>
+                    <p>First level of iframe inception challenge</p>
+                    <a href="challenges/iframe-inception-level1.html" class="challenge-link">Try Challenge</a>
+                </div>
+            </div>
+
+            <div class="challenge-card">
+                <div class="challenge-card-header">iframe-inception-level2</div>
+                <div class="challenge-card-content">
+                    <h3>Iframe Level 2</h3>
+                    <p>Second level of iframe inception challenge</p>
+                    <a href="challenges/iframe-inception-level2.html" class="challenge-link">Try Challenge</a>
+                </div>
+            </div>
+
+            <div class="challenge-card">
+                <div class="challenge-card-header">iframe-inception-level3</div>
+                <div class="challenge-card-content">
+                    <h3>Iframe Level 3</h3>
+                    <p>Third level of iframe inception challenge</p>
+                    <a href="challenges/iframe-inception-level3.html" class="challenge-link">Try Challenge</a>
+                </div>
+            </div>
+
+            <div class="challenge-card">
+                <div class="challenge-card-header">hidden-labels-form</div>
+                <div class="challenge-card-content">
+                    <h3>Hidden Labels Form</h3>
+                    <p>Fill out a form with visually hidden labels</p>
+                    <a href="challenges/hidden-labels-form.html" class="challenge-link">Try Challenge</a>
+                </div>
+            </div>
+
+            <div class="challenge-card">
+                <div class="challenge-card-header">non-latin-form</div>
+                <div class="challenge-card-content">
+                    <h3>Non-Latin Form</h3>
+                    <p>Complete a form with exotic character sets and languages</p>
+                    <a href="challenges/non-latin-form.html" class="challenge-link">Try Challenge</a>
+                </div>
+            </div>
+
+            <div class="challenge-card">
+                <div class="challenge-card-header">contenteditable-form</div>
+                <div class="challenge-card-content">
+                    <h3>Contenteditable Form</h3>
+                    <p>Fill out a form using contenteditable elements</p>
+                    <a href="challenges/contenteditable-form.html" class="challenge-link">Try Challenge</a>
+                </div>
+            </div>
+
+            <div class="challenge-card">
+                <div class="challenge-card-header">rich-text-form</div>
+                <div class="challenge-card-content">
+                    <h3>Rich Text Form</h3>
+                    <p>Complete a form with rich text editor fields</p>
+                    <a href="challenges/rich-text-form.html" class="challenge-link">Try Challenge</a>
+                </div>
+            </div>
+
+            <div class="challenge-card">
+                <div class="challenge-card-header">table-form</div>
+                <div class="challenge-card-content">
+                    <h3>Table-based Form</h3>
+                    <p>Complete a form laid out using HTML tables</p>
+                    <a href="challenges/table-form.html" class="challenge-link">Try Challenge</a>
+                </div>
+            </div>
+
+            <div class="challenge-card">
+                <div class="challenge-card-header">animated-form</div>
+                <div class="challenge-card-content">
+                    <h3>Animated Form</h3>
+                    <p>Fill out a form with animated transitions and effects</p>
+                    <a href="challenges/animated-form.html" class="challenge-link">Try Challenge</a>
+                </div>
+            </div>
+
+            <div class="challenge-card">
+                <div class="challenge-card-header">i18n-form</div>
+                <div class="challenge-card-content">
+                    <h3>Internationalized Form</h3>
+                    <p>Complete a form with internationalization features</p>
+                    <a href="challenges/i18n-form.html" class="challenge-link">Try Challenge</a>
+                </div>
+            </div>
+
+            <!-- Complex UI Challenges -->
+            <div class="challenge-card">
+                <div class="challenge-card-header">flight-booking-calendar</div>
+                <div class="challenge-card-content">
+                    <h3>Flight Booking Calendar</h3>
+                    <p>Navigate complex flight booking calendar with price indicators and date constraints</p>
+                    <a href="challenges/flight-booking-calendar.html" class="challenge-link">Try Challenge</a>
+                </div>
+            </div>
+
+            <div class="challenge-card">
+                <div class="challenge-card-header">hotel-booking-calendar</div>
+                <div class="challenge-card-content">
+                    <h3>Hotel Booking Calendar</h3>
+                    <p>Select check-in/check-out dates with availability indicators and minimum stay requirements</p>
+                    <a href="challenges/hotel-booking-calendar.html" class="challenge-link">Try Challenge</a>
+                </div>
+            </div>
+
+            <div class="challenge-card">
+                <div class="challenge-card-header">flight-booking-flow</div>
+                <div class="challenge-card-content">
+                    <h3>Flight Booking Flow</h3>
+                    <p>Complete a multi-step flight booking process from search to confirmation</p>
+                    <a href="challenges/flight-booking-flow.html" class="challenge-link">Try Challenge</a>
+                </div>
+            </div>
+
+            <div class="challenge-card">
+                <div class="challenge-card-header">advanced-data-table</div>
+                <div class="challenge-card-content">
+                    <h3>Advanced Data Table</h3>
+                    <p>Interact with complex data table featuring sorting, filtering, pagination, and inline editing</p>
+                    <a href="challenges/advanced-data-table.html" class="challenge-link">Try Challenge</a>
+                </div>
+            </div>
+
+            <div class="challenge-card">
+                <div class="challenge-card-header">advanced-autocomplete</div>
+                <div class="challenge-card-content">
+                    <h3>Advanced Autocomplete</h3>
+                    <p>Test live search suggestions, keyboard navigation, and multiple selection modes</p>
+                    <a href="challenges/advanced-autocomplete.html" class="challenge-link">Try Challenge</a>
+                </div>
+            </div>
+
+            <div class="challenge-card">
+                <div class="challenge-card-header">conditional-form-fields</div>
+                <div class="challenge-card-content">
+                    <h3>Conditional Form Fields</h3>
+                    <p>Navigate dynamic form fields that appear/disappear based on user selections</p>
+                    <a href="challenges/conditional-form-fields.html" class="challenge-link">Try Challenge</a>
+                </div>
+            </div>
+
+            <div class="challenge-card">
+                <div class="challenge-card-header">product-configurator</div>
+                <div class="challenge-card-content">
+                    <h3>Product Configurator</h3>
+                    <p>Customize products with options, pricing calculations, and inventory checking</p>
+                    <a href="challenges/product-configurator.html" class="challenge-link">Try Challenge</a>
+                </div>
+            </div>
+
+            <div class="challenge-card">
+                <div class="challenge-card-header">interactive-map-challenge</div>
+                <div class="challenge-card-content">
+                    <h3>Interactive Map Challenge</h3>
+                    <p>Navigate maps with markers, location selection, route planning, and geolocation</p>
+                    <a href="challenges/interactive-map-challenge.html" class="challenge-link">Try Challenge</a>
+                </div>
+            </div>
+
+            <div class="challenge-card">
+                <div class="challenge-card-header">live-chat-interface</div>
+                <div class="challenge-card-content">
+                    <h3>Live Chat Interface</h3>
+                    <p>Test real-time messaging with file uploads, emoji selection, and typing indicators</p>
+                    <a href="challenges/live-chat-interface.html" class="challenge-link">Try Challenge</a>
+                </div>
+            </div>
+
+            <div class="challenge-card">
+                <div class="challenge-card-header">tap-hold-captcha</div>
+                <div class="challenge-card-content">
+                    <h3>Tap & Hold CAPTCHA</h3>
+                    <p>Complete a tap and hold CAPTCHA verification with random timing</p>
+                    <a href="challenges/tap-hold-captcha.html" class="challenge-link">Try Challenge</a>
+                </div>
+            </div>
+
+            <div class="challenge-card">
+                <div class="challenge-card-header">signature-pad</div>
+                <div class="challenge-card-content">
+                    <h3>Signature Pad</h3>
+                    <p>Draw a digital signature using HTML5 canvas and verify it</p>
+                    <a href="challenges/signature-pad.html" class="challenge-link">Try Challenge</a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <footer>
+        <p>Individual Browser Challenges &copy; 2025</p>
+    </footer>
+</body>
+
+</html>

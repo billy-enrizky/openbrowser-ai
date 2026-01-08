@@ -88,7 +88,7 @@ class TestAgentSettings:
         settings = AgentSettings()
         assert settings.use_vision == "auto"
         assert settings.max_failures == 3
-        assert settings.max_actions_per_step == 10  # Updated to match browser-use default
+        assert settings.max_actions_per_step == 10  # Default value
         assert settings.use_thinking is True
         assert settings.flash_mode is False
 

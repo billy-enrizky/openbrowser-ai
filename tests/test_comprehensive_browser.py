@@ -1,6 +1,6 @@
-"""Comprehensive test suite for BrowserSession and all watchdogs following browser-use pattern.
+"""Comprehensive test suite for BrowserSession and all watchdogs.
 
-This test suite validates all features from difference.md (92-112) except cloud browser support:
+This test suite validates all browser features:
 - Local browser launch with watchdog system
 - Session manager for CDP session lifecycle
 - Multiple tab support
@@ -46,7 +46,7 @@ logging.getLogger("asyncio").setLevel(logging.WARNING)
 # Test: BrowserProfile Configuration
 # ============================================================================
 async def test_browser_profile():
-    """Test BrowserProfile class configuration following browser-use pattern."""
+    """Test BrowserProfile class configuration."""
     logger.info("=" * 80)
     logger.info("TEST: BrowserProfile Configuration")
     logger.info("=" * 80)

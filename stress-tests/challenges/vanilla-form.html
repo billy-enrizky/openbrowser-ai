@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vanilla HTML + JS Form</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        form {
+            background: #f9f9f9;
+            border: 1px solid #ddd;
+            padding: 20px;
+            border-radius: 5px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+
+        input, select {
+            width: 100%;
+            padding: 8px;
+            margin-bottom: 15px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+
+        input[type="radio"] {
+            width: auto;
+            margin-right: 10px;
+        }
+
+        .radio-group {
+            margin-bottom: 15px;
+        }
+
+        .radio-label {
+            font-weight: normal;
+        }
+
+        button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px 15px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background-color: #45a049;
+        }
+    </style>
+</head>
+<body>
+    <h1>Vanilla HTML + JavaScript Form</h1>
+
+    <form id="vanillaForm" action="https://example.com/submit" method="POST">
+        <div>
+            <label for="email-input">Email Address:</label>
+            <input type="email" id="email-input" name="email-input" required>
+        </div>
+
+        <div>
+            <label for="country-select">Country:</label>
+            <select id="country-select" name="country-select" required>
+                <option value="">Please select a country</option>
+                <option value="usa">United States</option>
+                <option value="canada">Canada</option>
+                <option value="uk">United Kingdom</option>
+                <option value="australia">Australia</option>
+            </select>
+        </div>
+
+        <div>
+            <label for="date-input">Date:</label>
+            <input type="date" id="date-input" name="date-input" required>
+        </div>
+
+        <div class="radio-group">
+            <label>Subscription Type:</label>
+            <div>
+                <input type="radio" id="radio1" name="subscription" value="free" required>
+                <label for="radio1" class="radio-label">Free</label>
+            </div>
+            <div>
+                <input type="radio" id="radio2" name="subscription" value="basic" required>
+                <label for="radio2" class="radio-label">Basic</label>
+            </div>
+            <div>
+                <input type="radio" id="radio3" name="subscription" value="premium" required>
+                <label for="radio3" class="radio-label">Premium</label>
+            </div>
+        </div>
+
+        <div>
+            <label for="file-input">Upload File:</label>
+            <input type="file" id="file-input" name="file-input" required>
+        </div>
+
+        <div>
+            <button type="submit" id="submit-button">Submit Form</button>
+        </div>
+    </form>
+
+    <script>
+        document.getElementById('vanillaForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+
+            // Get all form values
+            const email = document.getElementById('email-input').value;
+            const country = document.getElementById('country-select').value;
+            const date = document.getElementById('date-input').value;
+            const subscription = document.querySelector('input[name="subscription"]:checked');
+            const file = document.getElementById('file-input').files[0];
+
+            // Validate all fields are filled
+            if (!email || !country || !date || !subscription || !file) {
+                alert('Please fill in all required fields');
+                return false;
+            }
+
+            // Specific validation for dropdown - ensure a value is actually selected
+            if (country === '') {
+                alert('Please select a country from the dropdown');
+                return false;
+            }
+
+            // All validation passed
+            console.log('Form submitted successfully! The secret is: dumbledore');
+            alert('Form submitted successfully! The secret is: dumbledore');
+        });
+    </script>
+</body>
+</html>
