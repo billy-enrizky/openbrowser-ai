@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'stress-tests/**'
+      - 'docs/**'
       - '.github/workflows/docs.yml'
   workflow_dispatch:
 
@@ -36,6 +37,77 @@ jobs:
           
           # Create .nojekyll to prevent Jekyll processing
           touch output/.nojekyll
+          
+          # Create a simple docs landing page that links to GitHub
+          mkdir -p output/docs
+          cat > output/docs/index.html << 'DOCSEOF'
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+              <meta charset="UTF-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+              <title>OpenBrowser Documentation</title>
+              <style>
+                  * { box-sizing: border-box; }
+                  body {
+                      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                      background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+                      min-height: 100vh;
+                      margin: 0;
+                      display: flex;
+                      align-items: center;
+                      justify-content: center;
+                      color: #e2e8f0;
+                  }
+                  .container {
+                      text-align: center;
+                      padding: 2rem;
+                      max-width: 600px;
+                  }
+                  h1 {
+                      color: #0ea5e9;
+                      font-size: 2.5rem;
+                      margin-bottom: 1rem;
+                  }
+                  p {
+                      color: #94a3b8;
+                      font-size: 1.1rem;
+                      line-height: 1.6;
+                      margin-bottom: 2rem;
+                  }
+                  .btn {
+                      display: inline-block;
+                      background: #0ea5e9;
+                      color: white;
+                      padding: 1rem 2rem;
+                      border-radius: 8px;
+                      text-decoration: none;
+                      font-weight: 600;
+                      margin: 0.5rem;
+                      transition: all 0.3s;
+                  }
+                  .btn:hover {
+                      background: #0284c7;
+                      transform: translateY(-2px);
+                  }
+                  .btn-secondary {
+                      background: #8b5cf6;
+                  }
+                  .btn-secondary:hover {
+                      background: #7c3aed;
+                  }
+              </style>
+          </head>
+          <body>
+              <div class="container">
+                  <h1>OpenBrowser</h1>
+                  <p>AI-Powered Browser Automation. Control your browser with natural language using state-of-the-art LLMs.</p>
+                  <a href="https://github.com/billy-enrizky/openbrowser-ai#readme" class="btn">View Documentation</a>
+                  <a href="../" class="btn btn-secondary">Stress Tests</a>
+              </div>
+          </body>
+          </html>
+          DOCSEOF
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
