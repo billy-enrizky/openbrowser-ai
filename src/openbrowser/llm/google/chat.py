@@ -1,638 +1,542 @@
-"""Google Gemini LLM integration compatible with LangChain."""
-
 import asyncio
-import base64
 import json
 import logging
-import os
 import time
+from dataclasses import dataclass, field
 from typing import Any, Literal, TypeVar, overload
 
 from google import genai
 from google.auth.credentials import Credentials
 from google.genai import types
 from google.genai.types import MediaModality
-from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import (
-    AIMessage,
-    BaseMessage,
-    HumanMessage,
-    SystemMessage,
-    ToolMessage,
-)
-from langchain_core.outputs import ChatGeneration, ChatResult
-from pydantic import BaseModel, Field, PrivateAttr
+from pydantic import BaseModel
 
-logger = logging.getLogger(__name__)
+from openbrowser.llm.base import BaseChatModel
+from openbrowser.llm.exceptions import ModelProviderError
+from openbrowser.llm.google.serializer import GoogleMessageSerializer
+from openbrowser.llm.messages import BaseMessage
+from openbrowser.llm.schema import SchemaOptimizer
+from openbrowser.llm.views import ChatInvokeCompletion, ChatInvokeUsage
 
-T = TypeVar("T", bound=BaseModel)
+T = TypeVar('T', bound=BaseModel)
 
 
 VerifiedGeminiModels = Literal[
-    "gemini-2.0-flash",
-    "gemini-2.0-flash-exp",
-    "gemini-2.0-flash-lite-preview-02-05",
-    "Gemini-2.0-exp",
-    "gemini-2.5-flash",
-    "gemini-2.5-flash-lite",
-    "gemini-flash-latest",
-    "gemini-flash-lite-latest",
-    "gemini-2.5-pro",
-    "gemma-3-27b-it",
-    "gemma-3-4b",
-    "gemma-3-12b",
-    "gemma-3n-e2b",
-    "gemma-3n-e4b",
+	'gemini-2.0-flash',
+	'gemini-2.0-flash-exp',
+	'gemini-2.0-flash-lite-preview-02-05',
+	'Gemini-2.0-exp',
+	'gemini-2.5-flash',
+	'gemini-2.5-flash-lite',
+	'gemini-flash-latest',
+	'gemini-flash-lite-latest',
+	'gemini-2.5-pro',
+	'gemma-3-27b-it',
+	'gemma-3-4b',
+	'gemma-3-12b',
+	'gemma-3n-e2b',
+	'gemma-3n-e4b',
 ]
 
 
-class ModelProviderError(Exception):
-    """Exception raised when a model provider returns an error."""
-
-    def __init__(
-        self,
-        message: str,
-        status_code: int = 502,
-        model: str | None = None,
-    ):
-        super().__init__(message)
-        self.message = message
-        self.status_code = status_code
-        self.model = model
-
-
-def _create_gemini_optimized_schema(model: type[BaseModel]) -> dict[str, Any]:
-    """
-    Create Gemini-optimized schema that removes unsupported fields.
-    
-    Google Gemini API doesn't support 'additionalProperties', 'title', 'default',
-    and '$ref' references in the response schema. This function creates a clean
-    schema that Gemini can process.
-    
-    Args:
-        model: The Pydantic model to create schema for
-        
-    Returns:
-        Optimized schema compatible with Gemini API
-    """
-    original_schema = model.model_json_schema()
-    
-    # Extract $defs for reference resolution
-    defs_lookup = original_schema.get('$defs', {})
-    
-    def resolve_refs(obj: Any) -> Any:
-        """Resolve $ref references by inlining definitions."""
-        if isinstance(obj, dict):
-            if '$ref' in obj:
-                ref_path = obj['$ref'].split('/')[-1]
-                if ref_path in defs_lookup:
-                    # Get the referenced definition and resolve it
-                    resolved = defs_lookup[ref_path].copy()
-                    # Merge any additional properties from the reference object
-                    for key, value in obj.items():
-                        if key != '$ref':
-                            resolved[key] = value
-                    return resolve_refs(resolved)
-                return obj
-            else:
-                return {k: resolve_refs(v) for k, v in obj.items()}
-        elif isinstance(obj, list):
-            return [resolve_refs(item) for item in obj]
-        return obj
-    
-    def clean_schema(obj: Any) -> Any:
-        """Remove unsupported properties from schema."""
-        if isinstance(obj, dict):
-            cleaned = {}
-            for key, value in obj.items():
-                # Skip unsupported fields
-                if key in ['additionalProperties', 'additional_properties', 'title', 'default', '$defs']:
-                    continue
-                
-                cleaned_value = clean_schema(value)
-                
-                # Handle empty object properties - Gemini doesn't allow empty OBJECT types
-                if (
-                    key == 'properties'
-                    and isinstance(cleaned_value, dict)
-                    and len(cleaned_value) == 0
-                    and isinstance(obj.get('type', ''), str)
-                    and obj.get('type', '').upper() == 'OBJECT'
-                ):
-                    cleaned['properties'] = {'_placeholder': {'type': 'string'}}
-                else:
-                    cleaned[key] = cleaned_value
-            
-            # If this is an object type with empty properties, add a placeholder
-            if (
-                isinstance(cleaned.get('type', ''), str)
-                and cleaned.get('type', '').upper() == 'OBJECT'
-                and 'properties' in cleaned
-                and isinstance(cleaned['properties'], dict)
-                and len(cleaned['properties']) == 0
-            ):
-                cleaned['properties'] = {'_placeholder': {'type': 'string'}}
-            
-            return cleaned
-        elif isinstance(obj, list):
-            return [clean_schema(item) for item in obj]
-        return obj
-    
-    # First resolve all $ref references
-    resolved_schema = resolve_refs(original_schema)
-    
-    # Then clean up unsupported fields
-    return clean_schema(resolved_schema)
-
-
-def _convert_langchain_to_google_messages(
-    messages: list[BaseMessage],
-) -> tuple[types.ContentListUnion, str | None]:
-    """Convert LangChain messages to Google Gemini format."""
-    formatted_messages: types.ContentListUnion = []
-    system_instruction: str | None = None
-
-    for message in messages:
-        if isinstance(message, SystemMessage):
-            if isinstance(message.content, str):
-                system_instruction = message.content
-            continue
-
-        role = "user" if isinstance(message, HumanMessage) else "model"
-        parts: list[types.Part] = []
-
-        if isinstance(message, ToolMessage):
-            role = "user"
-            parts.append(types.Part.from_text(text=f"Tool result: {message.content}"))
-        elif isinstance(message, AIMessage):
-            if message.content:
-                if isinstance(message.content, str):
-                    parts.append(types.Part.from_text(text=message.content))
-                elif isinstance(message.content, list):
-                    for part in message.content:
-                        if isinstance(part, dict):
-                            if part.get("type") == "text":
-                                parts.append(types.Part.from_text(text=part["text"]))
-                            elif part.get("type") == "image_url":
-                                url = part["image_url"]["url"]
-                                if url.startswith("data:"):
-                                    header, data = url.split(",", 1)
-                                    mime_type = header.split(":")[1].split(";")[0]
-                                    image_bytes = base64.b64decode(data)
-                                    parts.append(
-                                        types.Part.from_bytes(data=image_bytes, mime_type=mime_type)
-                                    )
-        else:
-            if isinstance(message.content, str):
-                parts.append(types.Part.from_text(text=message.content))
-            elif isinstance(message.content, list):
-                for part in message.content:
-                    if isinstance(part, dict):
-                        if part.get("type") == "text":
-                            parts.append(types.Part.from_text(text=part["text"]))
-                        elif part.get("type") == "image_url":
-                            url = part["image_url"]["url"]
-                            if url.startswith("data:"):
-                                header, data = url.split(",", 1)
-                                mime_type = header.split(":")[1].split(";")[0]
-                                image_bytes = base64.b64decode(data)
-                                parts.append(
-                                    types.Part.from_bytes(data=image_bytes, mime_type=mime_type)
-                                )
-
-        if parts:
-            formatted_messages.append(types.Content(role=role, parts=parts))
-
-    return formatted_messages, system_instruction
-
-
-def _convert_google_to_langchain_message(
-    response: types.GenerateContentResponse,
-) -> AIMessage:
-    """Convert Google Gemini response to LangChain AIMessage."""
-    if not response.candidates:
-        return AIMessage(content="")
-
-    candidate = response.candidates[0]
-    content_parts = []
-
-    if candidate.content and candidate.content.parts:
-        for part in candidate.content.parts:
-            if hasattr(part, "text") and part.text:
-                content_parts.append({"type": "text", "text": part.text})
-
-    content = content_parts[0]["text"] if content_parts else ""
-
-    tool_calls = []
-    if candidate.content and candidate.content.parts:
-        for idx, part in enumerate(candidate.content.parts):
-            if hasattr(part, "function_call") and part.function_call:
-                func_call = part.function_call
-                args_dict = {}
-                if hasattr(func_call, "args") and func_call.args:
-                    if isinstance(func_call.args, dict):
-                        args_dict = func_call.args
-                    elif isinstance(func_call.args, str):
-                        try:
-                            args_dict = json.loads(func_call.args)
-                        except json.JSONDecodeError:
-                            args_dict = {}
-                
-                tool_calls.append(
-                    {
-                        "id": f"call_{idx}",
-                        "name": func_call.name,
-                        "args": args_dict,
-                    }
-                )
-
-    return AIMessage(content=content, tool_calls=tool_calls if tool_calls else [])
-
-
+@dataclass
 class ChatGoogle(BaseChatModel):
-    """
-    LangChain-compatible wrapper for Google's Gemini chat model.
+	"""
+	A wrapper around Google's Gemini chat model using the genai client.
 
-    This class wraps Google's genai client and provides a LangChain-compatible interface
-    that works with bind_tools() and other LangChain features.
+	This class accepts all genai.Client parameters while adding model,
+	temperature, and config parameters for the LLM interface.
 
-    Args:
-        model: The Gemini model to use
-        temperature: Temperature for response generation
-        api_key: Google API key (defaults to GOOGLE_API_KEY env var)
-        vertexai: Whether to use Vertex AI (defaults to False)
-        credentials: Google credentials object for Vertex AI
-        project: Google Cloud project ID for Vertex AI
-        location: Google Cloud location for Vertex AI
-        max_output_tokens: Maximum output tokens
-        max_retries: Number of retries for retryable errors
-        retryable_status_codes: List of HTTP status codes to retry on
-        retry_delay: Delay in seconds between retries
-    """
+	Args:
+		model: The Gemini model to use
+		temperature: Temperature for response generation
+		config: Additional configuration parameters to pass to generate_content
+			(e.g., tools, safety_settings, etc.).
+		api_key: Google API key
+		vertexai: Whether to use Vertex AI
+		credentials: Google credentials object
+		project: Google Cloud project ID
+		location: Google Cloud location
+		http_options: HTTP options for the client
+		include_system_in_user: If True, system messages are included in the first user message
+		supports_structured_output: If True, uses native JSON mode; if False, uses prompt-based fallback
+		max_retries: Number of retries for retryable errors (default: 3)
+		retryable_status_codes: List of HTTP status codes to retry on (default: [403,  503])
+		retry_delay: Delay in seconds between retries (default: 0.01)
 
-    model: VerifiedGeminiModels | str = Field(default="gemini-flash-latest")
-    temperature: float | None = Field(default=0.5)
-    top_p: float | None = Field(default=None)
-    seed: int | None = Field(default=None)
-    thinking_budget: int | None = Field(default=None)
-    max_output_tokens: int | None = Field(default=8096)
+	Example:
+		from google.genai import types
 
-    api_key: str | None = Field(default=None)
-    vertexai: bool | None = Field(default=None)
-    credentials: Credentials | None = Field(default=None)
-    project: str | None = Field(default=None)
-    location: str | None = Field(default=None)
-    http_options: types.HttpOptions | types.HttpOptionsDict | None = Field(default=None)
+		llm = ChatGoogle(
+			model='gemini-2.0-flash-exp',
+			config={
+				'tools': [types.Tool(code_execution=types.ToolCodeExecution())]
+			},
+			max_retries=5,
+			retryable_status_codes=[403, 503],
+			retry_delay=0.02
+		)
+	"""
 
-    max_retries: int = Field(default=3)
-    retryable_status_codes: list[int] = Field(default_factory=lambda: [403, 503])
-    retry_delay: float = Field(default=0.01)
+	# Model configuration
+	model: VerifiedGeminiModels | str
+	temperature: float | None = 0.5
+	top_p: float | None = None
+	seed: int | None = None
+	thinking_budget: int | None = None  # for gemini-2.5 flash and flash-lite models, default will be set to 0
+	max_output_tokens: int | None = 8096
+	config: types.GenerateContentConfigDict | None = None
+	include_system_in_user: bool = False
+	supports_structured_output: bool = True  # New flag
+	max_retries: int = 3  # Number of retries for retryable errors
+	retryable_status_codes: list[int] = field(default_factory=lambda: [403, 503])  # Status codes to retry on
+	retry_delay: float = 0.01  # Delay in seconds between retries
 
-    _client: genai.Client | None = PrivateAttr(default=None)
-    _bound_tools: Any = PrivateAttr(default=None)
+	# Client initialization parameters
+	api_key: str | None = None
+	vertexai: bool | None = None
+	credentials: Credentials | None = None
+	project: str | None = None
+	location: str | None = None
+	http_options: types.HttpOptions | types.HttpOptionsDict | None = None
 
-    @property
-    def _llm_type(self) -> str:
-        return "google-gemini"
+	# Internal client cache to prevent connection issues
+	_client: genai.Client | None = None
 
-    def bind_tools(self, tools: list[Any], tool_choice: Any = None, **kwargs: Any) -> "ChatGoogle":
-        """Bind tools to this LLM instance for function calling.
-        
-        Args:
-            tools: List of tools to bind
-            tool_choice: Tool choice parameter (ignored, kept for compatibility with with_structured_output)
-            **kwargs: Additional keyword arguments (ignored)
-        """
-        bound = ChatGoogle(
-            model=self.model,
-            temperature=self.temperature,
-            top_p=self.top_p,
-            seed=self.seed,
-            thinking_budget=self.thinking_budget,
-            max_output_tokens=self.max_output_tokens,
-            api_key=self.api_key,
-            vertexai=self.vertexai,
-            credentials=self.credentials,
-            project=self.project,
-            location=self.location,
-            http_options=self.http_options,
-            max_retries=self.max_retries,
-            retryable_status_codes=self.retryable_status_codes,
-            retry_delay=self.retry_delay,
-        )
-        bound._client = self._client
-        bound._bound_tools = tools
-        return bound
+	# Static
+	@property
+	def provider(self) -> str:
+		return 'google'
 
-    def with_structured_output(self, output_schema: type[T], **kwargs: Any) -> Any:
-        """Get structured output from the model using Gemini's response schema.
-        
-        Args:
-            output_schema: Pydantic model class for structured output
-            **kwargs: Additional keyword arguments (ignored)
-        
-        Returns:
-            A callable that can be invoked with messages to get structured output
-        """
-        class StructuredOutputWrapper:
-            def __init__(self, llm: "ChatGoogle", schema: type[T]):
-                self.llm = llm
-                self.schema = schema
-            
-            async def ainvoke(self, input: Any, config: dict[str, Any] | None = None) -> T:
-                """Invoke with structured output."""
-                # Convert input to messages if it's a string
-                if isinstance(input, str):
-                    messages = [HumanMessage(content=input)]
-                elif isinstance(input, list):
-                    messages = input
-                else:
-                    messages = [HumanMessage(content=str(input))]
-                
-                # Get the schema JSON - use optimized schema for Gemini compatibility
-                schema_json = _create_gemini_optimized_schema(self.schema)
-                
-                # Add schema instruction to system message or first message
-                system_instruction = (
-                    f"You must respond with valid JSON matching this schema:\n"
-                    f"{json.dumps(schema_json, indent=2)}\n\n"
-                    f"Return only the JSON object, no other text."
-                )
-                
-                # Convert messages and add system instruction
-                contents, existing_system = _convert_langchain_to_google_messages(messages)
-                
-                # Prepare config with response schema
-                config_dict: types.GenerateContentConfigDict = {}
-                if self.llm.temperature is not None:
-                    config_dict["temperature"] = self.llm.temperature
-                if self.llm.max_output_tokens is not None:
-                    config_dict["max_output_tokens"] = self.llm.max_output_tokens
-                
-                # Use Gemini's response schema feature
-                config_dict["response_mime_type"] = "application/json"
-                config_dict["response_schema"] = schema_json
-                
-                # Combine system instructions
-                if existing_system:
-                    config_dict["system_instruction"] = f"{existing_system}\n\n{system_instruction}"
-                else:
-                    config_dict["system_instruction"] = system_instruction
-                
-                # Make API call
-                client = self.llm._get_client()
-                response = await client.aio.models.generate_content(
-                    model=self.llm.model,
-                    contents=contents,
-                    config=config_dict,
-                )
-                
-                # Parse response
-                if not response.candidates or not response.candidates[0].content:
-                    raise ModelProviderError(
-                        message="No response from model",
-                        status_code=500,
-                        model=self.llm.model,
-                    )
-                
-                candidate = response.candidates[0]
-                text_content = ""
-                if candidate.content and candidate.content.parts:
-                    for part in candidate.content.parts:
-                        if hasattr(part, "text") and part.text:
-                            text_content += part.text
-                
-                if not text_content:
-                    raise ModelProviderError(
-                        message="Empty response from model",
-                        status_code=500,
-                        model=self.llm.model,
-                    )
-                
-                # Parse JSON and validate against schema
-                try:
-                    parsed_json = json.loads(text_content)
-                    return self.schema.model_validate(parsed_json)
-                except json.JSONDecodeError as e:
-                    raise ModelProviderError(
-                        message=f"Failed to parse JSON response: {e}",
-                        status_code=500,
-                        model=self.llm.model,
-                    ) from e
-                except Exception as e:
-                    raise ModelProviderError(
-                        message=f"Failed to validate response against schema: {e}",
-                        status_code=500,
-                        model=self.llm.model,
-                    ) from e
-            
-            def invoke(self, input: Any, config: dict[str, Any] | None = None) -> T:
-                """Synchronous invoke (not supported)."""
-                raise NotImplementedError("ChatGoogle structured output only supports async. Use ainvoke().")
-        
-        return StructuredOutputWrapper(self, output_schema)
+	@property
+	def logger(self) -> logging.Logger:
+		"""Get logger for this chat instance"""
+		return logging.getLogger(f'openbrowser.llm.google.{self.model}')
 
-    def _get_client(self) -> genai.Client:
-        """Get or create Google genai client."""
-        if self._client is not None:
-            return self._client
+	def _get_client_params(self) -> dict[str, Any]:
+		"""Prepare client parameters dictionary."""
+		# Define base client params
+		base_params = {
+			'api_key': self.api_key,
+			'vertexai': self.vertexai,
+			'credentials': self.credentials,
+			'project': self.project,
+			'location': self.location,
+			'http_options': self.http_options,
+		}
 
-        client_params: dict[str, Any] = {}
+		# Create client_params dict with non-None values
+		client_params = {k: v for k, v in base_params.items() if v is not None}
 
-        if self.api_key:
-            client_params["api_key"] = self.api_key
-        elif not self.vertexai:
-            api_key = os.getenv("GOOGLE_API_KEY")
-            if api_key:
-                client_params["api_key"] = api_key
+		return client_params
 
-        if self.vertexai is not None:
-            client_params["vertexai"] = self.vertexai
+	def get_client(self) -> genai.Client:
+		"""
+		Returns a genai.Client instance.
 
-        if self.credentials:
-            client_params["credentials"] = self.credentials
+		Returns:
+			genai.Client: An instance of the Google genai client.
+		"""
+		if self._client is not None:
+			return self._client
 
-        if self.project:
-            client_params["project"] = self.project
+		client_params = self._get_client_params()
+		self._client = genai.Client(**client_params)
+		return self._client
 
-        if self.location:
-            client_params["location"] = self.location
+	@property
+	def name(self) -> str:
+		return str(self.model)
 
-        if self.http_options:
-            client_params["http_options"] = self.http_options
+	def _get_stop_reason(self, response: types.GenerateContentResponse) -> str | None:
+		"""Extract stop_reason from Google response."""
+		if hasattr(response, 'candidates') and response.candidates:
+			return str(response.candidates[0].finish_reason) if hasattr(response.candidates[0], 'finish_reason') else None
+		return None
 
-        self._client = genai.Client(**client_params)
-        return self._client
+	def _get_usage(self, response: types.GenerateContentResponse) -> ChatInvokeUsage | None:
+		usage: ChatInvokeUsage | None = None
 
-    def _get_usage(self, response: types.GenerateContentResponse) -> dict[str, Any] | None:
-        """Extract usage information from Google response."""
-        if not response.usage_metadata:
-            return None
+		if response.usage_metadata is not None:
+			image_tokens = 0
+			if response.usage_metadata.prompt_tokens_details is not None:
+				image_tokens = sum(
+					detail.token_count or 0
+					for detail in response.usage_metadata.prompt_tokens_details
+					if detail.modality == MediaModality.IMAGE
+				)
 
-        image_tokens = 0
-        if response.usage_metadata.prompt_tokens_details:
-            image_tokens = sum(
-                detail.token_count or 0
-                for detail in response.usage_metadata.prompt_tokens_details
-                if detail.modality == MediaModality.IMAGE
-            )
+			usage = ChatInvokeUsage(
+				prompt_tokens=response.usage_metadata.prompt_token_count or 0,
+				completion_tokens=(response.usage_metadata.candidates_token_count or 0)
+				+ (response.usage_metadata.thoughts_token_count or 0),
+				total_tokens=response.usage_metadata.total_token_count or 0,
+				prompt_cached_tokens=response.usage_metadata.cached_content_token_count,
+				prompt_cache_creation_tokens=None,
+				prompt_image_tokens=image_tokens,
+			)
 
-        return {
-            "prompt_tokens": response.usage_metadata.prompt_token_count or 0,
-            "completion_tokens": (response.usage_metadata.candidates_token_count or 0)
-            + (response.usage_metadata.thoughts_token_count or 0),
-            "total_tokens": response.usage_metadata.total_token_count or 0,
-            "prompt_image_tokens": image_tokens,
-        }
+		return usage
 
-    def _convert_tools_to_google_format(self, tools: Any) -> list[types.FunctionDeclaration] | None:
-        """Convert LangChain tools to Google Gemini function declarations."""
-        if not tools:
-            return None
+	@overload
+	async def ainvoke(self, messages: list[BaseMessage], output_format: None = None) -> ChatInvokeCompletion[str]: ...
 
-        google_tools = []
-        for tool in tools:
-            if hasattr(tool, "name") and hasattr(tool, "args_schema"):
-                schema = tool.args_schema.model_json_schema() if tool.args_schema else {}
-                google_tools.append(
-                    types.FunctionDeclaration(
-                        name=tool.name,
-                        description=tool.description or "",
-                        parameters=schema,
-                    )
-                )
-            elif hasattr(tool, "name") and hasattr(tool, "description"):
-                google_tools.append(
-                    types.FunctionDeclaration(
-                        name=tool.name,
-                        description=tool.description or "",
-                        parameters={"type": "object", "properties": {}},
-                    )
-                )
+	@overload
+	async def ainvoke(self, messages: list[BaseMessage], output_format: type[T]) -> ChatInvokeCompletion[T]: ...
 
-        return google_tools if google_tools else None
+	async def ainvoke(
+		self, messages: list[BaseMessage], output_format: type[T] | None = None
+	) -> ChatInvokeCompletion[T] | ChatInvokeCompletion[str]:
+		"""
+		Invoke the model with the given messages.
 
-    async def _agenerate(
-        self,
-        messages: list[BaseMessage],
-        stop: list[str] | None = None,
-        run_manager: Any = None,
-        **kwargs: Any,
-    ) -> ChatResult:
-        """Generate a chat response from Google Gemini."""
-        start_time = time.time()
-        logger.debug(f"Starting API call to {self.model}")
+		Args:
+			messages: List of chat messages
+			output_format: Optional Pydantic model class for structured output
 
-        contents, system_instruction = _convert_langchain_to_google_messages(messages)
+		Returns:
+			Either a string response or an instance of output_format
+		"""
 
-        config: types.GenerateContentConfigDict = {}
-        if self.temperature is not None:
-            config["temperature"] = self.temperature
-        if self.top_p is not None:
-            config["top_p"] = self.top_p
-        if self.seed is not None:
-            config["seed"] = self.seed
-        if self.max_output_tokens is not None:
-            config["max_output_tokens"] = self.max_output_tokens
+		# Serialize messages to Google format with the include_system_in_user flag
+		contents, system_instruction = GoogleMessageSerializer.serialize_messages(
+			messages, include_system_in_user=self.include_system_in_user
+		)
 
-        if system_instruction:
-            config["system_instruction"] = system_instruction
+		# Build config dictionary starting with user-provided config
+		config: types.GenerateContentConfigDict = {}
+		if self.config:
+			config = self.config.copy()
 
-        if self.thinking_budget is None and (
-            "gemini-2.5-flash" in self.model or "gemini-flash" in self.model
-        ):
-            self.thinking_budget = 0
+		# Apply model-specific configuration (these can override config)
+		if self.temperature is not None:
+			config['temperature'] = self.temperature
 
-        if self.thinking_budget is not None:
-            config["thinking_config"] = {"thinking_budget": self.thinking_budget}
+		# Add system instruction if present
+		if system_instruction:
+			config['system_instruction'] = system_instruction
 
-        if stop:
-            config["stop_sequences"] = stop
+		if self.top_p is not None:
+			config['top_p'] = self.top_p
 
-        tools = kwargs.get("tools") or getattr(self, "_bound_tools", None)
-        if tools:
-            google_tools = self._convert_tools_to_google_format(tools)
-            if google_tools:
-                config["tools"] = [types.Tool(function_declarations=google_tools)]
+		if self.seed is not None:
+			config['seed'] = self.seed
 
-        async def _make_api_call():
-            try:
-                client = self._get_client()
-                response = await client.aio.models.generate_content(
-                    model=self.model,
-                    contents=contents,
-                    config=config,
-                )
+		# set default for flash, flash-lite, gemini-flash-lite-latest, and gemini-flash-latest models
+		if self.thinking_budget is None and ('gemini-2.5-flash' in self.model or 'gemini-flash' in self.model):
+			self.thinking_budget = 0
 
-                elapsed = time.time() - start_time
-                logger.debug(f"Got response in {elapsed:.2f}s")
+		if self.thinking_budget is not None:
+			thinking_config_dict: types.ThinkingConfigDict = {'thinking_budget': self.thinking_budget}
+			config['thinking_config'] = thinking_config_dict
 
-                message = _convert_google_to_langchain_message(response)
-                usage = self._get_usage(response)
+		if self.max_output_tokens is not None:
+			config['max_output_tokens'] = self.max_output_tokens
 
-                generation = ChatGeneration(message=message)
-                return ChatResult(generations=[generation], llm_output={"usage": usage})
+		async def _make_api_call():
+			start_time = time.time()
+			self.logger.debug(f'🚀 Starting API call to {self.model}')
 
-            except Exception as e:
-                elapsed = time.time() - start_time
-                logger.error(f"API call failed after {elapsed:.2f}s: {type(e).__name__}: {e}")
+			try:
+				if output_format is None:
+					# Return string response
+					self.logger.debug('📄 Requesting text response')
 
-                error_message = str(e)
-                status_code: int | None = None
+					response = await self.get_client().aio.models.generate_content(
+						model=self.model,
+						contents=contents,  # type: ignore
+						config=config,
+					)
 
-                if hasattr(e, "response"):
-                    response_obj = getattr(e, "response", None)
-                    if response_obj and hasattr(response_obj, "status_code"):
-                        status_code = getattr(response_obj, "status_code", None)
+					elapsed = time.time() - start_time
+					self.logger.debug(f'✅ Got text response in {elapsed:.2f}s')
 
-                if "timeout" in error_message.lower() or "cancelled" in error_message.lower():
-                    status_code = 504 if "CancelledError" in str(type(e)) else 408
-                elif any(indicator in error_message.lower() for indicator in ["forbidden", "403"]):
-                    status_code = 403
-                elif any(
-                    indicator in error_message.lower()
-                    for indicator in ["rate limit", "resource exhausted", "quota exceeded", "429"]
-                ):
-                    status_code = 429
-                elif any(
-                    indicator in error_message.lower()
-                    for indicator in ["service unavailable", "internal server error", "503", "502", "500"]
-                ):
-                    status_code = 503
+					# Handle case where response.text might be None
+					text = response.text or ''
+					if not text:
+						self.logger.warning('⚠️ Empty text response received')
 
-                raise ModelProviderError(
-                    message=error_message,
-                    status_code=status_code or 502,
-                    model=self.model,
-                ) from e
+					usage = self._get_usage(response)
 
-        for attempt in range(self.max_retries):
-            try:
-                return await _make_api_call()
-            except ModelProviderError as e:
-                if e.status_code in self.retryable_status_codes and attempt < self.max_retries - 1:
-                    logger.warning(
-                        f"Got {e.status_code} error, retrying... (attempt {attempt + 1}/{self.max_retries})"
-                    )
-                    await asyncio.sleep(self.retry_delay)
-                    continue
-                raise
-            except Exception as e:
-                raise ModelProviderError(
-                    message=str(e),
-                    status_code=502,
-                    model=self.model,
-                ) from e
+					return ChatInvokeCompletion(
+						completion=text,
+						usage=usage,
+						stop_reason=self._get_stop_reason(response),
+					)
 
-        raise RuntimeError("Retry loop completed without return or exception")
+				else:
+					# Handle structured output
+					if self.supports_structured_output:
+						# Use native JSON mode
+						self.logger.debug(f'🔧 Requesting structured output for {output_format.__name__}')
+						config['response_mime_type'] = 'application/json'
+						# Convert Pydantic model to Gemini-compatible schema
+						optimized_schema = SchemaOptimizer.create_gemini_optimized_schema(output_format)
 
-    def _generate(
-        self,
-        messages: list[BaseMessage],
-        stop: list[str] | None = None,
-        run_manager: Any = None,
-        **kwargs: Any,
-    ) -> ChatResult:
-        """Synchronous generate (not supported, raises error)."""
-        raise NotImplementedError("ChatGoogle only supports async generation. Use agenerate() or ainvoke().")
+						gemini_schema = self._fix_gemini_schema(optimized_schema)
+						config['response_schema'] = gemini_schema
 
+						response = await self.get_client().aio.models.generate_content(
+							model=self.model,
+							contents=contents,
+							config=config,
+						)
+
+						elapsed = time.time() - start_time
+						self.logger.debug(f'✅ Got structured response in {elapsed:.2f}s')
+
+						usage = self._get_usage(response)
+
+						# Handle case where response.parsed might be None
+						if response.parsed is None:
+							self.logger.debug('📝 Parsing JSON from text response')
+							# When using response_schema, Gemini returns JSON as text
+							if response.text:
+								try:
+									# Handle JSON wrapped in markdown code blocks (common Gemini behavior)
+									text = response.text.strip()
+									if text.startswith('```json') and text.endswith('```'):
+										text = text[7:-3].strip()
+										self.logger.debug('🔧 Stripped ```json``` wrapper from response')
+									elif text.startswith('```') and text.endswith('```'):
+										text = text[3:-3].strip()
+										self.logger.debug('🔧 Stripped ``` wrapper from response')
+
+									# Parse the JSON text and validate with the Pydantic model
+									parsed_data = json.loads(text)
+									return ChatInvokeCompletion(
+										completion=output_format.model_validate(parsed_data),
+										usage=usage,
+										stop_reason=self._get_stop_reason(response),
+									)
+								except (json.JSONDecodeError, ValueError) as e:
+									self.logger.error(f'❌ Failed to parse JSON response: {str(e)}')
+									self.logger.debug(f'Raw response text: {response.text[:200]}...')
+									raise ModelProviderError(
+										message=f'Failed to parse or validate response {response}: {str(e)}',
+										status_code=500,
+										model=self.model,
+									) from e
+							else:
+								self.logger.error('❌ No response text received')
+								raise ModelProviderError(
+									message=f'No response from model {response}',
+									status_code=500,
+									model=self.model,
+								)
+
+						# Ensure we return the correct type
+						if isinstance(response.parsed, output_format):
+							return ChatInvokeCompletion(
+								completion=response.parsed,
+								usage=usage,
+								stop_reason=self._get_stop_reason(response),
+							)
+						else:
+							# If it's not the expected type, try to validate it
+							return ChatInvokeCompletion(
+								completion=output_format.model_validate(response.parsed),
+								usage=usage,
+								stop_reason=self._get_stop_reason(response),
+							)
+					else:
+						# Fallback: Request JSON in the prompt for models without native JSON mode
+						self.logger.debug(f'🔄 Using fallback JSON mode for {output_format.__name__}')
+						# Create a copy of messages to modify
+						modified_messages = [m.model_copy(deep=True) for m in messages]
+
+						# Add JSON instruction to the last message
+						if modified_messages and isinstance(modified_messages[-1].content, str):
+							json_instruction = f'\n\nPlease respond with a valid JSON object that matches this schema: {SchemaOptimizer.create_optimized_json_schema(output_format)}'
+							modified_messages[-1].content += json_instruction
+
+						# Re-serialize with modified messages
+						fallback_contents, fallback_system = GoogleMessageSerializer.serialize_messages(
+							modified_messages, include_system_in_user=self.include_system_in_user
+						)
+
+						# Update config with fallback system instruction if present
+						fallback_config = config.copy()
+						if fallback_system:
+							fallback_config['system_instruction'] = fallback_system
+
+						response = await self.get_client().aio.models.generate_content(
+							model=self.model,
+							contents=fallback_contents,  # type: ignore
+							config=fallback_config,
+						)
+
+						elapsed = time.time() - start_time
+						self.logger.debug(f'✅ Got fallback response in {elapsed:.2f}s')
+
+						usage = self._get_usage(response)
+
+						# Try to extract JSON from the text response
+						if response.text:
+							try:
+								# Try to find JSON in the response
+								text = response.text.strip()
+
+								# Common patterns: JSON wrapped in markdown code blocks
+								if text.startswith('```json') and text.endswith('```'):
+									text = text[7:-3].strip()
+								elif text.startswith('```') and text.endswith('```'):
+									text = text[3:-3].strip()
+
+								# Parse and validate
+								parsed_data = json.loads(text)
+								return ChatInvokeCompletion(
+									completion=output_format.model_validate(parsed_data),
+									usage=usage,
+									stop_reason=self._get_stop_reason(response),
+								)
+							except (json.JSONDecodeError, ValueError) as e:
+								self.logger.error(f'❌ Failed to parse fallback JSON: {str(e)}')
+								self.logger.debug(f'Raw response text: {response.text[:200]}...')
+								raise ModelProviderError(
+									message=f'Model does not support JSON mode and failed to parse JSON from text response: {str(e)}',
+									status_code=500,
+									model=self.model,
+								) from e
+						else:
+							self.logger.error('❌ No response text in fallback mode')
+							raise ModelProviderError(
+								message='No response from model',
+								status_code=500,
+								model=self.model,
+							)
+			except Exception as e:
+				elapsed = time.time() - start_time
+				self.logger.error(f'💥 API call failed after {elapsed:.2f}s: {type(e).__name__}: {e}')
+				# Re-raise the exception
+				raise
+
+		# Retry logic for certain errors
+		assert self.max_retries >= 1, 'max_retries must be at least 1'
+
+		for attempt in range(self.max_retries):
+			try:
+				return await _make_api_call()
+			except ModelProviderError as e:
+				# Retry if status code is in retryable list and we have attempts left
+				if e.status_code in self.retryable_status_codes and attempt < self.max_retries - 1:
+					self.logger.warning(f'⚠️ Got {e.status_code} error, retrying... (attempt {attempt + 1}/{self.max_retries})')
+					await asyncio.sleep(self.retry_delay)
+					continue
+				# Otherwise raise
+				raise
+			except Exception as e:
+				# For non-ModelProviderError, wrap and raise
+				error_message = str(e)
+				status_code: int | None = None
+
+				# Try to extract status code if available
+				if hasattr(e, 'response'):
+					response_obj = getattr(e, 'response', None)
+					if response_obj and hasattr(response_obj, 'status_code'):
+						status_code = getattr(response_obj, 'status_code', None)
+
+				# Enhanced timeout error handling
+				if 'timeout' in error_message.lower() or 'cancelled' in error_message.lower():
+					if isinstance(e, asyncio.CancelledError) or 'CancelledError' in str(type(e)):
+						error_message = 'Gemini API request was cancelled (likely timeout). Consider: 1) Reducing input size, 2) Using a different model, 3) Checking network connectivity.'
+						status_code = 504
+					else:
+						status_code = 408
+				elif any(indicator in error_message.lower() for indicator in ['forbidden', '403']):
+					status_code = 403
+				elif any(
+					indicator in error_message.lower()
+					for indicator in ['rate limit', 'resource exhausted', 'quota exceeded', 'too many requests', '429']
+				):
+					status_code = 429
+				elif any(
+					indicator in error_message.lower()
+					for indicator in ['service unavailable', 'internal server error', 'bad gateway', '503', '502', '500']
+				):
+					status_code = 503
+
+				raise ModelProviderError(
+					message=error_message,
+					status_code=status_code or 502,
+					model=self.name,
+				) from e
+
+		raise RuntimeError('Retry loop completed without return or exception')
+
+	def _fix_gemini_schema(self, schema: dict[str, Any]) -> dict[str, Any]:
+		"""
+		Convert a Pydantic model to a Gemini-compatible schema.
+
+		This function removes unsupported properties like 'additionalProperties' and resolves
+		$ref references that Gemini doesn't support.
+		"""
+
+		# Handle $defs and $ref resolution
+		if '$defs' in schema:
+			defs = schema.pop('$defs')
+
+			def resolve_refs(obj: Any) -> Any:
+				if isinstance(obj, dict):
+					if '$ref' in obj:
+						ref = obj.pop('$ref')
+						ref_name = ref.split('/')[-1]
+						if ref_name in defs:
+							# Replace the reference with the actual definition
+							resolved = defs[ref_name].copy()
+							# Merge any additional properties from the reference
+							for key, value in obj.items():
+								if key != '$ref':
+									resolved[key] = value
+							return resolve_refs(resolved)
+						return obj
+					else:
+						# Recursively process all dictionary values
+						return {k: resolve_refs(v) for k, v in obj.items()}
+				elif isinstance(obj, list):
+					return [resolve_refs(item) for item in obj]
+				return obj
+
+			schema = resolve_refs(schema)
+
+		# Remove unsupported properties
+		def clean_schema(obj: Any) -> Any:
+			if isinstance(obj, dict):
+				# Remove unsupported properties
+				cleaned = {}
+				for key, value in obj.items():
+					if key not in ['additionalProperties', 'title', 'default']:
+						cleaned_value = clean_schema(value)
+						# Handle empty object properties - Gemini doesn't allow empty OBJECT types
+						if (
+							key == 'properties'
+							and isinstance(cleaned_value, dict)
+							and len(cleaned_value) == 0
+							and isinstance(obj.get('type', ''), str)
+							and obj.get('type', '').upper() == 'OBJECT'
+						):
+							# Convert empty object to have at least one property
+							cleaned['properties'] = {'_placeholder': {'type': 'string'}}
+						else:
+							cleaned[key] = cleaned_value
+
+				# If this is an object type with empty properties, add a placeholder
+				if (
+					isinstance(cleaned.get('type', ''), str)
+					and cleaned.get('type', '').upper() == 'OBJECT'
+					and 'properties' in cleaned
+					and isinstance(cleaned['properties'], dict)
+					and len(cleaned['properties']) == 0
+				):
+					cleaned['properties'] = {'_placeholder': {'type': 'string'}}
+
+				# Also remove 'title' from the required list if it exists
+				if 'required' in cleaned and isinstance(cleaned.get('required'), list):
+					cleaned['required'] = [p for p in cleaned['required'] if p != 'title']
+
+				return cleaned
+			elif isinstance(obj, list):
+				return [clean_schema(item) for item in obj]
+			return obj
+
+		return clean_schema(schema)

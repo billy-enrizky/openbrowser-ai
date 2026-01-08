@@ -1,51 +1,108 @@
-"""Token cost tracking views and models."""
-
-from __future__ import annotations
+from datetime import datetime
+from typing import Any, TypeVar
 
 from pydantic import BaseModel, Field
 
+from openbrowser.llm.views import ChatInvokeUsage
+
+T = TypeVar('T', bound=BaseModel)
+
+
+class TokenUsageEntry(BaseModel):
+	"""Single token usage entry"""
+
+	model: str
+	timestamp: datetime
+	usage: ChatInvokeUsage
+
+
+class TokenCostCalculated(BaseModel):
+	"""Token cost"""
+
+	new_prompt_tokens: int
+	new_prompt_cost: float
+
+	prompt_read_cached_tokens: int | None
+	prompt_read_cached_cost: float | None
+
+	prompt_cached_creation_tokens: int | None
+	prompt_cache_creation_cost: float | None
+	"""Anthropic only: The cost of creating the cache."""
+
+	completion_tokens: int
+	completion_cost: float
+
+	@property
+	def prompt_cost(self) -> float:
+		return self.new_prompt_cost + (self.prompt_read_cached_cost or 0) + (self.prompt_cache_creation_cost or 0)
+
+	@property
+	def total_cost(self) -> float:
+		return (
+			self.new_prompt_cost
+			+ (self.prompt_read_cached_cost or 0)
+			+ (self.prompt_cache_creation_cost or 0)
+			+ self.completion_cost
+		)
+
 
 class ModelPricing(BaseModel):
-    """Pricing information for a model."""
+	"""Pricing information for a model"""
 
-    provider: str
-    model: str
-    input_cost_per_1k: float = Field(description="Cost per 1000 input tokens in USD")
-    output_cost_per_1k: float = Field(description="Cost per 1000 output tokens in USD")
-    image_cost: float = Field(default=0.0, description="Cost per image in USD")
+	model: str
+	input_cost_per_token: float | None
+	output_cost_per_token: float | None
 
+	cache_read_input_token_cost: float | None
+	cache_creation_input_token_cost: float | None
 
-class TokenUsage(BaseModel):
-    """Token usage for a single LLM call."""
-
-    input_tokens: int = 0
-    output_tokens: int = 0
-    total_tokens: int = 0
-    image_count: int = 0
-
-    # Calculated costs
-    input_cost: float = 0.0
-    output_cost: float = 0.0
-    image_cost: float = 0.0
-    total_cost: float = 0.0
+	max_tokens: int | None
+	max_input_tokens: int | None
+	max_output_tokens: int | None
 
 
-class CumulativeTokenUsage(BaseModel):
-    """Cumulative token usage across all LLM calls."""
+class CachedPricingData(BaseModel):
+	"""Cached pricing data with timestamp"""
 
-    total_input_tokens: int = 0
-    total_output_tokens: int = 0
-    total_tokens: int = 0
-    total_images: int = 0
-    total_cost: float = 0.0
-    call_count: int = 0
+	timestamp: datetime
+	data: dict[str, Any]
 
-    def add(self, usage: TokenUsage) -> None:
-        """Add usage from a single call."""
-        self.total_input_tokens += usage.input_tokens
-        self.total_output_tokens += usage.output_tokens
-        self.total_tokens += usage.total_tokens
-        self.total_images += usage.image_count
-        self.total_cost += usage.total_cost
-        self.call_count += 1
 
+class ModelUsageStats(BaseModel):
+	"""Usage statistics for a single model"""
+
+	model: str
+	prompt_tokens: int = 0
+	completion_tokens: int = 0
+	total_tokens: int = 0
+	cost: float = 0.0
+	invocations: int = 0
+	average_tokens_per_invocation: float = 0.0
+
+
+class ModelUsageTokens(BaseModel):
+	"""Usage tokens for a single model"""
+
+	model: str
+	prompt_tokens: int
+	prompt_cached_tokens: int
+	completion_tokens: int
+	total_tokens: int
+
+
+class UsageSummary(BaseModel):
+	"""Summary of token usage and costs"""
+
+	total_prompt_tokens: int
+	total_prompt_cost: float
+
+	total_prompt_cached_tokens: int
+	total_prompt_cached_cost: float
+
+	total_completion_tokens: int
+	total_completion_cost: float
+	total_tokens: int
+	total_cost: float
+	entry_count: int
+
+	by_model: dict[str, ModelUsageStats] = Field(default_factory=dict)

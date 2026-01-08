@@ -1,193 +1,192 @@
-"""Browser state formatting helpers for code-use agent.
-
-This module provides utilities for formatting browser state information
-into a text representation suitable for LLM consumption. The formatted
-output includes URL, title, scroll position, available variables, and
-a simplified DOM structure.
-"""
+"""Browser state formatting helpers for code-use agent."""
 
 import logging
 from typing import Any
 
 from openbrowser.browser.session import BrowserSession
+from openbrowser.browser.views import BrowserStateSummary
 
 logger = logging.getLogger(__name__)
 
 
 async def format_browser_state_for_llm(
-    url: str,
-    title: str,
-    dom_html: str,
-    namespace: dict[str, Any],
-    browser_session: BrowserSession,
-    screenshot: str | None = None,
-    page_info: dict | None = None,
+	state: BrowserStateSummary,
+	namespace: dict[str, Any],
+	browser_session: BrowserSession,
 ) -> str:
-    """Format browser state summary for LLM consumption in code-use mode.
+	"""
+	Format browser state summary for LLM consumption in code-use mode.
 
-    Creates a structured text representation of the current browser state
-    that helps the LLM understand the page context and available actions.
-    The output includes Markdown formatting for readability.
+	Args:
+		state: Browser state summary from browser_session.get_browser_state_summary()
+		namespace: The code execution namespace (for showing available variables)
+		browser_session: Browser session for additional checks (jQuery, etc.)
 
-    Args:
-        url: Current page URL.
-        title: Current page title.
-        dom_html: Simplified DOM representation of the visible page.
-        namespace: The code execution namespace containing available
-            functions and variables.
-        browser_session: The active browser session (used for additional checks).
-        screenshot: Optional base64-encoded screenshot (not included in text output).
-        page_info: Optional dictionary with scroll/viewport information:
-            - pixels_above: Pixels scrolled from top
-            - pixels_below: Pixels remaining below viewport
-            - viewport_height: Height of the visible viewport
-            - page_height: Total page height
+	Returns:
+		Formatted browser state text for LLM
+	"""
+	assert state.dom_state is not None
+	dom_state = state.dom_state
 
-    Returns:
-        Markdown-formatted string containing:
-            - Browser State header
-            - Current URL and title
-            - Page scroll position (if page_info provided)
-            - Available code block variables and namespace variables
-            - DOM structure (possibly truncated)
+	# Use eval_representation (compact serializer for code agents)
+	dom_html = dom_state.eval_representation()
+	if dom_html == '':
+		dom_html = 'Empty DOM tree (you might have to wait for the page to load)'
 
-    Example:
-        ```python
-        state_text = await format_browser_state_for_llm(
-            url="https://example.com/products",
-            title="Products - Example Store",
-            dom_html="<div>...</div>",
-            namespace=agent.namespace,
-            browser_session=agent.browser_session,
-            page_info={"pixels_above": 500, "pixels_below": 1000, "viewport_height": 800}
-        )
-        ```
-    """
-    if dom_html == "":
-        dom_html = "Empty DOM tree (you might have to wait for the page to load)"
+	# Format with URL and title header
+	lines = ['## Browser State']
+	lines.append(f'**URL:** {state.url}')
+	lines.append(f'**Title:** {state.title}')
+	lines.append('')
 
-    # Format with URL and title header
-    lines = ["## Browser State"]
-    lines.append(f"**URL:** {url}")
-    lines.append(f"**Title:** {title}")
-    lines.append("")
+	# Add tabs info if multiple tabs exist
+	if len(state.tabs) > 1:
+		lines.append('**Tabs:**')
+		current_target_candidates = []
+		# Find tabs that match current URL and title
+		for tab in state.tabs:
+			if tab.url == state.url and tab.title == state.title:
+				current_target_candidates.append(tab.target_id)
+		current_target_id = current_target_candidates[0] if len(current_target_candidates) == 1 else None
 
-    # Add page scroll info if available
-    if page_info:
-        pixels_above = page_info.get("pixels_above", 0)
-        pixels_below = page_info.get("pixels_below", 0)
-        viewport_height = page_info.get("viewport_height", 1)
-        page_height = page_info.get("page_height", 1)
+		for tab in state.tabs:
+			is_current = ' (current)' if tab.target_id == current_target_id else ''
+			lines.append(f'  - Tab {tab.target_id[-4:]}: {tab.url} - {tab.title[:30]}{is_current}')
+		lines.append('')
 
-        pages_above = pixels_above / viewport_height if viewport_height > 0 else 0
-        pages_below = pixels_below / viewport_height if viewport_height > 0 else 0
-        total_pages = page_height / viewport_height if viewport_height > 0 else 0
+	# Add page scroll info if available
+	if state.page_info:
+		pi = state.page_info
+		pages_above = pi.pixels_above / pi.viewport_height if pi.viewport_height > 0 else 0
+		pages_below = pi.pixels_below / pi.viewport_height if pi.viewport_height > 0 else 0
+		total_pages = pi.page_height / pi.viewport_height if pi.viewport_height > 0 else 0
 
-        scroll_info = f"**Page:** {pages_above:.1f} pages above, {pages_below:.1f} pages below"
-        if total_pages > 1.2:  # Only mention total if significantly > 1 page
-            scroll_info += f", {total_pages:.1f} total pages"
-        lines.append(scroll_info)
-        lines.append("")
+		scroll_info = f'**Page:** {pages_above:.1f} pages above, {pages_below:.1f} pages below'
+		if total_pages > 1.2:  # Only mention total if significantly > 1 page
+			scroll_info += f', {total_pages:.1f} total pages'
+		lines.append(scroll_info)
+		lines.append('')
 
-    # Add available variables and functions BEFORE DOM structure
-    skip_vars = {
-        "browser",
-        "file_system",
-        "np",
-        "pd",
-        "plt",
-        "numpy",
-        "pandas",
-        "matplotlib",
-        "requests",
-        "BeautifulSoup",
-        "bs4",
-        "pypdf",
-        "PdfReader",
-        "wait",
-    }
+	# Add network loading info if there are pending requests
+	if state.pending_network_requests:
+		# Remove duplicates by URL (keep first occurrence with earliest duration)
+		seen_urls = set()
+		unique_requests = []
+		for req in state.pending_network_requests:
+			if req.url not in seen_urls:
+				seen_urls.add(req.url)
+				unique_requests.append(req)
 
-    # Highlight code block variables separately from regular variables
-    code_block_vars = []
-    regular_vars = []
-    tracked_code_blocks = namespace.get("_code_block_vars", set())
-    for name in namespace.keys():
-        # Skip private vars and system objects/actions
-        if not name.startswith("_") and name not in skip_vars:
-            if name in tracked_code_blocks:
-                code_block_vars.append(name)
-            else:
-                regular_vars.append(name)
+		lines.append(f'**⏳ Loading:** {len(unique_requests)} network requests still loading')
+		# Show up to 20 unique requests with truncated URLs (30 chars max)
+		for req in unique_requests[:20]:
+			duration_sec = req.loading_duration_ms / 1000
+			url_display = req.url if len(req.url) <= 30 else req.url[:27] + '...'
+			logger.info(f'  - [{duration_sec:.1f}s] {url_display}')
+			lines.append(f'  - [{duration_sec:.1f}s] {url_display}')
+		if len(unique_requests) > 20:
+			lines.append(f'  - ... and {len(unique_requests) - 20} more')
+		lines.append('**Tip:** Content may still be loading. Consider waiting with `await asyncio.sleep(1)` if data is missing.')
+		lines.append('')
 
-    # Sort for consistent display
-    available_vars_sorted = sorted(regular_vars)
-    code_block_vars_sorted = sorted(code_block_vars)
+	# Add available variables and functions BEFORE DOM structure
+	# Show useful utilities (json, asyncio, etc.) and user-defined vars, but hide system objects
+	skip_vars = {
+		'browser',
+		'file_system',  # System objects
+		'np',
+		'pd',
+		'plt',
+		'numpy',
+		'pandas',
+		'matplotlib',
+		'requests',
+		'BeautifulSoup',
+		'bs4',
+		'pypdf',
+		'PdfReader',
+		'wait',
+	}
 
-    # Build available line with code blocks and variables
-    parts = []
-    if code_block_vars_sorted:
-        # Show detailed info for code block variables
-        code_block_details = []
-        for var_name in code_block_vars_sorted:
-            value = namespace.get(var_name)
-            if value is not None:
-                type_name = type(value).__name__
-                value_str = str(value) if not isinstance(value, str) else value
+	# Highlight code block variables separately from regular variables
+	code_block_vars = []
+	regular_vars = []
+	tracked_code_blocks = namespace.get('_code_block_vars', set())
+	for name in namespace.keys():
+		# Skip private vars and system objects/actions
+		if not name.startswith('_') and name not in skip_vars:
+			if name in tracked_code_blocks:
+				code_block_vars.append(name)
+			else:
+				regular_vars.append(name)
 
-                # Check if it's a function
-                is_function = value_str.strip().startswith("(function") or value_str.strip().startswith("(async function")
+	# Sort for consistent display
+	available_vars_sorted = sorted(regular_vars)
+	code_block_vars_sorted = sorted(code_block_vars)
 
-                if is_function:
-                    detail = f"{var_name}({type_name})"
-                else:
-                    first_20 = value_str[:20].replace("\n", "\\n").replace("\t", "\\t")
-                    last_20 = value_str[-20:].replace("\n", "\\n").replace("\t", "\\t") if len(value_str) > 20 else ""
+	# Build available line with code blocks and variables
+	parts = []
+	if code_block_vars_sorted:
+		# Show detailed info for code block variables
+		code_block_details = []
+		for var_name in code_block_vars_sorted:
+			value = namespace.get(var_name)
+			if value is not None:
+				type_name = type(value).__name__
+				value_str = str(value) if not isinstance(value, str) else value
 
-                    if last_20 and first_20 != last_20:
-                        detail = f'{var_name}({type_name}): "{first_20}...{last_20}"'
-                    else:
-                        detail = f'{var_name}({type_name}): "{first_20}"'
-                code_block_details.append(detail)
+				# Check if it's a function (starts with "(function" or "(async function")
+				is_function = value_str.strip().startswith('(function') or value_str.strip().startswith('(async function')
 
-        parts.append(f'**Code block variables:** {" | ".join(code_block_details)}')
-    if available_vars_sorted:
-        parts.append(f'**Variables:** {", ".join(available_vars_sorted)}')
+				if is_function:
+					# For functions, only show name and type
+					detail = f'{var_name}({type_name})'
+				else:
+					# For non-functions, show first and last 20 chars
+					first_20 = value_str[:20].replace('\n', '\\n').replace('\t', '\\t')
+					last_20 = value_str[-20:].replace('\n', '\\n').replace('\t', '\\t') if len(value_str) > 20 else ''
 
-    lines.append(f'**Available:** {" | ".join(parts)}')
-    lines.append("")
+					if last_20 and first_20 != last_20:
+						detail = f'{var_name}({type_name}): "{first_20}...{last_20}"'
+					else:
+						detail = f'{var_name}({type_name}): "{first_20}"'
+				code_block_details.append(detail)
 
-    # Add DOM structure
-    lines.append("**DOM Structure:**")
+		parts.append(f'**Code block variables:** {" | ".join(code_block_details)}')
+	if available_vars_sorted:
+		parts.append(f'**Variables:** {", ".join(available_vars_sorted)}')
 
-    # Add scroll position hints for DOM
-    if page_info:
-        pixels_above = page_info.get("pixels_above", 0)
-        pixels_below = page_info.get("pixels_below", 0)
-        viewport_height = page_info.get("viewport_height", 1)
+	lines.append(f'**Available:** {" | ".join(parts)}')
+	lines.append('')
 
-        pages_above = pixels_above / viewport_height if viewport_height > 0 else 0
-        pages_below = pixels_below / viewport_height if viewport_height > 0 else 0
+	# Add DOM structure
+	lines.append('**DOM Structure:**')
 
-        if pages_above > 0:
-            dom_html = f"... {pages_above:.1f} pages above \n{dom_html}"
-        else:
-            dom_html = "[Start of page]\n" + dom_html
+	# Add scroll position hints for DOM
+	if state.page_info:
+		pi = state.page_info
+		pages_above = pi.pixels_above / pi.viewport_height if pi.viewport_height > 0 else 0
+		pages_below = pi.pixels_below / pi.viewport_height if pi.viewport_height > 0 else 0
 
-        if pages_below > 0:
-            dom_html += f"\n... {pages_below:.1f} pages below "
-        else:
-            dom_html += "\n[End of page]"
+		if pages_above > 0:
+			dom_html = f'... {pages_above:.1f} pages above \n{dom_html}'
+		else:
+			dom_html = '[Start of page]\n' + dom_html
 
-    # Truncate DOM if too long and notify LLM
-    max_dom_length = 60000
-    if len(dom_html) > max_dom_length:
-        lines.append(dom_html[:max_dom_length])
-        lines.append(
-            f"\n[DOM truncated after {max_dom_length} characters. Full page contains {len(dom_html)} characters total. Use evaluate to explore more.]"
-        )
-    else:
-        lines.append(dom_html)
+		if pages_below > 0:
+			dom_html += f'\n... {pages_below:.1f} pages below '
+		else:
+			dom_html += '\n[End of page]'
 
-    browser_state_text = "\n".join(lines)
-    return browser_state_text
+	# Truncate DOM if too long and notify LLM
+	max_dom_length = 60000
+	if len(dom_html) > max_dom_length:
+		lines.append(dom_html[:max_dom_length])
+		lines.append(
+			f'\n[DOM truncated after {max_dom_length} characters. Full page contains {len(dom_html)} characters total. Use evaluate to explore more.]'
+		)
+	else:
+		lines.append(dom_html)
 
+	browser_state_text = '\n'.join(lines)
+	return browser_state_text
