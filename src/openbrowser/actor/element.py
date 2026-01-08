@@ -1,7 +1,12 @@
-"""Element class for element operations."""
+"""Element class for element operations.
+
+Performance optimizations:
+- Added __slots__ to Element class
+- Cached modifier map as module-level constant
+"""
 
 import asyncio
-from typing import TYPE_CHECKING, Literal, Union
+from typing import TYPE_CHECKING, Final, Literal, Union
 
 from cdp_use.client import logger
 from typing_extensions import TypedDict
@@ -28,6 +33,9 @@ if TYPE_CHECKING:
 
 # Type definitions for element operations
 ModifierType = Literal['Alt', 'Control', 'Meta', 'Shift']
+
+# Module-level constant for modifier bitmask calculation
+_MODIFIER_MAP: Final[dict[str, int]] = {'Alt': 1, 'Control': 2, 'Meta': 4, 'Shift': 8}
 
 
 class Position(TypedDict):
@@ -60,7 +68,14 @@ class ElementInfo(TypedDict):
 
 
 class Element:
-	"""Element operations using BackendNodeId."""
+	"""Element operations using BackendNodeId.
+	
+	Performance optimizations:
+	- __slots__ for faster attribute access and reduced memory
+	- Uses module-level modifier map constant
+	"""
+	
+	__slots__ = ('_browser_session', '_client', '_backend_node_id', '_session_id')
 
 	def __init__(
 		self,
@@ -265,12 +280,11 @@ class Element:
 			except Exception:
 				pass
 
-			# Calculate modifier bitmask for CDP
+			# Calculate modifier bitmask for CDP using module-level constant
 			modifier_value = 0
 			if modifiers:
-				modifier_map = {'Alt': 1, 'Control': 2, 'Meta': 4, 'Shift': 8}
 				for mod in modifiers:
-					modifier_value |= modifier_map.get(mod, 0)
+					modifier_value |= _MODIFIER_MAP.get(mod, 0)
 
 			# Perform the click using CDP
 			try:

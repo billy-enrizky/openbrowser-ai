@@ -1,5 +1,8 @@
-"""
-Cloud sync service for sending events to the Browser Use cloud.
+"""Cloud sync service for sending events to the Browser Use cloud.
+
+Performance optimizations:
+- Added __slots__ to CloudSync class
+- Cached enabled check for fast early returns
 """
 
 import logging
@@ -14,7 +17,21 @@ logger = logging.getLogger(__name__)
 
 
 class CloudSync:
-	"""Service for syncing events to the Browser Use cloud"""
+	"""Service for syncing events to the Browser Use cloud.
+	
+	Performance optimizations:
+	- __slots__ for faster attribute access
+	- Cached enabled flag for early returns
+	"""
+	
+	__slots__ = (
+		'base_url',
+		'auth_client',
+		'session_id',
+		'allow_session_events_for_auth',
+		'auth_flow_active',
+		'enabled',
+	)
 
 	def __init__(self, base_url: str | None = None, allow_session_events_for_auth: bool = False):
 		# Backend API URL for all API requests - can be passed directly or defaults to env var
@@ -28,11 +45,11 @@ class CloudSync:
 
 	async def handle_event(self, event: BaseEvent) -> None:
 		"""Handle an event by sending it to the cloud"""
+		# Fast path: early return if disabled
+		if not self.enabled:
+			return
+			
 		try:
-			# If cloud sync is disabled, don't handle any events
-			if not self.enabled:
-				return
-
 			# Extract session ID from CreateAgentSessionEvent
 			if event.event_type == 'CreateAgentSessionEvent' and hasattr(event, 'id'):
 				self.session_id = str(event.id)  # type: ignore
@@ -96,47 +113,13 @@ class CloudSync:
 					)
 		except httpx.TimeoutException:
 			logger.debug(f'Event send timed out after 10 seconds: {event}')
-		except httpx.ConnectError as e:
-			# logger.warning(f'⚠️ Failed to connect to cloud service at {self.base_url}: {e}')
+		except httpx.ConnectError:
+			# Silently ignore connection errors
 			pass
 		except httpx.HTTPError as e:
 			logger.debug(f'HTTP error sending event {event}: {type(e).__name__}: {e}')
 		except Exception as e:
 			logger.debug(f'Unexpected error sending event {event}: {type(e).__name__}: {e}')
-
-	# async def _update_wal_user_ids(self, session_id: str) -> None:
-	# 	"""Update user IDs in WAL file after authentication"""
-	# 	try:
-	# 		assert self.auth_client, 'Cloud sync must be authenticated to update WAL user ID'
-
-	# 		wal_path = CONFIG.OPENBROWSER_CONFIG_DIR / 'events' / f'{session_id}.jsonl'
-	# 		if not await anyio.Path(wal_path).exists():
-	# 			raise FileNotFoundError(
-	# 				f'CloudSync failed to update saved event user_ids after auth: Agent EventBus WAL file not found: {wal_path}'
-	# 			)
-
-	# 		# Read all events
-	# 		events = []
-	# 		content = await anyio.Path(wal_path).read_text()
-	# 		for line in content.splitlines():
-	# 			if line.strip():
-	# 				events.append(json.loads(line))
-
-	# 		# Update user_id and device_id
-	# 		user_id = self.auth_client.user_id
-	# 		device_id = self.auth_client.device_id
-	# 		for event in events:
-	# 			if 'user_id' in event:
-	# 				event['user_id'] = user_id
-	# 			# Add device_id to all events
-	# 			event['device_id'] = device_id
-
-	# 		# Write back
-	# 		updated_content = '\n'.join(json.dumps(event) for event in events) + '\n'
-	# 		await anyio.Path(wal_path).write_text(updated_content)
-
-	# 	except Exception as e:
-	# 		logger.warning(f'Failed to update WAL user IDs: {e}')
 
 	def set_auth_flow_active(self) -> None:
 		"""Mark auth flow as active to allow all events"""
@@ -150,11 +133,8 @@ class CloudSync:
 
 		# Check if already authenticated first
 		if self.auth_client.is_authenticated:
-			import logging
-
-			logger = logging.getLogger(__name__)
 			if show_instructions:
-				logger.info('✅ Already authenticated! Skipping OAuth flow.')
+				logger.info('Already authenticated! Skipping OAuth flow.')
 			return True
 
 		# Not authenticated - run OAuth flow
