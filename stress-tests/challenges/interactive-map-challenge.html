@@ -1,0 +1,1247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive Map Challenge</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+        }
+
+        .map-container {
+            display: grid;
+            grid-template-columns: 300px 1fr;
+            height: 600px;
+        }
+
+        .map-sidebar {
+            background: #f8f9fa;
+            padding: 20px;
+            border-right: 1px solid #e9ecef;
+            overflow-y: auto;
+        }
+
+        .map-section {
+            margin-bottom: 30px;
+        }
+
+        .section-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 15px;
+            padding-bottom: 5px;
+            border-bottom: 2px solid #667eea;
+        }
+
+        .location-search {
+            width: 100%;
+            padding: 10px;
+            border: 2px solid #e9ecef;
+            border-radius: 8px;
+            font-size: 14px;
+            margin-bottom: 10px;
+        }
+
+        .location-search:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .location-suggestions {
+            background: white;
+            border: 1px solid #e9ecef;
+            border-radius: 8px;
+            max-height: 200px;
+            overflow-y: auto;
+            display: none;
+        }
+
+        .location-suggestions.show {
+            display: block;
+        }
+
+        .suggestion-item {
+            padding: 10px;
+            cursor: pointer;
+            border-bottom: 1px solid #f0f0f0;
+            transition: background-color 0.2s ease;
+        }
+
+        .suggestion-item:hover {
+            background: #f8f9fa;
+        }
+
+        .suggestion-item:last-child {
+            border-bottom: none;
+        }
+
+        .map-controls {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .control-btn {
+            padding: 10px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background-color 0.3s ease;
+        }
+
+        .control-btn:hover {
+            background: #5a6fd8;
+        }
+
+        .control-btn.active {
+            background: #28a745;
+        }
+
+        .control-btn.secondary {
+            background: #6c757d;
+        }
+
+        .control-btn.secondary:hover {
+            background: #5a6268;
+        }
+
+        .layer-controls {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .layer-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px;
+            border: 1px solid #e9ecef;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .layer-item:hover {
+            background: #f8f9fa;
+        }
+
+        .layer-item.active {
+            background: #f8f9ff;
+            border-color: #667eea;
+        }
+
+        .layer-item input[type="checkbox"] {
+            transform: scale(1.2);
+        }
+
+        .marker-list {
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .marker-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px;
+            border: 1px solid #e9ecef;
+            border-radius: 6px;
+            margin-bottom: 8px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .marker-item:hover {
+            background: #f8f9fa;
+        }
+
+        .marker-item.selected {
+            background: #f8f9ff;
+            border-color: #667eea;
+        }
+
+        .marker-icon {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            color: white;
+        }
+
+        .marker-restaurant {
+            background: #e74c3c;
+        }
+
+        .marker-hotel {
+            background: #3498db;
+        }
+
+        .marker-attraction {
+            background: #f39c12;
+        }
+
+        .marker-parking {
+            background: #95a5a6;
+        }
+
+        .marker-info {
+            flex: 1;
+        }
+
+        .marker-name {
+            font-weight: 600;
+            color: #333;
+            font-size: 0.9rem;
+        }
+
+        .marker-distance {
+            color: #666;
+            font-size: 0.8rem;
+        }
+
+        .map-canvas {
+            position: relative;
+            background: #e8f4f8;
+            overflow: hidden;
+            cursor: grab;
+        }
+
+        .map-canvas:active {
+            cursor: grabbing;
+        }
+
+        .map-canvas.draw-mode {
+            cursor: crosshair;
+        }
+
+        .map-canvas.route-mode {
+            cursor: pointer;
+        }
+
+        .map-viewport {
+            position: absolute;
+            width: 1000px;
+            height: 800px;
+            background: 
+                radial-gradient(circle at 30% 30%, rgba(76, 175, 80, 0.3) 0%, transparent 50%),
+                radial-gradient(circle at 70% 40%, rgba(33, 150, 243, 0.3) 0%, transparent 50%),
+                radial-gradient(circle at 50% 80%, rgba(255, 193, 7, 0.3) 0%, transparent 50%),
+                linear-gradient(45deg, #e3f2fd 25%, transparent 25%),
+                linear-gradient(-45deg, #e3f2fd 25%, transparent 25%),
+                linear-gradient(45deg, transparent 75%, #e3f2fd 75%),
+                linear-gradient(-45deg, transparent 75%, #e3f2fd 75%);
+            background-size: 100px 100px;
+            transition: transform 0.3s ease;
+        }
+
+        .map-marker {
+            position: absolute;
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            color: white;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+            z-index: 10;
+        }
+
+        .map-marker:hover {
+            transform: scale(1.2);
+            z-index: 20;
+        }
+
+        .map-marker.selected {
+            transform: scale(1.3);
+            box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+            z-index: 30;
+        }
+
+        .map-marker.restaurant {
+            background: #e74c3c;
+        }
+
+        .map-marker.hotel {
+            background: #3498db;
+        }
+
+        .map-marker.attraction {
+            background: #f39c12;
+        }
+
+        .map-marker.parking {
+            background: #95a5a6;
+        }
+
+        .map-marker.user-location {
+            background: #667eea;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% { box-shadow: 0 0 0 0 rgba(102, 126, 234, 0.7); }
+            70% { box-shadow: 0 0 0 20px rgba(102, 126, 234, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(102, 126, 234, 0); }
+        }
+
+        .map-route {
+            position: absolute;
+            pointer-events: none;
+            z-index: 5;
+        }
+
+        .route-line {
+            stroke: #667eea;
+            stroke-width: 3;
+            fill: none;
+            stroke-dasharray: 5,5;
+            animation: dash 1s linear infinite;
+        }
+
+        @keyframes dash {
+            to { stroke-dashoffset: -10; }
+        }
+
+        .map-polygon {
+            position: absolute;
+            pointer-events: none;
+            z-index: 5;
+        }
+
+        .polygon-path {
+            fill: rgba(102, 126, 234, 0.3);
+            stroke: #667eea;
+            stroke-width: 2;
+        }
+
+        .zoom-controls {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+            z-index: 100;
+        }
+
+        .zoom-btn {
+            width: 40px;
+            height: 40px;
+            background: white;
+            border: 2px solid #e9ecef;
+            border-radius: 6px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            font-weight: bold;
+            transition: all 0.3s ease;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        .zoom-btn:hover {
+            background: #f8f9fa;
+            border-color: #667eea;
+        }
+
+        .map-info-panel {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            background: white;
+            border-radius: 8px;
+            padding: 15px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            min-width: 200px;
+            display: none;
+            z-index: 100;
+        }
+
+        .map-info-panel.show {
+            display: block;
+        }
+
+        .info-title {
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 5px;
+        }
+
+        .info-details {
+            color: #666;
+            font-size: 0.9rem;
+            margin-bottom: 10px;
+        }
+
+        .info-actions {
+            display: flex;
+            gap: 8px;
+        }
+
+        .info-btn {
+            padding: 6px 12px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            transition: background-color 0.3s ease;
+        }
+
+        .info-btn:hover {
+            background: #5a6fd8;
+        }
+
+        .coordinate-display {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            background: white;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-family: monospace;
+            color: #666;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            z-index: 100;
+        }
+
+        .route-info {
+            background: #fff3cd;
+            border: 1px solid #ffeeba;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 15px;
+            display: none;
+        }
+
+        .route-info.show {
+            display: block;
+        }
+
+        .route-info h4 {
+            color: #856404;
+            margin-bottom: 10px;
+        }
+
+        .route-stats {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.9rem;
+            color: #856404;
+        }
+
+        .demo-actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 15px;
+            flex-wrap: wrap;
+        }
+
+        .demo-btn {
+            padding: 6px 12px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            transition: background-color 0.3s ease;
+        }
+
+        .demo-btn:hover {
+            background: #5a6fd8;
+        }
+
+        .demo-btn.secondary {
+            background: #6c757d;
+        }
+
+        .demo-btn.secondary:hover {
+            background: #5a6268;
+        }
+
+        .success-message {
+            background: #d4edda;
+            color: #155724;
+            padding: 20px;
+            border-radius: 12px;
+            margin: 20px;
+            display: none;
+        }
+
+        .success-message.show {
+            display: block;
+        }
+
+        @media (max-width: 768px) {
+            .map-container {
+                grid-template-columns: 1fr;
+                height: auto;
+            }
+            
+            .map-sidebar {
+                height: 200px;
+            }
+            
+            .map-canvas {
+                height: 400px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🗺️ Interactive Map Challenge</h1>
+            <p>Test map navigation, markers, location selection, and route planning</p>
+        </div>
+
+        <div class="map-container">
+            <div class="map-sidebar">
+                <div class="map-section">
+                    <h3 class="section-title">🔍 Location Search</h3>
+                    <input type="text" class="location-search" id="location-search" placeholder="Search locations...">
+                    <div class="location-suggestions" id="location-suggestions"></div>
+                </div>
+
+                <div class="map-section">
+                    <h3 class="section-title">🎮 Map Controls</h3>
+                    <div class="map-controls">
+                        <button class="control-btn" id="pan-btn" onclick="setMapMode('pan')">🤚 Pan Mode</button>
+                        <button class="control-btn" id="marker-btn" onclick="setMapMode('marker')">📍 Add Marker</button>
+                        <button class="control-btn" id="route-btn" onclick="setMapMode('route')">🛣️ Route Mode</button>
+                        <button class="control-btn" id="draw-btn" onclick="setMapMode('draw')">✏️ Draw Area</button>
+                        <button class="control-btn secondary" onclick="getUserLocation()">📍 My Location</button>
+                        <button class="control-btn secondary" onclick="clearMap()">🗑️ Clear All</button>
+                    </div>
+                </div>
+
+                <div class="map-section">
+                    <h3 class="section-title">🗂️ Map Layers</h3>
+                    <div class="layer-controls">
+                        <div class="layer-item active" onclick="toggleLayer('streets')">
+                            <input type="checkbox" checked>
+                            <span>Streets</span>
+                        </div>
+                        <div class="layer-item" onclick="toggleLayer('satellite')">
+                            <input type="checkbox">
+                            <span>Satellite</span>
+                        </div>
+                        <div class="layer-item" onclick="toggleLayer('terrain')">
+                            <input type="checkbox">
+                            <span>Terrain</span>
+                        </div>
+                        <div class="layer-item" onclick="toggleLayer('traffic')">
+                            <input type="checkbox">
+                            <span>Traffic</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="map-section">
+                    <h3 class="section-title">📍 Nearby Places</h3>
+                    <div class="marker-list" id="marker-list"></div>
+                </div>
+
+                <div class="route-info" id="route-info">
+                    <h4>📍 Route Information</h4>
+                    <div class="route-stats">
+                        <span>Distance: <span id="route-distance">0 km</span></span>
+                        <span>Duration: <span id="route-duration">0 min</span></span>
+                    </div>
+                </div>
+
+                <div class="demo-actions">
+                    <button class="demo-btn" onclick="demoTour()">🎬 Demo Tour</button>
+                    <button class="demo-btn" onclick="addRandomMarkers()">📍 Add POIs</button>
+                    <button class="demo-btn" onclick="planRoute()">🛣️ Plan Route</button>
+                    <button class="demo-btn secondary" onclick="resetMap()">🔄 Reset</button>
+                </div>
+            </div>
+
+            <div class="map-canvas" id="map-canvas">
+                <div class="map-viewport" id="map-viewport"></div>
+                
+                <div class="zoom-controls">
+                    <button class="zoom-btn" onclick="zoomIn()">+</button>
+                    <button class="zoom-btn" onclick="zoomOut()">-</button>
+                </div>
+
+                <div class="coordinate-display" id="coordinate-display">
+                    Lat: 0.000, Lng: 0.000
+                </div>
+
+                <div class="map-info-panel" id="map-info-panel">
+                    <div class="info-title" id="info-title">Location Info</div>
+                    <div class="info-details" id="info-details">Click on a marker to see details</div>
+                    <div class="info-actions">
+                        <button class="info-btn" onclick="getDirections()">Directions</button>
+                        <button class="info-btn" onclick="closeInfoPanel()">Close</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="success-message" id="success-message">
+            <strong>Success!</strong> All map interactions completed successfully. The extraction layer detected all navigation, marker, and route planning features.
+        </div>
+    </div>
+
+    <script>
+        // Map data and state
+        let mapState = {
+            mode: 'pan',
+            zoom: 1,
+            centerX: 0,
+            centerY: 0,
+            isDragging: false,
+            dragStart: { x: 0, y: 0 },
+            selectedMarker: null,
+            routePoints: [],
+            drawingPolygon: [],
+            userLocation: null
+        };
+
+        let mapMarkers = [];
+        let mapRoutes = [];
+        let mapPolygons = [];
+
+        // Sample location data
+        const sampleLocations = [
+            { name: 'Central Park', type: 'attraction', x: 200, y: 150, emoji: '🌳' },
+            { name: 'Times Square', type: 'attraction', x: 180, y: 180, emoji: '🎭' },
+            { name: 'Empire State Building', type: 'attraction', x: 190, y: 200, emoji: '🏢' },
+            { name: 'Grand Central Station', type: 'attraction', x: 195, y: 190, emoji: '🚂' },
+            { name: 'The Plaza Hotel', type: 'hotel', x: 185, y: 160, emoji: '🏨' },
+            { name: 'Waldorf Astoria', type: 'hotel', x: 200, y: 185, emoji: '🏨' },
+            { name: 'Joe\'s Pizza', type: 'restaurant', x: 175, y: 175, emoji: '🍕' },
+            { name: 'Katz\'s Delicatessen', type: 'restaurant', x: 220, y: 220, emoji: '🥪' },
+            { name: 'Parking Garage A', type: 'parking', x: 160, y: 170, emoji: '🅿️' },
+            { name: 'Parking Garage B', type: 'parking', x: 210, y: 210, emoji: '🅿️' }
+        ];
+
+        // Search functionality
+        function setupLocationSearch() {
+            const searchInput = document.getElementById('location-search');
+            const suggestions = document.getElementById('location-suggestions');
+            
+            searchInput.addEventListener('input', function() {
+                const query = this.value.toLowerCase();
+                if (query.length < 2) {
+                    suggestions.classList.remove('show');
+                    return;
+                }
+                
+                const matches = sampleLocations.filter(location => 
+                    location.name.toLowerCase().includes(query)
+                );
+                
+                if (matches.length > 0) {
+                    suggestions.innerHTML = matches.map(location => `
+                        <div class="suggestion-item" onclick="selectLocation('${location.name}')">
+                            ${location.emoji} ${location.name}
+                        </div>
+                    `).join('');
+                    suggestions.classList.add('show');
+                } else {
+                    suggestions.classList.remove('show');
+                }
+            });
+            
+            // Close suggestions when clicking outside
+            document.addEventListener('click', function(e) {
+                if (!searchInput.contains(e.target) && !suggestions.contains(e.target)) {
+                    suggestions.classList.remove('show');
+                }
+            });
+        }
+
+        function selectLocation(locationName) {
+            const location = sampleLocations.find(loc => loc.name === locationName);
+            if (location) {
+                // Pan to location
+                panToLocation(location.x, location.y);
+                
+                // Add marker if not exists
+                if (!mapMarkers.find(marker => marker.name === locationName)) {
+                    addMarker(location.x, location.y, location.type, location.name, location.emoji);
+                }
+                
+                // Select the marker
+                selectMarker(locationName);
+            }
+            
+            document.getElementById('location-suggestions').classList.remove('show');
+            document.getElementById('location-search').value = '';
+        }
+
+        // Map mode management
+        function setMapMode(mode) {
+            mapState.mode = mode;
+            
+            // Update button states
+            document.querySelectorAll('.control-btn').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            
+            const modeBtn = document.getElementById(mode + '-btn');
+            if (modeBtn) {
+                modeBtn.classList.add('active');
+            }
+            
+            // Update cursor
+            const canvas = document.getElementById('map-canvas');
+            canvas.classList.remove('draw-mode', 'route-mode');
+            
+            if (mode === 'draw') {
+                canvas.classList.add('draw-mode');
+            } else if (mode === 'route') {
+                canvas.classList.add('route-mode');
+            }
+            
+            // Clear route points when switching modes
+            if (mode !== 'route') {
+                mapState.routePoints = [];
+                document.getElementById('route-info').classList.remove('show');
+            }
+        }
+
+        // Map interaction handlers
+        function setupMapInteractions() {
+            const canvas = document.getElementById('map-canvas');
+            const viewport = document.getElementById('map-viewport');
+            
+            canvas.addEventListener('mousedown', function(e) {
+                if (mapState.mode === 'pan') {
+                    mapState.isDragging = true;
+                    mapState.dragStart = { x: e.clientX, y: e.clientY };
+                    canvas.style.cursor = 'grabbing';
+                }
+            });
+            
+            canvas.addEventListener('mousemove', function(e) {
+                // Update coordinate display
+                const rect = canvas.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const y = e.clientY - rect.top;
+                const lat = ((y - 300) / -10).toFixed(3);
+                const lng = ((x - 400) / 10).toFixed(3);
+                document.getElementById('coordinate-display').textContent = `Lat: ${lat}, Lng: ${lng}`;
+                
+                if (mapState.isDragging && mapState.mode === 'pan') {
+                    const deltaX = e.clientX - mapState.dragStart.x;
+                    const deltaY = e.clientY - mapState.dragStart.y;
+                    
+                    mapState.centerX += deltaX;
+                    mapState.centerY += deltaY;
+                    
+                    updateViewport();
+                    
+                    mapState.dragStart = { x: e.clientX, y: e.clientY };
+                }
+            });
+            
+            canvas.addEventListener('mouseup', function(e) {
+                if (mapState.isDragging) {
+                    mapState.isDragging = false;
+                    canvas.style.cursor = 'grab';
+                } else if (mapState.mode === 'marker') {
+                    const rect = canvas.getBoundingClientRect();
+                    const x = e.clientX - rect.left;
+                    const y = e.clientY - rect.top;
+                    addMarker(x, y, 'custom', `Marker ${mapMarkers.length + 1}`, '📍');
+                } else if (mapState.mode === 'route') {
+                    const rect = canvas.getBoundingClientRect();
+                    const x = e.clientX - rect.left;
+                    const y = e.clientY - rect.top;
+                    addRoutePoint(x, y);
+                } else if (mapState.mode === 'draw') {
+                    const rect = canvas.getBoundingClientRect();
+                    const x = e.clientX - rect.left;
+                    const y = e.clientY - rect.top;
+                    addPolygonPoint(x, y);
+                }
+            });
+            
+            canvas.addEventListener('mouseleave', function() {
+                if (mapState.isDragging) {
+                    mapState.isDragging = false;
+                    canvas.style.cursor = 'grab';
+                }
+            });
+            
+            // Double-click to finish polygon
+            canvas.addEventListener('dblclick', function(e) {
+                if (mapState.mode === 'draw' && mapState.drawingPolygon.length > 2) {
+                    finishPolygon();
+                }
+            });
+        }
+
+        // Marker management
+        function addMarker(x, y, type, name, emoji) {
+            const marker = {
+                id: Date.now(),
+                x: x,
+                y: y,
+                type: type,
+                name: name,
+                emoji: emoji
+            };
+            
+            mapMarkers.push(marker);
+            renderMarker(marker);
+            updateMarkerList();
+        }
+
+        function renderMarker(marker) {
+            const viewport = document.getElementById('map-viewport');
+            const markerElement = document.createElement('div');
+            markerElement.className = `map-marker ${marker.type}`;
+            markerElement.id = `marker-${marker.id}`;
+            markerElement.style.left = marker.x + 'px';
+            markerElement.style.top = marker.y + 'px';
+            markerElement.textContent = marker.emoji;
+            markerElement.title = marker.name;
+            
+            markerElement.addEventListener('click', function(e) {
+                e.stopPropagation();
+                selectMarker(marker.name);
+                showMarkerInfo(marker);
+            });
+            
+            viewport.appendChild(markerElement);
+        }
+
+        function selectMarker(markerName) {
+            // Clear previous selection
+            document.querySelectorAll('.map-marker').forEach(marker => {
+                marker.classList.remove('selected');
+            });
+            
+            document.querySelectorAll('.marker-item').forEach(item => {
+                item.classList.remove('selected');
+            });
+            
+            // Select new marker
+            const marker = mapMarkers.find(m => m.name === markerName);
+            if (marker) {
+                document.getElementById(`marker-${marker.id}`).classList.add('selected');
+                document.querySelector(`[data-marker="${markerName}"]`).classList.add('selected');
+                mapState.selectedMarker = marker;
+            }
+        }
+
+        function showMarkerInfo(marker) {
+            const panel = document.getElementById('map-info-panel');
+            document.getElementById('info-title').textContent = marker.name;
+            document.getElementById('info-details').textContent = `Type: ${marker.type.charAt(0).toUpperCase() + marker.type.slice(1)}`;
+            panel.classList.add('show');
+        }
+
+        function updateMarkerList() {
+            const list = document.getElementById('marker-list');
+            list.innerHTML = mapMarkers.map(marker => `
+                <div class="marker-item" data-marker="${marker.name}" onclick="selectMarker('${marker.name}')">
+                    <div class="marker-icon marker-${marker.type}">${marker.emoji}</div>
+                    <div class="marker-info">
+                        <div class="marker-name">${marker.name}</div>
+                        <div class="marker-distance">${Math.floor(Math.random() * 500 + 100)}m away</div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // Route management
+        function addRoutePoint(x, y) {
+            mapState.routePoints.push({ x, y });
+            
+            // Add route point marker
+            const viewport = document.getElementById('map-viewport');
+            const pointElement = document.createElement('div');
+            pointElement.className = 'map-marker route-point';
+            pointElement.style.left = x + 'px';
+            pointElement.style.top = y + 'px';
+            pointElement.style.background = '#667eea';
+            pointElement.textContent = mapState.routePoints.length;
+            viewport.appendChild(pointElement);
+            
+            // Draw route line if we have multiple points
+            if (mapState.routePoints.length > 1) {
+                drawRoute();
+                updateRouteInfo();
+            }
+        }
+
+        function drawRoute() {
+            // Remove existing route
+            document.querySelectorAll('.map-route').forEach(route => route.remove());
+            
+            if (mapState.routePoints.length < 2) return;
+            
+            const viewport = document.getElementById('map-viewport');
+            const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+            svg.className = 'map-route';
+            svg.style.position = 'absolute';
+            svg.style.top = '0';
+            svg.style.left = '0';
+            svg.style.width = '100%';
+            svg.style.height = '100%';
+            svg.style.pointerEvents = 'none';
+            
+            const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+            path.className = 'route-line';
+            
+            let pathData = `M ${mapState.routePoints[0].x} ${mapState.routePoints[0].y}`;
+            for (let i = 1; i < mapState.routePoints.length; i++) {
+                pathData += ` L ${mapState.routePoints[i].x} ${mapState.routePoints[i].y}`;
+            }
+            
+            path.setAttribute('d', pathData);
+            svg.appendChild(path);
+            viewport.appendChild(svg);
+        }
+
+        function updateRouteInfo() {
+            const routeInfo = document.getElementById('route-info');
+            let totalDistance = 0;
+            
+            for (let i = 1; i < mapState.routePoints.length; i++) {
+                const prev = mapState.routePoints[i - 1];
+                const curr = mapState.routePoints[i];
+                const distance = Math.sqrt(Math.pow(curr.x - prev.x, 2) + Math.pow(curr.y - prev.y, 2));
+                totalDistance += distance;
+            }
+            
+            // Convert pixels to km (rough approximation)
+            const kmDistance = (totalDistance / 50).toFixed(1);
+            const duration = Math.floor(totalDistance / 10);
+            
+            document.getElementById('route-distance').textContent = `${kmDistance} km`;
+            document.getElementById('route-duration').textContent = `${duration} min`;
+            routeInfo.classList.add('show');
+        }
+
+        // Polygon drawing
+        function addPolygonPoint(x, y) {
+            mapState.drawingPolygon.push({ x, y });
+            
+            // Add visual point
+            const viewport = document.getElementById('map-viewport');
+            const pointElement = document.createElement('div');
+            pointElement.className = 'map-marker';
+            pointElement.style.left = x + 'px';
+            pointElement.style.top = y + 'px';
+            pointElement.style.background = '#667eea';
+            pointElement.style.width = '8px';
+            pointElement.style.height = '8px';
+            pointElement.textContent = '';
+            viewport.appendChild(pointElement);
+            
+            // Draw temporary line
+            if (mapState.drawingPolygon.length > 1) {
+                drawPolygonPreview();
+            }
+        }
+
+        function drawPolygonPreview() {
+            // Remove existing preview
+            document.querySelectorAll('.map-polygon').forEach(poly => poly.remove());
+            
+            if (mapState.drawingPolygon.length < 2) return;
+            
+            const viewport = document.getElementById('map-viewport');
+            const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+            svg.className = 'map-polygon';
+            svg.style.position = 'absolute';
+            svg.style.top = '0';
+            svg.style.left = '0';
+            svg.style.width = '100%';
+            svg.style.height = '100%';
+            svg.style.pointerEvents = 'none';
+            
+            const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+            path.className = 'polygon-path';
+            
+            let pathData = `M ${mapState.drawingPolygon[0].x} ${mapState.drawingPolygon[0].y}`;
+            for (let i = 1; i < mapState.drawingPolygon.length; i++) {
+                pathData += ` L ${mapState.drawingPolygon[i].x} ${mapState.drawingPolygon[i].y}`;
+            }
+            pathData += ' Z'; // Close the path
+            
+            path.setAttribute('d', pathData);
+            svg.appendChild(path);
+            viewport.appendChild(svg);
+        }
+
+        function finishPolygon() {
+            if (mapState.drawingPolygon.length > 2) {
+                mapPolygons.push([...mapState.drawingPolygon]);
+                drawPolygonPreview();
+            }
+            mapState.drawingPolygon = [];
+        }
+
+        // Zoom and pan controls
+        function zoomIn() {
+            mapState.zoom = Math.min(mapState.zoom * 1.2, 3);
+            updateViewport();
+        }
+
+        function zoomOut() {
+            mapState.zoom = Math.max(mapState.zoom / 1.2, 0.5);
+            updateViewport();
+        }
+
+        function updateViewport() {
+            const viewport = document.getElementById('map-viewport');
+            viewport.style.transform = `translate(${mapState.centerX}px, ${mapState.centerY}px) scale(${mapState.zoom})`;
+        }
+
+        function panToLocation(x, y) {
+            mapState.centerX = 400 - x;
+            mapState.centerY = 300 - y;
+            updateViewport();
+        }
+
+        // Layer management
+        function toggleLayer(layerName) {
+            const layerItem = event.target.closest('.layer-item');
+            const checkbox = layerItem.querySelector('input[type="checkbox"]');
+            
+            checkbox.checked = !checkbox.checked;
+            layerItem.classList.toggle('active', checkbox.checked);
+            
+            // Apply layer effects
+            const viewport = document.getElementById('map-viewport');
+            if (layerName === 'satellite') {
+                viewport.style.filter = checkbox.checked ? 'sepia(0.3) contrast(1.2)' : 'none';
+            } else if (layerName === 'terrain') {
+                viewport.style.filter = checkbox.checked ? 'contrast(1.1) brightness(0.9)' : 'none';
+            } else if (layerName === 'traffic') {
+                // Add traffic indicators (simplified)
+                if (checkbox.checked) {
+                    addTrafficIndicators();
+                } else {
+                    removeTrafficIndicators();
+                }
+            }
+        }
+
+        function addTrafficIndicators() {
+            const viewport = document.getElementById('map-viewport');
+            for (let i = 0; i < 5; i++) {
+                const traffic = document.createElement('div');
+                traffic.className = 'traffic-indicator';
+                traffic.style.position = 'absolute';
+                traffic.style.left = Math.random() * 600 + 'px';
+                traffic.style.top = Math.random() * 400 + 'px';
+                traffic.style.width = '20px';
+                traffic.style.height = '4px';
+                traffic.style.background = ['#28a745', '#ffc107', '#dc3545'][Math.floor(Math.random() * 3)];
+                traffic.style.borderRadius = '2px';
+                viewport.appendChild(traffic);
+            }
+        }
+
+        function removeTrafficIndicators() {
+            document.querySelectorAll('.traffic-indicator').forEach(indicator => {
+                indicator.remove();
+            });
+        }
+
+        // Geolocation
+        function getUserLocation() {
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(function(position) {
+                    const lat = position.coords.latitude;
+                    const lng = position.coords.longitude;
+                    
+                    // Convert to map coordinates (simplified)
+                    const x = 400 + (lng * 10);
+                    const y = 300 - (lat * 10);
+                    
+                    // Add user location marker
+                    addMarker(x, y, 'user-location', 'Your Location', '📍');
+                    panToLocation(x, y);
+                    
+                    mapState.userLocation = { lat, lng, x, y };
+                    
+                    alert('Location found! You are now marked on the map.');
+                }, function(error) {
+                    alert('Unable to get your location. Using default location.');
+                    const x = 400;
+                    const y = 300;
+                    addMarker(x, y, 'user-location', 'Default Location', '📍');
+                    panToLocation(x, y);
+                });
+            } else {
+                alert('Geolocation is not supported by this browser.');
+            }
+        }
+
+        // Demo functions
+        function addRandomMarkers() {
+            sampleLocations.forEach(location => {
+                if (!mapMarkers.find(marker => marker.name === location.name)) {
+                    addMarker(location.x, location.y, location.type, location.name, location.emoji);
+                }
+            });
+        }
+
+        function planRoute() {
+            if (mapMarkers.length < 2) {
+                addRandomMarkers();
+            }
+            
+            setMapMode('route');
+            
+            // Add route points automatically
+            setTimeout(() => {
+                addRoutePoint(200, 150); // Central Park
+                setTimeout(() => {
+                    addRoutePoint(180, 180); // Times Square
+                    setTimeout(() => {
+                        addRoutePoint(190, 200); // Empire State Building
+                    }, 500);
+                }, 500);
+            }, 500);
+        }
+
+        function demoTour() {
+            let step = 0;
+            const steps = [
+                () => {
+                    addRandomMarkers();
+                    alert('Step 1: Added points of interest');
+                },
+                () => {
+                    selectLocation('Central Park');
+                    alert('Step 2: Selected Central Park');
+                },
+                () => {
+                    planRoute();
+                    alert('Step 3: Planned a route');
+                },
+                () => {
+                    setMapMode('draw');
+                    addPolygonPoint(150, 140);
+                    addPolygonPoint(250, 140);
+                    addPolygonPoint(250, 240);
+                    addPolygonPoint(150, 240);
+                    finishPolygon();
+                    alert('Step 4: Drew an area');
+                },
+                () => {
+                    document.getElementById('success-message').classList.add('show');
+                    setTimeout(() => {
+                        document.getElementById('success-message').classList.remove('show');
+                    }, 4000);
+                }
+            ];
+            
+            function runStep() {
+                if (step < steps.length) {
+                    steps[step]();
+                    step++;
+                    if (step < steps.length) {
+                        setTimeout(runStep, 1500);
+                    }
+                }
+            }
+            
+            runStep();
+        }
+
+        function clearMap() {
+            mapMarkers = [];
+            mapRoutes = [];
+            mapPolygons = [];
+            mapState.routePoints = [];
+            mapState.drawingPolygon = [];
+            mapState.selectedMarker = null;
+            
+            document.getElementById('map-viewport').innerHTML = '';
+            document.getElementById('marker-list').innerHTML = '';
+            document.getElementById('route-info').classList.remove('show');
+            document.getElementById('map-info-panel').classList.remove('show');
+        }
+
+        function resetMap() {
+            clearMap();
+            mapState.zoom = 1;
+            mapState.centerX = 0;
+            mapState.centerY = 0;
+            updateViewport();
+            setMapMode('pan');
+        }
+
+        // Utility functions
+        function closeInfoPanel() {
+            document.getElementById('map-info-panel').classList.remove('show');
+        }
+
+        function getDirections() {
+            if (mapState.selectedMarker && mapState.userLocation) {
+                alert(`Directions to ${mapState.selectedMarker.name} would be calculated here.`);
+            } else {
+                alert('Please select a marker and enable location services for directions.');
+            }
+        }
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', function() {
+            setupLocationSearch();
+            setupMapInteractions();
+            setMapMode('pan');
+        });
+    </script>
+</body>
+</html> 

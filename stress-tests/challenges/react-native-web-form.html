@@ -1,0 +1,782 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>React Native Web Form</title>
+    <!-- Use React development version for better error messages -->
+    <script src="https://unpkg.com/react@17.0.2/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@17.0.2/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/babel-standalone@6/babel.min.js"></script>
+    
+    <!-- Simple implementation of React Native Web components -->
+    <script>
+        // Create a basic implementation of React Native Web components
+        window.ReactNative = {};
+        
+        // Basic View component (div)
+        ReactNative.View = function(props) {
+            // Filter out React Native specific props
+            const { 
+                style, 
+                children,
+                nativeID,
+                // Filter out common RN specific props
+                flexDirection,
+                alignItems,
+                justifyContent,
+                flex,
+                padding,
+                paddingHorizontal,
+                paddingVertical,
+                margin,
+                marginHorizontal,
+                marginVertical,
+                borderWidth,
+                borderColor,
+                borderBottomWidth,
+                borderBottomColor,
+                borderRadius,
+                backgroundColor,
+                ...otherProps 
+            } = props;
+            
+            // Convert RN specific style props to regular CSS
+            const divStyle = {
+                // Process any manually specified styles
+                ...style,
+                // Handle common conversions explicitly to avoid warnings
+                display: flexDirection ? 'flex' : undefined,
+                flexDirection: flexDirection,
+                alignItems: alignItems,
+                justifyContent: justifyContent,
+                flex: flex,
+                padding: padding,
+                paddingLeft: paddingHorizontal,
+                paddingRight: paddingHorizontal,
+                paddingTop: paddingVertical,
+                paddingBottom: paddingVertical,
+                margin: margin,
+                marginLeft: marginHorizontal,
+                marginRight: marginHorizontal,
+                marginTop: marginVertical,
+                marginBottom: marginVertical,
+                borderWidth: borderWidth,
+                borderColor: borderColor,
+                borderBottomWidth: borderBottomWidth,
+                borderBottomColor: borderBottomColor,
+                borderRadius: borderRadius,
+                backgroundColor: backgroundColor
+            };
+            
+            return React.createElement('div', {
+                ...otherProps,
+                id: nativeID,
+                style: divStyle,
+                className: 'rn-view'
+            }, children);
+        };
+        
+        // Text component (span)
+        ReactNative.Text = function(props) {
+            const { 
+                style, 
+                children, 
+                nativeID,
+                // Filter out text-specific props
+                fontSize,
+                fontWeight,
+                color,
+                textAlign,
+                lineHeight,
+                ...otherProps 
+            } = props;
+            
+            // Convert RN specific style props to CSS
+            const spanStyle = {
+                ...style,
+                fontSize: fontSize,
+                fontWeight: fontWeight,
+                color: color,
+                textAlign: textAlign,
+                lineHeight: lineHeight
+            };
+            
+            return React.createElement('span', {
+                ...otherProps,
+                id: nativeID,
+                style: spanStyle,
+                className: 'rn-text'
+            }, children);
+        };
+        
+        // TextInput component (input)
+        ReactNative.TextInput = function(props) {
+            // Extract React Native specific props to prevent DOM warnings
+            const { 
+                style, 
+                onChangeText, 
+                nativeID, 
+                keyboardType, 
+                autoCapitalize,
+                editable,
+                ...otherProps 
+            } = props;
+            
+            const inputStyle = style || {};
+            
+            // Handle React Native specific props
+            const onChange = onChangeText ? (e) => onChangeText(e.target.value) : null;
+            
+            // Convert React Native props to DOM props
+            let type = 'text';
+            if (keyboardType === 'numeric' || keyboardType === 'number-pad') {
+                type = 'number';
+            } else if (keyboardType === 'email-address') {
+                type = 'email';
+            } else if (keyboardType === 'phone-pad') {
+                type = 'tel';
+            }
+            
+            // Handle editable (disabled) prop
+            const disabled = editable === false;
+            
+            return React.createElement('input', {
+                ...otherProps,
+                id: nativeID, // Use standard id instead of nativeID
+                onChange: onChange,
+                style: inputStyle,
+                className: 'rn-textinput',
+                type: type,
+                disabled: disabled
+            });
+        };
+        
+        // StyleSheet utility
+        ReactNative.StyleSheet = {
+            create: function(styles) {
+                return styles;
+            },
+            compose: function(...styles) {
+                return styles.reduce((acc, style) => {
+                    if (!style) return acc;
+                    return {...acc, ...style};
+                }, {});
+            }
+        };
+        
+        // TouchableOpacity (button)
+        ReactNative.TouchableOpacity = function(props) {
+            const { 
+                style, 
+                onPress,
+                nativeID,
+                disabled,
+                children, 
+                ...otherProps 
+            } = props;
+            
+            const buttonStyle = {
+                cursor: disabled ? 'not-allowed' : 'pointer',
+                userSelect: 'none',
+                border: 'none',
+                opacity: disabled ? 0.6 : 1,
+                ...style
+            };
+            
+            return React.createElement('button', {
+                ...otherProps,
+                id: nativeID,
+                onClick: disabled ? null : onPress,
+                style: buttonStyle,
+                disabled: disabled,
+                className: 'rn-touchable'
+            }, children);
+        };
+        
+        // ScrollView (scrollable div)
+        ReactNative.ScrollView = function(props) {
+            const { 
+                style, 
+                children, 
+                nativeID,
+                ...otherProps 
+            } = props;
+            
+            const scrollStyle = {
+                overflowY: 'auto',
+                ...style
+            };
+            
+            return React.createElement('div', {
+                ...otherProps,
+                id: nativeID,
+                style: scrollStyle,
+                className: 'rn-scrollview'
+            }, children);
+        };
+        
+        // Switch (checkbox with styling)
+        ReactNative.Switch = function(props) {
+            const { 
+                style, 
+                value, 
+                onValueChange, 
+                trackColor, 
+                thumbColor,
+                nativeID,
+                ...otherProps 
+            } = props;
+            
+            // Create a better styled switch using a wrapper div with labels inside
+            const switchStyle = style || {};
+            
+            // Custom styled switch using a label wrapper
+            return React.createElement('div', {
+                className: 'rn-switch-container',
+                style: {
+                    position: 'relative',
+                    display: 'inline-block',
+                    ...switchStyle
+                }
+            }, [
+                // Hidden checkbox input 
+                React.createElement('input', {
+                    ...otherProps,
+                    id: nativeID,
+                    key: 'input',
+                    type: 'checkbox',
+                    checked: value,
+                    onChange: (e) => onValueChange && onValueChange(e.target.checked),
+                    style: {
+                        position: 'absolute',
+                        opacity: 0,
+                        cursor: 'pointer',
+                        height: 0,
+                        width: 0
+                    },
+                    className: 'rn-switch-input'
+                }),
+                // Custom switch UI
+                React.createElement('label', {
+                    key: 'label',
+                    htmlFor: nativeID,
+                    className: 'rn-switch-label',
+                    style: {
+                        display: 'block',
+                        position: 'relative',
+                        cursor: 'pointer',
+                        width: '40px',
+                        height: '24px',
+                        backgroundColor: value ? 
+                            (trackColor && trackColor.true ? trackColor.true : '#4cd964') :
+                            (trackColor && trackColor.false ? trackColor.false : '#f4f3f4'),
+                        borderRadius: '12px',
+                        transition: 'background-color 0.2s',
+                    }
+                }, 
+                    // Switch thumb/knob
+                    React.createElement('span', {
+                        key: 'thumb',
+                        className: 'rn-switch-thumb',
+                        style: {
+                            position: 'absolute',
+                            content: '""',
+                            height: '20px',
+                            width: '20px',
+                            left: '2px',
+                            bottom: '2px',
+                            backgroundColor: thumbColor || '#FFFFFF',
+                            borderRadius: '50%',
+                            transition: 'transform 0.2s',
+                            transform: value ? 'translateX(16px)' : 'translateX(0)',
+                            boxShadow: '0 1px 3px rgba(0,0,0,0.2)'
+                        }
+                    })
+                )
+            ]);
+        };
+        
+        // Picker (select)
+        ReactNative.Picker = function(props) {
+            const { 
+                style, 
+                selectedValue, 
+                onValueChange, 
+                children,
+                nativeID,
+                ...otherProps 
+            } = props;
+            
+            const selectStyle = style || {};
+            
+            return React.createElement('select', {
+                ...otherProps,
+                id: nativeID,
+                value: selectedValue,
+                onChange: (e) => onValueChange && onValueChange(e.target.value),
+                style: selectStyle,
+                className: 'rn-picker'
+            }, children);
+        };
+        
+        // Picker.Item (option)
+        ReactNative.Picker.Item = function(props) {
+            const { label, value, ...otherProps } = props;
+            return React.createElement('option', {
+                ...otherProps,
+                value: value
+            }, label);
+        };
+        
+        // ActivityIndicator (loading indicator)
+        ReactNative.ActivityIndicator = function(props) {
+            const { size, color, ...otherProps } = props;
+            const indicatorStyle = {
+                color: color || 'black',
+                fontSize: size === 'small' ? '14px' : '18px',
+                ...otherProps.style
+            };
+            
+            return React.createElement('div', {
+                ...otherProps,
+                style: indicatorStyle,
+                className: 'rn-activity-indicator'
+            }, 'Loading...');
+        };
+        
+        // Modal (dialog)
+        ReactNative.Modal = function(props) {
+            const { visible, animationType, transparent, onRequestClose, children, ...otherProps } = props;
+            
+            if (!visible) return null;
+            
+            const modalStyle = {
+                position: 'fixed',
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                zIndex: 1000,
+                ...otherProps.style
+            };
+            
+            return React.createElement('div', {
+                ...otherProps,
+                style: modalStyle,
+                className: 'rn-modal',
+                onClick: (e) => {
+                    // Close modal when clicking outside content
+                    if (e.target === e.currentTarget && onRequestClose) {
+                        onRequestClose();
+                    }
+                }
+            }, children);
+        };
+    </script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+        
+        h1 {
+            text-align: center;
+            color: #2089dc;
+            margin-top: 0;
+        }
+        
+        p {
+            text-align: center;
+            margin-bottom: 30px;
+            color: #5a6270;
+        }
+        
+        .alert {
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            display: none;
+        }
+        
+        .alert-success {
+            background-color: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>React Native Web Form</h1>
+        <p>This form uses React Native Web components, which have unusual DOM structures that can challenge autofill systems.</p>
+        
+        <div class="alert alert-success" id="success-message">
+            <strong>Success!</strong> Form submitted successfully! The secret is: dumbledore
+        </div>
+        
+        <div id="react-native-form"></div>
+    </div>
+    
+    <script type="text/babel">
+        // Access React Native Web components from the global object
+        const {
+            View, Text, TextInput, StyleSheet, TouchableOpacity, 
+            ScrollView, Switch, Picker, ActivityIndicator, Modal
+        } = ReactNative;
+        
+        const styles = StyleSheet.create({
+            container: {
+                flex: 1,
+                padding: 20,
+            },
+            inputContainer: {
+                marginBottom: 15,
+            },
+            label: {
+                marginBottom: 5,
+                fontWeight: '500',
+                color: '#374151',
+            },
+            input: {
+                height: 45,
+                borderWidth: 1,
+                borderColor: '#d1d5db',
+                borderRadius: 6,
+                paddingHorizontal: 12,
+                backgroundColor: 'white',
+                fontSize: 16,
+            },
+            pickerContainer: {
+                borderWidth: 1,
+                borderColor: '#d1d5db',
+                borderRadius: 6,
+                backgroundColor: 'white',
+            },
+            picker: {
+                height: 45,
+            },
+            radioContainer: {
+                flexDirection: 'row',
+                marginBottom: 15,
+            },
+            radioOption: {
+                flexDirection: 'row',
+                alignItems: 'center',
+                marginRight: 20,
+            },
+            radioCircle: {
+                width: 20,
+                height: 20,
+                borderWidth: 2,
+                borderColor: '#2089dc',
+                borderRadius: 10,
+                marginRight: 8,
+                justifyContent: 'center',
+                alignItems: 'center',
+            },
+            radioDot: {
+                width: 10,
+                height: 10,
+                borderRadius: 5,
+                backgroundColor: '#2089dc',
+            },
+            button: {
+                backgroundColor: '#2089dc',
+                paddingVertical: 12,
+                paddingHorizontal: 20,
+                borderRadius: 6,
+                alignItems: 'center',
+                justifyContent: 'center',
+                marginTop: 20,
+            },
+            buttonText: {
+                color: 'white',
+                fontSize: 16,
+                fontWeight: '500',
+            },
+            errorText: {
+                color: '#ef4444',
+                fontSize: 14,
+                marginTop: 5,
+            },
+            requiredAsterisk: {
+                color: '#ef4444',
+                marginLeft: 2,
+            }
+        });
+        
+        class ReactNativeWebForm extends React.Component {
+            constructor(props) {
+                super(props);
+                this.state = {
+                    email: '',
+                    category: '',
+                    birthDate: '',
+                    contactMethod: 'email',
+                    file: null,
+                    errors: {
+                        email: '',
+                        category: '',
+                        birthDate: '',
+                        file: ''
+                    }
+                };
+            }
+
+            validateEmail = (email) => {
+                const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+                return emailRegex.test(email);
+            }
+
+            validateDate = (date) => {
+                const dateRegex = /^(0[1-9]|1[0-2])\/(0[1-9]|[12][0-9]|3[01])\/\d{4}$/;
+                return dateRegex.test(date);
+            }
+
+            handleSubmit = () => {
+                // Reset errors
+                const errors = {
+                    email: '',
+                    category: '',
+                    birthDate: '',
+                    file: ''
+                };
+
+                let hasErrors = false;
+
+                // Validate email
+                if (!this.state.email.trim()) {
+                    errors.email = 'Email is required';
+                    hasErrors = true;
+                } else if (!this.validateEmail(this.state.email)) {
+                    errors.email = 'Please enter a valid email address';
+                    hasErrors = true;
+                }
+
+                // Validate category - check that actual value is set in state, not empty string
+                if (!this.state.category || this.state.category === '') {
+                    errors.category = 'Category is required';
+                    hasErrors = true;
+                }
+
+                // Validate date
+                if (!this.state.birthDate.trim()) {
+                    errors.birthDate = 'Preferred Date is required';
+                    hasErrors = true;
+                } else if (!this.validateDate(this.state.birthDate)) {
+                    errors.birthDate = 'Please enter date in MM/DD/YYYY format';
+                    hasErrors = true;
+                }
+
+                // Validate file
+                if (!this.state.file) {
+                    errors.file = 'File upload is required';
+                    hasErrors = true;
+                }
+
+                // Update state with errors
+                this.setState({ errors });
+
+                // If there are errors, don't submit
+                if (hasErrors) {
+                    console.log('Form validation failed:', errors);
+                    return;
+                }
+
+                // Show success message only if validation passes
+                const successMessage = document.getElementById('success-message');
+                if (successMessage) {
+                    successMessage.style.display = 'block';
+
+                    // Hide after 3 seconds
+                    setTimeout(() => {
+                        successMessage.style.display = 'none';
+                    }, 8000);
+                }
+
+                console.log('Form submitted successfully!', this.state);
+            }
+
+            handleFileChange = (e) => {
+                const file = e.target.files[0];
+                this.setState({
+                    file: file ? file.name : null,
+                    errors: { ...this.state.errors, file: '' }
+                });
+            }
+            
+            render() {
+                return (
+                    <ScrollView style={styles.container}>
+                        {/* Email Field */}
+                        <View style={styles.inputContainer}>
+                            <View style={{ flexDirection: 'row' }}>
+                                <Text style={styles.label}>Email Address</Text>
+                                <Text style={styles.requiredAsterisk}>*</Text>
+                            </View>
+                            <TextInput
+                                style={styles.input}
+                                value={this.state.email}
+                                onChangeText={(text) => this.setState({
+                                    email: text,
+                                    errors: { ...this.state.errors, email: '' }
+                                })}
+                                placeholder="Enter your email"
+                                keyboardType="email-address"
+                                autoCapitalize="none"
+                                nativeID="email"
+                                name="email"
+                            />
+                            {this.state.errors.email && (
+                                <Text style={styles.errorText}>{this.state.errors.email}</Text>
+                            )}
+                        </View>
+
+                        {/* Category Dropdown */}
+                        <View style={styles.inputContainer}>
+                            <View style={{ flexDirection: 'row' }}>
+                                <Text style={styles.label}>Category</Text>
+                                <Text style={styles.requiredAsterisk}>*</Text>
+                            </View>
+                            <View style={styles.pickerContainer}>
+                                <Picker
+                                    selectedValue={this.state.category}
+                                    style={styles.picker}
+                                    onValueChange={(itemValue) => this.setState({
+                                        category: itemValue,
+                                        errors: { ...this.state.errors, category: '' }
+                                    })}
+                                    nativeID="category"
+                                    name="category"
+                                >
+                                    <Picker.Item label="Select Category" value="" />
+                                    <Picker.Item label="General Inquiry" value="general" />
+                                    <Picker.Item label="Technical Support" value="support" />
+                                    <Picker.Item label="Sales" value="sales" />
+                                    <Picker.Item label="Feedback" value="feedback" />
+                                </Picker>
+                            </View>
+                            {this.state.errors.category && (
+                                <Text style={styles.errorText}>{this.state.errors.category}</Text>
+                            )}
+                        </View>
+
+                        {/* Date Picker */}
+                        <View style={styles.inputContainer}>
+                            <View style={{ flexDirection: 'row' }}>
+                                <Text style={styles.label}>Preferred Date</Text>
+                                <Text style={styles.requiredAsterisk}>*</Text>
+                            </View>
+                            <TextInput
+                                style={styles.input}
+                                value={this.state.birthDate}
+                                onChangeText={(text) => this.setState({
+                                    birthDate: text,
+                                    errors: { ...this.state.errors, birthDate: '' }
+                                })}
+                                placeholder="MM/DD/YYYY"
+                                nativeID="birthDate"
+                                name="birthDate"
+                            />
+                            {this.state.errors.birthDate && (
+                                <Text style={styles.errorText}>{this.state.errors.birthDate}</Text>
+                            )}
+                        </View>
+
+                        {/* Radio Button Group */}
+                        <View style={styles.inputContainer}>
+                            <Text style={styles.label}>Preferred Contact Method</Text>
+                            <View style={styles.radioContainer}>
+                                <TouchableOpacity
+                                    style={styles.radioOption}
+                                    onPress={() => this.setState({ contactMethod: 'email' })}
+                                >
+                                    <View style={styles.radioCircle}>
+                                        {this.state.contactMethod === 'email' && (
+                                            <View style={styles.radioDot} />
+                                        )}
+                                    </View>
+                                    <Text>Email</Text>
+                                </TouchableOpacity>
+
+                                <TouchableOpacity
+                                    style={styles.radioOption}
+                                    onPress={() => this.setState({ contactMethod: 'phone' })}
+                                >
+                                    <View style={styles.radioCircle}>
+                                        {this.state.contactMethod === 'phone' && (
+                                            <View style={styles.radioDot} />
+                                        )}
+                                    </View>
+                                    <Text>Phone</Text>
+                                </TouchableOpacity>
+
+                                <TouchableOpacity
+                                    style={styles.radioOption}
+                                    onPress={() => this.setState({ contactMethod: 'text' })}
+                                >
+                                    <View style={styles.radioCircle}>
+                                        {this.state.contactMethod === 'text' && (
+                                            <View style={styles.radioDot} />
+                                        )}
+                                    </View>
+                                    <Text>Text</Text>
+                                </TouchableOpacity>
+                            </View>
+                        </View>
+
+                        {/* File Upload */}
+                        <View style={styles.inputContainer}>
+                            <View style={{ flexDirection: 'row' }}>
+                                <Text style={styles.label}>Upload File</Text>
+                                <Text style={styles.requiredAsterisk}>*</Text>
+                            </View>
+                            <input
+                                type="file"
+                                onChange={this.handleFileChange}
+                                style={{
+                                    padding: '10px',
+                                    border: '1px solid #d1d5db',
+                                    borderRadius: '6px',
+                                    backgroundColor: 'white',
+                                    fontSize: '16px'
+                                }}
+                            />
+                            {this.state.file && (
+                                <Text style={{ marginTop: 5, color: '#6b7280' }}>
+                                    Selected: {this.state.file}
+                                </Text>
+                            )}
+                            {this.state.errors.file && (
+                                <Text style={styles.errorText}>{this.state.errors.file}</Text>
+                            )}
+                        </View>
+
+                        {/* Submit Button */}
+                        <TouchableOpacity
+                            style={styles.button}
+                            onPress={this.handleSubmit}
+                        >
+                            <Text style={styles.buttonText}>Submit Form</Text>
+                        </TouchableOpacity>
+                    </ScrollView>
+                );
+            }
+        }
+        
+        ReactDOM.render(<ReactNativeWebForm />, document.getElementById('react-native-form'));
+    </script>
+</body>
+</html>

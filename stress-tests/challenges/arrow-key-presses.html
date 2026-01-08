@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Arrow Key Navigation Challenge</title>
+    <style>
+        :root {
+            --primary-color: #4a6bff;
+            --secondary-color: #ff4a6b;
+            --background-color: #f8f9fa;
+            --task-bg-color: #ffffff;
+            --success-color: #28a745;
+            --text-color: #333;
+            --box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: var(--text-color);
+            background-color: var(--background-color);
+            padding: 0;
+            margin: 0;
+            transition: background-color 0.3s ease;
+        }
+
+        header {
+            background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+            color: white;
+            text-align: center;
+            padding: 1.8rem 1rem;
+            box-shadow: var(--box-shadow);
+        }
+
+        h1 {
+            margin: 0;
+            font-size: 2rem;
+            letter-spacing: -0.5px;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 2rem auto;
+            padding: 0 1rem;
+        }
+
+        .back-link {
+            display: inline-block;
+            background-color: var(--primary-color);
+            color: white;
+            text-decoration: none;
+            padding: 0.6rem 1.2rem;
+            border-radius: 4px;
+            font-weight: 500;
+            transition: background-color 0.3s ease, transform 0.2s ease;
+            margin-bottom: 2rem;
+        }
+
+        .back-link:hover {
+            background-color: #3755d8;
+            transform: translateY(-2px);
+        }
+
+        .task {
+            background-color: var(--task-bg-color);
+            margin-bottom: 2rem;
+            padding: 2rem;
+            border-radius: 8px;
+            box-shadow: var(--box-shadow);
+            position: relative;
+            border-left: 5px solid var(--primary-color);
+        }
+
+        .task.completed {
+            border-left: 5px solid var(--success-color);
+            background-color: #f8fff8;
+        }
+
+        .task-badge {
+            position: absolute;
+            top: -15px;
+            left: -15px;
+            background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+            color: white;
+            min-width: 30px;
+            height: 30px;
+            border-radius: 15px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            text-decoration: none;
+            padding: 0 5px;
+        }
+        
+        .task-badge a {
+            color: white;
+            text-decoration: none;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.7rem;
+        }
+
+        .task-title {
+            font-weight: bold;
+            margin-bottom: 1rem;
+            font-size: 1.2rem;
+        }
+
+        .key-press-area {
+            border: 2px solid #ddd;
+            border-radius: 4px;
+            padding: 1.5rem;
+            margin: 1rem 0;
+            text-align: center;
+            background-color: #f8f9fa;
+            cursor: pointer;
+            transition: border-color 0.3s ease;
+        }
+
+        .key-press-area:focus {
+            outline: none;
+            border-color: var(--primary-color);
+        }
+
+        .key-press-display {
+            font-family: monospace;
+            font-size: 1.2rem;
+            margin: 1rem 0;
+            min-height: 1.5rem;
+            color: var(--primary-color);
+            font-weight: bold;
+        }
+
+        .instructions {
+            margin-bottom: 1.5rem;
+            padding: 1rem;
+            background-color: #f8f9fa;
+            border-radius: 4px;
+            border-left: 4px solid var(--primary-color);
+        }
+
+        .success-message {
+            margin-top: 1rem;
+            padding: 1rem;
+            background-color: #d4edda;
+            border: 1px solid #c3e6cb;
+            border-radius: 4px;
+            color: #155724;
+            font-weight: 500;
+            opacity: 0;
+            transform: translateY(-10px);
+            transition: all 0.3s ease;
+        }
+
+        .success-message.show {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        .confetti {
+            position: fixed;
+            top: -10px;
+            z-index: 9999;
+            pointer-events: none;
+            animation: confetti-fall linear forwards;
+        }
+
+        @keyframes confetti-fall {
+            0% {
+                transform: translateY(-10px) rotate(0deg);
+            }
+            100% {
+                transform: translateY(100vh) rotate(720deg);
+            }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Arrow Key Navigation Challenge</h1>
+    </header>
+
+    <div class="container">
+        <a href="../challenges-index.html" class="back-link">← Back to Challenges</a>
+
+        <div class="task" id="arrow-key-presses">
+            <div class="task-badge"><a href="#arrow-key-presses" id="arrow-key-presses-link">arrow-key-presses</a></div>
+            <div class="task-title">Press the right arrow key 3 times</div>
+            <div class="instructions">
+                Click in the box below to focus it, then press the right arrow key (→) three times
+            </div>
+            <div class="key-press-area" id="key-press-area" tabindex="0">
+                <p>Click here and press the right arrow key (→) three times</p>
+                <div class="key-press-display" id="key-press-display">Keys pressed: </div>
+            </div>
+            <div class="success-message" id="success-message">
+                ✅ Challenge completed successfully! You pressed the right arrow key 3 times.
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function completeTask(taskElement) {
+            if (taskElement.classList.contains('completed')) return;
+
+            taskElement.classList.add('completed');
+            document.getElementById('success-message').classList.add('show');
+            createConfetti();
+        }
+
+        function createConfetti() {
+            const colors = ['#ff4a6b', '#4a6bff', '#4aff6b', '#ff4aff', '#ffff4a'];
+            for (let i = 0; i < 20; i++) {
+                const confetti = document.createElement('div');
+                confetti.className = 'confetti';
+                confetti.style.left = Math.random() * window.innerWidth + 'px';
+                confetti.style.backgroundColor = colors[Math.floor(Math.random() * colors.length)];
+                confetti.style.width = (Math.random() * 10 + 5) + 'px';
+                confetti.style.height = (Math.random() * 10 + 5) + 'px';
+                confetti.style.animationDuration = (Math.random() * 3 + 2) + 's';
+                document.body.appendChild(confetti);
+
+                // Remove confetti after animation ends
+                setTimeout(() => {
+                    if (document.body.contains(confetti)) {
+                        document.body.removeChild(confetti);
+                    }
+                }, 5000);
+            }
+        }
+
+        // Task-specific logic
+        const keyPressArea = document.getElementById('key-press-area');
+        const keyPressDisplay = document.getElementById('key-press-display');
+        let rightArrowPresses = 0;
+
+        keyPressArea.addEventListener('keydown', function(e) {
+            if (e.key === 'ArrowRight') {
+                rightArrowPresses++;
+                
+                // Update display
+                if (rightArrowPresses === 1) {
+                    keyPressDisplay.textContent = 'Keys pressed: →';
+                } else if (rightArrowPresses === 2) {
+                    keyPressDisplay.textContent = 'Keys pressed: → →';
+                } else if (rightArrowPresses === 3) {
+                    keyPressDisplay.textContent = 'Keys pressed: → → →';
+                    completeTask(document.getElementById('arrow-key-presses'));
+                } else {
+                    keyPressDisplay.textContent = `Keys pressed: ${'→ '.repeat(rightArrowPresses)}`;
+                }
+                
+                // Prevent scrolling with arrow keys
+                e.preventDefault();
+            }
+        });
+
+        // Ensure key press area is focusable
+        keyPressArea.addEventListener('click', function() {
+            this.focus();
+        });
+
+        // Auto-focus on page load
+        window.addEventListener('load', function() {
+            keyPressArea.focus();
+        });
+    </script>
+</body>
+</html> 
