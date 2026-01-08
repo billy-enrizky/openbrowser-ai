@@ -1,14 +1,19 @@
-"""
-Token cost service that tracks LLM token usage and costs.
+"""Token cost service that tracks LLM token usage and costs.
 
 Fetches pricing data from LiteLLM repository and caches it for 1 day.
 Automatically tracks token usage when LLMs are registered and invoked.
+
+Performance optimizations:
+- Added __slots__ to TokenCost class
+- Cached xdg_cache_home with lru_cache
+- Module-level constants for cache settings
 """
 
 import asyncio
 import logging
 import os
 from datetime import datetime, timedelta
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -37,8 +42,15 @@ from openbrowser.config import CONFIG
 logger = logging.getLogger(__name__)
 cost_logger = logging.getLogger('cost')
 
+# Module-level constants
+_CACHE_DIR_NAME = 'openbrowser/token_cost'
+_CACHE_DURATION = timedelta(days=1)
+_PRICING_URL = 'https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json'
 
+
+@lru_cache(maxsize=1)
 def xdg_cache_home() -> Path:
+	"""Get XDG cache home directory (cached)."""
 	default = Path.home() / '.cache'
 	if CONFIG.XDG_CACHE_HOME and (path := Path(CONFIG.XDG_CACHE_HOME)).is_absolute():
 		return path
@@ -46,11 +58,27 @@ def xdg_cache_home() -> Path:
 
 
 class TokenCost:
-	"""Service for tracking token usage and calculating costs"""
+	"""Service for tracking token usage and calculating costs.
+	
+	Performance optimizations:
+	- __slots__ for faster attribute access
+	- Module-level constants for cache settings
+	- Cached xdg_cache_home lookup
+	"""
+	
+	__slots__ = (
+		'include_cost',
+		'usage_history',
+		'registered_llms',
+		'_pricing_data',
+		'_initialized',
+		'_cache_dir',
+	)
 
-	CACHE_DIR_NAME = 'openbrowser/token_cost'
-	CACHE_DURATION = timedelta(days=1)
-	PRICING_URL = 'https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json'
+	# Class-level constants (shared across instances)
+	CACHE_DIR_NAME = _CACHE_DIR_NAME
+	CACHE_DURATION = _CACHE_DURATION
+	PRICING_URL = _PRICING_URL
 
 	def __init__(self, include_cost: bool = False):
 		self.include_cost = include_cost or os.getenv('OPENBROWSER_CALCULATE_COST', 'false').lower() == 'true'
@@ -59,7 +87,7 @@ class TokenCost:
 		self.registered_llms: dict[str, BaseChatModel] = {}
 		self._pricing_data: dict[str, Any] | None = None
 		self._initialized = False
-		self._cache_dir = xdg_cache_home() / self.CACHE_DIR_NAME
+		self._cache_dir = xdg_cache_home() / _CACHE_DIR_NAME
 
 	async def initialize(self) -> None:
 		"""Initialize the service by loading pricing data"""
