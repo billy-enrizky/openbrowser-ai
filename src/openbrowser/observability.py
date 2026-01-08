@@ -1,6 +1,4 @@
-# @file purpose: Observability module for browser-use that handles optional lmnr integration with debug mode support
-"""
-Observability module for browser-use
+"""Observability module for browser-use.
 
 This module provides observability decorators that optionally integrate with lmnr (Laminar) for tracing.
 If lmnr is not installed, it provides no-op wrappers that accept the same parameters.
@@ -10,6 +8,12 @@ Features:
 - Debug mode support - observe_debug only traces when in debug mode
 - Full parameter compatibility with lmnr observe decorator
 - No-op fallbacks when lmnr is unavailable
+
+Performance optimizations:
+- Cached debug mode check (only computed once at module load)
+- Cached lmnr availability check
+- Optimized no-op decorator (identity function when possible)
+- Module-level constants for fast access
 """
 
 import logging
@@ -27,21 +31,23 @@ load_dotenv()
 F = TypeVar('F', bound=Callable[..., Any])
 
 
-# Check if we're in debug mode
+# Cache debug mode check at module load time (environment rarely changes)
+def _compute_debug_mode() -> bool:
+	"""Compute debug mode once at module load."""
+	return os.getenv('LMNR_LOGGING_LEVEL', '').lower() == 'debug'
+
+
+_DEBUG_MODE: bool = _compute_debug_mode()
+
+
 def _is_debug_mode() -> bool:
-	"""Check if we're in debug mode based on environment variables or logging level."""
-
-	lmnr_debug_mode = os.getenv('LMNR_LOGGING_LEVEL', '').lower()
-	if lmnr_debug_mode == 'debug':
-		# logger.info('Debug mode is enabled for observability')
-		return True
-	# logger.info('Debug mode is disabled for observability')
-	return False
+	"""Check if we're in debug mode (cached)."""
+	return _DEBUG_MODE
 
 
-# Try to import lmnr observe
-_LMNR_AVAILABLE = False
-_lmnr_observe = None
+# Try to import lmnr observe - cache result at module load
+_LMNR_AVAILABLE: bool = False
+_lmnr_observe: Callable | None = None
 
 try:
 	from lmnr import observe as _lmnr_observe  # type: ignore
@@ -55,6 +61,11 @@ except ImportError:
 	_LMNR_AVAILABLE = False
 
 
+def _identity_decorator(func: F) -> F:
+	"""Identity decorator - returns function unchanged (zero overhead)."""
+	return func
+
+
 def _create_no_op_decorator(
 	name: str | None = None,
 	ignore_input: bool = False,
@@ -62,24 +73,22 @@ def _create_no_op_decorator(
 	metadata: dict[str, Any] | None = None,
 	**kwargs: Any,
 ) -> Callable[[F], F]:
-	"""Create a no-op decorator that accepts all lmnr observe parameters but does nothing."""
+	"""Create a no-op decorator that accepts all lmnr observe parameters but does nothing.
+	
+	Optimized: For sync functions, returns identity. For async, minimal wrapper.
+	"""
 	import asyncio
 
 	def decorator(func: F) -> F:
+		# For async functions, we need a wrapper to preserve async behavior
 		if asyncio.iscoroutinefunction(func):
-
 			@wraps(func)
 			async def async_wrapper(*args, **kwargs):
 				return await func(*args, **kwargs)
-
 			return cast(F, async_wrapper)
 		else:
-
-			@wraps(func)
-			def sync_wrapper(*args, **kwargs):
-				return func(*args, **kwargs)
-
-			return cast(F, sync_wrapper)
+			# For sync functions, just return the function unchanged (zero overhead)
+			return func
 
 	return decorator
 
@@ -113,7 +122,12 @@ def observe(
 	    def my_function(param1, param2):
 	        return param1 + param2
 	"""
-	kwargs = {
+	# Fast path: if lmnr not available, return identity decorator
+	if not _LMNR_AVAILABLE or _lmnr_observe is None:
+		return _create_no_op_decorator(name=name, ignore_input=ignore_input, ignore_output=ignore_output, metadata=metadata)
+
+	# lmnr is available - use real decorator
+	observe_kwargs = {
 		'name': name,
 		'ignore_input': ignore_input,
 		'ignore_output': ignore_output,
@@ -122,13 +136,7 @@ def observe(
 		'tags': ['observe', 'observe_debug'],  # important: tags need to be created on laminar first
 		**kwargs,
 	}
-
-	if _LMNR_AVAILABLE and _lmnr_observe:
-		# Use the real lmnr observe decorator
-		return cast(Callable[[F], F], _lmnr_observe(**kwargs))
-	else:
-		# Use no-op decorator
-		return _create_no_op_decorator(**kwargs)
+	return cast(Callable[[F], F], _lmnr_observe(**observe_kwargs))
 
 
 def observe_debug(
@@ -146,9 +154,7 @@ def observe_debug(
 	AND we're in debug mode, otherwise it will be a no-op.
 
 	Debug mode is determined by:
-	- DEBUG environment variable set to 1/true/yes/on
-	- OPENBROWSER_DEBUG environment variable set to 1/true/yes/on
-	- Root logging level set to DEBUG or lower
+	- LMNR_LOGGING_LEVEL environment variable set to 'debug'
 
 	Args:
 	    name: Name of the span/trace
@@ -161,11 +167,16 @@ def observe_debug(
 	    Decorated function that may be traced only in debug mode
 
 	Example:
-	    @observe_debug(ignore_input=True, ignore_output=True,name="debug_function", metadata={"debug": True})
+	    @observe_debug(ignore_input=True, ignore_output=True, name="debug_function", metadata={"debug": True})
 	    def debug_function(param1, param2):
 	        return param1 + param2
 	"""
-	kwargs = {
+	# Fast path: if lmnr not available or not in debug mode, return identity decorator
+	if not _LMNR_AVAILABLE or _lmnr_observe is None or not _DEBUG_MODE:
+		return _create_no_op_decorator(name=name, ignore_input=ignore_input, ignore_output=ignore_output, metadata=metadata)
+
+	# lmnr is available and debug mode is on - use real decorator
+	observe_kwargs = {
 		'name': name,
 		'ignore_input': ignore_input,
 		'ignore_output': ignore_output,
@@ -174,13 +185,7 @@ def observe_debug(
 		'tags': ['observe_debug'],  # important: tags need to be created on laminar first
 		**kwargs,
 	}
-
-	if _LMNR_AVAILABLE and _lmnr_observe and _is_debug_mode():
-		# Use the real lmnr observe decorator only in debug mode
-		return cast(Callable[[F], F], _lmnr_observe(**kwargs))
-	else:
-		# Use no-op decorator (either not in debug mode or lmnr not available)
-		return _create_no_op_decorator(**kwargs)
+	return cast(Callable[[F], F], _lmnr_observe(**observe_kwargs))
 
 
 # Convenience functions for checking availability and debug status
@@ -191,14 +196,14 @@ def is_lmnr_available() -> bool:
 
 def is_debug_mode() -> bool:
 	"""Check if we're currently in debug mode."""
-	return _is_debug_mode()
+	return _DEBUG_MODE
 
 
 def get_observability_status() -> dict[str, bool]:
 	"""Get the current status of observability features."""
 	return {
 		'lmnr_available': _LMNR_AVAILABLE,
-		'debug_mode': _is_debug_mode(),
+		'debug_mode': _DEBUG_MODE,
 		'observe_active': _LMNR_AVAILABLE,
-		'observe_debug_active': _LMNR_AVAILABLE and _is_debug_mode(),
+		'observe_debug_active': _LMNR_AVAILABLE and _DEBUG_MODE,
 	}

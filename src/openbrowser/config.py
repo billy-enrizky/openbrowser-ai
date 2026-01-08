@@ -1,10 +1,17 @@
-"""Configuration system for browser-use with automatic migration support."""
+"""Configuration system for browser-use with automatic migration support.
+
+Performance optimizations:
+- Cached environment variable lookups
+- Lazy directory creation (only when needed)
+- Cached config file loading
+- Reduced redundant Path operations
+"""
 
 import json
 import logging
 import os
 from datetime import datetime
-from functools import cache
+from functools import cache, lru_cache
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -18,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 @cache
 def is_running_in_docker() -> bool:
-	"""Detect if we are running in a docker container, for the purpose of optimizing chrome launch flags (dev shm usage, gpu settings, etc.)"""
+	"""Detect if we are running in a docker container, for the purpose of optimizing chrome launch flags (dev shm usage, gpu settings, etc.)."""
 	try:
 		if Path('/.dockerenv').exists() or 'docker' in Path('/proc/1/cgroup').read_text().lower():
 			return True
@@ -44,19 +51,45 @@ def is_running_in_docker() -> bool:
 	return False
 
 
+# Cached environment variable lookups for frequently accessed values
+@lru_cache(maxsize=32)
+def _get_env_cached(key: str, default: str = '') -> str:
+	"""Get environment variable with caching."""
+	return os.getenv(key, default)
+
+
+@lru_cache(maxsize=16)
+def _get_env_bool_cached(key: str, default: bool = False) -> bool:
+	"""Get boolean environment variable with caching."""
+	val = os.getenv(key, str(default)).lower()
+	return val[:1] in 'ty1' if val else default
+
+
+@lru_cache(maxsize=8)
+def _get_path_cached(key: str, default: str) -> Path:
+	"""Get path environment variable with caching."""
+	return Path(os.getenv(key, default)).expanduser().resolve()
+
+
 class OldConfig:
-	"""Original lazy-loading configuration class for environment variables."""
+	"""Original lazy-loading configuration class for environment variables.
+	
+	Optimized with cached property access patterns.
+	"""
 
 	# Cache for directory creation tracking
 	_dirs_created = False
+	
+	# Cached values (class-level for singleton-like behavior)
+	_cached_values: dict[str, Any] = {}
 
 	@property
 	def OPENBROWSER_LOGGING_LEVEL(self) -> str:
-		return os.getenv('OPENBROWSER_LOGGING_LEVEL', 'info').lower()
+		return _get_env_cached('OPENBROWSER_LOGGING_LEVEL', 'info').lower()
 
 	@property
 	def ANONYMIZED_TELEMETRY(self) -> bool:
-		return os.getenv('ANONYMIZED_TELEMETRY', 'true').lower()[:1] in 'ty1'
+		return _get_env_bool_cached('ANONYMIZED_TELEMETRY', True)
 
 	@property
 	def BROWSER_USE_CLOUD_SYNC(self) -> bool:
@@ -64,30 +97,34 @@ class OldConfig:
 
 	@property
 	def BROWSER_USE_CLOUD_API_URL(self) -> str:
-		url = os.getenv('BROWSER_USE_CLOUD_API_URL', 'https://api.browser-use.com')
+		url = _get_env_cached('BROWSER_USE_CLOUD_API_URL', 'https://api.browser-use.com')
 		assert '://' in url, 'BROWSER_USE_CLOUD_API_URL must be a valid URL'
 		return url
 
 	@property
 	def BROWSER_USE_CLOUD_UI_URL(self) -> str:
-		url = os.getenv('BROWSER_USE_CLOUD_UI_URL', '')
+		url = _get_env_cached('BROWSER_USE_CLOUD_UI_URL', '')
 		# Allow empty string as default, only validate if set
 		if url and '://' not in url:
 			raise AssertionError('BROWSER_USE_CLOUD_UI_URL must be a valid URL if set')
 		return url
 
-	# Path configuration
+	# Path configuration - use cached path lookups
 	@property
 	def XDG_CACHE_HOME(self) -> Path:
-		return Path(os.getenv('XDG_CACHE_HOME', '~/.cache')).expanduser().resolve()
+		return _get_path_cached('XDG_CACHE_HOME', '~/.cache')
 
 	@property
 	def XDG_CONFIG_HOME(self) -> Path:
-		return Path(os.getenv('XDG_CONFIG_HOME', '~/.config')).expanduser().resolve()
+		return _get_path_cached('XDG_CONFIG_HOME', '~/.config')
 
 	@property
 	def OPENBROWSER_CONFIG_DIR(self) -> Path:
-		path = Path(os.getenv('OPENBROWSER_CONFIG_DIR', str(self.XDG_CONFIG_HOME / 'browseruse'))).expanduser().resolve()
+		config_dir_env = os.getenv('OPENBROWSER_CONFIG_DIR')
+		if config_dir_env:
+			path = Path(config_dir_env).expanduser().resolve()
+		else:
+			path = self.XDG_CONFIG_HOME / 'browseruse'
 		self._ensure_dirs()
 		return path
 
@@ -112,69 +149,71 @@ class OldConfig:
 		return path
 
 	def _ensure_dirs(self) -> None:
-		"""Create directories if they don't exist (only once)"""
-		if not self._dirs_created:
-			config_dir = (
-				Path(os.getenv('OPENBROWSER_CONFIG_DIR', str(self.XDG_CONFIG_HOME / 'browseruse'))).expanduser().resolve()
-			)
+		"""Create directories if they don't exist (only once)."""
+		if not OldConfig._dirs_created:
+			config_dir_env = os.getenv('OPENBROWSER_CONFIG_DIR')
+			if config_dir_env:
+				config_dir = Path(config_dir_env).expanduser().resolve()
+			else:
+				config_dir = self.XDG_CONFIG_HOME / 'browseruse'
 			config_dir.mkdir(parents=True, exist_ok=True)
 			(config_dir / 'profiles').mkdir(parents=True, exist_ok=True)
 			(config_dir / 'extensions').mkdir(parents=True, exist_ok=True)
-			self._dirs_created = True
+			OldConfig._dirs_created = True
 
-	# LLM API key configuration
+	# LLM API key configuration - use cached lookups
 	@property
 	def OPENAI_API_KEY(self) -> str:
-		return os.getenv('OPENAI_API_KEY', '')
+		return _get_env_cached('OPENAI_API_KEY', '')
 
 	@property
 	def ANTHROPIC_API_KEY(self) -> str:
-		return os.getenv('ANTHROPIC_API_KEY', '')
+		return _get_env_cached('ANTHROPIC_API_KEY', '')
 
 	@property
 	def GOOGLE_API_KEY(self) -> str:
-		return os.getenv('GOOGLE_API_KEY', '')
+		return _get_env_cached('GOOGLE_API_KEY', '')
 
 	@property
 	def DEEPSEEK_API_KEY(self) -> str:
-		return os.getenv('DEEPSEEK_API_KEY', '')
+		return _get_env_cached('DEEPSEEK_API_KEY', '')
 
 	@property
 	def GROK_API_KEY(self) -> str:
-		return os.getenv('GROK_API_KEY', '')
+		return _get_env_cached('GROK_API_KEY', '')
 
 	@property
 	def NOVITA_API_KEY(self) -> str:
-		return os.getenv('NOVITA_API_KEY', '')
+		return _get_env_cached('NOVITA_API_KEY', '')
 
 	@property
 	def AZURE_OPENAI_ENDPOINT(self) -> str:
-		return os.getenv('AZURE_OPENAI_ENDPOINT', '')
+		return _get_env_cached('AZURE_OPENAI_ENDPOINT', '')
 
 	@property
 	def AZURE_OPENAI_KEY(self) -> str:
-		return os.getenv('AZURE_OPENAI_KEY', '')
+		return _get_env_cached('AZURE_OPENAI_KEY', '')
 
 	@property
 	def SKIP_LLM_API_KEY_VERIFICATION(self) -> bool:
-		return os.getenv('SKIP_LLM_API_KEY_VERIFICATION', 'false').lower()[:1] in 'ty1'
+		return _get_env_bool_cached('SKIP_LLM_API_KEY_VERIFICATION', False)
 
 	@property
 	def DEFAULT_LLM(self) -> str:
-		return os.getenv('DEFAULT_LLM', '')
+		return _get_env_cached('DEFAULT_LLM', '')
 
 	# Runtime hints
 	@property
 	def IN_DOCKER(self) -> bool:
-		return os.getenv('IN_DOCKER', 'false').lower()[:1] in 'ty1' or is_running_in_docker()
+		return _get_env_bool_cached('IN_DOCKER', False) or is_running_in_docker()
 
 	@property
 	def IS_IN_EVALS(self) -> bool:
-		return os.getenv('IS_IN_EVALS', 'false').lower()[:1] in 'ty1'
+		return _get_env_bool_cached('IS_IN_EVALS', False)
 
 	@property
 	def WIN_FONT_DIR(self) -> str:
-		return os.getenv('WIN_FONT_DIR', 'C:\\Windows\\Fonts')
+		return _get_env_cached('WIN_FONT_DIR', 'C:\\Windows\\Fonts')
 
 
 class FlatEnvConfig(BaseSettings):
@@ -295,14 +334,35 @@ def create_default_config() -> DBStyleConfigJSON:
 	return new_config
 
 
+# Cache for loaded config files (keyed by path)
+_config_cache: dict[str, tuple[float, DBStyleConfigJSON]] = {}
+
+
 def load_and_migrate_config(config_path: Path) -> DBStyleConfigJSON:
-	"""Load config.json or create fresh one if old format detected."""
+	"""Load config.json or create fresh one if old format detected.
+	
+	Uses caching to avoid repeated file reads.
+	"""
+	config_path_str = str(config_path)
+	
+	# Check cache first
+	if config_path_str in _config_cache:
+		cached_mtime, cached_config = _config_cache[config_path_str]
+		try:
+			current_mtime = config_path.stat().st_mtime
+			if current_mtime == cached_mtime:
+				return cached_config
+		except FileNotFoundError:
+			pass  # File was deleted, recreate it
+	
 	if not config_path.exists():
 		# Create fresh config with defaults
 		config_path.parent.mkdir(parents=True, exist_ok=True)
 		new_config = create_default_config()
 		with open(config_path, 'w') as f:
 			json.dump(new_config.model_dump(), f, indent=2)
+		# Cache the new config
+		_config_cache[config_path_str] = (config_path.stat().st_mtime, new_config)
 		return new_config
 
 	try:
@@ -316,7 +376,9 @@ def load_and_migrate_config(config_path: Path) -> DBStyleConfigJSON:
 			# Check if the values are DB-style entries (have UUIDs as keys)
 			if data.get('browser_profile') and all(isinstance(v, dict) and 'id' in v for v in data['browser_profile'].values()):
 				# Already in new format
-				return DBStyleConfigJSON(**data)
+				config = DBStyleConfigJSON(**data)
+				_config_cache[config_path_str] = (config_path.stat().st_mtime, config)
+				return config
 
 		# Old format detected - delete it and create fresh config
 		logger.debug(f'Old config format detected at {config_path}, creating fresh config')
@@ -327,6 +389,7 @@ def load_and_migrate_config(config_path: Path) -> DBStyleConfigJSON:
 			json.dump(new_config.model_dump(), f, indent=2)
 
 		logger.debug(f'Created fresh config.json at {config_path}')
+		_config_cache[config_path_str] = (config_path.stat().st_mtime, new_config)
 		return new_config
 
 	except Exception as e:
@@ -336,6 +399,7 @@ def load_and_migrate_config(config_path: Path) -> DBStyleConfigJSON:
 		try:
 			with open(config_path, 'w') as f:
 				json.dump(new_config.model_dump(), f, indent=2)
+			_config_cache[config_path_str] = (config_path.stat().st_mtime, new_config)
 		except Exception as write_error:
 			logger.error(f'Failed to write fresh config: {write_error}')
 		return new_config
@@ -344,31 +408,45 @@ def load_and_migrate_config(config_path: Path) -> DBStyleConfigJSON:
 class Config:
 	"""Backward-compatible configuration class that merges all config sources.
 
-	Re-reads environment variables on every access to maintain compatibility.
+	Optimized with caching for frequently accessed attributes.
 	"""
+	
+	__slots__ = ('_dirs_created', '_old_config', '_env_config')
 
 	def __init__(self):
 		# Cache for directory creation tracking only
 		self._dirs_created = False
+		# Lazy-initialized config instances
+		self._old_config: OldConfig | None = None
+		self._env_config: FlatEnvConfig | None = None
+
+	def _get_old_config(self) -> OldConfig:
+		"""Get or create OldConfig instance."""
+		if self._old_config is None:
+			self._old_config = OldConfig()
+		return self._old_config
+
+	def _get_env_config(self) -> FlatEnvConfig:
+		"""Get or create FlatEnvConfig instance."""
+		if self._env_config is None:
+			self._env_config = FlatEnvConfig()
+		return self._env_config
 
 	def __getattr__(self, name: str) -> Any:
-		"""Dynamically proxy all attributes to fresh instances.
-
-		This ensures env vars are re-read on every access.
-		"""
+		"""Dynamically proxy all attributes to cached instances."""
 		# Special handling for internal attributes
 		if name.startswith('_'):
 			raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{name}'")
 
-		# Create fresh instances on every access
-		old_config = OldConfig()
+		# Use cached old config instance
+		old_config = self._get_old_config()
 
 		# Always use old config for all attributes (it handles env vars with proper transformations)
 		if hasattr(old_config, name):
 			return getattr(old_config, name)
 
 		# For new MCP-specific attributes not in old config
-		env_config = FlatEnvConfig()
+		env_config = self._get_env_config()
 		if hasattr(env_config, name):
 			return getattr(env_config, name)
 
@@ -388,7 +466,7 @@ class Config:
 
 	def _get_config_path(self) -> Path:
 		"""Get config path from fresh env config."""
-		env_config = FlatEnvConfig()
+		env_config = self._get_env_config()
 		if env_config.OPENBROWSER_CONFIG_PATH:
 			return Path(env_config.OPENBROWSER_CONFIG_PATH).expanduser()
 		elif env_config.OPENBROWSER_CONFIG_DIR:
@@ -449,8 +527,8 @@ class Config:
 			'agent': self._get_default_agent(),
 		}
 
-		# Fresh env config for overrides
-		env_config = FlatEnvConfig()
+		# Use cached env config for overrides
+		env_config = self._get_env_config()
 
 		# Apply MCP-specific env var overrides
 		if env_config.OPENBROWSER_HEADLESS is not None:
