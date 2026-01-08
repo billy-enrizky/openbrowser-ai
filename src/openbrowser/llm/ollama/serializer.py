@@ -1,186 +1,143 @@
-"""Ollama message serializer.
-
-Ollama uses OpenAI-compatible API format.
-"""
-
+import base64
 import json
-import logging
-from typing import Any, TypeVar
+from typing import Any, overload
 
-from pydantic import BaseModel
+from ollama._types import Image, Message
 
-from openbrowser.agent.views import (
-    AssistantMessage,
-    BaseMessage,
-    ContentPartImageParam,
-    ContentPartTextParam,
-    SystemMessage,
-    UserMessage,
+from openbrowser.llm.messages import (
+	AssistantMessage,
+	BaseMessage,
+	SystemMessage,
+	ToolCall,
+	UserMessage,
 )
-from openbrowser.llm.serializer import BaseMessageSerializer
-
-logger = logging.getLogger(__name__)
-
-T = TypeVar('T', bound=BaseModel)
 
 
-class OllamaMessageSerializer(BaseMessageSerializer):
-    """Serializer for converting messages to Ollama format.
-    
-    Ollama supports both its native format and OpenAI-compatible format.
-    This serializer uses the native Ollama format for better compatibility.
-    """
+class OllamaMessageSerializer:
+	"""Serializer for converting between custom message types and Ollama message types."""
 
-    def serialize(self, message: BaseMessage) -> dict[str, Any]:
-        """Serialize a message to Ollama format."""
-        if isinstance(message, UserMessage):
-            result = {
-                'role': 'user',
-                'content': self._get_text_content(message.content),
-            }
-            # Add images if present
-            images = self._extract_images(message.content)
-            if images:
-                result['images'] = images
-            return result
+	@staticmethod
+	def _extract_text_content(content: Any) -> str:
+		"""Extract text content from message content, ignoring images."""
+		if content is None:
+			return ''
+		if isinstance(content, str):
+			return content
 
-        elif isinstance(message, SystemMessage):
-            return {
-                'role': 'system',
-                'content': self._get_text_content(message.content),
-            }
+		text_parts: list[str] = []
+		for part in content:
+			if hasattr(part, 'type'):
+				if part.type == 'text':
+					text_parts.append(part.text)
+				elif part.type == 'refusal':
+					text_parts.append(f'[Refusal] {part.refusal}')
+			# Skip image parts as they're handled separately
 
-        elif isinstance(message, AssistantMessage):
-            result = {'role': 'assistant'}
-            
-            if message.content is not None:
-                result['content'] = self._get_text_content(message.content)
-            
-            if message.tool_calls:
-                result['tool_calls'] = [
-                    {
-                        'function': {
-                            'name': tc.function.name,
-                            'arguments': json.loads(tc.function.arguments) if tc.function.arguments else {},
-                        }
-                    }
-                    for tc in message.tool_calls
-                ]
-            
-            return result
+		return '\n'.join(text_parts)
 
-        else:
-            raise ValueError(f'Unknown message type: {type(message)}')
+	@staticmethod
+	def _extract_images(content: Any) -> list[Image]:
+		"""Extract images from message content."""
+		if content is None or isinstance(content, str):
+			return []
 
-    def _get_text_content(
-        self,
-        content: str | list[ContentPartTextParam | ContentPartImageParam] | None,
-    ) -> str:
-        """Extract text from content."""
-        if content is None:
-            return ''
-        if isinstance(content, str):
-            return content
-        
-        texts = []
-        for part in content:
-            if hasattr(part, 'type') and part.type == 'text':
-                texts.append(part.text)
-        return '\n'.join(texts)
+		images: list[Image] = []
+		for part in content:
+			if hasattr(part, 'type') and part.type == 'image_url':
+				url = part.image_url.url
+				if url.startswith('data:'):
+					# Handle base64 encoded images
+					# Format: data:image/jpeg;base64,<data>
+					_, data = url.split(',', 1)
+					# Decode base64 to bytes
+					image_bytes = base64.b64decode(data)
+					images.append(Image(value=image_bytes))
+				else:
+					# Handle URL images (Ollama will download them)
+					images.append(Image(value=url))
 
-    def _extract_images(
-        self,
-        content: str | list[ContentPartTextParam | ContentPartImageParam],
-    ) -> list[str]:
-        """Extract base64 images from content."""
-        if isinstance(content, str):
-            return []
-        
-        images = []
-        for part in content:
-            if hasattr(part, 'type') and part.type == 'image_url':
-                url = part.image_url.url
-                # Ollama expects raw base64 without data URL prefix
-                if url.startswith('data:'):
-                    if ',' in url:
-                        images.append(url.split(',', 1)[1])
-                else:
-                    images.append(url)
-        return images
+		return images
 
-    def serialize_tool_schema(self, output_format: type[T]) -> dict[str, Any]:
-        """Serialize a Pydantic model to Ollama tool format."""
-        schema = output_format.model_json_schema()
-        
-        # Remove $defs and resolve references
-        if '$defs' in schema:
-            defs = schema.pop('$defs')
-            schema = self._resolve_refs(schema, defs)
-        
-        return {
-            "type": "function",
-            "function": {
-                "name": output_format.__name__,
-                "description": output_format.__doc__ or f"Generate {output_format.__name__}",
-                "parameters": schema,
-            }
-        }
+	@staticmethod
+	def _serialize_tool_calls(tool_calls: list[ToolCall]) -> list[Message.ToolCall]:
+		"""Convert openbrowser ToolCalls to Ollama ToolCalls."""
+		ollama_tool_calls: list[Message.ToolCall] = []
 
-    def _resolve_refs(self, obj: Any, defs: dict) -> Any:
-        """Recursively resolve $ref references in schema."""
-        if isinstance(obj, dict):
-            if '$ref' in obj:
-                ref_path = obj['$ref'].split('/')[-1]
-                if ref_path in defs:
-                    return self._resolve_refs(defs[ref_path], defs)
-            return {k: self._resolve_refs(v, defs) for k, v in obj.items()}
-        elif isinstance(obj, list):
-            return [self._resolve_refs(item, defs) for item in obj]
-        return obj
+		for tool_call in tool_calls:
+			# Parse arguments from JSON string to dict for Ollama
+			try:
+				arguments_dict = json.loads(tool_call.function.arguments)
+			except json.JSONDecodeError:
+				# If parsing fails, wrap in a dict
+				arguments_dict = {'arguments': tool_call.function.arguments}
 
-    def get_format_schema(self, output_format: type[T]) -> dict[str, Any]:
-        """Get the format parameter for Ollama structured output.
-        
-        Ollama supports a 'format' parameter for JSON output.
-        """
-        schema = output_format.model_json_schema()
-        
-        if '$defs' in schema:
-            defs = schema.pop('$defs')
-            schema = self._resolve_refs(schema, defs)
-        
-        return schema
+			ollama_tool_call = Message.ToolCall(
+				function=Message.ToolCall.Function(name=tool_call.function.name, arguments=arguments_dict)
+			)
+			ollama_tool_calls.append(ollama_tool_call)
 
-    def parse_tool_call_response(
-        self,
-        response: dict[str, Any],
-        output_format: type[T],
-    ) -> T:
-        """Parse an Ollama response into a Pydantic model."""
-        message = response.get('message', {})
-        tool_calls = message.get('tool_calls', [])
+		return ollama_tool_calls
 
-        if tool_calls:
-            args = tool_calls[0].get('function', {}).get('arguments', {})
-            return output_format.model_validate(args)
+	# region - Serialize overloads
+	@overload
+	@staticmethod
+	def serialize(message: UserMessage) -> Message: ...
 
-        # Try to parse content as JSON
-        content = message.get('content', '')
-        if content:
-            try:
-                data = json.loads(content)
-                return output_format.model_validate(data)
-            except json.JSONDecodeError:
-                pass
+	@overload
+	@staticmethod
+	def serialize(message: SystemMessage) -> Message: ...
 
-        raise ValueError("No tool calls or valid JSON in response")
+	@overload
+	@staticmethod
+	def serialize(message: AssistantMessage) -> Message: ...
 
-    def parse_content_response(self, response: dict[str, Any]) -> str:
-        """Parse plain text content from Ollama response."""
-        message = response.get('message', {})
-        return message.get('content', '')
+	@staticmethod
+	def serialize(message: BaseMessage) -> Message:
+		"""Serialize a custom message to an Ollama Message."""
 
+		if isinstance(message, UserMessage):
+			text_content = OllamaMessageSerializer._extract_text_content(message.content)
+			images = OllamaMessageSerializer._extract_images(message.content)
 
-# Singleton instance
-ollama_serializer = OllamaMessageSerializer()
+			ollama_message = Message(
+				role='user',
+				content=text_content if text_content else None,
+			)
 
+			if images:
+				ollama_message.images = images
+
+			return ollama_message
+
+		elif isinstance(message, SystemMessage):
+			text_content = OllamaMessageSerializer._extract_text_content(message.content)
+
+			return Message(
+				role='system',
+				content=text_content if text_content else None,
+			)
+
+		elif isinstance(message, AssistantMessage):
+			# Handle content
+			text_content = None
+			if message.content is not None:
+				text_content = OllamaMessageSerializer._extract_text_content(message.content)
+
+			ollama_message = Message(
+				role='assistant',
+				content=text_content if text_content else None,
+			)
+
+			# Handle tool calls
+			if message.tool_calls:
+				ollama_message.tool_calls = OllamaMessageSerializer._serialize_tool_calls(message.tool_calls)
+
+			return ollama_message
+
+		else:
+			raise ValueError(f'Unknown message type: {type(message)}')
+
+	@staticmethod
+	def serialize_messages(messages: list[BaseMessage]) -> list[Message]:
+		"""Serialize a list of openbrowser messages to Ollama Messages."""
+		return [OllamaMessageSerializer.serialize(m) for m in messages]
