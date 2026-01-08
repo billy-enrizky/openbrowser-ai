@@ -13,7 +13,7 @@ from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
 
 INVALID_FILENAME_ERROR_MESSAGE = 'Error: Invalid filename format. Must be alphanumeric with supported extension.'
-DEFAULT_FILE_SYSTEM_PATH = 'browseruse_agent_data'
+DEFAULT_FILE_SYSTEM_PATH = 'openbrowser_agent_data'
 
 
 class FileSystemError(Exception):

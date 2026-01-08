@@ -1,5 +1,5 @@
 """
-This implementation is based on the OpenAI types, while removing all the parts that are not needed for Browser Use.
+This implementation is based on the OpenAI types, while removing all the parts that are not needed for OpenBrowser.
 """
 
 # region - Content parts

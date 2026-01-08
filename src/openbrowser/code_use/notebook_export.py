@@ -67,7 +67,7 @@ globals().update(namespace)
 # Type hints for better IDE support (these are now available globally)
 # navigate, click, input, evaluate, search, extract, scroll, done, etc.
 
-print("Browser-use environment initialized!")
+	print("OpenBrowser environment initialized!")
 print("Available functions: navigate, click, input, evaluate, search, extract, done, etc.")"""
 
 	setup_cell = {

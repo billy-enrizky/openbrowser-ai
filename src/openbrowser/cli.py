@@ -407,8 +407,8 @@ class RichLogHandler(logging.Handler):
 			self.handleError(record)
 
 
-class BrowserUseApp(App):
-	"""Browser-use TUI application."""
+class OpenBrowserApp(App):
+	"""OpenBrowser TUI application."""
 
 	# Make it an inline app instead of fullscreen
 	# MODES = {"light"}  # Ensure app is inline, not fullscreen
@@ -625,7 +625,7 @@ class BrowserUseApp(App):
 		log_handler = RichLogHandler(rich_log)
 		log_type = os.getenv('OPENBROWSER_LOGGING_LEVEL', 'result').lower()
 
-		class BrowserUseFormatter(logging.Formatter):
+		class OpenBrowserFormatter(logging.Formatter):
 			def format(self, record):
 				# if isinstance(record.name, str) and record.name.startswith('openbrowser.'):
 				# 	record.name = record.name.split('.')[-2]
@@ -634,9 +634,9 @@ class BrowserUseApp(App):
 		# Set up the formatter based on log type
 		if log_type == 'result':
 			log_handler.setLevel('RESULT')
-			log_handler.setFormatter(BrowserUseFormatter('%(message)s'))
+			log_handler.setFormatter(OpenBrowserFormatter('%(message)s'))
 		else:
-			log_handler.setFormatter(BrowserUseFormatter('%(levelname)-8s [%(name)s] %(message)s'))
+			log_handler.setFormatter(OpenBrowserFormatter('%(levelname)-8s [%(name)s] %(message)s'))
 
 		# Configure root logger - Replace ALL handlers, not just stdout handlers
 		root = logging.getLogger()
@@ -1688,9 +1688,9 @@ async def textual_interface(config: dict[str, Any]):
 		logger.error(f'Error getting LLM: {str(e)}', exc_info=True)
 		raise RuntimeError(f'Failed to initialize LLM: {str(e)}')
 
-	logger.debug('Initializing BrowserUseApp instance...')
+	logger.debug('Initializing OpenBrowserApp instance...')
 	try:
-		app = BrowserUseApp(config)
+		app = OpenBrowserApp(config)
 		# Pass the initialized components to the app
 		app.browser_session = browser_session
 		app.controller = controller
@@ -1728,7 +1728,7 @@ async def run_auth_command():
 
 	from openbrowser.sync.auth import DeviceAuthClient
 
-	print('🔐 Browser Use Cloud Authentication')
+	print('OpenBrowser Cloud Authentication')
 	print('=' * 40)
 
 	# Ensure cloud sync is enabled (should be default, but make sure)
@@ -1915,7 +1915,7 @@ async def run_auth_command():
 				],
 				next_goal='Star openbrowser-ai GitHub repository to join the community',
 				evaluation_previous_goal='Authentication completed successfully',
-				memory='User authenticated with Browser Use Cloud and is now part of the community',
+				memory='User authenticated with OpenBrowser Cloud and is now part of the community',
 				screenshot_url=None,
 				url='https://github.com/billy-enrizky/openbrowser-ai',
 			)
@@ -1930,7 +1930,7 @@ async def run_auth_command():
 				id=task_id,
 				user_id=auth_client.temp_user_id,  # Use same temp user_id as task for consistency
 				device_id=auth_client.device_id,  # Use consistent device_id
-				done_output="🎉 Welcome to Browser Use! You're now authenticated and part of our community. ⭐ Your future tasks will sync to the cloud automatically.",
+				done_output="Welcome to OpenBrowser! You're now authenticated and part of our community. Your future tasks will sync to the cloud automatically.",
 				user_feedback_type=None,
 				user_comment=None,
 				gif_url=None,
@@ -2004,7 +2004,7 @@ async def run_auth_command():
 @click.option('--mcp', is_flag=True, help='Run as MCP server (exposes JSON RPC via stdin/stdout)')
 @click.pass_context
 def main(ctx: click.Context, debug: bool = False, **kwargs):
-	"""Browser Use - AI Agent for Web Automation
+	"""OpenBrowser - AI Agent for Web Automation
 
 	Run without arguments to start the interactive TUI.
 
@@ -2071,7 +2071,7 @@ def run_main_interface(ctx: click.Context, debug: bool = False, **kwargs):
 	root_logger.addHandler(console_handler)
 
 	logger = logging.getLogger('openbrowser.startup')
-	logger.info('Starting Browser-Use initialization')
+	logger.info('Starting OpenBrowser initialization')
 	if debug:
 		logger.debug(f'System info: Python {sys.version.split()[0]}, Platform: {sys.platform}')
 
@@ -2131,8 +2131,8 @@ def run_main_interface(ctx: click.Context, debug: bool = False, **kwargs):
 			root_logger.removeHandler(handler)
 		root_logger.addHandler(console_handler)
 
-		logger.error(f'Error initializing Browser-Use: {str(e)}', exc_info=debug)
-		print(f'\nError launching Browser-Use: {str(e)}')
+		logger.error(f'Error initializing OpenBrowser: {str(e)}', exc_info=debug)
+		print(f'\nError launching OpenBrowser: {str(e)}')
 		if debug:
 			import traceback
 
@@ -2142,7 +2142,7 @@ def run_main_interface(ctx: click.Context, debug: bool = False, **kwargs):
 
 @main.command()
 def auth():
-	"""Authenticate with Browser Use Cloud to sync your runs"""
+	"""Authenticate with OpenBrowser Cloud to sync your runs"""
 	asyncio.run(run_auth_command())
 
 

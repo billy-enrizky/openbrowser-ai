@@ -1,4 +1,4 @@
-# DXT ignore file for browser-use
+# DXT ignore file for openbrowser
 
 # Development and testing
 tests/
@@ -86,8 +86,8 @@ Makefile
 .venv/lib/python3.*/lib-dynload/
 .venv/include/
 
-# Keep browser-use executable
-# .venv/bin/browser-use  # KEEP THIS
+# Keep openbrowser executable
+# .venv/bin/openbrowser  # KEEP THIS
 
 # Exclude activation scripts and package managers  
 .venv/bin/activate*

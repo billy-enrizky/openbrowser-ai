@@ -1,4 +1,4 @@
-"""Cloud sync module for Browser Use."""
+"""Cloud sync module for OpenBrowser."""
 
 from openbrowser.sync.auth import CloudAuthConfig, DeviceAuthClient
 from openbrowser.sync.service import CloudSync

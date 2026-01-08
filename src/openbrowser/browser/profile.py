@@ -277,7 +277,7 @@ class BrowserChannel(str, Enum):
 
 
 # Using constants from central location in openbrowser.config
-BROWSERUSE_DEFAULT_CHANNEL = BrowserChannel.CHROMIUM
+OPENBROWSER_DEFAULT_CHANNEL = BrowserChannel.CHROMIUM
 
 
 # ===== Type definitions with validators =====
@@ -552,7 +552,7 @@ class BrowserProfile(BrowserConnectArgs, BrowserLaunchPersistentContextArgs, Bro
 	is_local: bool = Field(default=False, description='Whether this is a local browser instance')
 	use_cloud: bool = Field(
 		default=False,
-		description='Use Browser-Use cloud browser service instead of local browser',
+		description='Use cloud browser service instead of local browser',
 	)
 
 	@property
@@ -669,7 +669,7 @@ class BrowserProfile(BrowserConnectArgs, BrowserLaunchPersistentContextArgs, Bro
 	# 	default_factory=list, description='List of Chrome extension IDs to preinstall.'
 	# )
 	# extensions_dir: Path = Field(
-	# 	default_factory=lambda: Path('~/.config/browseruse/cache/extensions').expanduser(),
+	# 	default_factory=lambda: Path('~/.config/openbrowser/cache/extensions').expanduser(),
 	# 	description='Directory containing .crx extension files.',
 	# )
 
@@ -733,7 +733,7 @@ class BrowserProfile(BrowserConnectArgs, BrowserLaunchPersistentContextArgs, Bro
 		to avoid corrupting the default data dir created with a different channel.
 		"""
 
-		is_not_using_default_chromium = self.executable_path or self.channel not in (BROWSERUSE_DEFAULT_CHANNEL, None)
+		is_not_using_default_chromium = self.executable_path or self.channel not in (OPENBROWSER_DEFAULT_CHANNEL, None)
 		if self.user_data_dir == CONFIG.OPENBROWSER_DEFAULT_USER_DATA_DIR and is_not_using_default_chromium:
 			alternate_name = (
 				Path(self.executable_path).name.lower().replace(' ', '-')
@@ -743,7 +743,7 @@ class BrowserProfile(BrowserConnectArgs, BrowserLaunchPersistentContextArgs, Bro
 				else 'None'
 			)
 			logger.warning(
-				f'⚠️ {self} Changing user_data_dir= {_log_pretty_path(self.user_data_dir)} ➡️ .../default-{alternate_name} to avoid {alternate_name.upper()} corruping default profile created by {BROWSERUSE_DEFAULT_CHANNEL.name}'
+				f'{self} Changing user_data_dir= {_log_pretty_path(self.user_data_dir)} -> .../default-{alternate_name} to avoid {alternate_name.upper()} corruping default profile created by {OPENBROWSER_DEFAULT_CHANNEL.name}'
 			)
 			self.user_data_dir = CONFIG.OPENBROWSER_DEFAULT_USER_DATA_DIR.parent / f'default-{alternate_name}'
 		return self

@@ -1993,20 +1993,20 @@ class BrowserSession(BaseModel):
 			# Remove highlights via JavaScript - be thorough
 			script = """
 			(function() {
-				// Remove all browser-use highlight elements
-				const highlights = document.querySelectorAll('[data-browser-use-highlight]');
-				console.log('Removing', highlights.length, 'browser-use highlight elements');
+				// Remove all openbrowser highlight elements
+				const highlights = document.querySelectorAll('[data-openbrowser-highlight]');
+				console.log('Removing', highlights.length, 'openbrowser highlight elements');
 				highlights.forEach(el => el.remove());
 
 				// Also remove by ID in case selector missed anything
-				const highlightContainer = document.getElementById('browser-use-debug-highlights');
+				const highlightContainer = document.getElementById('openbrowser-debug-highlights');
 				if (highlightContainer) {
 					console.log('Removing highlight container by ID');
 					highlightContainer.remove();
 				}
 
 				// Final cleanup - remove any orphaned tooltips
-				const orphanedTooltips = document.querySelectorAll('[data-browser-use-highlight="tooltip"]');
+				const orphanedTooltips = document.querySelectorAll('[data-openbrowser-highlight="tooltip"]');
 				orphanedTooltips.forEach(el => el.remove());
 
 				return { removed: highlights.length };
@@ -2191,7 +2191,7 @@ class BrowserSession(BaseModel):
 
 				// Create container for all corners
 				const container = document.createElement('div');
-				container.setAttribute('data-browser-use-interaction-highlight', 'true');
+				container.setAttribute('data-openbrowser-interaction-highlight', 'true');
 				container.style.cssText = `
 					position: absolute;
 					left: ${{rect.x + scrollX}}px;
@@ -2339,18 +2339,18 @@ class BrowserSession(BaseModel):
 				// Interactive elements data
 				const interactiveElements = {json.dumps(elements_data)};
 
-				console.log('=== BROWSER-USE HIGHLIGHTING ===');
+				console.log('=== OPENBROWSER HIGHLIGHTING ===');
 				console.log('Highlighting', interactiveElements.length, 'interactive elements');
 
 				// Double-check: Remove any existing highlight container first
-				const existingContainer = document.getElementById('browser-use-debug-highlights');
+				const existingContainer = document.getElementById('openbrowser-debug-highlights');
 				if (existingContainer) {{
 					console.log('⚠️ Found existing highlight container, removing it first');
 					existingContainer.remove();
 				}}
 
 				// Also remove any stray highlight elements
-				const strayHighlights = document.querySelectorAll('[data-browser-use-highlight]');
+				const strayHighlights = document.querySelectorAll('[data-openbrowser-highlight]');
 				if (strayHighlights.length > 0) {{
 					console.log('⚠️ Found', strayHighlights.length, 'stray highlight elements, removing them');
 					strayHighlights.forEach(el => el.remove());
@@ -2361,8 +2361,8 @@ class BrowserSession(BaseModel):
 
 				// Create container for all highlights - use FIXED positioning (key insight from v0.6.0)
 				const container = document.createElement('div');
-				container.id = 'browser-use-debug-highlights';
-				container.setAttribute('data-browser-use-highlight', 'container');
+				container.id = 'openbrowser-debug-highlights';
+				container.setAttribute('data-openbrowser-highlight', 'container');
 
 				container.style.cssText = `
 					position: absolute;
@@ -2393,7 +2393,7 @@ class BrowserSession(BaseModel):
 				// Add highlights for each element
 				interactiveElements.forEach((element, index) => {{
 					const highlight = document.createElement('div');
-					highlight.setAttribute('data-browser-use-highlight', 'element');
+					highlight.setAttribute('data-openbrowser-highlight', 'element');
 					highlight.setAttribute('data-element-id', element.backend_node_id);
 					highlight.style.cssText = `
 						position: absolute;

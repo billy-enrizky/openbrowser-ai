@@ -124,7 +124,7 @@ class OldConfig:
 		if config_dir_env:
 			path = Path(config_dir_env).expanduser().resolve()
 		else:
-			path = self.XDG_CONFIG_HOME / 'browseruse'
+			path = self.XDG_CONFIG_HOME / 'openbrowser'
 		self._ensure_dirs()
 		return path
 
@@ -155,7 +155,7 @@ class OldConfig:
 			if config_dir_env:
 				config_dir = Path(config_dir_env).expanduser().resolve()
 			else:
-				config_dir = self.XDG_CONFIG_HOME / 'browseruse'
+				config_dir = self.XDG_CONFIG_HOME / 'openbrowser'
 			config_dir.mkdir(parents=True, exist_ok=True)
 			(config_dir / 'profiles').mkdir(parents=True, exist_ok=True)
 			(config_dir / 'extensions').mkdir(parents=True, exist_ok=True)
@@ -473,7 +473,7 @@ class Config:
 			return Path(env_config.OPENBROWSER_CONFIG_DIR).expanduser() / 'config.json'
 		else:
 			xdg_config = Path(env_config.XDG_CONFIG_HOME).expanduser()
-			return xdg_config / 'browseruse' / 'config.json'
+			return xdg_config / 'openbrowser' / 'config.json'
 
 	def _get_db_config(self) -> DBStyleConfigJSON:
 		"""Load and migrate config.json."""

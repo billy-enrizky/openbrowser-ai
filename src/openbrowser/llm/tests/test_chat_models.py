@@ -262,7 +262,7 @@ class TestChatModels:
 		"""Provides an initialized ChatOCIRaw client for tests."""
 		# Skip if OCI models not available
 		if not OCI_MODELS_AVAILABLE:
-			pytest.skip('OCI models not available - install with pip install "browser-use[oci]"')
+			pytest.skip('OCI models not available - install with pip install "openbrowser-ai[oci]"')
 
 		# Skip if OCI credentials not available - check for config file existence
 		try:

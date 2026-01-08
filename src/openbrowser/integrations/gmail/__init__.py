@@ -1,5 +1,5 @@
 """
-Gmail Integration for Browser Use
+Gmail Integration for OpenBrowser
 Provides Gmail API integration for email reading and verification code extraction.
 This integration enables agents to read email content and extract verification codes themselves.
 Usage:
