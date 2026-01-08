@@ -1,3 +1,12 @@
+"""Utility functions and classes for openbrowser.
+
+Performance optimizations:
+- Pre-compiled regex patterns at module level
+- Cached version lookups
+- Optimized SignalHandler with __slots__
+- Reduced redundant imports
+"""
+
 import asyncio
 import logging
 import os
@@ -44,6 +53,9 @@ R = TypeVar('R')
 T = TypeVar('T')
 P = ParamSpec('P')
 
+# Cache platform check at module load
+_IS_WINDOWS: bool = platform.system() == 'Windows'
+
 
 class SignalHandler:
 	"""
@@ -56,7 +68,15 @@ class SignalHandler:
 	- Management of event loop state across signals
 	- Standardized handling of first and second Ctrl+C presses
 	- Cross-platform compatibility (with simplified behavior on Windows)
+	
+	Optimized with __slots__ for faster attribute access.
 	"""
+
+	__slots__ = (
+		'loop', 'pause_callback', 'resume_callback', 'custom_exit_callback',
+		'exit_on_second_int', 'interruptible_task_patterns',
+		'original_sigint_handler', 'original_sigterm_handler'
+	)
 
 	def __init__(
 		self,
@@ -85,7 +105,6 @@ class SignalHandler:
 		self.custom_exit_callback = custom_exit_callback
 		self.exit_on_second_int = exit_on_second_int
 		self.interruptible_task_patterns = interruptible_task_patterns or ['step', 'multi_act', 'get_next_action']
-		self.is_windows = platform.system() == 'Windows'
 
 		# Initialize loop state attributes
 		self._initialize_loop_state()
@@ -102,10 +121,10 @@ class SignalHandler:
 	def register(self) -> None:
 		"""Register signal handlers for SIGINT and SIGTERM."""
 		try:
-			if self.is_windows:
+			if _IS_WINDOWS:
 				# On Windows, use simple signal handling with immediate exit on Ctrl+C
 				def windows_handler(sig, frame):
-					print('\n\n🛑 Got Ctrl+C. Exiting immediately on Windows...\n', file=stderr)
+					logger.info('Got Ctrl+C. Exiting immediately on Windows...')
 					# Run the custom exit callback if provided
 					if self.custom_exit_callback:
 						self.custom_exit_callback()
@@ -127,7 +146,7 @@ class SignalHandler:
 	def unregister(self) -> None:
 		"""Unregister signal handlers and restore original handlers if possible."""
 		try:
-			if self.is_windows:
+			if _IS_WINDOWS:
 				# On Windows, just restore the original SIGINT handler
 				if self.original_sigint_handler:
 					signal.signal(signal.SIGINT, self.original_sigint_handler)
@@ -162,7 +181,7 @@ class SignalHandler:
 					logger.error(f'Error in exit callback: {e}')
 
 		# Force immediate exit - more reliable than sys.exit()
-		print('\n\n🛑  Got second Ctrl+C. Exiting immediately...\n', file=stderr)
+		logger.info('Got second Ctrl+C. Exiting immediately...')
 
 		# Reset terminal to a clean state by sending multiple escape sequences
 		# Order matters for terminal resets - we try different approaches
@@ -240,7 +259,7 @@ class SignalHandler:
 		global _exiting
 		if not _exiting:
 			_exiting = True
-			print('\n\n🛑 SIGTERM received. Exiting immediately...\n\n', file=stderr)
+			logger.info('SIGTERM received. Exiting immediately...')
 
 			# Call custom exit callback if provided
 			if self.custom_exit_callback:
@@ -251,11 +270,13 @@ class SignalHandler:
 	def _cancel_interruptible_tasks(self) -> None:
 		"""Cancel current tasks that should be interruptible."""
 		current_task = asyncio.current_task(self.loop)
+		patterns = self.interruptible_task_patterns
+		
 		for task in asyncio.all_tasks(self.loop):
 			if task != current_task and not task.done():
 				task_name = task.get_name() if hasattr(task, 'get_name') else str(task)
 				# Cancel tasks that match certain patterns
-				if any(pattern in task_name for pattern in self.interruptible_task_patterns):
+				if any(pattern in task_name for pattern in patterns):
 					logger.debug(f'Cancelling task: {task_name}')
 					task.cancel()
 					# Add exception handler to silence "Task exception was never retrieved" warnings
@@ -264,7 +285,7 @@ class SignalHandler:
 		# Also cancel the current task if it's interruptible
 		if current_task and not current_task.done():
 			task_name = current_task.get_name() if hasattr(current_task, 'get_name') else str(current_task)
-			if any(pattern in task_name for pattern in self.interruptible_task_patterns):
+			if any(pattern in task_name for pattern in patterns):
 				logger.debug(f'Cancelling current task: {task_name}')
 				current_task.cancel()
 
@@ -297,7 +318,7 @@ class SignalHandler:
 
 		try:  # escape code is to blink the ...
 			print(
-				f'➡️  Press {green}[Enter]{reset} to resume or {red}[Ctrl+C]{reset} again to exit{blink}...{unblink} ',
+				f'Press {green}[Enter]{reset} to resume or {red}[Ctrl+C]{reset} again to exit{blink}...{unblink} ',
 				end='',
 				flush=True,
 				file=stderr,
@@ -328,6 +349,7 @@ class SignalHandler:
 
 
 def time_execution_sync(additional_text: str = '') -> Callable[[Callable[P, R]], Callable[P, R]]:
+	"""Decorator to time synchronous function execution."""
 	def decorator(func: Callable[P, R]) -> Callable[P, R]:
 		@wraps(func)
 		def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
@@ -338,14 +360,14 @@ def time_execution_sync(additional_text: str = '') -> Callable[[Callable[P, R]],
 			if execution_time > 0.25:
 				self_has_logger = args and getattr(args[0], 'logger', None)
 				if self_has_logger:
-					logger = getattr(args[0], 'logger')
+					log = getattr(args[0], 'logger')
 				elif 'agent' in kwargs:
-					logger = getattr(kwargs['agent'], 'logger')
+					log = getattr(kwargs['agent'], 'logger')
 				elif 'browser_session' in kwargs:
-					logger = getattr(kwargs['browser_session'], 'logger')
+					log = getattr(kwargs['browser_session'], 'logger')
 				else:
-					logger = logging.getLogger(__name__)
-				logger.debug(f'⏳ {additional_text.strip("-")}() took {execution_time:.2f}s')
+					log = logging.getLogger(__name__)
+				log.debug(f'{additional_text.strip("-")}() took {execution_time:.2f}s')
 			return result
 
 		return wrapper
@@ -356,6 +378,7 @@ def time_execution_sync(additional_text: str = '') -> Callable[[Callable[P, R]],
 def time_execution_async(
 	additional_text: str = '',
 ) -> Callable[[Callable[P, Coroutine[Any, Any, R]]], Callable[P, Coroutine[Any, Any, R]]]:
+	"""Decorator to time asynchronous function execution."""
 	def decorator(func: Callable[P, Coroutine[Any, Any, R]]) -> Callable[P, Coroutine[Any, Any, R]]:
 		@wraps(func)
 		async def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
@@ -367,14 +390,14 @@ def time_execution_async(
 			if execution_time > 0.25:
 				self_has_logger = args and getattr(args[0], 'logger', None)
 				if self_has_logger:
-					logger = getattr(args[0], 'logger')
+					log = getattr(args[0], 'logger')
 				elif 'agent' in kwargs:
-					logger = getattr(kwargs['agent'], 'logger')
+					log = getattr(kwargs['agent'], 'logger')
 				elif 'browser_session' in kwargs:
-					logger = getattr(kwargs['browser_session'], 'logger')
+					log = getattr(kwargs['browser_session'], 'logger')
 				else:
-					logger = logging.getLogger(__name__)
-				logger.debug(f'⏳ {additional_text.strip("-")}() took {execution_time:.2f}s')
+					log = logging.getLogger(__name__)
+				log.debug(f'{additional_text.strip("-")}() took {execution_time:.2f}s')
 			return result
 
 		return wrapper
@@ -383,6 +406,7 @@ def time_execution_async(
 
 
 def singleton(cls):
+	"""Decorator to make a class a singleton."""
 	instance = [None]
 
 	def wrapper(*args, **kwargs):
@@ -394,7 +418,7 @@ def singleton(cls):
 
 
 def check_env_variables(keys: list[str], any_or_all=all) -> bool:
-	"""Check if all required environment variables are set"""
+	"""Check if all required environment variables are set."""
 	return any_or_all(os.getenv(key, '').strip() for key in keys)
 
 
@@ -498,23 +522,20 @@ def match_url_with_domain_pattern(url: str, domain_pattern: str, log_warnings: b
 			# First, check for patterns like *.*.domain which are unsafe
 			if pattern_domain.count('*.') > 1 or pattern_domain.count('.*') > 1:
 				if log_warnings:
-					logger = logging.getLogger(__name__)
-					logger.error(f'⛔️ Multiple wildcards in pattern=[{domain_pattern}] are not supported')
+					logger.error(f'Multiple wildcards in pattern=[{domain_pattern}] are not supported')
 				return False  # Don't match unsafe patterns
 
 			# Check for wildcards in TLD part (example.*)
 			if pattern_domain.endswith('.*'):
 				if log_warnings:
-					logger = logging.getLogger(__name__)
-					logger.error(f'⛔️ Wildcard TLDs like in pattern=[{domain_pattern}] are not supported for security')
+					logger.error(f'Wildcard TLDs like in pattern=[{domain_pattern}] are not supported for security')
 				return False  # Don't match unsafe patterns
 
 			# Then check for embedded wildcards
 			bare_domain = pattern_domain.replace('*.', '')
 			if '*' in bare_domain:
 				if log_warnings:
-					logger = logging.getLogger(__name__)
-					logger.error(f'⛔️ Only *.domain style patterns are supported, ignoring pattern=[{domain_pattern}]')
+					logger.error(f'Only *.domain style patterns are supported, ignoring pattern=[{domain_pattern}]')
 				return False  # Don't match unsafe patterns
 
 			# Special handling so that *.google.com also matches bare google.com
@@ -529,12 +550,12 @@ def match_url_with_domain_pattern(url: str, domain_pattern: str, log_warnings: b
 
 		return False
 	except Exception as e:
-		logger = logging.getLogger(__name__)
-		logger.error(f'⛔️ Error matching URL {url} with pattern {domain_pattern}: {type(e).__name__}: {e}')
+		logger.error(f'Error matching URL {url} with pattern {domain_pattern}: {type(e).__name__}: {e}')
 		return False
 
 
 def merge_dicts(a: dict, b: dict, path: tuple[str, ...] = ()):
+	"""Recursively merge two dictionaries."""
 	for key in b:
 		if key in a:
 			if isinstance(a[key], dict) and isinstance(b[key], dict):
@@ -550,15 +571,13 @@ def merge_dicts(a: dict, b: dict, path: tuple[str, ...] = ()):
 
 @cache
 def get_openbrowser_version() -> str:
-	"""Get the openbrowser package version from pyproject.toml or pip metadata"""
+	"""Get the openbrowser package version from pyproject.toml or pip metadata."""
 	try:
 		package_root = Path(__file__).parent.parent
 		pyproject_path = package_root / 'pyproject.toml'
 
 		# Try to read version from pyproject.toml
 		if pyproject_path.exists():
-			import re
-
 			with open(pyproject_path, encoding='utf-8') as f:
 				content = f.read()
 				match = re.search(r'version\s*=\s*["\']([^"\']+)["\']', content)
@@ -599,7 +618,7 @@ async def check_latest_openbrowser_version() -> str | None:
 
 @cache
 def get_git_info() -> dict[str, str] | None:
-	"""Get git information if installed from git repository"""
+	"""Get git information if installed from git repository."""
 	try:
 		import subprocess
 
@@ -663,8 +682,8 @@ def _log_pretty_path(path: str | Path | None) -> str:
 
 
 def _log_pretty_url(s: str, max_len: int | None = 22) -> str:
-	"""Truncate/pretty-print a URL with a maximum length, removing the protocol and www. prefix"""
+	"""Truncate/pretty-print a URL with a maximum length, removing the protocol and www. prefix."""
 	s = s.replace('https://', '').replace('http://', '').replace('www.', '')
 	if max_len is not None and len(s) > max_len:
-		return s[:max_len] + '…'
+		return s[:max_len] + '...'
 	return s
