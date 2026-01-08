@@ -1,0 +1,729 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Progressive Multi-step Form</title>
+    <style>
+        :root {
+            --primary-color: #6366f1;
+            --primary-dark: #4f46e5;
+            --primary-light: #a5b4fc;
+            --error-color: #ef4444;
+            --success-color: #22c55e;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #f9fafb;
+            margin: 0;
+            padding: 20px;
+            color: #1f2937;
+            line-height: 1.5;
+        }
+        
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            padding: 25px;
+        }
+        
+        h1 {
+            color: var(--primary-color);
+            text-align: center;
+            margin-top: 0;
+            margin-bottom: 10px;
+            font-size: 28px;
+        }
+        
+        p {
+            text-align: center;
+            margin-bottom: 30px;
+            color: #6b7280;
+            font-size: 16px;
+        }
+        
+        .alert {
+            padding: 15px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+            display: none;
+            animation: fadeIn 0.3s;
+        }
+        
+        .alert-success {
+            background-color: #dcfce7;
+            border: 1px solid var(--success-color);
+            color: #166534;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        
+        /* Progress Bar */
+        .progress-container {
+            margin-bottom: 30px;
+        }
+        
+        .progress-bar {
+            display: flex;
+            position: relative;
+            justify-content: space-between;
+            counter-reset: step;
+            z-index: 1;
+        }
+        
+        .progress-bar::before {
+            content: '';
+            position: absolute;
+            top: 15px;
+            left: 0;
+            width: 100%;
+            height: 2px;
+            background-color: #e5e7eb;
+            z-index: -1;
+        }
+        
+        .progress-step {
+            text-align: center;
+            position: relative;
+            width: 30px;
+            height: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: white;
+            border: 2px solid #e5e7eb;
+            border-radius: 50%;
+            font-weight: bold;
+            color: #9ca3af;
+            transition: all 0.3s;
+        }
+        
+        .progress-step.active {
+            background-color: var(--primary-color);
+            border-color: var(--primary-color);
+            color: white;
+        }
+        
+        .progress-step.completed {
+            background-color: var(--success-color);
+            border-color: var(--success-color);
+            color: white;
+        }
+        
+        .progress-step-text {
+            position: absolute;
+            top: 40px;
+            left: 50%;
+            transform: translateX(-50%);
+            white-space: nowrap;
+            color: #6b7280;
+            font-size: 14px;
+            font-weight: normal;
+        }
+        
+        /* Form Step Sections */
+        .form-step {
+            display: none;
+            animation: fadeIn 0.3s;
+        }
+        
+        .form-step.active {
+            display: block;
+        }
+        
+        .form-section {
+            margin-bottom: 25px;
+            padding: 20px;
+            background-color: #f9fafb;
+            border-radius: 8px;
+            border: 1px solid #e5e7eb;
+        }
+        
+        .form-section h2 {
+            margin-top: 0;
+            margin-bottom: 20px;
+            color: var(--primary-color);
+            font-size: 20px;
+            border-bottom: 1px solid #e5e7eb;
+            padding-bottom: 10px;
+        }
+        
+        .form-group {
+            margin-bottom: 20px;
+        }
+        
+        .form-label {
+            display: block;
+            margin-bottom: 6px;
+            font-weight: 500;
+            color: #374151;
+        }
+        
+        .form-label.required::after {
+            content: " *";
+            color: var(--error-color);
+        }
+        
+        .form-control {
+            display: block;
+            width: 100%;
+            padding: 10px 12px;
+            font-size: 16px;
+            line-height: 1.5;
+            color: #1f2937;
+            background-color: white;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            transition: border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
+            box-sizing: border-box;
+        }
+        
+        .form-control:focus {
+            outline: none;
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
+        }
+        
+        .form-control.is-invalid {
+            border-color: var(--error-color);
+        }
+        
+        .form-control.is-invalid:focus {
+            box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.2);
+        }
+        
+        .invalid-feedback {
+            display: none;
+            width: 100%;
+            margin-top: 5px;
+            font-size: 14px;
+            color: var(--error-color);
+        }
+        
+        .form-text {
+            margin-top: 5px;
+            font-size: 14px;
+            color: #6b7280;
+        }
+        
+        .form-check {
+            display: flex;
+            align-items: flex-start;
+            margin-bottom: 10px;
+        }
+        
+        .form-check-input {
+            margin-right: 10px;
+            margin-top: 4px;
+        }
+        
+        /* Form Buttons */
+        .form-buttons {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 30px;
+        }
+        
+        .btn {
+            display: inline-block;
+            font-weight: 500;
+            text-align: center;
+            white-space: nowrap;
+            vertical-align: middle;
+            user-select: none;
+            border: 1px solid transparent;
+            padding: 10px 15px;
+            font-size: 16px;
+            line-height: 1.5;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: color 0.15s ease-in-out, background-color 0.15s ease-in-out, border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
+        }
+        
+        .btn-primary {
+            color: white;
+            background-color: var(--primary-color);
+            border-color: var(--primary-color);
+        }
+        
+        .btn-primary:hover {
+            background-color: var(--primary-dark);
+            border-color: var(--primary-dark);
+        }
+        
+        .btn-secondary {
+            color: #1f2937;
+            background-color: white;
+            border-color: #d1d5db;
+        }
+        
+        .btn-secondary:hover {
+            background-color: #f3f4f6;
+            border-color: #9ca3af;
+        }
+        
+        .btn-danger {
+            color: white;
+            background-color: var(--error-color);
+            border-color: var(--error-color);
+        }
+        
+        .btn-danger:hover {
+            background-color: #dc2626;
+            border-color: #dc2626;
+        }
+        
+        /* Modal Styles */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .modal-content {
+            background-color: white;
+            border-radius: 10px;
+            max-width: 500px;
+            width: 100%;
+            padding: 0;
+            box-shadow: 0 10px 15px rgba(0, 0, 0, 0.1);
+            animation: slideIn 0.3s;
+        }
+        
+        @keyframes slideIn {
+            from { transform: translateY(-50px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+        
+        .modal-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 15px 20px;
+            border-bottom: 1px solid #e5e7eb;
+        }
+        
+        .modal-title {
+            font-size: 20px;
+            margin: 0;
+            color: #1f2937;
+        }
+        
+        .modal-close {
+            background: none;
+            border: none;
+            font-size: 24px;
+            font-weight: bold;
+            cursor: pointer;
+            color: #9ca3af;
+        }
+        
+        .modal-body {
+            padding: 20px;
+        }
+        
+        .modal-footer {
+            padding: 15px 20px;
+            border-top: 1px solid #e5e7eb;
+            display: flex;
+            justify-content: flex-end;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Progressive Multi-step Form</h1>
+        <p>This form reveals fields progressively based on previous answers, which can be challenging for autofill systems.</p>
+
+        <div class="alert alert-success" id="success-message">
+            <strong>Success!</strong> Form submitted successfully! The secret is: dumbledore
+        </div>
+
+        <div class="progress-container">
+            <div class="progress-bar">
+                <div class="progress-step active" id="step-1">
+                    1
+                    <span class="progress-step-text">Step 1</span>
+                </div>
+                <div class="progress-step" id="step-2">
+                    2
+                    <span class="progress-step-text">Step 2</span>
+                </div>
+                <div class="progress-step" id="step-3">
+                    3
+                    <span class="progress-step-text">Review</span>
+                </div>
+            </div>
+        </div>
+        
+        <form id="progressive-form">
+            <!-- Step 1: Basic Information -->
+            <div class="form-step active" id="step-1-content">
+                <div class="form-section">
+                    <h2>Basic Information</h2>
+
+                    <div class="form-group">
+                        <label for="email" class="form-label required">Email Address</label>
+                        <input type="email" id="email" name="email" class="form-control" required>
+                        <div class="invalid-feedback">Please enter a valid email address</div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="category" class="form-label required">Category</label>
+                        <select id="category" name="category" class="form-control" required>
+                            <option value="">Select a category</option>
+                            <option value="technology">Technology</option>
+                            <option value="healthcare">Healthcare</option>
+                            <option value="education">Education</option>
+                        </select>
+                        <div class="invalid-feedback">Please select a category</div>
+                    </div>
+                </div>
+
+                <div class="form-buttons">
+                    <div></div>
+                    <button type="button" class="btn btn-primary" id="step1-next">Next</button>
+                </div>
+            </div>
+            
+            <!-- Step 2: Additional Details -->
+            <div class="form-step" id="step-2-content">
+                <div class="form-section">
+                    <h2>Additional Details</h2>
+
+                    <div class="form-group">
+                        <label for="eventDate" class="form-label required">Event Date</label>
+                        <input type="date" id="eventDate" name="eventDate" class="form-control" required>
+                        <div class="invalid-feedback">Event date is required</div>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label required">Preference</label>
+                        <div class="form-check">
+                            <input type="radio" id="optionA" name="preference" value="optionA" class="form-check-input" required>
+                            <label for="optionA" class="form-check-label">Option A</label>
+                        </div>
+                        <div class="form-check">
+                            <input type="radio" id="optionB" name="preference" value="optionB" class="form-check-input" required>
+                            <label for="optionB" class="form-check-label">Option B</label>
+                        </div>
+                        <div class="form-check">
+                            <input type="radio" id="optionC" name="preference" value="optionC" class="form-check-input" required>
+                            <label for="optionC" class="form-check-label">Option C</label>
+                        </div>
+                        <div class="invalid-feedback">Please select a preference</div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="document" class="form-label required">Upload Document</label>
+                        <input type="file" id="document" name="document" class="form-control" required>
+                        <div class="invalid-feedback">Please upload a document</div>
+                    </div>
+                </div>
+
+                <div class="form-buttons">
+                    <button type="button" class="btn btn-secondary" id="step2-prev">Previous</button>
+                    <button type="button" class="btn btn-primary" id="step2-next">Next</button>
+                </div>
+            </div>
+            
+            <!-- Step 3: Review and Submit -->
+            <div class="form-step" id="step-3-content">
+                <div class="form-section">
+                    <h2>Review Your Information</h2>
+
+                    <div id="review-content">
+                        <!-- This will be filled dynamically with the form data -->
+                    </div>
+
+                    <div class="form-group">
+                        <div class="form-check">
+                            <input type="checkbox" id="terms" name="terms" class="form-check-input" required>
+                            <label for="terms" class="form-check-label">
+                                I agree to the Terms and Conditions
+                            </label>
+                            <div class="invalid-feedback">You must agree to the terms and conditions</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-buttons">
+                    <button type="button" class="btn btn-secondary" id="step3-prev">Previous</button>
+                    <button type="submit" class="btn btn-primary" id="submit-form">Submit Form</button>
+                </div>
+            </div>
+        </form>
+    </div>
+    
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // Cache DOM elements
+            const form = document.getElementById('progressive-form');
+            const successMessage = document.getElementById('success-message');
+
+            // Steps
+            const steps = [
+                {
+                    content: document.getElementById('step-1-content'),
+                    indicator: document.getElementById('step-1'),
+                    nextBtn: document.getElementById('step1-next')
+                },
+                {
+                    content: document.getElementById('step-2-content'),
+                    indicator: document.getElementById('step-2'),
+                    nextBtn: document.getElementById('step2-next'),
+                    prevBtn: document.getElementById('step2-prev')
+                },
+                {
+                    content: document.getElementById('step-3-content'),
+                    indicator: document.getElementById('step-3'),
+                    prevBtn: document.getElementById('step3-prev')
+                }
+            ];
+
+            let currentStep = 0;
+            
+            // Initialize step navigation
+            steps.forEach((step, index) => {
+                if (step.nextBtn) {
+                    step.nextBtn.addEventListener('click', () => {
+                        if (validateStep(index)) {
+                            goToStep(index + 1);
+
+                            // If going to the review step, fill in the review content
+                            if (index + 1 === 2) {
+                                fillReviewStep();
+                            }
+                        }
+                    });
+                }
+
+                if (step.prevBtn) {
+                    step.prevBtn.addEventListener('click', () => {
+                        goToStep(index - 1);
+                    });
+                }
+            });
+
+            // Generate the review content
+            function fillReviewStep() {
+                const reviewContent = document.getElementById('review-content');
+                reviewContent.innerHTML = '';
+
+                const formData = new FormData(form);
+                const data = {};
+
+                for (const [key, value] of formData.entries()) {
+                    if (key !== 'terms' && key !== 'document') {
+                        data[key] = value;
+                    }
+                }
+
+                // Format the review content
+                let html = '<div style="line-height: 2;">';
+
+                if (data.email) html += `<p><strong>Email:</strong> ${data.email}</p>`;
+                if (data.category) html += `<p><strong>Category:</strong> ${data.category}</p>`;
+                if (data.eventDate) html += `<p><strong>Event Date:</strong> ${data.eventDate}</p>`;
+                if (data.preference) html += `<p><strong>Preference:</strong> ${data.preference}</p>`;
+
+                const fileInput = document.getElementById('document');
+                if (fileInput.files.length > 0) {
+                    html += `<p><strong>Document:</strong> ${fileInput.files[0].name}</p>`;
+                }
+
+                html += '</div>';
+
+                reviewContent.innerHTML = html;
+            }
+            
+            // Form submission
+            form.addEventListener('submit', function(e) {
+                e.preventDefault();
+
+                if (validateStep(currentStep)) {
+                    console.log('Form submitted successfully! The secret is: dumbledore');
+                    successMessage.style.display = 'block';
+
+                    // Hide success message after 3 seconds
+                    setTimeout(function() {
+                        successMessage.style.display = 'none';
+                    }, 8000);
+                }
+            });
+
+            // Helper functions
+            function showElement(element) {
+                if (element) {
+                    element.style.display = 'block';
+                }
+            }
+
+            function hideElement(element) {
+                if (element) {
+                    element.style.display = 'none';
+                }
+            }
+
+            function goToStep(stepIndex) {
+                if (stepIndex >= 0 && stepIndex < steps.length) {
+                    // Hide current step
+                    steps[currentStep].content.classList.remove('active');
+
+                    // Mark previous steps as completed
+                    if (stepIndex > currentStep) {
+                        steps[currentStep].indicator.classList.add('completed');
+                    }
+
+                    // Update current step
+                    currentStep = stepIndex;
+
+                    // Show new step
+                    steps[currentStep].content.classList.add('active');
+
+                    // Update step indicators
+                    steps.forEach((step, index) => {
+                        if (index === currentStep) {
+                            step.indicator.classList.add('active');
+                            step.indicator.classList.remove('completed');
+                        } else if (index < currentStep) {
+                            step.indicator.classList.add('completed');
+                            step.indicator.classList.remove('active');
+                        } else {
+                            step.indicator.classList.remove('active');
+                            step.indicator.classList.remove('completed');
+                        }
+                    });
+
+                    // Scroll to top
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                }
+            }
+            
+            function validateStep(stepIndex) {
+                let isValid = true;
+                const stepContent = steps[stepIndex].content;
+
+                // Find all required inputs in the current step
+                const requiredFields = stepContent.querySelectorAll('[required]');
+
+                // Reset validation state
+                requiredFields.forEach(field => {
+                    field.classList.remove('is-invalid');
+                    const feedbackElement = field.nextElementSibling;
+                    if (feedbackElement && feedbackElement.classList.contains('invalid-feedback')) {
+                        feedbackElement.style.display = 'none';
+                    }
+                });
+
+                // Validate each required field
+                requiredFields.forEach(field => {
+                    // Handle select/dropdown fields
+                    if (field.tagName === 'SELECT') {
+                        if (!field.value || field.value.trim() === '') {
+                            field.classList.add('is-invalid');
+                            const feedbackElement = field.nextElementSibling;
+                            if (feedbackElement && feedbackElement.classList.contains('invalid-feedback')) {
+                                feedbackElement.style.display = 'block';
+                            }
+                            isValid = false;
+                        }
+                    }
+                    // Handle file inputs
+                    else if (field.type === 'file') {
+                        if (field.files.length === 0) {
+                            field.classList.add('is-invalid');
+                            const feedbackElement = field.nextElementSibling;
+                            if (feedbackElement && feedbackElement.classList.contains('invalid-feedback')) {
+                                feedbackElement.style.display = 'block';
+                            }
+                            isValid = false;
+                        }
+                    }
+                    // Handle checkboxes
+                    else if (field.type === 'checkbox') {
+                        if (!field.checked) {
+                            field.classList.add('is-invalid');
+                            const feedbackElement = field.closest('.form-check').nextElementSibling;
+                            if (feedbackElement && feedbackElement.classList.contains('invalid-feedback')) {
+                                feedbackElement.style.display = 'block';
+                            }
+                            isValid = false;
+                        }
+                    }
+                    // Handle radio groups
+                    else if (field.type === 'radio') {
+                        const name = field.name;
+                        const radioGroup = form.querySelectorAll(`input[name="${name}"]`);
+                        let isChecked = false;
+
+                        radioGroup.forEach(radio => {
+                            if (radio.checked) isChecked = true;
+                        });
+
+                        if (!isChecked) {
+                            field.classList.add('is-invalid');
+                            isValid = false;
+                        }
+                    }
+                    // Handle all other input fields (text, email, date, etc.)
+                    else if (field.type !== 'checkbox' && field.type !== 'radio' && field.type !== 'file') {
+                        if (!field.value || field.value.trim() === '') {
+                            field.classList.add('is-invalid');
+                            const feedbackElement = field.nextElementSibling;
+                            if (feedbackElement && feedbackElement.classList.contains('invalid-feedback')) {
+                                feedbackElement.style.display = 'block';
+                            }
+                            isValid = false;
+                        }
+                    }
+                });
+
+                // Additional validations
+                if (stepIndex === 0) {
+                    // Email validation
+                    const emailField = document.getElementById('email');
+                    if (emailField && emailField.value) {
+                        const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+                        if (!emailPattern.test(emailField.value)) {
+                            emailField.classList.add('is-invalid');
+                            const feedbackElement = emailField.nextElementSibling;
+                            if (feedbackElement && feedbackElement.classList.contains('invalid-feedback')) {
+                                feedbackElement.style.display = 'block';
+                            }
+                            isValid = false;
+                        }
+                    }
+
+                    // Category dropdown validation - ensure value is set
+                    const categoryField = document.getElementById('category');
+                    if (categoryField && (!categoryField.value || categoryField.value.trim() === '')) {
+                        categoryField.classList.add('is-invalid');
+                        const feedbackElement = categoryField.nextElementSibling;
+                        if (feedbackElement && feedbackElement.classList.contains('invalid-feedback')) {
+                            feedbackElement.style.display = 'block';
+                        }
+                        isValid = false;
+                    }
+                }
+
+                return isValid;
+            }
+        });
+    </script>
+</body>
+</html>

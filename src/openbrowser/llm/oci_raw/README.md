@@ -23,8 +23,8 @@ pip install oci
 ### Basic Usage
 
 ```python
-from browser_use import Agent
-from browser_use.llm import ChatOCIRaw
+from openbrowser import Agent
+from openbrowser.llm import ChatOCIRaw
 
 # Configure the model
 model = ChatOCIRaw(
@@ -39,7 +39,7 @@ model = ChatOCIRaw(
     auth_profile="DEFAULT"
 )
 
-# Use with browser-use Agent
+# Use with openbrowser Agent
 agent = Agent(
     task="Search for Python tutorials and summarize them",
     llm=model
@@ -117,13 +117,13 @@ For the complete list of available models in Oracle Cloud Infrastructure Generat
 
 ### Tool Calling Support
 
-**Important**: Only models that support tool calling/function calling are compatible with browser-use. Tool calling is essential for browser-use as the agent needs to call browser automation functions (click, type, scroll, etc.) to interact with web pages.
+**Important**: Only models that support tool calling/function calling are compatible with openbrowser. Tool calling is essential for openbrowser as the agent needs to call browser automation functions (click, type, scroll, etc.) to interact with web pages.
 
-According to Oracle's documentation, tool calling functionality is available exclusively through the API and is not supported for browser-based use. However, when using browser-use with OCI models through this integration, the tool calling happens at the application level (not browser-based), making it compatible.
+According to Oracle's documentation, tool calling functionality is available exclusively through the API and is not supported for browser-based use. However, when using openbrowser with OCI models through this integration, the tool calling happens at the application level (not browser-based), making it compatible.
 
 ### Image Support Models
 
-Several OCI models support image processing capabilities, which are useful when browser-use needs to analyze webpage screenshots:
+Several OCI models support image processing capabilities, which are useful when openbrowser needs to analyze webpage screenshots:
 
 #### Vision-Enabled Chat Models
 - **Meta Llama 3.2 90B Vision**: Supports both text and image inputs
@@ -135,7 +135,7 @@ Several OCI models support image processing capabilities, which are useful when 
 - **Cohere Embed English Light Image 3**: Lightweight version with image support
 - **Cohere Embed Multilingual Light Image 3**: Lightweight multilingual version with image support
 
-These vision-enabled models are particularly useful for browser-use tasks that require understanding webpage content through screenshots, such as:
+These vision-enabled models are particularly useful for openbrowser tasks that require understanding webpage content through screenshots, such as:
 - Identifying UI elements and buttons
 - Reading text from images
 - Understanding page layouts and visual context
