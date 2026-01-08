@@ -1,0 +1,767 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GraphQL Mutation Form</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.7.0/styles/github.min.css">
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f8f9fa;
+            color: #333;
+            line-height: 1.6;
+        }
+        
+        .container {
+            max-width: 1000px;
+            margin: 20px auto;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 2px 15px rgba(0, 0, 0, 0.1);
+            padding: 25px;
+        }
+        
+        h1 {
+            color: #6f42c1;
+            margin-bottom: 20px;
+        }
+        
+        .description {
+            margin-bottom: 30px;
+        }
+        
+        .form-section {
+            margin-bottom: 30px;
+            padding: 20px;
+            background-color: #f8f9fa;
+            border-radius: 8px;
+            border: 1px solid #e9ecef;
+        }
+        
+        .form-section-title {
+            color: #6f42c1;
+            margin-bottom: 20px;
+            border-bottom: 1px solid #e9ecef;
+            padding-bottom: 10px;
+        }
+        
+        .required::after {
+            content: " *";
+            color: #dc3545;
+        }
+        
+        .btn-primary {
+            background-color: #6f42c1;
+            border-color: #6f42c1;
+        }
+        
+        .btn-primary:hover {
+            background-color: #5e37a6;
+            border-color: #5e37a6;
+        }
+        
+        .card {
+            margin-bottom: 20px;
+        }
+        
+        .card-header {
+            background-color: #f0ebf8;
+            color: #6f42c1;
+            font-weight: 500;
+        }
+        
+        pre {
+            background-color: #f8f9fa;
+            border-radius: 4px;
+            padding: 15px;
+            margin-bottom: 20px;
+            overflow: auto;
+        }
+        
+        code {
+            font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+            font-size: 14px;
+        }
+        
+        .mutation-preview {
+            background-color: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            border: 1px solid #e9ecef;
+        }
+        
+        .gql-type {
+            color: #0366d6;
+        }
+        
+        .gql-field {
+            color: #24292e;
+        }
+        
+        .gql-operation {
+            color: #6f42c1;
+        }
+        
+        .gql-string {
+            color: #032f62;
+        }
+        
+        .gql-variable {
+            color: #e36209;
+        }
+        
+        .gql-delimiter {
+            color: #24292e;
+        }
+        
+        .schema-explorer {
+            background-color: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            border: 1px solid #e9ecef;
+            max-height: 300px;
+            overflow: auto;
+        }
+        
+        .schema-type {
+            margin-bottom: 10px;
+        }
+        
+        .schema-type-name {
+            font-weight: bold;
+            cursor: pointer;
+            color: #6f42c1;
+        }
+        
+        .schema-type-fields {
+            padding-left: 20px;
+            display: none;
+        }
+        
+        .schema-field {
+            margin: 5px 0;
+        }
+        
+        .schema-field-name {
+            color: #0366d6;
+        }
+        
+        .schema-field-type {
+            color: #6f42c1;
+            font-style: italic;
+        }
+        
+        .response-container {
+            background-color: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 20px;
+            border: 1px solid #e9ecef;
+            max-height: 300px;
+            overflow: auto;
+            display: none;
+        }
+        
+        .response-title {
+            font-weight: bold;
+            margin-bottom: 10px;
+            color: #6f42c1;
+        }
+        
+        .response-success {
+            border-left: 4px solid #28a745;
+        }
+        
+        .response-error {
+            border-left: 4px solid #dc3545;
+        }
+        
+        .tabs {
+            display: flex;
+            border-bottom: 1px solid #e9ecef;
+            margin-bottom: 15px;
+        }
+        
+        .tab {
+            padding: 10px 15px;
+            cursor: pointer;
+            border: 1px solid transparent;
+            border-bottom: none;
+            border-radius: 4px 4px 0 0;
+            background-color: transparent;
+        }
+        
+        .tab.active {
+            background-color: #f8f9fa;
+            border-color: #e9ecef;
+            color: #6f42c1;
+            font-weight: bold;
+        }
+        
+        .tab-content {
+            display: none;
+        }
+        
+        .tab-content.active {
+            display: block;
+        }
+        
+        .variables-editor {
+            width: 100%;
+            height: 100px;
+            font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+            font-size: 14px;
+            padding: 10px;
+            border: 1px solid #e9ecef;
+            border-radius: 4px;
+        }
+        
+        .accordion-button:not(.collapsed) {
+            background-color: #f0ebf8;
+            color: #6f42c1;
+        }
+        
+        .accordion-button:focus {
+            box-shadow: 0 0 0 0.25rem rgba(111, 66, 193, 0.25);
+        }
+        
+        .alert {
+            margin-bottom: 20px;
+            display: none;
+        }
+        
+        .spinner-container {
+            display: none;
+            justify-content: center;
+            align-items: center;
+            margin: 20px 0;
+        }
+        
+        .spinner-border {
+            color: #6f42c1;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 class="text-center">GraphQL Mutation Form</h1>
+        <p class="text-center description">
+            This form uses GraphQL mutations to submit data, presenting a unique challenge for autofill systems that expect traditional form submissions.
+        </p>
+        
+        <div class="alert alert-success" id="successMessage">
+            <strong>Success!</strong> Mutation executed successfully! The secret is: dumbledore
+        </div>
+        
+        <div class="alert alert-danger" id="errorMessage">
+            <strong>Error!</strong> <span id="errorText"></span>
+        </div>
+        
+        <div class="row">
+            <div class="col-md-7">
+                <div class="form-section">
+                    <h2 class="form-section-title">User Registration</h2>
+
+                    <form id="graphqlForm">
+                        <div class="mb-3">
+                            <label for="email" class="form-label required">Email Address</label>
+                            <input type="email" class="form-control" id="email" name="email" data-gql-field="email" required>
+                            <div class="invalid-feedback">Please enter a valid email address</div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="accountType" class="form-label required">Account Type</label>
+                            <select class="form-select" id="accountType" name="accountType" data-gql-field="accountType" required>
+                                <option value="">Select...</option>
+                                <option value="personal">Personal</option>
+                                <option value="business">Business</option>
+                                <option value="enterprise">Enterprise</option>
+                            </select>
+                            <div class="invalid-feedback">Account type is required</div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="birthdate" class="form-label required">Birth Date</label>
+                            <input type="date" class="form-control" id="birthdate" name="birthdate" data-gql-field="birthdate" required>
+                            <div class="invalid-feedback">Birth date is required</div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label required">Subscription Plan</label>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="subscriptionPlan" id="planFree" value="free" data-gql-field="subscriptionPlan" required>
+                                <label class="form-check-label" for="planFree">
+                                    Free
+                                </label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="subscriptionPlan" id="planPro" value="pro" data-gql-field="subscriptionPlan" required>
+                                <label class="form-check-label" for="planPro">
+                                    Pro
+                                </label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="subscriptionPlan" id="planEnterprise" value="enterprise" data-gql-field="subscriptionPlan" required>
+                                <label class="form-check-label" for="planEnterprise">
+                                    Enterprise
+                                </label>
+                            </div>
+                            <div class="invalid-feedback d-block" id="subscriptionPlanError" style="display: none !important;"></div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="profilePicture" class="form-label required">Profile Picture</label>
+                            <input type="file" class="form-control" id="profilePicture" name="profilePicture" accept="image/*" data-gql-field="profilePicture" required>
+                            <div class="invalid-feedback">Profile picture is required</div>
+                        </div>
+
+                        <div class="d-flex gap-2 justify-content-center">
+                            <button type="submit" class="btn btn-primary">Execute Mutation</button>
+                            <button type="button" class="btn btn-secondary" id="resetButton">Reset</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+            
+            <div class="col-md-5">
+                <div class="accordion" id="gqlAccordion">
+                    <div class="accordion-item">
+                        <h2 class="accordion-header" id="headingMutation">
+                            <button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#collapseMutation" aria-expanded="true" aria-controls="collapseMutation">
+                                Generated Mutation
+                            </button>
+                        </h2>
+                        <div id="collapseMutation" class="accordion-collapse collapse show" aria-labelledby="headingMutation" data-bs-parent="#gqlAccordion">
+                            <div class="accordion-body">
+                                <div class="tabs">
+                                    <button class="tab active" data-tab="mutation">Mutation</button>
+                                    <button class="tab" data-tab="variables">Variables</button>
+                                </div>
+                                
+                                <div class="tab-content active" id="mutationTab">
+                                    <pre><code id="mutationCode" class="language-graphql"></code></pre>
+                                </div>
+                                
+                                <div class="tab-content" id="variablesTab">
+                                    <pre><code id="variablesCode" class="language-json"></code></pre>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="accordion-item">
+                        <h2 class="accordion-header" id="headingSchema">
+                            <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseSchema" aria-expanded="false" aria-controls="collapseSchema">
+                                Schema Explorer
+                            </button>
+                        </h2>
+                        <div id="collapseSchema" class="accordion-collapse collapse" aria-labelledby="headingSchema" data-bs-parent="#gqlAccordion">
+                            <div class="accordion-body">
+                                <div class="schema-explorer">
+                                    <div class="schema-type">
+                                        <div class="schema-type-name" data-type="User">User</div>
+                                        <div class="schema-type-fields">
+                                            <div class="schema-field">
+                                                <span class="schema-field-name">id</span>: <span class="schema-field-type">ID!</span>
+                                            </div>
+                                            <div class="schema-field">
+                                                <span class="schema-field-name">email</span>: <span class="schema-field-type">String!</span>
+                                            </div>
+                                            <div class="schema-field">
+                                                <span class="schema-field-name">accountType</span>: <span class="schema-field-type">String!</span>
+                                            </div>
+                                            <div class="schema-field">
+                                                <span class="schema-field-name">birthdate</span>: <span class="schema-field-type">String!</span>
+                                            </div>
+                                            <div class="schema-field">
+                                                <span class="schema-field-name">subscriptionPlan</span>: <span class="schema-field-type">String!</span>
+                                            </div>
+                                            <div class="schema-field">
+                                                <span class="schema-field-name">profilePicture</span>: <span class="schema-field-type">String!</span>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div class="schema-type">
+                                        <div class="schema-type-name" data-type="CreateUserInput">CreateUserInput</div>
+                                        <div class="schema-type-fields">
+                                            <div class="schema-field">
+                                                <span class="schema-field-name">email</span>: <span class="schema-field-type">String!</span>
+                                            </div>
+                                            <div class="schema-field">
+                                                <span class="schema-field-name">accountType</span>: <span class="schema-field-type">String!</span>
+                                            </div>
+                                            <div class="schema-field">
+                                                <span class="schema-field-name">birthdate</span>: <span class="schema-field-type">String!</span>
+                                            </div>
+                                            <div class="schema-field">
+                                                <span class="schema-field-name">subscriptionPlan</span>: <span class="schema-field-type">String!</span>
+                                            </div>
+                                            <div class="schema-field">
+                                                <span class="schema-field-name">profilePicture</span>: <span class="schema-field-type">String!</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="accordion-item">
+                        <h2 class="accordion-header" id="headingResponse">
+                            <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseResponse" aria-expanded="false" aria-controls="collapseResponse">
+                                Response
+                            </button>
+                        </h2>
+                        <div id="collapseResponse" class="accordion-collapse collapse" aria-labelledby="headingResponse" data-bs-parent="#gqlAccordion">
+                            <div class="accordion-body">
+                                <div class="spinner-container" id="loadingSpinner">
+                                    <div class="spinner-border" role="status">
+                                        <span class="visually-hidden">Loading...</span>
+                                    </div>
+                                </div>
+                                <div class="response-container" id="responseContainer">
+                                    <div class="response-title">Response:</div>
+                                    <pre><code id="responseCode" class="language-json"></code></pre>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.7.0/lib/core.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.7.0/lib/languages/graphql.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.7.0/lib/languages/json.min.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            hljs.registerLanguage('graphql', window.hljsDefineGraphQL);
+            hljs.registerLanguage('json', window.hljsDefineJson);
+
+            const form = document.getElementById('graphqlForm');
+            const inputFields = form.querySelectorAll('input, select');
+            const mutationCode = document.getElementById('mutationCode');
+            const variablesCode = document.getElementById('variablesCode');
+            const resetButton = document.getElementById('resetButton');
+            const successMessage = document.getElementById('successMessage');
+            const errorMessage = document.getElementById('errorMessage');
+            const errorText = document.getElementById('errorText');
+            const tabs = document.querySelectorAll('.tab');
+            const tabContents = document.querySelectorAll('.tab-content');
+            const schemaTypeNames = document.querySelectorAll('.schema-type-name');
+            const loadingSpinner = document.getElementById('loadingSpinner');
+            const responseContainer = document.getElementById('responseContainer');
+            const responseCode = document.getElementById('responseCode');
+
+            // Update mutation on input changes
+            inputFields.forEach(field => {
+                field.addEventListener('input', updateMutation);
+                field.addEventListener('change', updateMutation);
+
+                // Clear validation styles on input/change
+                field.addEventListener('input', function() {
+                    this.classList.remove('is-invalid');
+                });
+                field.addEventListener('change', function() {
+                    this.classList.remove('is-invalid');
+
+                    // Special handling for radio buttons
+                    if (this.type === 'radio') {
+                        const allRadios = document.querySelectorAll(`input[name="${this.name}"]`);
+                        allRadios.forEach(radio => radio.classList.remove('is-invalid'));
+                        const errorEl = document.getElementById('subscriptionPlanError');
+                        if (errorEl) {
+                            errorEl.style.display = 'none';
+                        }
+                    }
+                });
+            });
+            
+            // Tab switching
+            tabs.forEach(tab => {
+                tab.addEventListener('click', function() {
+                    const tabId = this.getAttribute('data-tab');
+                    
+                    // Update active tab
+                    tabs.forEach(t => t.classList.remove('active'));
+                    this.classList.add('active');
+                    
+                    // Update active content
+                    tabContents.forEach(content => content.classList.remove('active'));
+                    document.getElementById(`${tabId}Tab`).classList.add('active');
+                });
+            });
+            
+            // Schema explorer type toggling
+            schemaTypeNames.forEach(typeName => {
+                typeName.addEventListener('click', function() {
+                    const fields = this.nextElementSibling;
+                    if (fields.style.display === 'block') {
+                        fields.style.display = 'none';
+                    } else {
+                        fields.style.display = 'block';
+                    }
+                });
+            });
+            
+            // Form submission
+            form.addEventListener('submit', function(e) {
+                e.preventDefault();
+                
+                if (validateForm()) {
+                    // Show loading spinner
+                    loadingSpinner.style.display = 'flex';
+                    responseContainer.style.display = 'none';
+                    
+                    // Expand response accordion
+                    const responseAccordion = new bootstrap.Collapse(document.getElementById('collapseResponse'));
+                    responseAccordion.show();
+                    
+                    // Get form data
+                    const formData = getFormData();
+                    
+                    // Simulate GraphQL request
+                    simulateGraphQLRequest(formData)
+                        .then(response => {
+                            // Hide loading spinner
+                            loadingSpinner.style.display = 'none';
+                            
+                            // Show response
+                            responseContainer.style.display = 'block';
+                            responseContainer.classList.remove('response-error');
+                            responseContainer.classList.add('response-success');
+                            
+                            // Format and display response
+                            responseCode.textContent = JSON.stringify(response, null, 2);
+                            hljs.highlightElement(responseCode);
+                            
+                            // Show success message
+                            successMessage.style.display = 'block';
+                            errorMessage.style.display = 'none';
+                            
+                            // Hide success message after 3 seconds
+                            setTimeout(function() {
+                                successMessage.style.display = 'none';
+                            }, 8000);
+                        })
+                        .catch(error => {
+                            // Hide loading spinner
+                            loadingSpinner.style.display = 'none';
+                            
+                            // Show response
+                            responseContainer.style.display = 'block';
+                            responseContainer.classList.remove('response-success');
+                            responseContainer.classList.add('response-error');
+                            
+                            // Format and display error
+                            responseCode.textContent = JSON.stringify(error, null, 2);
+                            hljs.highlightElement(responseCode);
+                            
+                            // Show error message
+                            errorMessage.style.display = 'block';
+                            successMessage.style.display = 'none';
+                            errorText.textContent = error.errors[0].message;
+                            
+                            // Hide error message after 5 seconds
+                            setTimeout(function() {
+                                errorMessage.style.display = 'none';
+                            }, 5000);
+                        });
+                }
+            });
+            
+            // Reset form
+            resetButton.addEventListener('click', function() {
+                form.reset();
+                updateMutation();
+
+                // Clear validation styles
+                inputFields.forEach(field => {
+                    field.classList.remove('is-invalid');
+                });
+
+                // Hide messages
+                successMessage.style.display = 'none';
+                errorMessage.style.display = 'none';
+
+                // Hide response
+                responseContainer.style.display = 'none';
+            });
+            
+            // Generate and update the mutation
+            function updateMutation() {
+                const formData = getFormData();
+                const mutation = generateMutation(formData);
+                const variables = generateVariables(formData);
+                
+                mutationCode.textContent = mutation;
+                variablesCode.textContent = JSON.stringify(variables, null, 2);
+                
+                hljs.highlightElement(mutationCode);
+                hljs.highlightElement(variablesCode);
+            }
+            
+            // Get form data
+            function getFormData() {
+                const subscriptionPlanRadio = document.querySelector('input[name="subscriptionPlan"]:checked');
+                const profilePictureInput = document.getElementById('profilePicture');
+
+                const data = {
+                    email: document.getElementById('email').value,
+                    accountType: document.getElementById('accountType').value,
+                    birthdate: document.getElementById('birthdate').value,
+                    subscriptionPlan: subscriptionPlanRadio ? subscriptionPlanRadio.value : '',
+                    profilePicture: profilePictureInput.files.length > 0 ? profilePictureInput.files[0].name : ''
+                };
+
+                return data;
+            }
+            
+            // Generate GraphQL mutation
+            function generateMutation(data) {
+                return `mutation CreateUser($input: CreateUserInput!) {
+    createUser(input: $input) {
+        id
+        email
+        accountType
+        birthdate
+        subscriptionPlan
+        profilePicture
+    }
+}`;
+            }
+            
+            // Generate variables for GraphQL mutation
+            function generateVariables(data) {
+                const variables = {
+                    input: {
+                        email: data.email,
+                        accountType: data.accountType,
+                        birthdate: data.birthdate,
+                        subscriptionPlan: data.subscriptionPlan,
+                        profilePicture: data.profilePicture
+                    }
+                };
+
+                return variables;
+            }
+            
+            // Validate form
+            function validateForm() {
+                let isValid = true;
+
+                // Validate email
+                const emailInput = document.getElementById('email');
+                if (!emailInput.value.trim() || !isValidEmail(emailInput.value)) {
+                    emailInput.classList.add('is-invalid');
+                    isValid = false;
+                } else {
+                    emailInput.classList.remove('is-invalid');
+                }
+
+                // Validate account type - ensure a non-empty value is selected
+                const accountTypeInput = document.getElementById('accountType');
+                if (!accountTypeInput.value || accountTypeInput.value === '') {
+                    accountTypeInput.classList.add('is-invalid');
+                    isValid = false;
+                } else {
+                    accountTypeInput.classList.remove('is-invalid');
+                }
+
+                // Validate birthdate
+                const birthdateInput = document.getElementById('birthdate');
+                if (!birthdateInput.value || birthdateInput.value === '') {
+                    birthdateInput.classList.add('is-invalid');
+                    isValid = false;
+                } else {
+                    birthdateInput.classList.remove('is-invalid');
+                }
+
+                // Validate subscription plan
+                const subscriptionPlanRadio = document.querySelector('input[name="subscriptionPlan"]:checked');
+                const subscriptionPlanError = document.getElementById('subscriptionPlanError');
+                if (!subscriptionPlanRadio || !subscriptionPlanRadio.value) {
+                    // Add validation styling to all radio buttons
+                    const allRadios = document.querySelectorAll('input[name="subscriptionPlan"]');
+                    allRadios.forEach(radio => radio.classList.add('is-invalid'));
+                    if (subscriptionPlanError) {
+                        subscriptionPlanError.textContent = 'Please select a subscription plan';
+                        subscriptionPlanError.style.display = 'block';
+                    }
+                    isValid = false;
+                } else {
+                    const allRadios = document.querySelectorAll('input[name="subscriptionPlan"]');
+                    allRadios.forEach(radio => radio.classList.remove('is-invalid'));
+                    if (subscriptionPlanError) {
+                        subscriptionPlanError.style.display = 'none';
+                    }
+                }
+
+                // Validate profile picture
+                const profilePictureInput = document.getElementById('profilePicture');
+                if (!profilePictureInput.files || profilePictureInput.files.length === 0) {
+                    profilePictureInput.classList.add('is-invalid');
+                    isValid = false;
+                } else {
+                    profilePictureInput.classList.remove('is-invalid');
+                }
+
+                return isValid;
+            }
+
+            // Helper function for email validation
+            function isValidEmail(email) {
+                const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+                return re.test(email);
+            }
+            
+            // Simulate GraphQL request
+            function simulateGraphQLRequest(formData) {
+                return new Promise((resolve, reject) => {
+                    // Simulate network delay
+                    setTimeout(() => {
+                        // Check if the email is already "registered"
+                        if (formData.email === 'test@example.com') {
+                            reject({
+                                errors: [
+                                    {
+                                        message: "Email address is already registered",
+                                        locations: [{ line: 2, column: 5 }],
+                                        path: ["createUser"]
+                                    }
+                                ],
+                                data: null
+                            });
+                            return;
+                        }
+
+                        // Simulate successful response
+                        resolve({
+                            data: {
+                                createUser: {
+                                    id: "user_" + Math.random().toString(36).substr(2, 9),
+                                    email: formData.email,
+                                    accountType: formData.accountType,
+                                    birthdate: formData.birthdate,
+                                    subscriptionPlan: formData.subscriptionPlan,
+                                    profilePicture: formData.profilePicture || null
+                                }
+                            }
+                        });
+                    }, 1500);
+                });
+            }
+            
+            // Initialize the mutation on page load
+            updateMutation();
+        });
+    </script>
+</body>
+</html>

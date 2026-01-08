@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>jQuery + Bootstrap + Select2 Form</title>
+
+    <!-- Bootstrap CSS -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@4.6.2/dist/css/bootstrap.min.css">
+
+    <!-- Select2 CSS -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css">
+
+    <!-- Bootstrap Datepicker CSS -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-datepicker/1.9.0/css/bootstrap-datepicker.min.css">
+
+    <style>
+        body {
+            padding: 20px;
+        }
+
+        .select2-container {
+            width: 100% !important;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 class="mb-4">jQuery + Bootstrap + Select2 Form</h1>
+
+        <form id="jqueryBootstrapForm" action="https://example.com/submit" method="POST">
+            <div class="card">
+                <div class="card-body">
+                    <div class="form-group">
+                        <label for="email">Email Address <span class="text-danger">*</span></label>
+                        <input type="email" class="form-control" id="email" name="email" required>
+                        <div class="invalid-feedback">Please enter a valid email address.</div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="country">Country <span class="text-danger">*</span></label>
+                        <select class="form-control select2" id="country" name="country" required>
+                            <option value="">Select Country</option>
+                            <option value="US">United States</option>
+                            <option value="CA">Canada</option>
+                            <option value="UK">United Kingdom</option>
+                            <option value="AU">Australia</option>
+                        </select>
+                        <div class="invalid-feedback">Please select a country.</div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="birth-date">Date of Birth <span class="text-danger">*</span></label>
+                        <div class="input-group date">
+                            <input type="text" class="form-control" id="birth-date" name="birth-date" required>
+                            <div class="input-group-append">
+                                <span class="input-group-text"><i class="fa fa-calendar"></i></span>
+                            </div>
+                        </div>
+                        <div class="invalid-feedback">Please select a date of birth.</div>
+                    </div>
+
+                    <fieldset class="form-group">
+                        <legend class="col-form-label">Rate your experience <span class="text-danger">*</span></legend>
+                        <div class="form-check form-check-inline">
+                            <input class="form-check-input" type="radio" name="rating" id="rating1" value="1" required>
+                            <label class="form-check-label" for="rating1">1</label>
+                        </div>
+                        <div class="form-check form-check-inline">
+                            <input class="form-check-input" type="radio" name="rating" id="rating2" value="2" required>
+                            <label class="form-check-label" for="rating2">2</label>
+                        </div>
+                        <div class="form-check form-check-inline">
+                            <input class="form-check-input" type="radio" name="rating" id="rating3" value="3" required>
+                            <label class="form-check-label" for="rating3">3</label>
+                        </div>
+                        <div class="form-check form-check-inline">
+                            <input class="form-check-input" type="radio" name="rating" id="rating4" value="4" required>
+                            <label class="form-check-label" for="rating4">4</label>
+                        </div>
+                        <div class="form-check form-check-inline">
+                            <input class="form-check-input" type="radio" name="rating" id="rating5" value="5" required>
+                            <label class="form-check-label" for="rating5">5</label>
+                        </div>
+                        <div class="invalid-feedback d-block" id="rating-error" style="display: none !important;">Please select a rating.</div>
+                    </fieldset>
+
+                    <div class="form-group">
+                        <label for="file-upload">Upload Profile Picture <span class="text-danger">*</span></label>
+                        <div class="custom-file">
+                            <input type="file" class="custom-file-input" id="file-upload" name="profile-picture" required>
+                            <label class="custom-file-label" for="file-upload">Choose file</label>
+                        </div>
+                        <div class="invalid-feedback">Please upload a file.</div>
+                    </div>
+
+                    <div class="form-group mt-4">
+                        <button type="submit" class="btn btn-primary">Submit Form</button>
+                    </div>
+                </div>
+            </div>
+        </form>
+    </div>
+
+    <!-- jQuery first, then Popper.js, then Bootstrap JS -->
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/popper.js@1.16.1/dist/umd/popper.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@4.6.2/dist/js/bootstrap.min.js"></script>
+
+    <!-- Select2 JS -->
+    <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
+
+    <!-- Bootstrap Datepicker -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-datepicker/1.9.0/js/bootstrap-datepicker.min.js"></script>
+
+    <!-- Font Awesome (for icons) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/js/all.min.js"></script>
+
+    <script>
+        $(document).ready(function() {
+            // Initialize Select2
+            $('.select2').select2({
+                placeholder: "Select an option",
+                allowClear: true
+            });
+
+            // Initialize Datepicker
+            $('#birth-date').datepicker({
+                format: 'mm/dd/yyyy',
+                autoclose: true,
+                todayHighlight: true
+            });
+
+            // Custom file input label
+            $('.custom-file-input').on('change', function() {
+                let fileName = $(this).val().split('\\').pop();
+                $(this).next('.custom-file-label').addClass("selected").html(fileName);
+                // Clear validation error when file is selected
+                $(this).removeClass('is-invalid');
+            });
+
+            // Clear validation error when dropdown changes
+            $('#country').on('change', function() {
+                if ($(this).val()) {
+                    $(this).removeClass('is-invalid');
+                }
+            });
+
+            // Clear validation error when date is selected
+            $('#birth-date').on('change', function() {
+                if ($(this).val()) {
+                    $(this).removeClass('is-invalid');
+                }
+            });
+
+            // Clear validation error when radio is selected
+            $('input[name="rating"]').on('change', function() {
+                $('#rating-error').hide();
+                $('input[name="rating"]').removeClass('is-invalid');
+            });
+
+            // Form validation and submission
+            $('#jqueryBootstrapForm').on('submit', function(e) {
+                e.preventDefault();
+
+                let isValid = true;
+
+                // Validate email
+                const email = $('#email');
+                if (!email[0].checkValidity() || !email.val().trim()) {
+                    email.addClass('is-invalid');
+                    isValid = false;
+                } else {
+                    email.removeClass('is-invalid');
+                }
+
+                // Validate country dropdown - check actual value in form state
+                const country = $('#country');
+                const countryValue = country.val();
+                if (!countryValue || countryValue === '') {
+                    country.addClass('is-invalid');
+                    isValid = false;
+                } else {
+                    country.removeClass('is-invalid');
+                }
+
+                // Validate date of birth
+                const birthDate = $('#birth-date');
+                if (!birthDate.val().trim()) {
+                    birthDate.addClass('is-invalid');
+                    isValid = false;
+                } else {
+                    birthDate.removeClass('is-invalid');
+                }
+
+                // Validate rating (radio buttons)
+                const ratingChecked = $('input[name="rating"]:checked').length > 0;
+                if (!ratingChecked) {
+                    $('input[name="rating"]').addClass('is-invalid');
+                    $('#rating-error').show();
+                    isValid = false;
+                } else {
+                    $('input[name="rating"]').removeClass('is-invalid');
+                    $('#rating-error').hide();
+                }
+
+                // Validate file upload
+                const fileUpload = $('#file-upload');
+                if (!fileUpload[0].files || fileUpload[0].files.length === 0) {
+                    fileUpload.addClass('is-invalid');
+                    isValid = false;
+                } else {
+                    fileUpload.removeClass('is-invalid');
+                }
+
+                // Only submit if all validations pass
+                if (isValid) {
+                    alert('Form submitted successfully! The secret is: dumbledore');
+                    console.log('Form submitted successfully! The secret is: dumbledore');
+                    console.log('Form data:', {
+                        email: email.val(),
+                        country: countryValue,
+                        birthDate: birthDate.val(),
+                        rating: $('input[name="rating"]:checked').val(),
+                        file: fileUpload[0].files[0].name
+                    });
+                } else {
+                    // Scroll to first error
+                    const firstError = $('.is-invalid').first();
+                    if (firstError.length) {
+                        $('html, body').animate({
+                            scrollTop: firstError.offset().top - 100
+                        }, 300);
+                    }
+                }
+            });
+        });
+    </script>
+</body>
+</html>

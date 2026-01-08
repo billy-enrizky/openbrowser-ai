@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Reference Number Form</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f8f9fa;
+            color: #333;
+        }
+
+        h1 {
+            color: #4a6bff;
+            text-align: center;
+            margin-bottom: 1.5rem;
+        }
+
+        .container {
+            background: #ffffff;
+            padding: 2rem;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        .form-group {
+            margin-bottom: 1.5rem;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-weight: 600;
+        }
+
+        input[type="text"],
+        input[type="email"],
+        select,
+        textarea {
+            width: 100%;
+            padding: 0.75rem;
+            border: 1px solid #ced4da;
+            border-radius: 4px;
+            font-size: 1rem;
+            box-sizing: border-box;
+        }
+
+        textarea {
+            resize: vertical;
+            min-height: 100px;
+        }
+
+        .radio-group {
+            display: flex;
+            gap: 1.5rem;
+        }
+
+        .radio-option {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        input[type="radio"],
+        input[type="checkbox"] {
+            width: auto;
+            margin: 0;
+        }
+
+        .checkbox-group {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        button {
+            background-color: #4a6bff;
+            color: white;
+            padding: 0.75rem 1.5rem;
+            border: none;
+            border-radius: 4px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            width: 100%;
+            transition: background-color 0.2s;
+        }
+
+        button:hover {
+            background-color: #3755d8;
+        }
+
+        #result-container {
+            margin-top: 2rem;
+            padding: 1.5rem;
+            background-color: #e8f0fe;
+            border: 1px solid #b6d4fe;
+            border-radius: 4px;
+            display: none;
+            text-align: center;
+        }
+
+        #reference-number {
+            font-family: monospace;
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: #4a6bff;
+            margin-top: 0.5rem;
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Support Ticket Form</h1>
+        <p style="text-align: center; margin-bottom: 2rem; color: #666;">Submit a ticket to generate a reference number.</p>
+
+        <form id="ticket-form">
+            <div class="form-group">
+                <label for="name">Full Name</label>
+                <input type="text" id="name" name="name" required placeholder="Enter your full name">
+            </div>
+
+            <div class="form-group">
+                <label for="email">Email Address</label>
+                <input type="email" id="email" name="email" required placeholder="Enter your email">
+            </div>
+
+            <div class="form-group">
+                <label for="department">Department</label>
+                <select id="department" name="department" required>
+                    <option value="">Select a department...</option>
+                    <option value="support">Technical Support</option>
+                    <option value="billing">Billing & Payments</option>
+                    <option value="sales">Sales & Inquiries</option>
+                    <option value="general">General Information</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label>Priority Level</label>
+                <div class="radio-group">
+                    <div class="radio-option">
+                        <input type="radio" id="priority-low" name="priority" value="low" required>
+                        <label for="priority-low" style="margin-bottom: 0; font-weight: normal;">Low</label>
+                    </div>
+                    <div class="radio-option">
+                        <input type="radio" id="priority-medium" name="priority" value="medium">
+                        <label for="priority-medium" style="margin-bottom: 0; font-weight: normal;">Medium</label>
+                    </div>
+                    <div class="radio-option">
+                        <input type="radio" id="priority-high" name="priority" value="high">
+                        <label for="priority-high" style="margin-bottom: 0; font-weight: normal;">High</label>
+                    </div>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label for="description">Description</label>
+                <textarea id="description" name="description" required placeholder="Describe your issue..."></textarea>
+            </div>
+
+            <div class="form-group checkbox-group">
+                <input type="checkbox" id="terms" name="terms" required>
+                <label for="terms" style="margin-bottom: 0; font-weight: normal;">I agree to the terms and conditions</label>
+            </div>
+
+            <button type="submit">Submit Ticket</button>
+        </form>
+
+        <div id="result-container">
+            <h3>Ticket Submitted Successfully!</h3>
+            <p>Your reference number is:</p>
+            <span id="reference-number"></span>
+        </div>
+    </div>
+
+    <script>
+        document.getElementById('ticket-form').addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            // Get form values
+            const department = document.getElementById('department').value.toUpperCase();
+            const name = document.getElementById('name').value;
+            
+            // Generate date string YYYYMMDD
+            const now = new Date();
+            const dateStr = now.getFullYear() +
+                String(now.getMonth() + 1).padStart(2, '0') +
+                String(now.getDate()).padStart(2, '0');
+            
+            // Generate random hash component
+            const randomHash = Math.random().toString(36).substring(2, 8).toUpperCase();
+            
+            // Construct reference number
+            const referenceNumber = `REF-${dateStr}-${department}-${randomHash}`;
+            
+            // Display result
+            const resultContainer = document.getElementById('result-container');
+            const refSpan = document.getElementById('reference-number');
+            
+            refSpan.textContent = referenceNumber;
+            resultContainer.style.display = 'block';
+            
+            // Scroll to result
+            resultContainer.scrollIntoView({ behavior: 'smooth' });
+            
+            console.log('Form submitted. Reference:', referenceNumber);
+        });
+    </script>
+</body>
+</html>
