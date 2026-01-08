@@ -38,6 +38,7 @@ if _parent_utils:
     get_git_info = _parent_utils.get_git_info
     is_unsafe_pattern = _parent_utils.is_unsafe_pattern
     URL_PATTERN = _parent_utils.URL_PATTERN
+    _IS_WINDOWS = _parent_utils._IS_WINDOWS
 else:
     # Fallback logger if utils.py doesn't exist
     logger = logging.getLogger('openbrowser')
@@ -55,6 +56,7 @@ else:
     get_git_info = lambda: None
     is_unsafe_pattern = lambda pattern: False
     URL_PATTERN = None
+    _IS_WINDOWS = False  # Fallback for Windows check
 
 __all__ = [
     "SignalHandler",
@@ -74,5 +76,6 @@ __all__ = [
     "get_git_info",
     "is_unsafe_pattern",
     "URL_PATTERN",
+    "_IS_WINDOWS",
 ]
 

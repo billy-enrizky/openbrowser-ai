@@ -2,6 +2,9 @@
 
 Provides graceful handling of SIGINT (Ctrl+C) for agent operations,
 allowing users to pause, resume, or stop the agent.
+
+Performance optimizations:
+- __slots__ for faster attribute access and reduced memory
 """
 
 import asyncio
@@ -30,6 +33,11 @@ class SignalHandler:
         custom_exit_callback: Optional callback before exit
         exit_on_second_int: Whether to exit on second SIGINT
     """
+    
+    __slots__ = (
+        '_loop', '_pause_callback', '_resume_callback', '_custom_exit_callback',
+        '_exit_on_second_int', '_sigint_count', '_is_paused', '_original_handler', '_registered'
+    )
     
     def __init__(
         self,
@@ -136,6 +144,11 @@ class AsyncSignalHandler:
     Provides async callbacks and integrates better with asyncio.
     """
     
+    __slots__ = (
+        '_pause_callback', '_resume_callback', '_stop_callback',
+        '_pause_event', '_stop_event', '_is_paused', '_handler'
+    )
+    
     def __init__(
         self,
         pause_callback: Callable[[], Any] | None = None,
@@ -218,4 +231,3 @@ class AsyncSignalHandler:
     
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         self.stop()
-

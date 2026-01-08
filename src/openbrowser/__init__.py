@@ -1,3 +1,12 @@
+"""OpenBrowser - Browser automation with AI agents.
+
+Performance optimizations:
+- Lazy imports with caching (imports only when accessed)
+- Optimized __getattr__ with dict lookup instead of repeated conditionals
+- Minimal module-level imports
+- Event loop error handling patched at module load
+"""
+
 import os
 from typing import TYPE_CHECKING
 
@@ -68,19 +77,20 @@ if TYPE_CHECKING:
 
 
 # Lazy imports mapping - only import when actually accessed
-_LAZY_IMPORTS = {
+# Format: name -> (module_path, attr_name) where attr_name=None means return module itself
+_LAZY_IMPORTS: dict[str, tuple[str, str | None]] = {
 	# Agent service (heavy due to dependencies)
-	# 'Agent': ('openbrowser.agent.service', 'Agent'),
-	# Code-use agent (Jupyter notebook-like execution)
-	'CodeAgent': ('openbrowser.code_use.service', 'CodeAgent'),
 	'Agent': ('openbrowser.agent.service', 'Agent'),
 	'BrowserAgent': ('openbrowser.agent.service', 'Agent'),  # Alias for backward compatibility
+	# Code-use agent (Jupyter notebook-like execution)
+	'CodeAgent': ('openbrowser.code_use.service', 'CodeAgent'),
 	# System prompt (moderate weight due to agent.views imports)
 	'SystemPrompt': ('openbrowser.agent.prompts', 'SystemPrompt'),
 	# Agent views (very heavy - over 1 second!)
 	'ActionModel': ('openbrowser.agent.views', 'ActionModel'),
 	'ActionResult': ('openbrowser.agent.views', 'ActionResult'),
 	'AgentHistoryList': ('openbrowser.agent.views', 'AgentHistoryList'),
+	# Browser session
 	'BrowserSession': ('openbrowser.browser', 'BrowserSession'),
 	'Browser': ('openbrowser.browser', 'BrowserSession'),  # Alias for BrowserSession
 	'BrowserProfile': ('openbrowser.browser', 'BrowserProfile'),
@@ -102,9 +112,20 @@ _LAZY_IMPORTS = {
 	'models': ('openbrowser.llm.models', None),
 }
 
+# Cache for imported modules/attributes
+_import_cache: dict[str, object] = {}
+
 
 def __getattr__(name: str):
-	"""Lazy import mechanism - only import modules when they're actually accessed."""
+	"""Lazy import mechanism - only import modules when they're actually accessed.
+	
+	Optimized with caching to avoid repeated imports.
+	"""
+	# Check cache first (fast path)
+	if name in _import_cache:
+		return _import_cache[name]
+	
+	# Check if it's a lazy import
 	if name in _LAZY_IMPORTS:
 		module_path, attr_name = _LAZY_IMPORTS[name]
 		try:
@@ -116,7 +137,8 @@ def __getattr__(name: str):
 				attr = module
 			else:
 				attr = getattr(module, attr_name)
-			# Cache the imported attribute in the module's globals
+			# Cache the imported attribute
+			_import_cache[name] = attr
 			globals()[name] = attr
 			return attr
 		except ImportError as e:
@@ -129,7 +151,6 @@ __all__ = [
 	'Agent',
 	'BrowserAgent',  # Alias for Agent
 	'CodeAgent',
-	# 'CodeAgent',
 	'BrowserSession',
 	'Browser',  # Alias for BrowserSession
 	'BrowserProfile',
