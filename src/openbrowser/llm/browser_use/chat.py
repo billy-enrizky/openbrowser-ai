@@ -1,227 +1,195 @@
-"""Browser-use cloud LLM integration.
+"""
+ChatBrowserUse - Client for browser-use cloud API
 
-This module provides integration with browser-use's hosted LLM endpoint,
-allowing users to leverage browser-use's cloud infrastructure for LLM calls.
+This wraps the BaseChatModel protocol and sends requests to the browser-use cloud API
+for optimized browser automation LLM inference.
 """
 
-import json
 import logging
 import os
-from typing import Any
+from typing import TypeVar, overload
 
 import httpx
-from langchain_core.language_models.chat_models import BaseChatModel
-from pydantic import PrivateAttr
+from pydantic import BaseModel
 
-from openbrowser.llm.exceptions import ModelProviderError
+from openbrowser.llm.base import BaseChatModel
+from openbrowser.llm.messages import BaseMessage
+from openbrowser.llm.views import ChatInvokeCompletion
+from openbrowser.observability import observe
+
+T = TypeVar('T', bound=BaseModel)
 
 logger = logging.getLogger(__name__)
 
 
 class ChatBrowserUse(BaseChatModel):
-    """
-    Chat model for browser-use's hosted LLM endpoint.
+	"""
+	Client for browser-use cloud API.
 
-    This provides access to browser-use's cloud LLM service, which handles
-    model selection and optimization for browser automation tasks.
+	This sends requests to the browser-use cloud API which uses optimized models
+	and prompts for browser automation tasks.
 
-    Args:
-        api_key: Browser-use API key (defaults to BROWSER_USE_API_KEY env var)
-        base_url: Browser-use API base URL
-        model: Model preference (optional, service may auto-select)
-        temperature: Temperature for response generation
-        max_tokens: Maximum tokens in response
-        **kwargs: Additional parameters
-    """
+	Usage:
+		agent = Agent(
+			task="Find the number of stars of the browser-use repo",
+			llm=ChatBrowserUse(model='bu-latest'),
+		)
+	"""
 
-    _api_key: str = PrivateAttr()
-    _base_url: str = PrivateAttr()
-    _model: str = PrivateAttr()
-    _temperature: float = PrivateAttr()
-    _max_tokens: int = PrivateAttr()
-    _client: httpx.AsyncClient = PrivateAttr()
+	def __init__(
+		self,
+		model: str = 'bu-latest',
+		api_key: str | None = None,
+		base_url: str | None = None,
+		timeout: float = 120.0,
+		**kwargs,
+	):
+		"""
+		Initialize ChatBrowserUse client.
 
-    def __init__(
-        self,
-        api_key: str | None = None,
-        base_url: str = "https://api.browser-use.com",
-        model: str = "auto",
-        temperature: float = 0,
-        max_tokens: int = 4096,
-        **kwargs: Any,
-    ):
-        super().__init__()
-        self._api_key = api_key or os.getenv("BROWSER_USE_API_KEY", "")
-        self._base_url = base_url.rstrip('/')
-        self._model = model
-        self._temperature = temperature
-        self._max_tokens = max_tokens
-        self._client = httpx.AsyncClient(timeout=120.0)
+		Args:
+			model: Model name to use. Options: 'bu-latest', 'bu-1-0'. Defaults to 'bu-latest'.
+			api_key: API key for browser-use cloud. Defaults to BROWSER_USE_API_KEY env var.
+			base_url: Base URL for the API. Defaults to BROWSER_USE_LLM_URL env var or production URL.
+			timeout: Request timeout in seconds.
+		"""
+		# Validate model name
+		valid_models = ['bu-latest', 'bu-1-0']
+		if model not in valid_models:
+			raise ValueError(f"Invalid model: '{model}'. Must be one of {valid_models}")
 
-        if not self._api_key:
-            raise ValueError("BROWSER_USE_API_KEY is not set and no api_key provided")
+		self.model = 'bu-1-0' if model == 'bu-latest' else model  # must update on new model releases
+		self.fast = False
+		self.api_key = api_key or os.getenv('BROWSER_USE_API_KEY')
+		self.base_url = base_url or os.getenv('BROWSER_USE_LLM_URL', 'https://llm.api.browser-use.com')
+		self.timeout = timeout
 
-    @property
-    def model(self) -> str:
-        """Get the model name."""
-        return self._model
+		if not self.api_key:
+			raise ValueError(
+				'You need to set the BROWSER_USE_API_KEY environment variable. '
+				'Get your key at https://cloud.browser-use.com/new-api-key'
+			)
 
-    @property
-    def _llm_type(self) -> str:
-        return "browser-use"
+	@property
+	def provider(self) -> str:
+		return 'browser-use'
 
-    def bind_tools(self, tools: list[Any]) -> "ChatBrowserUse":
-        """Bind tools to this LLM instance."""
-        # Browser-use cloud handles tool binding internally
-        return self
+	@property
+	def name(self) -> str:
+		return self.model
 
-    def with_structured_output(self, output_schema: type[Any], **kwargs: Any) -> Any:
-        """Get structured output from the model."""
-        return self
+	@overload
+	async def ainvoke(self, messages: list[BaseMessage], output_format: None = None) -> ChatInvokeCompletion[str]: ...
 
-    async def ainvoke(
-        self,
-        messages: list[Any],
-        config: dict[str, Any] | None = None,
-        **kwargs: Any,
-    ) -> Any:
-        """Invoke the model with the given messages."""
-        from langchain_core.messages import AIMessage
+	@overload
+	async def ainvoke(self, messages: list[BaseMessage], output_format: type[T]) -> ChatInvokeCompletion[T]: ...
 
-        # Convert messages to OpenAI-compatible format
-        formatted_messages = []
-        for msg in messages:
-            if hasattr(msg, 'type'):
-                role = 'system' if msg.type == 'system' else ('assistant' if msg.type == 'ai' else 'user')
-                content = msg.content
-                
-                # Handle multimodal content
-                if isinstance(content, list):
-                    formatted_content = []
-                    for part in content:
-                        if hasattr(part, 'type'):
-                            if part.type == 'text':
-                                formatted_content.append({"type": "text", "text": part.text})
-                            elif part.type == 'image_url':
-                                formatted_content.append({
-                                    "type": "image_url",
-                                    "image_url": {"url": part.image_url.url}
-                                })
-                    content = formatted_content
-                
-                formatted_messages.append({"role": role, "content": content})
-            elif isinstance(msg, dict):
-                formatted_messages.append(msg)
+	@observe(name='chat_openbrowser_ainvoke')
+	async def ainvoke(
+		self, messages: list[BaseMessage], output_format: type[T] | None = None
+	) -> ChatInvokeCompletion[T] | ChatInvokeCompletion[str]:
+		"""
+		Send request to browser-use cloud API.
 
-        request_body = {
-            "model": self._model,
-            "messages": formatted_messages,
-            "max_tokens": self._max_tokens,
-            "temperature": self._temperature,
-        }
+		Args:
+			messages: List of messages to send
+			output_format: Expected output format (Pydantic model)
 
-        # Add any structured output schema if provided
-        output_format = kwargs.get("output_format")
-        if output_format:
-            schema = output_format.model_json_schema()
-            request_body["response_format"] = {
-                "type": "json_schema",
-                "json_schema": {
-                    "name": output_format.__name__,
-                    "schema": schema,
-                }
-            }
+		Returns:
+			ChatInvokeCompletion with structured response and usage info
+		"""
+		# Prepare request payload
+		payload = {
+			'messages': [self._serialize_message(msg) for msg in messages],
+			'fast': self.fast,
+		}
 
-        try:
-            response = await self._client.post(
-                f"{self._base_url}/v1/chat/completions",
-                json=request_body,
-                headers={
-                    "Authorization": f"Bearer {self._api_key}",
-                    "Content-Type": "application/json",
-                    "X-Client": "openbrowser",
-                },
-            )
-            response.raise_for_status()
-            data = response.json()
+		# Add output format schema if provided
+		if output_format is not None:
+			payload['output_format'] = output_format.model_json_schema()
 
-            content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-            
-            # Handle structured output
-            if output_format and content:
-                try:
-                    parsed = json.loads(content)
-                    return AIMessage(content=content, additional_kwargs={"parsed": parsed})
-                except json.JSONDecodeError:
-                    pass
+		# Make API request
+		async with httpx.AsyncClient(timeout=self.timeout) as client:
+			try:
+				response = await client.post(
+					f'{self.base_url}/v1/chat/completions',
+					json=payload,
+					headers={
+						'Authorization': f'Bearer {self.api_key}',
+						'Content-Type': 'application/json',
+					},
+				)
+				response.raise_for_status()
+				result = response.json()
 
-            return AIMessage(content=content)
+			except httpx.HTTPStatusError as e:
+				error_detail = ''
+				try:
+					error_data = e.response.json()
+					error_detail = error_data.get('detail', str(e))
+				except Exception:
+					error_detail = str(e)
 
-        except httpx.HTTPStatusError as e:
-            raise ModelProviderError(
-                message=f"Browser-use API error: {e.response.text}",
-                status_code=e.response.status_code,
-                model=self._model,
-            )
+				error_msg = ''
+				if e.response.status_code == 401:
+					error_msg = f'Invalid API key. {error_detail}'
+				elif e.response.status_code == 402:
+					error_msg = f'Insufficient credits. {error_detail}'
+				else:
+					error_msg = f'API request failed: {error_detail}'
 
-    def invoke(
-        self,
-        messages: list[Any],
-        config: dict[str, Any] | None = None,
-        **kwargs: Any,
-    ) -> Any:
-        """Synchronously invoke the model."""
-        import asyncio
-        return asyncio.get_event_loop().run_until_complete(
-            self.ainvoke(messages, config, **kwargs)
-        )
+				raise ValueError(error_msg)
 
-    def _generate(
-        self,
-        messages: list[Any],
-        stop: list[str] | None = None,
-        run_manager: Any = None,
-        **kwargs: Any,
-    ) -> Any:
-        """Internal generate method required by BaseChatModel."""
-        from langchain_core.outputs import ChatGeneration, ChatResult
-        result = self.invoke(messages, **kwargs)
-        return ChatResult(generations=[ChatGeneration(message=result)])
+			except httpx.TimeoutException:
+				error_msg = f'Request timed out after {self.timeout}s'
+				raise ValueError(error_msg)
 
-    async def aclose(self) -> None:
-        """Close the HTTP client."""
-        await self._client.aclose()
+			except Exception as e:
+				error_msg = f'Failed to connect to browser-use API: {e}'
+				raise ValueError(error_msg)
 
-    # Browser-use specific methods
+			# Parse response - server returns structured data as dict
+			if output_format is not None:
+				# Server returns structured data as a dict, validate it
+				completion_data = result['completion']
+				logger.debug(
+					f'📥 Got structured data from service: {list(completion_data.keys()) if isinstance(completion_data, dict) else type(completion_data)}'
+				)
 
-    async def get_usage(self) -> dict[str, Any]:
-        """Get API usage statistics."""
-        try:
-            response = await self._client.get(
-                f"{self._base_url}/v1/usage",
-                headers={
-                    "Authorization": f"Bearer {self._api_key}",
-                },
-            )
-            response.raise_for_status()
-            return response.json()
-        except httpx.HTTPStatusError as e:
-            logger.error(f"Failed to get usage: {e}")
-            return {}
+				# Convert action dicts to ActionModel instances if needed
+				# llm-use returns dicts to avoid validation with empty ActionModel
+				if isinstance(completion_data, dict) and 'action' in completion_data:
+					actions = completion_data['action']
+					if actions and isinstance(actions[0], dict):
+						from typing import get_args
 
-    async def get_available_models(self) -> list[str]:
-        """Get list of available models."""
-        try:
-            response = await self._client.get(
-                f"{self._base_url}/v1/models",
-                headers={
-                    "Authorization": f"Bearer {self._api_key}",
-                },
-            )
-            response.raise_for_status()
-            data = response.json()
-            return [m["id"] for m in data.get("data", [])]
-        except httpx.HTTPStatusError as e:
-            logger.error(f"Failed to get models: {e}")
-            return []
+						# Get ActionModel type from output_format
+						action_model_type = get_args(output_format.model_fields['action'].annotation)[0]
 
+						# Convert dicts to ActionModel instances
+						completion_data['action'] = [action_model_type.model_validate(action_dict) for action_dict in actions]
+
+				completion = output_format.model_validate(completion_data)
+			else:
+				completion = result['completion']
+
+			# Parse usage info
+			usage = None
+			if 'usage' in result:
+				from openbrowser.llm.views import ChatInvokeUsage
+
+				usage = ChatInvokeUsage(**result['usage'])
+
+		return ChatInvokeCompletion(
+			completion=completion,
+			usage=usage,
+		)
+
+	def _serialize_message(self, message: BaseMessage) -> dict:
+		"""Serialize a message to JSON format."""
+		# Handle Union types by checking the actual message type
+		msg_dict = message.model_dump()
+		return {
+			'role': msg_dict['role'],
+			'content': msg_dict['content'],
+		}

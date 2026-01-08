@@ -1,212 +1,174 @@
-"""Views and models for the tools registry.
-
-This module provides the Pydantic models and data classes used by the
-action registry system. These models define the structure of registered
-actions and their parameters for browser automation.
-
-Classes:
-    ActionModel: Base model for action parameter validation.
-    RegisteredAction: Metadata and function for a registered action.
-    ActionRegistry: Container for all registered actions.
-"""
-
-from __future__ import annotations
-
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 
+from openbrowser.browser import BrowserSession
+from openbrowser.filesystem.file_system import FileSystem
+from openbrowser.llm.base import BaseChatModel
 
-class ActionModel(BaseModel):
-    """Base model for dynamically created action parameter models.
-    
-    This class serves as the base for all action parameter models. When the
-    registry creates parameter models from function signatures, they inherit
-    from this class to gain common functionality.
-    
-    The model is used with Pydantic's create_model() to dynamically generate
-    typed parameter models for each registered action.
-    
-    Attributes:
-        model_config: Pydantic configuration allowing arbitrary types and
-            forbidding extra fields for strict validation.
-    
-    Example:
-        >>> class ClickParams(ActionModel):
-        ...     index: int = Field(description="Element index to click")
-        ...     button: str = Field(default="left", description="Mouse button")
-    """
-    
-    model_config = ConfigDict(arbitrary_types_allowed=True, extra='forbid')
-
-    def get_index(self) -> int | None:
-        """Get the index from the action parameters if present.
-        
-        This utility method searches the action parameters for an 'index'
-        field, which is commonly used to reference DOM elements.
-        
-        Returns:
-            int | None: The index value if found, None otherwise.
-        """
-        params = self.model_dump(exclude_unset=True).values()
-        if not params:
-            return None
-        for param in params:
-            if param is not None and isinstance(param, dict) and 'index' in param:
-                return param['index']
-        return None
-
-    def set_index(self, index: int) -> None:
-        """Set the index on the action parameters.
-        
-        This utility method updates the 'index' field in the action parameters,
-        used for remapping element indices after DOM changes.
-        
-        Args:
-            index: The new index value to set.
-        """
-        action_data = self.model_dump(exclude_unset=True)
-        if not action_data:
-            return
-        action_name = next(iter(action_data.keys()))
-        action_params = getattr(self, action_name, None)
-        if action_params and hasattr(action_params, 'index'):
-            action_params.index = index
+if TYPE_CHECKING:
+	pass
 
 
 class RegisteredAction(BaseModel):
-    """Metadata and function reference for a registered action.
-    
-    This model holds all information about a registered action, including
-    its name, description, the function to execute, parameter model,
-    and optional domain restrictions.
-    
-    Attributes:
-        name: The action name (e.g., 'click', 'navigate').
-        description: Human-readable description for the LLM.
-        function: The async callable to execute the action.
-        param_model: Pydantic model class for parameter validation.
-        domains: Optional list of domain patterns for URL filtering.
-    
-    Example:
-        >>> action = RegisteredAction(
-        ...     name="navigate",
-        ...     description="Navigate to a URL",
-        ...     function=navigate_func,
-        ...     param_model=NavigateParams,
-        ...     domains=None  # Available on all domains
-        ... )
-    """
+	"""Model for a registered action"""
 
-    name: str
-    description: str
-    function: Callable
-    param_model: type[BaseModel]
-    domains: list[str] | None = None
+	name: str
+	description: str
+	function: Callable
+	param_model: type[BaseModel]
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+	# filters: provide specific domains to determine whether the action should be available on the given URL or not
+	domains: list[str] | None = None  # e.g. ['*.google.com', 'www.bing.com', 'yahoo.*]
 
-    def prompt_description(self) -> str:
-        """Get a description of the action for the system prompt.
-        
-        Generates a formatted string that describes the action and its
-        parameters for inclusion in the LLM system prompt.
-        
-        Returns:
-            str: Formatted description like "click: Click on element. (index=int)"
-        """
-        schema = self.param_model.model_json_schema()
-        params = []
+	model_config = ConfigDict(arbitrary_types_allowed=True)
 
-        if 'properties' in schema:
-            for param_name, param_info in schema['properties'].items():
-                param_desc = param_name
-                if 'type' in param_info:
-                    param_desc += f'={param_info["type"]}'
-                if 'description' in param_info:
-                    param_desc += f' ({param_info["description"]})'
-                params.append(param_desc)
+	def prompt_description(self) -> str:
+		"""Get a description of the action for the prompt in unstructured format"""
+		schema = self.param_model.model_json_schema()
+		params = []
 
-        if params:
-            return f'{self.name}: {self.description}. ({", ".join(params)})'
-        return f'{self.name}: {self.description}'
+		if 'properties' in schema:
+			for param_name, param_info in schema['properties'].items():
+				# Build parameter description
+				param_desc = param_name
+
+				# Add type information if available
+				if 'type' in param_info:
+					param_type = param_info['type']
+					param_desc += f'={param_type}'
+
+				# Add description as comment if available
+				if 'description' in param_info:
+					param_desc += f' ({param_info["description"]})'
+
+				params.append(param_desc)
+
+		# Format: action_name: Description. (param1=type, param2=type, ...)
+		if params:
+			return f'{self.name}: {self.description}. ({", ".join(params)})'
+		else:
+			return f'{self.name}: {self.description}'
+
+
+class ActionModel(BaseModel):
+	"""Base model for dynamically created action models"""
+
+	# this will have all the registered actions, e.g.
+	# click_element = param_model = ClickElementParams
+	# done = param_model = None
+	#
+	model_config = ConfigDict(arbitrary_types_allowed=True, extra='forbid')
+
+	def get_index(self) -> int | None:
+		"""Get the index of the action"""
+		# {'clicked_element': {'index':5}}
+		params = self.model_dump(exclude_unset=True).values()
+		if not params:
+			return None
+		for param in params:
+			if param is not None and 'index' in param:
+				return param['index']
+		return None
+
+	def set_index(self, index: int):
+		"""Overwrite the index of the action"""
+		# Get the action name and params
+		action_data = self.model_dump(exclude_unset=True)
+		action_name = next(iter(action_data.keys()))
+		action_params = getattr(self, action_name)
+
+		# Update the index directly on the model
+		if hasattr(action_params, 'index'):
+			action_params.index = index
 
 
 class ActionRegistry(BaseModel):
-    """Container for all registered actions.
-    
-    This model holds the collection of registered actions and provides
-    methods for generating action descriptions for LLM prompts.
-    
-    Attributes:
-        actions: Dictionary mapping action names to RegisteredAction objects.
-    
-    Example:
-        >>> registry = ActionRegistry()
-        >>> registry.actions['click'] = click_action
-        >>> description = registry.get_prompt_description(page_url="https://google.com")
-    """
+	"""Model representing the action registry"""
 
-    actions: dict[str, RegisteredAction] = Field(default_factory=dict)
+	actions: dict[str, RegisteredAction] = {}
 
-    def get_prompt_description(self, page_url: str | None = None) -> str:
-        """Get a description of all actions for the LLM prompt.
-        
-        Generates a formatted string describing available actions. When a
-        page_url is provided, includes domain-filtered actions for that URL.
-        
-        Args:
-            page_url: Optional current page URL. If provided, includes
-                domain-specific actions that match the URL.
-            
-        Returns:
-            str: Newline-separated action descriptions for the prompt.
-        """
-        if page_url is None:
-            # For system prompt, include only actions with no domain filters
-            return '\n'.join(
-                action.prompt_description() 
-                for action in self.actions.values() 
-                if action.domains is None
-            )
+	@staticmethod
+	def _match_domains(domains: list[str] | None, url: str) -> bool:
+		"""
+		Match a list of domain glob patterns against a URL.
 
-        # Include filtered actions for the current page URL
-        filtered_actions = []
-        for action in self.actions.values():
-            if not action.domains:
-                continue
-            if self._match_domains(action.domains, page_url):
-                filtered_actions.append(action)
+		Args:
+			domains: A list of domain patterns that can include glob patterns (* wildcard)
+			url: The URL to match against
 
-        return '\n'.join(action.prompt_description() for action in filtered_actions)
+		Returns:
+			True if the URL's domain matches the pattern, False otherwise
+		"""
 
-    @staticmethod
-    def _match_domains(domains: list[str] | None, url: str) -> bool:
-        """Match domain patterns against a URL."""
-        if domains is None or not url:
-            return True
+		if domains is None or not url:
+			return True
 
-        from urllib.parse import urlparse
-        import fnmatch
+		# Use the centralized URL matching logic from utils
+		from openbrowser.utils import match_url_with_domain_pattern
 
-        try:
-            parsed = urlparse(url)
-            hostname = parsed.hostname or ''
-        except Exception:
-            return False
+		for domain_pattern in domains:
+			if match_url_with_domain_pattern(url, domain_pattern):
+				return True
+		return False
 
-        for pattern in domains:
-            # Handle scheme patterns like http*://*.example.com
-            if '://' in pattern:
-                scheme_pattern, domain_pattern = pattern.split('://', 1)
-                if not fnmatch.fnmatch(parsed.scheme, scheme_pattern.replace('*', '?*')):
-                    continue
-                if fnmatch.fnmatch(hostname, domain_pattern):
-                    return True
-            else:
-                if fnmatch.fnmatch(hostname, pattern):
-                    return True
+	def get_prompt_description(self, page_url: str | None = None) -> str:
+		"""Get a description of all actions for the prompt
 
-        return False
+		Args:
+			page_url: If provided, filter actions by URL using domain filters.
 
+		Returns:
+			A string description of available actions.
+			- If page is None: return only actions with no page_filter and no domains (for system prompt)
+			- If page is provided: return only filtered actions that match the current page (excluding unfiltered actions)
+		"""
+		if page_url is None:
+			# For system prompt (no URL provided), include only actions with no filters
+			return '\n'.join(action.prompt_description() for action in self.actions.values() if action.domains is None)
+
+		# only include filtered actions for the current page URL
+		filtered_actions = []
+		for action in self.actions.values():
+			if not action.domains:
+				# skip actions with no filters, they are already included in the system prompt
+				continue
+
+			# Check domain filter
+			if self._match_domains(action.domains, page_url):
+				filtered_actions.append(action)
+
+		return '\n'.join(action.prompt_description() for action in filtered_actions)
+
+
+class SpecialActionParameters(BaseModel):
+	"""Model defining all special parameters that can be injected into actions"""
+
+	model_config = ConfigDict(arbitrary_types_allowed=True)
+
+	# optional user-provided context object passed down from Agent(context=...)
+	# e.g. can contain anything, external db connections, file handles, queues, runtime config objects, etc.
+	# that you might want to be able to access quickly from within many of your actions
+	# browser-use code doesn't use this at all, we just pass it down to your actions for convenience
+	context: Any | None = None
+
+	# browser-use session object, can be used to create new tabs, navigate, access CDP
+	browser_session: BrowserSession | None = None
+
+	# Current page URL for filtering and context
+	page_url: str | None = None
+
+	# CDP client for direct Chrome DevTools Protocol access
+	cdp_client: Any | None = None  # CDPClient type from cdp_use
+
+	# extra injected config if the action asks for these arg names
+	page_extraction_llm: BaseChatModel | None = None
+	file_system: FileSystem | None = None
+	available_file_paths: list[str] | None = None
+	has_sensitive_data: bool = False
+
+	@classmethod
+	def get_browser_requiring_params(cls) -> set[str]:
+		"""Get parameter names that require browser_session"""
+		return {'browser_session', 'cdp_client', 'page_url'}

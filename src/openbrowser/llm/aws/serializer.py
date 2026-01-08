@@ -1,210 +1,257 @@
-"""AWS Bedrock message serializer."""
-
+import base64
 import json
-import logging
-from typing import Any, TypeVar
+import re
+from typing import Any, overload
 
-from pydantic import BaseModel
-
-from openbrowser.agent.views import (
-    AssistantMessage,
-    BaseMessage,
-    ContentPartImageParam,
-    ContentPartTextParam,
-    SystemMessage,
-    UserMessage,
+from openbrowser.llm.messages import (
+	AssistantMessage,
+	BaseMessage,
+	ContentPartImageParam,
+	ContentPartRefusalParam,
+	ContentPartTextParam,
+	SystemMessage,
+	ToolCall,
+	UserMessage,
 )
-from openbrowser.llm.serializer import BaseMessageSerializer
-
-logger = logging.getLogger(__name__)
-
-T = TypeVar('T', bound=BaseModel)
 
 
-class AWSBedrockMessageSerializer(BaseMessageSerializer):
-    """Serializer for converting messages to AWS Bedrock format.
-    
-    AWS Bedrock supports multiple model families with different formats.
-    This serializer primarily targets Anthropic Claude models on Bedrock.
-    """
+class AWSBedrockMessageSerializer:
+	"""Serializer for converting between custom message types and AWS Bedrock message format."""
 
-    def serialize(self, message: BaseMessage) -> dict[str, Any]:
-        """Serialize a message to AWS Bedrock (Claude) format."""
-        if isinstance(message, UserMessage):
-            return {
-                'role': 'user',
-                'content': self._serialize_user_content(message.content),
-            }
+	@staticmethod
+	def _is_base64_image(url: str) -> bool:
+		"""Check if the URL is a base64 encoded image."""
+		return url.startswith('data:image/')
 
-        elif isinstance(message, SystemMessage):
-            # System messages are handled separately
-            return {
-                'role': 'user',
-                'content': [{'type': 'text', 'text': f"[SYSTEM]: {self._get_text_content(message.content)}"}],
-            }
+	@staticmethod
+	def _is_url_image(url: str) -> bool:
+		"""Check if the URL is a regular HTTP/HTTPS image URL."""
+		return url.startswith(('http://', 'https://')) and any(
+			url.lower().endswith(ext) for ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp']
+		)
 
-        elif isinstance(message, AssistantMessage):
-            content = []
-            if message.content is not None:
-                content = self._serialize_assistant_content(message.content)
-            
-            if message.tool_calls:
-                for tc in message.tool_calls:
-                    content.append({
-                        'type': 'tool_use',
-                        'id': tc.id,
-                        'name': tc.function.name,
-                        'input': json.loads(tc.function.arguments) if tc.function.arguments else {},
-                    })
-            
-            return {'role': 'assistant', 'content': content if content else [{'type': 'text', 'text': ''}]}
+	@staticmethod
+	def _parse_base64_url(url: str) -> tuple[str, bytes]:
+		"""Parse a base64 data URL to extract format and raw bytes."""
+		# Format: data:image/jpeg;base64,<data>
+		if not url.startswith('data:'):
+			raise ValueError(f'Invalid base64 URL: {url}')
 
-        else:
-            raise ValueError(f'Unknown message type: {type(message)}')
+		header, data = url.split(',', 1)
 
-    def _serialize_user_content(
-        self,
-        content: str | list[ContentPartTextParam | ContentPartImageParam],
-    ) -> list[dict[str, Any]]:
-        """Serialize user content to Bedrock format."""
-        if isinstance(content, str):
-            return [{'type': 'text', 'text': content}]
+		# Extract format from mime type
+		mime_match = re.search(r'image/(\w+)', header)
+		if mime_match:
+			format_name = mime_match.group(1).lower()
+			# Map common formats
+			format_mapping = {'jpg': 'jpeg', 'jpeg': 'jpeg', 'png': 'png', 'gif': 'gif', 'webp': 'webp'}
+			image_format = format_mapping.get(format_name, 'jpeg')
+		else:
+			image_format = 'jpeg'  # Default format
 
-        parts = []
-        for part in content:
-            if part.type == 'text':
-                parts.append({'type': 'text', 'text': part.text})
-            elif part.type == 'image_url':
-                parts.append({
-                    'type': 'image',
-                    'source': {
-                        'type': 'base64',
-                        'media_type': self._get_media_type(part.image_url.url),
-                        'data': self._extract_base64(part.image_url.url),
-                    }
-                })
-        return parts
+		# Decode base64 data
+		try:
+			image_bytes = base64.b64decode(data)
+		except Exception as e:
+			raise ValueError(f'Failed to decode base64 image data: {e}')
 
-    def _serialize_assistant_content(
-        self,
-        content: str | list,
-    ) -> list[dict[str, Any]]:
-        """Serialize assistant content to Bedrock format."""
-        if isinstance(content, str):
-            return [{'type': 'text', 'text': content}]
+		return image_format, image_bytes
 
-        parts = []
-        for part in content:
-            if hasattr(part, 'type') and part.type == 'text':
-                parts.append({'type': 'text', 'text': part.text})
-        return parts
+	@staticmethod
+	def _download_and_convert_image(url: str) -> tuple[str, bytes]:
+		"""Download an image from URL and convert to base64 bytes."""
+		try:
+			import httpx
+		except ImportError:
+			raise ImportError('httpx not available. Please install it to use URL images with AWS Bedrock.')
 
-    def _get_text_content(self, content: str | list) -> str:
-        """Extract text from content."""
-        if isinstance(content, str):
-            return content
-        
-        texts = []
-        for part in content:
-            if hasattr(part, 'type') and part.type == 'text':
-                texts.append(part.text)
-        return '\n'.join(texts)
+		try:
+			response = httpx.get(url, timeout=30)
+			response.raise_for_status()
 
-    def _get_media_type(self, url: str) -> str:
-        """Get media type from URL."""
-        if url.startswith('data:'):
-            parts = url.split(';')[0].split(':')
-            if len(parts) > 1:
-                return parts[1]
-        elif url.lower().endswith('.png'):
-            return 'image/png'
-        elif url.lower().endswith(('.jpg', '.jpeg')):
-            return 'image/jpeg'
-        elif url.lower().endswith('.gif'):
-            return 'image/gif'
-        elif url.lower().endswith('.webp'):
-            return 'image/webp'
-        return 'image/jpeg'
+			# Detect format from content type or URL
+			content_type = response.headers.get('content-type', '').lower()
+			if 'jpeg' in content_type or url.lower().endswith(('.jpg', '.jpeg')):
+				image_format = 'jpeg'
+			elif 'png' in content_type or url.lower().endswith('.png'):
+				image_format = 'png'
+			elif 'gif' in content_type or url.lower().endswith('.gif'):
+				image_format = 'gif'
+			elif 'webp' in content_type or url.lower().endswith('.webp'):
+				image_format = 'webp'
+			else:
+				image_format = 'jpeg'  # Default format
 
-    def _extract_base64(self, data_url: str) -> str:
-        """Extract base64 data from data URL."""
-        if ',' in data_url:
-            return data_url.split(',', 1)[1]
-        return data_url
+			return image_format, response.content
 
-    def extract_system(
-        self,
-        messages: list[BaseMessage],
-    ) -> tuple[list[dict[str, Any]] | None, list[BaseMessage]]:
-        """Extract system messages for Bedrock's system parameter.
-        
-        Returns:
-            Tuple of (system_content, remaining_messages)
-        """
-        system_content = None
-        remaining = []
+		except Exception as e:
+			raise ValueError(f'Failed to download image from {url}: {e}')
 
-        for msg in messages:
-            if isinstance(msg, SystemMessage) and system_content is None:
-                system_content = [{'type': 'text', 'text': self._get_text_content(msg.content)}]
-            else:
-                remaining.append(msg)
+	@staticmethod
+	def _serialize_content_part_text(part: ContentPartTextParam) -> dict[str, Any]:
+		"""Convert a text content part to AWS Bedrock format."""
+		return {'text': part.text}
 
-        return system_content, remaining
+	@staticmethod
+	def _serialize_content_part_image(part: ContentPartImageParam) -> dict[str, Any]:
+		"""Convert an image content part to AWS Bedrock format."""
+		url = part.image_url.url
 
-    def serialize_tool_schema(self, output_format: type[T]) -> dict[str, Any]:
-        """Serialize a Pydantic model to Bedrock tool format."""
-        schema = output_format.model_json_schema()
-        
-        if '$defs' in schema:
-            defs = schema.pop('$defs')
-            schema = self._resolve_refs(schema, defs)
-        
-        return {
-            "name": output_format.__name__,
-            "description": output_format.__doc__ or f"Generate {output_format.__name__}",
-            "input_schema": schema,
-        }
+		if AWSBedrockMessageSerializer._is_base64_image(url):
+			# Handle base64 encoded images
+			image_format, image_bytes = AWSBedrockMessageSerializer._parse_base64_url(url)
+		elif AWSBedrockMessageSerializer._is_url_image(url):
+			# Download and convert URL images
+			image_format, image_bytes = AWSBedrockMessageSerializer._download_and_convert_image(url)
+		else:
+			raise ValueError(f'Unsupported image URL format: {url}')
 
-    def _resolve_refs(self, obj: Any, defs: dict) -> Any:
-        """Recursively resolve $ref references in schema."""
-        if isinstance(obj, dict):
-            if '$ref' in obj:
-                ref_path = obj['$ref'].split('/')[-1]
-                if ref_path in defs:
-                    return self._resolve_refs(defs[ref_path], defs)
-            return {k: self._resolve_refs(v, defs) for k, v in obj.items()}
-        elif isinstance(obj, list):
-            return [self._resolve_refs(item, defs) for item in obj]
-        return obj
+		return {
+			'image': {
+				'format': image_format,
+				'source': {
+					'bytes': image_bytes,
+				},
+			}
+		}
 
-    def parse_tool_call_response(
-        self,
-        response: dict[str, Any],
-        output_format: type[T],
-    ) -> T:
-        """Parse a Bedrock tool use response into a Pydantic model."""
-        content = response.get('content', [])
-        
-        for block in content:
-            if block.get('type') == 'tool_use':
-                data = block.get('input', {})
-                return output_format.model_validate(data)
+	@staticmethod
+	def _serialize_user_content(
+		content: str | list[ContentPartTextParam | ContentPartImageParam],
+	) -> list[dict[str, Any]]:
+		"""Serialize content for user messages."""
+		if isinstance(content, str):
+			return [{'text': content}]
 
-        raise ValueError("No tool use block in response")
+		content_blocks: list[dict[str, Any]] = []
+		for part in content:
+			if part.type == 'text':
+				content_blocks.append(AWSBedrockMessageSerializer._serialize_content_part_text(part))
+			elif part.type == 'image_url':
+				content_blocks.append(AWSBedrockMessageSerializer._serialize_content_part_image(part))
 
-    def parse_content_response(self, response: dict[str, Any]) -> str:
-        """Parse plain text content from Bedrock response."""
-        content = response.get('content', [])
-        texts = []
-        
-        for block in content:
-            if block.get('type') == 'text':
-                texts.append(block.get('text', ''))
-        
-        return '\n'.join(texts)
+		return content_blocks
 
+	@staticmethod
+	def _serialize_system_content(
+		content: str | list[ContentPartTextParam],
+	) -> list[dict[str, Any]]:
+		"""Serialize content for system messages."""
+		if isinstance(content, str):
+			return [{'text': content}]
 
-# Singleton instance
-aws_bedrock_serializer = AWSBedrockMessageSerializer()
+		content_blocks: list[dict[str, Any]] = []
+		for part in content:
+			if part.type == 'text':
+				content_blocks.append(AWSBedrockMessageSerializer._serialize_content_part_text(part))
 
+		return content_blocks
+
+	@staticmethod
+	def _serialize_assistant_content(
+		content: str | list[ContentPartTextParam | ContentPartRefusalParam] | None,
+	) -> list[dict[str, Any]]:
+		"""Serialize content for assistant messages."""
+		if content is None:
+			return []
+		if isinstance(content, str):
+			return [{'text': content}]
+
+		content_blocks: list[dict[str, Any]] = []
+		for part in content:
+			if part.type == 'text':
+				content_blocks.append(AWSBedrockMessageSerializer._serialize_content_part_text(part))
+			# Skip refusal content parts - AWS Bedrock doesn't need them
+
+		return content_blocks
+
+	@staticmethod
+	def _serialize_tool_call(tool_call: ToolCall) -> dict[str, Any]:
+		"""Convert a tool call to AWS Bedrock format."""
+		try:
+			arguments = json.loads(tool_call.function.arguments)
+		except json.JSONDecodeError:
+			# If arguments aren't valid JSON, wrap them
+			arguments = {'arguments': tool_call.function.arguments}
+
+		return {
+			'toolUse': {
+				'toolUseId': tool_call.id,
+				'name': tool_call.function.name,
+				'input': arguments,
+			}
+		}
+
+	# region - Serialize overloads
+	@overload
+	@staticmethod
+	def serialize(message: UserMessage) -> dict[str, Any]: ...
+
+	@overload
+	@staticmethod
+	def serialize(message: SystemMessage) -> SystemMessage: ...
+
+	@overload
+	@staticmethod
+	def serialize(message: AssistantMessage) -> dict[str, Any]: ...
+
+	@staticmethod
+	def serialize(message: BaseMessage) -> dict[str, Any] | SystemMessage:
+		"""Serialize a custom message to AWS Bedrock format."""
+
+		if isinstance(message, UserMessage):
+			return {
+				'role': 'user',
+				'content': AWSBedrockMessageSerializer._serialize_user_content(message.content),
+			}
+
+		elif isinstance(message, SystemMessage):
+			# System messages are handled separately in AWS Bedrock
+			return message
+
+		elif isinstance(message, AssistantMessage):
+			content_blocks: list[dict[str, Any]] = []
+
+			# Add content blocks if present
+			if message.content is not None:
+				content_blocks.extend(AWSBedrockMessageSerializer._serialize_assistant_content(message.content))
+
+			# Add tool use blocks if present
+			if message.tool_calls:
+				for tool_call in message.tool_calls:
+					content_blocks.append(AWSBedrockMessageSerializer._serialize_tool_call(tool_call))
+
+			# AWS Bedrock requires at least one content block
+			if not content_blocks:
+				content_blocks = [{'text': ''}]
+
+			return {
+				'role': 'assistant',
+				'content': content_blocks,
+			}
+
+		else:
+			raise ValueError(f'Unknown message type: {type(message)}')
+
+	@staticmethod
+	def serialize_messages(messages: list[BaseMessage]) -> tuple[list[dict[str, Any]], list[dict[str, Any]] | None]:
+		"""
+		Serialize a list of messages, extracting any system message.
+
+		Returns:
+			Tuple of (bedrock_messages, system_message) where system_message is extracted
+			from any SystemMessage in the list.
+		"""
+		bedrock_messages: list[dict[str, Any]] = []
+		system_message: list[dict[str, Any]] | None = None
+
+		for message in messages:
+			if isinstance(message, SystemMessage):
+				# Extract system message content
+				system_message = AWSBedrockMessageSerializer._serialize_system_content(message.content)
+			else:
+				# Serialize and add to regular messages
+				serialized = AWSBedrockMessageSerializer.serialize(message)
+				bedrock_messages.append(serialized)
+
+		return bedrock_messages, system_message

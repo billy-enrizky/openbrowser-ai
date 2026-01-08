@@ -1,158 +1,165 @@
-"""OpenAI message serializer."""
+from typing import overload
 
-import json
-import logging
-from typing import Any, TypeVar
-
-from pydantic import BaseModel
-
-from openbrowser.agent.views import (
-    AssistantMessage,
-    BaseMessage,
-    SystemMessage,
-    UserMessage,
+from openai.types.chat import (
+	ChatCompletionAssistantMessageParam,
+	ChatCompletionContentPartImageParam,
+	ChatCompletionContentPartRefusalParam,
+	ChatCompletionContentPartTextParam,
+	ChatCompletionMessageFunctionToolCallParam,
+	ChatCompletionMessageParam,
+	ChatCompletionSystemMessageParam,
+	ChatCompletionUserMessageParam,
 )
-from openbrowser.llm.serializer import BaseMessageSerializer
+from openai.types.chat.chat_completion_content_part_image_param import ImageURL
+from openai.types.chat.chat_completion_message_function_tool_call_param import Function
 
-logger = logging.getLogger(__name__)
-
-T = TypeVar('T', bound=BaseModel)
-
-
-class OpenAIMessageSerializer(BaseMessageSerializer):
-    """Serializer for converting messages to OpenAI format."""
-
-    def serialize(self, message: BaseMessage) -> dict[str, Any]:
-        """Serialize a message to OpenAI format."""
-        if isinstance(message, UserMessage):
-            result = {
-                'role': 'user',
-                'content': self.serialize_user_content(message.content),
-            }
-            if message.name is not None:
-                result['name'] = message.name
-            return result
-
-        elif isinstance(message, SystemMessage):
-            result = {
-                'role': 'system',
-                'content': self.serialize_system_content(message.content),
-            }
-            if message.name is not None:
-                result['name'] = message.name
-            return result
-
-        elif isinstance(message, AssistantMessage):
-            content = None
-            if message.content is not None:
-                content = self.serialize_assistant_content(message.content)
-
-            result = {'role': 'assistant'}
-
-            if content is not None:
-                result['content'] = content
-            if message.name is not None:
-                result['name'] = message.name
-            if message.refusal is not None:
-                result['refusal'] = message.refusal
-            if message.tool_calls:
-                result['tool_calls'] = [
-                    self.serialize_tool_call(tc) for tc in message.tool_calls
-                ]
-            return result
-
-        else:
-            raise ValueError(f'Unknown message type: {type(message)}')
-
-    def serialize_tool_schema(self, output_format: type[T]) -> dict[str, Any]:
-        """Serialize a Pydantic model to OpenAI function calling format."""
-        schema = output_format.model_json_schema()
-        
-        # Remove definitions key if present and inline them
-        if '$defs' in schema:
-            defs = schema.pop('$defs')
-            schema = self._resolve_refs(schema, defs)
-        
-        return {
-            "type": "function",
-            "function": {
-                "name": output_format.__name__,
-                "description": output_format.__doc__ or f"Generate {output_format.__name__}",
-                "strict": True,
-                "parameters": schema,
-            }
-        }
-
-    def _resolve_refs(self, obj: Any, defs: dict) -> Any:
-        """Recursively resolve $ref references in schema."""
-        if isinstance(obj, dict):
-            if '$ref' in obj:
-                ref_path = obj['$ref'].split('/')[-1]
-                if ref_path in defs:
-                    return self._resolve_refs(defs[ref_path], defs)
-            return {k: self._resolve_refs(v, defs) for k, v in obj.items()}
-        elif isinstance(obj, list):
-            return [self._resolve_refs(item, defs) for item in obj]
-        return obj
-
-    def get_response_format(self, output_format: type[T]) -> dict[str, Any]:
-        """Get response_format parameter for structured output.
-        
-        OpenAI supports json_schema response format for guaranteed JSON output.
-        """
-        schema = output_format.model_json_schema()
-        
-        # Remove definitions and resolve refs
-        if '$defs' in schema:
-            defs = schema.pop('$defs')
-            schema = self._resolve_refs(schema, defs)
-        
-        return {
-            "type": "json_schema",
-            "json_schema": {
-                "name": output_format.__name__,
-                "strict": True,
-                "schema": schema,
-            }
-        }
-
-    def parse_tool_call_response(
-        self,
-        response: dict[str, Any],
-        output_format: type[T],
-    ) -> T:
-        """Parse an OpenAI tool call response into a Pydantic model."""
-        choices = response.get('choices', [])
-        if not choices:
-            raise ValueError("No choices in response")
-
-        message = choices[0].get('message', {})
-        tool_calls = message.get('tool_calls', [])
-
-        if tool_calls:
-            # Parse from tool call arguments
-            arguments = tool_calls[0].get('function', {}).get('arguments', '{}')
-            data = json.loads(arguments)
-            return output_format.model_validate(data)
-
-        # Parse from content if using response_format
-        content = message.get('content', '')
-        if content:
-            data = json.loads(content)
-            return output_format.model_validate(data)
-
-        raise ValueError("No tool calls or content in response")
-
-    def parse_content_response(self, response: dict[str, Any]) -> str:
-        """Parse plain text content from OpenAI response."""
-        choices = response.get('choices', [])
-        if not choices:
-            return ""
-        
-        message = choices[0].get('message', {})
-        return message.get('content', '') or ""
+from openbrowser.llm.messages import (
+	AssistantMessage,
+	BaseMessage,
+	ContentPartImageParam,
+	ContentPartRefusalParam,
+	ContentPartTextParam,
+	SystemMessage,
+	ToolCall,
+	UserMessage,
+)
 
 
-# Singleton instance for convenience
-openai_serializer = OpenAIMessageSerializer()
+class OpenAIMessageSerializer:
+	"""Serializer for converting between custom message types and OpenAI message param types."""
 
+	@staticmethod
+	def _serialize_content_part_text(part: ContentPartTextParam) -> ChatCompletionContentPartTextParam:
+		return ChatCompletionContentPartTextParam(text=part.text, type='text')
+
+	@staticmethod
+	def _serialize_content_part_image(part: ContentPartImageParam) -> ChatCompletionContentPartImageParam:
+		return ChatCompletionContentPartImageParam(
+			image_url=ImageURL(url=part.image_url.url, detail=part.image_url.detail),
+			type='image_url',
+		)
+
+	@staticmethod
+	def _serialize_content_part_refusal(part: ContentPartRefusalParam) -> ChatCompletionContentPartRefusalParam:
+		return ChatCompletionContentPartRefusalParam(refusal=part.refusal, type='refusal')
+
+	@staticmethod
+	def _serialize_user_content(
+		content: str | list[ContentPartTextParam | ContentPartImageParam],
+	) -> str | list[ChatCompletionContentPartTextParam | ChatCompletionContentPartImageParam]:
+		"""Serialize content for user messages (text and images allowed)."""
+		if isinstance(content, str):
+			return content
+
+		serialized_parts: list[ChatCompletionContentPartTextParam | ChatCompletionContentPartImageParam] = []
+		for part in content:
+			if part.type == 'text':
+				serialized_parts.append(OpenAIMessageSerializer._serialize_content_part_text(part))
+			elif part.type == 'image_url':
+				serialized_parts.append(OpenAIMessageSerializer._serialize_content_part_image(part))
+		return serialized_parts
+
+	@staticmethod
+	def _serialize_system_content(
+		content: str | list[ContentPartTextParam],
+	) -> str | list[ChatCompletionContentPartTextParam]:
+		"""Serialize content for system messages (text only)."""
+		if isinstance(content, str):
+			return content
+
+		serialized_parts: list[ChatCompletionContentPartTextParam] = []
+		for part in content:
+			if part.type == 'text':
+				serialized_parts.append(OpenAIMessageSerializer._serialize_content_part_text(part))
+		return serialized_parts
+
+	@staticmethod
+	def _serialize_assistant_content(
+		content: str | list[ContentPartTextParam | ContentPartRefusalParam] | None,
+	) -> str | list[ChatCompletionContentPartTextParam | ChatCompletionContentPartRefusalParam] | None:
+		"""Serialize content for assistant messages (text and refusal allowed)."""
+		if content is None:
+			return None
+		if isinstance(content, str):
+			return content
+
+		serialized_parts: list[ChatCompletionContentPartTextParam | ChatCompletionContentPartRefusalParam] = []
+		for part in content:
+			if part.type == 'text':
+				serialized_parts.append(OpenAIMessageSerializer._serialize_content_part_text(part))
+			elif part.type == 'refusal':
+				serialized_parts.append(OpenAIMessageSerializer._serialize_content_part_refusal(part))
+		return serialized_parts
+
+	@staticmethod
+	def _serialize_tool_call(tool_call: ToolCall) -> ChatCompletionMessageFunctionToolCallParam:
+		return ChatCompletionMessageFunctionToolCallParam(
+			id=tool_call.id,
+			function=Function(name=tool_call.function.name, arguments=tool_call.function.arguments),
+			type='function',
+		)
+
+	# endregion
+
+	# region - Serialize overloads
+	@overload
+	@staticmethod
+	def serialize(message: UserMessage) -> ChatCompletionUserMessageParam: ...
+
+	@overload
+	@staticmethod
+	def serialize(message: SystemMessage) -> ChatCompletionSystemMessageParam: ...
+
+	@overload
+	@staticmethod
+	def serialize(message: AssistantMessage) -> ChatCompletionAssistantMessageParam: ...
+
+	@staticmethod
+	def serialize(message: BaseMessage) -> ChatCompletionMessageParam:
+		"""Serialize a custom message to an OpenAI message param."""
+
+		if isinstance(message, UserMessage):
+			user_result: ChatCompletionUserMessageParam = {
+				'role': 'user',
+				'content': OpenAIMessageSerializer._serialize_user_content(message.content),
+			}
+			if message.name is not None:
+				user_result['name'] = message.name
+			return user_result
+
+		elif isinstance(message, SystemMessage):
+			system_result: ChatCompletionSystemMessageParam = {
+				'role': 'system',
+				'content': OpenAIMessageSerializer._serialize_system_content(message.content),
+			}
+			if message.name is not None:
+				system_result['name'] = message.name
+			return system_result
+
+		elif isinstance(message, AssistantMessage):
+			# Handle content serialization
+			content = None
+			if message.content is not None:
+				content = OpenAIMessageSerializer._serialize_assistant_content(message.content)
+
+			assistant_result: ChatCompletionAssistantMessageParam = {'role': 'assistant'}
+
+			# Only add content if it's not None
+			if content is not None:
+				assistant_result['content'] = content
+
+			if message.name is not None:
+				assistant_result['name'] = message.name
+			if message.refusal is not None:
+				assistant_result['refusal'] = message.refusal
+			if message.tool_calls:
+				assistant_result['tool_calls'] = [OpenAIMessageSerializer._serialize_tool_call(tc) for tc in message.tool_calls]
+
+			return assistant_result
+
+		else:
+			raise ValueError(f'Unknown message type: {type(message)}')
+
+	@staticmethod
+	def serialize_messages(messages: list[BaseMessage]) -> list[ChatCompletionMessageParam]:
+		return [OpenAIMessageSerializer.serialize(m) for m in messages]
