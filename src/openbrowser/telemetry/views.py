@@ -1,9 +1,24 @@
+"""Telemetry views and event definitions.
+
+Performance optimizations:
+- Using dataclasses with slots=True for all event classes
+- Cached is_running_in_docker check
+"""
+
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
+from functools import lru_cache
 from typing import Any, Literal
 
 from openbrowser.config import is_running_in_docker
+
+
+# Cache the docker check at module level for repeated calls
+@lru_cache(maxsize=1)
+def _cached_is_docker() -> bool:
+	"""Cached version of is_running_in_docker check."""
+	return is_running_in_docker()
 
 
 @dataclass
@@ -16,12 +31,12 @@ class BaseTelemetryEvent(ABC):
 	@property
 	def properties(self) -> dict[str, Any]:
 		props = {k: v for k, v in asdict(self).items() if k != 'name'}
-		# Add Docker context if running in Docker
-		props['is_docker'] = is_running_in_docker()
+		# Use cached docker check
+		props['is_docker'] = _cached_is_docker()
 		return props
 
 
-@dataclass
+@dataclass(slots=True)
 class AgentTelemetryEvent(BaseTelemetryEvent):
 	# start details
 	task: str
@@ -49,10 +64,17 @@ class AgentTelemetryEvent(BaseTelemetryEvent):
 	final_result_response: str | None
 	error_message: str | None
 
-	name: str = 'agent_event'
+	name: str = field(default='agent_event', repr=False)
+
+	@property
+	def properties(self) -> dict[str, Any]:
+		# Override to use cached docker check
+		props = {k: v for k, v in asdict(self).items() if k != 'name'}
+		props['is_docker'] = _cached_is_docker()
+		return props
 
 
-@dataclass
+@dataclass(slots=True)
 class MCPClientTelemetryEvent(BaseTelemetryEvent):
 	"""Telemetry event for MCP client usage"""
 
@@ -65,10 +87,16 @@ class MCPClientTelemetryEvent(BaseTelemetryEvent):
 	duration_seconds: float | None = None
 	error_message: str | None = None
 
-	name: str = 'mcp_client_event'
+	name: str = field(default='mcp_client_event', repr=False)
+
+	@property
+	def properties(self) -> dict[str, Any]:
+		props = {k: v for k, v in asdict(self).items() if k != 'name'}
+		props['is_docker'] = _cached_is_docker()
+		return props
 
 
-@dataclass
+@dataclass(slots=True)
 class MCPServerTelemetryEvent(BaseTelemetryEvent):
 	"""Telemetry event for MCP server usage"""
 
@@ -79,10 +107,16 @@ class MCPServerTelemetryEvent(BaseTelemetryEvent):
 	error_message: str | None = None
 	parent_process_cmdline: str | None = None
 
-	name: str = 'mcp_server_event'
+	name: str = field(default='mcp_server_event', repr=False)
+
+	@property
+	def properties(self) -> dict[str, Any]:
+		props = {k: v for k, v in asdict(self).items() if k != 'name'}
+		props['is_docker'] = _cached_is_docker()
+		return props
 
 
-@dataclass
+@dataclass(slots=True)
 class CLITelemetryEvent(BaseTelemetryEvent):
 	"""Telemetry event for CLI usage"""
 
@@ -94,4 +128,10 @@ class CLITelemetryEvent(BaseTelemetryEvent):
 	duration_seconds: float | None = None
 	error_message: str | None = None
 
-	name: str = 'cli_event'
+	name: str = field(default='cli_event', repr=False)
+
+	@property
+	def properties(self) -> dict[str, Any]:
+		props = {k: v for k, v in asdict(self).items() if k != 'name'}
+		props['is_docker'] = _cached_is_docker()
+		return props

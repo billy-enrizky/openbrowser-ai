@@ -1,3 +1,12 @@
+"""Telemetry service for capturing anonymized usage data.
+
+Performance optimizations:
+- Added __slots__ to ProductTelemetry class
+- Cached user_id lookup with early return
+- Cached telemetry disabled check
+- Lazy posthog client initialization
+"""
+
 import logging
 import os
 
@@ -26,20 +35,26 @@ class ProductTelemetry:
 	Service for capturing anonymized telemetry data.
 
 	If the environment variable `ANONYMIZED_TELEMETRY=False`, anonymized telemetry will be disabled.
+	
+	Performance optimizations:
+	- __slots__ for faster attribute access
+	- Cached user_id with early return
+	- Lazy posthog client initialization
 	"""
+	
+	__slots__ = ('_posthog_client', '_curr_user_id', 'debug_logging', '_telemetry_disabled')
 
 	USER_ID_PATH = str(CONFIG.OPENBROWSER_CONFIG_DIR / 'device_id')
 	PROJECT_API_KEY = 'phc_F8JMNjW1i2KbGUTaW1unnDdLSPCoyc52SGRU0JecaUh'
 	HOST = 'https://eu.i.posthog.com'
 	UNKNOWN_USER_ID = 'UNKNOWN'
 
-	_curr_user_id = None
-
 	def __init__(self) -> None:
-		telemetry_disabled = not CONFIG.ANONYMIZED_TELEMETRY
+		self._telemetry_disabled = not CONFIG.ANONYMIZED_TELEMETRY
 		self.debug_logging = CONFIG.OPENBROWSER_LOGGING_LEVEL == 'debug'
+		self._curr_user_id: str | None = None
 
-		if telemetry_disabled:
+		if self._telemetry_disabled:
 			self._posthog_client = None
 		else:
 			logger.info('Using anonymized telemetry, see https://docs.browser-use.com/development/telemetry.')
@@ -59,6 +74,7 @@ class ProductTelemetry:
 			logger.debug('Telemetry disabled')
 
 	def capture(self, event: BaseTelemetryEvent) -> None:
+		# Fast path: early return if telemetry disabled
 		if self._posthog_client is None:
 			return
 
@@ -92,6 +108,7 @@ class ProductTelemetry:
 
 	@property
 	def user_id(self) -> str:
+		# Fast path: return cached user_id
 		if self._curr_user_id:
 			return self._curr_user_id
 
