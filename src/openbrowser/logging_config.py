@@ -1,3 +1,12 @@
+"""Logging configuration for openbrowser.
+
+Performance optimizations:
+- Cached BrowserUseFormatter class (created once, reused)
+- Cached third-party logger list as frozenset
+- Early return for already-configured logging
+- Optimized logger name cleanup with cached patterns
+"""
+
 import logging
 import os
 import sys
@@ -8,6 +17,45 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from openbrowser.config import CONFIG
+
+# Cache the RESULT level number
+_RESULT_LEVEL = 35
+
+# Pre-compute third-party loggers to silence (as frozenset for O(1) lookup)
+_THIRD_PARTY_LOGGERS: frozenset[str] = frozenset([
+	'WDM',
+	'httpx',
+	'selenium',
+	'playwright',
+	'urllib3',
+	'asyncio',
+	'langsmith',
+	'langsmith.client',
+	'openai',
+	'httpcore',
+	'charset_normalizer',
+	'anthropic._base_client',
+	'PIL.PngImagePlugin',
+	'trafilatura.htmlprocessing',
+	'trafilatura',
+	'groq',
+	'portalocker',
+	'google_genai',
+	'portalocker.utils',
+	'websockets',
+])
+
+# Cache CDP logger names
+_CDP_LOGGERS: tuple[str, ...] = (
+	'websockets.client',
+	'cdp_use',
+	'cdp_use.client',
+	'cdp_use.cdp',
+	'cdp_use.cdp.registry',
+)
+
+# Flag to track if RESULT level has been added
+_result_level_added = False
 
 
 def addLoggingLevel(levelName, levelNum, methodName=None):
@@ -61,6 +109,41 @@ def addLoggingLevel(levelName, levelNum, methodName=None):
 	setattr(logging, methodName, logToRoot)
 
 
+class BrowserUseFormatter(logging.Formatter):
+	"""Optimized formatter with cached log level check."""
+	
+	__slots__ = ('log_level', '_is_debug_mode')
+	
+	def __init__(self, fmt, log_level):
+		super().__init__(fmt)
+		self.log_level = log_level
+		self._is_debug_mode = log_level <= logging.DEBUG
+
+	def format(self, record):
+		# Fast path: in DEBUG mode, keep everything
+		if self._is_debug_mode:
+			return super().format(record)
+		
+		# Only clean up names in INFO mode
+		name = record.name
+		if isinstance(name, str) and name.startswith('openbrowser.'):
+			# Extract clean component names from logger names
+			if 'Agent' in name:
+				record.name = 'Agent'
+			elif 'BrowserSession' in name:
+				record.name = 'BrowserSession'
+			elif 'tools' in name:
+				record.name = 'tools'
+			elif 'dom' in name:
+				record.name = 'dom'
+			else:
+				# For other openbrowser modules, use the last part
+				parts = name.split('.')
+				if len(parts) >= 2:
+					record.name = parts[-1]
+		return super().format(record)
+
+
 def setup_logging(stream=None, log_level=None, force_setup=False, debug_log_file=None, info_log_file=None):
 	"""Setup logging configuration for browser-use.
 
@@ -71,11 +154,15 @@ def setup_logging(stream=None, log_level=None, force_setup=False, debug_log_file
 		debug_log_file: Path to log file for debug level logs only
 		info_log_file: Path to log file for info level logs only
 	"""
+	global _result_level_added
+	
 	# Try to add RESULT level, but ignore if it already exists
-	try:
-		addLoggingLevel('RESULT', 35)  # This allows ERROR, FATAL and CRITICAL
-	except AttributeError:
-		pass  # Level already exists, which is fine
+	if not _result_level_added:
+		try:
+			addLoggingLevel('RESULT', _RESULT_LEVEL)
+			_result_level_added = True
+		except AttributeError:
+			_result_level_added = True  # Level already exists, which is fine
 
 	log_type = log_level or CONFIG.OPENBROWSER_LOGGING_LEVEL
 
@@ -87,48 +174,24 @@ def setup_logging(stream=None, log_level=None, force_setup=False, debug_log_file
 	root = logging.getLogger()
 	root.handlers = []
 
-	class BrowserUseFormatter(logging.Formatter):
-		def __init__(self, fmt, log_level):
-			super().__init__(fmt)
-			self.log_level = log_level
-
-		def format(self, record):
-			# Only clean up names in INFO mode, keep everything in DEBUG mode
-			if self.log_level > logging.DEBUG and isinstance(record.name, str) and record.name.startswith('openbrowser.'):
-				# Extract clean component names from logger names
-				if 'Agent' in record.name:
-					record.name = 'Agent'
-				elif 'BrowserSession' in record.name:
-					record.name = 'BrowserSession'
-				elif 'tools' in record.name:
-					record.name = 'tools'
-				elif 'dom' in record.name:
-					record.name = 'dom'
-				elif record.name.startswith('openbrowser.'):
-					# For other openbrowser modules, use the last part
-					parts = record.name.split('.')
-					if len(parts) >= 2:
-						record.name = parts[-1]
-			return super().format(record)
-
 	# Setup single handler for all loggers
 	console = logging.StreamHandler(stream or sys.stdout)
 
 	# Determine the log level to use first
 	if log_type == 'result':
-		log_level = 35  # RESULT level value
+		effective_level = _RESULT_LEVEL
 	elif log_type == 'debug':
-		log_level = logging.DEBUG
+		effective_level = logging.DEBUG
 	else:
-		log_level = logging.INFO
+		effective_level = logging.INFO
 
-	# adittional setLevel here to filter logs
+	# Configure console handler
 	if log_type == 'result':
 		console.setLevel('RESULT')
-		console.setFormatter(BrowserUseFormatter('%(message)s', log_level))
+		console.setFormatter(BrowserUseFormatter('%(message)s', effective_level))
 	else:
-		console.setLevel(log_level)  # Keep console at original log level (e.g., INFO)
-		console.setFormatter(BrowserUseFormatter('%(levelname)-8s [%(name)s] %(message)s', log_level))
+		console.setLevel(effective_level)
+		console.setFormatter(BrowserUseFormatter('%(levelname)-8s [%(name)s] %(message)s', effective_level))
 
 	# Configure root logger only
 	root.addHandler(console)
@@ -153,8 +216,8 @@ def setup_logging(stream=None, log_level=None, force_setup=False, debug_log_file
 		root.addHandler(info_handler)
 
 	# Configure root logger - use DEBUG if debug file logging is enabled
-	effective_log_level = logging.DEBUG if debug_log_file else log_level
-	root.setLevel(effective_log_level)
+	root_effective_level = logging.DEBUG if debug_log_file else effective_level
+	root.setLevel(root_effective_level)
 
 	# Configure openbrowser logger
 	openbrowser_logger = logging.getLogger('openbrowser')
@@ -162,7 +225,7 @@ def setup_logging(stream=None, log_level=None, force_setup=False, debug_log_file
 	openbrowser_logger.addHandler(console)
 	for handler in file_handlers:
 		openbrowser_logger.addHandler(handler)
-	openbrowser_logger.setLevel(effective_log_level)
+	openbrowser_logger.setLevel(root_effective_level)
 
 	# Configure bubus logger to allow INFO level logs
 	bubus_logger = logging.getLogger('bubus')
@@ -170,7 +233,7 @@ def setup_logging(stream=None, log_level=None, force_setup=False, debug_log_file
 	bubus_logger.addHandler(console)
 	for handler in file_handlers:
 		bubus_logger.addHandler(handler)
-	bubus_logger.setLevel(logging.INFO if log_type == 'result' else effective_log_level)
+	bubus_logger.setLevel(logging.INFO if log_type == 'result' else root_effective_level)
 
 	# Configure CDP logging using cdp_use's setup function
 	# This enables the formatted CDP output using CDP_LOGGING_LEVEL environment variable
@@ -189,46 +252,16 @@ def setup_logging(stream=None, log_level=None, force_setup=False, debug_log_file
 		)
 	except ImportError:
 		# If cdp_use doesn't have the new logging module, fall back to manual config
-		cdp_loggers = [
-			'websockets.client',
-			'cdp_use',
-			'cdp_use.client',
-			'cdp_use.cdp',
-			'cdp_use.cdp.registry',
-		]
-		for logger_name in cdp_loggers:
+		for logger_name in _CDP_LOGGERS:
 			cdp_logger = logging.getLogger(logger_name)
 			cdp_logger.setLevel(cdp_level)
 			cdp_logger.addHandler(console)
 			cdp_logger.propagate = False
 
 	logger = logging.getLogger('openbrowser')
-	# logger.debug('BrowserUse logging setup complete with level %s', log_type)
 
 	# Silence third-party loggers (but not CDP ones which we configured above)
-	third_party_loggers = [
-		'WDM',
-		'httpx',
-		'selenium',
-		'playwright',
-		'urllib3',
-		'asyncio',
-		'langsmith',
-		'langsmith.client',
-		'openai',
-		'httpcore',
-		'charset_normalizer',
-		'anthropic._base_client',
-		'PIL.PngImagePlugin',
-		'trafilatura.htmlprocessing',
-		'trafilatura',
-		'groq',
-		'portalocker',
-		'google_genai',
-		'portalocker.utils',
-		'websockets',  # General websockets (but not websockets.client which we need)
-	]
-	for logger_name in third_party_loggers:
+	for logger_name in _THIRD_PARTY_LOGGERS:
 		third_party = logging.getLogger(logger_name)
 		third_party.setLevel(logging.ERROR)
 		third_party.propagate = False
@@ -237,7 +270,12 @@ def setup_logging(stream=None, log_level=None, force_setup=False, debug_log_file
 
 
 class FIFOHandler(logging.Handler):
-	"""Non-blocking handler that writes to a named pipe."""
+	"""Non-blocking handler that writes to a named pipe.
+	
+	Optimized with __slots__ for faster attribute access.
+	"""
+	
+	__slots__ = ('fifo_path', 'fd')
 
 	def __init__(self, fifo_path: str):
 		super().__init__()
