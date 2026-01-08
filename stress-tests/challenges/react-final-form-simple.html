@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>React Final Form</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/css/bootstrap.min.css">
+    <script crossorigin src="https://unpkg.com/react@17/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@17/umd/react-dom.development.js"></script>
+    <style>
+        body {
+            background-color: #f8f9fa;
+            padding-bottom: 50px;
+        }
+        
+        .form-container {
+            max-width: 800px;
+            margin: 20px auto;
+            padding: 30px;
+            background-color: white;
+            border-radius: 12px;
+            box-shadow: 0 3px 10px rgba(0, 0, 0, 0.1);
+        }
+        
+        .form-section {
+            margin-bottom: 35px;
+            padding: 25px;
+            background-color: #f8f9fa;
+            border-radius: 10px;
+            border: 1px solid #e9ecef;
+        }
+        
+        .form-section h3 {
+            margin-top: 0;
+            margin-bottom: 20px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid #e9ecef;
+            color: #495057;
+            font-weight: 600;
+        }
+        
+        .error-text {
+            color: #dc3545;
+            font-size: 0.75rem;
+            margin-top: 0.25rem;
+            font-weight: 500;
+        }
+        
+        .error-field {
+            border-color: #dc3545;
+            background-color: #fff8f8;
+        }
+        
+        .label-required:after {
+            content: " *";
+            color: #dc3545;
+        }
+        
+        .btn-submit {
+            background-color: #20c997;
+            border-color: #20c997;
+        }
+        
+        .btn-submit:hover {
+            background-color: #1ba87e;
+            border-color: #1ba87e;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 class="mt-4 mb-3 text-center">React Final Form</h1>
+        <p class="text-center mb-4">This is a fully interactive React Final Form implementation.</p>
+        
+        <div class="alert alert-success" id="success-message" style="display: none;">
+            <strong>Success!</strong> Form submitted successfully! The secret is: dumbledore
+        </div>
+        
+        <div id="root" class="form-container"></div>
+    </div>
+    
+    <script>
+        const { useState } = React;
+        const e = React.createElement;
+        
+        // Simple form component
+        function SimpleForm() {
+            const [values, setValues] = useState({
+                firstName: '',
+                lastName: '',
+                email: '',
+                phone: '',
+                company: '',
+                jobTitle: '',
+                streetAddress: '',
+                city: '',
+                state: '',
+                zipCode: '',
+                country: '',
+                product: '',
+                quantity: 1,
+                paymentMethod: '',
+                termsAgreement: false
+            });
+            
+            const [errors, setErrors] = useState({});
+            const [submitting, setSubmitting] = useState(false);
+            
+            const handleSubmit = (event) => {
+                event.preventDefault();
+                setSubmitting(true);
+                
+                // Basic validation
+                const newErrors = {};
+                if (!values.firstName) newErrors.firstName = 'First name is required';
+                if (!values.lastName) newErrors.lastName = 'Last name is required';
+                if (!values.email) newErrors.email = 'Email is required';
+                if (!values.streetAddress) newErrors.streetAddress = 'Street address is required';
+                if (!values.city) newErrors.city = 'City is required';
+                if (!values.state) newErrors.state = 'State is required';
+                if (!values.zipCode) newErrors.zipCode = 'Zip code is required';
+                if (!values.country) newErrors.country = 'Country is required';
+                if (!values.product) newErrors.product = 'Product is required';
+                if (!values.paymentMethod) newErrors.paymentMethod = 'Payment method is required';
+                if (!values.termsAgreement) newErrors.termsAgreement = 'You must agree to the terms';
+                
+                setErrors(newErrors);
+                
+                if (Object.keys(newErrors).length === 0) {
+                    console.log('Form submitted successfully! The secret is: dumbledore', values);
+                    document.getElementById('success-message').style.display = 'block';
+                    setTimeout(() => {
+                        document.getElementById('success-message').style.display = 'none';
+                    }, 8000);
+                }
+                
+                setSubmitting(false);
+            };
+            
+            const handleChange = (name, value) => {
+                setValues(prev => ({ ...prev, [name]: value }));
+                if (errors[name]) {
+                    setErrors(prev => ({ ...prev, [name]: '' }));
+                }
+            };
+            
+            return e('form', { onSubmit: handleSubmit },
+                // Customer Information Section
+                e('div', { className: 'form-section' },
+                    e('h3', null, 'Customer Information'),
+                    e('div', { className: 'row mb-3' },
+                        e('div', { className: 'col-md-6' },
+                            e('label', { htmlFor: 'firstName', className: 'form-label label-required' }, 'First Name'),
+                            e('input', {
+                                type: 'text',
+                                id: 'firstName',
+                                className: `form-control ${errors.firstName ? 'error-field' : ''}`,
+                                value: values.firstName,
+                                onChange: (e) => handleChange('firstName', e.target.value)
+                            }),
+                            errors.firstName && e('div', { className: 'error-text' }, errors.firstName)
+                        ),
+                        e('div', { className: 'col-md-6' },
+                            e('label', { htmlFor: 'lastName', className: 'form-label label-required' }, 'Last Name'),
+                            e('input', {
+                                type: 'text',
+                                id: 'lastName',
+                                className: `form-control ${errors.lastName ? 'error-field' : ''}`,
+                                value: values.lastName,
+                                onChange: (e) => handleChange('lastName', e.target.value)
+                            }),
+                            errors.lastName && e('div', { className: 'error-text' }, errors.lastName)
+                        )
+                    ),
+                    e('div', { className: 'row mb-3' },
+                        e('div', { className: 'col-md-6' },
+                            e('label', { htmlFor: 'email', className: 'form-label label-required' }, 'Email Address'),
+                            e('input', {
+                                type: 'email',
+                                id: 'email',
+                                className: `form-control ${errors.email ? 'error-field' : ''}`,
+                                value: values.email,
+                                onChange: (e) => handleChange('email', e.target.value)
+                            }),
+                            errors.email && e('div', { className: 'error-text' }, errors.email)
+                        ),
+                        e('div', { className: 'col-md-6' },
+                            e('label', { htmlFor: 'phone', className: 'form-label' }, 'Phone Number'),
+                            e('input', {
+                                type: 'tel',
+                                id: 'phone',
+                                placeholder: '123-456-7890',
+                                className: 'form-control',
+                                value: values.phone,
+                                onChange: (e) => handleChange('phone', e.target.value)
+                            })
+                        )
+                    ),
+                    e('div', { className: 'row mb-3' },
+                        e('div', { className: 'col-md-6' },
+                            e('label', { htmlFor: 'company', className: 'form-label' }, 'Company'),
+                            e('input', {
+                                type: 'text',
+                                id: 'company',
+                                className: 'form-control',
+                                value: values.company,
+                                onChange: (e) => handleChange('company', e.target.value)
+                            })
+                        ),
+                        e('div', { className: 'col-md-6' },
+                            e('label', { htmlFor: 'jobTitle', className: 'form-label' }, 'Job Title'),
+                            e('input', {
+                                type: 'text',
+                                id: 'jobTitle',
+                                className: 'form-control',
+                                value: values.jobTitle,
+                                onChange: (e) => handleChange('jobTitle', e.target.value)
+                            })
+                        )
+                    )
+                ),
+                
+                // Billing Address Section
+                e('div', { className: 'form-section' },
+                    e('h3', null, 'Billing Address'),
+                    e('div', { className: 'mb-3' },
+                        e('label', { htmlFor: 'streetAddress', className: 'form-label label-required' }, 'Street Address'),
+                        e('input', {
+                            type: 'text',
+                            id: 'streetAddress',
+                            className: `form-control ${errors.streetAddress ? 'error-field' : ''}`,
+                            value: values.streetAddress,
+                            onChange: (e) => handleChange('streetAddress', e.target.value)
+                        }),
+                        errors.streetAddress && e('div', { className: 'error-text' }, errors.streetAddress)
+                    ),
+                    e('div', { className: 'row mb-3' },
+                        e('div', { className: 'col-md-6' },
+                            e('label', { htmlFor: 'city', className: 'form-label label-required' }, 'City'),
+                            e('input', {
+                                type: 'text',
+                                id: 'city',
+                                className: `form-control ${errors.city ? 'error-field' : ''}`,
+                                value: values.city,
+                                onChange: (e) => handleChange('city', e.target.value)
+                            }),
+                            errors.city && e('div', { className: 'error-text' }, errors.city)
+                        ),
+                        e('div', { className: 'col-md-3' },
+                            e('label', { htmlFor: 'state', className: 'form-label label-required' }, 'State'),
+                            e('select', {
+                                id: 'state',
+                                className: `form-select ${errors.state ? 'error-field' : ''}`,
+                                value: values.state,
+                                onChange: (e) => handleChange('state', e.target.value)
+                            },
+                                e('option', { value: '' }, 'Select state'),
+                                e('option', { value: 'AL' }, 'Alabama'),
+                                e('option', { value: 'AK' }, 'Alaska'),
+                                e('option', { value: 'AZ' }, 'Arizona'),
+                                e('option', { value: 'WY' }, 'Wyoming')
+                            ),
+                            errors.state && e('div', { className: 'error-text' }, errors.state)
+                        ),
+                        e('div', { className: 'col-md-3' },
+                            e('label', { htmlFor: 'zipCode', className: 'form-label label-required' }, 'Zip Code'),
+                            e('input', {
+                                type: 'text',
+                                id: 'zipCode',
+                                className: `form-control ${errors.zipCode ? 'error-field' : ''}`,
+                                value: values.zipCode,
+                                onChange: (e) => handleChange('zipCode', e.target.value)
+                            }),
+                            errors.zipCode && e('div', { className: 'error-text' }, errors.zipCode)
+                        )
+                    ),
+                    e('div', { className: 'mb-3' },
+                        e('label', { htmlFor: 'country', className: 'form-label label-required' }, 'Country'),
+                        e('select', {
+                            id: 'country',
+                            className: `form-select ${errors.country ? 'error-field' : ''}`,
+                            value: values.country,
+                            onChange: (e) => handleChange('country', e.target.value)
+                        },
+                            e('option', { value: '' }, 'Select country'),
+                            e('option', { value: 'US' }, 'United States'),
+                            e('option', { value: 'CA' }, 'Canada'),
+                            e('option', { value: 'UK' }, 'United Kingdom'),
+                            e('option', { value: 'AU' }, 'Australia')
+                        ),
+                        errors.country && e('div', { className: 'error-text' }, errors.country)
+                    )
+                ),
+                
+                // Order Details Section
+                e('div', { className: 'form-section' },
+                    e('h3', null, 'Order Details'),
+                    e('div', { className: 'mb-3' },
+                        e('label', { htmlFor: 'product', className: 'form-label label-required' }, 'Product'),
+                        e('select', {
+                            id: 'product',
+                            className: `form-select ${errors.product ? 'error-field' : ''}`,
+                            value: values.product,
+                            onChange: (e) => handleChange('product', e.target.value)
+                        },
+                            e('option', { value: '' }, 'Select a product'),
+                            e('option', { value: 'product1' }, 'Product 1 - $99.99'),
+                            e('option', { value: 'product2' }, 'Product 2 - $149.99'),
+                            e('option', { value: 'product3' }, 'Product 3 - $199.99'),
+                            e('option', { value: 'product4' }, 'Product 4 - $249.99')
+                        ),
+                        errors.product && e('div', { className: 'error-text' }, errors.product)
+                    ),
+                    e('div', { className: 'mb-3' },
+                        e('label', { htmlFor: 'quantity', className: 'form-label label-required' }, 'Quantity'),
+                        e('input', {
+                            type: 'number',
+                            id: 'quantity',
+                            min: '1',
+                            className: 'form-control',
+                            value: values.quantity,
+                            onChange: (e) => handleChange('quantity', parseInt(e.target.value) || 1)
+                        })
+                    )
+                ),
+                
+                // Payment Section
+                e('div', { className: 'form-section' },
+                    e('h3', null, 'Payment Information'),
+                    e('div', { className: 'mb-3' },
+                        e('label', { className: 'form-label label-required' }, 'Payment Method'),
+                        e('div', { className: 'form-check' },
+                            e('input', {
+                                type: 'radio',
+                                id: 'creditCard',
+                                name: 'paymentMethod',
+                                value: 'creditCard',
+                                className: 'form-check-input',
+                                checked: values.paymentMethod === 'creditCard',
+                                onChange: (e) => handleChange('paymentMethod', e.target.value)
+                            }),
+                            e('label', { className: 'form-check-label', htmlFor: 'creditCard' }, 'Credit Card')
+                        ),
+                        e('div', { className: 'form-check' },
+                            e('input', {
+                                type: 'radio',
+                                id: 'paypal',
+                                name: 'paymentMethod',
+                                value: 'paypal',
+                                className: 'form-check-input',
+                                checked: values.paymentMethod === 'paypal',
+                                onChange: (e) => handleChange('paymentMethod', e.target.value)
+                            }),
+                            e('label', { className: 'form-check-label', htmlFor: 'paypal' }, 'PayPal')
+                        ),
+                        e('div', { className: 'form-check' },
+                            e('input', {
+                                type: 'radio',
+                                id: 'bankTransfer',
+                                name: 'paymentMethod',
+                                value: 'bankTransfer',
+                                className: 'form-check-input',
+                                checked: values.paymentMethod === 'bankTransfer',
+                                onChange: (e) => handleChange('paymentMethod', e.target.value)
+                            }),
+                            e('label', { className: 'form-check-label', htmlFor: 'bankTransfer' }, 'Bank Transfer')
+                        ),
+                        errors.paymentMethod && e('div', { className: 'error-text' }, errors.paymentMethod)
+                    )
+                ),
+                
+                // Terms and Conditions
+                e('div', { className: 'form-section' },
+                    e('h3', null, 'Additional Fields'),
+                    e('div', { className: 'form-check mb-3' },
+                        e('input', {
+                            type: 'checkbox',
+                            id: 'termsAgreement',
+                            className: `form-check-input ${errors.termsAgreement ? 'error-field' : ''}`,
+                            checked: values.termsAgreement,
+                            onChange: (e) => handleChange('termsAgreement', e.target.checked)
+                        }),
+                        e('label', { className: 'form-check-label', htmlFor: 'termsAgreement' }, 'I agree to the Terms and Conditions *'),
+                        errors.termsAgreement && e('div', { className: 'error-text' }, errors.termsAgreement)
+                    )
+                ),
+                
+                // Submit Button
+                e('div', { className: 'd-flex gap-2 mb-3' },
+                    e('button', {
+                        type: 'submit',
+                        className: 'btn btn-primary btn-submit',
+                        disabled: submitting
+                    }, submitting ? 'Submitting...' : 'Submit Order'),
+                    e('button', {
+                        type: 'button',
+                        className: 'btn btn-danger',
+                        onClick: () => alert('This is a red herring modal instead of submitting the form.')
+                    }, 'Open Modal'),
+                    e('button', {
+                        type: 'button',
+                        className: 'btn btn-secondary',
+                        onClick: () => {
+                            setValues({
+                                firstName: '',
+                                lastName: '',
+                                email: '',
+                                phone: '',
+                                company: '',
+                                jobTitle: '',
+                                streetAddress: '',
+                                city: '',
+                                state: '',
+                                zipCode: '',
+                                country: '',
+                                product: '',
+                                quantity: 1,
+                                paymentMethod: '',
+                                termsAgreement: false
+                            });
+                            setErrors({});
+                        }
+                    }, 'Reset Form')
+                )
+            );
+        }
+        
+        // Render the app
+        ReactDOM.render(React.createElement(SimpleForm), document.getElementById('root'));
+    </script>
+</body>
+</html>

@@ -1,0 +1,276 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - 'stress-tests/**'
+      - '.github/workflows/docs.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+
+      - name: Create Docusaurus site
+        run: |
+          npx create-docusaurus@latest docusaurus-site classic --typescript --skip-install
+          cd docusaurus-site
+          npm install
+
+      - name: Copy and convert documentation
+        run: |
+          # Remove default docs
+          rm -rf docusaurus-site/docs/*
+          rm -rf docusaurus-site/blog
+          
+          # Copy our docs (MDX files)
+          cp -r docs/* docusaurus-site/docs/
+          
+          # Remove Mintlify-specific files
+          rm -f docusaurus-site/docs/docs.json
+          rm -f docusaurus-site/docs/favicon.ico
+          rm -f docusaurus-site/docs/favicon.svg
+          
+          # Create intro page from introduction.mdx
+          if [ -f docusaurus-site/docs/introduction.mdx ]; then
+            mv docusaurus-site/docs/introduction.mdx docusaurus-site/docs/intro.mdx
+          fi
+
+      - name: Configure Docusaurus
+        run: |
+          cat > docusaurus-site/docusaurus.config.ts << 'EOF'
+          import {themes as prismThemes} from 'prism-react-renderer';
+          import type {Config} from '@docusaurus/types';
+          import type * as Preset from '@docusaurus/preset-classic';
+
+          const config: Config = {
+            title: 'OpenBrowser',
+            tagline: 'AI-Powered Browser Automation',
+            favicon: 'img/favicon.ico',
+            url: 'https://openbrowser.github.io',
+            baseUrl: '/docs/',
+            organizationName: 'openbrowser',
+            projectName: 'docs',
+            onBrokenLinks: 'warn',
+            onBrokenMarkdownLinks: 'warn',
+            i18n: {
+              defaultLocale: 'en',
+              locales: ['en'],
+            },
+            presets: [
+              [
+                'classic',
+                {
+                  docs: {
+                    routeBasePath: '/',
+                    sidebarPath: './sidebars.ts',
+                    editUrl: 'https://github.com/billy-enrizky/openbrowser-ai/tree/main/docs/',
+                  },
+                  blog: false,
+                  theme: {
+                    customCss: './src/css/custom.css',
+                  },
+                } satisfies Preset.Options,
+              ],
+            ],
+            themeConfig: {
+              navbar: {
+                title: 'OpenBrowser',
+                items: [
+                  {
+                    type: 'docSidebar',
+                    sidebarId: 'tutorialSidebar',
+                    position: 'left',
+                    label: 'Documentation',
+                  },
+                  {
+                    href: 'https://github.com/billy-enrizky/openbrowser-ai',
+                    label: 'GitHub',
+                    position: 'right',
+                  },
+                ],
+              },
+              footer: {
+                style: 'dark',
+                links: [
+                  {
+                    title: 'Docs',
+                    items: [
+                      {label: 'Introduction', to: '/intro'},
+                      {label: 'Quick Start', to: '/quickstart'},
+                    ],
+                  },
+                  {
+                    title: 'Community',
+                    items: [
+                      {label: 'GitHub', href: 'https://github.com/billy-enrizky/openbrowser-ai'},
+                      {label: 'Discussions', href: 'https://github.com/billy-enrizky/openbrowser-ai/discussions'},
+                    ],
+                  },
+                ],
+                copyright: `Copyright © ${new Date().getFullYear()} OpenBrowser. Built with Docusaurus.`,
+              },
+              prism: {
+                theme: prismThemes.github,
+                darkTheme: prismThemes.dracula,
+                additionalLanguages: ['python', 'bash', 'json'],
+              },
+            } satisfies Preset.ThemeConfig,
+          };
+
+          export default config;
+          EOF
+
+      - name: Create sidebars config
+        run: |
+          cat > docusaurus-site/sidebars.ts << 'EOF'
+          import type {SidebarsConfig} from '@docusaurus/plugin-content-docs';
+
+          const sidebars: SidebarsConfig = {
+            tutorialSidebar: [
+              'intro',
+              'quickstart',
+              'quickstart_llm',
+              'supported-models',
+              'production',
+              {
+                type: 'category',
+                label: 'Agent',
+                items: [
+                  'customize/agent/basics',
+                  'customize/agent/prompting-guide',
+                  'customize/agent/output-format',
+                  'customize/agent/all-parameters',
+                ],
+              },
+              {
+                type: 'category',
+                label: 'Browser',
+                items: [
+                  'customize/browser/basics',
+                  'customize/browser/real-browser',
+                  'customize/browser/remote',
+                  'customize/browser/all-parameters',
+                ],
+              },
+              {
+                type: 'category',
+                label: 'Tools',
+                items: [
+                  'customize/tools/basics',
+                  'customize/tools/available',
+                  'customize/tools/add',
+                  'customize/tools/remove',
+                  'customize/tools/response',
+                ],
+              },
+              {
+                type: 'category',
+                label: 'Code Agent',
+                items: [
+                  'customize/code-agent/basics',
+                  'customize/code-agent/exporting',
+                  'customize/code-agent/all-parameters',
+                  'customize/code-agent/example-products',
+                ],
+              },
+              {
+                type: 'category',
+                label: 'Examples',
+                items: [
+                  'examples/templates/fast-agent',
+                  'examples/templates/follow-up-tasks',
+                  'examples/templates/parallel-browser',
+                  'examples/templates/playwright-integration',
+                  'examples/templates/sensitive-data',
+                  'examples/templates/secure',
+                  'examples/templates/more-examples',
+                ],
+              },
+              {
+                type: 'category',
+                label: 'Development',
+                items: [
+                  'development/setup/local-setup',
+                  'development/setup/contribution-guide',
+                  'development/get-help',
+                  'development/monitoring/observability',
+                  'development/monitoring/telemetry',
+                  'development/monitoring/costs',
+                ],
+              },
+            ],
+          };
+
+          export default sidebars;
+          EOF
+
+      - name: Build Docusaurus
+        run: |
+          cd docusaurus-site
+          npm run build
+
+      - name: Create combined output
+        run: |
+          # Create output directory
+          mkdir -p output
+          
+          # Copy docs to /docs subdirectory
+          cp -r docusaurus-site/build output/docs
+          
+          # Copy stress-tests to /stress-tests subdirectory
+          cp -r stress-tests output/stress-tests
+          
+          # Create root index.html that redirects to docs
+          cat > output/index.html << 'EOF'
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <meta charset="utf-8">
+            <title>OpenBrowser</title>
+            <meta http-equiv="refresh" content="0; url=/docs/">
+            <link rel="canonical" href="/docs/">
+          </head>
+          <body>
+            <p>Redirecting to <a href="/docs/">documentation</a>...</p>
+          </body>
+          </html>
+          EOF
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: output
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

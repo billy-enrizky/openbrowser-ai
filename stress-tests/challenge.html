@@ -1,0 +1,988 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <!--
+    This is a mini game/playtest tool based on forms and interactive html elements.
+    It presents a sequence of tasks that test various browser APIs and user interaction methods.
+    It's designed to test AI agents' ability to drive a browser like a human using tools like Playwright.
+    
+    Task Structure Requirements:
+    1. Each task must have a URL-friendly unique ID (e.g., "simple-button", "drag-drop", "audio-transcription")
+    2. Use this ID format for both the div ID and the anchor tag
+    3. Always update the total count in the score display when adding new tasks
+    
+    Required HTML structure for a new task:
+    
+    <div class="task" id="descriptive-id">
+        <div class="task-badge"><a href="#descriptive-id" id="descriptive-id">descriptive-id</a></div>
+        <div class="task-title">Imperative straightforward instructions for the user</div>
+        ... task content here ...
+        <style>
+            ... task-specific styles here ...
+        </style>
+        <script>
+            // ... task completion logic here ...
+            // Use completeTask(document.getElementById('descriptive-id')) to mark as complete
+        </script>
+    </div>
+    
+    Note: Each task's title should be an imperative statement clearly telling the user what they need to do.
+    -->
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Browser-use Challenge for AI Browser Drivers</title>
+    <style>
+        :root {
+            --primary-color: #4a6bff;
+            --secondary-color: #ff4a6b;
+            --background-color: #f8f9fa;
+            --task-bg-color: #ffffff;
+            --success-color: #28a745;
+            --text-color: #333;
+            --box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: var(--text-color);
+            background-color: var(--background-color);
+            padding: 0;
+            margin: 0;
+            transition: background-color 0.3s ease;
+        }
+
+        header {
+            background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+            color: white;
+            text-align: center;
+            padding: 1.8rem 1rem;
+            box-shadow: var(--box-shadow);
+        }
+
+        h1 {
+            margin: 0;
+            font-size: 2rem;
+            letter-spacing: -0.5px;
+        }
+
+        .score-container {
+            font-size: 1.5rem;
+            padding: 0.5rem;
+            background-color: rgba(55, 55, 55, 0.2);
+            border-radius: 8px;
+            display: inline-block;
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 200;
+        }
+
+        .score {
+            font-weight: bold;
+            font-size: 2rem;
+            color: #fff;
+            display: inline-block;
+        }
+
+        .score-animation {
+            animation: pulse 0.5s ease-in-out;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 2rem auto;
+            padding: 0 1rem;
+        }
+
+        .task {
+            background-color: var(--task-bg-color);
+            margin-bottom: 2rem;
+            padding: 2rem;
+            border-radius: 8px;
+            box-shadow: var(--box-shadow);
+            opacity: 0.7;
+            transition: all 0.3s ease;
+            position: relative;
+        }
+
+        .task.active {
+            opacity: 1;
+            transform: translateY(-5px);
+            border-left: 5px solid var(--primary-color);
+        }
+
+        .task.completed {
+            border-left: 5px solid var(--success-color);
+        }
+
+        .task-badge {
+            position: absolute;
+            top: -15px;
+            left: -15px;
+            background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+            color: white;
+            min-width: 30px;
+            height: 30px;
+            border-radius: 15px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            text-decoration: none;
+            padding: 0 5px;
+        }
+        
+        .task-badge a {
+            color: white;
+            text-decoration: none;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.7rem;
+        }
+
+        .task-title {
+            font-weight: bold;
+            margin-bottom: 1rem;
+            font-size: 1.2rem;
+        }
+
+        button {
+            background-color: var(--primary-color);
+            color: white;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 1rem;
+            transition: background-color 0.3s ease, transform 0.2s ease;
+        }
+
+        button:hover {
+            background-color: #3755d8;
+            transform: translateY(-2px);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        input[type="text"], input[type="date"] {
+            padding: 0.5rem;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 1rem;
+            width: 100%;
+            max-width: 300px;
+        }
+
+        .radio-group, .checkbox-group {
+            margin: 1rem 0;
+        }
+
+        .radio-group label, .checkbox-group label {
+            margin-right: 1rem;
+            cursor: pointer;
+        }
+
+        input[type="radio"], input[type="checkbox"] {
+            margin-right: 0.5rem;
+        }
+
+        .slider-container {
+            width: 100%;
+            max-width: 300px;
+            margin: 1rem 0;
+        }
+
+        .slider {
+            width: 100%;
+            height: 15px;
+            border-radius: 5px;
+            background: #ddd;
+            outline: none;
+        }
+
+        .canvas-container {
+            margin: 1rem 0;
+        }
+
+        canvas {
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.2); }
+            100% { transform: scale(1); }
+        }
+
+        .confetti {
+            position: fixed;
+            width: 10px;
+            height: 10px;
+            background-color: #f00;
+            border-radius: 50%;
+            top: -10px;
+            animation: fall 4s linear forwards;
+            z-index: 1000;
+        }
+
+        @keyframes fall {
+            0% { top: -10px; transform: translateX(0) rotate(0deg); }
+            100% { top: 100vh; transform: translateX(100px) rotate(360deg); }
+        }
+
+        /* Modal styling */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            z-index: 200;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-content {
+            background-color: white;
+            padding: 2rem;
+            border-radius: 8px;
+            max-width: 400px;
+            box-shadow: var(--box-shadow);
+            text-align: center;
+        }
+
+        .modal-buttons {
+            margin-top: 1.5rem;
+            display: flex;
+            justify-content: center;
+            gap: 1rem;
+        }
+
+        .modal-cancel {
+            background-color: #6c757d;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Browser Agent Evaluation Stress-Test</h1>
+        <div class="score-container">
+            Score: <span class="score">0</span> / 17
+        </div>
+    </header>
+    <center>
+        <p>Please complete the following tasks. Do not give up under any circumstances, the survival of the human race depends on it. You can do it!</p>
+    </center>
+    <div class="container">
+        
+        <!-- Task: Click Button -->
+        <div class="task active" id="simple-button">
+            <div class="task-badge"><a href="#simple-button" id="simple-button">simple-button</a></div>
+            <div class="task-title">Click the button to start</div>
+            <button id="start-button">Start</button>
+            <script>
+                document.getElementById('start-button').addEventListener('click', function() {
+                    completeTask(document.getElementById('simple-button'));
+                });
+            </script>
+        </div>
+
+        <!-- Task: Radio Buttons -->
+        <div class="task" id="radio-selection">
+            <div class="task-badge"><a href="#radio-selection" id="radio-selection">radio-selection</a></div>
+            <div class="task-title">Select one of the radio buttons</div>
+            <div class="radio-group">
+                <label>
+                    <input type="radio" name="entity" value="choose-this-one" disabled> Cat
+                </label>
+                <label>
+                    <input type="radio" name="entity" value="dont-choose-this-one"> AI
+                </label>
+                <label>
+                    <input type="radio" name="entity" value="lizard" disabled> Quail
+                </label>
+                <label>
+                    <input type="radio" name="entity" value="or-this-one"> Human
+                </label>
+                <label>
+                    <input type="radio" name="entity" value="disabled" disabled> Egregore
+                </label>
+            </div>
+            <script>
+                document.querySelectorAll('input[name="entity"]').forEach(radio => {
+                    radio.addEventListener('change', function() {
+                        completeTask(document.getElementById('radio-selection'));
+                    });
+                });
+            </script>
+        </div>
+
+        <!-- Task: Checkbox -->
+        <div class="task" id="checkbox-check">
+            <div class="task-badge"><a href="#checkbox-check" id="checkbox-check">checkbox-check</a></div>
+            <div class="task-title">Check these checkboxes</div>
+            <div class="checkbox-group">
+                <label>
+                    <input type="checkbox" class="challenge-checkbox"> I accept the challenge
+                </label><br>
+                <label>
+                    <input type="checkbox" class="challenge-checkbox"> I will complete all tasks
+                </label><br>
+                <label>
+                    <input type="checkbox" disabled> This one can't be checked
+                </label><br>
+                <label disabled>
+                    <input type="checkbox" class="challenge-checkbox"> This one has sneaky html
+                </label>
+            </div>
+            <script>
+                const checkboxes = document.querySelectorAll('.challenge-checkbox');
+                checkboxes.forEach(checkbox => {
+                    checkbox.addEventListener('change', function() {
+                        // Check if all non-disabled checkboxes are checked
+                        const allChecked = Array.from(checkboxes).every(cb => cb.checked);
+                        if (allChecked) {
+                            completeTask(document.getElementById('checkbox-check'));
+                        }
+                    });
+                });
+            </script>
+        </div>
+
+        <!-- Task: Search -->
+        <div class="task" id="search-squash">
+            <div class="task-badge"><a href="#search-squash" id="search-squash">search-squash</a></div>
+            <div class="task-title">Use this search field to search for "squash"</div>
+            <input type="search" id="search-input" placeholder="Enter a search term and press Enter" value="abc">
+            <script>
+                document.getElementById('search-input').addEventListener('keypress', function(e) {
+                    if (e.key === 'Enter' && this.value.trim().toLowerCase() === 'squash') {
+                        completeTask(document.getElementById('search-squash'));
+                    } else if (e.key === 'Enter') {
+                        // Wrong search term feedback
+                        const oldVal = this.value;
+                        this.value = "Try searching for 'squash'";
+                        setTimeout(() => {
+                            this.value = oldVal;
+                            this.select(); // Select the text for easy replacement
+                        }, 1500);
+                    }
+                });
+            </script>
+        </div>
+
+        <!-- Task: Date and Time Pickers -->
+        <div class="task" id="date-time-input">
+            <div class="task-badge"><a href="#date-time-input" id="date-time-input">date-time-input</a></div>
+            <div class="task-title">Input the current date and time</div>
+            <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                <input type="date" id="date-picker">
+                <input type="time" id="time-picker">
+            </div>
+            <script>
+                const datePicker = document.getElementById('date-picker');
+                const timePicker = document.getElementById('time-picker');
+                let dateSelected = false;
+                let timeSelected = false;
+                
+                function checkDateTimeCompletion() {
+                    if (dateSelected && timeSelected) {
+                        completeTask(document.getElementById('date-time-input'));
+                    }
+                }
+                
+                datePicker.addEventListener('change', function() {
+                    if (this.value) {
+                        dateSelected = true;
+                        checkDateTimeCompletion();
+                    }
+                });
+                
+                timePicker.addEventListener('change', function() {
+                    if (this.value) {
+                        timeSelected = true;
+                        checkDateTimeCompletion();
+                    }
+                });
+            </script>
+        </div>
+
+        <!-- Task: Slider -->
+        <div class="task" id="slider-drag">
+            <div class="task-badge"><a href="#slider-drag" id="slider-drag">slider-drag</a></div>
+            <div class="task-title">Drag this slider completely to the right</div>
+            <div class="slider-container">
+                <input type="range" min="1" max="100" value="1" class="slider" id="range-slider">
+                <div>Value: <span id="slider-value">1</span></div>
+            </div>
+            <script>
+                const slider = document.getElementById('range-slider');
+                const sliderValue = document.getElementById('slider-value');
+                slider.addEventListener('input', function() {
+                    sliderValue.textContent = this.value;
+                    if (parseInt(this.value) >= 90) {
+                        completeTask(document.getElementById('slider-drag'));
+                    }
+                });
+            </script>
+        </div>
+
+        <!-- Task: Hover -->
+        <div class="task" id="hover-element">
+            <div class="task-badge"><a href="#hover-element" id="hover-element">hover-element</a></div>
+            <div class="task-title">Hover over this element</div>
+            <style>
+                .hover-area {
+                    background-color: #e9ecef;
+                    padding: 1rem;
+                    border-radius: 4px;
+                    text-align: center;
+                    transition: background-color 0.3s ease;
+                }
+
+                .hover-area:hover {
+                    background-color: var(--secondary-color);
+                    color: white;
+                }
+            </style>
+            <div class="hover-area" id="hover-target">Hover over me</div>
+            <script>
+                let hoverTimeout;
+                document.getElementById('hover-target').addEventListener('mouseenter', function() {
+                    this.textContent = 'Nice hovering!';
+                    hoverTimeout = setTimeout(() => {
+                        completeTask(document.getElementById('hover-element'));
+                    }, 1000);
+                });
+                
+                document.getElementById('hover-target').addEventListener('mouseleave', function() {
+                    this.textContent = 'Hover over me';
+                    clearTimeout(hoverTimeout);
+                });
+            </script>
+        </div>
+
+        <!-- Task: Canvas Text -->
+        <div class="task" id="canvas-captcha">
+            <div class="task-badge"><a href="#canvas-captcha" id="canvas-captcha">canvas-captcha</a></div>
+            <div class="task-title">Read the text off this canvas element and type it into this input field</div>
+            <div class="canvas-container">
+                <canvas id="text-canvas" width="300" height="100"></canvas>
+            </div>
+            <input type="text" id="canvas-text-input" placeholder="Type the text you see in the canvas">
+            <script>
+                const canvas = document.getElementById('text-canvas');
+                const ctx12 = canvas.getContext('2d');
+                const canvasText = 'CAPTCHA123';
+                
+                // Draw text on canvas
+                ctx12.fillStyle = '#f8f9fa';
+                ctx12.fillRect(0, 0, canvas.width, canvas.height);
+                ctx12.font = '30px Arial';
+                ctx12.fillStyle = '#333';
+                ctx12.textAlign = 'center';
+                ctx12.textBaseline = 'middle';
+                
+                // Add some noise to make it harder to read
+                for (let i = 0; i < 100; i++) {
+                    ctx12.fillStyle = `rgba(${Math.random() * 255}, ${Math.random() * 255}, ${Math.random() * 255}, 0.5)`;
+                    ctx12.fillRect(Math.random() * canvas.width, Math.random() * canvas.height, 2, 2);
+                }
+                
+                // Draw wavy text
+                let x = canvas.width / 2;
+                let y = canvas.height / 2;
+                
+                // Draw rotated, slightly distorted text
+                ctx12.save();
+                ctx12.translate(x, y);
+                ctx12.rotate(Math.random() * 0.1 - 0.05);
+                ctx12.fillText(canvasText, 0, Math.sin(y * 0.01) * 5);
+                ctx12.restore();
+                
+                document.getElementById('canvas-text-input').addEventListener('input', function() {
+                    if (this.value.toUpperCase() === canvasText) {
+                        completeTask(document.getElementById('canvas-captcha'));
+                    }
+                });
+            </script>
+        </div>
+
+        <!-- Task: Iframe slider -->
+        <div class="task" id="iframe-slider">
+            <div class="task-badge"><a href="#iframe-slider" id="iframe-slider">iframe-slider</a></div>
+            <div class="task-title">Drag the slider completely to the right inside this iframe</div>
+            <iframe id="slider-iframe-element" style="width: 350px; height: 150px; border: 1px solid #ddd; border-radius: 4px;" src="#"></iframe>
+            <script>
+                const sliderIframe = document.getElementById('slider-iframe-element');
+                sliderIframe.onload = function() {
+                    const iframeDoc = sliderIframe.contentDocument || sliderIframe.contentWindow.document;
+                    
+                    // Create the slider in the iframe
+                    iframeDoc.body.innerHTML = `
+                        <style>
+                            body {
+                                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                                padding: 10px;
+                                margin: 0;
+                            }
+                            .slider-container {
+                                width: 300px;
+                                margin: 10px auto;
+                            }
+                            .slider {
+                                width: 100%;
+                                height: 15px;
+                                border-radius: 5px;
+                                background: #ddd;
+                                outline: none;
+                            }
+                            .value-display {
+                                text-align: center;
+                                margin-top: 10px;
+                            }
+                        </style>
+                        <div class="slider-container">
+                            <input type="range" min="1" max="100" value="1" class="slider" id="iframe-slider">
+                            <div class="value-display">Value: <span id="iframe-slider-value">1</span></div>
+                        </div>
+                    `;
+                    
+                    // Add event listeners for the iframe slider
+                    const iframeSlider = iframeDoc.getElementById('iframe-slider');
+                    const iframeSliderValue = iframeDoc.getElementById('iframe-slider-value');
+                    
+                    iframeSlider.addEventListener('input', function() {
+                        iframeSliderValue.textContent = this.value;
+                        if (parseInt(this.value) >= 90) {
+                            completeTask(document.getElementById('iframe-slider'));
+                        }
+                    });
+                };
+                
+                // Set the iframe source to be about:blank and force load event
+                sliderIframe.src = 'about:blank';
+            </script>
+        </div>
+
+        <!-- Task: Scroll to bottom and accept terms -->
+        <div class="task" id="scroll-accept">
+            <div class="task-badge"><a href="#scroll-accept" id="scroll-accept">scroll-accept</a></div>
+            <div class="task-title">Scroll the to the bottom of this legal text and click I accept</div>
+            <div id="scroll-container" style="height: 150px; overflow-y: auto; border: 1px solid #ddd; padding: 10px; border-radius: 4px;">
+                <p>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.</p>
+                <p>Sed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium doloremque laudantium, totam rem aperiam, eaque ipsa quae ab illo inventore veritatis et quasi architecto beatae vitae dicta sunt explicabo. Nemo enim ipsam voluptatem quia voluptas sit aspernatur aut odit aut fugit, sed quia consequuntur magni dolores eos qui ratione voluptatem sequi nesciunt.</p>
+                <p>Neque porro quisquam est, qui dolorem ipsum quia dolor sit amet, consectetur, adipisci velit, sed quia non numquam eius modi tempora incidunt ut labore et dolore magnam aliquam quaerat voluptatem. Ut enim ad minima veniam, quis nostrum exercitationem ullam corporis suscipit laboriosam, nisi ut aliquid ex ea commodi consequatur. Quis autem vel eum iure reprehenderit qui in ea voluptate velit esse quam nihil molestiae consequatur, vel illum qui dolorem eum fugiat quo voluptas nulla pariatur.</p>
+                <p>At vero eos et accusamus et iusto odio dignissimos ducimus qui blanditiis praesentium voluptatum deleniti atque corrupti quos dolores et quas molestias excepturi sint occaecati cupiditate non provident, similique sunt in culpa qui officia deserunt mollitia animi, id est laborum et dolorum fuga.</p>
+                <p id="scroll-bottom-marker" style="color: var(--primary-color); font-weight: bold;">You've reached the bottom!</p>
+            </div>
+            <button id="accept-button">I accept</button>
+            <script>
+                const scrollContainer = document.getElementById('scroll-container');
+                const scrollBottomMarker = document.getElementById('scroll-bottom-marker');
+                const acceptButton = document.getElementById('accept-button');
+                let hasScrolledToBottom = false;
+                
+                // Initially disable the accept button
+                acceptButton.disabled = true;
+                acceptButton.style.opacity = '0.5';
+                acceptButton.style.cursor = 'not-allowed';
+                
+                scrollContainer.addEventListener('scroll', function() {
+                    // Check if scrolled to bottom
+                    if (this.scrollHeight - this.scrollTop <= this.clientHeight + 5) {
+                        // Enable the accept button when scrolled to bottom
+                        hasScrolledToBottom = true;
+                        acceptButton.disabled = false;
+                        acceptButton.style.opacity = '1';
+                        acceptButton.style.cursor = 'pointer';
+                        scrollBottomMarker.textContent = "You've read all the terms. Please click 'I accept' button.";
+                    }
+                });
+                
+                // Add click handler for the accept button
+                acceptButton.addEventListener('click', function() {
+                    if (hasScrolledToBottom) {
+                        this.textContent = "Terms Accepted";
+                        completeTask(document.getElementById('scroll-accept'));
+                    } else {
+                        // If they somehow click before scrolling (shouldn't be possible with disabled button)
+                        alert("Please scroll to the bottom and read all terms first!");
+                    }
+                });
+            </script>
+        </div>
+
+        <!-- Task: Arrow Key Presses -->
+        <div class="task" id="arrow-key-presses">
+            <div class="task-badge"><a href="#arrow-key-presses" id="arrow-key-presses">arrow-key-presses</a></div>
+            <div class="task-title">Press the right arrow key 3 times</div>
+            <style>
+                .key-press-area {
+                    border: 2px solid #ddd;
+                    border-radius: 4px;
+                    padding: 1.5rem;
+                    margin: 1rem 0;
+                    text-align: center;
+                    background-color: #f8f9fa;
+                }
+
+                .key-press-display {
+                    font-family: monospace;
+                    font-size: 1.2rem;
+                    margin: 1rem 0;
+                    min-height: 1.5rem;
+                    color: var(--primary-color);
+                }
+            </style>
+            <div class="key-press-area" id="key-press-area" tabindex="0">
+                <p>Click here and press the right arrow key (→) three times</p>
+                <div class="key-press-display" id="key-press-display">Keys pressed: </div>
+            </div>
+            <script>
+                const keyPressArea = document.getElementById('key-press-area');
+                const keyPressDisplay = document.getElementById('key-press-display');
+                let rightArrowPresses = 0;
+
+                keyPressArea.addEventListener('keydown', function(e) {
+                    if (e.key === 'ArrowRight') {
+                        rightArrowPresses++;
+                        
+                        // Update display
+                        if (rightArrowPresses === 1) {
+                            keyPressDisplay.textContent = 'Keys pressed: →';
+                        } else if (rightArrowPresses === 2) {
+                            keyPressDisplay.textContent = 'Keys pressed: → →';
+                        } else if (rightArrowPresses === 3) {
+                            keyPressDisplay.textContent = 'Keys pressed: → → →';
+                            completeTask(document.getElementById('arrow-key-presses'));
+                        } else {
+                            keyPressDisplay.textContent = `Keys pressed: ${'→ '.repeat(rightArrowPresses)}`;
+                        }
+                        
+                        // Prevent scrolling with arrow keys
+                        e.preventDefault();
+                    }
+                });
+
+                // Ensure key press area is focusable
+                keyPressArea.addEventListener('click', function() {
+                    this.focus();
+                });
+            </script>
+        </div>
+
+        <!-- Task: File upload -->
+        <div class="task" id="file-upload">
+            <div class="task-badge"><a href="#file-upload" id="file-upload">file-upload</a></div>
+            <div class="task-title">Upload a file using this input</div>
+            <input type="file" id="file-upload-input">
+            <div id="file-upload-status" style="margin-top: 10px; font-size: 0.9rem;"></div>
+            <script>
+                const fileUploadInput = document.getElementById('file-upload-input');
+                const fileUploadStatus = document.getElementById('file-upload-status');
+                
+                fileUploadInput.addEventListener('change', function() {
+                    if (this.files.length > 0) {
+                        const file = this.files[0];
+                        fileUploadStatus.textContent = `Uploaded: ${file.name} (${Math.round(file.size / 1024)} KB)`;
+                        completeTask(document.getElementById('file-upload'));
+                    }
+                });
+            </script>
+        </div>
+
+        <!-- Task: Details element -->
+        <div class="task" id="expand-details">
+            <div class="task-badge"><a href="#expand-details" id="expand-details">expand-details</a></div>
+            <div class="task-title">Expand this details section to complete the task</div>
+            <details id="details-element">
+                <summary>Click to expand me</summary>
+                <div style="padding: 15px; background-color: #f8f9fa; margin-top: 10px; border-radius: 4px;">
+                    <p>Congratulations, you've expanded the details section!</p>
+                    <p>This is the HTML <code>&lt;details&gt;</code> element - a native disclosure widget.</p>
+                </div>
+            </details>
+            <script>
+                const detailsElement = document.getElementById('details-element');
+                
+                detailsElement.addEventListener('toggle', function() {
+                    if (this.open) {
+                        completeTask(document.getElementById('expand-details'));
+                    }
+                });
+            </script>
+        </div>
+        
+        <!-- Task: Dropdown Selections -->
+        <div class="task" id="dropdown-selections">
+            <div class="task-badge"><a href="#dropdown-selections" id="dropdown-selections">dropdown-selections</a></div>
+            <div class="task-title">Select "red" and "ball" from these dropdowns</div>
+            
+            <!-- Include Select2 CSS and JS for the fancy dropdown -->
+            <link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet" />
+            <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+            <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
+            
+            <div style="margin: 1rem 0;">
+                <div style="margin-bottom: 1rem;">
+                    <label for="color-select">Select a color:</label>
+                    <select id="color-select" style="width: 200px; margin-left: 10px;">
+                        <option value="">Choose a color</option>
+                        <option value="blue">Blue</option>
+                        <option value="green">Green</option>
+                        <option value="red">Red</option>
+                        <option value="yellow">Yellow</option>
+                        <option value="purple">Purple</option>
+                    </select>
+                </div>
+                
+                <div>
+                    <label for="object-select">Select an object:</label>
+                    <select id="object-select" class="object-select-dropdown" style="width: 200px; margin-left: 10px;">
+                        <option value="">Choose an object</option>
+                        <option value="apple">Apple</option>
+                        <option value="airplane">Airplane</option>
+                        <option value="arrow">Arrow</option>
+                        <option value="backpack">Backpack</option>
+                        <option value="badge">Badge</option>
+                        <option value="bagel">Bagel</option>
+                        <option value="balloon">Balloon</option>
+                        <option value="ball">Ball</option>
+                        <option value="banana">Banana</option>
+                        <option value="basket">Basket</option>
+                        <option value="battery">Battery</option>
+                        <option value="beach">Beach</option>
+                        <option value="bean">Bean</option>
+                        <option value="bicycle">Bicycle</option>
+                        <option value="bird">Bird</option>
+                        <option value="blanket">Blanket</option>
+                        <option value="boat">Boat</option>
+                        <option value="book">Book</option>
+                        <option value="bottle">Bottle</option>
+                        <option value="bowl">Bowl</option>
+                        <option value="box">Box</option>
+                        <option value="bracelet">Bracelet</option>
+                        <option value="bread">Bread</option>
+                        <option value="bridge">Bridge</option>
+                        <option value="broom">Broom</option>
+                        <option value="brush">Brush</option>
+                        <option value="bucket">Bucket</option>
+                        <option value="button">Button</option>
+                        <option value="cabinet">Cabinet</option>
+                        <option value="cable">Cable</option>
+                        <option value="cactus">Cactus</option>
+                        <option value="calculator">Calculator</option>
+                        <option value="calendar">Calendar</option>
+                        <option value="camera">Camera</option>
+                        <option value="candle">Candle</option>
+                        <option value="car">Car</option>
+                        <option value="card">Card</option>
+                        <option value="carpet">Carpet</option>
+                        <option value="carrot">Carrot</option>
+                        <option value="castle">Castle</option>
+                        <option value="cat">Cat</option>
+                        <option value="chair">Chair</option>
+                        <option value="chalk">Chalk</option>
+                        <option value="charger">Charger</option>
+                        <option value="cheese">Cheese</option>
+                        <option value="cherry">Cherry</option>
+                        <option value="chess">Chess</option>
+                        <option value="chicken">Chicken</option>
+                        <option value="chocolate">Chocolate</option>
+                        <option value="clock">Clock</option>
+                        <option value="cloud">Cloud</option>
+                        <option value="coat">Coat</option>
+                        <option value="coffee">Coffee</option>
+                        <option value="coin">Coin</option>
+                        <option value="comb">Comb</option>
+                        <option value="compass">Compass</option>
+                        <option value="computer">Computer</option>
+                        <option value="cookie">Cookie</option>
+                        <option value="cup">Cup</option>
+                        <option value="cube">Cube</option>
+                        <option value="curtain">Curtain</option>
+                        <option value="desk">Desk</option>
+                        <option value="diamond">Diamond</option>
+                        <option value="dog">Dog</option>
+                        <option value="door">Door</option>
+                        <option value="drawing">Drawing</option>
+                        <option value="dress">Dress</option>
+                        <option value="drum">Drum</option>
+                        <option value="duck">Duck</option>
+                        <option value="earring">Earring</option>
+                        <option value="egg">Egg</option>
+                        <option value="elephant">Elephant</option>
+                        <option value="envelope">Envelope</option>
+                        <option value="eraser">Eraser</option>
+                        <option value="fan">Fan</option>
+                        <option value="feather">Feather</option>
+                        <option value="fence">Fence</option>
+                        <option value="fidget">Fidget</option>
+                        <option value="fish">Fish</option>
+                        <option value="flag">Flag</option>
+                        <option value="flashlight">Flashlight</option>
+                        <option value="flower">Flower</option>
+                        <option value="flute">Flute</option>
+                        <option value="fork">Fork</option>
+                        <option value="frog">Frog</option>
+                        <option value="garden">Garden</option>
+                        <option value="glove">Glove</option>
+                        <option value="grapes">Grapes</option>
+                        <option value="guitar">Guitar</option>
+                        <option value="hammer">Hammer</option>
+                        <option value="hat">Hat</option>
+                        <option value="headphones">Headphones</option>
+                        <option value="helmet">Helmet</option>
+                        <option value="house">House</option>
+                        <option value="icecream">Icecream</option>
+                        <option value="pen">Pen</option>
+                        <option value="phone">Phone</option>
+                    </select>
+                </div>
+            </div>
+            
+            <script>
+                // Initialize Select2 for the object dropdown to make it fancy
+                $(document).ready(function() {
+                    $('.object-select-dropdown').select2({
+                        placeholder: "Select an object"
+                    });
+                    
+                    // Track selections
+                    let colorSelected = false;
+                    let objectSelected = false;
+                    
+                    // Check if task is complete
+                    function checkDropdownSelections() {
+                        if (colorSelected && objectSelected) {
+                            completeTask(document.getElementById('dropdown-selections'));
+                        }
+                    }
+                    
+                    // Listen for color selection
+                    $('#color-select').on('change', function() {
+                        if ($(this).val() === 'red') {
+                            colorSelected = true;
+                            checkDropdownSelections();
+                        } else {
+                            colorSelected = false;
+                        }
+                    });
+                    
+                    // Listen for object selection
+                    $('#object-select').on('change', function() {
+                        if ($(this).val() === 'ball') {
+                            objectSelected = true;
+                            checkDropdownSelections();
+                        } else {
+                            objectSelected = false;
+                        }
+                    });
+                });
+            </script>
+        </div>
+
+        <!-- Task: Contenteditable Div -->
+        <div class="task" id="contenteditable-div">
+            <div class="task-badge"><a href="#contenteditable-div" id="contenteditable-div">contenteditable-div</a></div>
+            <div class="task-title">Type "banana" into this contenteditable div element</div>
+            <div style="margin: 1rem 0;">
+                <div 
+                    id="editable-content" 
+                    contenteditable="true" 
+                    style="min-height: 50px; padding: 10px; border: 1px solid #ddd; border-radius: 4px; background-color: #f8f9fa;">
+                    Click here and start typing...
+                </div>
+            </div>
+            <script>
+                const editableDiv = document.getElementById('editable-content');
+                
+                // Clear default text when div is first clicked
+                editableDiv.addEventListener('focus', function() {
+                    if (this.textContent.trim() === 'Click here and start typing...') {
+                        this.textContent = '';
+                    }
+                }, { once: true });
+                
+                // Check for completion
+                editableDiv.addEventListener('input', function() {
+                    if (this.textContent.trim().toLowerCase() === 'banana') {
+                        completeTask(document.getElementById('contenteditable-div'));
+                    }
+                });
+            </script>
+        </div>
+
+    </div>
+
+        
+    <!--------------------------------------------------------------------------------------------------->
+    <script>
+        // Global script for shared functions
+        document.addEventListener('DOMContentLoaded', function() {
+            const tasks = document.querySelectorAll('.task');
+            const scoreElement = document.querySelector('.score');
+            let score = 0;
+            let currentTaskIndex = 0;
+
+            // Define the global completeTask function that all tasks use
+            window.completeTask = function(taskElement) {
+                if (taskElement.classList.contains('completed')) return;
+
+                // Save current scroll position
+                const scrollPos = window.scrollY;
+
+                taskElement.classList.remove('active');
+                taskElement.classList.add('completed');
+                score++;
+                updateScore();
+
+                // Move to next task
+                if (currentTaskIndex < tasks.length - 1) {
+                    currentTaskIndex++;
+                    tasks[currentTaskIndex].classList.add('active');
+                }
+                
+                // Restore scroll position
+                window.scrollTo(0, scrollPos);
+            }
+
+            function updateScore() {
+                scoreElement.textContent = score;
+                scoreElement.classList.add('score-animation');
+                setTimeout(() => scoreElement.classList.remove('score-animation'), 500);
+                createConfetti();
+            }
+
+            function createConfetti() {
+                const colors = ['#ff4a6b', '#4a6bff', '#4aff6b', '#ff4aff', '#ffff4a'];
+                for (let i = 0; i < 20; i++) {
+                    const confetti = document.createElement('div');
+                    confetti.className = 'confetti';
+                    confetti.style.left = Math.random() * window.innerWidth + 'px';
+                    confetti.style.backgroundColor = colors[Math.floor(Math.random() * colors.length)];
+                    confetti.style.width = (Math.random() * 10 + 5) + 'px';
+                    confetti.style.height = (Math.random() * 10 + 5) + 'px';
+                    confetti.style.animationDuration = (Math.random() * 3 + 2) + 's';
+                    document.body.appendChild(confetti);
+
+                    // Remove confetti after animation ends
+                    setTimeout(() => {
+                        document.body.removeChild(confetti);
+                    }, 5000);
+                }
+            }
+        });
+    </script>
+</body>
+</html>
