@@ -1,211 +1,242 @@
-"""Anthropic Claude chat model wrapper."""
+import json
+from collections.abc import Mapping
+from dataclasses import dataclass
+from typing import Any, TypeVar, overload
 
-from __future__ import annotations
+import httpx
+from anthropic import (
+	APIConnectionError,
+	APIStatusError,
+	AsyncAnthropic,
+	NotGiven,
+	RateLimitError,
+	omit,
+)
+from anthropic.types import CacheControlEphemeralParam, Message, ToolParam
+from anthropic.types.model_param import ModelParam
+from anthropic.types.text_block import TextBlock
+from anthropic.types.tool_choice_tool_param import ToolChoiceToolParam
+from httpx import Timeout
+from pydantic import BaseModel
 
-import logging
-import os
-from typing import Any, List, Optional, Type, TypeVar
+from openbrowser.llm.anthropic.serializer import AnthropicMessageSerializer
+from openbrowser.llm.base import BaseChatModel
+from openbrowser.llm.exceptions import ModelProviderError, ModelRateLimitError
+from openbrowser.llm.messages import BaseMessage
+from openbrowser.llm.schema import SchemaOptimizer
+from openbrowser.llm.views import ChatInvokeCompletion, ChatInvokeUsage
 
-from langchain_core.callbacks import CallbackManagerForLLMRun
-from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
-from langchain_core.outputs import ChatGeneration, ChatResult
-from pydantic import BaseModel, Field, PrivateAttr
-
-logger = logging.getLogger(__name__)
-
-T = TypeVar("T", bound=BaseModel)
+T = TypeVar('T', bound=BaseModel)
 
 
+@dataclass
 class ChatAnthropic(BaseChatModel):
-    """
-    LangChain-compatible wrapper for Anthropic Claude models.
-    Requires: pip install anthropic
-    """
+	"""
+	A wrapper around Anthropic's chat model.
+	"""
 
-    model_name: str = Field(default="claude-sonnet-4-20250514", alias="model")
-    temperature: float = Field(default=0.0)
-    max_tokens: int = Field(default=4096)
-    api_key: Optional[str] = Field(default=None)
-    timeout: float = Field(default=60.0)
-    max_retries: int = Field(default=3)
+	# Model configuration
+	model: str | ModelParam
+	max_tokens: int = 8192
+	temperature: float | None = None
+	top_p: float | None = None
+	seed: int | None = None
 
-    _client: Any = PrivateAttr(default=None)
-    _bound_tools: List[Any] = PrivateAttr(default_factory=list)
+	# Client initialization parameters
+	api_key: str | None = None
+	auth_token: str | None = None
+	base_url: str | httpx.URL | None = None
+	timeout: float | Timeout | None | NotGiven = NotGiven()
+	max_retries: int = 10
+	default_headers: Mapping[str, str] | None = None
+	default_query: Mapping[str, object] | None = None
 
-    def __init__(self, **kwargs: Any):
-        super().__init__(**kwargs)
-        self._bound_tools = []
-        self._init_client()
+	# Static
+	@property
+	def provider(self) -> str:
+		return 'anthropic'
 
-    def _init_client(self) -> None:
-        """Initialize Anthropic client."""
-        try:
-            from anthropic import AsyncAnthropic
-        except ImportError:
-            raise ImportError("Please install anthropic: pip install anthropic")
+	def _get_client_params(self) -> dict[str, Any]:
+		"""Prepare client parameters dictionary."""
+		# Define base client params
+		base_params = {
+			'api_key': self.api_key,
+			'auth_token': self.auth_token,
+			'base_url': self.base_url,
+			'timeout': self.timeout,
+			'max_retries': self.max_retries,
+			'default_headers': self.default_headers,
+			'default_query': self.default_query,
+		}
 
-        api_key = self.api_key or os.environ.get("ANTHROPIC_API_KEY")
-        if not api_key:
-            raise ValueError("ANTHROPIC_API_KEY not set")
+		# Create client_params dict with non-None values and non-NotGiven values
+		client_params = {}
+		for k, v in base_params.items():
+			if v is not None and v is not NotGiven():
+				client_params[k] = v
 
-        self._client = AsyncAnthropic(
-            api_key=api_key,
-            timeout=self.timeout,
-            max_retries=self.max_retries,
-        )
+		return client_params
 
-    @property
-    def _llm_type(self) -> str:
-        return "anthropic"
+	def _get_client_params_for_invoke(self):
+		"""Prepare client parameters dictionary for invoke."""
 
-    @property
-    def _identifying_params(self) -> dict[str, Any]:
-        return {"model_name": self.model_name, "temperature": self.temperature}
+		client_params = {}
 
-    def _generate(
-        self,
-        messages: List[BaseMessage],
-        stop: Optional[List[str]] = None,
-        run_manager: Optional[CallbackManagerForLLMRun] = None,
-        **kwargs: Any,
-    ) -> ChatResult:
-        """Synchronous generation - raises NotImplementedError."""
-        raise NotImplementedError("Use ainvoke for async generation")
+		if self.temperature is not None:
+			client_params['temperature'] = self.temperature
 
-    async def _agenerate(
-        self,
-        messages: List[BaseMessage],
-        stop: Optional[List[str]] = None,
-        run_manager: Optional[CallbackManagerForLLMRun] = None,
-        **kwargs: Any,
-    ) -> ChatResult:
-        """Async generation with Anthropic API."""
-        anthropic_messages = self._convert_messages(messages)
-        system_message = None
-        filtered_messages = []
+		if self.max_tokens is not None:
+			client_params['max_tokens'] = self.max_tokens
 
-        for msg in anthropic_messages:
-            if msg["role"] == "system":
-                system_message = msg["content"]
-            else:
-                filtered_messages.append(msg)
+		if self.top_p is not None:
+			client_params['top_p'] = self.top_p
 
-        request_params = {
-            "model": self.model_name,
-            "max_tokens": self.max_tokens,
-            "temperature": self.temperature,
-            "messages": filtered_messages,
-        }
+		if self.seed is not None:
+			client_params['seed'] = self.seed
 
-        if system_message:
-            request_params["system"] = system_message
+		return client_params
 
-        if self._bound_tools:
-            request_params["tools"] = self._bound_tools
+	def get_client(self) -> AsyncAnthropic:
+		"""
+		Returns an AsyncAnthropic client.
 
-        if stop:
-            request_params["stop_sequences"] = stop
+		Returns:
+			AsyncAnthropic: An instance of the AsyncAnthropic client.
+		"""
+		client_params = self._get_client_params()
+		return AsyncAnthropic(**client_params)
 
-        response = await self._client.messages.create(**request_params)
+	@property
+	def name(self) -> str:
+		return str(self.model)
 
-        # Convert response to LangChain format
-        content = ""
-        tool_calls = []
+	def _get_usage(self, response: Message) -> ChatInvokeUsage | None:
+		usage = ChatInvokeUsage(
+			prompt_tokens=response.usage.input_tokens
+			+ (
+				response.usage.cache_read_input_tokens or 0
+			),  # Total tokens in Anthropic are a bit fucked, you have to add cached tokens to the prompt tokens
+			completion_tokens=response.usage.output_tokens,
+			total_tokens=response.usage.input_tokens + response.usage.output_tokens,
+			prompt_cached_tokens=response.usage.cache_read_input_tokens,
+			prompt_cache_creation_tokens=response.usage.cache_creation_input_tokens,
+			prompt_image_tokens=None,
+		)
+		return usage
 
-        for block in response.content:
-            if block.type == "text":
-                content += block.text
-            elif block.type == "tool_use":
-                tool_calls.append({
-                    "id": block.id,
-                    "name": block.name,
-                    "args": block.input,
-                })
+	@overload
+	async def ainvoke(self, messages: list[BaseMessage], output_format: None = None) -> ChatInvokeCompletion[str]: ...
 
-        message = AIMessage(
-            content=content,
-            tool_calls=tool_calls,  # Always pass list, never None (Pydantic validation)
-        )
+	@overload
+	async def ainvoke(self, messages: list[BaseMessage], output_format: type[T]) -> ChatInvokeCompletion[T]: ...
 
-        return ChatResult(generations=[ChatGeneration(message=message)])
+	async def ainvoke(
+		self, messages: list[BaseMessage], output_format: type[T] | None = None
+	) -> ChatInvokeCompletion[T] | ChatInvokeCompletion[str]:
+		anthropic_messages, system_prompt = AnthropicMessageSerializer.serialize_messages(messages)
 
-    def _convert_messages(self, messages: List[BaseMessage]) -> List[dict]:
-        """Convert LangChain messages to Anthropic format."""
-        result = []
-        for msg in messages:
-            if isinstance(msg, SystemMessage):
-                result.append({"role": "system", "content": msg.content})
-            elif isinstance(msg, HumanMessage):
-                content = msg.content
-                if isinstance(content, list):
-                    # Handle multimodal content
-                    anthropic_content = []
-                    for item in content:
-                        if isinstance(item, dict):
-                            if item.get("type") == "text":
-                                anthropic_content.append({"type": "text", "text": item["text"]})
-                            elif item.get("type") == "image_url":
-                                image_url = item.get("image_url", {}).get("url", "")
-                                if image_url.startswith("data:image"):
-                                    # Extract base64 data
-                                    media_type = image_url.split(";")[0].split(":")[1]
-                                    base64_data = image_url.split(",")[1]
-                                    anthropic_content.append({
-                                        "type": "image",
-                                        "source": {
-                                            "type": "base64",
-                                            "media_type": media_type,
-                                            "data": base64_data,
-                                        }
-                                    })
-                        else:
-                            anthropic_content.append({"type": "text", "text": str(item)})
-                    result.append({"role": "user", "content": anthropic_content})
-                else:
-                    result.append({"role": "user", "content": content})
-            elif isinstance(msg, AIMessage):
-                result.append({"role": "assistant", "content": msg.content})
-        return result
+		try:
+			if output_format is None:
+				# Normal completion without structured output
+				response = await self.get_client().messages.create(
+					model=self.model,
+					messages=anthropic_messages,
+					system=system_prompt or omit,
+					**self._get_client_params_for_invoke(),
+				)
 
-    def bind_tools(self, tools: List[Any], **kwargs: Any) -> ChatAnthropic:
-        """Bind tools for function calling."""
-        new_instance = ChatAnthropic(
-            model=self.model_name,
-            temperature=self.temperature,
-            max_tokens=self.max_tokens,
-            api_key=self.api_key,
-        )
-        new_instance._bound_tools = self._convert_tools(tools)
-        return new_instance
+				# Ensure we have a valid Message object before accessing attributes
+				if not isinstance(response, Message):
+					raise ModelProviderError(
+						message=f'Unexpected response type from Anthropic API: {type(response).__name__}. Response: {str(response)[:200]}',
+						status_code=502,
+						model=self.name,
+					)
 
-    def _convert_tools(self, tools: List[Any]) -> List[dict]:
-        """Convert tools to Anthropic format."""
-        anthropic_tools = []
-        for tool in tools:
-            if hasattr(tool, "name") and hasattr(tool, "description"):
-                schema = {}
-                if hasattr(tool, "args_schema"):
-                    schema = tool.args_schema.model_json_schema()
-                anthropic_tools.append({
-                    "name": tool.name,
-                    "description": tool.description,
-                    "input_schema": schema,
-                })
-            elif isinstance(tool, dict):
-                anthropic_tools.append(tool)
-        return anthropic_tools
+				usage = self._get_usage(response)
 
-    def with_structured_output(
-        self,
-        schema: Type[T],
-        **kwargs: Any,
-    ) -> ChatAnthropic:
-        """Configure for structured output using tool use."""
-        tool = {
-            "name": schema.__name__,
-            "description": f"Output structured data as {schema.__name__}",
-            "input_schema": schema.model_json_schema(),
-        }
-        return self.bind_tools([tool])
+				# Extract text from the first content block
+				first_content = response.content[0]
+				if isinstance(first_content, TextBlock):
+					response_text = first_content.text
+				else:
+					# If it's not a text block, convert to string
+					response_text = str(first_content)
 
+				return ChatInvokeCompletion(
+					completion=response_text,
+					usage=usage,
+					stop_reason=response.stop_reason,
+				)
+
+			else:
+				# Use tool calling for structured output
+				# Create a tool that represents the output format
+				tool_name = output_format.__name__
+				schema = SchemaOptimizer.create_optimized_json_schema(output_format)
+
+				# Remove title from schema if present (Anthropic doesn't like it in parameters)
+				if 'title' in schema:
+					del schema['title']
+
+				tool = ToolParam(
+					name=tool_name,
+					description=f'Extract information in the format of {tool_name}',
+					input_schema=schema,
+					cache_control=CacheControlEphemeralParam(type='ephemeral'),
+				)
+
+				# Force the model to use this tool
+				tool_choice = ToolChoiceToolParam(type='tool', name=tool_name)
+
+				response = await self.get_client().messages.create(
+					model=self.model,
+					messages=anthropic_messages,
+					tools=[tool],
+					system=system_prompt or omit,
+					tool_choice=tool_choice,
+					**self._get_client_params_for_invoke(),
+				)
+
+				# Ensure we have a valid Message object before accessing attributes
+				if not isinstance(response, Message):
+					raise ModelProviderError(
+						message=f'Unexpected response type from Anthropic API: {type(response).__name__}. Response: {str(response)[:200]}',
+						status_code=502,
+						model=self.name,
+					)
+
+				usage = self._get_usage(response)
+
+				# Extract the tool use block
+				for content_block in response.content:
+					if hasattr(content_block, 'type') and content_block.type == 'tool_use':
+						# Parse the tool input as the structured output
+						try:
+							return ChatInvokeCompletion(
+								completion=output_format.model_validate(content_block.input),
+								usage=usage,
+								stop_reason=response.stop_reason,
+							)
+						except Exception as e:
+							# If validation fails, try to parse it as JSON first
+							if isinstance(content_block.input, str):
+								data = json.loads(content_block.input)
+								return ChatInvokeCompletion(
+									completion=output_format.model_validate(data),
+									usage=usage,
+									stop_reason=response.stop_reason,
+								)
+							raise e
+
+				# If no tool use block found, raise an error
+				raise ValueError('Expected tool use in response but none found')
+
+		except APIConnectionError as e:
+			raise ModelProviderError(message=e.message, model=self.name) from e
+		except RateLimitError as e:
+			raise ModelRateLimitError(message=e.message, model=self.name) from e
+		except APIStatusError as e:
+			raise ModelProviderError(message=e.message, status_code=e.status_code, model=self.name) from e
+		except Exception as e:
+			raise ModelProviderError(message=str(e), model=self.name) from e

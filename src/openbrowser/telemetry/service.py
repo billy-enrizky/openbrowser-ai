@@ -1,175 +1,112 @@
-"""Telemetry service for tracking agent performance."""
-
-from __future__ import annotations
-
 import logging
 import os
-import uuid
-from typing import Optional
 
-from openbrowser.telemetry.views import AgentTelemetryEvent, StepTelemetryEvent
+from dotenv import load_dotenv
+from posthog import Posthog
+from uuid_extensions import uuid7str
+
+from openbrowser.telemetry.views import BaseTelemetryEvent
+from openbrowser.utils import singleton
+
+load_dotenv()
+
+from openbrowser.config import CONFIG
 
 logger = logging.getLogger(__name__)
 
 
+POSTHOG_EVENT_SETTINGS = {
+	'process_person_profile': True,
+}
+
+
+@singleton
 class ProductTelemetry:
-    """
-    Telemetry service for tracking agent runs and performance.
-    Uses PostHog for analytics when available.
-    """
+	"""
+	Service for capturing anonymized telemetry data.
 
-    def __init__(
-        self,
-        api_key: str | None = None,
-        enabled: bool | None = None,
-    ):
-        """
-        Initialize telemetry service.
+	If the environment variable `ANONYMIZED_TELEMETRY=False`, anonymized telemetry will be disabled.
+	"""
 
-        Args:
-            api_key: PostHog API key (or POSTHOG_API_KEY env var)
-            enabled: Whether telemetry is enabled (or OPENBROWSER_AI_TELEMETRY_ENABLED env var)
-        """
-        self._enabled = enabled if enabled is not None else self._is_enabled()
-        self._api_key = api_key or os.environ.get("POSTHOG_API_KEY")
-        self._posthog = None
-        self._user_id = self._get_user_id()
+	USER_ID_PATH = str(CONFIG.OPENBROWSER_CONFIG_DIR / 'device_id')
+	PROJECT_API_KEY = 'phc_F8JMNjW1i2KbGUTaW1unnDdLSPCoyc52SGRU0JecaUh'
+	HOST = 'https://eu.i.posthog.com'
+	UNKNOWN_USER_ID = 'UNKNOWN'
 
-        if self._enabled and self._api_key:
-            self._init_posthog()
+	_curr_user_id = None
 
-    def _is_enabled(self) -> bool:
-        """Check if telemetry is enabled via environment variable."""
-        env_value = os.environ.get("OPENBROWSER_AI_TELEMETRY_ENABLED", "true").lower()
-        return env_value not in ("false", "0", "no", "off")
+	def __init__(self) -> None:
+		telemetry_disabled = not CONFIG.ANONYMIZED_TELEMETRY
+		self.debug_logging = CONFIG.OPENBROWSER_LOGGING_LEVEL == 'debug'
 
-    def _get_user_id(self) -> str:
-        """Get or generate a unique user ID."""
-        # Try to get from environment or generate a new one
-        user_id = os.environ.get("OPENBROWSER_AI_USER_ID")
-        if not user_id:
-            user_id = str(uuid.uuid4())
-        return user_id
+		if telemetry_disabled:
+			self._posthog_client = None
+		else:
+			logger.info('Using anonymized telemetry, see https://docs.browser-use.com/development/telemetry.')
+			self._posthog_client = Posthog(
+				project_api_key=self.PROJECT_API_KEY,
+				host=self.HOST,
+				disable_geoip=False,
+				enable_exception_autocapture=True,
+			)
 
-    def _init_posthog(self) -> None:
-        """Initialize PostHog client."""
-        try:
-            import posthog
+			# Silence posthog's logging
+			if not self.debug_logging:
+				posthog_logger = logging.getLogger('posthog')
+				posthog_logger.disabled = True
 
-            posthog.project_api_key = self._api_key
-            posthog.host = "https://app.posthog.com"
-            self._posthog = posthog
-            logger.debug("PostHog telemetry initialized")
-        except ImportError:
-            logger.debug("PostHog not installed, telemetry disabled")
-            self._enabled = False
+		if self._posthog_client is None:
+			logger.debug('Telemetry disabled')
 
-    @property
-    def enabled(self) -> bool:
-        """Check if telemetry is enabled."""
-        return self._enabled and self._posthog is not None
+	def capture(self, event: BaseTelemetryEvent) -> None:
+		if self._posthog_client is None:
+			return
 
-    def track_agent_run(self, event: AgentTelemetryEvent) -> None:
-        """
-        Track an agent run event.
+		self._direct_capture(event)
 
-        Args:
-            event: Agent telemetry event to track
-        """
-        if not self.enabled:
-            return
+	def _direct_capture(self, event: BaseTelemetryEvent) -> None:
+		"""
+		Should not be thread blocking because posthog magically handles it
+		"""
+		if self._posthog_client is None:
+			return
 
-        try:
-            self._posthog.capture(
-                distinct_id=self._user_id,
-                event="agent_run",
-                properties={
-                    "run_id": event.run_id,
-                    "task_length": len(event.task),
-                    "total_steps": event.total_steps,
-                    "total_duration_seconds": event.total_duration_seconds,
-                    "is_successful": event.is_successful,
-                    "is_done": event.is_done,
-                    "total_errors": event.total_errors,
-                    "llm_provider": event.llm_provider,
-                    "llm_model": event.llm_model,
-                    "total_llm_calls": event.total_llm_calls,
-                    "total_input_tokens": event.total_input_tokens,
-                    "total_output_tokens": event.total_output_tokens,
-                    "total_cost": event.total_cost,
-                    "total_actions": event.total_actions,
-                    "action_summary": event.action_summary,
-                    "browser_headless": event.browser_headless,
-                    "use_vision": event.use_vision,
-                    "version": event.version,
-                },
-            )
-            logger.debug(f"Tracked agent run: {event.run_id}")
-        except Exception as e:
-            logger.warning(f"Failed to track agent run: {e}")
+		try:
+			self._posthog_client.capture(
+				distinct_id=self.user_id,
+				event=event.name,
+				properties={**event.properties, **POSTHOG_EVENT_SETTINGS},
+			)
+		except Exception as e:
+			logger.error(f'Failed to send telemetry event {event.name}: {e}')
 
-    def track_step(self, event: StepTelemetryEvent) -> None:
-        """
-        Track an individual step event.
+	def flush(self) -> None:
+		if self._posthog_client:
+			try:
+				self._posthog_client.flush()
+				logger.debug('PostHog client telemetry queue flushed.')
+			except Exception as e:
+				logger.error(f'Failed to flush PostHog client: {e}')
+		else:
+			logger.debug('PostHog client not available, skipping flush.')
 
-        Args:
-            event: Step telemetry event to track
-        """
-        if not self.enabled:
-            return
+	@property
+	def user_id(self) -> str:
+		if self._curr_user_id:
+			return self._curr_user_id
 
-        try:
-            self._posthog.capture(
-                distinct_id=self._user_id,
-                event="agent_step",
-                properties={
-                    "run_id": event.run_id,
-                    "step_number": event.step_number,
-                    "action_name": event.action_name,
-                    "duration_seconds": event.duration_seconds,
-                    "is_successful": event.is_successful,
-                    "has_error": event.error is not None,
-                },
-            )
-        except Exception as e:
-            logger.warning(f"Failed to track step: {e}")
-
-    def track_error(self, run_id: str, error: str) -> None:
-        """
-        Track an error event.
-
-        Args:
-            run_id: Run identifier
-            error: Error message
-        """
-        if not self.enabled:
-            return
-
-        try:
-            self._posthog.capture(
-                distinct_id=self._user_id,
-                event="agent_error",
-                properties={
-                    "run_id": run_id,
-                    "error": error[:500],  # Truncate long errors
-                },
-            )
-        except Exception as e:
-            logger.warning(f"Failed to track error: {e}")
-
-    def flush(self) -> None:
-        """Flush pending events."""
-        if self._posthog:
-            try:
-                self._posthog.flush()
-            except Exception as e:
-                logger.warning(f"Failed to flush telemetry: {e}")
-
-    def shutdown(self) -> None:
-        """Shutdown telemetry service."""
-        if self._posthog:
-            try:
-                self._posthog.shutdown()
-            except Exception as e:
-                logger.warning(f"Failed to shutdown telemetry: {e}")
-
+		# File access may fail due to permissions or other reasons. We don't want to
+		# crash so we catch all exceptions.
+		try:
+			if not os.path.exists(self.USER_ID_PATH):
+				os.makedirs(os.path.dirname(self.USER_ID_PATH), exist_ok=True)
+				with open(self.USER_ID_PATH, 'w') as f:
+					new_user_id = uuid7str()
+					f.write(new_user_id)
+				self._curr_user_id = new_user_id
+			else:
+				with open(self.USER_ID_PATH) as f:
+					self._curr_user_id = f.read()
+		except Exception:
+			self._curr_user_id = 'UNKNOWN_USER_ID'
+		return self._curr_user_id
