@@ -1,166 +1,212 @@
-"""DeepSeek LLM integration with reasoning support."""
+from __future__ import annotations
 
 import json
-import logging
-import os
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, TypeVar, overload
 
 import httpx
-from langchain_core.language_models.chat_models import BaseChatModel
-from pydantic import PrivateAttr
+from openai import (
+	APIConnectionError,
+	APIError,
+	APIStatusError,
+	APITimeoutError,
+	AsyncOpenAI,
+	RateLimitError,
+)
+from pydantic import BaseModel
 
-from openbrowser.llm.exceptions import ModelProviderError
+from openbrowser.llm.base import BaseChatModel
+from openbrowser.llm.deepseek.serializer import DeepSeekMessageSerializer
+from openbrowser.llm.exceptions import ModelProviderError, ModelRateLimitError
+from openbrowser.llm.messages import BaseMessage
+from openbrowser.llm.schema import SchemaOptimizer
+from openbrowser.llm.views import ChatInvokeCompletion
 
-logger = logging.getLogger(__name__)
+T = TypeVar('T', bound=BaseModel)
 
 
+@dataclass
 class ChatDeepSeek(BaseChatModel):
-    """
-    Chat model for DeepSeek with reasoning support.
+	"""DeepSeek /chat/completions wrapper (OpenAI-compatible)."""
 
-    DeepSeek provides models with strong reasoning capabilities.
-    Uses OpenAI-compatible API format.
+	model: str = 'deepseek-chat'
 
-    Args:
-        model: The DeepSeek model to use (e.g., "deepseek-chat", "deepseek-reasoner")
-        temperature: Temperature for response generation
-        api_key: DeepSeek API key (defaults to DEEPSEEK_API_KEY env var)
-        max_tokens: Maximum tokens in response
-        **kwargs: Additional parameters
-    """
+	# Generation parameters
+	max_tokens: int | None = None
+	temperature: float | None = None
+	top_p: float | None = None
+	seed: int | None = None
 
-    _model: str = PrivateAttr()
-    _temperature: float = PrivateAttr()
-    _api_key: str = PrivateAttr()
-    _max_tokens: int = PrivateAttr()
-    _client: httpx.AsyncClient = PrivateAttr()
-    _base_url: str = PrivateAttr()
-    _reasoning_enabled: bool = PrivateAttr()
+	# Connection parameters
+	api_key: str | None = None
+	base_url: str | httpx.URL | None = 'https://api.deepseek.com/v1'
+	timeout: float | httpx.Timeout | None = None
+	client_params: dict[str, Any] | None = None
 
-    def __init__(
-        self,
-        model: str = "deepseek-chat",
-        temperature: float = 0,
-        api_key: str | None = None,
-        max_tokens: int = 4096,
-        base_url: str = "https://api.deepseek.com/v1",
-        reasoning_enabled: bool = False,
-        **kwargs: Any,
-    ):
-        super().__init__()
-        self._model = model
-        self._temperature = temperature
-        self._api_key = api_key or os.getenv("DEEPSEEK_API_KEY", "")
-        self._max_tokens = max_tokens
-        self._base_url = base_url
-        self._reasoning_enabled = reasoning_enabled
-        self._client = httpx.AsyncClient(timeout=120.0)
+	@property
+	def provider(self) -> str:
+		return 'deepseek'
 
-        if not self._api_key:
-            raise ValueError("DEEPSEEK_API_KEY is not set and no api_key provided")
+	def _client(self) -> AsyncOpenAI:
+		return AsyncOpenAI(
+			api_key=self.api_key,
+			base_url=self.base_url,
+			timeout=self.timeout,
+			**(self.client_params or {}),
+		)
 
-    @property
-    def model(self) -> str:
-        """Get the model name."""
-        return self._model
+	@property
+	def name(self) -> str:
+		return self.model
 
-    @property
-    def _llm_type(self) -> str:
-        return "deepseek"
+	@overload
+	async def ainvoke(
+		self,
+		messages: list[BaseMessage],
+		output_format: None = None,
+		tools: list[dict[str, Any]] | None = None,
+		stop: list[str] | None = None,
+	) -> ChatInvokeCompletion[str]: ...
 
-    def bind_tools(self, tools: list[Any]) -> "ChatDeepSeek":
-        """Bind tools to this LLM instance."""
-        # DeepSeek supports function calling
-        return self
+	@overload
+	async def ainvoke(
+		self,
+		messages: list[BaseMessage],
+		output_format: type[T],
+		tools: list[dict[str, Any]] | None = None,
+		stop: list[str] | None = None,
+	) -> ChatInvokeCompletion[T]: ...
 
-    def with_structured_output(self, output_schema: type[Any], **kwargs: Any) -> Any:
-        """Get structured output from the model."""
-        return self
+	async def ainvoke(
+		self,
+		messages: list[BaseMessage],
+		output_format: type[T] | None = None,
+		tools: list[dict[str, Any]] | None = None,
+		stop: list[str] | None = None,
+	) -> ChatInvokeCompletion[T] | ChatInvokeCompletion[str]:
+		"""
+		DeepSeek ainvoke supports:
+		1. Regular text/multi-turn conversation
+		2. Function Calling
+		3. JSON Output (response_format)
+		4. Conversation prefix continuation (beta, prefix, stop)
+		"""
+		client = self._client()
+		ds_messages = DeepSeekMessageSerializer.serialize_messages(messages)
+		common: dict[str, Any] = {}
 
-    async def ainvoke(
-        self,
-        messages: list[Any],
-        config: dict[str, Any] | None = None,
-        **kwargs: Any,
-    ) -> Any:
-        """Invoke the model with the given messages."""
-        from langchain_core.messages import AIMessage
+		if self.temperature is not None:
+			common['temperature'] = self.temperature
+		if self.max_tokens is not None:
+			common['max_tokens'] = self.max_tokens
+		if self.top_p is not None:
+			common['top_p'] = self.top_p
+		if self.seed is not None:
+			common['seed'] = self.seed
 
-        # Convert messages to OpenAI format
-        formatted_messages = []
-        for msg in messages:
-            if hasattr(msg, 'type'):
-                role = 'system' if msg.type == 'system' else ('assistant' if msg.type == 'ai' else 'user')
-                formatted_messages.append({"role": role, "content": msg.content})
-            elif isinstance(msg, dict):
-                formatted_messages.append(msg)
+		# Beta conversation prefix continuation (see official documentation)
+		if self.base_url and str(self.base_url).endswith('/beta'):
+			# The last assistant message must have prefix
+			if ds_messages and isinstance(ds_messages[-1], dict) and ds_messages[-1].get('role') == 'assistant':
+				ds_messages[-1]['prefix'] = True
+			if stop:
+				common['stop'] = stop
 
-        request_body = {
-            "model": self._model,
-            "messages": formatted_messages,
-            "max_tokens": self._max_tokens,
-            "temperature": self._temperature,
-        }
+		# ① Regular multi-turn conversation/text output
+		if output_format is None and not tools:
+			try:
+				resp = await client.chat.completions.create(  # type: ignore
+					model=self.model,
+					messages=ds_messages,  # type: ignore
+					**common,
+				)
+				return ChatInvokeCompletion(
+					completion=resp.choices[0].message.content or '',
+					usage=None,
+				)
+			except RateLimitError as e:
+				raise ModelRateLimitError(str(e), model=self.name) from e
+			except (APIError, APIConnectionError, APITimeoutError, APIStatusError) as e:
+				raise ModelProviderError(str(e), model=self.name) from e
+			except Exception as e:
+				raise ModelProviderError(str(e), model=self.name) from e
 
-        # Add reasoning mode if enabled
-        if self._reasoning_enabled:
-            request_body["response_format"] = {"type": "text"}
+		# ② Function Calling path (with tools or output_format)
+		if tools or (output_format is not None and hasattr(output_format, 'model_json_schema')):
+			try:
+				call_tools = tools
+				tool_choice = None
+				if output_format is not None and hasattr(output_format, 'model_json_schema'):
+					tool_name = output_format.__name__
+					schema = SchemaOptimizer.create_optimized_json_schema(output_format)
+					schema.pop('title', None)
+					call_tools = [
+						{
+							'type': 'function',
+							'function': {
+								'name': tool_name,
+								'description': f'Return a JSON object of type {tool_name}',
+								'parameters': schema,
+							},
+						}
+					]
+					tool_choice = {'type': 'function', 'function': {'name': tool_name}}
+				resp = await client.chat.completions.create(  # type: ignore
+					model=self.model,
+					messages=ds_messages,  # type: ignore
+					tools=call_tools,  # type: ignore
+					tool_choice=tool_choice,  # type: ignore
+					**common,
+				)
+				msg = resp.choices[0].message
+				if not msg.tool_calls:
+					raise ValueError('Expected tool_calls in response but got none')
+				raw_args = msg.tool_calls[0].function.arguments
+				if isinstance(raw_args, str):
+					parsed = json.loads(raw_args)
+				else:
+					parsed = raw_args
+				# --------- Fix: only use model_validate when output_format is not None ----------
+				if output_format is not None:
+					return ChatInvokeCompletion(
+						completion=output_format.model_validate(parsed),
+						usage=None,
+					)
+				else:
+					# If no output_format, return dict directly
+					return ChatInvokeCompletion(
+						completion=parsed,
+						usage=None,
+					)
+			except RateLimitError as e:
+				raise ModelRateLimitError(str(e), model=self.name) from e
+			except (APIError, APIConnectionError, APITimeoutError, APIStatusError) as e:
+				raise ModelProviderError(str(e), model=self.name) from e
+			except Exception as e:
+				raise ModelProviderError(str(e), model=self.name) from e
 
-        try:
-            response = await self._client.post(
-                f"{self._base_url}/chat/completions",
-                json=request_body,
-                headers={
-                    "Authorization": f"Bearer {self._api_key}",
-                    "Content-Type": "application/json",
-                },
-            )
-            response.raise_for_status()
-            data = response.json()
+		# ③ JSON Output path (official response_format)
+		if output_format is not None and hasattr(output_format, 'model_json_schema'):
+			try:
+				resp = await client.chat.completions.create(  # type: ignore
+					model=self.model,
+					messages=ds_messages,  # type: ignore
+					response_format={'type': 'json_object'},
+					**common,
+				)
+				content = resp.choices[0].message.content
+				if not content:
+					raise ModelProviderError('Empty JSON content in DeepSeek response', model=self.name)
+				parsed = output_format.model_validate_json(content)
+				return ChatInvokeCompletion(
+					completion=parsed,
+					usage=None,
+				)
+			except RateLimitError as e:
+				raise ModelRateLimitError(str(e), model=self.name) from e
+			except (APIError, APIConnectionError, APITimeoutError, APIStatusError) as e:
+				raise ModelProviderError(str(e), model=self.name) from e
+			except Exception as e:
+				raise ModelProviderError(str(e), model=self.name) from e
 
-            choice = data.get("choices", [{}])[0]
-            message = choice.get("message", {})
-            content = message.get("content", "")
-            
-            # Extract reasoning if present
-            reasoning_content = message.get("reasoning_content", "")
-            if reasoning_content:
-                logger.debug(f"DeepSeek reasoning: {reasoning_content[:200]}...")
-
-            return AIMessage(content=content)
-
-        except httpx.HTTPStatusError as e:
-            raise ModelProviderError(
-                message=f"DeepSeek API error: {e.response.text}",
-                status_code=e.response.status_code,
-                model=self._model,
-            )
-
-    def invoke(
-        self,
-        messages: list[Any],
-        config: dict[str, Any] | None = None,
-        **kwargs: Any,
-    ) -> Any:
-        """Synchronously invoke the model."""
-        import asyncio
-        return asyncio.get_event_loop().run_until_complete(
-            self.ainvoke(messages, config, **kwargs)
-        )
-
-    def _generate(
-        self,
-        messages: list[Any],
-        stop: list[str] | None = None,
-        run_manager: Any = None,
-        **kwargs: Any,
-    ) -> Any:
-        """Internal generate method required by BaseChatModel."""
-        from langchain_core.outputs import ChatGeneration, ChatResult
-        result = self.invoke(messages, **kwargs)
-        return ChatResult(generations=[ChatGeneration(message=result)])
-
-    async def aclose(self) -> None:
-        """Close the HTTP client."""
-        await self._client.aclose()
-
+		raise ModelProviderError('No valid ainvoke execution path for DeepSeek LLM', model=self.name)

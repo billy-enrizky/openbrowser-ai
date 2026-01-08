@@ -1,55 +1,97 @@
-"""Telemetry views and event models."""
+from abc import ABC, abstractmethod
+from collections.abc import Sequence
+from dataclasses import asdict, dataclass
+from typing import Any, Literal
 
-from __future__ import annotations
-
-from typing import Optional
-
-from pydantic import BaseModel, Field
-
-
-class AgentTelemetryEvent(BaseModel):
-    """Telemetry event for agent runs."""
-
-    # Run identification
-    run_id: str = Field(description="Unique identifier for this run")
-    task: str = Field(description="The task description")
-
-    # Run metrics
-    total_steps: int = Field(default=0, description="Total number of steps taken")
-    total_duration_seconds: float = Field(default=0.0, description="Total duration in seconds")
-    is_successful: Optional[bool] = Field(default=None, description="Whether the task was successful")
-    is_done: bool = Field(default=False, description="Whether the task completed")
-
-    # Error tracking
-    total_errors: int = Field(default=0, description="Total number of errors encountered")
-    last_error: Optional[str] = Field(default=None, description="Last error message")
-
-    # LLM metrics
-    llm_provider: str = Field(default="unknown", description="LLM provider used")
-    llm_model: str = Field(default="unknown", description="LLM model used")
-    total_llm_calls: int = Field(default=0, description="Total LLM API calls")
-    total_input_tokens: int = Field(default=0, description="Total input tokens")
-    total_output_tokens: int = Field(default=0, description="Total output tokens")
-    total_cost: float = Field(default=0.0, description="Estimated total cost in USD")
-
-    # Actions
-    total_actions: int = Field(default=0, description="Total actions executed")
-    action_summary: dict[str, int] = Field(default_factory=dict, description="Count of each action type")
-
-    # Metadata
-    browser_headless: bool = Field(default=True, description="Whether browser was in headless mode")
-    use_vision: bool = Field(default=True, description="Whether vision was enabled")
-    version: str = Field(default="0.1.0", description="openbrowser-ai version")
+from openbrowser.config import is_running_in_docker
 
 
-class StepTelemetryEvent(BaseModel):
-    """Telemetry event for individual steps."""
+@dataclass
+class BaseTelemetryEvent(ABC):
+	@property
+	@abstractmethod
+	def name(self) -> str:
+		pass
 
-    run_id: str
-    step_number: int
-    action_name: str
-    action_params: dict
-    duration_seconds: float
-    is_successful: bool
-    error: Optional[str] = None
+	@property
+	def properties(self) -> dict[str, Any]:
+		props = {k: v for k, v in asdict(self).items() if k != 'name'}
+		# Add Docker context if running in Docker
+		props['is_docker'] = is_running_in_docker()
+		return props
 
+
+@dataclass
+class AgentTelemetryEvent(BaseTelemetryEvent):
+	# start details
+	task: str
+	model: str
+	model_provider: str
+	max_steps: int
+	max_actions_per_step: int
+	use_vision: bool | Literal['auto']
+	version: str
+	source: str
+	cdp_url: str | None
+	agent_type: str | None  # 'code' for CodeAgent, None for regular Agent
+	# step details
+	action_errors: Sequence[str | None]
+	action_history: Sequence[list[dict] | None]
+	urls_visited: Sequence[str | None]
+	# end details
+	steps: int
+	total_input_tokens: int
+	total_output_tokens: int
+	prompt_cached_tokens: int
+	total_tokens: int
+	total_duration_seconds: float
+	success: bool | None
+	final_result_response: str | None
+	error_message: str | None
+
+	name: str = 'agent_event'
+
+
+@dataclass
+class MCPClientTelemetryEvent(BaseTelemetryEvent):
+	"""Telemetry event for MCP client usage"""
+
+	server_name: str
+	command: str
+	tools_discovered: int
+	version: str
+	action: str  # 'connect', 'disconnect', 'tool_call'
+	tool_name: str | None = None
+	duration_seconds: float | None = None
+	error_message: str | None = None
+
+	name: str = 'mcp_client_event'
+
+
+@dataclass
+class MCPServerTelemetryEvent(BaseTelemetryEvent):
+	"""Telemetry event for MCP server usage"""
+
+	version: str
+	action: str  # 'start', 'stop', 'tool_call'
+	tool_name: str | None = None
+	duration_seconds: float | None = None
+	error_message: str | None = None
+	parent_process_cmdline: str | None = None
+
+	name: str = 'mcp_server_event'
+
+
+@dataclass
+class CLITelemetryEvent(BaseTelemetryEvent):
+	"""Telemetry event for CLI usage"""
+
+	version: str
+	action: str  # 'start', 'message_sent', 'task_completed', 'error'
+	mode: str  # 'interactive', 'oneshot', 'mcp_server'
+	model: str | None = None
+	model_provider: str | None = None
+	duration_seconds: float | None = None
+	error_message: str | None = None
+
+	name: str = 'cli_event'
