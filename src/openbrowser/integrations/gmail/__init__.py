@@ -1,23 +1,24 @@
-"""Gmail integration module for browser-based email automation.
-
-This module provides the GmailIntegration class with helper methods
-for common Gmail operations like composing, searching, and reading emails.
-
-Example:
-    ```python
-    from openbrowser.integrations.gmail import GmailIntegration
-
-    gmail = GmailIntegration(browser_session)
-    await gmail.navigate_to_gmail()
-    await gmail.compose_email(
-        recipient="user@example.com",
-        subject="Hello",
-        body="Message content"
-    )
-    ```
+"""
+Gmail Integration for OpenBrowser
+Provides Gmail API integration for email reading and verification code extraction.
+This integration enables agents to read email content and extract verification codes themselves.
+Usage:
+    from openbrowser.integrations.gmail import GmailService, register_gmail_actions
+    # Option 1: Register Gmail actions with file-based authentication
+    tools = Tools()
+    register_gmail_actions(tools)
+    # Option 2: Register Gmail actions with direct access token (recommended for production)
+    tools = Tools()
+    register_gmail_actions(tools, access_token="your_access_token_here")
+    # Option 3: Use the service directly
+    gmail = GmailService(access_token="your_access_token_here")
+    await gmail.authenticate()
+    emails = await gmail.get_recent_emails()
 """
 
-from .service import GmailIntegration
+# @file purpose: Gmail integration for 2FA email authentication and email reading
 
-__all__ = ["GmailIntegration"]
+from .actions import register_gmail_actions
+from .service import GmailService
 
+__all__ = ['GmailService', 'register_gmail_actions']

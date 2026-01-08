@@ -1,183 +1,68 @@
-"""Screenshot service for storage and management."""
+"""Screenshot storage service for openbrowser agents.
 
-from __future__ import annotations
+Performance optimizations:
+- Added __slots__ to ScreenshotService class
+- Cached screenshots_dir path
+- Pre-decode base64 module reference
+"""
 
 import base64
-import io
-import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
 
-if TYPE_CHECKING:
-    from openbrowser.browser.session import BrowserSession, CDPSession
+import anyio
 
-logger = logging.getLogger(__name__)
+from openbrowser.observability import observe_debug
+
+# Cache base64 functions at module level for faster access
+_b64decode = base64.b64decode
+_b64encode = base64.b64encode
 
 
 class ScreenshotService:
-    """
-    Service for managing screenshots during agent execution.
-    Handles capture, storage, and retrieval of screenshots.
-    """
+	"""Simple screenshot storage service that saves screenshots to disk.
+	
+	Performance optimizations:
+	- __slots__ for faster attribute access
+	- Cached directory path
+	- Module-level base64 function references
+	"""
+	
+	__slots__ = ('agent_directory', 'screenshots_dir')
 
-    def __init__(
-        self,
-        save_path: str | Path | None = None,
-        format: str = "png",
-        quality: int = 90,
-    ):
-        """
-        Initialize screenshot service.
+	def __init__(self, agent_directory: str | Path):
+		"""Initialize with agent directory path"""
+		self.agent_directory = Path(agent_directory) if isinstance(agent_directory, str) else agent_directory
 
-        Args:
-            save_path: Directory to save screenshots (None for in-memory only)
-            format: Image format (png or jpeg)
-            quality: JPEG quality (1-100)
-        """
-        self.save_path = Path(save_path) if save_path else None
-        self.format = format
-        self.quality = quality
-        self._screenshots: list[str] = []  # Base64 encoded screenshots
-        self._step_counter = 0
+		# Create screenshots subdirectory and cache path
+		self.screenshots_dir = self.agent_directory / 'screenshots'
+		self.screenshots_dir.mkdir(parents=True, exist_ok=True)
 
-        if self.save_path:
-            self.save_path.mkdir(parents=True, exist_ok=True)
+	@observe_debug(ignore_input=True, ignore_output=True, name='store_screenshot')
+	async def store_screenshot(self, screenshot_b64: str, step_number: int) -> str:
+		"""Store screenshot to disk and return the full path as string"""
+		screenshot_filename = f'step_{step_number}.png'
+		screenshot_path = self.screenshots_dir / screenshot_filename
 
-    async def take_screenshot(
-        self,
-        cdp_session: CDPSession,
-        step_number: int | None = None,
-        save: bool = True,
-    ) -> str:
-        """
-        Take a screenshot of the current page.
+		# Decode base64 and save to disk using cached function
+		screenshot_data = _b64decode(screenshot_b64)
 
-        Args:
-            cdp_session: CDP session to use
-            step_number: Optional step number for naming
-            save: Whether to save to disk
+		async with await anyio.open_file(screenshot_path, 'wb') as f:
+			await f.write(screenshot_data)
 
-        Returns:
-            Base64-encoded screenshot data
-        """
-        try:
-            result = await cdp_session.cdp_client.send.Page.captureScreenshot(
-                params={
-                    "format": self.format,
-                    "quality": self.quality if self.format == "jpeg" else None,
-                },
-                session_id=cdp_session.session_id,
-            )
+		return str(screenshot_path)
 
-            screenshot_b64 = result.get("data", "")
+	@observe_debug(ignore_input=True, ignore_output=True, name='get_screenshot_from_disk')
+	async def get_screenshot(self, screenshot_path: str) -> str | None:
+		"""Load screenshot from disk path and return as base64"""
+		if not screenshot_path:
+			return None
 
-            if not screenshot_b64:
-                logger.warning("Empty screenshot data received")
-                return ""
+		path = Path(screenshot_path)
+		if not path.exists():
+			return None
 
-            # Store in memory
-            self._screenshots.append(screenshot_b64)
+		# Load from disk and encode to base64 using cached function
+		async with await anyio.open_file(path, 'rb') as f:
+			screenshot_data = await f.read()
 
-            # Save to disk if configured
-            if save and self.save_path:
-                step = step_number if step_number is not None else self._step_counter
-                self._step_counter += 1
-                file_path = self.save_path / f"step_{step:04d}.{self.format}"
-                self._save_to_file(screenshot_b64, file_path)
-                logger.debug(f"Screenshot saved to {file_path}")
-
-            return screenshot_b64
-
-        except Exception as e:
-            logger.error(f"Failed to take screenshot: {e}")
-            return ""
-
-    def _save_to_file(self, screenshot_b64: str, file_path: Path) -> None:
-        """Save base64 screenshot to file."""
-        try:
-            image_data = base64.b64decode(screenshot_b64)
-            with open(file_path, "wb") as f:
-                f.write(image_data)
-        except Exception as e:
-            logger.error(f"Failed to save screenshot to {file_path}: {e}")
-
-    def add_screenshot(self, screenshot_b64: str) -> None:
-        """Add a screenshot to the collection."""
-        self._screenshots.append(screenshot_b64)
-
-    def get_screenshots(self) -> list[str]:
-        """Get all collected screenshots."""
-        return self._screenshots.copy()
-
-    def get_latest(self) -> str | None:
-        """Get the latest screenshot."""
-        return self._screenshots[-1] if self._screenshots else None
-
-    def get_by_step(self, step: int) -> str | None:
-        """Get screenshot by step number."""
-        if 0 <= step < len(self._screenshots):
-            return self._screenshots[step]
-        return None
-
-    def count(self) -> int:
-        """Get the number of screenshots."""
-        return len(self._screenshots)
-
-    def clear(self) -> None:
-        """Clear all screenshots from memory."""
-        self._screenshots.clear()
-        self._step_counter = 0
-
-    def get_screenshot_paths(self) -> list[Path]:
-        """Get paths to all saved screenshots."""
-        if not self.save_path:
-            return []
-
-        paths = sorted(self.save_path.glob(f"*.{self.format}"))
-        return paths
-
-    @staticmethod
-    def decode_to_bytes(screenshot_b64: str) -> bytes:
-        """Decode base64 screenshot to bytes."""
-        return base64.b64decode(screenshot_b64)
-
-    @staticmethod
-    def encode_from_bytes(image_bytes: bytes) -> str:
-        """Encode bytes to base64 string."""
-        return base64.b64encode(image_bytes).decode("utf-8")
-
-    def resize_screenshot(
-        self,
-        screenshot_b64: str,
-        width: int,
-        height: int,
-    ) -> str:
-        """
-        Resize a screenshot.
-
-        Args:
-            screenshot_b64: Base64-encoded screenshot
-            width: Target width
-            height: Target height
-
-        Returns:
-            Resized base64-encoded screenshot
-        """
-        try:
-            from PIL import Image
-
-            image_data = base64.b64decode(screenshot_b64)
-            image = Image.open(io.BytesIO(image_data))
-            resized = image.resize((width, height), Image.Resampling.LANCZOS)
-
-            buffer = io.BytesIO()
-            resized.save(buffer, format=self.format.upper())
-            return base64.b64encode(buffer.getvalue()).decode("utf-8")
-
-        except ImportError:
-            logger.warning("PIL not installed, cannot resize screenshot")
-            return screenshot_b64
-        except Exception as e:
-            logger.error(f"Failed to resize screenshot: {e}")
-            return screenshot_b64
-
+		return _b64encode(screenshot_data).decode('utf-8')

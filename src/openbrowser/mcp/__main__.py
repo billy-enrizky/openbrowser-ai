@@ -1,4 +1,4 @@
-"""Entry point for running openbrowser-ai MCP server.
+"""Entry point for running MCP server as a module.
 
 Usage:
     python -m openbrowser.mcp
@@ -8,6 +8,5 @@ import asyncio
 
 from openbrowser.mcp.server import main
 
-if __name__ == "__main__":
-    asyncio.run(main())
-
+if __name__ == '__main__':
+	asyncio.run(main())
