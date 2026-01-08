@@ -10,7 +10,7 @@ llm = ChatAzureOpenAI(
 
 
 TASK = """
-Go to https://browser-use.github.io/stress-tests/challenges/react-native-web-form.html and complete the React Native Web form by filling in all required fields and submitting.
+Go to https://openbrowser.github.io/stress-tests/challenges/react-native-web-form.html and complete the React Native Web form by filling in all required fields and submitting.
 """
 
 

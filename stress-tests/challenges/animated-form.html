@@ -1,0 +1,821 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Animated Form</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css"/>
+    <style>
+        :root {
+            --primary-color: #8e44ad;
+            --secondary-color: #9b59b6;
+            --bg-color: #f8f9fa;
+            --text-color: #333;
+            --white-color: #fff;
+            --shadow-color: rgba(0, 0, 0, 0.1);
+            --border-color: #ced4da;
+            --error-color: #dc3545;
+            --success-color: #28a745;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            line-height: 1.6;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 20px 0;
+            overflow-x: hidden;
+        }
+        
+        .container {
+            max-width: 900px;
+            width: 100%;
+            background: var(--white-color);
+            border-radius: 10px;
+            box-shadow: 0 5px 20px var(--shadow-color);
+            padding: 25px;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        h1 {
+            color: var(--primary-color);
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        
+        .description {
+            margin-bottom: 30px;
+            text-align: center;
+        }
+        
+        /* Animated form styles */
+        .form-container {
+            position: relative;
+            overflow: hidden;
+            min-height: 400px;
+        }
+        
+        .form-step {
+            position: absolute;
+            width: 100%;
+            transition: transform 0.5s ease-in-out, opacity 0.5s ease-in-out;
+            padding: 20px;
+            background-color: var(--white-color);
+            border-radius: 8px;
+            box-shadow: 0 2px 10px var(--shadow-color);
+        }
+        
+        .step-inactive {
+            transform: translateX(100%);
+            opacity: 0;
+            pointer-events: none;
+        }
+        
+        .step-active {
+            transform: translateX(0);
+            opacity: 1;
+            z-index: 1;
+        }
+        
+        .form-step-title {
+            color: var(--primary-color);
+            margin-bottom: 20px;
+            font-size: 1.4rem;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+        }
+        
+        .step-icon {
+            background-color: var(--primary-color);
+            color: var(--white-color);
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            margin-right: 15px;
+            font-weight: bold;
+        }
+        
+        .form-control {
+            margin-bottom: 15px;
+            position: relative;
+        }
+        
+        .form-control:focus {
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 0.2rem rgba(142, 68, 173, 0.25);
+        }
+        
+        .form-label {
+            font-weight: 500;
+            margin-bottom: 8px;
+            display: block;
+        }
+        
+        .required::after {
+            content: " *";
+            color: var(--error-color);
+        }
+        
+        .floating-label-group {
+            position: relative;
+            margin-bottom: 20px;
+        }
+        
+        .floating-label-input {
+            width: 100%;
+            padding: 15px 10px;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            outline: none;
+            transition: border-color 0.3s, box-shadow 0.3s;
+        }
+        
+        .floating-label {
+            position: absolute;
+            left: 10px;
+            top: 15px;
+            color: #6c757d;
+            pointer-events: none;
+            transition: 0.3s ease all;
+        }
+        
+        .floating-label-input:focus ~ .floating-label,
+        .floating-label-input:not(:placeholder-shown) ~ .floating-label {
+            top: -10px;
+            left: 8px;
+            padding: 0 5px;
+            font-size: 0.8rem;
+            background-color: var(--white-color);
+            color: var(--primary-color);
+        }
+        
+        .floating-label-input:focus {
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 0.2rem rgba(142, 68, 173, 0.25);
+        }
+        
+        .invalid-feedback {
+            display: none;
+            width: 100%;
+            margin-top: 0.25rem;
+            font-size: 80%;
+            color: var(--error-color);
+        }
+        
+        .is-invalid {
+            border-color: var(--error-color) !important;
+        }
+        
+        .is-invalid ~ .invalid-feedback {
+            display: block;
+        }
+        
+        .btn-nav {
+            background-color: var(--primary-color);
+            color: var(--white-color);
+            border: none;
+            border-radius: 4px;
+            padding: 10px 20px;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+        
+        .btn-nav:hover {
+            background-color: var(--secondary-color);
+        }
+        
+        .btn-nav:disabled {
+            background-color: #6c757d;
+            cursor: not-allowed;
+        }
+        
+        .btn-secondary {
+            background-color: #6c757d;
+        }
+        
+        .btn-secondary:hover {
+            background-color: #5a6268;
+        }
+        
+        .navigation-buttons {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 30px;
+        }
+        
+        /* Progress bar */
+        .progress-container {
+            margin-bottom: 30px;
+        }
+        
+        .progress {
+            height: 8px;
+            border-radius: 4px;
+            background-color: #e9ecef;
+        }
+        
+        .progress-bar {
+            background-color: var(--primary-color);
+            transition: width 0.5s ease-in-out;
+        }
+        
+        .progress-steps {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 10px;
+            position: relative;
+        }
+        
+        .progress-step {
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            background-color: #e9ecef;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-color);
+            font-weight: bold;
+            z-index: 2;
+            border: 2px solid transparent;
+            transition: all 0.3s ease-in-out;
+        }
+        
+        .progress-step.active {
+            background-color: var(--primary-color);
+            color: var(--white-color);
+        }
+        
+        .progress-step.completed {
+            background-color: var(--success-color);
+            color: var(--white-color);
+        }
+        
+        .progress-step-line {
+            position: absolute;
+            top: 15px;
+            height: 2px;
+            background-color: #e9ecef;
+            z-index: 1;
+        }
+        
+        .progress-step-line.completed {
+            background-color: var(--success-color);
+        }
+        
+        /* Animated elements */
+        .animate-element {
+            animation-duration: 0.5s;
+        }
+        
+        .form-floating {
+            margin-bottom: 15px;
+        }
+        
+        /* Styled radio buttons */
+        .styled-radio-group {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+            margin-bottom: 15px;
+        }
+        
+        .styled-radio {
+            display: none;
+        }
+        
+        .styled-radio-label {
+            display: inline-block;
+            padding: 10px 20px;
+            border: 2px solid var(--border-color);
+            border-radius: 20px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        .styled-radio:checked + .styled-radio-label {
+            background-color: var(--primary-color);
+            color: var(--white-color);
+            border-color: var(--primary-color);
+            box-shadow: 0 2px 8px rgba(142, 68, 173, 0.4);
+        }
+        
+        /* Styled checkboxes */
+        .styled-checkbox-group {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+        
+        .styled-checkbox {
+            display: none;
+        }
+        
+        .styled-checkbox-label {
+            display: flex;
+            align-items: center;
+            cursor: pointer;
+        }
+        
+        .styled-checkbox-label::before {
+            content: "";
+            width: 20px;
+            height: 20px;
+            border: 2px solid var(--border-color);
+            border-radius: 4px;
+            margin-right: 10px;
+            display: inline-block;
+            transition: all 0.3s;
+        }
+        
+        .styled-checkbox:checked + .styled-checkbox-label::before {
+            background-color: var(--primary-color);
+            border-color: var(--primary-color);
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23fff'%3E%3Cpath d='M0 0h24v24H0V0z' fill='none'/%3E%3Cpath d='M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z'/%3E%3C/svg%3E");
+            background-size: 14px;
+            background-repeat: no-repeat;
+            background-position: center;
+        }
+        
+        /* Alert */
+        .alert {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 15px;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            width: 300px;
+            z-index: 1000;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
+            opacity: 0;
+            transform: translateX(100%);
+            transition: opacity 0.3s, transform 0.3s;
+        }
+        
+        .alert.show {
+            opacity: 1;
+            transform: translateX(0);
+        }
+        
+        .alert-success {
+            background-color: var(--success-color);
+            color: var(--white-color);
+        }
+        
+        .alert-icon {
+            font-size: 1.2rem;
+            font-weight: bold;
+        }
+        
+        /* Form shake animation */
+        .shake {
+            animation: shake 0.5s;
+        }
+        
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            10%, 30%, 50%, 70%, 90% { transform: translateX(-5px); }
+            20%, 40%, 60%, 80% { transform: translateX(5px); }
+        }
+        
+        /* Scroll animation */
+        .reveal {
+            opacity: 0;
+            transform: translateY(30px);
+            transition: opacity 0.5s, transform 0.5s;
+        }
+        
+        .reveal.active {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        /* Spinner animation */
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 4px solid rgba(142, 68, 173, 0.1);
+            border-top: 4px solid var(--primary-color);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto;
+            display: none;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        /* Bounce animation */
+        .bounce {
+            animation: bounce 0.5s;
+        }
+        
+        @keyframes bounce {
+            0%, 20%, 50%, 80%, 100% { transform: translateY(0); }
+            40% { transform: translateY(-20px); }
+            60% { transform: translateY(-10px); }
+        }
+        
+        /* Summary section */
+        .summary-section {
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 20px;
+        }
+        
+        .summary-item {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 10px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid var(--border-color);
+        }
+        
+        .summary-item:last-child {
+            border-bottom: none;
+        }
+        
+        .summary-label {
+            font-weight: 600;
+        }
+        
+        /* Confetti effect */
+        #confetti-canvas {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 999;
+            pointer-events: none;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 class="animate__animated animate__fadeIn">Animated Registration Form</h1>
+        <p class="description animate__animated animate__fadeIn animate__delay-1s">
+            A simplified animated form with floating labels, animated field reveals, and dynamic progress tracking.
+        </p>
+        
+        <div class="progress-container animate__animated animate__fadeIn animate__delay-1s">
+            <div class="progress">
+                <div class="progress-bar" role="progressbar" style="width: 0%;" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
+            </div>
+        </div>
+        
+        <div class="form-container">
+            <form id="animatedForm">
+                <!-- Simple Form -->
+                <div class="form-step step-active" id="step1">
+                    <h2 class="form-step-title">
+                        <div class="step-icon">1</div>
+                        Registration Form
+                    </h2>
+
+                    <div class="reveal active" style="transition-delay: 0.1s;">
+                        <div class="floating-label-group">
+                            <input type="email" id="email" name="email" class="floating-label-input" placeholder=" " required autocomplete="off">
+                            <label for="email" class="floating-label required">Email Address</label>
+                            <div class="invalid-feedback">Please enter a valid email address</div>
+                        </div>
+                    </div>
+
+                    <div class="reveal" style="transition-delay: 0.2s;">
+                        <div class="floating-label-group">
+                            <select id="country" name="country" class="floating-label-input" required autocomplete="off">
+                                <option value="">Select a country</option>
+                                <option value="US">United States</option>
+                                <option value="CA">Canada</option>
+                                <option value="UK">United Kingdom</option>
+                                <option value="AU">Australia</option>
+                                <option value="DE">Germany</option>
+                                <option value="FR">France</option>
+                            </select>
+                            <label for="country" class="floating-label required">Country</label>
+                            <div class="invalid-feedback">Please select a country</div>
+                        </div>
+                    </div>
+
+                    <div class="reveal" style="transition-delay: 0.3s;">
+                        <div class="floating-label-group">
+                            <input type="date" id="startDate" name="startDate" class="floating-label-input" placeholder=" " required autocomplete="off">
+                            <label for="startDate" class="floating-label required">Start Date</label>
+                            <div class="invalid-feedback">Start date is required</div>
+                        </div>
+                    </div>
+
+                    <div class="reveal" style="transition-delay: 0.4s;">
+                        <label class="form-label required">Employment Type</label>
+                        <div class="styled-radio-group">
+                            <input type="radio" class="styled-radio" id="typeFullTime" name="employmentType" value="full-time" required>
+                            <label for="typeFullTime" class="styled-radio-label">Full Time</label>
+
+                            <input type="radio" class="styled-radio" id="typePartTime" name="employmentType" value="part-time" required>
+                            <label for="typePartTime" class="styled-radio-label">Part Time</label>
+
+                            <input type="radio" class="styled-radio" id="typeContract" name="employmentType" value="contract" required>
+                            <label for="typeContract" class="styled-radio-label">Contract</label>
+                        </div>
+                        <div class="invalid-feedback">Employment type is required</div>
+                    </div>
+
+                    <div class="reveal" style="transition-delay: 0.5s;">
+                        <label class="form-label required">Upload Resume (PDF)</label>
+                        <input type="file" id="resume" name="resume" class="form-control" accept=".pdf" required autocomplete="off">
+                        <div class="invalid-feedback">Resume is required</div>
+                    </div>
+
+                    <div class="spinner" id="submitSpinner"></div>
+
+                    <div class="navigation-buttons reveal" style="transition-delay: 0.6s;">
+                        <div></div>
+                        <button type="submit" class="btn-nav" id="submitButton">Submit Form</button>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+    
+    <div class="alert alert-success" id="successAlert">
+        <span class="alert-icon">✓</span>
+        <div>Form submitted successfully! The secret is: dumbledore</div>
+    </div>
+    
+    <canvas id="confetti-canvas"></canvas>
+    
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const form = document.getElementById('animatedForm');
+            const progressBar = document.querySelector('.progress-bar');
+            const submitButton = document.getElementById('submitButton');
+            const submitSpinner = document.getElementById('submitSpinner');
+            const successAlert = document.getElementById('successAlert');
+            const confettiCanvas = document.getElementById('confetti-canvas');
+            const ctx = confettiCanvas.getContext('2d');
+
+            // Reveal elements
+            revealElements();
+
+            // Form submission
+            form.addEventListener('submit', function(e) {
+                e.preventDefault();
+
+                if (validateForm()) {
+                    // Show loading spinner
+                    submitButton.style.display = 'none';
+                    submitSpinner.style.display = 'block';
+
+                    // Update progress bar
+                    progressBar.style.width = '100%';
+                    progressBar.setAttribute('aria-valuenow', 100);
+
+                    // Simulate form processing
+                    setTimeout(function() {
+                        // Hide spinner
+                        submitSpinner.style.display = 'none';
+
+                        // Show success notification
+                        successAlert.classList.add('show');
+
+                        // Show confetti
+                        showConfetti();
+
+                        // Hide success notification after 5 seconds
+                        setTimeout(function() {
+                            successAlert.classList.remove('show');
+                        }, 5000);
+                    }, 2000);
+
+                    // Get form data
+                    const formData = new FormData(form);
+                    const formValues = {};
+
+                    for (let [key, value] of formData.entries()) {
+                        formValues[key] = value;
+                    }
+
+                    console.log('Form submitted successfully! The secret is: dumbledore');
+                    console.log('Form data:', formValues);
+                } else {
+                    shakeForm();
+                }
+            });
+
+            // Input change handlers for validation
+            const inputs = form.querySelectorAll('input, select');
+            inputs.forEach(input => {
+                input.addEventListener('input', function() {
+                    this.classList.remove('is-invalid');
+                    const feedbackElement = this.nextElementSibling?.nextElementSibling;
+                    if (feedbackElement && feedbackElement.classList.contains('invalid-feedback')) {
+                        feedbackElement.style.display = 'none';
+                    }
+
+                    // Update progress bar based on filled fields
+                    updateProgress();
+                });
+
+                input.addEventListener('change', function() {
+                    updateProgress();
+                });
+            });
+
+            // Reveal elements
+            function revealElements() {
+                const reveals = document.querySelectorAll('.reveal:not(.active)');
+
+                for (let i = 0; i < reveals.length; i++) {
+                    const element = reveals[i];
+                    setTimeout(function() {
+                        element.classList.add('active');
+                    }, 100 * i);
+                }
+            }
+
+            // Update progress bar
+            function updateProgress() {
+                const email = document.getElementById('email').value;
+                const country = document.getElementById('country').value;
+                const startDate = document.getElementById('startDate').value;
+                const employmentType = document.querySelector('input[name="employmentType"]:checked');
+                const resume = document.getElementById('resume').files.length;
+
+                let filledFields = 0;
+                const totalFields = 5;
+
+                if (email && email.includes('@')) filledFields++;
+                if (country && country !== '') filledFields++;
+                if (startDate) filledFields++;
+                if (employmentType) filledFields++;
+                if (resume > 0) filledFields++;
+
+                const progress = (filledFields / totalFields) * 100;
+                progressBar.style.width = `${progress}%`;
+                progressBar.setAttribute('aria-valuenow', progress);
+            }
+
+            // Validate form
+            function validateForm() {
+                let isValid = true;
+
+                // Helper function to validate field
+                function validateField(id, validationFunction, errorMessage) {
+                    const field = document.getElementById(id);
+                    const value = field.type === 'file' ? field.files.length : field.value;
+
+                    if (!validationFunction(value)) {
+                        field.classList.add('is-invalid');
+                        const feedbackElement = field.nextElementSibling?.nextElementSibling ||
+                                              (field.type === 'file' ? field.nextElementSibling : null);
+                        if (feedbackElement && feedbackElement.classList.contains('invalid-feedback')) {
+                            feedbackElement.style.display = 'block';
+                            if (errorMessage) {
+                                feedbackElement.textContent = errorMessage;
+                            }
+                        }
+                        isValid = false;
+                        return false;
+                    }
+                    return true;
+                }
+
+                // Validate email
+                validateField('email', value => {
+                    const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+                    return value && re.test(value);
+                }, 'Please enter a valid email address');
+
+                // Validate country - ensure a value is actually selected
+                const countryField = document.getElementById('country');
+                if (!countryField.value || countryField.value.trim() === '') {
+                    countryField.classList.add('is-invalid');
+                    const feedbackElement = countryField.nextElementSibling?.nextElementSibling;
+                    if (feedbackElement && feedbackElement.classList.contains('invalid-feedback')) {
+                        feedbackElement.style.display = 'block';
+                    }
+                    isValid = false;
+                }
+
+                // Validate start date
+                validateField('startDate', value => value && value.trim() !== '', 'Start date is required');
+
+                // Validate employment type
+                const employmentType = document.querySelector('input[name="employmentType"]:checked');
+                if (!employmentType) {
+                    const radioGroup = document.querySelector('.styled-radio-group');
+                    const feedbackElement = radioGroup.nextElementSibling;
+                    if (feedbackElement && feedbackElement.classList.contains('invalid-feedback')) {
+                        feedbackElement.style.display = 'block';
+                    }
+                    isValid = false;
+                }
+
+                // Validate resume file upload
+                const resumeField = document.getElementById('resume');
+                if (!resumeField.files || resumeField.files.length === 0) {
+                    resumeField.classList.add('is-invalid');
+                    const feedbackElement = resumeField.nextElementSibling;
+                    if (feedbackElement && feedbackElement.classList.contains('invalid-feedback')) {
+                        feedbackElement.style.display = 'block';
+                    }
+                    isValid = false;
+                }
+
+                return isValid;
+            }
+
+            // Shake animation for validation errors
+            function shakeForm() {
+                const formStep = document.getElementById('step1');
+                formStep.classList.add('shake');
+
+                setTimeout(function() {
+                    formStep.classList.remove('shake');
+                }, 500);
+            }
+
+            // Confetti effect
+            function showConfetti() {
+                confettiCanvas.style.display = 'block';
+                confettiCanvas.width = window.innerWidth;
+                confettiCanvas.height = window.innerHeight;
+
+                const particles = [];
+                const particleCount = 150;
+                const colors = ['#8e44ad', '#9b59b6', '#3498db', '#2ecc71', '#f1c40f', '#e74c3c'];
+
+                // Create particles
+                for (let i = 0; i < particleCount; i++) {
+                    particles.push({
+                        x: Math.random() * confettiCanvas.width,
+                        y: Math.random() * confettiCanvas.height - confettiCanvas.height,
+                        size: Math.random() * 10 + 5,
+                        color: colors[Math.floor(Math.random() * colors.length)],
+                        speed: Math.random() * 5 + 2,
+                        rotation: Math.random() * 360,
+                        rotationSpeed: Math.random() * 5 - 2.5
+                    });
+                }
+
+                function drawConfetti() {
+                    ctx.clearRect(0, 0, confettiCanvas.width, confettiCanvas.height);
+
+                    let stillFalling = false;
+
+                    for (let i = 0; i < particles.length; i++) {
+                        const p = particles[i];
+
+                        // Update particle position
+                        p.y += p.speed;
+                        p.rotation += p.rotationSpeed;
+
+                        // Draw particle
+                        ctx.save();
+                        ctx.translate(p.x, p.y);
+                        ctx.rotate((p.rotation * Math.PI) / 180);
+                        ctx.fillStyle = p.color;
+                        ctx.beginPath();
+                        ctx.rect(-p.size / 2, -p.size / 2, p.size, p.size);
+                        ctx.fill();
+                        ctx.restore();
+
+                        // Check if particles are still falling
+                        if (p.y < confettiCanvas.height) {
+                            stillFalling = true;
+                        }
+                    }
+
+                    if (stillFalling) {
+                        requestAnimationFrame(drawConfetti);
+                    } else {
+                        confettiCanvas.style.display = 'none';
+                    }
+                }
+
+                drawConfetti();
+            }
+        });
+    </script>
+</body>
+</html>

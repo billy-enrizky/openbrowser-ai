@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Material UI Form</title>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,400,500,700&display=swap">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/icon?family=Material+Icons">
+    <style>
+        :root {
+            --primary-color: #1976d2;
+            --primary-light: #4791db;
+            --primary-dark: #115293;
+            --secondary-color: #dc004e;
+            --error-color: #f44336;
+            --success-color: #4caf50;
+            --background-color: #f5f5f5;
+            --surface-color: #ffffff;
+            --text-primary: rgba(0, 0, 0, 0.87);
+            --text-secondary: rgba(0, 0, 0, 0.54);
+        }
+        
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        
+        body {
+            font-family: 'Roboto', sans-serif;
+            background-color: var(--background-color);
+            color: var(--text-primary);
+            line-height: 1.5;
+            padding-bottom: 50px;
+        }
+        
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 24px;
+        }
+        
+        h1 {
+            font-weight: 400;
+            font-size: 2rem;
+            margin-bottom: 16px;
+            color: var(--primary-color);
+            text-align: center;
+        }
+        
+        .description {
+            text-align: center;
+            margin-bottom: 32px;
+            color: var(--text-secondary);
+        }
+        
+        .material-form {
+            background-color: var(--surface-color);
+            border-radius: 8px;
+            box-shadow: 0px 3px 5px -1px rgba(0,0,0,0.2), 
+                        0px 6px 10px 0px rgba(0,0,0,0.14), 
+                        0px 1px 18px 0px rgba(0,0,0,0.12);
+            padding: 24px;
+            margin-bottom: 24px;
+        }
+        
+        .form-section {
+            margin-bottom: 32px;
+        }
+        
+        .form-section-title {
+            font-size: 1.25rem;
+            font-weight: 500;
+            margin-bottom: 16px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid rgba(0, 0, 0, 0.12);
+            color: var(--primary-color);
+        }
+        
+        .form-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 16px;
+            margin-bottom: 16px;
+        }
+        
+        .form-field {
+            flex: 1;
+            min-width: calc(50% - 8px);
+            position: relative;
+            margin-bottom: 16px;
+        }
+        
+        @media (max-width: 600px) {
+            .form-field {
+                min-width: 100%;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Material UI Form</h1>
+        <p class="description">This Material UI Form example is using the MUI components library with React, allowing full interactivity with form elements.</p>
+        
+        <div id="root"></div>
+    </div>
+    
+    <!-- React and ReactDOM -->
+    <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+    
+    <!-- Material UI -->
+    <script src="https://unpkg.com/@mui/material@5.14.5/umd/material-ui.development.js" crossorigin></script>
+    
+    <!-- Babel for JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <script type="text/babel">
+        const {
+            Button,
+            TextField,
+            FormControl,
+            FormControlLabel,
+            InputLabel,
+            Select,
+            MenuItem,
+            Radio,
+            RadioGroup,
+            Alert,
+            Box,
+            Typography,
+            createTheme,
+            ThemeProvider,
+            CssBaseline
+        } = MaterialUI;
+
+        // Create a theme instance
+        const theme = createTheme({
+            palette: {
+                primary: {
+                    main: '#1976d2',
+                },
+                secondary: {
+                    main: '#dc004e',
+                },
+                error: {
+                    main: '#f44336',
+                },
+                background: {
+                    default: '#f5f5f5',
+                },
+            },
+        });
+        
+        function MaterialForm() {
+            const [formData, setFormData] = React.useState({
+                email: '',
+                country: '',
+                birthDate: '',
+                contactPreference: 'email',
+                file: null
+            });
+
+            const [errors, setErrors] = React.useState({});
+            const [showSuccess, setShowSuccess] = React.useState(false);
+            const [fileName, setFileName] = React.useState('No file selected');
+
+            const handleChange = (e) => {
+                const { name, value } = e.target;
+                setFormData({ ...formData, [name]: value });
+                // Clear error for this field when user starts typing
+                if (errors[name]) {
+                    setErrors({ ...errors, [name]: '' });
+                }
+            };
+
+            const handleFileChange = (e) => {
+                if (e.target.files.length > 0) {
+                    setFileName(e.target.files[0].name);
+                    setFormData({ ...formData, file: e.target.files[0] });
+                    if (errors.file) {
+                        setErrors({ ...errors, file: '' });
+                    }
+                } else {
+                    setFileName('No file selected');
+                    setFormData({ ...formData, file: null });
+                }
+            };
+
+            const validateForm = () => {
+                const newErrors = {};
+
+                // Email validation
+                if (!formData.email || formData.email.trim() === '') {
+                    newErrors.email = 'Email is required';
+                } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) {
+                    newErrors.email = 'Please enter a valid email address';
+                }
+
+                // Country dropdown validation - check actual form state value
+                if (!formData.country || formData.country === '') {
+                    newErrors.country = 'Country is required';
+                }
+
+                // Birth date validation
+                if (!formData.birthDate || formData.birthDate === '') {
+                    newErrors.birthDate = 'Date of birth is required';
+                }
+
+                // Contact preference validation (always has default, but check anyway)
+                if (!formData.contactPreference || formData.contactPreference === '') {
+                    newErrors.contactPreference = 'Contact preference is required';
+                }
+
+                // File validation
+                if (!formData.file) {
+                    newErrors.file = 'File upload is required';
+                }
+
+                return newErrors;
+            };
+
+            const handleSubmit = (e) => {
+                e.preventDefault();
+
+                // Validate all fields
+                const validationErrors = validateForm();
+
+                if (Object.keys(validationErrors).length > 0) {
+                    setErrors(validationErrors);
+                    return;
+                }
+
+                console.log('Form submitted successfully!', formData);
+                setShowSuccess(true);
+                setTimeout(() => {
+                    setShowSuccess(false);
+                }, 8000);
+            };
+            
+            return (
+                <ThemeProvider theme={theme}>
+                    <CssBaseline />
+                    {showSuccess && (
+                        <Alert severity="success" sx={{ mb: 2 }}>
+                            <strong>Success!</strong> Form submitted successfully! The secret is: dumbledore
+                        </Alert>
+                    )}
+
+                    <Box
+                        component="form"
+                        onSubmit={handleSubmit}
+                        noValidate
+                        sx={{
+                            backgroundColor: 'background.paper',
+                            borderRadius: 1,
+                            boxShadow: 3,
+                            p: 3,
+                            mb: 3,
+                        }}
+                    >
+                        <TextField
+                            id="email"
+                            name="email"
+                            label="Email Address"
+                            type="email"
+                            value={formData.email}
+                            onChange={handleChange}
+                            required
+                            fullWidth
+                            error={!!errors.email}
+                            helperText={errors.email}
+                            sx={{ mb: 3 }}
+                        />
+
+                        <FormControl fullWidth sx={{ mb: 3 }} required error={!!errors.country}>
+                            <InputLabel id="country-label">Country *</InputLabel>
+                            <Select
+                                labelId="country-label"
+                                id="country"
+                                name="country"
+                                value={formData.country}
+                                onChange={handleChange}
+                                label="Country *"
+                            >
+                                <MenuItem value=""><em>None</em></MenuItem>
+                                <MenuItem value="US">United States</MenuItem>
+                                <MenuItem value="CA">Canada</MenuItem>
+                                <MenuItem value="UK">United Kingdom</MenuItem>
+                                <MenuItem value="AU">Australia</MenuItem>
+                            </Select>
+                            {errors.country && (
+                                <Typography variant="caption" color="error" sx={{ mt: 0.5, ml: 1.75 }}>
+                                    {errors.country}
+                                </Typography>
+                            )}
+                        </FormControl>
+
+                        <TextField
+                            id="birthDate"
+                            name="birthDate"
+                            label="Date of Birth"
+                            type="date"
+                            value={formData.birthDate}
+                            onChange={handleChange}
+                            required
+                            InputLabelProps={{ shrink: true }}
+                            fullWidth
+                            error={!!errors.birthDate}
+                            helperText={errors.birthDate}
+                            sx={{ mb: 3 }}
+                        />
+
+                        <FormControl component="fieldset" sx={{ mb: 3 }} required error={!!errors.contactPreference}>
+                            <Typography variant="subtitle1" gutterBottom>
+                                Contact Preference *
+                            </Typography>
+                            <RadioGroup
+                                name="contactPreference"
+                                value={formData.contactPreference}
+                                onChange={handleChange}
+                            >
+                                <FormControlLabel value="email" control={<Radio />} label="Email" />
+                                <FormControlLabel value="phone" control={<Radio />} label="Phone" />
+                                <FormControlLabel value="mail" control={<Radio />} label="Mail" />
+                            </RadioGroup>
+                            {errors.contactPreference && (
+                                <Typography variant="caption" color="error">
+                                    {errors.contactPreference}
+                                </Typography>
+                            )}
+                        </FormControl>
+
+                        <Box sx={{ mb: 3 }}>
+                            <Button
+                                variant="outlined"
+                                component="label"
+                                startIcon={<span className="material-icons">attach_file</span>}
+                                color={errors.file ? "error" : "primary"}
+                            >
+                                Upload File *
+                                <input
+                                    type="file"
+                                    hidden
+                                    onChange={handleFileChange}
+                                />
+                            </Button>
+                            <Typography variant="body2" sx={{ mt: 1, ml: 1 }} color={errors.file ? "error" : "text.secondary"}>
+                                {fileName}
+                            </Typography>
+                            {errors.file && (
+                                <Typography variant="caption" color="error" sx={{ ml: 1 }}>
+                                    {errors.file}
+                                </Typography>
+                            )}
+                        </Box>
+
+                        <Button
+                            type="submit"
+                            variant="contained"
+                            color="primary"
+                            startIcon={<span className="material-icons">send</span>}
+                        >
+                            Submit
+                        </Button>
+                    </Box>
+                </ThemeProvider>
+            );
+        }
+        
+        // Render the app
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<MaterialForm />);
+    </script>
+</body>
+</html>

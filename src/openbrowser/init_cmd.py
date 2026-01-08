@@ -24,7 +24,7 @@ from rich.text import Text
 console = Console()
 
 # GitHub template repository URL (for runtime fetching)
-TEMPLATE_REPO_URL = 'https://raw.githubusercontent.com/browser-use/template-library/main'
+TEMPLATE_REPO_URL = 'https://raw.githubusercontent.com/billy-enrizky/openbrowser-ai/main/examples'
 
 # Export for backward compatibility with cli.py
 # Templates are fetched at runtime via _get_template_list()

@@ -1,0 +1,1109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Advanced Data Table Challenge</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+        }
+
+        .controls {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px 30px;
+            background: #f8f9fa;
+            border-bottom: 1px solid #e9ecef;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+
+        .search-filters {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .search-box {
+            display: flex;
+            align-items: center;
+            background: white;
+            border: 2px solid #e9ecef;
+            border-radius: 8px;
+            padding: 8px 12px;
+            transition: border-color 0.3s ease;
+        }
+
+        .search-box:focus-within {
+            border-color: #667eea;
+        }
+
+        .search-box input {
+            border: none;
+            outline: none;
+            padding: 4px 8px;
+            font-size: 14px;
+            width: 200px;
+        }
+
+        .search-box .search-icon {
+            color: #666;
+            margin-right: 8px;
+        }
+
+        .filter-dropdown {
+            position: relative;
+        }
+
+        .filter-btn {
+            background: white;
+            border: 2px solid #e9ecef;
+            border-radius: 8px;
+            padding: 8px 12px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 0.3s ease;
+        }
+
+        .filter-btn:hover {
+            border-color: #667eea;
+        }
+
+        .filter-dropdown-menu {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            background: white;
+            border: 1px solid #e9ecef;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            z-index: 1000;
+            min-width: 200px;
+            display: none;
+        }
+
+        .filter-dropdown-menu.show {
+            display: block;
+        }
+
+        .filter-option {
+            padding: 8px 12px;
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+        }
+
+        .filter-option:hover {
+            background: #f8f9fa;
+        }
+
+        .filter-option input[type="checkbox"] {
+            margin-right: 8px;
+        }
+
+        .table-actions {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.3s ease;
+        }
+
+        .btn-primary {
+            background: #667eea;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #5a6fd8;
+        }
+
+        .btn-secondary {
+            background: #6c757d;
+            color: white;
+        }
+
+        .btn-secondary:hover {
+            background: #5a6268;
+        }
+
+        .btn-danger {
+            background: #dc3545;
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #c82333;
+        }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .table-container {
+            overflow-x: auto;
+            max-height: 600px;
+        }
+
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 14px;
+        }
+
+        .data-table th,
+        .data-table td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #e9ecef;
+        }
+
+        .data-table th {
+            background: #f8f9fa;
+            font-weight: 600;
+            color: #333;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+
+        .data-table th.sortable {
+            cursor: pointer;
+            user-select: none;
+            transition: background-color 0.3s ease;
+        }
+
+        .data-table th.sortable:hover {
+            background: #e9ecef;
+        }
+
+        .data-table th.sortable::after {
+            content: ' ↕️';
+            font-size: 12px;
+            opacity: 0.5;
+        }
+
+        .data-table th.sortable.asc::after {
+            content: ' ↑';
+            opacity: 1;
+        }
+
+        .data-table th.sortable.desc::after {
+            content: ' ↓';
+            opacity: 1;
+        }
+
+        .data-table tr:hover {
+            background: #f8f9fa;
+        }
+
+        .data-table tr.selected {
+            background: #e3f2fd;
+        }
+
+        .checkbox-cell {
+            width: 40px;
+            text-align: center;
+        }
+
+        .checkbox-cell input[type="checkbox"] {
+            transform: scale(1.2);
+            cursor: pointer;
+        }
+
+        .actions-cell {
+            width: 120px;
+        }
+
+        .action-btn {
+            padding: 4px 8px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            margin-right: 4px;
+            transition: all 0.3s ease;
+        }
+
+        .action-btn.edit {
+            background: #28a745;
+            color: white;
+        }
+
+        .action-btn.edit:hover {
+            background: #218838;
+        }
+
+        .action-btn.delete {
+            background: #dc3545;
+            color: white;
+        }
+
+        .action-btn.delete:hover {
+            background: #c82333;
+        }
+
+        .action-btn.save {
+            background: #007bff;
+            color: white;
+        }
+
+        .action-btn.cancel {
+            background: #6c757d;
+            color: white;
+        }
+
+        .editable-cell {
+            position: relative;
+        }
+
+        .editable-cell.editing input,
+        .editable-cell.editing select {
+            width: 100%;
+            padding: 4px;
+            border: 2px solid #667eea;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+
+        .status-badge {
+            padding: 4px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 500;
+            text-transform: uppercase;
+        }
+
+        .status-active {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .status-inactive {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .status-pending {
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        .pagination {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px 30px;
+            background: #f8f9fa;
+            border-top: 1px solid #e9ecef;
+        }
+
+        .pagination-info {
+            font-size: 14px;
+            color: #666;
+        }
+
+        .pagination-controls {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .page-btn {
+            padding: 6px 12px;
+            border: 1px solid #e9ecef;
+            background: white;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.3s ease;
+        }
+
+        .page-btn:hover {
+            background: #f8f9fa;
+        }
+
+        .page-btn.active {
+            background: #667eea;
+            color: white;
+            border-color: #667eea;
+        }
+
+        .page-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .page-size-selector {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .page-size-selector select {
+            padding: 4px 8px;
+            border: 1px solid #e9ecef;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+
+        .loading-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(255, 255, 255, 0.8);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            display: none;
+        }
+
+        .loading-overlay.show {
+            display: flex;
+        }
+
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-right: 10px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .bulk-actions {
+            background: #fff3cd;
+            border: 1px solid #ffeeba;
+            border-radius: 8px;
+            padding: 12px;
+            margin: 20px 30px;
+            display: none;
+        }
+
+        .bulk-actions.show {
+            display: block;
+        }
+
+        .bulk-actions-content {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .success-message {
+            background: #d4edda;
+            color: #155724;
+            padding: 12px;
+            border-radius: 8px;
+            margin: 20px 30px;
+            display: none;
+        }
+
+        .success-message.show {
+            display: block;
+        }
+
+        @media (max-width: 768px) {
+            .controls {
+                flex-direction: column;
+                align-items: stretch;
+            }
+            
+            .search-filters {
+                justify-content: center;
+            }
+            
+            .table-actions {
+                justify-content: center;
+            }
+            
+            .pagination {
+                flex-direction: column;
+                gap: 15px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📊 Advanced Data Table Challenge</h1>
+            <p>Test complex data interactions: sorting, filtering, pagination, and inline editing</p>
+        </div>
+
+        <div class="controls">
+            <div class="search-filters">
+                <div class="search-box">
+                    <span class="search-icon">🔍</span>
+                    <input type="text" placeholder="Search employees..." id="search-input">
+                </div>
+                
+                <div class="filter-dropdown">
+                    <div class="filter-btn" onclick="toggleFilter('department')">
+                        <span>Department</span>
+                        <span>▼</span>
+                    </div>
+                    <div class="filter-dropdown-menu" id="department-filter">
+                        <div class="filter-option">
+                            <input type="checkbox" id="dept-all" checked>
+                            <label for="dept-all">All Departments</label>
+                        </div>
+                        <div class="filter-option">
+                            <input type="checkbox" id="dept-engineering" checked>
+                            <label for="dept-engineering">Engineering</label>
+                        </div>
+                        <div class="filter-option">
+                            <input type="checkbox" id="dept-marketing" checked>
+                            <label for="dept-marketing">Marketing</label>
+                        </div>
+                        <div class="filter-option">
+                            <input type="checkbox" id="dept-sales" checked>
+                            <label for="dept-sales">Sales</label>
+                        </div>
+                        <div class="filter-option">
+                            <input type="checkbox" id="dept-hr" checked>
+                            <label for="dept-hr">HR</label>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="filter-dropdown">
+                    <div class="filter-btn" onclick="toggleFilter('status')">
+                        <span>Status</span>
+                        <span>▼</span>
+                    </div>
+                    <div class="filter-dropdown-menu" id="status-filter">
+                        <div class="filter-option">
+                            <input type="checkbox" id="status-all" checked>
+                            <label for="status-all">All Statuses</label>
+                        </div>
+                        <div class="filter-option">
+                            <input type="checkbox" id="status-active" checked>
+                            <label for="status-active">Active</label>
+                        </div>
+                        <div class="filter-option">
+                            <input type="checkbox" id="status-inactive" checked>
+                            <label for="status-inactive">Inactive</label>
+                        </div>
+                        <div class="filter-option">
+                            <input type="checkbox" id="status-pending" checked>
+                            <label for="status-pending">Pending</label>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="table-actions">
+                <button class="btn btn-primary" onclick="addNewEmployee()">+ Add Employee</button>
+                <button class="btn btn-secondary" onclick="exportData()">Export CSV</button>
+                <button class="btn btn-danger" onclick="deleteSelected()" id="delete-btn" disabled>Delete Selected</button>
+            </div>
+        </div>
+
+        <div class="bulk-actions" id="bulk-actions">
+            <div class="bulk-actions-content">
+                <div>
+                    <span id="selected-count">0</span> items selected
+                </div>
+                <div>
+                    <button class="btn btn-primary" onclick="bulkUpdateStatus()">Update Status</button>
+                    <button class="btn btn-secondary" onclick="bulkExport()">Export Selected</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="success-message" id="success-message"></div>
+
+        <div class="table-container">
+            <div class="loading-overlay" id="loading-overlay">
+                <div class="spinner"></div>
+                <span>Loading data...</span>
+            </div>
+            
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th class="checkbox-cell">
+                            <input type="checkbox" id="select-all" onchange="toggleSelectAll()">
+                        </th>
+                        <th class="sortable" onclick="sortTable('id')">ID</th>
+                        <th class="sortable" onclick="sortTable('name')">Name</th>
+                        <th class="sortable" onclick="sortTable('email')">Email</th>
+                        <th class="sortable" onclick="sortTable('department')">Department</th>
+                        <th class="sortable" onclick="sortTable('position')">Position</th>
+                        <th class="sortable" onclick="sortTable('salary')">Salary</th>
+                        <th class="sortable" onclick="sortTable('hireDate')">Hire Date</th>
+                        <th class="sortable" onclick="sortTable('status')">Status</th>
+                        <th class="actions-cell">Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="table-body">
+                    <!-- Data will be populated here -->
+                </tbody>
+            </table>
+        </div>
+
+        <div class="pagination">
+            <div class="pagination-info">
+                Showing <span id="showing-start">1</span> to <span id="showing-end">10</span> of <span id="total-records">100</span> records
+            </div>
+            
+            <div class="pagination-controls">
+                <button class="page-btn" onclick="changePage('first')" id="first-btn">First</button>
+                <button class="page-btn" onclick="changePage('prev')" id="prev-btn">Previous</button>
+                
+                <div id="page-numbers"></div>
+                
+                <button class="page-btn" onclick="changePage('next')" id="next-btn">Next</button>
+                <button class="page-btn" onclick="changePage('last')" id="last-btn">Last</button>
+            </div>
+            
+            <div class="page-size-selector">
+                <label>Show:</label>
+                <select id="page-size" onchange="changePageSize()">
+                    <option value="10">10</option>
+                    <option value="25">25</option>
+                    <option value="50">50</option>
+                    <option value="100">100</option>
+                </select>
+                <span>per page</span>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let employees = [];
+        let filteredEmployees = [];
+        let currentPage = 1;
+        let pageSize = 10;
+        let currentSort = { field: 'id', direction: 'asc' };
+        let selectedRows = new Set();
+        let editingRow = null;
+
+        // Generate sample data
+        function generateEmployees() {
+            const names = ['John Doe', 'Jane Smith', 'Mike Johnson', 'Sarah Wilson', 'Tom Brown', 'Lisa Davis', 'Chris Miller', 'Amy Taylor', 'David Anderson', 'Emma Thomas'];
+            const departments = ['Engineering', 'Marketing', 'Sales', 'HR'];
+            const positions = ['Manager', 'Senior', 'Junior', 'Lead', 'Intern'];
+            const statuses = ['Active', 'Inactive', 'Pending'];
+            
+            employees = [];
+            for (let i = 1; i <= 100; i++) {
+                employees.push({
+                    id: i,
+                    name: names[Math.floor(Math.random() * names.length)],
+                    email: `user${i}@company.com`,
+                    department: departments[Math.floor(Math.random() * departments.length)],
+                    position: positions[Math.floor(Math.random() * positions.length)],
+                    salary: Math.floor(Math.random() * 100000) + 40000,
+                    hireDate: new Date(2020 + Math.floor(Math.random() * 4), Math.floor(Math.random() * 12), Math.floor(Math.random() * 28) + 1),
+                    status: statuses[Math.floor(Math.random() * statuses.length)]
+                });
+            }
+        }
+
+        function showLoading() {
+            document.getElementById('loading-overlay').classList.add('show');
+        }
+
+        function hideLoading() {
+            document.getElementById('loading-overlay').classList.remove('show');
+        }
+
+        function applyFilters() {
+            const searchTerm = document.getElementById('search-input').value.toLowerCase();
+            const departmentFilters = getCheckedFilters('department');
+            const statusFilters = getCheckedFilters('status');
+            
+            filteredEmployees = employees.filter(employee => {
+                const matchesSearch = employee.name.toLowerCase().includes(searchTerm) || 
+                                     employee.email.toLowerCase().includes(searchTerm) ||
+                                     employee.department.toLowerCase().includes(searchTerm) ||
+                                     employee.position.toLowerCase().includes(searchTerm);
+                
+                const matchesDepartment = departmentFilters.length === 0 || departmentFilters.includes(employee.department);
+                const matchesStatus = statusFilters.length === 0 || statusFilters.includes(employee.status);
+                
+                return matchesSearch && matchesDepartment && matchesStatus;
+            });
+            
+            currentPage = 1;
+            updateTable();
+        }
+
+        function getCheckedFilters(filterType) {
+            const filters = [];
+            const checkboxes = document.querySelectorAll(`#${filterType}-filter input[type="checkbox"]:not([id*="all"])`);
+            
+            checkboxes.forEach(checkbox => {
+                if (checkbox.checked) {
+                    filters.push(checkbox.labels[0].textContent);
+                }
+            });
+            
+            return filters;
+        }
+
+        function sortTable(field) {
+            if (currentSort.field === field) {
+                currentSort.direction = currentSort.direction === 'asc' ? 'desc' : 'asc';
+            } else {
+                currentSort.field = field;
+                currentSort.direction = 'asc';
+            }
+            
+            // Update sort indicators
+            document.querySelectorAll('.sortable').forEach(th => {
+                th.classList.remove('asc', 'desc');
+            });
+            
+            document.querySelector(`th[onclick="sortTable('${field}')"]`).classList.add(currentSort.direction);
+            
+            // Sort data
+            filteredEmployees.sort((a, b) => {
+                let aVal = a[field];
+                let bVal = b[field];
+                
+                if (field === 'salary') {
+                    aVal = parseInt(aVal);
+                    bVal = parseInt(bVal);
+                } else if (field === 'hireDate') {
+                    aVal = new Date(aVal);
+                    bVal = new Date(bVal);
+                } else if (typeof aVal === 'string') {
+                    aVal = aVal.toLowerCase();
+                    bVal = bVal.toLowerCase();
+                }
+                
+                if (currentSort.direction === 'asc') {
+                    return aVal > bVal ? 1 : -1;
+                } else {
+                    return aVal < bVal ? 1 : -1;
+                }
+            });
+            
+            updateTable();
+        }
+
+        function updateTable() {
+            showLoading();
+            
+            // Simulate API delay
+            setTimeout(() => {
+                const tbody = document.getElementById('table-body');
+                tbody.innerHTML = '';
+                
+                const start = (currentPage - 1) * pageSize;
+                const end = start + pageSize;
+                const pageData = filteredEmployees.slice(start, end);
+                
+                pageData.forEach(employee => {
+                    const row = createTableRow(employee);
+                    tbody.appendChild(row);
+                });
+                
+                updatePagination();
+                hideLoading();
+            }, 500);
+        }
+
+        function createTableRow(employee) {
+            const row = document.createElement('tr');
+            row.dataset.id = employee.id;
+            
+            if (selectedRows.has(employee.id)) {
+                row.classList.add('selected');
+            }
+            
+            row.innerHTML = `
+                <td class="checkbox-cell">
+                    <input type="checkbox" ${selectedRows.has(employee.id) ? 'checked' : ''} 
+                           onchange="toggleRowSelection(${employee.id})">
+                </td>
+                <td>${employee.id}</td>
+                <td class="editable-cell" data-field="name">${employee.name}</td>
+                <td class="editable-cell" data-field="email">${employee.email}</td>
+                <td class="editable-cell" data-field="department">${employee.department}</td>
+                <td class="editable-cell" data-field="position">${employee.position}</td>
+                <td class="editable-cell" data-field="salary">$${employee.salary.toLocaleString()}</td>
+                <td>${employee.hireDate.toLocaleDateString()}</td>
+                <td>
+                    <span class="status-badge status-${employee.status.toLowerCase()}">${employee.status}</span>
+                </td>
+                <td class="actions-cell">
+                    <button class="action-btn edit" onclick="editRow(${employee.id})">Edit</button>
+                    <button class="action-btn delete" onclick="deleteRow(${employee.id})">Delete</button>
+                </td>
+            `;
+            
+            return row;
+        }
+
+        function updatePagination() {
+            const totalPages = Math.ceil(filteredEmployees.length / pageSize);
+            const start = (currentPage - 1) * pageSize + 1;
+            const end = Math.min(currentPage * pageSize, filteredEmployees.length);
+            
+            document.getElementById('showing-start').textContent = start;
+            document.getElementById('showing-end').textContent = end;
+            document.getElementById('total-records').textContent = filteredEmployees.length;
+            
+            // Update page buttons
+            document.getElementById('first-btn').disabled = currentPage === 1;
+            document.getElementById('prev-btn').disabled = currentPage === 1;
+            document.getElementById('next-btn').disabled = currentPage === totalPages;
+            document.getElementById('last-btn').disabled = currentPage === totalPages;
+            
+            // Update page numbers
+            const pageNumbers = document.getElementById('page-numbers');
+            pageNumbers.innerHTML = '';
+            
+            const startPage = Math.max(1, currentPage - 2);
+            const endPage = Math.min(totalPages, currentPage + 2);
+            
+            for (let i = startPage; i <= endPage; i++) {
+                const pageBtn = document.createElement('button');
+                pageBtn.className = `page-btn ${i === currentPage ? 'active' : ''}`;
+                pageBtn.textContent = i;
+                pageBtn.onclick = () => changePage(i);
+                pageNumbers.appendChild(pageBtn);
+            }
+        }
+
+        function changePage(action) {
+            const totalPages = Math.ceil(filteredEmployees.length / pageSize);
+            
+            switch (action) {
+                case 'first':
+                    currentPage = 1;
+                    break;
+                case 'prev':
+                    currentPage = Math.max(1, currentPage - 1);
+                    break;
+                case 'next':
+                    currentPage = Math.min(totalPages, currentPage + 1);
+                    break;
+                case 'last':
+                    currentPage = totalPages;
+                    break;
+                default:
+                    currentPage = parseInt(action);
+            }
+            
+            updateTable();
+        }
+
+        function changePageSize() {
+            pageSize = parseInt(document.getElementById('page-size').value);
+            currentPage = 1;
+            updateTable();
+        }
+
+        function toggleSelectAll() {
+            const selectAllCheckbox = document.getElementById('select-all');
+            const checkboxes = document.querySelectorAll('tbody input[type="checkbox"]');
+            
+            checkboxes.forEach(checkbox => {
+                checkbox.checked = selectAllCheckbox.checked;
+                const rowId = parseInt(checkbox.closest('tr').dataset.id);
+                
+                if (selectAllCheckbox.checked) {
+                    selectedRows.add(rowId);
+                    checkbox.closest('tr').classList.add('selected');
+                } else {
+                    selectedRows.delete(rowId);
+                    checkbox.closest('tr').classList.remove('selected');
+                }
+            });
+            
+            updateBulkActions();
+        }
+
+        function toggleRowSelection(id) {
+            const row = document.querySelector(`tr[data-id="${id}"]`);
+            const checkbox = row.querySelector('input[type="checkbox"]');
+            
+            if (checkbox.checked) {
+                selectedRows.add(id);
+                row.classList.add('selected');
+            } else {
+                selectedRows.delete(id);
+                row.classList.remove('selected');
+            }
+            
+            updateBulkActions();
+        }
+
+        function updateBulkActions() {
+            const bulkActions = document.getElementById('bulk-actions');
+            const deleteBtn = document.getElementById('delete-btn');
+            const selectedCount = document.getElementById('selected-count');
+            
+            if (selectedRows.size > 0) {
+                bulkActions.classList.add('show');
+                deleteBtn.disabled = false;
+                selectedCount.textContent = selectedRows.size;
+            } else {
+                bulkActions.classList.remove('show');
+                deleteBtn.disabled = true;
+            }
+        }
+
+        function toggleFilter(filterType) {
+            const dropdown = document.getElementById(`${filterType}-filter`);
+            dropdown.classList.toggle('show');
+            
+            // Close other dropdowns
+            document.querySelectorAll('.filter-dropdown-menu').forEach(menu => {
+                if (menu !== dropdown) {
+                    menu.classList.remove('show');
+                }
+            });
+        }
+
+        function editRow(id) {
+            if (editingRow) {
+                cancelEdit();
+            }
+            
+            editingRow = id;
+            const row = document.querySelector(`tr[data-id="${id}"]`);
+            const employee = employees.find(emp => emp.id === id);
+            
+            // Replace editable cells with inputs
+            const editableCells = row.querySelectorAll('.editable-cell');
+            editableCells.forEach(cell => {
+                const field = cell.dataset.field;
+                const currentValue = employee[field];
+                
+                cell.classList.add('editing');
+                
+                if (field === 'department') {
+                    cell.innerHTML = `
+                        <select>
+                            <option value="Engineering" ${currentValue === 'Engineering' ? 'selected' : ''}>Engineering</option>
+                            <option value="Marketing" ${currentValue === 'Marketing' ? 'selected' : ''}>Marketing</option>
+                            <option value="Sales" ${currentValue === 'Sales' ? 'selected' : ''}>Sales</option>
+                            <option value="HR" ${currentValue === 'HR' ? 'selected' : ''}>HR</option>
+                        </select>
+                    `;
+                } else if (field === 'position') {
+                    cell.innerHTML = `
+                        <select>
+                            <option value="Manager" ${currentValue === 'Manager' ? 'selected' : ''}>Manager</option>
+                            <option value="Senior" ${currentValue === 'Senior' ? 'selected' : ''}>Senior</option>
+                            <option value="Junior" ${currentValue === 'Junior' ? 'selected' : ''}>Junior</option>
+                            <option value="Lead" ${currentValue === 'Lead' ? 'selected' : ''}>Lead</option>
+                            <option value="Intern" ${currentValue === 'Intern' ? 'selected' : ''}>Intern</option>
+                        </select>
+                    `;
+                } else if (field === 'salary') {
+                    cell.innerHTML = `<input type="number" value="${currentValue}" min="0">`;
+                } else {
+                    cell.innerHTML = `<input type="text" value="${currentValue}">`;
+                }
+            });
+            
+            // Update action buttons
+            const actionsCell = row.querySelector('.actions-cell');
+            actionsCell.innerHTML = `
+                <button class="action-btn save" onclick="saveRow(${id})">Save</button>
+                <button class="action-btn cancel" onclick="cancelEdit()">Cancel</button>
+            `;
+        }
+
+        function saveRow(id) {
+            const row = document.querySelector(`tr[data-id="${id}"]`);
+            const employee = employees.find(emp => emp.id === id);
+            
+            // Get updated values
+            const editableCells = row.querySelectorAll('.editable-cell');
+            editableCells.forEach(cell => {
+                const field = cell.dataset.field;
+                const input = cell.querySelector('input, select');
+                
+                if (field === 'salary') {
+                    employee[field] = parseInt(input.value);
+                } else {
+                    employee[field] = input.value;
+                }
+            });
+            
+            editingRow = null;
+            applyFilters();
+            showSuccessMessage('Employee updated successfully!');
+        }
+
+        function cancelEdit() {
+            editingRow = null;
+            applyFilters();
+        }
+
+        function deleteRow(id) {
+            if (confirm('Are you sure you want to delete this employee?')) {
+                employees = employees.filter(emp => emp.id !== id);
+                selectedRows.delete(id);
+                applyFilters();
+                showSuccessMessage('Employee deleted successfully!');
+            }
+        }
+
+        function deleteSelected() {
+            if (confirm(`Are you sure you want to delete ${selectedRows.size} selected employees?`)) {
+                employees = employees.filter(emp => !selectedRows.has(emp.id));
+                selectedRows.clear();
+                applyFilters();
+                showSuccessMessage('Selected employees deleted successfully!');
+            }
+        }
+
+        function addNewEmployee() {
+            const newId = Math.max(...employees.map(emp => emp.id)) + 1;
+            const newEmployee = {
+                id: newId,
+                name: 'New Employee',
+                email: `new${newId}@company.com`,
+                department: 'Engineering',
+                position: 'Junior',
+                salary: 50000,
+                hireDate: new Date(),
+                status: 'Active'
+            };
+            
+            employees.push(newEmployee);
+            applyFilters();
+            showSuccessMessage('New employee added successfully!');
+        }
+
+        function exportData() {
+            const csvContent = convertToCSV(filteredEmployees);
+            downloadCSV(csvContent, 'employees.csv');
+            showSuccessMessage('Data exported successfully!');
+        }
+
+        function bulkExport() {
+            const selectedEmployees = employees.filter(emp => selectedRows.has(emp.id));
+            const csvContent = convertToCSV(selectedEmployees);
+            downloadCSV(csvContent, 'selected_employees.csv');
+            showSuccessMessage('Selected employees exported successfully!');
+        }
+
+        function convertToCSV(data) {
+            const headers = ['ID', 'Name', 'Email', 'Department', 'Position', 'Salary', 'Hire Date', 'Status'];
+            const csvRows = [headers.join(',')];
+            
+            data.forEach(employee => {
+                const row = [
+                    employee.id,
+                    `"${employee.name}"`,
+                    employee.email,
+                    employee.department,
+                    employee.position,
+                    employee.salary,
+                    employee.hireDate.toLocaleDateString(),
+                    employee.status
+                ];
+                csvRows.push(row.join(','));
+            });
+            
+            return csvRows.join('\n');
+        }
+
+        function downloadCSV(content, filename) {
+            const blob = new Blob([content], { type: 'text/csv' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            a.click();
+            window.URL.revokeObjectURL(url);
+        }
+
+        function showSuccessMessage(message) {
+            const successDiv = document.getElementById('success-message');
+            successDiv.textContent = message;
+            successDiv.classList.add('show');
+            
+            setTimeout(() => {
+                successDiv.classList.remove('show');
+            }, 8000);
+        }
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', function() {
+            generateEmployees();
+            filteredEmployees = [...employees];
+            updateTable();
+            
+            // Set up search
+            document.getElementById('search-input').addEventListener('input', applyFilters);
+            
+            // Set up filter checkboxes
+            document.querySelectorAll('.filter-dropdown-menu input[type="checkbox"]').forEach(checkbox => {
+                checkbox.addEventListener('change', applyFilters);
+            });
+            
+            // Close dropdowns when clicking outside
+            document.addEventListener('click', function(e) {
+                if (!e.target.closest('.filter-dropdown')) {
+                    document.querySelectorAll('.filter-dropdown-menu').forEach(menu => {
+                        menu.classList.remove('show');
+                    });
+                }
+            });
+        });
+    </script>
+</body>
+</html> 

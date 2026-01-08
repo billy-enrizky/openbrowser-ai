@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Level 3 Iframe - Form</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            margin: 0;
+            padding: 15px;
+            background-color: #b39ddb;
+            color: #333;
+        }
+        
+        h4 {
+            color: #6200ea;
+            margin-top: 0;
+            margin-bottom: 15px;
+        }
+        
+        .form-container {
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+        }
+        
+        .form-group {
+            margin-bottom: 15px;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 500;
+        }
+        
+        .required::after {
+            content: " *";
+            color: #f44336;
+        }
+        
+        input, select, textarea {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+            font-family: inherit;
+            font-size: 14px;
+        }
+        
+        input:focus, select:focus, textarea:focus {
+            border-color: #6200ea;
+            outline: none;
+            box-shadow: 0 0 0 2px rgba(98, 0, 234, 0.2);
+        }
+        
+        .error-text {
+            color: #f44336;
+            font-size: 12px;
+            margin-top: 5px;
+            display: none;
+        }
+        
+        .checkbox-group {
+            display: flex;
+            align-items: flex-start;
+            margin-bottom: 15px;
+        }
+        
+        .checkbox-group input {
+            width: auto;
+            margin-right: 10px;
+            margin-top: 2px;
+        }
+        
+        .btn {
+            display: inline-block;
+            padding: 8px 16px;
+            border-radius: 4px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-align: center;
+            border: none;
+        }
+        
+        .btn-primary {
+            background-color: #6200ea;
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background-color: #5600e8;
+        }
+        
+        .btn-danger {
+            background-color: #f44336;
+            color: white;
+        }
+        
+        .btn-danger:hover {
+            background-color: #e53935;
+        }
+        
+        .btn-secondary {
+            background-color: #9e9e9e;
+            color: white;
+        }
+        
+        .btn-secondary:hover {
+            background-color: #757575;
+        }
+        
+        .form-buttons {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+        }
+        
+        .success-message {
+            display: none;
+            padding: 10px 15px;
+            background-color: #e8f5e9;
+            border: 1px solid #66bb6a;
+            color: #2e7d32;
+            border-radius: 4px;
+            margin-bottom: 15px;
+        }
+        
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .modal-content {
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            width: 80%;
+            max-width: 400px;
+            position: relative;
+        }
+        
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        
+        .modal-title {
+            margin: 0;
+            font-size: 18px;
+        }
+        
+        .modal-close {
+            font-size: 24px;
+            cursor: pointer;
+            background: none;
+            border: none;
+            padding: 0;
+        }
+        
+        .modal-body {
+            margin-bottom: 15px;
+        }
+        
+        .modal-footer {
+            text-align: right;
+        }
+    </style>
+</head>
+<body>
+    <h4>Form (Level 3 Iframe)</h4>
+    
+    <div class="success-message" id="local-success-message">
+        <strong>Success!</strong> Form submitted successfully! The secret is: dumbledore
+    </div>
+    
+    <div class="form-container">
+        <form id="nested-form">
+            <div class="form-group">
+                <label for="firstName" class="required">First Name</label>
+                <input type="text" id="firstName" name="firstName" required>
+                <div class="error-text" id="firstName-error">First name is required</div>
+            </div>
+            
+            <div class="form-group">
+                <label for="lastName" class="required">Last Name</label>
+                <input type="text" id="lastName" name="lastName" required>
+                <div class="error-text" id="lastName-error">Last name is required</div>
+            </div>
+            
+            <div class="form-group">
+                <label for="email" class="required">Email Address</label>
+                <input type="email" id="email" name="email" required>
+                <div class="error-text" id="email-error">Please enter a valid email address</div>
+            </div>
+            
+            <div class="form-group">
+                <label for="phone">Phone Number</label>
+                <input type="tel" id="phone" name="phone" placeholder="123-456-7890">
+                <div class="error-text" id="phone-error">Please enter a valid phone number</div>
+            </div>
+            
+            <div class="form-group">
+                <label for="address" class="required">Address</label>
+                <input type="text" id="address" name="address" required>
+                <div class="error-text" id="address-error">Address is required</div>
+            </div>
+            
+            <div class="form-group">
+                <label for="city" class="required">City</label>
+                <input type="text" id="city" name="city" required>
+                <div class="error-text" id="city-error">City is required</div>
+            </div>
+            
+            <div class="form-group">
+                <label for="state" class="required">State</label>
+                <select id="state" name="state" required>
+                    <option value="">Select State</option>
+                    <option value="AL">Alabama</option>
+                    <option value="AK">Alaska</option>
+                    <option value="AZ">Arizona</option>
+                    <option value="CA">California</option>
+                    <option value="CO">Colorado</option>
+                    <option value="NY">New York</option>
+                    <option value="TX">Texas</option>
+                    <option value="WA">Washington</option>
+                </select>
+                <div class="error-text" id="state-error">State is required</div>
+            </div>
+            
+            <div class="form-group">
+                <label for="zipCode" class="required">Zip Code</label>
+                <input type="text" id="zipCode" name="zipCode" required>
+                <div class="error-text" id="zipCode-error">Please enter a valid zip code</div>
+            </div>
+            
+            <div class="form-group">
+                <label for="birthDate">Date of Birth</label>
+                <input type="date" id="birthDate" name="birthDate">
+            </div>
+            
+            <div class="form-group">
+                <label for="preferredTime">Preferred Time</label>
+                <input type="time" id="preferredTime" name="preferredTime">
+            </div>
+            
+            <div class="form-group">
+                <label for="alphanumericOnly">Alphanumeric Only</label>
+                <input type="text" id="alphanumericOnly" name="alphanumericOnly">
+                <small>Only letters and numbers are allowed</small>
+            </div>
+            
+            <div class="form-group">
+                <label for="disabledInput">Disabled Field</label>
+                <input type="text" id="disabledInput" name="disabledInput" value="This field is disabled" disabled>
+            </div>
+            
+            <div class="checkbox-group">
+                <input type="checkbox" id="terms" name="terms" required>
+                <label for="terms">I agree to the <a href="#" id="terms-link">Terms and Conditions</a> <span style="color: #f44336;">*</span></label>
+            </div>
+            <div class="error-text" id="terms-error">You must agree to the terms and conditions</div>
+            
+            <div class="form-buttons">
+                <button type="submit" class="btn btn-primary">Submit Form</button>
+                <button type="button" class="btn btn-danger" id="modal-button">Open Modal</button>
+                <button type="reset" class="btn btn-secondary">Reset Form</button>
+            </div>
+        </form>
+    </div>
+    
+    <div class="modal" id="red-herring-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Red Herring Modal</h5>
+                <button type="button" class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p>This is a red herring modal instead of submitting the form.</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary modal-close-btn">Close</button>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // Alphanumeric validation
+            const alphanumericInput = document.getElementById('alphanumericOnly');
+            if (alphanumericInput) {
+                alphanumericInput.addEventListener('input', function(e) {
+                    e.target.value = e.target.value.replace(/[^a-zA-Z0-9]/g, '');
+                });
+            }
+            
+            // Terms link handler
+            const termsLink = document.getElementById('terms-link');
+            if (termsLink) {
+                termsLink.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    alert('Terms and Conditions would be displayed here.');
+                });
+            }
+            
+            // Form submission
+            const form = document.getElementById('nested-form');
+            const localSuccessMessage = document.getElementById('local-success-message');
+            
+            if (form) {
+                form.addEventListener('submit', function(e) {
+                    e.preventDefault();
+                    
+                    // Reset error messages
+                    const errorMessages = document.querySelectorAll('.error-text');
+                    errorMessages.forEach(error => error.style.display = 'none');
+                    
+                    // Validate required fields
+                    let isValid = true;
+                    const requiredFields = form.querySelectorAll('[required]');
+                    
+                    requiredFields.forEach(field => {
+                        if (field.type === 'checkbox') {
+                            if (!field.checked) {
+                                isValid = false;
+                                document.getElementById('terms-error').style.display = 'block';
+                            }
+                        } else if (!field.value.trim()) {
+                            isValid = false;
+                            const fieldId = field.id;
+                            const errorElement = document.getElementById(fieldId + '-error');
+                            if (errorElement) {
+                                errorElement.style.display = 'block';
+                            }
+                        }
+                    });
+                    
+                    // Email validation
+                    const emailField = document.getElementById('email');
+                    if (emailField && emailField.value) {
+                        const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+                        if (!emailPattern.test(emailField.value)) {
+                            isValid = false;
+                            document.getElementById('email-error').style.display = 'block';
+                        }
+                    }
+                    
+                    // Zip code validation
+                    const zipField = document.getElementById('zipCode');
+                    if (zipField && zipField.value) {
+                        const zipPattern = /^\d{5}(-\d{4})?$/;
+                        if (!zipPattern.test(zipField.value)) {
+                            isValid = false;
+                            document.getElementById('zipCode-error').style.display = 'block';
+                        }
+                    }
+                    
+                    if (isValid) {
+                        // Display local success message
+                        localSuccessMessage.style.display = 'block';
+                        
+                        // Notify the top frame via postMessage
+                        try {
+                            window.parent.parent.parent.postMessage({ type: 'formSubmit' }, '*');
+                            
+                            // Hide local success message after 3 seconds
+                            setTimeout(function() {
+                                localSuccessMessage.style.display = 'none';
+                            }, 8000);
+                        } catch (error) {
+                            console.error('Could not access parent frames:', error);
+                            
+                            // Hide local success message after 3 seconds
+                            setTimeout(function() {
+                                localSuccessMessage.style.display = 'none';
+                            }, 8000);
+                        }
+                        
+                        console.log('Form submitted successfully! The secret is: dumbledore');
+                    }
+                });
+            }
+            
+            // Modal functionality
+            const modalButton = document.getElementById('modal-button');
+            const modal = document.getElementById('red-herring-modal');
+            const closeButtons = document.querySelectorAll('.modal-close, .modal-close-btn');
+            
+            if (modalButton && modal) {
+                modalButton.addEventListener('click', function() {
+                    modal.style.display = 'flex';
+                });
+            }
+            
+            if (closeButtons.length > 0 && modal) {
+                closeButtons.forEach(button => {
+                    button.addEventListener('click', function() {
+                        modal.style.display = 'none';
+                    });
+                });
+            }
+            
+            if (modal) {
+                modal.addEventListener('click', function(e) {
+                    if (e.target === modal) {
+                        modal.style.display = 'none';
+                    }
+                });
+            }
+        });
+    </script>
+</body>
+</html>
