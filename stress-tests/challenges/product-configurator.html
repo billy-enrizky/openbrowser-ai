@@ -1,0 +1,1150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Product Configurator Challenge</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+        }
+
+        .configurator-main {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+            padding: 40px;
+        }
+
+        .product-preview {
+            background: #f8f9fa;
+            border-radius: 15px;
+            padding: 30px;
+            text-align: center;
+            position: relative;
+        }
+
+        .product-image {
+            width: 100%;
+            max-width: 400px;
+            height: 400px;
+            background: #e9ecef;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 3rem;
+            margin-bottom: 20px;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .product-image.laptop {
+            background: linear-gradient(45deg, #2c3e50, #34495e);
+            color: white;
+        }
+
+        .product-image.phone {
+            background: linear-gradient(45deg, #e74c3c, #c0392b);
+            color: white;
+        }
+
+        .product-image.tablet {
+            background: linear-gradient(45deg, #3498db, #2980b9);
+            color: white;
+        }
+
+        .product-360 {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: rgba(255, 255, 255, 0.9);
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .product-360:hover {
+            background: white;
+            transform: scale(1.1);
+        }
+
+        .product-360.active {
+            background: #667eea;
+            color: white;
+            animation: rotate360 2s linear infinite;
+        }
+
+        @keyframes rotate360 {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        .product-zoom {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(255, 255, 255, 0.9);
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .product-zoom:hover {
+            background: white;
+            transform: scale(1.1);
+        }
+
+        .product-title {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: #333;
+            margin-bottom: 10px;
+        }
+
+        .product-description {
+            color: #666;
+            margin-bottom: 20px;
+            line-height: 1.6;
+        }
+
+        .product-price {
+            font-size: 2rem;
+            font-weight: 700;
+            color: #28a745;
+            margin-bottom: 10px;
+        }
+
+        .original-price {
+            font-size: 1.2rem;
+            color: #999;
+            text-decoration: line-through;
+            margin-right: 10px;
+        }
+
+        .savings {
+            color: #dc3545;
+            font-weight: 600;
+            font-size: 0.9rem;
+        }
+
+        .stock-status {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            margin-top: 10px;
+        }
+
+        .stock-status.in-stock {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .stock-status.low-stock {
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        .stock-status.out-of-stock {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .product-options {
+            padding: 20px;
+        }
+
+        .option-group {
+            margin-bottom: 30px;
+        }
+
+        .option-title {
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 15px;
+        }
+
+        .option-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: 10px;
+        }
+
+        .option-item {
+            border: 2px solid #e9ecef;
+            border-radius: 8px;
+            padding: 15px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            position: relative;
+        }
+
+        .option-item:hover {
+            border-color: #667eea;
+            transform: translateY(-2px);
+        }
+
+        .option-item.selected {
+            border-color: #667eea;
+            background: #f8f9ff;
+        }
+
+        .option-item.disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            pointer-events: none;
+        }
+
+        .option-label {
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 5px;
+        }
+
+        .option-price {
+            font-size: 0.9rem;
+            color: #28a745;
+            font-weight: 600;
+        }
+
+        .option-price.additional {
+            color: #667eea;
+        }
+
+        .option-price.included {
+            color: #28a745;
+        }
+
+        .color-option {
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            cursor: pointer;
+            border: 3px solid #e9ecef;
+            transition: all 0.3s ease;
+            position: relative;
+            margin: 0 auto 10px;
+        }
+
+        .color-option:hover {
+            border-color: #667eea;
+            transform: scale(1.1);
+        }
+
+        .color-option.selected {
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.3);
+        }
+
+        .color-option::after {
+            content: '✓';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            font-weight: bold;
+            font-size: 1.2rem;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+
+        .color-option.selected::after {
+            opacity: 1;
+        }
+
+        .storage-slider {
+            margin: 20px 0;
+        }
+
+        .slider-container {
+            position: relative;
+            height: 6px;
+            background: #e9ecef;
+            border-radius: 3px;
+            margin: 20px 0;
+        }
+
+        .slider-track {
+            height: 100%;
+            background: #667eea;
+            border-radius: 3px;
+            transition: width 0.3s ease;
+        }
+
+        .slider-handle {
+            position: absolute;
+            top: -7px;
+            width: 20px;
+            height: 20px;
+            background: #667eea;
+            border-radius: 50%;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .slider-handle:hover {
+            transform: scale(1.2);
+        }
+
+        .slider-labels {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 10px;
+            font-size: 0.9rem;
+            color: #666;
+        }
+
+        .customization-section {
+            background: #f8f9fa;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
+        .customization-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 15px;
+        }
+
+        .engraving-input {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e9ecef;
+            border-radius: 8px;
+            font-size: 16px;
+            margin-bottom: 10px;
+            transition: border-color 0.3s ease;
+        }
+
+        .engraving-input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .engraving-preview {
+            background: #333;
+            color: white;
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+            font-family: 'Courier New', monospace;
+            margin-top: 10px;
+            min-height: 50px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .price-breakdown {
+            background: #f8f9fa;
+            border-radius: 12px;
+            padding: 20px;
+            margin-top: 20px;
+        }
+
+        .price-breakdown h3 {
+            color: #333;
+            margin-bottom: 15px;
+        }
+
+        .price-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid #e9ecef;
+        }
+
+        .price-row:last-child {
+            border-bottom: none;
+            font-weight: 600;
+            font-size: 1.1rem;
+            color: #28a745;
+        }
+
+        .price-row.discount {
+            color: #dc3545;
+        }
+
+        .action-buttons {
+            display: flex;
+            gap: 15px;
+            margin-top: 30px;
+        }
+
+        .btn {
+            padding: 15px 30px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            flex: 1;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.3);
+        }
+
+        .btn-secondary {
+            background: #6c757d;
+            color: white;
+        }
+
+        .btn-secondary:hover {
+            background: #5a6268;
+        }
+
+        .btn-wishlist {
+            background: #dc3545;
+            color: white;
+        }
+
+        .btn-wishlist:hover {
+            background: #c82333;
+        }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .quick-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+        }
+
+        .quick-btn {
+            padding: 8px 16px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background-color 0.3s ease;
+        }
+
+        .quick-btn:hover {
+            background: #5a6fd8;
+        }
+
+        .quick-btn.secondary {
+            background: #6c757d;
+        }
+
+        .quick-btn.secondary:hover {
+            background: #5a6268;
+        }
+
+        .inventory-warning {
+            background: #fff3cd;
+            color: #856404;
+            padding: 12px;
+            border-radius: 8px;
+            margin-top: 15px;
+            display: none;
+        }
+
+        .inventory-warning.show {
+            display: block;
+        }
+
+        .success-message {
+            background: #d4edda;
+            color: #155724;
+            padding: 20px;
+            border-radius: 12px;
+            margin-top: 20px;
+            display: none;
+        }
+
+        .success-message.show {
+            display: block;
+        }
+
+        @media (max-width: 768px) {
+            .configurator-main {
+                grid-template-columns: 1fr;
+            }
+            
+            .option-grid {
+                grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+            }
+            
+            .action-buttons {
+                flex-direction: column;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🛍️ Product Configurator Challenge</h1>
+            <p>Test complex product customization with options, pricing, and inventory management</p>
+        </div>
+
+        <div class="configurator-main">
+            <div class="product-preview">
+                <div class="product-image laptop" id="product-image">
+                    <div class="product-360" id="product-360" onclick="toggle360View()">🔄</div>
+                    <div class="product-zoom" id="product-zoom" onclick="toggleZoom()">🔍</div>
+                    💻
+                </div>
+                <h2 class="product-title" id="product-title">MacBook Pro 16"</h2>
+                <p class="product-description" id="product-description">
+                    Professional laptop with stunning Retina display, powerful performance, and all-day battery life.
+                </p>
+                <div class="product-price">
+                    <span class="original-price" id="original-price">$2,499</span>
+                    <span id="current-price">$2,399</span>
+                    <div class="savings" id="savings">Save $100</div>
+                </div>
+                <div class="stock-status in-stock" id="stock-status">✅ In Stock</div>
+                
+                <div class="inventory-warning" id="inventory-warning">
+                    <strong>⚠️ Low Stock Alert:</strong> Only <span id="stock-count">3</span> items remaining with this configuration.
+                </div>
+            </div>
+
+            <div class="product-options">
+                <!-- Product Type Selection -->
+                <div class="option-group">
+                    <h3 class="option-title">Product Type</h3>
+                    <div class="option-grid">
+                        <div class="option-item selected" onclick="selectProduct('laptop')">
+                            <div class="option-label">MacBook Pro</div>
+                            <div class="option-price">$2,399</div>
+                        </div>
+                        <div class="option-item" onclick="selectProduct('phone')">
+                            <div class="option-label">iPhone 15</div>
+                            <div class="option-price">$999</div>
+                        </div>
+                        <div class="option-item" onclick="selectProduct('tablet')">
+                            <div class="option-label">iPad Pro</div>
+                            <div class="option-price">$1,299</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Color Selection -->
+                <div class="option-group">
+                    <h3 class="option-title">Color</h3>
+                    <div class="option-grid">
+                        <div class="option-item">
+                            <div class="color-option selected" style="background: #2c3e50" onclick="selectColor('space-gray', '#2c3e50')"></div>
+                            <div class="option-label">Space Gray</div>
+                            <div class="option-price included">Included</div>
+                        </div>
+                        <div class="option-item">
+                            <div class="color-option" style="background: #ecf0f1" onclick="selectColor('silver', '#ecf0f1')"></div>
+                            <div class="option-label">Silver</div>
+                            <div class="option-price included">Included</div>
+                        </div>
+                        <div class="option-item">
+                            <div class="color-option" style="background: #e74c3c" onclick="selectColor('red', '#e74c3c')"></div>
+                            <div class="option-label">Product Red</div>
+                            <div class="option-price additional">+$50</div>
+                        </div>
+                        <div class="option-item">
+                            <div class="color-option" style="background: #3498db" onclick="selectColor('blue', '#3498db')"></div>
+                            <div class="option-label">Blue</div>
+                            <div class="option-price additional">+$50</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Storage/Memory Selection -->
+                <div class="option-group">
+                    <h3 class="option-title">Storage</h3>
+                    <div class="option-grid">
+                        <div class="option-item selected" onclick="selectStorage('512gb', 0)">
+                            <div class="option-label">512GB</div>
+                            <div class="option-price included">Included</div>
+                        </div>
+                        <div class="option-item" onclick="selectStorage('1tb', 200)">
+                            <div class="option-label">1TB</div>
+                            <div class="option-price additional">+$200</div>
+                        </div>
+                        <div class="option-item" onclick="selectStorage('2tb', 600)">
+                            <div class="option-label">2TB</div>
+                            <div class="option-price additional">+$600</div>
+                        </div>
+                        <div class="option-item disabled">
+                            <div class="option-label">4TB</div>
+                            <div class="option-price">Out of Stock</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- RAM Selection -->
+                <div class="option-group">
+                    <h3 class="option-title">Memory (RAM)</h3>
+                    <div class="option-grid">
+                        <div class="option-item selected" onclick="selectRAM('16gb', 0)">
+                            <div class="option-label">16GB</div>
+                            <div class="option-price included">Included</div>
+                        </div>
+                        <div class="option-item" onclick="selectRAM('32gb', 400)">
+                            <div class="option-label">32GB</div>
+                            <div class="option-price additional">+$400</div>
+                        </div>
+                        <div class="option-item" onclick="selectRAM('64gb', 800)">
+                            <div class="option-label">64GB</div>
+                            <div class="option-price additional">+$800</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Accessories -->
+                <div class="option-group">
+                    <h3 class="option-title">Accessories</h3>
+                    <div class="option-grid">
+                        <div class="option-item" onclick="toggleAccessory('case', 89)">
+                            <div class="option-label">Leather Case</div>
+                            <div class="option-price additional">+$89</div>
+                        </div>
+                        <div class="option-item" onclick="toggleAccessory('stand', 129)">
+                            <div class="option-label">Stand</div>
+                            <div class="option-price additional">+$129</div>
+                        </div>
+                        <div class="option-item" onclick="toggleAccessory('keyboard', 199)">
+                            <div class="option-label">Magic Keyboard</div>
+                            <div class="option-price additional">+$199</div>
+                        </div>
+                        <div class="option-item" onclick="toggleAccessory('mouse', 79)">
+                            <div class="option-label">Magic Mouse</div>
+                            <div class="option-price additional">+$79</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Customization -->
+                <div class="customization-section">
+                    <h3 class="customization-title">🎨 Personalization</h3>
+                    <input type="text" class="engraving-input" id="engraving-text" placeholder="Enter custom engraving text (max 20 characters)" maxlength="20" oninput="updateEngraving()">
+                    <div class="engraving-preview" id="engraving-preview">Your custom text will appear here</div>
+                    <div style="margin-top: 10px; color: #666; font-size: 0.9rem;">
+                        Custom engraving: <span style="color: #28a745; font-weight: 600;">Free</span>
+                    </div>
+                </div>
+
+                <!-- Price Breakdown -->
+                <div class="price-breakdown">
+                    <h3>💰 Price Breakdown</h3>
+                    <div class="price-row">
+                        <span>Base Price:</span>
+                        <span id="base-price">$2,399</span>
+                    </div>
+                    <div class="price-row">
+                        <span>Color Upgrade:</span>
+                        <span id="color-price">$0</span>
+                    </div>
+                    <div class="price-row">
+                        <span>Storage Upgrade:</span>
+                        <span id="storage-price">$0</span>
+                    </div>
+                    <div class="price-row">
+                        <span>RAM Upgrade:</span>
+                        <span id="ram-price">$0</span>
+                    </div>
+                    <div class="price-row">
+                        <span>Accessories:</span>
+                        <span id="accessories-price">$0</span>
+                    </div>
+                    <div class="price-row discount">
+                        <span>Discount:</span>
+                        <span id="discount-price">-$100</span>
+                    </div>
+                    <div class="price-row">
+                        <span>Total:</span>
+                        <span id="total-price">$2,299</span>
+                    </div>
+                </div>
+
+                <!-- Quick Actions -->
+                <div class="quick-actions">
+                    <button class="quick-btn" onclick="simulateConfig('gaming')">Gaming Setup</button>
+                    <button class="quick-btn" onclick="simulateConfig('professional')">Professional</button>
+                    <button class="quick-btn" onclick="simulateConfig('student')">Student</button>
+                    <button class="quick-btn secondary" onclick="resetConfiguration()">Reset</button>
+                </div>
+
+                <!-- Action Buttons -->
+                <div class="action-buttons">
+                    <button class="btn btn-secondary" onclick="addToWishlist()">💖 Wishlist</button>
+                    <button class="btn btn-primary" onclick="addToCart()" id="add-to-cart-btn">🛒 Add to Cart</button>
+                </div>
+
+                <div class="success-message" id="success-message">
+                    <strong>Success!</strong> Product configuration completed successfully. The extraction layer detected all customization options and interactions.
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Product configurations and pricing
+        const products = {
+            laptop: {
+                name: 'MacBook Pro 16"',
+                description: 'Professional laptop with stunning Retina display, powerful performance, and all-day battery life.',
+                basePrice: 2399,
+                emoji: '💻',
+                class: 'laptop',
+                colors: {
+                    'space-gray': { price: 0, color: '#2c3e50' },
+                    'silver': { price: 0, color: '#ecf0f1' },
+                    'red': { price: 50, color: '#e74c3c' },
+                    'blue': { price: 50, color: '#3498db' }
+                },
+                storage: {
+                    '512gb': { price: 0, available: true },
+                    '1tb': { price: 200, available: true },
+                    '2tb': { price: 600, available: true },
+                    '4tb': { price: 1200, available: false }
+                },
+                ram: {
+                    '16gb': { price: 0 },
+                    '32gb': { price: 400 },
+                    '64gb': { price: 800 }
+                }
+            },
+            phone: {
+                name: 'iPhone 15 Pro',
+                description: 'Latest iPhone with advanced camera system, A17 Pro chip, and titanium design.',
+                basePrice: 999,
+                emoji: '📱',
+                class: 'phone',
+                colors: {
+                    'space-gray': { price: 0, color: '#2c3e50' },
+                    'silver': { price: 0, color: '#ecf0f1' },
+                    'red': { price: 0, color: '#e74c3c' },
+                    'blue': { price: 0, color: '#3498db' }
+                },
+                storage: {
+                    '128gb': { price: 0, available: true },
+                    '256gb': { price: 100, available: true },
+                    '512gb': { price: 300, available: true },
+                    '1tb': { price: 500, available: true }
+                },
+                ram: {
+                    '8gb': { price: 0 }
+                }
+            },
+            tablet: {
+                name: 'iPad Pro 12.9"',
+                description: 'Most advanced iPad with M2 chip, Liquid Retina XDR display, and pro cameras.',
+                basePrice: 1299,
+                emoji: '📱',
+                class: 'tablet',
+                colors: {
+                    'space-gray': { price: 0, color: '#2c3e50' },
+                    'silver': { price: 0, color: '#ecf0f1' }
+                },
+                storage: {
+                    '128gb': { price: 0, available: true },
+                    '256gb': { price: 100, available: true },
+                    '512gb': { price: 300, available: true },
+                    '1tb': { price: 500, available: true }
+                },
+                ram: {
+                    '8gb': { price: 0 },
+                    '16gb': { price: 200 }
+                }
+            }
+        };
+
+        const accessories = {
+            case: { price: 89, selected: false },
+            stand: { price: 129, selected: false },
+            keyboard: { price: 199, selected: false },
+            mouse: { price: 79, selected: false }
+        };
+
+        let currentProduct = 'laptop';
+        let currentConfig = {
+            color: 'space-gray',
+            storage: '512gb',
+            ram: '16gb',
+            engraving: ''
+        };
+
+        let inventory = {
+            laptop: { stock: 15, threshold: 5 },
+            phone: { stock: 8, threshold: 3 },
+            tablet: { stock: 12, threshold: 4 }
+        };
+
+        // Product selection
+        function selectProduct(productType) {
+            currentProduct = productType;
+            const product = products[productType];
+            
+            // Update product display
+            document.getElementById('product-title').textContent = product.name;
+            document.getElementById('product-description').textContent = product.description;
+            document.getElementById('product-image').innerHTML = `
+                <div class="product-360" onclick="toggle360View()">🔄</div>
+                <div class="product-zoom" onclick="toggleZoom()">🔍</div>
+                ${product.emoji}
+            `;
+            document.getElementById('product-image').className = `product-image ${product.class}`;
+            
+            // Update product type selection
+            document.querySelectorAll('.option-group .option-item').forEach(item => {
+                item.classList.remove('selected');
+            });
+            event.target.classList.add('selected');
+            
+            // Reset configuration
+            currentConfig = {
+                color: 'space-gray',
+                storage: Object.keys(product.storage)[0],
+                ram: Object.keys(product.ram)[0],
+                engraving: ''
+            };
+            
+            // Reset accessories
+            Object.keys(accessories).forEach(key => {
+                accessories[key].selected = false;
+            });
+            
+            updatePricing();
+            updateInventory();
+        }
+
+        function selectColor(colorName, colorValue) {
+            currentConfig.color = colorName;
+            
+            // Update color selection
+            document.querySelectorAll('.color-option').forEach(option => {
+                option.classList.remove('selected');
+            });
+            event.target.classList.add('selected');
+            
+            // Update product image gradient
+            const productImage = document.getElementById('product-image');
+            if (colorName === 'space-gray') {
+                productImage.style.background = 'linear-gradient(45deg, #2c3e50, #34495e)';
+            } else if (colorName === 'silver') {
+                productImage.style.background = 'linear-gradient(45deg, #ecf0f1, #bdc3c7)';
+            } else if (colorName === 'red') {
+                productImage.style.background = 'linear-gradient(45deg, #e74c3c, #c0392b)';
+            } else if (colorName === 'blue') {
+                productImage.style.background = 'linear-gradient(45deg, #3498db, #2980b9)';
+            }
+            
+            updatePricing();
+            updateInventory();
+        }
+
+        function selectStorage(storageSize, additionalPrice) {
+            currentConfig.storage = storageSize;
+            
+            // Update storage selection
+            const storageOptions = document.querySelectorAll('.option-group:nth-child(3) .option-item');
+            storageOptions.forEach(option => {
+                option.classList.remove('selected');
+            });
+            event.target.classList.add('selected');
+            
+            updatePricing();
+            updateInventory();
+        }
+
+        function selectRAM(ramSize, additionalPrice) {
+            currentConfig.ram = ramSize;
+            
+            // Update RAM selection
+            const ramOptions = document.querySelectorAll('.option-group:nth-child(4) .option-item');
+            ramOptions.forEach(option => {
+                option.classList.remove('selected');
+            });
+            event.target.classList.add('selected');
+            
+            updatePricing();
+            updateInventory();
+        }
+
+        function toggleAccessory(accessoryName, price) {
+            accessories[accessoryName].selected = !accessories[accessoryName].selected;
+            
+            // Update accessory selection
+            event.target.classList.toggle('selected');
+            
+            updatePricing();
+            updateInventory();
+        }
+
+        function updateEngraving() {
+            const engravingText = document.getElementById('engraving-text').value;
+            currentConfig.engraving = engravingText;
+            
+            const preview = document.getElementById('engraving-preview');
+            if (engravingText.trim()) {
+                preview.textContent = engravingText;
+                preview.style.fontWeight = 'bold';
+            } else {
+                preview.textContent = 'Your custom text will appear here';
+                preview.style.fontWeight = 'normal';
+            }
+        }
+
+        function updatePricing() {
+            const product = products[currentProduct];
+            let total = product.basePrice;
+            
+            // Color pricing
+            const colorPrice = product.colors[currentConfig.color].price;
+            document.getElementById('color-price').textContent = colorPrice > 0 ? `+$${colorPrice}` : '$0';
+            total += colorPrice;
+            
+            // Storage pricing
+            const storagePrice = product.storage[currentConfig.storage].price;
+            document.getElementById('storage-price').textContent = storagePrice > 0 ? `+$${storagePrice}` : '$0';
+            total += storagePrice;
+            
+            // RAM pricing
+            const ramPrice = product.ram[currentConfig.ram].price;
+            document.getElementById('ram-price').textContent = ramPrice > 0 ? `+$${ramPrice}` : '$0';
+            total += ramPrice;
+            
+            // Accessories pricing
+            let accessoriesTotal = 0;
+            Object.keys(accessories).forEach(key => {
+                if (accessories[key].selected) {
+                    accessoriesTotal += accessories[key].price;
+                }
+            });
+            document.getElementById('accessories-price').textContent = accessoriesTotal > 0 ? `+$${accessoriesTotal}` : '$0';
+            total += accessoriesTotal;
+            
+            // Apply discount
+            const discount = 100;
+            total -= discount;
+            
+            // Update displays
+            document.getElementById('base-price').textContent = `$${product.basePrice}`;
+            document.getElementById('total-price').textContent = `$${total}`;
+            document.getElementById('current-price').textContent = `$${total}`;
+            document.getElementById('original-price').textContent = `$${total + discount}`;
+            
+            // Update savings
+            const savings = colorPrice + storagePrice + ramPrice + accessoriesTotal + discount;
+            document.getElementById('savings').textContent = `Save $${savings}`;
+        }
+
+        function updateInventory() {
+            const stock = inventory[currentProduct];
+            const stockCount = Math.max(1, stock.stock - Math.floor(Math.random() * 5));
+            
+            const stockStatus = document.getElementById('stock-status');
+            const inventoryWarning = document.getElementById('inventory-warning');
+            const stockCountSpan = document.getElementById('stock-count');
+            
+            stockCountSpan.textContent = stockCount;
+            
+            if (stockCount <= 0) {
+                stockStatus.className = 'stock-status out-of-stock';
+                stockStatus.textContent = '❌ Out of Stock';
+                inventoryWarning.classList.remove('show');
+                document.getElementById('add-to-cart-btn').disabled = true;
+            } else if (stockCount <= stock.threshold) {
+                stockStatus.className = 'stock-status low-stock';
+                stockStatus.textContent = '⚠️ Low Stock';
+                inventoryWarning.classList.add('show');
+                document.getElementById('add-to-cart-btn').disabled = false;
+            } else {
+                stockStatus.className = 'stock-status in-stock';
+                stockStatus.textContent = '✅ In Stock';
+                inventoryWarning.classList.remove('show');
+                document.getElementById('add-to-cart-btn').disabled = false;
+            }
+        }
+
+        function toggle360View() {
+            const btn = document.getElementById('product-360');
+            btn.classList.toggle('active');
+            
+            setTimeout(() => {
+                btn.classList.remove('active');
+            }, 2000);
+        }
+
+        function toggleZoom() {
+            const image = document.getElementById('product-image');
+            if (image.style.transform === 'scale(1.5)') {
+                image.style.transform = 'scale(1)';
+            } else {
+                image.style.transform = 'scale(1.5)';
+            }
+        }
+
+        // Demo configurations
+        function simulateConfig(configType) {
+            if (configType === 'gaming') {
+                selectProduct('laptop');
+                setTimeout(() => {
+                    selectColor('red', '#e74c3c');
+                    setTimeout(() => {
+                        selectStorage('2tb', 600);
+                        setTimeout(() => {
+                            selectRAM('64gb', 800);
+                            setTimeout(() => {
+                                toggleAccessory('keyboard', 199);
+                                toggleAccessory('mouse', 79);
+                            }, 200);
+                        }, 200);
+                    }, 200);
+                }, 200);
+            } else if (configType === 'professional') {
+                selectProduct('laptop');
+                setTimeout(() => {
+                    selectColor('space-gray', '#2c3e50');
+                    setTimeout(() => {
+                        selectStorage('1tb', 200);
+                        setTimeout(() => {
+                            selectRAM('32gb', 400);
+                            setTimeout(() => {
+                                toggleAccessory('stand', 129);
+                            }, 200);
+                        }, 200);
+                    }, 200);
+                }, 200);
+            } else if (configType === 'student') {
+                selectProduct('tablet');
+                setTimeout(() => {
+                    selectColor('silver', '#ecf0f1');
+                    setTimeout(() => {
+                        selectStorage('256gb', 100);
+                        setTimeout(() => {
+                            toggleAccessory('case', 89);
+                        }, 200);
+                    }, 200);
+                }, 200);
+            }
+        }
+
+        function resetConfiguration() {
+            // Reset to default laptop configuration
+            selectProduct('laptop');
+            
+            // Reset all form inputs
+            document.getElementById('engraving-text').value = '';
+            updateEngraving();
+            
+            // Reset all selections
+            document.querySelectorAll('.option-item.selected').forEach(item => {
+                item.classList.remove('selected');
+            });
+            
+            // Reset accessories
+            Object.keys(accessories).forEach(key => {
+                accessories[key].selected = false;
+            });
+            
+            // Set default selections
+            document.querySelector('.option-group:nth-child(1) .option-item').classList.add('selected');
+            document.querySelector('.color-option').classList.add('selected');
+            document.querySelector('.option-group:nth-child(3) .option-item').classList.add('selected');
+            document.querySelector('.option-group:nth-child(4) .option-item').classList.add('selected');
+            
+            updatePricing();
+            updateInventory();
+        }
+
+        function addToCart() {
+            const product = products[currentProduct];
+            const config = {
+                product: product.name,
+                color: currentConfig.color,
+                storage: currentConfig.storage,
+                ram: currentConfig.ram,
+                engraving: currentConfig.engraving,
+                accessories: Object.keys(accessories).filter(key => accessories[key].selected)
+            };
+            
+            console.log('Adding to cart:', config);
+            
+            // Show success message
+            document.getElementById('success-message').classList.add('show');
+            setTimeout(() => {
+                document.getElementById('success-message').classList.remove('show');
+            }, 4000);
+            
+            // Decrease inventory
+            inventory[currentProduct].stock = Math.max(0, inventory[currentProduct].stock - 1);
+            updateInventory();
+        }
+
+        function addToWishlist() {
+            alert('Product added to wishlist!');
+        }
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', function() {
+            updatePricing();
+            updateInventory();
+        });
+    </script>
+</body>
+</html> 
