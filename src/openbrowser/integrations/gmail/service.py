@@ -1,5 +1,5 @@
 """
-Gmail API Service for Browser Use
+Gmail API Service for OpenBrowser
 Handles Gmail API authentication, email reading, and 2FA code extraction.
 This service provides a clean interface for agents to interact with Gmail.
 """

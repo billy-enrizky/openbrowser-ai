@@ -1,4 +1,4 @@
-# Browser Use LLMs
+# OpenBrowser LLMs
 
 We officially support the following LLMs:
 

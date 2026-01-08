@@ -1,5 +1,5 @@
 """
-Gmail Actions for Browser Use
+Gmail Actions for OpenBrowser
 Defines agent actions for Gmail integration including 2FA code retrieval,
 email reading, and authentication management.
 """

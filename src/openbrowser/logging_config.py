@@ -1,7 +1,7 @@
 """Logging configuration for openbrowser.
 
 Performance optimizations:
-- Cached BrowserUseFormatter class (created once, reused)
+- Cached OpenBrowserFormatter class (created once, reused)
 - Cached third-party logger list as frozenset
 - Early return for already-configured logging
 - Optimized logger name cleanup with cached patterns
@@ -109,7 +109,7 @@ def addLoggingLevel(levelName, levelNum, methodName=None):
 	setattr(logging, methodName, logToRoot)
 
 
-class BrowserUseFormatter(logging.Formatter):
+class OpenBrowserFormatter(logging.Formatter):
 	"""Optimized formatter with cached log level check."""
 	
 	__slots__ = ('log_level', '_is_debug_mode')
@@ -188,10 +188,10 @@ def setup_logging(stream=None, log_level=None, force_setup=False, debug_log_file
 	# Configure console handler
 	if log_type == 'result':
 		console.setLevel('RESULT')
-		console.setFormatter(BrowserUseFormatter('%(message)s', effective_level))
+		console.setFormatter(OpenBrowserFormatter('%(message)s', effective_level))
 	else:
 		console.setLevel(effective_level)
-		console.setFormatter(BrowserUseFormatter('%(levelname)-8s [%(name)s] %(message)s', effective_level))
+		console.setFormatter(OpenBrowserFormatter('%(levelname)-8s [%(name)s] %(message)s', effective_level))
 
 	# Configure root logger only
 	root.addHandler(console)
@@ -203,7 +203,7 @@ def setup_logging(stream=None, log_level=None, force_setup=False, debug_log_file
 	if debug_log_file:
 		debug_handler = logging.FileHandler(debug_log_file, encoding='utf-8')
 		debug_handler.setLevel(logging.DEBUG)
-		debug_handler.setFormatter(BrowserUseFormatter('%(asctime)s - %(levelname)-8s [%(name)s] %(message)s', logging.DEBUG))
+		debug_handler.setFormatter(OpenBrowserFormatter('%(asctime)s - %(levelname)-8s [%(name)s] %(message)s', logging.DEBUG))
 		file_handlers.append(debug_handler)
 		root.addHandler(debug_handler)
 
@@ -211,7 +211,7 @@ def setup_logging(stream=None, log_level=None, force_setup=False, debug_log_file
 	if info_log_file:
 		info_handler = logging.FileHandler(info_log_file, encoding='utf-8')
 		info_handler.setLevel(logging.INFO)
-		info_handler.setFormatter(BrowserUseFormatter('%(asctime)s - %(levelname)-8s [%(name)s] %(message)s', logging.INFO))
+		info_handler.setFormatter(OpenBrowserFormatter('%(asctime)s - %(levelname)-8s [%(name)s] %(message)s', logging.INFO))
 		file_handlers.append(info_handler)
 		root.addHandler(info_handler)
 
