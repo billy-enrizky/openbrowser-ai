@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Browser-Use Stress Tests</title>
+    <style>
+        :root {
+            --primary-color: #4a6bff;
+            --secondary-color: #ff4a6b;
+            --background-color: #f8f9fa;
+            --card-bg-color: #ffffff;
+            --text-color: #333;
+            --box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: var(--text-color);
+            background-color: var(--background-color);
+            padding: 0;
+            margin: 0;
+        }
+
+        header {
+            background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+            color: white;
+            text-align: center;
+            padding: 2.5rem 1rem;
+            box-shadow: var(--box-shadow);
+        }
+
+        h1 {
+            margin: 0;
+            font-size: 2.5rem;
+            letter-spacing: -0.5px;
+        }
+
+        .subtitle {
+            font-size: 1.2rem;
+            margin-top: 0.5rem;
+            opacity: 0.9;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 2rem auto;
+            padding: 0 1rem;
+        }
+
+        .card-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 2rem;
+            justify-content: center;
+            margin-top: 2rem;
+        }
+
+        .card {
+            background-color: var(--card-bg-color);
+            border-radius: 8px;
+            box-shadow: var(--box-shadow);
+            overflow: hidden;
+            width: 100%;
+            max-width: 350px;
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 15px rgba(0, 0, 0, 0.1);
+        }
+
+        .card-img {
+            height: 200px;
+            width: 100%;
+            object-fit: cover;
+            border-bottom: 1px solid #eee;
+        }
+
+        .card-content {
+            padding: 1.5rem;
+        }
+
+        .card h2 {
+            margin-top: 0;
+            color: var(--primary-color);
+        }
+
+        .card p {
+            margin-bottom: 1.5rem;
+        }
+
+        .btn {
+            display: inline-block;
+            background-color: var(--primary-color);
+            color: white;
+            text-decoration: none;
+            padding: 0.6rem 1.2rem;
+            border-radius: 4px;
+            font-weight: 500;
+            transition: background-color 0.3s ease, transform 0.2s ease;
+        }
+
+        .btn:hover {
+            background-color: #3755d8;
+            transform: translateY(-2px);
+        }
+
+        .github-link {
+            text-align: center;
+            margin-top: 3rem;
+            padding: 1rem;
+            background-color: var(--card-bg-color);
+            border-radius: 8px;
+            box-shadow: var(--box-shadow);
+        }
+
+        .github-link a {
+            color: var(--primary-color);
+            text-decoration: none;
+            font-weight: 500;
+        }
+
+        .github-link a:hover {
+            text-decoration: underline;
+        }
+
+        footer {
+            text-align: center;
+            padding: 2rem;
+            margin-top: 2rem;
+            background-color: var(--card-bg-color);
+            border-top: 1px solid #eee;
+        }
+
+        @media (max-width: 768px) {
+            .card-container {
+                flex-direction: column;
+                align-items: center;
+            }
+            
+            .card {
+                max-width: 100%;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Browser-Use Stress Tests</h1>
+        <div class="subtitle">Testing browser features, form libraries, and AI agents</div>
+    </header>
+
+    <div class="container">
+        <div class="card-container">
+            <div class="card">
+                <div class="card-content">
+                    <h2>Browser Agent Challenge</h2>
+                    <p>An interactive evaluation challenge designed to test AI agents' ability to drive a browser like a human using tools like Playwright. Complete 31 tasks including button clicks, drag & drop, CAPTCHA solving, and more.</p>
+                    <a href="challenge.html" class="btn">Take the Challenge</a>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-content">
+                    <h2>Forms Comparison</h2>
+                    <p>Compare 27 different form implementations across various libraries and frameworks. This comprehensive test suite includes everything from vanilla HTML to complex libraries like React Hook Form, with challenging cases for autofill systems.</p>
+                    <a href="forms-comparison.html" class="btn">View Forms</a>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-content">
+                    <h2>Tap and Hold Captcha</h2>
+                    <p>Test your ability to complete a tap and hold captcha verification. This challenge requires precise timing and sustained interaction to verify human behavior through a 3-second hold gesture.</p>
+                    <a href="tap-hold-captcha.html" class="btn">Try Captcha</a>
+                </div>
+            </div>
+        </div>
+
+        <div class="github-link">
+            <p>View the source code and contribute:</p>
+            <a href="https://github.com/browser-use/stress-tests" target="_blank">github.com/browser-use/stress-tests</a>
+
+            <br/>
+            <br/>
+            Drive your browser with AI: <a href="https://browser-use.com" target="_blank">Try Browser-Use today!</a>
+        </div>
+    </div>
+
+    <footer>
+        <p>Browser-Use Stress Tests &copy; 2025</p>
+    </footer>
+</body>
+</html>

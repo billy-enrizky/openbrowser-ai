@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Formik Form</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/css/bootstrap.min.css">
+    <style>
+        body {
+            background-color: #f8f9fa;
+            padding-bottom: 50px;
+        }
+        
+        .form-container {
+            max-width: 800px;
+            margin: 20px auto;
+            padding: 25px;
+            background-color: white;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        
+        .form-section {
+            margin-bottom: 30px;
+            padding: 20px;
+            background-color: #f8f9fa;
+            border-radius: 8px;
+            border: 1px solid #dee2e6;
+        }
+        
+        .form-section h3 {
+            margin-top: 0;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #dee2e6;
+            color: #344767;
+        }
+        
+        .error-text {
+            color: #dc3545;
+            font-size: 0.75rem;
+            margin-top: 0.25rem;
+            font-weight: 500;
+        }
+        
+        .form-control.is-invalid, .form-select.is-invalid {
+            border-color: #dc3545;
+            background-image: none;
+        }
+        
+        .label-required:after {
+            content: " *";
+            color: #dc3545;
+        }
+        
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: rgba(0, 0, 0, 0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+        
+        .modal-container {
+            background-color: white;
+            padding: 25px;
+            border-radius: 10px;
+            max-width: 500px;
+            width: 100%;
+            box-shadow: 0 10px 15px rgba(0, 0, 0, 0.1);
+        }
+        
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid #dee2e6;
+        }
+        
+        .modal-header h4 {
+            margin: 0;
+            color: #344767;
+        }
+        
+        .modal-close {
+            background: none;
+            border: none;
+            font-size: 1.5rem;
+            cursor: pointer;
+            color: #6c757d;
+        }
+        
+        .modal-footer {
+            margin-top: 20px;
+            padding-top: 15px;
+            border-top: 1px solid #dee2e6;
+            display: flex;
+            justify-content: flex-end;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 class="mt-4 mb-3 text-center">Formik Form</h1>
+        <p class="text-center mb-4">This form example demonstrates a fully interactive React-based form with client-side validation using our custom implementation.</p>
+        
+        <div id="root"></div>
+    </div>
+    
+    <!-- React and ReactDOM -->
+    <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+    
+    <!-- Babel for JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <script type="text/babel">
+        function FormExampleForm() {
+            const [formValues, setFormValues] = React.useState({
+                email: '',
+                country: '',
+                dateOfBirth: '',
+                contactMethod: '',
+                fileUpload: null
+            });
+
+            const [touched, setTouched] = React.useState({});
+            const [errors, setErrors] = React.useState({});
+            const [isSubmitting, setIsSubmitting] = React.useState(false);
+            const [showSuccess, setShowSuccess] = React.useState(false);
+            const [fileName, setFileName] = React.useState('No file selected');
+
+            // Validation function
+            const validateForm = (values) => {
+                const newErrors = {};
+
+                if (!values.email) {
+                    newErrors.email = 'Email is required';
+                } else if (!/^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,4}$/i.test(values.email)) {
+                    newErrors.email = 'Invalid email address';
+                }
+
+                if (!values.country || values.country === '') {
+                    newErrors.country = 'Country is required';
+                }
+
+                if (!values.dateOfBirth || values.dateOfBirth === '') {
+                    newErrors.dateOfBirth = 'Date of Birth is required';
+                }
+
+                if (!values.contactMethod || values.contactMethod === '') {
+                    newErrors.contactMethod = 'Contact method is required';
+                }
+
+                if (!values.fileUpload) {
+                    newErrors.fileUpload = 'File upload is required';
+                }
+
+                return newErrors;
+            };
+
+            // Run validation when form values change
+            React.useEffect(() => {
+                const validationErrors = validateForm(formValues);
+                setErrors(validationErrors);
+            }, [formValues]);
+
+            const handleChange = (e) => {
+                const { name, value } = e.target;
+                setFormValues(prev => ({
+                    ...prev,
+                    [name]: value
+                }));
+
+                // Mark as touched
+                setTouched(prev => ({
+                    ...prev,
+                    [name]: true
+                }));
+            };
+
+            const handleBlur = (e) => {
+                const { name } = e.target;
+                setTouched(prev => ({
+                    ...prev,
+                    [name]: true
+                }));
+            };
+
+            const handleFileChange = (e) => {
+                if (e.target.files.length > 0) {
+                    setFileName(e.target.files[0].name);
+                    setFormValues(prev => ({
+                        ...prev,
+                        fileUpload: e.target.files[0]
+                    }));
+                } else {
+                    setFileName('No file selected');
+                    setFormValues(prev => ({
+                        ...prev,
+                        fileUpload: null
+                    }));
+                }
+
+                // Mark as touched
+                setTouched(prev => ({
+                    ...prev,
+                    fileUpload: true
+                }));
+            };
+
+            const handleSubmit = (e) => {
+                e.preventDefault();
+
+                // Mark all fields as touched
+                const allFields = {};
+                Object.keys(formValues).forEach(key => {
+                    allFields[key] = true;
+                });
+
+                setTouched(allFields);
+
+                // Validate form
+                const validationErrors = validateForm(formValues);
+                setErrors(validationErrors);
+
+                // If no errors, submit form
+                if (Object.keys(validationErrors).length === 0) {
+                    setIsSubmitting(true);
+
+                    // Simulate API call
+                    setTimeout(() => {
+                        console.log('Form submitted successfully!', formValues);
+                        setIsSubmitting(false);
+                        setShowSuccess(true);
+
+                        setTimeout(() => {
+                            setShowSuccess(false);
+                        }, 8000);
+                    }, 1000);
+                }
+            };
+
+            // Helper functions
+            const getFieldError = (name) => {
+                return touched[name] && errors[name] ? errors[name] : null;
+            };
+
+            const isFieldInvalid = (name) => {
+                return touched[name] && errors[name] ? true : false;
+            };
+            
+            return (
+                <div>
+                    {showSuccess && (
+                        <div className="alert alert-success" role="alert">
+                            <strong>Success!</strong> Form submitted successfully! The secret is: dumbledore
+                        </div>
+                    )}
+
+                    <form className="form-container" onSubmit={handleSubmit}>
+                        <div className="form-section">
+                            <h3>Simple Form</h3>
+
+                            <div className="mb-3">
+                                <label htmlFor="email" className="form-label label-required">Email Address</label>
+                                <input
+                                    type="email"
+                                    id="email"
+                                    name="email"
+                                    className={`form-control ${isFieldInvalid('email') ? 'is-invalid' : ''}`}
+                                    value={formValues.email}
+                                    onChange={handleChange}
+                                    onBlur={handleBlur}
+                                />
+                                {getFieldError('email') && (
+                                    <div className="error-text">{getFieldError('email')}</div>
+                                )}
+                            </div>
+
+                            <div className="mb-3">
+                                <label htmlFor="country" className="form-label label-required">Country</label>
+                                <select
+                                    id="country"
+                                    name="country"
+                                    className={`form-select ${isFieldInvalid('country') ? 'is-invalid' : ''}`}
+                                    value={formValues.country}
+                                    onChange={handleChange}
+                                    onBlur={handleBlur}
+                                >
+                                    <option value="">Select country</option>
+                                    <option value="US">United States</option>
+                                    <option value="CA">Canada</option>
+                                    <option value="UK">United Kingdom</option>
+                                    <option value="AU">Australia</option>
+                                    <option value="DE">Germany</option>
+                                    <option value="FR">France</option>
+                                </select>
+                                {getFieldError('country') && (
+                                    <div className="error-text">{getFieldError('country')}</div>
+                                )}
+                            </div>
+
+                            <div className="mb-3">
+                                <label htmlFor="dateOfBirth" className="form-label label-required">Date of Birth</label>
+                                <input
+                                    type="date"
+                                    id="dateOfBirth"
+                                    name="dateOfBirth"
+                                    className={`form-control ${isFieldInvalid('dateOfBirth') ? 'is-invalid' : ''}`}
+                                    value={formValues.dateOfBirth}
+                                    onChange={handleChange}
+                                    onBlur={handleBlur}
+                                />
+                                {getFieldError('dateOfBirth') && (
+                                    <div className="error-text">{getFieldError('dateOfBirth')}</div>
+                                )}
+                            </div>
+
+                            <div className="mb-3">
+                                <label className="form-label label-required">Contact Preference</label>
+                                <div className="form-check">
+                                    <input
+                                        type="radio"
+                                        id="contactEmail"
+                                        name="contactMethod"
+                                        value="email"
+                                        className="form-check-input"
+                                        checked={formValues.contactMethod === 'email'}
+                                        onChange={handleChange}
+                                    />
+                                    <label className="form-check-label" htmlFor="contactEmail">Email</label>
+                                </div>
+                                <div className="form-check">
+                                    <input
+                                        type="radio"
+                                        id="contactPhone"
+                                        name="contactMethod"
+                                        value="phone"
+                                        className="form-check-input"
+                                        checked={formValues.contactMethod === 'phone'}
+                                        onChange={handleChange}
+                                    />
+                                    <label className="form-check-label" htmlFor="contactPhone">Phone</label>
+                                </div>
+                                <div className="form-check">
+                                    <input
+                                        type="radio"
+                                        id="contactMail"
+                                        name="contactMethod"
+                                        value="mail"
+                                        className="form-check-input"
+                                        checked={formValues.contactMethod === 'mail'}
+                                        onChange={handleChange}
+                                    />
+                                    <label className="form-check-label" htmlFor="contactMail">Mail</label>
+                                </div>
+                                {getFieldError('contactMethod') && (
+                                    <div className="error-text">{getFieldError('contactMethod')}</div>
+                                )}
+                            </div>
+
+                            <div className="mb-3">
+                                <label htmlFor="fileUpload" className="form-label label-required">Upload File</label>
+                                <input
+                                    type="file"
+                                    id="fileUpload"
+                                    name="fileUpload"
+                                    className={`form-control ${isFieldInvalid('fileUpload') ? 'is-invalid' : ''}`}
+                                    onChange={handleFileChange}
+                                />
+                                <small className="form-text text-muted">{fileName}</small>
+                                {getFieldError('fileUpload') && (
+                                    <div className="error-text">{getFieldError('fileUpload')}</div>
+                                )}
+                            </div>
+                        </div>
+
+                        <div className="d-flex gap-2 mb-3">
+                            <button type="submit" className="btn btn-primary" disabled={isSubmitting}>
+                                {isSubmitting ? 'Submitting...' : 'Submit Form'}
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            );
+        }
+        
+        // Render the app
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<FormExampleForm />);
+    </script>
+</body>
+</html>

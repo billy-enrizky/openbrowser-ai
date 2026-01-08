@@ -1,0 +1,936 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Advanced Autocomplete Challenge</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+        }
+
+        .content {
+            padding: 40px;
+        }
+
+        .autocomplete-section {
+            margin-bottom: 50px;
+        }
+
+        .section-title {
+            font-size: 1.5rem;
+            color: #333;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #667eea;
+        }
+
+        .section-description {
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 1.1rem;
+        }
+
+        .autocomplete-wrapper {
+            position: relative;
+            margin-bottom: 30px;
+        }
+
+        .autocomplete-input {
+            width: 100%;
+            padding: 15px 20px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            font-size: 16px;
+            transition: all 0.3s ease;
+            background: white;
+        }
+
+        .autocomplete-input:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        .autocomplete-input.loading {
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 24 24'%3E%3Cpath fill='%23667eea' d='M12,4V2A10,10 0 0,0 2,12H4A8,8 0 0,1 12,4Z'%3E%3CanimateTransform attributeName='transform' type='rotate' from='0 12 12' to='360 12 12' dur='1s' repeatCount='indefinite'/%3E%3C/path%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 15px center;
+            background-size: 20px 20px;
+        }
+
+        .autocomplete-dropdown {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            background: white;
+            border: 2px solid #e0e0e0;
+            border-top: none;
+            border-radius: 0 0 10px 10px;
+            max-height: 300px;
+            overflow-y: auto;
+            z-index: 1000;
+            display: none;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+
+        .autocomplete-dropdown.show {
+            display: block;
+        }
+
+        .autocomplete-item {
+            padding: 12px 20px;
+            cursor: pointer;
+            transition: background-color 0.2s ease;
+            border-bottom: 1px solid #f0f0f0;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .autocomplete-item:last-child {
+            border-bottom: none;
+        }
+
+        .autocomplete-item:hover,
+        .autocomplete-item.highlighted {
+            background: #f8f9ff;
+        }
+
+        .autocomplete-item.selected {
+            background: #e3f2fd;
+            font-weight: 600;
+        }
+
+        .item-icon {
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            background: #667eea;
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .item-details {
+            flex: 1;
+        }
+
+        .item-title {
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 2px;
+        }
+
+        .item-subtitle {
+            font-size: 0.9rem;
+            color: #666;
+        }
+
+        .item-badge {
+            background: #e9ecef;
+            color: #495057;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            font-weight: 500;
+        }
+
+        .item-badge.popular {
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        .item-badge.new {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .selected-items {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 15px;
+            padding: 10px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            min-height: 40px;
+        }
+
+        .selected-item {
+            background: #667eea;
+            color: white;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 0.9rem;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .selected-item .remove-btn {
+            background: rgba(255, 255, 255, 0.3);
+            border: none;
+            color: white;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            cursor: pointer;
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .selected-item .remove-btn:hover {
+            background: rgba(255, 255, 255, 0.5);
+        }
+
+        .autocomplete-footer {
+            padding: 10px 20px;
+            background: #f8f9fa;
+            border-top: 1px solid #e9ecef;
+            display: none;
+        }
+
+        .autocomplete-footer.show {
+            display: block;
+        }
+
+        .footer-actions {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .results-count {
+            font-size: 0.9rem;
+            color: #666;
+        }
+
+        .clear-btn {
+            background: none;
+            border: none;
+            color: #667eea;
+            cursor: pointer;
+            font-size: 0.9rem;
+            padding: 4px 8px;
+            border-radius: 4px;
+            transition: background-color 0.2s ease;
+        }
+
+        .clear-btn:hover {
+            background: #f8f9ff;
+        }
+
+        .grouped-dropdown {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            background: white;
+            border: 2px solid #e0e0e0;
+            border-top: none;
+            border-radius: 0 0 10px 10px;
+            max-height: 400px;
+            overflow-y: auto;
+            z-index: 1000;
+            display: none;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+
+        .grouped-dropdown.show {
+            display: block;
+        }
+
+        .dropdown-group {
+            border-bottom: 1px solid #e9ecef;
+        }
+
+        .dropdown-group:last-child {
+            border-bottom: none;
+        }
+
+        .group-header {
+            padding: 8px 20px;
+            background: #f8f9fa;
+            font-weight: 600;
+            color: #495057;
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .no-results {
+            padding: 20px;
+            text-align: center;
+            color: #666;
+            font-style: italic;
+        }
+
+        .keyboard-hints {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 20px;
+        }
+
+        .keyboard-hints h4 {
+            margin-bottom: 10px;
+            color: #333;
+        }
+
+        .keyboard-hints ul {
+            list-style: none;
+            font-size: 0.9rem;
+            color: #666;
+        }
+
+        .keyboard-hints li {
+            margin-bottom: 4px;
+        }
+
+        .keyboard-hints kbd {
+            background: #e9ecef;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 0.8rem;
+            font-family: monospace;
+        }
+
+        .demo-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+        }
+
+        .demo-btn {
+            padding: 8px 16px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background-color 0.3s ease;
+        }
+
+        .demo-btn:hover {
+            background: #5a6fd8;
+        }
+
+        .demo-btn.secondary {
+            background: #6c757d;
+        }
+
+        .demo-btn.secondary:hover {
+            background: #5a6268;
+        }
+
+        .success-message {
+            background: #d4edda;
+            color: #155724;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 20px;
+            display: none;
+        }
+
+        .success-message.show {
+            display: block;
+        }
+
+        @media (max-width: 768px) {
+            .content {
+                padding: 20px;
+            }
+            
+            .demo-actions {
+                flex-direction: column;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔍 Advanced Autocomplete Challenge</h1>
+            <p>Test complex search suggestions, keyboard navigation, and multiple selection modes</p>
+        </div>
+
+        <div class="content">
+            <!-- Single Selection Autocomplete -->
+            <div class="autocomplete-section">
+                <h2 class="section-title">1. Single Selection Autocomplete</h2>
+                <p class="section-description">Type to search for a country. Use arrow keys to navigate, Enter to select, Escape to close.</p>
+                
+                <div class="autocomplete-wrapper">
+                    <input type="text" class="autocomplete-input" id="country-input" placeholder="Search for a country...">
+                    <div class="autocomplete-dropdown" id="country-dropdown"></div>
+                </div>
+                
+                <div class="demo-actions">
+                    <button class="demo-btn" onclick="simulateSearch('country-input', 'united')">Search "United"</button>
+                    <button class="demo-btn secondary" onclick="clearAutocomplete('country-input')">Clear</button>
+                </div>
+                
+                <div class="keyboard-hints">
+                    <h4>Keyboard Navigation:</h4>
+                    <ul>
+                        <li><kbd>↑</kbd> <kbd>↓</kbd> Navigate suggestions</li>
+                        <li><kbd>Enter</kbd> Select highlighted item</li>
+                        <li><kbd>Escape</kbd> Close dropdown</li>
+                        <li><kbd>Tab</kbd> Select and move to next field</li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- Multiple Selection Autocomplete -->
+            <div class="autocomplete-section">
+                <h2 class="section-title">2. Multiple Selection Autocomplete</h2>
+                <p class="section-description">Search and select multiple programming languages. Selected items appear as tags below.</p>
+                
+                <div class="autocomplete-wrapper">
+                    <input type="text" class="autocomplete-input" id="tech-input" placeholder="Search programming languages...">
+                    <div class="autocomplete-dropdown" id="tech-dropdown">
+                        <div class="autocomplete-footer">
+                            <div class="footer-actions">
+                                <span class="results-count" id="tech-count">0 results</span>
+                                <button class="clear-btn" onclick="clearAllSelections('tech')">Clear All</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="selected-items" id="tech-selected"></div>
+                </div>
+                
+                <div class="demo-actions">
+                    <button class="demo-btn" onclick="simulateSearch('tech-input', 'java')">Search "Java"</button>
+                    <button class="demo-btn" onclick="selectMultipleItems('tech', ['JavaScript', 'Python', 'React'])">Select Popular</button>
+                    <button class="demo-btn secondary" onclick="clearAllSelections('tech')">Clear All</button>
+                </div>
+            </div>
+
+            <!-- Grouped Autocomplete -->
+            <div class="autocomplete-section">
+                <h2 class="section-title">3. Grouped Autocomplete with Categories</h2>
+                <p class="section-description">Search for employees grouped by department. Results are organized by categories.</p>
+                
+                <div class="autocomplete-wrapper">
+                    <input type="text" class="autocomplete-input" id="employee-input" placeholder="Search employees by name or department...">
+                    <div class="grouped-dropdown" id="employee-dropdown"></div>
+                </div>
+                
+                <div class="demo-actions">
+                    <button class="demo-btn" onclick="simulateSearch('employee-input', 'john')">Search "John"</button>
+                    <button class="demo-btn" onclick="simulateSearch('employee-input', 'engineering')">Search "Engineering"</button>
+                    <button class="demo-btn secondary" onclick="clearAutocomplete('employee-input')">Clear</button>
+                </div>
+            </div>
+
+            <!-- API-driven Autocomplete -->
+            <div class="autocomplete-section">
+                <h2 class="section-title">4. API-driven Autocomplete with Debouncing</h2>
+                <p class="section-description">Simulates real API calls with loading states and debouncing for better performance.</p>
+                
+                <div class="autocomplete-wrapper">
+                    <input type="text" class="autocomplete-input" id="api-input" placeholder="Search products (simulated API)...">
+                    <div class="autocomplete-dropdown" id="api-dropdown"></div>
+                </div>
+                
+                <div class="demo-actions">
+                    <button class="demo-btn" onclick="simulateAPISearch('api-input', 'laptop')">Search "Laptop"</button>
+                    <button class="demo-btn" onclick="simulateAPISearch('api-input', 'phone')">Search "Phone"</button>
+                    <button class="demo-btn secondary" onclick="clearAutocomplete('api-input')">Clear</button>
+                </div>
+            </div>
+
+            <div class="success-message" id="success-message">
+                <strong>Success!</strong> All autocomplete interactions completed successfully.
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Sample data
+        const countries = [
+            { id: 1, name: 'United States', code: 'US', continent: 'North America' },
+            { id: 2, name: 'United Kingdom', code: 'GB', continent: 'Europe' },
+            { id: 3, name: 'Canada', code: 'CA', continent: 'North America' },
+            { id: 4, name: 'Australia', code: 'AU', continent: 'Oceania' },
+            { id: 5, name: 'Germany', code: 'DE', continent: 'Europe' },
+            { id: 6, name: 'France', code: 'FR', continent: 'Europe' },
+            { id: 7, name: 'Japan', code: 'JP', continent: 'Asia' },
+            { id: 8, name: 'Brazil', code: 'BR', continent: 'South America' },
+            { id: 9, name: 'India', code: 'IN', continent: 'Asia' },
+            { id: 10, name: 'China', code: 'CN', continent: 'Asia' }
+        ];
+
+        const technologies = [
+            { id: 1, name: 'JavaScript', category: 'Language', popularity: 'popular' },
+            { id: 2, name: 'Python', category: 'Language', popularity: 'popular' },
+            { id: 3, name: 'Java', category: 'Language', popularity: 'popular' },
+            { id: 4, name: 'React', category: 'Framework', popularity: 'popular' },
+            { id: 5, name: 'Vue.js', category: 'Framework', popularity: 'new' },
+            { id: 6, name: 'Angular', category: 'Framework', popularity: 'popular' },
+            { id: 7, name: 'Node.js', category: 'Runtime', popularity: 'popular' },
+            { id: 8, name: 'TypeScript', category: 'Language', popularity: 'new' },
+            { id: 9, name: 'Go', category: 'Language', popularity: 'new' },
+            { id: 10, name: 'Rust', category: 'Language', popularity: 'new' }
+        ];
+
+        const employees = [
+            { id: 1, name: 'John Doe', department: 'Engineering', position: 'Senior Developer' },
+            { id: 2, name: 'Jane Smith', department: 'Engineering', position: 'Tech Lead' },
+            { id: 3, name: 'Mike Johnson', department: 'Marketing', position: 'Marketing Manager' },
+            { id: 4, name: 'Sarah Wilson', department: 'Sales', position: 'Sales Representative' },
+            { id: 5, name: 'Tom Brown', department: 'HR', position: 'HR Specialist' },
+            { id: 6, name: 'Lisa Davis', department: 'Engineering', position: 'Frontend Developer' },
+            { id: 7, name: 'Chris Miller', department: 'Marketing', position: 'Content Writer' },
+            { id: 8, name: 'Amy Taylor', department: 'Sales', position: 'Account Manager' }
+        ];
+
+        const products = [
+            { id: 1, name: 'MacBook Pro', category: 'Laptop', price: 1999, rating: 4.8 },
+            { id: 2, name: 'iPhone 15', category: 'Phone', price: 999, rating: 4.7 },
+            { id: 3, name: 'Dell XPS 13', category: 'Laptop', price: 1299, rating: 4.6 },
+            { id: 4, name: 'Samsung Galaxy S24', category: 'Phone', price: 899, rating: 4.5 },
+            { id: 5, name: 'Surface Laptop', category: 'Laptop', price: 1199, rating: 4.4 },
+            { id: 6, name: 'Google Pixel 8', category: 'Phone', price: 699, rating: 4.6 }
+        ];
+
+        let selectedTech = [];
+        let currentHighlight = -1;
+        let debounceTimer = null;
+
+        // Initialize autocomplete functionality
+        function initAutocomplete() {
+            // Country autocomplete
+            setupSingleAutocomplete('country-input', 'country-dropdown', countries, {
+                searchFields: ['name', 'code'],
+                displayField: 'name',
+                template: (item) => `
+                    <div class="autocomplete-item" data-value="${item.id}">
+                        <div class="item-icon">${item.code}</div>
+                        <div class="item-details">
+                            <div class="item-title">${item.name}</div>
+                            <div class="item-subtitle">${item.continent}</div>
+                        </div>
+                    </div>
+                `
+            });
+
+            // Technology multiple autocomplete
+            setupMultipleAutocomplete('tech-input', 'tech-dropdown', technologies, {
+                searchFields: ['name', 'category'],
+                displayField: 'name',
+                selectedContainer: 'tech-selected',
+                template: (item) => `
+                    <div class="autocomplete-item" data-value="${item.id}">
+                        <div class="item-icon">${item.name.charAt(0)}</div>
+                        <div class="item-details">
+                            <div class="item-title">${item.name}</div>
+                            <div class="item-subtitle">${item.category}</div>
+                        </div>
+                        <div class="item-badge ${item.popularity}">${item.popularity}</div>
+                    </div>
+                `
+            });
+
+            // Employee grouped autocomplete
+            setupGroupedAutocomplete('employee-input', 'employee-dropdown', employees, {
+                searchFields: ['name', 'department', 'position'],
+                displayField: 'name',
+                groupField: 'department',
+                template: (item) => `
+                    <div class="autocomplete-item" data-value="${item.id}">
+                        <div class="item-icon">${item.name.charAt(0)}</div>
+                        <div class="item-details">
+                            <div class="item-title">${item.name}</div>
+                            <div class="item-subtitle">${item.position}</div>
+                        </div>
+                    </div>
+                `
+            });
+
+            // API-driven autocomplete
+            setupAPIAutocomplete('api-input', 'api-dropdown', {
+                searchFields: ['name', 'category'],
+                displayField: 'name',
+                template: (item) => `
+                    <div class="autocomplete-item" data-value="${item.id}">
+                        <div class="item-icon">$</div>
+                        <div class="item-details">
+                            <div class="item-title">${item.name}</div>
+                            <div class="item-subtitle">${item.category} - $${item.price}</div>
+                        </div>
+                        <div class="item-badge">⭐ ${item.rating}</div>
+                    </div>
+                `
+            });
+        }
+
+        function setupSingleAutocomplete(inputId, dropdownId, data, options) {
+            const input = document.getElementById(inputId);
+            const dropdown = document.getElementById(dropdownId);
+            
+            input.addEventListener('input', function() {
+                const query = this.value.toLowerCase();
+                if (query.length < 1) {
+                    dropdown.classList.remove('show');
+                    return;
+                }
+                
+                const filtered = data.filter(item => 
+                    options.searchFields.some(field => 
+                        item[field].toLowerCase().includes(query)
+                    )
+                );
+                
+                showResults(dropdown, filtered, options);
+            });
+
+            input.addEventListener('keydown', function(e) {
+                handleKeyNavigation(e, dropdown);
+            });
+
+            // Close dropdown when clicking outside
+            document.addEventListener('click', function(e) {
+                if (!input.contains(e.target) && !dropdown.contains(e.target)) {
+                    dropdown.classList.remove('show');
+                }
+            });
+        }
+
+        function setupMultipleAutocomplete(inputId, dropdownId, data, options) {
+            const input = document.getElementById(inputId);
+            const dropdown = document.getElementById(dropdownId);
+            
+            input.addEventListener('input', function() {
+                const query = this.value.toLowerCase();
+                if (query.length < 1) {
+                    dropdown.classList.remove('show');
+                    return;
+                }
+                
+                const filtered = data.filter(item => 
+                    !selectedTech.some(selected => selected.id === item.id) &&
+                    options.searchFields.some(field => 
+                        item[field].toLowerCase().includes(query)
+                    )
+                );
+                
+                showResults(dropdown, filtered, options);
+                updateResultsCount(filtered.length, 'tech-count');
+            });
+
+            input.addEventListener('keydown', function(e) {
+                if (e.key === 'Backspace' && this.value === '' && selectedTech.length > 0) {
+                    removeSelectedItem(selectedTech.length - 1, 'tech');
+                } else {
+                    handleKeyNavigation(e, dropdown);
+                }
+            });
+
+            // Handle item selection
+            dropdown.addEventListener('click', function(e) {
+                const item = e.target.closest('.autocomplete-item');
+                if (item) {
+                    const itemId = parseInt(item.dataset.value);
+                    const selectedItem = data.find(d => d.id === itemId);
+                    if (selectedItem) {
+                        addSelectedItem(selectedItem, 'tech');
+                        input.value = '';
+                        dropdown.classList.remove('show');
+                    }
+                }
+            });
+        }
+
+        function setupGroupedAutocomplete(inputId, dropdownId, data, options) {
+            const input = document.getElementById(inputId);
+            const dropdown = document.getElementById(dropdownId);
+            
+            input.addEventListener('input', function() {
+                const query = this.value.toLowerCase();
+                if (query.length < 1) {
+                    dropdown.classList.remove('show');
+                    return;
+                }
+                
+                const filtered = data.filter(item => 
+                    options.searchFields.some(field => 
+                        item[field].toLowerCase().includes(query)
+                    )
+                );
+                
+                showGroupedResults(dropdown, filtered, options);
+            });
+
+            input.addEventListener('keydown', function(e) {
+                handleKeyNavigation(e, dropdown);
+            });
+        }
+
+        function setupAPIAutocomplete(inputId, dropdownId, options) {
+            const input = document.getElementById(inputId);
+            const dropdown = document.getElementById(dropdownId);
+            
+            input.addEventListener('input', function() {
+                const query = this.value.toLowerCase();
+                if (query.length < 2) {
+                    dropdown.classList.remove('show');
+                    return;
+                }
+                
+                // Clear previous timer
+                clearTimeout(debounceTimer);
+                
+                // Show loading state
+                input.classList.add('loading');
+                
+                // Debounce API call
+                debounceTimer = setTimeout(() => {
+                    simulateAPICall(query).then(results => {
+                        input.classList.remove('loading');
+                        showResults(dropdown, results, options);
+                    });
+                }, 500);
+            });
+
+            input.addEventListener('keydown', function(e) {
+                handleKeyNavigation(e, dropdown);
+            });
+        }
+
+        function simulateAPICall(query) {
+            return new Promise((resolve) => {
+                // Simulate API delay
+                setTimeout(() => {
+                    const filtered = products.filter(item => 
+                        item.name.toLowerCase().includes(query) ||
+                        item.category.toLowerCase().includes(query)
+                    );
+                    resolve(filtered);
+                }, 300);
+            });
+        }
+
+        function showResults(dropdown, results, options) {
+            if (results.length === 0) {
+                dropdown.innerHTML = '<div class="no-results">No results found</div>';
+                dropdown.classList.add('show');
+                return;
+            }
+
+            dropdown.innerHTML = results.map(item => options.template(item)).join('');
+            dropdown.classList.add('show');
+            currentHighlight = -1;
+
+            // Add click handlers
+            dropdown.querySelectorAll('.autocomplete-item').forEach(item => {
+                item.addEventListener('click', function() {
+                    const input = dropdown.previousElementSibling;
+                    const itemId = parseInt(this.dataset.value);
+                    const selectedItem = results.find(r => r.id === itemId);
+                    input.value = selectedItem[options.displayField];
+                    dropdown.classList.remove('show');
+                });
+            });
+        }
+
+        function showGroupedResults(dropdown, results, options) {
+            if (results.length === 0) {
+                dropdown.innerHTML = '<div class="no-results">No results found</div>';
+                dropdown.classList.add('show');
+                return;
+            }
+
+            // Group results
+            const grouped = results.reduce((acc, item) => {
+                const group = item[options.groupField];
+                if (!acc[group]) acc[group] = [];
+                acc[group].push(item);
+                return acc;
+            }, {});
+
+            let html = '';
+            Object.keys(grouped).forEach(group => {
+                html += `<div class="dropdown-group">
+                    <div class="group-header">${group}</div>
+                    ${grouped[group].map(item => options.template(item)).join('')}
+                </div>`;
+            });
+
+            dropdown.innerHTML = html;
+            dropdown.classList.add('show');
+            currentHighlight = -1;
+
+            // Add click handlers
+            dropdown.querySelectorAll('.autocomplete-item').forEach(item => {
+                item.addEventListener('click', function() {
+                    const input = dropdown.previousElementSibling;
+                    const itemId = parseInt(this.dataset.value);
+                    const selectedItem = results.find(r => r.id === itemId);
+                    input.value = selectedItem[options.displayField];
+                    dropdown.classList.remove('show');
+                });
+            });
+        }
+
+        function handleKeyNavigation(e, dropdown) {
+            const items = dropdown.querySelectorAll('.autocomplete-item');
+            
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                currentHighlight = Math.min(currentHighlight + 1, items.length - 1);
+                updateHighlight(items);
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                currentHighlight = Math.max(currentHighlight - 1, -1);
+                updateHighlight(items);
+            } else if (e.key === 'Enter') {
+                e.preventDefault();
+                if (currentHighlight >= 0 && items[currentHighlight]) {
+                    items[currentHighlight].click();
+                }
+            } else if (e.key === 'Escape') {
+                dropdown.classList.remove('show');
+                currentHighlight = -1;
+            }
+        }
+
+        function updateHighlight(items) {
+            items.forEach((item, index) => {
+                item.classList.toggle('highlighted', index === currentHighlight);
+            });
+        }
+
+        function addSelectedItem(item, type) {
+            if (type === 'tech') {
+                selectedTech.push(item);
+                updateSelectedDisplay('tech-selected', selectedTech);
+            }
+        }
+
+        function removeSelectedItem(index, type) {
+            if (type === 'tech') {
+                selectedTech.splice(index, 1);
+                updateSelectedDisplay('tech-selected', selectedTech);
+            }
+        }
+
+        function updateSelectedDisplay(containerId, items) {
+            const container = document.getElementById(containerId);
+            container.innerHTML = items.map((item, index) => `
+                <div class="selected-item">
+                    <span>${item.name}</span>
+                    <button class="remove-btn" onclick="removeSelectedItem(${index}, 'tech')">×</button>
+                </div>
+            `).join('');
+        }
+
+        function updateResultsCount(count, elementId) {
+            document.getElementById(elementId).textContent = `${count} results`;
+        }
+
+        // Demo functions
+        function simulateSearch(inputId, query) {
+            const input = document.getElementById(inputId);
+            input.value = query;
+            input.dispatchEvent(new Event('input'));
+            input.focus();
+        }
+
+        function simulateAPISearch(inputId, query) {
+            const input = document.getElementById(inputId);
+            input.value = query;
+            input.dispatchEvent(new Event('input'));
+            input.focus();
+        }
+
+        function clearAutocomplete(inputId) {
+            const input = document.getElementById(inputId);
+            input.value = '';
+            const dropdown = input.nextElementSibling;
+            dropdown.classList.remove('show');
+        }
+
+        function clearAllSelections(type) {
+            if (type === 'tech') {
+                selectedTech = [];
+                updateSelectedDisplay('tech-selected', selectedTech);
+                const input = document.getElementById('tech-input');
+                input.value = '';
+                document.getElementById('tech-dropdown').classList.remove('show');
+            }
+        }
+
+        function selectMultipleItems(type, items) {
+            if (type === 'tech') {
+                items.forEach(itemName => {
+                    const item = technologies.find(tech => tech.name === itemName);
+                    if (item && !selectedTech.some(selected => selected.id === item.id)) {
+                        selectedTech.push(item);
+                    }
+                });
+                updateSelectedDisplay('tech-selected', selectedTech);
+            }
+        }
+
+        // Initialize on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            initAutocomplete();
+            
+            // Show success message when interactions are completed
+            let interactionCount = 0;
+            document.addEventListener('click', function(e) {
+                if (e.target.classList.contains('autocomplete-item') || 
+                    e.target.classList.contains('demo-btn')) {
+                    interactionCount++;
+                    if (interactionCount >= 5) {
+                        document.getElementById('success-message').classList.add('show');
+                        setTimeout(() => {
+                            document.getElementById('success-message').classList.remove('show');
+                        }, 8000);
+                        interactionCount = 0;
+                    }
+                }
+            });
+        });
+    </script>
+</body>
+</html> 

@@ -1,0 +1,977 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Conditional Form Fields Challenge</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+        }
+
+        .content {
+            padding: 40px;
+        }
+
+        .form-section {
+            background: #f8f9fa;
+            border-radius: 15px;
+            padding: 30px;
+            margin-bottom: 30px;
+            border: 2px solid #e9ecef;
+        }
+
+        .section-title {
+            font-size: 1.5rem;
+            color: #333;
+            margin-bottom: 10px;
+        }
+
+        .section-description {
+            color: #666;
+            margin-bottom: 25px;
+        }
+
+        .form-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .form-group label {
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #333;
+        }
+
+        .form-group input,
+        .form-group select,
+        .form-group textarea {
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: all 0.3s ease;
+        }
+
+        .form-group input:focus,
+        .form-group select:focus,
+        .form-group textarea:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        .form-group.hidden {
+            display: none;
+        }
+
+        .form-group.fade-in {
+            animation: fadeIn 0.5s ease-in-out;
+        }
+
+        .form-group.fade-out {
+            animation: fadeOut 0.3s ease-in-out;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        @keyframes fadeOut {
+            from { opacity: 1; transform: translateY(0); }
+            to { opacity: 0; transform: translateY(-10px); }
+        }
+
+        .radio-group {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+
+        .radio-option {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .radio-option:hover {
+            border-color: #667eea;
+            background: #f8f9ff;
+        }
+
+        .radio-option input[type="radio"] {
+            margin: 0;
+        }
+
+        .radio-option.selected {
+            border-color: #667eea;
+            background: #f8f9ff;
+        }
+
+        .checkbox-group {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .checkbox-option {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 0;
+        }
+
+        .checkbox-option input[type="checkbox"] {
+            transform: scale(1.2);
+            cursor: pointer;
+        }
+
+        .checkbox-option label {
+            cursor: pointer;
+            margin: 0;
+        }
+
+        .conditional-field {
+            border-left: 4px solid #667eea;
+            padding-left: 20px;
+            margin-top: 20px;
+        }
+
+        .nested-conditional {
+            border-left: 4px solid #28a745;
+            padding-left: 20px;
+            margin-top: 15px;
+        }
+
+        .field-indicator {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #28a745;
+            margin-right: 8px;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: #e9ecef;
+            border-radius: 4px;
+            overflow: hidden;
+            margin: 20px 0;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            transition: width 0.5s ease;
+        }
+
+        .progress-text {
+            text-align: center;
+            color: #666;
+            font-size: 0.9rem;
+            margin-top: 5px;
+        }
+
+        .validation-message {
+            color: #dc3545;
+            font-size: 0.9rem;
+            margin-top: 5px;
+            display: none;
+        }
+
+        .validation-message.show {
+            display: block;
+        }
+
+        .dependency-info {
+            background: #fff3cd;
+            border: 1px solid #ffeeba;
+            border-radius: 8px;
+            padding: 15px;
+            margin-top: 20px;
+        }
+
+        .dependency-info h4 {
+            color: #856404;
+            margin-bottom: 10px;
+        }
+
+        .dependency-info ul {
+            color: #856404;
+            margin-left: 20px;
+        }
+
+        .form-actions {
+            display: flex;
+            gap: 15px;
+            justify-content: center;
+            margin-top: 30px;
+        }
+
+        .btn {
+            padding: 12px 30px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.3);
+        }
+
+        .btn-secondary {
+            background: #6c757d;
+            color: white;
+        }
+
+        .btn-secondary:hover {
+            background: #5a6268;
+        }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .success-message {
+            background: #d4edda;
+            color: #155724;
+            padding: 20px;
+            border-radius: 12px;
+            margin-top: 20px;
+            display: none;
+        }
+
+        .success-message.show {
+            display: block;
+        }
+
+        .demo-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+            flex-wrap: wrap;
+        }
+
+        .demo-btn {
+            padding: 8px 16px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background-color 0.3s ease;
+        }
+
+        .demo-btn:hover {
+            background: #5a6fd8;
+        }
+
+        .demo-btn.secondary {
+            background: #6c757d;
+        }
+
+        .demo-btn.secondary:hover {
+            background: #5a6268;
+        }
+
+        @media (max-width: 768px) {
+            .content {
+                padding: 20px;
+            }
+            
+            .form-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .radio-group {
+                flex-direction: column;
+            }
+            
+            .form-actions {
+                flex-direction: column;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔀 Conditional Form Fields Challenge</h1>
+            <p>Test dynamic field visibility, cascading dropdowns, and progressive disclosure</p>
+        </div>
+
+        <div class="content">
+            <!-- Job Application Form -->
+            <div class="form-section">
+                <h2 class="section-title">1. Job Application Form</h2>
+                <p class="section-description">Fields appear/disappear based on job type selection and experience level.</p>
+                
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label for="job-type">Job Type *</label>
+                        <select id="job-type" onchange="handleJobTypeChange()">
+                            <option value="">Select job type</option>
+                            <option value="full-time">Full-time</option>
+                            <option value="part-time">Part-time</option>
+                            <option value="contract">Contract</option>
+                            <option value="internship">Internship</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="experience-level">Experience Level *</label>
+                        <select id="experience-level" onchange="handleExperienceChange()">
+                            <option value="">Select experience level</option>
+                            <option value="entry">Entry Level (0-2 years)</option>
+                            <option value="mid">Mid Level (3-5 years)</option>
+                            <option value="senior">Senior Level (6+ years)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="conditional-field" id="contract-fields" style="display: none;">
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label for="contract-duration">Contract Duration *</label>
+                            <select id="contract-duration">
+                                <option value="">Select duration</option>
+                                <option value="3-months">3 months</option>
+                                <option value="6-months">6 months</option>
+                                <option value="12-months">12 months</option>
+                                <option value="custom">Custom</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="hourly-rate">Hourly Rate ($) *</label>
+                            <input type="number" id="hourly-rate" placeholder="e.g., 50">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="conditional-field" id="internship-fields" style="display: none;">
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label for="university">University *</label>
+                            <input type="text" id="university" placeholder="Enter your university">
+                        </div>
+                        <div class="form-group">
+                            <label for="graduation-year">Expected Graduation Year *</label>
+                            <select id="graduation-year">
+                                <option value="">Select year</option>
+                                <option value="2024">2024</option>
+                                <option value="2025">2025</option>
+                                <option value="2026">2026</option>
+                                <option value="2027">2027</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="conditional-field" id="senior-fields" style="display: none;">
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label for="management-experience">Management Experience</label>
+                            <div class="radio-group">
+                                <div class="radio-option">
+                                    <input type="radio" name="management" value="yes" id="mgmt-yes" onchange="handleManagementChange()">
+                                    <label for="mgmt-yes">Yes</label>
+                                </div>
+                                <div class="radio-option">
+                                    <input type="radio" name="management" value="no" id="mgmt-no" onchange="handleManagementChange()">
+                                    <label for="mgmt-no">No</label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="nested-conditional" id="team-size-field" style="display: none;">
+                        <div class="form-group">
+                            <label for="team-size">Team Size Managed *</label>
+                            <select id="team-size">
+                                <option value="">Select team size</option>
+                                <option value="1-5">1-5 people</option>
+                                <option value="6-10">6-10 people</option>
+                                <option value="11-20">11-20 people</option>
+                                <option value="20+">20+ people</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="demo-actions">
+                    <button class="demo-btn" onclick="simulateJobApplication('full-time', 'senior')">Senior Full-time</button>
+                    <button class="demo-btn" onclick="simulateJobApplication('contract', 'mid')">Contract Mid-level</button>
+                    <button class="demo-btn" onclick="simulateJobApplication('internship', 'entry')">Internship Entry</button>
+                    <button class="demo-btn secondary" onclick="resetForm('job-form')">Reset Form</button>
+                </div>
+            </div>
+
+            <!-- Travel Booking Form -->
+            <div class="form-section">
+                <h2 class="section-title">2. Travel Booking Form</h2>
+                <p class="section-description">Cascading dropdowns and conditional fields based on travel type and preferences.</p>
+                
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label for="travel-type">Travel Type *</label>
+                        <select id="travel-type" onchange="handleTravelTypeChange()">
+                            <option value="">Select travel type</option>
+                            <option value="domestic">Domestic</option>
+                            <option value="international">International</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="country">Country *</label>
+                        <select id="country" disabled onchange="handleCountryChange()">
+                            <option value="">Select country first</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="city">City *</label>
+                        <select id="city" disabled>
+                            <option value="">Select city</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="conditional-field" id="international-fields" style="display: none;">
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label for="passport-required">Passport Required</label>
+                            <div class="checkbox-group">
+                                <div class="checkbox-option">
+                                    <input type="checkbox" id="passport-required" onchange="handlePassportChange()">
+                                    <label for="passport-required">I need passport assistance</label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="nested-conditional" id="passport-fields" style="display: none;">
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label for="passport-status">Passport Status *</label>
+                                <select id="passport-status">
+                                    <option value="">Select status</option>
+                                    <option value="have">I have a valid passport</option>
+                                    <option value="expired">My passport is expired</option>
+                                    <option value="none">I don't have a passport</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="travel-preferences">Travel Preferences</label>
+                    <div class="checkbox-group">
+                        <div class="checkbox-option">
+                            <input type="checkbox" id="pref-business" onchange="handlePreferenceChange()">
+                            <label for="pref-business">Business class upgrade</label>
+                        </div>
+                        <div class="checkbox-option">
+                            <input type="checkbox" id="pref-hotel" onchange="handlePreferenceChange()">
+                            <label for="pref-hotel">Hotel booking</label>
+                        </div>
+                        <div class="checkbox-option">
+                            <input type="checkbox" id="pref-car" onchange="handlePreferenceChange()">
+                            <label for="pref-car">Car rental</label>
+                        </div>
+                        <div class="checkbox-option">
+                            <input type="checkbox" id="pref-insurance" onchange="handlePreferenceChange()">
+                            <label for="pref-insurance">Travel insurance</label>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="conditional-field" id="business-class-fields" style="display: none;">
+                    <div class="form-group">
+                        <label for="business-reason">Business Class Reason</label>
+                        <textarea id="business-reason" placeholder="Why do you need business class?"></textarea>
+                    </div>
+                </div>
+
+                <div class="conditional-field" id="hotel-fields" style="display: none;">
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label for="hotel-stars">Hotel Rating *</label>
+                            <select id="hotel-stars">
+                                <option value="">Select rating</option>
+                                <option value="3">3 stars</option>
+                                <option value="4">4 stars</option>
+                                <option value="5">5 stars</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="room-type">Room Type *</label>
+                            <select id="room-type">
+                                <option value="">Select room type</option>
+                                <option value="single">Single</option>
+                                <option value="double">Double</option>
+                                <option value="suite">Suite</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="demo-actions">
+                    <button class="demo-btn" onclick="simulateTravel('international', 'UK')">International to UK</button>
+                    <button class="demo-btn" onclick="simulateTravel('domestic', 'USA')">Domestic USA</button>
+                    <button class="demo-btn" onclick="simulatePreferences()">Select Preferences</button>
+                    <button class="demo-btn secondary" onclick="resetForm('travel-form')">Reset Form</button>
+                </div>
+            </div>
+
+            <!-- Form Progress and Validation -->
+            <div class="form-section">
+                <h2 class="section-title">Form Progress & Validation</h2>
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progress-fill"></div>
+                </div>
+                <div class="progress-text" id="progress-text">0% Complete</div>
+                
+                <div class="dependency-info">
+                    <h4>🔗 Field Dependencies</h4>
+                    <ul>
+                        <li>Job Type → Contract/Internship/Senior fields</li>
+                        <li>Experience Level → Management questions</li>
+                        <li>Management Experience → Team Size</li>
+                        <li>Travel Type → Country/City options</li>
+                        <li>Travel Preferences → Additional booking fields</li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="form-actions">
+                <button class="btn btn-secondary" onclick="resetAllForms()">Reset All Forms</button>
+                <button class="btn btn-primary" onclick="validateAllForms()" id="submit-btn">Submit Application</button>
+            </div>
+
+            <div class="success-message" id="success-message">
+                <strong>Success!</strong> All conditional form interactions completed successfully. The extraction layer should have detected all dynamic field changes.
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Country and city data
+        const locationData = {
+            domestic: {
+                'USA': ['New York', 'Los Angeles', 'Chicago', 'Houston', 'Phoenix']
+            },
+            international: {
+                'UK': ['London', 'Manchester', 'Birmingham', 'Edinburgh'],
+                'Canada': ['Toronto', 'Vancouver', 'Montreal', 'Calgary'],
+                'Australia': ['Sydney', 'Melbourne', 'Brisbane', 'Perth'],
+                'Japan': ['Tokyo', 'Osaka', 'Kyoto', 'Hiroshima']
+            }
+        };
+
+        let formProgress = 0;
+        let totalFields = 0;
+        let completedFields = 0;
+
+        // Job application form handlers
+        function handleJobTypeChange() {
+            const jobType = document.getElementById('job-type').value;
+            const contractFields = document.getElementById('contract-fields');
+            const internshipFields = document.getElementById('internship-fields');
+            const seniorFields = document.getElementById('senior-fields');
+            
+            // Hide all conditional fields
+            hideElement(contractFields);
+            hideElement(internshipFields);
+            hideElement(seniorFields);
+            
+            // Show relevant fields based on job type
+            if (jobType === 'contract') {
+                showElement(contractFields);
+            } else if (jobType === 'internship') {
+                showElement(internshipFields);
+            }
+            
+            updateProgress();
+        }
+
+        function handleExperienceChange() {
+            const experience = document.getElementById('experience-level').value;
+            const seniorFields = document.getElementById('senior-fields');
+            
+            if (experience === 'senior') {
+                showElement(seniorFields);
+            } else {
+                hideElement(seniorFields);
+                hideElement(document.getElementById('team-size-field'));
+            }
+            
+            updateProgress();
+        }
+
+        function handleManagementChange() {
+            const management = document.querySelector('input[name="management"]:checked');
+            const teamSizeField = document.getElementById('team-size-field');
+            
+            if (management && management.value === 'yes') {
+                showElement(teamSizeField);
+            } else {
+                hideElement(teamSizeField);
+            }
+            
+            updateProgress();
+        }
+
+        // Travel form handlers
+        function handleTravelTypeChange() {
+            const travelType = document.getElementById('travel-type').value;
+            const countrySelect = document.getElementById('country');
+            const citySelect = document.getElementById('city');
+            const internationalFields = document.getElementById('international-fields');
+            
+            // Reset dependent fields
+            countrySelect.innerHTML = '<option value="">Select country</option>';
+            citySelect.innerHTML = '<option value="">Select city</option>';
+            citySelect.disabled = true;
+            
+            if (travelType) {
+                countrySelect.disabled = false;
+                
+                // Populate countries based on travel type
+                const countries = Object.keys(locationData[travelType] || {});
+                countries.forEach(country => {
+                    const option = document.createElement('option');
+                    option.value = country;
+                    option.textContent = country;
+                    countrySelect.appendChild(option);
+                });
+                
+                // Show international fields for international travel
+                if (travelType === 'international') {
+                    showElement(internationalFields);
+                } else {
+                    hideElement(internationalFields);
+                    hideElement(document.getElementById('passport-fields'));
+                }
+            } else {
+                countrySelect.disabled = true;
+                hideElement(internationalFields);
+            }
+            
+            updateProgress();
+        }
+
+        function handleCountryChange() {
+            const country = document.getElementById('country').value;
+            const travelType = document.getElementById('travel-type').value;
+            const citySelect = document.getElementById('city');
+            
+            citySelect.innerHTML = '<option value="">Select city</option>';
+            
+            if (country && locationData[travelType] && locationData[travelType][country]) {
+                citySelect.disabled = false;
+                
+                locationData[travelType][country].forEach(city => {
+                    const option = document.createElement('option');
+                    option.value = city;
+                    option.textContent = city;
+                    citySelect.appendChild(option);
+                });
+            } else {
+                citySelect.disabled = true;
+            }
+            
+            updateProgress();
+        }
+
+        function handlePassportChange() {
+            const passportRequired = document.getElementById('passport-required').checked;
+            const passportFields = document.getElementById('passport-fields');
+            
+            if (passportRequired) {
+                showElement(passportFields);
+            } else {
+                hideElement(passportFields);
+            }
+            
+            updateProgress();
+        }
+
+        function handlePreferenceChange() {
+            const businessClass = document.getElementById('pref-business').checked;
+            const hotel = document.getElementById('pref-hotel').checked;
+            
+            const businessFields = document.getElementById('business-class-fields');
+            const hotelFields = document.getElementById('hotel-fields');
+            
+            if (businessClass) {
+                showElement(businessFields);
+            } else {
+                hideElement(businessFields);
+            }
+            
+            if (hotel) {
+                showElement(hotelFields);
+            } else {
+                hideElement(hotelFields);
+            }
+            
+            updateProgress();
+        }
+
+        // Utility functions
+        function showElement(element) {
+            if (element) {
+                element.style.display = 'block';
+                element.classList.add('fade-in');
+                setTimeout(() => element.classList.remove('fade-in'), 500);
+            }
+        }
+
+        function hideElement(element) {
+            if (element) {
+                element.classList.add('fade-out');
+                setTimeout(() => {
+                    element.style.display = 'none';
+                    element.classList.remove('fade-out');
+                }, 300);
+            }
+        }
+
+        function updateProgress() {
+            const allInputs = document.querySelectorAll('input, select, textarea');
+            let total = 0;
+            let completed = 0;
+            
+            allInputs.forEach(input => {
+                // Only count visible fields
+                if (input.offsetParent !== null) {
+                    total++;
+                    if (input.type === 'checkbox' || input.type === 'radio') {
+                        if (input.checked) completed++;
+                    } else if (input.value.trim() !== '') {
+                        completed++;
+                    }
+                }
+            });
+            
+            const progress = total > 0 ? Math.round((completed / total) * 100) : 0;
+            document.getElementById('progress-fill').style.width = progress + '%';
+            document.getElementById('progress-text').textContent = progress + '% Complete';
+            
+            totalFields = total;
+            completedFields = completed;
+            formProgress = progress;
+        }
+
+        // Demo functions
+        function simulateJobApplication(jobType, experience) {
+            document.getElementById('job-type').value = jobType;
+            handleJobTypeChange();
+            
+            setTimeout(() => {
+                document.getElementById('experience-level').value = experience;
+                handleExperienceChange();
+                
+                if (experience === 'senior') {
+                    setTimeout(() => {
+                        document.getElementById('mgmt-yes').checked = true;
+                        handleManagementChange();
+                        
+                        setTimeout(() => {
+                            document.getElementById('team-size').value = '6-10';
+                            updateProgress();
+                        }, 300);
+                    }, 300);
+                }
+                
+                if (jobType === 'contract') {
+                    setTimeout(() => {
+                        document.getElementById('contract-duration').value = '6-months';
+                        document.getElementById('hourly-rate').value = '75';
+                        updateProgress();
+                    }, 300);
+                }
+            }, 300);
+        }
+
+        function simulateTravel(travelType, country) {
+            document.getElementById('travel-type').value = travelType;
+            handleTravelTypeChange();
+            
+            setTimeout(() => {
+                document.getElementById('country').value = country;
+                handleCountryChange();
+                
+                setTimeout(() => {
+                    const citySelect = document.getElementById('city');
+                    if (citySelect.options.length > 1) {
+                        citySelect.value = citySelect.options[1].value;
+                    }
+                    updateProgress();
+                }, 300);
+            }, 300);
+        }
+
+        function simulatePreferences() {
+            document.getElementById('pref-business').checked = true;
+            document.getElementById('pref-hotel').checked = true;
+            handlePreferenceChange();
+            
+            setTimeout(() => {
+                document.getElementById('business-reason').value = 'Long international flight requires comfort for productivity';
+                document.getElementById('hotel-stars').value = '4';
+                document.getElementById('room-type').value = 'double';
+                updateProgress();
+            }, 300);
+        }
+
+        function resetForm(formType) {
+            if (formType === 'job-form') {
+                document.getElementById('job-type').value = '';
+                document.getElementById('experience-level').value = '';
+                hideElement(document.getElementById('contract-fields'));
+                hideElement(document.getElementById('internship-fields'));
+                hideElement(document.getElementById('senior-fields'));
+                hideElement(document.getElementById('team-size-field'));
+                
+                // Reset radio buttons
+                document.querySelectorAll('input[name="management"]').forEach(radio => {
+                    radio.checked = false;
+                });
+            } else if (formType === 'travel-form') {
+                document.getElementById('travel-type').value = '';
+                document.getElementById('country').value = '';
+                document.getElementById('city').value = '';
+                document.getElementById('country').disabled = true;
+                document.getElementById('city').disabled = true;
+                
+                // Reset checkboxes
+                document.querySelectorAll('input[type="checkbox"]').forEach(checkbox => {
+                    checkbox.checked = false;
+                });
+                
+                hideElement(document.getElementById('international-fields'));
+                hideElement(document.getElementById('passport-fields'));
+                hideElement(document.getElementById('business-class-fields'));
+                hideElement(document.getElementById('hotel-fields'));
+            }
+            
+            updateProgress();
+        }
+
+        function resetAllForms() {
+            resetForm('job-form');
+            resetForm('travel-form');
+            
+            // Reset all form fields
+            document.querySelectorAll('input, select, textarea').forEach(field => {
+                if (field.type === 'checkbox' || field.type === 'radio') {
+                    field.checked = false;
+                } else {
+                    field.value = '';
+                }
+            });
+            
+            updateProgress();
+        }
+
+        function validateAllForms() {
+            let isValid = true;
+            const requiredFields = document.querySelectorAll('input[required], select[required]');
+            
+            requiredFields.forEach(field => {
+                if (field.offsetParent !== null && !field.value.trim()) {
+                    isValid = false;
+                    field.style.borderColor = '#dc3545';
+                } else {
+                    field.style.borderColor = '#e0e0e0';
+                }
+            });
+            
+            if (isValid && formProgress > 50) {
+                document.getElementById('success-message').classList.add('show');
+                setTimeout(() => {
+                    document.getElementById('success-message').classList.remove('show');
+                }, 4000);
+            } else {
+                alert('Please complete at least 50% of the visible form fields');
+            }
+        }
+
+        // Initialize progress tracking
+        document.addEventListener('DOMContentLoaded', function() {
+            updateProgress();
+            
+            // Add event listeners for all form fields
+            document.querySelectorAll('input, select, textarea').forEach(field => {
+                field.addEventListener('input', updateProgress);
+                field.addEventListener('change', updateProgress);
+            });
+        });
+    </script>
+</body>
+</html> 
