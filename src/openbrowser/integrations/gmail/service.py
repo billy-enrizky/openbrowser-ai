@@ -1,349 +1,225 @@
-"""Gmail integration service for browser-based email automation.
-
-This module provides the GmailIntegration class, which offers helper methods
-for automating common Gmail operations through browser control. The integration
-provides structured instructions for email operations that can be executed
-by browser automation agents.
-
-Note:
-    This integration requires the user to be logged into Gmail in the browser.
-    Authentication is handled by the browser session, not by this module.
+"""
+Gmail API Service for OpenBrowser
+Handles Gmail API authentication, email reading, and 2FA code extraction.
+This service provides a clean interface for agents to interact with Gmail.
 """
 
-from __future__ import annotations
-
+import base64
 import logging
-from typing import TYPE_CHECKING, Optional
+import os
+from pathlib import Path
+from typing import Any
 
-from pydantic import BaseModel, Field
+import anyio
+from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import InstalledAppFlow
+from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 
-if TYPE_CHECKING:
-    from openbrowser.browser.session import BrowserSession
+from openbrowser.config import CONFIG
 
 logger = logging.getLogger(__name__)
 
 
-class EmailMessage(BaseModel):
-    """Email message model for Gmail operations.
-
-    Represents an email message with common fields used for composing,
-    reading, or displaying email content.
-
-    Attributes:
-        sender: Email address of the sender.
-        recipient: Email address of the recipient.
-        subject: Email subject line.
-        body: Email body content (plain text).
-        is_draft: Whether this is a draft message.
-
-    Example:
-        ```python
-        message = EmailMessage(
-            sender="me@example.com",
-            recipient="you@example.com",
-            subject="Meeting tomorrow",
-            body="Let's meet at 2pm."
-        )
-        ```
-    """
-
-    sender: str = ""
-    recipient: str = ""
-    subject: str = ""
-    body: str = ""
-    is_draft: bool = False
-
-
-class GmailIntegration:
-    """Gmail integration for browser-based email automation.
-
-    Provides helper methods for common Gmail operations, generating
-    structured instructions that can be executed by browser automation
-    agents. This class does not perform the actual browser actions
-    directly; instead, it provides the instructions and context needed
-    for an agent to perform the operations.
-
-    Attributes:
-        GMAIL_URL: Base URL for Gmail.
-        COMPOSE_URL: URL for composing a new email.
-        browser_session: The active browser session.
-
-    Example:
-        ```python
-        gmail = GmailIntegration(browser_session)
-
-        # Navigate to Gmail
-        await gmail.navigate_to_gmail()
-
-        # Search for emails
-        await gmail.search_emails("from:important@example.com")
-
-        # Get action definitions for agent
-        actions = gmail.get_gmail_actions()
-        ```
-
-    Note:
-        The user must be logged into Gmail for operations to succeed.
-        This integration is designed to work with browser automation
-        agents that can execute the provided instructions.
-    """
-
-    GMAIL_URL = "https://mail.google.com"
-    COMPOSE_URL = "https://mail.google.com/mail/u/0/#inbox?compose=new"
-
-    def __init__(self, browser_session: BrowserSession):
-        """Initialize the Gmail integration.
-
-        Args:
-            browser_session: The active browser session to use for
-                Gmail operations.
-        """
-        self.browser_session = browser_session
-
-    async def navigate_to_gmail(self) -> bool:
-        """Navigate to the Gmail inbox.
-
-        Dispatches a navigation event to open Gmail in the browser.
-        The user must be logged in for the inbox to be accessible.
-
-        Returns:
-            True if navigation was dispatched successfully,
-            False if an error occurred.
-        """
-        from openbrowser.browser.events import NavigateToUrlEvent
-
-        try:
-            await self.browser_session.event_bus.dispatch(
-                NavigateToUrlEvent(url=self.GMAIL_URL, new_tab=False)
-            )
-            logger.info("Navigated to Gmail")
-            return True
-        except Exception as e:
-            logger.error(f"Failed to navigate to Gmail: {e}")
-            return False
-
-    async def compose_email(
-        self,
-        recipient: str,
-        subject: str,
-        body: str,
-    ) -> bool:
-        """Compose and prepare to send an email.
-
-        Provides instructions for composing an email in Gmail.
-        The actual composition is performed by the browser automation
-        agent following the returned instructions.
-
-        Args:
-            recipient: Email address of the recipient.
-            subject: Subject line for the email.
-            body: Body content for the email.
-
-        Returns:
-            True if the compose operation was initiated.
-            The actual sending depends on agent execution.
-
-        Note:
-            The agent should click the Compose button, fill in the
-            recipient, subject, and body fields, then click Send.
-        """
-        # This provides the instructions for composing an email
-        # The actual execution is done by the agent using browser actions
-        logger.info(f"Composing email to {recipient}")
-
-        compose_instructions = f"""
-        To compose and send this email:
-        1. Click the Compose button
-        2. In the "To" field, enter: {recipient}
-        3. In the "Subject" field, enter: {subject}
-        4. In the message body, type: {body}
-        5. Click the Send button
-        """
-
-        return True
-
-    async def search_emails(self, query: str) -> bool:
-        """Search emails in Gmail.
-
-        Provides instructions for searching emails using Gmail's
-        search functionality. Supports Gmail search operators.
-
-        Args:
-            query: Search query string. Supports Gmail operators like
-                'from:', 'to:', 'subject:', 'is:unread', etc.
-
-        Returns:
-            True if the search operation was initiated.
-            Results depend on agent execution.
-
-        Example:
-            ```python
-            await gmail.search_emails("from:boss@company.com is:unread")
-            await gmail.search_emails("subject:invoice after:2024/01/01")
-            ```
-        """
-        logger.info(f"Searching emails with query: {query}")
-
-        search_instructions = f"""
-        To search for emails:
-        1. Click on the search bar at the top
-        2. Type: {query}
-        3. Press Enter to search
-        """
-
-        return True
-
-    async def read_latest_email(self) -> Optional[EmailMessage]:
-        """Read the latest email in the inbox.
-
-        Provides instructions for opening and reading the most recent
-        email in the inbox. The actual extraction of content is
-        performed by the browser automation agent.
-
-        Returns:
-            None. The agent is responsible for extracting the email
-            content using browser automation.
-
-        Note:
-            The agent should click on the first email in the inbox
-            and extract the sender, subject, and body content.
-        """
-        logger.info("Reading latest email")
-
-        read_instructions = """
-        To read the latest email:
-        1. Click on the first email in the inbox list
-        2. Extract the sender, subject, and body content
-        """
-
-        # The actual extraction is done by the agent
-        return None
-
-    async def reply_to_email(self, body: str) -> bool:
-        """Reply to the currently open email.
-
-        Provides instructions for replying to an email that is
-        currently open in the Gmail interface.
-
-        Args:
-            body: The reply message body content.
-
-        Returns:
-            True if the reply operation was initiated.
-            Actual sending depends on agent execution.
-
-        Note:
-            An email must be open in the Gmail interface before
-            calling this method.
-        """
-        logger.info("Replying to email")
-
-        reply_instructions = f"""
-        To reply to this email:
-        1. Click the Reply button
-        2. In the reply box, type: {body}
-        3. Click the Send button
-        """
-
-        return True
-
-    async def delete_email(self) -> bool:
-        """Delete the currently selected email.
-
-        Provides instructions for deleting the email that is
-        currently selected or open in Gmail.
-
-        Returns:
-            True if the delete operation was initiated.
-            Actual deletion depends on agent execution.
-
-        Note:
-            The email is moved to Trash, not permanently deleted.
-        """
-        logger.info("Deleting email")
-
-        delete_instructions = """
-        To delete this email:
-        1. Click the Delete (trash) button
-        """
-
-        return True
-
-    async def archive_email(self) -> bool:
-        """Archive the currently selected email.
-
-        Provides instructions for archiving the email that is
-        currently selected or open in Gmail.
-
-        Returns:
-            True if the archive operation was initiated.
-            Actual archiving depends on agent execution.
-
-        Note:
-            Archived emails are removed from the inbox but remain
-            accessible via search or the All Mail label.
-        """
-        logger.info("Archiving email")
-
-        archive_instructions = """
-        To archive this email:
-        1. Click the Archive button
-        """
-
-        return True
-
-    def get_gmail_actions(self) -> list[dict]:
-        """Get Gmail-specific actions for the agent.
-
-        Returns a list of action definitions that describe the
-        Gmail operations available to the automation agent.
-
-        Returns:
-            List of action dictionaries, each containing:
-            - name: The action identifier
-            - description: Human-readable description
-            - parameters: Dictionary of parameter definitions
-
-        Example:
-            ```python
-            actions = gmail.get_gmail_actions()
-            for action in actions:
-                print(f"{action['name']}: {action['description']}")
-            ```
-        """
-        return [
-            {
-                "name": "gmail_compose",
-                "description": "Compose a new email in Gmail",
-                "parameters": {
-                    "recipient": {"type": "string", "description": "Email recipient"},
-                    "subject": {"type": "string", "description": "Email subject"},
-                    "body": {"type": "string", "description": "Email body"},
-                },
-            },
-            {
-                "name": "gmail_search",
-                "description": "Search emails in Gmail",
-                "parameters": {
-                    "query": {"type": "string", "description": "Search query"},
-                },
-            },
-            {
-                "name": "gmail_reply",
-                "description": "Reply to the current email",
-                "parameters": {
-                    "body": {"type": "string", "description": "Reply message"},
-                },
-            },
-            {
-                "name": "gmail_delete",
-                "description": "Delete the current email",
-                "parameters": {},
-            },
-            {
-                "name": "gmail_archive",
-                "description": "Archive the current email",
-                "parameters": {},
-            },
-        ]
-
+class GmailService:
+	"""
+	Gmail API service for email reading.
+	Provides functionality to:
+	- Authenticate with Gmail API using OAuth2
+	- Read recent emails with filtering
+	- Return full email content for agent analysis
+	"""
+
+	# Gmail API scopes
+	SCOPES = ['https://www.googleapis.com/auth/gmail.readonly']
+
+	def __init__(
+		self,
+		credentials_file: str | None = None,
+		token_file: str | None = None,
+		config_dir: str | None = None,
+		access_token: str | None = None,
+	):
+		"""
+		Initialize Gmail Service
+		Args:
+		    credentials_file: Path to OAuth credentials JSON from Google Cloud Console
+		    token_file: Path to store/load access tokens
+		    config_dir: Directory to store config files (defaults to openbrowser config directory)
+		    access_token: Direct access token (skips file-based auth if provided)
+		"""
+		# Set up configuration directory using openbrowser's config system
+		if config_dir is None:
+			self.config_dir = CONFIG.OPENBROWSER_CONFIG_DIR
+		else:
+			self.config_dir = Path(config_dir).expanduser().resolve()
+
+		# Ensure config directory exists (only if not using direct token)
+		if access_token is None:
+			self.config_dir.mkdir(parents=True, exist_ok=True)
+
+		# Set up credential paths
+		self.credentials_file = credentials_file or self.config_dir / 'gmail_credentials.json'
+		self.token_file = token_file or self.config_dir / 'gmail_token.json'
+
+		# Direct access token support
+		self.access_token = access_token
+
+		self.service = None
+		self.creds = None
+		self._authenticated = False
+
+	def is_authenticated(self) -> bool:
+		"""Check if Gmail service is authenticated"""
+		return self._authenticated and self.service is not None
+
+	async def authenticate(self) -> bool:
+		"""
+		Handle OAuth authentication and token management
+		Returns:
+		    bool: True if authentication successful, False otherwise
+		"""
+		try:
+			logger.info('🔐 Authenticating with Gmail API...')
+
+			# Check if using direct access token
+			if self.access_token:
+				logger.info('🔑 Using provided access token')
+				# Create credentials from access token
+				self.creds = Credentials(token=self.access_token, scopes=self.SCOPES)
+				# Test token validity by building service
+				self.service = build('gmail', 'v1', credentials=self.creds)
+				self._authenticated = True
+				logger.info('✅ Gmail API ready with access token!')
+				return True
+
+			# Original file-based authentication flow
+			# Try to load existing tokens
+			if os.path.exists(self.token_file):
+				self.creds = Credentials.from_authorized_user_file(str(self.token_file), self.SCOPES)
+				logger.debug('📁 Loaded existing tokens')
+
+			# If no valid credentials, run OAuth flow
+			if not self.creds or not self.creds.valid:
+				if self.creds and self.creds.expired and self.creds.refresh_token:
+					logger.info('🔄 Refreshing expired tokens...')
+					self.creds.refresh(Request())
+				else:
+					logger.info('🌐 Starting OAuth flow...')
+					if not os.path.exists(self.credentials_file):
+						logger.error(
+							f'❌ Gmail credentials file not found: {self.credentials_file}\n'
+							'Please download it from Google Cloud Console:\n'
+							'1. Go to https://console.cloud.google.com/\n'
+							'2. APIs & Services > Credentials\n'
+							'3. Download OAuth 2.0 Client JSON\n'
+							f"4. Save as 'gmail_credentials.json' in {self.config_dir}/"
+						)
+						return False
+
+					flow = InstalledAppFlow.from_client_secrets_file(str(self.credentials_file), self.SCOPES)
+					# Use specific redirect URI to match OAuth credentials
+					self.creds = flow.run_local_server(port=8080, open_browser=True)
+
+				# Save tokens for next time
+				await anyio.Path(self.token_file).write_text(self.creds.to_json())
+				logger.info(f'💾 Tokens saved to {self.token_file}')
+
+			# Build Gmail service
+			self.service = build('gmail', 'v1', credentials=self.creds)
+			self._authenticated = True
+			logger.info('✅ Gmail API ready!')
+			return True
+
+		except Exception as e:
+			logger.error(f'❌ Gmail authentication failed: {e}')
+			return False
+
+	async def get_recent_emails(self, max_results: int = 10, query: str = '', time_filter: str = '1h') -> list[dict[str, Any]]:
+		"""
+		Get recent emails with optional query filter
+		Args:
+		    max_results: Maximum number of emails to fetch
+		    query: Gmail search query (e.g., 'from:noreply@example.com')
+		    time_filter: Time filter (e.g., '5m', '1h', '1d')
+		Returns:
+		    List of email dictionaries with parsed content
+		"""
+		if not self.is_authenticated():
+			logger.error('❌ Gmail service not authenticated. Call authenticate() first.')
+			return []
+
+		try:
+			# Add time filter to query if provided
+			if time_filter and 'newer_than:' not in query:
+				query = f'newer_than:{time_filter} {query}'.strip()
+
+			logger.info(f'📧 Fetching {max_results} recent emails...')
+			if query:
+				logger.debug(f'🔍 Query: {query}')
+
+			# Get message list
+			assert self.service is not None
+			results = self.service.users().messages().list(userId='me', maxResults=max_results, q=query).execute()
+
+			messages = results.get('messages', [])
+			if not messages:
+				logger.info('📭 No messages found')
+				return []
+
+			logger.info(f'📨 Found {len(messages)} messages, fetching details...')
+
+			# Get full message details
+			emails = []
+			for i, message in enumerate(messages, 1):
+				logger.debug(f'📖 Reading email {i}/{len(messages)}...')
+
+				full_message = self.service.users().messages().get(userId='me', id=message['id'], format='full').execute()
+
+				email_data = self._parse_email(full_message)
+				emails.append(email_data)
+
+			return emails
+
+		except HttpError as error:
+			logger.error(f'❌ Gmail API error: {error}')
+			return []
+		except Exception as e:
+			logger.error(f'❌ Unexpected error fetching emails: {e}')
+			return []
+
+	def _parse_email(self, message: dict[str, Any]) -> dict[str, Any]:
+		"""Parse Gmail message into readable format"""
+		headers = {h['name']: h['value'] for h in message['payload']['headers']}
+
+		return {
+			'id': message['id'],
+			'thread_id': message['threadId'],
+			'subject': headers.get('Subject', ''),
+			'from': headers.get('From', ''),
+			'to': headers.get('To', ''),
+			'date': headers.get('Date', ''),
+			'timestamp': int(message['internalDate']),
+			'body': self._extract_body(message['payload']),
+			'raw_message': message,
+		}
+
+	def _extract_body(self, payload: dict[str, Any]) -> str:
+		"""Extract email body from payload"""
+		body = ''
+
+		if payload.get('body', {}).get('data'):
+			# Simple email body
+			body = base64.urlsafe_b64decode(payload['body']['data']).decode('utf-8')
+		elif payload.get('parts'):
+			# Multi-part email
+			for part in payload['parts']:
+				if part['mimeType'] == 'text/plain' and part.get('body', {}).get('data'):
+					part_body = base64.urlsafe_b64decode(part['body']['data']).decode('utf-8')
+					body += part_body
+				elif part['mimeType'] == 'text/html' and not body and part.get('body', {}).get('data'):
+					# Fallback to HTML if no plain text
+					body = base64.urlsafe_b64decode(part['body']['data']).decode('utf-8')
+
+		return body

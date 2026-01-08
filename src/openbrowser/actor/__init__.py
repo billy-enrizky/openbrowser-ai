@@ -1,12 +1,11 @@
-"""Actor module for low-level browser interactions."""
+"""CDP-Use High-Level Library
 
-from openbrowser.actor.element import Element
-from openbrowser.actor.mouse import Mouse
-from openbrowser.actor.page import Page
+A Playwright-like library built on top of CDP (Chrome DevTools Protocol).
+"""
 
-__all__ = [
-    "Element",
-    "Mouse",
-    "Page",
-]
+from .element import Element
+from .mouse import Mouse
+from .page import Page
+from .utils import Utils
 
+__all__ = ['Page', 'Element', 'Mouse', 'Utils']
