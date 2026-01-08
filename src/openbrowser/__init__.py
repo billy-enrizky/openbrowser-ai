@@ -1,182 +1,176 @@
-"""OpenBrowser - A browser automation framework using CDP and LangGraph."""
+"""OpenBrowser - Browser automation with AI agents.
 
+Performance optimizations:
+- Lazy imports with caching (imports only when accessed)
+- Optimized __getattr__ with dict lookup instead of repeated conditionals
+- Minimal module-level imports
+- Event loop error handling patched at module load
+"""
+
+import os
 from typing import TYPE_CHECKING
 
-__version__ = "0.1.3"
+from openbrowser.logging_config import setup_logging
 
-# Core browser components - always available
-from openbrowser.browser.profile import BrowserProfile
-from openbrowser.browser.session import BrowserSession
+# Only set up logging if not in MCP mode or if explicitly requested
+if os.environ.get('OPENBROWSER_SETUP_LOGGING', 'true').lower() != 'false':
+	from openbrowser.config import CONFIG
 
-# Browser alias for cleaner API (matching browser-use pattern)
-Browser = BrowserSession
+	# Get log file paths from config/environment
+	debug_log_file = getattr(CONFIG, 'OPENBROWSER_DEBUG_LOG_FILE', None)
+	info_log_file = getattr(CONFIG, 'OPENBROWSER_INFO_LOG_FILE', None)
 
-# Agent components
-from openbrowser.agent import (
-    BrowserAgent,
-    AgentState,
-    ActionResult,
-    AgentBrain,
-    AgentError,
-    AgentHistory,
-    AgentHistoryList,
-    AgentOutput,
-    AgentSettings,
-    AgentStepInfo,
-    BrowserStateHistory,
-    StepMetadata,
-    SystemPrompt,
-    AgentMessagePrompt,
-    MessageManager,
-    MessageManagerState,
-    DEFAULT_INCLUDE_ATTRIBUTES,
-)
+	# Set up logging with file handlers if specified
+	logger = setup_logging(debug_log_file=debug_log_file, info_log_file=info_log_file)
+else:
+	import logging
 
-# Tools
-from openbrowser.tools.actions import Tools
+	logger = logging.getLogger('openbrowser')
 
-# Controller alias for backward compatibility
-Controller = Tools
+# Monkeypatch BaseSubprocessTransport.__del__ to handle closed event loops gracefully
+from asyncio import base_subprocess
 
-# DOM Service
-from openbrowser.browser.dom import DomService
+_original_del = base_subprocess.BaseSubprocessTransport.__del__
 
-# Lazy imports for heavier modules
+
+def _patched_del(self):
+	"""Patched __del__ that handles closed event loops without throwing noisy red-herring errors like RuntimeError: Event loop is closed"""
+	try:
+		# Check if the event loop is closed before calling the original
+		if hasattr(self, '_loop') and self._loop and self._loop.is_closed():
+			# Event loop is closed, skip cleanup that requires the loop
+			return
+		_original_del(self)
+	except RuntimeError as e:
+		if 'Event loop is closed' in str(e):
+			# Silently ignore this specific error
+			pass
+		else:
+			raise
+
+
+base_subprocess.BaseSubprocessTransport.__del__ = _patched_del
+
+
+# Type stubs for lazy imports - fixes linter warnings
 if TYPE_CHECKING:
-    from openbrowser.llm import (
-        BaseChatModel,
-        ChatAnthropic,
-        ChatAWSBedrock,
-        ChatAzureOpenAI,
-        ChatBrowserUse,
-        ChatCerebras,
-        ChatDeepSeek,
-        ChatGoogle,
-        ChatGroq,
-        ChatOCI,
-        ChatOllama,
-        ChatOpenAI,
-        ChatOpenRouter,
-        get_llm_by_name,
-    )
-    from openbrowser.code_use import CodeAgent, create_namespace
-    from openbrowser.filesystem import FileSystem
-    from openbrowser.tokens import TokenCost
-    from openbrowser.screenshots import ScreenshotService
-    from openbrowser.telemetry import ProductTelemetry
+	from openbrowser.agent.prompts import SystemPrompt
+	from openbrowser.agent.service import Agent
+	from openbrowser.agent.service import Agent as BrowserAgent  # Alias
 
-_LAZY_IMPORTS = {
-    # LLM
-    'BaseChatModel': ('openbrowser.llm', 'BaseChatModel'),
-    'ChatAnthropic': ('openbrowser.llm', 'ChatAnthropic'),
-    'ChatAWSBedrock': ('openbrowser.llm', 'ChatAWSBedrock'),
-    'ChatAzureOpenAI': ('openbrowser.llm', 'ChatAzureOpenAI'),
-    'ChatBrowserUse': ('openbrowser.llm', 'ChatBrowserUse'),
-    'ChatCerebras': ('openbrowser.llm', 'ChatCerebras'),
-    'ChatDeepSeek': ('openbrowser.llm', 'ChatDeepSeek'),
-    'ChatGoogle': ('openbrowser.llm', 'ChatGoogle'),
-    'ChatGroq': ('openbrowser.llm', 'ChatGroq'),
-    'ChatOCI': ('openbrowser.llm', 'ChatOCI'),
-    'ChatOllama': ('openbrowser.llm', 'ChatOllama'),
-    'ChatOpenAI': ('openbrowser.llm', 'ChatOpenAI'),
-    'ChatOpenRouter': ('openbrowser.llm', 'ChatOpenRouter'),
-    'get_llm_by_name': ('openbrowser.llm', 'get_llm_by_name'),
-    # Code use
-    'CodeAgent': ('openbrowser.code_use', 'CodeAgent'),
-    'create_namespace': ('openbrowser.code_use', 'create_namespace'),
-    # Filesystem
-    'FileSystem': ('openbrowser.filesystem', 'FileSystem'),
-    # Tokens
-    'TokenCost': ('openbrowser.tokens', 'TokenCost'),
-    # Screenshots
-    'ScreenshotService': ('openbrowser.screenshots', 'ScreenshotService'),
-    # Telemetry
-    'ProductTelemetry': ('openbrowser.telemetry', 'ProductTelemetry'),
+	# from openbrowser.agent.service import Agent
+	from openbrowser.agent.views import ActionModel, ActionResult, AgentHistoryList
+	from openbrowser.browser import BrowserProfile, BrowserSession
+	from openbrowser.browser import BrowserSession as Browser
+	from openbrowser.code_use.service import CodeAgent
+	from openbrowser.dom.service import DomService
+	from openbrowser.llm import models
+	from openbrowser.llm.anthropic.chat import ChatAnthropic
+	from openbrowser.llm.azure.chat import ChatAzureOpenAI
+	from openbrowser.llm.browser_use.chat import ChatBrowserUse
+	from openbrowser.llm.google.chat import ChatGoogle
+	from openbrowser.llm.groq.chat import ChatGroq
+	from openbrowser.llm.oci_raw.chat import ChatOCIRaw
+	from openbrowser.llm.ollama.chat import ChatOllama
+	from openbrowser.llm.openai.chat import ChatOpenAI
+	from openbrowser.tools.service import Controller, Tools
+
+
+# Lazy imports mapping - only import when actually accessed
+# Format: name -> (module_path, attr_name) where attr_name=None means return module itself
+_LAZY_IMPORTS: dict[str, tuple[str, str | None]] = {
+	# Agent service (heavy due to dependencies)
+	'Agent': ('openbrowser.agent.service', 'Agent'),
+	'BrowserAgent': ('openbrowser.agent.service', 'Agent'),  # Alias for backward compatibility
+	# Code-use agent (Jupyter notebook-like execution)
+	'CodeAgent': ('openbrowser.code_use.service', 'CodeAgent'),
+	# System prompt (moderate weight due to agent.views imports)
+	'SystemPrompt': ('openbrowser.agent.prompts', 'SystemPrompt'),
+	# Agent views (very heavy - over 1 second!)
+	'ActionModel': ('openbrowser.agent.views', 'ActionModel'),
+	'ActionResult': ('openbrowser.agent.views', 'ActionResult'),
+	'AgentHistoryList': ('openbrowser.agent.views', 'AgentHistoryList'),
+	# Browser session
+	'BrowserSession': ('openbrowser.browser', 'BrowserSession'),
+	'Browser': ('openbrowser.browser', 'BrowserSession'),  # Alias for BrowserSession
+	'BrowserProfile': ('openbrowser.browser', 'BrowserProfile'),
+	# Tools (moderate weight)
+	'Tools': ('openbrowser.tools.service', 'Tools'),
+	'Controller': ('openbrowser.tools.service', 'Controller'),  # alias
+	# DOM service (moderate weight)
+	'DomService': ('openbrowser.dom.service', 'DomService'),
+	# Chat models (very heavy imports)
+	'ChatOpenAI': ('openbrowser.llm.openai.chat', 'ChatOpenAI'),
+	'ChatGoogle': ('openbrowser.llm.google.chat', 'ChatGoogle'),
+	'ChatAnthropic': ('openbrowser.llm.anthropic.chat', 'ChatAnthropic'),
+	'ChatBrowserUse': ('openbrowser.llm.browser_use.chat', 'ChatBrowserUse'),
+	'ChatGroq': ('openbrowser.llm.groq.chat', 'ChatGroq'),
+	'ChatAzureOpenAI': ('openbrowser.llm.azure.chat', 'ChatAzureOpenAI'),
+	'ChatOCIRaw': ('openbrowser.llm.oci_raw.chat', 'ChatOCIRaw'),
+	'ChatOllama': ('openbrowser.llm.ollama.chat', 'ChatOllama'),
+	# LLM models module
+	'models': ('openbrowser.llm.models', None),
 }
+
+# Cache for imported modules/attributes
+_import_cache: dict[str, object] = {}
 
 
 def __getattr__(name: str):
-    """Lazy import mechanism for heavy modules.
-    
-    This function enables lazy loading of resource-intensive modules like LLM
-    providers, code execution tools, and telemetry. Modules are only imported
-    when first accessed, reducing startup time and memory usage.
-    
-    Args:
-        name: The name of the attribute being accessed.
-        
-    Returns:
-        The requested module attribute.
-        
-    Raises:
-        AttributeError: If the attribute is not found in the module.
-        
-    Example:
-        >>> from openbrowser import ChatOpenAI  # Only imports when accessed
-        >>> llm = ChatOpenAI(model="gpt-4o")
-    """
-    if name in _LAZY_IMPORTS:
-        module_path, attr_name = _LAZY_IMPORTS[name]
-        import importlib
-        module = importlib.import_module(module_path)
-        return getattr(module, attr_name)
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+	"""Lazy import mechanism - only import modules when they're actually accessed.
+	
+	Optimized with caching to avoid repeated imports.
+	"""
+	# Check cache first (fast path)
+	if name in _import_cache:
+		return _import_cache[name]
+	
+	# Check if it's a lazy import
+	if name in _LAZY_IMPORTS:
+		module_path, attr_name = _LAZY_IMPORTS[name]
+		try:
+			from importlib import import_module
+
+			module = import_module(module_path)
+			if attr_name is None:
+				# For modules like 'models', return the module itself
+				attr = module
+			else:
+				attr = getattr(module, attr_name)
+			# Cache the imported attribute
+			_import_cache[name] = attr
+			globals()[name] = attr
+			return attr
+		except ImportError as e:
+			raise ImportError(f'Failed to import {name} from {module_path}: {e}') from e
+
+	raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
 
 
 __all__ = [
-    # Version
-    "__version__",
-    # Browser
-    "BrowserProfile",
-    "BrowserSession",
-    "Browser",  # Alias for BrowserSession
-    # Agent
-    "BrowserAgent",
-    "AgentState",
-    "ActionResult",
-    "AgentBrain",
-    "AgentError",
-    "AgentHistory",
-    "AgentHistoryList",
-    "AgentOutput",
-    "AgentSettings",
-    "AgentStepInfo",
-    "BrowserStateHistory",
-    "StepMetadata",
-    "SystemPrompt",
-    "AgentMessagePrompt",
-    "MessageManager",
-    "MessageManagerState",
-    "DEFAULT_INCLUDE_ATTRIBUTES",
-    # Tools
-    "Tools",
-    "Controller",  # Alias for Tools
-    # DOM
-    "DomService",
-    # LLM (lazy)
-    "BaseChatModel",
-    "ChatAnthropic",
-    "ChatAWSBedrock",
-    "ChatAzureOpenAI",
-    "ChatBrowserUse",
-    "ChatCerebras",
-    "ChatDeepSeek",
-    "ChatGoogle",
-    "ChatGroq",
-    "ChatOCI",
-    "ChatOllama",
-    "ChatOpenAI",
-    "ChatOpenRouter",
-    "get_llm_by_name",
-    # Code use (lazy)
-    "CodeAgent",
-    "create_namespace",
-    # Filesystem (lazy)
-    "FileSystem",
-    # Tokens (lazy)
-    "TokenCost",
-    # Screenshots (lazy)
-    "ScreenshotService",
-    # Telemetry (lazy)
-    "ProductTelemetry",
+	'Agent',
+	'BrowserAgent',  # Alias for Agent
+	'CodeAgent',
+	'BrowserSession',
+	'Browser',  # Alias for BrowserSession
+	'BrowserProfile',
+	'Controller',
+	'DomService',
+	'SystemPrompt',
+	'ActionResult',
+	'ActionModel',
+	'AgentHistoryList',
+	# Chat models
+	'ChatOpenAI',
+	'ChatGoogle',
+	'ChatAnthropic',
+	'ChatBrowserUse',
+	'ChatGroq',
+	'ChatAzureOpenAI',
+	'ChatOCIRaw',
+	'ChatOllama',
+	'Tools',
+	'Controller',
+	# LLM models module
+	'models',
 ]

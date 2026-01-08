@@ -1,527 +1,449 @@
-"""Event definitions for browser communication.
+"""Event definitions for browser communication."""
 
-This module defines all event types used in the event-driven browser architecture.
-Events are dispatched via bubus EventBus to coordinate actions between browser
-components, watchdogs, and external consumers.
-
-Event Categories:
-    Browser Lifecycle: BrowserStartEvent, BrowserStopEvent, BrowserConnectedEvent, etc.
-    Navigation: NavigateToUrlEvent, NavigationStartedEvent, NavigationCompleteEvent
-    Tab Management: TabCreatedEvent, TabClosedEvent, SwitchTabEvent, CloseTabEvent
-    Browser Actions: ClickElementEvent, TypeTextEvent, PressKeyEvent, ScreenshotEvent
-    File Downloads: FileDownloadedEvent
-    Storage State: SaveStorageStateEvent, LoadStorageStateEvent
-    Errors: BrowserErrorEvent
-
-Each event class inherits from bubus.BaseEvent and may specify:
-    - Typed result (generic parameter)
-    - Event-specific timeout via event_timeout
-    - Pydantic fields for event data
-
-Timeouts can be overridden via environment variables (e.g., TIMEOUT_NavigateToUrlEvent).
-
-Example:
-    >>> from openbrowser.browser.events import NavigateToUrlEvent
-    >>> event = NavigateToUrlEvent(url='https://example.com', new_tab=True)
-    >>> await event_bus.dispatch(event)
-"""
-
+import inspect
 import os
 from typing import Any, Literal
 
 from bubus import BaseEvent
 from bubus.models import T_EventResultType
 from cdp_use.cdp.target import TargetID
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from openbrowser.browser.views import BrowserStateSummary
+from openbrowser.dom.views import EnhancedDOMTreeNode
 
 
 def _get_timeout(env_var: str, default: float) -> float | None:
-    """Safely parse environment variable timeout values with robust error handling.
+	"""
+	Safely parse environment variable timeout values with robust error handling.
 
-    Retrieves timeout value from environment variable, falling back to default
-    if not set or invalid.
+	Args:
+		env_var: Environment variable name (e.g. 'TIMEOUT_NavigateToUrlEvent')
+		default: Default timeout value as float (e.g. 15.0)
 
-    Args:
-        env_var: Environment variable name (e.g., 'TIMEOUT_NavigateToUrlEvent').
-        default: Default timeout value as float (e.g., 15.0).
+	Returns:
+		Parsed float value or the default if parsing fails
 
-    Returns:
-        Parsed float value from environment, or default if parsing fails
-        or value is negative.
+	Raises:
+		ValueError: Only if both env_var and default are invalid (should not happen with valid defaults)
+	"""
+	# Try environment variable first
+	env_value = os.getenv(env_var)
+	if env_value:
+		try:
+			parsed = float(env_value)
+			if parsed < 0:
+				print(f'Warning: {env_var}={env_value} is negative, using default {default}')
+				return default
+			return parsed
+		except (ValueError, TypeError):
+			print(f'Warning: {env_var}={env_value} is not a valid number, using default {default}')
 
-    Example:
-        >>> os.environ['TIMEOUT_MyEvent'] = '30.0'
-        >>> _get_timeout('TIMEOUT_MyEvent', 10.0)
-        30.0
-    """
-    env_value = os.getenv(env_var)
-    if env_value:
-        try:
-            parsed = float(env_value)
-            if parsed < 0:
-                return default
-            return parsed
-        except (ValueError, TypeError):
-            pass
-
-    return default
+	# Fall back to default
+	return default
 
 
 # ============================================================================
-# Browser Lifecycle Events
+# Agent/Tools -> BrowserSession Events (High-level browser actions)
 # ============================================================================
 
 
-class BrowserStartEvent(BaseEvent[dict[str, str]]):
-    """Event to start or connect to a browser.
+class ElementSelectedEvent(BaseEvent[T_EventResultType]):
+	"""An element was selected."""
 
-    Triggers browser launch and CDP connection establishment.
-    Returns dict with 'cdp_url' on success.
+	node: EnhancedDOMTreeNode
 
-    Attributes:
-        cdp_url: Optional CDP URL for connecting to existing browser.
-        launch_options: Additional options for browser launch.
-        event_timeout: Timeout for event handling (default: 30s).
-    """
-
-    cdp_url: str | None = None
-    launch_options: dict[str, Any] = Field(default_factory=dict)
-
-    event_timeout: float | None = _get_timeout('TIMEOUT_BrowserStartEvent', 30.0)
-
-
-class BrowserStopEvent(BaseEvent[None]):
-    """Event to stop or disconnect from browser.
-
-    Triggers browser shutdown and cleanup.
-
-    Attributes:
-        force: If True, forcefully kill browser process.
-            If False, keep browser alive for potential reattachment.
-        event_timeout: Timeout for event handling (default: 45s).
-    """
-
-    force: bool = False
-
-    event_timeout: float | None = _get_timeout('TIMEOUT_BrowserStopEvent', 45.0)
-
-
-class BrowserLaunchResult(BaseModel):
-    """Result of launching a browser process.
-
-    Returned by BrowserLaunchEvent handlers to communicate
-    the CDP WebSocket URL.
-
-    Attributes:
-        cdp_url: WebSocket URL for CDP connection.
-    """
-
-    cdp_url: str
+	@field_validator('node', mode='before')
+	@classmethod
+	def serialize_node(cls, data: EnhancedDOMTreeNode | None) -> EnhancedDOMTreeNode | None:
+		if data is None:
+			return None
+		return EnhancedDOMTreeNode(
+			node_id=data.node_id,
+			backend_node_id=data.backend_node_id,
+			session_id=data.session_id,
+			frame_id=data.frame_id,
+			target_id=data.target_id,
+			node_type=data.node_type,
+			node_name=data.node_name,
+			node_value=data.node_value,
+			attributes=data.attributes,
+			is_scrollable=data.is_scrollable,
+			is_visible=data.is_visible,
+			absolute_position=data.absolute_position,
+			# override the circular reference fields in EnhancedDOMTreeNode as they cant be serialized and aren't needed by event handlers
+			# only used internally by the DOM service during DOM tree building process, not intended public API use
+			content_document=None,
+			shadow_root_type=None,
+			shadow_roots=[],
+			parent_node=None,
+			children_nodes=[],
+			ax_node=None,
+			snapshot_node=None,
+		)
 
 
-class BrowserLaunchEvent(BaseEvent[BrowserLaunchResult]):
-    """Event to launch a local browser process.
+# TODO: add page handle to events
+# class PageHandle(share a base with browser.session.CDPSession?):
+# 	url: str
+# 	target_id: TargetID
+#   @classmethod
+#   def from_target_id(cls, target_id: TargetID) -> Self:
+#     return cls(target_id=target_id)
+#   @classmethod
+#   def from_target_id(cls, target_id: TargetID) -> Self:
+#     return cls(target_id=target_id)
+#   @classmethod
+#   def from_url(cls, url: str) -> Self:
+#   @property
+#   def root_frame_id(self) -> str:
+#     return self.target_id
+#   @property
+#   def session_id(self) -> str:
+#     return browser_session.get_or_create_cdp_session(self.target_id).session_id
 
-    Handled by LocalBrowserWatchdog to spawn Chrome subprocess.
-    Returns BrowserLaunchResult with CDP URL on success.
-
-    Attributes:
-        event_timeout: Timeout for browser launch (default: 30s).
-    """
-
-    event_timeout: float | None = _get_timeout('TIMEOUT_BrowserLaunchEvent', 30.0)
-
-
-class BrowserKillEvent(BaseEvent[None]):
-    """Event to kill local browser subprocess.
-
-    Forcefully terminates the browser process. Used when force=True
-    in BrowserStopEvent.
-
-    Attributes:
-        event_timeout: Timeout for process termination (default: 30s).
-    """
-
-    event_timeout: float | None = _get_timeout('TIMEOUT_BrowserKillEvent', 30.0)
-
-
-class BrowserConnectedEvent(BaseEvent[None]):
-    """Event indicating browser has started and CDP is connected.
-
-    Dispatched after successful browser launch and CDP connection.
-    Watchdogs listen to this to initialize their functionality.
-
-    Attributes:
-        cdp_url: The CDP WebSocket URL of the connected browser.
-        event_timeout: Timeout for event handling (default: 30s).
-    """
-
-    cdp_url: str
-
-    event_timeout: float | None = _get_timeout('TIMEOUT_BrowserConnectedEvent', 30.0)
-
-
-class BrowserStoppedEvent(BaseEvent[None]):
-    """Event indicating browser has stopped or disconnected.
-
-    Dispatched when browser session ends. Watchdogs listen to this
-    for cleanup.
-
-    Attributes:
-        reason: Optional description of why browser stopped.
-        event_timeout: Timeout for event handling (default: 30s).
-    """
-
-    reason: str | None = None
-
-    event_timeout: float | None = _get_timeout('TIMEOUT_BrowserStoppedEvent', 30.0)
-
-
-# ============================================================================
-# Navigation Events
-# ============================================================================
+# class PageSelectedEvent(BaseEvent[T_EventResultType]):
+# 	"""An event like SwitchToTabEvent(page=PageHandle) or CloseTabEvent(page=PageHandle)"""
+# 	page: PageHandle
 
 
 class NavigateToUrlEvent(BaseEvent[None]):
-    """Event to navigate to a specific URL.
+	"""Navigate to a specific URL."""
 
-    Triggers page navigation in the browser. Can optionally open
-    in a new tab.
+	url: str
+	wait_until: Literal['load', 'domcontentloaded', 'networkidle', 'commit'] = 'load'
+	timeout_ms: int | None = None
+	new_tab: bool = Field(
+		default=False, description='Set True to leave the current tab alone and open a new tab in the foreground for the new URL'
+	)
+	# existing_tab: PageHandle | None = None  # TODO
 
-    Attributes:
-        url: The URL to navigate to.
-        wait_until: Navigation completion condition ('load', 'domcontentloaded',
-            'networkidle', 'commit').
-        timeout_ms: Optional navigation timeout in milliseconds.
-        new_tab: If True, opens URL in a new tab.
-        event_timeout: Timeout for navigation (default: 15s).
-    """
-
-    url: str
-    wait_until: Literal['load', 'domcontentloaded', 'networkidle', 'commit'] = 'load'
-    timeout_ms: int | None = None
-    new_tab: bool = Field(
-        default=False, description='Set True to open URL in a new tab'
-    )
-
-    event_timeout: float | None = _get_timeout('TIMEOUT_NavigateToUrlEvent', 15.0)
+	# time limits enforced by bubus, not exposed to LLM:
+	event_timeout: float | None = _get_timeout('TIMEOUT_NavigateToUrlEvent', 15.0)  # seconds
 
 
-class NavigationStartedEvent(BaseEvent[None]):
-    """Event indicating navigation has started.
+class ClickElementEvent(ElementSelectedEvent[dict[str, Any] | None]):
+	"""Click an element."""
 
-    Dispatched just before Page.navigate CDP command is sent.
+	node: 'EnhancedDOMTreeNode'
+	button: Literal['left', 'right', 'middle'] = 'left'
+	# click_count: int = 1           # TODO
+	# expect_download: bool = False  # moved to downloads_watchdog.py
 
-    Attributes:
-        target_id: CDP target ID of the navigating page.
-        url: The URL being navigated to.
-        event_timeout: Timeout for event handling (default: 30s).
-    """
-
-    target_id: TargetID
-    url: str
-
-    event_timeout: float | None = _get_timeout('TIMEOUT_NavigationStartedEvent', 30.0)
+	event_timeout: float | None = _get_timeout('TIMEOUT_ClickElementEvent', 15.0)  # seconds
 
 
-class NavigationCompleteEvent(BaseEvent[None]):
-    """Event indicating navigation has completed.
+class TypeTextEvent(ElementSelectedEvent[dict | None]):
+	"""Type text into an element."""
 
-    Dispatched after page load completes. SecurityWatchdog uses this
-    to check for redirect violations.
+	node: 'EnhancedDOMTreeNode'
+	text: str
+	clear: bool = True
+	is_sensitive: bool = False  # Flag to indicate if text contains sensitive data
+	sensitive_key_name: str | None = None  # Name of the sensitive key being typed (e.g., 'username', 'password')
 
-    Attributes:
-        target_id: CDP target ID of the navigated page.
-        url: The final URL after navigation (may differ due to redirects).
-        status: HTTP status code of the navigation response.
-        error_message: Error message if navigation failed.
-        event_timeout: Timeout for event handling (default: 30s).
-    """
-
-    target_id: TargetID
-    url: str
-    status: int | None = None
-    error_message: str | None = None
-
-    event_timeout: float | None = _get_timeout('TIMEOUT_NavigationCompleteEvent', 30.0)
+	event_timeout: float | None = _get_timeout('TIMEOUT_TypeTextEvent', 15.0)  # seconds
 
 
-# ============================================================================
-# Tab Management Events
-# ============================================================================
+class ScrollEvent(ElementSelectedEvent[None]):
+	"""Scroll the page or element."""
 
+	direction: Literal['up', 'down', 'left', 'right']
+	amount: int  # pixels
+	node: 'EnhancedDOMTreeNode | None' = None  # None means scroll page
 
-class TabCreatedEvent(BaseEvent[None]):
-    """Event indicating a new tab was created.
-
-    Dispatched when a new browser tab or popup is opened.
-    Watchdogs can use this to set up per-tab functionality.
-
-    Attributes:
-        target_id: CDP target ID of the new tab.
-        url: Initial URL of the new tab.
-        event_timeout: Timeout for event handling (default: 30s).
-    """
-
-    target_id: TargetID
-    url: str
-
-    event_timeout: float | None = _get_timeout('TIMEOUT_TabCreatedEvent', 30.0)
-
-
-class TabClosedEvent(BaseEvent[None]):
-    """Event indicating a tab was closed.
-
-    Dispatched when a browser tab is closed. Used for cleanup.
-
-    Attributes:
-        target_id: CDP target ID of the closed tab.
-        event_timeout: Timeout for event handling (default: 10s).
-    """
-
-    target_id: TargetID
-
-    event_timeout: float | None = _get_timeout('TIMEOUT_TabClosedEvent', 10.0)
+	event_timeout: float | None = _get_timeout('TIMEOUT_ScrollEvent', 8.0)  # seconds
 
 
 class SwitchTabEvent(BaseEvent[TargetID]):
-    """Event to switch to a different tab.
+	"""Switch to a different tab."""
 
-    Triggers agent focus change and visual tab activation.
-    Returns the target_id of the switched-to tab.
+	target_id: TargetID | None = Field(default=None, description='None means switch to the most recently opened tab')
 
-    Attributes:
-        target_id: CDP target ID to switch to. If None, switches to
-            the most recently opened tab.
-        event_timeout: Timeout for tab switch (default: 10s).
-    """
-
-    target_id: TargetID | None = Field(
-        default=None, description='None means switch to the most recently opened tab'
-    )
-
-    event_timeout: float | None = _get_timeout('TIMEOUT_SwitchTabEvent', 10.0)
+	event_timeout: float | None = _get_timeout('TIMEOUT_SwitchTabEvent', 10.0)  # seconds
 
 
 class CloseTabEvent(BaseEvent[None]):
-    """Event to close a tab.
+	"""Close a tab."""
 
-    Triggers tab closure via CDP Target.closeTarget.
+	target_id: TargetID
 
-    Attributes:
-        target_id: CDP target ID of the tab to close.
-        event_timeout: Timeout for tab closure (default: 10s).
-    """
-
-    target_id: TargetID
-
-    event_timeout: float | None = _get_timeout('TIMEOUT_CloseTabEvent', 10.0)
-
-
-class AgentFocusChangedEvent(BaseEvent[None]):
-    """Event indicating agent focus changed to a different tab.
-
-    Dispatched when the browser session switches which tab is
-    the "active" target for agent interactions.
-
-    Attributes:
-        target_id: CDP target ID of the newly focused tab.
-        url: URL of the newly focused tab.
-        event_timeout: Timeout for event handling (default: 10s).
-    """
-
-    target_id: TargetID
-    url: str
-
-    event_timeout: float | None = _get_timeout('TIMEOUT_AgentFocusChangedEvent', 10.0)
-
-
-# ============================================================================
-# Browser Action Events
-# ============================================================================
-
-
-class ClickElementEvent(BaseEvent[dict[str, Any] | None]):
-    """Event to click an element by index.
-
-    Triggers element click using the selector map from DOM state.
-    Returns dict with click result or None.
-
-    Attributes:
-        index: Element index from the serialized DOM tree.
-        button: Mouse button to use ('left', 'right', 'middle').
-        event_timeout: Timeout for click action (default: 15s).
-    """
-
-    index: int
-    button: Literal['left', 'right', 'middle'] = 'left'
-
-    event_timeout: float | None = _get_timeout('TIMEOUT_ClickElementEvent', 15.0)
-
-
-class TypeTextEvent(BaseEvent[dict | None]):
-    """Event to type text into an element by index.
-
-    Triggers text input into the specified element.
-
-    Attributes:
-        index: Element index from the serialized DOM tree.
-        text: Text content to type.
-        clear: If True, clears existing content before typing.
-        event_timeout: Timeout for typing action (default: 15s).
-    """
-
-    index: int
-    text: str
-    clear: bool = True
-
-    event_timeout: float | None = _get_timeout('TIMEOUT_TypeTextEvent', 15.0)
-
-
-class PressKeyEvent(BaseEvent[None]):
-    """Event to press a keyboard key.
-
-    Triggers keyboard key press via CDP Input.dispatchKeyEvent.
-
-    Attributes:
-        key: Key identifier (e.g., 'Enter', 'Tab', 'Escape', 'ArrowDown').
-            Uses DOM key values.
-        event_timeout: Timeout for key press (default: 15s).
-    """
-
-    key: str  # e.g., "Enter", "Tab", "Escape", "ArrowDown", "ArrowUp"
-
-    event_timeout: float | None = _get_timeout('TIMEOUT_PressKeyEvent', 15.0)
-
-
-# ============================================================================
-# Browser State Events
-# ============================================================================
+	event_timeout: float | None = _get_timeout('TIMEOUT_CloseTabEvent', 10.0)  # seconds
 
 
 class ScreenshotEvent(BaseEvent[str]):
-    """Event to request a screenshot.
+	"""Request to take a screenshot."""
 
-    Triggers screenshot capture via CDP Page.captureScreenshot.
-    Returns base64-encoded image data.
+	full_page: bool = False
+	clip: dict[str, float] | None = None  # {x, y, width, height}
 
-    Attributes:
-        full_page: If True, captures entire scrollable page.
-        clip: Optional dict with {x, y, width, height} for partial capture.
-        event_timeout: Timeout for screenshot (default: 8s).
-    """
+	event_timeout: float | None = _get_timeout('TIMEOUT_ScreenshotEvent', 8.0)  # seconds
 
-    full_page: bool = False
-    clip: dict[str, float] | None = None  # {x, y, width, height}
 
-    event_timeout: float | None = _get_timeout('TIMEOUT_ScreenshotEvent', 8.0)
+class BrowserStateRequestEvent(BaseEvent[BrowserStateSummary]):
+	"""Request current browser state."""
+
+	include_dom: bool = True
+	include_screenshot: bool = True
+	include_recent_events: bool = False
+
+	event_timeout: float | None = _get_timeout('TIMEOUT_BrowserStateRequestEvent', 30.0)  # seconds
+
+
+# class WaitForConditionEvent(BaseEvent):
+# 	"""Wait for a condition."""
+
+# 	condition: Literal['navigation', 'selector', 'timeout', 'load_state']
+# 	timeout: float = 30000
+# 	selector: str | None = None
+# 	state: Literal['attached', 'detached', 'visible', 'hidden'] | None = None
+
+
+class GoBackEvent(BaseEvent[None]):
+	"""Navigate back in browser history."""
+
+	event_timeout: float | None = _get_timeout('TIMEOUT_GoBackEvent', 15.0)  # seconds
+
+
+class GoForwardEvent(BaseEvent[None]):
+	"""Navigate forward in browser history."""
+
+	event_timeout: float | None = _get_timeout('TIMEOUT_GoForwardEvent', 15.0)  # seconds
+
+
+class RefreshEvent(BaseEvent[None]):
+	"""Refresh/reload the current page."""
+
+	event_timeout: float | None = _get_timeout('TIMEOUT_RefreshEvent', 15.0)  # seconds
+
+
+class WaitEvent(BaseEvent[None]):
+	"""Wait for a specified number of seconds."""
+
+	seconds: float = 3.0
+	max_seconds: float = 10.0  # Safety cap
+
+	event_timeout: float | None = _get_timeout('TIMEOUT_WaitEvent', 60.0)  # seconds
+
+
+class SendKeysEvent(BaseEvent[None]):
+	"""Send keyboard keys/shortcuts."""
+
+	keys: str  # e.g., "ctrl+a", "cmd+c", "Enter"
+
+	event_timeout: float | None = _get_timeout('TIMEOUT_SendKeysEvent', 15.0)  # seconds
+
+
+class UploadFileEvent(ElementSelectedEvent[None]):
+	"""Upload a file to an element."""
+
+	node: 'EnhancedDOMTreeNode'
+	file_path: str
+
+	event_timeout: float | None = _get_timeout('TIMEOUT_UploadFileEvent', 30.0)  # seconds
+
+
+class GetDropdownOptionsEvent(ElementSelectedEvent[dict[str, str]]):
+	"""Get all options from any dropdown (native <select>, ARIA menus, or custom dropdowns).
+
+	Returns a dict containing dropdown type, options list, and element metadata."""
+
+	node: 'EnhancedDOMTreeNode'
+
+	event_timeout: float | None = _get_timeout(
+		'TIMEOUT_GetDropdownOptionsEvent',
+		15.0,
+	)  # some dropdowns lazy-load the list of options on first interaction, so we need to wait for them to load (e.g. table filter lists can have thousands of options)
+
+
+class SelectDropdownOptionEvent(ElementSelectedEvent[dict[str, str]]):
+	"""Select a dropdown option by exact text from any dropdown type.
+
+	Returns a dict containing success status and selection details."""
+
+	node: 'EnhancedDOMTreeNode'
+	text: str  # The option text to select
+
+	event_timeout: float | None = _get_timeout('TIMEOUT_SelectDropdownOptionEvent', 8.0)  # seconds
+
+
+class ScrollToTextEvent(BaseEvent[None]):
+	"""Scroll to specific text on the page. Raises exception if text not found."""
+
+	text: str
+	direction: Literal['up', 'down'] = 'down'
+
+	event_timeout: float | None = _get_timeout('TIMEOUT_ScrollToTextEvent', 15.0)  # seconds
 
 
 # ============================================================================
-# File Download Events
+
+
+class BrowserStartEvent(BaseEvent):
+	"""Start/connect to browser."""
+
+	cdp_url: str | None = None
+	launch_options: dict[str, Any] = Field(default_factory=dict)
+
+	event_timeout: float | None = _get_timeout('TIMEOUT_BrowserStartEvent', 30.0)  # seconds
+
+
+class BrowserStopEvent(BaseEvent):
+	"""Stop/disconnect from browser."""
+
+	force: bool = False
+
+	event_timeout: float | None = _get_timeout('TIMEOUT_BrowserStopEvent', 45.0)  # seconds
+
+
+class BrowserLaunchResult(BaseModel):
+	"""Result of launching a browser."""
+
+	# TODO: add browser executable_path, pid, version, latency, user_data_dir, X11 $DISPLAY, host IP address, etc.
+	cdp_url: str
+
+
+class BrowserLaunchEvent(BaseEvent[BrowserLaunchResult]):
+	"""Launch a local browser process."""
+
+	# TODO: add executable_path, proxy settings, preferences, extra launch args, etc.
+
+	event_timeout: float | None = _get_timeout('TIMEOUT_BrowserLaunchEvent', 30.0)  # seconds
+
+
+class BrowserKillEvent(BaseEvent):
+	"""Kill local browser subprocess."""
+
+	event_timeout: float | None = _get_timeout('TIMEOUT_BrowserKillEvent', 30.0)  # seconds
+
+
+# TODO: replace all Runtime.evaluate() calls with this event
+# class ExecuteJavaScriptEvent(BaseEvent):
+# 	"""Execute JavaScript in page context."""
+
+# 	target_id: TargetID
+# 	expression: str
+# 	await_promise: bool = True
+
+# 	event_timeout: float | None = 60.0  # seconds
+
+# TODO: add this and use the old BrowserProfile.viewport options to set it
+# class SetViewportEvent(BaseEvent):
+# 	"""Set the viewport size."""
+
+# 	width: int
+# 	height: int
+# 	device_scale_factor: float = 1.0
+
+# 	event_timeout: float | None = 15.0  # seconds
+
+
+# Moved to storage state
+# class SetCookiesEvent(BaseEvent):
+# 	"""Set browser cookies."""
+
+# 	cookies: list[dict[str, Any]]
+
+# 	event_timeout: float | None = (
+# 		30.0  # only long to support the edge case of restoring a big localStorage / on many origins (has to O(n) visit each origin to restore)
+# 	)
+
+
+# class GetCookiesEvent(BaseEvent):
+# 	"""Get browser cookies."""
+
+# 	urls: list[str] | None = None
+
+# 	event_timeout: float | None = 30.0  # seconds
+
+
+# ============================================================================
+# DOM-related Events
 # ============================================================================
 
 
-class FileDownloadedEvent(BaseEvent[None]):
-    """Event indicating a file has been downloaded.
+class BrowserConnectedEvent(BaseEvent):
+	"""Browser has started/connected."""
 
-    Dispatched by DownloadsWatchdog when a download completes.
+	cdp_url: str
 
-    Attributes:
-        url: Source URL of the downloaded file.
-        path: Local file path where file was saved.
-        file_name: Name of the downloaded file.
-        file_size: Size of file in bytes.
-        file_type: File extension (e.g., 'pdf', 'zip').
-        mime_type: MIME type (e.g., 'application/pdf').
-        from_cache: Whether file was served from cache.
-        auto_download: Whether this was an automatic download (e.g., PDF).
-        event_timeout: Timeout for event handling (default: 30s).
-    """
-
-    url: str
-    path: str
-    file_name: str
-    file_size: int
-    file_type: str | None = None  # e.g., 'pdf', 'zip', 'docx', etc.
-    mime_type: str | None = None  # e.g., 'application/pdf'
-    from_cache: bool = False
-    auto_download: bool = False  # Whether this was an automatic download (e.g., PDF auto-download)
-
-    event_timeout: float | None = _get_timeout('TIMEOUT_FileDownloadedEvent', 30.0)
+	event_timeout: float | None = _get_timeout('TIMEOUT_BrowserConnectedEvent', 30.0)  # seconds
 
 
-# ============================================================================
-# Storage State Events
-# ============================================================================
+class BrowserStoppedEvent(BaseEvent):
+	"""Browser has stopped/disconnected."""
+
+	reason: str | None = None
+
+	event_timeout: float | None = _get_timeout('TIMEOUT_BrowserStoppedEvent', 30.0)  # seconds
 
 
-class SaveStorageStateEvent(BaseEvent[None]):
-    """Event to save browser storage state.
+class TabCreatedEvent(BaseEvent):
+	"""A new tab was created."""
 
-    Triggers saving of cookies and localStorage to file.
+	target_id: TargetID
+	url: str
 
-    Attributes:
-        path: Optional path to save to. If None, uses profile setting.
-        event_timeout: Timeout for save operation (default: 30s).
-    """
-
-    path: str | None = Field(default=None, description='Optional path to save to (overrides profile setting)')
-
-    event_timeout: float | None = _get_timeout('TIMEOUT_SaveStorageStateEvent', 30.0)
+	event_timeout: float | None = _get_timeout('TIMEOUT_TabCreatedEvent', 30.0)  # seconds
 
 
-class LoadStorageStateEvent(BaseEvent[None]):
-    """Event to load browser storage state.
+class TabClosedEvent(BaseEvent):
+	"""A tab was closed."""
 
-    Triggers loading of cookies and localStorage from file.
+	target_id: TargetID
 
-    Attributes:
-        path: Optional path to load from. If None, uses profile setting.
-        event_timeout: Timeout for load operation (default: 30s).
-    """
+	# TODO:
+	# new_focus_target_id: int | None = None
+	# new_focus_url: str | None = None
 
-    path: str | None = Field(default=None, description='Optional path to load from (overrides profile setting)')
-
-    event_timeout: float | None = _get_timeout('TIMEOUT_LoadStorageStateEvent', 30.0)
+	event_timeout: float | None = _get_timeout('TIMEOUT_TabClosedEvent', 10.0)  # seconds
 
 
-class StorageStateSavedEvent(BaseEvent[None]):
-    """Event indicating storage state has been saved.
+# TODO: emit this when DOM changes significantly, inner frame navigates, form submits, history.pushState(), etc.
+# class TabUpdatedEvent(BaseEvent):
+# 	"""Tab information updated (URL changed, etc.)."""
 
-    Dispatched after successful storage state save operation.
-
-    Attributes:
-        path: File path where state was saved.
-        cookies_count: Number of cookies saved.
-        origins_count: Number of localStorage origins saved.
-        event_timeout: Timeout for event handling (default: 10s).
-    """
-
-    path: str
-    cookies_count: int = 0
-    origins_count: int = 0
-
-    event_timeout: float | None = _get_timeout('TIMEOUT_StorageStateSavedEvent', 10.0)
+# 	target_id: TargetID
+# 	url: str
 
 
-class StorageStateLoadedEvent(BaseEvent[None]):
-    """Event indicating storage state has been loaded.
+class AgentFocusChangedEvent(BaseEvent):
+	"""Agent focus changed to a different tab."""
 
-    Dispatched after successful storage state load operation.
+	target_id: TargetID
+	url: str
 
-    Attributes:
-        path: File path from which state was loaded.
-        cookies_count: Number of cookies loaded.
-        origins_count: Number of localStorage origins loaded.
-        event_timeout: Timeout for event handling (default: 10s).
-    """
+	event_timeout: float | None = _get_timeout('TIMEOUT_AgentFocusChangedEvent', 10.0)  # seconds
 
-    path: str
-    cookies_count: int = 0
-    origins_count: int = 0
 
-    event_timeout: float | None = _get_timeout('TIMEOUT_StorageStateLoadedEvent', 10.0)
+class TargetCrashedEvent(BaseEvent):
+	"""A target has crashed."""
+
+	target_id: TargetID
+	error: str
+
+	event_timeout: float | None = _get_timeout('TIMEOUT_TargetCrashedEvent', 10.0)  # seconds
+
+
+class NavigationStartedEvent(BaseEvent):
+	"""Navigation started."""
+
+	target_id: TargetID
+	url: str
+
+	event_timeout: float | None = _get_timeout('TIMEOUT_NavigationStartedEvent', 30.0)  # seconds
+
+
+class NavigationCompleteEvent(BaseEvent):
+	"""Navigation completed."""
+
+	target_id: TargetID
+	url: str
+	status: int | None = None
+	error_message: str | None = None  # Error/timeout message if navigation had issues
+	loading_status: str | None = None  # Detailed loading status (e.g., network timeout info)
+
+	event_timeout: float | None = _get_timeout('TIMEOUT_NavigationCompleteEvent', 30.0)  # seconds
 
 
 # ============================================================================
@@ -529,23 +451,128 @@ class StorageStateLoadedEvent(BaseEvent[None]):
 # ============================================================================
 
 
-class BrowserErrorEvent(BaseEvent[None]):
-    """Event indicating an error occurred in the browser layer.
+class BrowserErrorEvent(BaseEvent):
+	"""An error occurred in the browser layer."""
 
-    Dispatched when errors occur during browser operations. Can be
-    used for logging, recovery, or error aggregation.
+	error_type: str
+	message: str
+	details: dict[str, Any] = Field(default_factory=dict)
 
-    Attributes:
-        error_type: Category of error (e.g., 'NavigationBlocked',
-            'BrowserStartEventError').
-        message: Human-readable error description.
-        details: Additional error context as dict.
-        event_timeout: Timeout for event handling (default: 30s).
-    """
+	event_timeout: float | None = _get_timeout('TIMEOUT_BrowserErrorEvent', 30.0)  # seconds
 
-    error_type: str
-    message: str
-    details: dict[str, Any] = Field(default_factory=dict)
 
-    event_timeout: float | None = _get_timeout('TIMEOUT_BrowserErrorEvent', 30.0)
+# ============================================================================
+# Storage State Events
+# ============================================================================
 
+
+class SaveStorageStateEvent(BaseEvent):
+	"""Request to save browser storage state."""
+
+	path: str | None = None  # Optional path, uses profile default if not provided
+
+	event_timeout: float | None = _get_timeout('TIMEOUT_SaveStorageStateEvent', 45.0)  # seconds
+
+
+class StorageStateSavedEvent(BaseEvent):
+	"""Notification that storage state was saved."""
+
+	path: str
+	cookies_count: int
+	origins_count: int
+
+	event_timeout: float | None = _get_timeout('TIMEOUT_StorageStateSavedEvent', 30.0)  # seconds
+
+
+class LoadStorageStateEvent(BaseEvent):
+	"""Request to load browser storage state."""
+
+	path: str | None = None  # Optional path, uses profile default if not provided
+
+	event_timeout: float | None = _get_timeout('TIMEOUT_LoadStorageStateEvent', 45.0)  # seconds
+
+
+# TODO: refactor this to:
+# - on_BrowserConnectedEvent() -> dispatch(LoadStorageStateEvent()) -> _copy_storage_state_from_json_to_browser(json_file, new_cdp_session) + return storage_state from handler
+# - on_BrowserStopEvent() -> dispatch(SaveStorageStateEvent()) -> _copy_storage_state_from_browser_to_json(new_cdp_session, json_file)
+# and get rid of StorageStateSavedEvent and StorageStateLoadedEvent, have the original events + provide handler return values for any results
+class StorageStateLoadedEvent(BaseEvent):
+	"""Notification that storage state was loaded."""
+
+	path: str
+	cookies_count: int
+	origins_count: int
+
+	event_timeout: float | None = _get_timeout('TIMEOUT_StorageStateLoadedEvent', 30.0)  # seconds
+
+
+# ============================================================================
+# File Download Events
+# ============================================================================
+
+
+class FileDownloadedEvent(BaseEvent):
+	"""A file has been downloaded."""
+
+	url: str
+	path: str
+	file_name: str
+	file_size: int
+	file_type: str | None = None  # e.g., 'pdf', 'zip', 'docx', etc.
+	mime_type: str | None = None  # e.g., 'application/pdf'
+	from_cache: bool = False
+	auto_download: bool = False  # Whether this was an automatic download (e.g., PDF auto-download)
+
+	event_timeout: float | None = _get_timeout('TIMEOUT_FileDownloadedEvent', 30.0)  # seconds
+
+
+class AboutBlankDVDScreensaverShownEvent(BaseEvent):
+	"""AboutBlankWatchdog has shown DVD screensaver animation on an about:blank tab."""
+
+	target_id: TargetID
+	error: str | None = None
+
+
+class DialogOpenedEvent(BaseEvent):
+	"""Event dispatched when a JavaScript dialog is opened and handled."""
+
+	dialog_type: str  # 'alert', 'confirm', 'prompt', or 'beforeunload'
+	message: str
+	url: str
+	frame_id: str | None = None  # Can be None when frameId is not provided by CDP
+	# target_id: TargetID   # TODO: add this to avoid needing target_id_from_frame() later
+
+
+# Note: Model rebuilding for forward references is handled in the importing modules
+# Events with 'EnhancedDOMTreeNode' forward references (ClickElementEvent, TypeTextEvent,
+# ScrollEvent, UploadFileEvent) need model_rebuild() called after imports are complete
+
+
+def _check_event_names_dont_overlap():
+	"""
+	check that event names defined in this file are valid and non-overlapping
+	(naiively n^2 so it's pretty slow but ok for now, optimize when >20 events)
+	"""
+	event_names = {
+		name.split('[')[0]
+		for name in globals().keys()
+		if not name.startswith('_')
+		and inspect.isclass(globals()[name])
+		and issubclass(globals()[name], BaseEvent)
+		and name != 'BaseEvent'
+	}
+	for name_a in event_names:
+		assert name_a.endswith('Event'), f'Event with name {name_a} does not end with "Event"'
+		for name_b in event_names:
+			if name_a != name_b:  # Skip self-comparison
+				assert name_a not in name_b, (
+					f'Event with name {name_a} is a substring of {name_b}, all events must be completely unique to avoid find-and-replace accidents'
+				)
+
+
+# overlapping event names are a nightmare to trace and rename later, dont do it!
+# e.g. prevent ClickEvent and FailedClickEvent are terrible names because one is a substring of the other,
+# must be ClickEvent and ClickFailedEvent to preserve the usefulnes of codebase grep/sed/awk as refactoring tools.
+# at import time, we do a quick check that all event names defined above are valid and non-overlapping.
+# this is hand written in blood by a human! not LLM slop. feel free to optimize but do not remove it without a good reason.
+_check_event_names_dont_overlap()
