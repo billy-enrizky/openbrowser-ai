@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Canvas CAPTCHA Challenge</title>
+    <style>
+        :root {
+            --primary-color: #4a6bff;
+            --secondary-color: #ff4a6b;
+            --background-color: #f8f9fa;
+            --task-bg-color: #ffffff;
+            --success-color: #28a745;
+            --text-color: #333;
+            --box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: var(--text-color);
+            background-color: var(--background-color);
+            padding: 0;
+            margin: 0;
+            transition: background-color 0.3s ease;
+        }
+
+        header {
+            background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+            color: white;
+            text-align: center;
+            padding: 1.8rem 1rem;
+            box-shadow: var(--box-shadow);
+        }
+
+        h1 {
+            margin: 0;
+            font-size: 2rem;
+            letter-spacing: -0.5px;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 2rem auto;
+            padding: 0 1rem;
+        }
+
+        .back-link {
+            display: inline-block;
+            background-color: var(--primary-color);
+            color: white;
+            text-decoration: none;
+            padding: 0.6rem 1.2rem;
+            border-radius: 4px;
+            font-weight: 500;
+            transition: background-color 0.3s ease, transform 0.2s ease;
+            margin-bottom: 2rem;
+        }
+
+        .back-link:hover {
+            background-color: #3755d8;
+            transform: translateY(-2px);
+        }
+
+        .task {
+            background-color: var(--task-bg-color);
+            margin-bottom: 2rem;
+            padding: 2rem;
+            border-radius: 8px;
+            box-shadow: var(--box-shadow);
+            position: relative;
+            border-left: 5px solid var(--primary-color);
+        }
+
+        .task.completed {
+            border-left: 5px solid var(--success-color);
+            background-color: #f8fff8;
+        }
+
+        .task-badge {
+            position: absolute;
+            top: -15px;
+            left: -15px;
+            background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+            color: white;
+            min-width: 30px;
+            height: 30px;
+            border-radius: 15px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            text-decoration: none;
+            padding: 0 5px;
+        }
+        
+        .task-badge a {
+            color: white;
+            text-decoration: none;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.7rem;
+        }
+
+        .task-title {
+            font-weight: bold;
+            margin-bottom: 1rem;
+            font-size: 1.2rem;
+        }
+
+        .canvas-container {
+            margin: 1rem 0;
+            display: flex;
+            justify-content: center;
+        }
+
+        canvas {
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+
+        input[type="text"] {
+            padding: 0.5rem;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 1rem;
+            width: 100%;
+            max-width: 300px;
+            margin: 1rem 0;
+        }
+
+        .instructions {
+            margin-bottom: 1.5rem;
+            padding: 1rem;
+            background-color: #f8f9fa;
+            border-radius: 4px;
+            border-left: 4px solid var(--primary-color);
+        }
+
+        .success-message {
+            margin-top: 1rem;
+            padding: 1rem;
+            background-color: #d4edda;
+            border: 1px solid #c3e6cb;
+            border-radius: 4px;
+            color: #155724;
+            font-weight: 500;
+            opacity: 0;
+            transform: translateY(-10px);
+            transition: all 0.3s ease;
+        }
+
+        .success-message.show {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        .confetti {
+            position: fixed;
+            top: -10px;
+            z-index: 9999;
+            pointer-events: none;
+            animation: confetti-fall linear forwards;
+        }
+
+        @keyframes confetti-fall {
+            0% {
+                transform: translateY(-10px) rotate(0deg);
+            }
+            100% {
+                transform: translateY(100vh) rotate(720deg);
+            }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Canvas CAPTCHA Challenge</h1>
+    </header>
+
+    <div class="container">
+        <a href="../challenges-index.html" class="back-link">← Back to Challenges</a>
+
+        <div class="task" id="canvas-captcha">
+            <div class="task-badge"><a href="#canvas-captcha" id="canvas-captcha-link">canvas-captcha</a></div>
+            <div class="task-title">Read the text off this canvas element and type it into this input field</div>
+            <div class="instructions">
+                Look at the canvas below and type the text you see into the input field
+            </div>
+            <div class="canvas-container">
+                <canvas id="text-canvas" width="300" height="100"></canvas>
+            </div>
+            <input type="text" id="canvas-text-input" placeholder="Type the text you see in the canvas">
+            <div class="success-message" id="success-message">
+                ✅ Challenge completed successfully! You read the CAPTCHA text correctly.
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function completeTask(taskElement) {
+            if (taskElement.classList.contains('completed')) return;
+
+            taskElement.classList.add('completed');
+            document.getElementById('success-message').classList.add('show');
+            createConfetti();
+        }
+
+        function createConfetti() {
+            const colors = ['#ff4a6b', '#4a6bff', '#4aff6b', '#ff4aff', '#ffff4a'];
+            for (let i = 0; i < 20; i++) {
+                const confetti = document.createElement('div');
+                confetti.className = 'confetti';
+                confetti.style.left = Math.random() * window.innerWidth + 'px';
+                confetti.style.backgroundColor = colors[Math.floor(Math.random() * colors.length)];
+                confetti.style.width = (Math.random() * 10 + 5) + 'px';
+                confetti.style.height = (Math.random() * 10 + 5) + 'px';
+                confetti.style.animationDuration = (Math.random() * 3 + 2) + 's';
+                document.body.appendChild(confetti);
+
+                // Remove confetti after animation ends
+                setTimeout(() => {
+                    if (document.body.contains(confetti)) {
+                        document.body.removeChild(confetti);
+                    }
+                }, 5000);
+            }
+        }
+
+        // Task-specific logic
+        const canvas = document.getElementById('text-canvas');
+        const ctx = canvas.getContext('2d');
+        const canvasText = 'CAPTCHA123';
+        
+        // Draw text on canvas
+        ctx.fillStyle = '#f8f9fa';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.font = '30px Arial';
+        ctx.fillStyle = '#333';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        
+        // Add some noise to make it harder to read
+        for (let i = 0; i < 100; i++) {
+            ctx.fillStyle = `rgba(${Math.random() * 255}, ${Math.random() * 255}, ${Math.random() * 255}, 0.5)`;
+            ctx.fillRect(Math.random() * canvas.width, Math.random() * canvas.height, 2, 2);
+        }
+        
+        // Draw wavy text
+        let x = canvas.width / 2;
+        let y = canvas.height / 2;
+        
+        // Draw rotated, slightly distorted text
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(Math.random() * 0.1 - 0.05);
+        ctx.fillText(canvasText, 0, Math.sin(y * 0.01) * 5);
+        ctx.restore();
+        
+        document.getElementById('canvas-text-input').addEventListener('input', function() {
+            if (this.value.toUpperCase() === canvasText) {
+                completeTask(document.getElementById('canvas-captcha'));
+            }
+        });
+    </script>
+</body>
+</html> 

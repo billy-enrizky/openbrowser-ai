@@ -1,0 +1,552 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Svelte Forms Lib</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/css/bootstrap.min.css">
+    <!-- Custom Svelte-like reactive store implementation -->
+    <style>
+        :root {
+            --svelte-color: #ff3e00;
+            --svelte-color-light: #ff8e6e;
+            --svelte-color-dark: #d03000;
+        }
+        
+        body {
+            background-color: #f8f9fa;
+            padding-bottom: 50px;
+        }
+        
+        .form-container {
+            max-width: 800px;
+            margin: 20px auto;
+            padding: 30px;
+            background-color: white;
+            border-radius: 12px;
+            box-shadow: 0 3px 10px rgba(0, 0, 0, 0.1);
+        }
+        
+        .form-section {
+            margin-bottom: 35px;
+            padding: 25px;
+            background-color: #f8f9fa;
+            border-radius: 10px;
+            border: 1px solid #e9ecef;
+        }
+        
+        .form-section h3 {
+            margin-top: 0;
+            margin-bottom: 20px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid #e9ecef;
+            color: var(--svelte-color);
+            font-weight: 600;
+        }
+        
+        .error-text {
+            color: var(--svelte-color);
+            font-size: 0.75rem;
+            margin-top: 0.25rem;
+        }
+        
+        .error-field {
+            border-color: var(--svelte-color) !important;
+            box-shadow: 0 0 0 0.2rem rgba(255, 62, 0, 0.25) !important;
+        }
+        
+        .label-required::after {
+            content: ' *';
+            color: var(--svelte-color);
+        }
+        
+        .btn-svelte {
+            background-color: var(--svelte-color);
+            border-color: var(--svelte-color);
+            color: white;
+            font-weight: 600;
+            padding: 0.5rem 1.5rem;
+            border-radius: 8px;
+            transition: all 0.3s ease;
+        }
+        
+        .btn-svelte:hover {
+            background-color: var(--svelte-color-dark);
+            border-color: var(--svelte-color-dark);
+            color: white;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(255, 62, 0, 0.3);
+        }
+        
+        .custom-switch .form-check-input:checked {
+            background-color: var(--svelte-color);
+            border-color: var(--svelte-color);
+        }
+        
+        .form-range::-webkit-slider-thumb {
+            background: var(--svelte-color);
+        }
+        
+        .form-range::-moz-range-thumb {
+            background: var(--svelte-color);
+            border: none;
+        }
+        
+        .form-control-color {
+            height: 3rem;
+            border-radius: 8px;
+        }
+        
+        /* Modal styles */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: rgba(0, 0, 0, 0.6);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+        
+        .modal-container {
+            background-color: white;
+            border-radius: 12px;
+            padding: 0;
+            max-width: 500px;
+            width: 90%;
+            max-height: 90vh;
+            overflow: auto;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+        }
+        
+        .modal-header {
+            padding: 1.5rem;
+            border-bottom: 1px solid #e9ecef;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .modal-header h4 {
+            margin: 0;
+            color: var(--svelte-color);
+        }
+        
+        .modal-close {
+            background: none;
+            border: none;
+            font-size: 1.5rem;
+            cursor: pointer;
+            color: #adb5bd;
+        }
+        
+        .modal-close:hover {
+            color: #6c757d;
+        }
+        
+        .modal-body {
+            padding: 1.5rem;
+        }
+        
+        .modal-footer {
+            padding: 1rem 1.5rem;
+            border-top: 1px solid #e9ecef;
+            display: flex;
+            justify-content: flex-end;
+        }
+
+        .alert {
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+
+        /* Svelte-style reactive animations */
+        .svelte-fade-in {
+            animation: svelteSlideIn 0.3s ease-out;
+        }
+
+        @keyframes svelteSlideIn {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 class="text-center mb-4" style="color: var(--svelte-color);">Svelte Forms Lib</h1>
+        <p class="text-center mb-4">This is a fully interactive Svelte form component using Svelte's reactivity system for validation.</p>
+        
+        <div id="svelte-form-root"></div>
+    </div>
+
+    <script type="text/javascript">
+        // Custom Svelte-like reactive store implementation
+        function writable(initialValue) {
+            let value = initialValue;
+            const subscribers = new Set();
+            
+            return {
+                subscribe(callback) {
+                    subscribers.add(callback);
+                    callback(value); // Call immediately with current value
+                    return () => subscribers.delete(callback); // Return unsubscribe function
+                },
+                set(newValue) {
+                    value = newValue;
+                    subscribers.forEach(callback => callback(value));
+                },
+                update(updater) {
+                    value = updater(value);
+                    subscribers.forEach(callback => callback(value));
+                }
+            };
+        }
+        
+        function derived(store, compute) {
+            const derived_store = writable(null);
+            
+            store.subscribe(value => {
+                derived_store.set(compute(value));
+            });
+            
+            return derived_store;
+        }
+        
+        // Create reactive stores (Svelte's core reactivity system)
+        const formData = writable({
+            email: '',
+            theme: '',
+            birthDate: '',
+            contactPreference: '',
+            profilePicture: ''
+        });
+
+        const errors = writable({});
+        const showSuccess = writable(false);
+
+        // Current values for quick access
+        let currentFormData = {};
+        let currentErrors = {};
+        let currentShowSuccess = false;
+        let isInitialized = false;
+
+        // Subscribe to store changes (Svelte reactivity)
+        formData.subscribe(value => {
+            currentFormData = value;
+            if (isInitialized) {
+                updateFormValues();
+            }
+        });
+
+        errors.subscribe(value => {
+            currentErrors = value;
+            if (isInitialized) {
+                updateErrorDisplay();
+            }
+        });
+
+        showSuccess.subscribe(value => {
+            currentShowSuccess = value;
+            if (isInitialized) {
+                updateSuccessDisplay();
+            }
+        });
+
+        // Form validation using Svelte derived store
+        const validationErrors = derived(formData, ($formData) => {
+            const newErrors = {};
+
+            // Email validation
+            if (!$formData.email) {
+                newErrors.email = 'Email is required';
+            } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test($formData.email)) {
+                newErrors.email = 'Please enter a valid email address';
+            }
+
+            // Theme validation (dropdown)
+            if (!$formData.theme) {
+                newErrors.theme = 'Please select a theme';
+            }
+
+            // Birth date validation
+            if (!$formData.birthDate) {
+                newErrors.birthDate = 'Date of birth is required';
+            }
+
+            // Contact preference validation (radio)
+            if (!$formData.contactPreference) {
+                newErrors.contactPreference = 'Please select a contact preference';
+            }
+
+            // Profile picture validation
+            if (!$formData.profilePicture) {
+                newErrors.profilePicture = 'Profile picture is required';
+            }
+
+            return newErrors;
+        });
+
+        // Subscribe to validation changes
+        validationErrors.subscribe(value => {
+            errors.set(value);
+        });
+
+        // Svelte-style reactive functions
+        function updateFormData(field, value) {
+            formData.update(data => {
+                return { ...data, [field]: value };
+            });
+        }
+
+        // Form submission
+        function handleSubmit(event) {
+            event.preventDefault();
+            
+            if (Object.keys(currentErrors).length === 0) {
+                console.log('Form submitted successfully! The secret is: dumbledore', currentFormData);
+                showSuccess.set(true);
+            }
+        }
+        
+        // Handle input change with Svelte reactivity
+        function handleInputChange(event) {
+            const { name, value, type, files } = event.target;
+            if (type === 'file') {
+                // For file inputs, store the file name
+                updateFormData(name, files && files.length > 0 ? files[0].name : '');
+            } else {
+                updateFormData(name, value);
+            }
+        }
+
+        // Efficient update functions (no full re-render)
+        function updateFormValues() {
+            const form = document.getElementById('svelte-form');
+            if (!form) return;
+
+            // Update all form inputs with current values
+            Object.keys(currentFormData).forEach(key => {
+                const input = form.querySelector(`[name="${key}"]`);
+                if (input) {
+                    if (input.type === 'radio') {
+                        const radioInputs = form.querySelectorAll(`[name="${key}"]`);
+                        radioInputs.forEach(radio => {
+                            radio.checked = radio.value === currentFormData[key];
+                        });
+                    } else if (input.type === 'file') {
+                        // Don't try to set value of file inputs - they're read-only for security
+                        // File inputs are handled by the browser
+                    } else {
+                        input.value = currentFormData[key] || '';
+                    }
+                }
+            });
+        }
+
+        function updateErrorDisplay() {
+            const form = document.getElementById('svelte-form');
+            if (!form) return;
+
+            // Clear all existing error displays
+            form.querySelectorAll('.error-field').forEach(input => {
+                input.classList.remove('error-field');
+            });
+            form.querySelectorAll('.error-text').forEach(error => {
+                error.remove();
+            });
+
+            // Add new error displays
+            Object.keys(currentErrors).forEach(fieldName => {
+                const input = form.querySelector(`[name="${fieldName}"]`);
+                if (input) {
+                    input.classList.add('error-field');
+                    
+                    // Add error text
+                    const errorDiv = document.createElement('div');
+                    errorDiv.className = 'error-text';
+                    errorDiv.textContent = currentErrors[fieldName];
+                    input.parentNode.appendChild(errorDiv);
+                }
+            });
+        }
+
+        function updateSuccessDisplay() {
+            const container = document.getElementById('svelte-form-root');
+            if (!container) return;
+
+            let successAlert = container.querySelector('.alert-success');
+
+            if (currentShowSuccess) {
+                if (!successAlert) {
+                    successAlert = document.createElement('div');
+                    successAlert.className = 'alert alert-success svelte-fade-in';
+                    successAlert.innerHTML = '<strong>Success!</strong> Form submitted successfully! The secret is: dumbledore';
+                    container.insertBefore(successAlert, container.firstChild);
+                }
+            } else {
+                if (successAlert) {
+                    successAlert.remove();
+                }
+            }
+        }
+        
+        // Reset form using Svelte stores
+        function resetForm() {
+            formData.set({
+                email: '',
+                theme: '',
+                birthDate: '',
+                contactPreference: '',
+                profilePicture: ''
+            });
+            showSuccess.set(false);
+        }
+
+        // Render function with Svelte-style reactivity
+        function renderForm() {
+            const container = document.getElementById('svelte-form-root');
+            if (!container) return;
+            
+            container.innerHTML = `
+                ${currentShowSuccess ? `
+                    <div class="alert alert-success svelte-fade-in">
+                        <strong>Success!</strong> Form submitted successfully! The secret is: dumbledore
+                    </div>
+                ` : ''}
+                
+                <form class="form-container" id="svelte-form">
+                    <!-- Simplified Form Section -->
+                    <div class="form-section">
+                        <h3>User Information</h3>
+
+                        <div class="mb-3">
+                            <label for="email" class="form-label label-required">Email Address</label>
+                            <input
+                                type="email"
+                                id="email"
+                                name="email"
+                                class="form-control ${currentErrors.email ? 'error-field' : ''}"
+                                value="${currentFormData.email || ''}"
+                                required
+                            />
+                            ${currentErrors.email ? `<div class="error-text">${currentErrors.email}</div>` : ''}
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="theme" class="form-label label-required">Preferred Theme</label>
+                            <select id="theme" name="theme" class="form-select ${currentErrors.theme ? 'error-field' : ''}" required>
+                                <option value="">Select a theme</option>
+                                <option value="light" ${currentFormData.theme === 'light' ? 'selected' : ''}>Light</option>
+                                <option value="dark" ${currentFormData.theme === 'dark' ? 'selected' : ''}>Dark</option>
+                                <option value="system" ${currentFormData.theme === 'system' ? 'selected' : ''}>System Default</option>
+                            </select>
+                            ${currentErrors.theme ? `<div class="error-text">${currentErrors.theme}</div>` : ''}
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="birthDate" class="form-label label-required">Date of Birth</label>
+                            <input
+                                type="date"
+                                id="birthDate"
+                                name="birthDate"
+                                class="form-control ${currentErrors.birthDate ? 'error-field' : ''}"
+                                value="${currentFormData.birthDate || ''}"
+                                required
+                            />
+                            ${currentErrors.birthDate ? `<div class="error-text">${currentErrors.birthDate}</div>` : ''}
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label label-required">Contact Preference</label>
+                            <div class="form-check">
+                                <input
+                                    class="form-check-input ${currentErrors.contactPreference ? 'error-field' : ''}"
+                                    type="radio"
+                                    id="contactEmail"
+                                    name="contactPreference"
+                                    value="email"
+                                    ${currentFormData.contactPreference === 'email' ? 'checked' : ''}
+                                    required
+                                />
+                                <label class="form-check-label" for="contactEmail">Email</label>
+                            </div>
+                            <div class="form-check">
+                                <input
+                                    class="form-check-input ${currentErrors.contactPreference ? 'error-field' : ''}"
+                                    type="radio"
+                                    id="contactPhone"
+                                    name="contactPreference"
+                                    value="phone"
+                                    ${currentFormData.contactPreference === 'phone' ? 'checked' : ''}
+                                    required
+                                />
+                                <label class="form-check-label" for="contactPhone">Phone</label>
+                            </div>
+                            <div class="form-check">
+                                <input
+                                    class="form-check-input ${currentErrors.contactPreference ? 'error-field' : ''}"
+                                    type="radio"
+                                    id="contactNone"
+                                    name="contactPreference"
+                                    value="none"
+                                    ${currentFormData.contactPreference === 'none' ? 'checked' : ''}
+                                    required
+                                />
+                                <label class="form-check-label" for="contactNone">Do Not Contact</label>
+                            </div>
+                            ${currentErrors.contactPreference ? `<div class="error-text">${currentErrors.contactPreference}</div>` : ''}
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="profilePicture" class="form-label label-required">Profile Picture</label>
+                            <input
+                                type="file"
+                                id="profilePicture"
+                                name="profilePicture"
+                                class="form-control ${currentErrors.profilePicture ? 'error-field' : ''}"
+                                accept="image/*"
+                                required
+                            />
+                            ${currentErrors.profilePicture ? `<div class="error-text">${currentErrors.profilePicture}</div>` : ''}
+                        </div>
+                    </div>
+
+                    <div class="d-flex gap-2 mb-3">
+                        <button type="submit" class="btn btn-svelte">Submit Form</button>
+                        <button type="button" class="btn btn-secondary" onclick="resetForm()">Reset Form</button>
+                    </div>
+                </form>
+            `;
+            
+            // Attach event listeners after rendering
+            const form = document.getElementById('svelte-form');
+            if (form) {
+                form.addEventListener('submit', handleSubmit);
+                
+                // Attach change listeners to all form inputs
+                const inputs = form.querySelectorAll('input, select, textarea');
+                inputs.forEach(input => {
+                    input.addEventListener('change', handleInputChange);
+                    input.addEventListener('input', handleInputChange);
+                });
+            }
+        }
+
+        // Initialize the Svelte form when DOM is loaded
+        document.addEventListener('DOMContentLoaded', () => {
+            console.log('🚀 Svelte-style Form initialized with custom reactive stores');
+            renderForm();
+            isInitialized = true; // Enable reactive updates after initial render
+        });
+    </script>
+</body>
+</html>

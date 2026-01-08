@@ -34,7 +34,7 @@ async def main():
 	page = await browser.get_current_page() or await browser.new_page()
 
 	# Go to apple wikipedia page
-	await page.goto('https://browser-use.github.io/stress-tests/challenges/angularjs-form.html')
+	await page.goto('https://openbrowser.github.io/stress-tests/challenges/angularjs-form.html')
 
 	await asyncio.sleep(1)
 

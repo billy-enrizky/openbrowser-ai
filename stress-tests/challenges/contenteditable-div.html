@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Contenteditable Div Challenge</title>
+    <style>
+        :root {
+            --primary-color: #4a6bff;
+            --secondary-color: #ff4a6b;
+            --background-color: #f8f9fa;
+            --task-bg-color: #ffffff;
+            --success-color: #28a745;
+            --text-color: #333;
+            --box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: var(--text-color);
+            background-color: var(--background-color);
+            padding: 0;
+            margin: 0;
+            transition: background-color 0.3s ease;
+        }
+
+        header {
+            background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+            color: white;
+            text-align: center;
+            padding: 1.8rem 1rem;
+            box-shadow: var(--box-shadow);
+        }
+
+        h1 {
+            margin: 0;
+            font-size: 2rem;
+            letter-spacing: -0.5px;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 2rem auto;
+            padding: 0 1rem;
+        }
+
+        .back-link {
+            display: inline-block;
+            background-color: var(--primary-color);
+            color: white;
+            text-decoration: none;
+            padding: 0.6rem 1.2rem;
+            border-radius: 4px;
+            font-weight: 500;
+            transition: background-color 0.3s ease, transform 0.2s ease;
+            margin-bottom: 2rem;
+        }
+
+        .back-link:hover {
+            background-color: #3755d8;
+            transform: translateY(-2px);
+        }
+
+        .task {
+            background-color: var(--task-bg-color);
+            border-radius: 8px;
+            padding: 2rem;
+            margin-bottom: 2rem;
+            box-shadow: var(--box-shadow);
+            transition: all 0.3s ease;
+        }
+
+        .task.completed {
+            background-color: #e8f5e8;
+            border: 2px solid var(--success-color);
+        }
+
+        .task-badge {
+            display: inline-block;
+            background-color: var(--primary-color);
+            color: white;
+            padding: 0.3rem 0.8rem;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            margin-bottom: 1rem;
+        }
+
+        .task-badge a {
+            color: white;
+            text-decoration: none;
+        }
+
+        .task-title {
+            font-size: 1.4rem;
+            font-weight: 600;
+            margin-bottom: 1rem;
+            color: var(--text-color);
+        }
+
+        .instructions {
+            color: #666;
+            margin-bottom: 1.5rem;
+        }
+
+        .editable-content {
+            min-height: 50px;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            background-color: #f8f9fa;
+            color: #666;
+            font-family: inherit;
+            font-size: 1rem;
+            outline: none;
+            margin: 1rem 0;
+            transition: border-color 0.3s ease;
+        }
+
+        .editable-content:focus {
+            border-color: var(--primary-color);
+            background-color: white;
+        }
+
+        .editable-content:empty::before {
+            content: "Click here and start typing...";
+            color: #999;
+        }
+
+        .success-message {
+            background-color: var(--success-color);
+            color: white;
+            padding: 1rem;
+            border-radius: 4px;
+            margin-top: 1rem;
+            text-align: center;
+            font-weight: 600;
+            opacity: 0;
+            transform: translateY(-10px);
+            transition: all 0.3s ease;
+        }
+
+        .success-message.show {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        .confetti {
+            position: fixed;
+            width: 10px;
+            height: 10px;
+            background-color: #ff4a6b;
+            animation: confetti-fall 3s linear infinite;
+            pointer-events: none;
+            z-index: 1000;
+        }
+
+        @keyframes confetti-fall {
+            0% {
+                transform: translateY(-100vh) rotate(0deg);
+                opacity: 1;
+            }
+            100% {
+                transform: translateY(100vh) rotate(360deg);
+                opacity: 0;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Contenteditable Div Challenge</h1>
+    </header>
+
+    <div class="container">
+        <a href="../challenges-index.html" class="back-link">← Back to Challenges</a>
+
+        <div class="task" id="contenteditable-div">
+            <div class="task-badge"><a href="#contenteditable-div" id="contenteditable-div-link">contenteditable-div</a></div>
+            <div class="task-title">Type "banana" into this contenteditable div element</div>
+            <div class="instructions">
+                Click in the editable area below and type the word "banana" to complete the challenge.
+            </div>
+            <div 
+                id="editable-content" 
+                contenteditable="true" 
+                class="editable-content">
+                Click here and start typing...
+            </div>
+            <div class="success-message" id="success-message">
+                ✅ Challenge completed successfully! You typed "banana" into the contenteditable div.
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function completeTask(taskElement) {
+            if (taskElement.classList.contains('completed')) return;
+
+            taskElement.classList.add('completed');
+            document.getElementById('success-message').classList.add('show');
+            createConfetti();
+        }
+
+        function createConfetti() {
+            const colors = ['#ff4a6b', '#4a6bff', '#4aff6b', '#ff4aff', '#ffff4a'];
+            for (let i = 0; i < 20; i++) {
+                const confetti = document.createElement('div');
+                confetti.className = 'confetti';
+                confetti.style.left = Math.random() * window.innerWidth + 'px';
+                confetti.style.backgroundColor = colors[Math.floor(Math.random() * colors.length)];
+                confetti.style.width = (Math.random() * 10 + 5) + 'px';
+                confetti.style.height = (Math.random() * 10 + 5) + 'px';
+                confetti.style.animationDuration = (Math.random() * 3 + 2) + 's';
+                document.body.appendChild(confetti);
+
+                // Remove confetti after animation ends
+                setTimeout(() => {
+                    if (document.body.contains(confetti)) {
+                        document.body.removeChild(confetti);
+                    }
+                }, 5000);
+            }
+        }
+
+        // Task-specific logic
+        const editableDiv = document.getElementById('editable-content');
+        
+        // Clear default text when div is first clicked
+        editableDiv.addEventListener('focus', function() {
+            if (this.textContent.trim() === 'Click here and start typing...') {
+                this.textContent = '';
+            }
+        }, { once: true });
+        
+        // Check for completion
+        editableDiv.addEventListener('input', function() {
+            if (this.textContent.trim().toLowerCase() === 'banana') {
+                completeTask(document.getElementById('contenteditable-div'));
+            }
+        });
+    </script>
+</body>
+</html> 
