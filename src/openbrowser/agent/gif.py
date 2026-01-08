@@ -1,216 +1,436 @@
-"""GIF generation from agent history screenshots."""
-
 from __future__ import annotations
 
 import base64
 import io
 import logging
-from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+import os
+import platform
+from typing import TYPE_CHECKING
+
+from openbrowser.agent.views import AgentHistoryList
+from openbrowser.browser.views import PLACEHOLDER_4PX_SCREENSHOT
+from openbrowser.config import CONFIG
 
 if TYPE_CHECKING:
-    from openbrowser.agent.views import AgentHistoryList
+	from PIL import Image, ImageFont
 
 logger = logging.getLogger(__name__)
 
 
+def decode_unicode_escapes_to_utf8(text: str) -> str:
+	"""Handle decoding any unicode escape sequences embedded in a string (needed to render non-ASCII languages like chinese or arabic in the GIF overlay text)"""
+
+	if r'\u' not in text:
+		# doesn't have any escape sequences that need to be decoded
+		return text
+
+	try:
+		# Try to decode Unicode escape sequences
+		return text.encode('latin1').decode('unicode_escape')
+	except (UnicodeEncodeError, UnicodeDecodeError):
+		# logger.debug(f"Failed to decode unicode escape sequences while generating gif text: {text}")
+		return text
+
+
 def create_history_gif(
-    history: AgentHistoryList,
-    output_path: str | Path = "agent_history.gif",
-    duration: float = 1.0,
-    add_step_annotations: bool = True,
-    font_size: int = 24,
-) -> Path:
-    """
-    Create a GIF from agent history screenshots.
+	task: str,
+	history: AgentHistoryList,
+	#
+	output_path: str = 'agent_history.gif',
+	duration: int = 3000,
+	show_goals: bool = True,
+	show_task: bool = True,
+	show_logo: bool = False,
+	font_size: int = 40,
+	title_font_size: int = 56,
+	goal_font_size: int = 44,
+	margin: int = 40,
+	line_spacing: float = 1.5,
+) -> None:
+	"""Create a GIF from the agent's history with overlaid task and goal text."""
+	if not history.history:
+		logger.warning('No history to create GIF from')
+		return
 
-    Args:
-        history: Agent history containing screenshots
-        output_path: Path to save the GIF
-        duration: Duration per frame in seconds
-        add_step_annotations: Whether to add step number annotations
-        font_size: Font size for annotations
+	from PIL import Image, ImageFont
 
-    Returns:
-        Path to the saved GIF
-    """
-    try:
-        from PIL import Image, ImageDraw, ImageFont
-    except ImportError:
-        raise ImportError("Please install pillow: pip install pillow")
+	images = []
 
-    output_path = Path(output_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
+	# if history is empty, we can't create a gif
+	if not history.history:
+		logger.warning('No history to create GIF from')
+		return
 
-    # Collect screenshots from history
-    screenshots = history.screenshots()
-    if not screenshots:
-        raise ValueError("No screenshots found in agent history")
+	# Get all screenshots from history (including None placeholders)
+	screenshots = history.screenshots(return_none_if_not_screenshot=True)
 
-    logger.info(f"Creating GIF from {len(screenshots)} screenshots")
+	if not screenshots:
+		logger.warning('No screenshots found in history')
+		return
 
-    frames = []
-    for i, screenshot_b64 in enumerate(screenshots):
-        if not screenshot_b64:
-            continue
+	# Find the first non-placeholder screenshot
+	# A screenshot is considered a placeholder if:
+	# 1. It's the exact 4px placeholder for about:blank pages, OR
+	# 2. It comes from a new tab page (chrome://newtab/, about:blank, etc.)
+	first_real_screenshot = None
+	for screenshot in screenshots:
+		if screenshot and screenshot != PLACEHOLDER_4PX_SCREENSHOT:
+			first_real_screenshot = screenshot
+			break
 
-        # Decode base64 image
-        try:
-            image_data = base64.b64decode(screenshot_b64)
-            image = Image.open(io.BytesIO(image_data))
+	if not first_real_screenshot:
+		logger.warning('No valid screenshots found (all are placeholders or from new tab pages)')
+		return
 
-            # Convert to RGB if necessary (GIF requires palette mode)
-            if image.mode in ("RGBA", "P"):
-                # Create white background
-                background = Image.new("RGB", image.size, (255, 255, 255))
-                if image.mode == "RGBA":
-                    background.paste(image, mask=image.split()[3])
-                else:
-                    background.paste(image)
-                image = background
-            elif image.mode != "RGB":
-                image = image.convert("RGB")
+	# Try to load nicer fonts
+	try:
+		# Try different font options in order of preference
+		# ArialUni is a font that comes with Office and can render most non-alphabet characters
+		font_options = [
+			'PingFang',
+			'STHeiti Medium',
+			'Microsoft YaHei',  # 微软雅黑
+			'SimHei',  # 黑体
+			'SimSun',  # 宋体
+			'Noto Sans CJK SC',  # 思源黑体
+			'WenQuanYi Micro Hei',  # 文泉驿微米黑
+			'Helvetica',
+			'Arial',
+			'DejaVuSans',
+			'Verdana',
+		]
+		font_loaded = False
 
-            # Add step annotation if requested
-            if add_step_annotations:
-                image = _add_step_annotation(image, i + 1, font_size)
+		for font_name in font_options:
+			try:
+				if platform.system() == 'Windows':
+					# Need to specify the abs font path on Windows
+					font_name = os.path.join(CONFIG.WIN_FONT_DIR, font_name + '.ttf')
+				regular_font = ImageFont.truetype(font_name, font_size)
+				title_font = ImageFont.truetype(font_name, title_font_size)
+				goal_font = ImageFont.truetype(font_name, goal_font_size)
+				font_loaded = True
+				break
+			except OSError:
+				continue
 
-            frames.append(image)
+		if not font_loaded:
+			raise OSError('No preferred fonts found')
 
-        except Exception as e:
-            logger.warning(f"Failed to process screenshot {i}: {e}")
-            continue
+	except OSError:
+		regular_font = ImageFont.load_default()
+		title_font = ImageFont.load_default()
 
-    if not frames:
-        raise ValueError("No valid screenshots could be processed")
+		goal_font = regular_font
 
-    # Save as GIF
-    frames[0].save(
-        output_path,
-        save_all=True,
-        append_images=frames[1:],
-        duration=int(duration * 1000),  # Convert to milliseconds
-        loop=0,  # Infinite loop
-        optimize=True,
-    )
+	# Load logo if requested
+	logo = None
+	if show_logo:
+		try:
+			# Try to load logo from package static directory
+			import importlib.resources
+			try:
+				# Python 3.9+ style
+				logo_path = importlib.resources.files('openbrowser') / 'static' / 'logo.png'
+				if logo_path.is_file():
+					logo = Image.open(logo_path)
+				else:
+					logger.debug('Logo file not found in package static directory')
+			except (AttributeError, TypeError):
+				logger.debug('Could not load logo using importlib.resources')
+			
+			if logo:
+				# Resize logo to be small (e.g., 40px height)
+				logo_height = 150
+				aspect_ratio = logo.width / logo.height
+				logo_width = int(logo_height * aspect_ratio)
+				logo = logo.resize((logo_width, logo_height), Image.Resampling.LANCZOS)
+		except Exception as e:
+			logger.warning(f'Could not load logo: {e}')
 
-    logger.info(f"GIF saved to {output_path}")
-    return output_path
+	# Create task frame if requested
+	if show_task and task:
+		# Find the first non-placeholder screenshot for the task frame
+		first_real_screenshot = None
+		for item in history.history:
+			screenshot_b64 = item.state.get_screenshot()
+			if screenshot_b64 and screenshot_b64 != PLACEHOLDER_4PX_SCREENSHOT:
+				first_real_screenshot = screenshot_b64
+				break
+
+		if first_real_screenshot:
+			task_frame = _create_task_frame(
+				task,
+				first_real_screenshot,
+				title_font,  # type: ignore
+				regular_font,  # type: ignore
+				logo,
+				line_spacing,
+			)
+			images.append(task_frame)
+		else:
+			logger.warning('No real screenshots found for task frame, skipping task frame')
+
+	# Process each history item with its corresponding screenshot
+	for i, (item, screenshot) in enumerate(zip(history.history, screenshots), 1):
+		if not screenshot:
+			continue
+
+		# Skip placeholder screenshots from about:blank pages
+		# These are 4x4 white PNGs encoded as a specific base64 string
+		if screenshot == PLACEHOLDER_4PX_SCREENSHOT:
+			logger.debug(f'Skipping placeholder screenshot from about:blank page at step {i}')
+			continue
+
+		# Skip screenshots from new tab pages
+		from openbrowser.utils import is_new_tab_page
+
+		if is_new_tab_page(item.state.url):
+			logger.debug(f'Skipping screenshot from new tab page ({item.state.url}) at step {i}')
+			continue
+
+		# Convert base64 screenshot to PIL Image
+		img_data = base64.b64decode(screenshot)
+		image = Image.open(io.BytesIO(img_data))
+
+		if show_goals and item.model_output:
+			image = _add_overlay_to_image(
+				image=image,
+				step_number=i,
+				goal_text=item.model_output.current_state.next_goal,
+				regular_font=regular_font,  # type: ignore
+				title_font=title_font,  # type: ignore
+				margin=margin,
+				logo=logo,
+			)
+
+		images.append(image)
+
+	if images:
+		# Save the GIF
+		images[0].save(
+			output_path,
+			save_all=True,
+			append_images=images[1:],
+			duration=duration,
+			loop=0,
+			optimize=False,
+		)
+		logger.info(f'Created GIF at {output_path}')
+	else:
+		logger.warning('No images found in history to create GIF')
 
 
-def _add_step_annotation(image: "Image.Image", step_number: int, font_size: int = 24) -> "Image.Image":
-    """Add step number annotation to an image.
-    
-    Overlays a step number label on the top-left corner of the image
-    with a semi-transparent background for visibility.
-    
-    Args:
-        image: PIL Image to annotate.
-        step_number: Step number to display.
-        font_size: Font size for the annotation text.
-        
-    Returns:
-        New PIL Image with the step annotation overlay.
-    """
-    from PIL import ImageDraw, ImageFont
+def _create_task_frame(
+	task: str,
+	first_screenshot: str,
+	title_font: ImageFont.FreeTypeFont,
+	regular_font: ImageFont.FreeTypeFont,
+	logo: Image.Image | None = None,
+	line_spacing: float = 1.5,
+) -> Image.Image:
+	"""Create initial frame showing the task."""
+	from PIL import Image, ImageDraw, ImageFont
 
-    # Create a copy to avoid modifying original
-    annotated = image.copy()
-    draw = ImageDraw.Draw(annotated)
+	img_data = base64.b64decode(first_screenshot)
+	template = Image.open(io.BytesIO(img_data))
+	image = Image.new('RGB', template.size, (0, 0, 0))
+	draw = ImageDraw.Draw(image)
 
-    # Create annotation text
-    text = f"Step {step_number}"
+	# Calculate vertical center of image
+	center_y = image.height // 2
 
-    # Try to use a system font, fall back to default
-    try:
-        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", font_size)
-    except (OSError, IOError):
-        try:
-            font = ImageFont.truetype("arial.ttf", font_size)
-        except (OSError, IOError):
-            font = ImageFont.load_default()
+	# Draw task text with dynamic font size based on task length
+	margin = 140  # Increased margin
+	max_width = image.width - (2 * margin)
 
-    # Get text bounding box
-    bbox = draw.textbbox((0, 0), text, font=font)
-    text_width = bbox[2] - bbox[0]
-    text_height = bbox[3] - bbox[1]
+	# Dynamic font size calculation based on task length
+	# Start with base font size (regular + 16)
+	base_font_size = regular_font.size + 16
+	min_font_size = max(regular_font.size - 10, 16)  # Don't go below 16pt
+	max_font_size = base_font_size  # Cap at the base font size
 
-    # Draw background rectangle
-    padding = 10
-    x = 10
-    y = 10
-    draw.rectangle(
-        [x - padding, y - padding, x + text_width + padding, y + text_height + padding],
-        fill=(0, 0, 0, 180),
-    )
+	# Calculate dynamic font size based on text length and complexity
+	# Longer texts get progressively smaller fonts
+	text_length = len(task)
+	if text_length > 200:
+		# For very long text, reduce font size logarithmically
+		font_size = max(base_font_size - int(10 * (text_length / 200)), min_font_size)
+	else:
+		font_size = base_font_size
 
-    # Draw text
-    draw.text((x, y), text, font=font, fill=(255, 255, 255))
+	# Try to create a larger font, but fall back to regular font if it fails
+	try:
+		larger_font = ImageFont.truetype(regular_font.path, font_size)  # type: ignore
+	except (OSError, AttributeError):
+		# Fall back to regular font if .path is not available or font loading fails
+		larger_font = regular_font
 
-    return annotated
+	# Generate wrapped text with the calculated font size
+	wrapped_text = _wrap_text(task, larger_font, max_width)
+
+	# Calculate line height with spacing
+	line_height = larger_font.size * line_spacing
+
+	# Split text into lines and draw with custom spacing
+	lines = wrapped_text.split('\n')
+	total_height = line_height * len(lines)
+
+	# Start position for first line
+	text_y = center_y - (total_height / 2) + 50  # Shifted down slightly
+
+	for line in lines:
+		# Get line width for centering
+		line_bbox = draw.textbbox((0, 0), line, font=larger_font)
+		text_x = (image.width - (line_bbox[2] - line_bbox[0])) // 2
+
+		draw.text(
+			(text_x, text_y),
+			line,
+			font=larger_font,
+			fill=(255, 255, 255),
+		)
+		text_y += line_height
+
+	# Add logo if provided (top right corner)
+	if logo:
+		logo_margin = 20
+		logo_x = image.width - logo.width - logo_margin
+		image.paste(logo, (logo_x, logo_margin), logo if logo.mode == 'RGBA' else None)
+
+	return image
 
 
-def create_gif_from_screenshots(
-    screenshots: list[str],
-    output_path: str | Path = "screenshots.gif",
-    duration: float = 1.0,
-) -> Path:
-    """
-    Create a GIF from a list of base64-encoded screenshots.
+def _add_overlay_to_image(
+	image: Image.Image,
+	step_number: int,
+	goal_text: str,
+	regular_font: ImageFont.FreeTypeFont,
+	title_font: ImageFont.FreeTypeFont,
+	margin: int,
+	logo: Image.Image | None = None,
+	display_step: bool = True,
+	text_color: tuple[int, int, int, int] = (255, 255, 255, 255),
+	text_box_color: tuple[int, int, int, int] = (0, 0, 0, 255),
+) -> Image.Image:
+	"""Add step number and goal overlay to an image."""
 
-    Args:
-        screenshots: List of base64-encoded screenshot strings
-        output_path: Path to save the GIF
-        duration: Duration per frame in seconds
+	from PIL import Image, ImageDraw
 
-    Returns:
-        Path to the saved GIF
-    """
-    try:
-        from PIL import Image
-    except ImportError:
-        raise ImportError("Please install pillow: pip install pillow")
+	goal_text = decode_unicode_escapes_to_utf8(goal_text)
+	image = image.convert('RGBA')
+	txt_layer = Image.new('RGBA', image.size, (0, 0, 0, 0))
+	draw = ImageDraw.Draw(txt_layer)
+	if display_step:
+		# Add step number (bottom left)
+		step_text = str(step_number)
+		step_bbox = draw.textbbox((0, 0), step_text, font=title_font)
+		step_width = step_bbox[2] - step_bbox[0]
+		step_height = step_bbox[3] - step_bbox[1]
 
-    output_path = Path(output_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
+		# Position step number in bottom left
+		x_step = margin + 10  # Slight additional offset from edge
+		y_step = image.height - margin - step_height - 10  # Slight offset from bottom
 
-    frames = []
-    for screenshot_b64 in screenshots:
-        if not screenshot_b64:
-            continue
+		# Draw rounded rectangle background for step number
+		padding = 20  # Increased padding
+		step_bg_bbox = (
+			x_step - padding,
+			y_step - padding,
+			x_step + step_width + padding,
+			y_step + step_height + padding,
+		)
+		draw.rounded_rectangle(
+			step_bg_bbox,
+			radius=15,  # Add rounded corners
+			fill=text_box_color,
+		)
 
-        try:
-            image_data = base64.b64decode(screenshot_b64)
-            image = Image.open(io.BytesIO(image_data))
+		# Draw step number
+		draw.text(
+			(x_step, y_step),
+			step_text,
+			font=title_font,
+			fill=text_color,
+		)
 
-            if image.mode in ("RGBA", "P"):
-                background = Image.new("RGB", image.size, (255, 255, 255))
-                if image.mode == "RGBA":
-                    background.paste(image, mask=image.split()[3])
-                else:
-                    background.paste(image)
-                image = background
-            elif image.mode != "RGB":
-                image = image.convert("RGB")
+	# Draw goal text (centered, bottom)
+	max_width = image.width - (4 * margin)
+	wrapped_goal = _wrap_text(goal_text, title_font, max_width)
+	goal_bbox = draw.multiline_textbbox((0, 0), wrapped_goal, font=title_font)
+	goal_width = goal_bbox[2] - goal_bbox[0]
+	goal_height = goal_bbox[3] - goal_bbox[1]
 
-            frames.append(image)
+	# Center goal text horizontally, place above step number
+	x_goal = (image.width - goal_width) // 2
+	y_goal = y_step - goal_height - padding * 4  # More space between step and goal
 
-        except Exception as e:
-            logger.warning(f"Failed to process screenshot: {e}")
-            continue
+	# Draw rounded rectangle background for goal
+	padding_goal = 25  # Increased padding for goal
+	goal_bg_bbox = (
+		x_goal - padding_goal,  # Remove extra space for logo
+		y_goal - padding_goal,
+		x_goal + goal_width + padding_goal,
+		y_goal + goal_height + padding_goal,
+	)
+	draw.rounded_rectangle(
+		goal_bg_bbox,
+		radius=15,  # Add rounded corners
+		fill=text_box_color,
+	)
 
-    if not frames:
-        raise ValueError("No valid screenshots could be processed")
+	# Draw goal text
+	draw.multiline_text(
+		(x_goal, y_goal),
+		wrapped_goal,
+		font=title_font,
+		fill=text_color,
+		align='center',
+	)
 
-    frames[0].save(
-        output_path,
-        save_all=True,
-        append_images=frames[1:],
-        duration=int(duration * 1000),
-        loop=0,
-        optimize=True,
-    )
+	# Add logo if provided (top right corner)
+	if logo:
+		logo_layer = Image.new('RGBA', image.size, (0, 0, 0, 0))
+		logo_margin = 20
+		logo_x = image.width - logo.width - logo_margin
+		logo_layer.paste(logo, (logo_x, logo_margin), logo if logo.mode == 'RGBA' else None)
+		txt_layer = Image.alpha_composite(logo_layer, txt_layer)
 
-    logger.info(f"GIF saved to {output_path}")
-    return output_path
+	# Composite and convert
+	result = Image.alpha_composite(image, txt_layer)
+	return result.convert('RGB')
 
+
+def _wrap_text(text: str, font: ImageFont.FreeTypeFont, max_width: int) -> str:
+	"""
+	Wrap text to fit within a given width.
+
+	Args:
+	    text: Text to wrap
+	    font: Font to use for text
+	    max_width: Maximum width in pixels
+
+	Returns:
+	    Wrapped text with newlines
+	"""
+	text = decode_unicode_escapes_to_utf8(text)
+	words = text.split()
+	lines = []
+	current_line = []
+
+	for word in words:
+		current_line.append(word)
+		line = ' '.join(current_line)
+		bbox = font.getbbox(line)
+		if bbox[2] > max_width:
+			if len(current_line) == 1:
+				lines.append(current_line.pop())
+			else:
+				current_line.pop()
+				lines.append(' '.join(current_line))
+				current_line = [word]
+
+	if current_line:
+		lines.append(' '.join(current_line))
+
+	return '\n'.join(lines)
