@@ -1,7 +1,7 @@
-"""MCP (Model Context Protocol) client integration for browser-use.
+"""MCP (Model Context Protocol) client integration for openbrowser.
 
-This module provides integration between external MCP servers and browser-use's action registry.
-MCP tools are dynamically discovered and registered as browser-use actions.
+This module provides integration between external MCP servers and openbrowser's action registry.
+MCP tools are dynamically discovered and registered as openbrowser actions.
 
 Example usage:
     from openbrowser import Tools
@@ -16,7 +16,7 @@ Example usage:
         args=["@mycompany/mcp-server@latest"]
     )
 
-    # Register all MCP tools as browser-use actions
+    # Register all MCP tools as openbrowser actions
     await mcp_client.register_to_tools(tools)
 
     # Now use with Agent as normal - MCP tools are available as actions
@@ -45,7 +45,7 @@ MCP_AVAILABLE = True
 
 
 class MCPClient:
-	"""Client for connecting to MCP servers and exposing their tools as browser-use actions."""
+	"""Client for connecting to MCP servers and exposing their tools as openbrowser actions."""
 
 	def __init__(
 		self,
@@ -213,7 +213,7 @@ class MCPClient:
 		tool_filter: list[str] | None = None,
 		prefix: str | None = None,
 	) -> None:
-		"""Register MCP tools as actions in the browser-use tools.
+		"""Register MCP tools as actions in the openbrowser tools.
 
 		Args:
 			tools: Browser-use tools to register actions to
@@ -241,10 +241,10 @@ class MCPClient:
 			self._register_tool_as_action(registry, action_name, tool)
 			self._registered_actions.add(action_name)
 
-		logger.info(f"✅ Registered {len(self._registered_actions)} MCP tools from '{self.server_name}' as browser-use actions")
+		logger.info(f"Registered {len(self._registered_actions)} MCP tools from '{self.server_name}' as openbrowser actions")
 
 	def _register_tool_as_action(self, registry: Registry, action_name: str, tool: Any) -> None:
-		"""Register a single MCP tool as a browser-use action.
+		"""Register a single MCP tool as an openbrowser action.
 
 		Args:
 			registry: Browser-use registry to register action to
@@ -396,7 +396,7 @@ class MCPClient:
 		mcp_action_wrapper.__name__ = action_name
 		mcp_action_wrapper.__qualname__ = f'mcp.{self.server_name}.{action_name}'
 
-		# Register the action with browser-use
+		# Register the action with openbrowser
 		description = tool.description or f'MCP tool from {self.server_name}: {tool.name}'
 
 		# Use the registry's action decorator

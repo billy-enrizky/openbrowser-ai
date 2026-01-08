@@ -17,7 +17,7 @@ MessageDict = dict[str, Any]
 
 
 class CerebrasMessageSerializer:
-	"""Serializer for converting browser-use messages to Cerebras messages."""
+	"""Serializer for converting openbrowser messages to Cerebras messages."""
 
 	# -------- content 处理 --------------------------------------------------
 	@staticmethod

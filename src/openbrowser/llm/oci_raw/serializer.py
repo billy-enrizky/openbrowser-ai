@@ -1,7 +1,7 @@
 """
 Message serializer for OCI Raw API integration.
 
-This module handles the conversion between browser-use message formats
+This module handles the conversion between openbrowser message formats
 and the OCI Raw API message format using proper OCI SDK models.
 """
 
@@ -18,7 +18,7 @@ from openbrowser.llm.messages import (
 
 class OCIRawMessageSerializer:
 	"""
-	Serializer for converting between browser-use message types and OCI Raw API message formats.
+	Serializer for converting between openbrowser message types and OCI Raw API message formats.
 	Uses proper OCI SDK model objects as shown in the working example.
 
 	Supports both:
@@ -61,10 +61,10 @@ class OCIRawMessageSerializer:
 	@staticmethod
 	def serialize_messages(messages: list[BaseMessage]) -> list[Message]:
 		"""
-		Serialize a list of browser-use messages to OCI Raw API Message objects.
+		Serialize a list of openbrowser messages to OCI Raw API Message objects.
 
 		Args:
-		    messages: List of browser-use messages
+		    messages: List of openbrowser messages
 
 		Returns:
 		    List of OCI Message objects
@@ -134,7 +134,7 @@ class OCIRawMessageSerializer:
 							contents.append(text_content)
 						elif part.type == 'image_url':
 							# Assistant messages can have images in responses
-							# Note: This is currently unreachable in browser-use but kept for completeness
+							# Note: This is currently unreachable in openbrowser but kept for completeness
 							image_content = OCIRawMessageSerializer._create_image_content(part)
 							contents.append(image_content)
 						elif part.type == 'refusal':
@@ -165,7 +165,7 @@ class OCIRawMessageSerializer:
 		We combine all messages into a single conversation string.
 
 		Args:
-		    messages: List of browser-use messages
+		    messages: List of openbrowser messages
 
 		Returns:
 		    Single string containing the conversation

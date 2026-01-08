@@ -150,10 +150,10 @@ class SpecialActionParameters(BaseModel):
 	# optional user-provided context object passed down from Agent(context=...)
 	# e.g. can contain anything, external db connections, file handles, queues, runtime config objects, etc.
 	# that you might want to be able to access quickly from within many of your actions
-	# browser-use code doesn't use this at all, we just pass it down to your actions for convenience
+	# openbrowser code doesn't use this at all, we just pass it down to your actions for convenience
 	context: Any | None = None
 
-	# browser-use session object, can be used to create new tabs, navigate, access CDP
+	# openbrowser session object, can be used to create new tabs, navigate, access CDP
 	browser_session: BrowserSession | None = None
 
 	# Current page URL for filtering and context

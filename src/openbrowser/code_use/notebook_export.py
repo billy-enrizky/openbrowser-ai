@@ -194,7 +194,7 @@ def session_to_python_script(agent: CodeAgent) -> str:
 	"""
 	lines = []
 
-	lines.append('# Generated from browser-use code-use session\n')
+	lines.append('# Generated from openbrowser code-use session\n')
 	lines.append('import asyncio\n')
 	lines.append('import json\n')
 	lines.append('from openbrowser import BrowserSession\n')

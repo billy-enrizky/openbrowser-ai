@@ -74,7 +74,7 @@ def try_parse_groq_failed_generation(
 		# Parse the cleaned content
 		result_dict = json.loads(content)
 
-		# some models occasionally respond with a list containing one dict: https://github.com/browser-use/browser-use/issues/1458
+		# some models occasionally respond with a list containing one dict: https://github.com/billy-enrizky/openbrowser-ai/issues
 		if isinstance(result_dict, list) and len(result_dict) == 1 and isinstance(result_dict[0], dict):
 			result_dict = result_dict[0]
 

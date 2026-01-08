@@ -1,6 +1,6 @@
-"""Cloud browser service integration for browser-use.
+"""Cloud browser service integration for openbrowser.
 
-This module provides integration with the browser-use cloud browser service.
+This module provides integration with the openbrowser cloud browser service.
 When cloud_browser=True, it automatically creates a cloud browser instance
 and returns the CDP URL for connection.
 """
@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 class CloudBrowserClient:
-	"""Client for browser-use cloud browser service."""
+	"""Client for openbrowser cloud browser service (uses Browser-Use cloud backend)."""
 
 	def __init__(self, api_base_url: str = 'https://api.browser-use.com'):
 		self.api_base_url = api_base_url
@@ -68,7 +68,7 @@ class CloudBrowserClient:
 					'Authentication failed. Please make sure you have set BROWSER_USE_API_KEY environment variable to authenticate with the cloud service. You can also create an API key at https://cloud.browser-use.com/new-api-key'
 				)
 			elif response.status_code == 403:
-				raise CloudBrowserAuthError('Access forbidden. Please check your browser-use cloud subscription status.')
+				raise CloudBrowserAuthError('Access forbidden. Please check your Browser-Use cloud subscription status.')
 			elif not response.is_success:
 				error_msg = f'Failed to create cloud browser: HTTP {response.status_code}'
 				try:

@@ -1,4 +1,4 @@
-"""Video Recording Service for Browser Use Sessions."""
+"""Video Recording Service for OpenBrowser Sessions."""
 
 import base64
 import logging
@@ -63,7 +63,7 @@ class VideoRecorderService:
 		"""
 		if not IMAGEIO_AVAILABLE:
 			logger.error(
-				'MP4 recording requires optional dependencies. Please install them with: pip install "browser-use[video]"'
+				'MP4 recording requires optional dependencies. Please install them with: pip install "openbrowser-ai[video]"'
 			)
 			return
 

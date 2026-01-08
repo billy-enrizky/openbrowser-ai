@@ -1,4 +1,4 @@
-"""Configuration system for browser-use with automatic migration support.
+"""Configuration system for openbrowser with automatic migration support.
 
 Performance optimizations:
 - Cached environment variable lookups
@@ -569,7 +569,7 @@ CONFIG = Config()
 
 # Helper functions for MCP components
 def load_openbrowser_config() -> dict[str, Any]:
-	"""Load browser-use configuration for MCP components."""
+	"""Load openbrowser configuration for MCP components."""
 	return CONFIG.load_config()
 
 

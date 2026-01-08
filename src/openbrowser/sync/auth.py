@@ -1,5 +1,5 @@
 """
-OAuth2 Device Authorization Grant flow client for browser-use.
+OAuth2 Device Authorization Grant flow client for openbrowser.
 """
 
 import asyncio
@@ -317,7 +317,7 @@ class DeviceAuthClient:
 				self.auth_config.save_to_file()
 
 				if show_instructions:
-					logger.debug('✅  Authentication successful! Cloud sync is now enabled with your browser-use account.')
+					logger.debug('Authentication successful! Cloud sync is now enabled with your openbrowser account.')
 
 				return True
 

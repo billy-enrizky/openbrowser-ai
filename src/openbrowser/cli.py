@@ -29,7 +29,7 @@ if len(sys.argv) > 1 and sys.argv[1] == 'install':
 
 	if result.returncode == 0:
 		print('\n✅ Installation complete!')
-		print('🚀 Ready to use! Run: uvx browser-use')
+		print('Ready to use! Run: uvx openbrowser')
 	else:
 		print('\n❌ Installation failed')
 		sys.exit(1)
@@ -125,11 +125,11 @@ if '--template' in sys.argv:
 
 		click.echo(f'✅ Created {output_path}')
 		click.echo('\nNext steps:')
-		click.echo('  1. Install browser-use:')
-		click.echo('     uv pip install browser-use')
+		click.echo('  1. Install openbrowser:')
+		click.echo('     uv pip install openbrowser-ai')
 		click.echo('  2. Set up your API key in .env file or environment:')
 		click.echo('     BROWSER_USE_API_KEY=your-key')
-		click.echo('     (Get your key at https://cloud.browser-use.com/new-api-key)')
+		click.echo('     (Get your key at https://github.com/billy-enrizky/openbrowser-ai)')
 		click.echo('  3. Run your script:')
 		click.echo(f'     python {output_path.name}')
 	except Exception as e:
@@ -169,7 +169,7 @@ try:
 	from textual.containers import Container, HorizontalGroup, VerticalScroll
 	from textual.widgets import Footer, Header, Input, Label, Link, RichLog, Static
 except ImportError:
-	print('⚠️ CLI addon is not installed. Please install it with: `pip install "browser-use[cli]"` and try again.')
+	print('CLI addon is not installed. Please install it with: `pip install "openbrowser-ai[cli]"` and try again.')
 	sys.exit(1)
 
 
@@ -1127,7 +1127,7 @@ class BrowserUseApp(App):
 
 		# Exit the application
 		self.exit()
-		print('\nTry running tasks on our cloud: https://browser-use.com')
+		print('\nTry running tasks at: https://github.com/billy-enrizky/openbrowser-ai')
 
 	def compose(self) -> ComposeResult:
 		"""Create the UI layout."""
@@ -1142,7 +1142,7 @@ class BrowserUseApp(App):
 			with Container(id='links-panel'):
 				with HorizontalGroup(classes='link-row'):
 					yield Static('Run at scale on cloud:    [blink]☁️[/]  ', markup=True, classes='link-label')
-					yield Link('https://browser-use.com', url='https://browser-use.com', classes='link-white link-url')
+					yield Link('https://github.com/billy-enrizky/openbrowser-ai', url='https://github.com/billy-enrizky/openbrowser-ai', classes='link-white link-url')
 
 				yield Static('')  # Empty line
 
@@ -1155,16 +1155,16 @@ class BrowserUseApp(App):
 				with HorizontalGroup(classes='link-row'):
 					yield Static('Get prompt inspiration:   🦸 ', markup=True, classes='link-label')
 					yield Link(
-						'https://github.com/browser-use/awesome-prompts',
-						url='https://github.com/browser-use/awesome-prompts',
+						'https://github.com/billy-enrizky/openbrowser-ai',
+						url='https://github.com/billy-enrizky/openbrowser-ai',
 						classes='link-magenta link-url',
 					)
 
 				with HorizontalGroup(classes='link-row'):
 					yield Static('[dim]Report any issues:[/]        🐛 ', markup=True, classes='link-label')
 					yield Link(
-						'https://github.com/browser-use/browser-use/issues',
-						url='https://github.com/browser-use/browser-use/issues',
+						'https://github.com/billy-enrizky/openbrowser-ai/issues',
+						url='https://github.com/billy-enrizky/openbrowser-ai/issues',
 						classes='link-green link-url',
 					)
 
@@ -1483,7 +1483,7 @@ class BrowserUseApp(App):
 
 
 async def run_prompt_mode(prompt: str, ctx: click.Context, debug: bool = False):
-	"""Run browser-use in non-interactive mode with a single prompt."""
+	"""Run openbrowser in non-interactive mode with a single prompt."""
 	# Import and call setup_logging to ensure proper initialization
 	from openbrowser.logging_config import setup_logging
 
@@ -1819,7 +1819,7 @@ async def run_auth_command():
 			id=task_id,
 			agent_session_id=session_id,
 			llm_model='auth-flow',
-			task='🔐 Complete authentication and join the browser-use community',
+			task='Complete authentication and join the openbrowser community',
 			user_id=auth_client.temp_user_id,
 			device_id=auth_client.device_id,
 			done_output=None,
@@ -1910,15 +1910,15 @@ async def run_auth_command():
 						},
 						'done': {
 							'success': True,
-							'text': '⭐ Starred browser-use/browser-use repository! Welcome to the community!',
+							'text': 'Starred openbrowser-ai repository! Welcome to the community!',
 						},
 					}
 				],
-				next_goal='⭐ Star browser-use GitHub repository to join the community',
+				next_goal='Star openbrowser-ai GitHub repository to join the community',
 				evaluation_previous_goal='Authentication completed successfully',
 				memory='User authenticated with Browser Use Cloud and is now part of the community',
 				screenshot_url=None,
-				url='https://github.com/browser-use/browser-use',
+				url='https://github.com/billy-enrizky/openbrowser-ai',
 			)
 			print('📤 Sending dummy step event...')
 			await sync_service.handle_event(step_event)
@@ -1939,7 +1939,7 @@ async def run_auth_command():
 			await sync_service.handle_event(completion_event)
 
 			print('🎉 Authentication successful!')
-			print('   Future browser-use runs will now sync to the cloud.')
+			print('   Future openbrowser runs will now sync to the cloud.')
 		else:
 			# Failed - still complete the task with failure message
 			completion_event = UpdateAgentTaskEvent(
@@ -2010,8 +2010,8 @@ def main(ctx: click.Context, debug: bool = False, **kwargs):
 	Run without arguments to start the interactive TUI.
 
 	Examples:
-	  uvx browser-use --template default
-	  uvx browser-use --template advanced --output my_script.py
+	  uvx openbrowser --template default
+	  uvx openbrowser --template advanced --output my_script.py
 	"""
 
 	# Handle template generation
@@ -2025,12 +2025,12 @@ def main(ctx: click.Context, debug: bool = False, **kwargs):
 
 
 def run_main_interface(ctx: click.Context, debug: bool = False, **kwargs):
-	"""Run the main browser-use interface"""
+	"""Run the main openbrowser interface"""
 
 	if kwargs['version']:
 		from importlib.metadata import version
 
-		print(version('browser-use'))
+		print(version('openbrowser-ai'))
 		sys.exit(0)
 
 	# Check if MCP server mode is activated
@@ -2166,7 +2166,7 @@ def install():
 
 	if result.returncode == 0:
 		print('\n✅ Installation complete!')
-		print('🚀 Ready to use! Run: uvx browser-use')
+		print('Ready to use! Run: uvx openbrowser')
 	else:
 		print('\n❌ Installation failed')
 		sys.exit(1)
@@ -2215,11 +2215,11 @@ def _run_template_generation(template: str, output: str | None, force: bool):
 	if _write_init_file(output_path, content, force):
 		click.echo(f'✅ Created {output_path}')
 		click.echo('\nNext steps:')
-		click.echo('  1. Install browser-use:')
-		click.echo('     uv pip install browser-use')
+		click.echo('  1. Install openbrowser:')
+		click.echo('     uv pip install openbrowser-ai')
 		click.echo('  2. Set up your API key in .env file or environment:')
 		click.echo('     BROWSER_USE_API_KEY=your-key')
-		click.echo('     (Get your key at https://cloud.browser-use.com/new-api-key)')
+		click.echo('     (Get your key at https://github.com/billy-enrizky/openbrowser-ai)')
 		click.echo('  3. Run your script:')
 		click.echo(f'     python {output_path.name}')
 	else:
@@ -2280,25 +2280,25 @@ def init(
 	list_templates: bool,
 ):
 	"""
-	Generate a browser-use template file to get started quickly.
+	Generate an openbrowser template file to get started quickly.
 
 	Examples:
 
 	\b
 	# Interactive mode - prompts for template selection
-	uvx browser-use init
+	uvx openbrowser init
 
 	\b
 	# Generate default template
-	uvx browser-use init --template default
+	uvx openbrowser init --template default
 
 	\b
 	# Generate advanced template with custom filename
-	uvx browser-use init --template advanced --output my_script.py
+	uvx openbrowser init --template advanced --output my_script.py
 
 	\b
 	# List available templates
-	uvx browser-use init --list
+	uvx openbrowser init --list
 	"""
 
 	# Handle --list flag
@@ -2344,11 +2344,11 @@ def init(
 	if _write_init_file(output_path, content, force):
 		click.echo(f'✅ Created {output_path}')
 		click.echo('\nNext steps:')
-		click.echo('  1. Install browser-use:')
-		click.echo('     uv pip install browser-use')
+		click.echo('  1. Install openbrowser:')
+		click.echo('     uv pip install openbrowser-ai')
 		click.echo('  2. Set up your API key in .env file or environment:')
 		click.echo('     BROWSER_USE_API_KEY=your-key')
-		click.echo('     (Get your key at https://cloud.browser-use.com/new-api-key)')
+		click.echo('     (Get your key at https://github.com/billy-enrizky/openbrowser-ai)')
 		click.echo('  3. Run your script:')
 		click.echo(f'     python {output_path.name}')
 	else:
