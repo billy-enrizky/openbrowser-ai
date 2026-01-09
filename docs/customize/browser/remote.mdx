@@ -1,85 +1,97 @@
 ---
 title: "Remote Browser"
-description: ""
-icon: "cloud"
+description: "Connect to remote browsers via CDP"
+icon: "server"
 mode: "wide"
 ---
 
+### Connect via CDP URL
 
-### Browser-Use Cloud Browser or CDP URL
-
-The easiest way to use a cloud browser is with the built-in Browser-Use cloud service:
+Connect to any remote browser using Chrome DevTools Protocol (CDP):
 
 ```python
-from openbrowser import Agent, Browser, ChatBrowserUse
+from openbrowser import Agent, Browser, ChatGoogle
 
-# Simple: Use Browser-Use cloud browser service
+# Connect to a remote browser via CDP URL
 browser = Browser(
-    use_cloud=True,  # Automatically provisions a cloud browser
-)
-
-# Advanced: Configure cloud browser parameters
-# Using this settings can bypass any captcha protection on any website
-browser = Browser(
-    cloud_profile_id='your-profile-id',  # Optional: specific browser profile
-    cloud_proxy_country_code='us',  # Optional: proxy location (us, uk, fr, it, jp, au, de, fi, ca, in)
-    cloud_timeout=30,  # Optional: session timeout in minutes (MAX free: 15min, paid: 240min)
-)
-
-# Or use a CDP URL from any cloud browser provider
-browser = Browser(
-    cdp_url="http://remote-server:9222"  # Get a CDP URL from any provider
+    cdp_url="http://remote-server:9222"
 )
 
 agent = Agent(
     task="Your task here",
-    llm=ChatBrowserUse(),
+    llm=ChatGoogle(),
     browser=browser,
 )
 ```
 
-**Prerequisites:**
-1. Get an API key from [cloud.browser-use.com](https://cloud.browser-use.com/new-api-key)
-2. Set BROWSER_USE_API_KEY environment variable
+### Start Chrome with Remote Debugging
 
-**Cloud Browser Parameters:**
-- `cloud_profile_id`: UUID of a browser profile (optional, uses default if not specified)
-- `cloud_proxy_country_code`: Country code for proxy location - supports: us, uk, fr, it, jp, au, de, fi, ca, in
-- `cloud_timeout`: Session timeout in minutes (free users: max 15 min, paid users: max 240 min)
+To enable CDP on a local or remote Chrome instance:
 
-**Benefits:**
-- ✅ No local browser setup required
-- ✅ Scalable and fast cloud infrastructure
-- ✅ Automatic provisioning and teardown
-- ✅ Built-in authentication handling
-- ✅ Optimized for browser automation
-- ✅ Global proxy support for geo-restricted content
+```bash
+# macOS
+/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome --remote-debugging-port=9222
+
+# Linux
+google-chrome --remote-debugging-port=9222
+
+# Windows
+chrome.exe --remote-debugging-port=9222
+```
 
 ### Third-Party Cloud Browsers
-You can pass in a CDP URL from any remote browser
 
+You can use any cloud browser service that provides a CDP URL:
+
+- **Browserless** - `cdp_url="wss://chrome.browserless.io?token=YOUR_TOKEN"`
+- **BrowserStack** - Connect via their CDP endpoint
+- **LambdaTest** - Connect via their CDP endpoint
+- **Any Docker-based Chrome** - Run headless Chrome in a container
 
 ### Proxy Connection
 
 ```python
-
-from openbrowser import Agent, Browser, ChatBrowserUse
+from openbrowser import Agent, Browser, ChatGoogle
 from openbrowser.browser import ProxySettings
 
 browser = Browser(
-        headless=False,
-        proxy=ProxySettings(
-            server="http://proxy-server:8080",
-            username="proxy-user",
-            password="proxy-pass"
-        )
-        cdp_url="http://remote-server:9222"
+    headless=False,
+    proxy=ProxySettings(
+        server="http://proxy-server:8080",
+        username="proxy-user",
+        password="proxy-pass"
+    ),
+    cdp_url="http://remote-server:9222"
 )
-
 
 agent = Agent(
     task="Your task here",
-    llm=ChatBrowserUse(),
+    llm=ChatGoogle(),
     browser=browser,
 )
+```
+
+### Docker Setup
+
+Run Chrome in a Docker container:
+
+```dockerfile
+FROM zenika/alpine-chrome:latest
+
+# Expose CDP port
+EXPOSE 9222
+
+# Start Chrome with remote debugging
+CMD ["chromium-browser", "--headless", "--disable-gpu", "--remote-debugging-address=0.0.0.0", "--remote-debugging-port=9222"]
+```
+
+```bash
+docker build -t chrome-cdp .
+docker run -p 9222:9222 chrome-cdp
+```
+
+Then connect:
+
+```python
+browser = Browser(cdp_url="http://localhost:9222")
 ```
