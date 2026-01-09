@@ -130,18 +130,6 @@
     {
       "source": "/customize/examples/prompting-guide",
       "destination": "/customize/agent/prompting-guide"
-    },
-    {
-      "source": "/api-reference/browser-profiles/get-browser-profile",
-      "destination": "https://docs.cloud.browser-use.com/api-reference/v-2-api-current/profiles/get-profile-profiles-profile-id-get"
-    },
-    {
-      "source": "/cloud/v2/quickstart",
-      "destination": "https://docs.cloud.browser-use.com/get-started/quickstart"
-    },
-    {
-      "source": "/cloud/v1/*",
-      "destination": "https://docs.cloud.browser-use.com"
     }
   ],
   "navigation": {
@@ -326,12 +314,7 @@
         "label": "Discord",
         "href": "https://github.com/billy-enrizky/openbrowser-ai/discussions"
       }
-    ],
-    "primary": {
-      "type": "button",
-      "label": "Browser Use Cloud",
-      "href": "https://cloud.browser-use.com"
-    }
+    ]
   },
   "footer": {
     "socials": {

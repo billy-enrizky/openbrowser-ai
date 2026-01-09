@@ -53,17 +53,15 @@ If you want to develop with the n8n node:
    npm link n8n-nodes-openbrowser
    ```
 
-## Setting Up Browser Use Cloud API Credentials
+## Setting Up API Credentials
 
-To use the OpenBrowser node in n8n, you need to configure API credentials:
+To use the OpenBrowser node in n8n, you need to configure API credentials for your LLM provider:
 
-1. Sign up for an account at [Browser Use Cloud](https://cloud.browser-use.com/new-api-key)
-2. Navigate to the Settings or API section
-3. Generate or copy your API key
-4. In n8n, create a new credential:
+1. Get an API key from your preferred LLM provider (OpenAI, Google, Anthropic, etc.)
+2. In n8n, create a new credential:
    - Go to **Credentials** tab
    - Click **Create New**
-   - Select **Browser Use Cloud API**
+   - Select the appropriate credential type for your LLM
    - Enter your API key
    - Save the credential
 
@@ -113,11 +111,10 @@ If you encounter issues with the OpenBrowser node:
 - Verify your API key is valid and has sufficient credits
 - Check that your instructions are clear and specific
 - For complex tasks, consider breaking them into multiple steps
-- Refer to the [OpenBrowser documentation](https://openbrowser.github.io/docs) for instruction best practices
+- Refer to the [OpenBrowser documentation](https://docs.openbrowser.ai) for instruction best practices
 
 ## Resources
 
 - [n8n Community Nodes Documentation](https://docs.n8n.io/integrations/community-nodes/)
-- [OpenBrowser Documentation](https://openbrowser.github.io/docs)
-- [Browser Use Cloud](https://cloud.browser-use.com)
+- [OpenBrowser Documentation](https://docs.openbrowser.ai)
 - [n8n-nodes-openbrowser GitHub Repository](https://github.com/draphonix/n8n-nodes-openbrowser) 
