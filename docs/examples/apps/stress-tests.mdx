@@ -1,0 +1,86 @@
+---
+title: "Stress Tests"
+description: "Collection of challenging web forms and interactive pages for testing browser automation"
+icon: "vial"
+mode: "wide"
+---
+
+## Overview
+
+The OpenBrowser Stress Tests are a collection of HTML forms and interactive pages designed to evaluate and benchmark browser automation capabilities. These tests cover various edge cases and challenging scenarios that browser agents may encounter.
+
+**Live Demo**: [billy-enrizky.github.io/openbrowser-ai](https://billy-enrizky.github.io/openbrowser-ai/)
+
+## Available Tests
+
+### Form Challenges
+
+| Test | Description |
+|------|-------------|
+| **React Native Web Form** | Complex form with React Native Web components |
+| **Dynamic Form** | Form with dynamically generated fields |
+| **Multi-Step Form** | Wizard-style form with multiple pages |
+| **Validation Form** | Form with various validation rules |
+| **File Upload Form** | Form with file upload capabilities |
+
+### Interactive Challenges
+
+| Test | Description |
+|------|-------------|
+| **Drag and Drop** | Elements that require drag-and-drop interaction |
+| **Infinite Scroll** | Page with infinite scrolling content |
+| **Modal Dialogs** | Nested modal and popup interactions |
+| **Shadow DOM** | Elements inside Shadow DOM |
+| **iFrames** | Content embedded in iframes |
+
+## Running Stress Tests
+
+### Using the Live Site
+
+Navigate to the stress test you want to run:
+
+```
+https://billy-enrizky.github.io/openbrowser-ai/challenges/[test-name].html
+```
+
+### Running Locally
+
+Clone the repository and open the HTML files:
+
+```bash
+git clone https://github.com/billy-enrizky/openbrowser-ai.git
+cd openbrowser-ai/stress-tests
+python -m http.server 8000
+```
+
+Then visit `http://localhost:8000` in your browser.
+
+### Testing with OpenBrowser
+
+```python
+import asyncio
+from openbrowser import Agent, ChatGoogle
+
+async def run_stress_test():
+    agent = Agent(
+        task="Go to https://billy-enrizky.github.io/openbrowser-ai/challenges/react-native-web-form.html and fill out the form with test data",
+        llm=ChatGoogle(),
+    )
+    await agent.run()
+
+asyncio.run(run_stress_test())
+```
+
+## Contributing Tests
+
+To add a new stress test:
+
+1. Create an HTML file in `stress-tests/challenges/`
+2. Add the test to `stress-tests/index.html`
+3. Document the test in this page
+4. Submit a pull request
+
+## Source Code
+
+Full implementation: [github.com/billy-enrizky/openbrowser-ai/tree/main/stress-tests](https://github.com/billy-enrizky/openbrowser-ai/tree/main/stress-tests)
+
