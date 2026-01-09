@@ -11,7 +11,7 @@ This is the most advanced getting started example, combining all previous concep
 
 Setup:
 1. Get your API key from your LLM provider
-2. Set environment variable: export BROWSER_USE_API_KEY="your-key"
+2. Set environment variable: export GOOGLE_API_KEY="your-key"
 """
 
 import asyncio
@@ -25,12 +25,12 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from openbrowser import Agent, ChatBrowserUse
+from openbrowser import Agent, ChatGoogle
 
 
 async def main():
 	# Initialize the model
-	llm = ChatBrowserUse()
+	llm = ChatGoogle()
 
 	# Define a multi-step task
 	task = """
