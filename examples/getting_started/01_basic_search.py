@@ -1,7 +1,7 @@
 """
 Setup:
 1. Get your API key from your LLM provider
-2. Set environment variable: export BROWSER_USE_API_KEY="your-key"
+2. Set environment variable: export GOOGLE_API_KEY="your-key"
 """
 
 import asyncio
@@ -15,11 +15,11 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from openbrowser import Agent, ChatBrowserUse
+from openbrowser import Agent, ChatGoogle
 
 
 async def main():
-	llm = ChatBrowserUse()
+	llm = ChatGoogle()
 	task = "Search Google for 'what is browser automation' and tell me the top 3 results"
 	agent = Agent(task=task, llm=llm)
 	await agent.run()

@@ -64,7 +64,7 @@ llm = ChatAzureOpenAI(model='gpt-4.1-mini', api_key=api_key, azure_endpoint=azur
 task = 'Find the founders of the sensitive company_name'
 
 # Configuration Browser (optional)
-browser_profile = BrowserProfile(allowed_domains=['*google.com', 'browser-use.com'], enable_default_extensions=False)
+browser_profile = BrowserProfile(allowed_domains=['*google.com', 'example.com'], enable_default_extensions=False)
 
 # Sensitive data (optional) - {key: sensitive_information} - we filter out the sensitive_information from any input to the LLM, it will only work with placeholder.
 # By default we pass screenshots to the LLM which can contain your information. Set use_vision=False to disable this.
