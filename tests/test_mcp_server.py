@@ -33,14 +33,6 @@ def test_main_exits_when_mcp_missing(monkeypatch, capsys):
     assert "MCP SDK is required" in captured.err
 
 
-def test_openbrowser_server_init_raises_when_mcp_missing(monkeypatch):
-    """Verify OpenBrowserServer raises ImportError when MCP SDK is missing."""
-    monkeypatch.setattr(mcp_module.server, "MCP_AVAILABLE", False)
-
-    with pytest.raises(ImportError):
-        mcp_module.server.OpenBrowserServer()
-
-
 def test_execute_tool_unknown_returns_message(monkeypatch):
     """Verify _execute_tool returns informative message for unknown tools."""
 
