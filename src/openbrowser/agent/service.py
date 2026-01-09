@@ -128,7 +128,7 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 		# Initial agent run parameters
 		sensitive_data: dict[str, str | dict[str, str]] | None = None,
 		initial_actions: list[dict[str, dict[str, Any]]] | None = None,
-		# Cloud Callbacks
+		# Callbacks
 		register_new_step_callback: (
 			Callable[['BrowserStateSummary', 'AgentOutput', int], None]  # Sync callback
 			| Callable[['BrowserStateSummary', 'AgentOutput', int], Awaitable[None]]  # Async callback
@@ -688,7 +688,7 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 		# Always take screenshots for all steps
 		self.logger.debug('📸 Requesting browser state with include_screenshot=True')
 		browser_state_summary = await self.browser_session.get_browser_state_summary(
-			include_screenshot=True,  # always capture even if use_vision=False so that cloud sync is useful (it's fast now anyway)
+			include_screenshot=True,  # always capture for history/debugging
 			include_recent_events=self.include_recent_events,
 		)
 		if browser_state_summary.screenshot:
@@ -1283,17 +1283,6 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 			final_result = self.history.final_result()
 			final_result_str = str(final_result).lower() if final_result else ''
 
-			# Check for captcha/cloudflare related failures
-			captcha_keywords = ['captcha', 'cloudflare', 'recaptcha', 'challenge', 'bot detection', 'access denied']
-			has_captcha_issue = any(keyword in final_result_str for keyword in captcha_keywords)
-
-			if has_captcha_issue:
-				# Suggest use_cloud=True for captcha/cloudflare issues
-				task_preview = self.task[:10] if len(self.task) > 10 else self.task
-				self.logger.info('')
-				self.logger.info('Failed because of CAPTCHA? For better browser stealth, try:')
-				self.logger.info(f'   agent = Agent(task="{task_preview}...", browser=Browser(use_cloud=True))')
-
 			# General failure message
 			self.logger.info('')
 			self.logger.info('Did the Agent not work as expected? Let us fix this!')
@@ -1831,7 +1820,7 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 		Returns:
 		                List of action results
 		"""
-		# Skip cloud sync session events for rerunning (we're replaying, not starting new)
+		# Mark session as initialized since we're replaying, not starting new
 		self.state.session_initialized = True
 
 		# Initialize browser session

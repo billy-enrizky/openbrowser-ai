@@ -1885,17 +1885,6 @@ def run_main_interface(ctx: click.Context, debug: bool = False, **kwargs):
 
 
 @main.command()
-def auth():
-	"""Cloud sync is not available in OpenBrowser"""
-	import logging
-	logger = logging.getLogger(__name__)
-	logger.warning('Cloud sync has been removed from OpenBrowser.')
-	logger.warning('OpenBrowser is a fully local browser automation tool.')
-	print('Cloud sync is not available in OpenBrowser.')
-	print('OpenBrowser is a fully local browser automation tool.')
-
-
-@main.command()
 def install():
 	"""Install Chromium browser with system dependencies"""
 	import platform
