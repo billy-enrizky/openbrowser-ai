@@ -125,24 +125,4 @@ if __name__ == "__main__":
 
 ## 4. Going to Production
 
-Sandboxes are the **easiest way to run OpenBrowser in production**. We handle agents, browsers, persistence, auth, cookies, and LLMs. It's also the **fastest way to deploy** - the agent runs right next to the browser, so latency is minimal.
-
-<Warning>
-Sandboxes are in **beta**.
-</Warning>
-
-To run in production with authentication, just add `@sandbox` to your function:
-
-```python
-from openbrowser import Browser, sandbox, ChatBrowserUse
-from openbrowser.agent.service import Agent
-
-@sandbox(cloud_profile_id='your-profile-id')
-async def production_task(browser: Browser):
-    agent = Agent(task="Your authenticated task", browser=browser, llm=ChatBrowserUse())
-    await agent.run()
-
-await production_task()
-```
-
-See [Going to Production](/production) for how to sync your cookies to the cloud.
+For production deployments, see [Going to Production](/production) for best practices on running OpenBrowser in production environments.

@@ -300,17 +300,17 @@
     "links": [
       {
         "label": "Github",
-        "href": "https://github.com/billy-enrizky/openbrowser-ai",
-        "style": "button",
-        "color": "#0ea5e9"
+        "href": "https://github.com/billy-enrizky/openbrowser-ai"
       },
       {
         "label": "Discord",
-        "href": "https://discord.gg/xuhxWGCn",
-        "style": "button",
-        "color": "#0ea5e9"
+        "href": "https://discord.gg/xuhxWGCn"
       }
-    ]
+    ],
+    "primary": {
+      "type": "github",
+      "href": "https://github.com/billy-enrizky/openbrowser-ai"
+    }
   },
   "footer": {
     "socials": {
