@@ -26,7 +26,7 @@ export LMNR_PROJECT_API_KEY=<your-project-api-key>
 Then, you simply initialize the Laminar at the top of your project and both OpenBrowser and session recordings will be automatically traced.
 
 ```python {5-8}
-from openbrowser import Agent, ChatBrowserUse
+from openbrowser import Agent, ChatGoogle
 import asyncio
 
 from lmnr import Laminar, Instruments
@@ -36,7 +36,7 @@ Laminar.initialize(project_api_key="...", disabled_instruments={Instruments.OPEN
 async def main():
     agent = Agent(
         task="open google, search Laminar AI",
-        llm=ChatBrowserUse(),
+        llm=ChatGoogle(),
     )
     await agent.run()
 
@@ -56,41 +56,3 @@ In the trace view, you can also see the agent's current step, the tool it's usin
 ## Laminar
 
 To learn more about tracing and evaluating your browser agents, check out the [Laminar docs](https://docs.lmnr.ai).
-## Browser Use Cloud Authentication
-
-OpenBrowser can sync your agent runs to the cloud for easy viewing and sharing. Authentication is required to protect your data.
-
-### Quick Setup
-
-```bash
-# Authenticate once to enable cloud sync for all future runs
-openbrowser auth
-# Or if using module directly:
-python -m openbrowser.cli auth
-```
-
-**Note**: Cloud sync is enabled by default. If you've disabled it, you can re-enable with `export BROWSER_USE_CLOUD_SYNC=true`.
-
-### Manual Authentication
-
-```python
-# Authenticate from code after task completion
-from openbrowser import Agent
-
-agent = Agent(task="your task")
-await agent.run()
-
-# Later, authenticate for future runs
-await agent.authenticate_cloud_sync()
-```
-
-### Reset Authentication
-
-```bash
-# Force re-authentication with a different account
-rm ~/.config/openbrowser/cloud_auth.json
-openbrowser auth
-```
-
-**Note**: Authentication uses OAuth Device Flow - you must complete the auth process while the command is running. Links expire when the polling stops.
-
