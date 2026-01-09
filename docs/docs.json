@@ -9,10 +9,10 @@
   },
   "favicon": "/favicon.svg",
   "openGraph": {
-    "image": "/images/openbrowser-banner.png"
+    "image": "/images/openbrowser-banner.svg"
   },
   "metadata": {
-    "og:image": "/images/openbrowser-banner.png",
+    "og:image": "/images/openbrowser-banner.svg",
     "og:site_name": "OpenBrowser",
     "og:description": "AI-Powered Browser Automation - Control your browser with natural language"
   },
