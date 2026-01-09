@@ -29,13 +29,6 @@ from openbrowser.agent.views import (
     StepMetadata,
 )
 
-# Module-level import for performance
-try:
-    from openbrowser.agent.cloud_events import CreateAgentStepEvent
-    _HAS_CLOUD_EVENTS = True
-except ImportError:
-    _HAS_CLOUD_EVENTS = False
-
 logger = logging.getLogger(__name__)
 
 
@@ -186,16 +179,6 @@ class AgentGraphBuilder:
                     StepMetadata(step_number=step, step_start_time=t0, step_end_time=t1),
                     state_message=agent._message_manager.last_state_message_text,
                 )
-            
-            # Cloud events (fire and forget)
-            if _HAS_CLOUD_EVENTS and browser_state and model_output:
-                try:
-                    actions_data = [a.model_dump() for a in (model_output.action or []) if hasattr(a, 'model_dump')]
-                    agent.eventbus.dispatch(CreateAgentStepEvent.from_agent_step(
-                        agent, model_output, results, actions_data, browser_state,
-                    ))
-                except Exception:
-                    pass
             
             # Fast sync operations
             agent.save_file_system_state()
