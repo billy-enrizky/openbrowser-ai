@@ -4,39 +4,95 @@ description: "Deploy with authentication"
 icon: "rocket-launch"
 ---
 
-Deploy with saved authentication: test locally → sync cookies → use cloud profile.
+Deploy OpenBrowser with saved authentication using browser profiles.
 
-## 1. Test Locally
+## 1. Test Locally with Existing Chrome Profile
+
+Use your existing Chrome profile with saved logins:
 
 ```python
+from openbrowser import Agent, Browser, ChatGoogle
+
 browser = Browser(
     executable_path='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
     user_data_dir='~/Library/Application Support/Google/Chrome',
     profile_directory='Default',
 )
-agent = Agent(task="your task", browser=browser, llm=ChatBrowserUse())
+agent = Agent(task="your task", browser=browser, llm=ChatGoogle())
 await agent.run()
 ```
 
-<Warning>Close Chrome completely before running.</Warning>
+<Warning>Close Chrome completely before running to avoid conflicts.</Warning>
 
-## 2. Sync to Cloud
+### Chrome Profile Paths by OS
 
-Create profile at [cloud.browser-use.com/dashboard/settings?tab=profiles](https://cloud.browser-use.com/dashboard/settings?tab=profiles)
+| OS | User Data Dir |
+|----|---------------|
+| macOS | `~/Library/Application Support/Google/Chrome` |
+| Windows | `%LOCALAPPDATA%\Google\Chrome\User Data` |
+| Linux | `~/.config/google-chrome` |
 
-```bash
-export BROWSER_USE_API_KEY=your_key && curl -fsSL https://browser-use.com/profile.sh | sh
-```
+## 2. Use Persistent Browser Session
 
-Log into your accounts in the browser that opens. You'll get a `profile_id`.
-
-## 3. Use in Production
+For production, use a dedicated user data directory:
 
 ```python
-@sandbox(cloud_profile_id='your-profile-id')
-async def task(browser: Browser):
-    agent = Agent(task="authenticated task", browser=browser, llm=ChatBrowserUse())
-    await agent.run()
+from openbrowser import Agent, Browser, ChatGoogle
+import tempfile
+
+# Create persistent browser with custom user data
+browser = Browser(
+    user_data_dir='./browser_data',  # Persists between runs
+    headless=False,  # Set True for production
+)
+
+agent = Agent(
+    task="Login to example.com and check notifications",
+    browser=browser,
+    llm=ChatGoogle()
+)
+await agent.run()
 ```
 
-Done - your cloud browser is already logged in.
+## 3. Remote Browser via CDP
+
+Connect to a remote browser using Chrome DevTools Protocol:
+
+```python
+from openbrowser import Agent, Browser, ChatGoogle
+
+# Connect to existing Chrome instance
+# Start Chrome with: chrome --remote-debugging-port=9222
+browser = Browser(cdp_url="http://localhost:9222")
+
+agent = Agent(
+    task="your task",
+    browser=browser,
+    llm=ChatGoogle()
+)
+await agent.run()
+```
+
+## Best Practices
+
+1. **Use environment variables** for API keys
+2. **Run headless** in production (`headless=True`)
+3. **Set allowed_domains** to restrict navigation
+4. **Use proxy** for rate limiting and geo-targeting
+5. **Monitor with telemetry** for debugging
+
+```python
+from openbrowser import Agent, Browser, ChatGoogle
+
+browser = Browser(
+    headless=True,
+    allowed_domains=['*.example.com'],
+    proxy={'server': 'http://proxy:8080'},
+)
+
+agent = Agent(
+    task="Production task",
+    browser=browser,
+    llm=ChatGoogle(),
+)
+```
