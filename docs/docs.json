@@ -246,7 +246,8 @@
               "examples/apps/ad-use",
               "examples/apps/vibetest-use",
               "examples/apps/news-use",
-              "examples/apps/msg-use"
+              "examples/apps/msg-use",
+              "examples/apps/stress-tests"
             ]
           }
         ]
