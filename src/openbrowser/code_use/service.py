@@ -21,6 +21,7 @@ from openbrowser.llm.messages import (
 	ContentPartImageParam,
 	ContentPartTextParam,
 	ImageURL,
+	SystemMessage,
 	UserMessage,
 )
 from openbrowser.screenshots.service import ScreenshotService
@@ -94,7 +95,8 @@ class CodeAgent:
 			max_validations: Maximum number of times to run the validator agent (default: 0)
 			use_vision: Whether to include screenshots in LLM messages (default: True)
 			calculate_cost: Whether to calculate token costs (default: False)
-			llm: Optional ChatBrowserUse LLM instance (will create default if not provided)
+			llm: Optional LLM instance (ChatBrowserUse, ChatOpenAI, etc.). If not provided,
+			     will try ChatBrowserUse first, then fall back to ChatOpenAI.
 			**kwargs: Additional keyword arguments for compatibility (ignored)
 		"""
 		# Log and ignore unknown kwargs for compatibility
@@ -102,16 +104,29 @@ class CodeAgent:
 			logger.debug(f'Ignoring additional kwargs for CodeAgent compatibility: {list(kwargs.keys())}')
 
 		if llm is None:
+			# Try ChatBrowserUse first, fall back to Google Gemini
 			try:
 				from openbrowser import ChatBrowserUse
 
 				llm = ChatBrowserUse()
 				logger.debug('CodeAgent using ChatBrowserUse')
 			except Exception as e:
-				raise RuntimeError(f'Failed to initialize CodeAgent LLM: {e}')
+				logger.debug(f'ChatBrowserUse not available: {e}, trying Google Gemini fallback')
+				try:
+					from openbrowser.llm import ChatGoogle
 
-		if 'ChatBrowserUse' not in llm.__class__.__name__:
-			raise ValueError('This agent works only with ChatBrowserUse.')
+					llm = ChatGoogle(model='gemini-2.5-flash')
+					logger.info('CodeAgent using ChatGoogle (gemini-2.5-flash) as fallback')
+				except Exception as e2:
+					raise RuntimeError(
+						f'Failed to initialize CodeAgent LLM. '
+						f'ChatBrowserUse error: {e}. '
+						f'Google Gemini fallback error: {e2}. '
+						f'Please set BROWSER_USE_API_KEY or GOOGLE_API_KEY environment variable.'
+					)
+
+		# Check if using ChatBrowserUse (which has built-in prompts) vs other LLMs
+		self._is_browser_use_llm = 'ChatBrowserUse' in llm.__class__.__name__
 
 		# Handle browser vs browser_session parameter (browser takes precedence)
 		if browser and browser_session:
@@ -216,6 +231,10 @@ class CodeAgent:
 		)
 
 		# Initialize conversation with task
+		# For non-ChatBrowserUse LLMs, add a system prompt with instructions
+		if not self._is_browser_use_llm:
+			system_prompt = self._get_code_agent_system_prompt()
+			self._llm_messages.append(SystemMessage(content=system_prompt))
 		self._llm_messages.append(UserMessage(content=f'Task: {self.task}'))
 
 		# Track agent run error for telemetry
@@ -591,6 +610,35 @@ class CodeAgent:
 			logger.error(f'Failed to log telemetry event: {log_e}', exc_info=True)
 
 		return self.session
+
+	def _get_code_agent_system_prompt(self) -> str:
+		"""Get the system prompt for non-ChatBrowserUse LLMs.
+		
+		Loads the system prompt from system_prompt.md file in the code_use directory.
+		This ensures non-ChatBrowserUse LLMs get the same instructions as ChatBrowserUse.
+		"""
+		# Load system prompt from file
+		system_prompt_path = Path(__file__).parent / 'system_prompt.md'
+		try:
+			with open(system_prompt_path, 'r', encoding='utf-8') as f:
+				return f.read()
+		except FileNotFoundError:
+			logger.warning(f'System prompt file not found at {system_prompt_path}, using fallback')
+			# Fallback to a minimal system prompt if file is missing
+			return '''You are a browser automation agent that writes Python code to complete tasks.
+Execute ONE code cell per step. Variables persist across steps like Jupyter.
+
+Available functions (all async except done):
+- await navigate(url) - Navigate to URL
+- await click(index) - Click element by index [i_123]
+- await input_text(index, text, clear=True) - Type text
+- await scroll(down=True, pages=1) - Scroll page
+- await evaluate(js_code) - Execute JavaScript
+- await send_keys(keys="Enter") - Send keyboard keys
+- await done(text, success=True, files_to_display=[]) - Complete task
+
+Use ```js block_name for JavaScript, then await evaluate(block_name).
+Call done() in a separate final step after verifying results.'''
 
 	async def _get_code_from_llm(self) -> tuple[str, str]:
 		"""Get Python code from the LLM.
