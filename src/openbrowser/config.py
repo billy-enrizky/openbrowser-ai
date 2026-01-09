@@ -91,24 +91,6 @@ class OldConfig:
 	def ANONYMIZED_TELEMETRY(self) -> bool:
 		return _get_env_bool_cached('ANONYMIZED_TELEMETRY', True)
 
-	@property
-	def BROWSER_USE_CLOUD_SYNC(self) -> bool:
-		return os.getenv('BROWSER_USE_CLOUD_SYNC', str(self.ANONYMIZED_TELEMETRY)).lower()[:1] in 'ty1'
-
-	@property
-	def BROWSER_USE_CLOUD_API_URL(self) -> str:
-		url = _get_env_cached('BROWSER_USE_CLOUD_API_URL', 'https://api.browser-use.com')
-		assert '://' in url, 'BROWSER_USE_CLOUD_API_URL must be a valid URL'
-		return url
-
-	@property
-	def BROWSER_USE_CLOUD_UI_URL(self) -> str:
-		url = _get_env_cached('BROWSER_USE_CLOUD_UI_URL', '')
-		# Allow empty string as default, only validate if set
-		if url and '://' not in url:
-			raise AssertionError('BROWSER_USE_CLOUD_UI_URL must be a valid URL if set')
-		return url
-
 	# Path configuration - use cached path lookups
 	@property
 	def XDG_CACHE_HOME(self) -> Path:
@@ -227,9 +209,6 @@ class FlatEnvConfig(BaseSettings):
 	OPENBROWSER_DEBUG_LOG_FILE: str | None = Field(default=None)
 	OPENBROWSER_INFO_LOG_FILE: str | None = Field(default=None)
 	ANONYMIZED_TELEMETRY: bool = Field(default=True)
-	BROWSER_USE_CLOUD_SYNC: bool | None = Field(default=None)
-	BROWSER_USE_CLOUD_API_URL: str = Field(default='https://api.browser-use.com')
-	BROWSER_USE_CLOUD_UI_URL: str = Field(default='')
 
 	# Path configuration
 	XDG_CACHE_HOME: str = Field(default='~/.cache')

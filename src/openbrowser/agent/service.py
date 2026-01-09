@@ -14,13 +14,6 @@ from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 
-from openbrowser.agent.cloud_events import (
-	CreateAgentOutputFileEvent,
-	CreateAgentSessionEvent,
-	CreateAgentStepEvent,
-	CreateAgentTaskEvent,
-	UpdateAgentTaskEvent,
-)
 from openbrowser.agent.message_manager.utils import save_conversation
 from openbrowser.llm.base import BaseChatModel
 from openbrowser.llm.messages import BaseMessage, ContentPartImageParam, ContentPartTextParam, UserMessage
@@ -862,25 +855,6 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 		# Save file system state after step completion
 		self.save_file_system_state()
 
-		# Emit both step created and executed events
-		if browser_state_summary and self.state.last_model_output:
-			# Extract key step data for the event
-			actions_data = []
-			if self.state.last_model_output.action:
-				for action in self.state.last_model_output.action:
-					action_dict = action.model_dump() if hasattr(action, 'model_dump') else {}
-					actions_data.append(action_dict)
-
-			# Emit CreateAgentStepEvent
-			step_event = CreateAgentStepEvent.from_agent_step(
-				self,
-				self.state.last_model_output,
-				self.state.last_result,
-				actions_data,
-				browser_state_summary,
-			)
-			self.eventbus.dispatch(step_event)
-
 		# Increment step counter after step is fully completed
 		self.state.n_steps += 1
 
@@ -1666,12 +1640,7 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 			self._task_start_time = self._session_start_time
 
 			if not self.state.session_initialized:
-				self.logger.debug('Dispatching CreateAgentSessionEvent...')
-				self.eventbus.dispatch(CreateAgentSessionEvent.from_agent(self))
 				self.state.session_initialized = True
-
-			self.logger.debug('Dispatching CreateAgentTaskEvent...')
-			self.eventbus.dispatch(CreateAgentTaskEvent.from_agent(self))
 
 			self._log_first_step_startup()
 			await self.browser_session.start()
@@ -1714,17 +1683,12 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 				except Exception as log_e:
 					self.logger.error(f'Failed to log telemetry event: {log_e}', exc_info=True)
 
-			self.eventbus.dispatch(UpdateAgentTaskEvent.from_agent(self))
-
 			if self.settings.generate_gif:
 				output_path: str = 'agent_history.gif'
 				if isinstance(self.settings.generate_gif, str):
 					output_path = self.settings.generate_gif
 				from openbrowser.agent.gif import create_history_gif
 				create_history_gif(task=self.task, history=self.history, output_path=output_path)
-				if Path(output_path).exists():
-					output_event = await CreateAgentOutputFileEvent.from_agent_and_file(self, output_path)
-					self.eventbus.dispatch(output_event)
 
 			self._log_final_outcome_messages()
 			await self.eventbus.stop(timeout=3.0)
@@ -2229,22 +2193,6 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 				),
 			},
 		}
-
-	async def authenticate_cloud_sync(self, show_instructions: bool = True) -> bool:
-		"""
-		Authenticate with cloud service for future runs.
-
-		This is useful when users want to authenticate after a task has completed
-		so that future runs will sync to the cloud.
-
-		Args:
-			show_instructions: Whether to show authentication instructions to user
-
-		Returns:
-			bool: True if authentication was successful
-		"""
-		self.logger.warning('Cloud sync has been removed and is no longer available')
-		return False
 
 	def run_sync(
 		self,

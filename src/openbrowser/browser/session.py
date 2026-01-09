@@ -16,11 +16,8 @@ from cdp_use.cdp.target import AttachedToTargetEvent, SessionID, TargetID
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 from uuid_extensions import uuid7str
 
-from openbrowser.browser.cloud.cloud import CloudBrowserAuthError, CloudBrowserClient, CloudBrowserError
-
 # CDP logging is now handled by setup_logging() in logging_config.py
 # It automatically sets CDP logs to the same level as openbrowser logs
-from openbrowser.browser.cloud.views import CloudBrowserParams, CreateBrowserRequest, ProxyCountryCode
 from openbrowser.browser.events import (
 	AgentFocusChangedEvent,
 	BrowserConnectedEvent,
@@ -185,41 +182,7 @@ class BrowserSession(BaseModel):
 		revalidate_instances='never',  # resets private attrs on every model rebuild
 	)
 
-	# Overload 1: Cloud browser mode (use cloud-specific params)
-	@overload
-	def __init__(
-		self,
-		*,
-		# Cloud browser params - use these for cloud mode
-		cloud_profile_id: UUID | str | None = None,
-		cloud_proxy_country_code: ProxyCountryCode | None = None,
-		cloud_timeout: int | None = None,
-		# Backward compatibility aliases
-		profile_id: UUID | str | None = None,
-		proxy_country_code: ProxyCountryCode | None = None,
-		timeout: int | None = None,
-		use_cloud: bool | None = None,
-		cloud_browser: bool | None = None,  # Backward compatibility alias
-		cloud_browser_params: CloudBrowserParams | None = None,
-		# Common params that work with cloud
-		id: str | None = None,
-		headers: dict[str, str] | None = None,
-		allowed_domains: list[str] | None = None,
-		keep_alive: bool | None = None,
-		minimum_wait_page_load_time: float | None = None,
-		wait_for_network_idle_page_load_time: float | None = None,
-		wait_between_actions: float | None = None,
-		auto_download_pdfs: bool | None = None,
-		cookie_whitelist_domains: list[str] | None = None,
-		cross_origin_iframes: bool | None = None,
-		highlight_elements: bool | None = None,
-		dom_highlight_elements: bool | None = None,
-		paint_order_filtering: bool | None = None,
-		max_iframes: int | None = None,
-		max_iframe_depth: int | None = None,
-	) -> None: ...
-
-	# Overload 2: Local browser mode (use local browser params)
+	# Local browser mode init
 	@overload
 	def __init__(
 		self,
@@ -287,14 +250,6 @@ class BrowserSession(BaseModel):
 		cdp_url: str | None = None,
 		is_local: bool = False,
 		browser_profile: BrowserProfile | None = None,
-		# Cloud browser params (don't mix with local browser params)
-		cloud_profile_id: UUID | str | None = None,
-		cloud_proxy_country_code: ProxyCountryCode | None = None,
-		cloud_timeout: int | None = None,
-		# Backward compatibility aliases for cloud params
-		profile_id: UUID | str | None = None,
-		proxy_country_code: ProxyCountryCode | None = None,
-		timeout: int | None = None,
 		# BrowserProfile fields that can be passed directly
 		# From BrowserConnectArgs
 		headers: dict[str, str] | None = None,
@@ -328,11 +283,6 @@ class BrowserSession(BaseModel):
 		# From BrowserNewContextArgs
 		storage_state: str | Path | dict[str, Any] | None = None,
 		# BrowserProfile specific fields
-		## Cloud Browser Fields
-		use_cloud: bool | None = None,
-		cloud_browser: bool | None = None,  # Backward compatibility alias
-		cloud_browser_params: CloudBrowserParams | None = None,
-		## Other params
 		disable_security: bool | None = None,
 		deterministic_rendering: bool | None = None,
 		allowed_domains: list[str] | None = None,
@@ -367,46 +317,15 @@ class BrowserSession(BaseModel):
 				'self',
 				'browser_profile',
 				'id',
-				'cloud_profile_id',
-				'cloud_proxy_country_code',
-				'cloud_timeout',
-				'profile_id',
-				'proxy_country_code',
-				'timeout',
 			]
 			and v is not None
 		}
 
-		# Handle backward compatibility: prefer cloud_* params over old names
-		final_profile_id = cloud_profile_id if cloud_profile_id is not None else profile_id
-		final_proxy_country_code = cloud_proxy_country_code if cloud_proxy_country_code is not None else proxy_country_code
-		final_timeout = cloud_timeout if cloud_timeout is not None else timeout
-
-		# If any cloud params are provided, create cloud_browser_params
-		if final_profile_id is not None or final_proxy_country_code is not None or final_timeout is not None:
-			cloud_params = CreateBrowserRequest(
-				cloud_profile_id=final_profile_id,
-				cloud_proxy_country_code=final_proxy_country_code,
-				cloud_timeout=final_timeout,
-			)
-			profile_kwargs['cloud_browser_params'] = cloud_params
-			profile_kwargs['use_cloud'] = True
-
-		# Handle backward compatibility: map cloud_browser to use_cloud
-		if 'cloud_browser' in profile_kwargs:
-			profile_kwargs['use_cloud'] = profile_kwargs.pop('cloud_browser')
-
-		# If cloud_browser_params is set, force use_cloud=True
-		if cloud_browser_params is not None:
-			profile_kwargs['use_cloud'] = True
-
 		# if is_local is False but executable_path is provided, set is_local to True
 		if is_local is False and executable_path is not None:
 			profile_kwargs['is_local'] = True
-		# Only set is_local=True when cdp_url is missing if we're not using cloud browser
-		# (cloud browser will provide cdp_url later)
-		use_cloud = profile_kwargs.get('use_cloud') or profile_kwargs.get('cloud_browser')
-		if not cdp_url and not use_cloud:
+		# Set is_local=True when cdp_url is missing
+		if not cdp_url:
 			profile_kwargs['is_local'] = True
 
 		# Create browser profile from direct parameters or use provided one
@@ -443,11 +362,6 @@ class BrowserSession(BaseModel):
 		"""Whether this is a local browser instance from browser profile."""
 		return self.browser_profile.is_local
 
-	@property
-	def cloud_browser(self) -> bool:
-		"""Whether to use cloud browser service from browser profile."""
-		return self.browser_profile.use_cloud
-
 	# Main shared event bus for all browser session + all watchdogs
 	event_bus: EventBus = Field(default_factory=EventBus)
 
@@ -475,8 +389,6 @@ class BrowserSession(BaseModel):
 	_screenshot_watchdog: Any | None = PrivateAttr(default=None)
 	_permissions_watchdog: Any | None = PrivateAttr(default=None)
 	_recording_watchdog: Any | None = PrivateAttr(default=None)
-
-	_cloud_browser_client: CloudBrowserClient = PrivateAttr(default_factory=lambda: CloudBrowserClient())
 
 	_logger: Any = PrivateAttr(default=None)
 
@@ -634,24 +546,9 @@ class BrowserSession(BaseModel):
 		await self.attach_all_watchdogs()
 
 		try:
-			# If no CDP URL, launch local browser or cloud browser
+			# If no CDP URL, launch local browser
 			if not self.cdp_url:
-				if self.browser_profile.use_cloud or self.browser_profile.cloud_browser_params is not None:
-					# Use cloud browser service
-					try:
-						# Use cloud_browser_params if provided, otherwise create empty request
-						cloud_params = self.browser_profile.cloud_browser_params or CreateBrowserRequest()
-						cloud_browser_response = await self._cloud_browser_client.create_browser(cloud_params)
-						self.browser_profile.cdp_url = cloud_browser_response.cdpUrl
-						self.browser_profile.is_local = False
-						self.logger.info('🌤️ Successfully connected to cloud browser service')
-					except CloudBrowserAuthError:
-						raise CloudBrowserAuthError(
-							'Authentication failed for cloud browser service. Set BROWSER_USE_API_KEY environment variable. You can also create an API key at https://cloud.browser-use.com/new-api-key'
-						)
-					except CloudBrowserError as e:
-						raise CloudBrowserError(f'Failed to create cloud browser: {e}')
-				elif self.is_local:
+				if self.is_local:
 					# Launch local browser using event-driven approach
 					launch_event = self.event_bus.dispatch(BrowserLaunchEvent())
 					await launch_event
@@ -992,14 +889,6 @@ class BrowserSession(BaseModel):
 			if self.browser_profile.keep_alive and not event.force:
 				self.event_bus.dispatch(BrowserStoppedEvent(reason='Kept alive due to keep_alive=True'))
 				return
-
-			# Clean up cloud browser session if using cloud browser
-			if self.browser_profile.use_cloud:
-				try:
-					await self._cloud_browser_client.stop_browser()
-					self.logger.info('🌤️ Cloud browser session cleaned up')
-				except Exception as e:
-					self.logger.debug(f'Failed to cleanup cloud browser session: {e}')
 
 			# Clear CDP session cache before stopping
 			await self.reset()
