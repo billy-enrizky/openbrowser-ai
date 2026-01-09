@@ -208,17 +208,8 @@
             "isDefaultOpen": false,
             "pages": [
               "customize/integrations/docs-mcp",
-              "customize/integrations/mcp-server"
-            ]
-          },
-          {
-            "group": "Sandbox",
-            "icon": "box",
-            "isDefaultOpen": false,
-            "pages": [
-              "customize/sandbox/quickstart",
-              "customize/sandbox/events",
-              "customize/sandbox/all-parameters"
+              "customize/integrations/mcp-server",
+              "development/n8n-integration"
             ]
           }
         ]
@@ -283,7 +274,7 @@
               "development/monitoring/costs"
             ]
           },
-          "development/get-help"
+          development/get-help
         ]
       }
     ]
@@ -309,19 +300,23 @@
     "links": [
       {
         "label": "Github",
-        "href": "https://github.com/billy-enrizky/openbrowser-ai"
+        "href": "https://github.com/billy-enrizky/openbrowser-ai",
+        "style": "button",
+        "color": "#0ea5e9"
       },
       {
         "label": "Discord",
-        "href": "https://github.com/billy-enrizky/openbrowser-ai/discussions"
+        "href": "https://discord.gg/xuhxWGCn",
+        "style": "button",
+        "color": "#0ea5e9"
       }
     ]
   },
   "footer": {
     "socials": {
-      "x": "https://github.com/billy-enrizky/openbrowser-ai",
       "github": "https://github.com/billy-enrizky/openbrowser-ai",
-      "linkedin": "https://github.com/billy-enrizky/openbrowser-ai"
+      "linkedin": "https://www.linkedin.com/in/enrizky-brillian/",
+      "discord": "https://discord.gg/xuhxWGCn"
     }
   }
 }
