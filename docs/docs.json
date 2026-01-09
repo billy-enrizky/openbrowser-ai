@@ -297,19 +297,15 @@
     }
   },
   "navbar": {
-    "links": [
-      {
-        "label": "Github",
-        "href": "https://github.com/billy-enrizky/openbrowser-ai"
-      },
-      {
-        "label": "Discord",
-        "href": "https://discord.gg/xuhxWGCn"
-      }
-    ],
     "primary": {
+      "label": "Github",
       "type": "github",
       "href": "https://github.com/billy-enrizky/openbrowser-ai"
+    },
+    "secondary": {
+      "label": "Discord",
+      "type": "button",
+      "href": "https://discord.gg/xuhxWGCn"
     }
   },
   "footer": {
