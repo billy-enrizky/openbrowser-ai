@@ -7,12 +7,12 @@
     "light": "#e0f2fe",
     "dark": "#0284c7"
   },
-  "favicon": "/favicon.ico",
+  "favicon": "/favicon.svg",
   "openGraph": {
-    "image": "/images/openbrowser-banner.svg"
+    "image": "/images/openbrowser-banner.png"
   },
   "metadata": {
-    "og:image": "/images/openbrowser-banner.svg",
+    "og:image": "/images/openbrowser-banner.png",
     "og:site_name": "OpenBrowser",
     "og:description": "AI-Powered Browser Automation - Control your browser with natural language"
   },
