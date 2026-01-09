@@ -3,11 +3,19 @@
   "theme": "aspen",
   "name": "OpenBrowser",
   "colors": {
-    "primary": "#FE750E",
-    "light": "#FFF7ED",
-    "dark": "#C2410C"
+    "primary": "#0ea5e9",
+    "light": "#e0f2fe",
+    "dark": "#0284c7"
   },
   "favicon": "/favicon.ico",
+  "openGraph": {
+    "image": "/images/openbrowser-banner.svg"
+  },
+  "metadata": {
+    "og:image": "/images/openbrowser-banner.svg",
+    "og:site_name": "OpenBrowser",
+    "og:description": "AI-Powered Browser Automation - Control your browser with natural language"
+  },
   "contextual": {
     "options": [
       "copy",
