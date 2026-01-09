@@ -306,11 +306,7 @@
         "label": "Discord",
         "href": "https://discord.gg/xuhxWGCn"
       }
-    ],
-    "primary": {
-      "type": "github",
-      "href": "https://github.com/billy-enrizky/openbrowser-ai"
-    }
+    ]
   },
   "footer": {
     "socials": {
