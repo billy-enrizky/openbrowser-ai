@@ -15,7 +15,7 @@ CodeAgent executes Python code on your local machine like Claude Code.
 
 ```python
 import asyncio
-from openbrowser import CodeAgent
+from openbrowser import CodeAgent, ChatGoogle
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -23,20 +23,15 @@ load_dotenv()
 async def main():
     task = "Extract all products from example.com and save to products.csv"
 
-    agent = CodeAgent(task=task)
+    agent = CodeAgent(task=task, llm=ChatGoogle())
     await agent.run()
 
 asyncio.run(main())
 ```
 
 ```bash .env
-BROWSER_USE_API_KEY=your-api-key
+GOOGLE_API_KEY=your-api-key
 ```
-
-<Note>
-CodeAgent currently only works with [ChatBrowserUse](https://chat.browser-use.com) which is optimized for this use case.
-Don't have one? We give you $10 to try it out [here](https://cloud.browser-use.com/dashboard/api).
-</Note>
 
 ## When to Use
 
