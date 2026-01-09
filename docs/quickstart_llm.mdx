@@ -1,10 +1,65 @@
 ---
 title: "LLM Quickstart"
-description: ""
+description: "Get started with OpenBrowser using your favorite AI coding assistant"
 icon: "brain"
 ---
 
+## Using AI Coding Assistants
 
+1. Copy all content [🔗 from here](https://billy-enrizky.github.io/openbrowser-ai/llms-full.txt) (~32k tokens)
+2. Paste it into your favorite coding agent (Cursor, Claude, ChatGPT...).
 
-1. Copy all content [🔗  from here](https://openbrowser.github.io/docs/llms-full.txt)  (~32k tokens)
-2. Paste it into your favorite coding agent (Cursor, Claude, ChatGPT ...). 
+## Alternative Methods
+
+### Option 1: Direct Documentation Link
+
+Point your AI assistant to the OpenBrowser documentation:
+
+```
+https://docs.openbrowser.ai
+```
+
+### Option 2: GitHub Repository
+
+Share the repository for full context:
+
+```
+https://github.com/billy-enrizky/openbrowser-ai
+```
+
+### Option 3: Quick Reference
+
+Copy this quick reference for your AI assistant:
+
+```markdown
+# OpenBrowser Quick Reference
+
+## Installation
+pip install openbrowser-ai
+
+## Basic Usage
+from openbrowser import Agent, Browser, ChatGoogle
+
+agent = Agent(
+    task="Your task here",
+    llm=ChatGoogle(),  # or ChatOpenAI(), ChatAnthropic()
+)
+await agent.run()
+
+## Key Classes
+- Agent: Main automation agent
+- Browser: Browser instance wrapper  
+- BrowserSession: Low-level browser control
+- BrowserProfile: Browser configuration
+
+## Supported LLMs
+- ChatGoogle (Gemini)
+- ChatOpenAI (GPT-4)
+- ChatAnthropic (Claude)
+- ChatGroq, ChatOllama, ChatAWSBedrock, ChatAzureOpenAI
+```
+
+Then ask your AI assistant questions like:
+- "How do I configure a proxy in OpenBrowser?"
+- "Show me how to extract data from a webpage"
+- "How do I use vision mode?"
