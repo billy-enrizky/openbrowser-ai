@@ -72,6 +72,13 @@ source = "vcs"
 [tool.hatch.build.targets.wheel]
 packages = ["src/openbrowser"]
 
+# Include non-Python files (markdown system prompts, etc.)
+[tool.hatch.build.targets.wheel.force-include]
+"src/openbrowser/code_use/system_prompt.md" = "openbrowser/code_use/system_prompt.md"
+"src/openbrowser/agent/system_prompt.md" = "openbrowser/agent/system_prompt.md"
+"src/openbrowser/agent/system_prompt_flash.md" = "openbrowser/agent/system_prompt_flash.md"
+"src/openbrowser/agent/system_prompt_no_thinking.md" = "openbrowser/agent/system_prompt_no_thinking.md"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]

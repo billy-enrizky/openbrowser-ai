@@ -620,6 +620,9 @@ def create_namespace(
 						# Store the self-reported success status
 						if hasattr(result, 'success'):
 							namespace['_task_success'] = result.success
+						# Store file attachments if present
+						if hasattr(result, 'attachments') and result.attachments:
+							namespace['_task_attachments'] = result.attachments
 
 					# If there's extracted content, return it
 					if result.extracted_content:
