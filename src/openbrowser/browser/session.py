@@ -2109,30 +2109,34 @@ class BrowserSession(BaseModel):
 						transition: all 0.15s ease-out;
 					`;
 
-					// Position corners
+					// Position corners with rounded outer edges
 					if (corner.pos === 'top-left') {{
 						bracket.style.top = '0';
 						bracket.style.left = '0';
 						bracket.style.borderTop = `${{borderWidth}}px solid ${{color}}`;
 						bracket.style.borderLeft = `${{borderWidth}}px solid ${{color}}`;
+						bracket.style.borderTopLeftRadius = '8px';
 						bracket.style.transform = `translate(${{corner.startX}}px, ${{corner.startY}}px)`;
 					}} else if (corner.pos === 'top-right') {{
 						bracket.style.top = '0';
 						bracket.style.right = '0';
 						bracket.style.borderTop = `${{borderWidth}}px solid ${{color}}`;
 						bracket.style.borderRight = `${{borderWidth}}px solid ${{color}}`;
+						bracket.style.borderTopRightRadius = '8px';
 						bracket.style.transform = `translate(${{corner.startX}}px, ${{corner.startY}}px)`;
 					}} else if (corner.pos === 'bottom-left') {{
 						bracket.style.bottom = '0';
 						bracket.style.left = '0';
 						bracket.style.borderBottom = `${{borderWidth}}px solid ${{color}}`;
 						bracket.style.borderLeft = `${{borderWidth}}px solid ${{color}}`;
+						bracket.style.borderBottomLeftRadius = '8px';
 						bracket.style.transform = `translate(${{corner.startX}}px, ${{corner.startY}}px)`;
 					}} else if (corner.pos === 'bottom-right') {{
 						bracket.style.bottom = '0';
 						bracket.style.right = '0';
 						bracket.style.borderBottom = `${{borderWidth}}px solid ${{color}}`;
 						bracket.style.borderRight = `${{borderWidth}}px solid ${{color}}`;
+						bracket.style.borderBottomRightRadius = '8px';
 						bracket.style.transform = `translate(${{corner.startX}}px, ${{corner.startY}}px)`;
 					}}
 
