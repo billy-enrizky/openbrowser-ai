@@ -1,0 +1,2 @@
+"""Core configuration and utilities."""
+
