@@ -4,7 +4,7 @@ import logging
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger(__name__)
@@ -30,6 +30,13 @@ class Settings(BaseSettings):
         default=["http://localhost:3000", "https://openbrowser.me", "https://www.openbrowser.me"],
         description="Allowed CORS origins"
     )
+    
+    @field_validator('CORS_ORIGINS', mode='before')
+    @classmethod
+    def parse_cors_origins(cls, v):
+        if isinstance(v, str):
+            return [origin.strip() for origin in v.split(',')]
+        return v
     
     # OpenBrowser settings
     OPENBROWSER_DATA_DIR: Path = Field(
