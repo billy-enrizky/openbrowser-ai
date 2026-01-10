@@ -29,7 +29,7 @@ from openbrowser.telemetry.service import ProductTelemetry
 from openbrowser.telemetry.views import AgentTelemetryEvent
 from openbrowser.tokens.service import TokenCost
 from openbrowser.tokens.views import UsageSummary
-from openbrowser.tools.service import Tools
+from openbrowser.tools.service import CodeAgentTools, Tools
 from openbrowser.utils import get_openbrowser_version
 
 from .formatting import format_browser_state_for_llm
@@ -144,7 +144,7 @@ class CodeAgent:
 		self.task = task
 		self.llm = llm
 		self.browser_session = browser_session
-		self.tools = tools or Tools()
+		self.tools = tools or CodeAgentTools()
 		self.page_extraction_llm = page_extraction_llm
 		self.file_system = file_system if file_system is not None else FileSystem(base_dir='./')
 		self.available_file_paths = available_file_paths or []
@@ -365,8 +365,21 @@ class CodeAgent:
 						)
 						break  # Exit the loop since task is done
 
-					logger.warning('LLM returned empty code')
+					logger.warning('LLM returned empty code - no code blocks found in response')
 					self._consecutive_errors += 1
+
+					# Add feedback message to help LLM understand the error
+					# This is critical for models like Gemini that may not follow code block format
+					no_code_feedback = (
+						'ERROR: Your response did not contain any executable code blocks.\n\n'
+						'You MUST wrap your Python code in markdown code blocks like this:\n\n'
+						'```python\n'
+						'await navigate("https://example.com")\n'
+						'```\n\n'
+						'Do NOT write plain text explanations without code. '
+						'Write a brief plan (1-2 sentences) then provide the actual Python code in a ```python code block.'
+					)
+					self._llm_messages.append(UserMessage(content=no_code_feedback))
 
 					# new state
 					if self.browser_session and self.dom_service:
@@ -733,9 +746,18 @@ Call done() in a separate final step after verifying results.'''
 		self.namespace['_all_code_blocks'] = code_blocks
 
 		# Get Python code if it exists
-		# If no python block exists and no other code blocks exist, return empty string to skip execution
-		# This prevents treating plain text explanations as code
-		code = code_blocks.get('python', response.completion)
+		# If no python block exists, return empty string to trigger error handling
+		# This prevents treating plain text explanations as code (which causes syntax errors)
+		if 'python' in code_blocks:
+			code = code_blocks['python']
+		elif code_blocks:
+			# Has other code blocks (js, bash, etc.) but no python - that's OK, skip execution
+			code = ''
+		else:
+			# No code blocks at all - LLM returned plain text
+			# Return empty string and let error handling prompt for proper code
+			logger.warning('LLM response contains no code blocks - will prompt for proper code format')
+			code = ''
 
 		# Add to LLM messages (truncate for history to save context)
 		truncated_completion = truncate_message_content(response.completion)
