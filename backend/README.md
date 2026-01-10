@@ -1,6 +1,6 @@
 # OpenBrowser Backend
 
-Backend API for the OpenBrowser AI Chat Interface, similar to Manus AI.
+Backend API for the OpenBrowser AI Chat Interface, similar to .
 
 ## Features
 
