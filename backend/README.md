@@ -1,6 +1,6 @@
 # OpenBrowser Backend
 
-Backend API for the OpenBrowser AI Chat Interface, similar to .
+Backend API for the OpenBrowser AI Chat Interface. A FastAPI-based server that provides WebSocket and REST APIs for real-time browser automation using the OpenBrowser framework.
 
 ## Features
 
