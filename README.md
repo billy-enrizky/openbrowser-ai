@@ -11,7 +11,7 @@ OpenBrowser is a framework for intelligent browser automation. It combines direc
 
 ## Documentation
 
-**Full documentation**: [openbrowser.mintlify.app](https://openbrowser.mintlify.app)
+**Full documentation**: [https://docs.openbrowser.me](https://docs.openbrowser.me)
 
 ## Key Features
 
