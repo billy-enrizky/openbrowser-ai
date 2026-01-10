@@ -1450,6 +1450,12 @@ class CodeAgentTools(Tools[Context]):
 
 			attachments = []
 			if params.files_to_display:
+				# Get the FileSystem data directory for checking file existence
+				fs_dir = file_system.get_dir() if file_system else None
+				logger.warning(f'[DEBUG] Looking for files to display: {params.files_to_display}')
+				logger.warning(f'[DEBUG] FileSystem directory: {fs_dir}')
+				logger.warning(f'[DEBUG] Current working directory: {os.getcwd()}')
+				
 				if self.display_files_in_done_text:
 					file_msg = ''
 					for file_name in params.files_to_display:
@@ -1457,9 +1463,41 @@ class CodeAgentTools(Tools[Context]):
 						if file_content:
 							file_msg += f'\n\n{file_name}:\n{file_content}'
 							attachments.append(file_name)
-						elif os.path.exists(file_name):
-							# File exists on disk but not in FileSystem - just add to attachments
-							attachments.append(file_name)
+							logger.info(f'Found file in FileSystem: {file_name}')
+						else:
+							# File not in FileSystem - try to read from disk
+							# Check multiple locations where the file might be
+							file_found = False
+							paths_to_try = [
+								file_name,  # As provided (might be absolute or relative to cwd)
+							]
+							# Also check in FileSystem data directory
+							if fs_dir:
+								paths_to_try.append(str(fs_dir / file_name))
+							# Check current working directory explicitly
+							paths_to_try.append(os.path.join(os.getcwd(), file_name))
+							
+							logger.warning(f'[DEBUG] File not in FileSystem, checking paths: {paths_to_try}')
+							
+							for path in paths_to_try:
+								exists = os.path.exists(path)
+								is_file = os.path.isfile(path) if exists else False
+								logger.warning(f'[DEBUG] Checking path: {path} - exists: {exists}, isfile: {is_file}')
+								if exists and is_file:
+									try:
+										with open(path, 'r', encoding='utf-8') as f:
+											content = f.read()
+										file_msg += f'\n\n{file_name}:\n{content}'
+										attachments.append(path)  # Use the actual path found
+										file_found = True
+										logger.info(f'Successfully read file from: {path}')
+										break
+									except Exception as e:
+										logger.warning(f'Failed to read file {path}: {e}')
+							
+							if not file_found:
+								logger.warning(f'File not found in any location: {file_name}')
+								
 					if file_msg:
 						user_message += '\n\nAttachments:'
 						user_message += file_msg
@@ -1470,8 +1508,19 @@ class CodeAgentTools(Tools[Context]):
 						file_content = file_system.display_file(file_name)
 						if file_content:
 							attachments.append(file_name)
-						elif os.path.exists(file_name):
-							attachments.append(file_name)
+						else:
+							# Check multiple locations
+							paths_to_try = [
+								file_name,
+							]
+							if fs_dir:
+								paths_to_try.append(str(fs_dir / file_name))
+							paths_to_try.append(os.path.join(os.getcwd(), file_name))
+							
+							for path in paths_to_try:
+								if os.path.exists(path) and os.path.isfile(path):
+									attachments.append(path)
+									break
 
 			# Convert relative paths to absolute paths - handle both FileSystem-managed and regular files
 			resolved_attachments = []
