@@ -1,0 +1,2 @@
+"""OpenBrowser Backend API."""
+
