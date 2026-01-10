@@ -592,6 +592,10 @@ class BrowserProfile(BrowserConnectArgs, BrowserLaunchPersistentContextArgs, Bro
 		default=ViewportSize(width=0, height=0),
 		description='Window position to use for the browser x,y from the top left when headless=False.',
 	)
+	auto_split_screen: bool = Field(
+		default=True,
+		description='When headless=False, automatically position browser on the right half of the screen for split-screen view.',
+	)
 	cross_origin_iframes: bool = Field(
 		default=True,
 		description='Enable cross-origin iframe support (OOPIF/Out-of-Process iframes). When False, only same-origin frames are processed to avoid complexity and hanging.',
@@ -1092,6 +1096,9 @@ async function initialize(checkInitialized, magic) {{
 		"""
 		Detect the system display size and initialize the display-related config defaults:
 		        screen, window_size, window_position, viewport, no_viewport, device_scale_factor
+		
+		When auto_split_screen=True and headless=False, the browser window will be positioned
+		on the right half of the screen for a split-screen view with the user's current interface.
 		"""
 
 		display_size = get_display_size()
@@ -1104,6 +1111,10 @@ async function initialize(checkInitialized, magic) {{
 
 		# Determine viewport behavior based on mode and user preferences
 		user_provided_viewport = self.viewport is not None
+		user_provided_window_size = self.window_size is not None
+		user_provided_window_position = self.window_position is not None and (
+			self.window_position['width'] != 0 or self.window_position['height'] != 0
+		)
 
 		if self.headless:
 			# Headless mode: always use viewport for content size control
@@ -1113,7 +1124,22 @@ async function initialize(checkInitialized, magic) {{
 			self.no_viewport = False
 		else:
 			# Headful mode: respect user's viewport preference
-			self.window_size = self.window_size or self.screen
+			
+			# Apply auto_split_screen if enabled and user didn't provide custom window settings
+			if self.auto_split_screen and has_screen_available and not user_provided_window_size and not user_provided_window_position:
+				# Position browser on the right half of the screen
+				screen_width = self.screen['width']
+				screen_height = self.screen['height']
+				
+				# Browser window takes the right half
+				half_width = screen_width // 2
+				
+				self.window_size = ViewportSize(width=half_width, height=screen_height)
+				self.window_position = ViewportSize(width=half_width, height=0)  # x=half_width, y=0
+				
+				logger.info(f'Auto split-screen enabled: browser positioned at ({half_width}, 0) with size {half_width}x{screen_height}')
+			else:
+				self.window_size = self.window_size or self.screen
 
 			if user_provided_viewport:
 				# User explicitly set viewport - enable viewport mode
