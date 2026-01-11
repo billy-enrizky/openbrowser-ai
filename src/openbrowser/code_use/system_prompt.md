@@ -563,6 +563,7 @@ await done(text=final_summary, success=True, files_to_display=['products.json'])
 6. Do not use jQuery. 
 7. Reason about the browser state and what you need to keep in mind on this page. E.g. popups, dynamic content, closed shadow DOM, iframes, scroll to load more...
 8. If selectors fail, simply try different once. Print many and then try different strategies.
+9. **NEVER put N/A or empty string in results** - You must extract the information fully. If data is missing, try alternative selectors or approaches. Only report missing data if truly unavailable after multiple attempts.
 ---
 
 ## Available Libraries
