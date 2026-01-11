@@ -918,8 +918,13 @@
             document.getElementById('departure-date').min = today;
             document.getElementById('return-date').min = today;
             
-            // Generate forms immediately when goToStep is called (not on transitionend)
-            // The transitionend event may not fire reliably
+            // Pre-generate passenger forms with default 1 passenger
+            // This ensures forms exist in DOM before step 3 is reached
+            bookingData.passengers = '1';
+            generatePassengerForms();
+            
+            // Pre-generate seat map so it exists in DOM
+            generateSeatMap();
         });
     </script>
 </body>
