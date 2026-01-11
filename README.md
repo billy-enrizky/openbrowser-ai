@@ -1,4 +1,6 @@
 # OpenBrowser
+
+Automating Walmart Product Scraping:
 https://github.com/user-attachments/assets/ae5d74ce-0ac6-46b0-b02b-ff5518b4b20d
 
 [![PyPI version](https://badge.fury.io/py/openbrowser-ai.svg)](https://pypi.org/project/openbrowser-ai/)
@@ -274,18 +276,12 @@ Contributions are welcome! Please:
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## Acknowledgments
-
-- Forked from [browser-use](https://github.com/browser-use/browser-use)
-- Built with [LangGraph](https://github.com/langchain-ai/langgraph)
-- Uses [Playwright](https://playwright.dev/) for browser orchestration
-
 ## Contact
 
 - **Email**: billy.suharno@gmail.com
 - **GitHub**: [@billy-enrizky](https://github.com/billy-enrizky)
 - **Repository**: [github.com/billy-enrizky/openbrowser-ai](https://github.com/billy-enrizky/openbrowser-ai)
-- **Documentation**: [openbrowser.mintlify.app](https://openbrowser.mintlify.app)
+- **Documentation**: [https://docs.openbrowser.me](https://docs.openbrowser.me)
 
 ---
 
