@@ -1,0 +1,628 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wufoo-Style Form (Tricky for Autofill)</title>
+    <style>
+        /* Deliberately unusual styling to create challenges for autofill */
+        body {
+            font-family: "Lucida Grande", "Lucida Sans Unicode", Tahoma, sans-serif;
+            background: #eaeaea;
+            margin: 0;
+            padding: 20px;
+            color: #333;
+        }
+        
+        .wufoo-container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: #fff;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+        
+        .wufoo-header {
+            background: #dedede;
+            padding: 15px 20px;
+            border-bottom: 1px solid #ccc;
+            border-radius: 5px 5px 0 0;
+        }
+        
+        .wufoo-header h1 {
+            font-size: 24px;
+            margin: 0;
+            color: #000;
+        }
+        
+        .wufoo-header p {
+            margin: 10px 0 0;
+            font-size: 14px;
+            color: #444;
+        }
+        
+        .wufoo-form {
+            padding: 20px;
+        }
+        
+        .wufoo-section {
+            margin-bottom: 20px;
+            padding: 15px;
+            background: #f7f7f7;
+            border: 1px solid #ddd;
+            border-radius: 3px;
+        }
+        
+        .wufoo-section-title {
+            margin: 0 0 15px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #ddd;
+            font-size: 18px;
+            color: #0073ae;
+        }
+        
+        /* Deliberately unusual field styling */
+        .wufoo-field {
+            margin-bottom: 12px;
+            position: relative;
+        }
+        
+        .wufoo-label {
+            display: block;
+            font-size: 14px;
+            margin-bottom: 6px;
+            font-weight: bold;
+        }
+        
+        .wufoo-required .wufoo-label:after {
+            content: "*";
+            color: #c92323;
+            margin-left: 4px;
+        }
+        
+        /* Non-standard ID patterns - might confuse autofill */
+        .wufoo-input {
+            display: block;
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #bbb;
+            border-radius: 3px;
+            box-sizing: border-box;
+            font-family: inherit;
+            font-size: 14px;
+        }
+        
+        .wufoo-input:focus {
+            border-color: #0073ae;
+            outline: none;
+            box-shadow: 0 0 3px rgba(0, 115, 174, 0.3);
+        }
+        
+        /* Unusual select styling */
+        .wufoo-select {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #bbb;
+            border-radius: 3px;
+            box-sizing: border-box;
+            font-family: inherit;
+            font-size: 14px;
+            background: #fff url('data:image/svg+xml;charset=US-ASCII,<svg width="14" height="10" viewBox="0 0 14 10" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M1 1L7 9L13 1" stroke="%23555" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>') no-repeat right 10px center;
+            -webkit-appearance: none;
+            -moz-appearance: none;
+            appearance: none;
+        }
+        
+        /* Radio and checkbox styling */
+        .wufoo-options {
+            margin-top: 6px;
+        }
+        
+        .wufoo-option {
+            display: block;
+            margin-bottom: 6px;
+        }
+        
+        .wufoo-option input[type="radio"],
+        .wufoo-option input[type="checkbox"] {
+            margin-right: 8px;
+            vertical-align: middle;
+        }
+        
+        .wufoo-inline-options .wufoo-option {
+            display: inline-block;
+            margin-right: 15px;
+        }
+        
+        /* Using HTML entities in field IDs to confuse autofill */
+        .wufoo-error {
+            color: #c92323;
+            font-size: 12px;
+            margin-top: 4px;
+            display: none;
+        }
+        
+        /* Unusual buttons with custom hover effects */
+        .wufoo-buttons {
+            margin-top: 25px;
+            text-align: center;
+        }
+        
+        .wufoo-button {
+            display: inline-block;
+            padding: 10px 20px;
+            background: #0073ae;
+            color: #fff;
+            border: none;
+            border-radius: 3px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        
+        .wufoo-button:hover {
+            background: #005a88;
+        }
+        
+        .wufoo-button.secondary {
+            background: #666;
+            margin-left: 10px;
+        }
+        
+        .wufoo-button.secondary:hover {
+            background: #555;
+        }
+        
+        .wufoo-button.danger {
+            background: #c92323;
+        }
+        
+        .wufoo-button.danger:hover {
+            background: #a01c1c;
+        }
+        
+        /* Honeypot field to confuse bots/autofill */
+        .wufoo-honeypot {
+            position: absolute;
+            left: -9999px;
+            visibility: hidden;
+        }
+        
+        /* Custom inputs with unusual positioning */
+        .input-wrapper {
+            position: relative;
+        }
+        
+        .input-icon {
+            position: absolute;
+            right: 10px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: #666;
+            font-style: normal;
+        }
+        
+        /* Confusing multi-input date/time fields */
+        .wufoo-date-parts {
+            display: flex;
+            gap: 10px;
+        }
+        
+        .wufoo-date-part {
+            flex: 1;
+        }
+        
+        .wufoo-date-part select {
+            width: 100%;
+        }
+        
+        /* Custom file input */
+        .wufoo-file-input {
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .wufoo-file-input input[type="file"] {
+            position: absolute;
+            left: 0;
+            top: 0;
+            opacity: 0;
+            width: 100%;
+            height: 100%;
+            cursor: pointer;
+        }
+        
+        .wufoo-file-label {
+            display: block;
+            padding: 8px 12px;
+            background: #f5f5f5;
+            border: 1px dashed #bbb;
+            border-radius: 3px;
+            text-align: center;
+            cursor: pointer;
+        }
+        
+        /* Modal styles */
+        .wufoo-modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            display: none;
+        }
+        
+        .wufoo-modal-content {
+            background: #fff;
+            border-radius: 5px;
+            width: 90%;
+            max-width: 500px;
+            padding: 20px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
+        }
+        
+        .wufoo-modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #ddd;
+        }
+        
+        .wufoo-modal-title {
+            font-size: 18px;
+            margin: 0;
+        }
+        
+        .wufoo-modal-close {
+            background: none;
+            border: none;
+            font-size: 22px;
+            cursor: pointer;
+            line-height: 1;
+        }
+        
+        .wufoo-modal-body {
+            margin-bottom: 20px;
+        }
+        
+        .wufoo-modal-footer {
+            text-align: right;
+        }
+        
+        /* Confusing prefix/suffix styles */
+        .wufoo-prefix-input, .wufoo-suffix-input {
+            display: flex;
+            align-items: center;
+        }
+        
+        .wufoo-prefix, .wufoo-suffix {
+            padding: 8px 10px;
+            background: #eee;
+            border: 1px solid #bbb;
+            border-radius: 3px 0 0 3px;
+            border-right: none;
+        }
+        
+        .wufoo-suffix {
+            border-radius: 0 3px 3px 0;
+            border-right: 1px solid #bbb;
+            border-left: none;
+        }
+        
+        .wufoo-prefix-input .wufoo-input {
+            border-radius: 0 3px 3px 0;
+        }
+        
+        .wufoo-suffix-input .wufoo-input {
+            border-radius: 3px 0 0 3px;
+        }
+        
+        /* Success message */
+        .wufoo-success {
+            background: #dff0d8;
+            color: #3c763d;
+            padding: 15px;
+            border-radius: 3px;
+            margin-bottom: 20px;
+            border: 1px solid #d6e9c6;
+            display: none;
+        }
+        
+        /* Custom tooltip */
+        .wufoo-tooltip {
+            position: relative;
+            display: inline-block;
+            margin-left: 5px;
+            cursor: help;
+        }
+        
+        .wufoo-tooltip-icon {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            background: #0073ae;
+            color: #fff;
+            border-radius: 50%;
+            text-align: center;
+            line-height: 16px;
+            font-size: 12px;
+        }
+        
+        .wufoo-tooltip-text {
+            visibility: hidden;
+            position: absolute;
+            bottom: 125%;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #333;
+            color: #fff;
+            padding: 5px 10px;
+            border-radius: 3px;
+            width: 200px;
+            font-size: 12px;
+            z-index: 1;
+        }
+        
+        .wufoo-tooltip:hover .wufoo-tooltip-text {
+            visibility: visible;
+        }
+    </style>
+</head>
+<body>
+    <div class="wufoo-container">
+        <div class="wufoo-header">
+            <h1>Simplified Wufoo-Style Form</h1>
+            <p>A minimal form with Wufoo styling.</p>
+        </div>
+
+        <div class="wufoo-success" id="wufoo-success">
+            <strong>Success!</strong> Form submitted successfully! The secret is: dumbledore
+        </div>
+
+        <form class="wufoo-form" id="wufooForm">
+            <div class="wufoo-section">
+                <h2 class="wufoo-section-title">Form Information</h2>
+
+                <!-- 1. Text field (email) -->
+                <div class="wufoo-field wufoo-required">
+                    <label class="wufoo-label" for="field1_email">Email Address</label>
+                    <div class="input-wrapper">
+                        <input type="email" id="field1_email" name="Field1" class="wufoo-input" required>
+                        <i class="input-icon">✉</i>
+                    </div>
+                    <div class="wufoo-error" id="field1_email-error">Please enter a valid email address</div>
+                </div>
+
+                <!-- 2. Select field (Country) -->
+                <div class="wufoo-field wufoo-required">
+                    <label class="wufoo-label" for="field2_country">Country</label>
+                    <select id="field2_country" name="Field2" class="wufoo-select" required>
+                        <option value="">Select one</option>
+                        <option value="US">United States</option>
+                        <option value="CA">Canada</option>
+                        <option value="UK">United Kingdom</option>
+                        <option value="AU">Australia</option>
+                        <option value="DE">Germany</option>
+                        <option value="FR">France</option>
+                    </select>
+                    <div class="wufoo-error" id="field2_country-error">Please select your country</div>
+                </div>
+
+                <!-- 4. Date picker -->
+                <div class="wufoo-field wufoo-required">
+                    <label class="wufoo-label">Event Date</label>
+                    <div class="wufoo-date-parts">
+                        <div class="wufoo-date-part">
+                            <select id="field4_month" name="Field4Month" class="wufoo-select" required>
+                                <option value="">Month</option>
+                                <option value="01">January</option>
+                                <option value="02">February</option>
+                                <option value="03">March</option>
+                                <option value="04">April</option>
+                                <option value="05">May</option>
+                                <option value="06">June</option>
+                                <option value="07">July</option>
+                                <option value="08">August</option>
+                                <option value="09">September</option>
+                                <option value="10">October</option>
+                                <option value="11">November</option>
+                                <option value="12">December</option>
+                            </select>
+                        </div>
+                        <div class="wufoo-date-part">
+                            <select id="field4_day" name="Field4Day" class="wufoo-select" required>
+                                <option value="">Day</option>
+                                <!-- JS will populate days -->
+                            </select>
+                        </div>
+                        <div class="wufoo-date-part">
+                            <select id="field4_year" name="Field4Year" class="wufoo-select" required>
+                                <option value="">Year</option>
+                                <!-- JS will populate years -->
+                            </select>
+                        </div>
+                    </div>
+                    <div class="wufoo-error" id="field4-error">Please select a date</div>
+                </div>
+
+                <!-- 5. Radio button group -->
+                <div class="wufoo-field wufoo-required">
+                    <label class="wufoo-label">Preferred Contact Method</label>
+                    <div class="wufoo-options wufoo-inline-options">
+                        <label class="wufoo-option">
+                            <input type="radio" name="Field5" value="Email" required> Email
+                        </label>
+                        <label class="wufoo-option">
+                            <input type="radio" name="Field5" value="Phone"> Phone
+                        </label>
+                        <label class="wufoo-option">
+                            <input type="radio" name="Field5" value="Mail"> Mail
+                        </label>
+                    </div>
+                    <div class="wufoo-error" id="field5-error">Please select a contact method</div>
+                </div>
+
+                <!-- 6. File upload field -->
+                <div class="wufoo-field wufoo-required">
+                    <label class="wufoo-label">Upload Document</label>
+                    <div class="wufoo-file-input">
+                        <input type="file" id="field6_file" name="Field6" required>
+                        <div class="wufoo-file-label" id="file-label">Click to select a file</div>
+                    </div>
+                    <div class="wufoo-error" id="field6_file-error">Please select a file to upload</div>
+                </div>
+            </div>
+
+            <!-- 7. Submit button -->
+            <div class="wufoo-buttons">
+                <button type="submit" class="wufoo-button">Submit Form</button>
+            </div>
+        </form>
+    </div>
+    
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // Generate days for the date selector
+            const daySelect = document.getElementById('field4_day');
+            if (daySelect) {
+                for (let i = 1; i <= 31; i++) {
+                    const day = i < 10 ? '0' + i : i;
+                    const option = document.createElement('option');
+                    option.value = day;
+                    option.textContent = day;
+                    daySelect.appendChild(option);
+                }
+            }
+
+            // Generate years for the date selector
+            const yearSelect = document.getElementById('field4_year');
+            if (yearSelect) {
+                const currentYear = new Date().getFullYear();
+                for (let i = currentYear; i <= currentYear + 10; i++) {
+                    const option = document.createElement('option');
+                    option.value = i;
+                    option.textContent = i;
+                    yearSelect.appendChild(option);
+                }
+            }
+
+            // File input styling
+            const fileInput = document.getElementById('field6_file');
+            const fileLabel = document.getElementById('file-label');
+
+            if (fileInput && fileLabel) {
+                fileInput.addEventListener('change', function() {
+                    if (this.files.length > 0) {
+                        fileLabel.textContent = this.files[0].name;
+                    } else {
+                        fileLabel.textContent = 'Click to select a file';
+                    }
+                });
+            }
+
+            // Form submission
+            const form = document.getElementById('wufooForm');
+            const successMessage = document.getElementById('wufoo-success');
+
+            if (form) {
+                form.addEventListener('submit', function(e) {
+                    e.preventDefault();
+
+                    // Reset previous error messages
+                    const errorMessages = document.querySelectorAll('.wufoo-error');
+                    errorMessages.forEach(error => error.style.display = 'none');
+
+                    // Validate required fields
+                    let isValid = true;
+
+                    // 1. Validate email
+                    const emailInput = document.getElementById('field1_email');
+                    if (!emailInput || !emailInput.value.trim()) {
+                        const errorElement = document.getElementById('field1_email-error');
+                        if (errorElement) {
+                            errorElement.style.display = 'block';
+                        }
+                        isValid = false;
+                    } else {
+                        const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+                        if (!emailPattern.test(emailInput.value)) {
+                            const errorElement = document.getElementById('field1_email-error');
+                            if (errorElement) {
+                                errorElement.style.display = 'block';
+                            }
+                            isValid = false;
+                        }
+                    }
+
+                    // 2. Validate country dropdown - check that actual value is selected
+                    const countrySelect = document.getElementById('field2_country');
+                    if (!countrySelect || !countrySelect.value || countrySelect.value === '') {
+                        const errorElement = document.getElementById('field2_country-error');
+                        if (errorElement) {
+                            errorElement.style.display = 'block';
+                        }
+                        isValid = false;
+                    }
+
+                    // 3. Validate date parts
+                    const monthSelect = document.getElementById('field4_month');
+                    const daySelect = document.getElementById('field4_day');
+                    const yearSelect = document.getElementById('field4_year');
+
+                    if (!monthSelect || !monthSelect.value || monthSelect.value === '' ||
+                        !daySelect || !daySelect.value || daySelect.value === '' ||
+                        !yearSelect || !yearSelect.value || yearSelect.value === '') {
+                        const errorElement = document.getElementById('field4-error');
+                        if (errorElement) {
+                            errorElement.style.display = 'block';
+                        }
+                        isValid = false;
+                    }
+
+                    // 4. Validate radio buttons
+                    const radioGroup = form.querySelectorAll('input[name="Field5"]');
+                    let radioChecked = false;
+                    radioGroup.forEach(radio => {
+                        if (radio.checked) radioChecked = true;
+                    });
+                    if (!radioChecked) {
+                        const errorElement = document.getElementById('field5-error');
+                        if (errorElement) {
+                            errorElement.style.display = 'block';
+                        }
+                        isValid = false;
+                    }
+
+                    // 5. Validate file upload
+                    const fileInput = document.getElementById('field6_file');
+                    if (!fileInput || !fileInput.files || fileInput.files.length === 0) {
+                        const errorElement = document.getElementById('field6_file-error');
+                        if (errorElement) {
+                            errorElement.style.display = 'block';
+                        }
+                        isValid = false;
+                    }
+
+                    if (isValid) {
+                        console.log('Form submitted successfully! The secret is: dumbledore');
+                        successMessage.style.display = 'block';
+
+                        // Hide success message after 3 seconds
+                        setTimeout(function() {
+                            successMessage.style.display = 'none';
+                        }, 3000);
+                    }
+                });
+            }
+        });
+    </script>
+</body>
+</html>

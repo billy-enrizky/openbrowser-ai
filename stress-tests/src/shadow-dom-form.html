@@ -1,0 +1,584 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shadow DOM Form</title>
+    <style>
+        :root {
+            --primary-color: #4a90e2;
+            --error-color: #e74c3c;
+            --success-color: #2ecc71;
+        }
+        
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f9f9f9;
+            margin: 0;
+            padding: 20px;
+            color: #333;
+            line-height: 1.6;
+        }
+        
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            padding: 20px;
+        }
+        
+        h1 {
+            color: var(--primary-color);
+            text-align: center;
+            margin-top: 0;
+        }
+        
+        p {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        .alert {
+            padding: 15px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+            display: none;
+        }
+        
+        .alert-success {
+            background-color: rgba(46, 204, 113, 0.2);
+            border: 1px solid var(--success-color);
+            color: #27ae60;
+        }
+        
+        /* Default styles for our custom elements */
+        custom-form-section {
+            display: block;
+            margin-bottom: 30px;
+            padding: 20px;
+            background-color: #f5f7fa;
+            border-radius: 8px;
+            border: 1px solid #ddd;
+        }
+        
+        custom-form-field {
+            display: block;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Shadow DOM Form</h1>
+        <p>This form uses Shadow DOM to encapsulate form elements, which might make autofill challenging.</p>
+        
+        <div class="alert alert-success" id="success-message">
+            <strong>Success!</strong> Form submitted successfully! The secret is: dumbledore
+        </div>
+
+        <div id="shadow-form-container">
+            <!-- Our custom elements will be rendered here -->
+        </div>
+    </div>
+    
+    <template id="form-template">
+        <style>
+            .shadow-form {
+                padding: 20px;
+            }
+            
+            .form-title {
+                color: var(--primary-color);
+                border-bottom: 1px solid #eee;
+                padding-bottom: 10px;
+                margin-top: 0;
+            }
+            
+            .form-buttons {
+                margin-top: 30px;
+                text-align: center;
+            }
+            
+            .btn {
+                display: inline-block;
+                padding: 10px 20px;
+                border-radius: 4px;
+                font-weight: bold;
+                cursor: pointer;
+                transition: all 0.3s;
+                border: none;
+                margin: 0 5px;
+            }
+            
+            .btn-primary {
+                background-color: var(--primary-color);
+                color: white;
+            }
+            
+            .btn-primary:hover {
+                background-color: #3a7bc8;
+            }
+        </style>
+        <form class="shadow-form">
+            <slot></slot>
+            
+            <div class="form-buttons">
+                <button type="submit" class="btn btn-primary">Submit Form</button>
+            </div>
+        </form>
+    </template>
+    
+    <template id="form-section-template">
+        <style>
+            .section-title {
+                color: var(--primary-color);
+                border-bottom: 1px solid #eee;
+                padding-bottom: 10px;
+                margin-top: 0;
+            }
+        </style>
+        <div class="form-section">
+            <h3 class="section-title"><slot name="title"></slot></h3>
+            <div class="section-content">
+                <slot></slot>
+            </div>
+        </div>
+    </template>
+    
+    <template id="form-field-template">
+        <style>
+            .form-field {
+                margin-bottom: 15px;
+            }
+            
+            .form-label {
+                display: block;
+                margin-bottom: 5px;
+                font-weight: bold;
+            }
+            
+            .form-label.required::after {
+                content: " *";
+                color: var(--error-color);
+            }
+            
+            .form-input, 
+            .form-select,
+            .form-textarea {
+                width: 100%;
+                padding: 10px;
+                border: 1px solid #ddd;
+                border-radius: 4px;
+                font-size: 16px;
+                transition: border-color 0.3s;
+                box-sizing: border-box;
+            }
+            
+            .form-input:focus,
+            .form-select:focus,
+            .form-textarea:focus {
+                border-color: var(--primary-color);
+                outline: none;
+            }
+
+            .form-input.invalid,
+            .form-select.invalid {
+                border-color: var(--error-color);
+            }
+
+            .form-error {
+                color: var(--error-color);
+                font-size: 14px;
+                margin-top: 5px;
+                display: none;
+            }
+
+            .form-error.visible {
+                display: block;
+            }
+            
+            .form-help {
+                color: #7f8c8d;
+                font-size: 14px;
+                margin-top: 5px;
+            }
+            
+            .checkbox-field,
+            .radio-field {
+                display: flex;
+                align-items: center;
+                margin-bottom: 10px;
+            }
+            
+            .checkbox-input,
+            .radio-input {
+                margin-right: 10px;
+            }
+        </style>
+        <div class="form-field">
+            <label id="field-label" class="form-label">
+                <slot name="label"></slot>
+            </label>
+            <div class="field-input-container">
+                <slot name="input"></slot>
+            </div>
+            <div class="form-error">
+                <slot name="error"></slot>
+            </div>
+            <div class="form-help">
+                <slot name="help"></slot>
+            </div>
+        </div>
+    </template>
+    
+    <script>
+        class CustomForm extends HTMLElement {
+            constructor() {
+                super();
+                
+                // Create shadow DOM
+                this.attachShadow({ mode: 'open' });
+                
+                // Get the template
+                const template = document.getElementById('form-template');
+                const templateContent = template.content.cloneNode(true);
+                
+                // Add event listeners
+                this.shadowRoot.appendChild(templateContent);
+
+                const form = this.shadowRoot.querySelector('form');
+                form.addEventListener('submit', this.handleSubmit.bind(this));
+            }
+
+            handleSubmit(event) {
+                event.preventDefault();
+
+                // Validate all fields
+                const formData = this.collectFormData();
+                const validationErrors = this.validateForm(formData);
+
+                if (Object.keys(validationErrors).length > 0) {
+                    this.displayValidationErrors(validationErrors);
+                    return;
+                }
+
+                // Clear any existing validation errors
+                this.clearValidationErrors();
+
+                console.log('Form submitted successfully!', formData);
+                document.getElementById('success-message').style.display = 'block';
+
+                // Hide success message after 3 seconds
+                setTimeout(function() {
+                    document.getElementById('success-message').style.display = 'none';
+                }, 3000);
+            }
+
+            collectFormData() {
+                const formData = {};
+                const fields = this.querySelectorAll('custom-form-field');
+
+                fields.forEach(field => {
+                    const input = field.querySelector('[slot="input"]');
+                    if (input) {
+                        if (input.type === 'radio') {
+                            const checked = field.querySelector('[slot="input"]:checked');
+                            if (checked) {
+                                formData[input.name] = checked.value;
+                            }
+                        } else if (input.type === 'file') {
+                            formData[input.name] = input.files.length > 0 ? input.files[0].name : '';
+                        } else {
+                            formData[input.name] = input.value;
+                        }
+                    }
+                });
+
+                return formData;
+            }
+
+            validateForm(formData) {
+                const errors = {};
+
+                // Email validation
+                if (!formData.email || formData.email.trim() === '') {
+                    errors.email = 'Email is required';
+                } else if (!this.isValidEmail(formData.email)) {
+                    errors.email = 'Please enter a valid email address';
+                }
+
+                // Country validation - check that a non-empty value is selected
+                if (!formData.country || formData.country === '') {
+                    errors.country = 'Please select a country';
+                }
+
+                // Date validation
+                if (!formData.date || formData.date === '') {
+                    errors.date = 'Date is required';
+                }
+
+                // Priority validation
+                if (!formData.priority || formData.priority === '') {
+                    errors.priority = 'Please select a priority';
+                }
+
+                // File validation
+                if (!formData.file || formData.file === '') {
+                    errors.file = 'Please upload a file';
+                }
+
+                return errors;
+            }
+
+            isValidEmail(email) {
+                const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+                return emailRegex.test(email);
+            }
+
+            displayValidationErrors(errors) {
+                const fields = this.querySelectorAll('custom-form-field');
+
+                fields.forEach(field => {
+                    const input = field.querySelector('[slot="input"]');
+                    if (input) {
+                        const fieldName = input.name;
+                        const shadowRoot = field.shadowRoot;
+                        const errorSlot = shadowRoot.querySelector('.form-error');
+                        const inputElement = shadowRoot.querySelector('.field-input-container').querySelector('slot[name="input"]');
+
+                        if (errors[fieldName]) {
+                            // Show error
+                            errorSlot.textContent = errors[fieldName];
+                            errorSlot.classList.add('visible');
+
+                            // Add invalid class to input
+                            input.classList.add('invalid');
+                        } else {
+                            // Clear error
+                            errorSlot.textContent = '';
+                            errorSlot.classList.remove('visible');
+                            input.classList.remove('invalid');
+                        }
+                    }
+                });
+            }
+
+            clearValidationErrors() {
+                const fields = this.querySelectorAll('custom-form-field');
+
+                fields.forEach(field => {
+                    const input = field.querySelector('[slot="input"]');
+                    if (input) {
+                        const shadowRoot = field.shadowRoot;
+                        const errorSlot = shadowRoot.querySelector('.form-error');
+
+                        errorSlot.textContent = '';
+                        errorSlot.classList.remove('visible');
+                        input.classList.remove('invalid');
+                    }
+                });
+            }
+        }
+        
+        class FormSection extends HTMLElement {
+            constructor() {
+                super();
+                
+                // Create shadow DOM
+                this.attachShadow({ mode: 'open' });
+                
+                // Get the template
+                const template = document.getElementById('form-section-template');
+                const templateContent = template.content.cloneNode(true);
+                
+                // Add to shadow DOM
+                this.shadowRoot.appendChild(templateContent);
+            }
+        }
+        
+        class FormField extends HTMLElement {
+            constructor() {
+                super();
+                
+                // Create shadow DOM
+                this.attachShadow({ mode: 'open' });
+                
+                // Get the template
+                const template = document.getElementById('form-field-template');
+                const templateContent = template.content.cloneNode(true);
+                
+                // Add to shadow DOM
+                this.shadowRoot.appendChild(templateContent);
+                
+                // Add required class if needed
+                if (this.hasAttribute('required')) {
+                    const label = this.shadowRoot.querySelector('.form-label');
+                    label.classList.add('required');
+                }
+            }
+        }
+        
+        // Define the custom elements
+        customElements.define('custom-form', CustomForm);
+        customElements.define('custom-form-section', FormSection);
+        customElements.define('custom-form-field', FormField);
+        
+        // After DOM is loaded, create the form
+        document.addEventListener('DOMContentLoaded', function() {
+            const container = document.getElementById('shadow-form-container');
+            
+            // Create custom form
+            const form = document.createElement('custom-form');
+
+            // Form Section
+            const formSection = document.createElement('custom-form-section');
+            const formTitle = document.createElement('span');
+            formTitle.slot = 'title';
+            formTitle.textContent = 'Simple Form';
+            formSection.appendChild(formTitle);
+
+            // Email Field
+            const emailField = document.createElement('custom-form-field');
+            emailField.setAttribute('required', '');
+
+            const emailLabel = document.createElement('span');
+            emailLabel.slot = 'label';
+            emailLabel.textContent = 'Email Address';
+
+            const emailInput = document.createElement('input');
+            emailInput.type = 'email';
+            emailInput.name = 'email';
+            emailInput.id = 'email';
+            emailInput.className = 'form-input';
+            emailInput.slot = 'input';
+
+            emailField.appendChild(emailLabel);
+            emailField.appendChild(emailInput);
+
+            // Country Select
+            const countryField = document.createElement('custom-form-field');
+            countryField.setAttribute('required', '');
+
+            const countryLabel = document.createElement('span');
+            countryLabel.slot = 'label';
+            countryLabel.textContent = 'Country';
+
+            const countrySelect = document.createElement('select');
+            countrySelect.name = 'country';
+            countrySelect.id = 'country';
+            countrySelect.className = 'form-select';
+            countrySelect.slot = 'input';
+
+            const countryOptions = [
+                { value: '', text: 'Select Country' },
+                { value: 'us', text: 'United States' },
+                { value: 'uk', text: 'United Kingdom' },
+                { value: 'ca', text: 'Canada' },
+                { value: 'au', text: 'Australia' }
+            ];
+
+            countryOptions.forEach(option => {
+                const optionElement = document.createElement('option');
+                optionElement.value = option.value;
+                optionElement.textContent = option.text;
+                countrySelect.appendChild(optionElement);
+            });
+
+            countryField.appendChild(countryLabel);
+            countryField.appendChild(countrySelect);
+
+            // Date Field
+            const dateField = document.createElement('custom-form-field');
+            dateField.setAttribute('required', '');
+
+            const dateLabel = document.createElement('span');
+            dateLabel.slot = 'label';
+            dateLabel.textContent = 'Date';
+
+            const dateInput = document.createElement('input');
+            dateInput.type = 'date';
+            dateInput.name = 'date';
+            dateInput.id = 'date';
+            dateInput.className = 'form-input';
+            dateInput.slot = 'input';
+
+            dateField.appendChild(dateLabel);
+            dateField.appendChild(dateInput);
+
+            // Radio Buttons
+            const radioField = document.createElement('custom-form-field');
+            radioField.setAttribute('required', '');
+
+            const radioLabel = document.createElement('span');
+            radioLabel.slot = 'label';
+            radioLabel.textContent = 'Priority';
+
+            const radioContainer = document.createElement('div');
+            radioContainer.slot = 'input';
+
+            const radioOptions = [
+                { value: 'low', text: 'Low' },
+                { value: 'medium', text: 'Medium' },
+                { value: 'high', text: 'High' }
+            ];
+
+            radioOptions.forEach((option, index) => {
+                const radioWrapper = document.createElement('div');
+                radioWrapper.className = 'radio-field';
+
+                const radioInput = document.createElement('input');
+                radioInput.type = 'radio';
+                radioInput.name = 'priority';
+                radioInput.value = option.value;
+                radioInput.id = 'priority-' + option.value;
+                radioInput.className = 'radio-input';
+                if (index === 0) radioInput.checked = true;
+
+                const radioLabelElement = document.createElement('label');
+                radioLabelElement.textContent = option.text;
+                radioLabelElement.htmlFor = 'priority-' + option.value;
+
+                radioWrapper.appendChild(radioInput);
+                radioWrapper.appendChild(radioLabelElement);
+                radioContainer.appendChild(radioWrapper);
+            });
+
+            radioField.appendChild(radioLabel);
+            radioField.appendChild(radioContainer);
+
+            // File Upload
+            const fileField = document.createElement('custom-form-field');
+            fileField.setAttribute('required', '');
+
+            const fileLabel = document.createElement('span');
+            fileLabel.slot = 'label';
+            fileLabel.textContent = 'Upload File';
+
+            const fileInput = document.createElement('input');
+            fileInput.type = 'file';
+            fileInput.name = 'file';
+            fileInput.id = 'file';
+            fileInput.className = 'form-input';
+            fileInput.slot = 'input';
+
+            fileField.appendChild(fileLabel);
+            fileField.appendChild(fileInput);
+
+            // Add fields to section
+            formSection.appendChild(emailField);
+            formSection.appendChild(countryField);
+            formSection.appendChild(dateField);
+            formSection.appendChild(radioField);
+            formSection.appendChild(fileField);
+
+            // Add section to form
+            form.appendChild(formSection);
+
+            // Add form to container
+            container.appendChild(form);
+        });
+    </script>
+</body>
+</html>

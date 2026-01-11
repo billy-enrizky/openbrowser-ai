@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>Ultimate Nested Iframe Stress Test</title>
+	<style>
+		body {
+			font-family: Arial, sans-serif;
+			margin: 20px;
+			padding-bottom: 10000px;
+			background: linear-gradient(to bottom, white, #f0f0f0);
+		}
+		
+		#test-form {
+			max-height: 400px;
+			overflow: scroll;
+			border: 2px solid #333;
+			padding: 20px;
+			margin: 20px 0;
+			background: white;
+		}
+		
+		.form-group {
+			margin: 15px 0;
+		}
+		
+		label {
+			display: block;
+			margin-bottom: 5px;
+			font-weight: bold;
+		}
+		
+		input, textarea, select {
+			width: 100%;
+			padding: 8px;
+			box-sizing: border-box;
+		}
+		
+		#test-links {
+			border: 2px solid #666;
+			padding: 20px;
+			margin: 20px 0;
+			background: #fafafa;
+		}
+		
+		#test-links > * {
+			display: block;
+			margin: 10px 0;
+			padding: 10px;
+			background: #fff;
+			border: 1px solid #ddd;
+			text-decoration: none;
+			color: #333;
+			cursor: pointer;
+		}
+		
+		#test-links > *:hover {
+			background: #e0e0e0;
+		}
+		
+		#test-iframes {
+			border: 2px solid #999;
+			padding: 20px;
+			margin: 20px 0;
+			background: #f5f5f5;
+		}
+		
+		.shadow-container {
+			border: 2px dashed #ff6600;
+			padding: 20px;
+			margin: 20px 0;
+			background: #fff9f0;
+		}
+		
+		.iframe-container {
+			margin: 20px 0;
+			border: 1px solid #ccc;
+			padding: 10px;
+		}
+	</style>
+</head>
+<body onbeforeunload="return confirm('Are you sure you want to leave this page?')">
+	<h1>Ultimate Nested Iframe Stress Test Page</h1>
+	<p>This page stress tests iframe handling, form elements, links, shadow DOM, and scrolling.</p>
+	
+	<div id="shadow-host-main" class="shadow-container">
+		<p>This content is inside a closed shadow root:</p>
+	</div>
+	
+	<script>
+		// Create closed shadow root with all test content
+		const shadowHost = document.getElementById('shadow-host-main');
+		const shadowRoot = shadowHost.attachShadow({ mode: 'closed' });
+		
+		shadowRoot.innerHTML = `
+			<style>
+				.form-group {
+					margin: 15px 0;
+				}
+				
+				label {
+					display: block;
+					margin-bottom: 5px;
+					font-weight: bold;
+				}
+				
+				input, textarea, select {
+					width: 100%;
+					padding: 8px;
+					box-sizing: border-box;
+				}
+				
+				#test-form {
+					max-height: 400px;
+					overflow: scroll;
+					border: 2px solid #333;
+					padding: 20px;
+					margin: 20px 0;
+					background: white;
+				}
+				
+				#test-links {
+					border: 2px solid #666;
+					padding: 20px;
+					margin: 20px 0;
+					background: #fafafa;
+				}
+				
+				#test-links > * {
+					display: block;
+					margin: 10px 0;
+					padding: 10px;
+					background: #fff;
+					border: 1px solid #ddd;
+					text-decoration: none;
+					color: #333;
+					cursor: pointer;
+				}
+				
+				#test-links > *:hover {
+					background: #e0e0e0;
+				}
+				
+				#test-iframes {
+					border: 2px solid #999;
+					padding: 20px;
+					margin: 20px 0;
+					background: #f5f5f5;
+				}
+				
+				.nested-shadow {
+					border: 1px dashed #9900ff;
+					padding: 15px;
+					margin: 10px 0;
+					background: #f9f0ff;
+				}
+			</style>
+			
+			<form id="test-form">
+				<h2>Test Form Elements</h2>
+				
+				<div class="form-group">
+					<label for="button-elem">Button Element:</label>
+					<button type="button" id="button-elem">Click Me Button</button>
+				</div>
+				
+				<div class="form-group">
+					<label for="input-elem">Text Input Element:</label>
+					<input type="text" id="input-elem" placeholder="Enter text here">
+				</div>
+				
+				<div class="form-group">
+					<label for="search-elem">Search Input Element:</label>
+					<input type="search" id="search-elem" placeholder="Search...">
+				</div>
+				
+				<div class="form-group">
+					<label for="textarea-elem">Textarea Element:</label>
+					<textarea id="textarea-elem" rows="4" placeholder="Enter multiple lines of text"></textarea>
+				</div>
+				
+				<div class="form-group">
+					<label for="dropdown-elem">Dropdown with 250 Options:</label>
+					<select id="dropdown-elem">
+						${Array.from({length: 250}, (_, i) => `<option value="option${i+1}">Option ${i+1}</option>`).join('')}
+					</select>
+				</div>
+				
+				<div class="form-group">
+					<label for="checkbox-elem">Checkbox Element:</label>
+					<input type="checkbox" id="checkbox-elem" value="checked"> Check this box
+				</div>
+				
+				<div class="form-group">
+					<label>Radio Button Elements:</label>
+					<input type="radio" id="radio1" name="radio-group" value="option1"> Option 1<br>
+					<input type="radio" id="radio2" name="radio-group" value="option2"> Option 2<br>
+					<input type="radio" id="radio3" name="radio-group" value="option3"> Option 3
+				</div>
+				
+				<div class="form-group">
+					<label for="file-elem">File Upload Element:</label>
+					<input type="file" id="file-elem">
+				</div>
+				
+				<div class="form-group">
+					<label>Embed Element:</label>
+					<embed src="data:text/html,<h3>Embedded Content</h3>" width="300" height="100" type="text/html">
+				</div>
+				
+				<div class="form-group">
+					<label>Video Element:</label>
+					<video width="320" height="240" controls>
+						<source src="data:video/mp4;base64,AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAAAIZnJlZQAAAu1tZGF0AAACoAYF//+c3EXpvebZSLeWLNgg2SPu73gyNjQgLSBjb3JlIDE0OCByMjYwMSBhMGNkN2QzIC0gSC4yNjQvTVBFRy00IEFWQyBjb2RlYyAtIENvcHlsZWZ0IDIwMDMtMjAxNSAtIGh0dHA6Ly93d3cudmlkZW9sYW4ub3JnL3gyNjQuaHRtbCAtIG9wdGlvbnM6IGNhYmFjPTEgcmVmPTMgZGVibG9jaz0xOjA6MCBhbmFseXNlPTB4MzoweDExMyBtZT1oZXggc3VibWU9NyBwc3k9MSBwc3lfcmQ9MS4wMDowLjAwIG1peGVkX3JlZj0xIG1lX3JhbmdlPTE2IGNocm9tYV9tZT0xIHRyZWxsaXM9MSA4eDhkY3Q9MSBjcW09MCBkZWFkem9uZT0yMSwxMSBmYXN0X3Bza2lwPTEgY2hyb21hX3FwX29mZnNldD0tMiB0aHJlYWRzPTEgbG9va2FoZWFkX3RocmVhZHM9MSBzbGljZWRfdGhyZWFkcz0wIG5yPTAgZGVjaW1hdGU9MSBpbnRlcmxhY2VkPTAgYmx1cmF5X2NvbXBhdD0wIGNvbnN0cmFpbmVkX2ludHJhPTAgYmZyYW1lcz0zIGJfcHlyYW1pZD0yIGJfYWRhcHQ9MSBiX2JpYXM9MCBkaXJlY3Q9MSB3ZWlnaHRiPTEgb3Blbl9nb3A9MCB3ZWlnaHRwPTIga2V5aW50PTI1MCBrZXlpbnRfbWluPTEwIHNjZW5lY3V0PTQwIGludHJhX3JlZnJlc2g9MCByY19sb29rYWhlYWQ9NDAgcmM9Y3JmIG1idHJlZT0xIGNyZj0yOC4wIHFjb21wPTAuNjAgcXBtaW49MCBxcG1heD02OSBxcHN0ZXA9NCBpcF9yYXRpbz0xLjQwIGFxPTE6MS4wMACAAAAAD2WIhAA3//728P4FNjuZQQAAAu5tb292AAAAbG12aGQAAAAAAAAAAAAAAAAAAAPoAAAAZAABAAABAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAAACGHRyYWsAAABcdGtoZAAAAAMAAAAAAAAAAAAAAAEAAAAAAAAAZAAAAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAEAAAAAAAgAAAAIAAAAAACRlZHRzAAAAHGVsc3QAAAAAAAAAAQAAAGQAAAAAAAEAAAAAAZBtZGlhAAAAIG1kaGQAAAAAAAAAAAAAAAAAACgAAAAEAFXEAAAAAAAtaGRscgAAAAAAAAAAdmlkZQAAAAAAAAAAAAAAAFZpZGVvSGFuZGxlcgAAAAE7bWluZgAAABR2bWhkAAAAAQAAAAAAAAAAAAAAJGRpbmYAAAAcZHJlZgAAAAAAAAABAAAADHVybCAAAAABAAAA+3N0YmwAAACXc3RzZAAAAAAAAAABAAAAh2F2YzEAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAgACAEgAAABIAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAY//8AAAAxYXZjQwFkAAr/4QAYZ2QACqzZX4iIhAAAAwAEAAADAFA8SJZYAQAGaOvjyyLAAAAAGHN0dHMAAAAAAAAAAQAAAAEAAAQAAAAAHHN0c2MAAAAAAAAAAQAAAAEAAAABAAAAAQAAABRzdHN6AAAAAAAAAsUAAAABAAAAFHN0Y28AAAAAAAAAAQAAADAAAABidWR0YQAAAFptZXRhAAAAAAAAACFoZGxyAAAAAAAAAABtZGlyYXBwbAAAAAAAAAAAAAAAAC1pbHN0AAAAJal0b28AAAAdZGF0YQAAAAEAAAAATGF2ZjU2LjQwLjEwMQ==" type="video/mp4">
+						Your browser does not support the video tag.
+					</video>
+				</div>
+				
+				<div class="form-group">
+					<label>Object Element:</label>
+					<object data="data:text/html,<h3>Object Content</h3>" width="300" height="100" type="text/html"></object>
+				</div>
+				
+				<div class="form-group nested-shadow">
+					<label>Nested Closed Shadow Root:</label>
+					<div id="nested-shadow-host">Shadow content will be injected here</div>
+				</div>
+				
+				<div class="form-group">
+					<label for="date-elem">Date Input Element:</label>
+					<input type="date" id="date-elem">
+				</div>
+				
+				<div class="form-group">
+					<label for="time-elem">Time Input Element:</label>
+					<input type="time" id="time-elem">
+				</div>
+				
+				<div class="form-group">
+					<button type="submit" id="submit-btn">Submit Form</button>
+					<button type="reset" id="reset-btn">Reset Form</button>
+				</div>
+			</form>
+			
+			<div id="test-links">
+				<h2>Test Links Section</h2>
+				
+				<a href="?clicked-target-blank=1" target="_blank">Link with target="_blank"</a>
+				
+				<a href="?clicked-target-self=1" target="_self">Link with target="_self"</a>
+				
+				<a href="?clicked-target-top-frame=1" target="_top">Link with target="_top"</a>
+				
+				<a href="?clicked-target-iframe-link=1" target="same-origin-iframe">Link targeting iframe</a>
+				
+				<span onclick="window.location.href = '?clicked-target-span=1'" style="text-decoration: underline;">Pure JS Link (span with onclick)</span>
+				
+				<a href="#" onclick="alert('hello'); return false;">Link with alert onclick</a>
+				
+				<a href="#" onclick="confirm('hello'); return false;">Link with confirm onclick</a>
+				
+				<a href="#" onclick="history.pushState(null, '', '?foo=nextpage'); return false;">Link with history.pushState</a>
+				
+				<span id="dynamic-listener-span" style="text-decoration: underline;">Span with dynamic listener (added on ready)</span>
+				
+				<span id="document-listener-span" style="text-decoration: underline;">Span with document.body onclick listener</span>
+			</div>
+			
+			<div id="test-iframes">
+				<h2>Test Iframes Section</h2>
+				<!-- In this section, we use data-id instead of id because it makes it harder to differentiate between the iframe elements, we want to stress test our frame selector logic with the worst-case scenario -->
+				
+				<div class="iframe-container">
+					<h3>Same-Origin Iframe</h3>
+					<iframe src="https://openbrowser.github.io/stress-tests/iframes/index.html" data-id="same-origin-iframe" style="width: 100%; height: 1000px; display: inline-block; border: 2px solid blue;"></iframe>
+				</div>
+				
+				<div class="iframe-container">
+					<h3>Cross-Origin Iframe</h3>
+					<iframe src="https://openbrowser.github.io/stress-tests/iframes/index.html" data-id="cross-origin-iframe" style="width: 100%; height: 1000px; display: inline-block; border: 2px solid red;"></iframe>
+				</div>
+				
+				<div class="iframe-container">
+					<h3>Ad Iframe (Should be filtered out)</h3>
+					<iframe src="https://openbrowser.github.io/stress-tests/iframes/ad.html" data-id="ad-iframe" style="width: 3px; height: 3px; position: fixed; bottom: -3px; right: -3px; display: inline-block;"></iframe>
+				</div>
+				
+				<div class="iframe-container">
+					<h3>Sandboxed Same-Origin Iframe</h3>
+					<iframe src="https://openbrowser.github.io/stress-tests/iframes/index.html" data-id="sandboxed-same-origin-iframe" sandbox="allow-same-origin allow-scripts allow-popups allow-forms" style="width: 100%; height: 1000px; display: inline-block; border: 2px solid green;"></iframe>
+				</div>
+			</div>
+		`;
+		
+		// Add nested shadow root inside the form
+		setTimeout(() => {
+			const nestedHost = shadowRoot.getElementById('nested-shadow-host');
+			if (nestedHost) {
+				const nestedShadow = nestedHost.attachShadow({ mode: 'closed' });
+				nestedShadow.innerHTML = '<div style="padding: 10px; background: #e0e0ff;"><a href="?clicked-nested-shadow-link=1" target="_blank">this should be visible to llm, link inside nested closed shadow root</a><br/>but this ad frame should be filtered out: <iframe src="https://openbrowser.github.io/stress-tests/iframes/ad.html" data-id="nested-shadow-ad-iframe" style="width: 3px; height: 3px; display: inline-block; border: 2px solid green;"/></div>';
+			}
+			
+			// Add dynamic event listener to span
+			const dynamicSpan = shadowRoot.getElementById('dynamic-listener-span');
+			if (dynamicSpan) {
+				dynamicSpan.addEventListener('click', function() {
+					window.location.href = '?clicked-dynamic-listener=1';
+				});
+			}
+			
+			// Add document body onclick listener for specific span
+			document.body.addEventListener('click', function(e) {
+				// Check if click is within shadow DOM
+				if (e.composedPath) {
+					const path = e.composedPath();
+					for (let elem of path) {
+						if (elem.id === 'document-listener-span') {
+							window.location.href = '?clicked-document-onclick-listener-link=1';
+							break;
+						}
+					}
+				}
+			});
+		}, 100);
+	</script>
+	
+	<!-- Frameset section (legacy HTML) -->
+	<div style="margin: 40px 0; border: 3px solid #ff0000; padding: 20px;">
+		<h2>Legacy Frameset Test</h2>
+		<p>Note: Framesets are deprecated but included for completeness</p>
+		<iframe src="data:text/html,<!DOCTYPE html><html><head><title>Frameset</title></head><frameset cols='50%,50%'><frame src='https://openbrowser.github.io/stress-tests/iframes/index.html' name='leftframe'><frame src='https://openbrowser.github.io/stress-tests/iframes/index.html' name='rightframe'></frameset></html>" style="width: 100%; height: 400px; border: 2px solid purple;"></iframe>
+	</div>
+	
+	<div style="position: fixed; bottom: 20px; right: 20px; background: #333; color: white; padding: 10px; border-radius: 5px;">
+		Scroll Position: <span id="scroll-indicator">0</span>px / 10000px
+	</div>
+	
+	<script>
+		// Update scroll indicator
+		window.addEventListener('scroll', function() {
+			document.getElementById('scroll-indicator').textContent = Math.round(window.pageYOffset);
+		});
+		
+		// Log page parameters for testing
+		if (window.location.search) {
+			console.log('Page loaded with parameters:', window.location.search);
+		}
+	</script>
+</body>
+</html>

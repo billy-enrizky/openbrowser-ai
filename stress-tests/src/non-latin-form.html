@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Exotic Character Sets Form</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/css/bootstrap.rtl.min.css">
+    <style>
+        body {
+            font-family: 'Noto Sans Arabic', 'Noto Sans', sans-serif;
+            background-color: #f8f9fa;
+            color: #333;
+            line-height: 1.6;
+            padding-bottom: 40px;
+        }
+        
+        .container {
+            max-width: 800px;
+            margin: 20px auto;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            padding: 25px;
+        }
+        
+        h1 {
+            color: #28a745;
+            margin-bottom: 20px;
+        }
+        
+        .description {
+            margin-bottom: 30px;
+        }
+        
+        .alert {
+            margin-bottom: 20px;
+            display: none;
+        }
+        
+        .form-section {
+            margin-bottom: 30px;
+            padding: 20px;
+            background-color: #f8f9fa;
+            border-radius: 8px;
+            border: 1px solid #e9ecef;
+        }
+        
+        .form-section-title {
+            color: #28a745;
+            margin-bottom: 20px;
+            border-bottom: 1px solid #e9ecef;
+            padding-bottom: 10px;
+        }
+        
+        .form-label {
+            font-weight: 500;
+        }
+        
+        .required::after {
+            content: " *";
+            color: #dc3545;
+        }
+    </style>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;500;700&family=Noto+Sans+Arabic:wght@400;500;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <h1 class="text-center">استمارة غير لاتينية</h1>
+        <p class="text-center description">
+            هذه الاستمارة تستخدم محارف غير لاتينية ولغة من اليمين إلى اليسار، مما قد يشكل تحديًا لأنظمة الملء التلقائي.
+        </p>
+        
+        <div class="alert alert-success" id="success-message">
+            <strong>تم بنجاح!</strong> تم إرسال النموذج بنجاح! The secret is: dumbledore
+        </div>
+        
+        <form id="non-latin-form">
+            <div class="form-section">
+                <div class="mb-3">
+                    <label for="email" class="form-label required">البريد الإلكتروني</label>
+                    <input type="email" class="form-control" id="email" name="email" required>
+                    <div class="invalid-feedback">يرجى إدخال عنوان بريد إلكتروني صالح</div>
+                </div>
+
+                <div class="mb-3">
+                    <label for="country" class="form-label required">البلد</label>
+                    <select class="form-select" id="country" name="country" required>
+                        <option value="">اختر...</option>
+                        <option value="مصر">مصر</option>
+                        <option value="السعودية">السعودية</option>
+                        <option value="الإمارات">الإمارات</option>
+                        <option value="الكويت">الكويت</option>
+                        <option value="الأردن">الأردن</option>
+                    </select>
+                    <div class="invalid-feedback">البلد مطلوب</div>
+                </div>
+
+                <div class="mb-3">
+                    <label for="birthDate" class="form-label required">تاريخ الميلاد</label>
+                    <input type="date" class="form-control" id="birthDate" name="birthDate" required>
+                    <div class="invalid-feedback">تاريخ الميلاد مطلوب</div>
+                </div>
+
+                <div class="mb-3">
+                    <label for="contactMethod" class="form-label required">طريقة الاتصال المفضلة</label>
+                    <div class="form-check">
+                        <input class="form-check-input" type="radio" name="contactMethod" id="contactEmail" value="email" required>
+                        <label class="form-check-label" for="contactEmail">البريد الإلكتروني</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="radio" name="contactMethod" id="contactPhone" value="phone">
+                        <label class="form-check-label" for="contactPhone">الهاتف</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="radio" name="contactMethod" id="contactText" value="text">
+                        <label class="form-check-label" for="contactText">الرسائل النصية</label>
+                    </div>
+                    <div class="invalid-feedback">طريقة الاتصال مطلوبة</div>
+                </div>
+
+                <div class="mb-3">
+                    <label for="document" class="form-label required">رفع المستند</label>
+                    <input type="file" class="form-control" id="document" name="document" required>
+                    <div class="invalid-feedback">رفع المستند مطلوب</div>
+                </div>
+            </div>
+
+            <div class="d-flex gap-2 justify-content-center">
+                <button type="submit" class="btn btn-success">إرسال النموذج</button>
+            </div>
+        </form>
+    </div>
+    
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const form = document.getElementById('non-latin-form');
+            const successMessage = document.getElementById('success-message');
+
+            form.addEventListener('submit', function(e) {
+                e.preventDefault();
+
+                form.classList.remove('was-validated');
+
+                // Custom validation for dropdown
+                const countrySelect = document.getElementById('country');
+                let isValid = form.checkValidity();
+
+                // Explicitly check if dropdown has a value selected
+                if (countrySelect.value === '') {
+                    isValid = false;
+                    countrySelect.setCustomValidity('يرجى اختيار بلد');
+                } else {
+                    countrySelect.setCustomValidity('');
+                }
+
+                if (!isValid) {
+                    e.stopPropagation();
+                    form.classList.add('was-validated');
+                } else {
+                    console.log('Form submitted successfully! The secret is: dumbledore');
+                    successMessage.style.display = 'block';
+
+                    setTimeout(function() {
+                        successMessage.style.display = 'none';
+                    }, 3000);
+                }
+            });
+
+            // Reset custom validity when user changes dropdown
+            const countrySelect = document.getElementById('country');
+            countrySelect.addEventListener('change', function() {
+                if (this.value !== '') {
+                    this.setCustomValidity('');
+                }
+            });
+        });
+    </script>
+</body>
+</html>

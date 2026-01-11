@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rich Text Fields Form</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/quill@1.3.7/dist/quill.snow.css" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f8f9fa;
+            color: #333;
+            line-height: 1.6;
+        }
+        
+        .container {
+            max-width: 900px;
+            margin: 20px auto;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 2px 15px rgba(0, 0, 0, 0.1);
+            padding: 25px;
+        }
+        
+        h1 {
+            color: #495057;
+            margin-bottom: 20px;
+        }
+        
+        .description {
+            margin-bottom: 30px;
+        }
+        
+        .form-section {
+            margin-bottom: 30px;
+            padding: 20px;
+            background-color: #f8f9fa;
+            border-radius: 8px;
+            border: 1px solid #e9ecef;
+        }
+        
+        .form-section-title {
+            color: #495057;
+            margin-bottom: 20px;
+            border-bottom: 1px solid #e9ecef;
+            padding-bottom: 10px;
+        }
+        
+        .required::after {
+            content: " *";
+            color: #dc3545;
+        }
+        
+        .editor-container {
+            margin-bottom: 20px;
+            border-radius: 0.25rem;
+        }
+        
+        .ql-container {
+            min-height: 100px;
+            border-bottom-left-radius: 0.25rem;
+            border-bottom-right-radius: 0.25rem;
+            background: #fff;
+        }
+        
+        .bio-editor .ql-container {
+            min-height: 150px;
+        }
+        
+        .ql-toolbar {
+            border-top-left-radius: 0.25rem;
+            border-top-right-radius: 0.25rem;
+            background: #f8f9fa;
+        }
+        
+        .ql-editor {
+            line-height: 1.5;
+        }
+        
+        .ql-editor.ql-blank::before {
+            color: #6c757d;
+        }
+        
+        .is-invalid .ql-toolbar,
+        .is-invalid .ql-container {
+            border-color: #dc3545 !important;
+        }
+        
+        .invalid-feedback {
+            display: none;
+            width: 100%;
+            margin-top: 0.25rem;
+            font-size: 80%;
+            color: #dc3545;
+        }
+
+        .rating {
+            display: flex;
+            flex-direction: row-reverse;
+            justify-content: flex-end;
+        }
+
+        .rating input {
+            display: none;
+        }
+
+        .rating label {
+            cursor: pointer;
+            width: 40px;
+            height: 40px;
+            margin: 0;
+            padding: 0;
+            font-size: 30px;
+            line-height: 40px;
+            text-align: center;
+            color: #ccc;
+        }
+
+        .rating label:before {
+            content: "★";
+        }
+
+        .rating input:checked ~ label {
+            color: #ffc107;
+        }
+
+        .rating label:hover,
+        .rating label:hover ~ label {
+            color: #ffc107;
+        }
+        
+        .alert {
+            margin-bottom: 20px;
+            display: none;
+        }
+        
+        .btn-primary {
+            background-color: #0d6efd;
+            border-color: #0d6efd;
+        }
+        
+        .btn-primary:hover {
+            background-color: #0b5ed7;
+            border-color: #0a58ca;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 class="text-center">Rich Text Fields Form</h1>
+        <p class="text-center description">
+            This form uses various rich text editors and advanced input fields that challenge autofill systems.
+        </p>
+        
+        <div class="alert alert-success" id="successMessage">
+            <strong>Success!</strong> Form submitted successfully! The secret is: dumbledore
+        </div>
+        
+        <form id="richTextForm">
+            <!-- Simplified Form -->
+            <div class="form-section">
+                <h2 class="form-section-title">Simple Rich Text Form</h2>
+
+                <!-- Text field: Email with rich text editor -->
+                <div class="mb-3">
+                    <label for="email" class="form-label required">Email Address</label>
+                    <div class="editor-container" id="emailEditor">
+                        <div id="emailQuill"></div>
+                    </div>
+                    <div class="invalid-feedback" id="emailError">Email is required</div>
+                    <input type="hidden" name="email" id="email">
+                </div>
+
+                <!-- Dropdown: Country -->
+                <div class="mb-3">
+                    <label for="country" class="form-label required">Country</label>
+                    <select class="form-select" id="country" name="country" required>
+                        <option value="">Select a country</option>
+                        <option value="us">United States</option>
+                        <option value="uk">United Kingdom</option>
+                        <option value="ca">Canada</option>
+                        <option value="au">Australia</option>
+                        <option value="de">Germany</option>
+                    </select>
+                    <div class="invalid-feedback" id="countryError">Please select a country</div>
+                </div>
+
+                <!-- Date picker -->
+                <div class="mb-3">
+                    <label for="birthDate" class="form-label required">Date of Birth</label>
+                    <input type="date" class="form-control" id="birthDate" name="birthDate" required>
+                    <div class="invalid-feedback" id="birthDateError">Please select a date of birth</div>
+                </div>
+
+                <!-- Radio button group -->
+                <div class="mb-3">
+                    <label class="form-label required">Preferred Contact Method</label>
+                    <div class="rating">
+                        <input type="radio" id="contact3" name="contactMethod" value="phone" required>
+                        <label for="contact3" title="Phone"></label>
+                        <input type="radio" id="contact2" name="contactMethod" value="sms" required>
+                        <label for="contact2" title="SMS"></label>
+                        <input type="radio" id="contact1" name="contactMethod" value="email" required>
+                        <label for="contact1" title="Email"></label>
+                    </div>
+                    <div class="form-text">Select your preferred contact method (email, SMS, or phone)</div>
+                    <div class="invalid-feedback" id="contactMethodError" style="display: none;">Please select a contact method</div>
+                </div>
+
+                <!-- File upload -->
+                <div class="mb-3">
+                    <label for="fileUpload" class="form-label required">Upload Document</label>
+                    <input type="file" class="form-control" id="fileUpload" name="fileUpload" required>
+                    <div class="invalid-feedback" id="fileUploadError">Please upload a document</div>
+                </div>
+            </div>
+
+            <div class="d-flex gap-2 justify-content-center">
+                <button type="submit" class="btn btn-primary">Submit Form</button>
+                <button type="button" class="btn btn-secondary" id="resetButton">Reset</button>
+            </div>
+        </form>
+    </div>
+    
+    <script src="https://cdn.jsdelivr.net/npm/quill@1.3.7/dist/quill.min.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // Initialize Quill editor for email field
+            const emailQuill = new Quill('#emailQuill', {
+                theme: 'snow',
+                placeholder: 'Enter your email address',
+                modules: {
+                    toolbar: [
+                        ['bold', 'italic'],
+                        [{ 'color': [] }]
+                    ]
+                }
+            });
+
+            // Sync Quill editor with hidden input
+            function updateHiddenField(quill, hiddenField) {
+                const editor = document.getElementById(hiddenField);
+                editor.value = quill.getText().trim();
+            }
+
+            emailQuill.on('text-change', function() {
+                updateHiddenField(emailQuill, 'email');
+                document.getElementById('emailEditor').classList.remove('is-invalid');
+                document.getElementById('emailError').style.display = 'none';
+            });
+
+            // Remove validation errors on user interaction
+            document.getElementById('country').addEventListener('change', function() {
+                this.classList.remove('is-invalid');
+                document.getElementById('countryError').style.display = 'none';
+            });
+
+            document.getElementById('birthDate').addEventListener('change', function() {
+                this.classList.remove('is-invalid');
+                document.getElementById('birthDateError').style.display = 'none';
+            });
+
+            document.getElementsByName('contactMethod').forEach(function(radio) {
+                radio.addEventListener('change', function() {
+                    document.getElementById('contactMethodError').style.display = 'none';
+                });
+            });
+
+            document.getElementById('fileUpload').addEventListener('change', function() {
+                this.classList.remove('is-invalid');
+                document.getElementById('fileUploadError').style.display = 'none';
+            });
+
+            // Form validation and submission
+            const form = document.getElementById('richTextForm');
+            const emailInput = document.getElementById('email');
+            const successMessage = document.getElementById('successMessage');
+
+            form.addEventListener('submit', function(e) {
+                e.preventDefault();
+
+                let isValid = true;
+
+                // Validate email
+                if (emailQuill.getText().trim() === '') {
+                    isValid = false;
+                    document.getElementById('emailEditor').classList.add('is-invalid');
+                    document.getElementById('emailError').style.display = 'block';
+                } else {
+                    document.getElementById('emailEditor').classList.remove('is-invalid');
+                    document.getElementById('emailError').style.display = 'none';
+                }
+
+                // Validate country dropdown
+                const countrySelect = document.getElementById('country');
+                if (!countrySelect.value || countrySelect.value === '') {
+                    isValid = false;
+                    countrySelect.classList.add('is-invalid');
+                    document.getElementById('countryError').style.display = 'block';
+                } else {
+                    countrySelect.classList.remove('is-invalid');
+                    document.getElementById('countryError').style.display = 'none';
+                }
+
+                // Validate date of birth
+                const birthDateInput = document.getElementById('birthDate');
+                if (!birthDateInput.value) {
+                    isValid = false;
+                    birthDateInput.classList.add('is-invalid');
+                    document.getElementById('birthDateError').style.display = 'block';
+                } else {
+                    birthDateInput.classList.remove('is-invalid');
+                    document.getElementById('birthDateError').style.display = 'none';
+                }
+
+                // Validate contact method radio buttons
+                const contactMethodRadios = document.getElementsByName('contactMethod');
+                const contactMethodSelected = Array.from(contactMethodRadios).some(radio => radio.checked);
+                if (!contactMethodSelected) {
+                    isValid = false;
+                    document.getElementById('contactMethodError').style.display = 'block';
+                } else {
+                    document.getElementById('contactMethodError').style.display = 'none';
+                }
+
+                // Validate file upload
+                const fileUploadInput = document.getElementById('fileUpload');
+                if (!fileUploadInput.files || fileUploadInput.files.length === 0) {
+                    isValid = false;
+                    fileUploadInput.classList.add('is-invalid');
+                    document.getElementById('fileUploadError').style.display = 'block';
+                } else {
+                    fileUploadInput.classList.remove('is-invalid');
+                    document.getElementById('fileUploadError').style.display = 'none';
+                }
+
+                if (isValid) {
+                    console.log('Form submitted successfully! The secret is: dumbledore');
+
+                    // Collect form data
+                    const formData = new FormData(form);
+                    const formEntries = {};
+
+                    for (let [key, value] of formData.entries()) {
+                        formEntries[key] = value;
+                    }
+
+                    // Add data from rich text editor
+                    formEntries.email = document.getElementById('email').value;
+
+                    console.log('Form Data:', formEntries);
+
+                    // Show success message
+                    successMessage.style.display = 'block';
+
+                    // Hide success message after 3 seconds
+                    setTimeout(function() {
+                        successMessage.style.display = 'none';
+                    }, 3000);
+                }
+            });
+
+            // Reset form
+            const resetButton = document.getElementById('resetButton');
+
+            resetButton.addEventListener('click', function() {
+                // Reset Quill editor
+                emailQuill.setText('');
+
+                // Reset hidden input
+                document.getElementById('email').value = '';
+
+                // Reset regular form elements
+                form.reset();
+
+                // Remove all validation errors
+                document.getElementById('emailEditor').classList.remove('is-invalid');
+                document.getElementById('emailError').style.display = 'none';
+                document.getElementById('country').classList.remove('is-invalid');
+                document.getElementById('countryError').style.display = 'none';
+                document.getElementById('birthDate').classList.remove('is-invalid');
+                document.getElementById('birthDateError').style.display = 'none';
+                document.getElementById('contactMethodError').style.display = 'none';
+                document.getElementById('fileUpload').classList.remove('is-invalid');
+                document.getElementById('fileUploadError').style.display = 'none';
+
+                // Hide success message
+                successMessage.style.display = 'none';
+            });
+        });
+    </script>
+</body>
+</html>

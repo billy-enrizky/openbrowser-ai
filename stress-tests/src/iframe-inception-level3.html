@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Level 3 Iframe - Form</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            margin: 0;
+            padding: 15px;
+            background-color: #b39ddb;
+            color: #333;
+        }
+        
+        h4 {
+            color: #6200ea;
+            margin-top: 0;
+            margin-bottom: 15px;
+        }
+        
+        .form-container {
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+        }
+        
+        .form-group {
+            margin-bottom: 15px;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 500;
+        }
+        
+        .required::after {
+            content: " *";
+            color: #f44336;
+        }
+        
+        input, select, textarea {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+            font-family: inherit;
+            font-size: 14px;
+        }
+        
+        input:focus, select:focus, textarea:focus {
+            border-color: #6200ea;
+            outline: none;
+            box-shadow: 0 0 0 2px rgba(98, 0, 234, 0.2);
+        }
+        
+        .btn {
+            display: inline-block;
+            padding: 10px 24px;
+            border-radius: 4px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-align: center;
+            border: none;
+            font-size: 14px;
+        }
+
+        .btn-primary {
+            background-color: #6200ea;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background-color: #5600e8;
+        }
+
+        .form-buttons {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+        }
+
+        .success-message {
+            display: none;
+            padding: 10px 15px;
+            background-color: #e8f5e9;
+            border: 1px solid #66bb6a;
+            color: #2e7d32;
+            border-radius: 4px;
+            margin-bottom: 15px;
+        }
+    </style>
+</head>
+<body>
+    <h4>Form (Level 3 Iframe)</h4>
+    
+    <div class="success-message" id="local-success-message">
+        <strong>Success!</strong> Form submitted successfully! The secret is: dumbledore
+    </div>
+    
+    <div class="form-container">
+        <form id="nested-form">
+            <div class="form-group">
+                <label for="email" class="required">Email Address</label>
+                <input type="email" id="email" name="email" required>
+            </div>
+
+            <div class="form-group">
+                <label for="country" class="required">Country</label>
+                <select id="country" name="country" required>
+                    <option value="">Select Country</option>
+                    <option value="US">United States</option>
+                    <option value="CA">Canada</option>
+                    <option value="UK">United Kingdom</option>
+                    <option value="AU">Australia</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="birthDate" class="required">Date of Birth</label>
+                <input type="date" id="birthDate" name="birthDate" required>
+            </div>
+
+            <div class="form-group">
+                <label class="required">Gender</label>
+                <div style="margin-top: 8px;">
+                    <label style="display: inline-block; margin-right: 20px; font-weight: normal;">
+                        <input type="radio" name="gender" value="male" required style="width: auto; margin-right: 5px;">
+                        Male
+                    </label>
+                    <label style="display: inline-block; margin-right: 20px; font-weight: normal;">
+                        <input type="radio" name="gender" value="female" required style="width: auto; margin-right: 5px;">
+                        Female
+                    </label>
+                    <label style="display: inline-block; font-weight: normal;">
+                        <input type="radio" name="gender" value="other" required style="width: auto; margin-right: 5px;">
+                        Other
+                    </label>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label for="file" class="required">Upload Document</label>
+                <input type="file" id="file" name="file" required style="padding: 4px 12px;">
+            </div>
+
+            <div class="form-buttons">
+                <button type="submit" class="btn btn-primary">Submit Form</button>
+            </div>
+        </form>
+    </div>
+    
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const form = document.getElementById('nested-form');
+            const localSuccessMessage = document.getElementById('local-success-message');
+
+            if (form) {
+                form.addEventListener('submit', function(e) {
+                    e.preventDefault();
+
+                    // Get all form fields
+                    const email = document.getElementById('email');
+                    const country = document.getElementById('country');
+                    const birthDate = document.getElementById('birthDate');
+                    const gender = document.querySelector('input[name="gender"]:checked');
+                    const file = document.getElementById('file');
+
+                    // Validate all fields
+                    let isValid = true;
+                    let errorMessage = '';
+
+                    // Check email
+                    if (!email.value || !email.value.trim()) {
+                        isValid = false;
+                        errorMessage = 'Please enter your email address.';
+                        email.focus();
+                    }
+                    // Validate email format
+                    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.value)) {
+                        isValid = false;
+                        errorMessage = 'Please enter a valid email address.';
+                        email.focus();
+                    }
+                    // Check country dropdown - must have a value selected
+                    else if (!country.value || country.value === '') {
+                        isValid = false;
+                        errorMessage = 'Please select a country.';
+                        country.focus();
+                    }
+                    // Check birth date
+                    else if (!birthDate.value || !birthDate.value.trim()) {
+                        isValid = false;
+                        errorMessage = 'Please enter your date of birth.';
+                        birthDate.focus();
+                    }
+                    // Check gender radio buttons
+                    else if (!gender) {
+                        isValid = false;
+                        errorMessage = 'Please select your gender.';
+                    }
+                    // Check file upload
+                    else if (!file.files || file.files.length === 0) {
+                        isValid = false;
+                        errorMessage = 'Please upload a document.';
+                        file.focus();
+                    }
+
+                    // If validation fails, show alert and stop
+                    if (!isValid) {
+                        alert(errorMessage);
+                        return false;
+                    }
+
+                    // All validations passed - display local success message
+                    localSuccessMessage.style.display = 'block';
+
+                    // Notify the top frame via postMessage
+                    try {
+                        window.parent.parent.parent.postMessage({ type: 'formSubmit' }, '*');
+                    } catch (error) {
+                        console.error('Could not access parent frames:', error);
+                    }
+
+                    // Hide local success message after 3 seconds
+                    setTimeout(function() {
+                        localSuccessMessage.style.display = 'none';
+                    }, 3000);
+
+                    console.log('Form submitted successfully! The secret is: dumbledore');
+                });
+            }
+        });
+    </script>
+</body>
+</html>

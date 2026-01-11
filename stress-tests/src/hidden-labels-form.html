@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Visually Hidden Labels Form</title>
+    <style>
+        /* Basic styles */
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f8f9fa;
+            color: #333;
+            line-height: 1.6;
+        }
+        
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            padding: 25px;
+        }
+        
+        h1 {
+            color: #007bff;
+            text-align: center;
+            margin-top: 0;
+        }
+        
+        p {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        /* Visually hidden but accessible labels */
+        .sr-only {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            padding: 0;
+            margin: -1px;
+            overflow: hidden;
+            clip: rect(0, 0, 0, 0);
+            white-space: nowrap;
+            border-width: 0;
+        }
+        
+        /* Placeholder-reliant form styles */
+        .form-container {
+            padding: 20px;
+            background-color: #f8f9fa;
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+            position: relative;
+        }
+        
+        /* Special input styling to compensate for hidden labels */
+        .form-input {
+            width: 100%;
+            padding: 12px 15px;
+            border: 2px solid #ced4da;
+            border-radius: 6px;
+            font-size: 16px;
+            transition: all 0.3s;
+            box-sizing: border-box;
+        }
+        
+        .form-input:focus {
+            border-color: #007bff;
+            outline: none;
+            box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.25);
+        }
+        
+        .form-input::placeholder {
+            color: #6c757d;
+        }
+        
+        .form-select {
+            width: 100%;
+            padding: 12px 15px;
+            border: 2px solid #ced4da;
+            border-radius: 6px;
+            font-size: 16px;
+            transition: all 0.3s;
+            box-sizing: border-box;
+            appearance: none;
+            background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23343a40' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 15px center;
+            background-size: 16px;
+        }
+        
+        .form-select:focus {
+            border-color: #007bff;
+            outline: none;
+            box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.25);
+        }
+        
+        /* Styling for inputs with icons */
+        .input-with-icon {
+            position: relative;
+        }
+        
+        .input-icon {
+            position: absolute;
+            top: 50%;
+            transform: translateY(-50%);
+            left: 15px;
+            color: #6c757d;
+        }
+        
+        .input-with-icon .form-input {
+            padding-left: 45px;
+        }
+
+        /* Checkbox and radio styling */
+        .form-check {
+            display: flex;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        
+        .form-check-input {
+            margin-right: 10px;
+            width: 18px;
+            height: 18px;
+        }
+        
+        /* Button styling */
+        .btn {
+            display: inline-block;
+            font-weight: 500;
+            text-align: center;
+            white-space: nowrap;
+            vertical-align: middle;
+            user-select: none;
+            border: 1px solid transparent;
+            padding: 10px 15px;
+            font-size: 16px;
+            line-height: 1.5;
+            border-radius: 6px;
+            transition: all 0.15s;
+            cursor: pointer;
+        }
+        
+        .btn-primary {
+            color: #fff;
+            background-color: #007bff;
+            border-color: #007bff;
+        }
+        
+        .btn-primary:hover {
+            background-color: #0069d9;
+            border-color: #0062cc;
+        }
+
+        .form-buttons {
+            display: flex;
+            gap: 15px;
+            margin-top: 20px;
+        }
+        
+        /* Alert styling */
+        .alert {
+            padding: 15px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+            display: none;
+        }
+        
+        .alert-success {
+            background-color: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+        }
+
+        /* Icon font */
+        .icon {
+            font-family: 'Material Icons';
+            font-weight: normal;
+            font-style: normal;
+            font-size: 20px;
+            line-height: 1;
+            letter-spacing: normal;
+            text-transform: none;
+            display: inline-block;
+            white-space: nowrap;
+            word-wrap: normal;
+            direction: ltr;
+            -webkit-font-smoothing: antialiased;
+        }
+    </style>
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <h1>Visually Hidden Labels Form</h1>
+        <p>This form uses visually hidden labels (accessible to screen readers but not visible), relying on placeholders and icons. This can confuse autofill systems.</p>
+
+        <div class="alert alert-success" id="success-message">
+            <strong>Success!</strong> Form submitted successfully! The secret is: dumbledore
+        </div>
+
+        <form id="hidden-labels-form">
+            <div class="form-container">
+                <!-- Email Field -->
+                <div class="form-group input-with-icon">
+                    <label for="email" class="sr-only">Email Address (required)</label>
+                    <span class="input-icon icon">email</span>
+                    <input type="email" id="email" name="email" class="form-input" placeholder="Email Address *" required>
+                </div>
+
+                <!-- State Dropdown -->
+                <div class="form-group">
+                    <label for="state" class="sr-only">State (required)</label>
+                    <select id="state" name="state" class="form-select" required>
+                        <option value="">Select State *</option>
+                        <option value="AL">Alabama</option>
+                        <option value="AK">Alaska</option>
+                        <option value="AZ">Arizona</option>
+                        <option value="CA">California</option>
+                        <option value="CO">Colorado</option>
+                        <option value="NY">New York</option>
+                        <option value="TX">Texas</option>
+                        <option value="WA">Washington</option>
+                    </select>
+                </div>
+
+                <!-- Date Picker -->
+                <div class="form-group input-with-icon">
+                    <label for="birthDate" class="sr-only">Date of Birth (required)</label>
+                    <span class="input-icon icon">event</span>
+                    <input type="date" id="birthDate" name="birthDate" class="form-input" required>
+                </div>
+
+                <!-- Radio Button Group -->
+                <div class="form-group">
+                    <label class="sr-only">Preferred Contact Method (required)</label>
+                    <div class="form-check">
+                        <input type="radio" id="contactEmail" name="contactMethod" value="email" class="form-check-input" required>
+                        <label for="contactEmail">Email *</label>
+                    </div>
+                    <div class="form-check">
+                        <input type="radio" id="contactPhone" name="contactMethod" value="phone" class="form-check-input" required>
+                        <label for="contactPhone">Phone *</label>
+                    </div>
+                    <div class="form-check">
+                        <input type="radio" id="contactMail" name="contactMethod" value="mail" class="form-check-input" required>
+                        <label for="contactMail">Mail *</label>
+                    </div>
+                </div>
+
+                <!-- File Upload -->
+                <div class="form-group">
+                    <label for="fileUpload" class="sr-only">Upload Document (required)</label>
+                    <input type="file" id="fileUpload" name="fileUpload" class="form-input" required>
+                </div>
+
+                <!-- Submit Button -->
+                <div class="form-buttons">
+                    <button type="submit" class="btn btn-primary">Submit Form</button>
+                </div>
+            </div>
+        </form>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const form = document.getElementById('hidden-labels-form');
+            const successMessage = document.getElementById('success-message');
+
+            if (form) {
+                form.addEventListener('submit', function(e) {
+                    e.preventDefault();
+
+                    // Validate all required fields
+                    const emailField = document.getElementById('email');
+                    const stateField = document.getElementById('state');
+                    const birthDateField = document.getElementById('birthDate');
+                    const contactMethodRadios = document.getElementsByName('contactMethod');
+                    const fileUploadField = document.getElementById('fileUpload');
+
+                    // Check email is filled and valid
+                    if (!emailField.value || !emailField.validity.valid) {
+                        alert('Please enter a valid email address.');
+                        emailField.focus();
+                        return false;
+                    }
+
+                    // Check state dropdown has a value selected (not empty string)
+                    if (!stateField.value || stateField.value === '') {
+                        alert('Please select a state.');
+                        stateField.focus();
+                        return false;
+                    }
+
+                    // Check birth date is filled
+                    if (!birthDateField.value) {
+                        alert('Please enter your date of birth.');
+                        birthDateField.focus();
+                        return false;
+                    }
+
+                    // Check at least one contact method radio is selected
+                    let contactMethodSelected = false;
+                    for (let i = 0; i < contactMethodRadios.length; i++) {
+                        if (contactMethodRadios[i].checked) {
+                            contactMethodSelected = true;
+                            break;
+                        }
+                    }
+                    if (!contactMethodSelected) {
+                        alert('Please select a preferred contact method.');
+                        return false;
+                    }
+
+                    // Check file is uploaded
+                    if (!fileUploadField.files || fileUploadField.files.length === 0) {
+                        alert('Please upload a document.');
+                        fileUploadField.focus();
+                        return false;
+                    }
+
+                    // All validations passed - show success message
+                    console.log('Form submitted successfully! The secret is: dumbledore');
+                    successMessage.style.display = 'block';
+
+                    // Hide success message after 3 seconds
+                    setTimeout(function() {
+                        successMessage.style.display = 'none';
+                    }, 3000);
+
+                    return false;
+                });
+            }
+        });
+    </script>
+</body>
+</html>

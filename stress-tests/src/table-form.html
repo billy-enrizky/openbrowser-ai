@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Table-based Form</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f8f9fa;
+            color: #333;
+            line-height: 1.6;
+            padding-bottom: 40px;
+        }
+        
+        .container {
+            max-width: 900px;
+            margin: 20px auto;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 2px 15px rgba(0, 0, 0, 0.1);
+            padding: 25px;
+        }
+        
+        h1 {
+            color: #495057;
+            margin-bottom: 20px;
+        }
+        
+        .description {
+            margin-bottom: 30px;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 30px;
+        }
+        
+        table, th, td {
+            border: 1px solid #dee2e6;
+        }
+        
+        th {
+            background-color: #e9ecef;
+            color: #495057;
+            font-weight: 600;
+            text-align: left;
+            padding: 12px;
+        }
+        
+        td {
+            padding: 12px;
+            vertical-align: middle;
+        }
+        
+        .table-section {
+            margin-bottom: 30px;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        
+        .table-section-title {
+            background-color: #e9ecef;
+            color: #495057;
+            padding: 15px;
+            font-size: 1.2rem;
+            font-weight: 600;
+            border-bottom: 1px solid #dee2e6;
+            margin-bottom: 0;
+        }
+        
+        .required::after {
+            content: " *";
+            color: #dc3545;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 500;
+        }
+        
+        input, select, textarea {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #ced4da;
+            border-radius: 4px;
+            font-size: 1rem;
+        }
+        
+        input:focus, select:focus, textarea:focus {
+            border-color: #80bdff;
+            outline: 0;
+            box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25);
+        }
+        
+        input[type="checkbox"], input[type="radio"] {
+            width: auto;
+            margin-right: 10px;
+        }
+        
+        .form-check {
+            display: flex;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        
+        .form-check-input {
+            width: auto;
+            margin-right: 10px;
+        }
+        
+        .form-check-label {
+            margin-bottom: 0;
+        }
+        
+        .checkbox-group {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+        
+        .radio-group {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        
+        .col-form-label {
+            font-weight: 500;
+        }
+        
+        .invalid-feedback {
+            display: none;
+            width: 100%;
+            margin-top: 0.25rem;
+            font-size: 80%;
+            color: #dc3545;
+        }
+        
+        .table-nested {
+            margin: 0;
+            border: none;
+        }
+        
+        .table-nested td {
+            border: none;
+            padding: 6px 0;
+        }
+        
+        .alert {
+            margin-bottom: 20px;
+            display: none;
+        }
+        
+        .btn-primary {
+            background-color: #007bff;
+            border-color: #007bff;
+        }
+        
+        .btn-primary:hover {
+            background-color: #0069d9;
+            border-color: #0062cc;
+        }
+        
+        .cell-label {
+            font-weight: 600;
+            color: #495057;
+        }
+        
+        .cell-phone {
+            width: 40%;
+        }
+        
+        .cell-email {
+            width: 60%;
+        }
+        
+        .cell-street {
+            width: 60%;
+        }
+        
+        .cell-city {
+            width: 40%;
+        }
+        
+        .cell-state {
+            width: 30%;
+        }
+        
+        .cell-zip {
+            width: 30%;
+        }
+        
+        .cell-country {
+            width: 40%;
+        }
+        
+        .is-invalid {
+            border-color: #dc3545;
+        }
+        
+        .cell-disabled {
+            background-color: #e9ecef;
+            cursor: not-allowed;
+        }
+        
+        textarea {
+            resize: vertical;
+            min-height: 80px;
+        }
+        
+        /* Styling for custom date picker */
+        .date-group {
+            display: flex;
+            gap: 10px;
+        }
+        
+        .date-group select {
+            flex: 1;
+        }
+        
+        /* Responsive styling */
+        @media (max-width: 768px) {
+            table, thead, tbody, th, td, tr {
+                display: block;
+            }
+            
+            thead tr {
+                position: absolute;
+                top: -9999px;
+                left: -9999px;
+            }
+            
+            tr {
+                margin-bottom: 15px;
+                border: 1px solid #dee2e6;
+            }
+            
+            td {
+                border: none;
+                border-bottom: 1px solid #eee;
+                position: relative;
+                padding-left: 50%;
+                text-align: left;
+            }
+            
+            td:before {
+                position: absolute;
+                top: 12px;
+                left: 12px;
+                width: 45%;
+                padding-right: 10px;
+                white-space: nowrap;
+                font-weight: bold;
+                content: attr(data-label);
+            }
+            
+            .date-group {
+                flex-direction: column;
+                gap: 5px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 class="text-center">Table-based Form</h1>
+        <p class="text-center description">
+            This form uses HTML tables for layout instead of modern CSS, challenging autofill systems that expect standard form structures.
+        </p>
+        
+        <div class="alert alert-success" id="successMessage">
+            <strong>Success!</strong> Form submitted successfully! The secret is: dumbledore
+        </div>
+        
+        <form id="tableForm">
+            <!-- Form Section -->
+            <div class="table-section">
+                <h2 class="table-section-title">Simple Form</h2>
+                <table>
+                    <tr>
+                        <td colspan="2" data-label="Email:">
+                            <label for="email" class="required">Email Address</label>
+                            <input type="email" id="email" name="email" required>
+                            <div class="invalid-feedback">Please enter a valid email address.</div>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td colspan="2" data-label="Country:">
+                            <label for="country" class="required">Country</label>
+                            <select id="country" name="country" required>
+                                <option value="">Select...</option>
+                                <option value="US">United States</option>
+                                <option value="CA">Canada</option>
+                                <option value="UK">United Kingdom</option>
+                                <option value="AU">Australia</option>
+                                <option value="DE">Germany</option>
+                            </select>
+                            <div class="invalid-feedback">Please select a country.</div>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td colspan="2" data-label="Date of Birth:">
+                            <label for="birthDate" class="required">Date of Birth</label>
+                            <div class="date-group">
+                                <select id="birthMonth" name="birthMonth" required>
+                                    <option value="">Month</option>
+                                    <option value="01">January</option>
+                                    <option value="02">February</option>
+                                    <option value="03">March</option>
+                                    <option value="04">April</option>
+                                    <option value="05">May</option>
+                                    <option value="06">June</option>
+                                    <option value="07">July</option>
+                                    <option value="08">August</option>
+                                    <option value="09">September</option>
+                                    <option value="10">October</option>
+                                    <option value="11">November</option>
+                                    <option value="12">December</option>
+                                </select>
+                                <select id="birthDay" name="birthDay" required>
+                                    <option value="">Day</option>
+                                </select>
+                                <select id="birthYear" name="birthYear" required>
+                                    <option value="">Year</option>
+                                </select>
+                            </div>
+                            <div class="invalid-feedback">Please select a complete date of birth.</div>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td colspan="2" data-label="Gender:">
+                            <span class="cell-label required">Gender</span>
+                            <table class="table-nested">
+                                <tr>
+                                    <td>
+                                        <div class="form-check">
+                                            <input class="form-check-input" type="radio" name="gender" id="genderMale" value="male" required>
+                                            <label class="form-check-label" for="genderMale">Male</label>
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <div class="form-check">
+                                            <input class="form-check-input" type="radio" name="gender" id="genderFemale" value="female" required>
+                                            <label class="form-check-label" for="genderFemale">Female</label>
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <div class="form-check">
+                                            <input class="form-check-input" type="radio" name="gender" id="genderOther" value="other" required>
+                                            <label class="form-check-label" for="genderOther">Other</label>
+                                        </div>
+                                    </td>
+                                </tr>
+                            </table>
+                            <div class="invalid-feedback">Please select a gender.</div>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td colspan="2" data-label="Upload File:">
+                            <label for="fileUpload" class="required">Upload File</label>
+                            <input type="file" id="fileUpload" name="fileUpload" required>
+                            <div class="invalid-feedback">Please upload a file.</div>
+                        </td>
+                    </tr>
+                </table>
+            </div>
+
+            <div class="d-flex gap-2 justify-content-center">
+                <button type="submit" class="btn btn-primary">Submit Form</button>
+            </div>
+        </form>
+    </div>
+    
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const form = document.getElementById('tableForm');
+            const successMessage = document.getElementById('successMessage');
+
+            // Populate birth date selectors
+            populateBirthDays();
+            populateBirthYears();
+
+            // Update days when month changes
+            const birthMonthSelect = document.getElementById('birthMonth');
+            birthMonthSelect.addEventListener('change', updateBirthDays);
+
+            // Form submission
+            form.addEventListener('submit', function(e) {
+                e.preventDefault();
+
+                // Reset previous validation states
+                const invalidElements = form.querySelectorAll('.is-invalid');
+                invalidElements.forEach(el => el.classList.remove('is-invalid'));
+
+                const feedbacks = form.querySelectorAll('.invalid-feedback');
+                feedbacks.forEach(fb => fb.style.display = 'none');
+
+                // Validate all fields
+                let isValid = true;
+
+                // Validate email
+                const email = document.getElementById('email');
+                if (!email.value || !email.validity.valid) {
+                    email.classList.add('is-invalid');
+                    email.nextElementSibling.style.display = 'block';
+                    isValid = false;
+                }
+
+                // Validate country dropdown - check actual value in form state
+                const country = document.getElementById('country');
+                if (!country.value || country.value === '') {
+                    country.classList.add('is-invalid');
+                    country.nextElementSibling.style.display = 'block';
+                    isValid = false;
+                }
+
+                // Validate birth date dropdowns - check actual values in form state
+                const birthMonth = document.getElementById('birthMonth');
+                const birthDay = document.getElementById('birthDay');
+                const birthYear = document.getElementById('birthYear');
+
+                if (!birthMonth.value || birthMonth.value === '') {
+                    birthMonth.classList.add('is-invalid');
+                    isValid = false;
+                }
+                if (!birthDay.value || birthDay.value === '') {
+                    birthDay.classList.add('is-invalid');
+                    isValid = false;
+                }
+                if (!birthYear.value || birthYear.value === '') {
+                    birthYear.classList.add('is-invalid');
+                    isValid = false;
+                }
+
+                if (!birthMonth.value || !birthDay.value || !birthYear.value) {
+                    const dateGroup = document.querySelector('.date-group');
+                    dateGroup.nextElementSibling.style.display = 'block';
+                }
+
+                // Validate gender radio buttons
+                const genderInputs = document.querySelectorAll('input[name="gender"]');
+                const genderChecked = Array.from(genderInputs).some(input => input.checked);
+                if (!genderChecked) {
+                    genderInputs.forEach(input => input.classList.add('is-invalid'));
+                    const genderFeedback = document.querySelector('input[name="gender"]').closest('td').querySelector('.invalid-feedback');
+                    if (genderFeedback) genderFeedback.style.display = 'block';
+                    isValid = false;
+                }
+
+                // Validate file upload
+                const fileUpload = document.getElementById('fileUpload');
+                if (!fileUpload.files || fileUpload.files.length === 0) {
+                    fileUpload.classList.add('is-invalid');
+                    fileUpload.nextElementSibling.style.display = 'block';
+                    isValid = false;
+                }
+
+                // Only proceed if all validations pass
+                if (!isValid) {
+                    console.log('Form validation failed. Please fill in all required fields.');
+                    return false;
+                }
+
+                console.log('Form submitted successfully! The secret is: dumbledore');
+
+                // Get form data
+                const formData = new FormData(form);
+                const formValues = {};
+
+                for (let [key, value] of formData.entries()) {
+                    formValues[key] = value;
+                }
+
+                console.log('Form Data:', formValues);
+
+                // Show success message
+                successMessage.style.display = 'block';
+
+                // Hide success message after 3 seconds
+                setTimeout(function() {
+                    successMessage.style.display = 'none';
+                }, 3000);
+            });
+
+            // Helper functions
+            function populateBirthDays() {
+                const daySelect = document.getElementById('birthDay');
+                daySelect.innerHTML = '<option value="">Day</option>';
+
+                for (let i = 1; i <= 31; i++) {
+                    const option = document.createElement('option');
+                    option.value = i;
+                    option.textContent = i;
+                    daySelect.appendChild(option);
+                }
+            }
+
+            function updateBirthDays() {
+                const monthSelect = document.getElementById('birthMonth');
+                const daySelect = document.getElementById('birthDay');
+                const month = parseInt(monthSelect.value, 10);
+
+                const currentDay = daySelect.value;
+                daySelect.innerHTML = '<option value="">Day</option>';
+
+                let daysInMonth = 31;
+                if ([4, 6, 9, 11].includes(month)) {
+                    daysInMonth = 30;
+                } else if (month === 2) {
+                    daysInMonth = 29;
+                }
+
+                for (let i = 1; i <= daysInMonth; i++) {
+                    const option = document.createElement('option');
+                    option.value = i;
+                    option.textContent = i;
+                    daySelect.appendChild(option);
+                }
+
+                if (currentDay && parseInt(currentDay, 10) <= daysInMonth) {
+                    daySelect.value = currentDay;
+                }
+            }
+
+            function populateBirthYears() {
+                const yearSelect = document.getElementById('birthYear');
+                const currentYear = new Date().getFullYear();
+
+                for (let i = currentYear; i >= currentYear - 100; i--) {
+                    const option = document.createElement('option');
+                    option.value = i;
+                    option.textContent = i;
+                    yearSelect.appendChild(option);
+                }
+            }
+        });
+    </script>
+</body>
+</html>

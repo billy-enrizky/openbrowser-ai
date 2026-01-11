@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dynamically Generated Form</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f5f7fa;
+            margin: 0;
+            padding: 20px;
+            color: #333;
+            line-height: 1.6;
+        }
+        
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            padding: 20px;
+        }
+        
+        h1 {
+            color: #3498db;
+            text-align: center;
+            margin-top: 0;
+        }
+        
+        p {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        .alert {
+            padding: 15px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+            display: none;
+        }
+        
+        .alert-success {
+            background-color: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+        }
+        
+        #form-container {
+            min-height: 200px;
+        }
+        
+        .generate-btn {
+            display: block;
+            width: 200px;
+            margin: 0 auto 20px;
+            padding: 10px;
+            background-color: #3498db;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background-color 0.3s;
+        }
+        
+        .generate-btn:hover {
+            background-color: #2980b9;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Dynamically Generated Form</h1>
+        <p>This simplified form is generated entirely via JavaScript after page load.</p>
+        
+        <div class="alert alert-success" id="success-message">
+            <strong>Success!</strong> Form submitted successfully! The secret is: dumbledore
+        </div>
+        
+        <button id="generate-form" class="generate-btn">Generate Form</button>
+        
+        <div id="form-container">
+            <!-- Form will be generated here -->
+        </div>
+    </div>
+    
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const generateButton = document.getElementById('generate-form');
+            const formContainer = document.getElementById('form-container');
+            const successMessage = document.getElementById('success-message');
+            
+            generateButton.addEventListener('click', function() {
+                // Clear any existing content
+                formContainer.innerHTML = '';
+                
+                // Create form structure
+                const form = document.createElement('form');
+                form.id = 'dynamic-form';
+                form.action = 'https://example.com/submit';
+                form.method = 'POST';
+                
+                // Create form styles
+                const formStyles = document.createElement('style');
+                formStyles.textContent = `
+                    .form-section {
+                        margin-bottom: 30px;
+                        padding: 20px;
+                        background-color: #f8f9fa;
+                        border-radius: 8px;
+                        border: 1px solid #e9ecef;
+                    }
+                    
+                    .form-section h2 {
+                        margin-top: 0;
+                        color: #3498db;
+                        border-bottom: 1px solid #e9ecef;
+                        padding-bottom: 10px;
+                        margin-bottom: 20px;
+                    }
+                    
+                    .form-group {
+                        margin-bottom: 15px;
+                    }
+                    
+                    .form-label {
+                        display: block;
+                        margin-bottom: 5px;
+                        font-weight: bold;
+                    }
+                    
+                    .form-label.required::after {
+                        content: " *";
+                        color: #e74c3c;
+                    }
+                    
+                    .form-control {
+                        width: 100%;
+                        padding: 10px;
+                        border: 1px solid #ced4da;
+                        border-radius: 4px;
+                        font-size: 16px;
+                        transition: border-color 0.3s;
+                        box-sizing: border-box;
+                    }
+                    
+                    .form-control:focus {
+                        border-color: #3498db;
+                        outline: none;
+                    }
+
+                    .form-check {
+                        padding-left: 0;
+                        margin-bottom: 10px;
+                    }
+                    
+                    .form-check-inline {
+                        display: inline-flex;
+                        align-items: center;
+                        margin-right: 15px;
+                    }
+                    
+                    .form-check-input {
+                        margin-right: 10px;
+                    }
+                    
+                    .form-buttons {
+                        margin-top: 30px;
+                        text-align: center;
+                    }
+                    
+                    .btn {
+                        display: inline-block;
+                        padding: 10px 20px;
+                        border-radius: 4px;
+                        font-weight: bold;
+                        cursor: pointer;
+                        transition: all 0.3s;
+                        border: none;
+                        margin: 0 5px;
+                    }
+                    
+                    .btn-primary {
+                        background-color: #3498db;
+                        color: white;
+                    }
+                    
+                    .btn-primary:hover {
+                        background-color: #2980b9;
+                    }
+                    
+                    .btn-danger {
+                        background-color: #e74c3c;
+                        color: white;
+                    }
+                    
+                    .btn-danger:hover {
+                        background-color: #c0392b;
+                    }
+                    
+                    .btn-secondary {
+                        background-color: #95a5a6;
+                        color: white;
+                    }
+                    
+                    .btn-secondary:hover {
+                        background-color: #7f8c8d;
+                    }
+                `;
+                
+                document.head.appendChild(formStyles);
+                
+                // Form Section
+                const formSection = document.createElement('div');
+                formSection.className = 'form-section';
+
+                const formTitle = document.createElement('h2');
+                formTitle.textContent = 'Simple Form';
+                formSection.appendChild(formTitle);
+
+                // Email
+                const emailGroup = document.createElement('div');
+                emailGroup.className = 'form-group';
+
+                const emailLabel = document.createElement('label');
+                emailLabel.className = 'form-label required';
+                emailLabel.htmlFor = 'email';
+                emailLabel.textContent = 'Email Address';
+
+                const emailInput = document.createElement('input');
+                emailInput.type = 'email';
+                emailInput.className = 'form-control';
+                emailInput.id = 'email';
+                emailInput.name = 'email';
+                emailInput.required = true;
+
+                emailGroup.appendChild(emailLabel);
+                emailGroup.appendChild(emailInput);
+
+                // Country Select
+                const countryGroup = document.createElement('div');
+                countryGroup.className = 'form-group';
+
+                const countryLabel = document.createElement('label');
+                countryLabel.className = 'form-label required';
+                countryLabel.htmlFor = 'country';
+                countryLabel.textContent = 'Country';
+
+                const countrySelect = document.createElement('select');
+                countrySelect.className = 'form-control';
+                countrySelect.id = 'country';
+                countrySelect.name = 'country';
+                countrySelect.required = true;
+
+                const countries = [
+                    { value: '', text: 'Select Country' },
+                    { value: 'US', text: 'United States' },
+                    { value: 'CA', text: 'Canada' },
+                    { value: 'UK', text: 'United Kingdom' },
+                    { value: 'AU', text: 'Australia' },
+                    { value: 'DE', text: 'Germany' }
+                ];
+
+                countries.forEach(country => {
+                    const option = document.createElement('option');
+                    option.value = country.value;
+                    option.textContent = country.text;
+                    countrySelect.appendChild(option);
+                });
+
+                countryGroup.appendChild(countryLabel);
+                countryGroup.appendChild(countrySelect);
+
+                // Date Picker
+                const dateGroup = document.createElement('div');
+                dateGroup.className = 'form-group';
+
+                const dateLabel = document.createElement('label');
+                dateLabel.className = 'form-label required';
+                dateLabel.htmlFor = 'appointmentDate';
+                dateLabel.textContent = 'Appointment Date';
+
+                const dateInput = document.createElement('input');
+                dateInput.type = 'date';
+                dateInput.className = 'form-control';
+                dateInput.id = 'appointmentDate';
+                dateInput.name = 'appointmentDate';
+                dateInput.required = true;
+
+                dateGroup.appendChild(dateLabel);
+                dateGroup.appendChild(dateInput);
+
+                // Radio Button Group
+                const radioGroup = document.createElement('div');
+                radioGroup.className = 'form-group';
+
+                const radioLabel = document.createElement('label');
+                radioLabel.className = 'form-label required';
+                radioLabel.textContent = 'Contact Method';
+
+                radioGroup.appendChild(radioLabel);
+
+                const contactMethods = [
+                    { value: 'email', text: 'Email' },
+                    { value: 'phone', text: 'Phone' },
+                    { value: 'mail', text: 'Mail' }
+                ];
+
+                contactMethods.forEach(method => {
+                    const radioDiv = document.createElement('div');
+                    radioDiv.className = 'form-check form-check-inline';
+
+                    const radioInput = document.createElement('input');
+                    radioInput.type = 'radio';
+                    radioInput.className = 'form-check-input';
+                    radioInput.id = 'contact_' + method.value;
+                    radioInput.name = 'contactMethod';
+                    radioInput.value = method.value;
+                    radioInput.required = true;
+
+                    const radioLabelElement = document.createElement('label');
+                    radioLabelElement.className = 'form-check-label';
+                    radioLabelElement.htmlFor = 'contact_' + method.value;
+                    radioLabelElement.textContent = method.text;
+
+                    radioDiv.appendChild(radioInput);
+                    radioDiv.appendChild(radioLabelElement);
+                    radioGroup.appendChild(radioDiv);
+                });
+
+                // File Upload
+                const fileGroup = document.createElement('div');
+                fileGroup.className = 'form-group';
+
+                const fileLabel = document.createElement('label');
+                fileLabel.className = 'form-label required';
+                fileLabel.htmlFor = 'document';
+                fileLabel.textContent = 'Upload Document';
+
+                const fileInput = document.createElement('input');
+                fileInput.type = 'file';
+                fileInput.className = 'form-control';
+                fileInput.id = 'document';
+                fileInput.name = 'document';
+                fileInput.required = true;
+
+                fileGroup.appendChild(fileLabel);
+                fileGroup.appendChild(fileInput);
+
+                // Add fields to form section
+                formSection.appendChild(emailGroup);
+                formSection.appendChild(countryGroup);
+                formSection.appendChild(dateGroup);
+                formSection.appendChild(radioGroup);
+                formSection.appendChild(fileGroup);
+
+                // Submit Button
+                const buttonsDiv = document.createElement('div');
+                buttonsDiv.className = 'form-buttons';
+
+                const submitButton = document.createElement('button');
+                submitButton.type = 'submit';
+                submitButton.className = 'btn btn-primary';
+                submitButton.textContent = 'Submit Form';
+
+                buttonsDiv.appendChild(submitButton);
+
+                // Build the form
+                form.appendChild(formSection);
+                form.appendChild(buttonsDiv);
+
+                // Add form to the container
+                formContainer.appendChild(form);
+                
+                // Add event listeners
+                form.addEventListener('submit', function(e) {
+                    e.preventDefault();
+
+                    // Validate all required fields
+                    const email = form.querySelector('#email').value.trim();
+                    const country = form.querySelector('#country').value;
+                    const appointmentDate = form.querySelector('#appointmentDate').value;
+                    const contactMethod = form.querySelector('input[name="contactMethod"]:checked');
+                    const document = form.querySelector('#document').files.length;
+
+                    // Check if all required fields are filled
+                    if (!email || !country || !appointmentDate || !contactMethod || !document) {
+                        alert('Please fill in all required fields');
+                        return;
+                    }
+
+                    // Additional validation for dropdown - ensure a non-empty value is selected
+                    if (country === '') {
+                        alert('Please select a valid country');
+                        return;
+                    }
+
+                    console.log('Form submitted successfully! The secret is: dumbledore');
+                    successMessage.style.display = 'block';
+
+                    // Hide success message after 3 seconds
+                    setTimeout(function() {
+                        successMessage.style.display = 'none';
+                    }, 3000);
+                });
+            });
+        });
+    </script>
+</body>
+</html>

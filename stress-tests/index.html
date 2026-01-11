@@ -6,13 +6,12 @@
     <title>OpenBrowser Stress Tests</title>
     <style>
         :root {
-            --primary-color: #0ea5e9;
-            --secondary-color: #8b5cf6;
-            --background-color: #0f172a;
-            --card-bg-color: #1e293b;
-            --text-color: #e2e8f0;
-            --text-muted: #94a3b8;
-            --box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+            --primary-color: #4a6bff;
+            --secondary-color: #ff4a6b;
+            --background-color: #f8f9fa;
+            --card-bg-color: #ffffff;
+            --text-color: #333;
+            --box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
         }
 
         body {
@@ -28,7 +27,7 @@
             background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
             color: white;
             text-align: center;
-            padding: 3rem 1rem;
+            padding: 2.5rem 1rem;
             box-shadow: var(--box-shadow);
         }
 
@@ -60,9 +59,8 @@
 
         .card {
             background-color: var(--card-bg-color);
-            border-radius: 12px;
+            border-radius: 8px;
             box-shadow: var(--box-shadow);
-            border: 1px solid rgba(255,255,255,0.1);
             overflow: hidden;
             width: 100%;
             max-width: 350px;
@@ -71,8 +69,14 @@
 
         .card:hover {
             transform: translateY(-5px);
-            box-shadow: 0 12px 25px rgba(0, 0, 0, 0.4);
-            border-color: var(--primary-color);
+            box-shadow: 0 8px 15px rgba(0, 0, 0, 0.1);
+        }
+
+        .card-img {
+            height: 200px;
+            width: 100%;
+            object-fit: cover;
+            border-bottom: 1px solid #eee;
         }
 
         .card-content {
@@ -82,12 +86,10 @@
         .card h2 {
             margin-top: 0;
             color: var(--primary-color);
-            font-size: 1.4rem;
         }
 
         .card p {
             margin-bottom: 1.5rem;
-            color: var(--text-muted);
         }
 
         .btn {
@@ -95,48 +97,42 @@
             background-color: var(--primary-color);
             color: white;
             text-decoration: none;
-            padding: 0.7rem 1.4rem;
-            border-radius: 8px;
+            padding: 0.6rem 1.2rem;
+            border-radius: 4px;
             font-weight: 500;
-            transition: all 0.3s ease;
+            transition: background-color 0.3s ease, transform 0.2s ease;
         }
 
         .btn:hover {
-            background-color: #0284c7;
+            background-color: #3755d8;
             transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(14, 165, 233, 0.4);
         }
 
-        .links-section {
+        .github-link {
             text-align: center;
             margin-top: 3rem;
-            padding: 2rem;
+            padding: 1rem;
             background-color: var(--card-bg-color);
-            border-radius: 12px;
-            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 8px;
+            box-shadow: var(--box-shadow);
         }
 
-        .links-section a {
+        .github-link a {
             color: var(--primary-color);
             text-decoration: none;
             font-weight: 500;
         }
 
-        .links-section a:hover {
+        .github-link a:hover {
             text-decoration: underline;
-        }
-
-        .links-section p {
-            color: var(--text-muted);
-            margin: 0.5rem 0;
         }
 
         footer {
             text-align: center;
             padding: 2rem;
             margin-top: 2rem;
-            color: var(--text-muted);
-            border-top: 1px solid rgba(255,255,255,0.1);
+            background-color: var(--card-bg-color);
+            border-top: 1px solid #eee;
         }
 
         @media (max-width: 768px) {
@@ -162,34 +158,36 @@
             <div class="card">
                 <div class="card-content">
                     <h2>Browser Agent Challenge</h2>
-                    <p>An interactive evaluation challenge designed to test AI agents' ability to drive a browser like a human. Complete 31 tasks including button clicks, drag & drop, CAPTCHA solving, and more.</p>
+                    <p>An interactive evaluation challenge designed to test AI agents' ability to drive a browser like a human using tools like Playwright. Complete 31 tasks including button clicks, drag & drop, CAPTCHA solving, and more.</p>
                     <a href="challenge.html" class="btn">Take the Challenge</a>
                 </div>
             </div>
 
             <div class="card">
                 <div class="card-content">
-                    <h2>All Challenges</h2>
-                    <p>Browse all 56 challenge pages covering various form libraries (React, Vue, Angular, Svelte, Ember), Shadow DOM, nested iframes, and more edge cases.</p>
-                    <a href="challenges-index.html" class="btn">View All Challenges</a>
+                    <h2>Forms Comparison</h2>
+                    <p>Compare 27 different form implementations across various libraries and frameworks. This comprehensive test suite includes everything from vanilla HTML to complex libraries like React Hook Form, with challenging cases for autofill systems.</p>
+                    <a href="forms-comparison.html" class="btn">View Forms</a>
                 </div>
             </div>
 
             <div class="card">
                 <div class="card-content">
-                    <h2>Individual Forms</h2>
-                    <p>Test specific form implementations: React Native Web, AngularJS, Material UI, Wufoo-style forms, and many more challenging scenarios.</p>
-                    <a href="challenges/" class="btn">Browse Forms</a>
+                    <h2>Tap and Hold Captcha</h2>
+                    <p>Test your ability to complete a tap and hold captcha verification. This challenge requires precise timing and sustained interaction to verify human behavior through a 3-second hold gesture.</p>
+                    <a href="tap-hold-captcha.html" class="btn">Try Captcha</a>
                 </div>
             </div>
         </div>
 
-        <div class="links-section">
+        <div class="github-link">
             <p>View the source code and contribute:</p>
-            <a href="https://github.com/billy-enrizky/openbrowser-ai" target="_blank">github.com/billy-enrizky/openbrowser-ai</a>
-            <br><br>
+            <a href="https://github.com/openbrowser-ai/stress-tests" target="_blank">github.com/openbrowser-ai/stress-tests</a>
+
+            <br/>
+            <br/>
             <p>Documentation:</p>
-            <a href="https://github.com/billy-enrizky/openbrowser-ai#readme" target="_blank">OpenBrowser Documentation</a>
+            <a href="https://docs.openbrowser.me" target="_blank">OpenBrowser Documentation</a>
         </div>
     </div>
 

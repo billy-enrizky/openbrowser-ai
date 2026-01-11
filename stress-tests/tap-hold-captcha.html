@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tap and Hold Captcha Challenge</title>
+    <style>
+        :root {
+            --primary-color: #4a6bff;
+            --secondary-color: #ff4a6b;
+            --background-color: #f8f9fa;
+            --task-bg-color: #ffffff;
+            --success-color: #28a745;
+            --text-color: #333;
+            --box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: var(--text-color);
+            background-color: var(--background-color);
+            padding: 0;
+            margin: 0;
+            transition: background-color 0.3s ease;
+        }
+
+        header {
+            background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+            color: white;
+            text-align: center;
+            padding: 1.8rem 1rem;
+            box-shadow: var(--box-shadow);
+        }
+
+        h1 {
+            margin: 0;
+            font-size: 2rem;
+            letter-spacing: -0.5px;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 2rem auto;
+            padding: 0 1rem;
+        }
+
+        .task {
+            background-color: var(--task-bg-color);
+            margin-bottom: 2rem;
+            padding: 2rem;
+            border-radius: 8px;
+            box-shadow: var(--box-shadow);
+            position: relative;
+            border-left: 5px solid var(--primary-color);
+        }
+
+        .task.completed {
+            border-left: 5px solid var(--success-color);
+        }
+
+        .task-badge {
+            position: absolute;
+            top: -15px;
+            left: -15px;
+            background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+            color: white;
+            min-width: 30px;
+            height: 30px;
+            border-radius: 15px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            text-decoration: none;
+            padding: 0 5px;
+        }
+        
+        .task-badge a {
+            color: white;
+            text-decoration: none;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.7rem;
+        }
+
+        .task-title {
+            font-weight: bold;
+            margin-bottom: 1rem;
+            font-size: 1.2rem;
+        }
+
+        .captcha-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin: 2rem 0;
+        }
+
+        .captcha-button {
+            width: 200px;
+            height: 200px;
+            border: 3px solid #ddd;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #f8f9fa, #e9ecef);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.1rem;
+            font-weight: bold;
+            color: var(--text-color);
+            transition: all 0.3s ease;
+            user-select: none;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .captcha-button:hover {
+            border-color: var(--primary-color);
+            background: linear-gradient(135deg, #e3f2fd, #bbdefb);
+        }
+
+        .captcha-button.active {
+            border-color: var(--primary-color);
+            background: linear-gradient(135deg, var(--primary-color), #3755d8);
+            color: white;
+            transform: scale(0.95);
+        }
+
+        .captcha-button.success {
+            border-color: var(--success-color);
+            background: linear-gradient(135deg, var(--success-color), #1e7e34);
+            color: white;
+        }
+
+        .progress-ring {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 180px;
+            height: 180px;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+
+        .captcha-button.active .progress-ring {
+            opacity: 1;
+        }
+
+        .progress-ring-circle {
+            stroke: rgba(255, 255, 255, 0.8);
+            stroke-width: 4;
+            stroke-linecap: round;
+            fill: transparent;
+            stroke-dasharray: 565.48;
+            stroke-dashoffset: 565.48;
+            transition: none; /* Will be set dynamically via JavaScript */
+        }
+
+        .captcha-button.active .progress-ring-circle {
+            stroke-dashoffset: 0;
+        }
+
+        .instructions {
+            text-align: center;
+            margin: 1rem 0;
+            font-size: 1.1rem;
+            color: #666;
+        }
+
+        .status {
+            text-align: center;
+            margin: 1rem 0;
+            font-size: 1.2rem;
+            font-weight: bold;
+            height: 30px;
+        }
+
+        .status.success {
+            color: var(--success-color);
+        }
+
+        .status.error {
+            color: var(--secondary-color);
+        }
+
+        .back-link {
+            display: inline-block;
+            background-color: var(--primary-color);
+            color: white;
+            text-decoration: none;
+            padding: 0.6rem 1.2rem;
+            border-radius: 4px;
+            font-weight: 500;
+            transition: background-color 0.3s ease, transform 0.2s ease;
+            margin-top: 2rem;
+        }
+
+        .back-link:hover {
+            background-color: #3755d8;
+            transform: translateY(-2px);
+        }
+
+        @media (max-width: 768px) {
+            .captcha-button {
+                width: 150px;
+                height: 150px;
+                font-size: 1rem;
+            }
+            
+            .progress-ring {
+                width: 130px;
+                height: 130px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Tap and Hold Captcha Challenge</h1>
+    </header>
+
+    <div class="container">
+        <div class="task" id="tap-hold-captcha">
+            <div class="task-badge"><a href="#tap-hold-captcha" id="tap-hold-captcha-link">captcha</a></div>
+            <div class="task-title">Complete the tap and hold captcha verification</div>
+            
+            <div class="instructions">
+                Press and hold the circle below for the required time to verify you're human
+            </div>
+            
+            <div class="captcha-container">
+                <div class="captcha-button" id="captcha-button">
+                    <div class="progress-ring">
+                        <svg width="180" height="180">
+                            <circle cx="90" cy="90" r="90" class="progress-ring-circle" id="progress-circle"></circle>
+                        </svg>
+                    </div>
+                    <span id="button-text">HOLD ME</span>
+                </div>
+            </div>
+            
+            <div class="status" id="status"></div>
+            
+            <div style="text-align: center;">
+                <a href="index.html" class="back-link">← Back to Main</a>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let holdTimer = null;
+        let isHolding = false;
+        let isCompleted = false;
+        
+        // Generate random hold duration between 2-5 seconds
+        const holdDuration = Math.floor(Math.random() * 3000) + 2000; // 2000-5000ms
+        const holdDurationSeconds = Math.round(holdDuration / 1000 * 10) / 10; // Round to 1 decimal place
+
+        const captchaButton = document.getElementById('captcha-button');
+        const buttonText = document.getElementById('button-text');
+        const status = document.getElementById('status');
+        const progressCircle = document.getElementById('progress-circle');
+
+        // Update initial status to show the required duration
+        status.textContent = `Hold for ${holdDurationSeconds} seconds to verify`;
+        status.className = 'status';
+
+        function startHold() {
+            if (isCompleted) return;
+            
+            isHolding = true;
+            captchaButton.classList.add('active');
+            buttonText.textContent = 'KEEP HOLDING...';
+            status.textContent = `Hold for ${holdDurationSeconds} seconds...`;
+            status.className = 'status';
+            
+            // Start the progress animation with the random duration
+            progressCircle.style.transition = `stroke-dashoffset ${holdDuration}ms linear`;
+            
+            holdTimer = setTimeout(() => {
+                completeHold();
+            }, holdDuration);
+        }
+
+        function stopHold() {
+            if (isCompleted) return;
+            
+            isHolding = false;
+            captchaButton.classList.remove('active');
+            buttonText.textContent = 'HOLD ME';
+            status.textContent = `Hold cancelled. Try again. (Need ${holdDurationSeconds}s)`;
+            status.className = 'status error';
+            
+            // Reset progress animation
+            progressCircle.style.transition = 'none';
+            progressCircle.style.strokeDashoffset = '565.48';
+            
+            if (holdTimer) {
+                clearTimeout(holdTimer);
+                holdTimer = null;
+            }
+            
+            // After 2 seconds, show the original instruction
+            setTimeout(() => {
+                if (!isHolding && !isCompleted) {
+                    status.textContent = `Hold for ${holdDurationSeconds} seconds to verify`;
+                    status.className = 'status';
+                }
+            }, 2000);
+        }
+
+        function completeHold() {
+            if (isCompleted) return;
+            
+            isCompleted = true;
+            captchaButton.classList.remove('active');
+            captchaButton.classList.add('success');
+            buttonText.textContent = '✓ VERIFIED';
+            status.textContent = `Captcha completed successfully! (Held for ${holdDurationSeconds}s)`;
+            status.className = 'status success';
+            
+            // Mark task as completed
+            document.getElementById('tap-hold-captcha').classList.add('completed');
+            
+            // Disable further interactions
+            captchaButton.style.cursor = 'default';
+        }
+
+        // Mouse events
+        captchaButton.addEventListener('mousedown', startHold);
+        captchaButton.addEventListener('mouseup', stopHold);
+        captchaButton.addEventListener('mouseleave', stopHold);
+
+        // Touch events for mobile
+        captchaButton.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            startHold();
+        });
+
+        captchaButton.addEventListener('touchend', (e) => {
+            e.preventDefault();
+            stopHold();
+        });
+
+        captchaButton.addEventListener('touchcancel', (e) => {
+            e.preventDefault();
+            stopHold();
+        });
+
+        // Prevent context menu on right click
+        captchaButton.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+        });
+
+        // Prevent drag
+        captchaButton.addEventListener('dragstart', (e) => {
+            e.preventDefault();
+        });
+    </script>
+</body>
+</html> 
