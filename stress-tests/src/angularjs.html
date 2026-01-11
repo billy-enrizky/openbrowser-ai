@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en" ng-app="angularJsFormApp">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AngularJS (v1) Form</title>
+
+    <!-- Bootstrap CSS -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@3.4.1/dist/css/bootstrap.min.css">
+
+    <!-- AngularJS -->
+    <script src="https://ajax.googleapis.com/ajax/libs/angularjs/1.8.2/angular.min.js"></script>
+
+    <!-- UI Bootstrap (for Datepicker) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/angular-ui-bootstrap/2.5.6/ui-bootstrap-tpls.min.js"></script>
+
+    <!-- Custom CSS -->
+    <style>
+        body {
+            padding: 20px;
+        }
+
+        .form-section {
+            background-color: #f9f9f9;
+            padding: 20px;
+            border-radius: 5px;
+            margin-bottom: 30px;
+            border: 1px solid #ddd;
+        }
+
+        .radio-group {
+            margin-bottom: 15px;
+        }
+
+        .radio {
+            margin: 5px 0;
+        }
+
+        .has-error .form-control {
+            border-color: #a94442;
+        }
+
+        .has-error .help-block {
+            color: #a94442;
+        }
+
+        .help-block {
+            display: block;
+            margin-top: 5px;
+            margin-bottom: 10px;
+            font-size: 13px;
+        }
+    </style>
+</head>
+<body ng-controller="FormController as formCtrl">
+    <div class="container">
+        <h1>AngularJS (v1) Form</h1>
+
+        <div class="alert alert-info" ng-if="formCtrl.messageSent">
+            <strong>Success!</strong> Form submitted successfully! The secret is: dumbledore
+        </div>
+
+        <form name="userForm" ng-submit="formCtrl.submitForm(userForm)" novalidate>
+            <div class="form-section">
+                <!-- Text Field -->
+                <div class="form-group" ng-class="{'has-error': userForm.email.$touched && userForm.email.$invalid}">
+                    <label for="email">Email Address <span style="color: red;">*</span></label>
+                    <input type="email" class="form-control" id="email" name="email"
+                           ng-model="formCtrl.user.email"
+                           required
+                           ng-pattern="/^[^\s@]+@[^\s@]+\.[^\s@]+$/">
+                    <span class="help-block" ng-show="userForm.email.$touched && userForm.email.$error.required">
+                        Email is required.
+                    </span>
+                    <span class="help-block" ng-show="userForm.email.$touched && userForm.email.$error.pattern">
+                        Please enter a valid email address.
+                    </span>
+                </div>
+
+                <!-- Dropdown -->
+                <div class="form-group" ng-class="{'has-error': userForm.country.$touched && userForm.country.$invalid}">
+                    <label for="country">Country <span style="color: red;">*</span></label>
+                    <select class="form-control" id="country" name="country"
+                            ng-model="formCtrl.user.country"
+                            required>
+                        <option value="">Select Country</option>
+                        <option ng-repeat="country in formCtrl.countries" value="{{country}}">
+                            {{country}}
+                        </option>
+                    </select>
+                    <span class="help-block" ng-show="userForm.country.$touched && userForm.country.$invalid">
+                        Country is required.
+                    </span>
+                </div>
+
+                <!-- Date Picker -->
+                <div class="form-group" ng-class="{'has-error': userForm.birthDate.$touched && userForm.birthDate.$invalid}">
+                    <label for="birthDate">Date of Birth <span style="color: red;">*</span></label>
+                    <div class="input-group">
+                        <input type="text" class="form-control" id="birthDate" name="birthDate"
+                               ng-model="formCtrl.user.birthDate"
+                               uib-datepicker-popup="MM/dd/yyyy"
+                               is-open="formCtrl.birthDateOpened"
+                               required>
+                        <span class="input-group-btn">
+                            <button type="button" class="btn btn-default" ng-click="formCtrl.openDatepicker($event)">
+                                <i class="glyphicon glyphicon-calendar"></i>
+                            </button>
+                        </span>
+                    </div>
+                    <span class="help-block" ng-show="userForm.birthDate.$touched && userForm.birthDate.$invalid">
+                        Date of Birth is required.
+                    </span>
+                </div>
+
+                <!-- Radio Button Group -->
+                <div class="form-group radio-group" ng-class="{'has-error': userForm.contactMethod.$touched && userForm.contactMethod.$invalid}">
+                    <label>Preferred Contact Method: <span style="color: red;">*</span></label>
+                    <div class="radio" ng-repeat="option in formCtrl.contactMethods">
+                        <label>
+                            <input type="radio" name="contactMethod"
+                                   ng-model="formCtrl.user.contactMethod"
+                                   value="{{option.value}}"
+                                   required>
+                            {{option.label}}
+                        </label>
+                    </div>
+                    <span class="help-block" ng-show="userForm.contactMethod.$touched && userForm.contactMethod.$invalid">
+                        Preferred Contact Method is required.
+                    </span>
+                </div>
+
+                <!-- File Upload -->
+                <div class="form-group" ng-class="{'has-error': formCtrl.fileRequired && !formCtrl.user.file}">
+                    <label for="fileUpload">Upload File <span style="color: red;">*</span></label>
+                    <input type="file" class="form-control" id="fileUpload" name="fileUpload"
+                           onchange="angular.element(this).scope().formCtrl.handleFileSelect(this)"
+                           required>
+                    <span class="help-block" ng-show="formCtrl.fileRequired && !formCtrl.user.file">
+                        File upload is required.
+                    </span>
+                </div>
+
+                <!-- Submit Button -->
+                <div class="form-group">
+                    <button type="submit" class="btn btn-primary">Submit Form</button>
+                </div>
+            </div>
+        </form>
+    </div>
+
+    <!-- App Script -->
+    <script>
+        (function() {
+            'use strict';
+
+            angular
+                .module('angularJsFormApp', ['ui.bootstrap'])
+                .controller('FormController', FormController);
+
+            function FormController($scope) {
+                var vm = this;
+
+                // Initialize the user object
+                vm.user = {
+                    email: '',
+                    country: '',
+                    birthDate: null,
+                    contactMethod: '',
+                    file: null
+                };
+
+                // Form state
+                vm.birthDateOpened = false;
+                vm.messageSent = false;
+                vm.fileRequired = false;
+
+                // Form options
+                vm.countries = [
+                    'United States',
+                    'Canada',
+                    'United Kingdom',
+                    'Australia',
+                    'Germany',
+                    'France'
+                ];
+
+                vm.contactMethods = [
+                    { label: 'Email', value: 'email' },
+                    { label: 'Phone', value: 'phone' },
+                    { label: 'Mail', value: 'mail' }
+                ];
+
+                // Methods
+                vm.submitForm = submitForm;
+                vm.openDatepicker = openDatepicker;
+                vm.handleFileSelect = handleFileSelect;
+
+                function submitForm(form) {
+                    // Mark all fields as touched to show validation errors
+                    angular.forEach(form.$error, function(field) {
+                        angular.forEach(field, function(errorField) {
+                            errorField.$setTouched();
+                        });
+                    });
+
+                    // Validate file upload
+                    if (!vm.user.file) {
+                        vm.fileRequired = true;
+                    }
+
+                    // Check if form is valid and file is uploaded
+                    if (!form.$valid || !vm.user.file) {
+                        console.log('Form is invalid. Please fill all required fields.');
+                        return;
+                    }
+
+                    // Ensure dropdown has an actual value (not empty string)
+                    if (!vm.user.country || vm.user.country === '') {
+                        form.country.$setTouched();
+                        console.log('Country is required.');
+                        return;
+                    }
+
+                    // If all validations pass, submit the form
+                    console.log('Form submitted successfully!', vm.user);
+                    vm.messageSent = true;
+
+                    // Hide the success message after 3 seconds
+                    setTimeout(function() {
+                        $scope.$apply(function() {
+                            vm.messageSent = false;
+                        });
+                    }, 3000);
+                }
+
+                function openDatepicker($event) {
+                    $event.preventDefault();
+                    $event.stopPropagation();
+                    vm.birthDateOpened = true;
+                }
+
+                function handleFileSelect(input) {
+                    if (input.files && input.files[0]) {
+                        vm.user.file = input.files[0];
+                        vm.fileRequired = false;
+                        $scope.$apply();
+                        console.log('File selected:', input.files[0].name);
+                    } else {
+                        vm.user.file = null;
+                        vm.fileRequired = true;
+                        $scope.$apply();
+                    }
+                }
+            }
+        })();
+    </script>
+</body>
+</html>

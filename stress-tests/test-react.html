@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>React Test</title>
+    <script crossorigin src="https://unpkg.com/react@17/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@17/umd/react-dom.development.js"></script>
+</head>
+<body>
+    <div id="root"></div>
+    <script>
+        console.log('React available:', typeof React);
+        console.log('ReactDOM available:', typeof ReactDOM);
+        
+        const { useState } = React;
+        const e = React.createElement;
+        
+        function TestApp() {
+            const [count, setCount] = useState(0);
+            
+            return e('div', null,
+                e('h1', null, 'React Test'),
+                e('p', null, 'Count: ', count),
+                e('button', {
+                    onClick: () => setCount(count + 1)
+                }, 'Increment')
+            );
+        }
+        
+        ReactDOM.render(e(TestApp), document.getElementById('root'));
+    </script>
+</body>
+</html>
