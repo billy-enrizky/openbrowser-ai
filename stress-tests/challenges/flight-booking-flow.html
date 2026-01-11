@@ -694,6 +694,13 @@
             });
             
             currentStep = step;
+            
+            // Generate dynamic content immediately when step becomes active
+            if (step === 3) {
+                generatePassengerForms();
+            } else if (step === 4) {
+                generateSeatMap();
+            }
         }
 
         function searchFlights() {
@@ -911,18 +918,8 @@
             document.getElementById('departure-date').min = today;
             document.getElementById('return-date').min = today;
             
-            // Set up step transitions
-            document.getElementById('step-3').addEventListener('transitionend', function() {
-                if (this.classList.contains('active')) {
-                    generatePassengerForms();
-                }
-            });
-            
-            document.getElementById('step-4').addEventListener('transitionend', function() {
-                if (this.classList.contains('active')) {
-                    generateSeatMap();
-                }
-            });
+            // Generate forms immediately when goToStep is called (not on transitionend)
+            // The transitionend event may not fire reliably
         });
     </script>
 </body>
