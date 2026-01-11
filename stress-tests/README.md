@@ -53,7 +53,3 @@ Visit https://openbrowser.github.io/stress-tests/ or run locally.
 ## License
 
 MIT
-
-## Credits
-
-Originally from [browser-use/stress-tests](https://github.com/browser-use/stress-tests).

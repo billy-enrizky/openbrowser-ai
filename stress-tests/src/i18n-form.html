@@ -1,0 +1,1273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Internationalized Form</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f8f9fa;
+            color: #333;
+            line-height: 1.6;
+            padding-bottom: 40px;
+        }
+        
+        .container {
+            max-width: 900px;
+            margin: 20px auto;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 2px 15px rgba(0, 0, 0, 0.1);
+            padding: 25px;
+        }
+        
+        h1 {
+            color: #2c3e50;
+            margin-bottom: 20px;
+        }
+        
+        .description {
+            margin-bottom: 30px;
+        }
+        
+        .form-section {
+            margin-bottom: 30px;
+            padding: 20px;
+            background-color: #f8f9fa;
+            border-radius: 8px;
+            border: 1px solid #e9ecef;
+        }
+        
+        .form-section-title {
+            color: #2c3e50;
+            margin-bottom: 20px;
+            border-bottom: 1px solid #e9ecef;
+            padding-bottom: 10px;
+        }
+        
+        .required::after {
+            content: " *";
+            color: #dc3545;
+        }
+        
+        .form-control:focus {
+            border-color: #2c3e50;
+            box-shadow: 0 0 0 0.2rem rgba(44, 62, 80, 0.25);
+        }
+        
+        .language-selector {
+            display: flex;
+            justify-content: flex-end;
+            margin-bottom: 15px;
+        }
+        
+        .language-button {
+            margin-left: 10px;
+            padding: 5px 10px;
+            background-color: #f8f9fa;
+            border: 1px solid #ced4da;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .language-button:hover {
+            background-color: #e9ecef;
+        }
+        
+        .language-button.active {
+            background-color: #2c3e50;
+            color: white;
+            border-color: #2c3e50;
+        }
+        
+        .language-flag {
+            margin-right: 5px;
+        }
+        
+        .btn-primary {
+            background-color: #2c3e50;
+            border-color: #2c3e50;
+        }
+        
+        .btn-primary:hover {
+            background-color: #1e2b37;
+            border-color: #1e2b37;
+        }
+        
+        .date-group {
+            display: flex;
+            gap: 10px;
+        }
+        
+        .date-group select {
+            flex: 1;
+        }
+        
+        .currency-input-group {
+            position: relative;
+        }
+        
+        .currency-symbol {
+            position: absolute;
+            top: 0;
+            left: 12px;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            color: #495057;
+            z-index: 3;
+        }
+        
+        .currency-input {
+            padding-left: 25px;
+        }
+        
+        .form-check-label-rtl {
+            margin-right: 1.5rem;
+            margin-left: 0;
+        }
+        
+        /* RTL specific styles */
+        .rtl {
+            direction: rtl;
+            text-align: right;
+        }
+        
+        .rtl .form-check-input {
+            float: right;
+            margin-right: -1.5rem;
+            margin-left: 0;
+        }
+        
+        .rtl .currency-symbol {
+            left: auto;
+            right: 12px;
+        }
+        
+        .rtl .currency-input {
+            padding-left: 0.75rem;
+            padding-right: 25px;
+        }
+        
+        .rtl .date-group {
+            flex-direction: row-reverse;
+        }
+        
+        .rtl .form-check-label {
+            padding-right: 1.5rem;
+            padding-left: 0;
+        }
+        
+        .rtl .language-selector {
+            justify-content: flex-start;
+        }
+        
+        .rtl .language-button {
+            margin-left: 0;
+            margin-right: 10px;
+        }
+        
+        /* Japanese specific styles */
+        .jp .form-control {
+            font-family: "Hiragino Kaku Gothic Pro", "ヒラギノ角ゴ Pro W3", "メイリオ", Meiryo, "ＭＳ Ｐゴシック", sans-serif;
+        }
+        
+        /* Arabic specific styles */
+        .ar .form-control {
+            font-family: "Tahoma", "Arial", sans-serif;
+        }
+        
+        /* Alert styles */
+        .alert {
+            margin-bottom: 20px;
+            display: none;
+        }
+        
+        /* Postal code formats */
+        .postal-format {
+            display: block;
+            font-size: 80%;
+            margin-top: 0.25rem;
+            color: #6c757d;
+        }
+
+        /* Radio button validation */
+        .form-check-input.is-invalid ~ .form-check-label {
+            color: #dc3545;
+        }
+
+        .form-check-input.is-invalid {
+            border-color: #dc3545;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="language-selector">
+            <button type="button" class="language-button active" data-lang="en">
+                <span class="language-flag">🇺🇸</span> English
+            </button>
+            <button type="button" class="language-button" data-lang="es">
+                <span class="language-flag">🇪🇸</span> Español
+            </button>
+            <button type="button" class="language-button" data-lang="fr">
+                <span class="language-flag">🇫🇷</span> Français
+            </button>
+            <button type="button" class="language-button" data-lang="de">
+                <span class="language-flag">🇩🇪</span> Deutsch
+            </button>
+            <button type="button" class="language-button" data-lang="jp">
+                <span class="language-flag">🇯🇵</span> 日本語
+            </button>
+            <button type="button" class="language-button" data-lang="ar">
+                <span class="language-flag">🇦🇪</span> العربية
+            </button>
+        </div>
+        
+        <h1 class="text-center" data-i18n="title">Internationalized Form</h1>
+        <p class="text-center description" data-i18n="description">
+            This form adapts to different languages and cultural formats.
+        </p>
+        
+        <div class="alert alert-success" id="successMessage" data-i18n="success">
+            <strong>Success!</strong> Form submitted successfully! The secret is: dumbledore
+        </div>
+        
+        <form id="internationalForm">
+            <!-- Personal Information Section -->
+            <div class="form-section">
+                <h2 class="form-section-title" data-i18n="personal_info_title">Personal Information</h2>
+
+                <div class="mb-3">
+                    <label for="email" class="form-label required" data-i18n="email">Email Address</label>
+                    <input type="email" class="form-control" id="email" name="email" required>
+                    <div class="invalid-feedback" data-i18n="email_error">Please enter a valid email address</div>
+                </div>
+
+                <div class="mb-3">
+                    <label for="country" class="form-label required" data-i18n="country">Country</label>
+                    <select class="form-select" id="country" name="country" required>
+                        <option value="" data-i18n="select">Select...</option>
+                        <!-- Will be populated by JavaScript -->
+                    </select>
+                    <div class="invalid-feedback" data-i18n="country_error">Country is required</div>
+                </div>
+
+                <div class="mb-3">
+                    <label for="birthDate" class="form-label required" data-i18n="birth_date">Date of Birth</label>
+                    <div class="date-group">
+                        <select id="birthDay" name="birthDay" class="form-select" required>
+                            <option value="" data-i18n="day">Day</option>
+                            <!-- Will be populated by JavaScript -->
+                        </select>
+                        <select id="birthMonth" name="birthMonth" class="form-select" required>
+                            <option value="" data-i18n="month">Month</option>
+                            <!-- Will be populated by JavaScript -->
+                        </select>
+                        <select id="birthYear" name="birthYear" class="form-select" required>
+                            <option value="" data-i18n="year">Year</option>
+                            <!-- Will be populated by JavaScript -->
+                        </select>
+                    </div>
+                    <input type="hidden" id="birthDate" name="birthDate" required>
+                    <div class="invalid-feedback" data-i18n="birth_date_error">Birth date is required</div>
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label required" data-i18n="gender">Gender</label>
+                    <div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="gender" id="genderMale" value="male" required>
+                            <label class="form-check-label" for="genderMale" data-i18n="gender_male">Male</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="gender" id="genderFemale" value="female" required>
+                            <label class="form-check-label" for="genderFemale" data-i18n="gender_female">Female</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="gender" id="genderOther" value="other" required>
+                            <label class="form-check-label" for="genderOther" data-i18n="gender_other">Other</label>
+                        </div>
+                    </div>
+                    <div class="invalid-feedback" data-i18n="gender_error">Gender is required</div>
+                </div>
+            </div>
+
+            <div class="d-flex gap-2 justify-content-center">
+                <button type="submit" class="btn btn-primary" data-i18n="submit_button">Submit Form</button>
+                <button type="button" class="btn btn-secondary" id="resetButton" data-i18n="reset_button">Reset</button>
+            </div>
+        </form>
+    </div>
+    
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // Language translations
+            const translations = {
+                en: {
+                    title: "Internationalized Form",
+                    description: "This form adapts to different languages and cultural formats.",
+                    success: "<strong>Success!</strong> Form submitted successfully! The secret is: dumbledore",
+                    personal_info_title: "Personal Information",
+                    first_name: "First Name",
+                    last_name: "Last Name",
+                    email: "Email Address",
+                    phone: "Phone Number",
+                    birth_date: "Date of Birth",
+                    gender: "Gender",
+                    gender_male: "Male",
+                    gender_female: "Female",
+                    gender_other: "Other",
+                    address_title: "Address Information",
+                    street_address: "Street Address",
+                    city: "City",
+                    state_province: "State/Province",
+                    postal_code: "Postal Code",
+                    country: "Country",
+                    additional_info_title: "Additional Information",
+                    preferred_language: "Preferred Language",
+                    preferred_currency: "Preferred Currency",
+                    annual_income: "Annual Income",
+                    timezone: "Timezone",
+                    message: "Message",
+                    communication_preferences: "Communication Preferences",
+                    communication_email: "Email",
+                    communication_phone: "Phone",
+                    communication_sms: "SMS",
+                    agree_terms: "I agree to the Terms and Conditions",
+                    submit_button: "Submit Form",
+                    reset_button: "Reset",
+                    email_error: "Please enter a valid email address",
+                    country_error: "Country is required",
+                    preferred_language_error: "Preferred language is required",
+                    birth_date_error: "Birth date is required",
+                    gender_error: "Gender is required",
+                    select: "Select...",
+                    day: "Day",
+                    month: "Month",
+                    year: "Year",
+                    phone_format: "Format: + [country code] [number]",
+                    postal_code_format: "Format: XXXXX or XXXXX-XXXX",
+                    language_english: "English",
+                    language_spanish: "Spanish",
+                    language_french: "French",
+                    language_german: "German",
+                    language_japanese: "Japanese",
+                    language_arabic: "Arabic",
+                    currency_usd: "US Dollar (USD)",
+                    currency_eur: "Euro (EUR)",
+                    currency_gbp: "British Pound (GBP)",
+                    currency_jpy: "Japanese Yen (JPY)",
+                    currency_aed: "UAE Dirham (AED)"
+                },
+                es: {
+                    title: "Formulario Internacionalizado",
+                    description: "Este formulario se adapta a diferentes idiomas y formatos culturales.",
+                    success: "<strong>¡Éxito!</strong> ¡Formulario enviado correctamente! The secret is: dumbledore",
+                    personal_info_title: "Información Personal",
+                    first_name: "Nombre",
+                    last_name: "Apellido",
+                    email: "Correo Electrónico",
+                    phone: "Número de Teléfono",
+                    birth_date: "Fecha de Nacimiento",
+                    gender: "Género",
+                    gender_male: "Masculino",
+                    gender_female: "Femenino",
+                    gender_other: "Otro",
+                    address_title: "Información de Dirección",
+                    street_address: "Dirección",
+                    city: "Ciudad",
+                    state_province: "Estado/Provincia",
+                    postal_code: "Código Postal",
+                    country: "País",
+                    additional_info_title: "Información Adicional",
+                    preferred_language: "Idioma Preferido",
+                    preferred_currency: "Moneda Preferida",
+                    annual_income: "Ingreso Anual",
+                    timezone: "Zona Horaria",
+                    message: "Mensaje",
+                    communication_preferences: "Preferencias de Comunicación",
+                    communication_email: "Correo Electrónico",
+                    communication_phone: "Teléfono",
+                    communication_sms: "SMS",
+                    agree_terms: "Acepto los Términos y Condiciones",
+                    submit_button: "Enviar Formulario",
+                    reset_button: "Restablecer",
+                    email_error: "Por favor, introduce un correo electrónico válido",
+                    country_error: "El país es obligatorio",
+                    preferred_language_error: "El idioma preferido es obligatorio",
+                    birth_date_error: "La fecha de nacimiento es obligatoria",
+                    gender_error: "El género es obligatorio",
+                    select: "Seleccionar...",
+                    day: "Día",
+                    month: "Mes",
+                    year: "Año",
+                    phone_format: "Formato: + [código país] [número]",
+                    postal_code_format: "Formato: XXXXX",
+                    language_english: "Inglés",
+                    language_spanish: "Español",
+                    language_french: "Francés",
+                    language_german: "Alemán",
+                    language_japanese: "Japonés",
+                    language_arabic: "Árabe",
+                    currency_usd: "Dólar Estadounidense (USD)",
+                    currency_eur: "Euro (EUR)",
+                    currency_gbp: "Libra Esterlina (GBP)",
+                    currency_jpy: "Yen Japonés (JPY)",
+                    currency_aed: "Dirham de EAU (AED)"
+                },
+                fr: {
+                    title: "Formulaire Internationalisé",
+                    description: "Ce formulaire s'adapte à différentes langues et formats culturels.",
+                    success: "<strong>Succès!</strong> Formulaire soumis avec succès! The secret is: dumbledore",
+                    personal_info_title: "Informations Personnelles",
+                    first_name: "Prénom",
+                    last_name: "Nom de Famille",
+                    email: "Adresse Email",
+                    phone: "Numéro de Téléphone",
+                    birth_date: "Date de Naissance",
+                    gender: "Genre",
+                    gender_male: "Masculin",
+                    gender_female: "Féminin",
+                    gender_other: "Autre",
+                    address_title: "Informations d'Adresse",
+                    street_address: "Adresse",
+                    city: "Ville",
+                    state_province: "État/Province",
+                    postal_code: "Code Postal",
+                    country: "Pays",
+                    additional_info_title: "Informations Supplémentaires",
+                    preferred_language: "Langue Préférée",
+                    preferred_currency: "Devise Préférée",
+                    annual_income: "Revenu Annuel",
+                    timezone: "Fuseau Horaire",
+                    message: "Message",
+                    communication_preferences: "Préférences de Communication",
+                    communication_email: "Email",
+                    communication_phone: "Téléphone",
+                    communication_sms: "SMS",
+                    agree_terms: "J'accepte les Conditions Générales",
+                    submit_button: "Soumettre le Formulaire",
+                    reset_button: "Réinitialiser",
+                    email_error: "Veuillez entrer une adresse email valide",
+                    country_error: "Le pays est requis",
+                    preferred_language_error: "La langue préférée est requise",
+                    birth_date_error: "La date de naissance est requise",
+                    gender_error: "Le genre est requis",
+                    select: "Sélectionner...",
+                    day: "Jour",
+                    month: "Mois",
+                    year: "Année",
+                    phone_format: "Format: + [code pays] [numéro]",
+                    postal_code_format: "Format: XXXXX",
+                    language_english: "Anglais",
+                    language_spanish: "Espagnol",
+                    language_french: "Français",
+                    language_german: "Allemand",
+                    language_japanese: "Japonais",
+                    language_arabic: "Arabe",
+                    currency_usd: "Dollar Américain (USD)",
+                    currency_eur: "Euro (EUR)",
+                    currency_gbp: "Livre Sterling (GBP)",
+                    currency_jpy: "Yen Japonais (JPY)",
+                    currency_aed: "Dirham des EAU (AED)"
+                },
+                de: {
+                    title: "Internationalisiertes Formular",
+                    description: "Dieses Formular passt sich an verschiedene Sprachen und kulturelle Formate an.",
+                    success: "<strong>Erfolg!</strong> Formular erfolgreich übermittelt! The secret is: dumbledore",
+                    personal_info_title: "Persönliche Informationen",
+                    first_name: "Vorname",
+                    last_name: "Nachname",
+                    email: "E-Mail-Adresse",
+                    phone: "Telefonnummer",
+                    birth_date: "Geburtsdatum",
+                    gender: "Geschlecht",
+                    gender_male: "Männlich",
+                    gender_female: "Weiblich",
+                    gender_other: "Andere",
+                    address_title: "Adressinformationen",
+                    street_address: "Straßenanschrift",
+                    city: "Stadt",
+                    state_province: "Bundesland/Provinz",
+                    postal_code: "Postleitzahl",
+                    country: "Land",
+                    additional_info_title: "Zusätzliche Informationen",
+                    preferred_language: "Bevorzugte Sprache",
+                    preferred_currency: "Bevorzugte Währung",
+                    annual_income: "Jahreseinkommen",
+                    timezone: "Zeitzone",
+                    message: "Nachricht",
+                    communication_preferences: "Kommunikationspräferenzen",
+                    communication_email: "E-Mail",
+                    communication_phone: "Telefon",
+                    communication_sms: "SMS",
+                    agree_terms: "Ich stimme den Allgemeinen Geschäftsbedingungen zu",
+                    submit_button: "Formular absenden",
+                    reset_button: "Zurücksetzen",
+                    email_error: "Bitte geben Sie eine gültige E-Mail-Adresse ein",
+                    country_error: "Land ist erforderlich",
+                    preferred_language_error: "Bevorzugte Sprache ist erforderlich",
+                    birth_date_error: "Geburtsdatum ist erforderlich",
+                    gender_error: "Geschlecht ist erforderlich",
+                    select: "Auswählen...",
+                    day: "Tag",
+                    month: "Monat",
+                    year: "Jahr",
+                    phone_format: "Format: + [Ländercode] [Nummer]",
+                    postal_code_format: "Format: XXXXX",
+                    language_english: "Englisch",
+                    language_spanish: "Spanisch",
+                    language_french: "Französisch",
+                    language_german: "Deutsch",
+                    language_japanese: "Japanisch",
+                    language_arabic: "Arabisch",
+                    currency_usd: "US-Dollar (USD)",
+                    currency_eur: "Euro (EUR)",
+                    currency_gbp: "Britisches Pfund (GBP)",
+                    currency_jpy: "Japanischer Yen (JPY)",
+                    currency_aed: "VAE-Dirham (AED)"
+                },
+                jp: {
+                    title: "国際化フォーム",
+                    description: "このフォームは、異なる言語や文化的な形式に適応します。",
+                    success: "<strong>成功！</strong> フォームが正常に送信されました！ The secret is: dumbledore",
+                    personal_info_title: "個人情報",
+                    first_name: "名",
+                    last_name: "姓",
+                    email: "メールアドレス",
+                    phone: "電話番号",
+                    birth_date: "生年月日",
+                    gender: "性別",
+                    gender_male: "男性",
+                    gender_female: "女性",
+                    gender_other: "その他",
+                    address_title: "住所情報",
+                    street_address: "住所",
+                    city: "市区町村",
+                    state_province: "都道府県",
+                    postal_code: "郵便番号",
+                    country: "国",
+                    additional_info_title: "追加情報",
+                    preferred_language: "希望言語",
+                    preferred_currency: "希望通貨",
+                    annual_income: "年収",
+                    timezone: "タイムゾーン",
+                    message: "メッセージ",
+                    communication_preferences: "連絡方法の設定",
+                    communication_email: "メール",
+                    communication_phone: "電話",
+                    communication_sms: "SMS",
+                    agree_terms: "利用規約に同意します",
+                    submit_button: "フォームを送信",
+                    reset_button: "リセット",
+                    email_error: "有効なメールアドレスを入力してください",
+                    country_error: "国は必須です",
+                    preferred_language_error: "希望言語は必須です",
+                    birth_date_error: "生年月日は必須です",
+                    gender_error: "性別は必須です",
+                    select: "選択...",
+                    day: "日",
+                    month: "月",
+                    year: "年",
+                    phone_format: "形式: + [国コード] [番号]",
+                    postal_code_format: "形式: XXX-XXXX",
+                    language_english: "英語",
+                    language_spanish: "スペイン語",
+                    language_french: "フランス語",
+                    language_german: "ドイツ語",
+                    language_japanese: "日本語",
+                    language_arabic: "アラビア語",
+                    currency_usd: "米ドル (USD)",
+                    currency_eur: "ユーロ (EUR)",
+                    currency_gbp: "英ポンド (GBP)",
+                    currency_jpy: "日本円 (JPY)",
+                    currency_aed: "UAEディルハム (AED)"
+                },
+                ar: {
+                    title: "نموذج متعدد اللغات",
+                    description: "يتكيف هذا النموذج مع لغات وأشكال ثقافية مختلفة.",
+                    success: "<strong>نجاح!</strong> تم إرسال النموذج بنجاح! The secret is: dumbledore",
+                    personal_info_title: "المعلومات الشخصية",
+                    first_name: "الاسم الأول",
+                    last_name: "اسم العائلة",
+                    email: "البريد الإلكتروني",
+                    phone: "رقم الهاتف",
+                    birth_date: "تاريخ الميلاد",
+                    gender: "الجنس",
+                    gender_male: "ذكر",
+                    gender_female: "أنثى",
+                    gender_other: "أخرى",
+                    address_title: "معلومات العنوان",
+                    street_address: "عنوان الشارع",
+                    city: "المدينة",
+                    state_province: "الولاية / المقاطعة",
+                    postal_code: "الرمز البريدي",
+                    country: "البلد",
+                    additional_info_title: "معلومات إضافية",
+                    preferred_language: "اللغة المفضلة",
+                    preferred_currency: "العملة المفضلة",
+                    annual_income: "الدخل السنوي",
+                    timezone: "المنطقة الزمنية",
+                    message: "الرسالة",
+                    communication_preferences: "تفضيلات الاتصال",
+                    communication_email: "البريد الإلكتروني",
+                    communication_phone: "الهاتف",
+                    communication_sms: "الرسائل القصيرة",
+                    agree_terms: "أوافق على الشروط والأحكام",
+                    submit_button: "إرسال النموذج",
+                    reset_button: "إعادة تعيين",
+                    email_error: "يرجى إدخال بريد إلكتروني صالح",
+                    country_error: "البلد مطلوب",
+                    preferred_language_error: "اللغة المفضلة مطلوبة",
+                    birth_date_error: "تاريخ الميلاد مطلوب",
+                    gender_error: "الجنس مطلوب",
+                    select: "اختر...",
+                    day: "اليوم",
+                    month: "الشهر",
+                    year: "السنة",
+                    phone_format: "الصيغة: + [رمز البلد] [الرقم]",
+                    postal_code_format: "الصيغة: XXXXX",
+                    language_english: "الإنجليزية",
+                    language_spanish: "الإسبانية",
+                    language_french: "الفرنسية",
+                    language_german: "الألمانية",
+                    language_japanese: "اليابانية",
+                    language_arabic: "العربية",
+                    currency_usd: "دولار أمريكي (USD)",
+                    currency_eur: "يورو (EUR)",
+                    currency_gbp: "جنيه إسترليني (GBP)",
+                    currency_jpy: "ين ياباني (JPY)",
+                    currency_aed: "درهم إماراتي (AED)"
+                }
+            };
+            
+            // Region-specific data
+            const regionData = {
+                en: {
+                    dateFormat: "MM/DD/YYYY",
+                    postalFormat: "Format: XXXXX or XXXXX-XXXX",
+                    currencySymbol: "$",
+                    states: [
+                        { value: "AL", text: "Alabama" },
+                        { value: "AK", text: "Alaska" },
+                        { value: "AZ", text: "Arizona" },
+                        { value: "AR", text: "Arkansas" },
+                        { value: "CA", text: "California" },
+                        { value: "CO", text: "Colorado" },
+                        { value: "CT", text: "Connecticut" },
+                        { value: "DE", text: "Delaware" },
+                        { value: "FL", text: "Florida" },
+                        { value: "GA", text: "Georgia" }
+                    ],
+                    countries: [
+                        { value: "US", text: "United States" },
+                        { value: "CA", text: "Canada" },
+                        { value: "UK", text: "United Kingdom" },
+                        { value: "AU", text: "Australia" },
+                        { value: "DE", text: "Germany" },
+                        { value: "FR", text: "France" },
+                        { value: "JP", text: "Japan" },
+                        { value: "AE", text: "United Arab Emirates" },
+                        { value: "ES", text: "Spain" }
+                    ],
+                    timezones: [
+                        { value: "America/New_York", text: "Eastern Time (ET)" },
+                        { value: "America/Chicago", text: "Central Time (CT)" },
+                        { value: "America/Denver", text: "Mountain Time (MT)" },
+                        { value: "America/Los_Angeles", text: "Pacific Time (PT)" },
+                        { value: "America/Anchorage", text: "Alaska Time (AKT)" },
+                        { value: "Pacific/Honolulu", text: "Hawaii Time (HT)" }
+                    ],
+                    months: [
+                        { value: "01", text: "January" },
+                        { value: "02", text: "February" },
+                        { value: "03", text: "March" },
+                        { value: "04", text: "April" },
+                        { value: "05", text: "May" },
+                        { value: "06", text: "June" },
+                        { value: "07", text: "July" },
+                        { value: "08", text: "August" },
+                        { value: "09", text: "September" },
+                        { value: "10", text: "October" },
+                        { value: "11", text: "November" },
+                        { value: "12", text: "December" }
+                    ],
+                    isRTL: false
+                },
+                es: {
+                    dateFormat: "DD/MM/YYYY",
+                    postalFormat: "Formato: XXXXX",
+                    currencySymbol: "€",
+                    states: [
+                        { value: "AN", text: "Andalucía" },
+                        { value: "AR", text: "Aragón" },
+                        { value: "AS", text: "Asturias" },
+                        { value: "CN", text: "Canarias" },
+                        { value: "CB", text: "Cantabria" },
+                        { value: "CM", text: "Castilla-La Mancha" },
+                        { value: "CL", text: "Castilla y León" },
+                        { value: "CT", text: "Cataluña" },
+                        { value: "EX", text: "Extremadura" },
+                        { value: "GA", text: "Galicia" }
+                    ],
+                    countries: [
+                        { value: "ES", text: "España" },
+                        { value: "US", text: "Estados Unidos" },
+                        { value: "MX", text: "México" },
+                        { value: "AR", text: "Argentina" },
+                        { value: "CO", text: "Colombia" },
+                        { value: "DE", text: "Alemania" },
+                        { value: "FR", text: "Francia" },
+                        { value: "IT", text: "Italia" },
+                        { value: "UK", text: "Reino Unido" }
+                    ],
+                    timezones: [
+                        { value: "Europe/Madrid", text: "Hora de España (CET)" },
+                        { value: "Europe/London", text: "Hora de Londres (GMT)" },
+                        { value: "America/Mexico_City", text: "Hora de México (CST)" },
+                        { value: "America/Bogota", text: "Hora de Colombia (COT)" },
+                        { value: "America/Argentina/Buenos_Aires", text: "Hora de Argentina (ART)" }
+                    ],
+                    months: [
+                        { value: "01", text: "Enero" },
+                        { value: "02", text: "Febrero" },
+                        { value: "03", text: "Marzo" },
+                        { value: "04", text: "Abril" },
+                        { value: "05", text: "Mayo" },
+                        { value: "06", text: "Junio" },
+                        { value: "07", text: "Julio" },
+                        { value: "08", text: "Agosto" },
+                        { value: "09", text: "Septiembre" },
+                        { value: "10", text: "Octubre" },
+                        { value: "11", text: "Noviembre" },
+                        { value: "12", text: "Diciembre" }
+                    ],
+                    isRTL: false
+                },
+                fr: {
+                    dateFormat: "DD/MM/YYYY",
+                    postalFormat: "Format: XXXXX",
+                    currencySymbol: "€",
+                    states: [
+                        { value: "ARA", text: "Auvergne-Rhône-Alpes" },
+                        { value: "BFC", text: "Bourgogne-Franche-Comté" },
+                        { value: "BRE", text: "Bretagne" },
+                        { value: "CVL", text: "Centre-Val de Loire" },
+                        { value: "COR", text: "Corse" },
+                        { value: "GES", text: "Grand Est" },
+                        { value: "HDF", text: "Hauts-de-France" },
+                        { value: "IDF", text: "Île-de-France" },
+                        { value: "NOR", text: "Normandie" },
+                        { value: "NAQ", text: "Nouvelle-Aquitaine" }
+                    ],
+                    countries: [
+                        { value: "FR", text: "France" },
+                        { value: "BE", text: "Belgique" },
+                        { value: "CH", text: "Suisse" },
+                        { value: "CA", text: "Canada" },
+                        { value: "US", text: "États-Unis" },
+                        { value: "DE", text: "Allemagne" },
+                        { value: "IT", text: "Italie" },
+                        { value: "UK", text: "Royaume-Uni" },
+                        { value: "ES", text: "Espagne" }
+                    ],
+                    timezones: [
+                        { value: "Europe/Paris", text: "Heure de Paris (CET)" },
+                        { value: "Europe/London", text: "Heure de Londres (GMT)" },
+                        { value: "America/Montreal", text: "Heure de Montréal (ET)" },
+                        { value: "Africa/Tunis", text: "Heure de Tunis (CET)" },
+                        { value: "Indian/Reunion", text: "Heure de La Réunion (RET)" }
+                    ],
+                    months: [
+                        { value: "01", text: "Janvier" },
+                        { value: "02", text: "Février" },
+                        { value: "03", text: "Mars" },
+                        { value: "04", text: "Avril" },
+                        { value: "05", text: "Mai" },
+                        { value: "06", text: "Juin" },
+                        { value: "07", text: "Juillet" },
+                        { value: "08", text: "Août" },
+                        { value: "09", text: "Septembre" },
+                        { value: "10", text: "Octobre" },
+                        { value: "11", text: "Novembre" },
+                        { value: "12", text: "Décembre" }
+                    ],
+                    isRTL: false
+                },
+                de: {
+                    dateFormat: "DD.MM.YYYY",
+                    postalFormat: "Format: XXXXX",
+                    currencySymbol: "€",
+                    states: [
+                        { value: "BW", text: "Baden-Württemberg" },
+                        { value: "BY", text: "Bayern" },
+                        { value: "BE", text: "Berlin" },
+                        { value: "BB", text: "Brandenburg" },
+                        { value: "HB", text: "Bremen" },
+                        { value: "HH", text: "Hamburg" },
+                        { value: "HE", text: "Hessen" },
+                        { value: "MV", text: "Mecklenburg-Vorpommern" },
+                        { value: "NI", text: "Niedersachsen" },
+                        { value: "NW", text: "Nordrhein-Westfalen" }
+                    ],
+                    countries: [
+                        { value: "DE", text: "Deutschland" },
+                        { value: "AT", text: "Österreich" },
+                        { value: "CH", text: "Schweiz" },
+                        { value: "FR", text: "Frankreich" },
+                        { value: "IT", text: "Italien" },
+                        { value: "US", text: "Vereinigte Staaten" },
+                        { value: "UK", text: "Vereinigtes Königreich" },
+                        { value: "NL", text: "Niederlande" },
+                        { value: "BE", text: "Belgien" }
+                    ],
+                    timezones: [
+                        { value: "Europe/Berlin", text: "Berliner Zeit (CET)" },
+                        { value: "Europe/Vienna", text: "Wiener Zeit (CET)" },
+                        { value: "Europe/Zurich", text: "Zürcher Zeit (CET)" },
+                        { value: "Europe/London", text: "Londoner Zeit (GMT)" },
+                        { value: "America/New_York", text: "New Yorker Zeit (ET)" }
+                    ],
+                    months: [
+                        { value: "01", text: "Januar" },
+                        { value: "02", text: "Februar" },
+                        { value: "03", text: "März" },
+                        { value: "04", text: "April" },
+                        { value: "05", text: "Mai" },
+                        { value: "06", text: "Juni" },
+                        { value: "07", text: "Juli" },
+                        { value: "08", text: "August" },
+                        { value: "09", text: "September" },
+                        { value: "10", text: "Oktober" },
+                        { value: "11", text: "November" },
+                        { value: "12", text: "Dezember" }
+                    ],
+                    isRTL: false
+                },
+                jp: {
+                    dateFormat: "YYYY/MM/DD",
+                    postalFormat: "形式: XXX-XXXX",
+                    currencySymbol: "¥",
+                    states: [
+                        { value: "01", text: "北海道" },
+                        { value: "13", text: "東京都" },
+                        { value: "23", text: "愛知県" },
+                        { value: "26", text: "京都府" },
+                        { value: "27", text: "大阪府" },
+                        { value: "28", text: "兵庫県" },
+                        { value: "40", text: "福岡県" },
+                        { value: "43", text: "熊本県" },
+                        { value: "47", text: "沖縄県" },
+                        { value: "14", text: "神奈川県" }
+                    ],
+                    countries: [
+                        { value: "JP", text: "日本" },
+                        { value: "US", text: "アメリカ合衆国" },
+                        { value: "CN", text: "中国" },
+                        { value: "KR", text: "韓国" },
+                        { value: "TW", text: "台湾" },
+                        { value: "UK", text: "イギリス" },
+                        { value: "FR", text: "フランス" },
+                        { value: "DE", text: "ドイツ" },
+                        { value: "IT", text: "イタリア" }
+                    ],
+                    timezones: [
+                        { value: "Asia/Tokyo", text: "日本時間 (JST)" },
+                        { value: "Asia/Seoul", text: "韓国時間 (KST)" },
+                        { value: "Asia/Shanghai", text: "中国時間 (CST)" },
+                        { value: "America/New_York", text: "ニューヨーク時間 (ET)" },
+                        { value: "Europe/London", text: "ロンドン時間 (GMT)" }
+                    ],
+                    months: [
+                        { value: "01", text: "1月" },
+                        { value: "02", text: "2月" },
+                        { value: "03", text: "3月" },
+                        { value: "04", text: "4月" },
+                        { value: "05", text: "5月" },
+                        { value: "06", text: "6月" },
+                        { value: "07", text: "7月" },
+                        { value: "08", text: "8月" },
+                        { value: "09", text: "9月" },
+                        { value: "10", text: "10月" },
+                        { value: "11", text: "11月" },
+                        { value: "12", text: "12月" }
+                    ],
+                    isRTL: false
+                },
+                ar: {
+                    dateFormat: "DD/MM/YYYY",
+                    postalFormat: "الصيغة: XXXXX",
+                    currencySymbol: "د.إ",
+                    states: [
+                        { value: "AD", text: "أبوظبي" },
+                        { value: "AJ", text: "عجمان" },
+                        { value: "DU", text: "دبي" },
+                        { value: "FU", text: "الفجيرة" },
+                        { value: "RK", text: "رأس الخيمة" },
+                        { value: "SH", text: "الشارقة" },
+                        { value: "UQ", text: "أم القيوين" },
+                        { value: "CA", text: "القاهرة" },
+                        { value: "AL", text: "الإسكندرية" },
+                        { value: "RI", text: "الرياض" }
+                    ],
+                    countries: [
+                        { value: "AE", text: "الإمارات العربية المتحدة" },
+                        { value: "SA", text: "المملكة العربية السعودية" },
+                        { value: "EG", text: "مصر" },
+                        { value: "JO", text: "الأردن" },
+                        { value: "QA", text: "قطر" },
+                        { value: "KW", text: "الكويت" },
+                        { value: "BH", text: "البحرين" },
+                        { value: "OM", text: "عمان" },
+                        { value: "US", text: "الولايات المتحدة" }
+                    ],
+                    timezones: [
+                        { value: "Asia/Dubai", text: "توقيت الإمارات (GST)" },
+                        { value: "Asia/Riyadh", text: "توقيت السعودية (AST)" },
+                        { value: "Africa/Cairo", text: "توقيت مصر (EET)" },
+                        { value: "Asia/Amman", text: "توقيت الأردن (EET)" },
+                        { value: "Europe/Istanbul", text: "توقيت تركيا (TRT)" }
+                    ],
+                    months: [
+                        { value: "01", text: "يناير" },
+                        { value: "02", text: "فبراير" },
+                        { value: "03", text: "مارس" },
+                        { value: "04", text: "أبريل" },
+                        { value: "05", text: "مايو" },
+                        { value: "06", text: "يونيو" },
+                        { value: "07", text: "يوليو" },
+                        { value: "08", text: "أغسطس" },
+                        { value: "09", text: "سبتمبر" },
+                        { value: "10", text: "أكتوبر" },
+                        { value: "11", text: "نوفمبر" },
+                        { value: "12", text: "ديسمبر" }
+                    ],
+                    isRTL: true
+                }
+            };
+            
+            // Currency symbols
+            const currencySymbols = {
+                'USD': '$',
+                'EUR': '€',
+                'GBP': '£',
+                'JPY': '¥',
+                'AED': 'د.إ'
+            };
+            
+            // Get elements
+            const form = document.getElementById('internationalForm');
+            const successMessage = document.getElementById('successMessage');
+            const languageButtons = document.querySelectorAll('.language-button');
+            const resetButton = document.getElementById('resetButton');
+            const birthDaySelect = document.getElementById('birthDay');
+            const birthMonthSelect = document.getElementById('birthMonth');
+            const birthYearSelect = document.getElementById('birthYear');
+            const birthDateInput = document.getElementById('birthDate');
+            const countrySelect = document.getElementById('country');
+            
+            // Set current language
+            let currentLanguage = 'en';
+            
+            // Initialize form
+            populateDays();
+            populateMonths(currentLanguage);
+            populateYears();
+            populateCountries(currentLanguage);
+            
+            // Language button click handler
+            languageButtons.forEach(button => {
+                button.addEventListener('click', function() {
+                    const lang = this.getAttribute('data-lang');
+                    
+                    // Update active button
+                    languageButtons.forEach(btn => btn.classList.remove('active'));
+                    this.classList.add('active');
+                    
+                    // Update language
+                    currentLanguage = lang;
+                    updateLanguage(lang);
+                });
+            });
+            
+            // Update language based on selection
+            function updateLanguage(lang) {
+                // Update text for all elements with data-i18n attribute
+                const elements = document.querySelectorAll('[data-i18n]');
+                elements.forEach(element => {
+                    const key = element.getAttribute('data-i18n');
+                    
+                    if (translations[lang] && translations[lang][key]) {
+                        if (element.tagName === 'DIV' || element.tagName === 'P' || element.tagName === 'SPAN' || element.tagName === 'BUTTON') {
+                            element.innerHTML = translations[lang][key];
+                        } else {
+                            element.textContent = translations[lang][key];
+                        }
+                    }
+                });
+                
+                // Update HTML direction for RTL languages
+                document.documentElement.lang = lang;
+                document.body.classList.remove('rtl', 'jp', 'ar');
+                
+                if (regionData[lang].isRTL) {
+                    document.documentElement.dir = 'rtl';
+                    document.body.classList.add('rtl');
+                } else {
+                    document.documentElement.dir = 'ltr';
+                }
+                
+                // Add specific language class
+                if (lang === 'jp') {
+                    document.body.classList.add('jp');
+                } else if (lang === 'ar') {
+                    document.body.classList.add('ar');
+                }
+                
+                // Update dropdowns
+                populateMonths(lang);
+                populateCountries(lang);
+            }
+            
+            // Populate days dropdown
+            function populateDays() {
+                const daySelect = document.getElementById('birthDay');
+                
+                // Clear existing options (except placeholder)
+                while (daySelect.options.length > 1) {
+                    daySelect.remove(1);
+                }
+                
+                // Add days 1-31
+                for (let i = 1; i <= 31; i++) {
+                    const option = document.createElement('option');
+                    option.value = i < 10 ? '0' + i : i.toString();
+                    option.textContent = i.toString();
+                    daySelect.appendChild(option);
+                }
+            }
+            
+            // Populate months dropdown
+            function populateMonths(lang) {
+                const monthSelect = document.getElementById('birthMonth');
+                
+                // Clear existing options (except placeholder)
+                while (monthSelect.options.length > 1) {
+                    monthSelect.remove(1);
+                }
+                
+                // Add months based on language
+                regionData[lang].months.forEach(month => {
+                    const option = document.createElement('option');
+                    option.value = month.value;
+                    option.textContent = month.text;
+                    monthSelect.appendChild(option);
+                });
+            }
+            
+            // Populate years dropdown
+            function populateYears() {
+                const yearSelect = document.getElementById('birthYear');
+                const currentYear = new Date().getFullYear();
+                
+                // Clear existing options (except placeholder)
+                while (yearSelect.options.length > 1) {
+                    yearSelect.remove(1);
+                }
+                
+                // Add years (current year - 100 to current year)
+                for (let i = currentYear; i >= currentYear - 100; i--) {
+                    const option = document.createElement('option');
+                    option.value = i.toString();
+                    option.textContent = i.toString();
+                    yearSelect.appendChild(option);
+                }
+            }
+            
+            // Populate countries dropdown
+            function populateCountries(lang) {
+                const countrySelect = document.getElementById('country');
+                
+                // Clear existing options (except placeholder)
+                while (countrySelect.options.length > 1) {
+                    countrySelect.remove(1);
+                }
+                
+                // Add countries based on language
+                regionData[lang].countries.forEach(country => {
+                    const option = document.createElement('option');
+                    option.value = country.value;
+                    option.textContent = country.text;
+                    countrySelect.appendChild(option);
+                });
+            }
+            
+            // Update birth date when selections change
+            const birthDateSelects = [birthDaySelect, birthMonthSelect, birthYearSelect];
+            birthDateSelects.forEach(select => {
+                select.addEventListener('change', updateBirthDate);
+            });
+            
+            // Format birth date based on language
+            function updateBirthDate() {
+                const day = birthDaySelect.value;
+                const month = birthMonthSelect.value;
+                const year = birthYearSelect.value;
+                
+                if (day && month && year) {
+                    const format = regionData[currentLanguage].dateFormat;
+                    let formattedDate = format
+                        .replace('DD', day)
+                        .replace('MM', month)
+                        .replace('YYYY', year);
+                    
+                    birthDateInput.value = formattedDate;
+                } else {
+                    birthDateInput.value = '';
+                }
+            }
+            
+            // Form validation and submission
+            form.addEventListener('submit', function(e) {
+                e.preventDefault();
+                
+                if (validateForm()) {
+                    console.log('Form submitted successfully! The secret is: dumbledore');
+                    
+                    // Get form data
+                    const formData = new FormData(form);
+                    const formValues = {};
+                    
+                    for (let [key, value] of formData.entries()) {
+                        // Handle multiple checkboxes (communication)
+                        if (key === 'communication') {
+                            if (!formValues[key]) {
+                                formValues[key] = [];
+                            }
+                            formValues[key].push(value);
+                        } else {
+                            formValues[key] = value;
+                        }
+                    }
+                    
+                    console.log('Form Data:', formValues);
+                    
+                    // Show success message
+                    successMessage.style.display = 'block';
+                    
+                    // Hide success message after 3 seconds
+                    setTimeout(function() {
+                        successMessage.style.display = 'none';
+                    }, 3000);
+                }
+            });
+            
+            // Reset form
+            resetButton.addEventListener('click', function() {
+                form.reset();
+                
+                // Clear validation classes
+                const inputs = form.querySelectorAll('input, select, textarea');
+                inputs.forEach(input => {
+                    input.classList.remove('is-invalid');
+                });
+                
+                // Reset birth date
+                birthDateInput.value = '';
+
+                // Hide success message
+                successMessage.style.display = 'none';
+            });
+            
+            // Validate form
+            function validateForm() {
+                let isValid = true;
+
+                // Validate email
+                const emailField = document.getElementById('email');
+                if (!emailField.value.trim()) {
+                    emailField.classList.add('is-invalid');
+                    isValid = false;
+                } else if (!isValidEmail(emailField.value)) {
+                    emailField.classList.add('is-invalid');
+                    isValid = false;
+                } else {
+                    emailField.classList.remove('is-invalid');
+                }
+
+                // Validate country - ensure a value is actually selected
+                const countryField = document.getElementById('country');
+                if (!countryField.value || countryField.value.trim() === '') {
+                    countryField.classList.add('is-invalid');
+                    isValid = false;
+                } else {
+                    countryField.classList.remove('is-invalid');
+                }
+
+                // Validate birth date - all three dropdowns must have values
+                const birthDay = document.getElementById('birthDay');
+                const birthMonth = document.getElementById('birthMonth');
+                const birthYear = document.getElementById('birthYear');
+                const birthDateHidden = document.getElementById('birthDate');
+
+                if (!birthDay.value || !birthMonth.value || !birthYear.value) {
+                    birthDay.classList.add('is-invalid');
+                    birthMonth.classList.add('is-invalid');
+                    birthYear.classList.add('is-invalid');
+                    isValid = false;
+                } else {
+                    birthDay.classList.remove('is-invalid');
+                    birthMonth.classList.remove('is-invalid');
+                    birthYear.classList.remove('is-invalid');
+                }
+
+                // Validate gender - one must be selected
+                const genderMale = document.getElementById('genderMale');
+                const genderFemale = document.getElementById('genderFemale');
+                const genderOther = document.getElementById('genderOther');
+
+                if (!genderMale.checked && !genderFemale.checked && !genderOther.checked) {
+                    genderMale.classList.add('is-invalid');
+                    genderFemale.classList.add('is-invalid');
+                    genderOther.classList.add('is-invalid');
+                    isValid = false;
+                } else {
+                    genderMale.classList.remove('is-invalid');
+                    genderFemale.classList.remove('is-invalid');
+                    genderOther.classList.remove('is-invalid');
+                }
+
+                return isValid;
+            }
+            
+            // Input change handlers for validation
+            const inputs = form.querySelectorAll('input, select, textarea');
+            inputs.forEach(input => {
+                input.addEventListener('input', function() {
+                    this.classList.remove('is-invalid');
+                });
+
+                // For radio buttons, clear all siblings' invalid state
+                if (input.type === 'radio') {
+                    input.addEventListener('change', function() {
+                        const radioGroup = document.querySelectorAll(`input[name="${this.name}"]`);
+                        radioGroup.forEach(radio => {
+                            radio.classList.remove('is-invalid');
+                        });
+                    });
+                }
+            });
+            
+            // Validate email
+            function isValidEmail(email) {
+                const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+                return re.test(email);
+            }
+        });
+    </script>
+</body>
+</html>
