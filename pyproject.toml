@@ -29,6 +29,7 @@ dependencies = [
     "numpy>=2.4.0",
     "openai>=1.99.5,<2.0.0",
     "browser-use==0.9.5",
+    "pandas>=2.2.0",
 ]
 
 [project.optional-dependencies]
