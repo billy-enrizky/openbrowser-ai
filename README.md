@@ -1,10 +1,12 @@
 # OpenBrowser
 
 Automating Walmart Product Scraping:
+
 https://github.com/user-attachments/assets/ae5d74ce-0ac6-46b0-b02b-ff5518b4b20d
 
 
 OpenBrowserAI Automatic Flight Booking:
+
 https://github.com/user-attachments/assets/632128f6-3d09-497f-9e7d-e29b9cb65e0f
 
 
