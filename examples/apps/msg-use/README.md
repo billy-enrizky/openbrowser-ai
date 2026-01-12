@@ -5,8 +5,6 @@ AI-powered message scheduler using browser agents and Gemini. Schedule personali
 [!WARNING]
 This demo requires openbrowser v0.7.7+.
 
-https://openbrowser.github.io/media/demos/msg_use.mp4
-
 ## Features
 
 1. Agent logs into WhatsApp Web automatically

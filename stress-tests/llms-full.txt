@@ -202,7 +202,7 @@ OpenBrowser is a framework for intelligent browser automation. It combines direc
 
 ## Documentation
 
-**Full documentation**: [openbrowser.mintlify.app](https://openbrowser.mintlify.app)
+**Full documentation**: [docs.openbrowser.me](https://docs.openbrowser.me)
 
 ## Key Features
 
@@ -475,7 +475,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - **Email**: billy.suharno@gmail.com
 - **GitHub**: [@billy-enrizky](https://github.com/billy-enrizky)
 - **Repository**: [github.com/billy-enrizky/openbrowser-ai](https://github.com/billy-enrizky/openbrowser-ai)
-- **Documentation**: [openbrowser.mintlify.app](https://openbrowser.mintlify.app)
+- **Documentation**: [docs.openbrowser.me](https://docs.openbrowser.me)
 
 ---
 
