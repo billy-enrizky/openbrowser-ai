@@ -36,7 +36,6 @@ def save_models(params: Models):
 			f.write(f'{model.title} ({model.url}): {model.likes} likes, {model.license}\n')
 
 
-# video: https://preview.screen.studio/share/EtOhIk0P
 async def main():
 	task = 'Look up models with a license of cc-by-sa-4.0 and sort by most likes on Hugging face, save top 5 to file.'
 

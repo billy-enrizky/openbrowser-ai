@@ -25,7 +25,7 @@ from openbrowser.llm.openai.chat import ChatOpenAI
 async def main():
 	# Example task to demonstrate history saving and rerunning
 	history_file = Path('agent_history.json')
-	task = 'Go to https://openbrowser.github.io/stress-tests/challenges/ember-form.html and fill the form with example data.'
+	task = 'Go to https://billy-enrizky.github.io/openbrowser-ai/challenges/ember-form.html and fill the form with example data.'
 	llm = ChatOpenAI(model='gpt-4.1-mini')
 
 	agent = Agent(task=task, llm=llm, max_actions_per_step=1)

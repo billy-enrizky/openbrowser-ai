@@ -2,9 +2,9 @@
 
 A collection of particularly difficult test scenarios for evaluating browser automation agents.
 
-> - Guided Evaluation Challenge: https://openbrowser.github.io/stress-tests/challenge.html
-> - All the Form Libraries: https://openbrowser.github.io/stress-tests/index.html
-> - Challenges Index: https://openbrowser.github.io/stress-tests/challenges-index.html
+> - Guided Evaluation Challenge: https://billy-enrizky.github.io/openbrowser-ai/challenge.html
+> - All the Form Libraries: https://billy-enrizky.github.io/openbrowser-ai/index.html
+> - Challenges Index: https://billy-enrizky.github.io/openbrowser-ai/challenges-index.html
 
 ## Included Form Libraries
 
@@ -48,7 +48,7 @@ Each form includes:
 
 ## Usage
 
-Visit https://openbrowser.github.io/stress-tests/ or run locally.
+Visit https://billy-enrizky.github.io/openbrowser-ai/ or run locally.
 
 ## License
 
