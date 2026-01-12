@@ -29,7 +29,7 @@ def check_is_task_stopped():
 
 
 task = """
-Go to https://openbrowser.github.io/stress-tests/challenges/wufoo-style-form.html and complete the Wufoo-style form by filling in all required fields and submitting.
+Go to https://billy-enrizky.github.io/openbrowser-ai/challenges/wufoo-style-form.html and complete the Wufoo-style form by filling in all required fields and submitting.
 """
 
 agent = Agent(task=task, llm=llm, flash_mode=True, register_should_stop_callback=check_is_task_stopped(), max_actions_per_step=1)

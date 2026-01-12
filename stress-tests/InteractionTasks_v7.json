@@ -2,280 +2,280 @@
     {
         "task_id": "1",
         "name": "Radio Selection",
-        "confirmed_task": "Go to the URL and select one of the radio buttons to complete the challenge. https://browser-use.github.io/stress-tests/challenges/radio-selection.html",
+        "confirmed_task": "Go to the URL and select one of the radio buttons to complete the challenge. https://billy-enrizky.github.io/openbrowser-ai/challenges/radio-selection.html",
         "category": "CORE_INTERACTION",
         "ground_truth": "successfully"
     },
     {
         "task_id": "2",
         "name": "Checkbox Check",
-        "confirmed_task": "Go to the URL and check all the required checkboxes to complete the challenge. https://browser-use.github.io/stress-tests/challenges/checkbox-check.html",
+        "confirmed_task": "Go to the URL and check all the required checkboxes to complete the challenge. https://billy-enrizky.github.io/openbrowser-ai/challenges/checkbox-check.html",
         "category": "CORE_INTERACTION",
         "ground_truth": "successfully"
     },
     {
         "task_id": "3",
         "name": "Search Input",
-        "confirmed_task": "Go to the URL and type 'squash' into the search box and press enter to complete the task. https://browser-use.github.io/stress-tests/challenges/search-squash.html",
+        "confirmed_task": "Go to the URL and type 'squash' into the search box and press enter to complete the task. https://billy-enrizky.github.io/openbrowser-ai/challenges/search-squash.html",
         "category": "CORE_INTERACTION",
         "ground_truth": "successfully"
     },
     {
         "task_id": "4",
         "name": "Date Time Input",
-        "confirmed_task": "Go to the URL and fill out the date and time inputs to complete the challenge. https://browser-use.github.io/stress-tests/challenges/date-time-input.html",
+        "confirmed_task": "Go to the URL and fill out the date and time inputs to complete the challenge. https://billy-enrizky.github.io/openbrowser-ai/challenges/date-time-input.html",
         "category": "CORE_INTERACTION",
         "ground_truth": "successfully"
     },
     {
         "task_id": "5",
         "name": "Slider Drag",
-        "confirmed_task": "Go to the URL and drag the slider completely to the right to complete the task. https://browser-use.github.io/stress-tests/challenges/slider-drag.html",
+        "confirmed_task": "Go to the URL and drag the slider completely to the right to complete the task. https://billy-enrizky.github.io/openbrowser-ai/challenges/slider-drag.html",
         "category": "CORE_INTERACTION",
         "ground_truth": "successfully"
     },
     {
         "task_id": "6",
         "name": "Hover Element",
-        "confirmed_task": "Go to the URL and hover over the element to complete the challenge. https://browser-use.github.io/stress-tests/challenges/hover-element.html",
+        "confirmed_task": "Go to the URL and hover over the element to complete the challenge. https://billy-enrizky.github.io/openbrowser-ai/challenges/hover-element.html",
         "category": "CORE_INTERACTION",
         "ground_truth": "successfully"
     },
     {
         "task_id": "7",
         "name": "Canvas CAPTCHA",
-        "confirmed_task": "Go to the URL and read the text from the canvas CAPTCHA and enter it to complete the task. https://browser-use.github.io/stress-tests/challenges/canvas-captcha.html",
+        "confirmed_task": "Go to the URL and read the text from the canvas CAPTCHA and enter it to complete the task. https://billy-enrizky.github.io/openbrowser-ai/challenges/canvas-captcha.html",
         "category": "CORE_INTERACTION",
         "ground_truth": "successfully"
     },
     {
         "task_id": "8",
         "name": "Scroll and Accept",
-        "confirmed_task": "Go to the URL and scroll to the bottom of the content and click the Accept button to complete the challenge. https://browser-use.github.io/stress-tests/challenges/scroll-accept.html",
+        "confirmed_task": "Go to the URL and scroll to the bottom of the content and click the Accept button to complete the challenge. https://billy-enrizky.github.io/openbrowser-ai/challenges/scroll-accept.html",
         "category": "CORE_INTERACTION",
         "ground_truth": "successfully"
     },
     {
         "task_id": "9",
         "name": "Arrow Key Navigation",
-        "confirmed_task": "Go to the URL and use the arrow keys to navigate to complete the task. https://browser-use.github.io/stress-tests/challenges/arrow-key-presses.html",
+        "confirmed_task": "Go to the URL and use the arrow keys to navigate to complete the task. https://billy-enrizky.github.io/openbrowser-ai/challenges/arrow-key-presses.html",
         "category": "CORE_INTERACTION",
         "ground_truth": "successfully"
     },
     {
         "task_id": "10",
         "name": "File Upload",
-        "confirmed_task": "Go to the URL and upload a file using the file input element to complete the challenge. https://browser-use.github.io/stress-tests/challenges/file-upload.html",
+        "confirmed_task": "Go to the URL and upload a file using the file input element to complete the challenge. https://billy-enrizky.github.io/openbrowser-ai/challenges/file-upload.html",
         "category": "CORE_INTERACTION",
         "ground_truth": "successfully"
     },
     {
         "task_id": "11",
         "name": "Expand Details",
-        "confirmed_task": "Go to the URL and click to expand the HTML details element to complete the challenge. https://browser-use.github.io/stress-tests/challenges/expand-details.html",
+        "confirmed_task": "Go to the URL and click to expand the HTML details element to complete the challenge. https://billy-enrizky.github.io/openbrowser-ai/challenges/expand-details.html",
         "category": "CORE_INTERACTION",
         "ground_truth": "successfully"
     },
     {
         "task_id": "12",
         "name": "Dropdown Selections",
-        "confirmed_task": "Go to the URL and select options from the dropdown menus to complete the task. https://browser-use.github.io/stress-tests/challenges/dropdown-selections.html",
+        "confirmed_task": "Go to the URL and select options from the dropdown menus to complete the task. https://billy-enrizky.github.io/openbrowser-ai/challenges/dropdown-selections.html",
         "category": "CORE_INTERACTION",
         "ground_truth": "successfully"
     },
     {
         "task_id": "13",
         "name": "Contenteditable Div",
-        "confirmed_task": "Go to the URL and type text into the contenteditable div element to complete the challenge. https://browser-use.github.io/stress-tests/challenges/contenteditable-div.html",
+        "confirmed_task": "Go to the URL and type text into the contenteditable div element to complete the challenge. https://billy-enrizky.github.io/openbrowser-ai/challenges/contenteditable-div.html",
         "category": "CORE_INTERACTION",
         "ground_truth": "successfully"
     },
     {
         "task_id": "14",
         "name": "Vanilla Form",
-        "confirmed_task": "Go to the URL and complete the vanilla HTML form by filling in all required fields and submitting. If needed, create a file. Validate that the form was filled and submitted successfully. https://browser-use.github.io/stress-tests/challenges/vanilla-form.html",
+        "confirmed_task": "Go to the URL and complete the vanilla HTML form by filling in all required fields and submitting. If needed, create a file. Validate that the form was filled and submitted successfully. https://billy-enrizky.github.io/openbrowser-ai/challenges/vanilla-form.html",
         "category": "FRAMEWORK_FORM",
         "ground_truth": "dumbledore"
     },
     {
         "task_id": "15",
         "name": "jQuery Bootstrap Form",
-        "confirmed_task": "Go to the URL and complete the jQuery Bootstrap form by filling in all required fields and submitting. If needed, create a file. Validate that the form was filled and submitted successfully. https://browser-use.github.io/stress-tests/challenges/jquery-bootstrap-form.html",
+        "confirmed_task": "Go to the URL and complete the jQuery Bootstrap form by filling in all required fields and submitting. If needed, create a file. Validate that the form was filled and submitted successfully. https://billy-enrizky.github.io/openbrowser-ai/challenges/jquery-bootstrap-form.html",
         "category": "FRAMEWORK_FORM",
         "ground_truth": "dumbledore"
     },
     {
         "task_id": "16",
         "name": "AngularJS Form",
-        "confirmed_task": "Go to the URL and complete the AngularJS form by filling in all required fields and submitting. If needed, create a file. Validate that the form was filled and submitted successfully. https://browser-use.github.io/stress-tests/challenges/angularjs-form.html",
+        "confirmed_task": "Go to the URL and complete the AngularJS form by filling in all required fields and submitting. If needed, create a file. Validate that the form was filled and submitted successfully. https://billy-enrizky.github.io/openbrowser-ai/challenges/angularjs-form.html",
         "category": "FRAMEWORK_FORM",
         "ground_truth": "dumbledore"
     },
     {
         "task_id": "17",
         "name": "Angular Form",
-        "confirmed_task": "Go to the URL and complete the Angular form by filling in all required fields and submitting. If needed, create a file. Validate that the form was filled and submitted successfully. https://browser-use.github.io/stress-tests/challenges/angular-form.html",
+        "confirmed_task": "Go to the URL and complete the Angular form by filling in all required fields and submitting. If needed, create a file. Validate that the form was filled and submitted successfully. https://billy-enrizky.github.io/openbrowser-ai/challenges/angular-form.html",
         "category": "FRAMEWORK_FORM",
         "ground_truth": "dumbledore"
     },
     {
         "task_id": "18",
         "name": "React Hook Form",
-        "confirmed_task": "Go to the URL and complete the React Hook Form by filling in all required fields and submitting. If needed, create a file. Validate that the form was filled and submitted successfully. https://browser-use.github.io/stress-tests/challenges/react-hook-form.html",
+        "confirmed_task": "Go to the URL and complete the React Hook Form by filling in all required fields and submitting. If needed, create a file. Validate that the form was filled and submitted successfully. https://billy-enrizky.github.io/openbrowser-ai/challenges/react-hook-form.html",
         "category": "FRAMEWORK_FORM",
         "ground_truth": "dumbledore"
     },
     {
         "task_id": "19",
         "name": "Formik Form",
-        "confirmed_task": "Go to the URL and complete the Formik form by filling in all required fields and submitting. If needed, create a file. Validate that the form was filled and submitted successfully. https://browser-use.github.io/stress-tests/challenges/formik-form.html",
+        "confirmed_task": "Go to the URL and complete the Formik form by filling in all required fields and submitting. If needed, create a file. Validate that the form was filled and submitted successfully. https://billy-enrizky.github.io/openbrowser-ai/challenges/formik-form.html",
         "category": "FRAMEWORK_FORM",
         "ground_truth": "dumbledore"
     },
     {
         "task_id": "20",
         "name": "Svelte Form",
-        "confirmed_task": "Go to the URL and complete the Svelte form by filling in all required fields and submitting. If needed, create a file. Validate that the form was filled and submitted successfully. https://browser-use.github.io/stress-tests/challenges/svelte-form.html",
+        "confirmed_task": "Go to the URL and complete the Svelte form by filling in all required fields and submitting. If needed, create a file. Validate that the form was filled and submitted successfully. https://billy-enrizky.github.io/openbrowser-ai/challenges/svelte-form.html",
         "category": "FRAMEWORK_FORM",
         "ground_truth": "dumbledore"
     },
     {
         "task_id": "21",
         "name": "Ember Form",
-        "confirmed_task": "Go to the URL and complete the Ember form by filling in all required fields and submitting. If needed, create a file. Validate that the form was filled and submitted successfully. https://browser-use.github.io/stress-tests/challenges/ember-form.html",
+        "confirmed_task": "Go to the URL and complete the Ember form by filling in all required fields and submitting. If needed, create a file. Validate that the form was filled and submitted successfully. https://billy-enrizky.github.io/openbrowser-ai/challenges/ember-form.html",
         "category": "FRAMEWORK_FORM",
         "ground_truth": "dumbledore"
     },
     {
         "task_id": "22",
         "name": "Vue Form",
-        "confirmed_task": "Go to the URL and complete the Vue form by filling in all required fields and submitting. If needed, create a file. Validate that the form was filled and submitted successfully. https://browser-use.github.io/stress-tests/challenges/vue-form.html",
+        "confirmed_task": "Go to the URL and complete the Vue form by filling in all required fields and submitting. If needed, create a file. Validate that the form was filled and submitted successfully. https://billy-enrizky.github.io/openbrowser-ai/challenges/vue-form.html",
         "category": "FRAMEWORK_FORM",
         "ground_truth": "dumbledore"
     },
     {
         "task_id": "23",
         "name": "Material UI Form",
-        "confirmed_task": "Go to the URL and complete the Material-UI form by filling in all required fields and submitting. If needed, create a file. Validate that the form was filled and submitted successfully. https://browser-use.github.io/stress-tests/challenges/material-ui-form.html",
+        "confirmed_task": "Go to the URL and complete the Material-UI form by filling in all required fields and submitting. If needed, create a file. Validate that the form was filled and submitted successfully. https://billy-enrizky.github.io/openbrowser-ai/challenges/material-ui-form.html",
         "category": "FRAMEWORK_FORM",
         "ground_truth": "dumbledore"
     },
     {
         "task_id": "24",
         "name": "Wufoo Style Form",
-        "confirmed_task": "Go to the URL and complete the Wufoo-style form by filling in all required fields and submitting. If needed, create a file. Validate that the form was filled and submitted successfully. https://browser-use.github.io/stress-tests/challenges/wufoo-style-form.html",
+        "confirmed_task": "Go to the URL and complete the Wufoo-style form by filling in all required fields and submitting. If needed, create a file. Validate that the form was filled and submitted successfully. https://billy-enrizky.github.io/openbrowser-ai/challenges/wufoo-style-form.html",
         "category": "FRAMEWORK_FORM",
         "ground_truth": "dumbledore"
     },
     {
         "task_id": "25",
         "name": "Shadow DOM Form",
-        "confirmed_task": "Go to the URL and complete the Shadow DOM form by filling in all required fields and submitting. If needed, create a file. Validate that the form was filled and submitted successfully. https://browser-use.github.io/stress-tests/challenges/shadow-dom-form.html",
+        "confirmed_task": "Go to the URL and complete the Shadow DOM form by filling in all required fields and submitting. If needed, create a file. Validate that the form was filled and submitted successfully. https://billy-enrizky.github.io/openbrowser-ai/challenges/shadow-dom-form.html",
         "category": "FRAMEWORK_FORM",
         "ground_truth": "dumbledore"
     },
     {
         "task_id": "26",
         "name": "Dynamic Form",
-        "confirmed_task": "Go to the URL and complete the dynamic form by filling in all required fields and submitting. If needed, create a file. Validate that the form was filled and submitted successfully. https://browser-use.github.io/stress-tests/challenges/dynamic-form.html",
+        "confirmed_task": "Go to the URL and complete the dynamic form by filling in all required fields and submitting. If needed, create a file. Validate that the form was filled and submitted successfully. https://billy-enrizky.github.io/openbrowser-ai/challenges/dynamic-form.html",
         "category": "FRAMEWORK_FORM",
         "ground_truth": "dumbledore"
     },
     {
         "task_id": "27",
         "name": "Progressive Form",
-        "confirmed_task": "Go to the URL and complete the progressive multi-step form by filling in all required fields through multiple steps. If needed, create a file. Validate that the form was filled and submitted successfully. https://browser-use.github.io/stress-tests/challenges/progressive-form.html",
+        "confirmed_task": "Go to the URL and complete the progressive multi-step form by filling in all required fields through multiple steps. If needed, create a file. Validate that the form was filled and submitted successfully. https://billy-enrizky.github.io/openbrowser-ai/challenges/progressive-form.html",
         "category": "FRAMEWORK_FORM",
         "ground_truth": "dumbledore"
     },
     {
         "task_id": "28",
         "name": "React Native Web Form",
-        "confirmed_task": "Go to the URL and complete the React Native Web form by filling in all required fields and submitting. If needed, create a file. Validate that the form was filled and submitted successfully. https://browser-use.github.io/stress-tests/challenges/react-native-web-form.html",
+        "confirmed_task": "Go to the URL and complete the React Native Web form by filling in all required fields and submitting. If needed, create a file. Validate that the form was filled and submitted successfully. https://billy-enrizky.github.io/openbrowser-ai/challenges/react-native-web-form.html",
         "category": "FRAMEWORK_FORM",
         "ground_truth": "dumbledore"
     },
     {
         "task_id": "29",
         "name": "Iframe Inception Form",
-        "confirmed_task": "Go to the URL and complete the form within the nested iframe structure by filling in all required fields. If needed, create a file. Validate that the form was filled and submitted successfully. https://browser-use.github.io/stress-tests/challenges/iframe-inception-form.html",
+        "confirmed_task": "Go to the URL and complete the form within the nested iframe structure by filling in all required fields. If needed, create a file. Validate that the form was filled and submitted successfully. https://billy-enrizky.github.io/openbrowser-ai/challenges/iframe-inception-form.html",
         "category": "FRAMEWORK_FORM",
         "ground_truth": "dumbledore"
     },
     {
         "task_id": "30",
         "name": "Hidden Labels Form",
-        "confirmed_task": "Go to the URL and complete the form with hidden labels by filling in all required fields and submitting. If needed, create a file. Validate that the form was filled and submitted successfully. https://browser-use.github.io/stress-tests/challenges/hidden-labels-form.html",
+        "confirmed_task": "Go to the URL and complete the form with hidden labels by filling in all required fields and submitting. If needed, create a file. Validate that the form was filled and submitted successfully. https://billy-enrizky.github.io/openbrowser-ai/challenges/hidden-labels-form.html",
         "category": "FRAMEWORK_FORM",
         "ground_truth": "dumbledore"
     },
     {
         "task_id": "31",
         "name": "Non-Latin Form",
-        "confirmed_task": "Go to the URL and complete the form with non-Latin characters by filling in all required fields and submitting. If needed, create a file. Validate that the form was filled and submitted successfully. https://browser-use.github.io/stress-tests/challenges/non-latin-form.html",
+        "confirmed_task": "Go to the URL and complete the form with non-Latin characters by filling in all required fields and submitting. If needed, create a file. Validate that the form was filled and submitted successfully. https://billy-enrizky.github.io/openbrowser-ai/challenges/non-latin-form.html",
         "category": "FRAMEWORK_FORM",
         "ground_truth": "dumbledore"
     },
     {
         "task_id": "32",
         "name": "Contenteditable Form",
-        "confirmed_task": "Go to the URL and complete the contenteditable form by filling in all required fields and submitting. If needed, create a file. Validate that the form was filled and submitted successfully. https://browser-use.github.io/stress-tests/challenges/contenteditable-form.html",
+        "confirmed_task": "Go to the URL and complete the contenteditable form by filling in all required fields and submitting. If needed, create a file. Validate that the form was filled and submitted successfully. https://billy-enrizky.github.io/openbrowser-ai/challenges/contenteditable-form.html",
         "category": "FRAMEWORK_FORM",
         "ground_truth": "dumbledore"
     },
     {
         "task_id": "33",
         "name": "Rich Text Form",
-        "confirmed_task": "Go to the URL and complete the rich text form by filling in all required fields including the rich text editor. If needed, create a file. Validate that the form was filled and submitted successfully. https://browser-use.github.io/stress-tests/challenges/rich-text-form.html",
+        "confirmed_task": "Go to the URL and complete the rich text form by filling in all required fields including the rich text editor. If needed, create a file. Validate that the form was filled and submitted successfully. https://billy-enrizky.github.io/openbrowser-ai/challenges/rich-text-form.html",
         "category": "FRAMEWORK_FORM",
         "ground_truth": "dumbledore"
     },
     {
         "task_id": "34",
         "name": "GraphQL Form",
-        "confirmed_task": "Go to the URL and complete the GraphQL form by filling in all required fields and submitting. If needed, create a file. Validate that the form was filled and submitted successfully. https://browser-use.github.io/stress-tests/challenges/graphql-form.html",
+        "confirmed_task": "Go to the URL and complete the GraphQL form by filling in all required fields and submitting. If needed, create a file. Validate that the form was filled and submitted successfully. https://billy-enrizky.github.io/openbrowser-ai/challenges/graphql-form.html",
         "category": "FRAMEWORK_FORM",
         "ground_truth": "dumbledore"
     },
     {
         "task_id": "35",
         "name": "Table Form",
-        "confirmed_task": "Go to the URL and complete the table-based form by filling in all required fields and submitting. If needed, create a file. Validate that the form was filled and submitted successfully. https://browser-use.github.io/stress-tests/challenges/table-form.html",
+        "confirmed_task": "Go to the URL and complete the table-based form by filling in all required fields and submitting. If needed, create a file. Validate that the form was filled and submitted successfully. https://billy-enrizky.github.io/openbrowser-ai/challenges/table-form.html",
         "category": "FRAMEWORK_FORM",
         "ground_truth": "dumbledore"
     },
     {
         "task_id": "36",
         "name": "Animated Form",
-        "confirmed_task": "Go to the URL and complete the animated form by filling in all required fields and submitting. If needed, create a file. Validate that the form was filled and submitted successfully. https://browser-use.github.io/stress-tests/challenges/animated-form.html",
+        "confirmed_task": "Go to the URL and complete the animated form by filling in all required fields and submitting. If needed, create a file. Validate that the form was filled and submitted successfully. https://billy-enrizky.github.io/openbrowser-ai/challenges/animated-form.html",
         "category": "FRAMEWORK_FORM",
         "ground_truth": "dumbledore"
     },
     {
         "task_id": "37",
         "name": "Internationalization Form",
-        "confirmed_task": "Go to the URL and complete the internationalization form by filling in all required fields and submitting. If needed, create a file. Validate that the form was filled and submitted successfully. https://browser-use.github.io/stress-tests/challenges/i18n-form.html",
+        "confirmed_task": "Go to the URL and complete the internationalization form by filling in all required fields and submitting. If needed, create a file. Validate that the form was filled and submitted successfully. https://billy-enrizky.github.io/openbrowser-ai/challenges/i18n-form.html",
         "category": "FRAMEWORK_FORM",
         "ground_truth": "dumbledore"
     },
     {
         "task_id": "38",
         "name": "Iframe Inception Level 1",
-        "confirmed_task": "Go to the URL and complete the iframe inception challenge level 1. https://browser-use.github.io/stress-tests/challenges/iframe-inception-level1.html",
+        "confirmed_task": "Go to the URL and complete the iframe inception challenge level 1. https://billy-enrizky.github.io/openbrowser-ai/challenges/iframe-inception-level1.html",
         "category": "FRAMEWORK_FORM",
         "ground_truth": "successfully"
     },
     {
         "task_id": "39",
         "name": "Iframe Inception Level 2",
-        "confirmed_task": "Go to the URL and complete the iframe inception challenge level 2. https://browser-use.github.io/stress-tests/challenges/iframe-inception-level2.html",
+        "confirmed_task": "Go to the URL and complete the iframe inception challenge level 2. https://billy-enrizky.github.io/openbrowser-ai/challenges/iframe-inception-level2.html",
         "category": "FRAMEWORK_FORM",
         "ground_truth": "successfully"
     },
     {
         "task_id": "40",
         "name": "Iframe Inception Level 3",
-        "confirmed_task": "Go to the URL and complete the iframe inception challenge level 3. https://browser-use.github.io/stress-tests/challenges/iframe-inception-level3.html",
+        "confirmed_task": "Go to the URL and complete the iframe inception challenge level 3. https://billy-enrizky.github.io/openbrowser-ai/challenges/iframe-inception-level3.html",
         "category": "FRAMEWORK_FORM",
         "ground_truth": "successfully"
     }

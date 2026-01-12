@@ -14,7 +14,7 @@ agent_dir = SCRIPT_DIR / 'alphabet_earnings'
 agent_dir.mkdir(exist_ok=True)
 
 task = """
-Go to https://abc.xyz/assets/cc/27/3ada14014efbadd7a58472f1f3f4/2025q2-alphabet-earnings-release.pdf.
+Go to https://abc.xyz/investor/ and find the latest quarterly earnings report PDF.
 Read the PDF and save 3 interesting data points in "alphabet_earnings.pdf" and share it with me!
 """.strip('\n')
 

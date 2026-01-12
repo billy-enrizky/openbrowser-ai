@@ -33,15 +33,15 @@ async def test_focus_vs_all_elements():
 
 	# 10 Sample websites with various interactive elements
 	sample_websites = [
-		'https://openbrowser.github.io/stress-tests/challenges/iframe-inception-level2.html',
+		'https://billy-enrizky.github.io/openbrowser-ai/challenges/iframe-inception-level2.html',
 		'https://www.google.com/travel/flights',
 		'https://v0-simple-ui-test-site.vercel.app',
-		'https://openbrowser.github.io/stress-tests/challenges/iframe-inception-level1.html',
-		'https://openbrowser.github.io/stress-tests/challenges/angular-form.html',
+		'https://billy-enrizky.github.io/openbrowser-ai/challenges/iframe-inception-level1.html',
+		'https://billy-enrizky.github.io/openbrowser-ai/challenges/angular-form.html',
 		'https://www.google.com/travel/flights',
-		'https://www.amazon.com/s?k=laptop',
+		'https://www.ebay.com/',  # Alternative to Amazon
 		'https://github.com/trending',
-		'https://www.reddit.com',
+		'https://news.ycombinator.com',  # Alternative to Reddit
 		'https://www.ycombinator.com/companies',
 		'https://www.kayak.com/flights',
 		'https://www.booking.com',
@@ -55,7 +55,7 @@ async def test_focus_vs_all_elements():
 		'https://www.w3schools.com/html/tryit.asp?filename=tryhtml_iframe',  # Nested iframes
 		'https://semantic-ui.com/modules/dropdown.html',  # Complex dropdowns
 		'https://www.dezlearn.com/nested-iframes-example/',  # Cross-origin nested iframes
-		'https://codepen.io/towc/pen/mJzOWJ',  # Canvas elements with interactions
+		'https://jqueryui.com/draggable/',  # Interactive draggable elements (alternative to codepen)
 		'https://jqueryui.com/accordion/',  # Complex accordion/dropdown widgets
 		'https://v0-simple-landing-page-seven-xi.vercel.app/',  # Simple landing page with iframe
 		'https://www.unesco.org/en',
@@ -63,11 +63,11 @@ async def test_focus_vs_all_elements():
 
 	# Descriptions for difficult websites
 	difficult_descriptions = {
-		'https://www.w3schools.com/html/tryit.asp?filename=tryhtml_iframe': '🔸 NESTED IFRAMES: Multiple iframe layers',
-		'https://semantic-ui.com/modules/dropdown.html': '🔸 COMPLEX DROPDOWNS: Custom dropdown components',
-		'https://www.dezlearn.com/nested-iframes-example/': '🔸 CROSS-ORIGIN IFRAMES: Different domain iframes',
-		'https://codepen.io/towc/pen/mJzOWJ': '🔸 CANVAS ELEMENTS: Interactive canvas graphics',
-		'https://jqueryui.com/accordion/': '🔸 ACCORDION WIDGETS: Collapsible content sections',
+		'https://www.w3schools.com/html/tryit.asp?filename=tryhtml_iframe': 'NESTED IFRAMES: Multiple iframe layers',
+		'https://semantic-ui.com/modules/dropdown.html': 'COMPLEX DROPDOWNS: Custom dropdown components',
+		'https://www.dezlearn.com/nested-iframes-example/': 'CROSS-ORIGIN IFRAMES: Different domain iframes',
+		'https://jqueryui.com/draggable/': 'DRAGGABLE ELEMENTS: Interactive drag and drop',
+		'https://jqueryui.com/accordion/': 'ACCORDION WIDGETS: Collapsible content sections',
 	}
 
 	websites = sample_websites + difficult_websites
