@@ -46,7 +46,7 @@ async def search_web(query: str):
 	headers = {'Authorization': f'Bearer {BEARER_TOKEN}'}
 	async with httpx.AsyncClient() as client:
 		response = await client.post(
-			'https://asktessa.ai/api/search',
+			'https://api.heytessa.ai/search',
 			headers=headers,
 			json={'query': query},
 		)
