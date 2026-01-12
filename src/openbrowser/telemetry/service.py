@@ -46,7 +46,7 @@ class ProductTelemetry:
 
 	USER_ID_PATH = str(CONFIG.OPENBROWSER_CONFIG_DIR / 'device_id')
 	PROJECT_API_KEY = 'phc_F8JMNjW1i2KbGUTaW1unnDdLSPCoyc52SGRU0JecaUh'
-	HOST = 'https://eu.i.posthog.com'
+	HOST = 'https://eu.posthog.com'
 	UNKNOWN_USER_ID = 'UNKNOWN'
 
 	def __init__(self) -> None:
