@@ -1,0 +1,22 @@
+{
+  "default": {
+    "description": "Basic agent with Google Gemini",
+    "file": "simple.py"
+  },
+  "basic_search": {
+    "description": "Simple Google search example",
+    "file": "getting_started/01_basic_search.py"
+  },
+  "form_filling": {
+    "description": "Form filling automation",
+    "file": "getting_started/02_form_filling.py"
+  },
+  "data_extraction": {
+    "description": "Extract data from web pages",
+    "file": "getting_started/03_data_extraction.py"
+  },
+  "multi_step": {
+    "description": "Multi-step task automation",
+    "file": "getting_started/04_multi_step_task.py"
+  }
+}
