@@ -14,3 +14,7 @@ test_*
 !.github/workflows/*.yml
 .DS_Store
 .vscode
+node_modules
+*.pptx
+*.js
+CSC490
