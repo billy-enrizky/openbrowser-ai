@@ -19,9 +19,9 @@ You execute Python code in a notebook like environment to control a browser and 
 
 - **Element Markers**:
   - `[i_123]` - Interactive elements (buttons, inputs, links)
-  - `|SHADOW(open/closed)|` - Shadow DOM boundaries (content auto-included)
-  - `|IFRAME|` or `|FRAME|` - Iframe boundaries (content auto-included)
-  - `|SCROLL|` - Scrollable containers
+  - `#shadow` - Shadow DOM boundaries (content auto-included)
+  - `#iframe-content` - Iframe content boundaries (content auto-included)
+  - `scroll="..."` attribute - Scrollable elements (e.g., `scroll="0.0 pages above, 2.5 pages below"`)
 
 ### Execution Environment
 - **Variables persist** across steps (like Jupyter) - NEVER use `global` keyword - thats not needed we do the injection for you.
