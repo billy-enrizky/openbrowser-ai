@@ -2,11 +2,13 @@
 
 import asyncio
 import logging
+import os
 from datetime import datetime
 from typing import Any, Callable
 from uuid import uuid4
 
 from app.core.config import settings
+from app.services.vnc_service import vnc_service, VncSession, VNC_AVAILABLE
 
 logger = logging.getLogger(__name__)
 
@@ -22,12 +24,14 @@ class AgentSession:
         max_steps: int = 50,
         use_vision: bool = True,
         llm_model: str | None = None,
+        enable_vnc: bool = True,
         on_step_callback: Callable[[dict[str, Any]], None] | None = None,
         on_output_callback: Callable[[str, bool], None] | None = None,
         on_screenshot_callback: Callable[[str | None, int], None] | None = None,
         on_thinking_callback: Callable[[str], None] | None = None,
         on_error_callback: Callable[[str], None] | None = None,
         on_log_callback: Callable[[str, str, str | None, int | None], None] | None = None,
+        on_vnc_info_callback: Callable[[dict[str, Any]], None] | None = None,
     ):
         self.task_id = task_id
         self.task = task
@@ -35,6 +39,7 @@ class AgentSession:
         self.max_steps = max_steps
         self.use_vision = use_vision
         self.llm_model = llm_model
+        self.enable_vnc = enable_vnc and settings.VNC_ENABLED and VNC_AVAILABLE
         
         # Callbacks for real-time updates
         self.on_step_callback = on_step_callback
@@ -43,10 +48,12 @@ class AgentSession:
         self.on_thinking_callback = on_thinking_callback
         self.on_error_callback = on_error_callback
         self.on_log_callback = on_log_callback
+        self.on_vnc_info_callback = on_vnc_info_callback
         
         # State
         self.agent: Any = None
         self.browser_session: Any = None
+        self.vnc_session: VncSession | None = None
         self.is_running = False
         self.is_paused = False
         self.is_cancelled = False
@@ -62,6 +69,31 @@ class AgentSession:
         if self.on_log_callback:
             self.on_log_callback(level, message, source, step_number)
 
+    async def _setup_vnc(self) -> VncSession | None:
+        """Set up VNC session for browser viewing."""
+        if not self.enable_vnc:
+            return None
+        
+        try:
+            self._log("info", "Setting up VNC session for browser viewing...", "vnc")
+            vnc_session = await vnc_service.create_session(
+                task_id=self.task_id,
+                width=settings.VNC_WIDTH,
+                height=settings.VNC_HEIGHT,
+                password=settings.VNC_PASSWORD,
+            )
+            
+            # Send VNC info to frontend
+            if self.on_vnc_info_callback:
+                self.on_vnc_info_callback(vnc_session.to_dict())
+            
+            self._log("info", f"VNC session ready at {vnc_session.websocket_url}", "vnc")
+            return vnc_session
+        except Exception as e:
+            self._log("warning", f"Failed to set up VNC session: {e}. Continuing without VNC.", "vnc")
+            logger.warning(f"VNC setup failed for task {self.task_id}: {e}")
+            return None
+
     async def start(self) -> dict[str, Any]:
         """Start the agent and run the task."""
         if self.is_running:
@@ -72,22 +104,48 @@ class AgentSession:
         self._log("info", f"Starting task: {self.task[:100]}...", "agent")
         
         try:
+            # Set up VNC session first (if enabled)
+            self.vnc_session = await self._setup_vnc()
+            
             # Import openbrowser components
             from openbrowser import Agent, CodeAgent, BrowserSession, BrowserProfile
             
             self._log("info", "Initializing browser session...", "agent")
             
             # Create browser session with profile
+            # When VNC is enabled, we need headless=False and set DISPLAY
             browser_profile = BrowserProfile(
-                headless=False,
+                headless=False,  # Always headful when VNC is enabled
                 keep_alive=False,
             )
+            
+            # Set up environment for VNC display
+            browser_env = None
+            if self.vnc_session:
+                browser_env = {"DISPLAY": self.vnc_session.display}
+                self._log("info", f"Browser will use display {self.vnc_session.display}", "vnc")
+            
             self.browser_session = BrowserSession(browser_profile=browser_profile)
             
             # IMPORTANT: Start the browser session BEFORE passing to agent
             logger.info("Starting browser session...")
             self._log("info", "Starting browser session...", "browser")
-            await self.browser_session.start()
+            
+            # If VNC is enabled, set the DISPLAY environment variable before starting
+            if browser_env:
+                original_display = os.environ.get("DISPLAY")
+                os.environ["DISPLAY"] = browser_env["DISPLAY"]
+                try:
+                    await self.browser_session.start()
+                finally:
+                    # Restore original DISPLAY
+                    if original_display:
+                        os.environ["DISPLAY"] = original_display
+                    elif "DISPLAY" in os.environ:
+                        del os.environ["DISPLAY"]
+            else:
+                await self.browser_session.start()
+            
             logger.info("Browser session started successfully")
             self._log("info", "Browser session started successfully", "browser")
             
@@ -479,6 +537,10 @@ class AgentSession:
                 await self.agent.close()
             if self.browser_session:
                 await self.browser_session.kill()
+            # Clean up VNC session
+            if self.vnc_session:
+                await vnc_service.destroy_session(self.task_id)
+                self.vnc_session = None
         except Exception as e:
             logger.warning(f"Cleanup error: {e}")
 
@@ -498,6 +560,7 @@ class AgentManager:
         max_steps: int = 50,
         use_vision: bool = True,
         llm_model: str | None = None,
+        enable_vnc: bool = True,
         **callbacks,
     ) -> AgentSession:
         """Create a new agent session."""
@@ -509,6 +572,7 @@ class AgentManager:
             max_steps=max_steps,
             use_vision=use_vision,
             llm_model=llm_model,
+            enable_vnc=enable_vnc,
             **callbacks,
         )
 
@@ -520,7 +584,14 @@ class AgentManager:
         max_steps: int = 50,
         use_vision: bool = True,
         llm_model: str | None = None,
-        **callbacks,
+        enable_vnc: bool = True,
+        on_step_callback: Callable[[dict[str, Any]], None] | None = None,
+        on_output_callback: Callable[[str, bool], None] | None = None,
+        on_screenshot_callback: Callable[[str | None, int], None] | None = None,
+        on_thinking_callback: Callable[[str], None] | None = None,
+        on_error_callback: Callable[[str], None] | None = None,
+        on_log_callback: Callable[[str, str, str | None, int | None], None] | None = None,
+        on_vnc_info_callback: Callable[[dict[str, Any]], None] | None = None,
     ) -> AgentSession:
         """Create a new agent session with a specific task ID."""
         async with self._lock:
@@ -534,7 +605,14 @@ class AgentManager:
                 max_steps=max_steps,
                 use_vision=use_vision,
                 llm_model=llm_model,
-                **callbacks,
+                enable_vnc=enable_vnc,
+                on_step_callback=on_step_callback,
+                on_output_callback=on_output_callback,
+                on_screenshot_callback=on_screenshot_callback,
+                on_thinking_callback=on_thinking_callback,
+                on_error_callback=on_error_callback,
+                on_log_callback=on_log_callback,
+                on_vnc_info_callback=on_vnc_info_callback,
             )
             self.sessions[task_id] = session
             return session
