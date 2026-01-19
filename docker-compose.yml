@@ -1,0 +1,47 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    ports:
+      - "8000:8000"      # FastAPI backend
+      - "6080-6090:6080-6090"  # VNC websockify ports
+    environment:
+      - VNC_ENABLED=true
+      - VNC_WIDTH=1920
+      - VNC_HEIGHT=1080
+      - DEBUG=true
+      # Add your API keys here or use .env file
+      # - OPENAI_API_KEY=${OPENAI_API_KEY}
+      # - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      # - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+    volumes:
+      # Mount for development (optional - remove for production)
+      - ./backend/app:/app/backend/app:ro
+      - ./src:/app/src:ro
+    restart: unless-stopped
+    # Required for Xvfb to work properly
+    shm_size: '2gb'
+    # Security context for X11
+    security_opt:
+      - seccomp:unconfined
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+      - NEXT_PUBLIC_WS_URL=ws://localhost:8000/ws
+      - NEXT_PUBLIC_VNC_ENABLED=true
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+networks:
+  default:
+    name: openbrowser-network

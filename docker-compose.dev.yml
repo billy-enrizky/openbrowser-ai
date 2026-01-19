@@ -1,0 +1,33 @@
+version: '3.8'
+
+# Use this for development - runs only the backend with VNC support
+# Frontend can be run locally with `npm run dev`
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    ports:
+      - "8000:8000"      # FastAPI backend
+      - "6080-6090:6080-6090"  # VNC websockify ports
+    environment:
+      - VNC_ENABLED=true
+      - VNC_WIDTH=1920
+      - VNC_HEIGHT=1080
+      - DEBUG=true
+      - CORS_ORIGINS=["http://localhost:3000","http://127.0.0.1:3000"]
+      # Add your API keys here or use .env file
+      # - OPENAI_API_KEY=${OPENAI_API_KEY}
+      # - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      # - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+    volumes:
+      # Mount for hot-reload during development
+      - ./backend/app:/app/backend/app
+      - ./src:/app/src
+    restart: unless-stopped
+    # Required for Xvfb to work properly
+    shm_size: '2gb'
+    # Security context for X11
+    security_opt:
+      - seccomp:unconfined
