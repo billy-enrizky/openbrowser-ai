@@ -11,6 +11,9 @@ const nextConfig: NextConfig = {
   
   // Trailing slash for GitHub Pages compatibility
   trailingSlash: true,
+  
+  // Transpile react-vnc package for proper ESM support
+  transpilePackages: ["react-vnc"],
 };
 
 export default nextConfig;
