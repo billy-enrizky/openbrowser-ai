@@ -2,7 +2,7 @@
 
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { Task, Project, Message, AgentType, LogEntry } from "@/types";
+import type { Task, Project, Message, AgentType, LogEntry, VncInfo, BrowserViewerMode } from "@/types";
 
 interface AppState {
   // Sidebar
@@ -39,6 +39,15 @@ interface AppState {
   clearLogs: () => void;
   showLogs: boolean;
   setShowLogs: (show: boolean) => void;
+
+  // VNC / Browser Viewer
+  vncInfo: VncInfo | null;
+  setVncInfo: (info: VncInfo | null) => void;
+  browserViewerOpen: boolean;
+  setBrowserViewerOpen: (open: boolean) => void;
+  toggleBrowserViewer: () => void;
+  browserViewerMode: BrowserViewerMode;
+  setBrowserViewerMode: (mode: BrowserViewerMode) => void;
 
   // Settings
   agentType: AgentType;
@@ -107,6 +116,15 @@ export const useAppStore = create<AppState>()(
       showLogs: false,
       setShowLogs: (show) => set({ showLogs: show }),
 
+      // VNC / Browser Viewer
+      vncInfo: null,
+      setVncInfo: (info) => set({ vncInfo: info }),
+      browserViewerOpen: false,
+      setBrowserViewerOpen: (open) => set({ browserViewerOpen: open }),
+      toggleBrowserViewer: () => set((state) => ({ browserViewerOpen: !state.browserViewerOpen })),
+      browserViewerMode: "embedded",
+      setBrowserViewerMode: (mode) => set({ browserViewerMode: mode }),
+
       // Settings
       agentType: "code",
       setAgentType: (type) => set({ agentType: type }),
@@ -126,6 +144,7 @@ export const useAppStore = create<AppState>()(
         useVision: state.useVision,
         sidebarOpen: state.sidebarOpen,
         showLogs: state.showLogs,
+        browserViewerMode: state.browserViewerMode,
       }),
     }
   )
