@@ -137,6 +137,7 @@ class WSMessageType(str, Enum):
     CANCEL_TASK = "cancel_task"
     PAUSE_TASK = "pause_task"
     RESUME_TASK = "resume_task"
+    REQUEST_VNC = "request_vnc"  # Request VNC connection info
     
     # Server -> Client
     TASK_STARTED = "task_started"
@@ -150,6 +151,7 @@ class WSMessageType(str, Enum):
     TASK_FAILED = "task_failed"
     TASK_CANCELLED = "task_cancelled"
     LOG = "log"  # Backend terminal log messages
+    VNC_INFO = "vnc_info"  # VNC connection information
 
 
 class WSMessage(BaseModel):
@@ -218,4 +220,13 @@ class WSLogData(BaseModel):
     message: str
     source: str | None = None  # e.g., "openbrowser.code_use.service", "agent"
     step_number: int | None = None
+
+
+class WSVncInfoData(BaseModel):
+    """Data for VNC_INFO message (VNC connection details)."""
+    vnc_url: str = Field(..., description="WebSocket URL for noVNC connection")
+    password: str = Field(..., description="VNC password for authentication")
+    width: int = Field(default=1280, description="Display width in pixels")
+    height: int = Field(default=1024, description="Display height in pixels")
+    display: str | None = Field(default=None, description="X11 display string (e.g., ':99')")
 
