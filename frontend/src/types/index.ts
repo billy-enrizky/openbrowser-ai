@@ -4,6 +4,7 @@ export type WSMessageType =
   | "cancel_task"
   | "pause_task"
   | "resume_task"
+  | "request_vnc"
   | "task_started"
   | "step_update"
   | "thinking"
@@ -14,7 +15,8 @@ export type WSMessageType =
   | "task_completed"
   | "task_failed"
   | "task_cancelled"
-  | "log";  // Backend terminal log messages
+  | "log"
+  | "vnc_info";  // VNC connection information
 
 export interface WSMessage {
   type: WSMessageType;
@@ -32,6 +34,18 @@ export interface LogEntry {
   stepNumber?: number;
   timestamp: Date;
 }
+
+// VNC connection information
+export interface VncInfo {
+  vnc_url: string;
+  password: string;
+  width: number;
+  height: number;
+  display?: string;
+}
+
+// Browser viewer mode
+export type BrowserViewerMode = "embedded" | "popup";
 
 export type AgentType = "browser" | "code";
 
