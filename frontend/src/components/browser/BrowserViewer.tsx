@@ -42,6 +42,7 @@ export function BrowserViewer({ className }: BrowserViewerProps) {
 
   const containerRef = useRef<HTMLDivElement>(null);
   const vncContainerRef = useRef<HTMLDivElement>(null);
+  const isMountedRef = useRef(true);
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("disconnected");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -49,20 +50,37 @@ export function BrowserViewer({ className }: BrowserViewerProps) {
   const [panelWidth, setPanelWidth] = useState(BROWSER_VIEWER_DEFAULT_WIDTH);
   const [isResizing, setIsResizing] = useState(false);
   const [isInteractive, setIsInteractive] = useState(false);
+  const [isReconnecting, setIsReconnecting] = useState(false);
 
-  // Handle connection events
+  // Track mounted state
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
+  // Handle connection events - only update if mounted
   const handleConnect = useCallback(() => {
-    setConnectionStatus("connected");
-    setErrorMessage(null);
+    if (isMountedRef.current) {
+      setConnectionStatus("connected");
+      setErrorMessage(null);
+      setIsReconnecting(false);
+    }
   }, []);
 
   const handleDisconnect = useCallback(() => {
-    setConnectionStatus("disconnected");
-  }, []);
+    if (isMountedRef.current && !isReconnecting) {
+      setConnectionStatus("disconnected");
+    }
+  }, [isReconnecting]);
 
   const handleSecurityFailure = useCallback((e: CustomEvent<{ status: number; reason?: string }>) => {
-    setConnectionStatus("error");
-    setErrorMessage(`Security error: ${e.detail.reason || "Unknown"}`);
+    if (isMountedRef.current) {
+      setConnectionStatus("error");
+      setErrorMessage(`Security error: ${e.detail.reason || "Unknown"}`);
+      setIsReconnecting(false);
+    }
   }, []);
 
   // Force reconnection
@@ -151,9 +169,17 @@ export function BrowserViewer({ className }: BrowserViewerProps) {
     setIsFullscreen((prev) => !prev);
   }, []);
 
-  // Toggle interactive mode
+  // Toggle interactive mode - need to reconnect for viewOnly change to take effect
   const toggleInteractive = useCallback(() => {
+    setIsReconnecting(true);
+    setConnectionStatus("connecting");
     setIsInteractive((prev) => !prev);
+    // Delay key change to allow proper cleanup
+    setTimeout(() => {
+      if (isMountedRef.current) {
+        setKey((k) => k + 1);
+      }
+    }, 100);
   }, []);
 
   // Set connecting status when VNC info changes
@@ -300,10 +326,7 @@ export function BrowserViewer({ className }: BrowserViewerProps) {
           ) : (
             <div ref={vncContainerRef} className="absolute inset-0 flex items-center justify-center overflow-hidden">
               <div 
-                className={cn(
-                  "relative",
-                  !isInteractive && "pointer-events-none"
-                )}
+                className="relative"
                 style={{
                   width: "100%",
                   height: "100%",
