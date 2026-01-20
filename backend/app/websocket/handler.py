@@ -17,8 +17,10 @@ from app.models.schemas import (
     WSStepUpdateData,
     WSTaskCompletedData,
     WSLogData,
+    WSVncInfoData,
 )
 from app.services.agent_service import agent_manager
+from app.services.vnc_service import vnc_service
 
 logger = logging.getLogger(__name__)
 
@@ -132,6 +134,8 @@ async def handle_websocket(websocket: WebSocket, client_id: str):
                 await handle_pause_task(client_id, message)
             elif message.type == WSMessageType.RESUME_TASK:
                 await handle_resume_task(client_id, message)
+            elif message.type == WSMessageType.REQUEST_VNC:
+                await handle_request_vnc(client_id, message)
             else:
                 logger.warning(f"Unknown message type: {message.type}")
                 
@@ -247,6 +251,19 @@ async def handle_start_task(client_id: str, message: WSMessage):
                 )
             )
         
+        def on_vnc_info(vnc_data: dict[str, Any]):
+            """Send VNC connection info to frontend."""
+            asyncio.create_task(
+                connection_manager.send_message(
+                    client_id,
+                    WSMessage(
+                        type=WSMessageType.VNC_INFO,
+                        task_id=task_id,
+                        data=WSVncInfoData(**vnc_data).model_dump(),
+                    ),
+                )
+            )
+        
         # Create agent session with pre-generated task_id
         session = await agent_manager.create_session_with_id(
             task_id=task_id,
@@ -261,6 +278,7 @@ async def handle_start_task(client_id: str, message: WSMessage):
             on_thinking_callback=on_thinking,
             on_error_callback=on_error,
             on_log_callback=on_log,
+            on_vnc_info_callback=on_vnc_info,
         )
         
         # Send task started message
@@ -390,4 +408,29 @@ async def handle_resume_task(client_id: str, message: WSMessage):
         session = await agent_manager.get_session(message.task_id)
         if session:
             await session.resume()
+
+
+async def handle_request_vnc(client_id: str, message: WSMessage):
+    """Handle REQUEST_VNC message - send VNC info for an existing task."""
+    if message.task_id:
+        # Get VNC session info
+        vnc_session = await vnc_service.get_session(message.task_id)
+        if vnc_session:
+            await connection_manager.send_message(
+                client_id,
+                WSMessage(
+                    type=WSMessageType.VNC_INFO,
+                    task_id=message.task_id,
+                    data=WSVncInfoData(**vnc_session.to_dict()).model_dump(),
+                ),
+            )
+        else:
+            await connection_manager.send_message(
+                client_id,
+                WSMessage(
+                    type=WSMessageType.ERROR,
+                    task_id=message.task_id,
+                    data={"error": "No VNC session available for this task"},
+                ),
+            )
 
