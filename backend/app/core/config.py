@@ -65,6 +65,15 @@ class Settings(BaseSettings):
     # Rate limiting
     MAX_CONCURRENT_AGENTS: int = Field(default=10, description="Max concurrent agent sessions")
     
+    # VNC settings
+    VNC_ENABLED: bool = Field(default=True, description="Enable VNC browser viewing")
+    VNC_PASSWORD: str | None = Field(default=None, description="VNC password (auto-generated if not set)")
+    VNC_BASE_DISPLAY: int = Field(default=99, description="Base X11 display number for VNC")
+    VNC_BASE_PORT: int = Field(default=5900, description="Base VNC port")
+    WEBSOCKIFY_BASE_PORT: int = Field(default=6080, description="Base websockify port for WebSocket-to-VNC bridging")
+    VNC_WIDTH: int = Field(default=1920, description="Default VNC display width")
+    VNC_HEIGHT: int = Field(default=1080, description="Default VNC display height")
+    
     # LLM API Keys (optional - can be set via environment)
     GOOGLE_API_KEY: str | None = Field(default=None, description="Google API key for Gemini")
     OPENAI_API_KEY: str | None = Field(default=None, description="OpenAI API key")
