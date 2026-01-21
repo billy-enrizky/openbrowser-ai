@@ -101,30 +101,42 @@ Connect to `/ws` or `/ws/{client_id}` for real-time communication.
 
 ## Deployment
 
-### Docker
+### Docker Compose (Recommended)
 
-Build and run from the repository root:
+The backend requires VNC support for live browser viewing, which needs special Docker privileges. Use Docker Compose from the repository root:
 
 ```bash
-docker build -f backend/Dockerfile -t openbrowser-backend .
-docker run -p 8000:8000 --env-file backend/.env openbrowser-backend
+# Development
+docker-compose up --build
+
+# Production
+docker-compose -f docker-compose.yml up -d
 ```
 
-### Deploy to openbrowser.me
+This starts both the backend (port 8000) and frontend (port 3000) with proper VNC configuration.
 
-1. **Option A: Railway/Render**
-   - Connect GitHub repo
-   - Set environment variables
-   - Deploy automatically
+### VNC Requirements
 
-2. **Option B: VPS with Docker**
-   - Set up Docker on VPS
-   - Configure nginx reverse proxy
+The backend uses VNC for live browser streaming, which requires:
+- `shm_size: 2gb` - Shared memory for Chromium
+- `seccomp:unconfined` - Security context for X11
+- Xvfb, x11vnc, websockify - Display server and VNC tools
+
+These requirements mean **PaaS platforms like Railway/Render are not compatible** with VNC mode.
+
+### Production Deployment Options
+
+1. **VPS with Docker Compose** (Recommended)
+   - Use a cloud VM (AWS EC2, GCP Compute Engine, DigitalOcean Droplet, etc.)
+   - Install Docker and Docker Compose
+   - Clone the repository and run `docker-compose up -d`
+   - Configure nginx reverse proxy with SSL
    - Point api.openbrowser.me to the server
 
-3. **Option C: Cloudflare Workers + Durable Objects**
-   - For serverless deployment
-   - Requires adaptation for long-running tasks
+2. **Headless Mode (No VNC)**
+   - Set `VNC_ENABLED=false` in environment
+   - Can deploy to Railway/Render without VNC live viewing
+   - Screenshots still work, but no real-time browser streaming
 
 ## Architecture
 
@@ -146,6 +158,7 @@ backend/
     services/
       __init__.py
       agent_service.py   # Agent session management
+      vnc_service.py     # VNC session management (Xvfb, x11vnc, websockify)
     websocket/
       __init__.py
       handler.py         # WebSocket message handling
@@ -164,3 +177,10 @@ See `env.example` for all available configuration options:
 - `MAX_CONCURRENT_AGENTS` - Max concurrent agents
 - `REDIS_URL` - Optional Redis for session persistence
 - `GOOGLE_API_KEY` / `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` - LLM API keys
+
+### VNC Configuration
+
+- `VNC_ENABLED` - Enable VNC live browser streaming (default: true)
+- `VNC_WIDTH` - Browser viewport width (default: 1920)
+- `VNC_HEIGHT` - Browser viewport height (default: 1080)
+- `VNC_PASSWORD` - Optional VNC password for security
