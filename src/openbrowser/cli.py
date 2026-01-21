@@ -1148,7 +1148,7 @@ class OpenBrowserApp(App):
 				with HorizontalGroup(classes='link-row'):
 					yield Static('Chat & share on Discord:  ', markup=True, classes='link-label')
 					yield Link(
-						'https://discord.gg/ESAUZAdxXY', url='https://discord.gg/ESAUZAdxXY', classes='link-purple link-url'
+						'https://discord.gg/YRXzbJjq9K', url='https://discord.gg/YRXzbJjq9K', classes='link-purple link-url'
 					)
 
 				with HorizontalGroup(classes='link-row'):
