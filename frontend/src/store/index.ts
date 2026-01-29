@@ -2,7 +2,7 @@
 
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { Task, Project, Message, AgentType, LogEntry, VncInfo, BrowserViewerMode } from "@/types";
+import type { Task, Project, Message, AgentType, LogEntry, VncInfo, BrowserViewerMode, LLMModel } from "@/types";
 
 interface AppState {
   // Sidebar
@@ -56,6 +56,18 @@ interface AppState {
   setMaxSteps: (steps: number) => void;
   useVision: boolean;
   setUseVision: (use: boolean) => void;
+  
+  // LLM Model Selection
+  availableModels: LLMModel[];
+  setAvailableModels: (models: LLMModel[]) => void;
+  availableProviders: string[];
+  setAvailableProviders: (providers: string[]) => void;
+  selectedModel: string | null;
+  setSelectedModel: (model: string | null) => void;
+  modelsLoading: boolean;
+  setModelsLoading: (loading: boolean) => void;
+  modelsError: string | null;
+  setModelsError: (error: string | null) => void;
 }
 
 export const useAppStore = create<AppState>()(
@@ -132,6 +144,18 @@ export const useAppStore = create<AppState>()(
       setMaxSteps: (steps) => set({ maxSteps: steps }),
       useVision: true,
       setUseVision: (use) => set({ useVision: use }),
+      
+      // LLM Model Selection
+      availableModels: [],
+      setAvailableModels: (models) => set({ availableModels: models }),
+      availableProviders: [],
+      setAvailableProviders: (providers) => set({ availableProviders: providers }),
+      selectedModel: null,
+      setSelectedModel: (model) => set({ selectedModel: model }),
+      modelsLoading: false,
+      setModelsLoading: (loading) => set({ modelsLoading: loading }),
+      modelsError: null,
+      setModelsError: (error) => set({ modelsError: error }),
     }),
     {
       name: "openbrowser-storage",
@@ -145,6 +169,7 @@ export const useAppStore = create<AppState>()(
         sidebarOpen: state.sidebarOpen,
         showLogs: state.showLogs,
         browserViewerMode: state.browserViewerMode,
+        selectedModel: state.selectedModel, // Persist selected model
       }),
     }
   )
