@@ -230,3 +230,19 @@ class WSVncInfoData(BaseModel):
     height: int = Field(default=1024, description="Display height in pixels")
     display: str | None = Field(default=None, description="X11 display string (e.g., ':99')")
 
+
+# Models API Response
+
+class LLMModel(BaseModel):
+    """Available LLM model information."""
+    id: str = Field(..., description="Model identifier to use in API calls")
+    name: str = Field(..., description="Human-readable model name")
+    provider: str = Field(..., description="Provider name (google, openai, anthropic)")
+
+
+class AvailableModelsResponse(BaseModel):
+    """Response containing available LLM models based on configured API keys."""
+    models: list[LLMModel] = Field(default_factory=list, description="List of available models")
+    providers: list[str] = Field(default_factory=list, description="List of available providers")
+    default_model: str | None = Field(default=None, description="Default model to use")
+
