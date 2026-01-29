@@ -73,10 +73,13 @@ source = "vcs"
 [tool.hatch.build.targets.wheel]
 packages = ["src/openbrowser"]
 
-# Include non-Python files (markdown system prompts) in the wheel
-artifacts = [
-    "*.md",
-]
+# Force include non-Python files (markdown system prompts) in the wheel
+# These are required for the agent to load system prompts at runtime
+[tool.hatch.build.targets.wheel.force-include]
+"src/openbrowser/agent/system_prompt.md" = "openbrowser/agent/system_prompt.md"
+"src/openbrowser/agent/system_prompt_flash.md" = "openbrowser/agent/system_prompt_flash.md"
+"src/openbrowser/agent/system_prompt_no_thinking.md" = "openbrowser/agent/system_prompt_no_thinking.md"
+"src/openbrowser/code_use/system_prompt.md" = "openbrowser/code_use/system_prompt.md"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
