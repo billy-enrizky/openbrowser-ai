@@ -5,7 +5,6 @@ __pycache__
 *.pyc
 !README.md
 *.png
-test_*
 .env
 !.github/workflows/*.yml
 .DS_Store
