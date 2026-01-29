@@ -76,8 +76,67 @@ class Settings(BaseSettings):
     
     # LLM API Keys (optional - can be set via environment)
     GOOGLE_API_KEY: str | None = Field(default=None, description="Google API key for Gemini")
+    GEMINI_API_KEY: str | None = Field(default=None, description="Gemini API key (alias for GOOGLE_API_KEY)")
     OPENAI_API_KEY: str | None = Field(default=None, description="OpenAI API key")
     ANTHROPIC_API_KEY: str | None = Field(default=None, description="Anthropic API key")
+    
+    def get_google_api_key(self) -> str | None:
+        """Get Google/Gemini API key (supports both GOOGLE_API_KEY and GEMINI_API_KEY)."""
+        return self.GOOGLE_API_KEY or self.GEMINI_API_KEY
+    
+    def get_available_providers(self) -> list[str]:
+        """Get list of available LLM providers based on configured API keys."""
+        providers = []
+        if self.get_google_api_key():
+            providers.append("google")
+        if self.OPENAI_API_KEY:
+            providers.append("openai")
+        if self.ANTHROPIC_API_KEY:
+            providers.append("anthropic")
+        return providers
+    
+    def get_available_models(self) -> list[dict]:
+        """Get list of available models based on configured API keys."""
+        # Define all models by provider
+        google_models = [
+            {"id": "gemini-3-flash-preview", "name": "Gemini 3 Flash", "provider": "google"},
+            {"id": "gemini-3-pro-preview", "name": "Gemini 3 Pro", "provider": "google"},
+            {"id": "gemini-3-pro-image-preview", "name": "Gemini 3 Pro Image", "provider": "google"},
+            {"id": "gemini-2.5-flash-preview-05-20", "name": "Gemini 2.5 Flash", "provider": "google"},
+            {"id": "gemini-2.5-pro-preview-05-06", "name": "Gemini 2.5 Pro", "provider": "google"},
+            {"id": "gemini-2.0-flash", "name": "Gemini 2.0 Flash", "provider": "google"},
+            {"id": "gemini-1.5-flash", "name": "Gemini 1.5 Flash", "provider": "google"},
+            {"id": "gemini-1.5-pro", "name": "Gemini 1.5 Pro", "provider": "google"},
+        ]
+        
+        openai_models = [
+            {"id": "gpt-5.2", "name": "GPT-5.2", "provider": "openai"},
+            {"id": "gpt-5.2-pro", "name": "GPT-5.2 Pro", "provider": "openai"},
+            {"id": "gpt-5-mini", "name": "GPT-5 Mini", "provider": "openai"},
+            {"id": "gpt-4.1", "name": "GPT-4.1", "provider": "openai"},
+            {"id": "gpt-4o", "name": "GPT-4o", "provider": "openai"},
+            {"id": "gpt-4o-mini", "name": "GPT-4o Mini", "provider": "openai"},
+            {"id": "o4-mini", "name": "o4 Mini", "provider": "openai"},
+        ]
+        
+        anthropic_models = [
+            {"id": "claude-opus-4", "name": "Claude Opus 4", "provider": "anthropic"},
+            {"id": "claude-sonnet-4", "name": "Claude Sonnet 4", "provider": "anthropic"},
+            {"id": "claude-3-7-sonnet", "name": "Claude 3.7 Sonnet", "provider": "anthropic"},
+            {"id": "claude-3-5-sonnet-20241022", "name": "Claude 3.5 Sonnet", "provider": "anthropic"},
+            {"id": "claude-3-5-haiku-20241022", "name": "Claude 3.5 Haiku", "provider": "anthropic"},
+        ]
+        
+        # Return only models for providers with configured API keys
+        models = []
+        if self.get_google_api_key():
+            models += google_models
+        if self.OPENAI_API_KEY:
+            models += openai_models
+        if self.ANTHROPIC_API_KEY:
+            models += anthropic_models
+        
+        return models
 
 
 def get_settings() -> Settings:
