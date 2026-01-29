@@ -1,0 +1,218 @@
+---
+title: "Benchmarks"
+description: "Compare Agent vs CodeAgent performance on browser automation tasks"
+icon: "chart-bar"
+mode: "wide"
+---
+
+## Overview
+
+OpenBrowser provides two agent types for browser automation:
+
+- **Agent**: Standard browser automation using action-based interactions
+- **CodeAgent**: Code-first approach that writes and executes Python/JavaScript
+
+This page documents benchmark results comparing both approaches across various tasks.
+
+## Quick Comparison
+
+| Feature | Agent | CodeAgent |
+|---------|-------|-----------|
+| **Best For** | One-off tasks, complex navigation | Data extraction, repetitive tasks |
+| **Speed** | Fast for simple tasks | Faster for bulk operations |
+| **Output** | Action history | Reusable Python code |
+| **File Operations** | Via FileSystem tool | Direct file access |
+
+## Benchmark Results
+
+### Task Performance Summary
+
+| Task | Agent Time | CodeAgent Time | Winner |
+|------|------------|----------------|--------|
+| Product Configurator | 11.22s | 15.67s | Agent (1.4x faster) |
+| Flight Booking Flow | 74.07s | 108.33s | Agent (completed vs failed) |
+| HN Data Extraction + CSV | 18.84s | 10.72s | CodeAgent (1.8x faster) |
+| Google Search (with CAPTCHA) | 146.67s | 35.59s | CodeAgent (4.1x faster) |
+
+### Detailed Results by Model
+
+#### Gemini 3 Flash Preview
+
+| Task | Agent | CodeAgent | Notes |
+|------|-------|-----------|-------|
+| Product Configurator | 16.50s (3 steps) | 40.64s (6 steps) | Agent batched 5 clicks in 1 step |
+| Flight Booking Flow | 149.19s (19 steps) | 46.87s (8 steps) | CodeAgent 3.2x faster with JS |
+| HN Data Extraction | 48.10s (5 steps) | 14.72s (3 steps) | CodeAgent 3.3x faster |
+
+#### Gemini 2.5 Flash
+
+| Task | Agent | CodeAgent | Notes |
+|------|-------|-----------|-------|
+| Product Configurator | 11.22s (5 steps) | 15.67s (3 steps) | Agent faster |
+| Flight Booking Flow | 74.07s (21 steps) | Failed (49 steps) | CodeAgent stuck on seat selection |
+| HN Data Extraction | 18.84s (5 steps) | 10.72s (3 steps) | CodeAgent faster |
+
+## Running Benchmarks
+
+### Basic Comparison Script
+
+```python
+import asyncio
+import time
+from openbrowser import Agent, Browser, BrowserProfile, ChatGoogle
+from openbrowser.browser import BrowserSession
+from openbrowser.code_use import CodeAgent
+
+async def run_agent_task(instruction: str):
+    """Run task with standard Agent."""
+    llm = ChatGoogle(model='gemini-2.5-flash', temperature=0)
+    browser = Browser(browser_profile=BrowserProfile(headless=True))
+    
+    agent = Agent(
+        task=instruction,
+        llm=llm,
+        browser=browser,
+        max_failures=5,
+    )
+    
+    start = time.time()
+    result = await agent.run()
+    elapsed = time.time() - start
+    
+    await browser.close()
+    return {"time": elapsed, "steps": len(result.history), "success": result.is_done()}
+
+async def run_code_agent_task(instruction: str):
+    """Run task with CodeAgent."""
+    llm = ChatGoogle(model='gemini-2.5-flash', temperature=0)
+    browser_session = BrowserSession(browser_profile=BrowserProfile(headless=True))
+    await browser_session.start()
+    
+    agent = CodeAgent(
+        task=instruction,
+        llm=llm,
+        browser=browser_session,
+        max_steps=50,
+    )
+    
+    start = time.time()
+    result = await agent.run()
+    elapsed = time.time() - start
+    
+    await browser_session.close()
+    return {"time": elapsed, "steps": len(agent.complete_history), "success": result is not None}
+
+async def main():
+    task = """
+    Navigate to https://browser-use.github.io/stress-tests/challenges/product-configurator.html
+    Configure: MacBook Pro, Space Gray, 1TB, 32GB
+    Click Add to Cart
+    """
+    
+    agent_result = await run_agent_task(task)
+    code_agent_result = await run_code_agent_task(task)
+    
+    print(f"Agent: {agent_result['time']:.2f}s, {agent_result['steps']} steps")
+    print(f"CodeAgent: {code_agent_result['time']:.2f}s, {code_agent_result['steps']} steps")
+
+asyncio.run(main())
+```
+
+### Comprehensive Benchmark
+
+For a full benchmark suite with multiple tasks and CSV output:
+
+```python
+import asyncio
+import csv
+from datetime import datetime
+from openbrowser import Agent, Browser, BrowserProfile, ChatGoogle
+from openbrowser.browser import BrowserSession
+from openbrowser.code_use import CodeAgent
+
+TEST_TASKS = [
+    {
+        "name": "Vanilla Form",
+        "instruction": """Navigate to https://browser-use.github.io/stress-tests/challenges/vanilla-form.html
+Fill out: Email: test@example.com, Country: United States, Date: 2026-02-15
+Click Submit""",
+    },
+    {
+        "name": "Product Configurator",
+        "instruction": """Navigate to https://browser-use.github.io/stress-tests/challenges/product-configurator.html
+Configure: MacBook Pro, Space Gray, 1TB, 32GB
+Click Add to Cart""",
+    },
+    {
+        "name": "Flight Booking",
+        "instruction": """Navigate to https://browser-use.github.io/stress-tests/challenges/flight-booking-flow.html
+Book flight: NYC to LON, 2026-03-15, 2 Adults, Business
+Complete all steps through payment""",
+    },
+]
+
+async def run_benchmark():
+    results = []
+    
+    for task in TEST_TASKS:
+        # Run both agents
+        agent_result = await run_agent_task(task["instruction"])
+        code_agent_result = await run_code_agent_task(task["instruction"])
+        
+        results.append({
+            "task": task["name"],
+            "agent_time": agent_result["time"],
+            "agent_steps": agent_result["steps"],
+            "code_agent_time": code_agent_result["time"],
+            "code_agent_steps": code_agent_result["steps"],
+        })
+    
+    # Save to CSV
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    with open(f"benchmark_{timestamp}.csv", "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=results[0].keys())
+        writer.writeheader()
+        writer.writerows(results)
+    
+    return results
+
+asyncio.run(run_benchmark())
+```
+
+## Key Findings
+
+### When to Use Agent
+
+- **Form filling**: Agent excels at multi-step forms with validation
+- **Complex navigation**: Better at handling unexpected popups and dialogs
+- **One-off tasks**: Lower overhead for single executions
+
+### When to Use CodeAgent
+
+- **Data extraction**: 2-4x faster for extracting multiple items
+- **File operations**: Direct CSV/JSON file creation
+- **Repetitive tasks**: Generated code can be reused
+- **Bulk operations**: JavaScript evaluation is faster than individual clicks
+
+### Performance Tips
+
+1. **Use headless mode** for benchmarks to reduce rendering overhead
+2. **Set appropriate timeouts** - CodeAgent may need more steps for complex flows
+3. **Match the model** - Results vary significantly between model versions
+4. **Consider task type** - Choose the right agent for your use case
+
+## Test Tasks
+
+The benchmarks use the [OpenBrowser Stress Tests](/examples/apps/stress-tests):
+
+- **Vanilla Form**: Basic HTML form with various input types
+- **Product Configurator**: Dynamic product selection with price updates
+- **Flight Booking Flow**: Multi-step wizard with seat selection
+- **Progressive Form**: Form with conditional field revelation
+
+## Source Code
+
+Full benchmark implementations:
+
+- [Basic comparison](https://github.com/billy-enrizky/openbrowser-ai/blob/main/examples/benchmarks/agent_comparison.py)
+- [Comprehensive benchmark](https://github.com/billy-enrizky/openbrowser-ai/blob/main/examples/benchmarks/comprehensive_benchmark.py)
