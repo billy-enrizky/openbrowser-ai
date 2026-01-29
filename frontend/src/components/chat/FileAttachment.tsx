@@ -128,42 +128,49 @@ function CSVPreview({ content }: { content: string }) {
   const hasMore = rows.length > maxRows;
 
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b border-zinc-700/50">
-            {headers.map((header, i) => (
-              <th
-                key={i}
-                className="px-3 py-2 text-left text-xs font-semibold text-cyan-400 bg-zinc-800/50 whitespace-nowrap"
-              >
-                {header || `Column ${i + 1}`}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {displayRows.map((row, rowIndex) => (
-            <tr
-              key={rowIndex}
-              className="border-b border-zinc-800/50 hover:bg-zinc-800/30"
-            >
-              {row.map((cell, cellIndex) => (
-                <td
-                  key={cellIndex}
-                  className="px-3 py-2 text-zinc-300 whitespace-nowrap max-w-[200px] truncate"
-                  title={cell}
+    <div>
+      {/* Scroll container */}
+      <div 
+        className="w-full overflow-x-auto"
+        style={{ overflowX: 'auto' }}
+      >
+        {/* Table with min-width to force horizontal scroll when needed */}
+        <table className="text-sm w-full" style={{ minWidth: 'max-content' }}>
+          <thead>
+            <tr className="border-b border-zinc-700/50">
+              {headers.map((header, i) => (
+                <th
+                  key={i}
+                  className="px-3 py-2 text-left text-xs font-semibold text-cyan-400 bg-zinc-800/50 whitespace-nowrap"
                 >
-                  {cell}
-                </td>
+                  {header || `Column ${i + 1}`}
+                </th>
               ))}
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {displayRows.map((row, rowIndex) => (
+              <tr
+                key={rowIndex}
+                className="border-b border-zinc-800/50 hover:bg-zinc-800/30"
+              >
+                {row.map((cell, cellIndex) => (
+                  <td
+                    key={cellIndex}
+                    className="px-3 py-2 text-zinc-300 whitespace-nowrap"
+                    title={cell}
+                  >
+                    {cell}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
       {hasMore && (
         <div className="px-3 py-2 text-xs text-zinc-500 bg-zinc-800/30">
-          ... and {rows.length - maxRows} more rows
+          ... and {rows.length - maxRows} more rows (scroll horizontally to see all columns)
         </div>
       )}
     </div>
@@ -178,8 +185,6 @@ interface CSVTableProps {
 
 function CSVTable({ content, onDownload }: CSVTableProps) {
   const { headers, rows } = parseCSVContent(content);
-  const maxDisplayRows = 15;
-  const hasScrollableContent = rows.length > maxDisplayRows;
 
   return (
     <div className="border-t border-zinc-700/50 bg-zinc-900/50">
@@ -187,56 +192,59 @@ function CSVTable({ content, onDownload }: CSVTableProps) {
       <div className="flex justify-end items-center px-4 py-2 bg-zinc-800/30 border-b border-zinc-700/30">
         <button
           onClick={onDownload}
-          className="flex items-center gap-1.5 text-cyan-400 hover:text-cyan-300 text-sm font-medium transition-colors"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan-500/20 text-cyan-400 hover:bg-cyan-500/30 hover:text-cyan-300 text-sm font-medium transition-colors"
         >
           <Download size={14} />
           Download CSV
         </button>
       </div>
       
-      {/* Table content */}
-      <div className="overflow-x-auto">
-        <div className={cn(
-          hasScrollableContent && "max-h-[400px] overflow-y-auto"
-        )}>
-          <table className="min-w-full">
-            <thead className="bg-zinc-800/80 sticky top-0 z-10">
-              <tr>
-                {headers.map((header, i) => (
-                  <th
-                    key={i}
-                    className="px-4 py-3 text-left text-xs font-semibold text-zinc-400 uppercase tracking-wider border-b border-zinc-700/50 whitespace-nowrap"
+      {/* Scroll container - handles both horizontal and vertical scrolling */}
+      <div 
+        className="max-h-[400px] overflow-auto"
+        style={{
+          overflowX: 'auto',
+          overflowY: 'auto',
+        }}
+      >
+        {/* Table with min-width to force horizontal scroll when needed */}
+        <table className="w-full" style={{ minWidth: 'max-content' }}>
+          <thead className="bg-zinc-800/80 sticky top-0 z-10">
+            <tr>
+              {headers.map((header, i) => (
+                <th
+                  key={i}
+                  className="px-4 py-3 text-left text-xs font-semibold text-zinc-400 uppercase tracking-wider border-b border-zinc-700/50 whitespace-nowrap"
+                >
+                  {header || `Column ${i + 1}`}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-zinc-800/50">
+            {rows.map((row, rowIndex) => (
+              <tr 
+                key={rowIndex} 
+                className="hover:bg-zinc-800/30 transition-colors"
+              >
+                {headers.map((_, cellIndex) => (
+                  <td
+                    key={cellIndex}
+                    className="px-4 py-2.5 text-sm text-zinc-300 border-b border-zinc-800/30 whitespace-nowrap"
                   >
-                    {header || `Column ${i + 1}`}
-                  </th>
+                    {row[cellIndex] || ""}
+                  </td>
                 ))}
               </tr>
-            </thead>
-            <tbody className="divide-y divide-zinc-800/50">
-              {rows.map((row, rowIndex) => (
-                <tr 
-                  key={rowIndex} 
-                  className="hover:bg-zinc-800/30 transition-colors"
-                >
-                  {headers.map((_, cellIndex) => (
-                    <td
-                      key={cellIndex}
-                      className="px-4 py-2.5 text-sm text-zinc-300 border-b border-zinc-800/30"
-                    >
-                      {row[cellIndex] || ""}
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        {rows.length > 0 && (
-          <p className="text-xs text-zinc-500 py-2 text-center bg-zinc-800/30 border-t border-zinc-700/30">
-            Showing {rows.length} results
-          </p>
-        )}
+            ))}
+          </tbody>
+        </table>
       </div>
+      {rows.length > 0 && (
+        <p className="text-xs text-zinc-500 py-2 text-center bg-zinc-800/30 border-t border-zinc-700/30">
+          Showing {rows.length} rows - {headers.length} columns - Scroll horizontally to see all data
+        </p>
+      )}
     </div>
   );
 }
@@ -433,11 +441,11 @@ export function FileAttachment({ file }: FileAttachmentProps) {
     return (
       <div className="rounded-xl border border-zinc-700/50 bg-zinc-800/30 overflow-hidden">
         {/* Collapsible Header */}
-        <button
-          onClick={() => setIsExpanded(!isExpanded)}
-          className="w-full flex items-center justify-between px-4 py-3 bg-zinc-800/50 hover:bg-zinc-700/50 transition-colors"
-        >
-          <div className="flex items-center gap-3 min-w-0">
+        <div className="flex items-center justify-between px-4 py-3 bg-zinc-800/50">
+          <button
+            onClick={() => setIsExpanded(!isExpanded)}
+            className="flex items-center gap-3 min-w-0 hover:opacity-80 transition-opacity"
+          >
             <div className="w-10 h-10 rounded-lg flex items-center justify-center shrink-0 bg-green-500/20 text-green-400">
               <FileSpreadsheet className="w-5 h-5" />
             </div>
@@ -450,19 +458,39 @@ export function FileAttachment({ file }: FileAttachmentProps) {
                 {file.size && ` - ${formatFileSize(file.size)}`}
               </div>
             </div>
-          </div>
+          </button>
 
           <div className="flex items-center gap-2">
-            <span className="text-xs text-zinc-500">
-              {isExpanded ? "Click to collapse" : "Click to expand"}
-            </span>
-            {isExpanded ? (
-              <ChevronUp className="w-5 h-5 text-zinc-400" />
-            ) : (
-              <ChevronDown className="w-5 h-5 text-zinc-400" />
-            )}
+            {/* Download button - always visible */}
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                handleDownload();
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan-500/20 text-cyan-400 hover:bg-cyan-500/30 hover:text-cyan-300 text-sm font-medium transition-colors"
+              title="Download CSV"
+            >
+              <Download size={14} />
+              <span className="hidden sm:inline">Download</span>
+            </button>
+            
+            {/* Expand/Collapse button */}
+            <button
+              onClick={() => setIsExpanded(!isExpanded)}
+              className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/50 transition-colors"
+              title={isExpanded ? "Collapse" : "Expand to view"}
+            >
+              <span className="text-xs hidden sm:inline">
+                {isExpanded ? "Collapse" : "Expand"}
+              </span>
+              {isExpanded ? (
+                <ChevronUp className="w-5 h-5" />
+              ) : (
+                <ChevronDown className="w-5 h-5" />
+              )}
+            </button>
           </div>
-        </button>
+        </div>
 
         {/* Expandable CSV Table */}
         <AnimatePresence>
@@ -472,6 +500,7 @@ export function FileAttachment({ file }: FileAttachmentProps) {
               animate={{ height: "auto", opacity: 1 }}
               exit={{ height: 0, opacity: 0 }}
               transition={{ duration: 0.2 }}
+              style={{ overflow: 'hidden' }}
             >
               <CSVTable 
                 content={file.content} 
