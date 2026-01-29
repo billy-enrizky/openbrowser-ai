@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import projects, tasks
 from app.core.config import settings
+from app.models.schemas import AvailableModelsResponse, LLMModel
 from app.websocket.handler import handle_websocket
 
 # Configure logging
@@ -62,6 +63,42 @@ async def root():
 async def health():
     """Health check endpoint."""
     return {"status": "healthy"}
+
+
+@app.get("/api/v1/models", response_model=AvailableModelsResponse)
+async def get_available_models():
+    """Get available LLM models based on configured API keys."""
+    available_models = settings.get_available_models()
+    available_providers = settings.get_available_providers()
+    
+    models = [
+        LLMModel(id=m["id"], name=m["name"], provider=m["provider"])
+        for m in available_models
+    ]
+    
+    # Determine default model
+    default_model = None
+    if available_models:
+        # Prefer the configured default if its provider is available
+        default_provider = None
+        if "gemini" in settings.DEFAULT_LLM_MODEL.lower() or "google" in settings.DEFAULT_LLM_MODEL.lower():
+            default_provider = "google"
+        elif "gpt" in settings.DEFAULT_LLM_MODEL.lower() or "openai" in settings.DEFAULT_LLM_MODEL.lower():
+            default_provider = "openai"
+        elif "claude" in settings.DEFAULT_LLM_MODEL.lower() or "anthropic" in settings.DEFAULT_LLM_MODEL.lower():
+            default_provider = "anthropic"
+        
+        if default_provider in available_providers:
+            default_model = settings.DEFAULT_LLM_MODEL
+        else:
+            # Use first available model as default
+            default_model = available_models[0]["id"]
+    
+    return AvailableModelsResponse(
+        models=models,
+        providers=available_providers,
+        default_model=default_model,
+    )
 
 
 @app.websocket("/ws")
