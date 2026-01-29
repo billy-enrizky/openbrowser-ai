@@ -51,6 +51,19 @@ export type AgentType = "browser" | "code";
 
 export type TaskStatus = "pending" | "running" | "completed" | "failed" | "cancelled";
 
+// LLM Model types
+export interface LLMModel {
+  id: string;
+  name: string;
+  provider: "google" | "openai" | "anthropic";
+}
+
+export interface AvailableModelsResponse {
+  models: LLMModel[];
+  providers: string[];
+  default_model: string | null;
+}
+
 export interface Task {
   id: string;
   task: string;
