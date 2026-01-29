@@ -56,6 +56,41 @@ body {
   background: #52525b;
 }
 
+/* CSV Table horizontal scrollbar - always visible and prominent */
+.csv-table-scroll {
+  scrollbar-width: auto !important;
+  scrollbar-color: #71717a #3f3f46 !important;
+  overflow-x: scroll !important;
+  padding-bottom: 4px;
+}
+
+.csv-table-scroll::-webkit-scrollbar {
+  height: 16px !important;
+  display: block !important;
+  background: #3f3f46;
+}
+
+.csv-table-scroll::-webkit-scrollbar-track {
+  background: #3f3f46 !important;
+  border-radius: 8px;
+}
+
+.csv-table-scroll::-webkit-scrollbar-thumb {
+  background: #a1a1aa !important;
+  border-radius: 8px;
+  border: 3px solid #3f3f46;
+  min-width: 60px;
+}
+
+.csv-table-scroll::-webkit-scrollbar-thumb:hover {
+  background: #d4d4d8 !important;
+}
+
+/* Force scrollbar to always be visible */
+.csv-table-scroll::-webkit-scrollbar-corner {
+  background: #3f3f46;
+}
+
 /* Selection */
 ::selection {
   background: rgba(6, 182, 212, 0.3);

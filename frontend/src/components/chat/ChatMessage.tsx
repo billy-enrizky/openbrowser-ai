@@ -150,7 +150,53 @@ function MessageContent({ content }: { content: string }) {
           );
         }
 
-        // Handle inline code
+        // Check if this part contains a markdown table (lines starting with |)
+        const lines = part.split('\n');
+        const hasTable = lines.some(line => line.trim().startsWith('|') && line.trim().endsWith('|'));
+        
+        if (hasTable) {
+          // Render with horizontal scroll for tables
+          return (
+            <div 
+              key={index} 
+              className="my-2 rounded-lg border border-zinc-700/50 bg-zinc-900/30"
+            >
+              <div 
+                className="overflow-x-auto"
+                style={{ 
+                  maxWidth: '100%',
+                  overflowX: 'auto',
+                }}
+              >
+                <div className="inline-block min-w-full">
+                  {lines.map((line, lineIndex) => {
+                    // Handle inline code within lines
+                    const inlineCodeParts = line.split(/(`[^`]+`)/g);
+                    return (
+                      <p key={lineIndex} className="whitespace-nowrap font-mono text-sm px-3 py-1">
+                        {inlineCodeParts.map((segment, segIndex) => {
+                          if (segment.startsWith("`") && segment.endsWith("`")) {
+                            return (
+                              <code
+                                key={segIndex}
+                                className="px-1.5 py-0.5 bg-zinc-800 rounded text-cyan-300 text-sm font-mono"
+                              >
+                                {segment.slice(1, -1)}
+                              </code>
+                            );
+                          }
+                          return segment;
+                        })}
+                      </p>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          );
+        }
+
+        // Handle inline code for non-table content
         const inlineCodeParts = part.split(/(`[^`]+`)/g);
         
         return (
