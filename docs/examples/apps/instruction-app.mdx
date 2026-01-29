@@ -1,0 +1,338 @@
+---
+title: "Instruction App"
+description: "Chainlit-based UI for executing browser automation instructions from CSV"
+icon: "list-check"
+mode: "wide"
+---
+
+## Overview
+
+The Instruction App is a Chainlit-based web interface for executing browser automation workflows. It reads instructions from a CSV file and allows users to:
+
+1. Select from predefined instructions
+2. Fill in specification values (manually or via CSV upload)
+3. Execute browser automation with visual feedback
+
+## Features
+
+- **CSV-based instructions**: Define reusable automation templates
+- **Placeholder variables**: Use `$VARIABLE$` syntax for dynamic values
+- **Multiple input methods**: Manual entry or CSV file upload
+- **Real-time execution**: Watch the browser automation in action
+- **Full-screen browser**: Non-headless mode for visibility
+
+## Quick Start
+
+### 1. Create Instructions CSV
+
+Create `openbrowser_instructions.csv` with your automation templates:
+
+```csv
+instruction_name,general_instruction
+Flight Booking,"Navigate to https://example.com/booking
+Fill departure: $FROM_CITY$
+Fill destination: $TO_CITY$
+Fill date: $DEPARTURE_DATE$
+Click Search"
+```
+
+### 2. Create Specifications CSV (Optional)
+
+Create a specs file for each instruction type:
+
+```csv
+FROM_CITY,TO_CITY,DEPARTURE_DATE
+New York (NYC),London (LON),2026-02-15
+```
+
+### 3. Run the App
+
+```bash
+uv run chainlit run instruction_app.py
+```
+
+## Instruction Format
+
+### Template Structure
+
+Instructions use `$PLACEHOLDER$` syntax for dynamic values:
+
+```
+### **Work Instruction: Complete Flight Booking**
+
+**URL:** https://example.com/booking
+
+#### **Procedure**
+
+1. **Navigate to Booking Page**
+   * Go to the URL
+   * Wait for page to load
+
+2. **Fill Search Form**
+   * Select departure: $FROM_CITY$
+   * Select destination: $TO_CITY$
+   * Enter date: $DEPARTURE_DATE$
+   * Click "Search"
+
+3. **Complete Booking**
+   * Select first option
+   * **STOP:** Complete when you see confirmation
+```
+
+### Placeholder Naming
+
+- Use UPPERCASE with underscores: `$FIRST_NAME$`, `$DEPARTURE_DATE$`
+- Keep names descriptive and consistent
+- The app auto-generates input prompts from placeholder names
+
+## Example Instructions
+
+### Flight Booking Flow
+
+```csv
+instruction_name,general_instruction
+Flight Booking Flow,"### **Work Instruction: Complete Flight Booking Flow**
+
+**URL:** https://openbrowser.me/openbrowser-ai/challenges/flight-booking-flow.html
+
+#### **Procedure**
+
+1. **Search Flights**
+   * From: $FROM_CITY$
+   * To: $TO_CITY$
+   * Date: $DEPARTURE_DATE$
+   * Passengers: $PASSENGERS$
+   * Class: $CLASS$
+   * Click Search
+
+2. **Select Flight**
+   * Choose option $FLIGHT_OPTION$
+   * Click Continue
+
+3. **Passenger Details**
+   * First Name: $FIRST_NAME$
+   * Last Name: $LAST_NAME$
+   * DOB: $DOB$
+   * Passport: $PASSPORT$
+
+4. **Payment**
+   * Method: $PAYMENT_METHOD$
+   * Card: $CARD_NUMBER$
+   * Expiry: $EXPIRY$
+   * CVV: $CVV$
+   * Name: $CARDHOLDER_NAME$
+
+**STOP:** Complete when you see Booking Confirmed!"
+```
+
+### Product Configurator
+
+```csv
+instruction_name,general_instruction
+Product Configurator,"### **Work Instruction: Configure Product**
+
+**URL:** https://openbrowser.me/openbrowser-ai/challenges/product-configurator.html
+
+#### **Procedure**
+
+1. **Select Options**
+   * Product: $PRODUCT_TYPE$
+   * Color: $COLOR$
+   * Storage: $STORAGE$
+   * RAM: $RAM$
+
+2. **Add Accessories**
+   * Leather Case: $ADD_CASE$
+   * Stand: $ADD_STAND$
+   * Keyboard: $ADD_KEYBOARD$
+   * Mouse: $ADD_MOUSE$
+
+3. **Personalization**
+   * Engraving: $ENGRAVING_TEXT$
+
+4. **Complete**
+   * Click Add to Cart
+
+**STOP:** Complete when you see success message"
+```
+
+## Code
+
+### Full Implementation
+
+```python
+import asyncio
+import csv
+import io
+import logging
+import os
+import re
+import time
+from typing import Any, Dict, List, Optional
+
+import chainlit as cl
+from dotenv import load_dotenv
+
+from openbrowser import Agent, Browser, BrowserProfile, ChatGoogle
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+load_dotenv(override=True)
+
+INSTRUCTIONS_CSV = "openbrowser_instructions.csv"
+
+
+def get_instructions_from_csv() -> List[Dict[str, str]]:
+    """Read instructions from CSV file."""
+    instructions = []
+    if not os.path.isfile(INSTRUCTIONS_CSV):
+        return instructions
+    
+    with open(INSTRUCTIONS_CSV, 'r', encoding='utf-8') as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            name = row.get("instruction_name", "").strip()
+            instruction = row.get("general_instruction", "").strip()
+            if name and instruction:
+                instructions.append({
+                    "instruction_name": name,
+                    "general_instruction": instruction
+                })
+    return instructions
+
+
+def extract_placeholders(instruction: str) -> List[str]:
+    """Extract $PLACEHOLDER$ variables from instruction."""
+    placeholders = re.findall(r'\$([A-Z_]+)\$', instruction)
+    return list(set(placeholders))
+
+
+def configure_instruction(template: str, specs: str) -> str:
+    """Replace placeholders with user values."""
+    configured = template
+    for line in specs.strip().split("\n"):
+        if ":" in line:
+            key, value = line.split(":", 1)
+            key = key.strip().upper().replace(" ", "_")
+            value = value.strip()
+            configured = configured.replace(f"${key}$", value)
+    return configured
+
+
+async def execute_browser_automation(instruction: str) -> Dict[str, Any]:
+    """Execute browser automation with the configured instruction."""
+    GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+    
+    if not GEMINI_API_KEY:
+        return {"status": "error", "message": "API key not set"}
+    
+    llm = ChatGoogle(
+        model='gemini-3-flash-preview',
+        temperature=0,
+        api_key=GEMINI_API_KEY,
+    )
+    
+    browser_profile = BrowserProfile(
+        headless=False,
+        auto_split_screen=False,
+    )
+    browser = Browser(browser_profile=browser_profile)
+    
+    agent = Agent(
+        task=instruction,
+        llm=llm,
+        browser=browser,
+        max_failures=6,
+        max_actions_per_step=50,
+    )
+    
+    start_time = time.time()
+    result = await agent.run()
+    execution_time = time.time() - start_time
+    
+    return {
+        "status": "success",
+        "message": f"Completed in {execution_time:.2f}s",
+        "execution_time": execution_time,
+    }
+
+
+@cl.on_chat_start
+async def on_chat_start():
+    """Handle chat session start."""
+    cl.user_session.set("awaiting_specifications", False)
+    
+    await cl.Message(content="Welcome to OpenBrowser Instruction Executor!").send()
+    
+    instructions = get_instructions_from_csv()
+    if not instructions:
+        await cl.Message(content="No instructions found in CSV.").send()
+        return
+    
+    # Create action buttons
+    actions = [
+        cl.Action(
+            name=f"select_{i}",
+            payload={"name": inst["instruction_name"]},
+            label=inst["instruction_name"]
+        )
+        for i, inst in enumerate(instructions)
+    ]
+    
+    res = await cl.AskActionMessage(
+        content="Select an instruction:",
+        actions=actions,
+        timeout=60000
+    ).send()
+    
+    if res:
+        selected = res.get("payload", {}).get("name")
+        # Continue with instruction setup...
+
+
+@cl.on_message
+async def on_message(message: cl.Message):
+    """Handle incoming messages."""
+    if cl.user_session.get("awaiting_specifications"):
+        # Process user specifications
+        pass
+
+
+if __name__ == "__main__":
+    logger.info("OpenBrowser Instruction App loaded")
+```
+
+## Specification Files
+
+### Flight Booking Specs
+
+```csv
+FROM_CITY,TO_CITY,DEPARTURE_DATE,RETURN_DATE,PASSENGERS,CLASS,FLIGHT_OPTION,FIRST_NAME,LAST_NAME,DOB,PASSPORT,PAYMENT_METHOD,CARD_NUMBER,EXPIRY,CVV,CARDHOLDER_NAME
+New York (NYC),London (LON),2026-02-15,2026-02-22,2 Adults,Economy,2,John,Smith,1985-03-15,AB1234567,Credit Card,4111111111111111,12/28,123,John Smith
+```
+
+### Product Configurator Specs
+
+```csv
+PRODUCT_TYPE,COLOR,STORAGE,RAM,ADD_CASE,ADD_STAND,ADD_KEYBOARD,ADD_MOUSE,ENGRAVING_TEXT
+MacBook Pro,Space Gray,1TB,32GB,no,yes,yes,no,My MacBook 2026
+```
+
+### Vanilla Form Specs
+
+```csv
+FIRST_NAME,LAST_NAME,EMAIL,PHONE,ADDRESS,CITY,STATE,POSTAL_CODE,COUNTRY
+Alice,Johnson,alice.johnson@example.com,+1-555-123-4567,123 Main Street,San Francisco,California,94102,United States
+```
+
+## Usage Tips
+
+1. **Test instructions manually first** before adding to CSV
+2. **Use descriptive placeholder names** for better auto-generated prompts
+3. **Include STOP conditions** to tell the agent when to finish
+4. **Add safety instructions** to handle unexpected popups
+
+## Source Code
+
+Full implementation: [examples/ui/instruction_app.py](https://github.com/billy-enrizky/openbrowser-ai/blob/main/examples/ui/instruction_app.py)
