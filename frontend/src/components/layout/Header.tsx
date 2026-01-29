@@ -4,6 +4,7 @@ import React from "react";
 import { motion } from "framer-motion";
 import { Bell, Sparkles, User, Monitor } from "lucide-react";
 import { Button } from "@/components/ui";
+import { ModelSelector } from "./ModelSelector";
 import { useAppStore } from "@/store";
 import { cn } from "@/lib/utils";
 
@@ -12,10 +13,10 @@ export function Header() {
   const hasVncSession = !!vncInfo;
 
   return (
-    <header className="h-16 border-b border-zinc-800/50 bg-zinc-900/50 backdrop-blur-xl">
+    <header className="h-16 border-b border-zinc-800/50 bg-zinc-900/50 backdrop-blur-xl relative z-[9999]">
       <div className="h-full flex items-center justify-between px-6">
-        {/* Left: Version selector */}
-        <div className="flex items-center gap-2">
+        {/* Left: Version selector + Model selector */}
+        <div className="flex items-center gap-3">
           <motion.button
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
@@ -36,6 +37,9 @@ export function Header() {
               />
             </svg>
           </motion.button>
+          
+          {/* Model Selector */}
+          <ModelSelector />
         </div>
 
         {/* Center: Plan status + View Browser button */}

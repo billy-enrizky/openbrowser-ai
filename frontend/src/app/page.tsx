@@ -1,13 +1,14 @@
 "use client";
 
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import { motion } from "framer-motion";
 import { Sidebar, Header } from "@/components/layout";
 import { ChatInput, ChatMessages, getFileTypeFromName, LogPanel } from "@/components/chat";
 import { BrowserViewer } from "@/components/browser";
 import { useAppStore } from "@/store";
 import { useWebSocket } from "@/hooks/useWebSocket";
-import type { Message, WSMessage, FileAttachment, LogEntry, VncInfo } from "@/types";
+import { API_BASE_URL } from "@/lib/config";
+import type { Message, WSMessage, FileAttachment, LogEntry, VncInfo, AvailableModelsResponse } from "@/types";
 import { cn } from "@/lib/utils";
 
 // Helper function to get file type - use backend-provided type or derive from filename
@@ -121,9 +122,50 @@ export default function Home() {
     setShowLogs,
     setVncInfo,
     browserViewerOpen,
+    // Model selection
+    selectedModel,
+    setSelectedModel,
+    setAvailableModels,
+    setAvailableProviders,
+    setModelsLoading,
+    setModelsError,
   } = useAppStore();
   const [isLoading, setIsLoading] = useState(false);
   const [currentTaskId, setCurrentTaskId] = useState<string | null>(null);
+
+  // Fetch available models on mount
+  useEffect(() => {
+    async function fetchModels() {
+      setModelsLoading(true);
+      setModelsError(null);
+      
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/v1/models`);
+        if (!response.ok) {
+          throw new Error("Failed to fetch models");
+        }
+        
+        const data: AvailableModelsResponse = await response.json();
+        setAvailableModels(data.models);
+        setAvailableProviders(data.providers);
+        
+        // Set default model if none selected or if selected model is no longer available
+        if (!selectedModel || !data.models.find(m => m.id === selectedModel)) {
+          if (data.default_model) {
+            setSelectedModel(data.default_model);
+          } else if (data.models.length > 0) {
+            setSelectedModel(data.models[0].id);
+          }
+        }
+      } catch (error) {
+        setModelsError(error instanceof Error ? error.message : "Failed to fetch models");
+      } finally {
+        setModelsLoading(false);
+      }
+    }
+    
+    fetchModels();
+  }, [setAvailableModels, setAvailableProviders, setModelsLoading, setModelsError, setSelectedModel, selectedModel]);
 
   // Handle incoming WebSocket messages
   const handleWSMessage = useCallback((wsMessage: WSMessage) => {
@@ -283,6 +325,7 @@ export default function Home() {
       agent_type: agentType,
       max_steps: maxSteps,
       use_vision: useVision,
+      llm_model: selectedModel, // Include selected model
     });
 
     if (!sent) {
@@ -295,7 +338,7 @@ export default function Home() {
         metadata: { isError: true },
       });
     }
-  }, [addMessage, sendMessage, agentType, maxSteps, useVision]);
+  }, [addMessage, sendMessage, agentType, maxSteps, useVision, selectedModel]);
 
   const hasMessages = messages.length > 0;
 
