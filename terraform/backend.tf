@@ -23,6 +23,8 @@ locals {
   ]
   # Use provided secret name or the one we create
   backend_secret_id = var.secrets_manager_secret_name != "" ? var.secrets_manager_secret_name : (length(aws_secretsmanager_secret.backend_keys) > 0 ? aws_secretsmanager_secret.backend_keys[0].name : "")
+  # Image: explicit URI or ECR repo (created by this module) + tag
+  backend_image_uri = var.backend_image != "" ? var.backend_image : "${aws_ecr_repository.backend.repository_url}:${var.backend_image_tag}"
 }
 
 resource "aws_instance" "backend" {
@@ -35,7 +37,7 @@ resource "aws_instance" "backend" {
   associate_public_ip_address = false
 
   user_data = templatefile("${path.module}/scripts/backend-userdata.sh", {
-    backend_image     = var.backend_image
+    backend_image     = local.backend_image_uri
     backend_port      = var.backend_port
     backend_env       = join("\n", local.backend_env)
     secrets_secret_id = local.backend_secret_id
