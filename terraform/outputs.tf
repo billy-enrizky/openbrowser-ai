@@ -52,6 +52,16 @@ output "backend_secret_name" {
   value       = length(aws_secretsmanager_secret.backend_keys) > 0 ? aws_secretsmanager_secret.backend_keys[0].name : null
 }
 
+output "backend_ecr_repository_url" {
+  description = "ECR repository URL for the backend image. Push your image here, then EC2 will pull it."
+  value       = aws_ecr_repository.backend.repository_url
+}
+
+output "backend_image_uri" {
+  description = "Full image URI the EC2 instance will pull (ECR repo:tag or backend_image variable)."
+  value       = local.backend_image_uri
+}
+
 output "cloudfront_distribution_id" {
   description = "CloudFront distribution ID (for cache invalidations)"
   value       = aws_cloudfront_distribution.frontend.id

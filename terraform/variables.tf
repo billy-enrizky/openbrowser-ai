@@ -45,7 +45,14 @@ variable "backend_port" {
 
 variable "backend_image" {
   type        = string
-  description = "Backend container image URI (e.g. ECR or Docker Hub)."
+  default     = ""
+  description = "Backend container image URI (ECR or Docker Hub). If empty, the image is expected at the ECR repo created by this module (see ecr.tf) with tag from backend_image_tag."
+}
+
+variable "backend_image_tag" {
+  type        = string
+  default     = "latest"
+  description = "Tag to use when pulling from the Terraform-created ECR repo (only when backend_image is empty)."
 }
 
 variable "backend_instance_type" {

@@ -3,10 +3,15 @@
 aws_region   = "ca-central-1"
 project_name = "openbrowser"
 
-# Required: backend container image (ECR or Docker Hub)
-# ECR example: 123456789012.dkr.ecr.ca-central-1.amazonaws.com/openbrowser-backend:latest
-# Docker Hub: youruser/openbrowser-backend:latest
+# Backend container image:
+# - Leave empty to use the ECR repo created by Terraform (push your image there, see README).
+# - Or set to a full URI (ECR or Docker Hub), e.g.:
+#   backend_image = "123456789012.dkr.ecr.ca-central-1.amazonaws.com/openbrowser-backend:latest"
+#   backend_image = "youruser/openbrowser-backend:latest"
 backend_image = ""
+
+# When using the Terraform-created ECR repo, tag to pull (default: latest)
+# backend_image_tag = "latest"
 
 # Optional: use an existing Secrets Manager secret for LLM API keys
 # Leave empty to have Terraform create a placeholder secret
