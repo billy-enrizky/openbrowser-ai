@@ -14,8 +14,7 @@ This directory defines AWS infrastructure for OpenBrowser: VPC, backend (EC2 + D
 
    ```bash
    cp terraform.tfvars.example terraform.tfvars
-   # Edit terraform.tfvars and set at least:
-   # - backend_image (e.g. 123456789012.dkr.ecr.ca-central-1.amazonaws.com/openbrowser-backend:latest)
+   # backend_image can be left empty to use the ECR repo Terraform creates (see "Backend image" below).
    ```
 
 2. **Initialize and plan**
@@ -75,13 +74,14 @@ This directory defines AWS infrastructure for OpenBrowser: VPC, backend (EC2 + D
 | **API Gateway**     | HTTP API with VPC Link to ALB; public `GET /health`, optional JWT (Cognito) on other routes                                                      |
 | **Cognito**         | User pool, app client, hosted domain (for when you add auth)                                                                                     |
 | **Secrets Manager** | Optional placeholder secret for LLM API keys; EC2 fetches at boot and passes to container                                                        |
+| **ECR**             | Container registry for the backend image; EC2 pulls from here (or from `backend_image` if set)                                                   |
 | **S3 + CloudFront** | S3 bucket for static frontend; CloudFront with OAC, SPA error pages (403/404 → index.html)                                                       |
 
 ## Variables
 
 See `variables.tf`. Key ones:
 
-- **backend_image** (required): Container image URI (ECR or Docker Hub).
+- **backend_image**: Container image URI (ECR or Docker Hub). If empty, Terraform’s ECR repo is used; push your image there and set **backend_image_tag** (default `latest`) if needed.
 - **backend_port**: Port the container listens on (default `8000`).
 - **secrets_manager_secret_name**: Leave empty to create a placeholder secret; set to an existing secret name/ARN to use it.
 - **enable_api_auth**: Set to `true` when you want JWT (Cognito) required on API routes (default `false`).
@@ -96,18 +96,30 @@ See `variables.tf`. Key ones:
 
 Table name is output as `dynamodb_table_name`. Use it in your backend (e.g. `DDB_TABLE` is already passed to the container). Design `pk`/`sk` for user sessions and chats when you add that logic.
 
-## Backend image
+## Backend image (container registry + EC2)
 
-- Build and push to ECR (recommended):
+Terraform **creates an ECR repository** for the backend image. The EC2 instance has IAM permission to pull from ECR. On boot, user_data runs `docker pull <image>` and `docker run` with that image.
 
-  ```bash
-  aws ecr get-login-password --region ca-central-1 | docker login --username AWS --password-stdin 123456789012.dkr.ecr.ca-central-1.amazonaws.com
-  docker build -t openbrowser-backend -f backend/Dockerfile .
-  docker tag openbrowser-backend:latest 123456789012.dkr.ecr.ca-central-1.amazonaws.com/openbrowser-backend:latest
-  docker push 123456789012.dkr.ecr.ca-central-1.amazonaws.com/openbrowser-backend:latest
-  ```
+**Option A – Use the Terraform-created ECR repo (recommended)**
 
-- Set `backend_image` in `terraform.tfvars` to that URI, then `terraform apply`.
+1. Apply Terraform (leave `backend_image` empty in `terraform.tfvars`).
+2. Get the repo URL: `terraform output backend_ecr_repository_url`.
+3. Build, tag, and push your image:
+
+   ```bash
+   REPO=$(terraform -chdir=terraform output -raw backend_ecr_repository_url)
+   REGION=ca-central-1   # or your aws_region from terraform.tfvars
+   aws ecr get-login-password --region $REGION | docker login --username AWS --password-stdin ${REPO%%/*}
+   docker build -t openbrowser-backend -f backend/Dockerfile .
+   docker tag openbrowser-backend:latest $REPO:latest
+   docker push $REPO:latest
+   ```
+
+4. EC2 will pull `$REPO:latest` on next boot (or restart the instance / re-run user_data if the instance was already up).
+
+**Option B – Use your own registry**
+
+- Set `backend_image` in `terraform.tfvars` to the full image URI (e.g. Docker Hub `youruser/openbrowser-backend:latest` or another ECR repo). EC2 will pull from that URI; no ECR repo is required for the image source, but the Terraform-created ECR repo is still created for consistency.
 
 ## CloudFront distribution ID (for invalidations)
 
