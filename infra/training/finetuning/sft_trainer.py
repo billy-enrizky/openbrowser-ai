@@ -22,11 +22,11 @@ from transformers import (
     TrainingArguments,
 )
 
-from infra.training.finetuning.config import DATA_CONFIG, S3_CONFIG, SFT_CONFIG
+from infra.training.finetuning.config import DATA_CONFIG, SFT_CONFIG
 from infra.training.shared.utils import (
     format_prompt_parts,
+    persist_checkpoint,
     resolve_data_path,
-    upload_checkpoint_to_s3,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -187,7 +187,7 @@ def train():
         logging_steps=config["logging_steps"],
         save_steps=config["save_steps"],
         eval_steps=config["eval_steps"],
-        evaluation_strategy="steps",
+        eval_strategy="steps",
         save_total_limit=3,
         report_to="none",
         gradient_checkpointing=True,
@@ -209,8 +209,8 @@ def train():
     tokenizer.save_pretrained(final_dir)
     logger.info(f"SFT training complete. Model saved to {final_dir}")
 
-    # Upload checkpoint to S3
-    upload_checkpoint_to_s3(final_dir, S3_CONFIG, "sft")
+    # Persist checkpoint to Anyscale storage
+    persist_checkpoint(final_dir, "sft")
 
 
 if __name__ == "__main__":
