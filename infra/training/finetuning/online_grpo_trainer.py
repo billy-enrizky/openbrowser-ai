@@ -93,7 +93,10 @@ def generate_rollouts(
         all_input_ids: tensor of full sequences [G, seq_len]
         prompt_length: length of the prompt tokens
     """
-    inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
+    # Prepend empty think block to suppress Qwen3 thinking mode --
+    # model sees <think>\n</think>\n as already completed and generates actions directly
+    prompt_with_skip = prompt + "<think>\n</think>\n"
+    inputs = tokenizer(prompt_with_skip, return_tensors="pt").to(model.device)
     prompt_length = inputs.input_ids.shape[1]
 
     # Enable KV cache for generation (disabled during training for gradient checkpointing)
@@ -130,6 +133,13 @@ def compute_log_probs(
 ) -> torch.Tensor:
     """Compute per-token log probabilities for the response portion.
 
+    Processes one sample at a time to avoid CUDA OOM from materializing
+    [B, seq_len, vocab_size] tensors (Qwen3-8B has vocab=152064, which
+    at B=4 and seq_len=1024 would require ~2.5GB for log_softmax alone).
+
+    Uses F.cross_entropy which fuses log_softmax + gather internally
+    and never materializes the full [seq_len, vocab] softmax tensor.
+
     Args:
         model: the language model
         input_ids: [B, seq_len] full sequences
@@ -137,36 +147,43 @@ def compute_log_probs(
         prompt_length: number of prompt tokens to skip
 
     Returns:
-        log_probs: [B] sum of log-probs over response tokens
+        log_probs: [B] mean log-probs over response tokens
     """
-    with torch.set_grad_enabled(model.training):
-        outputs = model(input_ids=input_ids, attention_mask=attention_mask)
-        logits = outputs.logits  # [B, seq_len, vocab]
+    B = input_ids.shape[0]
+    result = []
 
-    # Shift: predict token t+1 from position t
-    shift_logits = logits[:, :-1, :]  # [B, seq_len-1, vocab]
-    shift_labels = input_ids[:, 1:]   # [B, seq_len-1]
+    for i in range(B):
+        ids_i = input_ids[i : i + 1]  # [1, seq_len]
+        mask_i = attention_mask[i : i + 1]  # [1, seq_len]
 
-    # Log softmax over vocab
-    log_probs_all = F.log_softmax(shift_logits, dim=-1)  # [B, seq_len-1, vocab]
+        with torch.set_grad_enabled(model.training):
+            outputs = model(input_ids=ids_i, attention_mask=mask_i)
+            logits = outputs.logits  # [1, seq_len, vocab]
 
-    # Gather log-probs for actual tokens
-    token_log_probs = log_probs_all.gather(
-        2, shift_labels.unsqueeze(-1)
-    ).squeeze(-1)  # [B, seq_len-1]
+        # Shift: predict token t+1 from position t
+        shift_logits = logits[0, :-1, :]  # [seq_len-1, vocab]
+        shift_labels = ids_i[0, 1:]  # [seq_len-1]
 
-    # Only sum over response tokens (skip prompt)
-    response_start = max(0, prompt_length - 1)  # -1 for shift
-    response_log_probs = token_log_probs[:, response_start:]
+        # Use cross_entropy with reduction='none' -- fuses log_softmax + gather
+        # internally without materializing the full softmax tensor
+        token_nll = F.cross_entropy(
+            shift_logits, shift_labels, reduction="none"
+        )  # [seq_len-1]
+        token_log_probs = -token_nll  # log_prob = -cross_entropy
 
-    # Use attention_mask shifted to match label positions for padding mask
-    mask = attention_mask[:, 1:][:, response_start:].float()
-    masked_log_probs = response_log_probs * mask
+        # Only sum over response tokens (skip prompt)
+        response_start = max(0, prompt_length - 1)  # -1 for shift
+        response_log_probs = token_log_probs[response_start:]
 
-    # Mean over response tokens (not sum) to keep ratio = exp(policy - ref)
-    # in a numerically stable range -- sum over 500 tokens creates exp(>20) explosions
-    num_tokens = mask.sum(dim=-1).clamp(min=1)
-    return masked_log_probs.sum(dim=-1) / num_tokens  # [B]
+        # Masking for padding
+        mask_shifted = mask_i[0, 1:][response_start:].float()
+        masked_log_probs = response_log_probs * mask_shifted
+
+        # Mean over response tokens
+        num_tokens = mask_shifted.sum().clamp(min=1)
+        result.append(masked_log_probs.sum() / num_tokens)
+
+    return torch.stack(result)  # [B]
 
 
 async def train():
@@ -271,6 +288,15 @@ async def train():
             epoch_kl = []
 
             for i, prompt_data in enumerate(prompts):
+                # Periodically restart browser to reset DOM element indices.
+                # DOMWatchdog assigns monotonically increasing indices across
+                # navigations -- after ~10 forms, indices reach 19000+ which
+                # slows CDP communication and causes action timeouts.
+                if i > 0 and i % 10 == 0:
+                    logger.info(f"Periodic browser restart (prompt {i}) to reset DOM indices")
+                    await browser_env.close()
+                    browser_env = await BrowserEnvironment.create(headless=headless)
+
                 instruction = prompt_data.get("instruction", "")
                 form_url = prompt_data.get("url", "")
                 ground_truth_fields = prompt_data.get("ground_truth_fields", {})
