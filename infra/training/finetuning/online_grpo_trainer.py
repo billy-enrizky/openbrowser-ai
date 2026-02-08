@@ -27,7 +27,7 @@ import torch.nn.functional as F
 from peft import LoraConfig, PeftModel, get_peft_model, prepare_model_for_kbit_training
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
-from infra.training.finetuning.config import DATA_CONFIG, ONLINE_GRPO_CONFIG, S3_CONFIG
+from infra.training.finetuning.config import DATA_CONFIG, ONLINE_GRPO_CONFIG
 from infra.training.shared.action_parser import parse_rollout_to_actions
 from infra.training.shared.browser_env import BrowserEnvironment
 from infra.training.shared.formfactory_server import FormFactoryServer
@@ -36,7 +36,7 @@ from infra.training.shared.reward_functions import compute_grpo_advantages
 from infra.training.shared.utils import (
     format_chat_prompt,
     resolve_data_path,
-    upload_checkpoint_to_s3,
+    persist_checkpoint,
 )
 
 logging.basicConfig(
@@ -96,6 +96,9 @@ def generate_rollouts(
     inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
     prompt_length = inputs.input_ids.shape[1]
 
+    # Enable KV cache for generation (disabled during training for gradient checkpointing)
+    model.eval()
+    model.config.use_cache = True
     with torch.no_grad():
         outputs = model.generate(
             **inputs,
@@ -107,6 +110,8 @@ def generate_rollouts(
             return_dict_in_generate=True,
             output_scores=False,
         )
+    model.config.use_cache = False
+    model.train()
 
     all_sequences = outputs.sequences  # [G, total_len]
 
@@ -158,7 +163,10 @@ def compute_log_probs(
     mask = attention_mask[:, 1:][:, response_start:].float()
     masked_log_probs = response_log_probs * mask
 
-    return masked_log_probs.sum(dim=-1)  # [B]
+    # Mean over response tokens (not sum) to keep ratio = exp(policy - ref)
+    # in a numerically stable range -- sum over 500 tokens creates exp(>20) explosions
+    num_tokens = mask.sum(dim=-1).clamp(min=1)
+    return masked_log_probs.sum(dim=-1) / num_tokens  # [B]
 
 
 async def train():
@@ -193,7 +201,7 @@ async def train():
         base_model = prepare_model_for_kbit_training(
             base_model, use_gradient_checkpointing=True, gradient_checkpointing_kwargs={"use_reentrant": False}
         )
-        model = PeftModel.from_pretrained(base_model, model_name)
+        model = PeftModel.from_pretrained(base_model, model_name, is_trainable=True)
         model.train()
     else:
         model = load_quantized_model(model_name, config)
@@ -415,8 +423,8 @@ async def train():
         tokenizer.save_pretrained(final_dir)
         logger.info(f"Online GRPO training complete. Model saved to {final_dir}")
 
-        # Upload checkpoint to S3
-        upload_checkpoint_to_s3(final_dir, S3_CONFIG, "online-grpo")
+        # Persist checkpoint to Anyscale storage
+        persist_checkpoint(final_dir, "online-grpo")
 
     finally:
         await browser_env.close()
