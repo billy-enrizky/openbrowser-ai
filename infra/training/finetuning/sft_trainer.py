@@ -1,23 +1,38 @@
-"""SFT trainer: LoRA fine-tuning on Mind2Web data."""
+"""SFT trainer: QLoRA fine-tuning on FormFactory data with Qwen3-8B.
+
+Loads a pre-quantized 4-bit model, applies LoRA adapters, and trains
+on instruction-response pairs with proper label masking (only response
+tokens contribute to the loss).
+
+Usage:
+    uv run infra/training/finetuning/sft_trainer.py
+"""
 
 import json
 import logging
-from pathlib import Path
 
 import torch
 from datasets import Dataset
-from peft import LoraConfig, get_peft_model
+from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
-    TrainingArguments,
+    BitsAndBytesConfig,
     Trainer,
+    TrainingArguments,
 )
 
-from infra.training.finetuning.config import SFT_CONFIG, DATA_CONFIG
+from infra.training.finetuning.config import DATA_CONFIG, S3_CONFIG, SFT_CONFIG
+from infra.training.shared.utils import (
+    format_prompt_parts,
+    resolve_data_path,
+    upload_checkpoint_to_s3,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+IGNORE_INDEX = -100
 
 
 def load_sft_data(file_path: str, max_samples: int = 0) -> Dataset:
@@ -34,32 +49,67 @@ def load_sft_data(file_path: str, max_samples: int = 0) -> Dataset:
     return Dataset.from_list(records)
 
 
-def format_prompt(example: dict) -> str:
-    """Format instruction-response pair as chat prompt."""
-    return (
-        f"<|im_start|>system\n"
-        f"You are a web browser automation agent. Given a task, "
-        f"produce a step-by-step action plan to complete it.\n"
-        f"<|im_end|>\n"
-        f"<|im_start|>user\n{example['instruction']}\n<|im_end|>\n"
-        f"<|im_start|>assistant\n{example['response']}\n<|im_end|>"
+def tokenize_dataset(dataset: Dataset, tokenizer, max_length: int) -> Dataset:
+    """Tokenize dataset with proper label masking.
+
+    Instruction tokens get label=-100 (ignored in loss).
+    Only response tokens contribute to the training loss.
+    """
+
+    def tokenize_fn(examples):
+        all_input_ids = []
+        all_attention_mask = []
+        all_labels = []
+
+        for inst, resp in zip(examples["instruction"], examples["response"]):
+            instruction_part, response_part = format_prompt_parts(inst, resp)
+
+            # Tokenize instruction and response separately to find the boundary
+            inst_tokens = tokenizer(
+                instruction_part, add_special_tokens=False
+            )
+            resp_tokens = tokenizer(
+                response_part, add_special_tokens=False
+            )
+
+            input_ids = inst_tokens["input_ids"] + resp_tokens["input_ids"]
+            attention_mask = [1] * len(input_ids)
+
+            # Labels: mask instruction tokens with IGNORE_INDEX
+            labels = (
+                [IGNORE_INDEX] * len(inst_tokens["input_ids"])
+                + resp_tokens["input_ids"]
+            )
+
+            # Truncate to max_length
+            input_ids = input_ids[:max_length]
+            attention_mask = attention_mask[:max_length]
+            labels = labels[:max_length]
+
+            # Pad to max_length
+            pad_length = max_length - len(input_ids)
+            if pad_length > 0:
+                input_ids = input_ids + [tokenizer.pad_token_id] * pad_length
+                attention_mask = attention_mask + [0] * pad_length
+                labels = labels + [IGNORE_INDEX] * pad_length
+
+            all_input_ids.append(input_ids)
+            all_attention_mask.append(attention_mask)
+            all_labels.append(labels)
+
+        return {
+            "input_ids": all_input_ids,
+            "attention_mask": all_attention_mask,
+            "labels": all_labels,
+        }
+
+    return dataset.map(
+        tokenize_fn, batched=True, remove_columns=dataset.column_names
     )
 
 
-def tokenize_dataset(dataset: Dataset, tokenizer, max_length: int) -> Dataset:
-    """Tokenize dataset for training."""
-    def tokenize_fn(examples):
-        prompts = [format_prompt({"instruction": inst, "response": resp})
-                   for inst, resp in zip(examples["instruction"], examples["response"])]
-        return tokenizer(
-            prompts, truncation=True, max_length=max_length, padding="max_length"
-        )
-
-    return dataset.map(tokenize_fn, batched=True, remove_columns=dataset.column_names)
-
-
 def train():
-    """Run SFT training."""
+    """Run SFT training with QLoRA."""
     config = SFT_CONFIG
 
     logger.info(f"Loading model: {config['model_name']}")
@@ -67,11 +117,28 @@ def train():
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
+    # Load model with 4-bit quantization
+    compute_dtype = (
+        torch.bfloat16
+        if config["bnb_4bit_compute_dtype"] == "bfloat16"
+        else torch.float16
+    )
+    bnb_config = BitsAndBytesConfig(
+        load_in_4bit=config["load_in_4bit"],
+        bnb_4bit_quant_type=config["bnb_4bit_quant_type"],
+        bnb_4bit_use_double_quant=config["bnb_4bit_use_double_quant"],
+        bnb_4bit_compute_dtype=compute_dtype,
+    )
+
     model = AutoModelForCausalLM.from_pretrained(
         config["model_name"],
-        torch_dtype=torch.float16 if config["fp16"] else torch.float32,
+        quantization_config=bnb_config,
         device_map="auto",
+        torch_dtype=compute_dtype,
     )
+
+    # Prepare model for QLoRA training
+    model = prepare_model_for_kbit_training(model)
 
     # Apply LoRA
     lora_config = LoraConfig(
@@ -85,19 +152,28 @@ def train():
     model.print_trainable_parameters()
 
     # Load data
+    train_file = resolve_data_path(DATA_CONFIG["train_file"])
+
     dataset = load_sft_data(
-        DATA_CONFIG["train_file"],
+        train_file,
         max_samples=DATA_CONFIG.get("max_train_samples", 0),
     )
 
     # Split train/eval
-    split = dataset.train_test_split(test_size=DATA_CONFIG.get("eval_split", 0.1))
-    train_dataset = tokenize_dataset(split["train"], tokenizer, config["max_seq_length"])
-    eval_dataset = tokenize_dataset(split["test"], tokenizer, config["max_seq_length"])
+    split = dataset.train_test_split(
+        test_size=DATA_CONFIG.get("eval_split", 0.1)
+    )
+    train_dataset = tokenize_dataset(
+        split["train"], tokenizer, config["max_seq_length"]
+    )
+    eval_dataset = tokenize_dataset(
+        split["test"], tokenizer, config["max_seq_length"]
+    )
 
     # Training args
+    output_dir = "outputs/finetuning_sft"
     training_args = TrainingArguments(
-        output_dir="outputs/finetuning_sft",
+        output_dir=output_dir,
         num_train_epochs=config["num_epochs"],
         per_device_train_batch_size=config["batch_size"],
         gradient_accumulation_steps=config["gradient_accumulation_steps"],
@@ -105,12 +181,15 @@ def train():
         warmup_ratio=config["warmup_ratio"],
         weight_decay=config["weight_decay"],
         fp16=config["fp16"],
+        bf16=config["bf16"],
         logging_steps=config["logging_steps"],
         save_steps=config["save_steps"],
         eval_steps=config["eval_steps"],
         evaluation_strategy="steps",
         save_total_limit=3,
         report_to="none",
+        gradient_checkpointing=True,
+        optim="paged_adamw_8bit",
     )
 
     trainer = Trainer(
@@ -120,11 +199,16 @@ def train():
         eval_dataset=eval_dataset,
     )
 
-    logger.info("Starting SFT training")
+    logger.info("Starting SFT training (QLoRA on Qwen3-8B)")
     trainer.train()
-    trainer.save_model("outputs/finetuning_sft/final")
-    tokenizer.save_pretrained("outputs/finetuning_sft/final")
-    logger.info("SFT training complete")
+
+    final_dir = f"{output_dir}/final"
+    trainer.save_model(final_dir)
+    tokenizer.save_pretrained(final_dir)
+    logger.info(f"SFT training complete. Model saved to {final_dir}")
+
+    # Upload checkpoint to S3
+    upload_checkpoint_to_s3(final_dir, S3_CONFIG, "sft")
 
 
 if __name__ == "__main__":
