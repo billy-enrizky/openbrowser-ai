@@ -113,13 +113,20 @@ preprocess-formfactory:
 
 SUBMIT_CMD = uv run infra/training/anyscale/submit_job.py
 
-train-submit-sft:
+# Preprocessed data file targets (only regenerate if missing)
+data/processed/formfactory_sft.jsonl:
+	uv run infra/training/shared/formfactory_preprocessor.py
+
+data/processed/mind2web_flow.jsonl:
+	uv run infra/training/shared/mind2web_preprocessor.py
+
+train-submit-sft: data/processed/formfactory_sft.jsonl
 	$(SUBMIT_CMD) finetuning-sft
 
-train-submit-grpo:
+train-submit-grpo: data/processed/formfactory_sft.jsonl
 	$(SUBMIT_CMD) finetuning-grpo
 
-train-submit-flow:
+train-submit-flow: data/processed/mind2web_flow.jsonl
 	$(SUBMIT_CMD) flow-matching
 
 train-list-jobs:
