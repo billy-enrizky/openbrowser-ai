@@ -1,0 +1,37 @@
+name: openbrowser-finetuning-grpo
+entrypoint: python -m infra.training.finetuning.grpo_trainer
+image_uri: anyscale/ray:2.44.1-slim-py312-cu128
+compute_config:
+  cloud: anyscale-prod
+  head_node:
+    instance_type: m5.2xlarge
+  worker_nodes:
+    - instance_type: g5.xlarge
+      min_nodes: 1
+      max_nodes: 1
+      market_type: SPOT
+working_dir: .
+excludes:
+  - .git
+  - .env
+  - __pycache__
+  - node_modules
+  - frontend
+  - .cursor
+  - presentation
+requirements:
+  - torch>=2.0
+  - transformers>=4.40
+  - peft>=0.10
+  - datasets>=2.18
+  - accelerate>=0.28
+  - bitsandbytes
+env_vars:
+  GOOGLE_API_KEY: ""
+  OPENAI_API_KEY: ""
+  ANTHROPIC_API_KEY: ""
+max_retries: 1
+timeout_s: 14400
+tags:
+  project: openbrowser
+  task: grpo
