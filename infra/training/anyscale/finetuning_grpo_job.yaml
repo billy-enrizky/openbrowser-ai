@@ -2,7 +2,7 @@ name: openbrowser-finetuning-grpo
 entrypoint: python -m infra.training.finetuning.grpo_trainer
 image_uri: anyscale/ray:2.44.1-slim-py312-cu128
 compute_config:
-  cloud: anyscale-prod
+  cloud: "Anyscale Cloud"
   head_node:
     instance_type: g5.xlarge
   worker_nodes: []
@@ -15,7 +15,9 @@ excludes:
   - frontend
   - .cursor
   - presentation
-  - data/
+  - data/mind2web/
+  - data/webarena/
+  - data/formfactory/
   - results/
   - outputs/
   - openbrowser_agent_data/
