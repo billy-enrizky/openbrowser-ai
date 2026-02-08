@@ -36,9 +36,6 @@ JOB_CONFIGS = {
 # Secret env vars to inject from .env into Anyscale jobs
 SECRET_ENV_KEYS = [
     "HF_TOKEN",
-    "AWS_ACCESS_KEY_ID",
-    "AWS_SECRET_ACCESS_KEY",
-    "AWS_SESSION_TOKEN",
 ]
 
 
