@@ -2,7 +2,7 @@ name: openbrowser-flow-matching
 entrypoint: python -m infra.training.flow_matching.flow_sft_trainer
 image_uri: anyscale/ray:2.44.1-slim-py312-cu128
 compute_config:
-  cloud: anyscale-prod
+  cloud: "Anyscale Cloud"
   head_node:
     instance_type: m5.2xlarge
   worker_nodes:
