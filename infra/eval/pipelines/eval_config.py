@@ -59,6 +59,12 @@ class EvalConfig:
     # Run ID (auto-generated if empty)
     run_id: str = ""
 
+    # Port for FormFactory Flask server (5050 to avoid macOS AirPlay on 5000)
+    formfactory_port: int = 5050
+
+    # Hostname for WebArena Docker containers (localhost or remote EC2 IP)
+    webarena_hostname: str = "localhost"
+
     def validate(self):
         """Validate configuration."""
         valid_datasets = ["stress_tests", "mind2web", "formfactory", "webarena"]
