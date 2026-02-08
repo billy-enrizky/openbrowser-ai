@@ -74,11 +74,18 @@ async def run_agent_task(
         started_at=started_at,
     )
 
+    # Create per-task output directory for artifacts (video, history)
+    task_output_dir = Path(config.output_dir) / run_id / "tasks" / task_id
+
     try:
         if agent_type == "Agent":
-            result = await _run_standard_agent(result, instruction, model, config)
+            result = await _run_standard_agent(
+                result, instruction, model, config, task_output_dir
+            )
         elif agent_type == "CodeAgent":
-            result = await _run_code_agent(result, instruction, model, config)
+            result = await _run_code_agent(
+                result, instruction, model, config, task_output_dir
+            )
         else:
             result.error_message = f"Unknown agent type: {agent_type}"
     except Exception as e:
@@ -99,7 +106,8 @@ async def run_agent_task(
 
 
 async def _run_standard_agent(
-    result: TaskResult, instruction: str, model: str, config: EvalConfig
+    result: TaskResult, instruction: str, model: str, config: EvalConfig,
+    task_output_dir: Path | None = None,
 ) -> TaskResult:
     """Run task with standard Agent."""
     from openbrowser import Agent, Browser, BrowserProfile
@@ -109,7 +117,14 @@ async def _run_standard_agent(
     start_time = time.time()
 
     try:
-        browser_profile = BrowserProfile(headless=config.headless)
+        # Configure browser profile with optional video recording
+        profile_kwargs = {"headless": config.headless}
+        if config.record_video and task_output_dir:
+            video_dir = task_output_dir / "video"
+            video_dir.mkdir(parents=True, exist_ok=True)
+            profile_kwargs["record_video_dir"] = str(video_dir)
+
+        browser_profile = BrowserProfile(**profile_kwargs)
         browser = Browser(browser_profile=browser_profile)
 
         agent = Agent(
@@ -127,6 +142,56 @@ async def _run_standard_agent(
         result.final_output = (
             str(agent_result.final_result())[:500] if agent_result else None
         )
+
+        # Save per-task artifacts
+        if task_output_dir and agent_result:
+            task_output_dir.mkdir(parents=True, exist_ok=True)
+
+            # Save agent history JSON
+            history_file = task_output_dir / "history.json"
+            try:
+                agent_result.save_to_file(str(history_file))
+                result.history_path = str(history_file)
+            except Exception as e:
+                logger.warning(f"Failed to save agent history: {e}")
+
+            # Capture agent messages (thinking, goals, actions per step)
+            try:
+                for step_idx, history_item in enumerate(agent_result.history):
+                    step_msg = {"step": step_idx}
+                    if history_item.model_output:
+                        out = history_item.model_output
+                        if hasattr(out, "current_state") and out.current_state:
+                            brain = out.current_state
+                            step_msg["evaluation"] = getattr(brain, "evaluation_previous_goal", None)
+                            step_msg["memory"] = getattr(brain, "memory", None)
+                            step_msg["next_goal"] = getattr(brain, "next_goal", None)
+                        if hasattr(out, "action") and out.action:
+                            step_msg["actions"] = [
+                                a.model_dump(exclude_none=True) for a in out.action
+                            ]
+                    if history_item.result:
+                        step_msg["results"] = [
+                            {
+                                "extracted_content": r.extracted_content,
+                                "error": r.error,
+                                "is_done": r.is_done,
+                                "success": getattr(r, "success", None),
+                            }
+                            for r in history_item.result
+                        ]
+                    result.agent_messages.append(step_msg)
+            except Exception as e:
+                logger.warning(f"Failed to capture agent messages: {e}")
+
+            # Find video file if recording was enabled
+            if config.record_video:
+                video_dir = task_output_dir / "video"
+                if video_dir.exists():
+                    mp4_files = list(video_dir.glob("*.mp4"))
+                    if mp4_files:
+                        result.video_path = str(mp4_files[0])
+                        result.output_files.append(str(mp4_files[0]))
     finally:
         if browser:
             try:
@@ -138,7 +203,8 @@ async def _run_standard_agent(
 
 
 async def _run_code_agent(
-    result: TaskResult, instruction: str, model: str, config: EvalConfig
+    result: TaskResult, instruction: str, model: str, config: EvalConfig,
+    task_output_dir: Path | None = None,
 ) -> TaskResult:
     """Run task with CodeAgent."""
     from openbrowser import BrowserProfile
@@ -150,7 +216,13 @@ async def _run_code_agent(
     start_time = time.time()
 
     try:
-        browser_profile = BrowserProfile(headless=config.headless)
+        profile_kwargs = {"headless": config.headless}
+        if config.record_video and task_output_dir:
+            video_dir = task_output_dir / "video"
+            video_dir.mkdir(parents=True, exist_ok=True)
+            profile_kwargs["record_video_dir"] = str(video_dir)
+
+        browser_profile = BrowserProfile(**profile_kwargs)
         browser_session = BrowserSession(browser_profile=browser_profile)
         await browser_session.start()
 
@@ -173,6 +245,15 @@ async def _run_code_agent(
             if agent_result and hasattr(agent_result, "output")
             else None
         )
+
+        # Find video file if recording was enabled
+        if config.record_video and task_output_dir:
+            video_dir = task_output_dir / "video"
+            if video_dir.exists():
+                mp4_files = list(video_dir.glob("*.mp4"))
+                if mp4_files:
+                    result.video_path = str(mp4_files[0])
+                    result.output_files.append(str(mp4_files[0]))
     finally:
         if browser_session:
             try:
@@ -272,6 +353,7 @@ def save_results_csv(results: list[TaskResult], output_path: Path):
                 "agent_type", "model", "project", "run_id",
                 "success", "execution_time", "steps_taken",
                 "final_output", "error_message",
+                "video_path", "history_path",
             ],
         )
         writer.writeheader()
@@ -290,6 +372,8 @@ def save_results_csv(results: list[TaskResult], output_path: Path):
                 "steps_taken": r.steps_taken,
                 "final_output": (r.final_output or "")[:200],
                 "error_message": r.error_message or "",
+                "video_path": r.video_path or "",
+                "history_path": r.history_path or "",
             })
 
     logger.info(f"Results saved to {output_path}")
@@ -687,6 +771,29 @@ async def run_evaluation(config: EvalConfig) -> RunSummary:
         upload_to_s3(output_dir / "results.csv", config.results_bucket, f"{s3_prefix}/results.csv")
         upload_to_s3(output_dir / "summary.json", config.results_bucket, f"{s3_prefix}/summary.json")
 
+        # Upload per-task artifacts (video, history)
+        tasks_dir = output_dir / "tasks"
+        if tasks_dir.exists():
+            for task_dir in tasks_dir.iterdir():
+                if not task_dir.is_dir():
+                    continue
+                task_id = task_dir.name
+                # Upload history.json
+                history_file = task_dir / "history.json"
+                if history_file.exists():
+                    upload_to_s3(
+                        history_file, config.results_bucket,
+                        f"{s3_prefix}/tasks/{task_id}/history.json",
+                    )
+                # Upload video files
+                video_dir = task_dir / "video"
+                if video_dir.exists():
+                    for mp4_file in video_dir.glob("*.mp4"):
+                        upload_to_s3(
+                            mp4_file, config.results_bucket,
+                            f"{s3_prefix}/tasks/{task_id}/{mp4_file.name}",
+                        )
+
     # Print summary
     logger.info("=" * 70)
     logger.info(f"EVALUATION COMPLETE: {run_id}")
@@ -728,6 +835,7 @@ def parse_args():
     parser.add_argument("--output-dir", default="results", help="Output directory")
     parser.add_argument("--results-bucket", default="", help="S3 bucket for results")
     parser.add_argument("--no-headless", action="store_true", help="Run with visible browser")
+    parser.add_argument("--no-record-video", action="store_true", help="Disable video recording")
     parser.add_argument("--run-id", default="", help="Custom run ID")
     parser.add_argument("--formfactory-port", type=int, default=5050, help="Port for FormFactory Flask server")
     parser.add_argument("--webarena-hostname", default="localhost", help="Hostname for WebArena containers (localhost or remote IP)")
@@ -746,6 +854,7 @@ def main():
         max_tasks=args.max_tasks,
         max_steps=args.max_steps,
         headless=not args.no_headless,
+        record_video=not args.no_record_video,
         output_dir=args.output_dir,
         results_bucket=args.results_bucket,
         run_id=args.run_id,
