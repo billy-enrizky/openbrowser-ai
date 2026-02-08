@@ -46,7 +46,7 @@ def compute_step_efficiency_reward(
     if steps_taken <= 0:
         return 0.0
 
-    target = optimal_steps if optimal_steps else max(1, max_steps // 5)
+    target = optimal_steps if optimal_steps is not None else max(1, max_steps // 5)
     if steps_taken <= target:
         return 1.0
 
@@ -135,7 +135,7 @@ def compute_grpo_advantages(
             continue
 
         mean = sum(group) / len(group)
-        variance = sum((r - mean) ** 2 for r in group) / len(group)
+        variance = sum((r - mean) ** 2 for r in group) / (len(group) - 1)
         std = max(variance ** 0.5, 1e-8)
 
         for r in group:
