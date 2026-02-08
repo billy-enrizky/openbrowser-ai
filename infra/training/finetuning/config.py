@@ -70,11 +70,25 @@ GRPO_CONFIG = {
     "save_steps": 50,
 }
 
+# Online GRPO Config -- browser execution on FormFactory
+ONLINE_GRPO_CONFIG = {
+    **GRPO_CONFIG,
+    "group_size": 2,  # Reduced from 4 -- browser execution is slower
+    "formfactory_port": int(os.environ.get("FORMFACTORY_PORT", "5050")),
+    "browser_headless": True,
+    "action_timeout_s": 5,
+    "reward_weights": {
+        "task_completion": 0.6,
+        "field_accuracy": 0.3,
+        "execution_completeness": 0.1,
+    },
+}
+
 # Data Config
 DATA_CONFIG = {
-    "train_file": "data/processed/formfactory_sft.jsonl",
+    "train_file": os.environ.get("TRAIN_FILE", "data/processed/formfactory_sft.jsonl"),
     "eval_split": 0.1,
-    "max_train_samples": 5000,
+    "max_train_samples": int(os.environ.get("MAX_TRAIN_SAMPLES", "5000")),
     "max_eval_samples": 500,
 }
 
