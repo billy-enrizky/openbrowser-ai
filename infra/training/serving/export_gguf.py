@@ -162,7 +162,7 @@ def create_ollama_model(modelfile_path: Path, model_name: str = "qwen3-8b-formfa
     except FileNotFoundError:
         logger.error(
             "Ollama CLI not found. Install Ollama from https://ollama.com "
-            "then run: ollama create {model_name} -f {modelfile_path}"
+            f"then run: ollama create {model_name} -f {modelfile_path}"
         )
     except subprocess.CalledProcessError as e:
         logger.error(f"Failed to create Ollama model: {e}")
