@@ -7,6 +7,8 @@
        serve-vllm serve-ollama export-gguf \
        docker-build-eval docker-run-eval \
        terraform-plan-eval terraform-apply-eval terraform-destroy-eval \
+       terraform-plan-prod terraform-apply-prod terraform-destroy-prod \
+       prod-push-api-keys prod-get-url \
        clean
 
 # Configuration
@@ -51,10 +53,17 @@ help:
 	@echo "  docker-build-eval   Build eval Docker image"
 	@echo "  docker-run-eval     Run eval in Docker container"
 	@echo ""
-	@echo "Terraform:"
+	@echo "Terraform (Eval):"
 	@echo "  terraform-plan-eval   Plan eval infrastructure"
 	@echo "  terraform-apply-eval  Apply eval infrastructure"
 	@echo "  terraform-destroy-eval Destroy eval infrastructure"
+	@echo ""
+	@echo "Terraform (Production):"
+	@echo "  terraform-plan-prod   Plan production infrastructure (EC2 + API Gateway)"
+	@echo "  terraform-apply-prod  Apply production infrastructure"
+	@echo "  terraform-destroy-prod Destroy production infrastructure"
+	@echo "  prod-push-api-keys    Push API keys from .env to SSM"
+	@echo "  prod-get-url          Get API Gateway URL"
 	@echo ""
 	@echo "Other:"
 	@echo "  clean               Remove local output files"
@@ -190,6 +199,27 @@ terraform-apply-eval:
 
 terraform-destroy-eval:
 	cd $(TF_EVAL_DIR) && terraform destroy
+
+# -------------------------------------------------------------------
+# Terraform (production)
+# -------------------------------------------------------------------
+
+TF_PROD_DIR = infra/production/terraform
+
+terraform-plan-prod:
+	cd $(TF_PROD_DIR) && terraform init && terraform plan
+
+terraform-apply-prod:
+	cd $(TF_PROD_DIR) && terraform init && terraform apply
+
+terraform-destroy-prod:
+	cd $(TF_PROD_DIR) && terraform destroy
+
+prod-push-api-keys:
+	bash infra/production/scripts/push_api_keys.sh
+
+prod-get-url:
+	@cd $(TF_PROD_DIR) && terraform output -raw api_gateway_url 2>/dev/null || echo "Run 'terraform apply' first"
 
 # -------------------------------------------------------------------
 # Cleanup
