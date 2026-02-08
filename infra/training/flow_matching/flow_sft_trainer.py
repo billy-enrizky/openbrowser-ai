@@ -2,6 +2,7 @@
 
 import json
 import logging
+from pathlib import Path
 
 import torch
 from torch.utils.data import DataLoader, Dataset
@@ -30,6 +31,28 @@ class FlowDataset(Dataset):
 
     def __getitem__(self, idx):
         return self.data[idx]
+
+
+def tokenize_for_flow(
+    texts: list[str], max_length: int, vocab_size: int, device: torch.device
+) -> torch.Tensor:
+    """Simple hash-based tokenization for flow matching.
+
+    Maps each byte to a token ID in [0, vocab_size). In production,
+    this should use a proper tokenizer aligned with the vocabulary.
+    """
+    batch_ids = []
+    for text in texts:
+        tokens = text.encode("utf-8")
+        ids = [b % vocab_size for b in tokens][:max_length]
+        ids = ids + [0] * (max_length - len(ids))
+        batch_ids.append(ids)
+    return torch.tensor(batch_ids, dtype=torch.long, device=device)
+
+
+def flow_collate_fn(batch):
+    """Return batch as a list of dicts (skip default collation)."""
+    return batch
 
 
 def cfm_loss(
@@ -82,7 +105,9 @@ def train():
     model = model.to(device)
 
     dataset = FlowDataset(DATA_CONFIG["train_file"], max_samples=DATA_CONFIG.get("max_train_samples", 0))
-    dataloader = DataLoader(dataset, batch_size=config["batch_size"], shuffle=True)
+    dataloader = DataLoader(
+        dataset, batch_size=config["batch_size"], shuffle=True, collate_fn=flow_collate_fn
+    )
 
     optimizer = torch.optim.AdamW(
         model.parameters(),
@@ -99,14 +124,31 @@ def train():
         epoch_loss = 0.0
 
         for batch in dataloader:
-            # Simplified: in practice, tokenize condition and target properly
-            # This is a skeleton -- actual implementation needs proper tokenization
             global_step += 1
 
+            # Extract condition and target text from batch items
+            conditions = [item.get("condition", "") for item in batch]
+            targets = [
+                " ".join(t) if isinstance(t, list) else str(t)
+                for t in (item.get("target", []) for item in batch)
+            ]
+
+            # Tokenize for flow model
+            vocab_size = model.vocab_size
+            max_seq_length = model.max_seq_length
+            condition_ids = tokenize_for_flow(conditions, max_seq_length, vocab_size, device)
+            target_ids = tokenize_for_flow(targets, max_seq_length, vocab_size, device)
+
+            # Sample noise tokens
+            x_0 = torch.randint(0, vocab_size, target_ids.shape, device=device)
+
             optimizer.zero_grad()
-            # Placeholder loss computation -- requires proper batch tokenization
-            loss = torch.tensor(0.0, device=device, requires_grad=True)
+            loss = cfm_loss(
+                model, x_0, target_ids, condition_ids,
+                sigma_min=config.get("sigma_min", 0.001),
+            )
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
 
             epoch_loss += loss.item()
@@ -118,7 +160,9 @@ def train():
         logger.info(f"Epoch {epoch+1} complete: avg_loss={avg_loss:.4f}")
 
     # Save
-    torch.save(model.state_dict(), "outputs/flow_matching_sft/model.pt")
+    output_dir = Path("outputs/flow_matching_sft")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    torch.save(model.state_dict(), str(output_dir / "model.pt"))
     logger.info("Flow SFT training complete")
 
 
