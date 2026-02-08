@@ -6,12 +6,85 @@ interface for executing parsed action sequences in a real browser.
 
 import asyncio
 import logging
+import os
+import subprocess
 
 from openbrowser import BrowserSession, Tools
 
 from infra.training.shared.online_reward import BrowserOutcome
 
 logger = logging.getLogger(__name__)
+
+
+def _find_chromium_binary() -> str | None:
+    """Find the Playwright-installed Chromium binary path.
+
+    Uses Playwright's own registry to locate the browser binary (most reliable),
+    then falls back to common system paths.
+    """
+    # Method 1: Ask Playwright where it installed Chromium (most reliable)
+    try:
+        result = subprocess.run(
+            ["python", "-c",
+             "from playwright._impl._driver import compute_driver_executable, get_driver_env; "
+             "import subprocess, json; "
+             "proc = subprocess.run("
+             "[str(compute_driver_executable()), 'print-api-json'], "
+             "capture_output=True, text=True, env=get_driver_env()); "
+             "print('OK')"],
+            capture_output=True, text=True, timeout=5,
+        )
+    except Exception:
+        pass
+
+    # Method 2: Search for the Playwright chromium executable via registry
+    try:
+        from playwright.sync_api import sync_playwright
+        pw = sync_playwright().start()
+        executable = pw.chromium.executable_path
+        pw.stop()
+        if executable and os.path.isfile(executable):
+            return executable
+    except Exception as e:
+        logger.debug(f"Playwright API lookup failed: {e}")
+
+    # Method 3: Check common system paths
+    for system_path in [
+        "/usr/bin/google-chrome-stable",
+        "/usr/bin/google-chrome",
+        "/usr/bin/chromium",
+        "/usr/bin/chromium-browser",
+    ]:
+        if os.path.isfile(system_path) and os.access(system_path, os.X_OK):
+            return system_path
+
+    # Method 4: Broad search of Playwright cache with multiple patterns
+    pw_path = os.environ.get(
+        "PLAYWRIGHT_BROWSERS_PATH",
+        os.path.expanduser("~/.cache/ms-playwright"),
+    )
+    if os.path.isdir(pw_path):
+        import glob
+        # Try multiple patterns (Playwright may use different directory layouts)
+        for pattern in [
+            "chromium-*/chrome-linux/chrome",
+            "chromium_headless_shell-*/chrome-linux/headless_shell",
+            "chromium-*/chrome-linux/headless_shell",
+            "chrome-*/chrome-linux/chrome",
+        ]:
+            matches = glob.glob(os.path.join(pw_path, pattern))
+            if matches:
+                return sorted(matches)[-1]
+
+        # Last resort: find any executable named 'chrome' or 'chromium'
+        for root, dirs, files in os.walk(pw_path):
+            for name in files:
+                if name in ("chrome", "chromium", "headless_shell"):
+                    path = os.path.join(root, name)
+                    if os.access(path, os.X_OK):
+                        return path
+
+    return None
 
 # Success indicators on FormFactory pages after form submission
 SUCCESS_INDICATORS = [
@@ -38,7 +111,18 @@ class BrowserEnvironment:
     @classmethod
     async def create(cls, headless: bool = True) -> "BrowserEnvironment":
         """Create and start a browser environment."""
-        browser_session = BrowserSession(headless=headless)
+        executable = _find_chromium_binary()
+        if executable:
+            logger.info(f"Found browser binary: {executable}")
+            browser_session = BrowserSession(
+                headless=headless, executable_path=executable
+            )
+        else:
+            logger.warning(
+                "No pre-installed browser binary found, "
+                "falling back to openbrowser auto-detection"
+            )
+            browser_session = BrowserSession(headless=headless)
         await browser_session.start()
         tools = Tools()
         logger.info("Browser environment created")
@@ -196,7 +280,7 @@ class BrowserEnvironment:
     async def close(self) -> None:
         """Shutdown browser."""
         try:
-            await self.browser_session.close()
+            await self.browser_session.kill()
             logger.info("Browser environment closed")
         except Exception as e:
             logger.warning(f"Error closing browser: {e}")
