@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  eval:
+    build:
+      context: ../..
+      dockerfile: infra/eval/docker/Dockerfile.eval
+    environment:
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - DATA_BUCKET=${DATA_BUCKET:-}
+      - RESULTS_BUCKET=${RESULTS_BUCKET:-}
+    volumes:
+      - ../../results:/app/results
+      - ../../stress-tests:/app/stress-tests:ro
+    shm_size: '2gb'
+    security_opt:
+      - seccomp:unconfined
+    # Override entrypoint args via command
+    # Example: docker-compose run eval --datasets stress_tests --max-tasks 5
