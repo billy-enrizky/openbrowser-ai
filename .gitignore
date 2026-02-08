@@ -17,6 +17,9 @@ STAD68
 STAD80
 litellm
 .cursor
+.claude
+.terraform
+.terraform.lock.hcl
 .github/copilot-instructions.md
 local_docs
 
