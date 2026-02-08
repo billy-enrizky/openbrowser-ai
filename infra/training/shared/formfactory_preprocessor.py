@@ -62,7 +62,7 @@ def build_response(form_name: str, route: str, fields: dict, port: int) -> str:
                 steps.append(
                     f"Step {step_num}: Click on the '{field_name}' checkbox to enable it"
                 )
-            step_num += 1
+                step_num += 1
         elif isinstance(value, list):
             for item in value:
                 steps.append(
