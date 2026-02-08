@@ -137,7 +137,10 @@ def compute_log_probs(
     mask = attention_mask[:, 1:][:, response_start:].float()
     masked_log_probs = response_log_probs * mask
 
-    return masked_log_probs.sum(dim=-1)  # [B]
+    # Mean over response tokens (not sum) to keep ratio = exp(policy - ref)
+    # in a numerically stable range -- sum over 500 tokens creates exp(>20) explosions
+    num_tokens = mask.sum(dim=-1).clamp(min=1)
+    return masked_log_probs.sum(dim=-1) / num_tokens  # [B]
 
 
 def parse_actions_from_rollout(rollout: str) -> list[str]:
@@ -196,7 +199,7 @@ def train():
         base_model = prepare_model_for_kbit_training(
             base_model, use_gradient_checkpointing=True, gradient_checkpointing_kwargs={"use_reentrant": False}
         )
-        model = PeftModel.from_pretrained(base_model, model_name)
+        model = PeftModel.from_pretrained(base_model, model_name, is_trainable=True)
         model.train()
     else:
         model = load_quantized_model(model_name, config)
