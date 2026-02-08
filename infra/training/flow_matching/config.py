@@ -1,5 +1,7 @@
 """Flow matching training hyperparameters: Discrete Flow Matching + GRPO."""
 
+import os
+
 FLOW_MODEL_CONFIG = {
     "vocab_size": 32000,
     "hidden_dim": 512,
@@ -40,8 +42,28 @@ FLOW_GRPO_CONFIG = {
     "logging_steps": 5,
 }
 
+ONLINE_FLOW_GRPO_CONFIG = {
+    "group_size": 2,  # Reduced from 4 -- browser execution is slower
+    "learning_rate": 5e-5,
+    "num_epochs": 3,
+    "kl_coeff": 0.05,
+    "clip_range": 0.2,
+    "num_ode_steps": 10,
+    "fp16": True,
+    "logging_steps": 5,
+    "formfactory_port": int(os.environ.get("FORMFACTORY_PORT", "5050")),
+    "browser_headless": True,
+    "action_timeout_s": 5,
+    "rollout_timeout_s": 30,
+    "reward_weights": {
+        "task_completion": 0.6,
+        "field_accuracy": 0.3,
+        "execution_completeness": 0.1,
+    },
+}
+
 DATA_CONFIG = {
-    "train_file": "data/processed/mind2web_flow.jsonl",
+    "train_file": os.environ.get("FLOW_TRAIN_FILE", "data/processed/mind2web_flow.jsonl"),
     "eval_split": 0.1,
-    "max_train_samples": 5000,
+    "max_train_samples": int(os.environ.get("MAX_TRAIN_SAMPLES", "5000")),
 }
