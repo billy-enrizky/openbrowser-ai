@@ -44,7 +44,7 @@ uv run playwright install-deps chromium
 if [ ! -d "data/formfactory" ]; then
     git clone --depth 1 https://github.com/formfactory-ai/formfactory.git data/formfactory
 fi
-uv pip install flask --system
+uv pip install flask
 
 # --- API keys from SSM ---
 GOOGLE_API_KEY=$(aws ssm get-parameter --name "/${project_name}/GOOGLE_API_KEY" --with-decryption --region ${aws_region} --query "Parameter.Value" --output text 2>/dev/null || echo "")
