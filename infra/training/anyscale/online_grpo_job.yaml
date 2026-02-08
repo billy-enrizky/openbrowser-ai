@@ -1,0 +1,36 @@
+name: openbrowser-online-grpo
+entrypoint: python -m infra.training.finetuning.online_grpo_trainer
+containerfile: infra/training/anyscale/Containerfile.online-grpo
+compute_config:
+  cloud: "Anyscale Cloud"
+  head_node:
+    instance_type: g5.xlarge
+  worker_nodes: []
+working_dir: .
+excludes:
+  - .git
+  - .env
+  - __pycache__
+  - node_modules
+  - frontend
+  - .cursor
+  - presentation
+  - data/mind2web/
+  - data/webarena/
+  - results/
+  - outputs/
+  - openbrowser_agent_data/
+  - "*.pyc"
+env_vars:
+  TRAIN_FILE: "data/processed/formfactory_sft.jsonl"
+  MAX_TRAIN_SAMPLES: "2"
+  SFT_CHECKPOINT_PATH: ""
+  S3_CHECKPOINT_BUCKET: "openbrowser-eval-results"
+  S3_CHECKPOINT_PREFIX: "training/checkpoints"
+  AWS_REGION: "ca-central-1"
+max_retries: 1
+timeout_s: 14400
+tags:
+  project: openbrowser
+  task: online-grpo
+  model: qwen3-8b
