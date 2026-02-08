@@ -35,7 +35,7 @@ def download_prefix(s3_client, bucket: str, prefix: str, local_dir: Path):
 def main():
     parser = argparse.ArgumentParser(description="Download results from S3")
     parser.add_argument("--bucket", required=True, help="S3 results bucket name")
-    parser.add_argument("--prefix", default="", help="S3 prefix filter (e.g., CSC490/)")
+    parser.add_argument("--prefix", default="", help="S3 prefix filter (e.g., benchmarking/)")
     parser.add_argument("--output-dir", default="results", help="Local output directory")
     parser.add_argument("--region", default="ca-central-1", help="AWS region")
     args = parser.parse_args()

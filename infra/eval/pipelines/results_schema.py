@@ -22,7 +22,7 @@ class TaskResult(BaseModel):
     # Execution metadata
     agent_type: str  # "Agent" or "CodeAgent"
     model: str
-    project: str = "CSC490"
+    project: str = "benchmarking"
     run_id: str = ""
 
     # Results
