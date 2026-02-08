@@ -73,10 +73,11 @@ GRPO_CONFIG = {
 # Online GRPO Config -- browser execution on FormFactory
 ONLINE_GRPO_CONFIG = {
     **GRPO_CONFIG,
-    "group_size": 2,  # Reduced from 4 -- browser execution is slower
+    "group_size": 4,  # G=4 for robust GRPO advantages (v10 used G=2, saw reward variance)
+    "kl_coeff": 0.25,  # Increased from 0.1 -- v10 showed policy divergence (kl=-1.35 at step 25)
     "formfactory_port": int(os.environ.get("FORMFACTORY_PORT", "5050")),
     "browser_headless": True,
-    "action_timeout_s": 5,
+    "action_timeout_s": 10,  # Increased from 5s -- v10 hit timeouts on long descriptions
     "reward_weights": {
         "task_completion": 0.6,
         "field_accuracy": 0.3,
