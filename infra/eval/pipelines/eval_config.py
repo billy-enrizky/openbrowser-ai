@@ -11,8 +11,8 @@ logger = logging.getLogger(__name__)
 class EvalConfig:
     """Configuration for a benchmark evaluation run."""
 
-    # Project identifier (CSC490, STAD68, STAD80)
-    project: str = "CSC490"
+    # Project identifier (benchmarking, finetuning, flow_matching)
+    project: str = "benchmarking"
 
     # Datasets to evaluate
     datasets: list[str] = field(
