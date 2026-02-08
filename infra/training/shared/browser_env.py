@@ -87,6 +87,14 @@ def _find_chromium_binary() -> str | None:
     return None
 
 # Success indicators on FormFactory pages after form submission
+# Map action parser names to openbrowser Tools method names
+ACTION_NAME_MAP = {
+    "input_text": "input",
+    "click_element": "click",
+    "select_dropdown_option": "select_dropdown",
+    "navigate": "navigate",
+}
+
 SUCCESS_INDICATORS = [
     "successfully submitted",
     "thank you",
@@ -112,17 +120,23 @@ class BrowserEnvironment:
     async def create(cls, headless: bool = True) -> "BrowserEnvironment":
         """Create and start a browser environment."""
         executable = _find_chromium_binary()
+        # Allow localhost/127.0.0.1 for FormFactory server
+        allowed = ["localhost", "127.0.0.1", "about:blank"]
         if executable:
             logger.info(f"Found browser binary: {executable}")
             browser_session = BrowserSession(
-                headless=headless, executable_path=executable
+                headless=headless,
+                executable_path=executable,
+                allowed_domains=allowed,
             )
         else:
             logger.warning(
                 "No pre-installed browser binary found, "
                 "falling back to openbrowser auto-detection"
             )
-            browser_session = BrowserSession(headless=headless)
+            browser_session = BrowserSession(
+                headless=headless, allowed_domains=allowed
+            )
         await browser_session.start()
         tools = Tools()
         logger.info("Browser environment created")
@@ -134,27 +148,98 @@ class BrowserEnvironment:
         Inspects the selector map and extracts element names from attributes
         (name, placeholder, aria-label, tag type for submit buttons).
         """
+        # Trigger DOM parsing first -- get_selector_map() returns empty
+        # unless the DOMWatchdog has built the DOM tree via get_browser_state_summary()
+        await self.browser_session.get_browser_state_summary(include_screenshot=False)
+
         selector_map = await self.browser_session.get_selector_map()
         field_map: dict[str, int] = {}
 
-        for idx, element in selector_map.items():
-            attrs = element.attributes or {}
+        logger.info(f"Selector map has {len(selector_map)} elements")
 
-            # Map by name, placeholder, aria-label
-            for attr_key in ["name", "placeholder", "aria-label"]:
+        for idx, element in selector_map.items():
+            # Try multiple ways to access attributes (openbrowser API varies)
+            attrs = {}
+            if hasattr(element, "attributes") and element.attributes:
+                if isinstance(element.attributes, dict):
+                    attrs = element.attributes
+                else:
+                    # Some openbrowser versions return attributes as list of tuples
+                    try:
+                        attrs = dict(element.attributes)
+                    except (TypeError, ValueError):
+                        attrs = {}
+
+            tag = getattr(element, "tag_name", "") or ""
+            tag_lower = tag.lower()
+
+            # Log first few elements for debugging
+            if idx < 5 or tag_lower in ("input", "select", "textarea", "button"):
+                logger.debug(
+                    f"  Element {idx}: tag={tag}, attrs={attrs}, "
+                    f"text={getattr(element, 'text_content', '')!r}"
+                )
+
+            # Map by name, placeholder, aria-label, id, for
+            for attr_key in ["name", "placeholder", "aria-label", "id", "for"]:
                 value = attrs.get(attr_key, "")
                 if value:
                     field_map[value.lower()] = idx
 
+            # Map by visible text / label content
+            text = getattr(element, "text_content", "") or ""
+            if text and len(text) < 100:  # Skip long text content
+                field_map[text.strip().lower()] = idx
+
+            # For <label> elements, extract the "for" attribute to link label text to input
+            if tag_lower == "label" and text:
+                label_for = attrs.get("for", "")
+                if label_for:
+                    # Map the human-readable label text to the input element index
+                    # (will be resolved when we find the matching input by id)
+                    field_map[text.strip().lower()] = field_map.get(label_for.lower(), idx)
+
             # Map submit buttons
-            tag = getattr(element, "tag_name", "") or ""
             input_type = attrs.get("type", "")
-            if tag.lower() in ("button", "input") and input_type.lower() == "submit":
+            if tag_lower in ("button", "input") and input_type.lower() == "submit":
                 field_map["submit"] = idx
                 btn_text = getattr(element, "node_value", "") or ""
                 if btn_text:
                     field_map[btn_text.lower()] = idx
+                # Also map by value attribute (common for submit inputs)
+                btn_value = attrs.get("value", "")
+                if btn_value:
+                    field_map[btn_value.lower()] = idx
 
+            # Map button elements by text
+            if tag_lower == "button":
+                field_map["submit"] = field_map.get("submit", idx)
+                if text:
+                    field_map[text.strip().lower()] = idx
+
+        # Post-process: link label text to actual input elements
+        # Labels have "for" attribute pointing to input "id" -- resolve the mapping
+        for idx, element in selector_map.items():
+            tag = (getattr(element, "tag_name", "") or "").lower()
+            if tag == "label":
+                attrs = {}
+                if hasattr(element, "attributes") and element.attributes:
+                    if isinstance(element.attributes, dict):
+                        attrs = element.attributes
+                    else:
+                        try:
+                            attrs = dict(element.attributes)
+                        except (TypeError, ValueError):
+                            pass
+                label_for = attrs.get("for", "")
+                text = (getattr(element, "text_content", "") or "").strip().lower()
+                if label_for and text:
+                    # Find the input element with matching id
+                    target_idx = field_map.get(label_for.lower())
+                    if target_idx is not None:
+                        field_map[text] = target_idx
+
+        logger.info(f"Element map built: {len(field_map)} entries, keys={list(field_map.keys())[:40]}")
         return field_map
 
     async def execute_actions(
@@ -184,11 +269,13 @@ class BrowserEnvironment:
             action_name = action_dict.get("action", "")
             params = action_dict.get("params", {})
 
+            # Map parser action names to openbrowser Tools method names
+            tools_method = ACTION_NAME_MAP.get(action_name, action_name)
+
             try:
-                # Use Tools' dynamic wrapper methods (via __getattr__)
-                action_fn = getattr(self.tools, action_name, None)
+                action_fn = getattr(self.tools, tools_method, None)
                 if action_fn is None:
-                    logger.warning(f"Unknown action: {action_name}")
+                    logger.warning(f"Unknown action: {action_name} (mapped to {tools_method})")
                     continue
 
                 result = await asyncio.wait_for(
