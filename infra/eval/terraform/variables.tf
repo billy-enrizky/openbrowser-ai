@@ -45,7 +45,7 @@ variable "eval_datasets" {
 variable "eval_max_tasks" {
   description = "Max tasks per dataset (0 = all)"
   type        = number
-  default     = 0
+  default     = 2
 }
 
 variable "eval_models" {

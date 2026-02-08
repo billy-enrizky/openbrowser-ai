@@ -65,6 +65,9 @@ class EvalConfig:
     # Hostname for WebArena Docker containers (localhost or remote EC2 IP)
     webarena_hostname: str = "localhost"
 
+    # Record video (.mp4) for each task
+    record_video: bool = True
+
     def validate(self):
         """Validate configuration."""
         valid_datasets = ["stress_tests", "mind2web", "formfactory", "webarena"]
