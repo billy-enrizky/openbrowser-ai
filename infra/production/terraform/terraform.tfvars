@@ -1,0 +1,28 @@
+# Copy to terraform.tfvars and fill in. Do not commit terraform.tfvars.
+
+aws_region   = "ca-central-1"
+project_name = "openbrowser"
+
+# Backend container image:
+# - Leave empty to use the ECR repo created by Terraform (push your image there, see README).
+# - Or set to a full URI (ECR or Docker Hub), e.g.:
+#   backend_image = "123456789012.dkr.ecr.ca-central-1.amazonaws.com/openbrowser-backend:latest"
+#   backend_image = "youruser/openbrowser-backend:latest"
+backend_image = ""
+
+# When using the Terraform-created ECR repo, tag to pull (default: latest)
+backend_image_tag = "latest"
+
+# Optional: use an existing Secrets Manager secret for LLM API keys
+# Leave empty to have Terraform create a placeholder secret
+# secrets_manager_secret_name = ""
+
+# Optional: require JWT (Cognito) on API routes. Set true when auth is implemented.
+enable_api_auth = false
+
+# Optional: custom domain for frontend (requires ACM cert in us-east-1 for CloudFront)
+# frontend_domain_name    = "app.example.com"
+# frontend_acm_certificate_arn = "arn:aws:acm:us-east-1:..."
+
+# Optional: Cognito hosted UI domain prefix
+# cognito_domain_prefix = "openbrowser"
