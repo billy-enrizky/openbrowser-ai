@@ -8,13 +8,15 @@ RUN sudo apt-get update && sudo apt-get install -y \
     fonts-liberation xdg-utils wget && \
     sudo rm -rf /var/lib/apt/lists/*
 
-# Freeze numpy at the base image version to avoid breaking pre-installed
-# pyarrow and scipy (compiled against numpy 1.x C ABI)
-RUN pip show numpy | grep "^Version:" | awk '{print "numpy=="$2}' > /tmp/numpy-constraints.txt && \
-    cat /tmp/numpy-constraints.txt
+# Upgrade numpy + reinstall scipy/pyarrow so all C extensions are
+# ABI-compatible (Ray base image ships numpy 1.x; torch requires numpy>=2)
+RUN pip install --no-cache-dir \
+    "numpy>=2.0,<2.5" \
+    "scipy>=1.14" \
+    "pyarrow>=17.0"
 
-# Install Python deps with numpy constraint
-RUN pip install --no-cache-dir -c /tmp/numpy-constraints.txt \
+# Install Python deps (numpy already at 2.x, compatible with torch)
+RUN pip install --no-cache-dir \
     "torch>=2.0" \
     "transformers>=4.45" \
     "peft>=0.12" \
@@ -34,5 +36,11 @@ RUN pip install --no-cache-dir -c /tmp/numpy-constraints.txt \
     "pydantic>=2.0.0" \
     aiofiles
 
-# Install Chromium browser for Playwright
-RUN playwright install chromium
+# Install uv (openbrowser uses uvx at runtime for browser management)
+RUN pip install --no-cache-dir uv
+
+# Install Chromium browser for Playwright and symlink to system path
+# (openbrowser's LocalBrowserWatchdog searches /usr/bin/chromium)
+RUN playwright install chromium && \
+    CHROME_PATH=$(python -c "from playwright.sync_api import sync_playwright; pw=sync_playwright().start(); print(pw.chromium.executable_path); pw.stop()" 2>/dev/null) && \
+    if [ -n "$CHROME_PATH" ] && [ -f "$CHROME_PATH" ]; then sudo ln -sf "$CHROME_PATH" /usr/bin/chromium; fi
