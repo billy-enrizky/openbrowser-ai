@@ -38,21 +38,9 @@ data "aws_region" "current" {}
 
 data "aws_caller_identity" "current" {}
 
-# Ubuntu 22.04 LTS AMI
-data "aws_ami" "ubuntu" {
-  most_recent = true
-  owners      = ["099720109477"] # Canonical
-
-  filter {
-    name   = "name"
-    values = ["ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-*"]
-  }
-
-  filter {
-    name   = "virtualization-type"
-    values = ["hvm"]
-  }
-}
+# Ubuntu 22.04 LTS AMI (hardcoded -- ec2:DescribeImages blocked by org SCP)
+# ca-central-1, amd64, hvm:ebs-ssd, 20251212 release
+# Source: https://cloud-images.ubuntu.com/locator/ec2/
 
 # ============================================================
 # VPC + NETWORKING
@@ -157,6 +145,7 @@ resource "aws_s3_bucket_lifecycle_configuration" "datasets" {
   rule {
     id     = "transition-to-ia"
     status = "Enabled"
+    filter {}
     transition {
       days          = 30
       storage_class = "STANDARD_IA"
@@ -195,6 +184,7 @@ resource "aws_s3_bucket_lifecycle_configuration" "results" {
   rule {
     id     = "expire-old-results"
     status = "Enabled"
+    filter {}
     expiration { days = 90 }
   }
 }
@@ -268,9 +258,10 @@ resource "aws_iam_role_policy_attachment" "eval_ssm" {
 # ============================================================
 
 resource "aws_launch_template" "eval" {
-  name_prefix   = "${var.project_name}-eval-"
-  image_id      = data.aws_ami.ubuntu.id
-  instance_type = var.instance_type
+  name_prefix            = "${var.project_name}-eval-"
+  image_id               = var.ubuntu_ami_id
+  instance_type          = var.instance_type
+  update_default_version = true
   key_name      = var.key_pair_name != "" ? var.key_pair_name : null
 
   iam_instance_profile {
@@ -305,6 +296,11 @@ resource "aws_launch_template" "eval" {
     aws_region          = var.aws_region
     data_bucket_name    = aws_s3_bucket.datasets.id
     results_bucket_name = aws_s3_bucket.results.id
+    eval_datasets       = var.eval_datasets
+    eval_max_tasks      = var.eval_max_tasks
+    eval_models         = var.eval_models
+    eval_agent_types    = var.eval_agent_types
+    auto_run_eval       = var.auto_run_eval
   }))
 
   tag_specifications {
@@ -318,3 +314,28 @@ resource "aws_launch_template" "eval" {
 
   tags = { Name = "${var.project_name}-eval-template" }
 }
+
+# ============================================================
+# SSM PARAMETERS (API Keys)
+# ============================================================
+# Created as placeholders -- real values are pushed by launch_eval.sh
+# from the local .env file before launching an instance.
+
+resource "aws_ssm_parameter" "google_api_key" {
+  name  = "/${var.project_name}/GOOGLE_API_KEY"
+  type  = "SecureString"
+  value = "PLACEHOLDER"
+
+  lifecycle { ignore_changes = [value] }
+  tags = { Name = "${var.project_name}-google-api-key" }
+}
+
+resource "aws_ssm_parameter" "openai_api_key" {
+  name  = "/${var.project_name}/OPENAI_API_KEY"
+  type  = "SecureString"
+  value = "PLACEHOLDER"
+
+  lifecycle { ignore_changes = [value] }
+  tags = { Name = "${var.project_name}-openai-api-key" }
+}
+
