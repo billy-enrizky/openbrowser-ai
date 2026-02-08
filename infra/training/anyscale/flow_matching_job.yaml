@@ -28,7 +28,7 @@ requirements:
 env_vars:
   FLOW_TRAIN_FILE: "data/processed/formfactory_flow.jsonl"
   MAX_TRAIN_SAMPLES: "200"
-  NUM_EPOCHS: "5"
+  NUM_EPOCHS: "50"
   # HF_TOKEN injected from .env at submission time by submit_job.py
 max_retries: 1
 timeout_s: 14400

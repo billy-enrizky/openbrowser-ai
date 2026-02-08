@@ -8,6 +8,7 @@ Usage:
     uv run infra/training/anyscale/submit_job.py finetuning-grpo
     uv run infra/training/anyscale/submit_job.py flow-matching
     uv run infra/training/anyscale/submit_job.py online-flow-grpo
+    uv run infra/training/anyscale/submit_job.py online-flow-llm-grpo
     uv run infra/training/anyscale/submit_job.py online-grpo
     uv run infra/training/anyscale/submit_job.py --list
 """
@@ -30,6 +31,7 @@ JOB_CONFIGS = {
     "finetuning-grpo": JOBS_DIR / "finetuning_grpo_job.yaml",
     "flow-matching": JOBS_DIR / "flow_matching_job.yaml",
     "online-flow-grpo": JOBS_DIR / "online_flow_grpo_job.yaml",
+    "online-flow-llm-grpo": JOBS_DIR / "online_flow_llm_grpo_job.yaml",
     "online-grpo": JOBS_DIR / "online_grpo_job.yaml",
 }
 
