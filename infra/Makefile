@@ -1,7 +1,8 @@
 .PHONY: help eval-local eval-docker eval-stress eval-mind2web eval-formfactory \
        eval-aws-launch eval-aws-results \
        download-datasets upload-datasets download-results report \
-       train-submit-sft train-submit-grpo train-submit-flow train-list-jobs \
+       train-submit-sft train-submit-grpo train-submit-flow \
+       train-submit-online-flow-grpo train-submit-online-grpo train-list-jobs \
        preprocess-mind2web preprocess-formfactory \
        serve-vllm serve-ollama export-gguf \
        docker-build-eval docker-run-eval \
@@ -34,10 +35,12 @@ help:
 	@echo "  preprocess-formfactory  Preprocess FormFactory data for training"
 	@echo ""
 	@echo "Training (Anyscale):"
-	@echo "  train-submit-sft    Submit finetuning SFT job (Qwen3-8B QLoRA)"
-	@echo "  train-submit-grpo   Submit finetuning GRPO job"
-	@echo "  train-submit-flow   Submit flow matching job"
-	@echo "  train-list-jobs     List available training jobs"
+	@echo "  train-submit-sft              Submit finetuning SFT job (Qwen3-8B QLoRA)"
+	@echo "  train-submit-grpo             Submit finetuning GRPO job"
+	@echo "  train-submit-flow             Submit flow matching job"
+	@echo "  train-submit-online-flow-grpo Submit online flow GRPO job (browser execution)"
+	@echo "  train-submit-online-grpo      Submit online AR GRPO job (browser execution)"
+	@echo "  train-list-jobs               List available training jobs"
 	@echo ""
 	@echo "Serving:"
 	@echo "  serve-vllm          Start vLLM server (Qwen3-8B-AWQ)"
@@ -128,6 +131,15 @@ train-submit-grpo: data/processed/formfactory_sft.jsonl
 
 train-submit-flow: data/processed/mind2web_flow.jsonl
 	$(SUBMIT_CMD) flow-matching
+
+data/processed/formfactory_flow.jsonl:
+	uv run infra/training/shared/formfactory_preprocessor.py
+
+train-submit-online-flow-grpo: data/processed/formfactory_flow.jsonl
+	$(SUBMIT_CMD) online-flow-grpo
+
+train-submit-online-grpo: data/processed/formfactory_sft.jsonl
+	$(SUBMIT_CMD) online-grpo
 
 train-list-jobs:
 	$(SUBMIT_CMD) --list
