@@ -1,0 +1,7 @@
+FROM ./qwen3-8b-formfactory-q4_k_m.gguf
+
+PARAMETER temperature 0
+PARAMETER num_ctx 4096
+PARAMETER stop <|im_end|>
+
+SYSTEM """You are a web browser automation agent. Given a task, produce a step-by-step action plan to complete it. Each step should be a specific browser action: navigate, click, type, select, or submit."""
