@@ -20,6 +20,8 @@ excludes:
   - results/
   - outputs/
   - openbrowser_agent_data/
+  - data/formfactory/.git/
+  - data/formfactory/img/
   - "*.pyc"
 env_vars:
   TRAIN_FILE: "data/processed/formfactory_sft.jsonl"
