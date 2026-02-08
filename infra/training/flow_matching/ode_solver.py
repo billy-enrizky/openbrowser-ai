@@ -13,6 +13,7 @@ def euler_solve(
     condition: torch.Tensor,
     num_steps: int = 20,
     sigma_min: float = 0.001,
+    temperature: float = 1.0,
 ) -> torch.Tensor:
     """Euler method ODE solver for flow matching.
 
@@ -53,13 +54,13 @@ def euler_solve(
         current_one_hot = torch.nn.functional.one_hot(
             x_t_ids, num_classes=vocab_size
         ).float()
-        predicted_probs = torch.softmax(logits, dim=-1)
+        predicted_probs = torch.softmax(logits / temperature, dim=-1)
 
         # Interpolate
         alpha = dt
         mixed = (1 - alpha) * current_one_hot + alpha * predicted_probs
 
-        # Sample or argmax
+        # Hard decision: take argmax of the mixed distribution
         x_t = mixed.argmax(dim=-1).float()
 
     return x_t.long()
@@ -91,6 +92,8 @@ def sample(
     noise = torch.randint(0, model.vocab_size, (B, seq_length), device=device)
 
     # Solve ODE
-    output = euler_solve(model, noise, condition, num_steps=num_steps)
+    output = euler_solve(
+        model, noise, condition, num_steps=num_steps, temperature=temperature
+    )
 
     return output
