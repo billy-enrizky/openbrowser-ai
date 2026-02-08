@@ -22,13 +22,17 @@ logger = logging.getLogger(__name__)
 RE_THINK_BLOCK = re.compile(r"<think>.*?</think>", re.DOTALL)
 
 # Regex patterns for FormFactory action format
-# (matches output from formfactory_preprocessor.py build_response)
-RE_NAVIGATE = re.compile(r"Step \d+:\s*Navigate to (.+)")
-RE_TYPE = re.compile(r"Step \d+:\s*Type '(.+)' into the '(.+)' field")
-RE_SELECT = re.compile(r"Step \d+:\s*Select '(.+)' from the '(.+)' field")
-RE_CLICK_CHECKBOX = re.compile(r"Step \d+:\s*Click on the '(.+)' checkbox")
-RE_CLICK_INPUT = re.compile(r"Step \d+:\s*Click on the '(.+)' input field")
-RE_SUBMIT = re.compile(r"Step \d+:\s*Click the Submit button")
+# Flexible prefix: matches "Step N:", "Step N.", "N:", "N." (with/without Step prefix)
+_P = r"(?:Step\s+)?\d+[.:]\s*"
+RE_NAVIGATE = re.compile(_P + r"Navigate to (.+)")
+RE_TYPE = re.compile(_P + r"Type ['\"](.+?)['\"] into the ['\"](.+?)['\"] field")
+RE_SELECT = re.compile(_P + r"Select ['\"](.+?)['\"] from the ['\"](.+?)['\"] field")
+RE_CLICK_CHECKBOX = re.compile(_P + r"Click on the ['\"](.+?)['\"] checkbox")
+RE_CLICK_INPUT = re.compile(_P + r"Click on the ['\"](.+?)['\"] input field")
+RE_SUBMIT = re.compile(_P + r"Click the Submit button")
+# Alternate formats the model may produce after SFT
+RE_FILL_IN = re.compile(_P + r"(?:Fill in|Enter|Input) ['\"](.+?)['\"] (?:in|into) the ['\"](.+?)['\"]")
+RE_FILL_FIELD_WITH = re.compile(_P + r"(?:Fill in|Locate and fill in) the ['\"](.+?)['\"] (?:field )?with ['\"](.+?)['\"]")
 
 
 def _find_element_index(
@@ -169,6 +173,36 @@ def parse_rollout_to_actions(
                 })
             else:
                 logger.warning("Could not resolve submit button element")
+                unresolved += 1
+            continue
+
+        # Alternate: "Fill in 'value' into the 'field'" / "Enter 'value' into the 'field'"
+        m = RE_FILL_IN.match(line)
+        if m:
+            value, field = m.group(1), m.group(2)
+            idx = _find_element_index(field, element_map)
+            if idx is not None:
+                actions.append({
+                    "action": "input_text",
+                    "params": {"index": idx, "text": value, "clear": True},
+                })
+            else:
+                logger.warning(f"Could not resolve element for field '{field}'")
+                unresolved += 1
+            continue
+
+        # Alternate: "Fill in the 'field' with 'value'"
+        m = RE_FILL_FIELD_WITH.match(line)
+        if m:
+            field, value = m.group(1), m.group(2)
+            idx = _find_element_index(field, element_map)
+            if idx is not None:
+                actions.append({
+                    "action": "input_text",
+                    "params": {"index": idx, "text": value, "clear": True},
+                })
+            else:
+                logger.warning(f"Could not resolve element for field '{field}'")
                 unresolved += 1
             continue
 
