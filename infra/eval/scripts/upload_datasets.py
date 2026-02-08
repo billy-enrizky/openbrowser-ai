@@ -10,7 +10,7 @@ import boto3
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
 DATASET_PATHS = {
     "stress-tests": PROJECT_ROOT / "stress-tests",
