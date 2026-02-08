@@ -1,0 +1,33 @@
+FROM anyscale/ray:2.44.1-slim-py312-cu128
+
+# Install Chromium system deps + browser
+RUN sudo apt-get update && sudo apt-get install -y \
+    libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 \
+    libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libgbm1 \
+    libasound2 libpango-1.0-0 libpangocairo-1.0-0 libgtk-3-0 \
+    fonts-liberation xdg-utils wget && \
+    sudo rm -rf /var/lib/apt/lists/*
+
+# Freeze numpy at the base image version to avoid breaking pre-installed
+# pyarrow and scipy (compiled against numpy 1.x C ABI)
+RUN pip show numpy | grep "^Version:" | awk '{print "numpy=="$2}' > /tmp/numpy-constraints.txt && \
+    cat /tmp/numpy-constraints.txt
+
+# Install Python deps with numpy constraint
+RUN pip install --no-cache-dir -c /tmp/numpy-constraints.txt \
+    "torch>=2.0" \
+    "transformers>=4.45" \
+    flask \
+    playwright \
+    "openbrowser-ai" \
+    "cdp-use" \
+    "bubus>=1.5.6" \
+    "httpx>=0.28.1" \
+    "websockets>=15.0.1" \
+    langgraph \
+    "langchain-core>=0.3.0" \
+    "pydantic>=2.0.0" \
+    aiofiles
+
+# Install Chromium browser for Playwright
+RUN playwright install chromium
