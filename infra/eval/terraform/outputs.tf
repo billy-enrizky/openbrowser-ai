@@ -22,3 +22,14 @@ output "security_group_id" {
   description = "Eval security group ID"
   value       = aws_security_group.eval.id
 }
+
+output "ssm_google_api_key_name" {
+  description = "SSM parameter name for Google API key"
+  value       = aws_ssm_parameter.google_api_key.name
+}
+
+output "ssm_openai_api_key_name" {
+  description = "SSM parameter name for OpenAI API key"
+  value       = aws_ssm_parameter.openai_api_key.name
+}
+

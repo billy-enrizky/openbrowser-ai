@@ -1,0 +1,21 @@
+services:
+  shopping:
+    image: webarenaimages/shopping_final_0712:latest
+    container_name: webarena-shopping
+    ports:
+      - "7770:80"
+    restart: unless-stopped
+
+  shopping_admin:
+    image: webarenaimages/shopping_admin_final_0719:latest
+    container_name: webarena-shopping-admin
+    ports:
+      - "7780:80"
+    restart: unless-stopped
+
+  reddit:
+    image: webarenaimages/postmill-populated-exposed-withimg:latest
+    container_name: webarena-reddit
+    ports:
+      - "9999:80"
+    restart: unless-stopped
