@@ -33,6 +33,11 @@ class TaskResult(BaseModel):
     error_message: str | None = None
     output_files: list[str] = Field(default_factory=list)
 
+    # Per-task artifacts
+    video_path: str | None = None
+    history_path: str | None = None
+    agent_messages: list[dict] = Field(default_factory=list)
+
     # Timestamps
     started_at: datetime | None = None
     completed_at: datetime | None = None
