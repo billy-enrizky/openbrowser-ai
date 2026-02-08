@@ -1,6 +1,6 @@
-name: openbrowser-finetuning-grpo
-entrypoint: python -m infra.training.finetuning.grpo_trainer
-image_uri: anyscale/ray:2.44.1-slim-py312-cu128
+name: openbrowser-online-grpo
+entrypoint: python -m infra.training.finetuning.online_grpo_trainer
+containerfile: infra/training/anyscale/Containerfile.online-grpo
 compute_config:
   cloud: "Anyscale Cloud"
   head_node:
@@ -17,20 +17,13 @@ excludes:
   - presentation
   - data/mind2web/
   - data/webarena/
-  - data/formfactory/
   - results/
   - outputs/
   - openbrowser_agent_data/
   - "*.pyc"
-requirements:
-  - torch>=2.0
-  - transformers>=4.45
-  - peft>=0.12
-  - datasets>=2.18
-  - accelerate>=0.28
-  - bitsandbytes>=0.43
-  - boto3
 env_vars:
+  TRAIN_FILE: "data/processed/formfactory_sft.jsonl"
+  MAX_TRAIN_SAMPLES: "2"
   SFT_CHECKPOINT_PATH: ""
   S3_CHECKPOINT_BUCKET: "openbrowser-eval-results"
   S3_CHECKPOINT_PREFIX: "training/checkpoints"
@@ -39,5 +32,5 @@ max_retries: 1
 timeout_s: 14400
 tags:
   project: openbrowser
-  task: grpo
+  task: online-grpo
   model: qwen3-8b
