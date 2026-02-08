@@ -95,7 +95,7 @@ DATA_CONFIG = {
 # S3 Config for checkpoint persistence
 S3_CONFIG = {
     "checkpoint_bucket": os.environ.get(
-        "S3_CHECKPOINT_BUCKET", "openbrowser-eval-results"
+        "S3_CHECKPOINT_BUCKET", "openbrowser-eval-results-529206289231"
     ),
     "checkpoint_prefix": os.environ.get(
         "S3_CHECKPOINT_PREFIX", "training/checkpoints"
