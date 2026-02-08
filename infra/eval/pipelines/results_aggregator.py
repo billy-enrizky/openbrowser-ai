@@ -29,7 +29,7 @@ def load_run_summaries(results_dir: str = "results") -> list[RunSummary]:
 
 
 def aggregate_by_project(summaries: list[RunSummary]) -> dict[str, dict]:
-    """Aggregate results grouped by project (CSC490, STAD68, STAD80)."""
+    """Aggregate results grouped by project (benchmarking, finetuning, flow_matching)."""
     projects: dict[str, dict] = {}
 
     for s in summaries:
