@@ -18,6 +18,9 @@ import re
 
 logger = logging.getLogger(__name__)
 
+# Strip <think>...</think> blocks from Qwen3 reasoning-mode output
+RE_THINK_BLOCK = re.compile(r"<think>.*?</think>", re.DOTALL)
+
 # Regex patterns for FormFactory action format
 # (matches output from formfactory_preprocessor.py build_response)
 RE_NAVIGATE = re.compile(r"Step \d+:\s*Navigate to (.+)")
@@ -79,6 +82,17 @@ def parse_rollout_to_actions(
     """
     actions = []
     unresolved = 0
+
+    # Strip Qwen3 <think>...</think> reasoning blocks
+    rollout_text = RE_THINK_BLOCK.sub("", rollout_text)
+    # Also strip unclosed <think> blocks (model may hit max_new_tokens mid-thought)
+    if "<think>" in rollout_text:
+        rollout_text = rollout_text.split("</think>")[-1]
+        # If no closing tag, strip everything from <think> onward before steps
+        if "<think>" in rollout_text:
+            think_idx = rollout_text.index("<think>")
+            # Keep any content before <think> and after the block
+            rollout_text = rollout_text[:think_idx]
 
     for line in rollout_text.strip().split("\n"):
         line = line.strip()
