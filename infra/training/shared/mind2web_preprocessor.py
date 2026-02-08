@@ -51,6 +51,11 @@ def format_for_sft(tasks: list[dict]) -> list[dict]:
                 response_lines.append(f"Step {i}: {action}")
             elif isinstance(action, dict):
                 response_lines.append(f"Step {i}: {action.get('action', str(action))}")
+            else:
+                logger.warning(
+                    f"Unexpected action type {type(action).__name__} in task "
+                    f"'{instruction}', skipping action at index {i}"
+                )
 
         sft_data.append({
             "instruction": instruction,
@@ -84,6 +89,11 @@ def format_for_flow(tasks: list[dict]) -> list[dict]:
                 action_tokens.append(action)
             elif isinstance(action, dict):
                 action_tokens.append(str(action.get("action", action)))
+            else:
+                logger.warning(
+                    f"Unexpected action type {type(action).__name__} in task "
+                    f"'{instruction}', skipping action"
+                )
 
         flow_data.append({
             "condition": instruction,
