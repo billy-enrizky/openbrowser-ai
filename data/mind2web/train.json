@@ -1,0 +1,105 @@
+[
+  {
+    "annotation_id": "7bda9645-0b5f-470a-8dd7-6af0bff4da68",
+    "website": "exploretock",
+    "domain": "Travel",
+    "subdomain": "Restaurant",
+    "confirmed_task": "Check for dine-in restaurant available in Boston, NY on March 18, 5pm with just one guest",
+    "action_reprs": [
+      "[combobox]  Reservation type -> SELECT: Dine-in",
+      "[svg]   -> CLICK",
+      "[searchbox]  Find a location -> TYPE: Boston, NY",
+      "[span]  Boston, NY -> CLICK",
+      "[svg]   -> CLICK",
+      "[button]  18 -> CLICK",
+      "[combobox]  Time -> SELECT: 5:00 PM",
+      "[svg]   -> CLICK",
+      "[span]  1 guest -> CLICK",
+      "[combobox]  Size -> SELECT: 1 guest",
+      "[button]  Update search -> CLICK"
+    ]
+  },
+  {
+    "annotation_id": "a6372f23-f462-4706-8455-5b350c46d83c",
+    "website": "exploretock",
+    "domain": "Travel",
+    "subdomain": "Restaurant",
+    "confirmed_task": "Book a winery tour in Napa Valley in a winery which serves Mediterranean cuisine with wine testing for 4 guests on April 15, 10 am in a outdoor setup.",
+    "action_reprs": [
+      "[svg]   -> CLICK",
+      "[svg]   -> CLICK",
+      "[searchbox]  Find a location -> TYPE: NAPA VALLEY",
+      "[span]  Napa Valley -> CLICK",
+      "[combobox]  Reservation type -> SELECT: Wineries",
+      "[svg]   -> CLICK",
+      "[svg]   -> CLICK",
+      "[button]  15 -> CLICK",
+      "[combobox]  Time -> SELECT: 10:00 AM",
+      "[combobox]  Party size -> SELECT: 4 guests",
+      "[svg]   -> CLICK",
+      "[button]  Edit cuisine type filter -> CLICK",
+      "[checkbox]  Mediterranean -> CLICK",
+      "[button]  Submit -> CLICK",
+      "[button]  Open additional search filters -> CLICK",
+      "[checkbox]  Outdoors -> CLICK",
+      "[checkbox]  Wine tasting -> CLICK",
+      "[button]  Update search -> CLICK",
+      "[span]  10:00 AM -> CLICK"
+    ]
+  },
+  {
+    "annotation_id": "c0eeead1-f8ea-4819-a6da-ef0108b40c89",
+    "website": "enterprise",
+    "domain": "Travel",
+    "subdomain": "Car rental",
+    "confirmed_task": "Sign Allan Smith for email offers with the email allan.smith@gmail.com and zip code 10001",
+    "action_reprs": [
+      "[a]   -> CLICK",
+      "[textbox]  First Name (required) -> TYPE: Allan",
+      "[textbox]  Last Name (required) -> TYPE: Smith",
+      "[textbox]  Email Address (required) -> TYPE: allan.smith@gmail.com",
+      "[textbox]  Confirm Email Address (required) -> TYPE: allan.smith@gmail.com",
+      "[textbox]  ZIP Code (required) -> TYPE: 10001",
+      "[button]  Submit -> CLICK"
+    ]
+  },
+  {
+    "annotation_id": "ce34bc61-e3d2-40c8-b02b-b149efc4b115",
+    "website": "enterprise",
+    "domain": "Travel",
+    "subdomain": "Car rental",
+    "confirmed_task": "Find a mini van at Brooklyn City from April 5th to April 8th for a 22 year old renter.",
+    "action_reprs": [
+      "[searchbox]  Pick-up & Return Location (ZIP, City or Airport) (... -> TYPE: Brooklyn",
+      "[option]  Brooklyn, NY, US Select -> CLICK",
+      "[button]  Selected Pick-Up Date 03/19/2023 -> CLICK",
+      "[button]  04/05/2023 -> CLICK",
+      "[svg]   -> CLICK",
+      "[button]  04/08/2023 -> CLICK",
+      "[combobox]  Renter Age -> SELECT: 22",
+      "[button]  Vehicle Class -> CLICK",
+      "[radio]  Minivans -> CLICK",
+      "[button]  Apply Filter -> CLICK",
+      "[button]  Browse Vehicles -> CLICK"
+    ]
+  },
+  {
+    "annotation_id": "bf469f30-6628-4017-b963-672645d7feab",
+    "website": "kohls",
+    "domain": "Shopping",
+    "subdomain": "Department",
+    "confirmed_task": "Find the highest rated dog collar under 10 dollar.",
+    "action_reprs": [
+      "[link]  Shop by Category -> CLICK",
+      "[link]  Pet -> CLICK",
+      "[span]  Pet Type -> CLICK",
+      "[link]  Dog (1,338) -> CLICK",
+      "[span]  Category -> CLICK",
+      "[link]  Collars & Leashes (485) -> CLICK",
+      "[link]  Sort by: Featured -> CLICK",
+      "[link]  Highest Rated -> CLICK",
+      "[div]  Price -> CLICK",
+      "[link]  Under $10 (1) -> CLICK"
+    ]
+  }
+]
