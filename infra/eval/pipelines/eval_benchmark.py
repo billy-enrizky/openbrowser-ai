@@ -366,7 +366,7 @@ def parse_args():
     )
     parser.add_argument("--max-tasks", type=int, default=0, help="Max tasks per dataset (0=all)")
     parser.add_argument("--max-steps", type=int, default=50, help="Max steps per agent run")
-    parser.add_argument("--project", default="CSC490", help="Project identifier")
+    parser.add_argument("--project", default="benchmarking", help="Project identifier")
     parser.add_argument("--output-dir", default="results", help="Output directory")
     parser.add_argument("--results-bucket", default="", help="S3 bucket for results")
     parser.add_argument("--no-headless", action="store_true", help="Run with visible browser")
