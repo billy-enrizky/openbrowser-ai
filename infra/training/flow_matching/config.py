@@ -3,20 +3,20 @@
 import os
 
 FLOW_MODEL_CONFIG = {
-    "vocab_size": 32000,
+    "vocab_size": 256,  # Byte-level: matches tokenize_for_flow encoding (0-255)
     "hidden_dim": 512,
-    "num_layers": 6,
+    "num_layers": 8,  # Added 2 layers to compensate for reduced embedding params
     "num_heads": 8,
-    "max_seq_length": 256,
+    "max_seq_length": 512,  # Doubled: 9-field action plans need ~500 bytes
     "dropout": 0.1,
 }
 
 FLOW_SFT_CONFIG = {
     "learning_rate": 1e-4,
-    "num_epochs": 10,
-    "batch_size": 16,
-    "gradient_accumulation_steps": 2,
-    "warmup_steps": 500,
+    "num_epochs": int(os.environ.get("NUM_EPOCHS", "10")),
+    "batch_size": 8,  # Reduced from 16: longer seqs (512) use more memory
+    "gradient_accumulation_steps": 4,  # Increased to keep effective batch at 32
+    "warmup_steps": 100,  # Reduced: fewer total steps with 200 samples
     "weight_decay": 0.01,
     "num_ode_steps": 20,  # Euler steps for ODE solver
     "sigma_min": 0.001,
@@ -45,7 +45,7 @@ FLOW_GRPO_CONFIG = {
 ONLINE_FLOW_GRPO_CONFIG = {
     "group_size": 2,  # Reduced from 4 -- browser execution is slower
     "learning_rate": 5e-5,
-    "num_epochs": 3,
+    "num_epochs": int(os.environ.get("NUM_EPOCHS", "3")),
     "kl_coeff": 0.05,
     "clip_range": 0.2,
     "num_ode_steps": 10,
