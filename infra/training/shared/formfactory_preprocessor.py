@@ -1,8 +1,10 @@
-"""Convert FormFactory ground truth JSON into SFT training data (JSONL).
+"""Convert FormFactory ground truth JSON into SFT and flow training data (JSONL).
 
 Reads the 25 ground truth JSON files from data/formfactory/data/data1/,
 maps each to its Flask route using the route map from data_loader.py,
-and produces instruction-response pairs for supervised fine-tuning.
+and produces:
+  - instruction-response pairs for supervised fine-tuning (SFT)
+  - condition-target pairs for discrete flow matching (Flow/GRPO)
 
 Usage:
     uv run infra/training/shared/formfactory_preprocessor.py
@@ -117,6 +119,7 @@ def load_and_format(
         domain = route_info["domain"]
         files_processed += 1
 
+        base_url = f"http://127.0.0.1:{port}"
         for record in records:
             instruction = build_instruction(form_name, route, record, port)
             response = build_response(form_name, route, record, port)
@@ -127,6 +130,8 @@ def load_and_format(
                 "form_name": form_name,
                 "domain": domain,
                 "num_fields": len(record),
+                "url": f"{base_url}{route}",
+                "ground_truth_fields": record,
             })
 
     logger.info(
@@ -144,12 +149,33 @@ def save_jsonl(data: list[dict], output_path: Path):
     logger.info(f"Saved {len(data)} examples to {output_path}")
 
 
+def format_for_flow(sft_data: list[dict]) -> list[dict]:
+    """Convert SFT examples to flow matching format.
+
+    Returns list of dicts with 'condition' (instruction), 'target' (action steps),
+    'ground_truth_fields' (raw field values for online reward), and metadata.
+    """
+    flow_data = []
+    for item in sft_data:
+        steps = item["response"].split("\n")
+        flow_data.append({
+            "condition": item["instruction"],
+            "target": steps,
+            "url": item.get("url", ""),
+            "ground_truth_fields": item.get("ground_truth_fields", {}),
+            "form_name": item.get("form_name", ""),
+            "num_steps": len(steps),
+        })
+    logger.info(f"Formatted {len(flow_data)} flow training examples")
+    return flow_data
+
+
 def preprocess(
     data_dir: str = "data/formfactory",
     output_path: str = "data/processed/formfactory_sft.jsonl",
     port: int = FORMFACTORY_DEFAULT_PORT,
 ):
-    """Full preprocessing pipeline."""
+    """Full preprocessing pipeline. Produces both SFT and flow JSONL."""
     data_path = Path(data_dir)
     if not data_path.is_absolute():
         data_path = PROJECT_ROOT / data_path
@@ -164,6 +190,12 @@ def preprocess(
         return
 
     save_jsonl(sft_data, out_path)
+
+    # Also produce flow matching format
+    flow_data = format_for_flow(sft_data)
+    flow_out_path = out_path.parent / "formfactory_flow.jsonl"
+    save_jsonl(flow_data, flow_out_path)
+
     logger.info("FormFactory preprocessing complete")
 
 
