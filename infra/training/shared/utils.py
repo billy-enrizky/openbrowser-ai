@@ -57,33 +57,34 @@ def resolve_data_path(relative_path: str) -> str:
     return str(PROJECT_ROOT / p)
 
 
-def upload_checkpoint_to_s3(local_dir: str, s3_config: dict, stage: str):
-    """Upload a checkpoint directory to S3.
+ANYSCALE_STORAGE = Path("/mnt/user_storage/openbrowser")
+
+
+def persist_checkpoint(local_dir: str, stage: str):
+    """Copy checkpoint to Anyscale persistent storage (/mnt/user_storage).
+
+    Falls back to a no-op when /mnt/user_storage does not exist (local dev).
 
     Args:
         local_dir: Local directory containing the checkpoint files.
-        s3_config: Dict with keys 'checkpoint_bucket', 'checkpoint_prefix', 'region'.
-        stage: Sub-path label (e.g. 'sft', 'grpo') appended to the S3 prefix.
+        stage: Sub-path label (e.g. 'online-grpo', 'online-flow-grpo').
     """
-    bucket = s3_config["checkpoint_bucket"]
-    prefix = s3_config["checkpoint_prefix"]
+    import shutil
 
-    if not bucket:
-        logger.info("No S3 bucket configured, skipping upload")
+    dest = ANYSCALE_STORAGE / "checkpoints" / stage
+    if not ANYSCALE_STORAGE.parent.exists():
+        logger.info("/mnt/user_storage not available (local dev), skipping persist")
         return
 
     try:
-        import boto3
-
-        s3 = boto3.client("s3", region_name=s3_config["region"])
-        local_path = Path(local_dir)
-
-        for file_path in local_path.rglob("*"):
-            if file_path.is_file():
-                s3_key = f"{prefix}/{stage}/{file_path.relative_to(local_path)}"
-                logger.info(f"Uploading {file_path} -> s3://{bucket}/{s3_key}")
-                s3.upload_file(str(file_path), bucket, s3_key)
-
-        logger.info(f"Checkpoint uploaded to s3://{bucket}/{prefix}/{stage}/")
+        dest.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(local_dir, str(dest), dirs_exist_ok=True)
+        logger.info(f"Checkpoint persisted to {dest}")
     except Exception as e:
-        logger.error(f"Failed to upload checkpoint to S3: {e}")
+        logger.error(f"Failed to persist checkpoint: {e}")
+
+
+# Keep backward-compatible alias
+def upload_checkpoint_to_s3(local_dir: str, s3_config: dict, stage: str):
+    """Deprecated: now persists to /mnt/user_storage instead of S3."""
+    persist_checkpoint(local_dir, stage)

@@ -7,8 +7,18 @@ Usage:
     uv run infra/training/anyscale/submit_job.py finetuning-sft
     uv run infra/training/anyscale/submit_job.py finetuning-grpo
     uv run infra/training/anyscale/submit_job.py flow-matching
+    uv run infra/training/anyscale/submit_job.py flow-llm-sft
     uv run infra/training/anyscale/submit_job.py online-flow-grpo
+    uv run infra/training/anyscale/submit_job.py online-flow-llm-grpo
     uv run infra/training/anyscale/submit_job.py online-grpo
+    uv run infra/training/anyscale/submit_job.py fsdfm-sft
+    uv run infra/training/anyscale/submit_job.py online-fsdfm-grpo
+    uv run infra/training/anyscale/submit_job.py eval-sft
+    uv run infra/training/anyscale/submit_job.py eval-grpo
+    uv run infra/training/anyscale/submit_job.py eval-fsdfm-sft
+    uv run infra/training/anyscale/submit_job.py eval-refusion-sft
+    uv run infra/training/anyscale/submit_job.py eval-fsdfm-grpo
+    uv run infra/training/anyscale/submit_job.py eval-refusion-grpo
     uv run infra/training/anyscale/submit_job.py --list
 """
 
@@ -29,16 +39,23 @@ JOB_CONFIGS = {
     "finetuning-sft": JOBS_DIR / "finetuning_sft_job.yaml",
     "finetuning-grpo": JOBS_DIR / "finetuning_grpo_job.yaml",
     "flow-matching": JOBS_DIR / "flow_matching_job.yaml",
+    "flow-llm-sft": JOBS_DIR / "flow_llm_sft_job.yaml",
     "online-flow-grpo": JOBS_DIR / "online_flow_grpo_job.yaml",
+    "online-flow-llm-grpo": JOBS_DIR / "online_flow_llm_grpo_job.yaml",
     "online-grpo": JOBS_DIR / "online_grpo_job.yaml",
+    "fsdfm-sft": JOBS_DIR / "fsdfm_sft_job.yaml",
+    "online-fsdfm-grpo": JOBS_DIR / "online_fsdfm_grpo_job.yaml",
+    "eval-sft": JOBS_DIR / "eval_sft_job.yaml",
+    "eval-grpo": JOBS_DIR / "eval_grpo_job.yaml",
+    "eval-fsdfm-sft": JOBS_DIR / "eval_fsdfm_sft_job.yaml",
+    "eval-refusion-sft": JOBS_DIR / "eval_refusion_sft_job.yaml",
+    "eval-fsdfm-grpo": JOBS_DIR / "eval_fsdfm_grpo_job.yaml",
+    "eval-refusion-grpo": JOBS_DIR / "eval_refusion_grpo_job.yaml",
 }
 
 # Secret env vars to inject from .env into Anyscale jobs
 SECRET_ENV_KEYS = [
     "HF_TOKEN",
-    "AWS_ACCESS_KEY_ID",
-    "AWS_SECRET_ACCESS_KEY",
-    "AWS_SESSION_TOKEN",
 ]
 
 

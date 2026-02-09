@@ -2,7 +2,12 @@
        eval-aws-launch eval-aws-results \
        download-datasets upload-datasets download-results report \
        train-submit-sft train-submit-grpo train-submit-flow \
-       train-submit-online-flow-grpo train-submit-online-grpo train-list-jobs \
+       train-submit-flow-llm-sft \
+       train-submit-online-flow-grpo train-submit-online-flow-llm-grpo \
+       train-submit-online-grpo \
+       train-submit-fsdfm-sft train-submit-online-fsdfm-grpo \
+       train-submit-eval-sft \
+       train-list-jobs \
        preprocess-mind2web preprocess-formfactory \
        serve-vllm serve-ollama export-gguf \
        docker-build-eval docker-run-eval \
@@ -38,8 +43,13 @@ help:
 	@echo "  train-submit-sft              Submit finetuning SFT job (Qwen3-8B QLoRA)"
 	@echo "  train-submit-grpo             Submit finetuning GRPO job"
 	@echo "  train-submit-flow             Submit flow matching job"
-	@echo "  train-submit-online-flow-grpo Submit online flow GRPO job (browser execution)"
-	@echo "  train-submit-online-grpo      Submit online AR GRPO job (browser execution)"
+	@echo "  train-submit-flow-llm-sft         Submit flow LLM SFT job (ReFusion 8B, MDM)"
+	@echo "  train-submit-online-flow-grpo     Submit online flow GRPO job (30M model, browser)"
+	@echo "  train-submit-online-flow-llm-grpo Submit online flow LLM GRPO job (8B model, browser)"
+	@echo "  train-submit-online-grpo          Submit online AR GRPO job (browser execution)"
+	@echo "  train-submit-fsdfm-sft            Submit FS-DFM SFT job (1.3B DFM, LoRA)"
+	@echo "  train-submit-online-fsdfm-grpo    Submit FS-DFM online GRPO job (browser)"
+	@echo "  train-submit-eval-sft             Submit SFT-only eval job (browser, no training)"
 	@echo "  train-list-jobs               List available training jobs"
 	@echo ""
 	@echo "Serving:"
@@ -135,11 +145,29 @@ train-submit-flow: data/processed/mind2web_flow.jsonl
 data/processed/formfactory_flow.jsonl:
 	uv run infra/training/shared/formfactory_preprocessor.py
 
+train-submit-flow-llm-sft: data/processed/formfactory_sft.jsonl
+	$(SUBMIT_CMD) flow-llm-sft
+
 train-submit-online-flow-grpo: data/processed/formfactory_flow.jsonl
 	$(SUBMIT_CMD) online-flow-grpo
 
+train-submit-online-flow-llm-grpo: data/processed/formfactory_sft.jsonl
+	$(SUBMIT_CMD) online-flow-llm-grpo
+
 train-submit-online-grpo: data/processed/formfactory_sft.jsonl
 	$(SUBMIT_CMD) online-grpo
+
+train-submit-fsdfm-sft: data/processed/formfactory_sft.jsonl
+	$(SUBMIT_CMD) fsdfm-sft
+
+train-submit-online-fsdfm-grpo: data/processed/formfactory_sft.jsonl
+	$(SUBMIT_CMD) online-fsdfm-grpo
+
+train-submit-eval-sft: data/processed/formfactory_sft.jsonl
+	$(SUBMIT_CMD) eval-sft
+
+train-submit-eval-grpo: data/processed/formfactory_sft.jsonl
+	$(SUBMIT_CMD) eval-grpo
 
 train-list-jobs:
 	$(SUBMIT_CMD) --list
