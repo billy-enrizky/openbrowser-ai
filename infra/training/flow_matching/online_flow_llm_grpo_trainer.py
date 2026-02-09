@@ -1,21 +1,26 @@
-"""Online Flow LLM GRPO trainer: LLaDA-8B masked diffusion with browser execution.
+"""Online Flow LLM GRPO trainer: ReFusion masked diffusion with browser execution.
 
-Uses LLaDA-8B (GSAI-ML/LLaDA-8B-Base) with QLoRA as the backbone for
+Uses ReFusion (GSAI-ML/ReFusion) with QLoRA as the backbone for
 masked diffusion, trained with GRPO (Group Relative Policy Optimization)
 using real browser execution rewards from FormFactory.
 
 Architecture:
-    1. FlowLLM (LLaDA-8B + QLoRA) generates G candidate plans via
+    1. FlowLLM (ReFusion + QLoRA) generates G candidate plans via
        iterative unmasking (masked diffusion reverse process)
     2. Each plan is decoded to text and parsed into executable actions
     3. Actions are executed in a headless browser against FormFactory
     4. Reward = actual form submission success + field accuracy
-    5. Advantage-weighted denoising loss updates LoRA parameters
-    6. KL penalty against a frozen reference model for stability
+    5. REINFORCE with group-relative advantages updates LoRA parameters
+    6. Non-negative KL penalty (Schulman k3) against frozen reference model
+
+ReFusion is built on Qwen3 and uses AutoModelForCausalLM, so standard
+HuggingFace/BnB/PEFT loading works without any compatibility patches.
+For GRPO, per-token log-probs are extracted from standard causal LM
+logits (no masking), while SFT uses ReFusion's native MDM loss.
 
 This is the STAD80 counterpart to the AR GRPO trainer (STAD68).
     - STAD68: Qwen3-8B, left-to-right autoregressive token generation
-    - STAD80: LLaDA-8B, parallel iterative unmasking via masked diffusion
+    - STAD80: ReFusion, slot-based parallel masked diffusion
 
 Usage:
     uv run infra/training/flow_matching/online_flow_llm_grpo_trainer.py
@@ -30,7 +35,7 @@ from pathlib import Path
 import torch
 import torch.nn.functional as F
 from peft import LoraConfig, PeftModel, get_peft_model, prepare_model_for_kbit_training
-from transformers import AutoModel, AutoTokenizer, BitsAndBytesConfig
+from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
 from infra.training.flow_matching.config import (
     DATA_CONFIG,
@@ -44,7 +49,6 @@ from infra.training.shared.formfactory_server import FormFactoryServer
 from infra.training.shared.online_reward import compute_online_reward
 from infra.training.shared.reward_functions import compute_grpo_advantages
 from infra.training.shared.utils import (
-    format_chat_prompt,
     persist_checkpoint,
     resolve_data_path,
 )
@@ -58,54 +62,8 @@ logger = logging.getLogger(__name__)
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
 
-def _patch_bnb_for_llada():
-    """Patch BitsAndBytes quantizer and model class for LLaDA compatibility.
-
-    LLaDA's custom model class (LLaDAModelLM) has two incompatibilities with
-    the version of transformers on the Anyscale cluster:
-    1. `all_tied_weights_keys` is a list but transformers expects a dict (.keys())
-    2. `tie_weights()` doesn't accept `missing_keys`/`recompute_mapping` kwargs
-       that newer transformers passes during `_finalize_model_loading`
-    """
-    import transformers.quantizers.base as _qbase
-
-    _orig_fn = _qbase.get_keys_to_not_convert
-
-    def _patched_fn(model):
-        if not hasattr(model, "all_tied_weights_keys"):
-            model.all_tied_weights_keys = {}
-        elif isinstance(model.all_tied_weights_keys, list):
-            model.all_tied_weights_keys = {k: None for k in model.all_tied_weights_keys}
-        return _orig_fn(model)
-
-    _qbase.get_keys_to_not_convert = _patched_fn
-
-
-def _patch_llada_tie_weights(model_name: str, trust_remote_code: bool = True):
-    """Patch LLaDA's tie_weights to accept kwargs from newer transformers.
-
-    Newer transformers calls model.tie_weights(missing_keys=..., recompute_mapping=...)
-    but LLaDA's custom tie_weights() doesn't accept those kwargs. We patch the
-    model class BEFORE from_pretrained so the fix is in place during loading.
-    """
-    from transformers import AutoConfig
-
-    config = AutoConfig.from_pretrained(model_name, trust_remote_code=trust_remote_code)
-    # This triggers the custom code download and registers the model class
-    from transformers import AutoModel
-    model_cls = AutoModel._model_mapping[type(config)]
-
-    import inspect
-    orig_tie = model_cls.tie_weights
-    sig = inspect.signature(orig_tie)
-    if "missing_keys" not in sig.parameters:
-        def _compat_tie_weights(self, **kwargs):
-            return orig_tie(self)
-        model_cls.tie_weights = _compat_tie_weights
-
-
 def load_quantized_model(model_name: str, config: dict):
-    """Load LLaDA-8B with 4-bit quantization."""
+    """Load ReFusion with 4-bit quantization."""
     compute_dtype = (
         torch.bfloat16
         if config["bnb_4bit_compute_dtype"] == "bfloat16"
@@ -113,24 +71,19 @@ def load_quantized_model(model_name: str, config: dict):
     )
     trust_remote_code = config.get("trust_remote_code", True)
 
-    # Patch BnB for LLaDA compatibility (missing all_tied_weights_keys)
-    _patch_bnb_for_llada()
-    # Patch tie_weights for LLaDA (missing kwargs in newer transformers)
-    _patch_llada_tie_weights(model_name, trust_remote_code)
-
-    # LLaDA has no pre-quantized variant -- always quantize on-the-fly
     bnb_config = BitsAndBytesConfig(
         load_in_4bit=config["load_in_4bit"],
         bnb_4bit_quant_type=config["bnb_4bit_quant_type"],
         bnb_4bit_use_double_quant=config["bnb_4bit_use_double_quant"],
         bnb_4bit_compute_dtype=compute_dtype,
     )
-    # LLaDA uses AutoModel (not AutoModelForCausalLM) + trust_remote_code
-    model = AutoModel.from_pretrained(
+
+    # ReFusion uses standard AutoModelForCausalLM -- no compatibility patches needed
+    model = AutoModelForCausalLM.from_pretrained(
         model_name,
         quantization_config=bnb_config,
         device_map="auto",
-        dtype=compute_dtype,
+        torch_dtype=compute_dtype,
         trust_remote_code=trust_remote_code,
     )
     return model
@@ -146,6 +99,62 @@ def load_prompts(file_path: str, max_samples: int = 0) -> list[dict]:
         records = records[:max_samples]
     logger.info(f"Loaded {len(records)} prompts for online flow LLM GRPO")
     return records
+
+
+def compute_per_token_log_probs(
+    model, input_ids: torch.Tensor, attention_mask: torch.Tensor, prompt_length: int
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Compute per-token log-probs for response tokens using standard causal LM forward.
+
+    Uses logits from a plain forward pass (no labels, no masking) so that
+    ReFusion's internal masked diffusion is NOT applied -- we get clean
+    autoregressive log-probs suitable for REINFORCE and KL computation.
+
+    Args:
+        model: Policy or reference model (ReFusion/PEFT).
+        input_ids: [B, L] full sequence (prompt + response + padding).
+        attention_mask: [B, L] attention mask.
+        prompt_length: Length of the prompt prefix.
+
+    Returns:
+        token_log_probs: [B, max_resp_len] per-token log-probs for response.
+        resp_mask: [B, max_resp_len] mask (1 for real response tokens, 0 for padding).
+    """
+    B = input_ids.shape[0]
+    seq_len = input_ids.shape[1]
+    response_start = max(0, prompt_length - 1)  # shifted by 1 for causal LM
+    max_resp_len = seq_len - 1 - response_start
+    if max_resp_len <= 0:
+        device = input_ids.device
+        return torch.zeros(B, 1, device=device), torch.zeros(B, 1, device=device)
+
+    all_log_probs = []
+    all_masks = []
+
+    for i in range(B):
+        ids_i = input_ids[i : i + 1]
+        mask_i = attention_mask[i : i + 1]
+
+        with torch.set_grad_enabled(model.training):
+            # Plain forward (no labels) to get standard causal LM logits
+            outputs = model(input_ids=ids_i, attention_mask=mask_i)
+            logits = outputs.logits
+
+        # Shift for next-token prediction
+        shift_logits = logits[0, :-1, :]  # [L-1, V]
+        shift_labels = ids_i[0, 1:]  # [L-1]
+
+        token_nll = F.cross_entropy(shift_logits, shift_labels, reduction="none")
+        token_log_probs = -token_nll  # [L-1]
+
+        # Extract response portion
+        response_log_probs = token_log_probs[response_start:]
+        mask_shifted = mask_i[0, 1:][response_start:].float()
+
+        all_log_probs.append(response_log_probs[:max_resp_len])
+        all_masks.append(mask_shifted[:max_resp_len])
+
+    return torch.stack(all_log_probs), torch.stack(all_masks)
 
 
 async def train():
@@ -194,21 +203,20 @@ async def train():
             use_gradient_checkpointing=True,
             gradient_checkpointing_kwargs={"use_reentrant": False},
         )
-        # LLaDA is not a causal LM -- use FEATURE_EXTRACTION task type
-        # since it's a bidirectional encoder with custom head
+        # Standard CAUSAL_LM LoRA
         lora_config = LoraConfig(
             r=model_config["lora_r"],
             lora_alpha=model_config["lora_alpha"],
             lora_dropout=model_config["lora_dropout"],
             target_modules=model_config["lora_target_modules"],
-            task_type="FEATURE_EXTRACTION",
+            task_type="CAUSAL_LM",
         )
         policy_model = get_peft_model(policy_model, lora_config)
 
     policy_model.print_trainable_parameters()
 
-    # Wrap in FlowLLM (LLaDA masked diffusion)
-    mask_token_id = model_config.get("mask_token_id", 126336)
+    # Wrap in FlowLLM for generation
+    mask_token_id = model_config.get("mask_token_id", 151670)
     flow_policy = FlowLLM(policy_model, tokenizer, mask_token_id=mask_token_id)
 
     # Load reference model (frozen, for KL computation)
@@ -238,7 +246,6 @@ async def train():
 
     group_size = grpo_config["group_size"]
     kl_coeff = grpo_config["kl_coeff"]
-    clip_range = grpo_config["clip_range"]
     max_seq_length = model_config["max_seq_length"]
     num_denoising_steps = grpo_config.get(
         "num_denoising_steps", model_config.get("num_denoising_steps", 20)
@@ -260,8 +267,7 @@ async def train():
 
     logger.info(
         f"Starting online flow LLM GRPO: {len(prompts)} prompts, G={group_size}, "
-        f"kl_coeff={kl_coeff}, clip_range={clip_range}, "
-        f"denoising_steps={num_denoising_steps}"
+        f"kl_coeff={kl_coeff}, denoising_steps={num_denoising_steps}"
     )
 
     total_steps = 0
@@ -277,15 +283,6 @@ async def train():
                 )
                 form_url = prompt_data.get("url", "")
                 ground_truth_fields = prompt_data.get("ground_truth_fields", {})
-                # Support multiple data formats: response (formfactory_sft), target, output
-                target_text = prompt_data.get("response", "")
-                if not target_text:
-                    target_actions = prompt_data.get("target", prompt_data.get("output", []))
-                    target_text = (
-                        "\n".join(target_actions)
-                        if isinstance(target_actions, list)
-                        else str(target_actions)
-                    )
 
                 if not instruction or not form_url:
                     logger.warning(
@@ -293,14 +290,26 @@ async def train():
                     )
                     continue
 
-                # Tokenize condition
+                # Periodic browser restart to reset DOM indices
+                if i > 0 and i % 10 == 0:
+                    logger.info(f"Periodic browser restart (prompt {i}) to reset DOM indices")
+                    await browser_env.close()
+                    browser_env = await BrowserEnvironment.create(headless=headless)
+
+                # Tokenize condition WITHOUT padding -- padding="max_length"
+                # created a 512-pad + 512-mask = 1024 token input, but the model
+                # was SFT-trained on 512 total (prompt + response, no padding gap).
                 condition_enc = tokenizer(
                     instruction,
-                    max_length=max_seq_length,
+                    add_special_tokens=True,
                     truncation=True,
-                    padding="max_length",
+                    max_length=max_seq_length,
                     return_tensors="pt",
                 ).to(flow_policy.device)
+
+                # Response length = total budget minus prompt tokens
+                prompt_len = condition_enc["attention_mask"].sum().item()
+                gen_length = max(1, max_seq_length - prompt_len)
 
                 # Generate G rollouts via iterative denoising
                 rollout_texts = []
@@ -309,11 +318,10 @@ async def train():
                     generated_ids = flow_policy.generate(
                         condition_ids=condition_enc["input_ids"],
                         condition_mask=condition_enc["attention_mask"],
-                        seq_length=max_seq_length,
+                        seq_length=gen_length,
                         num_steps=num_denoising_steps,
                         temperature=gen_temperature,
                     )
-                    # Decode generated tokens to text
                     text = tokenizer.decode(
                         generated_ids[0], skip_special_tokens=True
                     )
@@ -362,54 +370,85 @@ async def train():
                     advantages, dtype=torch.float32, device=flow_policy.device
                 )
 
-                # Tokenize target for loss computation
-                target_enc = tokenizer(
-                    target_text,
-                    max_length=max_seq_length,
-                    truncation=True,
-                    padding="max_length",
-                    return_tensors="pt",
-                ).to(flow_policy.device)
+                # Tokenize prompt once for reuse across rollouts
+                prompt_enc = tokenizer(
+                    instruction, add_special_tokens=True, return_tensors="pt"
+                )
+                prompt_ids = prompt_enc["input_ids"].squeeze(0)
+                prompt_length = prompt_ids.shape[0]
 
-                # Compute advantage-weighted denoising loss
-                total_loss = torch.tensor(0.0, device=flow_policy.device)
+                # Compute REINFORCE loss + Schulman k3 KL over generated rollouts
+                total_pg_loss = torch.tensor(
+                    0.0, device=flow_policy.device, requires_grad=False
+                )
                 total_kl = torch.tensor(0.0, device=flow_policy.device)
 
+                valid_rollouts = 0
                 for g in range(group_size):
-                    # Policy denoising loss
-                    policy_loss = flow_policy.compute_loss(
-                        condition_enc["input_ids"],
-                        condition_enc["attention_mask"],
-                        target_enc["input_ids"],
-                        target_enc["attention_mask"],
+                    # Tokenize the GENERATED rollout (not ground truth)
+                    rollout_text = rollout_texts[g]
+                    rollout_enc = tokenizer(
+                        rollout_text, add_special_tokens=False, return_tensors="pt"
                     )
+                    rollout_ids = rollout_enc["input_ids"].squeeze(0)
 
-                    # Reference denoising loss (for KL estimation)
+                    if rollout_ids.shape[0] == 0:
+                        logger.debug(f"Empty rollout {g}, skipping loss")
+                        continue
+
+                    # Build full sequence: prompt + generated rollout
+                    g_full_ids = torch.cat([prompt_ids, rollout_ids])[:max_seq_length]
+                    g_full_length = g_full_ids.shape[0]
+
+                    # Pad to max_seq_length
+                    g_pad_length = max_seq_length - g_full_length
+                    if g_pad_length > 0:
+                        pad_id = tokenizer.pad_token_id or 0
+                        g_full_ids = torch.cat([
+                            g_full_ids,
+                            torch.full((g_pad_length,), pad_id, dtype=torch.long),
+                        ])
+
+                    g_attn_mask = torch.zeros(max_seq_length, dtype=torch.long)
+                    g_attn_mask[:g_full_length] = 1
+
+                    # Move to device, add batch dim [1, L]
+                    g_full_ids = g_full_ids.unsqueeze(0).to(flow_policy.device)
+                    g_attn_mask = g_attn_mask.unsqueeze(0).to(flow_policy.device)
+
+                    # Per-token policy log-probs (with gradients for REINFORCE)
+                    policy_token_lp, resp_mask = compute_per_token_log_probs(
+                        policy_model, g_full_ids, g_attn_mask, prompt_length
+                    )  # [1, T], [1, T]
+
+                    # Per-token reference log-probs (no gradients)
                     with torch.no_grad():
-                        ref_loss = flow_ref.compute_loss(
-                            condition_enc["input_ids"],
-                            condition_enc["attention_mask"],
-                            target_enc["input_ids"],
-                            target_enc["attention_mask"],
-                        )
+                        ref_token_lp, _ = compute_per_token_log_probs(
+                            ref_model, g_full_ids, g_attn_mask, prompt_length
+                        )  # [1, T]
 
-                    # KL divergence estimate: difference in denoising losses
-                    # Lower policy loss = better denoising = diverged from ref
-                    kl_estimate = ref_loss - policy_loss
+                    # Per-sample mean log-prob under current policy
+                    tokens_per_sample = resp_mask.sum(dim=-1).clamp(min=1)  # [1]
+                    sample_log_prob = (
+                        (policy_token_lp * resp_mask).sum(dim=-1) / tokens_per_sample
+                    )  # [1]
 
-                    # Advantage-weighted loss with clipping
-                    ratio = torch.exp(-(policy_loss - ref_loss))
-                    clipped_ratio = torch.clamp(
-                        ratio, 1.0 - clip_range, 1.0 + clip_range
-                    )
-                    pg_loss1 = -advantages_t[g] * ratio * policy_loss
-                    pg_loss2 = -advantages_t[g] * clipped_ratio * policy_loss
-                    pg_loss = torch.max(pg_loss1, pg_loss2)
+                    # REINFORCE: -advantage * log_prob
+                    pg_loss_g = -(advantages_t[g] * sample_log_prob).squeeze()
 
-                    total_loss = total_loss + pg_loss + kl_coeff * kl_estimate
-                    total_kl = total_kl + kl_estimate
+                    # KL divergence: Schulman k3 (always >= 0)
+                    log_r = ref_token_lp - policy_token_lp  # [1, T]
+                    r = torch.exp(log_r)
+                    kl_per_token = r - log_r - 1  # >= 0 by Jensen's inequality
+                    total_resp_tokens = resp_mask.sum().clamp(min=1)
+                    kl_g = (kl_per_token * resp_mask).sum() / total_resp_tokens
 
-                loss = total_loss / group_size
+                    total_pg_loss = total_pg_loss + pg_loss_g + kl_coeff * kl_g
+                    total_kl = total_kl + kl_g
+                    valid_rollouts += 1
+
+                divisor = max(valid_rollouts, 1)
+                loss = total_pg_loss / divisor
 
                 if loss.requires_grad:
                     optimizer.zero_grad()
@@ -419,15 +458,17 @@ async def train():
 
                 total_steps += 1
                 avg_reward = sum(rewards) / len(rewards) if rewards else 0
-                avg_kl = (total_kl / group_size).item()
+                avg_kl = (total_kl / max(valid_rollouts, 1)).item()
                 epoch_kl.append(avg_kl)
 
                 if total_steps % grpo_config["logging_steps"] == 0:
+                    pg_loss_val = (total_pg_loss / divisor).item()
                     logger.info(
                         f"  Step {total_steps} (prompt {i+1}/{len(prompts)}): "
                         f"avg_reward={avg_reward:.3f}, "
-                        f"loss={loss.item():.4f}, "
-                        f"kl={avg_kl:.4f}"
+                        f"pg_loss={pg_loss_val:.4f}, "
+                        f"kl={avg_kl:.4f}, "
+                        f"loss={loss.item():.4f}"
                     )
 
             # Epoch summary
