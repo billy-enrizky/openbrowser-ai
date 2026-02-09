@@ -1,14 +1,15 @@
-"""Flow LLM SFT trainer: Masked diffusion denoising on LLaDA-8B.
+"""Flow LLM SFT trainer: Masked diffusion denoising on ReFusion.
 
-Trains LLaDA-8B (GSAI-ML/LLaDA-8B-Base) with QLoRA for form-filling
-action plan generation via masked diffusion. At each training step:
-    1. Sample time t ~ Uniform(eps, 1-eps) per batch element
-    2. Mask response tokens with probability p_mask = (1-eps)*t + eps
-    3. Feed prompt (unmasked) + masked response to bidirectional model
-    4. Compute cross-entropy loss on masked positions, normalized by p_mask
+Trains ReFusion (GSAI-ML/ReFusion) with QLoRA for form-filling action plan
+generation via masked diffusion. ReFusion's forward() handles the training
+objective natively:
+    1. Splits response into random-size slots (4/8/16/32 tokens)
+    2. Randomly masks some slots, keeps others in shuffled order
+    3. Computes hybrid loss: AR on unmasked + MDM on masked (normalized by p_mask)
+    4. Uses prompt_lengths to separate prompt from response tokens
 
-LLaDA natively supports masked diffusion -- it was pre-trained for this
-exact objective. This SFT stage teaches it the form-filling action format.
+ReFusion is built on Qwen3 and uses AutoModelForCausalLM, so standard
+HuggingFace/BnB/PEFT loading works without any compatibility patches.
 
 Usage:
     uv run infra/training/flow_matching/flow_llm_sft_trainer.py
@@ -16,20 +17,20 @@ Usage:
 
 import json
 import logging
+import math
 import os
 from pathlib import Path
 
 import torch
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 from torch.utils.data import DataLoader, Dataset
-from transformers import AutoModel, AutoTokenizer, BitsAndBytesConfig
+from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
 from infra.training.flow_matching.config import (
     DATA_CONFIG,
     FLOW_LLM_CONFIG,
     FLOW_LLM_SFT_CONFIG,
 )
-from infra.training.flow_matching.flow_llm_model import FlowLLM
 from infra.training.shared.utils import format_chat_prompt, persist_checkpoint, resolve_data_path
 
 logging.basicConfig(
@@ -38,9 +39,18 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+IGNORE_INDEX = -100
+
 
 class FlowLLMDataset(Dataset):
-    """Dataset for flow LLM denoising training."""
+    """Dataset for ReFusion masked diffusion training.
+
+    Each item returns a full sequence (prompt + response) with:
+    - input_ids: full token sequence
+    - attention_mask: 1 for real tokens, 0 for padding
+    - labels: -100 for prompt/padding, token IDs for response tokens
+    - prompt_lengths: length of prompt (for ReFusion's forward_process)
+    """
 
     def __init__(self, file_path: str, tokenizer, max_length: int, max_samples: int = 0):
         self.tokenizer = tokenizer
@@ -60,7 +70,6 @@ class FlowLLMDataset(Dataset):
     def __getitem__(self, idx):
         item = self.data[idx]
         instruction = item.get("instruction", item.get("condition", ""))
-        # Support multiple data formats: response (formfactory_sft), target, output
         target_text = item.get("response", "")
         if not target_text:
             target_actions = item.get("target", item.get("output", []))
@@ -69,76 +78,47 @@ class FlowLLMDataset(Dataset):
             else:
                 target_text = str(target_actions)
 
-        # Tokenize condition (instruction)
-        condition = self.tokenizer(
-            instruction,
-            max_length=self.max_length,
-            truncation=True,
-            padding="max_length",
-            return_tensors="pt",
+        # Tokenize prompt and response separately to track prompt_length
+        prompt_enc = self.tokenizer(
+            instruction, add_special_tokens=True, return_tensors="pt"
+        )
+        response_enc = self.tokenizer(
+            target_text, add_special_tokens=False, return_tensors="pt"
         )
 
-        # Tokenize target (action plan)
-        target = self.tokenizer(
-            target_text,
-            max_length=self.max_length,
-            truncation=True,
-            padding="max_length",
-            return_tensors="pt",
-        )
+        prompt_ids = prompt_enc["input_ids"].squeeze(0)
+        response_ids = response_enc["input_ids"].squeeze(0)
+        prompt_length = prompt_ids.shape[0]
+
+        # Concatenate and truncate/pad to max_length
+        full_ids = torch.cat([prompt_ids, response_ids])[:self.max_length]
+        full_length = full_ids.shape[0]
+
+        # Labels: -100 for prompt tokens, token IDs for response tokens
+        labels = torch.full((full_length,), IGNORE_INDEX, dtype=torch.long)
+        response_start = min(prompt_length, full_length)
+        labels[response_start:] = full_ids[response_start:]
+
+        # Pad to max_length
+        pad_length = self.max_length - full_length
+        if pad_length > 0:
+            pad_id = self.tokenizer.pad_token_id or 0
+            full_ids = torch.cat([full_ids, torch.full((pad_length,), pad_id, dtype=torch.long)])
+            labels = torch.cat([labels, torch.full((pad_length,), IGNORE_INDEX, dtype=torch.long)])
+
+        attention_mask = torch.zeros(self.max_length, dtype=torch.long)
+        attention_mask[:full_length] = 1
 
         return {
-            "condition_ids": condition["input_ids"].squeeze(0),
-            "condition_mask": condition["attention_mask"].squeeze(0),
-            "target_ids": target["input_ids"].squeeze(0),
-            "target_mask": target["attention_mask"].squeeze(0),
+            "input_ids": full_ids,
+            "attention_mask": attention_mask,
+            "labels": labels,
+            "prompt_lengths": torch.tensor([prompt_length], dtype=torch.long),
         }
 
 
-def _patch_bnb_for_llada():
-    """Patch BitsAndBytes quantizer for LLaDA compatibility.
-
-    LLaDA's custom model class sets `all_tied_weights_keys` as a list
-    but transformers expects a dict (.keys()).
-    """
-    import transformers.quantizers.base as _qbase
-
-    _orig_fn = _qbase.get_keys_to_not_convert
-
-    def _patched_fn(model):
-        if not hasattr(model, "all_tied_weights_keys"):
-            model.all_tied_weights_keys = {}
-        elif isinstance(model.all_tied_weights_keys, list):
-            model.all_tied_weights_keys = {k: None for k in model.all_tied_weights_keys}
-        return _orig_fn(model)
-
-    _qbase.get_keys_to_not_convert = _patched_fn
-
-
-def _patch_llada_tie_weights(model_name: str, trust_remote_code: bool = True):
-    """Patch LLaDA's tie_weights to accept kwargs from newer transformers.
-
-    Newer transformers calls model.tie_weights(missing_keys=..., recompute_mapping=...)
-    but LLaDA's custom tie_weights() doesn't accept those kwargs. We patch the
-    model class BEFORE from_pretrained so the fix is in place during loading.
-    """
-    from transformers import AutoConfig
-
-    config = AutoConfig.from_pretrained(model_name, trust_remote_code=trust_remote_code)
-    from transformers import AutoModel
-    model_cls = AutoModel._model_mapping[type(config)]
-
-    import inspect
-    orig_tie = model_cls.tie_weights
-    sig = inspect.signature(orig_tie)
-    if "missing_keys" not in sig.parameters:
-        def _compat_tie_weights(self, **kwargs):
-            return orig_tie(self)
-        model_cls.tie_weights = _compat_tie_weights
-
-
-def load_model_with_qlora(model_config: dict, lora_config_dict: dict):
-    """Load LLaDA-8B with 4-bit quantization and LoRA adapters."""
+def load_model_with_qlora(model_config: dict):
+    """Load ReFusion with 4-bit quantization and LoRA adapters."""
     model_name = model_config["model_name"]
     compute_dtype = (
         torch.bfloat16
@@ -147,12 +127,6 @@ def load_model_with_qlora(model_config: dict, lora_config_dict: dict):
     )
     trust_remote_code = model_config.get("trust_remote_code", True)
 
-    # Patch BnB for LLaDA compatibility (missing all_tied_weights_keys)
-    _patch_bnb_for_llada()
-    # Patch tie_weights for LLaDA (missing kwargs in newer transformers)
-    _patch_llada_tie_weights(model_name, trust_remote_code)
-
-    # LLaDA has no pre-quantized variant -- always quantize on-the-fly
     bnb_config = BitsAndBytesConfig(
         load_in_4bit=model_config["load_in_4bit"],
         bnb_4bit_quant_type=model_config["bnb_4bit_quant_type"],
@@ -160,12 +134,12 @@ def load_model_with_qlora(model_config: dict, lora_config_dict: dict):
         bnb_4bit_compute_dtype=compute_dtype,
     )
 
-    # LLaDA uses AutoModel (not AutoModelForCausalLM) + trust_remote_code
-    model = AutoModel.from_pretrained(
+    # ReFusion uses standard AutoModelForCausalLM -- no compatibility patches needed
+    model = AutoModelForCausalLM.from_pretrained(
         model_name,
         quantization_config=bnb_config,
         device_map="auto",
-        dtype=compute_dtype,
+        torch_dtype=compute_dtype,
         trust_remote_code=trust_remote_code,
     )
     model.config.use_cache = False
@@ -177,13 +151,13 @@ def load_model_with_qlora(model_config: dict, lora_config_dict: dict):
         gradient_checkpointing_kwargs={"use_reentrant": False},
     )
 
-    # Apply LoRA
+    # Apply LoRA (standard CAUSAL_LM task type)
     lora_config = LoraConfig(
-        r=lora_config_dict["lora_r"],
-        lora_alpha=lora_config_dict["lora_alpha"],
-        lora_dropout=lora_config_dict["lora_dropout"],
-        target_modules=lora_config_dict["lora_target_modules"],
-        task_type="FEATURE_EXTRACTION",
+        r=model_config["lora_r"],
+        lora_alpha=model_config["lora_alpha"],
+        lora_dropout=model_config["lora_dropout"],
+        target_modules=model_config["lora_target_modules"],
+        task_type="CAUSAL_LM",
     )
     model = get_peft_model(model, lora_config)
     model.print_trainable_parameters()
@@ -206,12 +180,8 @@ def train():
         tokenizer.pad_token = tokenizer.eos_token
 
     # Load model with QLoRA
-    logger.info(f"Loading LLaDA-8B with QLoRA: {model_config['model_name']}")
-    model = load_model_with_qlora(model_config, model_config)
-
-    # Wrap in FlowLLM (LLaDA masked diffusion)
-    mask_token_id = model_config.get("mask_token_id", 126336)
-    flow_model = FlowLLM(model, tokenizer, mask_token_id=mask_token_id)
+    logger.info(f"Loading ReFusion with QLoRA: {model_config['model_name']}")
+    model = load_model_with_qlora(model_config)
 
     # Load dataset
     train_file = resolve_data_path(DATA_CONFIG["train_file"])
@@ -234,10 +204,6 @@ def train():
         weight_decay=train_config["weight_decay"],
     )
 
-    # Warmup scheduler
-    total_steps = len(dataloader) * train_config["num_epochs"]
-    warmup_steps = int(total_steps * train_config.get("warmup_ratio", 0.05))
-
     logger.info(
         f"Starting flow LLM SFT: {len(dataset)} samples, "
         f"{train_config['num_epochs']} epochs, "
@@ -247,6 +213,7 @@ def train():
 
     global_step = 0
     accumulation_steps = train_config["gradient_accumulation_steps"]
+    device = next(model.parameters()).device
 
     for epoch in range(train_config["num_epochs"]):
         model.train()
@@ -254,16 +221,19 @@ def train():
         num_batches = 0
 
         for batch_idx, batch in enumerate(dataloader):
-            condition_ids = batch["condition_ids"].to(flow_model.device)
-            condition_mask = batch["condition_mask"].to(flow_model.device)
-            target_ids = batch["target_ids"].to(flow_model.device)
-            target_mask = batch["target_mask"].to(flow_model.device)
+            input_ids = batch["input_ids"].to(device)
+            attention_mask = batch["attention_mask"].to(device)
+            labels = batch["labels"].to(device)
+            prompt_lengths = batch["prompt_lengths"].to(device)
 
-            # Flow matching denoising loss
-            loss = flow_model.compute_loss(
-                condition_ids, condition_mask, target_ids, target_mask
+            # ReFusion forward() handles masked diffusion loss natively
+            outputs = model(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                labels=labels,
+                prompt_lengths=prompt_lengths,
             )
-            loss = loss / accumulation_steps
+            loss = outputs.loss / accumulation_steps
             loss.backward()
 
             if (batch_idx + 1) % accumulation_steps == 0:
@@ -272,16 +242,21 @@ def train():
                 optimizer.zero_grad()
                 global_step += 1
 
-            epoch_loss += loss.item() * accumulation_steps
-            num_batches += 1
+            batch_loss_val = loss.item() * accumulation_steps
+            if not math.isnan(batch_loss_val):
+                epoch_loss += batch_loss_val
+                num_batches += 1
+            else:
+                logger.warning(f"NaN loss at batch {batch_idx}, skipping accumulation")
 
-            if global_step > 0 and global_step % train_config["logging_steps"] == 0:
-                avg_loss = epoch_loss / num_batches
-                logger.info(
-                    f"Epoch {epoch + 1}, Step {global_step}: "
-                    f"loss={loss.item() * accumulation_steps:.4f}, "
-                    f"avg_loss={avg_loss:.4f}"
-                )
+            if (batch_idx + 1) % accumulation_steps == 0:
+                if global_step > 0 and global_step % train_config["logging_steps"] == 0:
+                    avg_loss = epoch_loss / max(num_batches, 1)
+                    logger.info(
+                        f"Epoch {epoch + 1}, Step {global_step}: "
+                        f"loss={batch_loss_val:.4f}, "
+                        f"avg_loss={avg_loss:.4f}"
+                    )
 
         avg_epoch_loss = epoch_loss / max(num_batches, 1)
         logger.info(f"Epoch {epoch + 1} complete: avg_loss={avg_epoch_loss:.4f}")
