@@ -49,3 +49,17 @@ CSC490/A1/high_level_architecture.pdf
 
 !docker-compose.dev.yml
 !docker-compose.yml
+
+# Terraform
+terraform/.terraform/
+terraform/.terraform.lock.hcl
+terraform/*.tfstate
+terraform/*.tfstate.*
+terraform/crash.log
+terraform/crash.*.log
+terraform/*.tfvars
+!terraform/terraform.tfvars.example
+terraform/override.tf
+terraform/override.tf.json
+terraform/*_override.tf
+terraform/*_override.tf.json
