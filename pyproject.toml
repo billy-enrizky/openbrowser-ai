@@ -41,12 +41,14 @@ groq = ["groq>=0.30.0"]
 ollama = ["ollama>=0.5.1"]
 aws = ["boto3"]
 azure = ["openai"]
+mcp = ["mcp>=1.0.0"]
 telemetry = ["posthog>=3.7.0"]
 pdf = ["pypdf", "reportlab"]
 dev = [
     "pytest>=9.0.2",
     "pytest-asyncio>=1.0.0",
     "pytest-cov>=6.0.0",
+    "mcp>=1.0.0",
 ]
 all = [
     "textual>=3.2.0",
@@ -59,6 +61,7 @@ all = [
     "posthog>=3.7.0",
     "pypdf",
     "reportlab",
+    "mcp>=1.0.0",
 ]
 
 [project.scripts]
