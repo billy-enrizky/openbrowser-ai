@@ -79,9 +79,9 @@ ONLINE_GRPO_CONFIG = {
     "browser_headless": True,
     "action_timeout_s": 10,  # Increased from 5s -- v10 hit timeouts on long descriptions
     "reward_weights": {
-        "task_completion": 0.6,
-        "field_accuracy": 0.3,
-        "execution_completeness": 0.1,
+        "task_completion": 0.4,
+        "field_accuracy": 0.4,
+        "execution_completeness": 0.2,
     },
 }
 
