@@ -1,34 +1,3 @@
-# Production infrastructure variables
-
-project_name   = "openbrowser"
-aws_region     = "ca-central-1"
-instance_type  = "t3.medium"
-
-key_pair_name    = ""           # Fill with your EC2 key pair name
-ssh_allowed_cidr = "0.0.0.0/0"  # Restrict to your IP for security
-
-# Auto Scaling
-min_instances     = 1
-max_instances     = 3
-desired_instances = 1
-
-# Docker deployment
-docker_image_tag  = "latest"  # Use "latest" for git clone, or ECR image tag
-github_repo_url   = "https://github.com/billy-enrizky/openbrowser-ai.git"
-github_branch     = "main"
-enable_vnc        = true
-
-# API Gateway
-cors_origins = ["*"]  # Or specify: ["https://yourdomain.com", "https://app.yourdomain.com"]
-
-# VPC Configuration
-vpc_cidr    = "10.0.0.0/16"
-enable_nat  = false  # Set to true if you need private subnets
-
-# Storage
-ebs_volume_size = 50
-
-# API keys -- put in terraform.tfvars.local (gitignored) or use SSM directly
 # Copy to terraform.tfvars and fill in. Do not commit terraform.tfvars.
 
 aws_region   = "ca-central-1"
@@ -42,14 +11,14 @@ project_name = "openbrowser"
 backend_image = ""
 
 # When using the Terraform-created ECR repo, tag to pull (default: latest)
-# backend_image_tag = "latest"
+backend_image_tag = "latest"
 
 # Optional: use an existing Secrets Manager secret for LLM API keys
 # Leave empty to have Terraform create a placeholder secret
 # secrets_manager_secret_name = ""
 
 # Optional: require JWT (Cognito) on API routes. Set true when auth is implemented.
-# enable_api_auth = false
+enable_api_auth = false
 
 # Optional: custom domain for frontend (requires ACM cert in us-east-1 for CloudFront)
 # frontend_domain_name    = "app.example.com"
