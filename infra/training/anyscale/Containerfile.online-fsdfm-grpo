@@ -18,11 +18,7 @@ RUN pip install --no-cache-dir \
 # Install Python deps (numpy already at 2.x, compatible with torch)
 RUN pip install --no-cache-dir \
     "torch>=2.0" \
-    "peft>=0.16" \
-    "datasets>=2.18" \
-    "accelerate>=1.0" \
-    "bitsandbytes>=0.43" \
-    boto3 \
+    "transformers>=4.45" \
     flask \
     playwright \
     "openbrowser-ai" \
@@ -33,13 +29,9 @@ RUN pip install --no-cache-dir \
     langgraph \
     "langchain-core>=0.3.0" \
     "pydantic>=2.0.0" \
-    aiofiles
-
-# Upgrade transformers to 4.52.4 -- ReFusion's modeling code imports
-# SlidingWindowCache which existed in 4.43-4.52 but was removed in 4.53+.
-# Pin urllib3<2 to avoid breaking Ray's botocore (urllib3 2.x removed DEFAULT_CIPHERS).
-RUN pip install --no-cache-dir "transformers==4.52.4" "urllib3<2" && \
-    python -c "from transformers.cache_utils import SlidingWindowCache; print('SlidingWindowCache OK')"
+    aiofiles \
+    "huggingface_hub>=0.20" \
+    "einops"
 
 # Install uv (openbrowser uses uvx at runtime for browser management)
 RUN pip install --no-cache-dir uv

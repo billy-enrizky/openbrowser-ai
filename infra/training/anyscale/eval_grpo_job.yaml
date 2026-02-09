@@ -1,6 +1,6 @@
-name: openbrowser-finetuning-sft
-entrypoint: python -m infra.training.finetuning.sft_trainer
-image_uri: anyscale/ray:2.44.1-slim-py312-cu128
+name: openbrowser-eval-grpo
+entrypoint: python -m infra.training.finetuning.eval_sft
+containerfile: infra/training/anyscale/Containerfile.online-grpo
 compute_config:
   cloud: "Anyscale Cloud"
   head_node:
@@ -17,26 +17,21 @@ excludes:
   - presentation
   - data/mind2web/
   - data/webarena/
-  - data/formfactory/
   - results/
   - outputs/
   - openbrowser_agent_data/
+  - data/formfactory/.git/
+  - data/formfactory/img/
   - "*.pyc"
-requirements:
-  - torch>=2.0
-  - transformers>=4.45
-  - peft>=0.12
-  - datasets>=2.18
-  - accelerate>=0.28
-  - bitsandbytes>=0.43
 env_vars:
   TRAIN_FILE: "data/processed/formfactory_sft.jsonl"
-  MAX_TRAIN_SAMPLES: "200"
-  NUM_EPOCHS: "1"
+  MAX_EVAL_SAMPLES: "25"
+  SFT_CHECKPOINT_PATH: "/mnt/user_storage/openbrowser/checkpoints/online-grpo"
+  EVAL_LABEL: "GRPO"
   # HF_TOKEN injected from .env at submission time by submit_job.py
 max_retries: 1
-timeout_s: 14400
+timeout_s: 7200
 tags:
   project: openbrowser
-  task: sft
+  task: eval-grpo
   model: qwen3-8b
