@@ -10,7 +10,7 @@ Architecture:
     2. Each plan is parsed into executable actions
     3. Actions are executed in a headless browser against FormFactory
     4. Reward = actual form submission success + field accuracy
-    5. PPO-style clipped objective with KL penalty updates LoRA parameters
+    5. REINFORCE with group-relative advantages + non-negative KL penalty (Schulman k3)
 
 Usage:
     SFT_CHECKPOINT_PATH=outputs/finetuning_sft/final uv run infra/training/finetuning/online_grpo_trainer.py
@@ -70,7 +70,7 @@ def load_quantized_model(model_name: str, config: dict):
     # Pre-quantized models (e.g. unsloth/Qwen3-8B-bnb-4bit) already have
     # quantization_config embedded -- passing it again triggers a warning.
     is_prequantized = "bnb" in model_name.lower()
-    load_kwargs = {"device_map": "auto", "dtype": compute_dtype}
+    load_kwargs = {"device_map": "auto", "torch_dtype": compute_dtype}
     if not is_prequantized:
         bnb_config = BitsAndBytesConfig(
             load_in_4bit=config["load_in_4bit"],
@@ -128,9 +128,9 @@ def generate_rollouts(
     return responses, all_sequences, prompt_length
 
 
-def compute_log_probs(
+def compute_per_token_log_probs(
     model, input_ids: torch.Tensor, attention_mask: torch.Tensor, prompt_length: int
-) -> torch.Tensor:
+) -> tuple[torch.Tensor, torch.Tensor]:
     """Compute per-token log probabilities for the response portion.
 
     Processes one sample at a time to avoid CUDA OOM from materializing
@@ -147,10 +147,16 @@ def compute_log_probs(
         prompt_length: number of prompt tokens to skip
 
     Returns:
-        log_probs: [B] mean log-probs over response tokens
+        token_log_probs: [B, max_resp_len] per-token log-probs (0 for padding)
+        resp_mask: [B, max_resp_len] float mask (1.0 for valid response tokens)
     """
     B = input_ids.shape[0]
-    result = []
+    seq_len = input_ids.shape[1]
+    response_start = max(0, prompt_length - 1)  # -1 for shift offset
+    max_resp_len = seq_len - 1 - response_start
+
+    all_log_probs = []
+    all_masks = []
 
     for i in range(B):
         ids_i = input_ids[i : i + 1]  # [1, seq_len]
@@ -171,19 +177,14 @@ def compute_log_probs(
         )  # [seq_len-1]
         token_log_probs = -token_nll  # log_prob = -cross_entropy
 
-        # Only sum over response tokens (skip prompt)
-        response_start = max(0, prompt_length - 1)  # -1 for shift
+        # Only take response tokens (skip prompt)
         response_log_probs = token_log_probs[response_start:]
-
-        # Masking for padding
         mask_shifted = mask_i[0, 1:][response_start:].float()
-        masked_log_probs = response_log_probs * mask_shifted
 
-        # Mean over response tokens
-        num_tokens = mask_shifted.sum().clamp(min=1)
-        result.append(masked_log_probs.sum() / num_tokens)
+        all_log_probs.append(response_log_probs[:max_resp_len])
+        all_masks.append(mask_shifted[:max_resp_len])
 
-    return torch.stack(result)  # [B]
+    return torch.stack(all_log_probs), torch.stack(all_masks)
 
 
 async def train():
@@ -259,7 +260,6 @@ async def train():
 
     group_size = config["group_size"]
     kl_coeff = config["kl_coeff"]
-    clip_range = config["clip_range"]
     max_new_tokens = config.get("max_new_tokens", 512)
     action_timeout = config.get("action_timeout_s", 5.0)
 
@@ -277,7 +277,7 @@ async def train():
 
     logger.info(
         f"Starting online GRPO training: {len(prompts)} prompts, G={group_size}, "
-        f"kl_coeff={kl_coeff}, clip_range={clip_range}"
+        f"kl_coeff={kl_coeff}"
     )
 
     total_steps = 0
@@ -378,31 +378,36 @@ async def train():
                     advantages, dtype=torch.float32, device=padded.device
                 )
 
-                # Compute policy log-probs (with gradients)
-                policy_log_probs = compute_log_probs(
+                # Compute per-token policy log-probs (with gradients)
+                policy_token_lp, resp_mask = compute_per_token_log_probs(
                     model, padded, attention_mask, prompt_length
-                )
+                )  # [G, T], [G, T]
 
-                # Compute reference log-probs (no gradients)
+                # Compute per-token reference log-probs (for KL, no gradients)
                 with torch.no_grad():
-                    ref_log_probs = compute_log_probs(
+                    ref_token_lp, _ = compute_per_token_log_probs(
                         ref_model, padded, attention_mask, prompt_length
-                    )
+                    )  # [G, T]
 
-                # KL divergence per sample
-                kl_div = policy_log_probs - ref_log_probs  # [G]
+                # Per-sample mean log-prob under current policy
+                tokens_per_sample = resp_mask.sum(dim=-1).clamp(min=1)  # [G]
+                sample_log_prob = (
+                    (policy_token_lp * resp_mask).sum(dim=-1) / tokens_per_sample
+                )  # [G]
 
-                # Policy gradient loss with PPO-style clipping
-                ratio = torch.exp(policy_log_probs - ref_log_probs)
-                clipped_ratio = torch.clamp(
-                    ratio, 1.0 - clip_range, 1.0 + clip_range
-                )
-                pg_loss1 = -advantages_t * ratio
-                pg_loss2 = -advantages_t * clipped_ratio
-                pg_loss = torch.max(pg_loss1, pg_loss2).mean()
+                # REINFORCE with group-relative advantages
+                pg_loss = -(advantages_t * sample_log_prob).mean()
 
-                # KL penalty
-                kl_penalty = kl_coeff * kl_div.mean()
+                # KL divergence: Schulman k3 approximation (always >= 0)
+                # D_KL(pi || ref) ~ r - log(r) - 1  where r = pi_ref / pi_theta
+                log_r = ref_token_lp - policy_token_lp  # [G, T]
+                r = torch.exp(log_r)
+                kl_per_token = r - log_r - 1  # >= 0 by Jensen's inequality
+                total_resp_tokens = resp_mask.sum().clamp(min=1)
+                kl_div = (kl_per_token * resp_mask).sum() / total_resp_tokens
+
+                # KL penalty (kl_div >= 0, so this always penalizes divergence)
+                kl_penalty = kl_coeff * kl_div
 
                 # Total loss
                 loss = pg_loss + kl_penalty
@@ -415,7 +420,7 @@ async def train():
 
                 total_steps += 1
                 avg_reward = sum(rewards) / len(rewards) if rewards else 0
-                avg_kl = kl_div.mean().item()
+                avg_kl = kl_div.item()
                 epoch_kl.append(avg_kl)
 
                 if total_steps % config["logging_steps"] == 0:
