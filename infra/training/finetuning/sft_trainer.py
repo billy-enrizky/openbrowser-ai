@@ -124,7 +124,7 @@ def train():
         else torch.float16
     )
     is_prequantized = "bnb" in config["model_name"].lower()
-    load_kwargs = {"device_map": "auto", "dtype": compute_dtype}
+    load_kwargs = {"device_map": "auto", "torch_dtype": compute_dtype}
     if not is_prequantized:
         bnb_config = BitsAndBytesConfig(
             load_in_4bit=config["load_in_4bit"],
