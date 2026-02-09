@@ -9,6 +9,7 @@ from torch.utils.data import DataLoader, Dataset
 
 from infra.training.flow_matching.config import FLOW_SFT_CONFIG, DATA_CONFIG, FLOW_MODEL_CONFIG
 from infra.training.flow_matching.flow_model import FlowVectorFieldEstimator
+from infra.training.shared.utils import persist_checkpoint
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -163,6 +164,7 @@ def train():
     output_dir = Path("outputs/flow_matching_sft")
     output_dir.mkdir(parents=True, exist_ok=True)
     torch.save(model.state_dict(), str(output_dir / "model.pt"))
+    persist_checkpoint(str(output_dir), "flow-sft")
     logger.info("Flow SFT training complete")
 
 
