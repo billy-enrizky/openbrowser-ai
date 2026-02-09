@@ -1,5 +1,5 @@
-name: openbrowser-online-flow-llm-grpo
-entrypoint: python -m infra.training.flow_matching.online_flow_llm_grpo_trainer
+name: openbrowser-flow-llm-sft
+entrypoint: python -m infra.training.flow_matching.flow_llm_sft_trainer
 containerfile: infra/training/anyscale/Containerfile.online-grpo
 compute_config:
   cloud: "Anyscale Cloud"
@@ -25,13 +25,12 @@ excludes:
   - "*.pyc"
 env_vars:
   FLOW_TRAIN_FILE: "data/processed/formfactory_sft.jsonl"
-  MAX_TRAIN_SAMPLES: "25"
-  NUM_EPOCHS: "1"
-  FLOW_LLM_SFT_CHECKPOINT: "/mnt/user_storage/openbrowser/checkpoints/flow-llm-sft/adapter"
+  MAX_TRAIN_SAMPLES: "200"
+  NUM_EPOCHS: "3"
   # HF_TOKEN injected from .env at submission time by submit_job.py
 max_retries: 1
 timeout_s: 14400
 tags:
   project: openbrowser
-  task: online-flow-llm-grpo
+  task: flow-llm-sft
   model: refusion-8b-mdm
