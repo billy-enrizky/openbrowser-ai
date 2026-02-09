@@ -94,6 +94,7 @@ from openbrowser import ActionModel, Agent
 from openbrowser.browser import BrowserProfile, BrowserSession
 from openbrowser.config import get_default_llm, get_default_profile, load_openbrowser_config
 from openbrowser.filesystem.file_system import FileSystem
+from openbrowser.llm.google.chat import ChatGoogle
 from openbrowser.llm.openai.chat import ChatOpenAI
 from openbrowser.tools.service import Tools
 
@@ -196,7 +197,7 @@ class OpenBrowserServer:
 		self.agent: Agent | None = None
 		self.browser_session: BrowserSession | None = None
 		self.tools: Tools | None = None
-		self.llm: ChatOpenAI | None = None
+		self.llm: ChatOpenAI | ChatGoogle | None = None
 		self.file_system: FileSystem | None = None
 		self._telemetry = ProductTelemetry()
 		self._start_time = time.time()
@@ -553,12 +554,20 @@ class OpenBrowserServer:
 
 		# Initialize LLM from config
 		llm_config = get_default_llm(self.config)
-		if api_key := llm_config.get('api_key'):
+		model_provider = llm_config.get('model_provider') or os.getenv('MODEL_PROVIDER', '')
+		if model_provider.lower() == 'google':
+			google_api_key = llm_config.get('api_key') or os.getenv('GOOGLE_API_KEY')
+			if google_api_key:
+				self.llm = ChatGoogle(
+					model=llm_config.get('model', 'gemini-2.5-flash'),
+					api_key=google_api_key,
+					temperature=llm_config.get('temperature', 0.7),
+				)
+		elif api_key := llm_config.get('api_key') or os.getenv('OPENAI_API_KEY'):
 			self.llm = ChatOpenAI(
 				model=llm_config.get('model', 'gpt-4o-mini'),
 				api_key=api_key,
 				temperature=llm_config.get('temperature', 0.7),
-				# max_tokens=llm_config.get('max_tokens'),
 			)
 
 		# Initialize FileSystem for extraction actions
@@ -584,14 +593,25 @@ class OpenBrowserServer:
 		# Get LLM provider
 		model_provider = llm_config.get('model_provider') or os.getenv('MODEL_PROVIDER')
 
-		# 如果model_provider不等于空，且等Bedrock
-		if model_provider and model_provider.lower() == 'bedrock':
+		if model_provider and model_provider.lower() == 'google':
+			google_api_key = llm_config.get('api_key') or os.getenv('GOOGLE_API_KEY')
+			if not google_api_key:
+				return 'Error: GOOGLE_API_KEY not set in config or environment'
+			llm_model = llm_config.get('model') or os.getenv('MODEL') or 'gemini-2.5-flash'
+			if model != 'gpt-4o':
+				llm_model = model
+			llm = ChatGoogle(
+				model=llm_model,
+				api_key=google_api_key,
+				temperature=llm_config.get('temperature', 0.7),
+			)
+		elif model_provider and model_provider.lower() == 'bedrock':
 			llm_model = llm_config.get('model') or os.getenv('MODEL') or 'us.anthropic.claude-sonnet-4-20250514-v1:0'
 			aws_region = llm_config.get('region') or os.getenv('REGION')
 			if not aws_region:
 				aws_region = 'us-east-1'
 			llm = ChatAWSBedrock(
-				model=llm_model,  # or any Bedrock model
+				model=llm_model,
 				aws_region=aws_region,
 				aws_sso_auth=True,
 			)
