@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     
     # CORS settings
     CORS_ORIGINS: list[str] = Field(
-        default=["http://localhost:3000", "https://openbrowser.me", "https://www.openbrowser.me"],
+        default=["http://localhost:3000", "http://localhost:3001", "https://openbrowser.me", "https://www.openbrowser.me"],
         description="Allowed CORS origins"
     )
     
