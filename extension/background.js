@@ -520,12 +520,10 @@ chrome.runtime.onMessage.addListener(function (message, _sender, sendResponse) {
 });
 
 // ---------------------------------------------------------------------------
-// Startup: restore previous backend URL and reconnect
+// Startup: do NOT auto-connect from cached URL.
+//
+// The content script will detect an OpenBrowser frontend page and send the
+// correct backend URL via "set_backend_url" message.  Auto-connecting from
+// cache caused stale-URL issues (e.g. connecting to port 8000 when the
+// backend moved to 8001).
 // ---------------------------------------------------------------------------
-
-chrome.storage.local.get(["backendUrl"], function (data) {
-  if (data.backendUrl) {
-    console.log("[OpenBrowser] Restoring connection to", data.backendUrl);
-    connect(data.backendUrl);
-  }
-});

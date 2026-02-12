@@ -12,34 +12,18 @@
   let lastSentUrl = null;
 
   /**
-   * Derive the default WebSocket backend URL from the current page origin.
-   * e.g. http://localhost:3000 -> ws://localhost:8000/ws/extension
-   *      https://app.openbrowser.me -> wss://api.openbrowser.me/ws/extension
-   */
-  function deriveBackendUrl() {
-    const loc = window.location;
-    const isSecure = loc.protocol === "https:";
-    const wsProtocol = isSecure ? "wss" : "ws";
-
-    if (loc.hostname === "localhost" || loc.hostname === "127.0.0.1") {
-      return `${wsProtocol}://${loc.hostname}:8000/ws/extension`;
-    }
-
-    // For production: replace app/www subdomain with api subdomain
-    const apiHost = loc.hostname.replace(/^(app|www)\./, "api.");
-    return `${wsProtocol}://${apiHost}/ws/extension`;
-  }
-
-  /**
-   * Read the WebSocket URL from the page meta tag, falling back to
-   * a derived URL based on the current page origin.
+   * Read the WebSocket URL from the page meta tag.
+   *
+   * Returns null if the meta tag is not found -- this means the page is
+   * not an OpenBrowser frontend and we should NOT send a URL to the
+   * background worker (avoids overriding a correct URL with a wrong guess).
    */
   function resolveBackendUrl() {
     const meta = document.querySelector('meta[name="openbrowser-ws-url"]');
     if (meta && meta.content) {
       return meta.content.trim();
     }
-    return deriveBackendUrl();
+    return null;
   }
 
   /**
@@ -48,7 +32,7 @@
    */
   function sendBackendUrl() {
     const url = resolveBackendUrl();
-    if (url === lastSentUrl) {
+    if (!url || url === lastSentUrl) {
       return;
     }
     lastSentUrl = url;
