@@ -56,7 +56,13 @@ interface AppState {
   setMaxSteps: (steps: number) => void;
   useVision: boolean;
   setUseVision: (use: boolean) => void;
-  
+
+  // Current browser mode
+  useCurrentBrowser: boolean;
+  setUseCurrentBrowser: (use: boolean) => void;
+  extensionConnected: boolean;
+  setExtensionConnected: (connected: boolean) => void;
+
   // LLM Model Selection
   availableModels: LLMModel[];
   setAvailableModels: (models: LLMModel[]) => void;
@@ -144,7 +150,13 @@ export const useAppStore = create<AppState>()(
       setMaxSteps: (steps) => set({ maxSteps: steps }),
       useVision: true,
       setUseVision: (use) => set({ useVision: use }),
-      
+
+      // Current browser mode
+      useCurrentBrowser: false,
+      setUseCurrentBrowser: (use) => set({ useCurrentBrowser: use }),
+      extensionConnected: false,
+      setExtensionConnected: (connected) => set({ extensionConnected: connected }),
+
       // LLM Model Selection
       availableModels: [],
       setAvailableModels: (models) => set({ availableModels: models }),
@@ -166,6 +178,7 @@ export const useAppStore = create<AppState>()(
         agentType: state.agentType,
         maxSteps: state.maxSteps,
         useVision: state.useVision,
+        useCurrentBrowser: state.useCurrentBrowser,
         sidebarOpen: state.sidebarOpen,
         showLogs: state.showLogs,
         browserViewerMode: state.browserViewerMode,
