@@ -39,6 +39,7 @@ class CreateTaskRequest(BaseModel):
     use_vision: bool = Field(default=True, description="Enable vision/screenshots")
     llm_model: str | None = Field(default=None, description="LLM model to use")
     project_id: str | None = Field(default=None, description="Project to associate task with")
+    use_current_browser: bool = Field(default=False, description="Use current browser via Chrome extension")
 
 
 class CreateProjectRequest(BaseModel):
@@ -152,6 +153,7 @@ class WSMessageType(str, Enum):
     TASK_CANCELLED = "task_cancelled"
     LOG = "log"  # Backend terminal log messages
     VNC_INFO = "vnc_info"  # VNC connection information
+    EXTENSION_STATUS = "extension_status"  # Chrome extension connection status
 
 
 class WSMessage(BaseModel):
@@ -169,6 +171,7 @@ class WSStartTaskData(BaseModel):
     max_steps: int = 50
     use_vision: bool = True
     llm_model: str | None = None
+    use_current_browser: bool = False
 
 
 class WSStepUpdateData(BaseModel):
