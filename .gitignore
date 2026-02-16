@@ -58,7 +58,8 @@ data/formfactory/
 # Runtime data
 openbrowser_agent_data/
 backend/openbrowser_agent_data/
-data/processed/
+data/processed/*
+!data/processed/*.jsonl
 results/
 feature-store-ui/
 
