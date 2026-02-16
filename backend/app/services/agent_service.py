@@ -25,6 +25,7 @@ class AgentSession:
         use_vision: bool = True,
         llm_model: str | None = None,
         enable_vnc: bool = True,
+        use_current_browser: bool = False,
         on_step_callback: Callable[[dict[str, Any]], None] | None = None,
         on_output_callback: Callable[[str, bool], None] | None = None,
         on_screenshot_callback: Callable[[str | None, int], None] | None = None,
@@ -39,8 +40,10 @@ class AgentSession:
         self.max_steps = max_steps
         self.use_vision = use_vision
         self.llm_model = llm_model
-        self.enable_vnc = enable_vnc and settings.VNC_ENABLED and VNC_AVAILABLE
-        
+        self.use_current_browser = use_current_browser
+        # Disable VNC when using current browser (agent controls user's browser directly)
+        self.enable_vnc = (not use_current_browser) and enable_vnc and settings.VNC_ENABLED and VNC_AVAILABLE
+
         # Callbacks for real-time updates
         self.on_step_callback = on_step_callback
         self.on_output_callback = on_output_callback
@@ -49,10 +52,11 @@ class AgentSession:
         self.on_error_callback = on_error_callback
         self.on_log_callback = on_log_callback
         self.on_vnc_info_callback = on_vnc_info_callback
-        
+
         # State
         self.agent: Any = None
         self.browser_session: Any = None
+        self.cdp_bridge: Any = None  # CDPBridge instance when using current browser
         self.vnc_session: VncSession | None = None
         self.is_running = False
         self.is_paused = False
@@ -94,6 +98,88 @@ class AgentSession:
             logger.warning(f"VNC setup failed for task {self.task_id}: {e}")
             return None
 
+    async def _setup_current_browser(self, BrowserSession, BrowserProfile):
+        """Set up browser session using the current browser via Chrome extension."""
+        from app.websocket.extension_handler import extension_manager
+        from app.services.cdp_bridge import CDPBridge
+
+        # Find a connected extension
+        extension_id = extension_manager.get_any_extension_id()
+        if not extension_id:
+            raise RuntimeError(
+                "Chrome extension not connected. Install the OpenBrowser extension "
+                "and visit the OpenBrowser frontend to auto-connect."
+            )
+
+        self._log("info", "Connecting to current browser via Chrome extension...", "browser")
+
+        # Create and start CDP bridge
+        self.cdp_bridge = CDPBridge(extension_id)
+        bridge_url = await self.cdp_bridge.start()
+        self._log("info", f"CDP Bridge started at {bridge_url}", "browser")
+
+        # Tell the extension to attach debugger to a new tab
+        await extension_manager.send_command(extension_id, {
+            "type": "attach_tab",
+        })
+
+        # Wait for the extension to attach (poll bridge for tab attachment)
+        for _ in range(20):
+            await asyncio.sleep(0.5)
+            if self.cdp_bridge._attached_tab_id is not None:
+                self._log("info", f"Tab attached: tabId={self.cdp_bridge._attached_tab_id}", "browser")
+                break
+        else:
+            raise RuntimeError("Timed out waiting for Chrome extension to attach debugger to a tab")
+
+        # Create browser session that connects to the bridge
+        browser_profile = BrowserProfile(
+            cdp_url=bridge_url,
+            headless=False,
+            keep_alive=True,
+        )
+        self.browser_session = BrowserSession(browser_profile=browser_profile)
+
+        logger.info("Connecting to current browser via CDP bridge...")
+        self._log("info", "Connecting to current browser via CDP bridge...", "browser")
+        await self.browser_session.start()
+
+    async def _setup_new_browser(self, BrowserSession, BrowserProfile):
+        """Set up a new browser instance (standard flow)."""
+        # Create browser session with profile
+        # When VNC is enabled, we need headless=False and set DISPLAY
+        browser_profile = BrowserProfile(
+            headless=False,  # Always headful when VNC is enabled
+            keep_alive=False,
+        )
+
+        # Set up environment for VNC display
+        browser_env = None
+        if self.vnc_session:
+            browser_env = {"DISPLAY": self.vnc_session.display}
+            self._log("info", f"Browser will use display {self.vnc_session.display}", "vnc")
+
+        self.browser_session = BrowserSession(browser_profile=browser_profile)
+
+        # IMPORTANT: Start the browser session BEFORE passing to agent
+        logger.info("Starting browser session...")
+        self._log("info", "Starting browser session...", "browser")
+
+        # If VNC is enabled, set the DISPLAY environment variable before starting
+        if browser_env:
+            original_display = os.environ.get("DISPLAY")
+            os.environ["DISPLAY"] = browser_env["DISPLAY"]
+            try:
+                await self.browser_session.start()
+            finally:
+                # Restore original DISPLAY
+                if original_display:
+                    os.environ["DISPLAY"] = original_display
+                elif "DISPLAY" in os.environ:
+                    del os.environ["DISPLAY"]
+        else:
+            await self.browser_session.start()
+
     async def start(self) -> dict[str, Any]:
         """Start the agent and run the task."""
         if self.is_running:
@@ -109,43 +195,16 @@ class AgentSession:
             
             # Import openbrowser components
             from openbrowser import Agent, CodeAgent, BrowserSession, BrowserProfile
-            
+
             self._log("info", "Initializing browser session...", "agent")
-            
-            # Create browser session with profile
-            # When VNC is enabled, we need headless=False and set DISPLAY
-            browser_profile = BrowserProfile(
-                headless=False,  # Always headful when VNC is enabled
-                keep_alive=False,
-            )
-            
-            # Set up environment for VNC display
-            browser_env = None
-            if self.vnc_session:
-                browser_env = {"DISPLAY": self.vnc_session.display}
-                self._log("info", f"Browser will use display {self.vnc_session.display}", "vnc")
-            
-            self.browser_session = BrowserSession(browser_profile=browser_profile)
-            
-            # IMPORTANT: Start the browser session BEFORE passing to agent
-            logger.info("Starting browser session...")
-            self._log("info", "Starting browser session...", "browser")
-            
-            # If VNC is enabled, set the DISPLAY environment variable before starting
-            if browser_env:
-                original_display = os.environ.get("DISPLAY")
-                os.environ["DISPLAY"] = browser_env["DISPLAY"]
-                try:
-                    await self.browser_session.start()
-                finally:
-                    # Restore original DISPLAY
-                    if original_display:
-                        os.environ["DISPLAY"] = original_display
-                    elif "DISPLAY" in os.environ:
-                        del os.environ["DISPLAY"]
+
+            if self.use_current_browser:
+                # Use current browser via Chrome extension and CDP bridge
+                await self._setup_current_browser(BrowserSession, BrowserProfile)
             else:
-                await self.browser_session.start()
-            
+                # Standard flow: launch a new browser instance
+                await self._setup_new_browser(BrowserSession, BrowserProfile)
+
             logger.info("Browser session started successfully")
             self._log("info", "Browser session started successfully", "browser")
             
@@ -536,7 +595,26 @@ class AgentSession:
             if self.agent and hasattr(self.agent, 'close'):
                 await self.agent.close()
             if self.browser_session:
-                await self.browser_session.kill()
+                if self.use_current_browser:
+                    # Stop gracefully -- keep user's browser alive
+                    await self.browser_session.stop()
+                else:
+                    await self.browser_session.kill()
+            # Stop CDP bridge
+            if self.cdp_bridge:
+                await self.cdp_bridge.stop()
+                self.cdp_bridge = None
+            # Detach debugger via extension
+            if self.use_current_browser:
+                try:
+                    from app.websocket.extension_handler import extension_manager
+                    extension_id = extension_manager.get_any_extension_id()
+                    if extension_id:
+                        await extension_manager.send_command(extension_id, {
+                            "type": "detach_debugger",
+                        })
+                except Exception:
+                    pass
             # Clean up VNC session
             if self.vnc_session:
                 await vnc_service.destroy_session(self.task_id)
@@ -561,6 +639,7 @@ class AgentManager:
         use_vision: bool = True,
         llm_model: str | None = None,
         enable_vnc: bool = True,
+        use_current_browser: bool = False,
         **callbacks,
     ) -> AgentSession:
         """Create a new agent session."""
@@ -573,6 +652,7 @@ class AgentManager:
             use_vision=use_vision,
             llm_model=llm_model,
             enable_vnc=enable_vnc,
+            use_current_browser=use_current_browser,
             **callbacks,
         )
 
@@ -585,6 +665,7 @@ class AgentManager:
         use_vision: bool = True,
         llm_model: str | None = None,
         enable_vnc: bool = True,
+        use_current_browser: bool = False,
         on_step_callback: Callable[[dict[str, Any]], None] | None = None,
         on_output_callback: Callable[[str, bool], None] | None = None,
         on_screenshot_callback: Callable[[str | None, int], None] | None = None,
@@ -597,7 +678,7 @@ class AgentManager:
         async with self._lock:
             if len(self.sessions) >= self.max_concurrent:
                 raise RuntimeError(f"Maximum concurrent sessions ({self.max_concurrent}) reached")
-            
+
             session = AgentSession(
                 task_id=task_id,
                 task=task,
@@ -606,6 +687,7 @@ class AgentManager:
                 use_vision=use_vision,
                 llm_model=llm_model,
                 enable_vnc=enable_vnc,
+                use_current_browser=use_current_browser,
                 on_step_callback=on_step_callback,
                 on_output_callback=on_output_callback,
                 on_screenshot_callback=on_screenshot_callback,

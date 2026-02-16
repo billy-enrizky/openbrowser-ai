@@ -48,4 +48,20 @@ CSC490/A1/a1.pdf
 CSC490/A1/high_level_architecture.pdf
 
 !docker-compose.dev.yml
-!docker-compose.ymldata/formfactory/
+!docker-compose.yml
+data/formfactory/
+
+# Extension build artifacts and secrets
+*.pem
+*.crx
+
+# Runtime data
+openbrowser_agent_data/
+backend/openbrowser_agent_data/
+data/processed/*
+!data/processed/*.jsonl
+results/
+feature-store-ui/
+
+# Drawio diagrams
+*.drawio
