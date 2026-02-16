@@ -1327,10 +1327,23 @@ class BrowserSession(BaseModel):
 				url = url + '/json/version'
 
 			# Run a tiny HTTP client to query for the WebSocket URL from the /json/version endpoint
-			async with httpx.AsyncClient() as client:
+			# Retry up to 30s -- browser may still be starting and not serving CDP yet
+			async with httpx.AsyncClient(timeout=httpx.Timeout(30.0)) as client:
 				headers = self.browser_profile.headers or {}
-				version_info = await client.get(url, headers=headers)
-				self.browser_profile.cdp_url = version_info.json()['webSocketDebuggerUrl']
+				max_wait = 30.0
+				start = asyncio.get_event_loop().time()
+				while True:
+					try:
+						version_info = await client.get(url, headers=headers)
+						self.browser_profile.cdp_url = version_info.json()['webSocketDebuggerUrl']
+						break
+					except (httpx.ReadTimeout, httpx.ConnectError, httpx.RemoteProtocolError):
+						elapsed = asyncio.get_event_loop().time() - start
+						if elapsed >= max_wait:
+							raise TimeoutError(
+								f'Browser CDP endpoint {url} did not respond within {max_wait}s'
+							)
+						await asyncio.sleep(0.3)
 
 		assert self.cdp_url is not None
 
