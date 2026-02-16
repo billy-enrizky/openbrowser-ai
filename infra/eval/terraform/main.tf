@@ -116,8 +116,9 @@ resource "aws_security_group" "eval" {
 
 # Dataset bucket: mind2web/, webarena/, formfactory/, stress-tests/
 resource "aws_s3_bucket" "datasets" {
-  bucket = "${var.project_name}-eval-datasets-${data.aws_caller_identity.current.account_id}"
-  tags   = { Name = "${var.project_name}-eval-datasets" }
+  bucket        = "${var.project_name}-eval-datasets-${data.aws_caller_identity.current.account_id}"
+  force_destroy = true
+  tags          = { Name = "${var.project_name}-eval-datasets" }
 }
 
 resource "aws_s3_bucket_versioning" "datasets" {
