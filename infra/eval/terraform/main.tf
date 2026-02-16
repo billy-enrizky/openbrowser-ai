@@ -156,8 +156,9 @@ resource "aws_s3_bucket_lifecycle_configuration" "datasets" {
 
 # Results bucket: {project}/runs/{ISO_DATE}/{run_id}/
 resource "aws_s3_bucket" "results" {
-  bucket = "${var.project_name}-eval-results-${data.aws_caller_identity.current.account_id}"
-  tags   = { Name = "${var.project_name}-eval-results" }
+  bucket        = "${var.project_name}-eval-results-${data.aws_caller_identity.current.account_id}"
+  force_destroy = true
+  tags          = { Name = "${var.project_name}-eval-results" }
 }
 
 resource "aws_s3_bucket_versioning" "results" {
