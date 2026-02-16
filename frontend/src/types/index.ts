@@ -16,7 +16,8 @@ export type WSMessageType =
   | "task_failed"
   | "task_cancelled"
   | "log"
-  | "vnc_info";  // VNC connection information
+  | "vnc_info"  // VNC connection information
+  | "extension_status";  // Extension connected/disconnected
 
 export interface WSMessage {
   type: WSMessageType;
