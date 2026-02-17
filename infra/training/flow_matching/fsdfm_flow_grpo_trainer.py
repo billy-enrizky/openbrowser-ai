@@ -18,7 +18,7 @@ Architecture:
     1. Generate G rollouts via discrete Euler solver, recording trajectories
     2. Execute rollouts in headless browser against FormFactory
     3. Compute group-relative advantages from browser rewards
-    4. For each rollout, iterate over ALL trajectory steps (denoising reduction):
+    4. For each rollout, sample K random trajectory steps (denoising reduction):
        a. Recompute policy log-prob at that step (with gradients)
        b. REINFORCE loss: -advantage * log_prob (per-step backward)
        c. KL penalty from Schulman k3 approximation (ref model swapped
@@ -35,6 +35,7 @@ import asyncio
 import json
 import logging
 import os
+import random
 from pathlib import Path
 
 import torch
@@ -166,6 +167,7 @@ async def train():
     gen_temperature = grpo_config.get("generation_temperature", 1.0)
     action_timeout = grpo_config.get("action_timeout_s", 5.0)
     grad_clip = grpo_config.get("grad_clip", 1.0)
+    num_sampled_timesteps = grpo_config.get("num_sampled_timesteps", 8)
     dt = 1.0 / num_gen_steps
 
     # ---------------------------------------------------------------
@@ -345,9 +347,17 @@ async def train():
 
                     # Response mask from the trajectory edit_mask (float)
                     response_mask = traj.edit_mask.float()  # [1, L]
-                    num_steps_g = max(len(traj.steps), 1)
 
-                    for step in traj.steps:
+                    # Denoising reduction: sample K random timesteps
+                    # instead of processing all T steps (Flow-GRPO paper)
+                    num_sampled = min(num_sampled_timesteps, len(traj.steps))
+                    sampled_indices = sorted(
+                        random.sample(range(len(traj.steps)), num_sampled)
+                    )
+                    sampled_steps = [traj.steps[idx] for idx in sampled_indices]
+                    num_steps_g = max(len(sampled_steps), 1)
+
+                    for step in sampled_steps:
                         # Current policy log-prob (WITH gradients)
                         log_prob = compute_discrete_step_log_prob(
                             model=policy_model,
