@@ -812,3 +812,291 @@ def generate_with_prefix_conditioning(
 
     # Extract generated response tokens
     return x_final[:, L_prefix:]
+
+
+# ---------------------------------------------------------------------------
+# Flow-GRPO: Trajectory-Recording Solver and Per-Step Log-Probability
+# ---------------------------------------------------------------------------
+# Adapted from Flow-GRPO (Liu et al., 2025) for discrete flow matching.
+# Reference: github.com/yifan123/flow_grpo
+#
+# In continuous Flow-GRPO, each SDE step gives a Gaussian policy whose
+# log-prob is a Gaussian log-density.  In our discrete adaptation, each
+# Euler step of the Poisson jump CTMC gives a categorical distribution
+# per position, whose log-prob we compute exactly.
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class EulerTrajectoryStep:
+    """Recorded data from one discrete Euler step for policy gradient computation.
+
+    Stores only token IDs (lightweight); model logits/probs are recomputed
+    during training to allow gradient flow through the current policy.
+    """
+    t_value: float            # Timestep scalar at the start of this step
+    x_t: torch.Tensor         # [B, L] token IDs before this transition
+    x_next: torch.Tensor      # [B, L] token IDs after this transition
+
+
+@dataclass
+class EulerTrajectory:
+    """Full generation trajectory for Flow-GRPO policy gradient computation."""
+    steps: list[EulerTrajectoryStep]
+    final_tokens: torch.Tensor   # [B, L] final generated tokens
+    edit_mask: torch.Tensor      # [B, L] bool -- True for response (editable) positions
+
+
+@torch.no_grad()
+def discrete_euler_solve_with_trajectory(
+    model: FSDFMTransformer,
+    x_init: torch.Tensor,
+    num_steps: int,
+    scheduler: PolynomialConvexScheduler,
+    vocab_size: int,
+    temperature: float = 1.0,
+    edit_mask: torch.Tensor | None = None,
+) -> EulerTrajectory:
+    """Discrete Euler solver that records the full trajectory for Flow-GRPO.
+
+    Same Poisson jump logic as ``discrete_euler_solve`` but additionally
+    stores (x_t, x_next) at each step so that per-step log-probabilities
+    can be recomputed during training with gradient flow.
+
+    Memory overhead per trajectory: ~2 * T * B * L * 8 bytes (int64 tensors).
+    For T=10, B=1, L=1024 this is ~160 KB -- negligible.
+
+    Args:
+        model: FSDFMTransformer to call for posterior predictions.
+        x_init: [B, L] initial noisy tokens (uniform random for response).
+        num_steps: Number of Euler steps from t=0 to t=1.
+        scheduler: PolynomialConvexScheduler instance.
+        vocab_size: Token vocabulary size.
+        temperature: Sampling temperature (1.0 = standard).
+        edit_mask: [B, L] bool. True = editable (generate), False = frozen.
+
+    Returns:
+        EulerTrajectory with recorded steps and final tokens.
+    """
+    model.eval()
+    device = x_init.device
+    x_t = x_init.clone()
+    B, L = x_t.shape
+    dt = 1.0 / num_steps
+
+    trajectory_steps: list[EulerTrajectoryStep] = []
+
+    for step in range(num_steps):
+        t_val = step * dt
+        t = torch.full((B,), t_val, device=device, dtype=torch.float32)
+
+        x_before = x_t.clone()
+
+        # Model posterior p_{1|t}
+        logits = model(x_t, t)  # [B, L, V]
+        if temperature != 1.0 and temperature > 0:
+            logits = logits / temperature
+        probs = F.softmax(logits, dim=-1)
+
+        # Jump rates
+        sched = scheduler(t)
+        alpha_t_val = sched["alpha_t"]
+        d_alpha_t_val = sched["d_alpha_t"]
+        rate_scale = d_alpha_t_val / (1.0 - alpha_t_val).clamp(min=1e-6)
+        rate_scale = rate_scale.unsqueeze(-1).unsqueeze(-1)  # [B, 1, 1]
+
+        p_current = probs.gather(2, x_t.unsqueeze(-1)).squeeze(-1)  # [B, L]
+        total_rate = rate_scale.squeeze(-1) * (1.0 - p_current)  # [B, L]
+
+        # Poisson jump probability
+        jump_prob = 1.0 - torch.exp(-total_rate * dt)
+        jumps = torch.rand_like(jump_prob) < jump_prob
+
+        # Apply edit mask
+        if edit_mask is not None:
+            jumps = jumps & edit_mask
+
+        # Sample new tokens from off-diagonal posterior
+        current_one_hot = F.one_hot(x_t, vocab_size).float()
+        off_diag_probs = (probs - current_one_hot * probs).clamp(min=0)
+        off_diag_probs = off_diag_probs / off_diag_probs.sum(dim=-1, keepdim=True).clamp(min=1e-10)
+
+        new_tokens = torch.multinomial(
+            off_diag_probs.view(-1, vocab_size), num_samples=1
+        ).view(B, L)
+
+        x_t = torch.where(jumps, new_tokens, x_t)
+
+        trajectory_steps.append(EulerTrajectoryStep(
+            t_value=t_val,
+            x_t=x_before,
+            x_next=x_t.clone(),
+        ))
+
+    # Final step: collapse to most likely token
+    t_final = torch.ones(B, device=device, dtype=torch.float32)
+    final_logits = model(x_t, t_final)
+    if temperature != 1.0 and temperature > 0:
+        final_logits = final_logits / temperature
+    final_tokens = final_logits.argmax(dim=-1)
+
+    if edit_mask is not None:
+        final_tokens = torch.where(edit_mask, final_tokens, x_t)
+
+    # Record the final collapse as the last step
+    trajectory_steps.append(EulerTrajectoryStep(
+        t_value=1.0 - dt,  # Last regular step time
+        x_t=x_t.clone(),
+        x_next=final_tokens.clone(),
+    ))
+
+    if edit_mask is None:
+        edit_mask = torch.ones(B, L, dtype=torch.bool, device=device)
+
+    return EulerTrajectory(
+        steps=trajectory_steps,
+        final_tokens=final_tokens,
+        edit_mask=edit_mask,
+    )
+
+
+def compute_discrete_step_log_prob(
+    model: FSDFMTransformer,
+    x_t: torch.Tensor,
+    x_next: torch.Tensor,
+    t_scalar: float,
+    dt: float,
+    scheduler: PolynomialConvexScheduler,
+    vocab_size: int,
+    response_mask: torch.Tensor,
+) -> torch.Tensor:
+    """Compute log P(x_next | x_t) under the discrete Poisson jump process.
+
+    This is the discrete analog of ``sde_step_with_logprob`` from
+    continuous Flow-GRPO: it computes the log-probability of an observed
+    transition under the model's posterior, enabling REINFORCE / PPO
+    policy gradients aligned with the actual generation process.
+
+    Per-position transition distribution (for response tokens):
+        P(stay at x_t[i]) = exp(-lambda_i * dt)
+        P(jump to j != x_t[i]) = (1 - exp(-lambda_i * dt)) * p(j) / (1 - p(x_t[i]))
+    where lambda_i = rate_scale * (1 - p(x_t[i])).
+
+    Args:
+        model: FSDFMTransformer (current policy or reference).
+        x_t: [B, L] token IDs before transition.
+        x_next: [B, L] token IDs after transition.
+        t_scalar: Timestep value (float in [0, 1]).
+        dt: Step size (1 / num_steps).
+        scheduler: PolynomialConvexScheduler.
+        vocab_size: Token vocabulary size.
+        response_mask: [B, L] float, 1 for response tokens, 0 for prefix/padding.
+
+    Returns:
+        log_prob: [B] mean-normalized per-step log-probability (summed over
+            response positions, divided by number of response tokens).
+    """
+    B, L = x_t.shape
+    device = x_t.device
+
+    t = torch.full((B,), t_scalar, device=device, dtype=torch.float32)
+
+    # Forward pass (gradients flow if model is in train mode)
+    logits = model(x_t, t)  # [B, L, V]
+    probs = F.softmax(logits, dim=-1)  # [B, L, V]
+
+    # Jump rates
+    sched = scheduler(t)
+    alpha_t = sched["alpha_t"]
+    d_alpha_t = sched["d_alpha_t"]
+    rate_scale = d_alpha_t / (1.0 - alpha_t).clamp(min=1e-6)  # [B]
+
+    # Per-position probability of current token
+    p_current = probs.gather(2, x_t.unsqueeze(-1)).squeeze(-1)  # [B, L]
+
+    # Per-position rate: lambda_i = rate_scale * (1 - p_current)
+    lambda_i = rate_scale.unsqueeze(-1) * (1.0 - p_current)  # [B, L]
+
+    # Which positions stayed vs jumped
+    stayed = (x_next == x_t)  # [B, L] bool
+
+    # -- Log-prob for positions that stayed --
+    # log P(stay) = -lambda_i * dt
+    log_prob_stay = -lambda_i * dt  # [B, L]
+
+    # -- Log-prob for positions that jumped --
+    # log P(jump to j) = log(1 - exp(-lambda_i * dt)) + log p(j) - log(1 - p(x_t[i]))
+    # Use log1p for numerical stability: log(1 - exp(-x)) = log1p(-exp(-x))
+    neg_exp_term = torch.exp(-lambda_i * dt)
+    log_jump_base = torch.log1p(-neg_exp_term.clamp(max=1.0 - 1e-8))  # [B, L]
+
+    # log p(j) for the actual jumped-to token
+    p_jumped_to = probs.gather(2, x_next.unsqueeze(-1)).squeeze(-1)  # [B, L]
+    log_p_jumped = torch.log(p_jumped_to.clamp(min=1e-10))  # [B, L]
+
+    # log(1 - p(x_t[i]))
+    log_one_minus_p_current = torch.log((1.0 - p_current).clamp(min=1e-8))  # [B, L]
+
+    log_prob_jump = log_jump_base + log_p_jumped - log_one_minus_p_current  # [B, L]
+
+    # Combine: use stay log-prob where stayed, jump log-prob where jumped
+    log_prob_per_pos = torch.where(stayed, log_prob_stay, log_prob_jump)  # [B, L]
+
+    # Mask to response tokens and mean-normalize
+    log_prob_per_pos = log_prob_per_pos * response_mask
+    num_response = response_mask.sum(dim=-1).clamp(min=1)  # [B]
+    log_prob = log_prob_per_pos.sum(dim=-1) / num_response  # [B]
+
+    return log_prob
+
+
+def generate_with_prefix_conditioning_trajectory(
+    model: FSDFMTransformer,
+    prefix_ids: torch.Tensor,
+    gen_length: int,
+    config: dict,
+    scheduler: PolynomialConvexScheduler,
+    temperature: float = 1.0,
+) -> EulerTrajectory:
+    """Generate response tokens with prefix conditioning, recording trajectory.
+
+    Combines prefix conditioning (instruction fixed, response denoised) with
+    trajectory recording for Flow-GRPO policy gradient computation.
+
+    Args:
+        model: FSDFMTransformer model.
+        prefix_ids: [B, L_prefix] instruction token IDs.
+        gen_length: Number of response tokens to generate.
+        config: Model config dict (must include vocab_size, num_generation_steps).
+        scheduler: PolynomialConvexScheduler instance.
+        temperature: Sampling temperature.
+
+    Returns:
+        EulerTrajectory with steps, final_tokens, and edit_mask.
+        final_tokens are [B, L_prefix + gen_length] (full sequence).
+        edit_mask is [B, L_prefix + gen_length] (True for response positions).
+    """
+    B = prefix_ids.shape[0]
+    L_prefix = prefix_ids.shape[1]
+    vocab_size = config["vocab_size"]
+    device = prefix_ids.device
+
+    # Initialize: prefix (fixed) + noise (uniform random for response)
+    noise = torch.randint(0, vocab_size, (B, gen_length), device=device)
+    x_init = torch.cat([prefix_ids, noise], dim=1)
+
+    # Edit mask: False for prefix, True for response
+    edit_mask = torch.zeros(B, L_prefix + gen_length, dtype=torch.bool, device=device)
+    edit_mask[:, L_prefix:] = True
+
+    num_steps = config.get("num_generation_steps", config.get("num_sampling_steps", 64))
+
+    return discrete_euler_solve_with_trajectory(
+        model=model,
+        x_init=x_init,
+        num_steps=num_steps,
+        scheduler=scheduler,
+        vocab_size=vocab_size,
+        temperature=temperature,
+        edit_mask=edit_mask,
+    )
