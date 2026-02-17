@@ -6,6 +6,7 @@ from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
 
+from app.core.auth import AuthConfigError, AuthTokenError, authenticate_websocket
 from app.models.schemas import (
     AgentType,
     FileAttachment,
@@ -117,6 +118,16 @@ connection_manager = ConnectionManager()
 
 async def handle_websocket(websocket: WebSocket, client_id: str):
     """Handle WebSocket connection for a client."""
+    try:
+        await authenticate_websocket(websocket)
+    except AuthConfigError as e:
+        logger.error("WebSocket auth misconfigured: %s", e)
+        await websocket.close(code=1011, reason="Authentication misconfigured")
+        return
+    except AuthTokenError as e:
+        await websocket.close(code=4401, reason=str(e))
+        return
+
     await connection_manager.connect(websocket, client_id)
     
     try:
@@ -433,4 +444,3 @@ async def handle_request_vnc(client_id: str, message: WSMessage):
                     data={"error": "No VNC session available for this task"},
                 ),
             )
-
