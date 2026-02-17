@@ -351,6 +351,7 @@ def compute_unmasking_step_log_prob(
     model,
     step: UnmaskingTrajectoryStep,
     condition_length: int,
+    temperature: float = 1.0,
 ) -> torch.Tensor:
     """Compute log-probability for one unmasking step (with gradient flow).
 
@@ -377,6 +378,9 @@ def compute_unmasking_step_log_prob(
     # Response logits only -- delete full outputs to free memory
     response_logits = outputs.logits[:, condition_length:, :]  # [B, L_r, V]
     del outputs
+    # Apply same temperature as generation to match the sampling distribution
+    if temperature != 1.0 and temperature > 0:
+        response_logits = response_logits / temperature
     log_probs = F.log_softmax(response_logits, dim=-1)  # [B, L_r, V]
     del response_logits  # Free [B, L_r, V] logits
 
