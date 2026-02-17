@@ -1,6 +1,6 @@
-# OpenBrowser-AI Production Infrastructure
+# OpenBrowser-AI Production Infrastructure (Terraform)
 
-Terraform configuration to deploy the OpenBrowser-AI application to AWS EC2 with API Gateway integration.
+This directory defines AWS infrastructure for OpenBrowser-AI: VPC, single EC2 backend (Docker), internal ALB, API Gateway (HTTP API + VPC Link), Cognito, DynamoDB, ECR, Secrets Manager, and S3 + CloudFront for the frontend.
 
 ## Architecture
 
@@ -8,200 +8,159 @@ Terraform configuration to deploy the OpenBrowser-AI application to AWS EC2 with
 Internet
    │
    ▼
-API Gateway (HTTP API)
+API Gateway (HTTP API, optional JWT)
+   │  VPC Link
+   ▼
+Internal ALB (:80)
    │
    ▼
-Application Load Balancer
+EC2 (private subnet) — Docker backend :8000
    │
-   ▼
-EC2 Auto Scaling Group
-   │
-   ▼
-Docker Compose (Backend + Frontend)
+   ├── DynamoDB (sessions)
+   ├── Secrets Manager (LLM keys)
+   └── ECR (pull image)
 ```
 
-## Features
+- **Frontend**: Static Next.js export on S3, served via CloudFront.
+- **Backend**: One EC2 instance in a private subnet; user_data pulls the image from ECR and runs the container with env from Secrets Manager and DynamoDB table name.
 
-- **API Gateway v2 (HTTP API)**: Exposes the application via API Gateway
-- **Application Load Balancer**: Routes traffic to EC2 instances
-- **Auto Scaling Group**: Automatically scales instances based on demand
-- **Docker Compose**: Runs backend and frontend in containers
-- **VPC with Public/Private Subnets**: Secure network configuration
-- **SSM Parameter Store**: Secure storage for API keys
-- **Health Checks**: ALB health checks for backend and frontend
-- **WebSocket Support**: API Gateway supports WebSocket connections
+## File layout
+
+| File | Purpose |
+|------|--------|
+| `versions.tf` | Terraform/provider requirements, AWS provider, data sources |
+| `vpc.tf` | VPC, public/private subnets, NAT, route tables |
+| `security_groups.tf` | ALB and backend EC2 security groups |
+| `alb.tf` | Internal ALB, target group, HTTP listener |
+| `backend.tf` | EC2 instance, user_data, target group attachment |
+| `api_gateway.tf` | HTTP API, VPC Link, routes, optional JWT authorizer |
+| `iam.tf` | Backend EC2 IAM role, ECR/DynamoDB/Secrets/SSM permissions |
+| `ecr.tf` | ECR repository and lifecycle policy for backend image |
+| `dynamodb.tf` | Sessions table + VPC endpoint |
+| `secrets.tf` | Optional Secrets Manager secret for LLM keys |
+| `cognito.tf` | User pool, app client, hosted domain |
+| `frontend.tf` | S3 bucket, CloudFront distribution, OAC |
+| `main.tf` | SSM parameters for API keys (Google, OpenAI, Anthropic) |
+| `outputs.tf` | URLs and IDs (API, frontend, Cognito, ECR, etc.) |
+| `variables.tf` | Input variables |
+| `AUTHENTICATION.md` | API Gateway + Cognito JWT setup and frontend integration |
+| `COGNITO_SETUP.md` | When callback URLs are needed for Cognito |
 
 ## Prerequisites
 
-1. AWS CLI configured with appropriate credentials
-2. Terraform >= 1.5.0
-3. SSH key pair in AWS (optional, for direct access)
-4. API keys for LLM providers (Google, OpenAI, Anthropic)
+- [Terraform](https://www.terraform.io/downloads) >= 1.5
+- AWS CLI configured (e.g. `aws configure`), with credentials for the target account/region
+- Docker (for building and pushing the backend image to ECR)
 
-## Quick Start
+## Quick start
 
-1. **Copy and configure variables:**
+1. **Copy and edit variables**
+
+   ```bash
+   cd infra/production/terraform
+   cp terraform.tfvars.example terraform.tfvars
+   # Edit terraform.tfvars (aws_region, project_name, backend_image = "" to use ECR).
+   ```
+
+2. **Create ECR and push backend image (recommended order)**
+
+   ```bash
+   terraform init
+   terraform apply -target=aws_ecr_repository.backend
+   REPO=$(terraform output -raw backend_ecr_repository_url)
+   REGION=ca-central-1   # or your aws_region
+   aws ecr get-login-password --region $REGION | docker login --username AWS --password-stdin ${REPO%%/*}
+   # From repo root:
+   docker build -t openbrowser-backend -f backend/Dockerfile .
+   docker tag openbrowser-backend:latest $REPO:latest
+   docker push $REPO:latest
+   ```
+
+3. **Apply full infrastructure**
+
+   ```bash
+   terraform plan
+   terraform apply
+   ```
+
+4. **Set LLM API keys (Secrets Manager or SSM)**
+
+   - If using the Terraform-created secret: put keys in Secrets Manager secret (see `backend_secret_name` output).
+   - SSM parameters are in `main.tf`; set values via AWS Console or CLI (see outputs `ssm_*_api_key_name`).
+
+5. **Verify**
+
+   ```bash
+   curl -i "$(terraform output -raw api_base_url)health"
+   ```
+
+## What’s included
+
+| Component | Purpose |
+|-----------|--------|
+| **VPC** | Public/private subnets (2 AZs), NAT, DynamoDB VPC endpoint |
+| **EC2 backend** | Single instance in private subnet; Docker runs backend image from ECR |
+| **ALB** | Internal ALB, health check `/health`, forwards to backend:8000 |
+| **API Gateway** | HTTP API with VPC Link to ALB; public `GET /health`, optional JWT on other routes |
+| **Cognito** | User pool, app client, hosted domain (see `AUTHENTICATION.md` / `COGNITO_SETUP.md`) |
+| **DynamoDB** | Table `{project_name}-sessions` (pk/sk); `DDB_TABLE` passed to container |
+| **ECR** | Backend image repo; EC2 pulls from here when `backend_image` is empty |
+| **Secrets Manager** | Optional secret for LLM keys; EC2 injects into container env |
+| **S3 + CloudFront** | Static frontend; CloudFront OAC, SPA 403/404 → index.html |
+
+## Variables
+
+See `variables.tf`. Key ones:
+
+- **backend_image** — Leave `""` to use the ECR repo Terraform creates; set to a full URI to use another registry.
+- **backend_image_tag** — Tag to pull from the Terraform ECR repo (default `latest`).
+- **backend_port** — Port the backend listens on (default `8000`).
+- **enable_api_auth** — Set `true` to require Cognito JWT on API routes (except `/health`).
+- **secrets_manager_secret_name** — Leave empty to create a placeholder secret, or set existing secret name/ARN.
+- **frontend_domain_name** / **frontend_acm_certificate_arn** — Optional custom domain (ACM in us-east-1 for CloudFront).
+
+## Backend image (ECR-first workflow)
+
+1. Create only the ECR repo:  
+   `terraform apply -target=aws_ecr_repository.backend`
+2. Log in to ECR, build from **repo root**, tag and push (see Quick start above).
+3. Keep `backend_image = ""` and `backend_image_tag = "latest"` (or your tag) in `terraform.tfvars`.
+4. Run full `terraform apply`; EC2 user_data will pull `backend_ecr_repository_url:backend_image_tag` on boot.
+
+To use a different registry, set `backend_image` to the full image URI in `terraform.tfvars`.
+
+## Auth (Cognito + API Gateway)
+
+- **AUTHENTICATION.md** — Enabling JWT on API Gateway, frontend Amplify usage, WebSocket auth, creating users.
+- **COGNITO_SETUP.md** — When callback URLs are needed (Hosted UI / OAuth) vs direct API auth.
+
+Set `enable_api_auth = true` in `terraform.tfvars` when the app is ready to enforce JWT.
+
+## Frontend deploy
+
+From project root, after `terraform apply`:
 
 ```bash
-cd infra/production/terraform
-cp terraform.tfvars.example terraform.tfvars
-# Edit terraform.tfvars with your values
+export NEXT_PUBLIC_API_URL=$(terraform -chdir=infra/production/terraform output -raw api_base_url)
+export NEXT_PUBLIC_WS_URL=$(terraform -chdir=infra/production/terraform output -raw api_ws_url)
+cd frontend && npm ci && npm run build
+aws s3 sync out/ s3://$(terraform -chdir=infra/production/terraform output -raw frontend_s3_bucket)/ --delete
+aws cloudfront create-invalidation --distribution-id $(terraform -chdir=infra/production/terraform output -raw cloudfront_distribution_id) --paths "/*"
 ```
 
-2. **Initialize Terraform:**
+## Outputs
 
-```bash
-terraform init
-```
-
-3. **Review the plan:**
-
-```bash
-terraform plan
-```
-
-4. **Apply the infrastructure:**
-
-```bash
-terraform apply
-```
-
-5. **Set API keys in SSM Parameter Store:**
-
-```bash
-# Get the parameter names from outputs
-terraform output
-
-# Set API keys
-aws ssm put-parameter \
-  --name "/openbrowser/GOOGLE_API_KEY" \
-  --value "your-key-here" \
-  --type SecureString \
-  --overwrite \
-  --region ca-central-1
-
-aws ssm put-parameter \
-  --name "/openbrowser/OPENAI_API_KEY" \
-  --value "your-key-here" \
-  --type SecureString \
-  --overwrite \
-  --region ca-central-1
-```
-
-6. **Get the API Gateway URL:**
-
-```bash
-terraform output api_gateway_url
-```
-
-## Configuration
-
-### Variables
-
-Key variables in `terraform.tfvars`:
-
-- `project_name`: Resource naming prefix
-- `aws_region`: AWS region to deploy to
-- `instance_type`: EC2 instance type (minimum t3.medium recommended)
-- `min_instances` / `max_instances` / `desired_instances`: Auto scaling configuration
-- `github_repo_url` / `github_branch`: Repository to clone
-- `enable_vnc`: Enable VNC for live browser viewing
-- `cors_origins`: Allowed CORS origins
-
-### API Gateway Endpoints
-
-After deployment, your API will be available at:
-
-- **API Gateway URL**: `https://<api-id>.execute-api.<region>.amazonaws.com`
-- **Backend API**: `https://<api-id>.execute-api.<region>.amazonaws.com/api/v1/*`
-- **WebSocket**: `wss://<api-id>.execute-api.<region>.amazonaws.com/ws`
-
-### Frontend Configuration
-
-Update your frontend to use the API Gateway URL:
-
-```env
-NEXT_PUBLIC_API_URL=https://<api-id>.execute-api.<region>.amazonaws.com
-NEXT_PUBLIC_WS_URL=wss://<api-id>.execute-api.<region>.amazonaws.com/ws
-```
-
-## Deployment Flow
-
-1. Terraform creates:
-   - VPC with subnets
-   - Security groups
-   - Application Load Balancer
-   - Auto Scaling Group
-   - API Gateway with VPC Link
-   - IAM roles and policies
-
-2. EC2 instances boot and run `user_data.sh`:
-   - Install Docker and Docker Compose
-   - Clone the repository
-   - Retrieve API keys from SSM
-   - Build and start Docker containers
-   - Register with ALB target groups
-
-3. API Gateway routes requests:
-   - HTTP requests → ALB → EC2 instances
-   - WebSocket connections → ALB → EC2 instances
-
-## Monitoring
-
-- **CloudWatch Logs**: API Gateway logs at `/aws/apigateway/openbrowser`
-- **ALB Access Logs**: Enable in ALB settings
-- **EC2 Logs**: SSH to instance and check `/var/log/user-data.log`
-
-## Scaling
-
-The Auto Scaling Group will automatically:
-- Scale up when CPU/memory usage is high
-- Scale down during low traffic
-- Replace unhealthy instances
-
-Adjust `min_instances`, `max_instances` in `terraform.tfvars`.
-
-## Security
-
-- API keys stored in SSM Parameter Store (encrypted)
-- Security groups restrict access
-- VPC isolation
-- HTTPS via API Gateway (add certificate for custom domain)
-
-## Custom Domain
-
-To use a custom domain:
-
-1. Create an ACM certificate
-2. Add a custom domain to API Gateway
-3. Update DNS records
+- `api_base_url` / `api_ws_url` — Use for `NEXT_PUBLIC_API_URL` and `NEXT_PUBLIC_WS_URL`.
+- `frontend_url`, `frontend_s3_bucket`, `cloudfront_distribution_id` — Frontend hosting.
+- `backend_ecr_repository_url`, `backend_image_uri` — Where to push the image and what EC2 pulls.
+- `cognito_user_pool_id`, `cognito_app_client_id`, `cognito_domain` — Auth integration.
+- `dynamodb_table_name`, `backend_secret_name` — Backend config.
 
 ## Troubleshooting
 
-### Services not starting
-
-```bash
-# SSH to instance
-ssh ubuntu@<instance-ip>
-
-# Check Docker logs
-docker compose -f docker-compose.prod.yml logs
-
-# Check user-data log
-tail -f /var/log/user-data.log
-```
-
-### API Gateway not connecting
-
-- Verify VPC Link is active
-- Check security group rules allow ALB → EC2
-- Verify ALB target groups have healthy targets
-
-### Health checks failing
-
-- Check backend is responding: `curl http://localhost:8000/health`
-- Check frontend is responding: `curl http://localhost:3000`
-- Review ALB target group health in AWS Console
+- **Health check fails** — Ensure backend serves `GET /health` with 200; check ALB target group health in the console.
+- **API Gateway 403/502** — Verify VPC Link status, security groups (ALB → backend port), and that the backend is healthy.
+- **EC2 not pulling image** — Confirm image exists in ECR (`aws ecr describe-images --repository-name openbrowser-backend --region ca-central-1`) and IAM role has ECR read.
 
 ## Cleanup
 
@@ -209,149 +168,4 @@ tail -f /var/log/user-data.log
 terraform destroy
 ```
 
-This will remove all created resources.
-
-## Cost Optimization
-
-- Use Spot instances for development (modify launch template)
-- Set `desired_instances = 0` when not in use
-- Use smaller instance types for development
-- Enable ALB access logs only when needed
-# OpenBrowser AWS Infrastructure (Terraform)
-
-This directory defines AWS infrastructure for OpenBrowser: VPC, backend (EC2 + Docker), API Gateway, Cognito, DynamoDB, S3 + CloudFront for the frontend, and optional Secrets Manager.
-
-## Prerequisites
-
-- [Terraform](https://www.terraform.io/downloads) >= 1.5
-- AWS CLI configured (e.g. `aws configure`) or environment variables
-- Backend Docker image built and pushed to ECR or Docker Hub
-
-## Quick start
-
-1. **Copy and edit variables**
-
-   ```bash
-   cp terraform.tfvars.example terraform.tfvars
-   # backend_image can be left empty to use the ECR repo Terraform creates (see "Backend image" below).
-   ```
-
-2. **Initialize and plan**
-
-   ```bash
-   cd terraform
-   terraform init
-   terraform plan
-   ```
-
-3. **Apply**
-
-   ```bash
-   terraform apply
-   ```
-
-4. **Deploy the frontend**
-
-   Build the Next.js static export and upload to S3:
-
-   ```bash
-   cd ../frontend
-   npm ci
-   npm run build
-   aws s3 sync out/ s3://$(terraform -chdir=../terraform output -raw frontend_s3_bucket)/ --delete
-   ```
-
-   Then invalidate CloudFront cache so changes are visible immediately (optional):
-
-   ```bash
-   aws cloudfront create-invalidation --distribution-id $(terraform -chdir=../terraform output -raw cloudfront_distribution_id) --paths "/*"
-   ```
-
-5. **Configure the frontend for production**
-
-   When building the frontend for this environment, set:
-   - `NEXT_PUBLIC_API_URL` = Terraform output `api_base_url`
-   - `NEXT_PUBLIC_WS_URL` = Terraform output `api_ws_url`
-
-   Example:
-
-   ```bash
-   export NEXT_PUBLIC_API_URL=$(terraform -chdir=../terraform output -raw api_base_url)
-   export NEXT_PUBLIC_WS_URL=$(terraform -chdir=../terraform output -raw api_ws_url)
-   npm run build
-   aws s3 sync out/ s3://$(terraform -chdir=../terraform output -raw frontend_s3_bucket)/ --delete
-   ```
-
-## What’s included
-
-| Component           | Purpose                                                                                                                                          |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **VPC**             | Public/private subnets (2 AZs), NAT gateway, DynamoDB VPC endpoint                                                                               |
-| **DynamoDB**        | Table `{project_name}-sessions` (pk/sk) for future user session/chats                                                                            |
-| **EC2 backend**     | Single instance in private subnet; user_data installs Docker and runs your backend image with 2GB shm, DynamoDB and optional Secrets Manager env |
-| **ALB**             | Internal ALB with HTTP health check to `/health`, forwards to backend:8000                                                                       |
-| **API Gateway**     | HTTP API with VPC Link to ALB; public `GET /health`, optional JWT (Cognito) on other routes                                                      |
-| **Cognito**         | User pool, app client, hosted domain (for when you add auth)                                                                                     |
-| **Secrets Manager** | Optional placeholder secret for LLM API keys; EC2 fetches at boot and passes to container                                                        |
-| **ECR**             | Container registry for the backend image; EC2 pulls from here (or from `backend_image` if set)                                                   |
-| **S3 + CloudFront** | S3 bucket for static frontend; CloudFront with OAC, SPA error pages (403/404 → index.html)                                                       |
-
-## Variables
-
-See `variables.tf`. Key ones:
-
-- **backend_image**: Container image URI (ECR or Docker Hub). If empty, Terraform’s ECR repo is used; push your image there and set **backend_image_tag** (default `latest`) if needed.
-- **backend_port**: Port the container listens on (default `8000`).
-- **secrets_manager_secret_name**: Leave empty to create a placeholder secret; set to an existing secret name/ARN to use it.
-- **enable_api_auth**: Set to `true` when you want JWT (Cognito) required on API routes (default `false`).
-- **frontend_domain_name** / **frontend_acm_certificate_arn**: Optional custom domain and ACM cert (cert must be in `us-east-1` for CloudFront).
-
-## Auth (future)
-
-- Cognito user pool and app client are created. Set `enable_api_auth = true` when your app uses Cognito and you want API Gateway to enforce JWT.
-- Frontend can use the Cognito outputs (`cognito_user_pool_id`, `cognito_app_client_id`, `cognito_domain`) to implement sign-in/sign-up.
-
-## DynamoDB
-
-Table name is output as `dynamodb_table_name`. Use it in your backend (e.g. `DDB_TABLE` is already passed to the container). Design `pk`/`sk` for user sessions and chats when you add that logic.
-
-## Backend image (container registry + EC2)
-
-Terraform **creates an ECR repository** for the backend image. The EC2 instance has IAM permission to pull from ECR. On boot, user_data runs `docker pull <image>` and `docker run` with that image.
-
-**Option A – Use the Terraform-created ECR repo (recommended)**
-
-1. Apply Terraform (leave `backend_image` empty in `terraform.tfvars`).
-2. Get the repo URL: `terraform output backend_ecr_repository_url`.
-3. Build, tag, and push your image:
-
-   ```bash
-   REPO=$(terraform -chdir=terraform output -raw backend_ecr_repository_url)
-   REGION=ca-central-1   # or your aws_region from terraform.tfvars
-   aws ecr get-login-password --region $REGION | docker login --username AWS --password-stdin ${REPO%%/*}
-   docker build -t openbrowser-backend -f backend/Dockerfile .
-   docker tag openbrowser-backend:latest $REPO:latest
-   docker push $REPO:latest
-   ```
-
-4. EC2 will pull `$REPO:latest` on next boot (or restart the instance / re-run user_data if the instance was already up).
-
-**Option B – Use your own registry**
-
-- Set `backend_image` in `terraform.tfvars` to the full image URI (e.g. Docker Hub `youruser/openbrowser-backend:latest` or another ECR repo). EC2 will pull from that URI; no ECR repo is required for the image source, but the Terraform-created ECR repo is still created for consistency.
-
-## CloudFront distribution ID (for invalidations)
-
-Add to `outputs.tf` if you want it:
-
-```hcl
-output "cloudfront_distribution_id" {
-  value = aws_cloudfront_distribution.frontend.id
-}
-```
-
-Then:
-
-```bash
-aws cloudfront create-invalidation --distribution-id $(terraform -chdir=../terraform output -raw cloudfront_distribution_id) --paths "/*"
-```
+Removes all resources created by this configuration.
