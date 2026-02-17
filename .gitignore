@@ -49,3 +49,4 @@ CSC490/A1/high_level_architecture.pdf
 
 !docker-compose.dev.yml
 !docker-compose.ymldata/formfactory/
+backend/openbrowser_agent_data/

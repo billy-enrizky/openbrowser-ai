@@ -79,10 +79,30 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: str | None = Field(default=None, description="Gemini API key (alias for GOOGLE_API_KEY)")
     OPENAI_API_KEY: str | None = Field(default=None, description="OpenAI API key")
     ANTHROPIC_API_KEY: str | None = Field(default=None, description="Anthropic API key")
+
+    # Authentication settings
+    AUTH_ENABLED: bool = Field(default=False, description="Enable Cognito authentication")
+    COGNITO_REGION: str | None = Field(default=None, description="AWS region of the Cognito User Pool")
+    COGNITO_USER_POOL_ID: str | None = Field(default=None, description="Cognito User Pool ID")
+    COGNITO_APP_CLIENT_ID: str | None = Field(default=None, description="Cognito App Client ID")
+    COGNITO_ISSUER: str | None = Field(
+        default=None,
+        description="Optional Cognito issuer override. If not set, built from region + user pool id.",
+    )
     
     def get_google_api_key(self) -> str | None:
         """Get Google/Gemini API key (supports both GOOGLE_API_KEY and GEMINI_API_KEY)."""
         return self.GOOGLE_API_KEY or self.GEMINI_API_KEY
+
+    def get_cognito_issuer(self) -> str | None:
+        """Get Cognito issuer URL for JWT verification."""
+        if self.COGNITO_ISSUER:
+            return self.COGNITO_ISSUER.rstrip("/")
+
+        if self.COGNITO_REGION and self.COGNITO_USER_POOL_ID:
+            return f"https://cognito-idp.{self.COGNITO_REGION}.amazonaws.com/{self.COGNITO_USER_POOL_ID}"
+
+        return None
     
     def get_available_providers(self) -> list[str]:
         """Get list of available LLM providers based on configured API keys."""
@@ -145,4 +165,3 @@ def get_settings() -> Settings:
 
 
 settings = get_settings()
-
