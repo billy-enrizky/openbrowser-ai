@@ -1,10 +1,10 @@
 """MCP Server for openbrowser - exposes browser automation capabilities via Model Context Protocol.
 
 This server provides tools for:
-- Running autonomous browser tasks with an AI agent
 - Direct browser control (navigation, clicking, typing, etc.)
 - Content extraction from web pages
-- File system operations
+- DOM inspection and accessibility tree analysis
+- Tab and session management
 
 Usage:
     uvx openbrowser --mcp
@@ -14,10 +14,7 @@ Or as an MCP server in Claude Desktop or other MCP clients:
         "mcpServers": {
             "openbrowser": {
                 "command": "uvx",
-                "args": ["openbrowser-ai[cli]", "--mcp"],
-                "env": {
-                    "OPENAI_API_KEY": "sk-proj-1234567890",
-                }
+                "args": ["openbrowser-ai[mcp]", "--mcp"]
             }
         }
     }
@@ -212,7 +209,6 @@ class OpenBrowserServer:
 		async def handle_list_tools() -> list[types.Tool]:
 			"""List all available openbrowser tools."""
 			return [
-				# Agent tools
 				# Direct browser control tools
 				types.Tool(
 					name='browser_navigate',
