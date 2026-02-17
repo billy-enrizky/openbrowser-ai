@@ -1,10 +1,10 @@
 """MCP Server for openbrowser - exposes browser automation capabilities via Model Context Protocol.
 
 This server provides tools for:
-- Running autonomous browser tasks with an AI agent
 - Direct browser control (navigation, clicking, typing, etc.)
 - Content extraction from web pages
-- File system operations
+- DOM inspection and accessibility tree analysis
+- Tab and session management
 
 Usage:
     uvx openbrowser --mcp
@@ -14,10 +14,7 @@ Or as an MCP server in Claude Desktop or other MCP clients:
         "mcpServers": {
             "openbrowser": {
                 "command": "uvx",
-                "args": ["openbrowser-ai[cli]", "--mcp"],
-                "env": {
-                    "OPENAI_API_KEY": "sk-proj-1234567890",
-                }
+                "args": ["openbrowser-ai[mcp]", "--mcp"]
             }
         }
     }
@@ -26,7 +23,6 @@ Or as an MCP server in Claude Desktop or other MCP clients:
 import os
 import sys
 
-from openbrowser.llm import ChatAWSBedrock
 
 # Set environment variables BEFORE any openbrowser imports to prevent early logging
 os.environ['OPENBROWSER_LOGGING_LEVEL'] = 'critical'
@@ -35,6 +31,7 @@ os.environ['OPENBROWSER_SETUP_LOGGING'] = 'false'
 import asyncio
 import json
 import logging
+import re
 import time
 from pathlib import Path
 from typing import Any
@@ -90,13 +87,11 @@ _configure_mcp_server_logging()
 logging.disable(logging.CRITICAL)
 
 # Import openbrowser modules
-from openbrowser import ActionModel, Agent
 from openbrowser.browser import BrowserProfile, BrowserSession
-from openbrowser.config import get_default_llm, get_default_profile, load_openbrowser_config
-from openbrowser.filesystem.file_system import FileSystem
-from openbrowser.llm.google.chat import ChatGoogle
-from openbrowser.llm.openai.chat import ChatOpenAI
-from openbrowser.tools.service import Tools
+from openbrowser.browser.events import ScrollToTextEvent
+from openbrowser.config import get_default_profile, load_openbrowser_config
+from openbrowser.dom.markdown_extractor import extract_clean_markdown
+from openbrowser.dom.service import DomService
 
 logger = logging.getLogger(__name__)
 
@@ -135,6 +130,7 @@ try:
 	import mcp.server.stdio
 	import mcp.types as types
 	from mcp.server import NotificationOptions, Server
+	from mcp.server.lowlevel.helper_types import ReadResourceContents
 	from mcp.server.models import InitializationOptions
 
 	MCP_AVAILABLE = True
@@ -194,11 +190,7 @@ class OpenBrowserServer:
 
 		self.server = Server('openbrowser')
 		self.config = load_openbrowser_config()
-		self.agent: Agent | None = None
 		self.browser_session: BrowserSession | None = None
-		self.tools: Tools | None = None
-		self.llm: ChatOpenAI | ChatGoogle | None = None
-		self.file_system: FileSystem | None = None
 		self._telemetry = ProductTelemetry()
 		self._start_time = time.time()
 
@@ -217,7 +209,6 @@ class OpenBrowserServer:
 		async def handle_list_tools() -> list[types.Tool]:
 			"""List all available openbrowser tools."""
 			return [
-				# Agent tools
 				# Direct browser control tools
 				types.Tool(
 					name='browser_navigate',
@@ -267,32 +258,16 @@ class OpenBrowserServer:
 				),
 				types.Tool(
 					name='browser_get_state',
-					description='Get the current state of the page including all interactive elements',
+					description='Get the current page state. Use compact=true (default) for a lightweight summary with URL, title, and element count. Use compact=false for the full list of interactive elements.',
 					inputSchema={
 						'type': 'object',
 						'properties': {
-							'include_screenshot': {
+							'compact': {
 								'type': 'boolean',
-								'description': 'Whether to include a screenshot of the current page',
-								'default': False,
+								'description': 'If true, returns only URL, title, tab count, and interactive element count. If false, returns full element details.',
+								'default': True,
 							}
 						},
-					},
-				),
-				types.Tool(
-					name='browser_extract_content',
-					description='Extract structured content from the current page based on a query',
-					inputSchema={
-						'type': 'object',
-						'properties': {
-							'query': {'type': 'string', 'description': 'What information to extract from the page'},
-							'extract_links': {
-								'type': 'boolean',
-								'description': 'Whether to include links in the extraction',
-								'default': False,
-							},
-						},
-						'required': ['query'],
 					},
 				),
 				types.Tool(
@@ -345,41 +320,6 @@ class OpenBrowserServer:
 				# 		"properties": {}
 				# 	}
 				# ),
-				types.Tool(
-					name='retry_with_openbrowser_agent',
-					description='Retry a task using the openbrowser agent. Only use this as a last resort if you fail to interact with a page multiple times.',
-					inputSchema={
-						'type': 'object',
-						'properties': {
-							'task': {
-								'type': 'string',
-								'description': 'The high-level goal and detailed step-by-step description of the task the AI browser agent needs to attempt, along with any relevant data needed to complete the task and info about previous attempts.',
-							},
-							'max_steps': {
-								'type': 'integer',
-								'description': 'Maximum number of steps an agent can take.',
-								'default': 100,
-							},
-							'model': {
-								'type': 'string',
-								'description': 'LLM model to use (e.g., gpt-4o, claude-3-opus-20240229)',
-								'default': 'gpt-4o',
-							},
-							'allowed_domains': {
-								'type': 'array',
-								'items': {'type': 'string'},
-								'description': 'List of domains the agent is allowed to visit (security feature)',
-								'default': [],
-							},
-							'use_vision': {
-								'type': 'boolean',
-								'description': 'Whether to use vision capabilities (screenshots) for the agent',
-								'default': True,
-							},
-						},
-						'required': ['task'],
-					},
-				),
 				# Browser session management tools
 				types.Tool(
 					name='browser_list_sessions',
@@ -405,12 +345,184 @@ class OpenBrowserServer:
 					description='Close all active browser sessions and clean up resources',
 					inputSchema={'type': 'object', 'properties': {}},
 				),
+				# Text-first content tools (efficient alternatives to screenshots)
+				types.Tool(
+					name='browser_get_text',
+					description='Get the current page content as clean markdown text. Use this instead of screenshots for reading page content efficiently.',
+					inputSchema={
+						'type': 'object',
+						'properties': {
+							'extract_links': {
+								'type': 'boolean',
+								'description': 'Whether to include href URLs in the output',
+								'default': False,
+							},
+						},
+					},
+				),
+				types.Tool(
+					name='browser_grep',
+					description='Search page text content using a regex or string pattern. Returns matching lines with context, like grep. Use this to find specific content on a page without reading the entire page.',
+					inputSchema={
+						'type': 'object',
+						'properties': {
+							'pattern': {
+								'type': 'string',
+								'description': 'Regex or string pattern to search for in page content',
+							},
+							'context_lines': {
+								'type': 'integer',
+								'description': 'Number of lines before and after each match to include',
+								'default': 2,
+							},
+							'max_matches': {
+								'type': 'integer',
+								'description': 'Maximum number of matches to return',
+								'default': 20,
+							},
+							'case_insensitive': {
+								'type': 'boolean',
+								'description': 'Whether to ignore case when matching',
+								'default': True,
+							},
+						},
+						'required': ['pattern'],
+					},
+				),
+				types.Tool(
+					name='browser_search_elements',
+					description='Search interactive DOM elements by text content, tag name, id, class, or attribute value. Returns element indices that can be used with browser_click and browser_type.',
+					inputSchema={
+						'type': 'object',
+						'properties': {
+							'query': {
+								'type': 'string',
+								'description': 'Text or pattern to search for in elements',
+							},
+							'by': {
+								'type': 'string',
+								'enum': ['text', 'tag', 'id', 'class', 'attribute'],
+								'description': 'What property to search by',
+								'default': 'text',
+							},
+							'max_results': {
+								'type': 'integer',
+								'description': 'Maximum number of results to return',
+								'default': 20,
+							},
+						},
+						'required': ['query'],
+					},
+				),
+				types.Tool(
+					name='browser_find_and_scroll',
+					description='Find text on the page and scroll to it. Use this to locate and navigate to specific content.',
+					inputSchema={
+						'type': 'object',
+						'properties': {
+							'text': {
+								'type': 'string',
+								'description': 'The text to find and scroll to on the page',
+							},
+						},
+						'required': ['text'],
+					},
+				),
+				# Advanced inspection tools
+				types.Tool(
+					name='browser_get_accessibility_tree',
+					description='Get the accessibility tree (a11y tree) of the current page. Returns structured data including roles, names, and properties of all accessible elements. Useful for understanding page structure, testing accessibility, and finding elements by their ARIA roles.',
+					inputSchema={
+						'type': 'object',
+						'properties': {
+							'max_depth': {
+								'type': 'integer',
+								'description': 'Maximum depth of the tree to return. Use -1 for unlimited depth.',
+								'default': -1,
+							},
+							'include_ignored': {
+								'type': 'boolean',
+								'description': 'Whether to include nodes marked as ignored in the accessibility tree.',
+								'default': False,
+							},
+						},
+					},
+				),
+				types.Tool(
+					name='browser_execute_js',
+					description='Execute JavaScript code on the current page and return the result. The expression is evaluated in the page context. Use for advanced page interactions, reading page state, or extracting data not available through other tools.',
+					inputSchema={
+						'type': 'object',
+						'properties': {
+							'expression': {
+								'type': 'string',
+								'description': 'JavaScript expression or IIFE to evaluate in the page context. For multi-statement code, wrap in an IIFE: (()=>{ ... return result; })()',
+							},
+						},
+						'required': ['expression'],
+					},
+				),
 			]
 
 		@self.server.list_resources()
 		async def handle_list_resources() -> list[types.Resource]:
-			"""List available resources (none for openbrowser)."""
-			return []
+			"""List available resources for the current browser state."""
+			resources = []
+			if self.browser_session:
+				try:
+					url = await self.browser_session.get_current_page_url()
+				except Exception:
+					url = 'unknown'
+				resources.append(
+					types.Resource(
+						uri='browser://current-page/content',
+						name='Page Content',
+						description=f'Clean markdown text of the current page ({url})',
+						mimeType='text/markdown',
+					)
+				)
+				resources.append(
+					types.Resource(
+						uri='browser://current-page/state',
+						name='Page State',
+						description=f'Interactive elements and metadata of the current page ({url})',
+						mimeType='application/json',
+					)
+				)
+				resources.append(
+					types.Resource(
+						uri='browser://current-page/accessibility',
+						name='Accessibility Tree',
+						description=f'Accessibility tree of the current page ({url})',
+						mimeType='application/json',
+					)
+				)
+			return resources
+
+		@self.server.read_resource()
+		async def handle_read_resource(uri: str) -> list[ReadResourceContents]:
+			"""Read a browser resource by URI."""
+			uri_str = str(uri)
+
+			if uri_str == 'browser://current-page/content':
+				if not self.browser_session:
+					return [ReadResourceContents(content='No browser session active', mime_type='text/plain')]
+				content = await self._get_text(extract_links=True)
+				return [ReadResourceContents(content=content, mime_type='text/markdown')]
+
+			elif uri_str == 'browser://current-page/state':
+				if not self.browser_session:
+					return [ReadResourceContents(content='{"error": "No browser session active"}', mime_type='application/json')]
+				state_json = await self._get_browser_state(compact=False)
+				return [ReadResourceContents(content=state_json, mime_type='application/json')]
+
+			elif uri_str == 'browser://current-page/accessibility':
+				if not self.browser_session:
+					return [ReadResourceContents(content='{"error": "No browser session active"}', mime_type='application/json')]
+				a11y_json = await self._get_accessibility_tree()
+				return [ReadResourceContents(content=a11y_json, mime_type='application/json')]
+
+			return [ReadResourceContents(content=f'Unknown resource: {uri_str}', mime_type='text/plain')]
 
 		@self.server.list_prompts()
 		async def handle_list_prompts() -> list[types.Prompt]:
@@ -445,16 +557,6 @@ class OpenBrowserServer:
 	async def _execute_tool(self, tool_name: str, arguments: dict[str, Any]) -> str:
 		"""Execute an openbrowser tool."""
 
-		# Agent-based tools
-		if tool_name == 'retry_with_openbrowser_agent':
-			return await self._retry_with_openbrowser_agent(
-				task=arguments['task'],
-				max_steps=arguments.get('max_steps', 100),
-				model=arguments.get('model', 'gpt-4o'),
-				allowed_domains=arguments.get('allowed_domains', []),
-				use_vision=arguments.get('use_vision', True),
-			)
-
 		# Browser session management tools (don't require active session)
 		if tool_name == 'browser_list_sessions':
 			return await self._list_sessions()
@@ -481,10 +583,7 @@ class OpenBrowserServer:
 				return await self._type_text(arguments['index'], arguments['text'])
 
 			elif tool_name == 'browser_get_state':
-				return await self._get_browser_state(arguments.get('include_screenshot', False))
-
-			elif tool_name == 'browser_extract_content':
-				return await self._extract_content(arguments['query'], arguments.get('extract_links', False))
+				return await self._get_browser_state(arguments.get('compact', True))
 
 			elif tool_name == 'browser_scroll':
 				return await self._scroll(arguments.get('direction', 'down'))
@@ -503,6 +602,38 @@ class OpenBrowserServer:
 
 			elif tool_name == 'browser_close_tab':
 				return await self._close_tab(arguments['tab_id'])
+
+			# Text-first content tools
+			elif tool_name == 'browser_get_text':
+				return await self._get_text(arguments.get('extract_links', False))
+
+			elif tool_name == 'browser_grep':
+				return await self._grep(
+					pattern=arguments['pattern'],
+					context_lines=arguments.get('context_lines', 2),
+					max_matches=arguments.get('max_matches', 20),
+					case_insensitive=arguments.get('case_insensitive', True),
+				)
+
+			elif tool_name == 'browser_search_elements':
+				return await self._search_elements(
+					query=arguments['query'],
+					by=arguments.get('by', 'text'),
+					max_results=arguments.get('max_results', 20),
+				)
+
+			elif tool_name == 'browser_find_and_scroll':
+				return await self._find_and_scroll(arguments['text'])
+
+			# Advanced inspection tools
+			elif tool_name == 'browser_get_accessibility_tree':
+				return await self._get_accessibility_tree(
+					max_depth=arguments.get('max_depth', -1),
+					include_ignored=arguments.get('include_ignored', False),
+				)
+
+			elif tool_name == 'browser_execute_js':
+				return await self._execute_js(arguments['expression'])
 
 		return f'Unknown tool: {tool_name}'
 
@@ -549,141 +680,8 @@ class OpenBrowserServer:
 		# Track the session for management
 		self._track_session(self.browser_session)
 
-		# Create tools for direct actions
-		self.tools = Tools()
-
-		# Initialize LLM from config
-		llm_config = get_default_llm(self.config)
-		model_provider = llm_config.get('model_provider') or os.getenv('MODEL_PROVIDER', '')
-		if model_provider.lower() == 'google':
-			google_api_key = llm_config.get('api_key') or os.getenv('GOOGLE_API_KEY')
-			if google_api_key:
-				self.llm = ChatGoogle(
-					model=llm_config.get('model', 'gemini-2.5-flash'),
-					api_key=google_api_key,
-					temperature=llm_config.get('temperature', 0.7),
-				)
-		elif api_key := llm_config.get('api_key') or os.getenv('OPENAI_API_KEY'):
-			self.llm = ChatOpenAI(
-				model=llm_config.get('model', 'gpt-4o-mini'),
-				api_key=api_key,
-				temperature=llm_config.get('temperature', 0.7),
-			)
-
-		# Initialize FileSystem for extraction actions
-		file_system_path = profile_config.get('file_system_path', '~/.openbrowser-mcp')
-		self.file_system = FileSystem(base_dir=Path(file_system_path).expanduser())
-
 		logger.debug('Browser session initialized')
 
-	async def _retry_with_openbrowser_agent(
-		self,
-		task: str,
-		max_steps: int = 100,
-		model: str = 'gpt-4o',
-		allowed_domains: list[str] | None = None,
-		use_vision: bool = True,
-	) -> str:
-		"""Run an autonomous agent task."""
-		logger.debug(f'Running agent task: {task}')
-
-		# Get LLM config
-		llm_config = get_default_llm(self.config)
-
-		# Get LLM provider
-		model_provider = llm_config.get('model_provider') or os.getenv('MODEL_PROVIDER')
-
-		if model_provider and model_provider.lower() == 'google':
-			google_api_key = llm_config.get('api_key') or os.getenv('GOOGLE_API_KEY')
-			if not google_api_key:
-				return 'Error: GOOGLE_API_KEY not set in config or environment'
-			llm_model = llm_config.get('model') or os.getenv('MODEL') or 'gemini-2.5-flash'
-			if model != 'gpt-4o':
-				llm_model = model
-			llm = ChatGoogle(
-				model=llm_model,
-				api_key=google_api_key,
-				temperature=llm_config.get('temperature', 0.7),
-			)
-		elif model_provider and model_provider.lower() == 'bedrock':
-			llm_model = llm_config.get('model') or os.getenv('MODEL') or 'us.anthropic.claude-sonnet-4-20250514-v1:0'
-			aws_region = llm_config.get('region') or os.getenv('REGION')
-			if not aws_region:
-				aws_region = 'us-east-1'
-			llm = ChatAWSBedrock(
-				model=llm_model,
-				aws_region=aws_region,
-				aws_sso_auth=True,
-			)
-		else:
-			api_key = llm_config.get('api_key') or os.getenv('OPENAI_API_KEY')
-			if not api_key:
-				return 'Error: OPENAI_API_KEY not set in config or environment'
-
-			# Override model if provided in tool call
-			if model != llm_config.get('model', 'gpt-4o'):
-				llm_model = model
-			else:
-				llm_model = llm_config.get('model', 'gpt-4o')
-
-			llm = ChatOpenAI(
-				model=llm_model,
-				api_key=api_key,
-				temperature=llm_config.get('temperature', 0.7),
-			)
-
-		# Get profile config and merge with tool parameters
-		profile_config = get_default_profile(self.config)
-
-		# Override allowed_domains if provided in tool call
-		if allowed_domains is not None:
-			profile_config['allowed_domains'] = allowed_domains
-
-		# Create browser profile using config
-		profile = BrowserProfile(**profile_config)
-
-		# Create and run agent
-		agent = Agent(
-			task=task,
-			llm=llm,
-			browser_profile=profile,
-			use_vision=use_vision,
-		)
-
-		try:
-			history = await agent.run(max_steps=max_steps)
-
-			# Format results
-			results = []
-			results.append(f'Task completed in {len(history.history)} steps')
-			results.append(f'Success: {history.is_successful()}')
-
-			# Get final result if available
-			final_result = history.final_result()
-			if final_result:
-				results.append(f'\nFinal result:\n{final_result}')
-
-			# Include any errors
-			errors = history.errors()
-			if errors:
-				results.append(f'\nErrors encountered:\n{json.dumps(errors, indent=2)}')
-
-			# Include URLs visited
-			urls = history.urls()
-			if urls:
-				# Filter out None values and convert to strings
-				valid_urls = [str(url) for url in urls if url is not None]
-				if valid_urls:
-					results.append(f'\nURLs visited: {", ".join(valid_urls)}')
-
-			return '\n'.join(results)
-
-		except Exception as e:
-			logger.error(f'Agent task failed: {e}', exc_info=True)
-			return f'Agent task failed: {str(e)}'
-		finally:
-			# Clean up
-			await agent.close()
 
 	async def _navigate(self, url: str, new_tab: bool = False) -> str:
 		"""Navigate to a URL."""
@@ -801,79 +799,42 @@ class OpenBrowserServer:
 		else:
 			return f"Typed '{text}' into element {index}"
 
-	async def _get_browser_state(self, include_screenshot: bool = False) -> str:
+	async def _get_browser_state(self, compact: bool = True) -> str:
 		"""Get current browser state."""
 		if not self.browser_session:
 			return 'Error: No browser session active'
 
-		state = await self.browser_session.get_browser_state_summary()
+		state = await self.browser_session.get_browser_state_summary(include_screenshot=False)
 
-		result = {
+		element_count = len(state.dom_state.selector_map)
+
+		result: dict[str, Any] = {
 			'url': state.url,
 			'title': state.title,
 			'tabs': [{'url': tab.url, 'title': tab.title} for tab in state.tabs],
-			'interactive_elements': [],
+			'interactive_element_count': element_count,
 		}
 
-		# Add interactive elements with their indices
-		for index, element in state.dom_state.selector_map.items():
-			elem_info = {
-				'index': index,
-				'tag': element.tag_name,
-				'text': element.get_all_children_text(max_depth=2)[:100],
-			}
-			if element.attributes.get('placeholder'):
-				elem_info['placeholder'] = element.attributes['placeholder']
-			if element.attributes.get('href'):
-				elem_info['href'] = element.attributes['href']
-			result['interactive_elements'].append(elem_info)
-
-		if include_screenshot and state.screenshot:
-			result['screenshot'] = state.screenshot
+		if not compact:
+			elements = []
+			for index, element in state.dom_state.selector_map.items():
+				elem_info: dict[str, Any] = {
+					'index': index,
+					'tag': element.tag_name,
+					'text': element.get_all_children_text(max_depth=2)[:100],
+				}
+				if element.attributes.get('placeholder'):
+					elem_info['placeholder'] = element.attributes['placeholder']
+				if element.attributes.get('href'):
+					elem_info['href'] = element.attributes['href']
+				if element.attributes.get('id'):
+					elem_info['id'] = element.attributes['id']
+				if element.attributes.get('class'):
+					elem_info['class'] = element.attributes['class']
+				elements.append(elem_info)
+			result['interactive_elements'] = elements
 
 		return json.dumps(result, indent=2)
-
-	async def _extract_content(self, query: str, extract_links: bool = False) -> str:
-		"""Extract content from current page."""
-		if not self.llm:
-			return 'Error: LLM not initialized (set OPENAI_API_KEY)'
-
-		if not self.file_system:
-			return 'Error: FileSystem not initialized'
-
-		if not self.browser_session:
-			return 'Error: No browser session active'
-
-		if not self.tools:
-			return 'Error: Tools not initialized'
-
-		state = await self.browser_session.get_browser_state_summary()
-
-		# Use the extract action
-		# Create a dynamic action model that matches the tools's expectations
-		from pydantic import create_model
-
-		# Create action model dynamically
-		ExtractAction = create_model(
-			'ExtractAction',
-			__base__=ActionModel,
-			extract=dict[str, Any],
-		)
-
-		# Use model_validate because Pyright does not understand the dynamic model
-		action = ExtractAction.model_validate(
-			{
-				'extract': {'query': query, 'extract_links': extract_links},
-			}
-		)
-		action_result = await self.tools.act(
-			action=action,
-			browser_session=self.browser_session,
-			page_extraction_llm=self.llm,
-			file_system=self.file_system,
-		)
-
-		return action_result.extracted_content or 'No content extracted'
 
 	async def _scroll(self, direction: str = 'down') -> str:
 		"""Scroll the page."""
@@ -911,7 +872,6 @@ class OpenBrowserServer:
 			event = self.browser_session.event_bus.dispatch(BrowserStopEvent())
 			await event
 			self.browser_session = None
-			self.tools = None
 			return 'Browser closed'
 		return 'No browser session to close'
 
@@ -951,6 +911,290 @@ class OpenBrowserServer:
 		await event
 		current_url = await self.browser_session.get_current_page_url()
 		return f'Closed tab # {tab_id}, now on {current_url}'
+
+	async def _get_text(self, extract_links: bool = False) -> str:
+		"""Get page content as clean markdown text."""
+		if not self.browser_session:
+			return 'Error: No browser session active'
+
+		try:
+			content, stats = await extract_clean_markdown(
+				browser_session=self.browser_session,
+				extract_links=extract_links,
+			)
+			if not content or not content.strip():
+				return 'No text content found on page'
+			return content
+		except Exception as e:
+			logger.error(f'Failed to extract text: {e}', exc_info=True)
+			return f'Error extracting text: {str(e)}'
+
+	async def _grep(
+		self,
+		pattern: str,
+		context_lines: int = 2,
+		max_matches: int = 20,
+		case_insensitive: bool = True,
+	) -> str:
+		"""Search page text content using regex or string pattern."""
+		if not self.browser_session:
+			return 'Error: No browser session active'
+
+		try:
+			content, _ = await extract_clean_markdown(browser_session=self.browser_session)
+			if not content or not content.strip():
+				return json.dumps({'matches': [], 'total_matches': 0, 'message': 'No text content on page'})
+
+			lines = content.split('\n')
+			flags = re.IGNORECASE if case_insensitive else 0
+
+			try:
+				compiled = re.compile(pattern, flags)
+			except re.error:
+				# Fall back to literal string search
+				escaped = re.escape(pattern)
+				compiled = re.compile(escaped, flags)
+
+			matches = []
+			for i, line in enumerate(lines):
+				if compiled.search(line):
+					context_before = lines[max(0, i - context_lines) : i]
+					context_after = lines[i + 1 : min(len(lines), i + 1 + context_lines)]
+					matches.append(
+						{
+							'line_number': i + 1,
+							'line': line.strip(),
+							'context_before': [l.strip() for l in context_before],
+							'context_after': [l.strip() for l in context_after],
+						}
+					)
+					if len(matches) >= max_matches:
+						break
+
+			total_found = sum(1 for line in lines if compiled.search(line))
+
+			return json.dumps(
+				{
+					'pattern': pattern,
+					'matches': matches,
+					'matches_shown': len(matches),
+					'total_matches': total_found,
+				},
+				indent=2,
+			)
+		except Exception as e:
+			logger.error(f'Grep failed: {e}', exc_info=True)
+			return f'Error during grep: {str(e)}'
+
+	async def _search_elements(self, query: str, by: str = 'text', max_results: int = 20) -> str:
+		"""Search interactive DOM elements by various criteria."""
+		if not self.browser_session:
+			return 'Error: No browser session active'
+
+		try:
+			# Use get_browser_state_summary() for a fresh DOM extraction instead of
+			# get_selector_map() which may return stale cached data
+			state = await self.browser_session.get_browser_state_summary(include_screenshot=False)
+			selector_map = state.dom_state.selector_map if state.dom_state else {}
+			results = []
+			query_lower = query.lower()
+
+			for index, element in selector_map.items():
+				matched = False
+
+				if by == 'text':
+					elem_text = element.get_all_children_text(max_depth=3).lower()
+					matched = query_lower in elem_text
+				elif by == 'tag':
+					matched = query_lower == element.tag_name.lower()
+				elif by == 'id':
+					elem_id = element.attributes.get('id', '').lower()
+					matched = query_lower in elem_id
+				elif by == 'class':
+					elem_class = element.attributes.get('class', '').lower()
+					matched = query_lower in elem_class
+				elif by == 'attribute':
+					for attr_val in element.attributes.values():
+						if query_lower in str(attr_val).lower():
+							matched = True
+							break
+
+				if matched:
+					elem_info: dict[str, Any] = {
+						'index': index,
+						'tag': element.tag_name,
+						'text': element.get_all_children_text(max_depth=2)[:100],
+					}
+					if element.attributes.get('id'):
+						elem_info['id'] = element.attributes['id']
+					if element.attributes.get('class'):
+						elem_info['class'] = element.attributes['class']
+					if element.attributes.get('placeholder'):
+						elem_info['placeholder'] = element.attributes['placeholder']
+					if element.attributes.get('href'):
+						elem_info['href'] = element.attributes['href']
+					if element.attributes.get('type'):
+						elem_info['type'] = element.attributes['type']
+					results.append(elem_info)
+
+					if len(results) >= max_results:
+						break
+
+			return json.dumps(
+				{
+					'query': query,
+					'by': by,
+					'results': results,
+					'count': len(results),
+				},
+				indent=2,
+			)
+		except Exception as e:
+			logger.error(f'Element search failed: {e}', exc_info=True)
+			return f'Error searching elements: {str(e)}'
+
+	async def _find_and_scroll(self, text: str) -> str:
+		"""Find text on the page and scroll to it."""
+		if not self.browser_session:
+			return 'Error: No browser session active'
+
+		try:
+			event = self.browser_session.event_bus.dispatch(ScrollToTextEvent(text=text))
+			await event
+			return f"Found and scrolled to: '{text}'"
+		except Exception as e:
+			logger.error(f'Find and scroll failed: {e}', exc_info=True)
+			return f"Text '{text}' not found or not visible on page"
+
+	async def _get_accessibility_tree(self, max_depth: int = -1, include_ignored: bool = False) -> str:
+		"""Get the accessibility tree of the current page."""
+		if not self.browser_session:
+			return 'Error: No browser session active'
+
+		try:
+			target_id = self.browser_session.current_target_id
+			if not target_id:
+				return 'Error: No active page target'
+
+			dom_service = DomService(self.browser_session)
+			ax_tree_result = await dom_service._get_ax_tree_for_all_frames(target_id)
+
+			nodes = []
+			node_map: dict[str, dict[str, Any]] = {}
+
+			for ax_node in ax_tree_result.get('nodes', []):
+				if not include_ignored and ax_node.get('ignored', False):
+					continue
+
+				enhanced = dom_service._build_enhanced_ax_node(ax_node)
+				node_info: dict[str, Any] = {
+					'id': enhanced.ax_node_id,
+					'role': enhanced.role,
+					'name': enhanced.name,
+				}
+				if enhanced.description:
+					node_info['description'] = enhanced.description
+				if enhanced.properties:
+					props = {}
+					for prop in enhanced.properties:
+						if prop.value is not None:
+							props[prop.name] = prop.value
+					if props:
+						node_info['properties'] = props
+				if enhanced.child_ids:
+					node_info['children'] = enhanced.child_ids
+
+				node_map[enhanced.ax_node_id] = node_info
+				nodes.append(node_info)
+
+			def _build_tree(node_id: str, depth: int) -> dict[str, Any] | None:
+				"""Recursively build tree structure with depth limit."""
+				node = node_map.get(node_id)
+				if not node:
+					return None
+				if max_depth >= 0 and depth > max_depth:
+					return None
+
+				result = {k: v for k, v in node.items() if k != 'children'}
+				child_ids = node.get('children', [])
+				if child_ids:
+					children = []
+					for child_id in child_ids:
+						child = _build_tree(child_id, depth + 1)
+						if child:
+							children.append(child)
+					if children:
+						result['children'] = children
+				return result
+
+			# Build tree from root nodes (nodes not referenced as children)
+			all_child_ids = set()
+			for node in nodes:
+				for child_id in node.get('children', []):
+					all_child_ids.add(child_id)
+
+			root_nodes = [n for n in nodes if n['id'] not in all_child_ids]
+
+			if root_nodes:
+				tree = []
+				for root in root_nodes:
+					built = _build_tree(root['id'], 0)
+					if built:
+						tree.append(built)
+
+				return json.dumps(
+					{
+						'tree': tree if len(tree) > 1 else tree[0] if tree else {},
+						'total_nodes': len(nodes),
+					},
+					indent=2,
+				)
+			else:
+				return json.dumps({'nodes': nodes, 'total_nodes': len(nodes)}, indent=2)
+
+		except Exception as e:
+			logger.error(f'Accessibility tree extraction failed: {e}', exc_info=True)
+			return f'Error getting accessibility tree: {str(e)}'
+
+	async def _execute_js(self, expression: str) -> str:
+		"""Execute JavaScript on the current page and return the result."""
+		if not self.browser_session:
+			return 'Error: No browser session active'
+
+		try:
+			target_id = self.browser_session.current_target_id
+			if not target_id:
+				return 'Error: No active page target'
+
+			cdp_session = await self.browser_session.get_or_create_cdp_session(target_id=target_id, focus=False)
+
+			result = await cdp_session.cdp_client.send.Runtime.evaluate(
+				params={
+					'expression': expression,
+					'returnByValue': True,
+					'awaitPromise': True,
+				},
+				session_id=cdp_session.session_id,
+			)
+
+			if 'exceptionDetails' in result:
+				exception = result['exceptionDetails']
+				error_text = exception.get('text', 'Unknown error')
+				if 'exception' in exception:
+					error_text = exception['exception'].get('description', error_text)
+				return json.dumps({'error': error_text})
+
+			value = result.get('result', {}).get('value')
+			result_type = result.get('result', {}).get('type', 'undefined')
+
+			if result_type == 'undefined':
+				return json.dumps({'result': None, 'type': 'undefined'})
+
+			return json.dumps({'result': value, 'type': result_type}, indent=2, default=str)
+
+		except Exception as e:
+			logger.error(f'JavaScript execution failed: {e}', exc_info=True)
+			return f'Error executing JavaScript: {str(e)}'
 
 	def _track_session(self, session: BrowserSession) -> None:
 		"""Track a browser session for management."""
@@ -1014,7 +1258,6 @@ class OpenBrowserServer:
 			# If this was the current session, clear it
 			if self.browser_session and self.browser_session.id == session_id:
 				self.browser_session = None
-				self.tools = None
 
 			return f'Successfully closed session {session_id}'
 		except Exception as e:
@@ -1040,7 +1283,6 @@ class OpenBrowserServer:
 
 		# Clear current session references
 		self.browser_session = None
-		self.tools = None
 
 		result = f'Closed {closed_count} sessions'
 		if errors:

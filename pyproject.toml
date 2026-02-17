@@ -93,4 +93,5 @@ asyncio_default_fixture_loop_scope = "function"
 asyncio_default_test_loop_scope = "function"
 markers = [
     "asyncio: mark tests as async tests",
+    "integration: integration tests requiring a real browser",
 ]
