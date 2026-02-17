@@ -330,6 +330,10 @@ async def train():
                 total_kl_val = 0.0
                 kl_terms = 0
 
+                # Move ref_model to GPU once for all KL computations
+                if kl_coeff > 0:
+                    ref_model.to(device)
+
                 for g in range(group_size):
                     traj = trajectories[g]
                     adv_g = torch.clamp(
@@ -385,8 +389,6 @@ async def train():
                         # KL penalty (Schulman k3: r - log(r) - 1 >= 0)
                         kl_loss = torch.tensor(0.0, device=device)
                         if kl_coeff > 0:
-                            # Move ref_model to GPU for KL computation
-                            ref_model.to(device)
                             with torch.no_grad():
                                 ref_log_prob = compute_discrete_step_log_prob(
                                     model=ref_model,
@@ -399,8 +401,6 @@ async def train():
                                     response_mask=response_mask,
                                     temperature=gen_temperature,
                                 )  # [1]
-                            ref_model.to("cpu")
-                            torch.cuda.empty_cache()
                             log_r = ref_log_prob - log_prob
                             kl_loss = (torch.exp(log_r) - log_r - 1).mean()
                             # Guard: replace NaN KL with 0
@@ -413,6 +413,11 @@ async def train():
                         # Per-step backward to release activations immediately
                         step_loss.backward()
                         total_loss_val += step_loss.detach().item()
+
+                # Move ref_model back to CPU after all KL computations
+                if kl_coeff > 0:
+                    ref_model.to("cpu")
+                    torch.cuda.empty_cache()
 
                 # Clip gradients and step (guard against NaN accumulated loss)
                 if total_loss_val != 0.0 and not (
