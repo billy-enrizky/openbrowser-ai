@@ -10,7 +10,7 @@ Architecture:
     2. Each plan is parsed into executable actions
     3. Actions are executed in a headless browser against FormFactory
     4. Reward = actual form submission success + field accuracy
-    5. PPO-style clipped objective with KL penalty updates LoRA parameters
+    5. REINFORCE with group-relative advantages + non-negative KL penalty (Schulman k3)
 
 Usage:
     SFT_CHECKPOINT_PATH=outputs/finetuning_sft/final uv run infra/training/finetuning/online_grpo_trainer.py
@@ -27,7 +27,7 @@ import torch.nn.functional as F
 from peft import LoraConfig, PeftModel, get_peft_model, prepare_model_for_kbit_training
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
-from infra.training.finetuning.config import DATA_CONFIG, ONLINE_GRPO_CONFIG, S3_CONFIG
+from infra.training.finetuning.config import DATA_CONFIG, ONLINE_GRPO_CONFIG
 from infra.training.shared.action_parser import parse_rollout_to_actions
 from infra.training.shared.browser_env import BrowserEnvironment
 from infra.training.shared.formfactory_server import FormFactoryServer
@@ -36,7 +36,7 @@ from infra.training.shared.reward_functions import compute_grpo_advantages
 from infra.training.shared.utils import (
     format_chat_prompt,
     resolve_data_path,
-    upload_checkpoint_to_s3,
+    persist_checkpoint,
 )
 
 logging.basicConfig(
@@ -67,18 +67,19 @@ def load_quantized_model(model_name: str, config: dict):
         if config["bnb_4bit_compute_dtype"] == "bfloat16"
         else torch.float16
     )
-    bnb_config = BitsAndBytesConfig(
-        load_in_4bit=config["load_in_4bit"],
-        bnb_4bit_quant_type=config["bnb_4bit_quant_type"],
-        bnb_4bit_use_double_quant=config["bnb_4bit_use_double_quant"],
-        bnb_4bit_compute_dtype=compute_dtype,
-    )
-    model = AutoModelForCausalLM.from_pretrained(
-        model_name,
-        quantization_config=bnb_config,
-        device_map="auto",
-        torch_dtype=compute_dtype,
-    )
+    # Pre-quantized models (e.g. unsloth/Qwen3-8B-bnb-4bit) already have
+    # quantization_config embedded -- passing it again triggers a warning.
+    is_prequantized = "bnb" in model_name.lower()
+    load_kwargs = {"device_map": "auto", "torch_dtype": compute_dtype}
+    if not is_prequantized:
+        bnb_config = BitsAndBytesConfig(
+            load_in_4bit=config["load_in_4bit"],
+            bnb_4bit_quant_type=config["bnb_4bit_quant_type"],
+            bnb_4bit_use_double_quant=config["bnb_4bit_use_double_quant"],
+            bnb_4bit_compute_dtype=compute_dtype,
+        )
+        load_kwargs["quantization_config"] = bnb_config
+    model = AutoModelForCausalLM.from_pretrained(model_name, **load_kwargs)
     return model
 
 
@@ -92,9 +93,15 @@ def generate_rollouts(
         all_input_ids: tensor of full sequences [G, seq_len]
         prompt_length: length of the prompt tokens
     """
-    inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
+    # Prepend empty think block to suppress Qwen3 thinking mode --
+    # model sees <think>\n</think>\n as already completed and generates actions directly
+    prompt_with_skip = prompt + "<think>\n</think>\n"
+    inputs = tokenizer(prompt_with_skip, return_tensors="pt").to(model.device)
     prompt_length = inputs.input_ids.shape[1]
 
+    # Enable KV cache for generation (disabled during training for gradient checkpointing)
+    model.eval()
+    model.config.use_cache = True
     with torch.no_grad():
         outputs = model.generate(
             **inputs,
@@ -106,6 +113,8 @@ def generate_rollouts(
             return_dict_in_generate=True,
             output_scores=False,
         )
+    model.config.use_cache = False
+    model.train()
 
     all_sequences = outputs.sequences  # [G, total_len]
 
@@ -119,10 +128,17 @@ def generate_rollouts(
     return responses, all_sequences, prompt_length
 
 
-def compute_log_probs(
+def compute_per_token_log_probs(
     model, input_ids: torch.Tensor, attention_mask: torch.Tensor, prompt_length: int
-) -> torch.Tensor:
+) -> tuple[torch.Tensor, torch.Tensor]:
     """Compute per-token log probabilities for the response portion.
+
+    Processes one sample at a time to avoid CUDA OOM from materializing
+    [B, seq_len, vocab_size] tensors (Qwen3-8B has vocab=152064, which
+    at B=4 and seq_len=1024 would require ~2.5GB for log_softmax alone).
+
+    Uses F.cross_entropy which fuses log_softmax + gather internally
+    and never materializes the full [seq_len, vocab] softmax tensor.
 
     Args:
         model: the language model
@@ -131,33 +147,44 @@ def compute_log_probs(
         prompt_length: number of prompt tokens to skip
 
     Returns:
-        log_probs: [B] sum of log-probs over response tokens
+        token_log_probs: [B, max_resp_len] per-token log-probs (0 for padding)
+        resp_mask: [B, max_resp_len] float mask (1.0 for valid response tokens)
     """
-    with torch.set_grad_enabled(model.training):
-        outputs = model(input_ids=input_ids, attention_mask=attention_mask)
-        logits = outputs.logits  # [B, seq_len, vocab]
+    B = input_ids.shape[0]
+    seq_len = input_ids.shape[1]
+    response_start = max(0, prompt_length - 1)  # -1 for shift offset
+    max_resp_len = seq_len - 1 - response_start
 
-    # Shift: predict token t+1 from position t
-    shift_logits = logits[:, :-1, :]  # [B, seq_len-1, vocab]
-    shift_labels = input_ids[:, 1:]   # [B, seq_len-1]
+    all_log_probs = []
+    all_masks = []
 
-    # Log softmax over vocab
-    log_probs_all = F.log_softmax(shift_logits, dim=-1)  # [B, seq_len-1, vocab]
+    for i in range(B):
+        ids_i = input_ids[i : i + 1]  # [1, seq_len]
+        mask_i = attention_mask[i : i + 1]  # [1, seq_len]
 
-    # Gather log-probs for actual tokens
-    token_log_probs = log_probs_all.gather(
-        2, shift_labels.unsqueeze(-1)
-    ).squeeze(-1)  # [B, seq_len-1]
+        with torch.set_grad_enabled(model.training):
+            outputs = model(input_ids=ids_i, attention_mask=mask_i)
+            logits = outputs.logits  # [1, seq_len, vocab]
 
-    # Only sum over response tokens (skip prompt)
-    response_start = max(0, prompt_length - 1)  # -1 for shift
-    response_log_probs = token_log_probs[:, response_start:]
+        # Shift: predict token t+1 from position t
+        shift_logits = logits[0, :-1, :]  # [seq_len-1, vocab]
+        shift_labels = ids_i[0, 1:]  # [seq_len-1]
 
-    # Use attention_mask shifted to match label positions for padding mask
-    mask = attention_mask[:, 1:][:, response_start:].float()
-    masked_log_probs = response_log_probs * mask
+        # Use cross_entropy with reduction='none' -- fuses log_softmax + gather
+        # internally without materializing the full softmax tensor
+        token_nll = F.cross_entropy(
+            shift_logits, shift_labels, reduction="none"
+        )  # [seq_len-1]
+        token_log_probs = -token_nll  # log_prob = -cross_entropy
 
-    return masked_log_probs.sum(dim=-1)  # [B]
+        # Only take response tokens (skip prompt)
+        response_log_probs = token_log_probs[response_start:]
+        mask_shifted = mask_i[0, 1:][response_start:].float()
+
+        all_log_probs.append(response_log_probs[:max_resp_len])
+        all_masks.append(mask_shifted[:max_resp_len])
+
+    return torch.stack(all_log_probs), torch.stack(all_masks)
 
 
 async def train():
@@ -188,12 +215,18 @@ async def train():
     logger.info(f"Loading policy model: {model_name}")
     if is_peft_checkpoint:
         base_model = load_quantized_model(config["model_name"], config)
-        base_model = prepare_model_for_kbit_training(base_model)
-        model = PeftModel.from_pretrained(base_model, model_name)
+        base_model.config.use_cache = False
+        base_model = prepare_model_for_kbit_training(
+            base_model, use_gradient_checkpointing=True, gradient_checkpointing_kwargs={"use_reentrant": False}
+        )
+        model = PeftModel.from_pretrained(base_model, model_name, is_trainable=True)
         model.train()
     else:
         model = load_quantized_model(model_name, config)
-        model = prepare_model_for_kbit_training(model)
+        model.config.use_cache = False
+        model = prepare_model_for_kbit_training(
+            model, use_gradient_checkpointing=True, gradient_checkpointing_kwargs={"use_reentrant": False}
+        )
         lora_config = LoraConfig(
             r=config["lora_r"],
             lora_alpha=config["lora_alpha"],
@@ -227,7 +260,6 @@ async def train():
 
     group_size = config["group_size"]
     kl_coeff = config["kl_coeff"]
-    clip_range = config["clip_range"]
     max_new_tokens = config.get("max_new_tokens", 512)
     action_timeout = config.get("action_timeout_s", 5.0)
 
@@ -245,7 +277,7 @@ async def train():
 
     logger.info(
         f"Starting online GRPO training: {len(prompts)} prompts, G={group_size}, "
-        f"kl_coeff={kl_coeff}, clip_range={clip_range}"
+        f"kl_coeff={kl_coeff}"
     )
 
     total_steps = 0
@@ -256,6 +288,15 @@ async def train():
             epoch_kl = []
 
             for i, prompt_data in enumerate(prompts):
+                # Periodically restart browser to reset DOM element indices.
+                # DOMWatchdog assigns monotonically increasing indices across
+                # navigations -- after ~10 forms, indices reach 19000+ which
+                # slows CDP communication and causes action timeouts.
+                if i > 0 and i % 10 == 0:
+                    logger.info(f"Periodic browser restart (prompt {i}) to reset DOM indices")
+                    await browser_env.close()
+                    browser_env = await BrowserEnvironment.create(headless=headless)
+
                 instruction = prompt_data.get("instruction", "")
                 form_url = prompt_data.get("url", "")
                 ground_truth_fields = prompt_data.get("ground_truth_fields", {})
@@ -337,31 +378,36 @@ async def train():
                     advantages, dtype=torch.float32, device=padded.device
                 )
 
-                # Compute policy log-probs (with gradients)
-                policy_log_probs = compute_log_probs(
+                # Compute per-token policy log-probs (with gradients)
+                policy_token_lp, resp_mask = compute_per_token_log_probs(
                     model, padded, attention_mask, prompt_length
-                )
+                )  # [G, T], [G, T]
 
-                # Compute reference log-probs (no gradients)
+                # Compute per-token reference log-probs (for KL, no gradients)
                 with torch.no_grad():
-                    ref_log_probs = compute_log_probs(
+                    ref_token_lp, _ = compute_per_token_log_probs(
                         ref_model, padded, attention_mask, prompt_length
-                    )
+                    )  # [G, T]
 
-                # KL divergence per sample
-                kl_div = policy_log_probs - ref_log_probs  # [G]
+                # Per-sample mean log-prob under current policy
+                tokens_per_sample = resp_mask.sum(dim=-1).clamp(min=1)  # [G]
+                sample_log_prob = (
+                    (policy_token_lp * resp_mask).sum(dim=-1) / tokens_per_sample
+                )  # [G]
 
-                # Policy gradient loss with PPO-style clipping
-                ratio = torch.exp(policy_log_probs - ref_log_probs)
-                clipped_ratio = torch.clamp(
-                    ratio, 1.0 - clip_range, 1.0 + clip_range
-                )
-                pg_loss1 = -advantages_t * ratio
-                pg_loss2 = -advantages_t * clipped_ratio
-                pg_loss = torch.max(pg_loss1, pg_loss2).mean()
+                # REINFORCE with group-relative advantages
+                pg_loss = -(advantages_t * sample_log_prob).mean()
 
-                # KL penalty
-                kl_penalty = kl_coeff * kl_div.mean()
+                # KL divergence: Schulman k3 approximation (always >= 0)
+                # D_KL(pi || ref) ~ r - log(r) - 1  where r = pi_ref / pi_theta
+                log_r = ref_token_lp - policy_token_lp  # [G, T]
+                r = torch.exp(log_r)
+                kl_per_token = r - log_r - 1  # >= 0 by Jensen's inequality
+                total_resp_tokens = resp_mask.sum().clamp(min=1)
+                kl_div = (kl_per_token * resp_mask).sum() / total_resp_tokens
+
+                # KL penalty (kl_div >= 0, so this always penalizes divergence)
+                kl_penalty = kl_coeff * kl_div
 
                 # Total loss
                 loss = pg_loss + kl_penalty
@@ -374,7 +420,7 @@ async def train():
 
                 total_steps += 1
                 avg_reward = sum(rewards) / len(rewards) if rewards else 0
-                avg_kl = kl_div.mean().item()
+                avg_kl = kl_div.item()
                 epoch_kl.append(avg_kl)
 
                 if total_steps % config["logging_steps"] == 0:
@@ -408,8 +454,8 @@ async def train():
         tokenizer.save_pretrained(final_dir)
         logger.info(f"Online GRPO training complete. Model saved to {final_dir}")
 
-        # Upload checkpoint to S3
-        upload_checkpoint_to_s3(final_dir, S3_CONFIG, "online-grpo")
+        # Persist checkpoint to Anyscale storage
+        persist_checkpoint(final_dir, "online-grpo")
 
     finally:
         await browser_env.close()
