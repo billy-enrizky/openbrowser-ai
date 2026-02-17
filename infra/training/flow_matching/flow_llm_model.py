@@ -27,6 +27,7 @@ This is the STAD80 counterpart to the STAD68 autoregressive approach.
 """
 
 import logging
+from dataclasses import dataclass, field
 
 import torch
 import torch.nn.functional as F
@@ -34,6 +35,29 @@ import torch.nn.functional as F
 logger = logging.getLogger(__name__)
 
 DEFAULT_MASK_TOKEN_ID = 151670
+
+
+@dataclass
+class UnmaskingTrajectoryStep:
+    """One denoising step in the masked diffusion trajectory.
+
+    Records the masked state before this step and which positions were
+    unmasked (with what tokens) so that per-step log-probs can be
+    recomputed during training with gradient flow.
+    """
+    step_index: int
+    masked_state: torch.Tensor         # [B, L_c + L_r] token IDs with mask tokens
+    attention_mask: torch.Tensor       # [B, L_c + L_r]
+    newly_unmasked_indices: list[list[int]]  # [B][k] indices into RESPONSE portion
+    unmasked_tokens: list[list[int]]   # [B][k] token IDs placed at those positions
+
+
+@dataclass
+class UnmaskingTrajectory:
+    """Full iterative unmasking trajectory for Flow-GRPO policy gradients."""
+    steps: list[UnmaskingTrajectoryStep] = field(default_factory=list)
+    final_tokens: torch.Tensor | None = None   # [B, L_r] fully unmasked response
+    condition_length: int = 0                   # L_c (prompt length)
 
 
 class FlowLLM:
