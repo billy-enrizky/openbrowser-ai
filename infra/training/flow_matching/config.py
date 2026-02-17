@@ -191,6 +191,35 @@ ONLINE_FSDFM_GRPO_CONFIG = {
     },
 }
 
+# --- Flow-GRPO for FS-DFM (discrete policy gradients, Liu et al. 2025) ---
+# Adapts continuous Flow-GRPO (ODE-to-SDE + Gaussian log-probs) to the
+# discrete Poisson jump process used by FS-DFM.  Per-step categorical
+# log-probabilities are computed from the jump process, enabling PPO-style
+# clipped policy gradients aligned with the actual generation trajectory.
+# Reference: github.com/yifan123/flow_grpo
+FLOW_GRPO_FSDFM_CONFIG = {
+    "group_size": 2,
+    "learning_rate": 1e-5,            # Lower than SFT (2e-4) per PPO convention
+    "num_epochs": int(os.environ.get("NUM_EPOCHS", "1")),
+    "kl_coeff": 0.04,                 # Matches reference geneval config
+    "clip_range": 0.2,                # Standard PPO clip
+    "adv_clip_max": 5.0,              # Advantage clipping (from reference)
+    "bf16": True,
+    "logging_steps": 5,
+    "grad_clip": 1.0,
+    "num_generation_steps": 10,        # Denoising reduction (T=10, inference uses 64)
+    "generation_temperature": 1.0,     # Full temperature for exploration
+    "formfactory_port": int(os.environ.get("FORMFACTORY_PORT", "5050")),
+    "browser_headless": True,
+    "action_timeout_s": 5,
+    "rollout_timeout_s": 30,
+    "reward_weights": {
+        "task_completion": 0.4,
+        "field_accuracy": 0.4,
+        "execution_completeness": 0.2,
+    },
+}
+
 DATA_CONFIG = {
     "train_file": os.environ.get("FLOW_TRAIN_FILE", "data/processed/formfactory_sft.jsonl"),
     "eval_split": 0.1,
