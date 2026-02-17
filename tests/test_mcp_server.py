@@ -1405,6 +1405,44 @@ class TestExecuteJs:
             session_id="session-1",
         )
 
+    def test_execute_js_await_promise_false(self, mcp_server):
+        """await_promise=False passes awaitPromise: false to CDP."""
+        mcp_server.browser_session = MagicMock()
+        mcp_server.browser_session.current_target_id = "target-123"
+
+        cdp = self._make_mock_cdp_session({"result": {"type": "number", "value": 2}})
+        mcp_server.browser_session.get_or_create_cdp_session = AsyncMock(return_value=cdp)
+
+        asyncio.run(mcp_server._execute_js("1+1", await_promise=False))
+
+        cdp.cdp_client.send.Runtime.evaluate.assert_called_once_with(
+            params={
+                "expression": "1+1",
+                "returnByValue": True,
+                "awaitPromise": False,
+            },
+            session_id="session-1",
+        )
+
+    def test_execute_js_await_promise_routed(self, mcp_server):
+        """await_promise parameter routes through _execute_tool."""
+        mcp_server.browser_session = MagicMock()
+        mcp_server.browser_session.current_target_id = "target-123"
+
+        cdp = self._make_mock_cdp_session({"result": {"type": "string", "value": "ok"}})
+        mcp_server.browser_session.get_or_create_cdp_session = AsyncMock(return_value=cdp)
+
+        asyncio.run(mcp_server._execute_tool("browser_execute_js", {"expression": "test", "await_promise": False}))
+
+        cdp.cdp_client.send.Runtime.evaluate.assert_called_once_with(
+            params={
+                "expression": "test",
+                "returnByValue": True,
+                "awaitPromise": False,
+            },
+            session_id="session-1",
+        )
+
     def test_execute_js_routed_via_execute_tool(self, mcp_server):
         """Verify browser_execute_js routes correctly."""
         mcp_server.browser_session = MagicMock()

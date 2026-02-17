@@ -458,6 +458,11 @@ class OpenBrowserServer:
 								'type': 'string',
 								'description': 'JavaScript expression or IIFE to evaluate in the page context. For multi-statement code, wrap in an IIFE: (()=>{ ... return result; })()',
 							},
+							'await_promise': {
+								'type': 'boolean',
+								'description': 'Whether to await the result if it is a Promise. Set to false for fire-and-forget scripts that should not be awaited.',
+								'default': True,
+							},
 						},
 						'required': ['expression'],
 					},
@@ -633,7 +638,10 @@ class OpenBrowserServer:
 				)
 
 			elif tool_name == 'browser_execute_js':
-				return await self._execute_js(arguments['expression'])
+				return await self._execute_js(
+					arguments['expression'],
+					await_promise=arguments.get('await_promise', True),
+				)
 
 		return f'Unknown tool: {tool_name}'
 
@@ -1156,7 +1164,7 @@ class OpenBrowserServer:
 			logger.error(f'Accessibility tree extraction failed: {e}', exc_info=True)
 			return f'Error getting accessibility tree: {str(e)}'
 
-	async def _execute_js(self, expression: str) -> str:
+	async def _execute_js(self, expression: str, await_promise: bool = True) -> str:
 		"""Execute JavaScript on the current page and return the result."""
 		if not self.browser_session:
 			return 'Error: No browser session active'
@@ -1172,7 +1180,7 @@ class OpenBrowserServer:
 				params={
 					'expression': expression,
 					'returnByValue': True,
-					'awaitPromise': True,
+					'awaitPromise': await_promise,
 				},
 				session_id=cdp_session.session_id,
 			)
