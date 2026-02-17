@@ -285,22 +285,6 @@ class OpenBrowserServer:
 					},
 				),
 				types.Tool(
-					name='browser_extract_content',
-					description='Extract structured content from the current page based on a query',
-					inputSchema={
-						'type': 'object',
-						'properties': {
-							'query': {'type': 'string', 'description': 'What information to extract from the page'},
-							'extract_links': {
-								'type': 'boolean',
-								'description': 'Whether to include links in the extraction',
-								'default': False,
-							},
-						},
-						'required': ['query'],
-					},
-				),
-				types.Tool(
 					name='browser_scroll',
 					description='Scroll the page',
 					inputSchema={
@@ -659,9 +643,6 @@ class OpenBrowserServer:
 
 			elif tool_name == 'browser_get_state':
 				return await self._get_browser_state(arguments.get('compact', True))
-
-			elif tool_name == 'browser_extract_content':
-				return await self._extract_content(arguments['query'], arguments.get('extract_links', False))
 
 			elif tool_name == 'browser_scroll':
 				return await self._scroll(arguments.get('direction', 'down'))
@@ -1046,48 +1027,6 @@ class OpenBrowserServer:
 			result['interactive_elements'] = elements
 
 		return json.dumps(result, indent=2)
-
-	async def _extract_content(self, query: str, extract_links: bool = False) -> str:
-		"""Extract content from current page."""
-		if not self.llm:
-			return 'Error: LLM not initialized (set OPENAI_API_KEY)'
-
-		if not self.file_system:
-			return 'Error: FileSystem not initialized'
-
-		if not self.browser_session:
-			return 'Error: No browser session active'
-
-		if not self.tools:
-			return 'Error: Tools not initialized'
-
-		state = await self.browser_session.get_browser_state_summary()
-
-		# Use the extract action
-		# Create a dynamic action model that matches the tools's expectations
-		from pydantic import create_model
-
-		# Create action model dynamically
-		ExtractAction = create_model(
-			'ExtractAction',
-			__base__=ActionModel,
-			extract=dict[str, Any],
-		)
-
-		# Use model_validate because Pyright does not understand the dynamic model
-		action = ExtractAction.model_validate(
-			{
-				'extract': {'query': query, 'extract_links': extract_links},
-			}
-		)
-		action_result = await self.tools.act(
-			action=action,
-			browser_session=self.browser_session,
-			page_extraction_llm=self.llm,
-			file_system=self.file_system,
-		)
-
-		return action_result.extracted_content or 'No content extracted'
 
 	async def _scroll(self, direction: str = 'down') -> str:
 		"""Scroll the page."""
