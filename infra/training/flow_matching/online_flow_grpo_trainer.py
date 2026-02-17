@@ -37,7 +37,7 @@ from infra.training.shared.browser_env import BrowserEnvironment
 from infra.training.shared.formfactory_server import FormFactoryServer
 from infra.training.shared.online_reward import compute_online_reward
 from infra.training.shared.reward_functions import compute_grpo_advantages
-from infra.training.shared.utils import resolve_data_path, upload_checkpoint_to_s3
+from infra.training.shared.utils import persist_checkpoint, resolve_data_path
 
 logging.basicConfig(
     level=logging.INFO,
@@ -49,9 +49,10 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
 
 def decode_flow_tokens(token_ids: torch.Tensor) -> str:
-    """Decode flow token IDs back to text (inverse of hash-based tokenization)."""
+    """Decode flow token IDs back to text (byte-level: each ID is a byte 0-255)."""
     ids = token_ids.squeeze(0).tolist()
-    ids = [i for i in ids if i != 0]
+    # Clamp to valid byte range and strip padding (0 = null byte)
+    ids = [min(max(int(i), 0), 255) for i in ids if int(i) != 0]
     try:
         return bytes(ids).decode("utf-8", errors="replace")
     except Exception:
@@ -243,17 +244,8 @@ async def train():
         torch.save(model.state_dict(), str(model_path))
         logger.info(f"Model saved to {model_path}")
 
-        # Upload to S3 if configured
-        s3_bucket = os.environ.get("S3_CHECKPOINT_BUCKET", "")
-        if s3_bucket:
-            s3_config = {
-                "checkpoint_bucket": s3_bucket,
-                "checkpoint_prefix": os.environ.get(
-                    "S3_CHECKPOINT_PREFIX", "training/checkpoints"
-                ),
-                "region": os.environ.get("AWS_REGION", "ca-central-1"),
-            }
-            upload_checkpoint_to_s3(str(output_dir), s3_config, "online-flow-grpo")
+        # Persist checkpoint to Anyscale storage
+        persist_checkpoint(str(output_dir), "online-flow-grpo")
 
         logger.info("Online flow GRPO training complete")
 

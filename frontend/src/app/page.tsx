@@ -2,9 +2,11 @@
 
 import React, { useState, useCallback, useEffect } from "react";
 import { motion } from "framer-motion";
+import { useRouter } from "next/navigation";
 import { Sidebar, Header } from "@/components/layout";
 import { ChatInput, ChatMessages, getFileTypeFromName, LogPanel } from "@/components/chat";
 import { BrowserViewer } from "@/components/browser";
+import { useAuth } from "@/components/auth";
 import { useAppStore } from "@/store";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { API_BASE_URL } from "@/lib/config";
@@ -108,6 +110,8 @@ function parseAttachments(data: Record<string, unknown>): FileAttachment[] {
 }
 
 export default function Home() {
+  const router = useRouter();
+  const { authEnabled, isLoading: authLoading, isAuthenticated, idToken, getValidIdToken } = useAuth();
   const { 
     sidebarOpen, 
     messages, 
@@ -133,14 +137,29 @@ export default function Home() {
   const [isLoading, setIsLoading] = useState(false);
   const [currentTaskId, setCurrentTaskId] = useState<string | null>(null);
 
+  useEffect(() => {
+    if (!authLoading && authEnabled && !isAuthenticated) {
+      router.replace("/login");
+    }
+  }, [authEnabled, authLoading, isAuthenticated, router]);
+
   // Fetch available models on mount
   useEffect(() => {
     async function fetchModels() {
+      if (authEnabled && !isAuthenticated) {
+        return;
+      }
+
       setModelsLoading(true);
       setModelsError(null);
       
       try {
-        const response = await fetch(`${API_BASE_URL}/api/v1/models`);
+        const token = await getValidIdToken();
+        const headers: HeadersInit = token
+          ? { Authorization: `Bearer ${token}` }
+          : {};
+
+        const response = await fetch(`${API_BASE_URL}/api/v1/models`, { headers });
         if (!response.ok) {
           throw new Error("Failed to fetch models");
         }
@@ -164,8 +183,21 @@ export default function Home() {
       }
     }
     
-    fetchModels();
-  }, [setAvailableModels, setAvailableProviders, setModelsLoading, setModelsError, setSelectedModel, selectedModel]);
+    if (!authLoading) {
+      fetchModels();
+    }
+  }, [
+    authEnabled,
+    authLoading,
+    isAuthenticated,
+    getValidIdToken,
+    setAvailableModels,
+    setAvailableProviders,
+    setModelsLoading,
+    setModelsError,
+    setSelectedModel,
+    selectedModel,
+  ]);
 
   // Handle incoming WebSocket messages
   const handleWSMessage = useCallback((wsMessage: WSMessage) => {
@@ -306,7 +338,8 @@ export default function Home() {
 
   const { isConnected, sendMessage } = useWebSocket({
     onMessage: handleWSMessage,
-    autoConnect: true,
+    autoConnect: !authEnabled || Boolean(idToken),
+    authToken: authEnabled ? idToken : null,
   });
 
   const handleSendMessage = useCallback((content: string) => {
@@ -341,6 +374,17 @@ export default function Home() {
   }, [addMessage, sendMessage, agentType, maxSteps, useVision, selectedModel]);
 
   const hasMessages = messages.length > 0;
+
+  if (authEnabled && (authLoading || !isAuthenticated)) {
+    return (
+      <main className="min-h-screen bg-zinc-950 text-zinc-100 flex items-center justify-center px-6">
+        <div className="w-full max-w-md rounded-2xl border border-zinc-800 bg-zinc-900/60 p-8 backdrop-blur text-center">
+          <h1 className="text-lg font-semibold">Checking authentication...</h1>
+          <p className="mt-2 text-sm text-zinc-400">Redirecting to sign-in if needed.</p>
+        </div>
+      </main>
+    );
+  }
 
   return (
     <div className="flex h-screen overflow-hidden bg-zinc-950">

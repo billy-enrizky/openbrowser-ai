@@ -48,18 +48,17 @@ def load_quantized_model(model_name: str, config: dict):
         if config["bnb_4bit_compute_dtype"] == "bfloat16"
         else torch.float16
     )
-    bnb_config = BitsAndBytesConfig(
-        load_in_4bit=config["load_in_4bit"],
-        bnb_4bit_quant_type=config["bnb_4bit_quant_type"],
-        bnb_4bit_use_double_quant=config["bnb_4bit_use_double_quant"],
-        bnb_4bit_compute_dtype=compute_dtype,
-    )
-    model = AutoModelForCausalLM.from_pretrained(
-        model_name,
-        quantization_config=bnb_config,
-        device_map="auto",
-        torch_dtype=compute_dtype,
-    )
+    is_prequantized = "bnb" in model_name.lower()
+    load_kwargs = {"device_map": "auto", "dtype": compute_dtype}
+    if not is_prequantized:
+        bnb_config = BitsAndBytesConfig(
+            load_in_4bit=config["load_in_4bit"],
+            bnb_4bit_quant_type=config["bnb_4bit_quant_type"],
+            bnb_4bit_use_double_quant=config["bnb_4bit_use_double_quant"],
+            bnb_4bit_compute_dtype=compute_dtype,
+        )
+        load_kwargs["quantization_config"] = bnb_config
+    model = AutoModelForCausalLM.from_pretrained(model_name, **load_kwargs)
     return model
 
 
@@ -138,7 +137,10 @@ def compute_log_probs(
     mask = attention_mask[:, 1:][:, response_start:].float()
     masked_log_probs = response_log_probs * mask
 
-    return masked_log_probs.sum(dim=-1)  # [B]
+    # Mean over response tokens (not sum) to keep ratio = exp(policy - ref)
+    # in a numerically stable range -- sum over 500 tokens creates exp(>20) explosions
+    num_tokens = mask.sum(dim=-1).clamp(min=1)
+    return masked_log_probs.sum(dim=-1) / num_tokens  # [B]
 
 
 def parse_actions_from_rollout(rollout: str) -> list[str]:
@@ -193,12 +195,18 @@ def train():
     logger.info(f"Loading policy model: {model_name}")
     if is_peft_checkpoint:
         base_model = load_quantized_model(config["model_name"], config)
-        base_model = prepare_model_for_kbit_training(base_model)
-        model = PeftModel.from_pretrained(base_model, model_name)
+        base_model.config.use_cache = False
+        base_model = prepare_model_for_kbit_training(
+            base_model, use_gradient_checkpointing=True, gradient_checkpointing_kwargs={"use_reentrant": False}
+        )
+        model = PeftModel.from_pretrained(base_model, model_name, is_trainable=True)
         model.train()
     else:
         model = load_quantized_model(model_name, config)
-        model = prepare_model_for_kbit_training(model)
+        model.config.use_cache = False
+        model = prepare_model_for_kbit_training(
+            model, use_gradient_checkpointing=True, gradient_checkpointing_kwargs={"use_reentrant": False}
+        )
         lora_config = LoraConfig(
             r=config["lora_r"],
             lora_alpha=config["lora_alpha"],

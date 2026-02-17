@@ -2,15 +2,18 @@
 
 import React from "react";
 import { motion } from "framer-motion";
-import { Bell, Sparkles, User, Monitor } from "lucide-react";
+import { Bell, Sparkles, User, Monitor, LogOut } from "lucide-react";
 import { Button } from "@/components/ui";
 import { ModelSelector } from "./ModelSelector";
 import { useAppStore } from "@/store";
+import { useAuth } from "@/components/auth";
 import { cn } from "@/lib/utils";
 
 export function Header() {
   const { vncInfo, browserViewerOpen, toggleBrowserViewer } = useAppStore();
+  const { authEnabled, user, logout } = useAuth();
   const hasVncSession = !!vncInfo;
+  const userLabel = user?.email || user?.name || user?.username || "User";
 
   return (
     <header className="h-16 border-b border-zinc-800/50 bg-zinc-900/50 backdrop-blur-xl relative z-[9999]">
@@ -94,9 +97,23 @@ export function Header() {
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
             className="w-9 h-9 rounded-full bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center"
+            title={userLabel}
           >
             <User className="w-5 h-5 text-white" />
           </motion.button>
+
+          {authEnabled && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={logout}
+              className="text-zinc-300 hover:text-zinc-100"
+              title="Sign out"
+            >
+              <LogOut className="w-4 h-4" />
+              <span className="ml-2">Sign out</span>
+            </Button>
+          )}
         </div>
       </div>
     </header>
