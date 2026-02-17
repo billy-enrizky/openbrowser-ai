@@ -197,6 +197,7 @@ async def train():
     max_seq_length = model_config["max_seq_length"]
     num_gen_steps = grpo_config.get("num_generation_steps", 10)
     gen_temperature = grpo_config.get("generation_temperature", 0.7)
+    confidence_noise_std = grpo_config.get("confidence_noise_std", 0.0)
     action_timeout = grpo_config.get("action_timeout_s", 5.0)
     grad_clip = grpo_config.get("grad_clip", 1.0)
 
@@ -272,6 +273,7 @@ async def train():
                         seq_length=gen_length,
                         num_steps=num_gen_steps,
                         temperature=gen_temperature,
+                        confidence_noise_std=confidence_noise_std,
                     )
                     trajectories.append(trajectory)
                     text = tokenizer.decode(
