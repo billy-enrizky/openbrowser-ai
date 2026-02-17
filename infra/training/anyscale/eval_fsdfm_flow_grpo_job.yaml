@@ -1,5 +1,5 @@
 name: openbrowser-eval-fsdfm-flow-grpo
-entrypoint: python -m infra.training.flow_matching.eval_fsdfm_sft
+entrypoint: bash -c "python -m infra.eval.scripts.download_datasets --datasets formfactory && python -m infra.training.flow_matching.eval_fsdfm_sft"
 containerfile: infra/training/anyscale/Containerfile.online-fsdfm-grpo
 compute_config:
   cloud: "Anyscale Cloud"
