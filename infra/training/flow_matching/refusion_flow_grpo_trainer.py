@@ -386,6 +386,7 @@ async def train():
                             model=policy_model,
                             step=step,
                             condition_length=traj.condition_length,
+                            temperature=gen_temperature,
                         )  # [B]
 
                         # Guard: skip if log_prob is NaN/Inf
@@ -407,6 +408,7 @@ async def train():
                                     model=ref_model,
                                     step=step,
                                     condition_length=traj.condition_length,
+                                    temperature=gen_temperature,
                                 )  # [B]
                             log_r = ref_log_prob - log_prob
                             kl_loss = (torch.exp(log_r) - log_r - 1).mean()
