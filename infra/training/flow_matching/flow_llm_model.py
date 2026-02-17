@@ -222,6 +222,7 @@ class FlowLLM:
         seq_length: int,
         num_steps: int = 10,
         temperature: float = 0.7,
+        confidence_noise_std: float = 0.0,
     ) -> UnmaskingTrajectory:
         """Generate via iterative unmasking, recording the trajectory.
 
@@ -294,6 +295,12 @@ class FlowLLM:
             probs = F.softmax(logits, dim=-1)
             confidences = probs.gather(2, predicted.unsqueeze(-1)).squeeze(-1)
             confidences[is_unmasked] = -float("inf")
+
+            # Add noise to confidence scores for diverse position selection
+            if confidence_noise_std > 0:
+                noise = torch.randn_like(confidences) * confidence_noise_std
+                noise[is_unmasked] = 0.0
+                confidences = confidences + noise
 
             if num_to_unmask > 0:
                 remaining_masked = (~is_unmasked).sum(dim=-1).min().item()
