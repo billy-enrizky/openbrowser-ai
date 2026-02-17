@@ -682,6 +682,7 @@ class OpenBrowserServer:
 
 		logger.debug('Browser session initialized')
 
+
 	async def _navigate(self, url: str, new_tab: bool = False) -> str:
 		"""Navigate to a URL."""
 		if not self.browser_session:
