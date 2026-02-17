@@ -169,7 +169,7 @@ def parse_rollout_to_actions(
             if idx is not None:
                 actions.append({
                     "action": "input_text",
-                    "params": {"index": idx, "text": value, "clear": True},
+                    "params": {"index": idx, "text": value, "clear": True, "field_name": field},
                 })
             else:
                 logger.warning(f"Could not resolve element for field '{field}'")
@@ -184,7 +184,7 @@ def parse_rollout_to_actions(
             if idx is not None:
                 actions.append({
                     "action": "select_dropdown_option",
-                    "params": {"index": idx, "text": option},
+                    "params": {"index": idx, "text": option, "field_name": field},
                 })
             else:
                 logger.warning(f"Could not resolve element for field '{field}'")
@@ -199,7 +199,7 @@ def parse_rollout_to_actions(
             if idx is not None:
                 actions.append({
                     "action": "click_element",
-                    "params": {"index": idx},
+                    "params": {"index": idx, "field_name": field, "is_checkbox": True},
                 })
             else:
                 logger.warning(f"Could not resolve element for checkbox '{field}'")
@@ -233,7 +233,7 @@ def parse_rollout_to_actions(
             if idx is not None:
                 actions.append({
                     "action": "input_text",
-                    "params": {"index": idx, "text": value, "clear": True},
+                    "params": {"index": idx, "text": value, "clear": True, "field_name": field},
                 })
             else:
                 logger.warning(f"Could not resolve element for field '{field}'")
@@ -248,7 +248,7 @@ def parse_rollout_to_actions(
             if idx is not None:
                 actions.append({
                     "action": "input_text",
-                    "params": {"index": idx, "text": value, "clear": True},
+                    "params": {"index": idx, "text": value, "clear": True, "field_name": field},
                 })
             else:
                 logger.warning(f"Could not resolve element for field '{field}'")
