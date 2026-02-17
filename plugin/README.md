@@ -70,7 +70,6 @@ Add to your project's `.mcp.json`:
 | `browser_get_state` | Get page metadata and interactive elements (compact or full) |
 | `browser_get_text` | Get page content as clean markdown |
 | `browser_grep` | Search page text with regex or string patterns |
-| `browser_extract_content` | Extract structured data using an LLM (requires API key) |
 
 ### DOM Inspection
 
@@ -97,22 +96,14 @@ Add to your project's `.mcp.json`:
 | `browser_close_session` | Close a specific session |
 | `browser_close_all` | Close all browser sessions |
 
-### Agent
-
-| Tool | Description |
-|------|-------------|
-| `retry_with_openbrowser_agent` | Execute a task using the autonomous AI agent (requires API key) |
-
 ## Configuration
 
-Some tools require additional configuration via environment variables:
+Optional environment variables:
 
-| Variable | Required For | Description |
-|----------|-------------|-------------|
-| `OPENAI_API_KEY` | `browser_extract_content`, `retry_with_openbrowser_agent` | OpenAI API key for LLM-powered features |
-| `ANTHROPIC_API_KEY` | Alternative to OpenAI | Anthropic API key |
-| `OPENBROWSER_HEADLESS` | Optional | Set to `true` to run browser without GUI |
-| `OPENBROWSER_ALLOWED_DOMAINS` | Optional | Comma-separated domain whitelist |
+| Variable | Description |
+|----------|-------------|
+| `OPENBROWSER_HEADLESS` | Set to `true` to run browser without GUI |
+| `OPENBROWSER_ALLOWED_DOMAINS` | Comma-separated domain whitelist |
 
 Set these in your `.mcp.json`:
 
@@ -123,7 +114,6 @@ Set these in your `.mcp.json`:
       "command": "uvx",
       "args": ["openbrowser-ai[mcp]", "--mcp"],
       "env": {
-        "OPENAI_API_KEY": "sk-...",
         "OPENBROWSER_HEADLESS": "true"
       }
     }
@@ -146,8 +136,6 @@ When a browser session is active, three MCP resources are available:
 **Browser does not launch**: Ensure Chrome or Chromium is installed and accessible from PATH.
 
 **MCP server not found**: Verify `uvx` is installed (`pip install uv`) and `openbrowser-ai` is available (`uvx openbrowser-ai --version`).
-
-**Tools return errors about LLM**: `browser_extract_content` and `retry_with_openbrowser_agent` require an LLM API key. All other tools work without one.
 
 **Session timeout**: Browser sessions auto-close after 10 minutes of inactivity. Use any tool to keep the session alive.
 
