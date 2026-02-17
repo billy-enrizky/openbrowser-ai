@@ -707,7 +707,9 @@ def discrete_euler_solve(
         if temperature != 1.0 and temperature > 0:
             logits = logits / temperature
 
-        probs = F.softmax(logits, dim=-1)  # [B, L, V]
+        # float32 softmax to prevent bf16 overflow -> NaN
+        probs = F.softmax(logits.float(), dim=-1)  # [B, L, V]
+        del logits
 
         # Compute jump rates
         sched = scheduler(t)
@@ -735,7 +737,15 @@ def discrete_euler_solve(
         # Zero out current token probability for off-diagonal sampling
         current_one_hot = F.one_hot(x_t, vocab_size).float()
         off_diag_probs = (probs - current_one_hot * probs).clamp(min=0)
-        off_diag_probs = off_diag_probs / off_diag_probs.sum(dim=-1, keepdim=True).clamp(min=1e-10)
+        del probs
+        row_sums = off_diag_probs.sum(dim=-1, keepdim=True)
+        # Guard: if row sum is 0 or NaN, fall back to uniform distribution
+        bad_rows = (row_sums < 1e-10) | torch.isnan(row_sums)
+        off_diag_probs = torch.where(
+            bad_rows.expand_as(off_diag_probs),
+            torch.ones_like(off_diag_probs) / vocab_size,
+            off_diag_probs / row_sums.clamp(min=1e-10),
+        )
 
         # Sample new tokens
         new_tokens = torch.multinomial(
@@ -896,7 +906,9 @@ def discrete_euler_solve_with_trajectory(
         logits = model(x_t, t)  # [B, L, V]
         if temperature != 1.0 and temperature > 0:
             logits = logits / temperature
-        probs = F.softmax(logits, dim=-1)
+        # float32 softmax to prevent bf16 overflow -> NaN
+        probs = F.softmax(logits.float(), dim=-1)
+        del logits
 
         # Jump rates
         sched = scheduler(t)
@@ -919,7 +931,15 @@ def discrete_euler_solve_with_trajectory(
         # Sample new tokens from off-diagonal posterior
         current_one_hot = F.one_hot(x_t, vocab_size).float()
         off_diag_probs = (probs - current_one_hot * probs).clamp(min=0)
-        off_diag_probs = off_diag_probs / off_diag_probs.sum(dim=-1, keepdim=True).clamp(min=1e-10)
+        del probs
+        row_sums = off_diag_probs.sum(dim=-1, keepdim=True)
+        # Guard: if row sum is 0 or NaN, fall back to uniform distribution
+        bad_rows = (row_sums < 1e-10) | torch.isnan(row_sums)
+        off_diag_probs = torch.where(
+            bad_rows.expand_as(off_diag_probs),
+            torch.ones_like(off_diag_probs) / vocab_size,
+            off_diag_probs / row_sums.clamp(min=1e-10),
+        )
 
         new_tokens = torch.multinomial(
             off_diag_probs.view(-1, vocab_size), num_samples=1
@@ -1003,7 +1023,8 @@ def compute_discrete_step_log_prob(
 
     # Forward pass (gradients flow if model is in train mode)
     logits = model(x_t, t)  # [B, L, V]
-    probs = F.softmax(logits, dim=-1)  # [B, L, V]
+    # float32 softmax to prevent bf16 overflow -> NaN
+    probs = F.softmax(logits.float(), dim=-1)  # [B, L, V]
     del logits  # Free [B, L, V] logits immediately
 
     # Extract the two probability values we need, then free the full probs tensor
