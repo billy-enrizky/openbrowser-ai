@@ -1,0 +1,43 @@
+FROM anyscale/ray:2.44.1-slim-py312-cu128
+
+# Install Chromium system deps + browser
+RUN sudo apt-get update && sudo apt-get install -y \
+    libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 \
+    libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libgbm1 \
+    libasound2 libpango-1.0-0 libpangocairo-1.0-0 libgtk-3-0 \
+    fonts-liberation xdg-utils wget && \
+    sudo rm -rf /var/lib/apt/lists/*
+
+# Upgrade numpy + reinstall scipy/pyarrow so all C extensions are
+# ABI-compatible (Ray base image ships numpy 1.x; torch requires numpy>=2)
+RUN pip install --no-cache-dir \
+    "numpy>=2.0,<2.5" \
+    "scipy>=1.14" \
+    "pyarrow>=17.0"
+
+# Install Python deps (numpy already at 2.x, compatible with torch)
+RUN pip install --no-cache-dir \
+    "torch>=2.0" \
+    "transformers>=4.45" \
+    flask \
+    playwright \
+    "openbrowser-ai" \
+    "cdp-use" \
+    "bubus>=1.5.6" \
+    "httpx>=0.28.1" \
+    "websockets>=15.0.1" \
+    langgraph \
+    "langchain-core>=0.3.0" \
+    "pydantic>=2.0.0" \
+    aiofiles \
+    "huggingface_hub>=0.20" \
+    "einops"
+
+# Install uv (openbrowser uses uvx at runtime for browser management)
+RUN pip install --no-cache-dir uv
+
+# Install Chromium browser for Playwright and symlink to system path
+# (openbrowser's LocalBrowserWatchdog searches /usr/bin/chromium)
+RUN playwright install chromium && \
+    CHROME_PATH=$(python -c "from playwright.sync_api import sync_playwright; pw=sync_playwright().start(); print(pw.chromium.executable_path); pw.stop()" 2>/dev/null) && \
+    if [ -n "$CHROME_PATH" ] && [ -f "$CHROME_PATH" ]; then sudo ln -sf "$CHROME_PATH" /usr/bin/chromium; fi
