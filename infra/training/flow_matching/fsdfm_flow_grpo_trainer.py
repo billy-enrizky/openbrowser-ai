@@ -366,6 +366,7 @@ async def train():
                             scheduler=scheduler,
                             vocab_size=vocab_size,
                             response_mask=response_mask,
+                            temperature=gen_temperature,
                         )  # [1]
 
                         # Guard: skip if log_prob is NaN/Inf
@@ -394,6 +395,7 @@ async def train():
                                     scheduler=scheduler,
                                     vocab_size=vocab_size,
                                     response_mask=response_mask,
+                                    temperature=gen_temperature,
                                 )  # [1]
                             ref_model.to("cpu")
                             torch.cuda.empty_cache()
