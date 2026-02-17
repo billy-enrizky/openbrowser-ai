@@ -220,6 +220,35 @@ FLOW_GRPO_FSDFM_CONFIG = {
     },
 }
 
+# --- Flow-GRPO for ReFusion 8B (masked diffusion policy gradients) ---
+# Adapts Flow-GRPO to ReFusion's iterative unmasking process.  Per-step
+# log-probabilities are computed at newly-unmasked positions, enabling
+# PPO-style clipped policy gradients aligned with the generation trajectory.
+# Fixes the generation/optimization mismatch in the existing GRPO trainer
+# which used autoregressive log-probs despite masked diffusion generation.
+FLOW_GRPO_REFUSION_CONFIG = {
+    "group_size": 2,
+    "learning_rate": 1e-5,
+    "num_epochs": int(os.environ.get("NUM_EPOCHS", "1")),
+    "kl_coeff": 0.04,
+    "clip_range": 0.2,
+    "adv_clip_max": 5.0,
+    "bf16": True,
+    "logging_steps": 5,
+    "grad_clip": 1.0,
+    "num_generation_steps": 10,
+    "generation_temperature": 0.7,
+    "formfactory_port": int(os.environ.get("FORMFACTORY_PORT", "5050")),
+    "browser_headless": True,
+    "action_timeout_s": 5,
+    "rollout_timeout_s": 30,
+    "reward_weights": {
+        "task_completion": 0.4,
+        "field_accuracy": 0.4,
+        "execution_completeness": 0.2,
+    },
+}
+
 DATA_CONFIG = {
     "train_file": os.environ.get("FLOW_TRAIN_FILE", "data/processed/formfactory_sft.jsonl"),
     "eval_split": 0.1,
