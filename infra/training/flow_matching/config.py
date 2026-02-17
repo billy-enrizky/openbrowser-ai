@@ -209,6 +209,7 @@ FLOW_GRPO_FSDFM_CONFIG = {
     "grad_clip": 1.0,
     "num_generation_steps": 64,        # Denoising steps (T=64, must match eval; T=32 still produces noise)
     "generation_temperature": 1.0,     # Increased from 0.7: old GRPO at 1.0 achieved 74% nonzero, 0.7 got 18%, 0.3 got 7%
+    "num_sampled_timesteps": 8,        # Denoising reduction: sample K random steps from T-step trajectory (Flow-GRPO paper)
     "formfactory_port": int(os.environ.get("FORMFACTORY_PORT", "5050")),
     "browser_headless": True,
     "action_timeout_s": 5,
