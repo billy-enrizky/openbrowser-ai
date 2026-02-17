@@ -26,7 +26,6 @@ Or as an MCP server in Claude Desktop or other MCP clients:
 import os
 import sys
 
-from openbrowser.llm import ChatAWSBedrock
 
 # Set environment variables BEFORE any openbrowser imports to prevent early logging
 os.environ['OPENBROWSER_LOGGING_LEVEL'] = 'critical'
@@ -91,16 +90,11 @@ _configure_mcp_server_logging()
 logging.disable(logging.CRITICAL)
 
 # Import openbrowser modules
-from openbrowser import ActionModel, Agent
 from openbrowser.browser import BrowserProfile, BrowserSession
 from openbrowser.browser.events import ScrollToTextEvent
-from openbrowser.config import get_default_llm, get_default_profile, load_openbrowser_config
+from openbrowser.config import get_default_profile, load_openbrowser_config
 from openbrowser.dom.markdown_extractor import extract_clean_markdown
 from openbrowser.dom.service import DomService
-from openbrowser.filesystem.file_system import FileSystem
-from openbrowser.llm.google.chat import ChatGoogle
-from openbrowser.llm.openai.chat import ChatOpenAI
-from openbrowser.tools.service import Tools
 
 logger = logging.getLogger(__name__)
 
@@ -199,11 +193,7 @@ class OpenBrowserServer:
 
 		self.server = Server('openbrowser')
 		self.config = load_openbrowser_config()
-		self.agent: Agent | None = None
 		self.browser_session: BrowserSession | None = None
-		self.tools: Tools | None = None
-		self.llm: ChatOpenAI | ChatGoogle | None = None
-		self.file_system: FileSystem | None = None
 		self._telemetry = ProductTelemetry()
 		self._start_time = time.time()
 
