@@ -4,10 +4,11 @@ import logging
 from contextlib import asynccontextmanager
 from uuid import uuid4
 
-from fastapi import FastAPI, WebSocket
+from fastapi import Depends, FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import projects, tasks
+from app.core.auth import get_current_user
 from app.core.config import settings
 from app.models.schemas import AvailableModelsResponse, LLMModel
 from app.websocket.handler import handle_websocket
@@ -45,8 +46,8 @@ app.add_middleware(
 )
 
 # Include routers
-app.include_router(tasks.router, prefix="/api/v1")
-app.include_router(projects.router, prefix="/api/v1")
+app.include_router(tasks.router, prefix="/api/v1", dependencies=[Depends(get_current_user)])
+app.include_router(projects.router, prefix="/api/v1", dependencies=[Depends(get_current_user)])
 
 
 @app.get("/")
@@ -65,7 +66,7 @@ async def health():
     return {"status": "healthy"}
 
 
-@app.get("/api/v1/models", response_model=AvailableModelsResponse)
+@app.get("/api/v1/models", response_model=AvailableModelsResponse, dependencies=[Depends(get_current_user)])
 async def get_available_models():
     """Get available LLM models based on configured API keys."""
     available_models = settings.get_available_models()
@@ -122,4 +123,3 @@ if __name__ == "__main__":
         port=settings.PORT,
         reload=settings.DEBUG,
     )
-
