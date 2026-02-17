@@ -22,11 +22,11 @@ from transformers import (
     TrainingArguments,
 )
 
-from infra.training.finetuning.config import DATA_CONFIG, S3_CONFIG, SFT_CONFIG
+from infra.training.finetuning.config import DATA_CONFIG, SFT_CONFIG
 from infra.training.shared.utils import (
     format_prompt_parts,
+    persist_checkpoint,
     resolve_data_path,
-    upload_checkpoint_to_s3,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -123,22 +123,24 @@ def train():
         if config["bnb_4bit_compute_dtype"] == "bfloat16"
         else torch.float16
     )
-    bnb_config = BitsAndBytesConfig(
-        load_in_4bit=config["load_in_4bit"],
-        bnb_4bit_quant_type=config["bnb_4bit_quant_type"],
-        bnb_4bit_use_double_quant=config["bnb_4bit_use_double_quant"],
-        bnb_4bit_compute_dtype=compute_dtype,
-    )
+    is_prequantized = "bnb" in config["model_name"].lower()
+    load_kwargs = {"device_map": "auto", "torch_dtype": compute_dtype}
+    if not is_prequantized:
+        bnb_config = BitsAndBytesConfig(
+            load_in_4bit=config["load_in_4bit"],
+            bnb_4bit_quant_type=config["bnb_4bit_quant_type"],
+            bnb_4bit_use_double_quant=config["bnb_4bit_use_double_quant"],
+            bnb_4bit_compute_dtype=compute_dtype,
+        )
+        load_kwargs["quantization_config"] = bnb_config
 
-    model = AutoModelForCausalLM.from_pretrained(
-        config["model_name"],
-        quantization_config=bnb_config,
-        device_map="auto",
-        torch_dtype=compute_dtype,
-    )
+    model = AutoModelForCausalLM.from_pretrained(config["model_name"], **load_kwargs)
 
     # Prepare model for QLoRA training
-    model = prepare_model_for_kbit_training(model)
+    model.config.use_cache = False
+    model = prepare_model_for_kbit_training(
+        model, use_gradient_checkpointing=True, gradient_checkpointing_kwargs={"use_reentrant": False}
+    )
 
     # Apply LoRA
     lora_config = LoraConfig(
@@ -185,7 +187,7 @@ def train():
         logging_steps=config["logging_steps"],
         save_steps=config["save_steps"],
         eval_steps=config["eval_steps"],
-        evaluation_strategy="steps",
+        eval_strategy="steps",
         save_total_limit=3,
         report_to="none",
         gradient_checkpointing=True,
@@ -207,8 +209,8 @@ def train():
     tokenizer.save_pretrained(final_dir)
     logger.info(f"SFT training complete. Model saved to {final_dir}")
 
-    # Upload checkpoint to S3
-    upload_checkpoint_to_s3(final_dir, S3_CONFIG, "sft")
+    # Persist checkpoint to Anyscale storage
+    persist_checkpoint(final_dir, "sft")
 
 
 if __name__ == "__main__":
