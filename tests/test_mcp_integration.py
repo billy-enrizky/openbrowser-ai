@@ -17,6 +17,9 @@ import asyncio
 import json
 import logging
 import tempfile
+import threading
+from functools import partial
+from http.server import HTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -197,7 +200,7 @@ def mcp_server_with_browser(test_html_path, monkeypatch_module):
         loop.close()
 
 
-@pytest.fixture()
+@pytest.fixture(scope="module")
 def monkeypatch_module():
     """Module-scoped monkeypatch (workaround for scope mismatch)."""
     from _pytest.monkeypatch import MonkeyPatch
