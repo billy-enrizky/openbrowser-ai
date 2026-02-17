@@ -684,31 +684,6 @@ class OpenBrowserServer:
 		# Track the session for management
 		self._track_session(self.browser_session)
 
-		# Create tools for direct actions
-		self.tools = Tools()
-
-		# Initialize LLM from config
-		llm_config = get_default_llm(self.config)
-		model_provider = llm_config.get('model_provider') or os.getenv('MODEL_PROVIDER', '')
-		if model_provider.lower() == 'google':
-			google_api_key = llm_config.get('api_key') or os.getenv('GOOGLE_API_KEY')
-			if google_api_key:
-				self.llm = ChatGoogle(
-					model=llm_config.get('model', 'gemini-2.5-flash'),
-					api_key=google_api_key,
-					temperature=llm_config.get('temperature', 0.7),
-				)
-		elif api_key := llm_config.get('api_key') or os.getenv('OPENAI_API_KEY'):
-			self.llm = ChatOpenAI(
-				model=llm_config.get('model', 'gpt-4o-mini'),
-				api_key=api_key,
-				temperature=llm_config.get('temperature', 0.7),
-			)
-
-		# Initialize FileSystem for extraction actions
-		file_system_path = profile_config.get('file_system_path', '~/.openbrowser-mcp')
-		self.file_system = FileSystem(base_dir=Path(file_system_path).expanduser())
-
 		logger.debug('Browser session initialized')
 
 	async def _navigate(self, url: str, new_tab: bool = False) -> str:
