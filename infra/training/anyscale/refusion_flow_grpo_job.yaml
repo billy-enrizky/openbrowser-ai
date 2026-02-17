@@ -1,5 +1,5 @@
 name: openbrowser-refusion-flow-grpo
-entrypoint: python -m infra.training.flow_matching.refusion_flow_grpo_trainer
+entrypoint: bash -c "python -m infra.eval.scripts.download_datasets --datasets formfactory && python -m infra.training.flow_matching.refusion_flow_grpo_trainer"
 containerfile: infra/training/anyscale/Containerfile.online-grpo
 compute_config:
   cloud: "Anyscale Cloud"
