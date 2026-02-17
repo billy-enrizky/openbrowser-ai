@@ -274,10 +274,18 @@ async def train():
 
                     actions = parse_rollout_to_actions(rollout_text, element_map)
                     if not actions:
-                        logger.debug("No valid actions parsed from rollout %d", g)
+                        logger.warning(
+                            "No valid actions parsed from rollout %d. "
+                            "Generated text (first 300 chars): %.300s",
+                            g, rollout_text,
+                        )
                         rewards.append(0.0)
                         continue
 
+                    logger.info(
+                        "Rollout %d: %d actions parsed. Text (first 200 chars): %.200s",
+                        g, len(actions), rollout_text,
+                    )
                     outcome = await browser_env.execute_actions(
                         actions, timeout_per_action=action_timeout
                     )
@@ -287,6 +295,12 @@ async def train():
                         weights=grpo_config.get("reward_weights"),
                     )
                     rewards.append(reward)
+                    logger.info(
+                        "Rollout %d: reward=%.3f (actions_executed=%d/%d)",
+                        g, reward,
+                        outcome.actions_executed if hasattr(outcome, 'actions_executed') else -1,
+                        len(actions),
+                    )
 
                 epoch_rewards.extend(rewards)
 
