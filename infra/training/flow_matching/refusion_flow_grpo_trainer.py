@@ -33,6 +33,7 @@ import asyncio
 import json
 import logging
 import os
+import random
 from pathlib import Path
 
 import torch
@@ -200,6 +201,7 @@ async def train():
     confidence_noise_std = grpo_config.get("confidence_noise_std", 0.0)
     action_timeout = grpo_config.get("action_timeout_s", 5.0)
     grad_clip = grpo_config.get("grad_clip", 1.0)
+    num_sampled_timesteps = grpo_config.get("num_sampled_timesteps", 8)
 
     # ---------------------------------------------------------------
     # Start FormFactory server and browser
@@ -373,9 +375,16 @@ async def train():
                     if adv_g.abs().item() < 1e-10:
                         continue
 
-                    num_steps_g = max(len(traj.steps), 1)
+                    # Denoising reduction: sample K random timesteps
+                    # instead of processing all T steps (Flow-GRPO paper)
+                    num_sampled = min(num_sampled_timesteps, len(traj.steps))
+                    sampled_indices = sorted(
+                        random.sample(range(len(traj.steps)), num_sampled)
+                    )
+                    sampled_steps = [traj.steps[idx] for idx in sampled_indices]
+                    num_steps_g = max(len(sampled_steps), 1)
 
-                    for step in traj.steps:
+                    for step in sampled_steps:
                         # Current policy log-prob (WITH gradients)
                         log_prob = compute_unmasking_step_log_prob(
                             model=policy_model,
