@@ -1,5 +1,5 @@
 # -----------------------------------------------------------------------------
-# Cognito: User Pool + App Client + Domain (for future auth)
+# Cognito: User Pool + App Client + Domain (Hosted UI + PKCE)
 # -----------------------------------------------------------------------------
 
 resource "random_id" "cognito_suffix" {
@@ -8,6 +8,15 @@ resource "random_id" "cognito_suffix" {
 
 locals {
   cognito_domain_prefix = var.cognito_domain_prefix != "" ? var.cognito_domain_prefix : "${var.project_name}-${random_id.cognito_suffix.hex}"
+  frontend_base_url     = var.frontend_domain_name != "" ? "https://${var.frontend_domain_name}" : "https://${aws_cloudfront_distribution.frontend.domain_name}"
+  cognito_callback_urls = length(var.cognito_callback_urls) > 0 ? var.cognito_callback_urls : [
+    "${local.frontend_base_url}/auth/callback",
+    "http://localhost:3000/auth/callback",
+  ]
+  cognito_logout_urls = length(var.cognito_logout_urls) > 0 ? var.cognito_logout_urls : [
+    "${local.frontend_base_url}/login",
+    "http://localhost:3000/login",
+  ]
 }
 
 resource "aws_cognito_user_pool" "main" {
@@ -31,13 +40,20 @@ resource "aws_cognito_user_pool_client" "app" {
   name         = "${var.project_name}-app-client"
   user_pool_id = aws_cognito_user_pool.main.id
 
-  generate_secret = false
+  generate_secret               = false
+  prevent_user_existence_errors = "ENABLED"
 
   explicit_auth_flows = [
     "ALLOW_USER_SRP_AUTH",
     "ALLOW_REFRESH_TOKEN_AUTH",
     "ALLOW_USER_PASSWORD_AUTH"
   ]
+
+  allowed_oauth_flows_user_pool_client = true
+  allowed_oauth_flows                  = ["code"]
+  allowed_oauth_scopes                 = var.cognito_oauth_scopes
+  callback_urls                        = local.cognito_callback_urls
+  logout_urls                          = local.cognito_logout_urls
 
   supported_identity_providers = ["COGNITO"]
 }

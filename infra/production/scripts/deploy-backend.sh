@@ -6,7 +6,8 @@ set -euxo pipefail
 # - Builds and pushes backend Docker image
 # - Applies full Terraform infra (VPC, ALB, EC2 backend, API Gateway, etc.)
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 TF_DIR="$ROOT_DIR/infra/production/terraform"
 REGION="ca-central-1"
 
@@ -34,4 +35,3 @@ docker push "$REPO:latest"
 # 6) Apply full infra (creates/updates VPC, ALB, EC2 backend, API Gateway, etc.)
 cd "$TF_DIR"
 terraform apply
-

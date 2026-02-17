@@ -15,7 +15,7 @@ resource "aws_secretsmanager_secret" "backend_keys" {
 resource "aws_secretsmanager_secret_version" "backend_keys" {
   count = var.secrets_manager_secret_name == "" ? 1 : 0
 
-  secret_id     = aws_secretsmanager_secret.backend_keys[0].id
+  secret_id = aws_secretsmanager_secret.backend_keys[0].id
   secret_string = jsonencode({
     OPENAI_API_KEY    = "replace-me"
     ANTHROPIC_API_KEY = "replace-me"

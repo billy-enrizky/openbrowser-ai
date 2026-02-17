@@ -6,6 +6,23 @@ resource "aws_apigatewayv2_api" "http" {
   name          = "${var.project_name}-api"
   protocol_type = "HTTP"
   description   = "OpenBrowser backend API"
+
+  cors_configuration {
+    allow_credentials = false
+    allow_headers = [
+      "authorization",
+      "content-type",
+      "x-amz-date",
+      "x-api-key",
+      "x-amz-security-token",
+    ]
+    allow_methods = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
+    allow_origins = var.cors_origins
+    expose_headers = [
+      "content-type",
+    ]
+    max_age = 3600
+  }
 }
 
 resource "aws_apigatewayv2_vpc_link" "backend" {
@@ -16,12 +33,12 @@ resource "aws_apigatewayv2_vpc_link" "backend" {
 }
 
 resource "aws_apigatewayv2_integration" "backend" {
-  api_id           = aws_apigatewayv2_api.http.id
-  integration_type = "HTTP_PROXY"
-  integration_uri  = aws_lb_listener.http.arn
-  integration_method = "ANY"
-  connection_type  = "VPC_LINK"
-  connection_id    = aws_apigatewayv2_vpc_link.backend.id
+  api_id                 = aws_apigatewayv2_api.http.id
+  integration_type       = "HTTP_PROXY"
+  integration_uri        = aws_lb_listener.http.arn
+  integration_method     = "ANY"
+  connection_type        = "VPC_LINK"
+  connection_id          = aws_apigatewayv2_vpc_link.backend.id
   payload_format_version = "1.0"
   timeout_milliseconds   = 30000
 }
@@ -48,7 +65,10 @@ resource "aws_apigatewayv2_authorizer" "jwt" {
   authorizer_type = "JWT"
   name            = "${var.project_name}-jwt"
 
-  identity_sources = ["$request.header.Authorization"]
+  identity_sources = [
+    "$request.header.Authorization",
+    "$request.querystring.token",
+  ]
 
   jwt_configuration {
     audience = [aws_cognito_user_pool_client.app.id]
