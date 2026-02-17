@@ -345,3 +345,48 @@ class FlowLLM:
 
         trajectory.final_tokens = current
         return trajectory
+
+
+def compute_unmasking_step_log_prob(
+    model,
+    step: UnmaskingTrajectoryStep,
+    condition_length: int,
+) -> torch.Tensor:
+    """Compute log-probability for one unmasking step (with gradient flow).
+
+    Forward-passes the model with the recorded masked state, extracts
+    response logits, and sums log_softmax at the positions that were
+    newly unmasked in this step.
+
+    Args:
+        model: ReFusion policy or reference model (PEFT/QLoRA).
+        step: Recorded trajectory step with masked_state and unmasked info.
+        condition_length: L_c (prompt token count).
+
+    Returns:
+        [B] tensor of per-sample log-probabilities for this step.
+    """
+    B = step.masked_state.shape[0]
+    device = step.masked_state.device
+
+    # Forward pass (no labels, no prompt_lengths -- just logits)
+    outputs = model(
+        input_ids=step.masked_state,
+        attention_mask=step.attention_mask,
+    )
+    # Response logits only
+    response_logits = outputs.logits[:, condition_length:, :]  # [B, L_r, V]
+    log_probs = F.log_softmax(response_logits, dim=-1)  # [B, L_r, V]
+
+    # Sum log-probs at newly-unmasked positions
+    step_log_prob = torch.zeros(B, device=device)
+    for b in range(B):
+        indices = step.newly_unmasked_indices[b]
+        tokens = step.unmasked_tokens[b]
+        if not indices:
+            continue
+        idx_t = torch.tensor(indices, dtype=torch.long, device=device)
+        tok_t = torch.tensor(tokens, dtype=torch.long, device=device)
+        step_log_prob[b] = log_probs[b, idx_t, tok_t].sum()
+
+    return step_log_prob
