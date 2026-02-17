@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased] - 2026-02-17 13:12:15
+
+### Fixed
+
+- Fix NaN/Inf crash in FS-DFM discrete Euler solver (`fsdfm_model.py`): compute softmax in float32 instead of bf16 to prevent overflow, add NaN guard on off-diagonal probabilities before `torch.multinomial` sampling (falls back to uniform distribution), applied to both `discrete_euler_solve` and `discrete_euler_solve_with_trajectory`
+- Fix float32 softmax in `compute_discrete_step_log_prob` for consistent numerical stability during training log-prob computation
+
+### Changed
+
+- Upgrade debug logging in both Flow-GRPO trainers (`fsdfm_flow_grpo_trainer.py`, `refusion_flow_grpo_trainer.py`): log generated text (first 300 chars) when no actions are parsed, log parsed action count and reward per rollout for diagnosing 0% reward issues
+
 ## [Unreleased] - 2026-02-17 17:53:45
 
 ### Fixed
