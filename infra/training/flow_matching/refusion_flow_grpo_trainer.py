@@ -250,7 +250,7 @@ async def train():
                 # Tokenize condition
                 condition_enc = tokenizer(
                     instruction,
-                    add_special_tokens=True,
+                    add_special_tokens=False,  # Must match eval (no special tokens for ReFusion)
                     truncation=True,
                     max_length=max_seq_length,
                     return_tensors="pt",
