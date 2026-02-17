@@ -1,5 +1,5 @@
 name: openbrowser-eval-sft
-entrypoint: python -m infra.training.finetuning.eval_sft
+entrypoint: bash -c "python -m infra.eval.scripts.download_datasets --datasets formfactory && python -m infra.training.finetuning.eval_sft"
 containerfile: infra/training/anyscale/Containerfile.online-grpo
 compute_config:
   cloud: "Anyscale Cloud"
