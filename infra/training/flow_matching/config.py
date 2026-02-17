@@ -240,6 +240,7 @@ FLOW_GRPO_REFUSION_CONFIG = {
     "num_generation_steps": 64,        # Denoising steps (T=64, must match eval; T=20 produces garbled text)
     "generation_temperature": 1.0,     # Increased from 0.7: masked diffusion too deterministic at 0.7, near-identical rollouts
     "confidence_noise_std": 0.1,       # Noise on confidence scores for diverse position unmasking order
+    "num_sampled_timesteps": 8,        # Denoising reduction: sample K random steps from trajectory (Flow-GRPO paper)
     "formfactory_port": int(os.environ.get("FORMFACTORY_PORT", "5050")),
     "browser_headless": True,
     "action_timeout_s": 5,
