@@ -374,6 +374,12 @@ async def train():
                     if len(traj.steps) == 0:
                         continue
 
+                    # Skip gradient computation when advantage is exactly 0
+                    # (no learning signal). This avoids 0 * NaN = NaN when
+                    # log_prob has numerical issues.
+                    if adv_g.abs().item() < 1e-10:
+                        continue
+
                     for step in traj.steps:
                         # Current policy log-prob (WITH gradients)
                         log_prob = compute_unmasking_step_log_prob(
@@ -381,6 +387,14 @@ async def train():
                             step=step,
                             condition_length=traj.condition_length,
                         )  # [B]
+
+                        # Guard: skip if log_prob is NaN/Inf
+                        if torch.isnan(log_prob).any() or torch.isinf(log_prob).any():
+                            logger.warning(
+                                "NaN/Inf log_prob at rollout %d, skipping",
+                                g,
+                            )
+                            continue
 
                         # REINFORCE policy loss (ratio=1 simplification)
                         policy_loss = (-adv_g * log_prob).mean()
@@ -396,6 +410,9 @@ async def train():
                                 )  # [B]
                             log_r = ref_log_prob - log_prob
                             kl_loss = (torch.exp(log_r) - log_r - 1).mean()
+                            # Guard: replace NaN KL with 0
+                            if torch.isnan(kl_loss):
+                                kl_loss = torch.tensor(0.0, device=flow_policy.device)
                             total_kl_val += kl_loss.detach().item()
 
                         step_loss = (policy_loss + kl_coeff * kl_loss) / valid_terms
@@ -403,8 +420,10 @@ async def train():
                         step_loss.backward()
                         total_loss_val += step_loss.detach().item()
 
-                # Clip gradients and step
-                if total_loss_val != 0.0:
+                # Clip gradients and step (guard against NaN accumulated loss)
+                if total_loss_val != 0.0 and not (
+                    total_loss_val != total_loss_val  # NaN check
+                ):
                     torch.nn.utils.clip_grad_norm_(trainable_params, grad_clip)
                     optimizer.step()
 
