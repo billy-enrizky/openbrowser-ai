@@ -139,6 +139,7 @@ try:
 	import mcp.server.stdio
 	import mcp.types as types
 	from mcp.server import NotificationOptions, Server
+	from mcp.server.lowlevel.helper_types import ReadResourceContents
 	from mcp.server.models import InitializationOptions
 
 	MCP_AVAILABLE = True
@@ -564,29 +565,29 @@ class OpenBrowserServer:
 			return resources
 
 		@self.server.read_resource()
-		async def handle_read_resource(uri: str) -> list[types.TextResourceContents]:
+		async def handle_read_resource(uri: str) -> list[ReadResourceContents]:
 			"""Read a browser resource by URI."""
 			uri_str = str(uri)
 
 			if uri_str == 'browser://current-page/content':
 				if not self.browser_session:
-					return [types.TextResourceContents(uri=uri, text='No browser session active', mimeType='text/plain')]
+					return [ReadResourceContents(content='No browser session active', mime_type='text/plain')]
 				content = await self._get_text(extract_links=True)
-				return [types.TextResourceContents(uri=uri, text=content, mimeType='text/markdown')]
+				return [ReadResourceContents(content=content, mime_type='text/markdown')]
 
 			elif uri_str == 'browser://current-page/state':
 				if not self.browser_session:
-					return [types.TextResourceContents(uri=uri, text='{"error": "No browser session active"}', mimeType='application/json')]
+					return [ReadResourceContents(content='{"error": "No browser session active"}', mime_type='application/json')]
 				state_json = await self._get_browser_state(compact=False)
-				return [types.TextResourceContents(uri=uri, text=state_json, mimeType='application/json')]
+				return [ReadResourceContents(content=state_json, mime_type='application/json')]
 
 			elif uri_str == 'browser://current-page/accessibility':
 				if not self.browser_session:
-					return [types.TextResourceContents(uri=uri, text='{"error": "No browser session active"}', mimeType='application/json')]
+					return [ReadResourceContents(content='{"error": "No browser session active"}', mime_type='application/json')]
 				a11y_json = await self._get_accessibility_tree()
-				return [types.TextResourceContents(uri=uri, text=a11y_json, mimeType='application/json')]
+				return [ReadResourceContents(content=a11y_json, mime_type='application/json')]
 
-			return [types.TextResourceContents(uri=uri, text=f'Unknown resource: {uri_str}', mimeType='text/plain')]
+			return [ReadResourceContents(content=f'Unknown resource: {uri_str}', mime_type='text/plain')]
 
 		@self.server.list_prompts()
 		async def handle_list_prompts() -> list[types.Prompt]:
