@@ -21,27 +21,30 @@
 # ============================================================
 
 resource "aws_ssm_parameter" "google_api_key" {
-  name  = "/${var.project_name}/GOOGLE_API_KEY"
-  type  = "SecureString"
-  value = "PLACEHOLDER"
+  name      = "/${var.project_name}/GOOGLE_API_KEY"
+  type      = "SecureString"
+  value     = "PLACEHOLDER"
+  overwrite = true
 
   lifecycle { ignore_changes = [value] }
   tags = { Name = "${var.project_name}-google-api-key" }
 }
 
 resource "aws_ssm_parameter" "openai_api_key" {
-  name  = "/${var.project_name}/OPENAI_API_KEY"
-  type  = "SecureString"
-  value = "PLACEHOLDER"
+  name      = "/${var.project_name}/OPENAI_API_KEY"
+  type      = "SecureString"
+  value     = "PLACEHOLDER"
+  overwrite = true
 
   lifecycle { ignore_changes = [value] }
   tags = { Name = "${var.project_name}-openai-api-key" }
 }
 
 resource "aws_ssm_parameter" "anthropic_api_key" {
-  name  = "/${var.project_name}/ANTHROPIC_API_KEY"
-  type  = "SecureString"
-  value = "PLACEHOLDER"
+  name      = "/${var.project_name}/ANTHROPIC_API_KEY"
+  type      = "SecureString"
+  value     = "PLACEHOLDER"
+  overwrite = true
 
   lifecycle { ignore_changes = [value] }
   tags = { Name = "${var.project_name}-anthropic-api-key" }
