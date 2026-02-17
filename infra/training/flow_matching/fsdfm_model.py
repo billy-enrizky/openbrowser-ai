@@ -1004,15 +1004,18 @@ def compute_discrete_step_log_prob(
     # Forward pass (gradients flow if model is in train mode)
     logits = model(x_t, t)  # [B, L, V]
     probs = F.softmax(logits, dim=-1)  # [B, L, V]
+    del logits  # Free [B, L, V] logits immediately
+
+    # Extract the two probability values we need, then free the full probs tensor
+    p_current = probs.gather(2, x_t.unsqueeze(-1)).squeeze(-1)  # [B, L]
+    p_jumped_to = probs.gather(2, x_next.unsqueeze(-1)).squeeze(-1)  # [B, L]
+    del probs  # Free [B, L, V] probs -- largest intermediate tensor
 
     # Jump rates
     sched = scheduler(t)
     alpha_t = sched["alpha_t"]
     d_alpha_t = sched["d_alpha_t"]
     rate_scale = d_alpha_t / (1.0 - alpha_t).clamp(min=1e-6)  # [B]
-
-    # Per-position probability of current token
-    p_current = probs.gather(2, x_t.unsqueeze(-1)).squeeze(-1)  # [B, L]
 
     # Per-position rate: lambda_i = rate_scale * (1 - p_current)
     lambda_i = rate_scale.unsqueeze(-1) * (1.0 - p_current)  # [B, L]
@@ -1031,7 +1034,6 @@ def compute_discrete_step_log_prob(
     log_jump_base = torch.log1p(-neg_exp_term.clamp(max=1.0 - 1e-8))  # [B, L]
 
     # log p(j) for the actual jumped-to token
-    p_jumped_to = probs.gather(2, x_next.unsqueeze(-1)).squeeze(-1)  # [B, L]
     log_p_jumped = torch.log(p_jumped_to.clamp(min=1e-10))  # [B, L]
 
     # log(1 - p(x_t[i]))
