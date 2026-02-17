@@ -94,6 +94,14 @@
     {
       "name": "browser_find_and_scroll",
       "description": "Find text on the page and scroll to it for navigation"
+    },
+    {
+      "name": "browser_get_accessibility_tree",
+      "description": "Get the page accessibility tree with roles, names, and properties for structure analysis and a11y testing"
+    },
+    {
+      "name": "browser_execute_js",
+      "description": "Execute JavaScript in the page context and return the result. Use for advanced interactions and data extraction"
     }
   ],
   "prompts": [
