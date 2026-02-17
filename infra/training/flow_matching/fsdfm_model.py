@@ -989,6 +989,7 @@ def compute_discrete_step_log_prob(
     scheduler: PolynomialConvexScheduler,
     vocab_size: int,
     response_mask: torch.Tensor,
+    temperature: float = 1.0,
 ) -> torch.Tensor:
     """Compute log P(x_next | x_t) under the discrete Poisson jump process.
 
@@ -1023,6 +1024,9 @@ def compute_discrete_step_log_prob(
 
     # Forward pass (gradients flow if model is in train mode)
     logits = model(x_t, t)  # [B, L, V]
+    # Apply same temperature as generation to match the sampling distribution
+    if temperature != 1.0 and temperature > 0:
+        logits = logits / temperature
     # float32 softmax to prevent bf16 overflow -> NaN
     probs = F.softmax(logits.float(), dim=-1)  # [B, L, V]
     del logits  # Free [B, L, V] logits immediately
