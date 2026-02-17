@@ -530,8 +530,63 @@ class OpenBrowserServer:
 
 		@self.server.list_resources()
 		async def handle_list_resources() -> list[types.Resource]:
-			"""List available resources (none for openbrowser)."""
-			return []
+			"""List available resources for the current browser state."""
+			resources = []
+			if self.browser_session:
+				try:
+					url = await self.browser_session.get_current_page_url()
+				except Exception:
+					url = 'unknown'
+				resources.append(
+					types.Resource(
+						uri='browser://current-page/content',
+						name='Page Content',
+						description=f'Clean markdown text of the current page ({url})',
+						mimeType='text/markdown',
+					)
+				)
+				resources.append(
+					types.Resource(
+						uri='browser://current-page/state',
+						name='Page State',
+						description=f'Interactive elements and metadata of the current page ({url})',
+						mimeType='application/json',
+					)
+				)
+				resources.append(
+					types.Resource(
+						uri='browser://current-page/accessibility',
+						name='Accessibility Tree',
+						description=f'Accessibility tree of the current page ({url})',
+						mimeType='application/json',
+					)
+				)
+			return resources
+
+		@self.server.read_resource()
+		async def handle_read_resource(uri: str) -> list[types.TextResourceContents]:
+			"""Read a browser resource by URI."""
+			uri_str = str(uri)
+
+			if uri_str == 'browser://current-page/content':
+				if not self.browser_session:
+					return [types.TextResourceContents(uri=uri, text='No browser session active', mimeType='text/plain')]
+				content = await self._get_text(extract_links=True)
+				return [types.TextResourceContents(uri=uri, text=content, mimeType='text/markdown')]
+
+			elif uri_str == 'browser://current-page/state':
+				if not self.browser_session:
+					return [types.TextResourceContents(uri=uri, text='{"error": "No browser session active"}', mimeType='application/json')]
+				state_json = await self._get_browser_state(compact=False)
+				return [types.TextResourceContents(uri=uri, text=state_json, mimeType='application/json')]
+
+			elif uri_str == 'browser://current-page/accessibility':
+				if not self.browser_session:
+					return [types.TextResourceContents(uri=uri, text='{"error": "No browser session active"}', mimeType='application/json')]
+				a11y_json = await self._get_accessibility_tree()
+				return [types.TextResourceContents(uri=uri, text=a11y_json, mimeType='application/json')]
+
+			return [types.TextResourceContents(uri=uri, text=f'Unknown resource: {uri_str}', mimeType='text/plain')]
 
 		@self.server.list_prompts()
 		async def handle_list_prompts() -> list[types.Prompt]:
