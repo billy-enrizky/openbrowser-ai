@@ -326,16 +326,7 @@ async def train():
                 optimizer.zero_grad()
                 total_loss_val = 0.0
                 total_kl_val = 0.0
-                valid_terms = 0
-
-                # Count total terms for loss normalization
-                for g in range(group_size):
-                    traj = trajectories[g]
-                    if len(traj.steps) > 0:
-                        valid_terms += len(traj.steps)
-
-                if valid_terms == 0:
-                    valid_terms = 1  # avoid division by zero
+                kl_terms = 0
 
                 for g in range(group_size):
                     traj = trajectories[g]
@@ -354,6 +345,7 @@ async def train():
 
                     # Response mask from the trajectory edit_mask (float)
                     response_mask = traj.edit_mask.float()  # [1, L]
+                    num_steps_g = max(len(traj.steps), 1)
 
                     for step in traj.steps:
                         # Current policy log-prob (WITH gradients)
@@ -405,8 +397,9 @@ async def train():
                             if torch.isnan(kl_loss):
                                 kl_loss = torch.tensor(0.0, device=device)
                             total_kl_val += kl_loss.detach().item()
+                            kl_terms += 1
 
-                        step_loss = (policy_loss + kl_coeff * kl_loss) / valid_terms
+                        step_loss = (policy_loss + kl_coeff * kl_loss) / num_steps_g
                         # Per-step backward to release activations immediately
                         step_loss.backward()
                         total_loss_val += step_loss.detach().item()
@@ -422,7 +415,7 @@ async def train():
 
                 total_steps += 1
                 avg_reward = sum(rewards) / len(rewards) if rewards else 0
-                avg_kl = total_kl_val / max(valid_terms, 1)
+                avg_kl = total_kl_val / max(kl_terms, 1)
                 epoch_kl.append(avg_kl)
 
                 if total_steps % grpo_config["logging_steps"] == 0:
