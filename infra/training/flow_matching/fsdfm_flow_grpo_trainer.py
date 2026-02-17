@@ -20,10 +20,10 @@ Architecture:
     3. Compute group-relative advantages from browser rewards
     4. For each rollout, iterate over ALL trajectory steps (denoising reduction):
        a. Recompute policy log-prob at that step (with gradients)
-       b. Recompute old/reference log-prob (detached)
-       c. PPO-style clipped surrogate objective on per-step log-ratios
-       d. KL penalty from Schulman k3 approximation
-    5. Average loss over steps and rollouts, backprop, update LoRA params
+       b. REINFORCE loss: -advantage * log_prob (per-step backward)
+       c. KL penalty from Schulman k3 approximation (ref model swapped
+          from CPU to GPU on demand to save VRAM)
+    5. Gradient accumulation across steps, single optimizer.step()
 
 Reference: github.com/yifan123/flow_grpo (continuous version for images)
 
@@ -129,11 +129,11 @@ async def train():
         )
 
     # ---------------------------------------------------------------
-    # Load reference model (frozen, for KL penalty)
+    # Load reference model (frozen, on CPU to save VRAM)
     # ---------------------------------------------------------------
-    logger.info("Loading FS-DFM 1.3B reference model (frozen)")
+    logger.info("Loading FS-DFM 1.3B reference model (frozen, CPU)")
     ref_model = load_fsdfm_from_huggingface(
-        model_config, device=device, dtype=compute_dtype
+        model_config, device=torch.device("cpu"), dtype=compute_dtype
     )
     ref_model = inject_lora(ref_model, model_config)
     if sft_checkpoint and Path(sft_checkpoint).exists():
@@ -160,7 +160,6 @@ async def train():
 
     group_size = grpo_config["group_size"]
     kl_coeff = grpo_config["kl_coeff"]
-    clip_range = grpo_config["clip_range"]
     adv_clip_max = grpo_config.get("adv_clip_max", 5.0)
     max_seq_length = model_config["max_seq_length"]
     num_gen_steps = grpo_config.get("num_generation_steps", 10)
@@ -183,12 +182,11 @@ async def train():
     browser_env = await BrowserEnvironment.create(headless=headless)
 
     logger.info(
-        "Starting FS-DFM Flow-GRPO: %d prompts, G=%d, kl=%.3f, clip=%.2f, "
+        "Starting FS-DFM Flow-GRPO: %d prompts, G=%d, kl=%.3f, "
         "T_gen=%d, temp=%.1f",
         len(prompts),
         group_size,
         kl_coeff,
-        clip_range,
         num_gen_steps,
         gen_temperature,
     )
@@ -199,7 +197,6 @@ async def train():
             logger.info("Epoch %d/%d", epoch + 1, grpo_config["num_epochs"])
             epoch_rewards = []
             epoch_kl = []
-            epoch_clipfrac = []
 
             for i, prompt_data in enumerate(prompts):
                 instruction = prompt_data.get(
@@ -304,14 +301,27 @@ async def train():
                 # ==========================================================
                 # Phase 4: Policy gradient update over ALL trajectory steps
                 # ==========================================================
-                # Following the reference implementation (train_sd3.py), we
-                # iterate over every timestep in the trajectory and accumulate
-                # gradients before a single optimizer step.
+                # REINFORCE with per-step gradient accumulation. We backward()
+                # after each step to release activation memory immediately,
+                # preventing OOM from accumulated autograd graphs.
+                #
+                # Note: old_log_prob was removed because with a single
+                # optimization step per prompt, the policy weights are
+                # identical when computing log_prob and old_log_prob, making
+                # ratio = exp(0) = 1.0 always (PPO clipping has no effect).
                 optimizer.zero_grad()
-                total_loss = torch.tensor(0.0, device=device, requires_grad=False)
-                total_kl = torch.tensor(0.0, device=device)
-                total_clipfrac = 0.0
+                total_loss_val = 0.0
+                total_kl_val = 0.0
                 valid_terms = 0
+
+                # Count total terms for loss normalization
+                for g in range(group_size):
+                    traj = trajectories[g]
+                    if len(traj.steps) > 0:
+                        valid_terms += len(traj.steps)
+
+                if valid_terms == 0:
+                    valid_terms = 1  # avoid division by zero
 
                 for g in range(group_size):
                     traj = trajectories[g]
@@ -338,38 +348,14 @@ async def train():
                             response_mask=response_mask,
                         )  # [1]
 
-                        # Old policy log-prob (detached -- same weights since
-                        # we haven't updated yet for this prompt)
-                        with torch.no_grad():
-                            old_log_prob = compute_discrete_step_log_prob(
-                                model=policy_model,
-                                x_t=step.x_t,
-                                x_next=step.x_next,
-                                t_scalar=step.t_value,
-                                dt=dt,
-                                scheduler=scheduler,
-                                vocab_size=vocab_size,
-                                response_mask=response_mask,
-                            )  # [1]
-
-                        # PPO clipped surrogate loss
-                        ratio = torch.exp(log_prob - old_log_prob)  # [1]
-                        unclipped = -adv_g * ratio
-                        clipped = -adv_g * torch.clamp(
-                            ratio, 1.0 - clip_range, 1.0 + clip_range
-                        )
-                        policy_loss = torch.maximum(unclipped, clipped).mean()
-
-                        # Track clip fraction
-                        with torch.no_grad():
-                            clip_frac = (
-                                (torch.abs(ratio - 1.0) > clip_range).float().mean()
-                            )
-                            total_clipfrac += clip_frac.item()
+                        # REINFORCE policy loss (ratio=1 simplification)
+                        policy_loss = (-adv_g * log_prob).mean()
 
                         # KL penalty (Schulman k3: r - log(r) - 1 >= 0)
                         kl_loss = torch.tensor(0.0, device=device)
                         if kl_coeff > 0:
+                            # Move ref_model to GPU for KL computation
+                            ref_model.to(device)
                             with torch.no_grad():
                                 ref_log_prob = compute_discrete_step_log_prob(
                                     model=ref_model,
@@ -381,41 +367,39 @@ async def train():
                                     vocab_size=vocab_size,
                                     response_mask=response_mask,
                                 )  # [1]
+                            ref_model.to("cpu")
+                            torch.cuda.empty_cache()
                             log_r = ref_log_prob - log_prob
                             kl_loss = (torch.exp(log_r) - log_r - 1).mean()
-                            total_kl = total_kl + kl_loss.detach()
+                            total_kl_val += kl_loss.detach().item()
 
-                        step_loss = policy_loss + kl_coeff * kl_loss
-                        total_loss = total_loss + step_loss
-                        valid_terms += 1
+                        step_loss = (policy_loss + kl_coeff * kl_loss) / valid_terms
+                        # Per-step backward to release activations immediately
+                        step_loss.backward()
+                        total_loss_val += step_loss.detach().item()
 
-                # Average loss and backprop
-                if valid_terms > 0:
-                    loss = total_loss / valid_terms
-                    if loss.requires_grad:
-                        loss.backward()
-                        torch.nn.utils.clip_grad_norm_(trainable_params, grad_clip)
-                        optimizer.step()
+                # Clip gradients and step
+                if total_loss_val != 0.0:
+                    torch.nn.utils.clip_grad_norm_(trainable_params, grad_clip)
+                    optimizer.step()
+
+                torch.cuda.empty_cache()
 
                 total_steps += 1
                 avg_reward = sum(rewards) / len(rewards) if rewards else 0
-                avg_kl = (total_kl / max(valid_terms, 1)).item()
-                avg_clipfrac = total_clipfrac / max(valid_terms, 1)
+                avg_kl = total_kl_val / max(valid_terms, 1)
                 epoch_kl.append(avg_kl)
-                epoch_clipfrac.append(avg_clipfrac)
 
                 if total_steps % grpo_config["logging_steps"] == 0:
-                    loss_val = (total_loss / max(valid_terms, 1)).item()
                     logger.info(
                         "  Step %d (prompt %d/%d): avg_reward=%.3f, "
-                        "loss=%.4f, kl=%.4f, clipfrac=%.3f",
+                        "loss=%.4f, kl=%.4f",
                         total_steps,
                         i + 1,
                         len(prompts),
                         avg_reward,
-                        loss_val,
+                        total_loss_val,
                         avg_kl,
-                        avg_clipfrac,
                     )
 
             # Epoch summary
@@ -424,13 +408,12 @@ async def train():
                 nonzero = sum(1 for r in epoch_rewards if r > 0)
                 logger.info(
                     "Epoch %d complete: avg_reward=%.3f, "
-                    "nonzero_rewards=%d/%d, avg_kl=%.4f, avg_clipfrac=%.3f",
+                    "nonzero_rewards=%d/%d, avg_kl=%.4f",
                     epoch + 1,
                     epoch_avg,
                     nonzero,
                     len(epoch_rewards),
                     sum(epoch_kl) / len(epoch_kl) if epoch_kl else 0,
-                    sum(epoch_clipfrac) / len(epoch_clipfrac) if epoch_clipfrac else 0,
                 )
 
         # Save final model
