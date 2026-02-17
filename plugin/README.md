@@ -131,6 +131,20 @@ When a browser session is active, three MCP resources are available:
 | `browser://current-page/state` | application/json | Interactive elements and metadata |
 | `browser://current-page/accessibility` | application/json | Accessibility tree |
 
+## Skills
+
+The plugin includes 5 built-in skills that provide guided workflows for common browser automation tasks. Each skill is triggered automatically when the user's request matches its description.
+
+| Skill | Directory | Description |
+|-------|-----------|-------------|
+| `web-scraping` | `skills/web-scraping/` | Extract structured data from websites, handle pagination, and multi-tab scraping |
+| `form-filling` | `skills/form-filling/` | Fill out web forms, handle login/registration flows, and multi-step wizards |
+| `e2e-testing` | `skills/e2e-testing/` | Test web applications end-to-end by simulating user interactions and verifying outcomes |
+| `page-analysis` | `skills/page-analysis/` | Analyze page content, structure, metadata, and interactive elements |
+| `accessibility-audit` | `skills/accessibility-audit/` | Audit pages for WCAG compliance, heading structure, labels, alt text, ARIA, and landmarks |
+
+Each skill file (`SKILL.md`) contains YAML frontmatter with trigger conditions and a step-by-step workflow that references the MCP tools listed above.
+
 ## Troubleshooting
 
 **Browser does not launch**: Ensure Chrome or Chromium is installed and accessible from PATH.
