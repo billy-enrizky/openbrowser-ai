@@ -1,0 +1,22 @@
+{
+  "name": "openbrowser",
+  "version": "0.5.0",
+  "description": "AI-powered browser automation -- lets Claude control real web browsers to navigate, click, type, extract content, and automate workflows",
+  "author": {
+    "name": "OpenBrowser Team",
+    "url": "https://github.com/billy-enrizky/openbrowser-ai"
+  },
+  "homepage": "https://github.com/billy-enrizky/openbrowser-ai",
+  "repository": "https://github.com/billy-enrizky/openbrowser-ai",
+  "license": "MIT",
+  "keywords": [
+    "browser",
+    "automation",
+    "web-scraping",
+    "testing",
+    "mcp",
+    "openbrowser",
+    "web-automation",
+    "ai-agent"
+  ]
+}
