@@ -41,13 +41,34 @@ Implemented Flow-GRPO (Liu et al., 2025) for FS-DFM 1.3B discrete flow matching 
 - [ ] Consider tuning kl_coeff (currently 0.04) and clip_range (currently 0.2)
 - [ ] If results are positive, run full-dataset evaluation (1,240 prompts)
 - [ ] Update STAD80 project proposal with Flow-GRPO results
-- [ ] Consider implementing Flow-GRPO for ReFusion 8B (requires adapting masked diffusion unmasking to trajectory-based log-probs)
+- [x] Implement Flow-GRPO for ReFusion 8B (completed 2026-02-17 12:00)
 
-### Commit Plan
+### ReFusion Flow-GRPO -- Next Steps
 
-All changes are on the `feat/flow-grpo` branch. Commits should be:
-1. `feat(training): add trajectory-recording Euler solver and per-step log-prob to fsdfm_model.py`
-2. `feat(training): add FLOW_GRPO_FSDFM_CONFIG to flow matching config`
-3. `feat(training): implement Flow-GRPO trainer for FS-DFM with discrete policy gradients`
-4. `feat(infra): add Anyscale job configs for Flow-GRPO training and evaluation`
-5. `docs: update changelog with Flow-GRPO implementation`
+- [ ] Submit FS-DFM Flow-GRPO job (submitted, image building): `uv run infra/training/anyscale/submit_job.py fsdfm-flow-grpo`
+- [ ] Submit ReFusion Flow-GRPO job: `uv run infra/training/anyscale/submit_job.py refusion-flow-grpo`
+- [ ] After FS-DFM training completes, submit eval: `uv run infra/training/anyscale/submit_job.py eval-fsdfm-flow-grpo`
+- [ ] After ReFusion training completes, submit eval: `uv run infra/training/anyscale/submit_job.py eval-refusion-flow-grpo`
+- [ ] Compare ReFusion Flow-GRPO results with existing baselines:
+  - ReFusion SFT (existing)
+  - ReFusion old GRPO (existing, AR log-probs)
+  - Target: Flow-GRPO >= old GRPO
+- [ ] If T=10 denoising steps produce low quality, increase to T=20
+- [ ] If results are positive, run full-dataset evaluation (1,240 prompts)
+- [ ] Update STAD80 project proposal with Flow-GRPO results for both models
+
+### Commit Plan (completed)
+
+All commits on `feat/flow-grpo` branch:
+1. [x] `feat(training): add trajectory-recording Euler solver and per-step log-prob to fsdfm_model.py`
+2. [x] `feat(training): add FLOW_GRPO_FSDFM_CONFIG to flow matching config`
+3. [x] `feat(training): implement Flow-GRPO trainer for FS-DFM with discrete policy gradients`
+4. [x] `feat(infra): add Anyscale job configs for Flow-GRPO training and evaluation`
+5. [x] `docs: add training session summary and TODO for Flow-GRPO next steps`
+6. [x] `docs: add ReFusion Flow-GRPO design document`
+7. [x] `feat(training): add UnmaskingTrajectory data structures for ReFusion Flow-GRPO`
+8. [x] `feat(training): add generate_with_trajectory() to FlowLLM for ReFusion Flow-GRPO`
+9. [x] `feat(training): add compute_unmasking_step_log_prob() for ReFusion trajectory log-probs`
+10. [x] `feat(training): add FLOW_GRPO_REFUSION_CONFIG for ReFusion 8B Flow-GRPO`
+11. [x] `feat(training): implement ReFusion Flow-GRPO trainer with masked diffusion policy gradients`
+12. [x] `feat(infra): add Anyscale job configs for ReFusion Flow-GRPO training and evaluation`
