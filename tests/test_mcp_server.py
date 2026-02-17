@@ -968,3 +968,409 @@ class TestToolManifest:
         result = asyncio.run(mcp_server._execute_tool("browser_get_state", {"include_screenshot": True}))
         data = json.loads(result)
         assert "url" in data
+
+    def test_all_tools_include_advanced_tools(self, mcp_server):
+        """Advanced inspection tools are routed in _execute_tool."""
+        advanced_tool_names = [
+            "browser_get_accessibility_tree",
+            "browser_execute_js",
+        ]
+
+        for tool_name in advanced_tool_names:
+            mcp_server.browser_session = MagicMock()
+            mcp_server.browser_session.current_target_id = "target-123"
+
+            # Mock CDP session for execute_js
+            mock_cdp_session = MagicMock()
+            mock_cdp_session.session_id = "session-1"
+            mock_cdp_session.cdp_client = MagicMock()
+            mock_cdp_session.cdp_client.send = MagicMock()
+            mock_cdp_session.cdp_client.send.Runtime = MagicMock()
+            mock_cdp_session.cdp_client.send.Runtime.evaluate = AsyncMock(
+                return_value={"result": {"type": "number", "value": 42}}
+            )
+            mcp_server.browser_session.get_or_create_cdp_session = AsyncMock(return_value=mock_cdp_session)
+
+            with patch.object(mcp_server_module, "DomService") as mock_dom_service_cls:
+                mock_dom_service = MagicMock()
+                mock_dom_service._get_ax_tree_for_all_frames = AsyncMock(return_value={"nodes": []})
+                mock_dom_service_cls.return_value = mock_dom_service
+
+                if tool_name == "browser_get_accessibility_tree":
+                    args = {}
+                elif tool_name == "browser_execute_js":
+                    args = {"expression": "1+1"}
+                else:
+                    args = {}
+
+                result = asyncio.run(mcp_server._execute_tool(tool_name, args))
+
+            assert "Unknown tool" not in result, f"Tool {tool_name} is not routed in _execute_tool"
+
+
+# ===========================================================================
+# browser_get_accessibility_tree tests
+# ===========================================================================
+
+
+class TestGetAccessibilityTree:
+    """Tests for the browser_get_accessibility_tree tool."""
+
+    def _make_ax_nodes(self):
+        """Create mock accessibility tree nodes."""
+        return {
+            "nodes": [
+                {
+                    "nodeId": "root-1",
+                    "ignored": False,
+                    "role": {"value": "WebArea"},
+                    "name": {"value": "Example Page"},
+                    "childIds": ["node-2", "node-3"],
+                },
+                {
+                    "nodeId": "node-2",
+                    "ignored": False,
+                    "role": {"value": "heading"},
+                    "name": {"value": "Welcome"},
+                    "properties": [{"name": "level", "value": {"value": 1}}],
+                },
+                {
+                    "nodeId": "node-3",
+                    "ignored": False,
+                    "role": {"value": "button"},
+                    "name": {"value": "Submit"},
+                    "properties": [{"name": "focusable", "value": {"value": True}}],
+                },
+                {
+                    "nodeId": "node-4",
+                    "ignored": True,
+                    "role": {"value": "generic"},
+                    "name": {},
+                },
+            ]
+        }
+
+    def test_a11y_tree_returns_error_without_session(self, mcp_server):
+        """Returns error when no browser session is active."""
+        result = asyncio.run(mcp_server._get_accessibility_tree())
+        assert "Error" in result
+        assert "No browser session active" in result
+
+    def test_a11y_tree_returns_error_without_target(self, mcp_server):
+        """Returns error when no active page target."""
+        mcp_server.browser_session = MagicMock()
+        mcp_server.browser_session.current_target_id = None
+
+        result = asyncio.run(mcp_server._get_accessibility_tree())
+        assert "Error" in result
+        assert "No active page target" in result
+
+    def test_a11y_tree_returns_structured_data(self, mcp_server):
+        """Returns structured accessibility tree with roles and names."""
+        mcp_server.browser_session = MagicMock()
+        mcp_server.browser_session.current_target_id = "target-123"
+
+        with patch.object(mcp_server_module, "DomService") as mock_dom_cls:
+            mock_dom = MagicMock()
+            mock_dom._get_ax_tree_for_all_frames = AsyncMock(return_value=self._make_ax_nodes())
+
+            def build_node(ax_node):
+                node = MagicMock()
+                node.ax_node_id = ax_node["nodeId"]
+                node.ignored = ax_node.get("ignored", False)
+                node.role = ax_node.get("role", {}).get("value")
+                node.name = ax_node.get("name", {}).get("value")
+                node.description = None
+                node.child_ids = ax_node.get("childIds")
+
+                props = []
+                for prop in ax_node.get("properties", []):
+                    p = MagicMock()
+                    p.name = prop["name"]
+                    p.value = prop.get("value", {}).get("value")
+                    props.append(p)
+                node.properties = props if props else None
+                return node
+
+            mock_dom._build_enhanced_ax_node = MagicMock(side_effect=build_node)
+            mock_dom_cls.return_value = mock_dom
+
+            result = asyncio.run(mcp_server._get_accessibility_tree())
+
+        data = json.loads(result)
+        assert data["total_nodes"] == 3  # 4 minus 1 ignored
+        assert "tree" in data
+
+    def test_a11y_tree_excludes_ignored_by_default(self, mcp_server):
+        """Ignored nodes are excluded by default."""
+        mcp_server.browser_session = MagicMock()
+        mcp_server.browser_session.current_target_id = "target-123"
+
+        with patch.object(mcp_server_module, "DomService") as mock_dom_cls:
+            mock_dom = MagicMock()
+            mock_dom._get_ax_tree_for_all_frames = AsyncMock(return_value=self._make_ax_nodes())
+
+            def build_node(ax_node):
+                node = MagicMock()
+                node.ax_node_id = ax_node["nodeId"]
+                node.ignored = ax_node.get("ignored", False)
+                node.role = ax_node.get("role", {}).get("value")
+                node.name = ax_node.get("name", {}).get("value")
+                node.description = None
+                node.child_ids = ax_node.get("childIds")
+                node.properties = None
+                return node
+
+            mock_dom._build_enhanced_ax_node = MagicMock(side_effect=build_node)
+            mock_dom_cls.return_value = mock_dom
+
+            result = asyncio.run(mcp_server._get_accessibility_tree(include_ignored=False))
+
+        data = json.loads(result)
+        assert data["total_nodes"] == 3
+
+    def test_a11y_tree_includes_ignored_when_requested(self, mcp_server):
+        """Ignored nodes are included when include_ignored=True."""
+        mcp_server.browser_session = MagicMock()
+        mcp_server.browser_session.current_target_id = "target-123"
+
+        with patch.object(mcp_server_module, "DomService") as mock_dom_cls:
+            mock_dom = MagicMock()
+            mock_dom._get_ax_tree_for_all_frames = AsyncMock(return_value=self._make_ax_nodes())
+
+            def build_node(ax_node):
+                node = MagicMock()
+                node.ax_node_id = ax_node["nodeId"]
+                node.ignored = ax_node.get("ignored", False)
+                node.role = ax_node.get("role", {}).get("value")
+                node.name = ax_node.get("name", {}).get("value")
+                node.description = None
+                node.child_ids = ax_node.get("childIds")
+                node.properties = None
+                return node
+
+            mock_dom._build_enhanced_ax_node = MagicMock(side_effect=build_node)
+            mock_dom_cls.return_value = mock_dom
+
+            result = asyncio.run(mcp_server._get_accessibility_tree(include_ignored=True))
+
+        data = json.loads(result)
+        assert data["total_nodes"] == 4
+
+    def test_a11y_tree_handles_error(self, mcp_server):
+        """Returns error message when extraction fails."""
+        mcp_server.browser_session = MagicMock()
+        mcp_server.browser_session.current_target_id = "target-123"
+
+        with patch.object(mcp_server_module, "DomService") as mock_dom_cls:
+            mock_dom = MagicMock()
+            mock_dom._get_ax_tree_for_all_frames = AsyncMock(side_effect=RuntimeError("CDP timeout"))
+            mock_dom_cls.return_value = mock_dom
+
+            result = asyncio.run(mcp_server._get_accessibility_tree())
+
+        assert "Error getting accessibility tree" in result
+        assert "CDP timeout" in result
+
+    def test_a11y_tree_empty_page(self, mcp_server):
+        """Handles empty accessibility tree."""
+        mcp_server.browser_session = MagicMock()
+        mcp_server.browser_session.current_target_id = "target-123"
+
+        with patch.object(mcp_server_module, "DomService") as mock_dom_cls:
+            mock_dom = MagicMock()
+            mock_dom._get_ax_tree_for_all_frames = AsyncMock(return_value={"nodes": []})
+            mock_dom_cls.return_value = mock_dom
+
+            result = asyncio.run(mcp_server._get_accessibility_tree())
+
+        data = json.loads(result)
+        assert data["total_nodes"] == 0
+
+    def test_a11y_tree_routed_via_execute_tool(self, mcp_server):
+        """Verify browser_get_accessibility_tree routes correctly."""
+        mcp_server.browser_session = MagicMock()
+        mcp_server.browser_session.current_target_id = "target-123"
+
+        with patch.object(mcp_server_module, "DomService") as mock_dom_cls:
+            mock_dom = MagicMock()
+            mock_dom._get_ax_tree_for_all_frames = AsyncMock(return_value={"nodes": []})
+            mock_dom_cls.return_value = mock_dom
+
+            result = asyncio.run(mcp_server._execute_tool("browser_get_accessibility_tree", {}))
+
+        assert "Unknown tool" not in result
+
+
+# ===========================================================================
+# browser_execute_js tests
+# ===========================================================================
+
+
+class TestExecuteJs:
+    """Tests for the browser_execute_js tool."""
+
+    def _make_mock_cdp_session(self, eval_return=None):
+        """Create a mock CDP session with Runtime.evaluate."""
+        cdp_session = MagicMock()
+        cdp_session.session_id = "session-1"
+        cdp_session.cdp_client = MagicMock()
+        cdp_session.cdp_client.send = MagicMock()
+        cdp_session.cdp_client.send.Runtime = MagicMock()
+        cdp_session.cdp_client.send.Runtime.evaluate = AsyncMock(
+            return_value=eval_return or {"result": {"type": "number", "value": 42}}
+        )
+        return cdp_session
+
+    def test_execute_js_returns_error_without_session(self, mcp_server):
+        """Returns error when no browser session is active."""
+        result = asyncio.run(mcp_server._execute_js("1+1"))
+        assert "Error" in result
+        assert "No browser session active" in result
+
+    def test_execute_js_returns_error_without_target(self, mcp_server):
+        """Returns error when no active page target."""
+        mcp_server.browser_session = MagicMock()
+        mcp_server.browser_session.current_target_id = None
+
+        result = asyncio.run(mcp_server._execute_js("1+1"))
+        assert "Error" in result
+        assert "No active page target" in result
+
+    def test_execute_js_returns_number(self, mcp_server):
+        """Returns numeric result from JavaScript evaluation."""
+        mcp_server.browser_session = MagicMock()
+        mcp_server.browser_session.current_target_id = "target-123"
+
+        cdp = self._make_mock_cdp_session({"result": {"type": "number", "value": 42}})
+        mcp_server.browser_session.get_or_create_cdp_session = AsyncMock(return_value=cdp)
+
+        result = asyncio.run(mcp_server._execute_js("21 * 2"))
+        data = json.loads(result)
+
+        assert data["result"] == 42
+        assert data["type"] == "number"
+
+    def test_execute_js_returns_string(self, mcp_server):
+        """Returns string result from JavaScript evaluation."""
+        mcp_server.browser_session = MagicMock()
+        mcp_server.browser_session.current_target_id = "target-123"
+
+        cdp = self._make_mock_cdp_session({"result": {"type": "string", "value": "hello world"}})
+        mcp_server.browser_session.get_or_create_cdp_session = AsyncMock(return_value=cdp)
+
+        result = asyncio.run(mcp_server._execute_js("document.title"))
+        data = json.loads(result)
+
+        assert data["result"] == "hello world"
+        assert data["type"] == "string"
+
+    def test_execute_js_returns_object(self, mcp_server):
+        """Returns object result from JavaScript evaluation."""
+        mcp_server.browser_session = MagicMock()
+        mcp_server.browser_session.current_target_id = "target-123"
+
+        cdp = self._make_mock_cdp_session(
+            {"result": {"type": "object", "value": {"width": 1920, "height": 1080}}}
+        )
+        mcp_server.browser_session.get_or_create_cdp_session = AsyncMock(return_value=cdp)
+
+        result = asyncio.run(mcp_server._execute_js("({width: window.innerWidth, height: window.innerHeight})"))
+        data = json.loads(result)
+
+        assert data["result"]["width"] == 1920
+        assert data["type"] == "object"
+
+    def test_execute_js_returns_boolean(self, mcp_server):
+        """Returns boolean result."""
+        mcp_server.browser_session = MagicMock()
+        mcp_server.browser_session.current_target_id = "target-123"
+
+        cdp = self._make_mock_cdp_session({"result": {"type": "boolean", "value": True}})
+        mcp_server.browser_session.get_or_create_cdp_session = AsyncMock(return_value=cdp)
+
+        result = asyncio.run(mcp_server._execute_js("document.hasFocus()"))
+        data = json.loads(result)
+
+        assert data["result"] is True
+        assert data["type"] == "boolean"
+
+    def test_execute_js_handles_undefined(self, mcp_server):
+        """Handles undefined return value."""
+        mcp_server.browser_session = MagicMock()
+        mcp_server.browser_session.current_target_id = "target-123"
+
+        cdp = self._make_mock_cdp_session({"result": {"type": "undefined"}})
+        mcp_server.browser_session.get_or_create_cdp_session = AsyncMock(return_value=cdp)
+
+        result = asyncio.run(mcp_server._execute_js("console.log('test')"))
+        data = json.loads(result)
+
+        assert data["result"] is None
+        assert data["type"] == "undefined"
+
+    def test_execute_js_handles_exception(self, mcp_server):
+        """Returns error when JavaScript throws an exception."""
+        mcp_server.browser_session = MagicMock()
+        mcp_server.browser_session.current_target_id = "target-123"
+
+        cdp = self._make_mock_cdp_session(
+            {
+                "result": {"type": "object"},
+                "exceptionDetails": {
+                    "text": "Uncaught ReferenceError",
+                    "exception": {"description": "ReferenceError: foo is not defined"},
+                },
+            }
+        )
+        mcp_server.browser_session.get_or_create_cdp_session = AsyncMock(return_value=cdp)
+
+        result = asyncio.run(mcp_server._execute_js("foo.bar"))
+        data = json.loads(result)
+
+        assert "error" in data
+        assert "ReferenceError" in data["error"]
+
+    def test_execute_js_handles_cdp_error(self, mcp_server):
+        """Returns error when CDP communication fails."""
+        mcp_server.browser_session = MagicMock()
+        mcp_server.browser_session.current_target_id = "target-123"
+        mcp_server.browser_session.get_or_create_cdp_session = AsyncMock(
+            side_effect=RuntimeError("CDP connection closed")
+        )
+
+        result = asyncio.run(mcp_server._execute_js("1+1"))
+        assert "Error executing JavaScript" in result
+        assert "CDP connection closed" in result
+
+    def test_execute_js_passes_correct_params(self, mcp_server):
+        """Verifies correct parameters are passed to Runtime.evaluate."""
+        mcp_server.browser_session = MagicMock()
+        mcp_server.browser_session.current_target_id = "target-123"
+
+        cdp = self._make_mock_cdp_session({"result": {"type": "number", "value": 2}})
+        mcp_server.browser_session.get_or_create_cdp_session = AsyncMock(return_value=cdp)
+
+        asyncio.run(mcp_server._execute_js("1+1"))
+
+        cdp.cdp_client.send.Runtime.evaluate.assert_called_once_with(
+            params={
+                "expression": "1+1",
+                "returnByValue": True,
+                "awaitPromise": True,
+            },
+            session_id="session-1",
+        )
+
+    def test_execute_js_routed_via_execute_tool(self, mcp_server):
+        """Verify browser_execute_js routes correctly."""
+        mcp_server.browser_session = MagicMock()
+        mcp_server.browser_session.current_target_id = "target-123"
+
+        cdp = self._make_mock_cdp_session({"result": {"type": "string", "value": "test"}})
+        mcp_server.browser_session.get_or_create_cdp_session = AsyncMock(return_value=cdp)
+
+        result = asyncio.run(mcp_server._execute_tool("browser_execute_js", {"expression": "document.title"}))
+        data = json.loads(result)
+
+        assert data["result"] == "test"
