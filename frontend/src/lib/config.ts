@@ -7,9 +7,9 @@ export const AUTH_ENABLED = process.env.NEXT_PUBLIC_AUTH_ENABLED === "true";
 export const COGNITO_DOMAIN = (process.env.NEXT_PUBLIC_COGNITO_DOMAIN || "").replace(/\/$/, "");
 export const COGNITO_CLIENT_ID = process.env.NEXT_PUBLIC_COGNITO_CLIENT_ID || "";
 export const COGNITO_REDIRECT_URI =
-  process.env.NEXT_PUBLIC_COGNITO_REDIRECT_URI || "http://localhost:3000/auth/callback";
+  process.env.NEXT_PUBLIC_COGNITO_REDIRECT_URI || "http://localhost:3000/auth/callback/";
 export const COGNITO_LOGOUT_URI =
-  process.env.NEXT_PUBLIC_COGNITO_LOGOUT_URI || "http://localhost:3000/login";
+  process.env.NEXT_PUBLIC_COGNITO_LOGOUT_URI || "http://localhost:3000/login/";
 export const COGNITO_SCOPES = process.env.NEXT_PUBLIC_COGNITO_SCOPES || "openid email profile";
 
 // VNC Configuration
