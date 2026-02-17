@@ -15,6 +15,15 @@ terraform {
 
 provider "aws" {
   region = var.aws_region
+
+  # Default tags applied to all resources
+  default_tags {
+    tags = {
+      Project     = var.project_name
+      Environment = "production"
+      ManagedBy   = "terraform"
+    }
+  }
 }
 
 data "aws_availability_zones" "available" {
