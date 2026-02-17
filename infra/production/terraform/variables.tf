@@ -87,7 +87,7 @@ variable "frontend_acm_certificate_arn" {
 }
 
 ## -----------------------------------------------------------------------------
-## Cognito (auth - for future use)
+## Cognito authentication
 ## -----------------------------------------------------------------------------
 
 variable "enable_api_auth" {
@@ -96,10 +96,34 @@ variable "enable_api_auth" {
   description = "Require JWT (Cognito) on API routes. Set to true when auth is implemented."
 }
 
+variable "enable_backend_auth" {
+  type        = bool
+  default     = true
+  description = "Enable Cognito JWT verification in the backend service (REST + WebSocket)."
+}
+
 variable "cognito_domain_prefix" {
   type        = string
   default     = ""
   description = "Prefix for Cognito hosted UI domain. If empty, a random suffix is used."
+}
+
+variable "cognito_callback_urls" {
+  type        = list(string)
+  default     = []
+  description = "Allowed Cognito callback URLs. Leave empty to auto-generate from frontend domain + localhost."
+}
+
+variable "cognito_logout_urls" {
+  type        = list(string)
+  default     = []
+  description = "Allowed Cognito logout URLs. Leave empty to auto-generate from frontend domain + localhost."
+}
+
+variable "cognito_oauth_scopes" {
+  type        = list(string)
+  default     = ["openid", "email", "profile"]
+  description = "OAuth scopes allowed on the Cognito app client."
 }
 
 ## -----------------------------------------------------------------------------

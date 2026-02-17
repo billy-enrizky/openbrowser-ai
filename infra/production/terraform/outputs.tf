@@ -42,6 +42,26 @@ output "cognito_domain" {
   value       = aws_cognito_user_pool_domain.main.domain
 }
 
+output "cognito_domain_url" {
+  description = "Cognito hosted UI base URL"
+  value       = "https://${aws_cognito_user_pool_domain.main.domain}.auth.${var.aws_region}.amazoncognito.com"
+}
+
+output "cognito_issuer" {
+  description = "Cognito issuer URL for JWT verification"
+  value       = "https://cognito-idp.${var.aws_region}.amazonaws.com/${aws_cognito_user_pool.main.id}"
+}
+
+output "cognito_callback_urls" {
+  description = "Effective callback URLs configured on the Cognito app client"
+  value       = local.cognito_callback_urls
+}
+
+output "cognito_logout_urls" {
+  description = "Effective logout URLs configured on the Cognito app client"
+  value       = local.cognito_logout_urls
+}
+
 output "dynamodb_table_name" {
   description = "DynamoDB table for session/chats data"
   value       = aws_dynamodb_table.main.name
@@ -90,5 +110,4 @@ output "ssm_anthropic_api_key_name" {
   description = "SSM parameter name for Anthropic API key"
   value       = aws_ssm_parameter.anthropic_api_key.name
 }
-
 

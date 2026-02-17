@@ -115,9 +115,11 @@ See `variables.tf`. Key ones:
 - **backend_image** — Leave `""` to use the ECR repo Terraform creates; set to a full URI to use another registry.
 - **backend_image_tag** — Tag to pull from the Terraform ECR repo (default `latest`).
 - **backend_port** — Port the backend listens on (default `8000`).
-- **enable_api_auth** — Set `true` to require Cognito JWT on API routes (except `/health`).
+- **enable_backend_auth** — Set `true` to require Cognito JWT in FastAPI (REST + WebSocket).
+- **enable_api_auth** — Optional second JWT check at API Gateway (kept `false` by default to simplify WebSocket auth).
 - **secrets_manager_secret_name** — Leave empty to create a placeholder secret, or set existing secret name/ARN.
 - **frontend_domain_name** / **frontend_acm_certificate_arn** — Optional custom domain (ACM in us-east-1 for CloudFront).
+- **cognito_callback_urls** / **cognito_logout_urls** — Optional explicit OAuth URLs. If empty, Terraform auto-generates URLs from frontend domain + localhost.
 
 ## Backend image (ECR-first workflow)
 
@@ -129,12 +131,14 @@ See `variables.tf`. Key ones:
 
 To use a different registry, set `backend_image` to the full image URI in `terraform.tfvars`.
 
-## Auth (Cognito + API Gateway)
+## Auth (Cognito + Hosted UI + PKCE)
 
-- **AUTHENTICATION.md** — Enabling JWT on API Gateway, frontend Amplify usage, WebSocket auth, creating users.
-- **COGNITO_SETUP.md** — When callback URLs are needed (Hosted UI / OAuth) vs direct API auth.
+- **AUTHENTICATION.md** — Exact env values and deploy steps for this repository's frontend PKCE implementation.
+- **COGNITO_SETUP.md** — Callback/logout URL behavior and when to override Terraform defaults.
 
-Set `enable_api_auth = true` in `terraform.tfvars` when the app is ready to enforce JWT.
+For parity with local auth, use:
+- `enable_backend_auth = true`
+- `enable_api_auth = false`
 
 ## Frontend deploy
 
@@ -143,6 +147,12 @@ From project root, after `terraform apply`:
 ```bash
 export NEXT_PUBLIC_API_URL=$(terraform -chdir=infra/production/terraform output -raw api_base_url)
 export NEXT_PUBLIC_WS_URL=$(terraform -chdir=infra/production/terraform output -raw api_ws_url)
+export NEXT_PUBLIC_AUTH_ENABLED=true
+export NEXT_PUBLIC_COGNITO_DOMAIN=$(terraform -chdir=infra/production/terraform output -raw cognito_domain_url)
+export NEXT_PUBLIC_COGNITO_CLIENT_ID=$(terraform -chdir=infra/production/terraform output -raw cognito_app_client_id)
+export NEXT_PUBLIC_COGNITO_REDIRECT_URI=https://app.example.com/auth/callback
+export NEXT_PUBLIC_COGNITO_LOGOUT_URI=https://app.example.com/login
+export NEXT_PUBLIC_COGNITO_SCOPES="openid email profile"
 cd frontend && npm ci && npm run build
 aws s3 sync out/ s3://$(terraform -chdir=infra/production/terraform output -raw frontend_s3_bucket)/ --delete
 aws cloudfront create-invalidation --distribution-id $(terraform -chdir=infra/production/terraform output -raw cloudfront_distribution_id) --paths "/*"
@@ -153,7 +163,7 @@ aws cloudfront create-invalidation --distribution-id $(terraform -chdir=infra/pr
 - `api_base_url` / `api_ws_url` — Use for `NEXT_PUBLIC_API_URL` and `NEXT_PUBLIC_WS_URL`.
 - `frontend_url`, `frontend_s3_bucket`, `cloudfront_distribution_id` — Frontend hosting.
 - `backend_ecr_repository_url`, `backend_image_uri` — Where to push the image and what EC2 pulls.
-- `cognito_user_pool_id`, `cognito_app_client_id`, `cognito_domain` — Auth integration.
+- `cognito_user_pool_id`, `cognito_app_client_id`, `cognito_domain_url`, `cognito_callback_urls`, `cognito_logout_urls` — Auth integration.
 - `dynamodb_table_name`, `backend_secret_name` — Backend config.
 
 ## Troubleshooting

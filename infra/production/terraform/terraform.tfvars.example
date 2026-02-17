@@ -1,59 +1,50 @@
-# Production infrastructure variables
-
-project_name   = "openbrowser"
-aws_region     = "ca-central-1"
-instance_type  = "t3.medium"
-
-key_pair_name    = ""           # Fill with your EC2 key pair name
-ssh_allowed_cidr = "0.0.0.0/0"  # Restrict to your IP for security
-
-# Auto Scaling
-min_instances     = 1
-max_instances     = 3
-desired_instances = 1
-
-# Docker deployment
-docker_image_tag  = "latest"  # Use "latest" for git clone, or ECR image tag
-github_repo_url   = "https://github.com/billy-enrizky/openbrowser-ai.git"
-github_branch     = "main"
-enable_vnc        = true
-
-# API Gateway
-cors_origins = ["*"]  # Or specify: ["https://yourdomain.com", "https://app.yourdomain.com"]
-
-# VPC Configuration
-vpc_cidr    = "10.0.0.0/16"
-enable_nat  = false  # Set to true if you need private subnets
-
-# Storage
-ebs_volume_size = 50
-
-# API keys -- put in terraform.tfvars.local (gitignored) or use SSM directly
-# Copy to terraform.tfvars and fill in. Do not commit terraform.tfvars.
+# -----------------------------------------------------------------------------
+# OpenBrowser production Terraform variables (example)
+# -----------------------------------------------------------------------------
 
 aws_region   = "ca-central-1"
 project_name = "openbrowser"
 
+# Backend runtime
+backend_instance_type = "t3.small"
+backend_port          = 8000
+
 # Backend container image:
-# - Leave empty to use the ECR repo created by Terraform (push your image there, see README).
-# - Or set to a full URI (ECR or Docker Hub), e.g.:
+# - Leave empty to use the ECR repo created by Terraform.
+# - Or set a full URI, e.g.:
 #   backend_image = "123456789012.dkr.ecr.ca-central-1.amazonaws.com/openbrowser-backend:latest"
-#   backend_image = "youruser/openbrowser-backend:latest"
-backend_image = ""
+backend_image     = ""
+backend_image_tag = "latest"
 
-# When using the Terraform-created ECR repo, tag to pull (default: latest)
-# backend_image_tag = "latest"
+# Frontend/API CORS (set this to your deployed frontend origin in production)
+cors_origins = [
+  "https://app.example.com",
+  "http://localhost:3000",
+]
 
-# Optional: use an existing Secrets Manager secret for LLM API keys
-# Leave empty to have Terraform create a placeholder secret
-# secrets_manager_secret_name = ""
+# Frontend custom domain (optional)
+# frontend_domain_name         = "app.example.com"
+# frontend_acm_certificate_arn = "arn:aws:acm:us-east-1:123456789012:certificate/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
 
-# Optional: require JWT (Cognito) on API routes. Set true when auth is implemented.
-# enable_api_auth = false
-
-# Optional: custom domain for frontend (requires ACM cert in us-east-1 for CloudFront)
-# frontend_domain_name    = "app.example.com"
-# frontend_acm_certificate_arn = "arn:aws:acm:us-east-1:..."
-
-# Optional: Cognito hosted UI domain prefix
+# Cognito hosted UI domain prefix (optional)
 # cognito_domain_prefix = "openbrowser"
+
+# Cognito app client OAuth config (optional overrides)
+# cognito_callback_urls = [
+#   "https://app.example.com/auth/callback",
+#   "http://localhost:3000/auth/callback",
+# ]
+# cognito_logout_urls = [
+#   "https://app.example.com/login",
+#   "http://localhost:3000/login",
+# ]
+# cognito_oauth_scopes = ["openid", "email", "profile"]
+
+# Auth enforcement:
+# - enable_backend_auth: verify JWT in FastAPI (REST + WebSocket)
+# - enable_api_auth: optional extra JWT validation at API Gateway
+enable_backend_auth = true
+enable_api_auth     = false
+
+# Optional: use an existing Secrets Manager secret for backend LLM keys
+# secrets_manager_secret_name = "openbrowser/backend-api-keys"
