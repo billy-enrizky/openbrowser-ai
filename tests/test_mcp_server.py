@@ -616,7 +616,9 @@ class TestSearchElements:
     def test_search_by_text(self, mcp_server):
         """Finds elements by text content."""
         mcp_server.browser_session = MagicMock()
-        mcp_server.browser_session.get_selector_map = AsyncMock(return_value=self._make_selector_map())
+        mcp_server.browser_session.get_browser_state_summary = AsyncMock(
+            return_value=_make_mock_browser_state(selector_map=self._make_selector_map())
+        )
 
         result = asyncio.run(mcp_server._search_elements("Home", by="text"))
         data = json.loads(result)
@@ -628,7 +630,9 @@ class TestSearchElements:
     def test_search_by_text_case_insensitive(self, mcp_server):
         """Text search is case insensitive."""
         mcp_server.browser_session = MagicMock()
-        mcp_server.browser_session.get_selector_map = AsyncMock(return_value=self._make_selector_map())
+        mcp_server.browser_session.get_browser_state_summary = AsyncMock(
+            return_value=_make_mock_browser_state(selector_map=self._make_selector_map())
+        )
 
         result = asyncio.run(mcp_server._search_elements("home page", by="text"))
         data = json.loads(result)
@@ -638,7 +642,9 @@ class TestSearchElements:
     def test_search_by_tag(self, mcp_server):
         """Finds elements by tag name."""
         mcp_server.browser_session = MagicMock()
-        mcp_server.browser_session.get_selector_map = AsyncMock(return_value=self._make_selector_map())
+        mcp_server.browser_session.get_browser_state_summary = AsyncMock(
+            return_value=_make_mock_browser_state(selector_map=self._make_selector_map())
+        )
 
         result = asyncio.run(mcp_server._search_elements("a", by="tag"))
         data = json.loads(result)
@@ -649,7 +655,9 @@ class TestSearchElements:
     def test_search_by_id(self, mcp_server):
         """Finds elements by id attribute."""
         mcp_server.browser_session = MagicMock()
-        mcp_server.browser_session.get_selector_map = AsyncMock(return_value=self._make_selector_map())
+        mcp_server.browser_session.get_browser_state_summary = AsyncMock(
+            return_value=_make_mock_browser_state(selector_map=self._make_selector_map())
+        )
 
         result = asyncio.run(mcp_server._search_elements("submit", by="id"))
         data = json.loads(result)
@@ -660,7 +668,9 @@ class TestSearchElements:
     def test_search_by_class(self, mcp_server):
         """Finds elements by class attribute."""
         mcp_server.browser_session = MagicMock()
-        mcp_server.browser_session.get_selector_map = AsyncMock(return_value=self._make_selector_map())
+        mcp_server.browser_session.get_browser_state_summary = AsyncMock(
+            return_value=_make_mock_browser_state(selector_map=self._make_selector_map())
+        )
 
         result = asyncio.run(mcp_server._search_elements("nav-link", by="class"))
         data = json.loads(result)
@@ -670,7 +680,9 @@ class TestSearchElements:
     def test_search_by_attribute(self, mcp_server):
         """Finds elements by any attribute value."""
         mcp_server.browser_session = MagicMock()
-        mcp_server.browser_session.get_selector_map = AsyncMock(return_value=self._make_selector_map())
+        mcp_server.browser_session.get_browser_state_summary = AsyncMock(
+            return_value=_make_mock_browser_state(selector_map=self._make_selector_map())
+        )
 
         result = asyncio.run(mcp_server._search_elements("/about", by="attribute"))
         data = json.loads(result)
@@ -681,7 +693,9 @@ class TestSearchElements:
     def test_search_respects_max_results(self, mcp_server):
         """Limits returned results to max_results."""
         mcp_server.browser_session = MagicMock()
-        mcp_server.browser_session.get_selector_map = AsyncMock(return_value=self._make_selector_map())
+        mcp_server.browser_session.get_browser_state_summary = AsyncMock(
+            return_value=_make_mock_browser_state(selector_map=self._make_selector_map())
+        )
 
         result = asyncio.run(mcp_server._search_elements("a", by="tag", max_results=1))
         data = json.loads(result)
@@ -691,7 +705,9 @@ class TestSearchElements:
     def test_search_no_matches(self, mcp_server):
         """Returns empty results when no elements match."""
         mcp_server.browser_session = MagicMock()
-        mcp_server.browser_session.get_selector_map = AsyncMock(return_value=self._make_selector_map())
+        mcp_server.browser_session.get_browser_state_summary = AsyncMock(
+            return_value=_make_mock_browser_state(selector_map=self._make_selector_map())
+        )
 
         result = asyncio.run(mcp_server._search_elements("nonexistent_element_xyz", by="text"))
         data = json.loads(result)
@@ -702,7 +718,9 @@ class TestSearchElements:
     def test_search_empty_selector_map(self, mcp_server):
         """Handles pages with no interactive elements."""
         mcp_server.browser_session = MagicMock()
-        mcp_server.browser_session.get_selector_map = AsyncMock(return_value={})
+        mcp_server.browser_session.get_browser_state_summary = AsyncMock(
+            return_value=_make_mock_browser_state(selector_map={})
+        )
 
         result = asyncio.run(mcp_server._search_elements("test", by="text"))
         data = json.loads(result)
@@ -712,7 +730,9 @@ class TestSearchElements:
     def test_search_result_includes_optional_fields(self, mcp_server):
         """Results include optional fields (id, class, placeholder, href, type) when present."""
         mcp_server.browser_session = MagicMock()
-        mcp_server.browser_session.get_selector_map = AsyncMock(return_value=self._make_selector_map())
+        mcp_server.browser_session.get_browser_state_summary = AsyncMock(
+            return_value=_make_mock_browser_state(selector_map=self._make_selector_map())
+        )
 
         result = asyncio.run(mcp_server._search_elements("search-input", by="id"))
         data = json.loads(result)
@@ -730,7 +750,9 @@ class TestSearchElements:
             0: _make_mock_element(tag_name="div", text="Plain div", attributes={}),
         }
         mcp_server.browser_session = MagicMock()
-        mcp_server.browser_session.get_selector_map = AsyncMock(return_value=selector_map)
+        mcp_server.browser_session.get_browser_state_summary = AsyncMock(
+            return_value=_make_mock_browser_state(selector_map=selector_map)
+        )
 
         result = asyncio.run(mcp_server._search_elements("Plain", by="text"))
         data = json.loads(result)
@@ -744,9 +766,9 @@ class TestSearchElements:
         assert "type" not in elem
 
     def test_search_handles_error(self, mcp_server):
-        """Returns error message when selector map retrieval fails."""
+        """Returns error message when state retrieval fails."""
         mcp_server.browser_session = MagicMock()
-        mcp_server.browser_session.get_selector_map = AsyncMock(side_effect=RuntimeError("DOM not ready"))
+        mcp_server.browser_session.get_browser_state_summary = AsyncMock(side_effect=RuntimeError("DOM not ready"))
 
         result = asyncio.run(mcp_server._search_elements("test"))
         assert "Error searching elements" in result
@@ -755,7 +777,9 @@ class TestSearchElements:
     def test_search_routed_via_execute_tool(self, mcp_server):
         """Verify browser_search_elements routes through _execute_tool correctly."""
         mcp_server.browser_session = MagicMock()
-        mcp_server.browser_session.get_selector_map = AsyncMock(return_value=self._make_selector_map())
+        mcp_server.browser_session.get_browser_state_summary = AsyncMock(
+            return_value=_make_mock_browser_state(selector_map=self._make_selector_map())
+        )
 
         result = asyncio.run(
             mcp_server._execute_tool("browser_search_elements", {"query": "button", "by": "tag", "max_results": 10})
@@ -870,7 +894,9 @@ class TestToolRouting:
     def test_routes_browser_search_elements(self, mcp_server):
         """browser_search_elements routes to _search_elements."""
         mcp_server.browser_session = MagicMock()
-        mcp_server.browser_session.get_selector_map = AsyncMock(return_value={})
+        mcp_server.browser_session.get_browser_state_summary = AsyncMock(
+            return_value=_make_mock_browser_state(selector_map={})
+        )
 
         result = asyncio.run(mcp_server._execute_tool("browser_search_elements", {"query": "test"}))
         data = json.loads(result)
@@ -903,7 +929,9 @@ class TestToolRouting:
     def test_search_elements_default_arguments(self, mcp_server):
         """browser_search_elements uses correct defaults for optional arguments."""
         mcp_server.browser_session = MagicMock()
-        mcp_server.browser_session.get_selector_map = AsyncMock(return_value={})
+        mcp_server.browser_session.get_browser_state_summary = AsyncMock(
+            return_value=_make_mock_browser_state(selector_map={})
+        )
 
         # Only provide required 'query', rest should use defaults
         result = asyncio.run(mcp_server._execute_tool("browser_search_elements", {"query": "test"}))
@@ -948,7 +976,9 @@ class TestToolManifest:
             mock_awaitable = AsyncMock()
             mock_event_bus.dispatch = MagicMock(return_value=mock_awaitable())
             mcp_server.browser_session.event_bus = mock_event_bus
-            mcp_server.browser_session.get_selector_map = AsyncMock(return_value={})
+            mcp_server.browser_session.get_browser_state_summary = AsyncMock(
+                return_value=_make_mock_browser_state(selector_map={})
+            )
 
             with patch.object(mcp_server_module, "extract_clean_markdown", new_callable=AsyncMock) as mock_extract:
                 mock_extract.return_value = ("content", {})
