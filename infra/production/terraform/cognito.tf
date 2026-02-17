@@ -10,11 +10,15 @@ locals {
   cognito_domain_prefix = var.cognito_domain_prefix != "" ? var.cognito_domain_prefix : "${var.project_name}-${random_id.cognito_suffix.hex}"
   frontend_base_url     = var.frontend_domain_name != "" ? "https://${var.frontend_domain_name}" : "https://${aws_cloudfront_distribution.frontend.domain_name}"
   cognito_callback_urls = length(var.cognito_callback_urls) > 0 ? var.cognito_callback_urls : [
+    "${local.frontend_base_url}/auth/callback/",
     "${local.frontend_base_url}/auth/callback",
+    "http://localhost:3000/auth/callback/",
     "http://localhost:3000/auth/callback",
   ]
   cognito_logout_urls = length(var.cognito_logout_urls) > 0 ? var.cognito_logout_urls : [
+    "${local.frontend_base_url}/login/",
     "${local.frontend_base_url}/login",
+    "http://localhost:3000/login/",
     "http://localhost:3000/login",
   ]
 }

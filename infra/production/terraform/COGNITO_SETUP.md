@@ -7,10 +7,14 @@ That means callback/logout URLs are required.
 
 If you do not set overrides, Terraform configures:
 - Callback URLs:
+  - `https://<frontend-domain>/auth/callback/`
   - `https://<frontend-domain>/auth/callback`
+  - `http://localhost:3000/auth/callback/`
   - `http://localhost:3000/auth/callback`
 - Logout URLs:
+  - `https://<frontend-domain>/login/`
   - `https://<frontend-domain>/login`
+  - `http://localhost:3000/login/`
   - `http://localhost:3000/login`
 
 `<frontend-domain>` is:
@@ -23,11 +27,11 @@ Use this in `terraform.tfvars` if you want strict custom URLs:
 
 ```hcl
 cognito_callback_urls = [
-  "https://app.example.com/auth/callback",
+  "https://app.example.com/auth/callback/",
 ]
 
 cognito_logout_urls = [
-  "https://app.example.com/login",
+  "https://app.example.com/login/",
 ]
 ```
 

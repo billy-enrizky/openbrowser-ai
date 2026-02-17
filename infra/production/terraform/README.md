@@ -150,8 +150,8 @@ export NEXT_PUBLIC_WS_URL=$(terraform -chdir=infra/production/terraform output -
 export NEXT_PUBLIC_AUTH_ENABLED=true
 export NEXT_PUBLIC_COGNITO_DOMAIN=$(terraform -chdir=infra/production/terraform output -raw cognito_domain_url)
 export NEXT_PUBLIC_COGNITO_CLIENT_ID=$(terraform -chdir=infra/production/terraform output -raw cognito_app_client_id)
-export NEXT_PUBLIC_COGNITO_REDIRECT_URI=https://app.example.com/auth/callback
-export NEXT_PUBLIC_COGNITO_LOGOUT_URI=https://app.example.com/login
+export NEXT_PUBLIC_COGNITO_REDIRECT_URI=https://app.example.com/auth/callback/
+export NEXT_PUBLIC_COGNITO_LOGOUT_URI=https://app.example.com/login/
 export NEXT_PUBLIC_COGNITO_SCOPES="openid email profile"
 cd frontend && npm ci && npm run build
 aws s3 sync out/ s3://$(terraform -chdir=infra/production/terraform output -raw frontend_s3_bucket)/ --delete
