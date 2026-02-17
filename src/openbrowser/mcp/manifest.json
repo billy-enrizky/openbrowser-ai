@@ -36,10 +36,6 @@
   },
   "tools": [
     {
-      "name": "retry_with_openbrowser_agent",
-      "description": "Execute a high-level task using the AI browser agent. Best for complex multi-step workflows"
-    },
-    {
       "name": "browser_navigate",
       "description": "Navigate to a URL in the current tab or open a new tab. Example: Navigate to https://example.com"
     },
@@ -54,10 +50,6 @@
     {
       "name": "browser_get_state",
       "description": "Get page state summary (URL, title, element count). Use compact=false for full element list"
-    },
-    {
-      "name": "browser_extract_content",
-      "description": "Extract structured content from the page using AI. Perfect for scraping specific information"
     },
     {
       "name": "browser_scroll",
@@ -108,7 +100,7 @@
     {
       "name": "scrape_data",
       "description": "Extract structured data from a website",
-      "text": "Use browser_navigate to go to {url}, then use browser_extract_content to extract {data_type}. If the page requires interaction, use browser_get_state to find elements and browser_click/browser_type as needed."
+      "text": "Use browser_navigate to go to {url}, then use browser_get_text to get page content as markdown. Use browser_grep to search for {data_type}. If the page requires interaction, use browser_get_state to find elements and browser_click/browser_type as needed."
     },
     {
       "name": "fill_form",
@@ -116,14 +108,9 @@
       "text": "Navigate to {url}, use browser_get_state to identify form fields, then use browser_type to fill in: {field_data}. Finally, click the submit button."
     },
     {
-      "name": "multi_step_task",
-      "description": "Execute a complex multi-step task",
-      "text": "Use retry_with_openbrowser_agent with task: '{task_description}'. Set max_steps based on complexity and use_vision=true for better understanding."
-    },
-    {
       "name": "research_topic",
       "description": "Research a topic across multiple websites",
-      "text": "Open multiple tabs using browser_navigate with new_tab=true for sites: {sites}. Use browser_extract_content on each to gather information about {topic}. Switch between tabs with browser_switch_tab."
+      "text": "Open multiple tabs using browser_navigate with new_tab=true for sites: {sites}. Use browser_get_text on each to gather information about {topic}. Switch between tabs with browser_switch_tab."
     }
   ],
   "keywords": ["browser", "automation", "web-scraping", "testing", "ai-agent", "playwright", "selenium-alternative", "rpa", "web-automation", "mcp", "openbrowser"],
