@@ -96,6 +96,7 @@ from openbrowser.browser import BrowserProfile, BrowserSession
 from openbrowser.browser.events import ScrollToTextEvent
 from openbrowser.config import get_default_llm, get_default_profile, load_openbrowser_config
 from openbrowser.dom.markdown_extractor import extract_clean_markdown
+from openbrowser.dom.service import DomService
 from openbrowser.filesystem.file_system import FileSystem
 from openbrowser.llm.google.chat import ChatGoogle
 from openbrowser.llm.openai.chat import ChatOpenAI
@@ -491,6 +492,40 @@ class OpenBrowserServer:
 						'required': ['text'],
 					},
 				),
+				# Advanced inspection tools
+				types.Tool(
+					name='browser_get_accessibility_tree',
+					description='Get the accessibility tree (a11y tree) of the current page. Returns structured data including roles, names, and properties of all accessible elements. Useful for understanding page structure, testing accessibility, and finding elements by their ARIA roles.',
+					inputSchema={
+						'type': 'object',
+						'properties': {
+							'max_depth': {
+								'type': 'integer',
+								'description': 'Maximum depth of the tree to return. Use -1 for unlimited depth.',
+								'default': -1,
+							},
+							'include_ignored': {
+								'type': 'boolean',
+								'description': 'Whether to include nodes marked as ignored in the accessibility tree.',
+								'default': False,
+							},
+						},
+					},
+				),
+				types.Tool(
+					name='browser_execute_js',
+					description='Execute JavaScript code on the current page and return the result. The expression is evaluated in the page context. Use for advanced page interactions, reading page state, or extracting data not available through other tools.',
+					inputSchema={
+						'type': 'object',
+						'properties': {
+							'expression': {
+								'type': 'string',
+								'description': 'JavaScript expression or IIFE to evaluate in the page context. For multi-statement code, wrap in an IIFE: (()=>{ ... return result; })()',
+							},
+						},
+						'required': ['expression'],
+					},
+				),
 			]
 
 		@self.server.list_resources()
@@ -611,6 +646,16 @@ class OpenBrowserServer:
 
 			elif tool_name == 'browser_find_and_scroll':
 				return await self._find_and_scroll(arguments['text'])
+
+			# Advanced inspection tools
+			elif tool_name == 'browser_get_accessibility_tree':
+				return await self._get_accessibility_tree(
+					max_depth=arguments.get('max_depth', -1),
+					include_ignored=arguments.get('include_ignored', False),
+				)
+
+			elif tool_name == 'browser_execute_js':
+				return await self._execute_js(arguments['expression'])
 
 		return f'Unknown tool: {tool_name}'
 
@@ -1215,6 +1260,136 @@ class OpenBrowserServer:
 		except Exception as e:
 			logger.error(f'Find and scroll failed: {e}', exc_info=True)
 			return f"Text '{text}' not found or not visible on page"
+
+	async def _get_accessibility_tree(self, max_depth: int = -1, include_ignored: bool = False) -> str:
+		"""Get the accessibility tree of the current page."""
+		if not self.browser_session:
+			return 'Error: No browser session active'
+
+		try:
+			target_id = self.browser_session.current_target_id
+			if not target_id:
+				return 'Error: No active page target'
+
+			dom_service = DomService(self.browser_session)
+			ax_tree_result = await dom_service._get_ax_tree_for_all_frames(target_id)
+
+			nodes = []
+			node_map: dict[str, dict[str, Any]] = {}
+
+			for ax_node in ax_tree_result.get('nodes', []):
+				if not include_ignored and ax_node.get('ignored', False):
+					continue
+
+				enhanced = dom_service._build_enhanced_ax_node(ax_node)
+				node_info: dict[str, Any] = {
+					'id': enhanced.ax_node_id,
+					'role': enhanced.role,
+					'name': enhanced.name,
+				}
+				if enhanced.description:
+					node_info['description'] = enhanced.description
+				if enhanced.properties:
+					props = {}
+					for prop in enhanced.properties:
+						if prop.value is not None:
+							props[prop.name] = prop.value
+					if props:
+						node_info['properties'] = props
+				if enhanced.child_ids:
+					node_info['children'] = enhanced.child_ids
+
+				node_map[enhanced.ax_node_id] = node_info
+				nodes.append(node_info)
+
+			def _build_tree(node_id: str, depth: int) -> dict[str, Any] | None:
+				"""Recursively build tree structure with depth limit."""
+				node = node_map.get(node_id)
+				if not node:
+					return None
+				if max_depth >= 0 and depth > max_depth:
+					return None
+
+				result = {k: v for k, v in node.items() if k != 'children'}
+				child_ids = node.get('children', [])
+				if child_ids:
+					children = []
+					for child_id in child_ids:
+						child = _build_tree(child_id, depth + 1)
+						if child:
+							children.append(child)
+					if children:
+						result['children'] = children
+				return result
+
+			# Build tree from root nodes (nodes not referenced as children)
+			all_child_ids = set()
+			for node in nodes:
+				for child_id in node.get('children', []):
+					all_child_ids.add(child_id)
+
+			root_nodes = [n for n in nodes if n['id'] not in all_child_ids]
+
+			if root_nodes:
+				tree = []
+				for root in root_nodes:
+					built = _build_tree(root['id'], 0)
+					if built:
+						tree.append(built)
+
+				return json.dumps(
+					{
+						'tree': tree if len(tree) > 1 else tree[0] if tree else {},
+						'total_nodes': len(nodes),
+					},
+					indent=2,
+				)
+			else:
+				return json.dumps({'nodes': nodes, 'total_nodes': len(nodes)}, indent=2)
+
+		except Exception as e:
+			logger.error(f'Accessibility tree extraction failed: {e}', exc_info=True)
+			return f'Error getting accessibility tree: {str(e)}'
+
+	async def _execute_js(self, expression: str) -> str:
+		"""Execute JavaScript on the current page and return the result."""
+		if not self.browser_session:
+			return 'Error: No browser session active'
+
+		try:
+			target_id = self.browser_session.current_target_id
+			if not target_id:
+				return 'Error: No active page target'
+
+			cdp_session = await self.browser_session.get_or_create_cdp_session(target_id=target_id, focus=False)
+
+			result = await cdp_session.cdp_client.send.Runtime.evaluate(
+				params={
+					'expression': expression,
+					'returnByValue': True,
+					'awaitPromise': True,
+				},
+				session_id=cdp_session.session_id,
+			)
+
+			if 'exceptionDetails' in result:
+				exception = result['exceptionDetails']
+				error_text = exception.get('text', 'Unknown error')
+				if 'exception' in exception:
+					error_text = exception['exception'].get('description', error_text)
+				return json.dumps({'error': error_text})
+
+			value = result.get('result', {}).get('value')
+			result_type = result.get('result', {}).get('type', 'undefined')
+
+			if result_type == 'undefined':
+				return json.dumps({'result': None, 'type': 'undefined'})
+
+			return json.dumps({'result': value, 'type': result_type}, indent=2, default=str)
+
+		except Exception as e:
+			logger.error(f'JavaScript execution failed: {e}', exc_info=True)
+			return f'Error executing JavaScript: {str(e)}'
 
 	def _track_session(self, session: BrowserSession) -> None:
 		"""Track a browser session for management."""
