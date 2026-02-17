@@ -199,7 +199,7 @@ ONLINE_FSDFM_GRPO_CONFIG = {
 # Reference: github.com/yifan123/flow_grpo
 FLOW_GRPO_FSDFM_CONFIG = {
     "group_size": 4,                   # Increased from 2: G=2 gave zero advantages (both rollouts same reward)
-    "learning_rate": 1e-5,            # Lower than SFT (2e-4) per PPO convention
+    "learning_rate": 5e-5,            # v8: increased from 1e-5 after per-rollout normalization fix
     "num_epochs": int(os.environ.get("NUM_EPOCHS", "1")),
     "kl_coeff": 0.04,                 # Matches reference geneval config
     "clip_range": 0.2,                # Standard PPO clip
@@ -229,7 +229,7 @@ FLOW_GRPO_FSDFM_CONFIG = {
 # which used autoregressive log-probs despite masked diffusion generation.
 FLOW_GRPO_REFUSION_CONFIG = {
     "group_size": 4,                   # Increased from 2: G=2 gave zero advantages (both rollouts same reward)
-    "learning_rate": 1e-5,
+    "learning_rate": 5e-5,            # v8: increased from 1e-5 after per-rollout normalization fix
     "num_epochs": int(os.environ.get("NUM_EPOCHS", "1")),
     "kl_coeff": 0.04,
     "clip_range": 0.2,
