@@ -1,24 +1,50 @@
-# Copy to terraform.tfvars and fill in. Do not commit terraform.tfvars.
+# -----------------------------------------------------------------------------
+# OpenBrowser production Terraform variables (example)
+# -----------------------------------------------------------------------------
 
 aws_region   = "ca-central-1"
 project_name = "openbrowser"
 
-# Backend container image (manually pushed to ECR; see README for build/push steps):
-# - Empty = use Terraform-created ECR repo (529206289231.dkr.ecr.ca-central-1.amazonaws.com/openbrowser-backend)
-# - Set to full URI to use another registry
+# Backend runtime
+backend_instance_type = "t3.small"
+backend_port          = 8000
+
+# Backend container image:
+# - Leave empty to use the ECR repo created by Terraform.
+# - Or set a full URI, e.g.:
+#   backend_image = "123456789012.dkr.ecr.ca-central-1.amazonaws.com/openbrowser-backend:latest"
 backend_image     = ""
 backend_image_tag = "latest"
 
-# Optional: use an existing Secrets Manager secret for LLM API keys
-# Leave empty to have Terraform create a placeholder secret
-# secrets_manager_secret_name = ""
+# Frontend/API CORS (set this to your deployed frontend origin in production)
+cors_origins = [
+  "https://app.example.com",
+  "http://localhost:3000",
+]
 
-# Optional: require JWT (Cognito) on API routes. Set true when auth is implemented.
-enable_api_auth = false
+# Frontend custom domain (optional)
+# frontend_domain_name         = "app.example.com"
+# frontend_acm_certificate_arn = "arn:aws:acm:us-east-1:123456789012:certificate/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
 
-# Optional: custom domain for frontend (requires ACM cert in us-east-1 for CloudFront)
-# frontend_domain_name    = "app.example.com"
-# frontend_acm_certificate_arn = "arn:aws:acm:us-east-1:..."
-
-# Optional: Cognito hosted UI domain prefix
+# Cognito hosted UI domain prefix (optional)
 # cognito_domain_prefix = "openbrowser"
+
+# Cognito app client OAuth config (optional overrides)
+# cognito_callback_urls = [
+#   "https://app.example.com/auth/callback",
+#   "http://localhost:3000/auth/callback",
+# ]
+# cognito_logout_urls = [
+#   "https://app.example.com/login",
+#   "http://localhost:3000/login",
+# ]
+# cognito_oauth_scopes = ["openid", "email", "profile"]
+
+# Auth enforcement:
+# - enable_backend_auth: verify JWT in FastAPI (REST + WebSocket)
+# - enable_api_auth: optional extra JWT validation at API Gateway
+enable_backend_auth = true
+enable_api_auth     = false
+
+# Optional: use an existing Secrets Manager secret for backend LLM keys
+# secrets_manager_secret_name = "openbrowser/backend-api-keys"

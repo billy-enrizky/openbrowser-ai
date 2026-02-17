@@ -16,10 +16,15 @@ locals {
   backend_env = [
     "AWS_REGION=${var.aws_region}",
     "DDB_TABLE=${aws_dynamodb_table.main.name}",
+    "CORS_ORIGINS=${join(",", var.cors_origins)}",
     "VNC_ENABLED=true",
     "VNC_WIDTH=1920",
     "VNC_HEIGHT=1080",
     "DEBUG=false",
+    "AUTH_ENABLED=${var.enable_backend_auth}",
+    "COGNITO_REGION=${var.aws_region}",
+    "COGNITO_USER_POOL_ID=${aws_cognito_user_pool.main.id}",
+    "COGNITO_APP_CLIENT_ID=${aws_cognito_user_pool_client.app.id}",
   ]
   # Use provided secret name or the one we create
   backend_secret_id = var.secrets_manager_secret_name != "" ? var.secrets_manager_secret_name : (length(aws_secretsmanager_secret.backend_keys) > 0 ? aws_secretsmanager_secret.backend_keys[0].name : "")
@@ -35,6 +40,7 @@ resource "aws_instance" "backend" {
   iam_instance_profile   = aws_iam_instance_profile.backend.name
 
   associate_public_ip_address = false
+  user_data_replace_on_change = true
 
   user_data = templatefile("${path.module}/scripts/backend-userdata.sh", {
     backend_image     = local.backend_image_uri

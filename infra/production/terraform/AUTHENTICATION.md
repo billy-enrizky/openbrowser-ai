@@ -1,225 +1,92 @@
-# API Gateway Authentication
+# Production Authentication Runbook
 
-All API Gateway requests now require Cognito JWT authentication, except for the `/health` endpoint.
+This repository uses:
+- Cognito Hosted UI + OAuth2 Authorization Code flow (PKCE) in the frontend
+- JWT verification in the backend (`AUTH_ENABLED=true`)
+- Optional additional JWT enforcement at API Gateway (`enable_api_auth`)
 
-## Architecture
+## 1. Terraform settings
 
-```
-Frontend
-   │
-   │ 1. User logs in → Cognito
-   │ 2. Receives JWT token
-   │
-   ▼
-API Gateway
-   │
-   │ Validates JWT token
-   │ (via Cognito authorizer)
-   │
-   ▼
-Backend (if token valid)
-```
-
-## Setup
-
-### 1. Configure Cognito Callback URLs
-
-Update `terraform.tfvars`:
+In `terraform.tfvars`:
 
 ```hcl
-cognito_callback_urls = [
-  "https://your-frontend-domain.com",
-  "http://localhost:3000"  # For local dev
+enable_backend_auth = true
+enable_api_auth     = false
+
+cors_origins = [
+  "https://app.example.com",
 ]
 
-cognito_logout_urls = [
-  "https://your-frontend-domain.com",
-  "http://localhost:3000"
-]
+# Optional overrides (if omitted, Terraform auto-generates these)
+# cognito_callback_urls = ["https://app.example.com/auth/callback"]
+# cognito_logout_urls   = ["https://app.example.com/login"]
 ```
 
-### 2. Deploy Infrastructure
-
-```bash
-make terraform-apply-prod
-```
-
-### 3. Get Cognito Details
+Apply:
 
 ```bash
 cd infra/production/terraform
-terraform output cognito_user_pool_id
-terraform output cognito_user_pool_client_id
-terraform output cognito_user_pool_endpoint
+terraform init
+terraform apply
 ```
 
-## Frontend Integration
+Note: backend auth env is injected via EC2 `user_data`; auth-related changes can replace the backend instance.
 
-### Install AWS Amplify (Recommended)
+## 2. Frontend build env
+
+Before `npm run build` in `frontend/`, set:
+
+```bash
+export NEXT_PUBLIC_API_URL=$(terraform -chdir=infra/production/terraform output -raw api_base_url)
+export NEXT_PUBLIC_WS_URL=$(terraform -chdir=infra/production/terraform output -raw api_ws_url)
+export NEXT_PUBLIC_AUTH_ENABLED=true
+export NEXT_PUBLIC_COGNITO_DOMAIN=$(terraform -chdir=infra/production/terraform output -raw cognito_domain_url)
+export NEXT_PUBLIC_COGNITO_CLIENT_ID=$(terraform -chdir=infra/production/terraform output -raw cognito_app_client_id)
+export NEXT_PUBLIC_COGNITO_REDIRECT_URI=https://app.example.com/auth/callback
+export NEXT_PUBLIC_COGNITO_LOGOUT_URI=https://app.example.com/login
+export NEXT_PUBLIC_COGNITO_SCOPES="openid email profile"
+```
+
+Then build + upload:
 
 ```bash
 cd frontend
-npm install aws-amplify
+npm ci
+npm run build
+aws s3 sync out/ s3://$(terraform -chdir=../infra/production/terraform output -raw frontend_s3_bucket)/ --delete
+aws cloudfront create-invalidation --distribution-id $(terraform -chdir=../infra/production/terraform output -raw cloudfront_distribution_id) --paths "/*"
 ```
 
-### Configure Amplify
+## 3. Backend auth env injected by Terraform
 
-```typescript
-// frontend/src/lib/auth.ts
-import { Amplify } from 'aws-amplify';
+`backend.tf` now injects:
+- `AUTH_ENABLED`
+- `COGNITO_REGION`
+- `COGNITO_USER_POOL_ID`
+- `COGNITO_APP_CLIENT_ID`
+- `CORS_ORIGINS`
 
-Amplify.configure({
-  Auth: {
-    Cognito: {
-      userPoolId: process.env.NEXT_PUBLIC_COGNITO_USER_POOL_ID!,
-      userPoolClientId: process.env.NEXT_PUBLIC_COGNITO_CLIENT_ID!,
-      loginWith: {
-        email: true,
-      },
-    },
-  },
-});
-```
+No extra manual env setup is needed on EC2 for Cognito verification.
 
-### Add Authentication to API Calls
+## 4. WebSocket auth behavior
 
-```typescript
-// frontend/src/lib/api.ts
-import { fetchAuthSession } from 'aws-amplify/auth';
+Frontend sends JWT as query param: `wss://.../ws/<id>?token=<jwt>`.
 
-export async function authenticatedFetch(url: string, options: RequestInit = {}) {
-  const session = await fetchAuthSession();
-  const token = session.tokens?.idToken?.toString();
+Backend validates this token.  
+If `enable_api_auth=true`, API Gateway also validates it (header or query token).
 
-  return fetch(url, {
-    ...options,
-    headers: {
-      ...options.headers,
-      Authorization: `Bearer ${token}`,
-    },
-  });
-}
-```
+## 5. Quick verification
 
-### WebSocket Authentication
+1. Open `https://app.example.com/login`.
+2. Sign in via Cognito Hosted UI.
+3. Confirm redirect to `/auth/callback` then `/`.
+4. Verify backend requests return `200`:
+   - `GET /api/v1/models`
+5. Verify WebSocket connects and task starts without `401/403`.
 
-For WebSocket connections, pass the token as a query parameter:
+## 6. Most common failures
 
-```typescript
-// frontend/src/hooks/useWebSocket.ts
-import { fetchAuthSession } from 'aws-amplify/auth';
-
-const connect = async () => {
-  const session = await fetchAuthSession();
-  const token = session.tokens?.idToken?.toString();
-  
-  const ws = new WebSocket(
-    `${WS_BASE_URL}?Authorization=Bearer ${token}`
-  );
-  // ...
-};
-```
-
-Or use the `Authorization` header (if your WebSocket library supports it).
-
-## Creating Users
-
-### Via AWS Console
-
-1. Go to Cognito → User Pools
-2. Select your user pool
-3. Users → Create user
-4. Enter email and temporary password
-
-### Via AWS CLI
-
-```bash
-aws cognito-idp admin-create-user \
-  --user-pool-id <user-pool-id> \
-  --username user@example.com \
-  --user-attributes Name=email,Value=user@example.com \
-  --temporary-password TempPass123! \
-  --message-action SUPPRESS
-```
-
-### Via Terraform (Optional)
-
-Add to `main.tf`:
-
-```hcl
-resource "aws_cognito_user" "admin" {
-  user_pool_id = aws_cognito_user_pool.main.id
-  username     = "admin@example.com"
-
-  attributes = {
-    email = "admin@example.com"
-  }
-}
-```
-
-## Testing Authentication
-
-### 1. Get Access Token
-
-```bash
-# Using AWS CLI
-aws cognito-idp initiate-auth \
-  --auth-flow USER_PASSWORD_AUTH \
-  --client-id <client-id> \
-  --auth-parameters \
-    USERNAME=user@example.com,PASSWORD=YourPassword123!
-```
-
-### 2. Make Authenticated Request
-
-```bash
-curl -H "Authorization: Bearer <id-token>" \
-  https://<api-gateway-url>/api/v1/tasks
-```
-
-### 3. Test Without Token (Should Fail)
-
-```bash
-curl https://<api-gateway-url>/api/v1/tasks
-# Returns 401 Unauthorized
-```
-
-## Public Endpoints
-
-The following endpoints are **public** (no auth required):
-
-- `GET /health` - Health check
-
-All other endpoints require authentication.
-
-## Security Notes
-
-1. **Token Expiration**: Tokens expire after 60 minutes. Frontend should refresh automatically.
-
-2. **HTTPS Required**: In production, always use HTTPS for API Gateway and Cognito.
-
-3. **CORS**: Update `cors_origins` in `terraform.tfvars` to restrict allowed origins.
-
-4. **Rate Limiting**: Consider adding API Gateway usage plans for rate limiting.
-
-5. **Custom Domain**: Use a custom domain for Cognito to match your brand.
-
-## Troubleshooting
-
-### 401 Unauthorized
-
-- Verify token is included in `Authorization` header
-- Check token hasn't expired
-- Verify Cognito User Pool ID and Client ID are correct
-
-### WebSocket Connection Fails
-
-- Ensure token is passed in connection request
-- Check WebSocket library supports custom headers
-- Verify API Gateway authorizer is configured for WebSocket routes
-
-### CORS Errors
-
-- Update `cors_origins` in Terraform variables
-- Ensure frontend domain is in allowed list
-- Check API Gateway CORS configuration
+- `invalid_scope`: Cognito app client missing one of `openid/email/profile`.
+- Redirect loop to `/`: `NEXT_PUBLIC_AUTH_ENABLED` was not set to `true` at frontend build time.
+- `401 Unauthorized` from backend: backend Cognito env mismatch (wrong client ID/user pool).
+- WebSocket `403` at handshake: token missing from WS URL or API Gateway authorizer misconfigured.
