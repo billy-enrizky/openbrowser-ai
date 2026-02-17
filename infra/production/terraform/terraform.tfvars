@@ -47,4 +47,4 @@ enable_backend_auth = true
 enable_api_auth     = false
 
 # Optional: use an existing Secrets Manager secret for backend LLM keys
-# secrets_manager_secret_name = "openbrowser/backend-api-keys"
+secrets_manager_secret_name = "openbrowser/backend-api-keys-v2"
