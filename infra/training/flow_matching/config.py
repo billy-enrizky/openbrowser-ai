@@ -208,7 +208,7 @@ FLOW_GRPO_FSDFM_CONFIG = {
     "logging_steps": 5,
     "grad_clip": 1.0,
     "num_generation_steps": 64,        # Denoising steps (T=64, must match eval; T=32 still produces noise)
-    "generation_temperature": 0.3,     # Reduced from 0.7: Poisson jump process too sensitive to temperature noise
+    "generation_temperature": 0.7,     # Reverted from 0.3: v5 at 0.3 was worse (7%) than v4 at 0.7 (18%), model needs stochasticity
     "formfactory_port": int(os.environ.get("FORMFACTORY_PORT", "5050")),
     "browser_headless": True,
     "action_timeout_s": 5,
