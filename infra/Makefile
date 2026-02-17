@@ -13,7 +13,8 @@
        docker-build-eval docker-run-eval \
        terraform-plan-eval terraform-apply-eval terraform-destroy-eval \
        terraform-plan-prod terraform-apply-prod terraform-destroy-prod \
-       prod-push-api-keys prod-get-url \
+       prod-push-api-keys prod-get-url prod-build-frontend prod-deploy-frontend \
+       prod-deploy-backend-script prod-deploy-frontend-script \
        clean
 
 # Configuration
@@ -74,6 +75,10 @@ help:
 	@echo "  terraform-destroy-prod Destroy production infrastructure"
 	@echo "  prod-push-api-keys    Push API keys from .env to SSM"
 	@echo "  prod-get-url          Get API Gateway URL"
+	@echo "  prod-build-frontend   Build frontend using Terraform outputs"
+	@echo "  prod-deploy-frontend  Build + upload frontend + CloudFront invalidation"
+	@echo "  prod-deploy-backend-script  Run infra/production/scripts/deploy-backend.sh"
+	@echo "  prod-deploy-frontend-script Run infra/production/scripts/deploy-frontend.sh"
 	@echo ""
 	@echo "Other:"
 	@echo "  clean               Remove local output files"
@@ -247,7 +252,19 @@ prod-push-api-keys:
 	bash infra/production/scripts/push_api_keys.sh
 
 prod-get-url:
-	@cd $(TF_PROD_DIR) && terraform output -raw api_gateway_url 2>/dev/null || echo "Run 'terraform apply' first"
+	@cd $(TF_PROD_DIR) && terraform output -raw api_base_url 2>/dev/null || echo "Run 'terraform apply' first"
+
+prod-build-frontend:
+	bash infra/production/scripts/build_frontend_from_tf.sh
+
+prod-deploy-frontend:
+	bash infra/production/scripts/build_frontend_from_tf.sh --deploy
+
+prod-deploy-backend-script:
+	bash infra/production/scripts/deploy-backend.sh
+
+prod-deploy-frontend-script:
+	bash infra/production/scripts/deploy-frontend.sh
 
 # -------------------------------------------------------------------
 # Cleanup
