@@ -198,7 +198,7 @@ ONLINE_FSDFM_GRPO_CONFIG = {
 # clipped policy gradients aligned with the actual generation trajectory.
 # Reference: github.com/yifan123/flow_grpo
 FLOW_GRPO_FSDFM_CONFIG = {
-    "group_size": 2,
+    "group_size": 4,                   # Increased from 2: G=2 gave zero advantages (both rollouts same reward)
     "learning_rate": 1e-5,            # Lower than SFT (2e-4) per PPO convention
     "num_epochs": int(os.environ.get("NUM_EPOCHS", "1")),
     "kl_coeff": 0.04,                 # Matches reference geneval config
@@ -208,7 +208,7 @@ FLOW_GRPO_FSDFM_CONFIG = {
     "logging_steps": 5,
     "grad_clip": 1.0,
     "num_generation_steps": 64,        # Denoising steps (T=64, must match eval; T=32 still produces noise)
-    "generation_temperature": 0.7,     # Moderate temperature for exploration
+    "generation_temperature": 0.3,     # Reduced from 0.7: Poisson jump process too sensitive to temperature noise
     "formfactory_port": int(os.environ.get("FORMFACTORY_PORT", "5050")),
     "browser_headless": True,
     "action_timeout_s": 5,
@@ -227,7 +227,7 @@ FLOW_GRPO_FSDFM_CONFIG = {
 # Fixes the generation/optimization mismatch in the existing GRPO trainer
 # which used autoregressive log-probs despite masked diffusion generation.
 FLOW_GRPO_REFUSION_CONFIG = {
-    "group_size": 2,
+    "group_size": 4,                   # Increased from 2: G=2 gave zero advantages (both rollouts same reward)
     "learning_rate": 1e-5,
     "num_epochs": int(os.environ.get("NUM_EPOCHS", "1")),
     "kl_coeff": 0.04,
