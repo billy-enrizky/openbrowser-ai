@@ -35,6 +35,7 @@ os.environ['OPENBROWSER_SETUP_LOGGING'] = 'false'
 import asyncio
 import json
 import logging
+import re
 import time
 from pathlib import Path
 from typing import Any
@@ -92,7 +93,9 @@ logging.disable(logging.CRITICAL)
 # Import openbrowser modules
 from openbrowser import ActionModel, Agent
 from openbrowser.browser import BrowserProfile, BrowserSession
+from openbrowser.browser.events import ScrollToTextEvent
 from openbrowser.config import get_default_llm, get_default_profile, load_openbrowser_config
+from openbrowser.dom.markdown_extractor import extract_clean_markdown
 from openbrowser.filesystem.file_system import FileSystem
 from openbrowser.llm.google.chat import ChatGoogle
 from openbrowser.llm.openai.chat import ChatOpenAI
@@ -267,14 +270,14 @@ class OpenBrowserServer:
 				),
 				types.Tool(
 					name='browser_get_state',
-					description='Get the current state of the page including all interactive elements',
+					description='Get the current page state. Use compact=true (default) for a lightweight summary with URL, title, and element count. Use compact=false for the full list of interactive elements.',
 					inputSchema={
 						'type': 'object',
 						'properties': {
-							'include_screenshot': {
+							'compact': {
 								'type': 'boolean',
-								'description': 'Whether to include a screenshot of the current page',
-								'default': False,
+								'description': 'If true, returns only URL, title, tab count, and interactive element count. If false, returns full element details.',
+								'default': True,
 							}
 						},
 					},
@@ -405,6 +408,89 @@ class OpenBrowserServer:
 					description='Close all active browser sessions and clean up resources',
 					inputSchema={'type': 'object', 'properties': {}},
 				),
+				# Text-first content tools (efficient alternatives to screenshots)
+				types.Tool(
+					name='browser_get_text',
+					description='Get the current page content as clean markdown text. Use this instead of screenshots for reading page content efficiently.',
+					inputSchema={
+						'type': 'object',
+						'properties': {
+							'extract_links': {
+								'type': 'boolean',
+								'description': 'Whether to include href URLs in the output',
+								'default': False,
+							},
+						},
+					},
+				),
+				types.Tool(
+					name='browser_grep',
+					description='Search page text content using a regex or string pattern. Returns matching lines with context, like grep. Use this to find specific content on a page without reading the entire page.',
+					inputSchema={
+						'type': 'object',
+						'properties': {
+							'pattern': {
+								'type': 'string',
+								'description': 'Regex or string pattern to search for in page content',
+							},
+							'context_lines': {
+								'type': 'integer',
+								'description': 'Number of lines before and after each match to include',
+								'default': 2,
+							},
+							'max_matches': {
+								'type': 'integer',
+								'description': 'Maximum number of matches to return',
+								'default': 20,
+							},
+							'case_insensitive': {
+								'type': 'boolean',
+								'description': 'Whether to ignore case when matching',
+								'default': True,
+							},
+						},
+						'required': ['pattern'],
+					},
+				),
+				types.Tool(
+					name='browser_search_elements',
+					description='Search interactive DOM elements by text content, tag name, id, class, or attribute value. Returns element indices that can be used with browser_click and browser_type.',
+					inputSchema={
+						'type': 'object',
+						'properties': {
+							'query': {
+								'type': 'string',
+								'description': 'Text or pattern to search for in elements',
+							},
+							'by': {
+								'type': 'string',
+								'enum': ['text', 'tag', 'id', 'class', 'attribute'],
+								'description': 'What property to search by',
+								'default': 'text',
+							},
+							'max_results': {
+								'type': 'integer',
+								'description': 'Maximum number of results to return',
+								'default': 20,
+							},
+						},
+						'required': ['query'],
+					},
+				),
+				types.Tool(
+					name='browser_find_and_scroll',
+					description='Find text on the page and scroll to it. Use this to locate and navigate to specific content.',
+					inputSchema={
+						'type': 'object',
+						'properties': {
+							'text': {
+								'type': 'string',
+								'description': 'The text to find and scroll to on the page',
+							},
+						},
+						'required': ['text'],
+					},
+				),
 			]
 
 		@self.server.list_resources()
@@ -481,7 +567,7 @@ class OpenBrowserServer:
 				return await self._type_text(arguments['index'], arguments['text'])
 
 			elif tool_name == 'browser_get_state':
-				return await self._get_browser_state(arguments.get('include_screenshot', False))
+				return await self._get_browser_state(arguments.get('compact', True))
 
 			elif tool_name == 'browser_extract_content':
 				return await self._extract_content(arguments['query'], arguments.get('extract_links', False))
@@ -503,6 +589,28 @@ class OpenBrowserServer:
 
 			elif tool_name == 'browser_close_tab':
 				return await self._close_tab(arguments['tab_id'])
+
+			# Text-first content tools
+			elif tool_name == 'browser_get_text':
+				return await self._get_text(arguments.get('extract_links', False))
+
+			elif tool_name == 'browser_grep':
+				return await self._grep(
+					pattern=arguments['pattern'],
+					context_lines=arguments.get('context_lines', 2),
+					max_matches=arguments.get('max_matches', 20),
+					case_insensitive=arguments.get('case_insensitive', True),
+				)
+
+			elif tool_name == 'browser_search_elements':
+				return await self._search_elements(
+					query=arguments['query'],
+					by=arguments.get('by', 'text'),
+					max_results=arguments.get('max_results', 20),
+				)
+
+			elif tool_name == 'browser_find_and_scroll':
+				return await self._find_and_scroll(arguments['text'])
 
 		return f'Unknown tool: {tool_name}'
 
@@ -801,35 +909,40 @@ class OpenBrowserServer:
 		else:
 			return f"Typed '{text}' into element {index}"
 
-	async def _get_browser_state(self, include_screenshot: bool = False) -> str:
+	async def _get_browser_state(self, compact: bool = True) -> str:
 		"""Get current browser state."""
 		if not self.browser_session:
 			return 'Error: No browser session active'
 
-		state = await self.browser_session.get_browser_state_summary()
+		state = await self.browser_session.get_browser_state_summary(include_screenshot=False)
 
-		result = {
+		element_count = len(state.dom_state.selector_map)
+
+		result: dict[str, Any] = {
 			'url': state.url,
 			'title': state.title,
 			'tabs': [{'url': tab.url, 'title': tab.title} for tab in state.tabs],
-			'interactive_elements': [],
+			'interactive_element_count': element_count,
 		}
 
-		# Add interactive elements with their indices
-		for index, element in state.dom_state.selector_map.items():
-			elem_info = {
-				'index': index,
-				'tag': element.tag_name,
-				'text': element.get_all_children_text(max_depth=2)[:100],
-			}
-			if element.attributes.get('placeholder'):
-				elem_info['placeholder'] = element.attributes['placeholder']
-			if element.attributes.get('href'):
-				elem_info['href'] = element.attributes['href']
-			result['interactive_elements'].append(elem_info)
-
-		if include_screenshot and state.screenshot:
-			result['screenshot'] = state.screenshot
+		if not compact:
+			elements = []
+			for index, element in state.dom_state.selector_map.items():
+				elem_info: dict[str, Any] = {
+					'index': index,
+					'tag': element.tag_name,
+					'text': element.get_all_children_text(max_depth=2)[:100],
+				}
+				if element.attributes.get('placeholder'):
+					elem_info['placeholder'] = element.attributes['placeholder']
+				if element.attributes.get('href'):
+					elem_info['href'] = element.attributes['href']
+				if element.attributes.get('id'):
+					elem_info['id'] = element.attributes['id']
+				if element.attributes.get('class'):
+					elem_info['class'] = element.attributes['class']
+				elements.append(elem_info)
+			result['interactive_elements'] = elements
 
 		return json.dumps(result, indent=2)
 
@@ -951,6 +1064,157 @@ class OpenBrowserServer:
 		await event
 		current_url = await self.browser_session.get_current_page_url()
 		return f'Closed tab # {tab_id}, now on {current_url}'
+
+	async def _get_text(self, extract_links: bool = False) -> str:
+		"""Get page content as clean markdown text."""
+		if not self.browser_session:
+			return 'Error: No browser session active'
+
+		try:
+			content, stats = await extract_clean_markdown(
+				browser_session=self.browser_session,
+				extract_links=extract_links,
+			)
+			if not content or not content.strip():
+				return 'No text content found on page'
+			return content
+		except Exception as e:
+			logger.error(f'Failed to extract text: {e}', exc_info=True)
+			return f'Error extracting text: {str(e)}'
+
+	async def _grep(
+		self,
+		pattern: str,
+		context_lines: int = 2,
+		max_matches: int = 20,
+		case_insensitive: bool = True,
+	) -> str:
+		"""Search page text content using regex or string pattern."""
+		if not self.browser_session:
+			return 'Error: No browser session active'
+
+		try:
+			content, _ = await extract_clean_markdown(browser_session=self.browser_session)
+			if not content or not content.strip():
+				return json.dumps({'matches': [], 'total_matches': 0, 'message': 'No text content on page'})
+
+			lines = content.split('\n')
+			flags = re.IGNORECASE if case_insensitive else 0
+
+			try:
+				compiled = re.compile(pattern, flags)
+			except re.error:
+				# Fall back to literal string search
+				escaped = re.escape(pattern)
+				compiled = re.compile(escaped, flags)
+
+			matches = []
+			for i, line in enumerate(lines):
+				if compiled.search(line):
+					context_before = lines[max(0, i - context_lines) : i]
+					context_after = lines[i + 1 : min(len(lines), i + 1 + context_lines)]
+					matches.append(
+						{
+							'line_number': i + 1,
+							'line': line.strip(),
+							'context_before': [l.strip() for l in context_before],
+							'context_after': [l.strip() for l in context_after],
+						}
+					)
+					if len(matches) >= max_matches:
+						break
+
+			total_found = sum(1 for line in lines if compiled.search(line))
+
+			return json.dumps(
+				{
+					'pattern': pattern,
+					'matches': matches,
+					'matches_shown': len(matches),
+					'total_matches': total_found,
+				},
+				indent=2,
+			)
+		except Exception as e:
+			logger.error(f'Grep failed: {e}', exc_info=True)
+			return f'Error during grep: {str(e)}'
+
+	async def _search_elements(self, query: str, by: str = 'text', max_results: int = 20) -> str:
+		"""Search interactive DOM elements by various criteria."""
+		if not self.browser_session:
+			return 'Error: No browser session active'
+
+		try:
+			selector_map = await self.browser_session.get_selector_map()
+			results = []
+			query_lower = query.lower()
+
+			for index, element in selector_map.items():
+				matched = False
+
+				if by == 'text':
+					elem_text = element.get_all_children_text(max_depth=3).lower()
+					matched = query_lower in elem_text
+				elif by == 'tag':
+					matched = query_lower == element.tag_name.lower()
+				elif by == 'id':
+					elem_id = element.attributes.get('id', '').lower()
+					matched = query_lower in elem_id
+				elif by == 'class':
+					elem_class = element.attributes.get('class', '').lower()
+					matched = query_lower in elem_class
+				elif by == 'attribute':
+					for attr_val in element.attributes.values():
+						if query_lower in str(attr_val).lower():
+							matched = True
+							break
+
+				if matched:
+					elem_info: dict[str, Any] = {
+						'index': index,
+						'tag': element.tag_name,
+						'text': element.get_all_children_text(max_depth=2)[:100],
+					}
+					if element.attributes.get('id'):
+						elem_info['id'] = element.attributes['id']
+					if element.attributes.get('class'):
+						elem_info['class'] = element.attributes['class']
+					if element.attributes.get('placeholder'):
+						elem_info['placeholder'] = element.attributes['placeholder']
+					if element.attributes.get('href'):
+						elem_info['href'] = element.attributes['href']
+					if element.attributes.get('type'):
+						elem_info['type'] = element.attributes['type']
+					results.append(elem_info)
+
+					if len(results) >= max_results:
+						break
+
+			return json.dumps(
+				{
+					'query': query,
+					'by': by,
+					'results': results,
+					'count': len(results),
+				},
+				indent=2,
+			)
+		except Exception as e:
+			logger.error(f'Element search failed: {e}', exc_info=True)
+			return f'Error searching elements: {str(e)}'
+
+	async def _find_and_scroll(self, text: str) -> str:
+		"""Find text on the page and scroll to it."""
+		if not self.browser_session:
+			return 'Error: No browser session active'
+
+		try:
+			event = self.browser_session.event_bus.dispatch(ScrollToTextEvent(text=text))
+			await event
+			return f"Found and scrolled to: '{text}'"
+		except Exception as e:
+			logger.error(f'Find and scroll failed: {e}', exc_info=True)
+			return f"Text '{text}' not found or not visible on page"
 
 	def _track_session(self, session: BrowserSession) -> None:
 		"""Track a browser session for management."""
