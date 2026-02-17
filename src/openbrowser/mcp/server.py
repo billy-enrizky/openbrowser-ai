@@ -1246,7 +1246,10 @@ class OpenBrowserServer:
 			return 'Error: No browser session active'
 
 		try:
-			selector_map = await self.browser_session.get_selector_map()
+			# Use get_browser_state_summary() for a fresh DOM extraction instead of
+			# get_selector_map() which may return stale cached data
+			state = await self.browser_session.get_browser_state_summary(include_screenshot=False)
+			selector_map = state.dom_state.selector_map if state.dom_state else {}
 			results = []
 			query_lower = query.lower()
 
