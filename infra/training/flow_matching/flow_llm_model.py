@@ -374,9 +374,11 @@ def compute_unmasking_step_log_prob(
         input_ids=step.masked_state,
         attention_mask=step.attention_mask,
     )
-    # Response logits only
+    # Response logits only -- delete full outputs to free memory
     response_logits = outputs.logits[:, condition_length:, :]  # [B, L_r, V]
+    del outputs
     log_probs = F.log_softmax(response_logits, dim=-1)  # [B, L_r, V]
+    del response_logits  # Free [B, L_r, V] logits
 
     # Sum log-probs at newly-unmasked positions
     step_log_prob = torch.zeros(B, device=device)
@@ -389,4 +391,5 @@ def compute_unmasking_step_log_prob(
         tok_t = torch.tensor(tokens, dtype=torch.long, device=device)
         step_log_prob[b] = log_probs[b, idx_t, tok_t].sum()
 
+    del log_probs  # Free [B, L_r, V] log-probs
     return step_log_prob
