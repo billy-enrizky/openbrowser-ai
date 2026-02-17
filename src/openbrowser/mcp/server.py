@@ -875,7 +875,6 @@ class OpenBrowserServer:
 			event = self.browser_session.event_bus.dispatch(BrowserStopEvent())
 			await event
 			self.browser_session = None
-			self.tools = None
 			return 'Browser closed'
 		return 'No browser session to close'
 
@@ -1262,7 +1261,6 @@ class OpenBrowserServer:
 			# If this was the current session, clear it
 			if self.browser_session and self.browser_session.id == session_id:
 				self.browser_session = None
-				self.tools = None
 
 			return f'Successfully closed session {session_id}'
 		except Exception as e:
@@ -1288,7 +1286,6 @@ class OpenBrowserServer:
 
 		# Clear current session references
 		self.browser_session = None
-		self.tools = None
 
 		result = f'Closed {closed_count} sessions'
 		if errors:
