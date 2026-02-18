@@ -146,6 +146,8 @@ except ImportError:
 	logger.error('MCP SDK not installed. Install with: pip install mcp')
 	sys.exit(1)
 
+from pydantic import AnyUrl
+
 from openbrowser.telemetry import MCPServerTelemetryEvent, ProductTelemetry
 from openbrowser.utils import get_openbrowser_version
 
@@ -198,6 +200,7 @@ class OpenBrowserServer:
 		self.active_sessions: dict[str, dict[str, Any]] = {}  # session_id -> session info
 		self.session_timeout_minutes = session_timeout_minutes
 		self._cleanup_task: Any = None
+		self._mcp_session = None
 
 		# Setup handlers
 		self._setup_handlers()
@@ -545,8 +548,20 @@ class OpenBrowserServer:
 			"""Handle tool execution."""
 			start_time = time.time()
 			error_msg = None
+			# Capture MCP session reference for notifications
+			try:
+				self._mcp_session = self.server.request_context.session
+			except (LookupError, AttributeError):
+				pass
 			try:
 				result = await self._execute_tool(name, arguments or {})
+				# Send resource notifications for state-changing tools
+				state_changing_tools = {
+					'browser_navigate', 'browser_click', 'browser_type',
+					'browser_go_back', 'browser_scroll', 'browser_find_and_scroll',
+				}
+				if name in state_changing_tools and self.browser_session:
+					await self._send_resource_notifications()
 				return [types.TextContent(type='text', text=result)]
 			except Exception as e:
 				error_msg = str(e)
@@ -1376,6 +1391,21 @@ class OpenBrowserServer:
 				logger.info(f'Auto-closed expired session {session_id}')
 			except Exception as e:
 				logger.error(f'Error auto-closing session {session_id}: {e}')
+
+	async def _send_resource_notifications(self) -> None:
+		"""Send resource updated notifications for all browser resources. Best-effort."""
+		if not self._mcp_session:
+			return
+		resource_uris = [
+			'browser://current-page/content',
+			'browser://current-page/state',
+			'browser://current-page/accessibility',
+		]
+		for uri_str in resource_uris:
+			try:
+				await self._mcp_session.send_resource_updated(AnyUrl(uri_str))
+			except Exception:
+				pass
 
 	async def _start_cleanup_task(self) -> None:
 		"""Start the background cleanup task."""
