@@ -221,7 +221,7 @@ async def stream_task_events(
                 content={"detail": "Missing token query parameter"},
             )
         try:
-            verify_token_string(token)
+            await verify_token_string(token)
         except Exception:
             from fastapi.responses import JSONResponse
             return JSONResponse(
