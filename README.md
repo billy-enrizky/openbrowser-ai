@@ -461,7 +461,22 @@ OpenBrowser MCP browser_navigate:
      "Navigated to: https://httpbin.org/forms/post"
 ```
 
-OpenBrowser returns minimal confirmations. The agent decides when it needs more: `compact=false` adds the element list (~51K chars), `browser_get_text` returns full page markdown (~100K chars), `search` returns only matching lines. Each detail level is opt-in.
+OpenBrowser returns minimal confirmations. The agent decides when it needs more: `compact=false` adds the element list (~51K chars), `browser_get_text` returns full page markdown (~100K chars). Search returns only matching lines -- not the full page:
+
+```
+browser_get_text(search="Guido van Rossum", context_lines=1)
+-> {
+     "pattern": "Guido van Rossum",
+     "matches": [
+       {"line_number": 244, "line": "| Designed by | Guido van Rossum |", ...},
+       {"line_number": 278, "line": "Guido van Rossum began working on Python...", ...}
+     ],
+     "total_matches": 11
+   }
+
+Full page text: ~97K chars.  Search result: ~3.9K chars (25x smaller).
+Playwright/CDP have no equivalent -- both require dumping the full snapshot.
+```
 
 [Full comparison with methodology](https://docs.openbrowser.me/comparison)
 
