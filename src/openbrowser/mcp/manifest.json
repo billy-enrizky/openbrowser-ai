@@ -86,11 +86,11 @@
     },
     {
       "name": "browser_get_accessibility_tree",
-      "description": "Get the page accessibility tree with roles, names, and properties for structure analysis and a11y testing"
+      "description": "Get the page accessibility tree. Supports format='tree' (nested, default) or 'flat' (array with parent_id). Use max_depth to limit depth. Returns total_nodes and total_nodes_in_page"
     },
     {
       "name": "browser_execute_js",
-      "description": "Execute JavaScript in the page context and return the result. Use for advanced interactions and data extraction"
+      "description": "Execute JavaScript in the page context and return the result. Set await_promise=false for fire-and-forget scripts"
     }
   ],
   "prompts": [
