@@ -63,7 +63,7 @@ bridges MCP servers to OpenClaw agents.
 }
 ```
 
-All 18 browser tools will be registered as native OpenClaw agent tools.
+All 11 browser tools will be registered as native OpenClaw agent tools.
 
 For OpenClaw plugin documentation, see [docs.openclaw.ai/tools/plugin](https://docs.openclaw.ai/tools/plugin).
 
@@ -114,6 +114,20 @@ Add to your project's `.mcp.json`:
 |------|-------------|
 | `browser_tab` | Manage tabs: `action=list` / `switch` / `close` |
 | `browser_session` | Manage sessions: `action=list` / `close` / `close_all` |
+
+## Benchmark: Token Efficiency
+
+Measured on a 5-step workflow (navigate Wikipedia, get state, click, go back, get state) via JSON-RPC stdio.
+
+| MCP Server | Tools | Response Tokens | Cost (Sonnet) | vs OpenBrowser |
+|------------|------:|----------------:|--------------:|---------------:|
+| **Playwright MCP** | 22 | 249,077 | $0.747 | 610x more |
+| **Chrome DevTools MCP** | 35+ | ~300,000 (est.) | ~$0.900 | ~735x more |
+| **OpenBrowser MCP** | 11 | **408** | **$0.001** | baseline |
+
+OpenBrowser returns minimal confirmations for actions and lets the agent request only the detail level it needs -- from 44 tokens (compact state) to 24K tokens (full page text).
+
+[Full comparison](https://docs.openbrowser.me/comparison)
 
 ## Configuration
 
