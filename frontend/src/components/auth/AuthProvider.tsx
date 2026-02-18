@@ -51,11 +51,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [tokens, setTokens] = useState<CognitoTokenSet | null>(null);
   const [user, setUser] = useState<AuthUser | null>(null);
 
-  const applyTokens = useCallback((nextTokens: CognitoTokenSet | null) => {
+  const applyTokens = useCallback((nextTokens: CognitoTokenSet | null, clearAuthStorage = true) => {
     if (!nextTokens) {
       setTokens(null);
       setUser(null);
-      clearTokens();
+      if (clearAuthStorage) {
+        clearTokens();
+      }
       return;
     }
 
@@ -73,7 +75,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const existingTokens = loadTokens();
       if (!existingTokens) {
-        applyTokens(null);
+        // Preserve PKCE session values for OAuth callback flow.
+        applyTokens(null, false);
         return;
       }
 
@@ -177,4 +180,3 @@ export function useAuth(): AuthContextValue {
   }
   return context;
 }
-
