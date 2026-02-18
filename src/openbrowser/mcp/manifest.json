@@ -90,7 +90,7 @@
     },
     {
       "name": "browser_execute_js",
-      "description": "Execute JavaScript in the page context and return the result. Set await_promise=false for fire-and-forget scripts"
+      "description": "Execute JavaScript in the page context and return the result. Set await_promise=false for fire-and-forget scripts. Set return_by_value=false to get RemoteObject references for DOM elements"
     }
   ],
   "prompts": [
