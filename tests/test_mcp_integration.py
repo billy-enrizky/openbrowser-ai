@@ -148,6 +148,15 @@ class DummyServer:
     def call_tool(self):
         return lambda f: f
 
+    def list_resource_templates(self):
+        return lambda f: f
+
+    def subscribe_resource(self):
+        return lambda f: f
+
+    def unsubscribe_resource(self):
+        return lambda f: f
+
     def get_capabilities(self, **kwargs):
         return {}
 
