@@ -117,15 +117,23 @@ Add to your project's `.mcp.json`:
 
 ## Benchmark: Token Efficiency
 
-Measured on a 5-step workflow (navigate Wikipedia, get state, click, go back, get state) via JSON-RPC stdio.
+Measured on a 5-step workflow (navigate Wikipedia, get state, click, go back, get state) via JSON-RPC stdio. All numbers are real measurements -- no estimates.
 
 | MCP Server | Tools | Response Tokens | Cost (Sonnet) | vs OpenBrowser |
 |------------|------:|----------------:|--------------:|---------------:|
-| **Playwright MCP** | 22 | 249,077 | $0.747 | 610x more |
-| **Chrome DevTools MCP** | 35+ | ~300,000 (est.) | ~$0.900 | ~735x more |
-| **OpenBrowser MCP** | 11 | **408** | **$0.001** | baseline |
+| **Playwright MCP** | 22 | 248,016 | $0.744 | 877x more |
+| **Chrome DevTools MCP** (Google) | 26 | 134,802 | $0.404 | 476x more |
+| **OpenBrowser MCP** | 11 | **283** | **$0.001** | baseline |
 
-OpenBrowser returns minimal confirmations for actions and lets the agent request only the detail level it needs -- from 44 tokens (compact state) to 24K tokens (full page text).
+**What each server returns for navigate:**
+
+| Server | Navigate Response | Size |
+|--------|------------------|-----:|
+| Playwright MCP | Full a11y snapshot (entire page tree with `[ref=eXX]` identifiers) | ~496K chars |
+| Chrome DevTools MCP | `"Successfully navigated to URL. ## Pages 1: URL [selected]"` | ~136 chars |
+| OpenBrowser MCP | `"Navigated to: URL"` | ~105 chars |
+
+OpenBrowser returns minimal confirmations for actions and lets the agent request only the detail level it needs -- from 105 tokens (compact state) to 25K tokens (full page text). Each detail level is opt-in.
 
 [Full comparison](https://docs.openbrowser.me/comparison)
 
