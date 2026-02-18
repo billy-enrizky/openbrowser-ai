@@ -2,6 +2,19 @@
 # API Gateway HTTP API: public /health, JWT-protected proxy to ALB
 # -----------------------------------------------------------------------------
 
+locals {
+  # Build effective CORS origins: auto-derived CloudFront + optional custom domain
+  # + localhost for dev + any extra origins from var.cors_origins.
+  cloudfront_origin    = "https://${aws_cloudfront_distribution.frontend.domain_name}"
+  custom_domain_origin = var.frontend_domain_name != "" ? ["https://${var.frontend_domain_name}"] : []
+  effective_cors_origins = distinct(concat(
+    [local.cloudfront_origin],
+    local.custom_domain_origin,
+    ["http://localhost:3000"],
+    var.cors_origins,
+  ))
+}
+
 resource "aws_apigatewayv2_api" "http" {
   name          = "${var.project_name}-api"
   protocol_type = "HTTP"
@@ -17,7 +30,7 @@ resource "aws_apigatewayv2_api" "http" {
       "x-amz-security-token",
     ]
     allow_methods = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
-    allow_origins = var.cors_origins
+    allow_origins = local.effective_cors_origins
     expose_headers = [
       "content-type",
     ]
