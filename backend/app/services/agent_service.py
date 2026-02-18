@@ -219,12 +219,16 @@ class AgentSession:
                 self._log("info", "Creating CodeAgent...", "agent")
                 # Import CodeAgentTools to configure display_files_in_done_text
                 from openbrowser.tools.service import CodeAgentTools
-                
+
                 # Create tools with display_files_in_done_text=False
                 # This prevents raw file content from being included in the message text
                 # since we send file attachments separately
                 tools = CodeAgentTools(display_files_in_done_text=False)
-                
+
+                # Create step callback for code agent real-time streaming
+                def code_step_callback(step_info: dict):
+                    self._handle_code_agent_step(step_info)
+
                 self.agent = CodeAgent(
                     task=self.task,
                     llm=llm,
@@ -232,6 +236,7 @@ class AgentSession:
                     max_steps=self.max_steps,
                     use_vision=self.use_vision,
                     tools=tools,
+                    register_new_step_callback=code_step_callback,
                 )
             else:
                 self._log("info", "Creating Browser Agent...", "agent")
@@ -549,6 +554,41 @@ class AgentSession:
         # Send screenshot if available
         if self.on_screenshot_callback and browser_state and browser_state.screenshot:
             self.on_screenshot_callback(browser_state.screenshot, step_number)
+
+    def _handle_code_agent_step(self, step_info: dict):
+        """Handle a step update from CodeAgent.
+
+        Decomposes step_info into individual event callbacks (step_update,
+        output, screenshot, log) so the frontend receives progressive updates.
+        """
+        step_num = step_info.get("step_number", 0)
+        total = step_info.get("total_steps", self.max_steps)
+        self.current_step = step_num
+
+        # 1. Emit step_update (shows thinking/reasoning in chat)
+        if self.on_step_callback:
+            step_data: dict[str, Any] = {
+                "step_number": step_num,
+                "total_steps": total,
+            }
+            if step_info.get("thinking"):
+                step_data["thinking"] = step_info["thinking"]
+            self.on_step_callback(step_data)
+
+        # 2. Emit code execution output
+        if self.on_output_callback and step_info.get("output"):
+            is_done = step_info.get("is_done", False)
+            self.on_output_callback(step_info["output"], is_done)
+
+        # 3. Emit screenshot
+        if self.on_screenshot_callback and step_info.get("screenshot_base64"):
+            self.on_screenshot_callback(step_info["screenshot_base64"], step_num)
+
+        # 4. Emit log events for step progress
+        self._log("info", f"Step {step_num}/{total} executed", "code", step_num)
+        if step_info.get("error"):
+            error_preview = step_info["error"][:200]
+            self._log("warning", f"Code error: {error_preview}", "code", step_num)
 
     def _create_llm(self, model_name: str):
         """Create an LLM instance based on model name."""
