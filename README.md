@@ -284,26 +284,39 @@ Detailed docs: [.opencode/INSTALL.md](.opencode/INSTALL.md)
 
 ## OpenClaw
 
-OpenBrowser works with [OpenClaw](https://openclaw.ai) via its plugin system.
+[OpenClaw](https://openclaw.ai) does not natively support MCP servers, but the community
+[openclaw-mcp-adapter](https://github.com/androidStern-personal/openclaw-mcp-adapter) plugin
+bridges MCP servers to OpenClaw agents.
 
-### Install via Plugin Registry
+1. Install the MCP adapter plugin (see its README for setup).
 
-```bash
-openclaw plugin install openbrowser
+2. Add OpenBrowser as an MCP server in `~/.openclaw/openclaw.json`:
+
+```json
+{
+  "plugins": {
+    "entries": {
+      "mcp-adapter": {
+        "enabled": true,
+        "config": {
+          "servers": [
+            {
+              "name": "openbrowser",
+              "transport": "stdio",
+              "command": "uvx",
+              "args": ["openbrowser-ai[mcp]", "--mcp"]
+            }
+          ]
+        }
+      }
+    }
+  }
+}
 ```
 
-### Manual Install
+All 18 browser tools will be registered as native OpenClaw agent tools.
 
-Clone the repository and register the plugin:
-
-```bash
-git clone https://github.com/billy-enrizky/openbrowser-ai.git
-openclaw plugin add ./openbrowser-ai/plugin
-```
-
-Then configure the MCP server in your project (see [MCP Server](#mcp-server) below).
-
-For OpenClaw plugin documentation, see [https://docs.openclaw.ai/tools/plugin](https://docs.openclaw.ai/tools/plugin).
+For OpenClaw plugin documentation, see [docs.openclaw.ai/tools/plugin](https://docs.openclaw.ai/tools/plugin).
 
 ## MCP Server
 
