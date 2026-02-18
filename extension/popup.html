@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      width: 300px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: #1a1a2e;
+      color: #e0e0e0;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .container {
+      padding: 16px;
+    }
+
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 16px;
+    }
+
+    .title {
+      font-size: 16px;
+      font-weight: 700;
+      color: #ffffff;
+      letter-spacing: 0.3px;
+    }
+
+    .version {
+      font-size: 11px;
+      color: #888;
+    }
+
+    /* Status section */
+    .status-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+
+    .status-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .status-dot.connected {
+      background: #4ade80;
+      box-shadow: 0 0 6px rgba(74, 222, 128, 0.5);
+    }
+
+    .status-dot.disconnected {
+      background: #ef4444;
+      box-shadow: 0 0 6px rgba(239, 68, 68, 0.4);
+    }
+
+    .status-text {
+      font-weight: 600;
+    }
+
+    .info-row {
+      margin-bottom: 6px;
+      color: #aaa;
+      font-size: 12px;
+      word-break: break-all;
+    }
+
+    .info-row .label {
+      color: #888;
+    }
+
+    .info-row .value {
+      color: #c0c0c0;
+    }
+
+    /* Divider */
+    .divider {
+      border: none;
+      border-top: 1px solid #2a2a4a;
+      margin: 14px 0;
+    }
+
+    /* Collapsible override section */
+    .override-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      cursor: pointer;
+      padding: 6px 0;
+      user-select: none;
+    }
+
+    .override-header:hover .override-title {
+      color: #ffffff;
+    }
+
+    .override-title {
+      font-size: 12px;
+      font-weight: 600;
+      color: #aaa;
+      transition: color 0.15s;
+    }
+
+    .override-arrow {
+      font-size: 10px;
+      color: #888;
+      transition: transform 0.2s;
+    }
+
+    .override-arrow.open {
+      transform: rotate(90deg);
+    }
+
+    .override-body {
+      display: none;
+      margin-top: 8px;
+    }
+
+    .override-body.open {
+      display: block;
+    }
+
+    .input-group {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 8px;
+    }
+
+    .input-group input {
+      flex: 1;
+      padding: 6px 8px;
+      border-radius: 4px;
+      border: 1px solid #3a3a5c;
+      background: #0f0f23;
+      color: #e0e0e0;
+      font-size: 12px;
+      outline: none;
+    }
+
+    .input-group input:focus {
+      border-color: #6366f1;
+    }
+
+    .input-group input::placeholder {
+      color: #555;
+    }
+
+    .btn {
+      padding: 6px 12px;
+      border-radius: 4px;
+      border: none;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s, opacity 0.15s;
+    }
+
+    .btn:hover {
+      opacity: 0.9;
+    }
+
+    .btn-primary {
+      background: #6366f1;
+      color: #fff;
+    }
+
+    .btn-danger {
+      background: #dc2626;
+      color: #fff;
+    }
+
+    .btn-small {
+      padding: 4px 10px;
+      font-size: 11px;
+    }
+
+    .action-row {
+      display: flex;
+      gap: 6px;
+    }
+
+    /* Footer link */
+    .footer {
+      margin-top: 14px;
+      text-align: center;
+    }
+
+    .footer a {
+      color: #6366f1;
+      text-decoration: none;
+      font-size: 11px;
+    }
+
+    .footer a:hover {
+      text-decoration: underline;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <div class="header">
+      <span class="title">OpenBrowser</span>
+      <span class="version">v0.1.0</span>
+    </div>
+
+    <!-- Status -->
+    <div class="status-row">
+      <div id="statusDot" class="status-dot disconnected"></div>
+      <span id="statusText" class="status-text">Disconnected</span>
+    </div>
+
+    <div id="connectedInfo" style="display:none;">
+      <div class="info-row">
+        <span class="label">Backend: </span>
+        <span id="backendUrlDisplay" class="value">--</span>
+      </div>
+      <div class="info-row">
+        <span class="label">Tab: </span>
+        <span id="tabIdDisplay" class="value">--</span>
+      </div>
+    </div>
+
+    <hr class="divider">
+
+    <!-- Manual override -->
+    <div class="override-header" id="overrideToggle">
+      <span class="override-title">Manual Connection</span>
+      <span class="override-arrow" id="overrideArrow">&#9654;</span>
+    </div>
+
+    <div class="override-body" id="overrideBody">
+      <div class="input-group">
+        <input
+          type="text"
+          id="manualUrl"
+          placeholder="ws://localhost:8000/ws/extension"
+        >
+      </div>
+      <div class="action-row">
+        <button class="btn btn-primary btn-small" id="connectBtn">Connect</button>
+        <button class="btn btn-danger btn-small" id="disconnectBtn">Disconnect</button>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <div class="footer">
+      <a href="https://openbrowser.me" target="_blank">Visit openbrowser.me</a>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
