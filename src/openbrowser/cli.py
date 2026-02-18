@@ -4,12 +4,35 @@
 import sys
 
 if '--mcp' in sys.argv:
+	import asyncio
 	import logging
 	import os
 
 	os.environ['OPENBROWSER_LOGGING_LEVEL'] = 'critical'
 	os.environ['OPENBROWSER_SETUP_LOGGING'] = 'false'
 	logging.disable(logging.CRITICAL)
+
+	# Early exit: run MCP server directly without loading heavy CLI dependencies
+	# (anthropic, openai, textual, etc. are not needed for MCP server mode)
+	try:
+		from openbrowser.telemetry import CLITelemetryEvent, ProductTelemetry
+		from openbrowser.utils import get_openbrowser_version
+
+		telemetry = ProductTelemetry()
+		telemetry.capture(
+			CLITelemetryEvent(
+				version=get_openbrowser_version(),
+				action='start',
+				mode='mcp_server',
+			)
+		)
+	except Exception:
+		pass
+
+	from openbrowser.mcp.server import main as mcp_main
+
+	asyncio.run(mcp_main())
+	sys.exit(0)
 
 # Special case: install command doesn't need CLI dependencies
 if len(sys.argv) > 1 and sys.argv[1] == 'install':
