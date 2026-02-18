@@ -48,8 +48,10 @@ try:
 except ImportError:
 	PSUTIL_AVAILABLE = False
 
-# Add openbrowser to path if running from source
-sys.path.insert(0, str(Path(__file__).parent.parent))
+# Add src/ to path if running from source (NOT openbrowser/ which would shadow the pip mcp package)
+_src_dir = str(Path(__file__).parent.parent.parent)
+if _src_dir not in sys.path:
+	sys.path.insert(0, _src_dir)
 
 # Import and configure logging to use stderr before other imports
 from openbrowser.logging_config import setup_logging
@@ -148,7 +150,13 @@ except ImportError:
 
 from pydantic import AnyUrl
 
-from openbrowser.telemetry import MCPServerTelemetryEvent, ProductTelemetry
+try:
+	from openbrowser.telemetry import MCPServerTelemetryEvent, ProductTelemetry
+
+	TELEMETRY_AVAILABLE = True
+except ImportError:
+	TELEMETRY_AVAILABLE = False
+
 from openbrowser.utils import get_openbrowser_version
 
 
@@ -193,7 +201,7 @@ class OpenBrowserServer:
 		self.server = Server('openbrowser')
 		self.config = load_openbrowser_config()
 		self.browser_session: BrowserSession | None = None
-		self._telemetry = ProductTelemetry()
+		self._telemetry = ProductTelemetry() if TELEMETRY_AVAILABLE else None
 		self._start_time = time.time()
 
 		# Session management
@@ -620,16 +628,17 @@ class OpenBrowserServer:
 				return [types.TextContent(type='text', text=f'Error: {str(e)}')]
 			finally:
 				# Capture telemetry for tool calls
-				duration = time.time() - start_time
-				self._telemetry.capture(
-					MCPServerTelemetryEvent(
-						version=get_openbrowser_version(),
-						action='tool_call',
-						tool_name=name,
-						duration_seconds=duration,
-						error_message=error_msg,
+				if self._telemetry and TELEMETRY_AVAILABLE:
+					duration = time.time() - start_time
+					self._telemetry.capture(
+						MCPServerTelemetryEvent(
+							version=get_openbrowser_version(),
+							action='tool_call',
+							tool_name=name,
+							duration_seconds=duration,
+							error_message=error_msg,
+						)
 					)
-				)
 
 	async def _execute_tool(self, tool_name: str, arguments: dict[str, Any]) -> str:
 		"""Execute an openbrowser tool."""
@@ -982,16 +991,31 @@ class OpenBrowserServer:
 		return f'Switched to tab {tab_id}: {state.url}'
 
 	async def _close_tab(self, tab_id: str) -> str:
-		"""Close a specific tab."""
+		"""Close a specific tab.
+
+		After closing, if the current tab is about:blank (created by AboutBlankWatchdog
+		to keep the browser alive), automatically switch to a non-blank tab if one exists.
+		"""
 		if not self.browser_session:
 			return 'Error: No browser session active'
 
-		from openbrowser.browser.events import CloseTabEvent
+		from openbrowser.browser.events import CloseTabEvent, SwitchTabEvent
 
 		target_id = await self.browser_session.get_target_id_from_tab_id(tab_id)
 		event = self.browser_session.event_bus.dispatch(CloseTabEvent(target_id=target_id))
 		await event
+
+		# Check if we landed on about:blank and auto-switch to a real tab
 		current_url = await self.browser_session.get_current_page_url()
+		if current_url and current_url.startswith('about:blank'):
+			tabs = await self.browser_session.get_tabs()
+			for tab in tabs:
+				if tab.url and not tab.url.startswith('about:blank'):
+					switch_event = self.browser_session.event_bus.dispatch(SwitchTabEvent(target_id=tab.target_id))
+					await switch_event
+					current_url = tab.url
+					break
+
 		return f'Closed tab # {tab_id}, now on {current_url}'
 
 	async def _get_text(self, extract_links: bool = False) -> str:
@@ -1535,27 +1559,29 @@ async def main(session_timeout_minutes: int = 10):
 		sys.exit(1)
 
 	server = OpenBrowserServer(session_timeout_minutes=session_timeout_minutes)
-	server._telemetry.capture(
-		MCPServerTelemetryEvent(
-			version=get_openbrowser_version(),
-			action='start',
-			parent_process_cmdline=get_parent_process_cmdline(),
+	if server._telemetry and TELEMETRY_AVAILABLE:
+		server._telemetry.capture(
+			MCPServerTelemetryEvent(
+				version=get_openbrowser_version(),
+				action='start',
+				parent_process_cmdline=get_parent_process_cmdline(),
+			)
 		)
-	)
 
 	try:
 		await server.run()
 	finally:
-		duration = time.time() - server._start_time
-		server._telemetry.capture(
-			MCPServerTelemetryEvent(
-				version=get_openbrowser_version(),
-				action='stop',
-				duration_seconds=duration,
-				parent_process_cmdline=get_parent_process_cmdline(),
+		if server._telemetry and TELEMETRY_AVAILABLE:
+			duration = time.time() - server._start_time
+			server._telemetry.capture(
+				MCPServerTelemetryEvent(
+					version=get_openbrowser_version(),
+					action='stop',
+					duration_seconds=duration,
+					parent_process_cmdline=get_parent_process_cmdline(),
+				)
 			)
-		)
-		server._telemetry.flush()
+			server._telemetry.flush()
 
 
 if __name__ == '__main__':
