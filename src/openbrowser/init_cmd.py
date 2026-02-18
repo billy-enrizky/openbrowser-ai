@@ -172,20 +172,20 @@ def main(
 
 	\b
 	# Interactive mode - prompts for template selection
-	uvx openbrowser init
-	uvx openbrowser init --template
+	uvx openbrowser-ai init
+	uvx openbrowser-ai init --template
 
 	\b
 	# Generate default template
-	uvx openbrowser init --template default
+	uvx openbrowser-ai init --template default
 
 	\b
 	# Generate advanced template with custom filename
-	uvx openbrowser init --template advanced --output my_script.py
+	uvx openbrowser-ai init --template advanced --output my_script.py
 
 	\b
 	# List available templates
-	uvx openbrowser init --list
+	uvx openbrowser-ai init --list
 	"""
 
 	# Fetch template list at runtime
