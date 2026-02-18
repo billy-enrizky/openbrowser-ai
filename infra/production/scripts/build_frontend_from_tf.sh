@@ -30,14 +30,9 @@ if ! command -v npm >/dev/null 2>&1; then
   exit 1
 fi
 
-if ! command -v jq >/dev/null 2>&1; then
-  echo "ERROR: jq is not installed."
-  exit 1
-fi
-
 tf_output_raw() {
   local key="$1"
-  terraform -chdir="$TF_DIR" output -json "$key" | jq -re '.value'
+  terraform -chdir="$TF_DIR" output -raw "$key"
 }
 
 echo "--- Reading Terraform outputs ---"
