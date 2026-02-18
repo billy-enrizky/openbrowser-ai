@@ -34,6 +34,34 @@ resource "aws_cloudfront_origin_access_control" "frontend" {
   signing_protocol                  = "sigv4"
 }
 
+# CloudFront Function: rewrite directory-like URIs to serve the correct
+# index.html from the Next.js static export.  Without this, S3 REST API
+# returns 403 for keys like "auth/callback/" (object does not exist) and
+# the custom error response would serve the root /index.html instead of
+# /auth/callback/index.html, breaking client-side auth callbacks.
+resource "aws_cloudfront_function" "rewrite_uri" {
+  name    = "${var.project_name}-rewrite-uri"
+  runtime = "cloudfront-js-2.0"
+  publish = true
+  code    = <<-EOF
+    function handler(event) {
+      var request = event.request;
+      var uri = request.uri;
+
+      // If URI ends with '/', append index.html
+      if (uri.endsWith('/')) {
+        request.uri = uri + 'index.html';
+      }
+      // If URI has no file extension, append /index.html
+      else if (!uri.includes('.')) {
+        request.uri = uri + '/index.html';
+      }
+
+      return request;
+    }
+  EOF
+}
+
 # CloudFront distribution
 locals {
   frontend_aliases = var.frontend_domain_name != "" ? [var.frontend_domain_name] : []
@@ -64,12 +92,19 @@ resource "aws_cloudfront_distribution" "frontend" {
       cookies { forward = "none" }
     }
 
+    # Rewrite /path/ -> /path/index.html before S3 lookup
+    function_association {
+      event_type   = "viewer-request"
+      function_arn = aws_cloudfront_function.rewrite_uri.arn
+    }
+
     min_ttl     = 0
     default_ttl = 3600
     max_ttl     = 86400
   }
 
-  # SPA: 403/404 -> index.html for client-side routing
+  # Fallback for truly missing files (e.g. direct deep-link to a route
+  # whose HTML was not generated at build time).
   custom_error_response {
     error_code         = 403
     response_code      = 200
