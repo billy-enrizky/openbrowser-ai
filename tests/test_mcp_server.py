@@ -26,6 +26,7 @@ import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from pydantic import AnyUrl
 
 from openbrowser.mcp import server as mcp_server_module
 
@@ -54,6 +55,18 @@ class DummyServer:
         return deco
 
     def read_resource(self):
+        def deco(f):
+            return f
+
+        return deco
+
+    def subscribe_resource(self):
+        def deco(f):
+            return f
+
+        return deco
+
+    def unsubscribe_resource(self):
         def deco(f):
             return f
 
@@ -1820,6 +1833,54 @@ class TestResourceNotifications:
 
         # Should not raise
         asyncio.run(mcp_server._send_resource_notifications())
+
+
+# ===========================================================================
+# Resource subscription management tests
+# ===========================================================================
+
+
+class TestResourceSubscriptions:
+    """Tests for resource subscription management."""
+
+    def test_subscribe_adds_uri_to_set(self, mcp_server):
+        """subscribe_resource adds URI to subscribed set."""
+        assert len(mcp_server._subscribed_resources) == 0
+        asyncio.run(mcp_server._handle_subscribe(AnyUrl('browser://current-page/content')))
+        assert 'browser://current-page/content' in mcp_server._subscribed_resources
+
+    def test_unsubscribe_removes_uri_from_set(self, mcp_server):
+        """unsubscribe_resource removes URI from subscribed set."""
+        mcp_server._subscribed_resources.add('browser://current-page/content')
+        asyncio.run(mcp_server._handle_unsubscribe(AnyUrl('browser://current-page/content')))
+        assert 'browser://current-page/content' not in mcp_server._subscribed_resources
+
+    def test_unsubscribe_nonexistent_uri_is_noop(self, mcp_server):
+        """Unsubscribing a URI that was never subscribed does not raise."""
+        asyncio.run(mcp_server._handle_unsubscribe(AnyUrl('browser://current-page/content')))
+
+    def test_notifications_only_for_subscribed_uris(self, mcp_server):
+        """When subscriptions exist, only subscribed URIs get notifications."""
+        mock_session = MagicMock()
+        mock_session.send_resource_updated = AsyncMock()
+        mcp_server._mcp_session = mock_session
+        mcp_server._subscribed_resources.add('browser://current-page/state')
+
+        asyncio.run(mcp_server._send_resource_notifications())
+
+        assert mock_session.send_resource_updated.call_count == 1
+        called_uri = str(mock_session.send_resource_updated.call_args[0][0])
+        assert 'state' in called_uri
+
+    def test_notifications_all_when_no_subscriptions(self, mcp_server):
+        """When no subscriptions, all 3 URIs get notifications (backward compat)."""
+        mock_session = MagicMock()
+        mock_session.send_resource_updated = AsyncMock()
+        mcp_server._mcp_session = mock_session
+
+        asyncio.run(mcp_server._send_resource_notifications())
+
+        assert mock_session.send_resource_updated.call_count == 3
 
 
 # ===========================================================================
