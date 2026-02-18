@@ -41,7 +41,7 @@ groq = ["groq>=0.30.0"]
 ollama = ["ollama>=0.5.1"]
 aws = ["boto3"]
 azure = ["openai"]
-mcp = ["mcp>=1.0.0"]
+mcp = ["mcp>=1.0.0", "posthog>=3.7.0"]
 telemetry = ["posthog>=3.7.0"]
 pdf = ["pypdf", "reportlab"]
 dev = [
@@ -93,4 +93,5 @@ asyncio_default_fixture_loop_scope = "function"
 asyncio_default_test_loop_scope = "function"
 markers = [
     "asyncio: mark tests as async tests",
+    "integration: integration tests requiring a real browser",
 ]
