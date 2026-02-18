@@ -31,12 +31,12 @@ cors_origins = [
 
 # Cognito app client OAuth config (optional overrides)
 # cognito_callback_urls = [
-#   "https://app.example.com/auth/callback/",
-#   "http://localhost:3000/auth/callback/",
+#   "https://app.example.com/auth/callback",
+#   "http://localhost:3000/auth/callback",
 # ]
 # cognito_logout_urls = [
-#   "https://app.example.com/login/",
-#   "http://localhost:3000/login/",
+#   "https://app.example.com/login",
+#   "http://localhost:3000/login",
 # ]
 # cognito_oauth_scopes = ["openid", "email", "profile"]
 
