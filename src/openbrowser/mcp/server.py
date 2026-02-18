@@ -201,6 +201,7 @@ class OpenBrowserServer:
 		self.session_timeout_minutes = session_timeout_minutes
 		self._cleanup_task: Any = None
 		self._mcp_session = None
+		self._subscribed_resources: set[str] = set()
 
 		# Setup handlers
 		self._setup_handlers()
@@ -575,6 +576,18 @@ class OpenBrowserServer:
 				return [ReadResourceContents(content=content, mime_type=mime)]
 
 			return [ReadResourceContents(content=f'Unknown resource: {uri_str}', mime_type='text/plain')]
+
+		@self.server.subscribe_resource()
+		async def handle_subscribe_resource(uri: AnyUrl) -> None:
+			self._subscribed_resources.add(str(uri))
+
+		@self.server.unsubscribe_resource()
+		async def handle_unsubscribe_resource(uri: AnyUrl) -> None:
+			self._subscribed_resources.discard(str(uri))
+
+		# Store references for testing
+		self._handle_subscribe = handle_subscribe_resource
+		self._handle_unsubscribe = handle_unsubscribe_resource
 
 		@self.server.list_prompts()
 		async def handle_list_prompts() -> list[types.Prompt]:
@@ -1466,15 +1479,16 @@ class OpenBrowserServer:
 				logger.error(f'Error auto-closing session {session_id}: {e}')
 
 	async def _send_resource_notifications(self) -> None:
-		"""Send resource updated notifications for all browser resources. Best-effort."""
+		"""Send resource updated notifications. If subscriptions exist, only notify subscribed URIs."""
 		if not self._mcp_session:
 			return
-		resource_uris = [
+		all_uris = [
 			'browser://current-page/content',
 			'browser://current-page/state',
 			'browser://current-page/accessibility',
 		]
-		for uri_str in resource_uris:
+		uris_to_notify = [u for u in all_uris if u in self._subscribed_resources] if self._subscribed_resources else all_uris
+		for uri_str in uris_to_notify:
 			try:
 				await self._mcp_session.send_resource_updated(AnyUrl(uri_str))
 			except Exception:
