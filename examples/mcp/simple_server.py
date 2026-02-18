@@ -9,7 +9,7 @@ Prerequisites:
    pip install 'openbrowser-ai[cli]'
 
 2. Start the openbrowser MCP server in a separate terminal:
-   uvx openbrowser --mcp
+   uvx openbrowser-ai[mcp] --mcp
 
 3. Run this client example:
    python simple_server.py
