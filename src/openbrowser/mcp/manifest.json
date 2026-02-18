@@ -34,70 +34,54 @@
   "tools": [
     {
       "name": "browser_navigate",
-      "description": "Navigate to a URL in the current tab or open a new tab. Example: Navigate to https://example.com"
+      "description": "Navigate to a URL in the current tab or open a new tab"
     },
     {
       "name": "browser_click",
-      "description": "Click on an element by its index from browser_get_state. Supports opening links in new tabs"
+      "description": "Click on an element by its index from browser_get_state"
     },
     {
       "name": "browser_type",
-      "description": "Type text into an input field identified by its index. Use after browser_get_state to find inputs"
+      "description": "Type text into an input field identified by its index"
     },
     {
       "name": "browser_get_state",
-      "description": "Get page state summary (URL, title, element count). Use compact=false for full element list"
+      "description": "Get page state summary. Use filter_by/filter_query to search interactive elements by text, tag, id, class, or attribute"
     },
     {
       "name": "browser_scroll",
-      "description": "Scroll the page up or down by one viewport height"
+      "description": "Scroll the page up or down. Use target_text to find text and scroll to it"
     },
     {
       "name": "browser_go_back",
       "description": "Navigate back to the previous page in browser history"
     },
     {
-      "name": "browser_list_tabs",
-      "description": "List all open browser tabs with their URLs and titles"
-    },
-    {
-      "name": "browser_switch_tab",
-      "description": "Switch to a different tab by its index"
-    },
-    {
-      "name": "browser_close_tab",
-      "description": "Close a specific tab by its index"
-    },
-    {
       "name": "browser_get_text",
-      "description": "Get page content as clean markdown text. Efficient alternative to screenshots for reading content"
+      "description": "Get page content as clean markdown text. Use search param to grep for a regex pattern and return matching lines with context"
     },
     {
-      "name": "browser_grep",
-      "description": "Search page text with regex or string pattern. Returns matching lines with context like grep"
+      "name": "browser_tab",
+      "description": "Manage browser tabs: list, switch, or close tabs by action param"
     },
     {
-      "name": "browser_search_elements",
-      "description": "Search interactive DOM elements by text, tag, id, class, or attribute. Returns indices for click/type"
-    },
-    {
-      "name": "browser_find_and_scroll",
-      "description": "Find text on the page and scroll to it for navigation"
+      "name": "browser_session",
+      "description": "Manage browser sessions: list, close, or close_all by action param"
     },
     {
       "name": "browser_get_accessibility_tree",
-      "description": "Get the page accessibility tree. Supports format='tree' (nested, default) or 'flat' (array with parent_id). Use max_depth to limit depth. Returns total_nodes and total_nodes_in_page"
+      "description": "Get the page accessibility tree in tree or flat format with depth limiting"
     },
     {
       "name": "browser_execute_js",
-      "description": "Execute JavaScript in the page context and return the result. Set await_promise=false for fire-and-forget scripts. Set return_by_value=false to get RemoteObject references for DOM elements"
+      "description": "Execute JavaScript in the page context and return the result"
     }
   ],
   "prompts": [
     {
       "name": "scrape_data",
       "description": "Extract structured data from a website",
-      "text": "Use browser_navigate to go to {url}, then use browser_get_text to get page content as markdown. Use browser_grep to search for {data_type}. If the page requires interaction, use browser_get_state to find elements and browser_click/browser_type as needed."
+      "text": "Use browser_navigate to go to {url}, then use browser_get_text to get page content as markdown. Use browser_get_text with search={data_type} to find specific data. If the page requires interaction, use browser_get_state to find elements and browser_click/browser_type as needed."
     },
     {
       "name": "fill_form",
@@ -107,7 +91,7 @@
     {
       "name": "research_topic",
       "description": "Research a topic across multiple websites",
-      "text": "Open multiple tabs using browser_navigate with new_tab=true for sites: {sites}. Use browser_get_text on each to gather information about {topic}. Switch between tabs with browser_switch_tab."
+      "text": "Open multiple tabs using browser_navigate with new_tab=true for sites: {sites}. Use browser_get_text on each to gather information about {topic}. Switch between tabs with browser_tab action=switch."
     }
   ],
   "keywords": ["browser", "automation", "web-scraping", "testing", "ai-agent", "playwright", "selenium-alternative", "rpa", "web-automation", "mcp", "openbrowser"],
