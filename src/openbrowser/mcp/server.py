@@ -7,7 +7,7 @@ This server provides tools for:
 - Tab and session management
 
 Usage:
-    uvx openbrowser --mcp
+    uvx openbrowser-ai[mcp] --mcp
 
 Or as an MCP server in Claude Desktop or other MCP clients:
     {
