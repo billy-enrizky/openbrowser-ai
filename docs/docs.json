@@ -141,6 +141,7 @@
           "quickstart",
           "quickstart_llm",
           "supported-models",
+          "comparison",
           "production"
         ]
       },
