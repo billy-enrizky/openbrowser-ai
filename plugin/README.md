@@ -133,7 +133,14 @@ Measured on a 5-step workflow (navigate Wikipedia, get state, click, go back, ge
 | Chrome DevTools MCP | `"Successfully navigated to URL. ## Pages 1: URL [selected]"` | ~136 chars |
 | OpenBrowser MCP | `"Navigated to: URL"` | ~105 chars |
 
-OpenBrowser returns minimal confirmations for actions and lets the agent request only the detail level it needs -- from 105 tokens (compact state) to 25K tokens (full page text). Each detail level is opt-in.
+OpenBrowser returns minimal confirmations for actions and lets the agent request only the detail level it needs. Search returns only matching lines -- Playwright and Chrome DevTools MCP have no equivalent:
+
+| Detail Level | Example | Wikipedia Size |
+|-------------|---------|---------------:|
+| Compact state | `browser_get_state(compact=true)` | ~250 chars |
+| Search result | `browser_get_text(search="Guido van Rossum")` | ~3.9K chars |
+| Full page text | `browser_get_text()` | ~97K chars |
+| Full a11y snapshot (Playwright/CDP) | `browser_snapshot` / `take_snapshot` | ~495-538K chars |
 
 [Full comparison](https://docs.openbrowser.me/comparison)
 
