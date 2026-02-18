@@ -1,12 +1,12 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import { useAuth } from "@/components/auth";
 
-function AuthCallbackContent() {
+export default function AuthCallbackPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { authEnabled, completeSignIn } = useAuth();
@@ -68,24 +68,5 @@ function AuthCallbackContent() {
         </Link>
       </div>
     </main>
-  );
-}
-
-function LoadingState() {
-  return (
-    <main className="min-h-screen bg-zinc-950 text-zinc-100 flex items-center justify-center px-6">
-      <div className="w-full max-w-md rounded-2xl border border-zinc-800 bg-zinc-900/60 p-8 backdrop-blur text-center">
-        <h1 className="text-lg font-semibold">Signing you in...</h1>
-        <p className="mt-2 text-sm text-zinc-400">Finishing Cognito authentication.</p>
-      </div>
-    </main>
-  );
-}
-
-export default function AuthCallbackPage() {
-  return (
-    <Suspense fallback={<LoadingState />}>
-      <AuthCallbackContent />
-    </Suspense>
   );
 }
