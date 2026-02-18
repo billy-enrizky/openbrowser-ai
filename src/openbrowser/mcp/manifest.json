@@ -26,19 +26,12 @@
       "command": "uvx",
       "args": ["openbrowser", "--mcp"],
       "env": {
-        "OPENAI_API_KEY": "${user_config.openai_api_key}",
-        "ANTHROPIC_API_KEY": "${user_config.anthropic_api_key}",
         "OPENBROWSER_HEADLESS": "${user_config.headless}",
-        "OPENBROWSER_ALLOWED_DOMAINS": "${user_config.allowed_domains}",
-        "OPENBROWSER_LLM_MODEL": "${user_config.llm_model}"
+        "OPENBROWSER_ALLOWED_DOMAINS": "${user_config.allowed_domains}"
       }
     }
   },
   "tools": [
-    {
-      "name": "retry_with_openbrowser_agent",
-      "description": "Execute a high-level task using the AI browser agent. Best for complex multi-step workflows"
-    },
     {
       "name": "browser_navigate",
       "description": "Navigate to a URL in the current tab or open a new tab. Example: Navigate to https://example.com"
@@ -53,11 +46,7 @@
     },
     {
       "name": "browser_get_state",
-      "description": "Get the current page state including all interactive elements with their indices. Essential for interaction"
-    },
-    {
-      "name": "browser_extract_content",
-      "description": "Extract structured content from the page using AI. Perfect for scraping specific information"
+      "description": "Get page state summary (URL, title, element count). Use compact=false for full element list"
     },
     {
       "name": "browser_scroll",
@@ -78,13 +67,37 @@
     {
       "name": "browser_close_tab",
       "description": "Close a specific tab by its index"
+    },
+    {
+      "name": "browser_get_text",
+      "description": "Get page content as clean markdown text. Efficient alternative to screenshots for reading content"
+    },
+    {
+      "name": "browser_grep",
+      "description": "Search page text with regex or string pattern. Returns matching lines with context like grep"
+    },
+    {
+      "name": "browser_search_elements",
+      "description": "Search interactive DOM elements by text, tag, id, class, or attribute. Returns indices for click/type"
+    },
+    {
+      "name": "browser_find_and_scroll",
+      "description": "Find text on the page and scroll to it for navigation"
+    },
+    {
+      "name": "browser_get_accessibility_tree",
+      "description": "Get the page accessibility tree. Supports format='tree' (nested, default) or 'flat' (array with parent_id). Use max_depth to limit depth. Returns total_nodes and total_nodes_in_page"
+    },
+    {
+      "name": "browser_execute_js",
+      "description": "Execute JavaScript in the page context and return the result. Set await_promise=false for fire-and-forget scripts. Set return_by_value=false to get RemoteObject references for DOM elements"
     }
   ],
   "prompts": [
     {
       "name": "scrape_data",
       "description": "Extract structured data from a website",
-      "text": "Use browser_navigate to go to {url}, then use browser_extract_content to extract {data_type}. If the page requires interaction, use browser_get_state to find elements and browser_click/browser_type as needed."
+      "text": "Use browser_navigate to go to {url}, then use browser_get_text to get page content as markdown. Use browser_grep to search for {data_type}. If the page requires interaction, use browser_get_state to find elements and browser_click/browser_type as needed."
     },
     {
       "name": "fill_form",
@@ -92,14 +105,9 @@
       "text": "Navigate to {url}, use browser_get_state to identify form fields, then use browser_type to fill in: {field_data}. Finally, click the submit button."
     },
     {
-      "name": "multi_step_task",
-      "description": "Execute a complex multi-step task",
-      "text": "Use retry_with_openbrowser_agent with task: '{task_description}'. Set max_steps based on complexity and use_vision=true for better understanding."
-    },
-    {
       "name": "research_topic",
       "description": "Research a topic across multiple websites",
-      "text": "Open multiple tabs using browser_navigate with new_tab=true for sites: {sites}. Use browser_extract_content on each to gather information about {topic}. Switch between tabs with browser_switch_tab."
+      "text": "Open multiple tabs using browser_navigate with new_tab=true for sites: {sites}. Use browser_get_text on each to gather information about {topic}. Switch between tabs with browser_switch_tab."
     }
   ],
   "keywords": ["browser", "automation", "web-scraping", "testing", "ai-agent", "playwright", "selenium-alternative", "rpa", "web-automation", "mcp", "openbrowser"],
@@ -131,44 +139,6 @@
       "title": "User Data Directory",
       "description": "Chrome profile directory for persistent sessions (cookies, localStorage, etc)",
       "default": "${HOME}/.config/openbrowser/profiles/default",
-      "required": false
-    },
-    "openai_api_key": {
-      "type": "string",
-      "title": "OpenAI API Key",
-      "description": "API key for OpenAI models (used by browser agent for content extraction). Get one at https://platform.openai.com",
-      "default": "",
-      "required": false,
-      "sensitive": true
-    },
-    "anthropic_api_key": {
-      "type": "string",
-      "title": "Anthropic API Key",
-      "description": "API key for Anthropic Claude models (alternative to OpenAI). Get one at https://console.anthropic.com",
-      "default": "",
-      "required": false,
-      "sensitive": true
-    },
-    "llm_model": {
-      "type": "string",
-      "title": "LLM Model",
-      "description": "Which AI model to use for browser agent tasks",
-      "enum": ["gpt-4o", "gpt-4o-mini", "claude-3-opus-20240229", "claude-3-sonnet-20240229"],
-      "default": "gpt-4o-mini",
-      "required": false
-    },
-    "llm_endpoint": {
-      "type": "string",
-      "title": "LLM API Endpoint",
-      "description": "Custom API endpoint for LLM (e.g., for Azure OpenAI or self-hosted models)",
-      "default": "",
-      "required": false
-    },
-    "use_vision": {
-      "type": "boolean",
-      "title": "Use Vision",
-      "description": "Enable vision capabilities for the agent to understand page content via screenshots",
-      "default": true,
       "required": false
     },
     "disable_security": {
@@ -234,13 +204,13 @@
       "maximum": 10,
       "required": false
     },
-    "max_steps": {
+    "session_timeout": {
       "type": "number",
-      "title": "Max Agent Steps",
-      "description": "Maximum number of steps the agent can take in a single task",
-      "default": 100,
+      "title": "Session Timeout (minutes)",
+      "description": "Minutes of inactivity before browser session auto-closes",
+      "default": 10,
       "minimum": 1,
-      "maximum": 1000,
+      "maximum": 60,
       "required": false
     }
   },

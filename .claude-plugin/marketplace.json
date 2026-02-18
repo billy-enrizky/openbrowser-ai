@@ -1,0 +1,9 @@
+{
+  "name": "openbrowser-ai",
+  "plugins": [
+    {
+      "name": "openbrowser",
+      "path": "./plugin"
+    }
+  ]
+}
