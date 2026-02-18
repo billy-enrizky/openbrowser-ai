@@ -187,33 +187,128 @@ profile = BrowserProfile(
 | **OCI** | `ChatOCIRaw` | Oracle Cloud GenAI models |
 | **Browser-Use** | `ChatBrowserUse` | External LLM service |
 
-## MCP Server (Claude Desktop Integration)
+## MCP Server
 
-OpenBrowser includes an MCP server for integration with Claude Desktop.
+OpenBrowser includes an MCP (Model Context Protocol) server that exposes browser automation as tools for AI assistants like Claude. No external LLM API keys required -- the MCP client (Claude) provides the intelligence.
 
-### Running the MCP Server
+### Quick Setup
 
-```bash
-python -m openbrowser.mcp
-```
-
-### Claude Desktop Configuration
-
-Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_desktop_config.json`):
+**Claude Code** -- add to your project's `.mcp.json`:
 
 ```json
 {
   "mcpServers": {
     "openbrowser": {
       "command": "uvx",
-      "args": ["openbrowser-ai", "mcp"],
+      "args": ["openbrowser-ai[mcp]", "--mcp"]
+    }
+  }
+}
+```
+
+**Claude Desktop** -- add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "openbrowser": {
+      "command": "uvx",
+      "args": ["openbrowser-ai[mcp]", "--mcp"],
       "env": {
-        "GOOGLE_API_KEY": "..."
+        "OPENBROWSER_HEADLESS": "true"
       }
     }
   }
 }
 ```
+
+**Run directly:**
+
+```bash
+uvx openbrowser-ai[mcp] --mcp
+```
+
+### Tools (18)
+
+#### Navigation
+
+| Tool | Description |
+|------|-------------|
+| `browser_navigate` | Navigate to a URL, optionally in a new tab |
+| `browser_go_back` | Go back to the previous page |
+| `browser_scroll` | Scroll the page up or down |
+
+#### Interaction
+
+| Tool | Description |
+|------|-------------|
+| `browser_click` | Click an element by its index |
+| `browser_type` | Type text into an input field |
+
+#### Content Extraction
+
+| Tool | Description |
+|------|-------------|
+| `browser_get_state` | Get page metadata and interactive elements (compact or full) |
+| `browser_get_text` | Get page content as clean markdown |
+| `browser_grep` | Search page text with regex or string patterns |
+
+#### DOM Inspection
+
+| Tool | Description |
+|------|-------------|
+| `browser_search_elements` | Search elements by text, tag, id, class, or attribute |
+| `browser_find_and_scroll` | Find text on page and scroll to it |
+| `browser_get_accessibility_tree` | Get page a11y tree (tree or flat format, depth limit) |
+| `browser_execute_js` | Execute JavaScript in page context (await/fire-and-forget, by-value/by-reference) |
+
+#### Tab Management
+
+| Tool | Description |
+|------|-------------|
+| `browser_list_tabs` | List all open tabs |
+| `browser_switch_tab` | Switch to a tab by ID |
+| `browser_close_tab` | Close a tab by ID |
+
+#### Session Management
+
+| Tool | Description |
+|------|-------------|
+| `browser_list_sessions` | List active browser sessions |
+| `browser_close_session` | Close a specific session |
+| `browser_close_all` | Close all browser sessions |
+
+### MCP Resources
+
+| URI | Type | Description |
+|-----|------|-------------|
+| `browser://current-page/content` | text/markdown | Current page as markdown |
+| `browser://current-page/state` | application/json | Interactive elements and metadata |
+| `browser://current-page/accessibility` | application/json | Accessibility tree |
+| `browser://sessions/{id}/content` | text/markdown | Specific session page content |
+| `browser://sessions/{id}/state` | application/json | Specific session state |
+| `browser://sessions/{id}/accessibility` | application/json | Specific session a11y tree |
+
+### Claude Code Plugin
+
+OpenBrowser is available as a Claude Code plugin with 5 built-in skills:
+
+| Skill | Description |
+|-------|-------------|
+| `web-scraping` | Extract structured data, handle pagination |
+| `form-filling` | Fill forms, login flows, multi-step wizards |
+| `e2e-testing` | Test web apps by simulating user interactions |
+| `page-analysis` | Analyze page content, structure, metadata |
+| `accessibility-audit` | Audit pages for WCAG compliance |
+
+See [plugin/README.md](plugin/README.md) for installation and detailed tool parameter documentation.
+
+### Configuration
+
+| Environment Variable | Description | Default |
+|---------------------|-------------|---------|
+| `OPENBROWSER_HEADLESS` | Run browser without GUI | `false` |
+| `OPENBROWSER_ALLOWED_DOMAINS` | Comma-separated domain whitelist | (none) |
 
 ## CLI Usage
 
