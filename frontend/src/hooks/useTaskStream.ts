@@ -1,27 +1,31 @@
 "use client";
 
 /**
- * SSE-based task streaming hook.
- *
- * Replaces useWebSocket for production where API Gateway HTTP API
- * does not support WebSocket protocol upgrade.
+ * Polling-based task streaming hook.
  *
  * Uses:
- *   POST /api/v1/tasks/start  -> start a task (returns task_id)
- *   GET  /api/v1/tasks/{task_id}/stream?token=...  -> SSE event stream
- *   POST /api/v1/tasks/{task_id}/cancel  -> cancel a running task
+ *   POST /api/v1/tasks/start              -> start a task (returns task_id)
+ *   GET  /api/v1/tasks/{task_id}/events    -> poll for new events
+ *   POST /api/v1/tasks/{task_id}/cancel    -> cancel a running task
+ *
+ * Previously this used SSE (Server-Sent Events) but API Gateway HTTP API
+ * has a hard 30s integration timeout that kills long-lived connections.
+ * Polling every ~1.5s avoids this limit.
  */
 
 import { useCallback, useRef, useState } from "react";
 import { API_BASE_URL } from "@/lib/config";
 import type { WSMessage } from "@/types";
 
+/** Interval between polls in milliseconds. */
+const POLL_INTERVAL_MS = 1500;
+
 interface UseTaskStreamOptions {
-  /** Called for every SSE event (same shape as the old WS messages). */
+  /** Called for every event (same shape as the old WS messages). */
   onMessage?: (message: WSMessage) => void;
-  /** Called when the SSE connection opens. */
+  /** Called when the polling loop starts. */
   onConnect?: () => void;
-  /** Called when the SSE connection closes. */
+  /** Called when the polling loop ends. */
   onDisconnect?: () => void;
   /** Auth token getter -- called fresh for every request. */
   getToken?: () => Promise<string | null>;
@@ -36,7 +40,7 @@ export function useTaskStream(options: UseTaskStreamOptions = {}) {
   const activeTaskRef = useRef<string | null>(null);
 
   // ------------------------------------------------------------------
-  // Start a task and open an SSE stream for its events.
+  // Start a task and begin polling for events.
   // Returns the task_id on success, null on failure.
   // ------------------------------------------------------------------
   const startTask = useCallback(
@@ -71,14 +75,11 @@ export function useTaskStream(options: UseTaskStreamOptions = {}) {
         const { task_id } = (await startResp.json()) as { task_id: string };
         activeTaskRef.current = task_id;
 
-        // 2. Open SSE stream
+        // 2. Start polling loop
         const abort = new AbortController();
         abortRef.current = abort;
 
-        const streamUrl = new URL(`${API_BASE_URL}/api/v1/tasks/${task_id}/stream`);
-        if (token) streamUrl.searchParams.set("token", token);
-
-        _consumeSSE(streamUrl.toString(), abort.signal, task_id, token);
+        _pollEvents(task_id, abort.signal, token);
         return task_id;
       } catch (err) {
         console.error("startTask error:", err);
@@ -115,7 +116,7 @@ export function useTaskStream(options: UseTaskStreamOptions = {}) {
   );
 
   // ------------------------------------------------------------------
-  // Disconnect / abort the current SSE stream.
+  // Disconnect / abort the current polling loop.
   // ------------------------------------------------------------------
   const disconnect = useCallback(() => {
     abortRef.current?.abort();
@@ -125,138 +126,103 @@ export function useTaskStream(options: UseTaskStreamOptions = {}) {
   }, []);
 
   // ------------------------------------------------------------------
-  // Internal: consume the SSE stream using fetch + ReadableStream.
-  //
-  // We use fetch instead of EventSource so we can pass auth headers
-  // and have full control over reconnection.
+  // Internal: poll GET /tasks/{id}/events?since=N every POLL_INTERVAL_MS.
   // ------------------------------------------------------------------
-  async function _consumeSSE(
-    url: string,
-    signal: AbortSignal,
+  async function _pollEvents(
     taskId: string,
+    signal: AbortSignal,
     token: string | null,
   ) {
     let lastEventId = 0;
+    let consecutiveErrors = 0;
+    const maxErrors = 10;
 
-    const attemptStream = async () => {
-      // Build URL with lastEventId for reconnection
-      const streamUrl = new URL(url);
-      if (lastEventId > 0) {
-        streamUrl.searchParams.set("lastEventId", String(lastEventId));
-      }
+    setIsConnected(true);
+    onConnect?.();
 
-      const resp = await fetch(streamUrl.toString(), { signal });
-      if (!resp.ok || !resp.body) {
-        throw new Error(`SSE stream failed: ${resp.status}`);
-      }
+    try {
+      while (!signal.aborted && consecutiveErrors < maxErrors) {
+        try {
+          const headers: HeadersInit = {};
+          if (token) headers["Authorization"] = `Bearer ${token}`;
 
-      setIsConnected(true);
-      onConnect?.();
+          const url = `${API_BASE_URL}/api/v1/tasks/${taskId}/events?since=${lastEventId}`;
+          const resp = await fetch(url, { headers, signal });
 
-      const reader = resp.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
+          if (!resp.ok) {
+            // 404 means task was cleaned up -- stop polling
+            if (resp.status === 404) break;
+            throw new Error(`Poll failed: ${resp.status}`);
+          }
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+          consecutiveErrors = 0;
 
-        buffer += decoder.decode(value, { stream: true });
+          const body = (await resp.json()) as {
+            events: Array<{ id: number; type: string; data: Record<string, unknown> }>;
+            complete: boolean;
+          };
 
-        // Parse SSE events from the buffer
-        const parts = buffer.split("\n\n");
-        // Last part is incomplete -- keep it in the buffer
-        buffer = parts.pop() || "";
-
-        for (const rawEvent of parts) {
-          if (!rawEvent.trim()) continue;
-
-          let eventId: string | null = null;
-          let eventType: string | null = null;
-          let eventData = "";
-
-          for (const line of rawEvent.split("\n")) {
-            if (line.startsWith("id: ")) {
-              eventId = line.slice(4).trim();
-            } else if (line.startsWith("event: ")) {
-              eventType = line.slice(7).trim();
-            } else if (line.startsWith("data: ")) {
-              eventData += line.slice(6);
-            } else if (line.startsWith(":")) {
-              // Comment / heartbeat -- ignore
+          // Dispatch events to onMessage
+          for (const evt of body.events) {
+            if (evt.id > lastEventId) {
+              lastEventId = evt.id;
             }
+
+            const message: WSMessage = {
+              type: evt.type as WSMessage["type"],
+              task_id: taskId,
+              data: evt.data,
+              timestamp: new Date().toISOString(),
+            };
+            onMessage?.(message);
           }
 
-          if (eventId) {
-            const parsed = parseInt(eventId, 10);
-            if (!isNaN(parsed)) lastEventId = parsed;
+          // Task is done
+          if (body.complete) break;
+
+          // Wait before next poll
+          await new Promise<void>((resolve, reject) => {
+            const timer = setTimeout(resolve, POLL_INTERVAL_MS);
+            signal.addEventListener("abort", () => {
+              clearTimeout(timer);
+              reject(new DOMException("Aborted", "AbortError"));
+            }, { once: true });
+          });
+        } catch (err: unknown) {
+          if (signal.aborted) break;
+          if (err instanceof DOMException && err.name === "AbortError") break;
+
+          consecutiveErrors++;
+          if (consecutiveErrors >= maxErrors) {
+            console.error("Polling: max consecutive errors reached", err);
+            break;
           }
 
-          // "done" event means the stream is complete
-          if (eventType === "done") {
-            return; // exit
-          }
-
-          if (eventType && eventData) {
-            try {
-              const data = JSON.parse(eventData);
-              const message: WSMessage = {
-                type: eventType as WSMessage["type"],
-                task_id: taskId,
-                data,
-                timestamp: new Date().toISOString(),
-              };
-              onMessage?.(message);
-            } catch {
-              console.error("Failed to parse SSE data:", eventData);
-            }
-          }
+          // Backoff on errors
+          const delay = Math.min(1000 * 2 ** (consecutiveErrors - 1), 10000);
+          console.warn(`Poll error (${consecutiveErrors}/${maxErrors}), retrying in ${delay}ms...`, err);
+          await new Promise((r) => setTimeout(r, delay));
         }
       }
-    };
-
-    // Retry loop with backoff
-    let retries = 0;
-    const maxRetries = 5;
-
-    while (retries <= maxRetries && !signal.aborted) {
-      try {
-        await attemptStream();
-        // Clean exit (stream ended normally via "done" event)
-        break;
-      } catch (err: unknown) {
-        if (signal.aborted) break;
-
-        retries++;
-        if (retries > maxRetries) {
-          console.error("SSE stream: max retries exceeded", err);
-          break;
-        }
-
-        const delay = Math.min(1000 * 2 ** (retries - 1), 15000);
-        console.warn(`SSE stream disconnected, retrying in ${delay}ms...`, err);
-        setIsConnected(false);
-        await new Promise((r) => setTimeout(r, delay));
-      }
+    } finally {
+      setIsConnected(false);
+      onDisconnect?.();
+      activeTaskRef.current = null;
     }
-
-    setIsConnected(false);
-    onDisconnect?.();
-    activeTaskRef.current = null;
   }
 
   return {
-    /** Whether an SSE stream is currently open. */
+    /** Whether the polling loop is active. */
     isConnected,
     /** Whether a start-task request is in flight. */
     isStarting,
     /** Currently active task ID (if any). */
     activeTaskId: activeTaskRef.current,
-    /** Start a new task and open an SSE stream. */
+    /** Start a new task and begin polling. */
     startTask,
     /** Cancel the active task. */
     cancelTask,
-    /** Abort the SSE stream. */
+    /** Abort the polling loop. */
     disconnect,
   };
 }
