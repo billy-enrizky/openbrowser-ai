@@ -21,7 +21,7 @@ class OpenBrowserMCPClient:
 
     async def start(self):
         self.proc = await asyncio.create_subprocess_exec(
-            "uvx", "openbrowser-ai[mcp]@0.1.16", "--mcp",
+            "uvx", "openbrowser-ai[mcp]@0.1.17", "--mcp",
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -163,14 +163,14 @@ async def main():
         results.append(("get_text", req_ct, res_ct, lat_t))
         logger.info("  get_text: req=%d chars, resp=%d chars, latency=%.0f ms", req_ct, res_ct, lat_t)
 
-        # --- Task 2d: Grep (OpenBrowser exclusive) ---
-        logger.info("=== Task 2d: Grep for specific content ===")
-        result_grep, lat_g, req_cg, res_cg = await client.call_tool("browser_grep", {
-            "pattern": "Guido van Rossum",
+        # --- Task 2d: Search (OpenBrowser exclusive -- consolidated into browser_get_text) ---
+        logger.info("=== Task 2d: Search for specific content ===")
+        result_grep, lat_g, req_cg, res_cg = await client.call_tool("browser_get_text", {
+            "search": "Guido van Rossum",
             "context_lines": 2,
         })
-        results.append(("grep", req_cg, res_cg, lat_g))
-        logger.info("  grep: req=%d chars, resp=%d chars, latency=%.0f ms", req_cg, res_cg, lat_g)
+        results.append(("search", req_cg, res_cg, lat_g))
+        logger.info("  search: req=%d chars, resp=%d chars, latency=%.0f ms", req_cg, res_cg, lat_g)
 
         # --- Task 3: Click an element ---
         logger.info("=== Task 3: Click element ===")
@@ -248,9 +248,9 @@ async def main():
         results.append(("type", req_c, res_c, lat))
         logger.info("  type: req=%d chars, resp=%d chars, latency=%.0f ms", req_c, res_c, lat)
 
-        # --- Task 9: List tabs ---
+        # --- Task 9: List tabs (consolidated into browser_tab) ---
         logger.info("=== Task 9: List tabs ===")
-        result, lat, req_c, res_c = await client.call_tool("browser_list_tabs", {})
+        result, lat, req_c, res_c = await client.call_tool("browser_tab", {"action": "list"})
         results.append(("list_tabs", req_c, res_c, lat))
         logger.info("  list_tabs: req=%d chars, resp=%d chars, latency=%.0f ms", req_c, res_c, lat)
 
