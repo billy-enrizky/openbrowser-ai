@@ -31,6 +31,25 @@ cd openbrowser-ai/plugin
 # }
 ```
 
+### OpenClaw
+
+Install via the [OpenClaw](https://openclaw.ai) plugin registry:
+
+```bash
+openclaw plugin install openbrowser
+```
+
+Or add manually:
+
+```bash
+git clone https://github.com/billy-enrizky/openbrowser-ai.git
+openclaw plugin add ./openbrowser-ai/plugin
+```
+
+Then configure the MCP server in your project (see Standalone MCP server below).
+
+For OpenClaw plugin documentation, see [https://docs.openclaw.ai/tools/plugin](https://docs.openclaw.ai/tools/plugin).
+
 ### Standalone MCP server (without plugin)
 
 Add to your project's `.mcp.json`:
