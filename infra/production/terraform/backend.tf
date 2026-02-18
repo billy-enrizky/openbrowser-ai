@@ -47,6 +47,10 @@ resource "aws_instance" "backend" {
     backend_port      = var.backend_port
     backend_env       = join("\n", local.backend_env)
     secrets_secret_id = local.backend_secret_id
+    aws_region        = var.aws_region
+    ssm_google_key    = aws_ssm_parameter.google_api_key.name
+    ssm_openai_key    = aws_ssm_parameter.openai_api_key.name
+    ssm_anthropic_key = aws_ssm_parameter.anthropic_api_key.name
   })
 
   tags = { Name = "${var.project_name}-backend" }
