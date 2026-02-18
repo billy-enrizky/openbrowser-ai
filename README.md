@@ -504,18 +504,38 @@ openbrowser-ai/
 │   ├── llm/                   # LLM providers
 │   ├── mcp/                   # MCP server
 │   └── tools/                 # Action registry
+├── benchmarks/                # MCP benchmarks and E2E tests
+│   ├── playwright_benchmark.py
+│   ├── cdp_benchmark.py
+│   ├── openbrowser_benchmark.py
+│   └── e2e_published_test.py
 └── tests/                     # Test suite
 ```
 
 ## Testing
 
 ```bash
-# Run tests
+# Run unit tests
 pytest tests/
 
 # Run with verbose output
 pytest tests/ -v
+
+# E2E test all 11 MCP tools against the published PyPI package
+uv run python benchmarks/e2e_published_test.py
 ```
+
+### Benchmarks
+
+Run individual MCP server benchmarks (JSON-RPC stdio, 5-step Wikipedia workflow):
+
+```bash
+uv run python benchmarks/openbrowser_benchmark.py   # OpenBrowser MCP
+uv run python benchmarks/playwright_benchmark.py     # Playwright MCP
+uv run python benchmarks/cdp_benchmark.py            # Chrome DevTools MCP
+```
+
+Results are written to `benchmarks/*_results.json`. See [full comparison](https://docs.openbrowser.me/comparison) for methodology.
 
 ## Contributing
 
