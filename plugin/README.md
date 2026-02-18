@@ -186,6 +186,18 @@ The plugin includes 5 built-in skills that provide guided workflows for common b
 
 Each skill file (`SKILL.md`) contains YAML frontmatter with trigger conditions and a step-by-step workflow that references the MCP tools listed above.
 
+## Testing and Benchmarks
+
+```bash
+# E2E test all 11 MCP tools against the published PyPI package
+uv run python benchmarks/e2e_published_test.py
+
+# Run MCP benchmarks (5-step Wikipedia workflow)
+uv run python benchmarks/openbrowser_benchmark.py
+uv run python benchmarks/playwright_benchmark.py
+uv run python benchmarks/cdp_benchmark.py
+```
+
 ## Troubleshooting
 
 **Browser does not launch**: Ensure Chrome or Chromium is installed and accessible from PATH.
