@@ -47,10 +47,12 @@ app.add_middleware(
 )
 
 # Include routers
+# SSE stream router MUST come before tasks router so that literal paths like
+# POST /tasks/start are matched before the parameterised GET /tasks/{task_id}
+# (otherwise FastAPI returns 405 because the path matches but the method doesn't).
+app.include_router(stream.router, prefix="/api/v1")
 app.include_router(tasks.router, prefix="/api/v1", dependencies=[Depends(get_current_user)])
 app.include_router(projects.router, prefix="/api/v1", dependencies=[Depends(get_current_user)])
-# SSE stream router (auth handled per-endpoint: POST uses header, GET uses query param)
-app.include_router(stream.router, prefix="/api/v1")
 
 
 @app.get("/")
