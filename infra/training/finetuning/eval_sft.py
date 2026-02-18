@@ -125,6 +125,11 @@ async def evaluate():
     config = ONLINE_GRPO_CONFIG
     eval_label = os.environ.get("EVAL_LABEL", "SFT-ONLY")
 
+    seed = int(os.environ.get("RANDOM_SEED", "42"))
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
     # Load tokenizer
     logger.info(f"Loading tokenizer from: {config['model_name']}")
     tokenizer = AutoTokenizer.from_pretrained(config["model_name"])
