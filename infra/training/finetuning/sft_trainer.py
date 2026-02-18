@@ -153,23 +153,24 @@ def train():
     model = get_peft_model(model, lora_config)
     model.print_trainable_parameters()
 
-    # Load data
+    # Load pre-split train and val data
     train_file = resolve_data_path(DATA_CONFIG["train_file"])
+    val_file = resolve_data_path(DATA_CONFIG["val_file"])
 
-    dataset = load_sft_data(
+    train_raw = load_sft_data(
         train_file,
         max_samples=DATA_CONFIG.get("max_train_samples", 0),
     )
-
-    # Split train/eval
-    split = dataset.train_test_split(
-        test_size=DATA_CONFIG.get("eval_split", 0.1)
+    val_raw = load_sft_data(
+        val_file,
+        max_samples=DATA_CONFIG.get("max_eval_samples", 0),
     )
+
     train_dataset = tokenize_dataset(
-        split["train"], tokenizer, config["max_seq_length"]
+        train_raw, tokenizer, config["max_seq_length"]
     )
     eval_dataset = tokenize_dataset(
-        split["test"], tokenizer, config["max_seq_length"]
+        val_raw, tokenizer, config["max_seq_length"]
     )
 
     # Training args
