@@ -28,63 +28,63 @@
     {
       "tool": "navigate",
       "request_chars": 113,
-      "response_chars": 493604,
-      "latency_ms": 4213.6
+      "response_chars": 495950,
+      "latency_ms": 9800.0
     },
     {
       "tool": "snapshot",
       "request_chars": 45,
-      "response_chars": 493486,
-      "latency_ms": 176.6
+      "response_chars": 495437,
+      "latency_ms": 218.6
     },
     {
       "tool": "click",
       "request_chars": 91,
-      "response_chars": 4107,
-      "latency_ms": 1348.2
+      "response_chars": 341,
+      "latency_ms": 1363.4
     },
     {
       "tool": "navigate_back",
       "request_chars": 50,
       "response_chars": 198,
-      "latency_ms": 71.3
+      "latency_ms": 429.0
     },
     {
       "tool": "snapshot_2",
       "request_chars": 45,
       "response_chars": 139,
-      "latency_ms": 3.4
+      "latency_ms": 18.5
     },
     {
       "tool": "navigate_form",
       "request_chars": 84,
       "response_chars": 1985,
-      "latency_ms": 300.0
+      "latency_ms": 2993.1
     },
     {
       "tool": "snapshot_form",
       "request_chars": 45,
       "response_chars": 1896,
-      "latency_ms": 3.7
+      "latency_ms": 15.2
     },
     {
       "tool": "type",
       "request_chars": 106,
       "response_chars": 526,
-      "latency_ms": 1039.8
+      "latency_ms": 1132.7
     },
     {
       "tool": "tabs",
       "request_chars": 41,
       "response_chars": 367,
-      "latency_ms": 0.6
+      "latency_ms": 7.6
     }
   ],
   "totals": {
     "tool_calls": 9,
     "total_request_chars": 620,
-    "total_response_chars": 996308,
-    "total_latency_ms": 7157.1,
-    "est_response_tokens": 249077
+    "total_response_chars": 996839,
+    "total_latency_ms": 15978.2,
+    "est_response_tokens": 249209
   }
 }
