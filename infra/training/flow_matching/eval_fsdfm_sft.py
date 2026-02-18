@@ -97,6 +97,11 @@ async def evaluate():
 
     model.eval()
 
+    seed = int(os.environ.get("RANDOM_SEED", "42"))
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
     # Load prompts from val or test split
     eval_split = os.environ.get("EVAL_SPLIT", "val")
     eval_file_key = "test_file" if eval_split == "test" else "val_file"
