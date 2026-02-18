@@ -52,9 +52,11 @@ resource "aws_iam_role_policy_attachment" "backend_dynamodb" {
   policy_arn = aws_iam_policy.backend_dynamodb.arn
 }
 
-# Secrets Manager read (for LLM API keys) - when using our secret or an external one
+# Secrets Manager read (for LLM API keys) - always enabled since a secret is
+# always present (auto-created when secrets_manager_secret_name is empty,
+# externally provided otherwise).
 data "aws_iam_policy_document" "backend_secrets" {
-  count = (var.secrets_manager_secret_name != "" || length(aws_secretsmanager_secret.backend_keys) > 0) ? 1 : 0
+  count = 1
 
   statement {
     sid    = "SecretsManagerRead"
@@ -72,14 +74,14 @@ data "aws_iam_policy_document" "backend_secrets" {
 }
 
 resource "aws_iam_policy" "backend_secrets" {
-  count = (var.secrets_manager_secret_name != "" || length(aws_secretsmanager_secret.backend_keys) > 0) ? 1 : 0
+  count = 1
 
   name   = "${var.project_name}-backend-secrets"
   policy = data.aws_iam_policy_document.backend_secrets[0].json
 }
 
 resource "aws_iam_role_policy_attachment" "backend_secrets" {
-  count = (var.secrets_manager_secret_name != "" || length(aws_secretsmanager_secret.backend_keys) > 0) ? 1 : 0
+  count = 1
 
   role       = aws_iam_role.backend.name
   policy_arn = aws_iam_policy.backend_secrets[0].arn
