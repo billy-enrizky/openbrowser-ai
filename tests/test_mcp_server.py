@@ -1637,6 +1637,76 @@ class TestExecuteJs:
 
         assert data["result"] == "test"
 
+    def test_execute_js_return_by_value_false_returns_remote_object(self, mcp_server):
+        """When return_by_value=False, returns RemoteObject reference instead of serialized value."""
+        mcp_server.browser_session = MagicMock()
+        mcp_server.browser_session.current_target_id = "target-123"
+
+        cdp = self._make_mock_cdp_session({
+            "result": {
+                "type": "object",
+                "subtype": "node",
+                "className": "HTMLDivElement",
+                "objectId": "obj-42",
+            }
+        })
+        mcp_server.browser_session.get_or_create_cdp_session = AsyncMock(return_value=cdp)
+
+        result = asyncio.run(mcp_server._execute_js("document.body", return_by_value=False))
+        data = json.loads(result)
+
+        assert data["type"] == "object"
+        assert data["subtype"] == "node"
+        assert data["className"] == "HTMLDivElement"
+        assert data["objectId"] == "obj-42"
+        assert "result" not in data
+
+    def test_execute_js_return_by_value_false_passes_to_cdp(self, mcp_server):
+        """When return_by_value=False, CDP receives returnByValue: False."""
+        mcp_server.browser_session = MagicMock()
+        mcp_server.browser_session.current_target_id = "target-123"
+
+        cdp = self._make_mock_cdp_session({
+            "result": {"type": "object", "objectId": "obj-1"}
+        })
+        mcp_server.browser_session.get_or_create_cdp_session = AsyncMock(return_value=cdp)
+
+        asyncio.run(mcp_server._execute_js("document.body", return_by_value=False))
+
+        call_kwargs = cdp.cdp_client.send.Runtime.evaluate.call_args
+        assert call_kwargs[1]["params"]["returnByValue"] is False
+
+    def test_execute_js_return_by_value_default_true(self, mcp_server):
+        """Default return_by_value=True preserves existing behavior."""
+        mcp_server.browser_session = MagicMock()
+        mcp_server.browser_session.current_target_id = "target-123"
+
+        cdp = self._make_mock_cdp_session({"result": {"type": "number", "value": 42}})
+        mcp_server.browser_session.get_or_create_cdp_session = AsyncMock(return_value=cdp)
+
+        asyncio.run(mcp_server._execute_js("1+1"))
+
+        call_kwargs = cdp.cdp_client.send.Runtime.evaluate.call_args
+        assert call_kwargs[1]["params"]["returnByValue"] is True
+
+    def test_execute_tool_routes_return_by_value(self, mcp_server):
+        """_execute_tool passes return_by_value to _execute_js."""
+        mcp_server.browser_session = MagicMock()
+        mcp_server.browser_session.current_target_id = "target-123"
+
+        cdp = self._make_mock_cdp_session({
+            "result": {"type": "object", "objectId": "obj-1"}
+        })
+        mcp_server.browser_session.get_or_create_cdp_session = AsyncMock(return_value=cdp)
+
+        asyncio.run(mcp_server._execute_tool("browser_execute_js", {
+            "expression": "document.body",
+            "return_by_value": False,
+        }))
+
+        call_kwargs = cdp.cdp_client.send.Runtime.evaluate.call_args
+        assert call_kwargs[1]["params"]["returnByValue"] is False
+
 
 # ===========================================================================
 # MCP Resource endpoint tests

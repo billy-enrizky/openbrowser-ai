@@ -472,6 +472,11 @@ class OpenBrowserServer:
 								'description': 'Whether to await the result if it is a Promise. Set to false for fire-and-forget scripts that should not be awaited.',
 								'default': True,
 							},
+							'return_by_value': {
+								'type': 'boolean',
+								'description': 'Whether to serialize the result value. Set to false to get a RemoteObject reference (objectId) for DOM elements that cannot be serialized.',
+								'default': True,
+							},
 						},
 						'required': ['expression'],
 					},
@@ -696,6 +701,7 @@ class OpenBrowserServer:
 				return await self._execute_js(
 					arguments['expression'],
 					await_promise=arguments.get('await_promise', True),
+					return_by_value=arguments.get('return_by_value', True),
 				)
 
 		return f'Unknown tool: {tool_name}'
@@ -1273,7 +1279,7 @@ class OpenBrowserServer:
 			logger.error(f'Accessibility tree extraction failed: {e}', exc_info=True)
 			return f'Error getting accessibility tree: {str(e)}'
 
-	async def _execute_js(self, expression: str, await_promise: bool = True) -> str:
+	async def _execute_js(self, expression: str, await_promise: bool = True, return_by_value: bool = True) -> str:
 		"""Execute JavaScript on the current page and return the result."""
 		if not self.browser_session:
 			return 'Error: No browser session active'
@@ -1288,7 +1294,7 @@ class OpenBrowserServer:
 			result = await cdp_session.cdp_client.send.Runtime.evaluate(
 				params={
 					'expression': expression,
-					'returnByValue': True,
+					'returnByValue': return_by_value,
 					'awaitPromise': await_promise,
 				},
 				session_id=cdp_session.session_id,
@@ -1300,6 +1306,16 @@ class OpenBrowserServer:
 				if 'exception' in exception:
 					error_text = exception['exception'].get('description', error_text)
 				return json.dumps({'error': error_text})
+
+			if not return_by_value:
+				remote_obj = result.get('result', {})
+				return json.dumps({
+					'objectId': remote_obj.get('objectId'),
+					'type': remote_obj.get('type', 'undefined'),
+					'subtype': remote_obj.get('subtype'),
+					'className': remote_obj.get('className'),
+					'description': remote_obj.get('description'),
+				}, indent=2)
 
 			value = result.get('result', {}).get('value')
 			result_type = result.get('result', {}).get('type', 'undefined')
