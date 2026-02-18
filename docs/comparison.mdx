@@ -169,15 +169,74 @@ All three servers return short confirmations for actions:
 
 #### Filter / Search (OpenBrowser only)
 
-No equivalent in Playwright or Chrome DevTools MCP -- both require dumping the full snapshot.
+No equivalent in Playwright or Chrome DevTools MCP -- both require dumping the full snapshot or running JavaScript.
+
+**Element filter** -- find interactive elements by text, tag, id, class, or attribute:
 
 ```json
 browser_get_state(filter_by="text", filter_query="Submit")
--> {"query": "Submit", "by": "text", "results": [{"index": 94, "tag": "button", "text": "Submit order"}], "count": 1}
-
-browser_get_text(search="Customer")
--> (only matching lines with context, not full page)
 ```
+
+```json
+{"query": "Submit", "by": "text", "results": [{"index": 94, "tag": "button", "text": "Submit order"}], "count": 1}
+```
+
+**Regex content search** -- returns only matching lines with context, not the full page.
+
+The Wikipedia Python page is ~97K chars as full markdown. Searching for "Guido van Rossum" returns only the 11 matching lines with context (~3.9K chars -- 25x smaller):
+
+```json
+browser_get_text(search="Guido van Rossum", context_lines=1)
+```
+
+```json
+{
+  "pattern": "Guido van Rossum",
+  "matches": [
+    {
+      "line_number": 244,
+      "line": "| Designed by | Guido van Rossum |",
+      "context_before": ["| Paradigm | Multi-paradigm: object-oriented,... |"],
+      "context_after": ["| Developer | Python Software Foundation |"]
+    },
+    {
+      "line_number": 278,
+      "line": "Guido van Rossum began working on Python in the late 1980s...",
+      "context_before": ["**Python** is a high-level, general-purpose programming language..."],
+      "context_after": ["Python has gained widespread use in the machine learning community..."]
+    }
+  ],
+  "matches_shown": 11,
+  "total_matches": 11
+}
+```
+
+Regex patterns also work -- `search="released in \\d{4}"` finds lines with release years, and `max_matches` limits results:
+
+```json
+browser_get_text(search="released in \\d{4}", context_lines=0, max_matches=3)
+```
+
+```json
+{
+  "pattern": "released in \\d{4}",
+  "matches": [
+    {"line_number": 278, "line": "...Python 3.0, released in 2008, was a major revision..."},
+    {"line_number": 287, "line": "...Python 2.7.18, released in 2020, was the last release of Python 2..."},
+    {"line_number": 463, "line": "...IronPython...An alpha version (released in 2021)..."}
+  ],
+  "matches_shown": 3,
+  "total_matches": 4
+}
+```
+
+**Comparison for finding "Guido van Rossum" on Wikipedia:**
+
+| Server | Method | Response Size |
+|--------|--------|-------------:|
+| Playwright MCP | `browser_snapshot` (dump full tree, search client-side) | ~495K chars |
+| Chrome DevTools MCP | `take_snapshot` (dump full tree, search client-side) | ~538K chars |
+| OpenBrowser MCP | `browser_get_text(search="Guido van Rossum")` | ~3.9K chars |
 
 ## Cost Comparison
 
