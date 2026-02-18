@@ -10,25 +10,23 @@ AI-powered browser automation for Claude Code. Control real web browsers directl
 
 ## Installation
 
-### From a marketplace (when available)
+### From GitHub marketplace
 
 ```bash
-# Install via Claude Code plugin system
-claude plugins install openbrowser
+# Add the OpenBrowser marketplace (one-time)
+claude plugin marketplace add billy-enrizky/openbrowser-ai
+
+# Install the plugin
+claude plugin install openbrowser@openbrowser-ai
 ```
 
-### Manual installation
+This installs the MCP server, 5 skills, and auto-enables the plugin. Restart Claude Code to activate.
 
-Clone the plugin into your Claude Code plugins directory:
+### Local development
 
 ```bash
-git clone https://github.com/billy-enrizky/openbrowser-ai.git
-cd openbrowser-ai/plugin
-
-# In your project, add the plugin path to .claude/settings.json:
-# {
-#   "plugins": ["/path/to/openbrowser-ai/plugin"]
-# }
+# Test from a local clone without installing
+claude --plugin-dir /path/to/openbrowser-ai/plugin
 ```
 
 ### OpenClaw
