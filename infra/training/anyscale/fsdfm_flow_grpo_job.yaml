@@ -24,7 +24,7 @@ excludes:
   - data/formfactory/img/
   - "*.pyc"
 env_vars:
-  FLOW_TRAIN_FILE: "data/processed/formfactory_sft.jsonl"
+  FLOW_TRAIN_FILE: "data/processed/formfactory_sft_train.jsonl"
   MAX_TRAIN_SAMPLES: "25"
   NUM_EPOCHS: "1"
   FSDFM_SFT_CHECKPOINT: "/mnt/user_storage/openbrowser/checkpoints/fsdfm-sft/lora_adapter"
