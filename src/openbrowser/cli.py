@@ -52,7 +52,7 @@ if len(sys.argv) > 1 and sys.argv[1] == 'install':
 
 	if result.returncode == 0:
 		print('\n✅ Installation complete!')
-		print('Ready to use! Run: uvx openbrowser')
+		print('Ready to use! Run: uvx openbrowser-ai')
 	else:
 		print('\n❌ Installation failed')
 		sys.exit(1)
@@ -1776,8 +1776,8 @@ def main(ctx: click.Context, debug: bool = False, **kwargs):
 	Run without arguments to start the interactive TUI.
 
 	Examples:
-	  uvx openbrowser --template default
-	  uvx openbrowser --template advanced --output my_script.py
+	  uvx openbrowser-ai --template default
+	  uvx openbrowser-ai --template advanced --output my_script.py
 	"""
 
 	# Handle template generation
@@ -1926,7 +1926,7 @@ def install():
 
 	if result.returncode == 0:
 		print('\n✅ Installation complete!')
-		print('Ready to use! Run: uvx openbrowser')
+		print('Ready to use! Run: uvx openbrowser-ai')
 	else:
 		print('\n❌ Installation failed')
 		sys.exit(1)
@@ -2045,19 +2045,19 @@ def init(
 
 	\b
 	# Interactive mode - prompts for template selection
-	uvx openbrowser init
+	uvx openbrowser-ai init
 
 	\b
 	# Generate default template
-	uvx openbrowser init --template default
+	uvx openbrowser-ai init --template default
 
 	\b
 	# Generate advanced template with custom filename
-	uvx openbrowser init --template advanced --output my_script.py
+	uvx openbrowser-ai init --template advanced --output my_script.py
 
 	\b
 	# List available templates
-	uvx openbrowser init --list
+	uvx openbrowser-ai init --list
 	"""
 
 	# Handle --list flag
