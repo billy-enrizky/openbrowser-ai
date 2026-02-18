@@ -38,7 +38,8 @@ function AuthCallbackContent() {
         await completeSignIn(code, state);
         router.replace("/");
       } catch (e) {
-        setAsyncError(e instanceof Error ? e.message : "Authentication failed.");
+        const msg = e instanceof Error ? e.message : "Authentication failed.";
+        setAsyncError(msg);
       }
     })();
   }, [authEnabled, code, completeSignIn, router, state, staticError]);
