@@ -80,6 +80,10 @@ class DummyServer:
 class DummyTypes:
     """Minimal stub for mcp.types."""
 
+    class ToolAnnotations:
+        def __init__(self, **kwargs):
+            pass
+
     class Tool:
         def __init__(self, **kwargs):
             pass

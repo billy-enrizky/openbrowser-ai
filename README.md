@@ -367,7 +367,7 @@ uvx openbrowser-ai[mcp] --mcp
 |------|-------------|
 | `browser_navigate` | Navigate to a URL, optionally in a new tab |
 | `browser_go_back` | Go back to the previous page |
-| `browser_scroll` | Scroll the page up or down |
+| `browser_scroll` | Scroll the page up or down. Use `target_text` to find text and scroll to it |
 
 #### Interaction
 
@@ -380,34 +380,17 @@ uvx openbrowser-ai[mcp] --mcp
 
 | Tool | Description |
 |------|-------------|
-| `browser_get_state` | Get page metadata and interactive elements (compact or full) |
-| `browser_get_text` | Get page content as clean markdown |
-| `browser_grep` | Search page text with regex or string patterns |
-
-#### DOM Inspection
-
-| Tool | Description |
-|------|-------------|
-| `browser_search_elements` | Search elements by text, tag, id, class, or attribute |
-| `browser_find_and_scroll` | Find text on page and scroll to it |
+| `browser_get_state` | Get page metadata and interactive elements. Use `filter_by`/`filter_query` to search elements by text, tag, id, class, or attribute |
+| `browser_get_text` | Get page content as clean markdown. Use `search` param to grep for regex patterns with context |
 | `browser_get_accessibility_tree` | Get page a11y tree (tree or flat format, depth limit) |
 | `browser_execute_js` | Execute JavaScript in page context (await/fire-and-forget, by-value/by-reference) |
 
-#### Tab Management
+#### Tab and Session Management
 
 | Tool | Description |
 |------|-------------|
-| `browser_list_tabs` | List all open tabs |
-| `browser_switch_tab` | Switch to a tab by ID |
-| `browser_close_tab` | Close a tab by ID |
-
-#### Session Management
-
-| Tool | Description |
-|------|-------------|
-| `browser_list_sessions` | List active browser sessions |
-| `browser_close_session` | Close a specific session |
-| `browser_close_all` | Close all browser sessions |
+| `browser_tab` | Manage tabs: `action=list` / `switch` / `close` with `tab_id` |
+| `browser_session` | Manage sessions: `action=list` / `close` / `close_all` with `session_id` |
 
 ### MCP Resources
 
