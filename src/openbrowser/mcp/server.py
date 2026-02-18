@@ -219,9 +219,14 @@ class OpenBrowserServer:
 
 		@self.server.list_tools()
 		async def handle_list_tools() -> list[types.Tool]:
-			"""List all available openbrowser tools."""
+			"""List all available openbrowser tools.
+
+			Consolidated to 11 tools following WebMCP design principles:
+			minimal tool surface area, progressive disclosure via optional params,
+			and tool annotations (readOnlyHint, destructiveHint, idempotentHint).
+			"""
 			return [
-				# Direct browser control tools
+				# -- Direct browser control tools --
 				types.Tool(
 					name='browser_navigate',
 					description='Navigate to a URL in the browser',
@@ -233,6 +238,7 @@ class OpenBrowserServer:
 						},
 						'required': ['url'],
 					},
+					annotations=types.ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True),
 				),
 				types.Tool(
 					name='browser_click',
@@ -252,6 +258,7 @@ class OpenBrowserServer:
 						},
 						'required': ['index'],
 					},
+					annotations=types.ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False),
 				),
 				types.Tool(
 					name='browser_type',
@@ -267,10 +274,12 @@ class OpenBrowserServer:
 						},
 						'required': ['index', 'text'],
 					},
+					annotations=types.ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False),
 				),
+				# -- Page state with optional element filtering (merged browser_search_elements) --
 				types.Tool(
 					name='browser_get_state',
-					description='Get the current page state. Use compact=true (default) for a lightweight summary with URL, title, and element count. Use compact=false for the full list of interactive elements.',
+					description='Get the current page state. Use compact=true (default) for a lightweight summary with URL, title, and element count. Use compact=false for the full list of interactive elements. Optionally filter elements by text, tag, id, class, or attribute.',
 					inputSchema={
 						'type': 'object',
 						'properties': {
@@ -278,89 +287,56 @@ class OpenBrowserServer:
 								'type': 'boolean',
 								'description': 'If true, returns only URL, title, tab count, and interactive element count. If false, returns full element details.',
 								'default': True,
-							}
+							},
+							'filter_by': {
+								'type': 'string',
+								'enum': ['text', 'tag', 'id', 'class', 'attribute'],
+								'description': 'Search interactive elements by this property. When set, returns matching elements with indices for browser_click/browser_type.',
+							},
+							'filter_query': {
+								'type': 'string',
+								'description': 'Text or pattern to search for in elements (requires filter_by).',
+							},
+							'max_results': {
+								'type': 'integer',
+								'description': 'Maximum number of filtered results to return.',
+								'default': 20,
+							},
 						},
 					},
+					annotations=types.ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True),
 				),
+				# -- Scroll with optional find-and-scroll (merged browser_find_and_scroll) --
 				types.Tool(
 					name='browser_scroll',
-					description='Scroll the page',
+					description='Scroll the page. Optionally find text on the page and scroll to it.',
 					inputSchema={
 						'type': 'object',
 						'properties': {
 							'direction': {
 								'type': 'string',
 								'enum': ['up', 'down'],
-								'description': 'Direction to scroll',
+								'description': 'Direction to scroll (ignored when target_text is set)',
 								'default': 'down',
-							}
+							},
+							'target_text': {
+								'type': 'string',
+								'description': 'Find this text on the page and scroll to it. When set, direction is ignored.',
+							},
 						},
 					},
+					annotations=types.ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True),
 				),
 				types.Tool(
 					name='browser_go_back',
 					description='Go back to the previous page',
 					inputSchema={'type': 'object', 'properties': {}},
+					annotations=types.ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False),
 				),
-				# Tab management
-				types.Tool(
-					name='browser_list_tabs', description='List all open tabs', inputSchema={'type': 'object', 'properties': {}}
-				),
-				types.Tool(
-					name='browser_switch_tab',
-					description='Switch to a different tab',
-					inputSchema={
-						'type': 'object',
-						'properties': {'tab_id': {'type': 'string', 'description': '4 Character Tab ID of the tab to switch to'}},
-						'required': ['tab_id'],
-					},
-				),
-				types.Tool(
-					name='browser_close_tab',
-					description='Close a tab',
-					inputSchema={
-						'type': 'object',
-						'properties': {'tab_id': {'type': 'string', 'description': '4 Character Tab ID of the tab to close'}},
-						'required': ['tab_id'],
-					},
-				),
-				# types.Tool(
-				# 	name="browser_close",
-				# 	description="Close the browser session",
-				# 	inputSchema={
-				# 		"type": "object",
-				# 		"properties": {}
-				# 	}
-				# ),
-				# Browser session management tools
-				types.Tool(
-					name='browser_list_sessions',
-					description='List all active browser sessions with their details and last activity time',
-					inputSchema={'type': 'object', 'properties': {}},
-				),
-				types.Tool(
-					name='browser_close_session',
-					description='Close a specific browser session by its ID',
-					inputSchema={
-						'type': 'object',
-						'properties': {
-							'session_id': {
-								'type': 'string',
-								'description': 'The browser session ID to close (get from browser_list_sessions)',
-							}
-						},
-						'required': ['session_id'],
-					},
-				),
-				types.Tool(
-					name='browser_close_all',
-					description='Close all active browser sessions and clean up resources',
-					inputSchema={'type': 'object', 'properties': {}},
-				),
-				# Text-first content tools (efficient alternatives to screenshots)
+				# -- Text extraction with optional search (merged browser_grep) --
 				types.Tool(
 					name='browser_get_text',
-					description='Get the current page content as clean markdown text. Use this instead of screenshots for reading page content efficiently.',
+					description='Get the current page content as clean markdown text. Optionally search for a regex or string pattern and return only matching lines with context.',
 					inputSchema={
 						'type': 'object',
 						'properties': {
@@ -369,78 +345,72 @@ class OpenBrowserServer:
 								'description': 'Whether to include href URLs in the output',
 								'default': False,
 							},
-						},
-					},
-				),
-				types.Tool(
-					name='browser_grep',
-					description='Search page text content using a regex or string pattern. Returns matching lines with context, like grep. Use this to find specific content on a page without reading the entire page.',
-					inputSchema={
-						'type': 'object',
-						'properties': {
-							'pattern': {
+							'search': {
 								'type': 'string',
-								'description': 'Regex or string pattern to search for in page content',
+								'description': 'Regex or string pattern to search for in page content. When set, returns only matching lines with context instead of full page text.',
 							},
 							'context_lines': {
 								'type': 'integer',
-								'description': 'Number of lines before and after each match to include',
+								'description': 'Number of lines before and after each match to include (only used with search).',
 								'default': 2,
 							},
 							'max_matches': {
 								'type': 'integer',
-								'description': 'Maximum number of matches to return',
+								'description': 'Maximum number of matches to return (only used with search).',
 								'default': 20,
 							},
 							'case_insensitive': {
 								'type': 'boolean',
-								'description': 'Whether to ignore case when matching',
+								'description': 'Whether to ignore case when matching (only used with search).',
 								'default': True,
 							},
 						},
-						'required': ['pattern'],
 					},
+					annotations=types.ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True),
 				),
+				# -- Tab management (merged list_tabs + switch_tab + close_tab) --
 				types.Tool(
-					name='browser_search_elements',
-					description='Search interactive DOM elements by text content, tag name, id, class, or attribute value. Returns element indices that can be used with browser_click and browser_type.',
+					name='browser_tab',
+					description='Manage browser tabs. Actions: list (list all open tabs), switch (switch to a tab by ID), close (close a tab by ID).',
 					inputSchema={
 						'type': 'object',
 						'properties': {
-							'query': {
+							'action': {
 								'type': 'string',
-								'description': 'Text or pattern to search for in elements',
+								'enum': ['list', 'switch', 'close'],
+								'description': 'Tab action to perform.',
 							},
-							'by': {
+							'tab_id': {
 								'type': 'string',
-								'enum': ['text', 'tag', 'id', 'class', 'attribute'],
-								'description': 'What property to search by',
-								'default': 'text',
-							},
-							'max_results': {
-								'type': 'integer',
-								'description': 'Maximum number of results to return',
-								'default': 20,
+								'description': '4 Character Tab ID (required for switch and close actions).',
 							},
 						},
-						'required': ['query'],
+						'required': ['action'],
 					},
+					annotations=types.ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False),
 				),
+				# -- Session management (merged list_sessions + close_session + close_all) --
 				types.Tool(
-					name='browser_find_and_scroll',
-					description='Find text on the page and scroll to it. Use this to locate and navigate to specific content.',
+					name='browser_session',
+					description='Manage browser sessions. Actions: list (list active sessions), close (close a session by ID), close_all (close all sessions).',
 					inputSchema={
 						'type': 'object',
 						'properties': {
-							'text': {
+							'action': {
 								'type': 'string',
-								'description': 'The text to find and scroll to on the page',
+								'enum': ['list', 'close', 'close_all'],
+								'description': 'Session action to perform.',
+							},
+							'session_id': {
+								'type': 'string',
+								'description': 'Session ID to close (required for close action).',
 							},
 						},
-						'required': ['text'],
+						'required': ['action'],
 					},
+					annotations=types.ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False),
 				),
-				# Advanced inspection tools
+				# -- Advanced inspection tools --
 				types.Tool(
 					name='browser_get_accessibility_tree',
 					description='Get the accessibility tree (a11y tree) of the current page. Returns structured data including roles, names, and properties of all accessible elements. Useful for understanding page structure, testing accessibility, and finding elements by their ARIA roles.',
@@ -465,6 +435,7 @@ class OpenBrowserServer:
 							},
 						},
 					},
+					annotations=types.ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True),
 				),
 				types.Tool(
 					name='browser_execute_js',
@@ -489,6 +460,7 @@ class OpenBrowserServer:
 						},
 						'required': ['expression'],
 					},
+					annotations=types.ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False),
 				),
 			]
 
@@ -617,7 +589,7 @@ class OpenBrowserServer:
 				# Send resource notifications for state-changing tools
 				state_changing_tools = {
 					'browser_navigate', 'browser_click', 'browser_type',
-					'browser_go_back', 'browser_scroll', 'browser_find_and_scroll',
+					'browser_go_back', 'browser_scroll',
 				}
 				if name in state_changing_tools and self.browser_session:
 					await self._send_resource_notifications()
@@ -641,24 +613,28 @@ class OpenBrowserServer:
 					)
 
 	async def _execute_tool(self, tool_name: str, arguments: dict[str, Any]) -> str:
-		"""Execute an openbrowser tool."""
+		"""Execute an openbrowser tool.
 
-		# Browser session management tools (don't require active session)
-		if tool_name == 'browser_list_sessions':
-			return await self._list_sessions()
+		Consolidated 11-tool dispatcher following WebMCP design principles.
+		"""
 
-		elif tool_name == 'browser_close_session':
-			return await self._close_session(arguments['session_id'])
+		# Session management (does not require active browser session)
+		if tool_name == 'browser_session':
+			action = arguments['action']
+			if action == 'list':
+				return await self._list_sessions()
+			elif action == 'close':
+				return await self._close_session(arguments['session_id'])
+			elif action == 'close_all':
+				return await self._close_all_sessions()
+			return f"Unknown browser_session action: {action}"
 
-		elif tool_name == 'browser_close_all':
-			return await self._close_all_sessions()
-
-		# Direct browser control tools (require active session)
-		elif tool_name.startswith('browser_'):
-			# Ensure browser session exists
+		# All remaining tools require an active browser session
+		if tool_name.startswith('browser_'):
 			if not self.browser_session:
 				await self._init_browser_session()
 
+			# Navigation and interaction
 			if tool_name == 'browser_navigate':
 				return await self._navigate(arguments['url'], arguments.get('new_tab', False))
 
@@ -669,49 +645,47 @@ class OpenBrowserServer:
 				return await self._type_text(arguments['index'], arguments['text'])
 
 			elif tool_name == 'browser_get_state':
+				# If filter params present, delegate to element search
+				if arguments.get('filter_by') and arguments.get('filter_query'):
+					return await self._search_elements(
+						query=arguments['filter_query'],
+						by=arguments['filter_by'],
+						max_results=arguments.get('max_results', 20),
+					)
 				return await self._get_browser_state(arguments.get('compact', True))
 
 			elif tool_name == 'browser_scroll':
+				# If target_text present, delegate to find-and-scroll
+				if arguments.get('target_text'):
+					return await self._find_and_scroll(arguments['target_text'])
 				return await self._scroll(arguments.get('direction', 'down'))
 
 			elif tool_name == 'browser_go_back':
 				return await self._go_back()
 
-			elif tool_name == 'browser_close':
-				return await self._close_browser()
-
-			elif tool_name == 'browser_list_tabs':
-				return await self._list_tabs()
-
-			elif tool_name == 'browser_switch_tab':
-				return await self._switch_tab(arguments['tab_id'])
-
-			elif tool_name == 'browser_close_tab':
-				return await self._close_tab(arguments['tab_id'])
-
-			# Text-first content tools
+			# Text extraction (with optional grep)
 			elif tool_name == 'browser_get_text':
+				if arguments.get('search'):
+					return await self._grep(
+						pattern=arguments['search'],
+						context_lines=arguments.get('context_lines', 2),
+						max_matches=arguments.get('max_matches', 20),
+						case_insensitive=arguments.get('case_insensitive', True),
+					)
 				return await self._get_text(arguments.get('extract_links', False))
 
-			elif tool_name == 'browser_grep':
-				return await self._grep(
-					pattern=arguments['pattern'],
-					context_lines=arguments.get('context_lines', 2),
-					max_matches=arguments.get('max_matches', 20),
-					case_insensitive=arguments.get('case_insensitive', True),
-				)
+			# Tab management (merged list/switch/close)
+			elif tool_name == 'browser_tab':
+				action = arguments['action']
+				if action == 'list':
+					return await self._list_tabs()
+				elif action == 'switch':
+					return await self._switch_tab(arguments['tab_id'])
+				elif action == 'close':
+					return await self._close_tab(arguments['tab_id'])
+				return f"Unknown browser_tab action: {action}"
 
-			elif tool_name == 'browser_search_elements':
-				return await self._search_elements(
-					query=arguments['query'],
-					by=arguments.get('by', 'text'),
-					max_results=arguments.get('max_results', 20),
-				)
-
-			elif tool_name == 'browser_find_and_scroll':
-				return await self._find_and_scroll(arguments['text'])
-
-			# Advanced inspection tools
+			# Advanced inspection
 			elif tool_name == 'browser_get_accessibility_tree':
 				return await self._get_accessibility_tree(
 					max_depth=arguments.get('max_depth', -1),
