@@ -38,8 +38,8 @@ COGNITO_CLIENT_ID="$(terraform -chdir="$TF_DIR" output -raw cognito_app_client_i
 FRONTEND_URL="$(terraform -chdir="$TF_DIR" output -raw frontend_url)"
 
 FRONTEND_URL="${FRONTEND_URL%/}"
-REDIRECT_URI="$FRONTEND_URL/auth/callback/"
-LOGOUT_URI="$FRONTEND_URL/login/"
+REDIRECT_URI="$FRONTEND_URL/auth/callback"
+LOGOUT_URI="$FRONTEND_URL/login"
 
 echo "--- Writing $ENV_FILE ---"
 cat > "$ENV_FILE" <<EOF
