@@ -79,6 +79,19 @@ class EventBuffer:
     def has_task(self, task_id: str) -> bool:
         return task_id in self._events
 
+    def get_events_since(
+        self, task_id: str, since_id: int = 0
+    ) -> tuple[list[TaskEvent], bool]:
+        """Return (events_after_since_id, is_complete).
+
+        Used by the polling endpoint as a synchronous alternative to
+        the async ``stream()`` generator.
+        """
+        events = self._events.get(task_id, [])
+        new_events = [e for e in events if e.id > since_id]
+        complete = self._completed.get(task_id, False)
+        return new_events, complete
+
     async def stream(
         self, task_id: str, last_event_id: int = 0
     ) -> AsyncGenerator[TaskEvent, None]:
