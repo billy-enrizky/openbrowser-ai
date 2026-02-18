@@ -80,7 +80,7 @@ pip install openbrowser-ai[video]
 ### Install Browser
 
 ```bash
-uvx openbrowser install
+uvx openbrowser-ai install
 # or
 playwright install chromium
 ```
@@ -325,7 +325,7 @@ bridges MCP servers to OpenClaw agents.
 }
 ```
 
-All 18 browser tools will be registered as native OpenClaw agent tools.
+All 11 browser tools will be registered as native OpenClaw agent tools.
 
 For OpenClaw plugin documentation, see [docs.openclaw.ai/tools/plugin](https://docs.openclaw.ai/tools/plugin).
 
@@ -494,13 +494,13 @@ Playwright/CDP have no equivalent -- both require dumping the full snapshot.
 
 ```bash
 # Run a browser automation task
-uvx openbrowser run "Search for Python tutorials on Google"
+uvx openbrowser-ai -p "Search for Python tutorials on Google"
 
 # Install browser
-uvx openbrowser install
+uvx openbrowser-ai install
 
 # Run MCP server
-uvx openbrowser mcp
+uvx openbrowser-ai[mcp] --mcp
 ```
 
 ## Project Structure
