@@ -1142,6 +1142,7 @@ class TestGetAccessibilityTree:
 
         data = json.loads(result)
         assert data["total_nodes"] == 3  # 4 minus 1 ignored
+        assert data["total_nodes_in_page"] == 3
         assert "tree" in data
 
     def test_a11y_tree_excludes_ignored_by_default(self, mcp_server):
@@ -1171,6 +1172,7 @@ class TestGetAccessibilityTree:
 
         data = json.loads(result)
         assert data["total_nodes"] == 3
+        assert data["total_nodes_in_page"] == 3
 
     def test_a11y_tree_includes_ignored_when_requested(self, mcp_server):
         """Ignored nodes are included when include_ignored=True."""
@@ -1199,6 +1201,7 @@ class TestGetAccessibilityTree:
 
         data = json.loads(result)
         assert data["total_nodes"] == 4
+        assert data["total_nodes_in_page"] == 4
 
     def test_a11y_tree_handles_error(self, mcp_server):
         """Returns error message when extraction fails."""
@@ -1229,6 +1232,7 @@ class TestGetAccessibilityTree:
 
         data = json.loads(result)
         assert data["total_nodes"] == 0
+        assert data["total_nodes_in_page"] == 0
 
     def test_a11y_tree_routed_via_execute_tool(self, mcp_server):
         """Verify browser_get_accessibility_tree routes correctly."""
@@ -1243,6 +1247,172 @@ class TestGetAccessibilityTree:
             result = asyncio.run(mcp_server._execute_tool("browser_get_accessibility_tree", {}))
 
         assert "Unknown tool" not in result
+
+    def test_a11y_tree_total_nodes_reflects_depth_limit(self, mcp_server):
+        """When depth is limited, total_nodes counts only the returned nodes."""
+        mcp_server.browser_session = MagicMock()
+        mcp_server.browser_session.current_target_id = "target-123"
+
+        with patch.object(mcp_server_module, "DomService") as mock_dom_cls:
+            mock_dom = MagicMock()
+            mock_dom._get_ax_tree_for_all_frames = AsyncMock(return_value=self._make_ax_nodes())
+
+            def build_node(ax_node):
+                node = MagicMock()
+                node.ax_node_id = ax_node["nodeId"]
+                node.ignored = ax_node.get("ignored", False)
+                node.role = ax_node.get("role", {}).get("value")
+                node.name = ax_node.get("name", {}).get("value")
+                node.description = None
+                node.child_ids = ax_node.get("childIds")
+                node.properties = None
+                return node
+
+            mock_dom._build_enhanced_ax_node = MagicMock(side_effect=build_node)
+            mock_dom_cls.return_value = mock_dom
+
+            result = asyncio.run(mcp_server._get_accessibility_tree(max_depth=0))
+
+        data = json.loads(result)
+        # depth=0 means only root node, so total_nodes=1
+        assert data["total_nodes"] == 1
+        assert data["total_nodes_in_page"] == 3
+
+    def test_a11y_tree_flat_format(self, mcp_server):
+        """Flat format returns array with parent_id references."""
+        mcp_server.browser_session = MagicMock()
+        mcp_server.browser_session.current_target_id = "target-123"
+
+        with patch.object(mcp_server_module, "DomService") as mock_dom_cls:
+            mock_dom = MagicMock()
+            mock_dom._get_ax_tree_for_all_frames = AsyncMock(return_value=self._make_ax_nodes())
+
+            def build_node(ax_node):
+                node = MagicMock()
+                node.ax_node_id = ax_node["nodeId"]
+                node.ignored = ax_node.get("ignored", False)
+                node.role = ax_node.get("role", {}).get("value")
+                node.name = ax_node.get("name", {}).get("value")
+                node.description = None
+                node.child_ids = ax_node.get("childIds")
+                node.properties = None
+                return node
+
+            mock_dom._build_enhanced_ax_node = MagicMock(side_effect=build_node)
+            mock_dom_cls.return_value = mock_dom
+
+            result = asyncio.run(
+                mcp_server._get_accessibility_tree(output_format="flat")
+            )
+
+        data = json.loads(result)
+        assert "nodes" in data
+        assert isinstance(data["nodes"], list)
+        assert len(data["nodes"]) == 3
+        assert data["total_nodes"] == 3
+        assert data["total_nodes_in_page"] == 3
+
+        # Root has parent_id None
+        root = [n for n in data["nodes"] if n["id"] == "root-1"][0]
+        assert root["parent_id"] is None
+
+        # Children reference root as parent
+        child = [n for n in data["nodes"] if n["id"] == "node-2"][0]
+        assert child["parent_id"] == "root-1"
+
+    def test_a11y_tree_flat_format_with_depth_limit(self, mcp_server):
+        """Flat format with depth=0 returns only root node."""
+        mcp_server.browser_session = MagicMock()
+        mcp_server.browser_session.current_target_id = "target-123"
+
+        with patch.object(mcp_server_module, "DomService") as mock_dom_cls:
+            mock_dom = MagicMock()
+            mock_dom._get_ax_tree_for_all_frames = AsyncMock(return_value=self._make_ax_nodes())
+
+            def build_node(ax_node):
+                node = MagicMock()
+                node.ax_node_id = ax_node["nodeId"]
+                node.ignored = ax_node.get("ignored", False)
+                node.role = ax_node.get("role", {}).get("value")
+                node.name = ax_node.get("name", {}).get("value")
+                node.description = None
+                node.child_ids = ax_node.get("childIds")
+                node.properties = None
+                return node
+
+            mock_dom._build_enhanced_ax_node = MagicMock(side_effect=build_node)
+            mock_dom_cls.return_value = mock_dom
+
+            result = asyncio.run(
+                mcp_server._get_accessibility_tree(max_depth=0, output_format="flat")
+            )
+
+        data = json.loads(result)
+        assert len(data["nodes"]) == 1
+        assert data["total_nodes"] == 1
+        assert data["total_nodes_in_page"] == 3
+
+    def test_a11y_tree_default_format_is_tree(self, mcp_server):
+        """Default format returns tree structure (backward compat)."""
+        mcp_server.browser_session = MagicMock()
+        mcp_server.browser_session.current_target_id = "target-123"
+
+        with patch.object(mcp_server_module, "DomService") as mock_dom_cls:
+            mock_dom = MagicMock()
+            mock_dom._get_ax_tree_for_all_frames = AsyncMock(return_value=self._make_ax_nodes())
+
+            def build_node(ax_node):
+                node = MagicMock()
+                node.ax_node_id = ax_node["nodeId"]
+                node.ignored = ax_node.get("ignored", False)
+                node.role = ax_node.get("role", {}).get("value")
+                node.name = ax_node.get("name", {}).get("value")
+                node.description = None
+                node.child_ids = ax_node.get("childIds")
+                node.properties = None
+                return node
+
+            mock_dom._build_enhanced_ax_node = MagicMock(side_effect=build_node)
+            mock_dom_cls.return_value = mock_dom
+
+            result = asyncio.run(mcp_server._get_accessibility_tree())
+
+        data = json.loads(result)
+        assert "tree" in data
+        assert "nodes" not in data
+
+    def test_a11y_tree_format_routed(self, mcp_server):
+        """Format parameter routes through _execute_tool."""
+        mcp_server.browser_session = MagicMock()
+        mcp_server.browser_session.current_target_id = "target-123"
+
+        with patch.object(mcp_server_module, "DomService") as mock_dom_cls:
+            mock_dom = MagicMock()
+            mock_dom._get_ax_tree_for_all_frames = AsyncMock(return_value=self._make_ax_nodes())
+
+            def build_node(ax_node):
+                node = MagicMock()
+                node.ax_node_id = ax_node["nodeId"]
+                node.ignored = ax_node.get("ignored", False)
+                node.role = ax_node.get("role", {}).get("value")
+                node.name = ax_node.get("name", {}).get("value")
+                node.description = None
+                node.child_ids = ax_node.get("childIds")
+                node.properties = None
+                return node
+
+            mock_dom._build_enhanced_ax_node = MagicMock(side_effect=build_node)
+            mock_dom_cls.return_value = mock_dom
+
+            result = asyncio.run(
+                mcp_server._execute_tool(
+                    "browser_get_accessibility_tree", {"format": "flat"}
+                )
+            )
+
+        data = json.loads(result)
+        assert "nodes" in data
+        assert isinstance(data["nodes"], list)
 
 
 # ===========================================================================
