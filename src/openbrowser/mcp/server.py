@@ -990,38 +990,55 @@ class OpenBrowserServer:
 		state = await self.browser_session.get_browser_state_summary()
 		return f'Switched to tab {tab_id}: {state.url}'
 
+	async def _switch_from_about_blank_if_needed(self) -> str:
+		"""Check if current tab is about:blank and switch to a real tab if available.
+
+		Returns the current URL after any switch.
+		"""
+		from openbrowser.browser.events import SwitchTabEvent
+
+		current_url = await self.browser_session.get_current_page_url()
+		if current_url and current_url.startswith('about:'):
+			tabs = await self.browser_session.get_tabs()
+			for tab in tabs:
+				if tab.url and not tab.url.startswith('about:'):
+					switch_event = self.browser_session.event_bus.dispatch(SwitchTabEvent(target_id=tab.target_id))
+					await switch_event
+					return tab.url
+		return current_url
+
 	async def _close_tab(self, tab_id: str) -> str:
 		"""Close a specific tab.
 
-		After closing, if the current tab is about:blank (created by AboutBlankWatchdog
-		to keep the browser alive), automatically switch to a non-blank tab if one exists.
-		Uses a brief delay after close to let Chrome settle the tab state before checking.
+		After closing, uses a two-phase settle to handle both Chrome's tab state
+		update and the AboutBlankWatchdog's asynchronous about:blank tab creation.
+		Phase 1: Wait for Chrome to settle the active tab after close.
+		Phase 2: Wait for AboutBlankWatchdog to potentially create and focus
+		         an about:blank keepalive tab, then switch away from it.
 		"""
 		if not self.browser_session:
 			return 'Error: No browser session active'
 
 		import asyncio
 
-		from openbrowser.browser.events import CloseTabEvent, SwitchTabEvent
+		from openbrowser.browser.events import CloseTabEvent
 
 		target_id = await self.browser_session.get_target_id_from_tab_id(tab_id)
 		event = self.browser_session.event_bus.dispatch(CloseTabEvent(target_id=target_id))
 		await event
 
-		# Brief delay to let Chrome settle tab state after close
+		# Phase 1: Wait for Chrome to settle tab state after close
 		# Without this, get_current_page_url() may still return the closed tab's URL
 		await asyncio.sleep(0.3)
+		current_url = await self._switch_from_about_blank_if_needed()
 
-		# Check if we landed on about:blank and auto-switch to a real tab
-		current_url = await self.browser_session.get_current_page_url()
-		if current_url and (current_url.startswith('about:blank') or current_url.startswith('about:')):
-			tabs = await self.browser_session.get_tabs()
-			for tab in tabs:
-				if tab.url and not tab.url.startswith('about:'):
-					switch_event = self.browser_session.event_bus.dispatch(SwitchTabEvent(target_id=tab.target_id))
-					await switch_event
-					current_url = tab.url
-					break
+		# Phase 2: AboutBlankWatchdog may asynchronously create and focus an
+		# about:blank tab after the TabClosedEvent propagates. If we landed on
+		# a real tab in phase 1, wait briefly and re-check in case the watchdog
+		# stole focus.
+		if current_url and not current_url.startswith('about:'):
+			await asyncio.sleep(0.5)
+			current_url = await self._switch_from_about_blank_if_needed()
 
 		return f'Closed tab # {tab_id}, now on {current_url}'
 
