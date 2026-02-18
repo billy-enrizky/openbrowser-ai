@@ -995,9 +995,12 @@ class OpenBrowserServer:
 
 		After closing, if the current tab is about:blank (created by AboutBlankWatchdog
 		to keep the browser alive), automatically switch to a non-blank tab if one exists.
+		Uses a brief delay after close to let Chrome settle the tab state before checking.
 		"""
 		if not self.browser_session:
 			return 'Error: No browser session active'
+
+		import asyncio
 
 		from openbrowser.browser.events import CloseTabEvent, SwitchTabEvent
 
@@ -1005,12 +1008,16 @@ class OpenBrowserServer:
 		event = self.browser_session.event_bus.dispatch(CloseTabEvent(target_id=target_id))
 		await event
 
+		# Brief delay to let Chrome settle tab state after close
+		# Without this, get_current_page_url() may still return the closed tab's URL
+		await asyncio.sleep(0.3)
+
 		# Check if we landed on about:blank and auto-switch to a real tab
 		current_url = await self.browser_session.get_current_page_url()
-		if current_url and current_url.startswith('about:blank'):
+		if current_url and (current_url.startswith('about:blank') or current_url.startswith('about:')):
 			tabs = await self.browser_session.get_tabs()
 			for tab in tabs:
-				if tab.url and not tab.url.startswith('about:blank'):
+				if tab.url and not tab.url.startswith('about:'):
 					switch_event = self.browser_session.event_bus.dispatch(SwitchTabEvent(target_id=tab.target_id))
 					await switch_event
 					current_url = tab.url
