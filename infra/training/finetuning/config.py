@@ -20,8 +20,9 @@ SFT_CONFIG = {
     "lora_dropout": 0.05,
     "lora_target_modules": "all-linear",
     # Training
-    "learning_rate": 2e-4,
+    "learning_rate": float(os.environ.get("LEARNING_RATE", "2e-4")),
     "num_epochs": int(os.environ.get("NUM_EPOCHS", "2")),
+    "max_steps": int(os.environ.get("MAX_STEPS", "-1")),  # -1 = use num_epochs
     "batch_size": 2,
     "gradient_accumulation_steps": 8,
     "max_seq_length": 512,
