@@ -10,6 +10,7 @@ Usage:
 
 import json
 import logging
+import os
 
 import torch
 from datasets import Dataset
@@ -111,6 +112,12 @@ def tokenize_dataset(dataset: Dataset, tokenizer, max_length: int) -> Dataset:
 def train():
     """Run SFT training with QLoRA."""
     config = SFT_CONFIG
+
+    seed = int(os.environ.get("RANDOM_SEED", "42"))
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+    logger.info("Set random seed to %d", seed)
 
     logger.info(f"Loading model: {config['model_name']}")
     tokenizer = AutoTokenizer.from_pretrained(config["model_name"])
