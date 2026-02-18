@@ -1705,3 +1705,37 @@ class TestResourceEndpoints:
         """Accessibility resource returns error when no session."""
         result = asyncio.run(mcp_server._get_accessibility_tree())
         assert "No browser session active" in result
+
+
+# ===========================================================================
+# Resource update notifications tests
+# ===========================================================================
+
+
+class TestResourceNotifications:
+    """Tests for resource update notifications after state-changing tools."""
+
+    def test_send_resource_notifications_sends_for_all_uris(self, mcp_server):
+        """send_resource_notifications sends updated for all 3 resource URIs."""
+        mock_session = MagicMock()
+        mock_session.send_resource_updated = AsyncMock()
+        mcp_server._mcp_session = mock_session
+
+        asyncio.run(mcp_server._send_resource_notifications())
+
+        assert mock_session.send_resource_updated.call_count == 3
+
+    def test_send_resource_notifications_handles_no_session(self, mcp_server):
+        """send_resource_notifications handles missing MCP session gracefully."""
+        mcp_server._mcp_session = None
+        # Should not raise
+        asyncio.run(mcp_server._send_resource_notifications())
+
+    def test_send_resource_notifications_handles_error(self, mcp_server):
+        """send_resource_notifications handles errors gracefully."""
+        mock_session = MagicMock()
+        mock_session.send_resource_updated = AsyncMock(side_effect=Exception("not connected"))
+        mcp_server._mcp_session = mock_session
+
+        # Should not raise
+        asyncio.run(mcp_server._send_resource_notifications())
