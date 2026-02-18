@@ -1,0 +1,104 @@
+{
+  "tool_count": 18,
+  "tool_names": [
+    "browser_navigate",
+    "browser_click",
+    "browser_type",
+    "browser_get_state",
+    "browser_scroll",
+    "browser_go_back",
+    "browser_list_tabs",
+    "browser_switch_tab",
+    "browser_close_tab",
+    "browser_list_sessions",
+    "browser_close_session",
+    "browser_close_all",
+    "browser_get_text",
+    "browser_grep",
+    "browser_search_elements",
+    "browser_find_and_scroll",
+    "browser_get_accessibility_tree",
+    "browser_execute_js"
+  ],
+  "measurements": [
+    {
+      "tool": "navigate",
+      "request_chars": 113,
+      "response_chars": 272,
+      "latency_ms": 30023.5
+    },
+    {
+      "tool": "get_state_full",
+      "request_chars": 62,
+      "response_chars": 209,
+      "latency_ms": 27.3
+    },
+    {
+      "tool": "get_state_compact",
+      "request_chars": 61,
+      "response_chars": 176,
+      "latency_ms": 8.9
+    },
+    {
+      "tool": "get_text",
+      "request_chars": 45,
+      "response_chars": 84,
+      "latency_ms": 2.0
+    },
+    {
+      "tool": "grep",
+      "request_chars": 90,
+      "response_chars": 80,
+      "latency_ms": 2.2
+    },
+    {
+      "tool": "click",
+      "request_chars": 52,
+      "response_chars": 91,
+      "latency_ms": 10.6
+    },
+    {
+      "tool": "go_back",
+      "request_chars": 44,
+      "response_chars": 75,
+      "latency_ms": 8.6
+    },
+    {
+      "tool": "get_state_after_back",
+      "request_chars": 61,
+      "response_chars": 176,
+      "latency_ms": 6.9
+    },
+    {
+      "tool": "navigate_form",
+      "request_chars": 84,
+      "response_chars": 105,
+      "latency_ms": 3.6
+    },
+    {
+      "tool": "get_state_form",
+      "request_chars": 62,
+      "response_chars": 209,
+      "latency_ms": 33.6
+    },
+    {
+      "tool": "type",
+      "request_chars": 71,
+      "response_chars": 91,
+      "latency_ms": 4.8
+    },
+    {
+      "tool": "list_tabs",
+      "request_chars": 46,
+      "response_chars": 63,
+      "latency_ms": 3.4
+    }
+  ],
+  "totals": {
+    "tool_calls": 12,
+    "total_request_chars": 791,
+    "total_response_chars": 1631,
+    "total_latency_ms": 30135.5,
+    "est_response_tokens": 407
+  }
+}
