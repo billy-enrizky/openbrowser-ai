@@ -11,6 +11,7 @@ import {
 const TOKEN_STORAGE_KEY = "openbrowser.auth.tokens";
 const PKCE_STATE_KEY = "openbrowser.auth.pkce_state";
 const PKCE_VERIFIER_KEY = "openbrowser.auth.pkce_verifier";
+const inFlightTokenExchange = new Map<string, Promise<CognitoTokenSet>>();
 
 export interface CognitoTokenSet {
   idToken: string;
@@ -115,47 +116,62 @@ export async function buildLoginUrl(): Promise<string> {
 export async function exchangeCodeForTokens(code: string, state: string): Promise<CognitoTokenSet> {
   validateCognitoClientConfig();
 
-  const expectedState = sessionStorage.getItem(PKCE_STATE_KEY);
-  const codeVerifier = sessionStorage.getItem(PKCE_VERIFIER_KEY);
-
-  sessionStorage.removeItem(PKCE_STATE_KEY);
-  sessionStorage.removeItem(PKCE_VERIFIER_KEY);
-
-  if (!expectedState || state !== expectedState) {
-    throw new Error("Invalid OAuth state");
-  }
-  if (!codeVerifier) {
-    throw new Error("Missing PKCE code_verifier");
+  const inFlight = inFlightTokenExchange.get(state);
+  if (inFlight) {
+    return inFlight;
   }
 
-  const body = new URLSearchParams({
-    grant_type: "authorization_code",
-    client_id: COGNITO_CLIENT_ID,
-    code,
-    redirect_uri: COGNITO_REDIRECT_URI,
-    code_verifier: codeVerifier,
-  });
+  const exchangePromise = (async () => {
+    const expectedState = sessionStorage.getItem(PKCE_STATE_KEY);
+    const codeVerifier = sessionStorage.getItem(PKCE_VERIFIER_KEY);
 
-  const response = await fetch(`${COGNITO_DOMAIN}/oauth2/token`, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: body.toString(),
-  });
+    if (!expectedState || state !== expectedState) {
+      throw new Error("Invalid OAuth state");
+    }
+    if (!codeVerifier) {
+      throw new Error("Missing PKCE code_verifier");
+    }
 
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`Token exchange failed: ${text}`);
+    sessionStorage.removeItem(PKCE_STATE_KEY);
+    sessionStorage.removeItem(PKCE_VERIFIER_KEY);
+
+    const body = new URLSearchParams({
+      grant_type: "authorization_code",
+      client_id: COGNITO_CLIENT_ID,
+      code,
+      redirect_uri: COGNITO_REDIRECT_URI,
+      code_verifier: codeVerifier,
+    });
+
+    const response = await fetch(`${COGNITO_DOMAIN}/oauth2/token`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: body.toString(),
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`Token exchange failed: ${text}`);
+    }
+
+    const tokenResponse = (await response.json()) as TokenResponse;
+    const expiresAt = Date.now() + tokenResponse.expires_in * 1000;
+
+    return {
+      idToken: tokenResponse.id_token,
+      accessToken: tokenResponse.access_token,
+      refreshToken: tokenResponse.refresh_token,
+      expiresAt,
+    };
+  })();
+
+  inFlightTokenExchange.set(state, exchangePromise);
+
+  try {
+    return await exchangePromise;
+  } finally {
+    inFlightTokenExchange.delete(state);
   }
-
-  const tokenResponse = (await response.json()) as TokenResponse;
-  const expiresAt = Date.now() + tokenResponse.expires_in * 1000;
-
-  return {
-    idToken: tokenResponse.id_token,
-    accessToken: tokenResponse.access_token,
-    refreshToken: tokenResponse.refresh_token,
-    expiresAt,
-  };
 }
 
 export async function refreshTokens(refreshToken: string): Promise<CognitoTokenSet> {
@@ -231,4 +247,3 @@ export function buildLogoutUrl(): string {
   });
   return `${COGNITO_DOMAIN}/logout?${params.toString()}`;
 }
-
