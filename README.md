@@ -413,33 +413,55 @@ uvx openbrowser-ai[mcp] --mcp
 
 ## MCP Benchmark: Why OpenBrowser
 
-Benchmark on identical 5-step workflow (navigate Wikipedia, get state, click, go back, get state). Real measurements via JSON-RPC stdio transport.
+Benchmark on identical 5-step workflow (navigate Wikipedia, get state, click, go back, get state). All numbers are real measurements via JSON-RPC stdio transport -- no estimates.
 
 ### Token Usage (5-Step Workflow, Wikipedia)
 
 | MCP Server | Tools | Response Tokens | vs OpenBrowser |
 |------------|------:|----------------:|---------------:|
-| **Playwright MCP** (Microsoft) | 22 | 249,077 | 610x more |
-| **Chrome DevTools MCP** | 35+ | ~300,000 (est.) | ~735x more |
-| **OpenBrowser MCP** | 11 | **408** | baseline |
+| **Playwright MCP** (Microsoft) | 22 | 248,016 | 877x more |
+| **Chrome DevTools MCP** (Google) | 26 | 134,802 | 476x more |
+| **OpenBrowser MCP** | 11 | **283** | baseline |
 
 ### Cost per Workflow
 
-| Model | Playwright MCP | OpenBrowser MCP | Savings |
-|-------|---------------:|----------------:|--------:|
-| Claude Sonnet ($3/M) | $0.747 | $0.001 | 99.9% |
-| Claude Opus ($15/M) | $3.736 | $0.006 | 99.8% |
-| GPT-4o ($2.50/M) | $0.623 | $0.001 | 99.8% |
+| Model | Playwright MCP | Chrome DevTools MCP | OpenBrowser MCP |
+|-------|---------------:|--------------------:|----------------:|
+| Claude Sonnet ($3/M) | $0.744 | $0.404 | **$0.001** |
+| Claude Opus ($15/M) | $3.720 | $2.022 | **$0.004** |
+| GPT-4o ($2.50/M) | $0.620 | $0.337 | **$0.001** |
 
-### Per-Operation Comparison (Wikipedia, 327 Elements)
+### Per-Operation Comparison (Wikipedia)
 
-| Operation | Playwright MCP | OpenBrowser MCP | Ratio |
-|-----------|---------------:|----------------:|------:|
-| Navigate | ~123,400 tokens | ~68 tokens | 1,815x |
-| Get page state | ~123,370 tokens | ~44 tokens | 2,804x |
-| Click element | ~1,027 tokens | ~23 tokens | 45x |
+| Operation | Playwright MCP | Chrome DevTools MCP | OpenBrowser MCP |
+|-----------|---------------:|--------------------:|----------------:|
+| Navigate | ~124,000 tokens | ~60 tokens | ~34 tokens |
+| Get page state | ~124,000 tokens | ~135,000 tokens | ~105 tokens |
+| Click element | ~85 tokens | ~55 tokens | ~20 tokens |
 
-**Why?** Playwright returns the full accessibility snapshot (~120K tokens) with every action. OpenBrowser returns minimal confirmations and lets the agent request only the detail level it needs.
+**Why?** Compare what each server returns for the same navigate operation:
+
+```
+Playwright MCP browser_navigate:
+  -> Full a11y snapshot with every navigation (~496K chars on Wikipedia):
+     "- generic [ref=e2]:
+        - paragraph [ref=e3]:
+          - text: 'Customer name:'
+          - textbox 'Customer name:' [ref=e5]
+        ... (entire page tree)"
+
+Chrome DevTools MCP navigate_page:
+  -> URL confirmation only (~136 chars):
+     "Successfully navigated to https://httpbin.org/forms/post.
+      ## Pages
+      1: https://httpbin.org/forms/post [selected]"
+
+OpenBrowser MCP browser_navigate:
+  -> URL confirmation only (~105 chars):
+     "Navigated to: https://httpbin.org/forms/post"
+```
+
+OpenBrowser returns minimal confirmations. The agent decides when it needs more: `compact=false` adds the element list (~51K chars), `browser_get_text` returns full page markdown (~100K chars), `search` returns only matching lines. Each detail level is opt-in.
 
 [Full comparison with methodology](https://docs.openbrowser.me/comparison)
 
