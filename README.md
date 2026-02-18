@@ -19,6 +19,26 @@ https://github.com/user-attachments/assets/632128f6-3d09-497f-9e7d-e29b9cb65e0f
 
 OpenBrowser is a framework for intelligent browser automation. It combines direct CDP communication with LangGraph orchestration to create AI agents that can navigate, interact with, and extract information from web pages autonomously.
 
+## Table of Contents
+
+- [Documentation](#documentation)
+- [Key Features](#key-features)
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [Configuration](#configuration)
+- [Supported LLM Providers](#supported-llm-providers)
+- [Claude Code Plugin](#claude-code-plugin)
+- [Codex](#codex)
+- [OpenCode](#opencode)
+- [OpenClaw](#openclaw)
+- [MCP Server](#mcp-server)
+- [CLI Usage](#cli-usage)
+- [Project Structure](#project-structure)
+- [Testing](#testing)
+- [Contributing](#contributing)
+- [License](#license)
+- [Contact](#contact)
+
 ## Documentation
 
 **Full documentation**: [https://docs.openbrowser.me](https://docs.openbrowser.me)
@@ -187,33 +207,225 @@ profile = BrowserProfile(
 | **OCI** | `ChatOCIRaw` | Oracle Cloud GenAI models |
 | **Browser-Use** | `ChatBrowserUse` | External LLM service |
 
-## MCP Server (Claude Desktop Integration)
+## Claude Code Plugin
 
-OpenBrowser includes an MCP server for integration with Claude Desktop.
+OpenBrowser is available as a Claude Code plugin with 5 built-in skills:
 
-### Running the MCP Server
+| Skill | Description |
+|-------|-------------|
+| `web-scraping` | Extract structured data, handle pagination |
+| `form-filling` | Fill forms, login flows, multi-step wizards |
+| `e2e-testing` | Test web apps by simulating user interactions |
+| `page-analysis` | Analyze page content, structure, metadata |
+| `accessibility-audit` | Audit pages for WCAG compliance |
 
-```bash
-python -m openbrowser.mcp
+See [plugin/README.md](plugin/README.md) for installation and detailed tool parameter documentation.
+
+## Codex
+
+OpenBrowser works with OpenAI Codex via native skill discovery.
+
+### Quick Install
+
+Tell Codex:
+
+```
+Fetch and follow instructions from https://raw.githubusercontent.com/billy-enrizky/openbrowser-ai/refs/heads/main/.codex/INSTALL.md
 ```
 
-### Claude Desktop Configuration
+### Manual Install
 
-Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_desktop_config.json`):
+```bash
+# Clone the repository
+git clone https://github.com/billy-enrizky/openbrowser-ai.git ~/.codex/openbrowser
+
+# Symlink skills for native discovery
+mkdir -p ~/.agents/skills
+ln -s ~/.codex/openbrowser/plugin/skills ~/.agents/skills/openbrowser
+
+# Restart Codex
+```
+
+Then configure the MCP server in your project (see [MCP Server](#mcp-server) below).
+
+Detailed docs: [.codex/INSTALL.md](.codex/INSTALL.md)
+
+## OpenCode
+
+OpenBrowser works with [OpenCode.ai](https://opencode.ai) via plugin and skill symlinks.
+
+### Quick Install
+
+Tell OpenCode:
+
+```
+Fetch and follow instructions from https://raw.githubusercontent.com/billy-enrizky/openbrowser-ai/refs/heads/main/.opencode/INSTALL.md
+```
+
+### Manual Install
+
+```bash
+# Clone the repository
+git clone https://github.com/billy-enrizky/openbrowser-ai.git ~/.config/opencode/openbrowser
+
+# Create directories
+mkdir -p ~/.config/opencode/plugins ~/.config/opencode/skills
+
+# Symlink plugin and skills
+ln -s ~/.config/opencode/openbrowser/.opencode/plugins/openbrowser.js ~/.config/opencode/plugins/openbrowser.js
+ln -s ~/.config/opencode/openbrowser/plugin/skills ~/.config/opencode/skills/openbrowser
+
+# Restart OpenCode
+```
+
+Then configure the MCP server in your project (see [MCP Server](#mcp-server) below).
+
+Detailed docs: [.opencode/INSTALL.md](.opencode/INSTALL.md)
+
+## OpenClaw
+
+[OpenClaw](https://openclaw.ai) does not natively support MCP servers, but the community
+[openclaw-mcp-adapter](https://github.com/androidStern-personal/openclaw-mcp-adapter) plugin
+bridges MCP servers to OpenClaw agents.
+
+1. Install the MCP adapter plugin (see its README for setup).
+
+2. Add OpenBrowser as an MCP server in `~/.openclaw/openclaw.json`:
+
+```json
+{
+  "plugins": {
+    "entries": {
+      "mcp-adapter": {
+        "enabled": true,
+        "config": {
+          "servers": [
+            {
+              "name": "openbrowser",
+              "transport": "stdio",
+              "command": "uvx",
+              "args": ["openbrowser-ai[mcp]", "--mcp"]
+            }
+          ]
+        }
+      }
+    }
+  }
+}
+```
+
+All 18 browser tools will be registered as native OpenClaw agent tools.
+
+For OpenClaw plugin documentation, see [docs.openclaw.ai/tools/plugin](https://docs.openclaw.ai/tools/plugin).
+
+## MCP Server
+
+OpenBrowser includes an MCP (Model Context Protocol) server that exposes browser automation as tools for AI assistants like Claude. No external LLM API keys required -- the MCP client (Claude) provides the intelligence.
+
+### Quick Setup
+
+**Claude Code** -- add to your project's `.mcp.json`:
 
 ```json
 {
   "mcpServers": {
     "openbrowser": {
       "command": "uvx",
-      "args": ["openbrowser-ai", "mcp"],
+      "args": ["openbrowser-ai[mcp]", "--mcp"]
+    }
+  }
+}
+```
+
+**Claude Desktop** -- add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "openbrowser": {
+      "command": "uvx",
+      "args": ["openbrowser-ai[mcp]", "--mcp"],
       "env": {
-        "GOOGLE_API_KEY": "..."
+        "OPENBROWSER_HEADLESS": "true"
       }
     }
   }
 }
 ```
+
+**Run directly:**
+
+```bash
+uvx openbrowser-ai[mcp] --mcp
+```
+
+### Tools (18)
+
+#### Navigation
+
+| Tool | Description |
+|------|-------------|
+| `browser_navigate` | Navigate to a URL, optionally in a new tab |
+| `browser_go_back` | Go back to the previous page |
+| `browser_scroll` | Scroll the page up or down |
+
+#### Interaction
+
+| Tool | Description |
+|------|-------------|
+| `browser_click` | Click an element by its index |
+| `browser_type` | Type text into an input field |
+
+#### Content Extraction
+
+| Tool | Description |
+|------|-------------|
+| `browser_get_state` | Get page metadata and interactive elements (compact or full) |
+| `browser_get_text` | Get page content as clean markdown |
+| `browser_grep` | Search page text with regex or string patterns |
+
+#### DOM Inspection
+
+| Tool | Description |
+|------|-------------|
+| `browser_search_elements` | Search elements by text, tag, id, class, or attribute |
+| `browser_find_and_scroll` | Find text on page and scroll to it |
+| `browser_get_accessibility_tree` | Get page a11y tree (tree or flat format, depth limit) |
+| `browser_execute_js` | Execute JavaScript in page context (await/fire-and-forget, by-value/by-reference) |
+
+#### Tab Management
+
+| Tool | Description |
+|------|-------------|
+| `browser_list_tabs` | List all open tabs |
+| `browser_switch_tab` | Switch to a tab by ID |
+| `browser_close_tab` | Close a tab by ID |
+
+#### Session Management
+
+| Tool | Description |
+|------|-------------|
+| `browser_list_sessions` | List active browser sessions |
+| `browser_close_session` | Close a specific session |
+| `browser_close_all` | Close all browser sessions |
+
+### MCP Resources
+
+| URI | Type | Description |
+|-----|------|-------------|
+| `browser://current-page/content` | text/markdown | Current page as markdown |
+| `browser://current-page/state` | application/json | Interactive elements and metadata |
+| `browser://current-page/accessibility` | application/json | Accessibility tree |
+| `browser://sessions/{id}/content` | text/markdown | Specific session page content |
+| `browser://sessions/{id}/state` | application/json | Specific session state |
+| `browser://sessions/{id}/accessibility` | application/json | Specific session a11y tree |
+
+### Configuration
+
+| Environment Variable | Description | Default |
+|---------------------|-------------|---------|
+| `OPENBROWSER_HEADLESS` | Run browser without GUI | `false` |
+| `OPENBROWSER_ALLOWED_DOMAINS` | Comma-separated domain whitelist | (none) |
 
 ## CLI Usage
 
@@ -232,31 +444,29 @@ uvx openbrowser mcp
 
 ```
 openbrowser-ai/
+├── .claude-plugin/            # Claude Code marketplace config
+├── .codex/                    # Codex integration
+│   └── INSTALL.md
+├── .opencode/                 # OpenCode integration
+│   ├── INSTALL.md
+│   └── plugins/openbrowser.js
+├── plugin/                    # Plugin package (skills + MCP config)
+│   ├── .claude-plugin/
+│   ├── .mcp.json
+│   └── skills/                # 5 browser automation skills
 ├── src/openbrowser/
-│   ├── __init__.py          # Main exports
-│   ├── cli.py                # CLI commands
-│   ├── config.py             # Configuration
-│   ├── actor/                # Element interaction
-│   ├── agent/                # LangGraph agent
-│   │   ├── graph.py          # Agent workflow
-│   │   ├── service.py        # Agent class
-│   │   └── views.py          # Data models
-│   ├── browser/              # CDP browser control
-│   │   ├── session.py        # BrowserSession
-│   │   └── profile.py        # BrowserProfile
-│   ├── code_use/             # Code agent
-│   ├── dom/                  # DOM extraction
-│   ├── llm/                  # LLM providers
-│   │   ├── openai/
-│   │   ├── anthropic/
-│   │   ├── google/
-│   │   ├── groq/
-│   │   ├── aws/
-│   │   ├── azure/
-│   │   └── ...
-│   ├── mcp/                  # MCP server
-│   └── tools/                # Action registry
-└── tests/                    # Test suite
+│   ├── __init__.py            # Main exports
+│   ├── cli.py                 # CLI commands
+│   ├── config.py              # Configuration
+│   ├── actor/                 # Element interaction
+│   ├── agent/                 # LangGraph agent
+│   ├── browser/               # CDP browser control
+│   ├── code_use/              # Code agent
+│   ├── dom/                   # DOM extraction
+│   ├── llm/                   # LLM providers
+│   ├── mcp/                   # MCP server
+│   └── tools/                 # Action registry
+└── tests/                     # Test suite
 ```
 
 ## Testing
