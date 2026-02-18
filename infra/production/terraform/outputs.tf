@@ -62,6 +62,21 @@ output "cognito_logout_urls" {
   value       = local.cognito_logout_urls
 }
 
+output "cognito_primary_callback_url" {
+  description = "Primary callback URL for frontend builds"
+  value       = local.cognito_callback_urls[0]
+}
+
+output "cognito_primary_logout_url" {
+  description = "Primary logout URL for frontend builds"
+  value       = local.cognito_logout_urls[0]
+}
+
+output "cognito_oauth_scopes_string" {
+  description = "Cognito OAuth scopes as a space-delimited string"
+  value       = join(" ", var.cognito_oauth_scopes)
+}
+
 output "dynamodb_table_name" {
   description = "DynamoDB table for session/chats data"
   value       = aws_dynamodb_table.main.name
@@ -110,4 +125,3 @@ output "ssm_anthropic_api_key_name" {
   description = "SSM parameter name for Anthropic API key"
   value       = aws_ssm_parameter.anthropic_api_key.name
 }
-
