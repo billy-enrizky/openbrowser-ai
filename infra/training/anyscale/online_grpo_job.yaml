@@ -24,7 +24,7 @@ excludes:
   - data/formfactory/img/
   - "*.pyc"
 env_vars:
-  TRAIN_FILE: "data/processed/formfactory_sft.jsonl"
+  TRAIN_FILE: "data/processed/formfactory_sft_train.jsonl"
   MAX_TRAIN_SAMPLES: "25"
   NUM_EPOCHS: "1"
   SFT_CHECKPOINT_PATH: "/mnt/user_storage/openbrowser/checkpoints/sft"
