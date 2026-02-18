@@ -108,6 +108,11 @@ def load_refusion_sft(config: dict):
 
 async def evaluate():
     """Run ReFusion SFT-only evaluation with browser execution."""
+    seed = int(os.environ.get("RANDOM_SEED", "42"))
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
     llm_config = FLOW_LLM_CONFIG
     grpo_config = ONLINE_FLOW_GRPO_CONFIG
 
