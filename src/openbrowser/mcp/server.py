@@ -513,6 +513,30 @@ class OpenBrowserServer:
 				)
 			return resources
 
+		@self.server.list_resource_templates()
+		async def handle_list_resource_templates() -> list[types.ResourceTemplate]:
+			"""List resource templates for session-specific browser resources."""
+			return [
+				types.ResourceTemplate(
+					uriTemplate='browser://sessions/{session_id}/content',
+					name='Session Page Content',
+					description='Clean markdown text of a specific browser session page',
+					mimeType='text/markdown',
+				),
+				types.ResourceTemplate(
+					uriTemplate='browser://sessions/{session_id}/state',
+					name='Session Page State',
+					description='Interactive elements and metadata of a specific browser session page',
+					mimeType='application/json',
+				),
+				types.ResourceTemplate(
+					uriTemplate='browser://sessions/{session_id}/accessibility',
+					name='Session Accessibility Tree',
+					description='Accessibility tree of a specific browser session page',
+					mimeType='application/json',
+				),
+			]
+
 		@self.server.read_resource()
 		async def handle_read_resource(uri: str) -> list[ReadResourceContents]:
 			"""Read a browser resource by URI."""
@@ -535,6 +559,15 @@ class OpenBrowserServer:
 					return [ReadResourceContents(content='{"error": "No browser session active"}', mime_type='application/json')]
 				a11y_json = await self._get_accessibility_tree()
 				return [ReadResourceContents(content=a11y_json, mime_type='application/json')]
+
+			# Check for session-specific resource URIs
+			session_match = re.match(r'browser://sessions/([^/]+)/(content|state|accessibility)', uri_str)
+			if session_match:
+				session_id = session_match.group(1)
+				resource_type = session_match.group(2)
+				content = await self._read_session_resource(session_id, resource_type)
+				mime = 'text/markdown' if resource_type == 'content' else 'application/json'
+				return [ReadResourceContents(content=content, mime_type=mime)]
 
 			return [ReadResourceContents(content=f'Unknown resource: {uri_str}', mime_type='text/plain')]
 
@@ -1293,6 +1326,26 @@ class OpenBrowserServer:
 		"""Update the last activity time for a session."""
 		if session_id in self.active_sessions:
 			self.active_sessions[session_id]['last_activity'] = time.time()
+
+	async def _read_session_resource(self, session_id: str, resource_type: str) -> str:
+		"""Read a resource from a specific session by temporarily swapping the active session."""
+		if session_id not in self.active_sessions:
+			return f'Session {session_id} not found'
+		session_data = self.active_sessions[session_id]
+		session = session_data['session']
+		original = self.browser_session
+		self.browser_session = session
+		try:
+			if resource_type == 'content':
+				return await self._get_text(extract_links=True)
+			elif resource_type == 'state':
+				return await self._get_browser_state(compact=False)
+			elif resource_type == 'accessibility':
+				return await self._get_accessibility_tree()
+			else:
+				return f'Unknown resource type: {resource_type}'
+		finally:
+			self.browser_session = original
 
 	async def _list_sessions(self) -> str:
 		"""List all active browser sessions."""
