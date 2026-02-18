@@ -22,7 +22,7 @@ excludes:
   - openbrowser_agent_data/
   - "*.pyc"
 env_vars:
-  FLOW_TRAIN_FILE: "data/processed/formfactory_flow.jsonl"
+  FLOW_TRAIN_FILE: "data/processed/formfactory_flow_train.jsonl"
   MAX_TRAIN_SAMPLES: "25"
   NUM_EPOCHS: "1"
   FLOW_SFT_CHECKPOINT: "/mnt/user_storage/openbrowser/checkpoints/flow-sft/model.pt"
