@@ -207,7 +207,7 @@ uv run python benchmarks/cdp_benchmark.py
 
 **Browser does not launch**: Ensure Chrome or Chromium is installed and accessible from PATH.
 
-**MCP server not found**: Verify `uvx` is installed (`pip install uv`) and `openbrowser-ai` is available (`uvx openbrowser-ai --version`).
+**MCP server not found**: Verify `uvx` is installed (`pip install uv`) and the MCP server starts (`uvx openbrowser-ai[mcp] --mcp`).
 
 **Session timeout**: Browser sessions auto-close after 10 minutes of inactivity. Use any tool to keep the session alive.
 
