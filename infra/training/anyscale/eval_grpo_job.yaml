@@ -24,7 +24,7 @@ excludes:
   - data/formfactory/img/
   - "*.pyc"
 env_vars:
-  TRAIN_FILE: "data/processed/formfactory_sft.jsonl"
+  VAL_FILE: "data/processed/formfactory_sft_val.jsonl"
   MAX_EVAL_SAMPLES: "25"
   SFT_CHECKPOINT_PATH: "/mnt/user_storage/openbrowser/checkpoints/online-grpo"
   EVAL_LABEL: "GRPO"
