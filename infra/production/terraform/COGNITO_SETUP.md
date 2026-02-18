@@ -8,10 +8,18 @@ That means callback/logout URLs are required.
 If you do not set overrides, Terraform configures:
 - Callback URLs:
   - `https://<frontend-domain>/auth/callback`
+  - `https://<frontend-domain>/auth/callback/`
   - `http://localhost:3000/auth/callback`
+  - `http://localhost:3000/auth/callback/`
 - Logout URLs:
   - `https://<frontend-domain>/login`
+  - `https://<frontend-domain>/login/`
   - `http://localhost:3000/login`
+  - `http://localhost:3000/login/`
+
+Both with and without trailing slash are registered because Next.js is
+configured with `trailingSlash: true`. The non-trailing-slash variant is
+listed first and used as the primary `redirect_uri` in frontend builds.
 
 `<frontend-domain>` is:
 - `frontend_domain_name` (if set), or
