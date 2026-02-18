@@ -80,7 +80,6 @@ resource "aws_apigatewayv2_authorizer" "jwt" {
 
   identity_sources = [
     "$request.header.Authorization",
-    "$request.querystring.token",
   ]
 
   jwt_configuration {
