@@ -52,9 +52,7 @@ resource "aws_iam_role_policy_attachment" "backend_dynamodb" {
   policy_arn = aws_iam_policy.backend_dynamodb.arn
 }
 
-# Secrets Manager read (for LLM API keys) - always enabled since a secret is
-# always present (auto-created when secrets_manager_secret_name is empty,
-# externally provided otherwise).
+# Secrets Manager read (for LLM API keys) - scoped to the specific secret ARN
 data "aws_iam_policy_document" "backend_secrets" {
   count = 1
 
@@ -64,7 +62,7 @@ data "aws_iam_policy_document" "backend_secrets" {
     actions = [
       "secretsmanager:GetSecretValue"
     ]
-    resources = ["*"]
+    resources = length(aws_secretsmanager_secret.backend_keys) > 0 ? [aws_secretsmanager_secret.backend_keys[0].arn] : []
     condition {
       test     = "StringEquals"
       variable = "secretsmanager:VersionStage"
@@ -85,6 +83,33 @@ resource "aws_iam_role_policy_attachment" "backend_secrets" {
 
   role       = aws_iam_role.backend.name
   policy_arn = aws_iam_policy.backend_secrets[0].arn
+}
+
+# SSM Parameter Store read (for LLM API keys encrypted with CMK)
+data "aws_iam_policy_document" "backend_ssm_keys" {
+  statement {
+    sid    = "SSMGetAPIKeys"
+    effect = "Allow"
+    actions = [
+      "ssm:GetParameter",
+      "ssm:GetParameters",
+    ]
+    resources = [
+      aws_ssm_parameter.google_api_key.arn,
+      aws_ssm_parameter.openai_api_key.arn,
+      aws_ssm_parameter.anthropic_api_key.arn,
+    ]
+  }
+}
+
+resource "aws_iam_policy" "backend_ssm_keys" {
+  name   = "${var.project_name}-backend-ssm-keys"
+  policy = data.aws_iam_policy_document.backend_ssm_keys.json
+}
+
+resource "aws_iam_role_policy_attachment" "backend_ssm_keys" {
+  role       = aws_iam_role.backend.name
+  policy_arn = aws_iam_policy.backend_ssm_keys.arn
 }
 
 resource "aws_iam_instance_profile" "backend" {

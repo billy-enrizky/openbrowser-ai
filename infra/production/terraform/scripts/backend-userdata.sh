@@ -17,13 +17,43 @@ cat > /opt/backend.env << 'ENVFILE'
 ${backend_env}
 ENVFILE
 
-# If Secrets Manager secret is set, fetch and append (expect JSON: {"KEY":"value",...})
+# Fetch LLM API keys from SSM Parameter Store (encrypted with CMK)
+fetch_ssm_key() {
+  local param_name="$1"
+  local env_var="$2"
+  local val
+  val=$(aws ssm get-parameter \
+    --name "$param_name" \
+    --with-decryption \
+    --region "${aws_region}" \
+    --query "Parameter.Value" \
+    --output text 2>/dev/null || echo "")
+  if [ -n "$val" ] && [ "$val" != "PLACEHOLDER" ]; then
+    echo "$${env_var}=$${val}" >> /opt/backend.env
+    echo "Loaded $env_var from SSM"
+  else
+    echo "Skipping $env_var (not set or placeholder)"
+  fi
+}
+
+fetch_ssm_key "${ssm_google_key}"    "GOOGLE_API_KEY"
+fetch_ssm_key "${ssm_openai_key}"    "OPENAI_API_KEY"
+fetch_ssm_key "${ssm_anthropic_key}" "ANTHROPIC_API_KEY"
+
+# Fallback: if Secrets Manager secret is set, fetch and append any missing keys
 if [ -n "${secrets_secret_id}" ]; then
-  aws secretsmanager get-secret-value \
+  echo "Checking Secrets Manager for additional keys..."
+  SM_JSON=$(aws secretsmanager get-secret-value \
     --secret-id "${secrets_secret_id}" \
-    --query SecretString --output text \
-  | jq -r 'to_entries | map("\(.key)=\(.value)") | .[]' >> /opt/backend.env
+    --query SecretString --output text 2>/dev/null || echo "{}")
+  if [ "$SM_JSON" != "{}" ]; then
+    echo "$SM_JSON" | jq -r 'to_entries[] | select(.value != "replace-me" and .value != "PLACEHOLDER" and .value != "") | "\(.key)=\(.value)"' >> /opt/backend.env
+    echo "Loaded additional keys from Secrets Manager"
+  fi
 fi
+
+# Secure the env file
+chmod 600 /opt/backend.env
 
 # Pull and run backend container (Playwright needs 2GB shm and relaxed seccomp)
 docker pull ${backend_image}
