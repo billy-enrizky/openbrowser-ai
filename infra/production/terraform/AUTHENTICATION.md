@@ -18,8 +18,8 @@ cors_origins = [
 ]
 
 # Optional overrides (if omitted, Terraform auto-generates these)
-# cognito_callback_urls = ["https://app.example.com/auth/callback/"]
-# cognito_logout_urls   = ["https://app.example.com/login/"]
+# cognito_callback_urls = ["https://app.example.com/auth/callback"]
+# cognito_logout_urls   = ["https://app.example.com/login"]
 ```
 
 Apply:
@@ -42,8 +42,8 @@ export NEXT_PUBLIC_WS_URL=$(terraform -chdir=infra/production/terraform output -
 export NEXT_PUBLIC_AUTH_ENABLED=true
 export NEXT_PUBLIC_COGNITO_DOMAIN=$(terraform -chdir=infra/production/terraform output -raw cognito_domain_url)
 export NEXT_PUBLIC_COGNITO_CLIENT_ID=$(terraform -chdir=infra/production/terraform output -raw cognito_app_client_id)
-export NEXT_PUBLIC_COGNITO_REDIRECT_URI=https://app.example.com/auth/callback/
-export NEXT_PUBLIC_COGNITO_LOGOUT_URI=https://app.example.com/login/
+export NEXT_PUBLIC_COGNITO_REDIRECT_URI=https://app.example.com/auth/callback
+export NEXT_PUBLIC_COGNITO_LOGOUT_URI=https://app.example.com/login
 export NEXT_PUBLIC_COGNITO_SCOPES="openid email profile"
 ```
 
@@ -79,7 +79,7 @@ If `enable_api_auth=true`, API Gateway also validates it (header or query token)
 
 1. Open `https://app.example.com/login`.
 2. Sign in via Cognito Hosted UI.
-3. Confirm redirect to `/auth/callback/` then `/`.
+3. Confirm redirect to `/auth/callback` then `/`.
 4. Verify backend requests return `200`:
    - `GET /api/v1/models`
 5. Verify WebSocket connects and task starts without `401/403`.
