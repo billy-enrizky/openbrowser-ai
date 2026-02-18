@@ -739,8 +739,21 @@ class OpenBrowserServer:
 		profile = BrowserProfile(**profile_data)
 
 		# Create browser session
-		self.browser_session = BrowserSession(browser_profile=profile)
-		await self.browser_session.start()
+		session = BrowserSession(browser_profile=profile)
+		try:
+			await session.start()
+		except Exception as e:
+			logger.error(f'Failed to start browser session: {e}')
+			# Clean up the failed session to avoid zombie state
+			try:
+				from openbrowser.browser.events import BrowserStopEvent
+				event = session.event_bus.dispatch(BrowserStopEvent())
+				await event
+			except Exception:
+				pass
+			raise
+
+		self.browser_session = session
 
 		# Track the session for management
 		self._track_session(self.browser_session)
@@ -1457,7 +1470,7 @@ class OpenBrowserServer:
 
 	async def _close_all_sessions(self) -> str:
 		"""Close all active browser sessions."""
-		if not self.active_sessions:
+		if not self.active_sessions and not self.browser_session:
 			return 'No active sessions to close'
 
 		closed_count = 0
