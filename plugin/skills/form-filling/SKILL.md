@@ -30,12 +30,12 @@ browser_get_state(compact=false)
 
 This returns each element with an index number, tag type, and any label or placeholder text.
 
-For complex forms, use `browser_search_elements` to find specific fields:
+For complex forms, use `browser_get_state` with filter params to find specific fields:
 
 ```
-browser_search_elements(query="input", by="tag")
-browser_search_elements(query="email", by="text")
-browser_search_elements(query="password", by="attribute")
+browser_get_state(filter_by="tag", filter_query="input")
+browser_get_state(filter_by="text", filter_query="email")
+browser_get_state(filter_by="attribute", filter_query="password")
 ```
 
 ### Step 3 -- Fill text inputs
@@ -61,7 +61,7 @@ For standard HTML `<select>` elements, use `browser_click` to open the dropdown,
 
 ```
 browser_click(index=<select_index>)
-browser_search_elements(query="Option Text", by="text")
+browser_get_state(filter_by="text", filter_query="Option Text")
 browser_click(index=<option_index>)
 ```
 
@@ -90,7 +90,7 @@ browser_execute_js(expression="document.querySelector('input[name=\"agree\"]').c
 Find and click the submit button:
 
 ```
-browser_search_elements(query="Submit", by="text")
+browser_get_state(filter_by="text", filter_query="Submit")
 browser_click(index=<submit_button_index>)
 ```
 
@@ -111,8 +111,8 @@ browser_get_state(compact=true)
 Check for success or error messages:
 
 ```
-browser_grep(pattern="success|thank you|welcome", case_insensitive=true)
-browser_grep(pattern="error|invalid|failed", case_insensitive=true)
+browser_get_text(search="success|thank you|welcome", case_insensitive=true)
+browser_get_text(search="error|invalid|failed", case_insensitive=true)
 ```
 
 For redirects after login, verify the URL changed:
@@ -128,7 +128,7 @@ For form wizards with multiple pages:
 1. Fill fields on the current step (Steps 3-5).
 2. Click "Next" or "Continue":
    ```
-   browser_search_elements(query="Next", by="text")
+   browser_get_state(filter_by="text", filter_query="Next")
    browser_click(index=<next_button_index>)
    ```
 3. Wait for the next step to load, then call `browser_get_state(compact=false)` again to discover new fields.
@@ -139,7 +139,7 @@ For form wizards with multiple pages:
 Close the browser session when done:
 
 ```
-browser_close_all()
+browser_session(action="close_all")
 ```
 
 ## Tips
@@ -147,5 +147,5 @@ browser_close_all()
 - Always use `browser_get_state(compact=false)` to discover fields before typing; do not guess element indices.
 - For sensitive data (passwords, tokens), confirm with the user before entering values.
 - Check for CAPTCHA or bot detection; notify the user if manual intervention is needed.
-- For forms with client-side validation, use `browser_grep` to check for validation error messages after each field.
+- For forms with client-side validation, use `browser_get_text` with `search` to check for validation error messages after each field.
 - Use `browser_execute_js` to bypass tricky custom components that do not respond to standard click/type interactions.
