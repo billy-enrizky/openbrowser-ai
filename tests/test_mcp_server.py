@@ -22,6 +22,7 @@ Claude Desktop, allowing AI assistants to control browser sessions.
 import asyncio
 import json
 import sys
+import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -58,6 +59,12 @@ class DummyServer:
 
         return deco
 
+    def list_resource_templates(self):
+        def deco(f):
+            return f
+
+        return deco
+
     def list_prompts(self):
         def deco(f):
             return f
@@ -85,6 +92,10 @@ class DummyTypes:
             pass
 
     class Resource:
+        def __init__(self, **kwargs):
+            pass
+
+    class ResourceTemplate:
         def __init__(self, **kwargs):
             pass
 
@@ -1739,3 +1750,80 @@ class TestResourceNotifications:
 
         # Should not raise
         asyncio.run(mcp_server._send_resource_notifications())
+
+
+# ===========================================================================
+# Multi-session resource template tests
+# ===========================================================================
+
+
+class TestMultiSessionResourceTemplates:
+    """Tests for multi-session resource templates."""
+
+    def test_read_session_content_resource(self, mcp_server):
+        """Reading session content returns that session's page text."""
+        mock_session = MagicMock()
+        mock_session.id = "sess-123"
+        mcp_server.active_sessions["sess-123"] = {
+            "session": mock_session,
+            "created_at": time.time(),
+            "last_activity": time.time(),
+        }
+
+        with patch.object(mcp_server_module, "extract_clean_markdown", new_callable=AsyncMock) as mock_extract:
+            mock_extract.return_value = ("Session content", {})
+            result = asyncio.run(mcp_server._read_session_resource("sess-123", "content"))
+
+        assert "Session content" in result
+
+    def test_read_session_state_resource(self, mcp_server):
+        """Reading session state returns that session's state JSON."""
+        mock_session = MagicMock()
+        mock_session.id = "sess-123"
+        mock_session.get_browser_state_summary = AsyncMock(
+            return_value=_make_mock_browser_state(selector_map={})
+        )
+        mcp_server.active_sessions["sess-123"] = {
+            "session": mock_session,
+            "created_at": time.time(),
+            "last_activity": time.time(),
+        }
+
+        result = asyncio.run(mcp_server._read_session_resource("sess-123", "state"))
+        data = json.loads(result)
+        assert "url" in data
+
+    def test_read_session_resource_unknown_session(self, mcp_server):
+        """Returns error for unknown session ID."""
+        result = asyncio.run(mcp_server._read_session_resource("nonexistent", "content"))
+        assert "not found" in result.lower()
+
+    def test_read_session_resource_unknown_type(self, mcp_server):
+        """Returns error for unknown resource type."""
+        mock_session = MagicMock()
+        mcp_server.active_sessions["sess-123"] = {
+            "session": mock_session,
+            "created_at": time.time(),
+            "last_activity": time.time(),
+        }
+        result = asyncio.run(mcp_server._read_session_resource("sess-123", "unknown"))
+        assert "unknown" in result.lower()
+
+    def test_read_session_resource_restores_original_session(self, mcp_server):
+        """Reading session resource restores the original browser_session."""
+        original_session = MagicMock()
+        mcp_server.browser_session = original_session
+
+        mock_session = MagicMock()
+        mock_session.id = "sess-456"
+        mcp_server.active_sessions["sess-456"] = {
+            "session": mock_session,
+            "created_at": time.time(),
+            "last_activity": time.time(),
+        }
+
+        with patch.object(mcp_server_module, "extract_clean_markdown", new_callable=AsyncMock) as mock_extract:
+            mock_extract.return_value = ("content", {})
+            asyncio.run(mcp_server._read_session_resource("sess-456", "content"))
+
+        assert mcp_server.browser_session is original_session
