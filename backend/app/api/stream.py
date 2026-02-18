@@ -194,7 +194,53 @@ async def _run_agent(session) -> None:
 
 
 # ---------------------------------------------------------------------------
-# GET /api/v1/tasks/{task_id}/stream  (SSE)
+# GET /api/v1/tasks/{task_id}/events  (polling)
+# ---------------------------------------------------------------------------
+
+@router.get("/tasks/{task_id}/events")
+async def poll_task_events(
+    task_id: str,
+    since: int = Query(default=0),
+    _user: dict = Depends(get_current_user),
+):
+    """Return new events for a task since the given event ID.
+
+    This is the polling alternative to the SSE stream endpoint.
+    API Gateway HTTP API has a 30s integration timeout which kills
+    long-lived SSE connections, so the frontend polls this endpoint
+    every ~1.5 seconds instead.
+
+    Response::
+
+        {
+            "events": [
+                {"id": 1, "type": "task_started", "data": {...}},
+                {"id": 2, "type": "log", "data": {...}},
+                ...
+            ],
+            "complete": false
+        }
+    """
+    if not event_buffer.has_task(task_id):
+        from fastapi.responses import JSONResponse
+        return JSONResponse(
+            status_code=404,
+            content={"detail": f"No active task {task_id}"},
+        )
+
+    events, complete = event_buffer.get_events_since(task_id, since)
+
+    return {
+        "events": [
+            {"id": e.id, "type": e.event_type, "data": e.data}
+            for e in events
+        ],
+        "complete": complete,
+    }
+
+
+# ---------------------------------------------------------------------------
+# GET /api/v1/tasks/{task_id}/stream  (SSE -- kept for local dev)
 # ---------------------------------------------------------------------------
 
 @router.get("/tasks/{task_id}/stream")
