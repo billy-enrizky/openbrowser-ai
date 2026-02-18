@@ -90,7 +90,7 @@ Add to your project's `.mcp.json`:
 |------|-------------|
 | `browser_navigate` | Navigate to a URL, optionally in a new tab |
 | `browser_go_back` | Go back to the previous page |
-| `browser_scroll` | Scroll the page up or down |
+| `browser_scroll` | Scroll the page. Use `target_text` to find text and scroll to it |
 
 ### Interaction
 
@@ -103,34 +103,17 @@ Add to your project's `.mcp.json`:
 
 | Tool | Description |
 |------|-------------|
-| `browser_get_state` | Get page metadata and interactive elements (compact or full) |
-| `browser_get_text` | Get page content as clean markdown |
-| `browser_grep` | Search page text with regex or string patterns |
-
-### DOM Inspection
-
-| Tool | Description |
-|------|-------------|
-| `browser_search_elements` | Search elements by text, tag, id, class, or attribute |
-| `browser_find_and_scroll` | Find text on page and scroll to it |
+| `browser_get_state` | Get page metadata and interactive elements. Use `filter_by`/`filter_query` to search elements |
+| `browser_get_text` | Get page content as markdown. Use `search` param to grep with regex |
 | `browser_get_accessibility_tree` | Get the page accessibility tree |
 | `browser_execute_js` | Execute JavaScript in the page context |
 
-### Tab Management
+### Tab and Session Management
 
 | Tool | Description |
 |------|-------------|
-| `browser_list_tabs` | List all open tabs |
-| `browser_switch_tab` | Switch to a tab by ID |
-| `browser_close_tab` | Close a tab by ID |
-
-### Session Management
-
-| Tool | Description |
-|------|-------------|
-| `browser_list_sessions` | List active browser sessions |
-| `browser_close_session` | Close a specific session |
-| `browser_close_all` | Close all browser sessions |
+| `browser_tab` | Manage tabs: `action=list` / `switch` / `close` |
+| `browser_session` | Manage sessions: `action=list` / `close` / `close_all` |
 
 ## Configuration
 
