@@ -168,6 +168,10 @@ def train():
         train_file,
         max_samples=DATA_CONFIG.get("max_train_samples", 0),
     )
+    # Shuffle training data to break sequential form-type blocks
+    train_raw = train_raw.shuffle(seed=seed)
+    logger.info("Shuffled training data (seed=%d)", seed)
+
     val_raw = load_sft_data(
         val_file,
         max_samples=DATA_CONFIG.get("max_eval_samples", 0),
@@ -182,9 +186,14 @@ def train():
 
     # Training args
     output_dir = "outputs/finetuning_sft"
+    max_steps = config.get("max_steps", -1)
+    if max_steps > 0:
+        logger.info("Using max_steps=%d (overrides num_epochs)", max_steps)
+
     training_args = TrainingArguments(
         output_dir=output_dir,
         num_train_epochs=config["num_epochs"],
+        max_steps=max_steps,
         per_device_train_batch_size=config["batch_size"],
         gradient_accumulation_steps=config["gradient_accumulation_steps"],
         learning_rate=config["learning_rate"],
