@@ -16,11 +16,10 @@ backend_port          = 8000
 backend_image     = ""
 backend_image_tag = "latest"
 
-# Frontend/API CORS (set this to your deployed frontend origin in production)
-cors_origins = [
-  "https://app.example.com",
-  "http://localhost:3000",
-]
+# CORS origins: additional origins beyond the auto-derived CloudFront domain.
+# The CloudFront domain and localhost:3000 are always included automatically.
+# Add any extra origins here (e.g., staging domains, custom domains).
+cors_origins = []
 
 # Frontend custom domain (optional)
 # frontend_domain_name         = "app.example.com"

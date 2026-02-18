@@ -16,7 +16,7 @@ locals {
   backend_env = [
     "AWS_REGION=${var.aws_region}",
     "DDB_TABLE=${aws_dynamodb_table.main.name}",
-    "CORS_ORIGINS=${join(",", var.cors_origins)}",
+    "CORS_ORIGINS=${join(",", local.effective_cors_origins)}",
     "VNC_ENABLED=true",
     "VNC_WIDTH=1920",
     "VNC_HEIGHT=1080",
