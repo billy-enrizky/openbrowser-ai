@@ -28,17 +28,17 @@ browser_get_state(compact=true)
 
 ### Step 2 -- Define test assertions
 
-Before interacting, establish what success looks like. Use `browser_grep` to assert that expected content is present:
+Before interacting, establish what success looks like. Use `browser_get_text` to assert that expected content is present:
 
 ```
-browser_grep(pattern="Welcome to Example App", case_insensitive=false)
+browser_get_text(search="Welcome to Example App", case_insensitive=false)
 ```
 
-Use `browser_search_elements` to assert that required UI elements exist:
+Use `browser_get_state` with filter params to assert that required UI elements exist:
 
 ```
-browser_search_elements(query="Sign In", by="text")
-browser_search_elements(query="nav", by="tag")
+browser_get_state(filter_by="text", filter_query="Sign In")
+browser_get_state(filter_by="tag", filter_query="nav")
 ```
 
 Use `browser_execute_js` for precise assertions on DOM state:
@@ -65,13 +65,13 @@ Simulate a typical user flow. For example, a login flow:
 
 3. Click the login button:
    ```
-   browser_search_elements(query="Log In", by="text")
+   browser_get_state(filter_by="text", filter_query="Log In")
    browser_click(index=<login_button_index>)
    ```
 
 4. Assert the user is now logged in:
    ```
-   browser_grep(pattern="Dashboard|Welcome back", case_insensitive=true)
+   browser_get_text(search="Dashboard|Welcome back", case_insensitive=true)
    ```
 
 ### Step 4 -- Test navigation flows
@@ -79,7 +79,7 @@ Simulate a typical user flow. For example, a login flow:
 Verify that links and navigation work correctly:
 
 ```
-browser_search_elements(query="Settings", by="text")
+browser_get_state(filter_by="text", filter_query="Settings")
 browser_click(index=<settings_link_index>)
 browser_get_state(compact=true)
 ```
@@ -109,8 +109,8 @@ browser_click(index=<submit_index>)
 Assert that validation errors appear:
 
 ```
-browser_grep(pattern="valid email|invalid|required", case_insensitive=true)
-browser_search_elements(query="error", by="class")
+browser_get_text(search="valid email|invalid|required", case_insensitive=true)
+browser_get_state(filter_by="class", filter_query="error")
 ```
 
 Assert that the page did not navigate away:
@@ -139,9 +139,9 @@ For multi-page flows (e.g., checkout), open pages in sequence and verify state a
 
 ```
 browser_navigate(url="https://staging.example.com/cart")
-browser_grep(pattern="Your Cart", case_insensitive=false)
+browser_get_text(search="Your Cart", case_insensitive=false)
 browser_click(index=<checkout_button_index>)
-browser_grep(pattern="Shipping Address", case_insensitive=false)
+browser_get_text(search="Shipping Address", case_insensitive=false)
 ```
 
 Use `browser_execute_js` to verify application state (e.g., cart contents, session data):
@@ -152,7 +152,7 @@ browser_execute_js(expression="JSON.parse(localStorage.getItem('cart'))?.items?.
 
 ### Step 8 -- Report results
 
-After running all test steps, compile results. Use `browser_get_state` and `browser_grep` to collect final state. Summarize:
+After running all test steps, compile results. Use `browser_get_state` and `browser_get_text` to collect final state. Summarize:
 
 - Which assertions passed
 - Which assertions failed (with details)
@@ -163,14 +163,14 @@ After running all test steps, compile results. Use `browser_get_state` and `brow
 Close all browser sessions after testing:
 
 ```
-browser_close_all()
+browser_session(action="close_all")
 ```
 
 ## Tips
 
 - Always verify page state after each interaction before proceeding to the next step.
-- Use `browser_grep` for content assertions and `browser_execute_js` for DOM state assertions.
+- Use `browser_get_text` with `search` for content assertions and `browser_execute_js` for DOM state assertions.
 - Test both happy paths and error paths for thorough coverage.
-- For flaky elements, use `browser_find_and_scroll` to ensure elements are in view before clicking.
-- Use `browser_list_tabs` to verify no unexpected popups or new tabs opened during testing.
+- For flaky elements, use `browser_scroll(target_text=...)` to ensure elements are in view before clicking.
+- Use `browser_tab(action="list")` to verify no unexpected popups or new tabs opened during testing.
 - Capture page content with `browser_get_text` at failure points for debugging.
