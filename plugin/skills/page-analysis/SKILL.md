@@ -46,23 +46,23 @@ browser_get_text(extract_links=true)
 
 ### Step 3 -- Search for specific content
 
-Use `browser_grep` to find specific patterns or sections on the page:
+Use `browser_get_text` with the `search` param to find specific patterns or sections on the page:
 
 ```
-browser_grep(pattern="pricing|plans|features", case_insensitive=true, context_lines=3)
+browser_get_text(search="pricing|plans|features", case_insensitive=true, context_lines=3)
 ```
 
 Search for contact information:
 
 ```
-browser_grep(pattern="[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}", case_insensitive=true)
-browser_grep(pattern="\\+?\\d[\\d\\s()-]{7,}", case_insensitive=true)
+browser_get_text(search="[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}", case_insensitive=true)
+browser_get_text(search="\\+?\\d[\\d\\s()-]{7,}", case_insensitive=true)
 ```
 
 Search for dates:
 
 ```
-browser_grep(pattern="\\d{4}-\\d{2}-\\d{2}|\\w+ \\d{1,2},? \\d{4}", case_insensitive=true)
+browser_get_text(search="\\d{4}-\\d{2}-\\d{2}|\\w+ \\d{1,2},? \\d{4}", case_insensitive=true)
 ```
 
 ### Step 4 -- Analyze interactive elements
@@ -76,9 +76,9 @@ browser_get_state(compact=false)
 Search for specific types of interactive elements:
 
 ```
-browser_search_elements(query="button", by="tag")
-browser_search_elements(query="input", by="tag")
-browser_search_elements(query="a", by="tag", max_results=50)
+browser_get_state(filter_by="tag", filter_query="button")
+browser_get_state(filter_by="tag", filter_query="input")
+browser_get_state(filter_by="tag", filter_query="a", max_results=50)
 ```
 
 ### Step 5 -- Inspect page structure with the accessibility tree
@@ -113,10 +113,10 @@ browser_execute_js(expression="(() => { const tech = []; if (window.__NEXT_DATA_
 
 ### Step 7 -- Analyze page layout sections
 
-Use `browser_find_and_scroll` to navigate to specific sections and analyze them:
+Use `browser_scroll` with `target_text` to navigate to specific sections and analyze them:
 
 ```
-browser_find_and_scroll(text="Footer")
+browser_scroll(target_text="Footer")
 browser_get_text()
 ```
 
@@ -136,8 +136,8 @@ browser_execute_js(expression="(() => { return { headings: document.querySelecto
 
 ## Tips
 
-- Start with `browser_get_text` for a quick content overview, then drill down with `browser_grep` for specifics.
+- Start with `browser_get_text` for a quick content overview, then drill down with `browser_get_text(search=...)` for specifics.
 - Use `browser_get_accessibility_tree(max_depth=3)` for a high-level structural summary without overwhelming detail.
 - Use `browser_execute_js` to extract metadata, detect technologies, and gather statistics not available through text extraction.
-- Combine `browser_grep` with regex patterns to find structured data like emails, phone numbers, dates, and prices.
-- Use `browser_find_and_scroll` to navigate long pages section by section.
+- Combine `browser_get_text` with `search` regex patterns to find structured data like emails, phone numbers, dates, and prices.
+- Use `browser_scroll(target_text=...)` to navigate long pages section by section.
