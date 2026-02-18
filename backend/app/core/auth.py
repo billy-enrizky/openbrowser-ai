@@ -248,6 +248,12 @@ async def get_current_user(request: Request) -> AuthPrincipal | None:
         ) from exc
 
 
+async def verify_token_string(token: str) -> AuthPrincipal:
+    """Verify a raw JWT string (used for SSE query-param auth)."""
+    _ensure_auth_configured()
+    return await verify_cognito_token(token)
+
+
 async def authenticate_websocket(websocket: WebSocket) -> AuthPrincipal | None:
     """Authenticate WebSocket connection via query token or Authorization header."""
     if not settings.AUTH_ENABLED:
