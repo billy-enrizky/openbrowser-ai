@@ -443,13 +443,13 @@ class TestGrep:
         assert "Connection timeout" in result
 
     def test_grep_routed_via_execute_tool(self, mcp_server):
-        """Verify browser_grep routes through _execute_tool correctly."""
+        """Verify browser_get_text with search param routes to _grep."""
         mcp_server.browser_session = MagicMock()
 
         with patch.object(mcp_server_module, "extract_clean_markdown", new_callable=AsyncMock) as mock_extract:
             mock_extract.return_value = (self.SAMPLE_PAGE, {})
             result = asyncio.run(
-                mcp_server._execute_tool("browser_grep", {"pattern": "Welcome", "context_lines": 0, "max_matches": 5})
+                mcp_server._execute_tool("browser_get_text", {"search": "Welcome", "context_lines": 0, "max_matches": 5})
             )
 
         data = json.loads(result)
@@ -663,14 +663,14 @@ class TestSearchElements:
         assert "DOM not ready" in result
 
     def test_search_routed_via_execute_tool(self, mcp_server):
-        """Verify browser_search_elements routes through _execute_tool correctly."""
+        """Verify browser_get_state with filter params routes to _search_elements."""
         mcp_server.browser_session = MagicMock()
         mcp_server.browser_session.get_browser_state_summary = AsyncMock(
             return_value=make_mock_browser_state(selector_map=self._make_selector_map())
         )
 
         result = asyncio.run(
-            mcp_server._execute_tool("browser_search_elements", {"query": "button", "by": "tag", "max_results": 10})
+            mcp_server._execute_tool("browser_get_state", {"filter_by": "tag", "filter_query": "button", "max_results": 10})
         )
         data = json.loads(result)
 
@@ -736,7 +736,7 @@ class TestFindAndScroll:
         assert "not found" in result or "not visible" in result
 
     def test_find_and_scroll_routed_via_execute_tool(self, mcp_server):
-        """Verify browser_find_and_scroll routes through _execute_tool correctly."""
+        """Verify browser_scroll with target_text routes to _find_and_scroll."""
         mock_event_bus = MagicMock()
         mock_awaitable = AsyncMock()
         mock_event_bus.dispatch = MagicMock(return_value=mock_awaitable())
@@ -744,7 +744,7 @@ class TestFindAndScroll:
         mcp_server.browser_session = MagicMock()
         mcp_server.browser_session.event_bus = mock_event_bus
 
-        result = asyncio.run(mcp_server._execute_tool("browser_find_and_scroll", {"text": "Footer"}))
+        result = asyncio.run(mcp_server._execute_tool("browser_scroll", {"target_text": "Footer"}))
 
         assert "Found and scrolled to" in result
         assert "Footer" in result
@@ -768,30 +768,30 @@ class TestToolRouting:
 
         assert result == "content"
 
-    def test_routes_browser_grep(self, mcp_server):
-        """browser_grep routes to _grep."""
+    def test_routes_browser_get_text_search(self, mcp_server):
+        """browser_get_text with search param routes to _grep."""
         mcp_server.browser_session = MagicMock()
 
         with patch.object(mcp_server_module, "extract_clean_markdown", new_callable=AsyncMock) as mock_extract:
             mock_extract.return_value = ("line one\nline two", {})
-            result = asyncio.run(mcp_server._execute_tool("browser_grep", {"pattern": "one"}))
+            result = asyncio.run(mcp_server._execute_tool("browser_get_text", {"search": "one"}))
 
         data = json.loads(result)
         assert data["pattern"] == "one"
 
-    def test_routes_browser_search_elements(self, mcp_server):
-        """browser_search_elements routes to _search_elements."""
+    def test_routes_browser_get_state_filter(self, mcp_server):
+        """browser_get_state with filter params routes to _search_elements."""
         mcp_server.browser_session = MagicMock()
         mcp_server.browser_session.get_browser_state_summary = AsyncMock(
             return_value=make_mock_browser_state(selector_map={})
         )
 
-        result = asyncio.run(mcp_server._execute_tool("browser_search_elements", {"query": "test"}))
+        result = asyncio.run(mcp_server._execute_tool("browser_get_state", {"filter_by": "text", "filter_query": "test"}))
         data = json.loads(result)
         assert data["query"] == "test"
 
-    def test_routes_browser_find_and_scroll(self, mcp_server):
-        """browser_find_and_scroll routes to _find_and_scroll."""
+    def test_routes_browser_scroll_target_text(self, mcp_server):
+        """browser_scroll with target_text routes to _find_and_scroll."""
         mock_event_bus = MagicMock()
         mock_awaitable = AsyncMock()
         mock_event_bus.dispatch = MagicMock(return_value=mock_awaitable())
@@ -799,30 +799,30 @@ class TestToolRouting:
         mcp_server.browser_session = MagicMock()
         mcp_server.browser_session.event_bus = mock_event_bus
 
-        result = asyncio.run(mcp_server._execute_tool("browser_find_and_scroll", {"text": "hello"}))
+        result = asyncio.run(mcp_server._execute_tool("browser_scroll", {"target_text": "hello"}))
         assert "Found and scrolled to" in result
 
-    def test_grep_default_arguments(self, mcp_server):
-        """browser_grep uses correct defaults for optional arguments."""
+    def test_get_text_search_default_arguments(self, mcp_server):
+        """browser_get_text with search uses correct defaults for optional arguments."""
         mcp_server.browser_session = MagicMock()
 
         with patch.object(mcp_server_module, "extract_clean_markdown", new_callable=AsyncMock) as mock_extract:
             mock_extract.return_value = ("some content", {})
-            # Only provide required 'pattern', rest should use defaults
-            result = asyncio.run(mcp_server._execute_tool("browser_grep", {"pattern": "test"}))
+            # Only provide 'search', rest should use defaults
+            result = asyncio.run(mcp_server._execute_tool("browser_get_text", {"search": "test"}))
 
         data = json.loads(result)
         assert "pattern" in data
 
-    def test_search_elements_default_arguments(self, mcp_server):
-        """browser_search_elements uses correct defaults for optional arguments."""
+    def test_get_state_filter_default_arguments(self, mcp_server):
+        """browser_get_state with filter uses correct defaults for optional arguments."""
         mcp_server.browser_session = MagicMock()
         mcp_server.browser_session.get_browser_state_summary = AsyncMock(
             return_value=make_mock_browser_state(selector_map={})
         )
 
-        # Only provide required 'query', rest should use defaults
-        result = asyncio.run(mcp_server._execute_tool("browser_search_elements", {"query": "test"}))
+        # Provide filter_by and filter_query, rest should use defaults
+        result = asyncio.run(mcp_server._execute_tool("browser_get_state", {"filter_by": "text", "filter_query": "test"}))
         data = json.loads(result)
 
         assert data["by"] == "text"
@@ -847,18 +847,19 @@ class TestToolRouting:
 class TestToolManifest:
     """Tests that the tool list is consistent and complete."""
 
-    def test_all_text_tools_listed(self, mcp_server):
-        """All text-first tools are registered in the tool list handler."""
-        # The server code registers tools in handle_list_tools. We verify
-        # the _execute_tool routing covers the new tool names.
-        text_tool_names = [
-            "browser_get_text",
-            "browser_grep",
-            "browser_search_elements",
-            "browser_find_and_scroll",
+    def test_all_consolidated_tools_routed(self, mcp_server):
+        """All 11 consolidated tools are routed in _execute_tool."""
+        # Test each consolidated tool with appropriate arguments
+        tool_cases = [
+            ("browser_get_text", {}),
+            ("browser_get_text", {"search": "test"}),  # grep mode
+            ("browser_get_state", {}),
+            ("browser_get_state", {"filter_by": "text", "filter_query": "test"}),  # search_elements mode
+            ("browser_scroll", {}),
+            ("browser_scroll", {"target_text": "test"}),  # find_and_scroll mode
         ]
 
-        for tool_name in text_tool_names:
+        for tool_name, args in tool_cases:
             mcp_server.browser_session = MagicMock()
             mock_event_bus = MagicMock()
             mock_awaitable = AsyncMock()
@@ -870,19 +871,9 @@ class TestToolManifest:
 
             with patch.object(mcp_server_module, "extract_clean_markdown", new_callable=AsyncMock) as mock_extract:
                 mock_extract.return_value = ("content", {})
-
-                if tool_name == "browser_grep":
-                    args = {"pattern": "test"}
-                elif tool_name == "browser_search_elements":
-                    args = {"query": "test"}
-                elif tool_name == "browser_find_and_scroll":
-                    args = {"text": "test"}
-                else:
-                    args = {}
-
                 result = asyncio.run(mcp_server._execute_tool(tool_name, args))
 
-            assert "Unknown tool" not in result, f"Tool {tool_name} is not routed in _execute_tool"
+            assert "Unknown tool" not in result, f"Tool {tool_name} with args {args} is not routed in _execute_tool"
 
     def test_get_state_does_not_include_screenshot_param(self, mcp_server):
         """browser_get_state no longer accepts include_screenshot, uses compact instead."""
