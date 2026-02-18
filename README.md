@@ -28,6 +28,9 @@ OpenBrowser is a framework for intelligent browser automation. It combines direc
 - [Configuration](#configuration)
 - [Supported LLM Providers](#supported-llm-providers)
 - [Claude Code Plugin](#claude-code-plugin)
+- [Codex](#codex)
+- [OpenCode](#opencode)
+- [OpenClaw](#openclaw)
 - [MCP Server](#mcp-server)
 - [CLI Usage](#cli-usage)
 - [Project Structure](#project-structure)
@@ -218,6 +221,90 @@ OpenBrowser is available as a Claude Code plugin with 5 built-in skills:
 
 See [plugin/README.md](plugin/README.md) for installation and detailed tool parameter documentation.
 
+## Codex
+
+OpenBrowser works with OpenAI Codex via native skill discovery.
+
+### Quick Install
+
+Tell Codex:
+
+```
+Fetch and follow instructions from https://raw.githubusercontent.com/billy-enrizky/openbrowser-ai/refs/heads/main/.codex/INSTALL.md
+```
+
+### Manual Install
+
+```bash
+# Clone the repository
+git clone https://github.com/billy-enrizky/openbrowser-ai.git ~/.codex/openbrowser
+
+# Symlink skills for native discovery
+mkdir -p ~/.agents/skills
+ln -s ~/.codex/openbrowser/plugin/skills ~/.agents/skills/openbrowser
+
+# Restart Codex
+```
+
+Then configure the MCP server in your project (see [MCP Server](#mcp-server) below).
+
+Detailed docs: [.codex/INSTALL.md](.codex/INSTALL.md)
+
+## OpenCode
+
+OpenBrowser works with [OpenCode.ai](https://opencode.ai) via plugin and skill symlinks.
+
+### Quick Install
+
+Tell OpenCode:
+
+```
+Fetch and follow instructions from https://raw.githubusercontent.com/billy-enrizky/openbrowser-ai/refs/heads/main/.opencode/INSTALL.md
+```
+
+### Manual Install
+
+```bash
+# Clone the repository
+git clone https://github.com/billy-enrizky/openbrowser-ai.git ~/.config/opencode/openbrowser
+
+# Create directories
+mkdir -p ~/.config/opencode/plugins ~/.config/opencode/skills
+
+# Symlink plugin and skills
+ln -s ~/.config/opencode/openbrowser/.opencode/plugins/openbrowser.js ~/.config/opencode/plugins/openbrowser.js
+ln -s ~/.config/opencode/openbrowser/plugin/skills ~/.config/opencode/skills/openbrowser
+
+# Restart OpenCode
+```
+
+Then configure the MCP server in your project (see [MCP Server](#mcp-server) below).
+
+Detailed docs: [.opencode/INSTALL.md](.opencode/INSTALL.md)
+
+## OpenClaw
+
+OpenBrowser works with [OpenClaw](https://openclaw.ai) via its plugin system.
+
+### Install via Plugin Registry
+
+```bash
+openclaw plugin install openbrowser
+```
+
+### Manual Install
+
+Clone the repository and register the plugin:
+
+```bash
+git clone https://github.com/billy-enrizky/openbrowser-ai.git
+openclaw plugin add ./openbrowser-ai/plugin
+```
+
+Then configure the MCP server in your project (see [MCP Server](#mcp-server) below).
+
+For OpenClaw plugin documentation, see [https://docs.openclaw.ai/tools/plugin](https://docs.openclaw.ai/tools/plugin).
+
 ## MCP Server
 
 OpenBrowser includes an MCP (Model Context Protocol) server that exposes browser automation as tools for AI assistants like Claude. No external LLM API keys required -- the MCP client (Claude) provides the intelligence.
@@ -344,31 +431,29 @@ uvx openbrowser mcp
 
 ```
 openbrowser-ai/
+├── .claude-plugin/            # Claude Code marketplace config
+├── .codex/                    # Codex integration
+│   └── INSTALL.md
+├── .opencode/                 # OpenCode integration
+│   ├── INSTALL.md
+│   └── plugins/openbrowser.js
+├── plugin/                    # Plugin package (skills + MCP config)
+│   ├── .claude-plugin/
+│   ├── .mcp.json
+│   └── skills/                # 5 browser automation skills
 ├── src/openbrowser/
-│   ├── __init__.py          # Main exports
-│   ├── cli.py                # CLI commands
-│   ├── config.py             # Configuration
-│   ├── actor/                # Element interaction
-│   ├── agent/                # LangGraph agent
-│   │   ├── graph.py          # Agent workflow
-│   │   ├── service.py        # Agent class
-│   │   └── views.py          # Data models
-│   ├── browser/              # CDP browser control
-│   │   ├── session.py        # BrowserSession
-│   │   └── profile.py        # BrowserProfile
-│   ├── code_use/             # Code agent
-│   ├── dom/                  # DOM extraction
-│   ├── llm/                  # LLM providers
-│   │   ├── openai/
-│   │   ├── anthropic/
-│   │   ├── google/
-│   │   ├── groq/
-│   │   ├── aws/
-│   │   ├── azure/
-│   │   └── ...
-│   ├── mcp/                  # MCP server
-│   └── tools/                # Action registry
-└── tests/                    # Test suite
+│   ├── __init__.py            # Main exports
+│   ├── cli.py                 # CLI commands
+│   ├── config.py              # Configuration
+│   ├── actor/                 # Element interaction
+│   ├── agent/                 # LangGraph agent
+│   ├── browser/               # CDP browser control
+│   ├── code_use/              # Code agent
+│   ├── dom/                   # DOM extraction
+│   ├── llm/                   # LLM providers
+│   ├── mcp/                   # MCP server
+│   └── tools/                 # Action registry
+└── tests/                     # Test suite
 ```
 
 ## Testing
