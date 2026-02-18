@@ -116,7 +116,7 @@ Compile all findings from Steps 2-9 into a structured report with:
 Close the browser session:
 
 ```
-browser_close_all()
+browser_session(action="close_all")
 ```
 
 ## WCAG Quick Reference
