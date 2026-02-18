@@ -30,144 +30,8 @@ from pydantic import AnyUrl
 
 from openbrowser.mcp import server as mcp_server_module
 
-
-# ---------------------------------------------------------------------------
-# Shared dummy MCP SDK stubs
-# ---------------------------------------------------------------------------
-
-
-class DummyServer:
-    """Minimal stub for mcp.server.Server so OpenBrowserServer can initialise."""
-
-    def __init__(self, name):
-        pass
-
-    def list_tools(self):
-        def deco(f):
-            return f
-
-        return deco
-
-    def list_resources(self):
-        def deco(f):
-            return f
-
-        return deco
-
-    def read_resource(self):
-        def deco(f):
-            return f
-
-        return deco
-
-    def subscribe_resource(self):
-        def deco(f):
-            return f
-
-        return deco
-
-    def unsubscribe_resource(self):
-        def deco(f):
-            return f
-
-        return deco
-
-    def list_resource_templates(self):
-        def deco(f):
-            return f
-
-        return deco
-
-    def list_prompts(self):
-        def deco(f):
-            return f
-
-        return deco
-
-    def call_tool(self):
-        def deco(f):
-            return f
-
-        return deco
-
-    def get_capabilities(self, **kwargs):
-        return {}
-
-    async def run(self, *args, **kwargs):
-        return None
-
-
-class DummyTypes:
-    """Minimal stub for mcp.types."""
-
-    class Tool:
-        def __init__(self, **kwargs):
-            pass
-
-    class Resource:
-        def __init__(self, **kwargs):
-            pass
-
-    class ResourceTemplate:
-        def __init__(self, **kwargs):
-            pass
-
-    class Prompt:
-        pass
-
-    class TextContent:
-        def __init__(self, type: str, text: str):
-            self.type = type
-            self.text = text
-
-    class TextResourceContents:
-        def __init__(self, **kwargs):
-            self.uri = kwargs.get("uri")
-            self.text = kwargs.get("text")
-            self.mimeType = kwargs.get("mimeType")
-
-
-@pytest.fixture()
-def mcp_server(monkeypatch):
-    """Create an OpenBrowserServer with dummy MCP SDK stubs."""
-    monkeypatch.setattr(mcp_server_module, "MCP_AVAILABLE", True)
-    monkeypatch.setattr(mcp_server_module, "Server", DummyServer)
-    monkeypatch.setattr(mcp_server_module, "types", DummyTypes)
-    return mcp_server_module.OpenBrowserServer()
-
-
-def _make_mock_element(
-    tag_name="a",
-    text="Click here",
-    attributes=None,
-    node_id=1,
-):
-    """Create a mock EnhancedDOMTreeNode-like object."""
-    elem = MagicMock()
-    elem.tag_name = tag_name
-    elem.node_name = tag_name
-    elem.attributes = attributes or {}
-    elem.get_all_children_text = MagicMock(return_value=text)
-    elem.node_id = node_id
-    return elem
-
-
-def _make_mock_browser_state(url="https://example.com", title="Example", tabs=None, selector_map=None):
-    """Create a mock BrowserStateSummary-like object."""
-    state = MagicMock()
-    state.url = url
-    state.title = title
-
-    tab = MagicMock()
-    tab.url = url
-    tab.title = title
-    state.tabs = tabs or [tab]
-
-    dom_state = MagicMock()
-    dom_state.selector_map = selector_map or {}
-    state.dom_state = dom_state
-
-    return state
+# Import shared stubs and helpers from conftest (auto-discovered by pytest)
+from conftest import make_mock_element, make_mock_browser_state
 
 
 # ===========================================================================
@@ -216,11 +80,11 @@ class TestGetBrowserState:
     def test_get_state_compact_default(self, mcp_server):
         """compact=True (default) returns only summary fields, no element list."""
         selector_map = {
-            0: _make_mock_element(tag_name="input", text="", attributes={"type": "text"}),
-            1: _make_mock_element(tag_name="a", text="Link"),
-            2: _make_mock_element(tag_name="button", text="Submit"),
+            0: make_mock_element(tag_name="input", text="", attributes={"type": "text"}),
+            1: make_mock_element(tag_name="a", text="Link"),
+            2: make_mock_element(tag_name="button", text="Submit"),
         }
-        state = _make_mock_browser_state(selector_map=selector_map)
+        state = make_mock_browser_state(selector_map=selector_map)
         mcp_server.browser_session = MagicMock()
         mcp_server.browser_session.get_browser_state_summary = AsyncMock(return_value=state)
 
@@ -235,14 +99,14 @@ class TestGetBrowserState:
     def test_get_state_full_includes_elements(self, mcp_server):
         """compact=False returns full element details."""
         selector_map = {
-            0: _make_mock_element(
+            0: make_mock_element(
                 tag_name="input",
                 text="",
                 attributes={"type": "text", "placeholder": "Search...", "id": "search-box"},
             ),
-            1: _make_mock_element(tag_name="a", text="Home", attributes={"href": "/home", "class": "nav-link"}),
+            1: make_mock_element(tag_name="a", text="Home", attributes={"href": "/home", "class": "nav-link"}),
         }
-        state = _make_mock_browser_state(selector_map=selector_map)
+        state = make_mock_browser_state(selector_map=selector_map)
         mcp_server.browser_session = MagicMock()
         mcp_server.browser_session.get_browser_state_summary = AsyncMock(return_value=state)
 
@@ -274,7 +138,7 @@ class TestGetBrowserState:
         tab2.url = "https://other.com"
         tab2.title = "Other"
 
-        state = _make_mock_browser_state(tabs=[tab1, tab2])
+        state = make_mock_browser_state(tabs=[tab1, tab2])
         mcp_server.browser_session = MagicMock()
         mcp_server.browser_session.get_browser_state_summary = AsyncMock(return_value=state)
 
@@ -287,7 +151,7 @@ class TestGetBrowserState:
 
     def test_get_state_empty_page(self, mcp_server):
         """Handles pages with zero interactive elements."""
-        state = _make_mock_browser_state(url="about:blank", title="", selector_map={})
+        state = make_mock_browser_state(url="about:blank", title="", selector_map={})
         mcp_server.browser_session = MagicMock()
         mcp_server.browser_session.get_browser_state_summary = AsyncMock(return_value=state)
 
@@ -298,7 +162,7 @@ class TestGetBrowserState:
 
     def test_get_state_routed_via_execute_tool(self, mcp_server):
         """Verify browser_get_state routes through _execute_tool correctly."""
-        state = _make_mock_browser_state(selector_map={})
+        state = make_mock_browser_state(selector_map={})
         mock_session = MagicMock()
         mock_session.get_browser_state_summary = AsyncMock(return_value=state)
         mcp_server.browser_session = mock_session
@@ -604,27 +468,27 @@ class TestSearchElements:
     def _make_selector_map(self):
         """Create a mock selector map with various elements."""
         return {
-            0: _make_mock_element(
+            0: make_mock_element(
                 tag_name="input",
                 text="",
                 attributes={"type": "text", "id": "search-input", "class": "form-control", "placeholder": "Search..."},
             ),
-            1: _make_mock_element(
+            1: make_mock_element(
                 tag_name="a",
                 text="Home Page",
                 attributes={"href": "/home", "class": "nav-link primary"},
             ),
-            2: _make_mock_element(
+            2: make_mock_element(
                 tag_name="button",
                 text="Submit Form",
                 attributes={"id": "submit-btn", "class": "btn btn-primary", "type": "submit"},
             ),
-            3: _make_mock_element(
+            3: make_mock_element(
                 tag_name="a",
                 text="About Us",
                 attributes={"href": "/about", "class": "nav-link"},
             ),
-            4: _make_mock_element(
+            4: make_mock_element(
                 tag_name="select",
                 text="Option 1 Option 2",
                 attributes={"id": "country-select", "class": "form-select"},
@@ -641,7 +505,7 @@ class TestSearchElements:
         """Finds elements by text content."""
         mcp_server.browser_session = MagicMock()
         mcp_server.browser_session.get_browser_state_summary = AsyncMock(
-            return_value=_make_mock_browser_state(selector_map=self._make_selector_map())
+            return_value=make_mock_browser_state(selector_map=self._make_selector_map())
         )
 
         result = asyncio.run(mcp_server._search_elements("Home", by="text"))
@@ -655,7 +519,7 @@ class TestSearchElements:
         """Text search is case insensitive."""
         mcp_server.browser_session = MagicMock()
         mcp_server.browser_session.get_browser_state_summary = AsyncMock(
-            return_value=_make_mock_browser_state(selector_map=self._make_selector_map())
+            return_value=make_mock_browser_state(selector_map=self._make_selector_map())
         )
 
         result = asyncio.run(mcp_server._search_elements("home page", by="text"))
@@ -667,7 +531,7 @@ class TestSearchElements:
         """Finds elements by tag name."""
         mcp_server.browser_session = MagicMock()
         mcp_server.browser_session.get_browser_state_summary = AsyncMock(
-            return_value=_make_mock_browser_state(selector_map=self._make_selector_map())
+            return_value=make_mock_browser_state(selector_map=self._make_selector_map())
         )
 
         result = asyncio.run(mcp_server._search_elements("a", by="tag"))
@@ -680,7 +544,7 @@ class TestSearchElements:
         """Finds elements by id attribute."""
         mcp_server.browser_session = MagicMock()
         mcp_server.browser_session.get_browser_state_summary = AsyncMock(
-            return_value=_make_mock_browser_state(selector_map=self._make_selector_map())
+            return_value=make_mock_browser_state(selector_map=self._make_selector_map())
         )
 
         result = asyncio.run(mcp_server._search_elements("submit", by="id"))
@@ -693,7 +557,7 @@ class TestSearchElements:
         """Finds elements by class attribute."""
         mcp_server.browser_session = MagicMock()
         mcp_server.browser_session.get_browser_state_summary = AsyncMock(
-            return_value=_make_mock_browser_state(selector_map=self._make_selector_map())
+            return_value=make_mock_browser_state(selector_map=self._make_selector_map())
         )
 
         result = asyncio.run(mcp_server._search_elements("nav-link", by="class"))
@@ -705,7 +569,7 @@ class TestSearchElements:
         """Finds elements by any attribute value."""
         mcp_server.browser_session = MagicMock()
         mcp_server.browser_session.get_browser_state_summary = AsyncMock(
-            return_value=_make_mock_browser_state(selector_map=self._make_selector_map())
+            return_value=make_mock_browser_state(selector_map=self._make_selector_map())
         )
 
         result = asyncio.run(mcp_server._search_elements("/about", by="attribute"))
@@ -718,7 +582,7 @@ class TestSearchElements:
         """Limits returned results to max_results."""
         mcp_server.browser_session = MagicMock()
         mcp_server.browser_session.get_browser_state_summary = AsyncMock(
-            return_value=_make_mock_browser_state(selector_map=self._make_selector_map())
+            return_value=make_mock_browser_state(selector_map=self._make_selector_map())
         )
 
         result = asyncio.run(mcp_server._search_elements("a", by="tag", max_results=1))
@@ -730,7 +594,7 @@ class TestSearchElements:
         """Returns empty results when no elements match."""
         mcp_server.browser_session = MagicMock()
         mcp_server.browser_session.get_browser_state_summary = AsyncMock(
-            return_value=_make_mock_browser_state(selector_map=self._make_selector_map())
+            return_value=make_mock_browser_state(selector_map=self._make_selector_map())
         )
 
         result = asyncio.run(mcp_server._search_elements("nonexistent_element_xyz", by="text"))
@@ -743,7 +607,7 @@ class TestSearchElements:
         """Handles pages with no interactive elements."""
         mcp_server.browser_session = MagicMock()
         mcp_server.browser_session.get_browser_state_summary = AsyncMock(
-            return_value=_make_mock_browser_state(selector_map={})
+            return_value=make_mock_browser_state(selector_map={})
         )
 
         result = asyncio.run(mcp_server._search_elements("test", by="text"))
@@ -755,7 +619,7 @@ class TestSearchElements:
         """Results include optional fields (id, class, placeholder, href, type) when present."""
         mcp_server.browser_session = MagicMock()
         mcp_server.browser_session.get_browser_state_summary = AsyncMock(
-            return_value=_make_mock_browser_state(selector_map=self._make_selector_map())
+            return_value=make_mock_browser_state(selector_map=self._make_selector_map())
         )
 
         result = asyncio.run(mcp_server._search_elements("search-input", by="id"))
@@ -771,11 +635,11 @@ class TestSearchElements:
     def test_search_result_omits_missing_fields(self, mcp_server):
         """Results omit optional fields that are not present on the element."""
         selector_map = {
-            0: _make_mock_element(tag_name="div", text="Plain div", attributes={}),
+            0: make_mock_element(tag_name="div", text="Plain div", attributes={}),
         }
         mcp_server.browser_session = MagicMock()
         mcp_server.browser_session.get_browser_state_summary = AsyncMock(
-            return_value=_make_mock_browser_state(selector_map=selector_map)
+            return_value=make_mock_browser_state(selector_map=selector_map)
         )
 
         result = asyncio.run(mcp_server._search_elements("Plain", by="text"))
@@ -802,7 +666,7 @@ class TestSearchElements:
         """Verify browser_search_elements routes through _execute_tool correctly."""
         mcp_server.browser_session = MagicMock()
         mcp_server.browser_session.get_browser_state_summary = AsyncMock(
-            return_value=_make_mock_browser_state(selector_map=self._make_selector_map())
+            return_value=make_mock_browser_state(selector_map=self._make_selector_map())
         )
 
         result = asyncio.run(
@@ -919,7 +783,7 @@ class TestToolRouting:
         """browser_search_elements routes to _search_elements."""
         mcp_server.browser_session = MagicMock()
         mcp_server.browser_session.get_browser_state_summary = AsyncMock(
-            return_value=_make_mock_browser_state(selector_map={})
+            return_value=make_mock_browser_state(selector_map={})
         )
 
         result = asyncio.run(mcp_server._execute_tool("browser_search_elements", {"query": "test"}))
@@ -954,7 +818,7 @@ class TestToolRouting:
         """browser_search_elements uses correct defaults for optional arguments."""
         mcp_server.browser_session = MagicMock()
         mcp_server.browser_session.get_browser_state_summary = AsyncMock(
-            return_value=_make_mock_browser_state(selector_map={})
+            return_value=make_mock_browser_state(selector_map={})
         )
 
         # Only provide required 'query', rest should use defaults
@@ -1001,7 +865,7 @@ class TestToolManifest:
             mock_event_bus.dispatch = MagicMock(return_value=mock_awaitable())
             mcp_server.browser_session.event_bus = mock_event_bus
             mcp_server.browser_session.get_browser_state_summary = AsyncMock(
-                return_value=_make_mock_browser_state(selector_map={})
+                return_value=make_mock_browser_state(selector_map={})
             )
 
             with patch.object(mcp_server_module, "extract_clean_markdown", new_callable=AsyncMock) as mock_extract:
@@ -1022,7 +886,7 @@ class TestToolManifest:
 
     def test_get_state_does_not_include_screenshot_param(self, mcp_server):
         """browser_get_state no longer accepts include_screenshot, uses compact instead."""
-        state = _make_mock_browser_state(selector_map={})
+        state = make_mock_browser_state(selector_map={})
         mcp_server.browser_session = MagicMock()
         mcp_server.browser_session.get_browser_state_summary = AsyncMock(return_value=state)
 
@@ -1722,6 +1586,122 @@ class TestExecuteJs:
 
 
 # ===========================================================================
+# close_tab about:blank auto-switch tests
+# ===========================================================================
+
+
+class TestCloseTabAboutBlankSwitch:
+    """Tests for _close_tab about:blank auto-switch behavior.
+
+    When closing a tab leaves <=1 real tab, the AboutBlankWatchdog creates
+    an about:blank keepalive tab. The two-phase settle in _close_tab should
+    detect this and switch back to the real tab.
+    """
+
+    def _make_mock_tabs(self, urls):
+        """Create mock tab objects for get_tabs()."""
+        tabs = []
+        for url in urls:
+            tab = MagicMock()
+            tab.url = url
+            tab.target_id = f"target-{url.replace('://', '-').replace('/', '-')}"
+            tabs.append(tab)
+        return tabs
+
+    def _setup_browser_mock(self, mcp_server):
+        """Set up browser session mock with fresh awaitables on each dispatch."""
+        mcp_server.browser_session = MagicMock()
+        mcp_server.browser_session.get_target_id_from_tab_id = AsyncMock(return_value="target-1")
+        mcp_server.browser_session.event_bus = MagicMock()
+        # Return a fresh coroutine on each call so it can be awaited multiple times
+        mcp_server.browser_session.event_bus.dispatch = MagicMock(
+            side_effect=lambda *args, **kwargs: AsyncMock()()
+        )
+
+    def test_close_tab_switches_away_from_about_blank(self, mcp_server):
+        """After close, if on about:blank, switches to a real tab."""
+        self._setup_browser_mock(mcp_server)
+
+        real_tabs = self._make_mock_tabs(["about:blank", "https://example.com"])
+        # Phase 1: current URL is about:blank, get_tabs returns real tab available
+        mcp_server.browser_session.get_current_page_url = AsyncMock(return_value="about:blank")
+        mcp_server.browser_session.get_tabs = AsyncMock(return_value=real_tabs)
+
+        result = asyncio.run(mcp_server._close_tab("ABCD"))
+
+        assert "example.com" in result
+        assert "about:blank" not in result.split("now on")[1]
+
+    def test_close_tab_stays_on_real_tab_no_watchdog(self, mcp_server):
+        """When no about:blank appears, stays on current real tab."""
+        self._setup_browser_mock(mcp_server)
+
+        # After close, already on a real tab
+        mcp_server.browser_session.get_current_page_url = AsyncMock(return_value="https://example.com")
+        mcp_server.browser_session.get_tabs = AsyncMock(
+            return_value=self._make_mock_tabs(["https://example.com"])
+        )
+
+        result = asyncio.run(mcp_server._close_tab("ABCD"))
+
+        assert "example.com" in result
+
+    def test_close_tab_phase2_handles_watchdog_focus_steal(self, mcp_server):
+        """Phase 2 detects watchdog focus steal after initial real tab landing."""
+        self._setup_browser_mock(mcp_server)
+
+        real_tabs = self._make_mock_tabs(["about:blank", "https://wikipedia.org"])
+
+        # Phase 1: lands on real tab
+        # Phase 2: watchdog steals focus to about:blank, then we switch back
+        call_count = 0
+
+        async def get_url_side_effect():
+            nonlocal call_count
+            call_count += 1
+            if call_count <= 1:
+                # Phase 1: on real tab
+                return "https://wikipedia.org"
+            else:
+                # Phase 2: watchdog stole focus
+                return "about:blank"
+
+        mcp_server.browser_session.get_current_page_url = AsyncMock(side_effect=get_url_side_effect)
+        mcp_server.browser_session.get_tabs = AsyncMock(return_value=real_tabs)
+
+        result = asyncio.run(mcp_server._close_tab("ABCD"))
+
+        assert "wikipedia.org" in result
+
+    def test_close_tab_no_session_returns_error(self, mcp_server):
+        """Returns error when no browser session is active."""
+        result = asyncio.run(mcp_server._close_tab("ABCD"))
+        assert "Error" in result
+        assert "No browser session active" in result
+
+    def test_switch_from_about_blank_no_real_tabs(self, mcp_server):
+        """When all tabs are about:blank, stays on about:blank."""
+        mcp_server.browser_session = MagicMock()
+        mcp_server.browser_session.get_current_page_url = AsyncMock(return_value="about:blank")
+        mcp_server.browser_session.get_tabs = AsyncMock(
+            return_value=self._make_mock_tabs(["about:blank"])
+        )
+
+        result = asyncio.run(mcp_server._switch_from_about_blank_if_needed())
+        assert result == "about:blank"
+
+    def test_switch_from_about_blank_noop_on_real_url(self, mcp_server):
+        """When already on a real tab, does nothing."""
+        mcp_server.browser_session = MagicMock()
+        mcp_server.browser_session.get_current_page_url = AsyncMock(return_value="https://example.com")
+
+        result = asyncio.run(mcp_server._switch_from_about_blank_if_needed())
+        assert result == "https://example.com"
+        # get_tabs should not be called since we're already on a real tab
+        mcp_server.browser_session.get_tabs.assert_not_called()
+
+
+# ===========================================================================
 # MCP Resource endpoint tests
 # ===========================================================================
 
@@ -1758,9 +1738,9 @@ class TestResourceEndpoints:
     def test_read_resource_state(self, mcp_server):
         """Reading browser://current-page/state returns page state JSON."""
         selector_map = {
-            0: _make_mock_element(tag_name="a", text="Link", attributes={"href": "/test"}),
+            0: make_mock_element(tag_name="a", text="Link", attributes={"href": "/test"}),
         }
-        state = _make_mock_browser_state(selector_map=selector_map)
+        state = make_mock_browser_state(selector_map=selector_map)
         mcp_server.browser_session = MagicMock()
         mcp_server.browser_session.get_browser_state_summary = AsyncMock(return_value=state)
 
@@ -1912,7 +1892,7 @@ class TestMultiSessionResourceTemplates:
         mock_session = MagicMock()
         mock_session.id = "sess-123"
         mock_session.get_browser_state_summary = AsyncMock(
-            return_value=_make_mock_browser_state(selector_map={})
+            return_value=make_mock_browser_state(selector_map={})
         )
         mcp_server.active_sessions["sess-123"] = {
             "session": mock_session,
