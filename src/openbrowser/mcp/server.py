@@ -445,6 +445,12 @@ class OpenBrowserServer:
 								'description': 'Whether to include nodes marked as ignored in the accessibility tree.',
 								'default': False,
 							},
+							'format': {
+								'type': 'string',
+								'enum': ['tree', 'flat'],
+								'description': "Output format. 'tree' (default) returns nested structure. 'flat' returns array with parent_id references.",
+								'default': 'tree',
+							},
 						},
 					},
 				),
@@ -635,6 +641,7 @@ class OpenBrowserServer:
 				return await self._get_accessibility_tree(
 					max_depth=arguments.get('max_depth', -1),
 					include_ignored=arguments.get('include_ignored', False),
+					output_format=arguments.get('format', 'tree'),
 				)
 
 			elif tool_name == 'browser_execute_js':
@@ -1074,7 +1081,7 @@ class OpenBrowserServer:
 			logger.error(f'Find and scroll failed: {e}', exc_info=True)
 			return f"Text '{text}' not found or not visible on page"
 
-	async def _get_accessibility_tree(self, max_depth: int = -1, include_ignored: bool = False) -> str:
+	async def _get_accessibility_tree(self, max_depth: int = -1, include_ignored: bool = False, output_format: str = 'tree') -> str:
 		"""Get the accessibility tree of the current page."""
 		if not self.browser_session:
 			return 'Error: No browser session active'
@@ -1115,6 +1122,26 @@ class OpenBrowserServer:
 				node_map[enhanced.ax_node_id] = node_info
 				nodes.append(node_info)
 
+			total_nodes_in_page = len(nodes)
+
+			# Build parent map for flat format
+			parent_map: dict[str, str | None] = {}
+			for node in nodes:
+				for child_id in node.get('children', []):
+					parent_map[child_id] = node['id']
+
+			def _count_tree_nodes(node_id: str, depth: int) -> int:
+				"""Count nodes in the depth-limited tree."""
+				node = node_map.get(node_id)
+				if not node:
+					return 0
+				if max_depth >= 0 and depth > max_depth:
+					return 0
+				count = 1
+				for child_id in node.get('children', []):
+					count += _count_tree_nodes(child_id, depth + 1)
+				return count
+
 			def _build_tree(node_id: str, depth: int) -> dict[str, Any] | None:
 				"""Recursively build tree structure with depth limit."""
 				node = node_map.get(node_id)
@@ -1135,6 +1162,21 @@ class OpenBrowserServer:
 						result['children'] = children
 				return result
 
+			def _collect_flat_nodes(node_id: str, depth: int) -> list[dict[str, Any]]:
+				"""Collect nodes in flat format respecting depth limit."""
+				node = node_map.get(node_id)
+				if not node:
+					return []
+				if max_depth >= 0 and depth > max_depth:
+					return []
+
+				flat_node = {k: v for k, v in node.items() if k != 'children'}
+				flat_node['parent_id'] = parent_map.get(node_id)
+				result = [flat_node]
+				for child_id in node.get('children', []):
+					result.extend(_collect_flat_nodes(child_id, depth + 1))
+				return result
+
 			# Build tree from root nodes (nodes not referenced as children)
 			all_child_ids = set()
 			for node in nodes:
@@ -1142,6 +1184,24 @@ class OpenBrowserServer:
 					all_child_ids.add(child_id)
 
 			root_nodes = [n for n in nodes if n['id'] not in all_child_ids]
+
+			# Count depth-limited nodes
+			total_nodes = 0
+			for root in root_nodes:
+				total_nodes += _count_tree_nodes(root['id'], 0)
+
+			if output_format == 'flat':
+				flat_nodes: list[dict[str, Any]] = []
+				for root in root_nodes:
+					flat_nodes.extend(_collect_flat_nodes(root['id'], 0))
+				return json.dumps(
+					{
+						'nodes': flat_nodes,
+						'total_nodes': total_nodes,
+						'total_nodes_in_page': total_nodes_in_page,
+					},
+					indent=2,
+				)
 
 			if root_nodes:
 				tree = []
@@ -1153,12 +1213,13 @@ class OpenBrowserServer:
 				return json.dumps(
 					{
 						'tree': tree if len(tree) > 1 else tree[0] if tree else {},
-						'total_nodes': len(nodes),
+						'total_nodes': total_nodes,
+						'total_nodes_in_page': total_nodes_in_page,
 					},
 					indent=2,
 				)
 			else:
-				return json.dumps({'nodes': nodes, 'total_nodes': len(nodes)}, indent=2)
+				return json.dumps({'nodes': nodes, 'total_nodes': total_nodes, 'total_nodes_in_page': total_nodes_in_page}, indent=2)
 
 		except Exception as e:
 			logger.error(f'Accessibility tree extraction failed: {e}', exc_info=True)
