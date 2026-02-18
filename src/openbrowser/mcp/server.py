@@ -1328,7 +1328,11 @@ class OpenBrowserServer:
 			self.active_sessions[session_id]['last_activity'] = time.time()
 
 	async def _read_session_resource(self, session_id: str, resource_type: str) -> str:
-		"""Read a resource from a specific session by temporarily swapping the active session."""
+		"""Read a resource from a specific session by temporarily swapping the active session.
+
+		NOTE: This session swap is safe because MCP stdio transport processes requests sequentially.
+		If switching to a concurrent transport (SSE, WebSocket), use a lock or pass the session directly.
+		"""
 		if session_id not in self.active_sessions:
 			return f'Session {session_id} not found'
 		session_data = self.active_sessions[session_id]
@@ -1458,7 +1462,7 @@ class OpenBrowserServer:
 			try:
 				await self._mcp_session.send_resource_updated(AnyUrl(uri_str))
 			except Exception:
-				pass
+				logger.debug('Failed to send resource notification for %s', uri_str, exc_info=True)
 
 	async def _start_cleanup_task(self) -> None:
 		"""Start the background cleanup task."""
