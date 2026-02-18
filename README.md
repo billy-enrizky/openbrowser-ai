@@ -19,6 +19,23 @@ https://github.com/user-attachments/assets/632128f6-3d09-497f-9e7d-e29b9cb65e0f
 
 OpenBrowser is a framework for intelligent browser automation. It combines direct CDP communication with LangGraph orchestration to create AI agents that can navigate, interact with, and extract information from web pages autonomously.
 
+## Table of Contents
+
+- [Documentation](#documentation)
+- [Key Features](#key-features)
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [Configuration](#configuration)
+- [Supported LLM Providers](#supported-llm-providers)
+- [Claude Code Plugin](#claude-code-plugin)
+- [MCP Server](#mcp-server)
+- [CLI Usage](#cli-usage)
+- [Project Structure](#project-structure)
+- [Testing](#testing)
+- [Contributing](#contributing)
+- [License](#license)
+- [Contact](#contact)
+
 ## Documentation
 
 **Full documentation**: [https://docs.openbrowser.me](https://docs.openbrowser.me)
@@ -187,6 +204,20 @@ profile = BrowserProfile(
 | **OCI** | `ChatOCIRaw` | Oracle Cloud GenAI models |
 | **Browser-Use** | `ChatBrowserUse` | External LLM service |
 
+## Claude Code Plugin
+
+OpenBrowser is available as a Claude Code plugin with 5 built-in skills:
+
+| Skill | Description |
+|-------|-------------|
+| `web-scraping` | Extract structured data, handle pagination |
+| `form-filling` | Fill forms, login flows, multi-step wizards |
+| `e2e-testing` | Test web apps by simulating user interactions |
+| `page-analysis` | Analyze page content, structure, metadata |
+| `accessibility-audit` | Audit pages for WCAG compliance |
+
+See [plugin/README.md](plugin/README.md) for installation and detailed tool parameter documentation.
+
 ## MCP Server
 
 OpenBrowser includes an MCP (Model Context Protocol) server that exposes browser automation as tools for AI assistants like Claude. No external LLM API keys required -- the MCP client (Claude) provides the intelligence.
@@ -288,20 +319,6 @@ uvx openbrowser-ai[mcp] --mcp
 | `browser://sessions/{id}/content` | text/markdown | Specific session page content |
 | `browser://sessions/{id}/state` | application/json | Specific session state |
 | `browser://sessions/{id}/accessibility` | application/json | Specific session a11y tree |
-
-### Claude Code Plugin
-
-OpenBrowser is available as a Claude Code plugin with 5 built-in skills:
-
-| Skill | Description |
-|-------|-------------|
-| `web-scraping` | Extract structured data, handle pagination |
-| `form-filling` | Fill forms, login flows, multi-step wizards |
-| `e2e-testing` | Test web apps by simulating user interactions |
-| `page-analysis` | Analyze page content, structure, metadata |
-| `accessibility-audit` | Audit pages for WCAG compliance |
-
-See [plugin/README.md](plugin/README.md) for installation and detailed tool parameter documentation.
 
 ### Configuration
 
