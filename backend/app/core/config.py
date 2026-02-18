@@ -8,8 +8,10 @@ from dotenv import load_dotenv
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# Load environment variables with override=True to ensure .env values take precedence
-load_dotenv(override=True)
+# Load .env file but do NOT override system environment variables.
+# In production, env vars are set by Docker --env-file; the baked-in
+# .env inside the image is only a fallback for local development.
+load_dotenv(override=False)
 
 logger = logging.getLogger(__name__)
 
