@@ -87,10 +87,11 @@ ONLINE_GRPO_CONFIG = {
 
 # Data Config
 DATA_CONFIG = {
-    "train_file": os.environ.get("TRAIN_FILE", "data/processed/formfactory_sft.jsonl"),
-    "eval_split": 0.1,
+    "train_file": os.environ.get("TRAIN_FILE", "data/processed/formfactory_sft_train.jsonl"),
+    "val_file": os.environ.get("VAL_FILE", "data/processed/formfactory_sft_val.jsonl"),
+    "test_file": os.environ.get("TEST_FILE", "data/processed/formfactory_sft_test.jsonl"),
     "max_train_samples": int(os.environ.get("MAX_TRAIN_SAMPLES", "5000")),
-    "max_eval_samples": 500,
+    "max_eval_samples": int(os.environ.get("MAX_EVAL_SAMPLES", "500")),
 }
 
 # S3 Config for checkpoint persistence
