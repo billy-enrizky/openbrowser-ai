@@ -175,6 +175,10 @@ class DummyTypes:
         def __init__(self, **kwargs):
             pass
 
+    class ResourceTemplate:
+        def __init__(self, **kwargs):
+            pass
+
     class Prompt:
         pass
 
