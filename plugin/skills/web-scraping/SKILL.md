@@ -38,24 +38,24 @@ browser_get_text(extract_links=true)
 
 ### Step 3 -- Search for specific data
 
-Use `browser_grep` to find targeted content on the page. Supports regex patterns for flexible matching.
+Use `browser_get_text` with the `search` param to find targeted content on the page. Supports regex patterns for flexible matching.
 
 ```
-browser_grep(pattern="Price:\\s*\\$[\\d.]+", case_insensitive=true)
+browser_get_text(search="Price:\\s*\\$[\\d.]+", case_insensitive=true)
 ```
 
 Adjust `context_lines` to capture surrounding data:
 
 ```
-browser_grep(pattern="product-name", context_lines=5, max_matches=50)
+browser_get_text(search="product-name", context_lines=5, max_matches=50)
 ```
 
 ### Step 4 -- Extract structured elements
 
-Use `browser_search_elements` to find specific DOM elements by text, tag, class, or attribute.
+Use `browser_get_state` with `filter_by`/`filter_query` to find specific DOM elements by text, tag, class, or attribute.
 
 ```
-browser_search_elements(query="product", by="class", max_results=50)
+browser_get_state(filter_by="class", filter_query="product", max_results=50)
 ```
 
 For more precise extraction, use `browser_execute_js` to run JavaScript that collects data into a structured format:
@@ -66,16 +66,16 @@ browser_execute_js(expression="(() => { const items = document.querySelectorAll(
 
 ### Step 5 -- Handle pagination
 
-Check for pagination controls using `browser_search_elements`:
+Check for pagination controls using `browser_get_state`:
 
 ```
-browser_search_elements(query="Next", by="text")
+browser_get_state(filter_by="text", filter_query="Next")
 ```
 
 Or search for pagination by class:
 
 ```
-browser_search_elements(query="pagination", by="class")
+browser_get_state(filter_by="class", filter_query="pagination")
 ```
 
 Click the next page button using the element index returned:
@@ -98,20 +98,20 @@ browser_navigate(url="https://example.com/page-2", new_tab=true)
 List open tabs to track progress:
 
 ```
-browser_list_tabs()
+browser_tab(action="list")
 ```
 
 Switch between tabs to extract data from each:
 
 ```
-browser_switch_tab(tab_id="<tab_id>")
+browser_tab(action="switch", tab_id="<tab_id>")
 browser_get_text()
 ```
 
 Close tabs when done:
 
 ```
-browser_close_tab(tab_id="<tab_id>")
+browser_tab(action="close", tab_id="<tab_id>")
 ```
 
 ### Step 7 -- Handle infinite scroll pages
@@ -123,7 +123,7 @@ browser_scroll(direction="down")
 browser_get_text()
 ```
 
-Use `browser_grep` after each scroll to check if new content appeared, and `browser_execute_js` to detect when you have reached the bottom:
+Use `browser_get_text` with `search` after each scroll to check if new content appeared, and `browser_execute_js` to detect when you have reached the bottom:
 
 ```
 browser_execute_js(expression="window.innerHeight + window.scrollY >= document.body.scrollHeight")
@@ -134,13 +134,13 @@ browser_execute_js(expression="window.innerHeight + window.scrollY >= document.b
 Close the browser session when scraping is complete:
 
 ```
-browser_close_all()
+browser_session(action="close_all")
 ```
 
 ## Tips
 
 - Use `browser_get_text` for a quick content overview before targeted extraction.
-- Use `browser_grep` with regex for pattern-based data extraction (prices, dates, emails).
+- Use `browser_get_text` with `search` and regex for pattern-based data extraction (prices, dates, emails).
 - Use `browser_execute_js` when you need structured JSON output from complex DOM structures.
 - For large datasets, process pages incrementally rather than loading all tabs at once.
 - Check for rate limiting or bot detection; add reasonable delays between page loads if needed.
