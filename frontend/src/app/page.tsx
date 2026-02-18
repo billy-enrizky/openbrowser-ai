@@ -8,7 +8,7 @@ import { ChatInput, ChatMessages, getFileTypeFromName, LogPanel } from "@/compon
 import { BrowserViewer } from "@/components/browser";
 import { useAuth } from "@/components/auth";
 import { useAppStore } from "@/store";
-import { useWebSocket } from "@/hooks/useWebSocket";
+import { useTaskStream } from "@/hooks/useTaskStream";
 import { API_BASE_URL } from "@/lib/config";
 import type { Message, WSMessage, FileAttachment, LogEntry, VncInfo, AvailableModelsResponse } from "@/types";
 import { cn } from "@/lib/utils";
@@ -345,13 +345,13 @@ export default function Home() {
     }
   }, [addMessage, addLog, clearLogs, setVncInfo, setExtensionConnected]);
 
-  const { isConnected, sendMessage } = useWebSocket({
+  const { isConnected, startTask, cancelTask } = useTaskStream({
     onMessage: handleWSMessage,
-    autoConnect: !authEnabled || Boolean(idToken),
-    authToken: authEnabled ? idToken : null,
+    onConnect: () => setIsLoading(true),
+    getToken: authEnabled ? getValidIdToken : undefined,
   });
 
-  const handleSendMessage = useCallback((content: string) => {
+  const handleSendMessage = useCallback(async (content: string) => {
     // Add user message
     addMessage({
       id: crypto.randomUUID(),
@@ -360,9 +360,9 @@ export default function Home() {
       timestamp: new Date(),
     });
 
-    // Send to backend
+    // Start task via REST + SSE
     setIsLoading(true);
-    const sent = sendMessage("start_task", undefined, {
+    const taskId = await startTask({
       task: content,
       agent_type: agentType,
       max_steps: maxSteps,
@@ -371,7 +371,7 @@ export default function Home() {
       use_current_browser: useCurrentBrowser,
     });
 
-    if (!sent) {
+    if (!taskId) {
       setIsLoading(false);
       addMessage({
         id: crypto.randomUUID(),
@@ -381,7 +381,7 @@ export default function Home() {
         metadata: { isError: true },
       });
     }
-  }, [addMessage, sendMessage, agentType, maxSteps, useVision, selectedModel, useCurrentBrowser]);
+  }, [addMessage, startTask, agentType, maxSteps, useVision, selectedModel, useCurrentBrowser]);
 
   const hasMessages = messages.length > 0;
 
@@ -487,11 +487,11 @@ export default function Home() {
                     <div
                       className={cn(
                         "w-2 h-2 rounded-full",
-                        isConnected ? "bg-green-500" : "bg-red-500"
+                        isConnected ? "bg-green-500 animate-pulse" : "bg-green-500"
                       )}
                     />
                     <span className="text-sm text-zinc-500">
-                      {isConnected ? "Connected to server" : "Connecting..."}
+                      {isConnected ? "Task streaming..." : "Ready"}
                     </span>
                   </motion.div>
 
