@@ -210,7 +210,17 @@ profile = BrowserProfile(
 
 ## Claude Code Plugin
 
-OpenBrowser is available as a Claude Code plugin with 5 built-in skills:
+Install OpenBrowser as a Claude Code plugin:
+
+```bash
+# Add the marketplace (one-time)
+claude plugin marketplace add billy-enrizky/openbrowser-ai
+
+# Install the plugin
+claude plugin install openbrowser@openbrowser-ai
+```
+
+This installs the MCP server (11 tools) and 5 built-in skills:
 
 | Skill | Description |
 |-------|-------------|
@@ -220,7 +230,7 @@ OpenBrowser is available as a Claude Code plugin with 5 built-in skills:
 | `page-analysis` | Analyze page content, structure, metadata |
 | `accessibility-audit` | Audit pages for WCAG compliance |
 
-See [plugin/README.md](plugin/README.md) for installation and detailed tool parameter documentation.
+See [plugin/README.md](plugin/README.md) for detailed tool parameter documentation.
 
 ## Codex
 
