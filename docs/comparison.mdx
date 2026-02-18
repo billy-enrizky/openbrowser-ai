@@ -1,11 +1,12 @@
 ---
 title: "MCP Server Comparison"
 description: "Benchmark comparison of OpenBrowser MCP vs Playwright MCP vs Chrome DevTools MCP"
+icon: "scale-balanced"
 ---
 
 # Browser MCP Server Comparison
 
-Benchmark date: 2026-02-18 | OpenBrowser MCP v0.1.17 | Playwright MCP v0.0.68
+Benchmark date: 2026-02-18 | OpenBrowser MCP v0.1.17 | Playwright MCP v0.0.68 | Chrome DevTools MCP v0.17.1
 
 ## Overview
 
@@ -13,88 +14,188 @@ Three approaches to browser automation via MCP, measured on identical tasks.
 
 | | Playwright MCP | Chrome DevTools MCP | OpenBrowser MCP |
 |---|---|---|---|
-| **Maintainer** | Microsoft | benjaminr | OpenBrowser |
-| **GitHub Stars** | 27,300+ | 283 | -- |
-| **Engine** | Playwright (Chromium/Firefox/WebKit) | Raw CDP (websockets) | Raw CDP (direct) |
-| **Tools** | 22 core (39 total) | 35+ | 11 |
-| **Approach** | A11y snapshot with every action | Raw DOM / CSS queries | Text-first, progressive disclosure |
-| **Element IDs** | `ref` from snapshot (`[ref=e25]`) | CSS selectors | Numeric index from state |
+| **Maintainer** | Microsoft | Chrome DevTools team (Google) | OpenBrowser |
+| **GitHub Stars** | 27,300+ | 25,900+ | -- |
+| **Engine** | Playwright (Chromium/Firefox/WebKit) | Puppeteer (CDP) | Raw CDP (direct) |
+| **Tools** | 22 core (39 total) | 26 | 11 |
+| **Approach** | A11y snapshot with every action | A11y snapshot on demand | Text-first, progressive disclosure |
+| **Element IDs** | `ref` from snapshot (`[ref=e25]`) | `uid` from snapshot (`uid=1_2`) | Numeric index from state |
 | **Transport** | stdio | stdio | stdio |
-| **Language** | TypeScript (Node.js) | Python | Python |
+| **Language** | TypeScript (Node.js) | TypeScript (Node.js) | Python |
 
 ## Token Usage Benchmark
 
 ### Methodology
 
-Both Playwright MCP and OpenBrowser MCP were started as subprocesses and tested via JSON-RPC stdio transport. Same 5-step workflow, same pages, same measurement method. Chrome DevTools MCP estimates are based on tool response pattern analysis (returns raw DOM/HTML, no compact mode).
+All three MCP servers were started as subprocesses and tested via JSON-RPC stdio transport. Same 5-step workflow, same pages, same measurement method. All numbers are real measurements, not estimates.
 
-**Workflow**: Navigate to Wikipedia Python page (327 interactive elements) -> get page state -> click link -> go back -> get state again.
+**Workflow**: Navigate to Wikipedia Python page -> get page state -> click link -> go back -> get state again.
 
 ### Results: 5-Step Workflow on Wikipedia (Complex Page)
 
 | Metric | Playwright MCP | Chrome DevTools MCP | OpenBrowser MCP |
-|--------|---------------|--------------------:|----------------:|
-| **Tool calls** | 9 | ~8 | 12 |
-| **Total response chars** | 996,308 | ~1,200,000 (est.) | 1,631 |
-| **Est. response tokens** | **249,077** | **~300,000** (est.) | **408** |
-| **Total latency** | 7.2s | ~8-10s (est.) | 0.1s* |
-| **Token ratio vs OpenBrowser** | 610x more | ~735x more (est.) | 1x (baseline) |
-
-\* Excludes 30s Chrome cold-start on first navigate. Subsequent operations: 2-34ms each.
+|--------|---------------:|--------------------:|----------------:|
+| **Tool calls** | 5 | 5 | 5 |
+| **Total response chars** | 992,065 | 539,209 | 1,131 |
+| **Est. response tokens** | **248,016** | **134,802** | **283** |
+| **Token ratio vs OpenBrowser** | 877x more | 476x more | 1x (baseline) |
 
 ### Results: Small Page (httpbin.org/forms/post)
 
-| Operation | Playwright MCP | OpenBrowser MCP | Ratio |
-|-----------|---------------|----------------:|------:|
-| Navigate | 1,985 chars | 105 chars | 19x |
-| Page state | 1,896 chars | 176 chars (compact) | 10.8x |
-| Type into form | 526 chars | 91 chars | 5.8x |
-| List tabs | 367 chars | 63 chars | 5.8x |
+| Operation | Playwright MCP | Chrome DevTools MCP | OpenBrowser MCP |
+|-----------|---------------:|--------------------:|----------------:|
+| Navigate | 1,985 chars | 182 chars | 105 chars |
+| Page state | 1,896 chars | 1,366 chars | 1,488 chars |
+| Type/fill | 526 chars | 95 chars | 92 chars |
+| List tabs/pages | 367 chars | 120 chars | 195 chars |
 
 ### Per-Operation Token Breakdown (Wikipedia)
 
-| Operation | Playwright MCP | OpenBrowser MCP |
-|-----------|---------------|----------------:|
-| Navigate | 493,604 chars (~123K tokens) | 272 chars (~68 tokens) |
-| Snapshot / Get state | 493,486 chars (~123K tokens) | 176 chars (~44 tokens) |
-| Click | 4,107 chars (~1K tokens) | 91 chars (~23 tokens) |
-| Go back | 198 chars (~50 tokens) | 75 chars (~19 tokens) |
-| Get state (2nd) | 139 chars (~35 tokens) | 176 chars (~44 tokens) |
+| Operation | Playwright MCP | Chrome DevTools MCP | OpenBrowser MCP |
+|-----------|---------------:|--------------------:|----------------:|
+| Navigate | 495,950 chars (~124K tokens) | 240 chars (~60 tokens) | 134 chars (~34 tokens) |
+| Snapshot / Get state | 495,437 chars (~124K tokens) | 538,467 chars (~135K tokens) | 421 chars (~105 tokens) |
+| Click | 341 chars (~85 tokens) | 218 chars (~55 tokens) | 80 chars (~20 tokens) |
+| Go back | 198 chars (~50 tokens) | 149 chars (~37 tokens) | 75 chars (~19 tokens) |
+| Get state (2nd) | 139 chars (~35 tokens) | 135 chars (~34 tokens) | 421 chars (~105 tokens) |
 
 ## Why the Difference
 
 | Design Decision | Playwright MCP | Chrome DevTools MCP | OpenBrowser MCP |
-|----------------|----------------|--------------------:|----------------:|
+|----------------|---------------:|--------------------:|----------------:|
 | Navigate response | Full a11y snapshot | URL confirmation | URL confirmation |
-| State query | Always full snapshot | Full DOM (`get_document`) | Compact (44 tokens) or full |
+| State query | Always full snapshot | Full a11y snapshot (`take_snapshot`) | Compact (105 tokens) or full |
 | Click response | Updated snapshot | Action confirmation | Action confirmation |
 | Text extraction | No dedicated tool | No dedicated tool | `browser_get_text` (markdown) |
-| Content search | Dump full snapshot | `query_selector_all` (CSS) | `search` param (regex grep) |
-| Element search | Part of snapshot | `query_selector` (CSS) | `filter_by` param (text/tag/id) |
+| Content search | Dump full snapshot | `evaluate_script` (JS) | `search` param (regex grep) |
+| Element search | Part of snapshot | `uid` from snapshot | `filter_by` param (text/tag/id) |
 
-**Playwright MCP**: Every action returns the full page accessibility snapshot. Simple and consistent, but forces the LLM to process ~120K tokens per interaction on large pages.
+**Playwright MCP**: Every navigation returns the full page accessibility snapshot (~124K tokens for Wikipedia). Consistent, but forces the LLM to process the entire page with every action.
 
-**Chrome DevTools MCP**: Returns raw DOM data via CSS selectors. Flexible but requires the agent to construct CSS selectors, and `get_document()` returns the entire page HTML (often larger than an a11y snapshot).
+**Chrome DevTools MCP**: Returns minimal confirmations for navigation. The agent must explicitly call `take_snapshot` to see the page (~135K tokens for Wikipedia). One snapshot is comparable in size to Playwright's, but actions don't auto-return snapshots.
 
-**OpenBrowser MCP**: Actions return minimal confirmations. The agent explicitly requests the level of detail it needs -- from 44 tokens (compact state) to 1,250 tokens (targeted grep) to 24K tokens (full text). More tool calls, dramatically fewer tokens.
+**OpenBrowser MCP**: Actions return minimal confirmations. The agent explicitly requests the level of detail it needs -- from 105 tokens (compact state) to 3,981 tokens (targeted search) to 25,164 tokens (full page text). More tool calls, dramatically fewer tokens.
+
+### What Each Server Returns (Verbatim)
+
+All responses below are real output captured from each MCP server on the httpbin.org/forms/post page.
+
+#### Navigate
+
+**Playwright MCP** -- returns full a11y snapshot with every navigation (~2,150 chars on httpbin, ~496K chars on Wikipedia):
+
+```yaml
+### Ran Playwright code
+await page.goto('https://httpbin.org/forms/post');
+### Page
+- Page URL: https://httpbin.org/forms/post
+- Console: 1 errors, 0 warnings
+### Snapshot
+- generic [ref=e2]:
+  - paragraph [ref=e3]:
+    - generic [ref=e4]:
+      - text: "Customer name:"
+      - textbox "Customer name:" [ref=e5]
+  - paragraph [ref=e6]:
+    - generic [ref=e7]:
+      - text: "Telephone:"
+      - textbox "Telephone:" [ref=e8]
+  ... (entire page tree continues)
+```
+
+**Chrome DevTools MCP** -- returns URL confirmation only (~136 chars):
+
+```
+# navigate_page response
+Successfully navigated to https://httpbin.org/forms/post.
+## Pages
+1: https://httpbin.org/forms/post [selected]
+```
+
+**OpenBrowser MCP** -- returns URL confirmation only (~105 chars):
+
+```
+Navigated to: https://httpbin.org/forms/post
+```
+
+#### Get Page State / Snapshot
+
+**Playwright MCP** `browser_snapshot` -- full a11y tree again (~1,896 chars on httpbin, ~495K chars on Wikipedia):
+
+```yaml
+- generic [ref=e2]:
+  - paragraph [ref=e3]:
+    - generic [ref=e4]:
+      - text: "Customer name:"
+      - textbox "Customer name:" [ref=e5]
+  ... (entire page tree)
+```
+
+**Chrome DevTools MCP** `take_snapshot` -- full a11y tree (~1,214 chars on httpbin, ~538K chars on Wikipedia):
+
+```
+uid=1_0 RootWebArea url="https://httpbin.org/forms/post"
+  uid=1_1 StaticText "Customer name: "
+  uid=1_2 textbox "Customer name: "
+  uid=1_3 StaticText "Telephone: "
+  uid=1_4 textbox "Telephone: "
+  uid=1_5 StaticText "E-mail address: "
+  uid=1_6 textbox "E-mail address: "
+  ... (entire page tree)
+```
+
+**OpenBrowser MCP** `browser_get_state(compact=true)` -- metadata only (~105 chars on httpbin, ~250 chars on Wikipedia):
+
+```json
+{
+  "url": "https://httpbin.org/forms/post",
+  "title": "httpbin.org/forms/post",
+  "tabs": [{"url": "...", "title": "..."}],
+  "interactive_element_count": 13
+}
+```
+
+The agent requests more detail only when needed: `compact=false` adds the element list, `browser_get_text` returns full page markdown, `browser_get_text(search="pattern")` returns only matching lines.
+
+#### Click / Type / Go Back
+
+All three servers return short confirmations for actions:
+
+| Operation | Playwright MCP | Chrome DevTools MCP | OpenBrowser MCP |
+|-----------|---------------|---------------------|-----------------|
+| Click | `Clicked element` | `Clicked element uid=1_2` | `Clicked element 5` |
+| Type | Updated snapshot (~526 chars) | `Filled element uid=1_2` | `Typed 'John Doe' into element 4` |
+| Go back | ~198 chars | ~149 chars | `Navigated back` |
+
+#### Filter / Search (OpenBrowser only)
+
+No equivalent in Playwright or Chrome DevTools MCP -- both require dumping the full snapshot.
+
+```json
+browser_get_state(filter_by="text", filter_query="Submit")
+-> {"query": "Submit", "by": "text", "results": [{"index": 94, "tag": "button", "text": "Submit order"}], "count": 1}
+
+browser_get_text(search="Customer")
+-> (only matching lines with context, not full page)
+```
 
 ## Cost Comparison
 
-Estimated MCP tool response costs per 5-step workflow on a complex page (Wikipedia). These tokens are added to the LLM's context window, charged at input token rates.
+MCP tool response costs per 5-step workflow on a complex page (Wikipedia). These tokens are added to the LLM's context window, charged at input token rates. All numbers based on real measurements.
 
 | Model | Playwright MCP | Chrome DevTools MCP | OpenBrowser MCP |
-|-------|---------------|--------------------:|----------------:|
-| Claude Sonnet ($3/M input) | $0.747 | ~$0.900 | **$0.001** |
-| Claude Opus ($15/M input) | $3.736 | ~$4.500 | **$0.006** |
-| GPT-4o ($2.50/M input) | $0.623 | ~$0.750 | **$0.001** |
+|-------|---------------:|--------------------:|----------------:|
+| Claude Sonnet ($3/M input) | $0.744 | $0.404 | **$0.001** |
+| Claude Opus ($15/M input) | $3.720 | $2.022 | **$0.004** |
+| GPT-4o ($2.50/M input) | $0.620 | $0.337 | **$0.001** |
 
 **Per 1,000 workflows:**
 
-| Model | Playwright MCP | OpenBrowser MCP | Savings |
-|-------|---------------|----------------:|--------:|
-| Claude Sonnet | $747 | $1.22 | **$746** |
-| Claude Opus | $3,736 | $6.12 | **$3,730** |
-| GPT-4o | $623 | $1.02 | **$622** |
+| Model | Playwright MCP | Chrome DevTools MCP | OpenBrowser MCP |
+|-------|---------------:|--------------------:|----------------:|
+| Claude Sonnet | $744 | $404 | **$0.85** |
+| Claude Opus | $3,720 | $2,022 | **$4.25** |
+| GPT-4o | $620 | $337 | **$0.71** |
 
 ## Tool Surface Comparison
 
@@ -102,9 +203,9 @@ Estimated MCP tool response costs per 5-step workflow on a complex page (Wikiped
 
 Navigation, interaction, form filling, file upload, drag, hover, key press, select option, screenshots, snapshots, console messages, dialog handling, network requests, tab management, code generation, PDF export, wait conditions.
 
-### Chrome DevTools MCP (35+ tools)
+### Chrome DevTools MCP (26 tools)
 
-Chrome management, navigation, DOM/CSS queries, JS execution, console logs, network monitoring, storage/cookies, performance metrics, CSS coverage tracking. No accessibility tree. No text extraction. No content search.
+Input automation (click, drag, fill, fill_form, hover, press_key, handle_dialog, upload_file), navigation (navigate_page, new_page, close_page, list_pages, select_page, wait_for), emulation (emulate, resize_page), performance tracing (start/stop/analyze), network debugging (list/get requests), JS execution, console messages, screenshots, DOM snapshots.
 
 ### OpenBrowser MCP (11 tools)
 
@@ -126,7 +227,7 @@ Chrome management, navigation, DOM/CSS queries, JS execution, console logs, netw
 
 Features no competitor offers:
 
-- **Progressive disclosure** -- compact state (44 tokens) vs full state vs text vs grep
+- **Progressive disclosure** -- compact state (105 tokens) vs full state vs text vs grep
 - **Regex content search** -- `browser_get_text(search="pattern")` returns only matching lines with context
 - **Element filtering** -- `browser_get_state(filter_by="text", filter_query="Login")` searches interactive elements
 - **Find-and-scroll** -- `browser_scroll(target_text="Section 3")` locates and scrolls to text
@@ -140,27 +241,33 @@ Features no competitor offers:
 | Capability | Playwright MCP | Chrome DevTools MCP | OpenBrowser MCP |
 |-----------|:-:|:-:|:-:|
 | Cross-browser | Yes (Chromium/Firefox/WebKit) | No | No |
-| Screenshots | Yes | No | No |
-| File upload | Yes | No | No |
+| Screenshots | Yes | Yes | No |
+| File upload | Yes | Yes | No |
 | PDF export | Yes | No | No |
-| Network interception | Yes | Yes | No |
+| Network monitoring | Yes | Yes | No |
 | Console logs | Yes | Yes | No |
-| Cookie management | No | Yes | No |
-| DOM/CSS inspection | No | Yes | No |
-| Performance metrics | No | Yes | No |
+| Performance tracing | No | Yes | No |
+| Emulation (device/viewport) | No | Yes | No |
+| Drag and drop | No | Yes | No |
+| Dialog handling | No | Yes | No |
+| Wait conditions | No | Yes | No |
 | Code generation | Yes | No | No |
 | Incremental snapshots | Yes | No | No |
-| Accessibility tree | Via snapshot | No | Yes (dedicated tool) |
+| Accessibility tree | Via snapshot | Via snapshot | Yes (dedicated tool) |
 | Content grep/search | No | No | Yes |
 | Progressive disclosure | No | No | Yes |
-| Session reuse | No | Yes (existing Chrome) | Yes (existing Chrome) |
+| Session reuse | No | Puppeteer-managed | Yes (existing Chrome) |
 
 ## Benchmark Methodology Notes
 
+- All three servers benchmarked via JSON-RPC stdio subprocess -- no estimates
 - Response sizes measured as total JSON-RPC response character count
 - Estimated tokens = characters / 4 (standard approximation for mixed English/JSON)
-- Chrome DevTools MCP estimates based on `get_document()` returning full page HTML (~1.2M chars for Wikipedia) and typical DOM query response patterns
+- 5-step workflow uses matched operations: navigate, get state/snapshot, click, go back, get state/snapshot
 - Playwright MCP v0.0.68 tested via `npx @playwright/mcp@latest`
+- Chrome DevTools MCP v0.17.1 tested via `npx -y chrome-devtools-mcp@latest`
 - OpenBrowser MCP v0.1.17 tested via `uvx openbrowser-ai[mcp]@0.1.17 --mcp`
 - All tests run on macOS, M-series Apple Silicon
 - Latency measured as round-trip time from JSON-RPC request to response
+- Raw benchmark data: `benchmarks/playwright_results.json`, `benchmarks/cdp_results.json`, `benchmarks/openbrowser_results.json`
+- Benchmark scripts: `benchmarks/playwright_benchmark.py`, `benchmarks/cdp_benchmark.py`, `benchmarks/openbrowser_benchmark.py`
