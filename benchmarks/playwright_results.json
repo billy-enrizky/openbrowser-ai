@@ -1,0 +1,90 @@
+{
+  "tool_count": 22,
+  "tool_names": [
+    "browser_close",
+    "browser_resize",
+    "browser_console_messages",
+    "browser_handle_dialog",
+    "browser_evaluate",
+    "browser_file_upload",
+    "browser_fill_form",
+    "browser_install",
+    "browser_press_key",
+    "browser_type",
+    "browser_navigate",
+    "browser_navigate_back",
+    "browser_network_requests",
+    "browser_run_code",
+    "browser_take_screenshot",
+    "browser_snapshot",
+    "browser_click",
+    "browser_drag",
+    "browser_hover",
+    "browser_select_option",
+    "browser_tabs",
+    "browser_wait_for"
+  ],
+  "measurements": [
+    {
+      "tool": "navigate",
+      "request_chars": 113,
+      "response_chars": 493604,
+      "latency_ms": 4213.6
+    },
+    {
+      "tool": "snapshot",
+      "request_chars": 45,
+      "response_chars": 493486,
+      "latency_ms": 176.6
+    },
+    {
+      "tool": "click",
+      "request_chars": 91,
+      "response_chars": 4107,
+      "latency_ms": 1348.2
+    },
+    {
+      "tool": "navigate_back",
+      "request_chars": 50,
+      "response_chars": 198,
+      "latency_ms": 71.3
+    },
+    {
+      "tool": "snapshot_2",
+      "request_chars": 45,
+      "response_chars": 139,
+      "latency_ms": 3.4
+    },
+    {
+      "tool": "navigate_form",
+      "request_chars": 84,
+      "response_chars": 1985,
+      "latency_ms": 300.0
+    },
+    {
+      "tool": "snapshot_form",
+      "request_chars": 45,
+      "response_chars": 1896,
+      "latency_ms": 3.7
+    },
+    {
+      "tool": "type",
+      "request_chars": 106,
+      "response_chars": 526,
+      "latency_ms": 1039.8
+    },
+    {
+      "tool": "tabs",
+      "request_chars": 41,
+      "response_chars": 367,
+      "latency_ms": 0.6
+    }
+  ],
+  "totals": {
+    "tool_calls": 9,
+    "total_request_chars": 620,
+    "total_response_chars": 996308,
+    "total_latency_ms": 7157.1,
+    "est_response_tokens": 249077
+  }
+}
