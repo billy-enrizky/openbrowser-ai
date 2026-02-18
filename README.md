@@ -32,6 +32,7 @@ OpenBrowser is a framework for intelligent browser automation. It combines direc
 - [OpenCode](#opencode)
 - [OpenClaw](#openclaw)
 - [MCP Server](#mcp-server)
+- [MCP Benchmark: Why OpenBrowser](#mcp-benchmark-why-openbrowser)
 - [CLI Usage](#cli-usage)
 - [Project Structure](#project-structure)
 - [Testing](#testing)
@@ -359,7 +360,7 @@ OpenBrowser includes an MCP (Model Context Protocol) server that exposes browser
 uvx openbrowser-ai[mcp] --mcp
 ```
 
-### Tools (18)
+### Tools (11)
 
 #### Navigation
 
@@ -409,6 +410,38 @@ uvx openbrowser-ai[mcp] --mcp
 |---------------------|-------------|---------|
 | `OPENBROWSER_HEADLESS` | Run browser without GUI | `false` |
 | `OPENBROWSER_ALLOWED_DOMAINS` | Comma-separated domain whitelist | (none) |
+
+## MCP Benchmark: Why OpenBrowser
+
+Benchmark on identical 5-step workflow (navigate Wikipedia, get state, click, go back, get state). Real measurements via JSON-RPC stdio transport.
+
+### Token Usage (5-Step Workflow, Wikipedia)
+
+| MCP Server | Tools | Response Tokens | vs OpenBrowser |
+|------------|------:|----------------:|---------------:|
+| **Playwright MCP** (Microsoft) | 22 | 249,077 | 610x more |
+| **Chrome DevTools MCP** | 35+ | ~300,000 (est.) | ~735x more |
+| **OpenBrowser MCP** | 11 | **408** | baseline |
+
+### Cost per Workflow
+
+| Model | Playwright MCP | OpenBrowser MCP | Savings |
+|-------|---------------:|----------------:|--------:|
+| Claude Sonnet ($3/M) | $0.747 | $0.001 | 99.9% |
+| Claude Opus ($15/M) | $3.736 | $0.006 | 99.8% |
+| GPT-4o ($2.50/M) | $0.623 | $0.001 | 99.8% |
+
+### Per-Operation Comparison (Wikipedia, 327 Elements)
+
+| Operation | Playwright MCP | OpenBrowser MCP | Ratio |
+|-----------|---------------:|----------------:|------:|
+| Navigate | ~123,400 tokens | ~68 tokens | 1,815x |
+| Get page state | ~123,370 tokens | ~44 tokens | 2,804x |
+| Click element | ~1,027 tokens | ~23 tokens | 45x |
+
+**Why?** Playwright returns the full accessibility snapshot (~120K tokens) with every action. OpenBrowser returns minimal confirmations and lets the agent request only the detail level it needs.
+
+[Full comparison with methodology](https://docs.openbrowser.me/comparison)
 
 ## CLI Usage
 
