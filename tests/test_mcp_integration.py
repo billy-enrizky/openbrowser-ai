@@ -25,6 +25,8 @@ from pathlib import Path
 
 import pytest
 
+from conftest import DummyServer, DummyTypes
+
 logger = logging.getLogger(__name__)
 
 # Skip all tests in this module if Chrome or dependencies are not available
@@ -127,73 +129,6 @@ def test_html_server():
     Path(tmp_dir).rmdir()
 
 
-class DummyServer:
-    """Minimal stub for mcp.server.Server."""
-
-    def __init__(self, name):
-        pass
-
-    def list_tools(self):
-        return lambda f: f
-
-    def list_resources(self):
-        return lambda f: f
-
-    def read_resource(self):
-        return lambda f: f
-
-    def list_prompts(self):
-        return lambda f: f
-
-    def call_tool(self):
-        return lambda f: f
-
-    def list_resource_templates(self):
-        return lambda f: f
-
-    def subscribe_resource(self):
-        return lambda f: f
-
-    def unsubscribe_resource(self):
-        return lambda f: f
-
-    def get_capabilities(self, **kwargs):
-        return {}
-
-    async def run(self, *args, **kwargs):
-        return None
-
-
-class DummyTypes:
-    """Minimal stub for mcp.types."""
-
-    class Tool:
-        def __init__(self, **kwargs):
-            pass
-
-    class Resource:
-        def __init__(self, **kwargs):
-            pass
-
-    class ResourceTemplate:
-        def __init__(self, **kwargs):
-            pass
-
-    class Prompt:
-        pass
-
-    class TextContent:
-        def __init__(self, type: str, text: str):
-            self.type = type
-            self.text = text
-
-    class TextResourceContents:
-        def __init__(self, **kwargs):
-            self.uri = kwargs.get("uri")
-            self.text = kwargs.get("text")
-            self.mimeType = kwargs.get("mimeType")
-
-
 @pytest.fixture(scope="module")
 def mcp_server_with_browser(test_html_server, monkeypatch_module):
     """Create an OpenBrowserServer with a real browser session.
@@ -230,16 +165,6 @@ def mcp_server_with_browser(test_html_server, monkeypatch_module):
 
         loop.run_until_complete(teardown())
         loop.close()
-
-
-@pytest.fixture(scope="module")
-def monkeypatch_module():
-    """Module-scoped monkeypatch (workaround for scope mismatch)."""
-    from _pytest.monkeypatch import MonkeyPatch
-
-    mp = MonkeyPatch()
-    yield mp
-    mp.undo()
 
 
 # ---------------------------------------------------------------------------
