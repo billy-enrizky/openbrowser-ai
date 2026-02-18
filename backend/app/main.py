@@ -12,6 +12,7 @@ from app.core.auth import get_current_user
 from app.core.config import settings
 from app.models.schemas import AvailableModelsResponse, LLMModel
 from app.websocket.handler import handle_websocket
+from app.websocket.extension_handler import handle_extension_websocket
 
 # Configure logging
 logging.basicConfig(
@@ -107,6 +108,21 @@ async def websocket_endpoint(websocket: WebSocket):
     """WebSocket endpoint for real-time agent communication."""
     client_id = str(uuid4())
     await handle_websocket(websocket, client_id)
+
+
+# Extension routes must be registered before the dynamic /ws/{client_id} route
+# to prevent "extension" from being captured as a client_id
+@app.websocket("/ws/extension")
+async def extension_websocket_endpoint(websocket: WebSocket):
+    """WebSocket endpoint for Chrome extension connections."""
+    extension_id = str(uuid4())
+    await handle_extension_websocket(websocket, extension_id)
+
+
+@app.websocket("/ws/extension/{extension_id}")
+async def extension_websocket_endpoint_with_id(websocket: WebSocket, extension_id: str):
+    """WebSocket endpoint for Chrome extension with specific ID."""
+    await handle_extension_websocket(websocket, extension_id)
 
 
 @app.websocket("/ws/{client_id}")
