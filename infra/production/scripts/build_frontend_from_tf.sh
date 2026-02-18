@@ -35,11 +35,9 @@ API_URL="$(terraform -chdir="$TF_DIR" output -raw api_base_url)"
 WS_URL="$(terraform -chdir="$TF_DIR" output -raw api_ws_url)"
 COGNITO_DOMAIN="$(terraform -chdir="$TF_DIR" output -raw cognito_domain_url)"
 COGNITO_CLIENT_ID="$(terraform -chdir="$TF_DIR" output -raw cognito_app_client_id)"
-FRONTEND_URL="$(terraform -chdir="$TF_DIR" output -raw frontend_url)"
-
-FRONTEND_URL="${FRONTEND_URL%/}"
-REDIRECT_URI="$FRONTEND_URL/auth/callback"
-LOGOUT_URI="$FRONTEND_URL/login"
+REDIRECT_URI="$(terraform -chdir="$TF_DIR" output -raw cognito_primary_callback_url)"
+LOGOUT_URI="$(terraform -chdir="$TF_DIR" output -raw cognito_primary_logout_url)"
+COGNITO_SCOPES="$(terraform -chdir="$TF_DIR" output -raw cognito_oauth_scopes_string)"
 
 echo "--- Writing $ENV_FILE ---"
 cat > "$ENV_FILE" <<EOF
@@ -50,7 +48,7 @@ NEXT_PUBLIC_COGNITO_DOMAIN=$COGNITO_DOMAIN
 NEXT_PUBLIC_COGNITO_CLIENT_ID=$COGNITO_CLIENT_ID
 NEXT_PUBLIC_COGNITO_REDIRECT_URI=$REDIRECT_URI
 NEXT_PUBLIC_COGNITO_LOGOUT_URI=$LOGOUT_URI
-NEXT_PUBLIC_COGNITO_SCOPES=openid email profile
+NEXT_PUBLIC_COGNITO_SCOPES=$COGNITO_SCOPES
 EOF
 
 echo "--- Building frontend ---"
