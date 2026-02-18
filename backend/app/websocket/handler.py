@@ -129,7 +129,21 @@ async def handle_websocket(websocket: WebSocket, client_id: str):
         return
 
     await connection_manager.connect(websocket, client_id)
-    
+
+    # Send current extension connection status on connect
+    try:
+        from app.websocket.extension_handler import extension_manager
+        ext_id = extension_manager.get_any_extension_id()
+        await connection_manager.send_message(
+            client_id,
+            WSMessage(
+                type=WSMessageType.EXTENSION_STATUS,
+                data={"connected": ext_id is not None, "extension_id": ext_id},
+            ),
+        )
+    except Exception:
+        pass
+
     try:
         while True:
             # Receive message from client
@@ -283,6 +297,7 @@ async def handle_start_task(client_id: str, message: WSMessage):
             max_steps=task_data.max_steps,
             use_vision=task_data.use_vision,
             llm_model=task_data.llm_model,
+            use_current_browser=task_data.use_current_browser,
             on_step_callback=on_step,
             on_output_callback=on_output,
             on_screenshot_callback=on_screenshot,

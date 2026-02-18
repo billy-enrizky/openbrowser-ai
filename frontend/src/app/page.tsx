@@ -133,6 +133,9 @@ export default function Home() {
     setAvailableProviders,
     setModelsLoading,
     setModelsError,
+    // Current browser
+    useCurrentBrowser,
+    setExtensionConnected,
   } = useAppStore();
   const [isLoading, setIsLoading] = useState(false);
   const [currentTaskId, setCurrentTaskId] = useState<string | null>(null);
@@ -333,8 +336,14 @@ export default function Home() {
           taskId: task_id,
         });
         break;
+
+      case "extension_status": {
+        const connected = data.connected as boolean;
+        setExtensionConnected(connected);
+        break;
+      }
     }
-  }, [addMessage, addLog, clearLogs, setVncInfo]);
+  }, [addMessage, addLog, clearLogs, setVncInfo, setExtensionConnected]);
 
   const { isConnected, sendMessage } = useWebSocket({
     onMessage: handleWSMessage,
@@ -358,7 +367,8 @@ export default function Home() {
       agent_type: agentType,
       max_steps: maxSteps,
       use_vision: useVision,
-      llm_model: selectedModel, // Include selected model
+      llm_model: selectedModel,
+      use_current_browser: useCurrentBrowser,
     });
 
     if (!sent) {
@@ -371,7 +381,7 @@ export default function Home() {
         metadata: { isError: true },
       });
     }
-  }, [addMessage, sendMessage, agentType, maxSteps, useVision, selectedModel]);
+  }, [addMessage, sendMessage, agentType, maxSteps, useVision, selectedModel, useCurrentBrowser]);
 
   const hasMessages = messages.length > 0;
 
