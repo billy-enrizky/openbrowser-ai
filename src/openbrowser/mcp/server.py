@@ -146,6 +146,8 @@ except ImportError:
 	logger.error('MCP SDK not installed. Install with: pip install mcp')
 	sys.exit(1)
 
+from pydantic import AnyUrl
+
 from openbrowser.telemetry import MCPServerTelemetryEvent, ProductTelemetry
 from openbrowser.utils import get_openbrowser_version
 
@@ -198,6 +200,8 @@ class OpenBrowserServer:
 		self.active_sessions: dict[str, dict[str, Any]] = {}  # session_id -> session info
 		self.session_timeout_minutes = session_timeout_minutes
 		self._cleanup_task: Any = None
+		self._mcp_session = None
+		self._subscribed_resources: set[str] = set()
 
 		# Setup handlers
 		self._setup_handlers()
@@ -445,6 +449,12 @@ class OpenBrowserServer:
 								'description': 'Whether to include nodes marked as ignored in the accessibility tree.',
 								'default': False,
 							},
+							'format': {
+								'type': 'string',
+								'enum': ['tree', 'flat'],
+								'description': "Output format. 'tree' (default) returns nested structure. 'flat' returns array with parent_id references.",
+								'default': 'tree',
+							},
 						},
 					},
 				),
@@ -457,6 +467,16 @@ class OpenBrowserServer:
 							'expression': {
 								'type': 'string',
 								'description': 'JavaScript expression or IIFE to evaluate in the page context. For multi-statement code, wrap in an IIFE: (()=>{ ... return result; })()',
+							},
+							'await_promise': {
+								'type': 'boolean',
+								'description': 'Whether to await the result if it is a Promise. Set to false for fire-and-forget scripts that should not be awaited.',
+								'default': True,
+							},
+							'return_by_value': {
+								'type': 'boolean',
+								'description': 'Whether to serialize the result value. Set to false to get a RemoteObject reference (objectId) for DOM elements that cannot be serialized.',
+								'default': True,
 							},
 						},
 						'required': ['expression'],
@@ -499,6 +519,30 @@ class OpenBrowserServer:
 				)
 			return resources
 
+		@self.server.list_resource_templates()
+		async def handle_list_resource_templates() -> list[types.ResourceTemplate]:
+			"""List resource templates for session-specific browser resources."""
+			return [
+				types.ResourceTemplate(
+					uriTemplate='browser://sessions/{session_id}/content',
+					name='Session Page Content',
+					description='Clean markdown text of a specific browser session page',
+					mimeType='text/markdown',
+				),
+				types.ResourceTemplate(
+					uriTemplate='browser://sessions/{session_id}/state',
+					name='Session Page State',
+					description='Interactive elements and metadata of a specific browser session page',
+					mimeType='application/json',
+				),
+				types.ResourceTemplate(
+					uriTemplate='browser://sessions/{session_id}/accessibility',
+					name='Session Accessibility Tree',
+					description='Accessibility tree of a specific browser session page',
+					mimeType='application/json',
+				),
+			]
+
 		@self.server.read_resource()
 		async def handle_read_resource(uri: str) -> list[ReadResourceContents]:
 			"""Read a browser resource by URI."""
@@ -522,7 +566,28 @@ class OpenBrowserServer:
 				a11y_json = await self._get_accessibility_tree()
 				return [ReadResourceContents(content=a11y_json, mime_type='application/json')]
 
+			# Check for session-specific resource URIs
+			session_match = re.match(r'browser://sessions/([^/]+)/(content|state|accessibility)', uri_str)
+			if session_match:
+				session_id = session_match.group(1)
+				resource_type = session_match.group(2)
+				content = await self._read_session_resource(session_id, resource_type)
+				mime = 'text/markdown' if resource_type == 'content' else 'application/json'
+				return [ReadResourceContents(content=content, mime_type=mime)]
+
 			return [ReadResourceContents(content=f'Unknown resource: {uri_str}', mime_type='text/plain')]
+
+		@self.server.subscribe_resource()
+		async def handle_subscribe_resource(uri: AnyUrl) -> None:
+			self._subscribed_resources.add(str(uri))
+
+		@self.server.unsubscribe_resource()
+		async def handle_unsubscribe_resource(uri: AnyUrl) -> None:
+			self._subscribed_resources.discard(str(uri))
+
+		# Store references for testing
+		self._handle_subscribe = handle_subscribe_resource
+		self._handle_unsubscribe = handle_unsubscribe_resource
 
 		@self.server.list_prompts()
 		async def handle_list_prompts() -> list[types.Prompt]:
@@ -534,8 +599,20 @@ class OpenBrowserServer:
 			"""Handle tool execution."""
 			start_time = time.time()
 			error_msg = None
+			# Capture MCP session reference for notifications
+			try:
+				self._mcp_session = self.server.request_context.session
+			except (LookupError, AttributeError):
+				pass
 			try:
 				result = await self._execute_tool(name, arguments or {})
+				# Send resource notifications for state-changing tools
+				state_changing_tools = {
+					'browser_navigate', 'browser_click', 'browser_type',
+					'browser_go_back', 'browser_scroll', 'browser_find_and_scroll',
+				}
+				if name in state_changing_tools and self.browser_session:
+					await self._send_resource_notifications()
 				return [types.TextContent(type='text', text=result)]
 			except Exception as e:
 				error_msg = str(e)
@@ -630,10 +707,15 @@ class OpenBrowserServer:
 				return await self._get_accessibility_tree(
 					max_depth=arguments.get('max_depth', -1),
 					include_ignored=arguments.get('include_ignored', False),
+					output_format=arguments.get('format', 'tree'),
 				)
 
 			elif tool_name == 'browser_execute_js':
-				return await self._execute_js(arguments['expression'])
+				return await self._execute_js(
+					arguments['expression'],
+					await_promise=arguments.get('await_promise', True),
+					return_by_value=arguments.get('return_by_value', True),
+				)
 
 		return f'Unknown tool: {tool_name}'
 
@@ -1066,7 +1148,7 @@ class OpenBrowserServer:
 			logger.error(f'Find and scroll failed: {e}', exc_info=True)
 			return f"Text '{text}' not found or not visible on page"
 
-	async def _get_accessibility_tree(self, max_depth: int = -1, include_ignored: bool = False) -> str:
+	async def _get_accessibility_tree(self, max_depth: int = -1, include_ignored: bool = False, output_format: str = 'tree') -> str:
 		"""Get the accessibility tree of the current page."""
 		if not self.browser_session:
 			return 'Error: No browser session active'
@@ -1107,6 +1189,26 @@ class OpenBrowserServer:
 				node_map[enhanced.ax_node_id] = node_info
 				nodes.append(node_info)
 
+			total_nodes_in_page = len(nodes)
+
+			# Build parent map for flat format
+			parent_map: dict[str, str | None] = {}
+			for node in nodes:
+				for child_id in node.get('children', []):
+					parent_map[child_id] = node['id']
+
+			def _count_tree_nodes(node_id: str, depth: int) -> int:
+				"""Count nodes in the depth-limited tree."""
+				node = node_map.get(node_id)
+				if not node:
+					return 0
+				if max_depth >= 0 and depth > max_depth:
+					return 0
+				count = 1
+				for child_id in node.get('children', []):
+					count += _count_tree_nodes(child_id, depth + 1)
+				return count
+
 			def _build_tree(node_id: str, depth: int) -> dict[str, Any] | None:
 				"""Recursively build tree structure with depth limit."""
 				node = node_map.get(node_id)
@@ -1127,6 +1229,21 @@ class OpenBrowserServer:
 						result['children'] = children
 				return result
 
+			def _collect_flat_nodes(node_id: str, depth: int) -> list[dict[str, Any]]:
+				"""Collect nodes in flat format respecting depth limit."""
+				node = node_map.get(node_id)
+				if not node:
+					return []
+				if max_depth >= 0 and depth > max_depth:
+					return []
+
+				flat_node = {k: v for k, v in node.items() if k != 'children'}
+				flat_node['parent_id'] = parent_map.get(node_id)
+				result = [flat_node]
+				for child_id in node.get('children', []):
+					result.extend(_collect_flat_nodes(child_id, depth + 1))
+				return result
+
 			# Build tree from root nodes (nodes not referenced as children)
 			all_child_ids = set()
 			for node in nodes:
@@ -1134,6 +1251,24 @@ class OpenBrowserServer:
 					all_child_ids.add(child_id)
 
 			root_nodes = [n for n in nodes if n['id'] not in all_child_ids]
+
+			# Count depth-limited nodes
+			total_nodes = 0
+			for root in root_nodes:
+				total_nodes += _count_tree_nodes(root['id'], 0)
+
+			if output_format == 'flat':
+				flat_nodes: list[dict[str, Any]] = []
+				for root in root_nodes:
+					flat_nodes.extend(_collect_flat_nodes(root['id'], 0))
+				return json.dumps(
+					{
+						'nodes': flat_nodes,
+						'total_nodes': total_nodes,
+						'total_nodes_in_page': total_nodes_in_page,
+					},
+					indent=2,
+				)
 
 			if root_nodes:
 				tree = []
@@ -1145,18 +1280,19 @@ class OpenBrowserServer:
 				return json.dumps(
 					{
 						'tree': tree if len(tree) > 1 else tree[0] if tree else {},
-						'total_nodes': len(nodes),
+						'total_nodes': total_nodes,
+						'total_nodes_in_page': total_nodes_in_page,
 					},
 					indent=2,
 				)
 			else:
-				return json.dumps({'nodes': nodes, 'total_nodes': len(nodes)}, indent=2)
+				return json.dumps({'nodes': nodes, 'total_nodes': total_nodes, 'total_nodes_in_page': total_nodes_in_page}, indent=2)
 
 		except Exception as e:
 			logger.error(f'Accessibility tree extraction failed: {e}', exc_info=True)
 			return f'Error getting accessibility tree: {str(e)}'
 
-	async def _execute_js(self, expression: str) -> str:
+	async def _execute_js(self, expression: str, await_promise: bool = True, return_by_value: bool = True) -> str:
 		"""Execute JavaScript on the current page and return the result."""
 		if not self.browser_session:
 			return 'Error: No browser session active'
@@ -1171,8 +1307,8 @@ class OpenBrowserServer:
 			result = await cdp_session.cdp_client.send.Runtime.evaluate(
 				params={
 					'expression': expression,
-					'returnByValue': True,
-					'awaitPromise': True,
+					'returnByValue': return_by_value,
+					'awaitPromise': await_promise,
 				},
 				session_id=cdp_session.session_id,
 			)
@@ -1183,6 +1319,16 @@ class OpenBrowserServer:
 				if 'exception' in exception:
 					error_text = exception['exception'].get('description', error_text)
 				return json.dumps({'error': error_text})
+
+			if not return_by_value:
+				remote_obj = result.get('result', {})
+				return json.dumps({
+					'objectId': remote_obj.get('objectId'),
+					'type': remote_obj.get('type', 'undefined'),
+					'subtype': remote_obj.get('subtype'),
+					'className': remote_obj.get('className'),
+					'description': remote_obj.get('description'),
+				}, indent=2)
 
 			value = result.get('result', {}).get('value')
 			result_type = result.get('result', {}).get('type', 'undefined')
@@ -1209,6 +1355,30 @@ class OpenBrowserServer:
 		"""Update the last activity time for a session."""
 		if session_id in self.active_sessions:
 			self.active_sessions[session_id]['last_activity'] = time.time()
+
+	async def _read_session_resource(self, session_id: str, resource_type: str) -> str:
+		"""Read a resource from a specific session by temporarily swapping the active session.
+
+		NOTE: This session swap is safe because MCP stdio transport processes requests sequentially.
+		If switching to a concurrent transport (SSE, WebSocket), use a lock or pass the session directly.
+		"""
+		if session_id not in self.active_sessions:
+			return f'Session {session_id} not found'
+		session_data = self.active_sessions[session_id]
+		session = session_data['session']
+		original = self.browser_session
+		self.browser_session = session
+		try:
+			if resource_type == 'content':
+				return await self._get_text(extract_links=True)
+			elif resource_type == 'state':
+				return await self._get_browser_state(compact=False)
+			elif resource_type == 'accessibility':
+				return await self._get_accessibility_tree()
+			else:
+				return f'Unknown resource type: {resource_type}'
+		finally:
+			self.browser_session = original
 
 	async def _list_sessions(self) -> str:
 		"""List all active browser sessions."""
@@ -1307,6 +1477,22 @@ class OpenBrowserServer:
 				logger.info(f'Auto-closed expired session {session_id}')
 			except Exception as e:
 				logger.error(f'Error auto-closing session {session_id}: {e}')
+
+	async def _send_resource_notifications(self) -> None:
+		"""Send resource updated notifications. If subscriptions exist, only notify subscribed URIs."""
+		if not self._mcp_session:
+			return
+		all_uris = [
+			'browser://current-page/content',
+			'browser://current-page/state',
+			'browser://current-page/accessibility',
+		]
+		uris_to_notify = [u for u in all_uris if u in self._subscribed_resources] if self._subscribed_resources else all_uris
+		for uri_str in uris_to_notify:
+			try:
+				await self._mcp_session.send_resource_updated(AnyUrl(uri_str))
+			except Exception:
+				logger.debug('Failed to send resource notification for %s', uri_str, exc_info=True)
 
 	async def _start_cleanup_task(self) -> None:
 		"""Start the background cleanup task."""
