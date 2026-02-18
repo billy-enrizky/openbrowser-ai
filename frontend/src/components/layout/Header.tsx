@@ -2,7 +2,7 @@
 
 import React from "react";
 import { motion } from "framer-motion";
-import { Bell, Sparkles, User, Monitor, LogOut } from "lucide-react";
+import { Bell, Sparkles, User, Monitor, Globe, LogOut } from "lucide-react";
 import { Button } from "@/components/ui";
 import { ModelSelector } from "./ModelSelector";
 import { useAppStore } from "@/store";
@@ -10,7 +10,7 @@ import { useAuth } from "@/components/auth";
 import { cn } from "@/lib/utils";
 
 export function Header() {
-  const { vncInfo, browserViewerOpen, toggleBrowserViewer } = useAppStore();
+  const { vncInfo, browserViewerOpen, toggleBrowserViewer, useCurrentBrowser, setUseCurrentBrowser, extensionConnected } = useAppStore();
   const { authEnabled, user, logout } = useAuth();
   const hasVncSession = !!vncInfo;
   const userLabel = user?.email || user?.name || user?.username || "User";
@@ -47,6 +47,34 @@ export function Header() {
 
         {/* Center: Plan status + View Browser button */}
         <div className="flex items-center gap-3">
+          {/* Use Current Browser Toggle */}
+          <motion.button
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+            onClick={() => setUseCurrentBrowser(!useCurrentBrowser)}
+            className={cn(
+              "flex items-center gap-2 px-3 py-1.5 rounded-lg transition-all border",
+              useCurrentBrowser
+                ? "bg-amber-500/20 text-amber-300 border-amber-500/30"
+                : "bg-zinc-800/50 text-zinc-400 hover:bg-zinc-700/50 border-transparent"
+            )}
+            title={useCurrentBrowser
+              ? "Using your current browser (extension connected)"
+              : "Switch to use your current browser with the OpenBrowser extension"
+            }
+          >
+            <Globe className={cn("w-4 h-4", useCurrentBrowser && "text-amber-400")} />
+            <span className="text-sm font-medium">
+              {useCurrentBrowser ? "Current Browser" : "New Browser"}
+            </span>
+            {useCurrentBrowser && (
+              <span className={cn(
+                "w-2 h-2 rounded-full",
+                extensionConnected ? "bg-green-400" : "bg-red-400 animate-pulse"
+              )} />
+            )}
+          </motion.button>
+
           {/* View Browser Button - Always clickable, shows empty state if no VNC session */}
           <motion.button
             whileHover={{ scale: 1.02 }}
