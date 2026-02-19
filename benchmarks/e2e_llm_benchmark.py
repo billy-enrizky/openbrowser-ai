@@ -119,7 +119,7 @@ class MCPClient:
         return "\n".join(texts) if texts else "(no output)"
 
     async def stop(self) -> None:
-        """Stop the MCP server subprocess and kill any browser it launched."""
+        """Stop the MCP server subprocess."""
         if self._process:
             try:
                 self._process.terminate()
@@ -127,13 +127,6 @@ class MCPClient:
             except Exception:
                 self._process.kill()
             self._process = None
-        # Kill Chrome to avoid profile lock conflicts between tasks
-        for sig_name in ["chromium", "chrome"]:
-            subprocess.run(
-                ["pkill", "-f", sig_name],
-                capture_output=True, timeout=5,
-            )
-        await asyncio.sleep(1)
 
     def _send_request(self, method: str, params: dict) -> dict:
         """Send a JSON-RPC request and read the response."""
@@ -159,37 +152,20 @@ class MCPClient:
         self._process.stdin.flush()
 
     def _send_and_read(self, request: dict) -> dict:
-        """Send request and read the matching response by id, skipping
-        notifications and out-of-order messages."""
+        """Send request and read response line."""
         assert self._process and self._process.stdin and self._process.stdout
         line = json.dumps(request) + "\n"
         self._process.stdin.write(line.encode())
         self._process.stdin.flush()
 
-        expected_id = request.get("id")
-
-        # Keep reading lines until we find the response with matching id
-        for _ in range(200):  # safety limit
-            response_line = self._process.stdout.readline()
-            if not response_line:
-                return {"error": "No response from MCP server (EOF)"}
-            try:
-                resp = json.loads(response_line)
-            except json.JSONDecodeError:
-                continue  # skip non-JSON lines (e.g. log output)
-
-            # Skip JSON-RPC notifications (no id field)
-            if "id" not in resp:
-                continue
-
-            # Match by request id
-            if resp.get("id") == expected_id:
-                return resp
-
-            # Wrong id -- skip (stale response from a previous request)
-            logger.debug("    Skipped response id=%s (expected %s)", resp.get("id"), expected_id)
-
-        return {"error": f"No matching response for request id={expected_id}"}
+        # Read response line
+        response_line = self._process.stdout.readline()
+        if not response_line:
+            return {"error": "No response from MCP server"}
+        try:
+            return json.loads(response_line)
+        except json.JSONDecodeError as e:
+            return {"error": f"Invalid JSON response: {e}"}
 
 
 # ---------------------------------------------------------------------------
@@ -293,10 +269,6 @@ SERVERS = {
         "command": "uvx",
         "args": ["openbrowser-ai[mcp]", "--mcp"],
     },
-    "openbrowser-1tools": {
-        "command": "uvx",
-        "args": ["openbrowser-ai[mcp]==0.1.21", "--mcp"],
-    },
     "playwright": {
         "command": "npx",
         "args": ["@playwright/mcp@latest"],
@@ -309,7 +281,7 @@ SERVERS = {
 }
 
 DEFAULT_MODEL = "us.anthropic.claude-sonnet-4-6"
-MAX_TURNS = 50
+MAX_TURNS = 20
 SYSTEM_PROMPT = (
     "You are a browser automation agent. Complete the task using the available "
     "browser tools. Be concise in your final answer."
@@ -335,9 +307,6 @@ async def run_task(
     logger.info("  [%s/%s] Starting...", server_name, task_name)
 
     tool_call_count = 0
-    total_response_chars = 0
-    total_input_tokens = 0
-    total_output_tokens = 0
     result_text = ""
     error_msg = None
     start = time.monotonic()
@@ -374,13 +343,6 @@ async def run_task(
                 logger.error("  [%s/%s] %s", server_name, task_name, error_msg)
                 break
 
-            # Accumulate token usage from Bedrock API
-            usage = response.get("usage", {})
-            turn_input = usage.get("inputTokens", 0)
-            turn_output = usage.get("outputTokens", 0)
-            total_input_tokens += turn_input
-            total_output_tokens += turn_output
-
             stop_reason = response.get("stopReason", "")
             output_message = response.get("output", {}).get("message", {})
             content_blocks = output_message.get("content", [])
@@ -407,28 +369,13 @@ async def run_task(
                 tool_input = tool_use.get("input", {})
                 tool_use_id = tool_use["toolUseId"]
 
-                # Log tool input (first 200 chars)
-                if "code" in tool_input:
-                    input_preview = tool_input["code"][:200]
-                else:
-                    input_preview = json.dumps(tool_input)[:200]
                 logger.info(
-                    "    [%s/%s] Turn %d: %s -- %s",
+                    "    [%s/%s] Turn %d: %s",
                     server_name, task_name, turn + 1, tool_name,
-                    input_preview.replace("\n", " | "),
                 )
 
-                # Call MCP tool with timing
-                tool_start = time.monotonic()
+                # Call MCP tool
                 tool_output = await mcp.call_tool(tool_name, tool_input)
-                tool_duration = time.monotonic() - tool_start
-                total_response_chars += len(tool_output)
-                logger.info(
-                    "    [%s/%s] Turn %d result (%.1fs, %d chars): %s",
-                    server_name, task_name, turn + 1,
-                    tool_duration, len(tool_output),
-                    tool_output[:200].replace("\n", " | "),
-                )
 
                 # Truncate large outputs to avoid token limits
                 if len(tool_output) > 50000:
@@ -458,16 +405,11 @@ async def run_task(
     duration_s = time.monotonic() - start
     success = task["verify"](result_text) if not error_msg else False
 
-    response_tokens_est = total_response_chars // 4
-
     logger.info(
-        "  [%s/%s] %s in %.1fs (%d tool calls, %d resp chars, "
-        "bedrock: %d input + %d output = %d total tokens)",
+        "  [%s/%s] %s in %.1fs (%d tool calls)",
         server_name, task_name,
         "PASS" if success else "FAIL",
-        duration_s, tool_call_count, total_response_chars,
-        total_input_tokens, total_output_tokens,
-        total_input_tokens + total_output_tokens,
+        duration_s, tool_call_count,
     )
 
     return {
@@ -475,10 +417,6 @@ async def run_task(
         "success": success,
         "duration_s": round(duration_s, 1),
         "tool_calls": tool_call_count,
-        "response_chars": total_response_chars,
-        "response_tokens_est": response_tokens_est,
-        "bedrock_input_tokens": total_input_tokens,
-        "bedrock_output_tokens": total_output_tokens,
         "result": result_text[:500],
         "error": error_msg,
     }
@@ -494,21 +432,12 @@ def aggregate_results(task_results: list[dict]) -> dict:
     passed = sum(1 for t in task_results if t["success"])
     total_duration = sum(t["duration_s"] for t in task_results)
     total_tools = sum(t["tool_calls"] for t in task_results)
-    total_resp_chars = sum(t.get("response_chars", 0) for t in task_results)
-    total_resp_tokens = sum(t.get("response_tokens_est", 0) for t in task_results)
-    total_bedrock_input = sum(t.get("bedrock_input_tokens", 0) for t in task_results)
-    total_bedrock_output = sum(t.get("bedrock_output_tokens", 0) for t in task_results)
     return {
         "total_tasks": total,
         "passed": passed,
         "total_duration_s": round(total_duration, 1),
         "total_tool_calls": total_tools,
         "avg_tool_calls": round(total_tools / total, 1) if total else 0,
-        "total_response_chars": total_resp_chars,
-        "total_response_tokens_est": total_resp_tokens,
-        "total_bedrock_input_tokens": total_bedrock_input,
-        "total_bedrock_output_tokens": total_bedrock_output,
-        "total_bedrock_tokens": total_bedrock_input + total_bedrock_output,
     }
 
 
@@ -528,11 +457,6 @@ def format_summary_table(server_results: dict) -> str:
         ("Total Duration (s)", "total_duration_s", ".1f"),
         ("Total Tool Calls", "total_tool_calls", "d"),
         ("Avg Tool Calls/Task", "avg_tool_calls", ".1f"),
-        ("Total Response Chars", "total_response_chars", ",d"),
-        ("Est. Response Tokens", "total_response_tokens_est", ",d"),
-        ("Bedrock Input Tokens", "total_bedrock_input_tokens", ",d"),
-        ("Bedrock Output Tokens", "total_bedrock_output_tokens", ",d"),
-        ("Bedrock Total Tokens", "total_bedrock_tokens", ",d"),
     ]:
         row = f"{label:<25s}"
         for name in names:
@@ -618,14 +542,9 @@ async def run_benchmark(
         }
 
         logger.info(
-            "  Server %s: %d/%d passed, %.1fs total, %d tool calls, "
-            "%d resp chars, bedrock: %d input + %d output = %d total tokens",
+            "  Server %s: %d/%d passed, %.1fs total, %d tool calls",
             server_name, summary["passed"], summary["total_tasks"],
             summary["total_duration_s"], summary["total_tool_calls"],
-            summary["total_response_chars"],
-            summary["total_bedrock_input_tokens"],
-            summary["total_bedrock_output_tokens"],
-            summary["total_bedrock_tokens"],
         )
         logger.info("")
 
