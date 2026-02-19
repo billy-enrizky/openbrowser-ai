@@ -56,8 +56,13 @@ async def vnc_websocket_proxy(
         await websocket.close(code=4004, reason=f"No VNC session for task {task_id}")
         return
 
-    # 3. Accept the frontend WebSocket with binary subprotocol (noVNC requirement)
-    await websocket.accept(subprotocol="binary")
+    # 3. Accept the frontend WebSocket.
+    # Only echo the "binary" subprotocol if the client requested it;
+    # replying with a subprotocol the client didn't ask for violates
+    # RFC 6455 and causes browsers to tear down the connection.
+    requested = websocket.scope.get("subprotocols", [])
+    subproto = "binary" if "binary" in requested else None
+    await websocket.accept(subprotocol=subproto)
 
     # 4. Connect to local websockify
     local_url = f"ws://localhost:{session.websockify_port}"
