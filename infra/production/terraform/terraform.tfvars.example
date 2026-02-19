@@ -16,6 +16,14 @@ backend_port          = 8000
 backend_image     = ""
 backend_image_tag = "latest"
 
+# PostgreSQL (RDS)
+postgres_db_name              = "openbrowser"
+postgres_username             = "openbrowser"
+postgres_instance_class       = "db.t4g.micro"
+postgres_allocated_storage    = 20
+postgres_backup_retention_days = 7
+postgres_skip_final_snapshot  = true
+
 # CORS origins: additional origins beyond the auto-derived CloudFront domain.
 # The CloudFront domain and localhost:3000 are always included automatically.
 # Add any extra origins here (e.g., staging domains, custom domains).
