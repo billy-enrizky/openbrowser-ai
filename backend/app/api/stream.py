@@ -18,7 +18,7 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import StreamingResponse
 
-from app.core.auth import get_current_user, verify_token_string
+from app.core.auth import AuthPrincipal, get_current_user, verify_token_string
 from app.core.config import settings
 from app.models.schemas import (
     AgentType,
@@ -34,6 +34,7 @@ from app.models.schemas import (
 )
 from app.services.agent_service import agent_manager
 from app.services.event_buffer import event_buffer
+from app.websocket.handler import _persist_assistant_message, _persist_task_user_message
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +48,7 @@ router = APIRouter()
 @router.post("/tasks/start")
 async def start_task(
     req: CreateTaskRequest,
-    _user: dict = Depends(get_current_user),
+    principal: AuthPrincipal | None = Depends(get_current_user),
 ):
     """Start a new agent task and return its ID.
 
@@ -55,6 +56,7 @@ async def start_task(
     ``GET /api/v1/tasks/{task_id}/stream`` to receive real-time events.
     """
     task_id = str(uuid4())
+    conversation_id = req.conversation_id
 
     # ---- build callbacks that push to the event buffer ----
 
@@ -127,20 +129,41 @@ async def start_task(
         on_vnc_info_callback=on_vnc_info,
     )
 
-    # Push the initial "task_started" event
+    # ---- persist user message ----
+    try:
+        conversation_id = await _persist_task_user_message(
+            principal=principal,
+            task_id=task_id,
+            task=req.task,
+            conversation_id=conversation_id,
+        )
+    except Exception as persistence_error:
+        logger.exception("Failed to persist start_task message: %s", persistence_error)
+
+    # Push the initial "task_started" event (include conversation_id)
     event_buffer.push(
         task_id,
         "task_started",
-        {"task": req.task, "agent_type": req.agent_type.value},
+        {
+            "task": req.task,
+            "agent_type": req.agent_type.value,
+            "conversation_id": conversation_id,
+        },
     )
 
     # Run agent in background
-    asyncio.create_task(_run_agent(session))
+    asyncio.create_task(
+        _run_agent(session, principal=principal, conversation_id=conversation_id)
+    )
 
     return {"task_id": task_id}
 
 
-async def _run_agent(session) -> None:
+async def _run_agent(
+    session,
+    principal: AuthPrincipal | None = None,
+    conversation_id: str | None = None,
+) -> None:
     """Run the agent task and push completion/failure events."""
     task_id = session.task_id
     try:
@@ -177,13 +200,53 @@ async def _run_agent(session) -> None:
                 attachments=[FileAttachment(**a) for a in attachments],
             ).model_dump(),
         )
+
+        # Persist assistant completion message
+        try:
+            await _persist_assistant_message(
+                principal=principal,
+                task_id=task_id,
+                conversation_id=conversation_id,
+                content=result.get("result", "") or "Task completed successfully.",
+                metadata={
+                    "success": result.get("success", False),
+                    "total_steps": result.get("total_steps", 0),
+                    "duration_seconds": result.get("duration_seconds", 0),
+                    "attachments": attachments,
+                },
+            )
+        except Exception as persistence_error:
+            logger.exception("Failed to persist task completion: %s", persistence_error)
+
     except asyncio.CancelledError:
         event_buffer.push(
             task_id, "task_cancelled", {"reason": "Task was cancelled"}
         )
+        try:
+            await _persist_assistant_message(
+                principal=principal,
+                task_id=task_id,
+                conversation_id=conversation_id,
+                content="Task was cancelled",
+                metadata={"cancelled": True},
+            )
+        except Exception as persistence_error:
+            logger.exception("Failed to persist cancellation: %s", persistence_error)
+
     except Exception as e:
         logger.exception("Task %s failed: %s", task_id, e)
         event_buffer.push(task_id, "task_failed", {"error": str(e)})
+        try:
+            await _persist_assistant_message(
+                principal=principal,
+                task_id=task_id,
+                conversation_id=conversation_id,
+                content=f"Error: {e}",
+                metadata={"is_error": True},
+            )
+        except Exception as persistence_error:
+            logger.exception("Failed to persist error: %s", persistence_error)
+
     finally:
         event_buffer.mark_complete(task_id)
         # Delayed cleanup
@@ -201,7 +264,7 @@ async def _run_agent(session) -> None:
 async def poll_task_events(
     task_id: str,
     since: int = Query(default=0),
-    _user: dict = Depends(get_current_user),
+    _user: AuthPrincipal | None = Depends(get_current_user),
 ):
     """Return new events for a task since the given event ID.
 
@@ -323,7 +386,7 @@ async def stream_task_events(
 @router.post("/tasks/{task_id}/cancel")
 async def cancel_task(
     task_id: str,
-    _user: dict = Depends(get_current_user),
+    _user: AuthPrincipal | None = Depends(get_current_user),
 ):
     """Cancel a running task."""
     session = await agent_manager.get_session(task_id)
