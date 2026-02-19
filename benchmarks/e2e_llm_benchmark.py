@@ -23,7 +23,6 @@ import logging
 import os
 import re
 import subprocess
-import sys
 import time
 from datetime import datetime, timezone
 
@@ -34,6 +33,19 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(message)s",
 )
 logger = logging.getLogger(__name__)
+
+
+def _kill_stale_browsers():
+    """Kill all Chrome/Chromium processes to ensure a clean browser state."""
+    for pattern in ["chromium", "chrome", "Chromium", "Google Chrome"]:
+        try:
+            subprocess.run(
+                ["pkill", "-9", "-f", pattern],
+                capture_output=True, timeout=5,
+            )
+        except Exception:
+            pass
+    time.sleep(0.5)
 
 
 # ---------------------------------------------------------------------------
@@ -267,7 +279,7 @@ TASKS = [
 SERVERS = {
     "openbrowser": {
         "command": "uvx",
-        "args": ["openbrowser-ai[mcp]", "--mcp"],
+        "args": ["openbrowser-ai[mcp]==0.1.21", "--mcp"],
     },
     "playwright": {
         "command": "npx",
@@ -283,8 +295,19 @@ SERVERS = {
 DEFAULT_MODEL = "us.anthropic.claude-sonnet-4-6"
 MAX_TURNS = 20
 SYSTEM_PROMPT = (
-    "You are a browser automation agent. Complete the task using the available "
-    "browser tools. Be concise in your final answer."
+    "You are a browser automation agent. Use the execute_code tool. "
+    "Give the answer directly, no markdown.\n\n"
+    "RULES:\n"
+    "1. Do EVERYTHING in 1-2 execute_code calls max. Combine navigate + get state + interact + extract + print answer in ONE call.\n"
+    "2. ALWAYS `await wait(2)` after navigate() before reading the page.\n"
+    "3. ALWAYS get state with `state = await browser.get_browser_state_summary()` to find element indices before click/input.\n"
+    "4. evaluate() JS tips: ALWAYS wrap multi-line JS in an explicit IIFE with return: "
+    "`(function(){ var x = ...; return x; })()`. "
+    "Arrow functions like `.map(e => e.text)` work fine inside an IIFE. "
+    "Single-line expressions like `document.title` work directly. "
+    "For returning objects, use: `(function(){ return {key: value}; })()`.\n"
+    "5. NEVER call done(). Just print() your final answer.\n"
+    "6. Do NOT make separate calls to verify or summarize."
 )
 
 
@@ -305,6 +328,10 @@ async def run_task(
     """
     task_name = task["name"]
     logger.info("  [%s/%s] Starting...", server_name, task_name)
+
+    # Kill stale Chrome/Chromium processes before each task to avoid
+    # interfering with the fresh browser session the MCP server will create.
+    _kill_stale_browsers()
 
     tool_call_count = 0
     result_text = ""
@@ -350,6 +377,14 @@ async def run_task(
             # Add assistant message to history
             messages.append({"role": "assistant", "content": content_blocks})
 
+            # Debug: log assistant text blocks
+            for block in content_blocks:
+                if "text" in block:
+                    logger.info(
+                        "    [%s/%s] LLM TEXT >>> %s",
+                        server_name, task_name, block["text"][:500],
+                    )
+
             # Check for tool use
             tool_uses = [b for b in content_blocks if "toolUse" in b]
 
@@ -358,6 +393,10 @@ async def run_task(
                 for block in content_blocks:
                     if "text" in block:
                         result_text += block["text"] + "\n"
+                logger.info(
+                    "    [%s/%s] FINAL (stop=%s): %s",
+                    server_name, task_name, stop_reason, result_text[:500],
+                )
                 break
 
             # Execute tool calls and collect results
@@ -374,8 +413,22 @@ async def run_task(
                     server_name, task_name, turn + 1, tool_name,
                 )
 
+                # Debug: log the code being sent to execute_code
+                if tool_name == "execute_code" and "code" in tool_input:
+                    logger.info(
+                        "    [%s/%s] CODE >>>\n%s\n    <<< END CODE",
+                        server_name, task_name, tool_input["code"],
+                    )
+
                 # Call MCP tool
                 tool_output = await mcp.call_tool(tool_name, tool_input)
+
+                # Debug: log the tool output
+                output_preview = tool_output[:2000] if len(tool_output) > 2000 else tool_output
+                logger.info(
+                    "    [%s/%s] OUTPUT >>>\n%s\n    <<< END OUTPUT",
+                    server_name, task_name, output_preview,
+                )
 
                 # Truncate large outputs to avoid token limits
                 if len(tool_output) > 50000:
