@@ -159,20 +159,37 @@ class MCPClient:
         self._process.stdin.flush()
 
     def _send_and_read(self, request: dict) -> dict:
-        """Send request and read response line."""
+        """Send request and read the matching response by id, skipping
+        notifications and out-of-order messages."""
         assert self._process and self._process.stdin and self._process.stdout
         line = json.dumps(request) + "\n"
         self._process.stdin.write(line.encode())
         self._process.stdin.flush()
 
-        # Read response line
-        response_line = self._process.stdout.readline()
-        if not response_line:
-            return {"error": "No response from MCP server"}
-        try:
-            return json.loads(response_line)
-        except json.JSONDecodeError as e:
-            return {"error": f"Invalid JSON response: {e}"}
+        expected_id = request.get("id")
+
+        # Keep reading lines until we find the response with matching id
+        for _ in range(200):  # safety limit
+            response_line = self._process.stdout.readline()
+            if not response_line:
+                return {"error": "No response from MCP server (EOF)"}
+            try:
+                resp = json.loads(response_line)
+            except json.JSONDecodeError:
+                continue  # skip non-JSON lines (e.g. log output)
+
+            # Skip JSON-RPC notifications (no id field)
+            if "id" not in resp:
+                continue
+
+            # Match by request id
+            if resp.get("id") == expected_id:
+                return resp
+
+            # Wrong id -- skip (stale response from a previous request)
+            logger.debug("    Skipped response id=%s (expected %s)", resp.get("id"), expected_id)
+
+        return {"error": f"No matching response for request id={expected_id}"}
 
 
 # ---------------------------------------------------------------------------
