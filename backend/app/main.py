@@ -4,11 +4,13 @@ import logging
 from contextlib import asynccontextmanager
 from uuid import uuid4
 
-from fastapi import FastAPI, WebSocket
+from fastapi import Depends, FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import projects, tasks
+from app.api import chats, projects, stream, tasks, vnc
+from app.core.auth import get_current_user
 from app.core.config import settings
+from app.db.init_db import init_database
 from app.models.schemas import AvailableModelsResponse, LLMModel
 from app.websocket.handler import handle_websocket
 from app.websocket.extension_handler import handle_extension_websocket
@@ -25,6 +27,7 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """Application lifespan handler."""
     logger.info("Starting OpenBrowser Backend API")
+    await init_database()
     yield
     logger.info("Shutting down OpenBrowser Backend API")
 
@@ -46,8 +49,16 @@ app.add_middleware(
 )
 
 # Include routers
-app.include_router(tasks.router, prefix="/api/v1")
-app.include_router(projects.router, prefix="/api/v1")
+# SSE stream router MUST come before tasks router so that literal paths like
+# POST /tasks/start are matched before the parameterised GET /tasks/{task_id}
+# (otherwise FastAPI returns 405 because the path matches but the method doesn't).
+app.include_router(stream.router, prefix="/api/v1")
+app.include_router(tasks.router, prefix="/api/v1", dependencies=[Depends(get_current_user)])
+app.include_router(projects.router, prefix="/api/v1", dependencies=[Depends(get_current_user)])
+# VNC WebSocket proxy (auth handled inside the endpoint via query-param token,
+# since WebSocket connections cannot send custom HTTP headers).
+app.include_router(vnc.router, prefix="/api/v1")
+app.include_router(chats.router, prefix="/api/v1")
 
 
 @app.get("/")
@@ -66,7 +77,7 @@ async def health():
     return {"status": "healthy"}
 
 
-@app.get("/api/v1/models", response_model=AvailableModelsResponse)
+@app.get("/api/v1/models", response_model=AvailableModelsResponse, dependencies=[Depends(get_current_user)])
 async def get_available_models():
     """Get available LLM models based on configured API keys."""
     available_models = settings.get_available_models()
@@ -138,4 +149,3 @@ if __name__ == "__main__":
         port=settings.PORT,
         reload=settings.DEBUG,
     )
-
