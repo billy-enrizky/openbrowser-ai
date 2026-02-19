@@ -20,8 +20,9 @@ SFT_CONFIG = {
     "lora_dropout": 0.05,
     "lora_target_modules": "all-linear",
     # Training
-    "learning_rate": 2e-4,
+    "learning_rate": float(os.environ.get("LEARNING_RATE", "2e-4")),
     "num_epochs": int(os.environ.get("NUM_EPOCHS", "2")),
+    "max_steps": int(os.environ.get("MAX_STEPS", "-1")),  # -1 = use num_epochs
     "batch_size": 2,
     "gradient_accumulation_steps": 8,
     "max_seq_length": 512,
@@ -74,8 +75,10 @@ GRPO_CONFIG = {
 ONLINE_GRPO_CONFIG = {
     **GRPO_CONFIG,
     "group_size": 4,  # G=4 for robust GRPO advantages (v10 used G=2, saw reward variance)
-    "kl_coeff": 0.25,  # Increased from 0.1 -- v10 showed policy divergence (kl=-1.35 at step 25)
+    "kl_coeff": 0.1,  # Lowered from 0.25 -- strong SFT checkpoint means pg_loss=0 most steps, so KL-only updates degrade model
     "formfactory_port": int(os.environ.get("FORMFACTORY_PORT", "5050")),
+    "temperature": 1.0,  # Higher temp for rollout diversity -- at 0.7 the SFT model produces identical outputs
+    "min_reward_variance": 0.01,  # Skip gradient update when within-group reward variance is below this
     "browser_headless": True,
     "action_timeout_s": 10,  # Increased from 5s -- v10 hit timeouts on long descriptions
     "reward_weights": {
@@ -83,14 +86,18 @@ ONLINE_GRPO_CONFIG = {
         "field_accuracy": 0.4,
         "execution_completeness": 0.2,
     },
+    # Early stopping: stop after patience gradient updates without improvement
+    "early_stopping_patience": int(os.environ.get("EARLY_STOPPING_PATIENCE", "50")),
+    "early_stopping_window": int(os.environ.get("EARLY_STOPPING_WINDOW", "20")),
 }
 
 # Data Config
 DATA_CONFIG = {
-    "train_file": os.environ.get("TRAIN_FILE", "data/processed/formfactory_sft.jsonl"),
-    "eval_split": 0.1,
+    "train_file": os.environ.get("TRAIN_FILE", "data/processed/formfactory_sft_train.jsonl"),
+    "val_file": os.environ.get("VAL_FILE", "data/processed/formfactory_sft_val.jsonl"),
+    "test_file": os.environ.get("TEST_FILE", "data/processed/formfactory_sft_test.jsonl"),
     "max_train_samples": int(os.environ.get("MAX_TRAIN_SAMPLES", "5000")),
-    "max_eval_samples": 500,
+    "max_eval_samples": int(os.environ.get("MAX_EVAL_SAMPLES", "500")),
 }
 
 # S3 Config for checkpoint persistence
