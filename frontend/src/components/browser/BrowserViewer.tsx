@@ -414,7 +414,7 @@ export function BrowserViewer({ className }: BrowserViewerProps) {
                 className="max-w-full max-h-full object-contain"
               />
               <div className="absolute top-2 right-2 px-2 py-1 bg-zinc-900/80 rounded text-xs text-zinc-400 backdrop-blur-sm">
-                Live screenshot
+                Live browser interaction
               </div>
             </div>
           ) : (
