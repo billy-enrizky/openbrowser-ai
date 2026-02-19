@@ -130,3 +130,47 @@ export interface Message {
     attachments?: FileAttachment[];
   };
 }
+
+export interface ChatConversation {
+  id: string;
+  title: string;
+  status: string;
+  createdAt: Date;
+  updatedAt: Date;
+  lastMessageAt?: Date | null;
+}
+
+export interface BackendChatConversation {
+  id: string;
+  title: string;
+  status: string;
+  created_at: string;
+  updated_at: string;
+  last_message_at?: string | null;
+}
+
+export interface BackendChatMessage {
+  id: string;
+  conversation_id: string;
+  role: "user" | "assistant" | "system";
+  content: string;
+  task_id?: string | null;
+  metadata?: {
+    step_number?: number;
+    is_thinking?: boolean;
+    is_error?: boolean;
+    screenshot?: string;
+    attachments?: FileAttachment[];
+  } | Record<string, unknown>;
+  created_at: string;
+}
+
+export interface ChatListApiResponse {
+  conversations: BackendChatConversation[];
+  active_conversation_id?: string | null;
+}
+
+export interface ChatDetailApiResponse {
+  conversation: BackendChatConversation;
+  messages: BackendChatMessage[];
+}
