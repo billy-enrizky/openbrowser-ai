@@ -63,6 +63,10 @@ class Settings(BaseSettings):
     
     # Redis settings (optional, for session persistence)
     REDIS_URL: str | None = Field(default=None, description="Redis URL for session storage")
+
+    # PostgreSQL settings (chat persistence)
+    DATABASE_URL: str | None = Field(default=None, description="Async PostgreSQL URL for chat persistence")
+    DATABASE_ECHO: bool = Field(default=False, description="Enable SQLAlchemy SQL logging")
     
     # Rate limiting
     MAX_CONCURRENT_AGENTS: int = Field(default=10, description="Max concurrent agent sessions")
