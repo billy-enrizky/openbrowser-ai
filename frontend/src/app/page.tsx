@@ -10,7 +10,7 @@ import { useAuth } from "@/components/auth";
 import { useAppStore } from "@/store";
 import { useTaskStream } from "@/hooks/useTaskStream";
 import { API_BASE_URL } from "@/lib/config";
-import { fetchChatList, fetchConversationDetail, setActiveConversation } from "@/lib/chat-api";
+import { fetchChatList, fetchConversationDetail, setActiveConversation, deleteConversation } from "@/lib/chat-api";
 import type { WSMessage, FileAttachment, LogEntry, VncInfo, AvailableModelsResponse } from "@/types";
 import { cn } from "@/lib/utils";
 
@@ -120,6 +120,7 @@ export default function Home() {
     setMessages,
     setConversations,
     upsertConversation,
+    removeConversation,
     activeConversationId,
     setActiveConversationId,
     agentType,
@@ -303,6 +304,25 @@ export default function Home() {
       setChatError(error instanceof Error ? error.message : "Failed to reset active chat");
     }
   }, [getValidIdToken, setActiveConversationId, setMessages, setVncInfo]);
+
+  const handleDeleteConversation = useCallback(async (conversationId: string) => {
+    setChatError(null);
+    try {
+      const token = await getValidIdToken();
+      await deleteConversation(token, conversationId);
+      removeConversation(conversationId);
+      // If the deleted conversation was active, clear the view
+      if (conversationId === activeConversationId) {
+        setMessages([]);
+        setActiveConversationId(null);
+        setCurrentTaskId(null);
+        setVncInfo(null);
+        await setActiveConversation(token, null);
+      }
+    } catch (error) {
+      setChatError(error instanceof Error ? error.message : "Failed to delete conversation");
+    }
+  }, [activeConversationId, getValidIdToken, removeConversation, setActiveConversationId, setMessages, setVncInfo]);
 
   // Handle incoming WebSocket messages
   const handleWSMessage = useCallback((wsMessage: WSMessage) => {
@@ -515,6 +535,7 @@ export default function Home() {
       <Sidebar
         onNewChat={handleNewChat}
         onSelectConversation={handleSelectConversation}
+        onDeleteConversation={handleDeleteConversation}
         chatsLoading={chatsLoading}
       />
 
