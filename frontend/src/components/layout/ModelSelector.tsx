@@ -39,11 +39,11 @@ export function ModelSelector() {
   }, []);
 
   // Get current model info
-  const currentModel = availableModels.find((m) => m.id === selectedModel);
+  const currentModel = availableModels.find((m: LLMModel) => m.id === selectedModel);
   const currentProvider = currentModel ? providerConfig[currentModel.provider] : null;
 
   // Group models by provider
-  const modelsByProvider = availableModels.reduce((acc, model) => {
+  const modelsByProvider = availableModels.reduce((acc: Record<string, LLMModel[]>, model: LLMModel) => {
     if (!acc[model.provider]) {
       acc[model.provider] = [];
     }
@@ -151,7 +151,7 @@ export function ModelSelector() {
                     </div>
 
                     {/* Models */}
-                    {models.map((model) => {
+                    {(models as LLMModel[]).map((model: LLMModel) => {
                       const isSelected = model.id === selectedModel;
                       return (
                         <button
