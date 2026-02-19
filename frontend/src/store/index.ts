@@ -205,7 +205,7 @@ export const useAppStore = create<AppState>()(
           messages: [],
           conversations: [],
           activeConversationId: null,
-        } as ReturnType<typeof useAppStore.getState>;
+        } as unknown as AppState;
       },
       partialize: (state) => ({
         tasks: state.tasks.slice(0, 50), // Keep last 50 tasks
