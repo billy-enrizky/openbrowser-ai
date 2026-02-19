@@ -61,7 +61,7 @@ bridges MCP servers to OpenClaw agents.
 }
 ```
 
-All 11 browser tools will be registered as native OpenClaw agent tools.
+The `execute_code` tool will be registered as a native OpenClaw agent tool.
 
 For OpenClaw plugin documentation, see [docs.openclaw.ai/tools/plugin](https://docs.openclaw.ai/tools/plugin).
 
@@ -80,38 +80,24 @@ Add to your project's `.mcp.json`:
 }
 ```
 
-## Available Tools
+## Available Tool
 
-### Navigation
+The MCP server exposes a single `execute_code` tool that runs Python code in a persistent namespace with browser automation functions. The LLM writes Python code to navigate, interact, and extract data.
 
-| Tool | Description |
-|------|-------------|
-| `browser_navigate` | Navigate to a URL, optionally in a new tab |
-| `browser_go_back` | Go back to the previous page |
-| `browser_scroll` | Scroll the page. Use `target_text` to find text and scroll to it |
+**Functions** (all async, use `await`):
 
-### Interaction
+| Category | Functions |
+|----------|-----------|
+| **Navigation** | `navigate(url, new_tab)`, `go_back()`, `wait(seconds)` |
+| **Interaction** | `click(index)`, `input_text(index, text, clear)`, `scroll(down, pages, index)`, `send_keys(keys)`, `upload_file(index, path)` |
+| **Dropdowns** | `select_dropdown(index, text)`, `dropdown_options(index)` |
+| **Tabs** | `switch(tab_id)`, `close(tab_id)` |
+| **JavaScript** | `evaluate(code)` -- run JS in page context, returns Python objects |
+| **State** | `browser.get_browser_state_summary()` -- page metadata and interactive elements |
+| **CSS** | `get_selector_from_index(index)` -- CSS selector for an element |
+| **Completion** | `done(text, success)` -- signal task completion |
 
-| Tool | Description |
-|------|-------------|
-| `browser_click` | Click an element by its index |
-| `browser_type` | Type text into an input field |
-
-### Content Extraction
-
-| Tool | Description |
-|------|-------------|
-| `browser_get_state` | Get page metadata and interactive elements. Use `filter_by`/`filter_query` to search elements |
-| `browser_get_text` | Get page content as markdown. Use `search` param to grep with regex |
-| `browser_get_accessibility_tree` | Get the page accessibility tree |
-| `browser_execute_js` | Execute JavaScript in the page context |
-
-### Tab and Session Management
-
-| Tool | Description |
-|------|-------------|
-| `browser_tab` | Manage tabs: `action=list` / `switch` / `close` |
-| `browser_session` | Manage sessions: `action=list` / `close` / `close_all` |
+**Pre-imported libraries**: `json`, `csv`, `re`, `datetime`, `asyncio`, `Path`, `requests`, `numpy`, `pandas`, `matplotlib`, `BeautifulSoup`
 
 ## Benchmark: Token Efficiency
 
@@ -172,16 +158,6 @@ Set these in your `.mcp.json`:
 }
 ```
 
-## MCP Resources
-
-When a browser session is active, three MCP resources are available:
-
-| URI | Type | Description |
-|-----|------|-------------|
-| `browser://current-page/content` | text/markdown | Page content as markdown |
-| `browser://current-page/state` | application/json | Interactive elements and metadata |
-| `browser://current-page/accessibility` | application/json | Accessibility tree |
-
 ## Skills
 
 The plugin includes 5 built-in skills that provide guided workflows for common browser automation tasks. Each skill is triggered automatically when the user's request matches its description.
@@ -194,12 +170,12 @@ The plugin includes 5 built-in skills that provide guided workflows for common b
 | `page-analysis` | `skills/page-analysis/` | Analyze page content, structure, metadata, and interactive elements |
 | `accessibility-audit` | `skills/accessibility-audit/` | Audit pages for WCAG compliance, heading structure, labels, alt text, ARIA, and landmarks |
 
-Each skill file (`SKILL.md`) contains YAML frontmatter with trigger conditions and a step-by-step workflow that references the MCP tools listed above.
+Each skill file (`SKILL.md`) contains YAML frontmatter with trigger conditions and a step-by-step workflow using the `execute_code` tool.
 
 ## Testing and Benchmarks
 
 ```bash
-# E2E test all 11 MCP tools against the published PyPI package
+# E2E test the MCP server against the published PyPI package
 uv run python benchmarks/e2e_published_test.py
 
 # Run MCP benchmarks (5-step Wikipedia workflow)
