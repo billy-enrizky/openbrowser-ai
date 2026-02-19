@@ -1,6 +1,6 @@
 # OpenBrowser-AI Production Infrastructure (Terraform)
 
-This directory defines AWS infrastructure for OpenBrowser-AI: VPC, single EC2 backend (Docker), internal ALB, API Gateway (HTTP API + VPC Link), Cognito, DynamoDB, ECR, Secrets Manager, and S3 + CloudFront for the frontend.
+This directory defines AWS infrastructure for OpenBrowser-AI: VPC, single EC2 backend (Docker), internal ALB, API Gateway (HTTP API + VPC Link), Cognito, PostgreSQL (RDS), DynamoDB, ECR, Secrets Manager, and S3 + CloudFront for the frontend.
 
 ## Architecture
 
@@ -16,7 +16,8 @@ Internal ALB (:80)
    ▼
 EC2 (private subnet) — Docker backend :8000
    │
-   ├── DynamoDB (sessions)
+   ├── PostgreSQL RDS (chat persistence)
+   ├── DynamoDB (legacy/session data)
    ├── Secrets Manager (LLM keys)
    └── ECR (pull image)
 ```
@@ -30,9 +31,10 @@ EC2 (private subnet) — Docker backend :8000
 |------|--------|
 | `versions.tf` | Terraform/provider requirements, AWS provider, data sources |
 | `vpc.tf` | VPC, public/private subnets, NAT, route tables |
-| `security_groups.tf` | ALB and backend EC2 security groups |
+| `security_groups.tf` | ALB, backend EC2, and PostgreSQL security groups |
 | `alb.tf` | Internal ALB, target group, HTTP listener |
 | `backend.tf` | EC2 instance, user_data, target group attachment |
+| `rds.tf` | PostgreSQL RDS instance and subnet group |
 | `api_gateway.tf` | HTTP API, VPC Link, routes, optional JWT authorizer |
 | `iam.tf` | Backend EC2 IAM role, ECR/DynamoDB/Secrets/SSM permissions |
 | `ecr.tf` | ECR repository and lifecycle policy for backend image |
@@ -100,6 +102,7 @@ EC2 (private subnet) — Docker backend :8000
 |-----------|--------|
 | **VPC** | Public/private subnets (2 AZs), NAT, DynamoDB VPC endpoint |
 | **EC2 backend** | Single instance in private subnet; Docker runs backend image from ECR |
+| **PostgreSQL (RDS)** | Backend chat persistence database |
 | **ALB** | Internal ALB, health check `/health`, forwards to backend:8000 |
 | **API Gateway** | HTTP API with VPC Link to ALB; public `GET /health`, optional JWT on other routes |
 | **Cognito** | User pool, app client, hosted domain (see `AUTHENTICATION.md` / `COGNITO_SETUP.md`) |
@@ -115,6 +118,7 @@ See `variables.tf`. Key ones:
 - **backend_image** — Leave `""` to use the ECR repo Terraform creates; set to a full URI to use another registry.
 - **backend_image_tag** — Tag to pull from the Terraform ECR repo (default `latest`).
 - **backend_port** — Port the backend listens on (default `8000`).
+- **postgres_db_name** / **postgres_username** / **postgres_instance_class** — PostgreSQL settings.
 - **enable_backend_auth** — Set `true` to require Cognito JWT in FastAPI (REST + WebSocket).
 - **enable_api_auth** — Optional second JWT check at API Gateway (kept `false` by default to simplify WebSocket auth).
 - **secrets_manager_secret_name** — Leave empty to create a placeholder secret, or set existing secret name/ARN.
@@ -164,7 +168,8 @@ aws cloudfront create-invalidation --distribution-id $(terraform -chdir=infra/pr
 - `frontend_url`, `frontend_s3_bucket`, `cloudfront_distribution_id` — Frontend hosting.
 - `backend_ecr_repository_url`, `backend_image_uri` — Where to push the image and what EC2 pulls.
 - `cognito_user_pool_id`, `cognito_app_client_id`, `cognito_domain_url`, `cognito_callback_urls`, `cognito_logout_urls` — Auth integration.
-- `dynamodb_table_name`, `backend_secret_name` — Backend config.
+- `postgres_endpoint`, `postgres_port`, `postgres_db_name` — PostgreSQL connectivity info.
+- `dynamodb_table_name`, `backend_secret_name` — Other backend config.
 
 ## Troubleshooting
 

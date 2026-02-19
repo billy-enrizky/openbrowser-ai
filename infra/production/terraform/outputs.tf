@@ -82,6 +82,21 @@ output "dynamodb_table_name" {
   value       = aws_dynamodb_table.main.name
 }
 
+output "postgres_endpoint" {
+  description = "RDS PostgreSQL endpoint hostname"
+  value       = aws_db_instance.postgres.address
+}
+
+output "postgres_port" {
+  description = "RDS PostgreSQL port"
+  value       = aws_db_instance.postgres.port
+}
+
+output "postgres_db_name" {
+  description = "RDS PostgreSQL database name"
+  value       = aws_db_instance.postgres.db_name
+}
+
 output "backend_secret_name" {
   description = "Secrets Manager secret name for backend API keys (if created)"
   value       = length(aws_secretsmanager_secret.backend_keys) > 0 ? aws_secretsmanager_secret.backend_keys[0].name : null
