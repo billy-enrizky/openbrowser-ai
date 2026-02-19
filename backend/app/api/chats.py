@@ -96,6 +96,29 @@ async def create_chat(
     return _conversation_to_response(conversation)
 
 
+# NOTE: /active MUST be defined BEFORE /{conversation_id} to avoid
+# FastAPI matching "active" as a conversation_id path parameter.
+
+@router.post("/active")
+async def set_active_chat(
+    request: SetActiveChatRequest,
+    principal: AuthPrincipal | None = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+):
+    """Set active conversation for current user."""
+    _ensure_db_available()
+    sub, email, username = _principal_to_identity(principal)
+    service = ChatService(db)
+    user = await service.ensure_user(cognito_sub=sub, email=email, username=username)
+    if request.conversation_id:
+        conversation = await service.get_conversation(user=user, conversation_id=request.conversation_id)
+        if conversation is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+    state = await service.set_active_conversation(user=user, conversation_id=request.conversation_id)
+    await db.commit()
+    return {"active_conversation_id": state.active_conversation_id}
+
+
 @router.get("/{conversation_id}", response_model=ChatConversationResponse)
 async def get_chat(
     conversation_id: str,
@@ -155,24 +178,4 @@ async def archive_chat(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
     await db.commit()
     return _conversation_to_response(conversation)
-
-
-@router.post("/active")
-async def set_active_chat(
-    request: SetActiveChatRequest,
-    principal: AuthPrincipal | None = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db_session),
-):
-    """Set active conversation for current user."""
-    _ensure_db_available()
-    sub, email, username = _principal_to_identity(principal)
-    service = ChatService(db)
-    user = await service.ensure_user(cognito_sub=sub, email=email, username=username)
-    if request.conversation_id:
-        conversation = await service.get_conversation(user=user, conversation_id=request.conversation_id)
-        if conversation is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
-    state = await service.set_active_conversation(user=user, conversation_id=request.conversation_id)
-    await db.commit()
-    return {"active_conversation_id": state.active_conversation_id}
 
