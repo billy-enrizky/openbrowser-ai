@@ -32,11 +32,68 @@ from app.models.schemas import (
     WSTaskCompletedData,
     WSVncInfoData,
 )
+from app.db.session import get_session_factory, is_database_configured
 from app.services.agent_service import agent_manager
+from app.services.chat_service import ChatService
 from app.services.event_buffer import event_buffer
-from app.websocket.handler import _persist_assistant_message, _persist_task_user_message
+from app.websocket.handler import (
+    _persist_assistant_message,
+    _persist_task_user_message,
+    _principal_to_identity,
+)
 
 logger = logging.getLogger(__name__)
+
+
+async def _load_conversation_history(
+    principal: AuthPrincipal | None,
+    conversation_id: str | None,
+    max_messages: int = 20,
+) -> str:
+    """Load previous messages from the conversation and format as context.
+
+    Returns a string like:
+        Previous conversation:
+        User: search for flights to tokyo
+        Assistant: I found several flights...
+        User: now check hotels
+
+    Returns empty string if no history is available.
+    """
+    if not conversation_id or not is_database_configured():
+        return ""
+
+    try:
+        session_factory = get_session_factory()
+        async with session_factory() as db:
+            service = ChatService(db)
+            sub, email, username = _principal_to_identity(principal)
+            user = await service.ensure_user(cognito_sub=sub, email=email, username=username)
+            conversation = await service.get_conversation(
+                user=user, conversation_id=conversation_id
+            )
+            if conversation is None:
+                return ""
+
+            messages = await service.get_messages(
+                user=user, conversation_id=conversation_id, limit=max_messages
+            )
+            if not messages:
+                return ""
+
+            lines = ["Previous conversation:"]
+            for msg in messages:
+                role_label = "User" if msg.role == "user" else "Assistant"
+                # Truncate very long messages to avoid blowing up the prompt
+                content = msg.content
+                if len(content) > 500:
+                    content = content[:500] + "..."
+                lines.append(f"{role_label}: {content}")
+
+            return "\n".join(lines)
+    except Exception as e:
+        logger.warning("Failed to load conversation history: %s", e)
+        return ""
 
 router = APIRouter()
 
@@ -110,11 +167,19 @@ async def start_task(
             WSVncInfoData(**vnc_data).model_dump(),
         )
 
+    # ---- load conversation history for context ----
+
+    task_with_context = req.task
+    if conversation_id:
+        history = await _load_conversation_history(principal, conversation_id)
+        if history:
+            task_with_context = f"{history}\n\nCurrent request:\n{req.task}"
+
     # ---- create session ----
 
     session = await agent_manager.create_session_with_id(
         task_id=task_id,
-        task=req.task,
+        task=task_with_context,
         agent_type=req.agent_type.value,
         max_steps=req.max_steps,
         use_vision=req.use_vision,
