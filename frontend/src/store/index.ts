@@ -48,6 +48,8 @@ interface AppState {
   toggleBrowserViewer: () => void;
   browserViewerMode: BrowserViewerMode;
   setBrowserViewerMode: (mode: BrowserViewerMode) => void;
+  latestScreenshot: string | null;
+  setLatestScreenshot: (screenshot: string | null) => void;
 
   // Settings
   agentType: AgentType;
@@ -142,6 +144,8 @@ export const useAppStore = create<AppState>()(
       toggleBrowserViewer: () => set((state) => ({ browserViewerOpen: !state.browserViewerOpen })),
       browserViewerMode: "embedded",
       setBrowserViewerMode: (mode) => set({ browserViewerMode: mode }),
+      latestScreenshot: null,
+      setLatestScreenshot: (screenshot) => set({ latestScreenshot: screenshot }),
 
       // Settings
       agentType: "code",
