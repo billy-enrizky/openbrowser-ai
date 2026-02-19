@@ -69,9 +69,27 @@ if [[ "$DEPLOY" == "true" ]]; then
 
   BUCKET="$(tf_output_raw frontend_s3_bucket)"
   DIST_ID="$(tf_output_raw cloudfront_distribution_id)"
+  REGION="$(tf_output_raw aws_region)"
 
-  echo "--- Deploying static assets to S3 ---"
-  aws s3 sync "$FRONTEND_DIR/out/" "s3://$BUCKET/" --delete
+  # Upload hashed static assets with immutable 1-year cache.
+  # _next/static/* filenames contain content hashes; they change on every
+  # build so caching forever is safe and avoids redundant downloads.
+  echo "--- Uploading hashed static assets (immutable, 1-year cache) ---"
+  aws s3 sync "$FRONTEND_DIR/out/_next/static/" "s3://$BUCKET/_next/static/" \
+    --cache-control "public, max-age=31536000, immutable" \
+    --delete \
+    --region "$REGION"
+
+  # Upload HTML and non-hashed files with no-cache.
+  # HTML references hashed JS/CSS bundles by name. If HTML is cached,
+  # users may load stale HTML pointing to deleted bundles -- this
+  # prevents that by forcing browsers to always revalidate.
+  echo "--- Uploading HTML and non-hashed files (no-cache) ---"
+  aws s3 sync "$FRONTEND_DIR/out/" "s3://$BUCKET/" \
+    --cache-control "no-cache, no-store, must-revalidate" \
+    --exclude "_next/static/*" \
+    --delete \
+    --region "$REGION"
 
   echo "--- Invalidating CloudFront cache ---"
   aws cloudfront create-invalidation --distribution-id "$DIST_ID" --paths "/*" >/dev/null
