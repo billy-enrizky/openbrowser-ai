@@ -335,6 +335,7 @@ async def run_task(
     logger.info("  [%s/%s] Starting...", server_name, task_name)
 
     tool_call_count = 0
+    total_response_chars = 0
     result_text = ""
     error_msg = None
     start = time.monotonic()
@@ -412,6 +413,7 @@ async def run_task(
                 tool_start = time.monotonic()
                 tool_output = await mcp.call_tool(tool_name, tool_input)
                 tool_duration = time.monotonic() - tool_start
+                total_response_chars += len(tool_output)
                 logger.info(
                     "    [%s/%s] Turn %d result (%.1fs, %d chars): %s",
                     server_name, task_name, turn + 1,
@@ -447,11 +449,14 @@ async def run_task(
     duration_s = time.monotonic() - start
     success = task["verify"](result_text) if not error_msg else False
 
+    response_tokens_est = total_response_chars // 4
+
     logger.info(
-        "  [%s/%s] %s in %.1fs (%d tool calls)",
+        "  [%s/%s] %s in %.1fs (%d tool calls, %d response chars, ~%d tokens)",
         server_name, task_name,
         "PASS" if success else "FAIL",
         duration_s, tool_call_count,
+        total_response_chars, response_tokens_est,
     )
 
     return {
@@ -459,6 +464,8 @@ async def run_task(
         "success": success,
         "duration_s": round(duration_s, 1),
         "tool_calls": tool_call_count,
+        "response_chars": total_response_chars,
+        "response_tokens_est": response_tokens_est,
         "result": result_text[:500],
         "error": error_msg,
     }
@@ -474,12 +481,16 @@ def aggregate_results(task_results: list[dict]) -> dict:
     passed = sum(1 for t in task_results if t["success"])
     total_duration = sum(t["duration_s"] for t in task_results)
     total_tools = sum(t["tool_calls"] for t in task_results)
+    total_resp_chars = sum(t.get("response_chars", 0) for t in task_results)
+    total_resp_tokens = sum(t.get("response_tokens_est", 0) for t in task_results)
     return {
         "total_tasks": total,
         "passed": passed,
         "total_duration_s": round(total_duration, 1),
         "total_tool_calls": total_tools,
         "avg_tool_calls": round(total_tools / total, 1) if total else 0,
+        "total_response_chars": total_resp_chars,
+        "total_response_tokens_est": total_resp_tokens,
     }
 
 
@@ -499,6 +510,8 @@ def format_summary_table(server_results: dict) -> str:
         ("Total Duration (s)", "total_duration_s", ".1f"),
         ("Total Tool Calls", "total_tool_calls", "d"),
         ("Avg Tool Calls/Task", "avg_tool_calls", ".1f"),
+        ("Total Response Chars", "total_response_chars", ",d"),
+        ("Est. Response Tokens", "total_response_tokens_est", ",d"),
     ]:
         row = f"{label:<25s}"
         for name in names:
@@ -584,9 +597,10 @@ async def run_benchmark(
         }
 
         logger.info(
-            "  Server %s: %d/%d passed, %.1fs total, %d tool calls",
+            "  Server %s: %d/%d passed, %.1fs total, %d tool calls, %d response chars (~%d tokens)",
             server_name, summary["passed"], summary["total_tasks"],
             summary["total_duration_s"], summary["total_tool_calls"],
+            summary["total_response_chars"], summary["total_response_tokens_est"],
         )
         logger.info("")
 
