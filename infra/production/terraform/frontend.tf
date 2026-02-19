@@ -103,10 +103,35 @@ resource "aws_cloudfront_distribution" "frontend" {
     }
   }
 
-  # VNC WebSocket traffic routed directly to ALB (not API Gateway)
+  # All API and WebSocket traffic routed directly to ALB.
+  # CloudFront provides HTTPS termination; backend handles auth via Cognito.
   ordered_cache_behavior {
-    path_pattern             = "/api/v1/vnc/*"
+    path_pattern             = "/api/*"
     allowed_methods          = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
+    cached_methods           = ["GET", "HEAD"]
+    target_origin_id         = local.alb_origin_id
+    viewer_protocol_policy   = "https-only"
+    compress                 = false
+    cache_policy_id          = data.aws_cloudfront_cache_policy.caching_disabled.id
+    origin_request_policy_id = data.aws_cloudfront_origin_request_policy.all_viewer.id
+  }
+
+  # WebSocket endpoint for real-time task events
+  ordered_cache_behavior {
+    path_pattern             = "/ws/*"
+    allowed_methods          = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
+    cached_methods           = ["GET", "HEAD"]
+    target_origin_id         = local.alb_origin_id
+    viewer_protocol_policy   = "https-only"
+    compress                 = false
+    cache_policy_id          = data.aws_cloudfront_cache_policy.caching_disabled.id
+    origin_request_policy_id = data.aws_cloudfront_origin_request_policy.all_viewer.id
+  }
+
+  # Health check endpoint for external monitoring
+  ordered_cache_behavior {
+    path_pattern             = "/health"
+    allowed_methods          = ["GET", "HEAD", "OPTIONS"]
     cached_methods           = ["GET", "HEAD"]
     target_origin_id         = local.alb_origin_id
     viewer_protocol_policy   = "https-only"
