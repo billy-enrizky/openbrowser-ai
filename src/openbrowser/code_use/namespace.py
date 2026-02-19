@@ -16,7 +16,10 @@ from typing import Any
 import requests
 
 from openbrowser.browser import BrowserSession
-from openbrowser.filesystem.file_system import FileSystem
+try:
+	from openbrowser.filesystem.file_system import FileSystem
+except ImportError:
+	FileSystem = None  # type: ignore[assignment,misc]
 from openbrowser.llm.base import BaseChatModel
 from openbrowser.tools.service import CodeAgentTools, Tools
 
