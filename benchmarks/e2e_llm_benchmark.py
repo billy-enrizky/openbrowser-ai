@@ -36,7 +36,11 @@ logger = logging.getLogger(__name__)
 
 
 def _kill_stale_browsers():
-    """Kill all Chrome/Chromium processes to ensure a clean browser state."""
+    """Kill all Chrome/Chromium processes and wait until they are fully dead.
+
+    A 0.5s sleep is not enough -- Chrome may still hold profile locks and CDP
+    ports, causing the next MCP server to connect to a dying browser.
+    """
     for pattern in ["chromium", "chrome", "Chromium", "Google Chrome"]:
         try:
             subprocess.run(
@@ -45,7 +49,22 @@ def _kill_stale_browsers():
             )
         except Exception:
             pass
-    time.sleep(0.5)
+
+    # Wait until no Chrome/Chromium processes remain (up to 10s)
+    for _ in range(20):
+        result = subprocess.run(
+            ["pgrep", "-f", "chrom"],
+            capture_output=True, timeout=5,
+        )
+        if result.returncode != 0:
+            # No matching processes found
+            break
+        time.sleep(0.5)
+    else:
+        logger.warning("Chrome processes still alive after 10s wait")
+
+    # Extra settle time for profile locks and port release
+    time.sleep(1)
 
 
 # ---------------------------------------------------------------------------
@@ -279,7 +298,8 @@ TASKS = [
 SERVERS = {
     "openbrowser": {
         "command": "uvx",
-        "args": ["openbrowser-ai[mcp]==0.1.21", "--mcp"],
+        "args": ["openbrowser-ai[mcp]==0.1.22", "--mcp"],
+        "env": {"TIMEOUT_BrowserStartEvent": "60"},
     },
     "playwright": {
         "command": "npx",
@@ -295,19 +315,16 @@ SERVERS = {
 DEFAULT_MODEL = "us.anthropic.claude-sonnet-4-6"
 MAX_TURNS = 20
 SYSTEM_PROMPT = (
-    "You are a browser automation agent. Use the execute_code tool. "
-    "Give the answer directly, no markdown.\n\n"
+    "You are a browser automation agent. Use the provided tools to complete "
+    "browser tasks. Give the answer directly, no markdown.\n\n"
     "RULES:\n"
-    "1. Do EVERYTHING in 1-2 execute_code calls max. Combine navigate + get state + interact + extract + print answer in ONE call.\n"
-    "2. ALWAYS `await wait(2)` after navigate() before reading the page.\n"
-    "3. ALWAYS get state with `state = await browser.get_browser_state_summary()` to find element indices before click/input.\n"
-    "4. evaluate() JS tips: ALWAYS wrap multi-line JS in an explicit IIFE with return: "
-    "`(function(){ var x = ...; return x; })()`. "
-    "Arrow functions like `.map(e => e.text)` work fine inside an IIFE. "
-    "Single-line expressions like `document.title` work directly. "
-    "For returning objects, use: `(function(){ return {key: value}; })()`.\n"
-    "5. NEVER call done(). Just print() your final answer.\n"
-    "6. Do NOT make separate calls to verify or summarize."
+    "1. Be efficient -- minimize the number of tool calls. Combine multiple "
+    "operations into as few calls as possible.\n"
+    "2. After navigating to a page, wait for it to load before interacting.\n"
+    "3. Always inspect page state to find element identifiers before clicking "
+    "or typing.\n"
+    "4. Give your final answer as plain text.\n"
+    "5. Do NOT make separate calls to verify or summarize what you already found."
 )
 
 
@@ -454,6 +471,8 @@ async def run_task(
         logger.error("  [%s/%s] Error: %s", server_name, task_name, error_msg)
     finally:
         await mcp.stop()
+        # Kill any browser the MCP server spawned so the next task starts clean
+        _kill_stale_browsers()
 
     duration_s = time.monotonic() - start
     success = task["verify"](result_text) if not error_msg else False
