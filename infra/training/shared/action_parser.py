@@ -94,7 +94,8 @@ def _find_element_index(
       1. Exact lowercase match
       2. Normalized match (underscores/hyphens/spaces treated as equivalent)
       3. Collapsed match (all non-alphanumeric removed: "First Name" == "firstname")
-      4. Substring containment in both directions
+      4. Alias lookup (common abbreviations and semantic equivalences)
+      5. Substring containment in both directions
     """
     key = field_name.lower().strip()
     if key in element_map:
