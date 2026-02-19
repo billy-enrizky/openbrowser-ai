@@ -42,18 +42,28 @@ RE_ENTER_VALUE_ONLY = re.compile(_P + r"(?:Enter|Input|Type) ['\"](.+?)['\"]$")
 # Common field name aliases: model output -> possible DOM element keys.
 # Covers standard abbreviations and semantic equivalences that fuzzy
 # matching alone cannot resolve.
+#
+# ORDERING MATTERS: Specific aliases (e.g. "i agree to the terms") must come
+# BEFORE generic aliases (e.g. "i agree") because the lookup uses startswith()
+# and returns the first match.
 _FIELD_ALIASES: dict[str, list[str]] = {
+    # --- Identity / contact ---
     "social security number": ["ssn", "socialsecuritynumber", "social_security_number"],
     "date of birth": ["dob", "dateofbirth", "date_of_birth", "birthdate"],
-    "phone number": ["phone", "phonenumber", "phone_number", "tel", "telephone"],
+    "phone number": ["phone", "phonenumber", "phone_number", "tel", "telephone",
+                      "founder_phone", "founderphone", "contactphone", "contact_phone"],
     "email address": ["email", "emailaddress", "email_address"],
-    "zip code": ["zipcode", "zip_code", "zip", "postalcode", "postal_code", "current_zip", "currentzip"],
-    "street address": ["streetaddress", "street_address", "address", "street", "current_street", "currentstreet"],
+    "your name": ["name", "fullname", "full_name", "patientname", "patient_name", "yourname"],
+    "your email": ["email", "emailaddress", "email_address", "youremail"],
+    "full name": ["fullname", "full_name", "name", "patientname"],
     "first name": ["firstname", "first_name", "fname"],
     "last name": ["lastname", "last_name", "lname"],
     "middle name": ["middlename", "middle_name", "mname"],
-    # Rental/professional form aliases (model: "Street Address", DOM: "current_street")
-    "current employer": ["employer_name", "employer", "employername"],
+    # --- Address ---
+    "zip code": ["zipcode", "zip_code", "zip", "postalcode", "postal_code", "current_zip", "currentzip"],
+    "street address": ["streetaddress", "street_address", "address", "street", "current_street", "currentstreet"],
+    # --- Rental/professional form aliases ---
+    "current employer": ["employer_name", "employer", "employername", "current_employer"],
     "length of employment": ["employment_length", "employmentlength", "employment_duration"],
     "preferred move-in date": ["preferred_move_date", "movedate", "move_date", "movein_date"],
     "move-in date": ["preferred_move_date", "movedate", "move_date", "movein_date"],
@@ -62,15 +72,72 @@ _FIELD_ALIASES: dict[str, list[str]] = {
     "maximum rent": ["max_rent", "maxrent", "max_rent_budget"],
     "preferred area": ["preferred_area", "preferredarea", "area"],
     "pet details": ["pet_details", "petdetails"],
-    "additional information": ["additional_info", "additionalinfo", "additional_notes"],
+    "additional information": ["additional_info", "additionalinfo", "additional_notes", "additional_comments"],
     "id proof": ["id_proof", "idproof", "identification"],
     "income proof": ["income_proof", "incomeproof"],
-    "job title": ["job_title", "jobtitle", "position"],
-    # Checkbox semantic aliases (model generates label text, DOM has short keys)
+    "job title": ["job_title", "jobtitle", "position", "reptitle", "rep_title"],
+    # --- NDA form (legal-compliance/nda-submission) ---
+    "effective date": ["startdate", "start_date", "effectivedate"],
+    "representative name": ["repname", "rep_name", "representativename"],
+    "title/position": ["reptitle", "rep_title", "titleposition"],
+    # --- Contractor onboarding ---
+    "services to be provided": ["servicedescription", "service_description"],
+    "scope of work": ["workdescription", "work_description", "servicedescription", "scope_of_work"],
+    "contact person": ["contactname", "contact_name", "contactperson"],
+    # --- Project bid (construction-manufacturing) ---
+    "estimated duration": ["projectduration", "project_duration", "duration"],
+    # --- Patient consent (healthcare-medical) ---
+    "name of procedure": ["procedurename", "procedure_name"],
+    "emergency contact name": ["emergencyname", "emergency_name"],
+    "emergency contact phone": ["emergencyphone", "emergency_phone"],
+    # --- Insurance claim (healthcare-medical) ---
+    "type of service": ["servicetype", "service_type"],
+    "provider id number": ["providernumber", "provider_number", "providerid"],
+    "date of service": ["servicedate", "service_date"],
+    # --- Medical research enrollment ---
+    "existing medical conditions": ["existingconditions", "existing_conditions"],
+    # --- Financial planning ---
+    "type of consultation": ["consultationtype", "consultation_type"],
+    # --- Workshop registration ---
+    "workshop category": ["workshop_type", "workshoptype"],
+    "preferred time slot": ["session_time", "sessiontime", "preferredtime"],
+    "accessibility requirements": ["accessibility_needs", "accessibilityneeds"],
+    "years of professional experience": ["experience_years", "experienceyears", "years_experience", "yearsexperience"],
+    "years of experience": ["years_experience", "yearsexperience", "experience_years", "experienceyears"],
+    "preferred contact time": ["availabletime", "available_time", "contacttime"],
+    # --- Startup funding ---
+    "purpose of funding": ["funding_purpose", "fundingpurpose"],
+    "current company valuation": ["current_valuation", "currentvaluation", "valuation"],
+    # --- Scholarship ---
+    "statement of purpose": ["essay", "statementofpurpose"],
+    "academic reference": ["reference1", "reference_name", "referencename"],
+    "reference contact": ["reference1email", "reference_email", "referencecontact"],
+    # --- Membership application ---
+    "membership type": ["membership_level", "membershiplevel", "membershiptype"],
+    "current position": ["current_role", "currentrole", "job_title", "jobtitle"],
+    "degree": ["education_level", "educationlevel", "major"],
+    # --- Manufacturing order ---
+    "required delivery date": ["requireddate", "required_date"],
+    "customer account number": ["customernumber", "customer_number"],
+    # --- Checkbox aliases: SPECIFIC must come BEFORE generic ---
+    # Patient consent checkboxes
+    "i understand the nature of the procedure": ["procedureconsent", "procedure_consent"],
+    "i understand the alternatives": ["alternativesconsent", "alternatives_consent"],
+    "i have had the opportunity to ask questions": ["questionconsent", "question_consent"],
+    # NDA checkboxes
+    "i have read and agree to the terms": ["termsagreed", "terms_agreed"],
+    "i confirm that i have the authority": ["authorityconfirm", "authority_confirm"],
+    # Contractor checkboxes
+    "i agree to the terms and conditions": ["termsagreed", "terms_agreed"],
+    "i agree to maintain confidentiality": ["confidentialityagreed", "confidentiality_agreed"],
+    # Generic checkbox aliases (MUST be last -- startswith fallback)
     "i authorize": ["authorization", "authorize", "auth"],
-    "i understand": ["truthfulness", "understand", "acknowledgement", "acknowledge"],
-    "i agree": ["agreement", "agree", "consent", "terms"],
+    "i understand": ["truthfulness", "understand", "acknowledgement", "acknowledge",
+                     "procedureconsent", "alternativesconsent", "questionconsent"],
+    "i agree": ["agreement", "agree", "consent", "terms",
+                "termsagreed", "confidentialityagreed", "code_of_conduct", "information_consent"],
     "i certify": ["certification", "certify"],
+    "i confirm": ["authorityconfirm", "authority_confirm", "confirm"],
     "i consent": ["consent", "patientconsent", "patient_consent"],
 }
 
