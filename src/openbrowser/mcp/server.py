@@ -1,10 +1,7 @@
-"""MCP Server for openbrowser - exposes browser automation capabilities via Model Context Protocol.
+"""MCP Server for openbrowser -- CodeAgent code execution via Model Context Protocol.
 
-This server provides tools for:
-- Direct browser control (navigation, clicking, typing, etc.)
-- Content extraction from web pages
-- DOM inspection and accessibility tree analysis
-- Tab and session management
+Exposes a single ``execute_code`` tool that runs Python code in a persistent
+namespace with browser automation functions (navigate, click, evaluate, etc.).
 
 Usage:
     uvx openbrowser-ai[mcp] --mcp
@@ -29,10 +26,10 @@ os.environ['OPENBROWSER_LOGGING_LEVEL'] = 'critical'
 os.environ['OPENBROWSER_SETUP_LOGGING'] = 'false'
 
 import asyncio
-import json
+import io
 import logging
-import re
 import time
+import traceback
 from pathlib import Path
 from typing import Any
 
@@ -58,22 +55,18 @@ from openbrowser.logging_config import setup_logging
 
 
 def _configure_mcp_server_logging():
-	"""Configure logging for MCP server mode - redirect all logs to stderr to prevent JSON RPC interference."""
-	# Set environment to suppress openbrowser logging during server mode
+	"""Configure logging for MCP server mode -- redirect all logs to stderr to prevent JSON RPC interference."""
 	os.environ['OPENBROWSER_LOGGING_LEVEL'] = 'warning'
-	os.environ['OPENBROWSER_SETUP_LOGGING'] = 'false'  # Prevent automatic logging setup
+	os.environ['OPENBROWSER_SETUP_LOGGING'] = 'false'
 
-	# Configure logging to stderr for MCP mode - preserve warnings and above for troubleshooting
 	setup_logging(stream=sys.stderr, log_level='warning', force_setup=True)
 
-	# Also configure the root logger and all existing loggers to use stderr
 	logging.root.handlers = []
 	stderr_handler = logging.StreamHandler(sys.stderr)
 	stderr_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
 	logging.root.addHandler(stderr_handler)
 	logging.root.setLevel(logging.CRITICAL)
 
-	# Configure all existing loggers to use stderr and CRITICAL level
 	for name in list(logging.root.manager.loggerDict.keys()):
 		logger_obj = logging.getLogger(name)
 		logger_obj.handlers = []
@@ -82,25 +75,22 @@ def _configure_mcp_server_logging():
 		logger_obj.propagate = False
 
 
-# Configure MCP server logging before any openbrowser imports to capture early log lines
 _configure_mcp_server_logging()
 
-# Additional suppression - disable all logging completely for MCP mode
+# Suppress all logging for MCP mode
 logging.disable(logging.CRITICAL)
 
 # Import openbrowser modules
 from openbrowser.browser import BrowserProfile, BrowserSession
-from openbrowser.browser.events import ScrollToTextEvent
+from openbrowser.code_use.namespace import create_namespace
 from openbrowser.config import get_default_profile, load_openbrowser_config
-from openbrowser.dom.markdown_extractor import extract_clean_markdown
-from openbrowser.dom.service import DomService
+from openbrowser.tools.service import CodeAgentTools
 
 logger = logging.getLogger(__name__)
 
 
 def _ensure_all_loggers_use_stderr():
 	"""Ensure ALL loggers only output to stderr, not stdout."""
-	# Get the stderr handler
 	stderr_handler = None
 	for handler in logging.root.handlers:
 		if hasattr(handler, 'stream') and handler.stream == sys.stderr:  # type: ignore
@@ -111,11 +101,9 @@ def _ensure_all_loggers_use_stderr():
 		stderr_handler = logging.StreamHandler(sys.stderr)
 		stderr_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
 
-	# Configure root logger
 	logging.root.handlers = [stderr_handler]
 	logging.root.setLevel(logging.CRITICAL)
 
-	# Configure all existing loggers
 	for name in list(logging.root.manager.loggerDict.keys()):
 		logger_obj = logging.getLogger(name)
 		logger_obj.handlers = [stderr_handler]
@@ -123,7 +111,6 @@ def _ensure_all_loggers_use_stderr():
 		logger_obj.propagate = False
 
 
-# Ensure stderr logging after all imports
 _ensure_all_loggers_use_stderr()
 
 
@@ -132,12 +119,10 @@ try:
 	import mcp.server.stdio
 	import mcp.types as types
 	from mcp.server import NotificationOptions, Server
-	from mcp.server.lowlevel.helper_types import ReadResourceContents
 	from mcp.server.models import InitializationOptions
 
 	MCP_AVAILABLE = True
 
-	# Configure MCP SDK logging to stderr as well
 	mcp_logger = logging.getLogger('mcp')
 	mcp_logger.handlers = []
 	mcp_logger.addHandler(logging.root.handlers[0] if logging.root.handlers else logging.StreamHandler(sys.stderr))
@@ -147,8 +132,6 @@ except ImportError:
 	MCP_AVAILABLE = False
 	logger.error('MCP SDK not installed. Install with: pip install mcp')
 	sys.exit(1)
-
-from pydantic import AnyUrl
 
 try:
 	from openbrowser.telemetry import MCPServerTelemetryEvent, ProductTelemetry
@@ -176,26 +159,111 @@ def get_parent_process_cmdline() -> str | None:
 				if cmdline:
 					cmdlines.append(' '.join(cmdline))
 			except (psutil.AccessDenied, psutil.NoSuchProcess):
-				# Skip processes we can't access (like system processes)
 				pass
 
 			try:
 				parent = parent.parent()
 			except (psutil.AccessDenied, psutil.NoSuchProcess):
-				# Can't go further up the chain
 				break
 
 		return ';'.join(cmdlines) if cmdlines else None
 	except Exception:
-		# If we can't get parent process info, just return None
 		return None
 
 
+_EXECUTE_CODE_DESCRIPTION = """Execute Python code in a persistent namespace with browser automation functions. All functions are async -- use `await`. Use print() to return output. Variables persist between calls.
+
+## Navigation
+
+- `await navigate(url: str, new_tab: bool = False)` -- Navigate to a URL. Set new_tab=True to open in a new tab.
+- `await go_back()` -- Go back to the previous page in browser history.
+- `await wait(seconds: int = 3)` -- Wait for specified seconds (max 30). Use after actions that trigger page loads.
+
+## Element Interaction
+
+- `await click(index: int)` -- Click an element by its index from browser state. Index must be >= 1. Works for buttons, links, checkboxes, radio buttons. Does NOT work for <select> elements (use select_dropdown instead).
+- `await input_text(index: int, text: str, clear: bool = True)` -- Type text into an input field. clear=True (default) clears the field first; clear=False appends.
+- `await scroll(down: bool = True, pages: float = 1.0, index: int | None = None)` -- Scroll the page. down=True scrolls down, down=False scrolls up. pages=0.5 for half page, 1 for full page, 10 for top/bottom. Pass index to scroll within a specific container element.
+- `await send_keys(keys: str)` -- Send keyboard keys or shortcuts. Examples: "Escape", "Enter", "PageDown", "Control+o", "Control+a", "ArrowDown".
+- `await upload_file(index: int, path: str)` -- Upload a file to a file input element. index is the file input element index, path is the local file path.
+
+## Dropdowns
+
+- `await select_dropdown(index: int, text: str)` -- Select an option in a <select> dropdown by its visible text. text must be the exact option text.
+- `await dropdown_options(index: int)` -- Get all available options for a <select> dropdown. Returns the options as text. Call this first to see what options are available.
+
+## Tab Management
+
+- `await switch(tab_id: str)` -- Switch to a different browser tab. tab_id is a 4-character ID (get IDs from browser state tabs list).
+- `await close(tab_id: str)` -- Close a browser tab by its 4-character tab_id.
+
+## JavaScript Execution
+
+- `await evaluate(code: str)` -- Execute JavaScript in the browser page context and return the result as a Python object. Auto-wraps code in an IIFE if not already wrapped. Returns Python dicts/lists/primitives directly. Raises EvaluateError on JS errors.
+  Example: `data = await evaluate('document.title')` returns the page title string.
+  Example: `items = await evaluate('Array.from(document.querySelectorAll(".item")).map(e => e.textContent)')` returns a Python list of strings.
+
+## CSS Selectors
+
+- `await get_selector_from_index(index: int)` -- Get the CSS selector for an element by its interactive index. Useful for building JS queries targeting specific elements. Returns a CSS selector string.
+
+## Task Completion
+
+- `await done(text: str, success: bool = True)` -- Signal that the task is complete. text is the final output/result. success=True if the task completed successfully. Call this only when the task is truly finished.
+
+## Browser State
+
+- `browser` -- The BrowserSession object. Use `state = await browser.get_browser_state_summary()` to get current page state including:
+  - `state.url` -- current URL
+  - `state.title` -- page title
+  - `state.tabs` -- list of open tabs (each has .target_id, .url, .title). For switch()/close(), use the LAST 4 CHARS of target_id as tab_id.
+  - `state.dom_state.selector_map` -- dict of {index: element} for all interactive elements
+  - Each element has: `.tag_name`, `.attributes` (dict), `.get_all_children_text(max_depth=N)` (text content)
+
+## File System
+
+- `file_system` -- FileSystem object for file operations.
+
+## Libraries (pre-imported)
+
+- `json` -- JSON encoding/decoding
+- `asyncio` -- async utilities
+- `Path` -- pathlib.Path for file paths
+- `csv` -- CSV reading/writing
+- `re` -- regular expressions
+- `datetime` -- date/time operations
+- `requests` -- HTTP requests (synchronous)
+
+## Optional Libraries (available if installed)
+
+- `numpy` / `np` -- numerical computing
+- `pandas` / `pd` -- data analysis and DataFrames
+- `matplotlib` / `plt` -- plotting and charts
+- `BeautifulSoup` / `bs4` -- HTML parsing
+- `PdfReader` / `pypdf` -- PDF reading
+- `tabulate` -- table formatting
+
+## Typical Workflow
+
+1. Navigate: `await navigate('https://example.com')`
+2. Get state: `state = await browser.get_browser_state_summary()`
+3. Inspect elements: iterate `state.dom_state.selector_map` to find element indices
+4. Interact: `await click(index)`, `await input_text(index, 'text')`, etc.
+5. Extract data: `data = await evaluate('JS expression')` -- returns Python objects
+6. Process with Python: use json, pandas, re, etc.
+7. Print results: `print(output)` -- this is what gets returned to the client
+"""
+
+
 class OpenBrowserServer:
-	"""MCP Server for openbrowser capabilities."""
+	"""MCP Server exposing CodeAgent code execution environment.
+
+	Provides a single ``execute_code`` tool that runs Python code in a
+	persistent namespace populated with browser automation functions from
+	``create_namespace()`` (navigate, click, evaluate, etc.).
+	"""
 
 	def __init__(self, session_timeout_minutes: int = 10):
-		# Ensure all logging goes to stderr (in case new loggers were created)
 		_ensure_all_loggers_use_stderr()
 
 		self.server = Server('openbrowser')
@@ -204,14 +272,15 @@ class OpenBrowserServer:
 		self._telemetry = ProductTelemetry() if TELEMETRY_AVAILABLE else None
 		self._start_time = time.time()
 
-		# Session management
-		self.active_sessions: dict[str, dict[str, Any]] = {}  # session_id -> session info
-		self.session_timeout_minutes = session_timeout_minutes
-		self._cleanup_task: Any = None
-		self._mcp_session = None
-		self._subscribed_resources: set[str] = set()
+		# CodeAgent namespace -- persistent across execute_code calls
+		self._namespace: dict[str, Any] | None = None
+		self._tools: CodeAgentTools | None = None
 
-		# Setup handlers
+		# Session management
+		self.session_timeout_minutes = session_timeout_minutes
+		self._last_activity = time.time()
+		self._cleanup_task: Any = None
+
 		self._setup_handlers()
 
 	def _setup_handlers(self):
@@ -219,246 +288,20 @@ class OpenBrowserServer:
 
 		@self.server.list_tools()
 		async def handle_list_tools() -> list[types.Tool]:
-			"""List all available openbrowser tools.
-
-			Consolidated to 11 tools following WebMCP design principles:
-			minimal tool surface area, progressive disclosure via optional params,
-			and tool annotations (readOnlyHint, destructiveHint, idempotentHint).
-			"""
+			"""List the single execute_code tool."""
 			return [
-				# -- Direct browser control tools --
 				types.Tool(
-					name='browser_navigate',
-					description='Navigate to a URL in the browser',
+					name='execute_code',
+					description=_EXECUTE_CODE_DESCRIPTION,
 					inputSchema={
 						'type': 'object',
 						'properties': {
-							'url': {'type': 'string', 'description': 'The URL to navigate to'},
-							'new_tab': {'type': 'boolean', 'description': 'Whether to open in a new tab', 'default': False},
-						},
-						'required': ['url'],
-					},
-					annotations=types.ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True),
-				),
-				types.Tool(
-					name='browser_click',
-					description='Click an element on the page by its index',
-					inputSchema={
-						'type': 'object',
-						'properties': {
-							'index': {
-								'type': 'integer',
-								'description': 'The index of the link or element to click (from browser_get_state)',
-							},
-							'new_tab': {
-								'type': 'boolean',
-								'description': 'Whether to open any resulting navigation in a new tab',
-								'default': False,
+							'code': {
+								'type': 'string',
+								'description': 'Python code to execute. All browser functions are async (use await).',
 							},
 						},
-						'required': ['index'],
-					},
-					annotations=types.ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False),
-				),
-				types.Tool(
-					name='browser_type',
-					description='Type text into an input field',
-					inputSchema={
-						'type': 'object',
-						'properties': {
-							'index': {
-								'type': 'integer',
-								'description': 'The index of the input element (from browser_get_state)',
-							},
-							'text': {'type': 'string', 'description': 'The text to type'},
-						},
-						'required': ['index', 'text'],
-					},
-					annotations=types.ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False),
-				),
-				# -- Page state with optional element filtering (merged browser_search_elements) --
-				types.Tool(
-					name='browser_get_state',
-					description='Get the current page state. Use compact=true (default) for a lightweight summary with URL, title, and element count. Use compact=false for the full list of interactive elements. Optionally filter elements by text, tag, id, class, or attribute.',
-					inputSchema={
-						'type': 'object',
-						'properties': {
-							'compact': {
-								'type': 'boolean',
-								'description': 'If true, returns only URL, title, tab count, and interactive element count. If false, returns full element details.',
-								'default': True,
-							},
-							'filter_by': {
-								'type': 'string',
-								'enum': ['text', 'tag', 'id', 'class', 'attribute'],
-								'description': 'Search interactive elements by this property. When set, returns matching elements with indices for browser_click/browser_type.',
-							},
-							'filter_query': {
-								'type': 'string',
-								'description': 'Text or pattern to search for in elements (requires filter_by).',
-							},
-							'max_results': {
-								'type': 'integer',
-								'description': 'Maximum number of filtered results to return.',
-								'default': 20,
-							},
-						},
-					},
-					annotations=types.ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True),
-				),
-				# -- Scroll with optional find-and-scroll (merged browser_find_and_scroll) --
-				types.Tool(
-					name='browser_scroll',
-					description='Scroll the page. Optionally find text on the page and scroll to it.',
-					inputSchema={
-						'type': 'object',
-						'properties': {
-							'direction': {
-								'type': 'string',
-								'enum': ['up', 'down'],
-								'description': 'Direction to scroll (ignored when target_text is set)',
-								'default': 'down',
-							},
-							'target_text': {
-								'type': 'string',
-								'description': 'Find this text on the page and scroll to it. When set, direction is ignored.',
-							},
-						},
-					},
-					annotations=types.ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True),
-				),
-				types.Tool(
-					name='browser_go_back',
-					description='Go back to the previous page',
-					inputSchema={'type': 'object', 'properties': {}},
-					annotations=types.ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False),
-				),
-				# -- Text extraction with optional search (merged browser_grep) --
-				types.Tool(
-					name='browser_get_text',
-					description='Get the current page content as clean markdown text. Optionally search for a regex or string pattern and return only matching lines with context.',
-					inputSchema={
-						'type': 'object',
-						'properties': {
-							'extract_links': {
-								'type': 'boolean',
-								'description': 'Whether to include href URLs in the output',
-								'default': False,
-							},
-							'search': {
-								'type': 'string',
-								'description': 'Regex or string pattern to search for in page content. When set, returns only matching lines with context instead of full page text.',
-							},
-							'context_lines': {
-								'type': 'integer',
-								'description': 'Number of lines before and after each match to include (only used with search).',
-								'default': 2,
-							},
-							'max_matches': {
-								'type': 'integer',
-								'description': 'Maximum number of matches to return (only used with search).',
-								'default': 20,
-							},
-							'case_insensitive': {
-								'type': 'boolean',
-								'description': 'Whether to ignore case when matching (only used with search).',
-								'default': True,
-							},
-						},
-					},
-					annotations=types.ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True),
-				),
-				# -- Tab management (merged list_tabs + switch_tab + close_tab) --
-				types.Tool(
-					name='browser_tab',
-					description='Manage browser tabs. Actions: list (list all open tabs), switch (switch to a tab by ID), close (close a tab by ID).',
-					inputSchema={
-						'type': 'object',
-						'properties': {
-							'action': {
-								'type': 'string',
-								'enum': ['list', 'switch', 'close'],
-								'description': 'Tab action to perform.',
-							},
-							'tab_id': {
-								'type': 'string',
-								'description': '4 Character Tab ID (required for switch and close actions).',
-							},
-						},
-						'required': ['action'],
-					},
-					annotations=types.ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False),
-				),
-				# -- Session management (merged list_sessions + close_session + close_all) --
-				types.Tool(
-					name='browser_session',
-					description='Manage browser sessions. Actions: list (list active sessions), close (close a session by ID), close_all (close all sessions).',
-					inputSchema={
-						'type': 'object',
-						'properties': {
-							'action': {
-								'type': 'string',
-								'enum': ['list', 'close', 'close_all'],
-								'description': 'Session action to perform.',
-							},
-							'session_id': {
-								'type': 'string',
-								'description': 'Session ID to close (required for close action).',
-							},
-						},
-						'required': ['action'],
-					},
-					annotations=types.ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False),
-				),
-				# -- Advanced inspection tools --
-				types.Tool(
-					name='browser_get_accessibility_tree',
-					description='Get the accessibility tree (a11y tree) of the current page. Returns structured data including roles, names, and properties of all accessible elements. Useful for understanding page structure, testing accessibility, and finding elements by their ARIA roles.',
-					inputSchema={
-						'type': 'object',
-						'properties': {
-							'max_depth': {
-								'type': 'integer',
-								'description': 'Maximum depth of the tree to return. Use -1 for unlimited depth.',
-								'default': -1,
-							},
-							'include_ignored': {
-								'type': 'boolean',
-								'description': 'Whether to include nodes marked as ignored in the accessibility tree.',
-								'default': False,
-							},
-							'format': {
-								'type': 'string',
-								'enum': ['tree', 'flat'],
-								'description': "Output format. 'tree' (default) returns nested structure. 'flat' returns array with parent_id references.",
-								'default': 'tree',
-							},
-						},
-					},
-					annotations=types.ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True),
-				),
-				types.Tool(
-					name='browser_execute_js',
-					description='Execute JavaScript code on the current page and return the result. The expression is evaluated in the page context. Use for advanced page interactions, reading page state, or extracting data not available through other tools.',
-					inputSchema={
-						'type': 'object',
-						'properties': {
-							'expression': {
-								'type': 'string',
-								'description': 'JavaScript expression or IIFE to evaluate in the page context. For multi-statement code, wrap in an IIFE: (()=>{ ... return result; })()',
-							},
-							'await_promise': {
-								'type': 'boolean',
-								'description': 'Whether to await the result if it is a Promise. Set to false for fire-and-forget scripts that should not be awaited.',
-								'default': True,
-							},
-							'return_by_value': {
-								'type': 'boolean',
-								'description': 'Whether to serialize the result value. Set to false to get a RemoteObject reference (objectId) for DOM elements that cannot be serialized.',
-								'default': True,
-							},
-						},
-						'required': ['expression'],
+						'required': ['code'],
 					},
 					annotations=types.ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False),
 				),
@@ -466,112 +309,14 @@ class OpenBrowserServer:
 
 		@self.server.list_resources()
 		async def handle_list_resources() -> list[types.Resource]:
-			"""List available resources for the current browser state."""
-			resources = []
-			if self.browser_session:
-				try:
-					url = await self.browser_session.get_current_page_url()
-				except Exception:
-					url = 'unknown'
-				resources.append(
-					types.Resource(
-						uri='browser://current-page/content',
-						name='Page Content',
-						description=f'Clean markdown text of the current page ({url})',
-						mimeType='text/markdown',
-					)
-				)
-				resources.append(
-					types.Resource(
-						uri='browser://current-page/state',
-						name='Page State',
-						description=f'Interactive elements and metadata of the current page ({url})',
-						mimeType='application/json',
-					)
-				)
-				resources.append(
-					types.Resource(
-						uri='browser://current-page/accessibility',
-						name='Accessibility Tree',
-						description=f'Accessibility tree of the current page ({url})',
-						mimeType='application/json',
-					)
-				)
-			return resources
+			return []
 
 		@self.server.list_resource_templates()
 		async def handle_list_resource_templates() -> list[types.ResourceTemplate]:
-			"""List resource templates for session-specific browser resources."""
-			return [
-				types.ResourceTemplate(
-					uriTemplate='browser://sessions/{session_id}/content',
-					name='Session Page Content',
-					description='Clean markdown text of a specific browser session page',
-					mimeType='text/markdown',
-				),
-				types.ResourceTemplate(
-					uriTemplate='browser://sessions/{session_id}/state',
-					name='Session Page State',
-					description='Interactive elements and metadata of a specific browser session page',
-					mimeType='application/json',
-				),
-				types.ResourceTemplate(
-					uriTemplate='browser://sessions/{session_id}/accessibility',
-					name='Session Accessibility Tree',
-					description='Accessibility tree of a specific browser session page',
-					mimeType='application/json',
-				),
-			]
-
-		@self.server.read_resource()
-		async def handle_read_resource(uri: str) -> list[ReadResourceContents]:
-			"""Read a browser resource by URI."""
-			uri_str = str(uri)
-
-			if uri_str == 'browser://current-page/content':
-				if not self.browser_session:
-					return [ReadResourceContents(content='No browser session active', mime_type='text/plain')]
-				content = await self._get_text(extract_links=True)
-				return [ReadResourceContents(content=content, mime_type='text/markdown')]
-
-			elif uri_str == 'browser://current-page/state':
-				if not self.browser_session:
-					return [ReadResourceContents(content='{"error": "No browser session active"}', mime_type='application/json')]
-				state_json = await self._get_browser_state(compact=False)
-				return [ReadResourceContents(content=state_json, mime_type='application/json')]
-
-			elif uri_str == 'browser://current-page/accessibility':
-				if not self.browser_session:
-					return [ReadResourceContents(content='{"error": "No browser session active"}', mime_type='application/json')]
-				a11y_json = await self._get_accessibility_tree()
-				return [ReadResourceContents(content=a11y_json, mime_type='application/json')]
-
-			# Check for session-specific resource URIs
-			session_match = re.match(r'browser://sessions/([^/]+)/(content|state|accessibility)', uri_str)
-			if session_match:
-				session_id = session_match.group(1)
-				resource_type = session_match.group(2)
-				content = await self._read_session_resource(session_id, resource_type)
-				mime = 'text/markdown' if resource_type == 'content' else 'application/json'
-				return [ReadResourceContents(content=content, mime_type=mime)]
-
-			return [ReadResourceContents(content=f'Unknown resource: {uri_str}', mime_type='text/plain')]
-
-		@self.server.subscribe_resource()
-		async def handle_subscribe_resource(uri: AnyUrl) -> None:
-			self._subscribed_resources.add(str(uri))
-
-		@self.server.unsubscribe_resource()
-		async def handle_unsubscribe_resource(uri: AnyUrl) -> None:
-			self._subscribed_resources.discard(str(uri))
-
-		# Store references for testing
-		self._handle_subscribe = handle_subscribe_resource
-		self._handle_unsubscribe = handle_unsubscribe_resource
+			return []
 
 		@self.server.list_prompts()
 		async def handle_list_prompts() -> list[types.Prompt]:
-			"""List available prompts (none for openbrowser)."""
 			return []
 
 		@self.server.call_tool()
@@ -579,27 +324,21 @@ class OpenBrowserServer:
 			"""Handle tool execution."""
 			start_time = time.time()
 			error_msg = None
-			# Capture MCP session reference for notifications
 			try:
-				self._mcp_session = self.server.request_context.session
-			except (LookupError, AttributeError):
-				pass
-			try:
-				result = await self._execute_tool(name, arguments or {})
-				# Send resource notifications for state-changing tools
-				state_changing_tools = {
-					'browser_navigate', 'browser_click', 'browser_type',
-					'browser_go_back', 'browser_scroll',
-				}
-				if name in state_changing_tools and self.browser_session:
-					await self._send_resource_notifications()
+				if name != 'execute_code':
+					return [types.TextContent(type='text', text=f'Unknown tool: {name}')]
+
+				code = (arguments or {}).get('code', '')
+				if not code.strip():
+					return [types.TextContent(type='text', text='Error: No code provided')]
+
+				result = await self._execute_code(code)
 				return [types.TextContent(type='text', text=result)]
 			except Exception as e:
 				error_msg = str(e)
 				logger.error(f'Tool execution failed: {e}', exc_info=True)
 				return [types.TextContent(type='text', text=f'Error: {str(e)}')]
 			finally:
-				# Capture telemetry for tool calls
 				if self._telemetry and TELEMETRY_AVAILABLE:
 					duration = time.time() - start_time
 					self._telemetry.capture(
@@ -612,110 +351,15 @@ class OpenBrowserServer:
 						)
 					)
 
-	async def _execute_tool(self, tool_name: str, arguments: dict[str, Any]) -> str:
-		"""Execute an openbrowser tool.
-
-		Consolidated 11-tool dispatcher following WebMCP design principles.
-		"""
-
-		# Session management (does not require active browser session)
-		if tool_name == 'browser_session':
-			action = arguments['action']
-			if action == 'list':
-				return await self._list_sessions()
-			elif action == 'close':
-				return await self._close_session(arguments['session_id'])
-			elif action == 'close_all':
-				return await self._close_all_sessions()
-			return f"Unknown browser_session action: {action}"
-
-		# All remaining tools require an active browser session
-		if tool_name.startswith('browser_'):
-			if not self.browser_session:
-				await self._init_browser_session()
-
-			# Navigation and interaction
-			if tool_name == 'browser_navigate':
-				return await self._navigate(arguments['url'], arguments.get('new_tab', False))
-
-			elif tool_name == 'browser_click':
-				return await self._click(arguments['index'], arguments.get('new_tab', False))
-
-			elif tool_name == 'browser_type':
-				return await self._type_text(arguments['index'], arguments['text'])
-
-			elif tool_name == 'browser_get_state':
-				# If filter params present, delegate to element search
-				if arguments.get('filter_by') and arguments.get('filter_query'):
-					return await self._search_elements(
-						query=arguments['filter_query'],
-						by=arguments['filter_by'],
-						max_results=arguments.get('max_results', 20),
-					)
-				return await self._get_browser_state(arguments.get('compact', True))
-
-			elif tool_name == 'browser_scroll':
-				# If target_text present, delegate to find-and-scroll
-				if arguments.get('target_text'):
-					return await self._find_and_scroll(arguments['target_text'])
-				return await self._scroll(arguments.get('direction', 'down'))
-
-			elif tool_name == 'browser_go_back':
-				return await self._go_back()
-
-			# Text extraction (with optional grep)
-			elif tool_name == 'browser_get_text':
-				if arguments.get('search'):
-					return await self._grep(
-						pattern=arguments['search'],
-						context_lines=arguments.get('context_lines', 2),
-						max_matches=arguments.get('max_matches', 20),
-						case_insensitive=arguments.get('case_insensitive', True),
-					)
-				return await self._get_text(arguments.get('extract_links', False))
-
-			# Tab management (merged list/switch/close)
-			elif tool_name == 'browser_tab':
-				action = arguments['action']
-				if action == 'list':
-					return await self._list_tabs()
-				elif action == 'switch':
-					return await self._switch_tab(arguments['tab_id'])
-				elif action == 'close':
-					return await self._close_tab(arguments['tab_id'])
-				return f"Unknown browser_tab action: {action}"
-
-			# Advanced inspection
-			elif tool_name == 'browser_get_accessibility_tree':
-				return await self._get_accessibility_tree(
-					max_depth=arguments.get('max_depth', -1),
-					include_ignored=arguments.get('include_ignored', False),
-					output_format=arguments.get('format', 'tree'),
-				)
-
-			elif tool_name == 'browser_execute_js':
-				return await self._execute_js(
-					arguments['expression'],
-					await_promise=arguments.get('await_promise', True),
-					return_by_value=arguments.get('return_by_value', True),
-				)
-
-		return f'Unknown tool: {tool_name}'
-
-	async def _init_browser_session(self, allowed_domains: list[str] | None = None, **kwargs):
-		"""Initialize browser session using config"""
-		if self.browser_session:
+	async def _ensure_namespace(self):
+		"""Lazily initialize browser session, tools, and namespace on first use."""
+		if self._namespace is not None:
 			return
 
-		# Ensure all logging goes to stderr before browser initialization
 		_ensure_all_loggers_use_stderr()
 
-		logger.debug('Initializing browser session...')
-
-		# Get profile config
+		# Initialize browser session
 		profile_config = get_default_profile(self.config)
-
-		# Merge profile config with defaults and overrides
 		profile_data = {
 			'downloads_path': str(Path.home() / 'Downloads' / 'openbrowser-mcp'),
 			'wait_between_actions': 0.5,
@@ -724,27 +368,15 @@ class OpenBrowserServer:
 			'device_scale_factor': 1.0,
 			'disable_security': False,
 			'headless': False,
-			**profile_config,  # Config values override defaults
+			**profile_config,
 		}
-
-		# Tool parameter overrides (highest priority)
-		if allowed_domains is not None:
-			profile_data['allowed_domains'] = allowed_domains
-
-		# Merge any additional kwargs that are valid BrowserProfile fields
-		for key, value in kwargs.items():
-			profile_data[key] = value
-
-		# Create browser profile
 		profile = BrowserProfile(**profile_data)
-
-		# Create browser session
 		session = BrowserSession(browser_profile=profile)
+
 		try:
 			await session.start()
 		except Exception as e:
 			logger.error(f'Failed to start browser session: {e}')
-			# Clean up the failed session to avoid zombie state
 			try:
 				from openbrowser.browser.events import BrowserStopEvent
 				event = session.event_bus.dispatch(BrowserStopEvent())
@@ -755,779 +387,104 @@ class OpenBrowserServer:
 
 		self.browser_session = session
 
-		# Track the session for management
-		self._track_session(self.browser_session)
-
-		logger.debug('Browser session initialized')
-
-
-	async def _navigate(self, url: str, new_tab: bool = False) -> str:
-		"""Navigate to a URL."""
-		if not self.browser_session:
-			return 'Error: No browser session active'
-
-		# Update session activity
-		self._update_session_activity(self.browser_session.id)
-
-		from openbrowser.browser.events import NavigateToUrlEvent
-
-		if new_tab:
-			event = self.browser_session.event_bus.dispatch(NavigateToUrlEvent(url=url, new_tab=True))
-			await event
-			return f'Opened new tab with URL: {url}'
-		else:
-			event = self.browser_session.event_bus.dispatch(NavigateToUrlEvent(url=url))
-			await event
-			return f'Navigated to: {url}'
-
-	async def _click(self, index: int, new_tab: bool = False) -> str:
-		"""Click an element by index."""
-		if not self.browser_session:
-			return 'Error: No browser session active'
-
-		# Update session activity
-		self._update_session_activity(self.browser_session.id)
-
-		# Get the element
-		element = await self.browser_session.get_dom_element_by_index(index)
-		if not element:
-			return f'Element with index {index} not found'
-
-		if new_tab:
-			# For links, extract href and open in new tab
-			href = element.attributes.get('href')
-			if href:
-				# Convert relative href to absolute URL
-				state = await self.browser_session.get_browser_state_summary()
-				current_url = state.url
-				if href.startswith('/'):
-					# Relative URL - construct full URL
-					from urllib.parse import urlparse
-
-					parsed = urlparse(current_url)
-					full_url = f'{parsed.scheme}://{parsed.netloc}{href}'
-				else:
-					full_url = href
-
-				# Open link in new tab
-				from openbrowser.browser.events import NavigateToUrlEvent
-
-				event = self.browser_session.event_bus.dispatch(NavigateToUrlEvent(url=full_url, new_tab=True))
-				await event
-				return f'Clicked element {index} and opened in new tab {full_url[:20]}...'
-			else:
-				# For non-link elements, just do a normal click
-				# Opening in new tab without href is not reliably supported
-				from openbrowser.browser.events import ClickElementEvent
-
-				event = self.browser_session.event_bus.dispatch(ClickElementEvent(node=element))
-				await event
-				return f'Clicked element {index} (new tab not supported for non-link elements)'
-		else:
-			# Normal click
-			from openbrowser.browser.events import ClickElementEvent
-
-			event = self.browser_session.event_bus.dispatch(ClickElementEvent(node=element))
-			await event
-			return f'Clicked element {index}'
-
-	async def _type_text(self, index: int, text: str) -> str:
-		"""Type text into an element."""
-		if not self.browser_session:
-			return 'Error: No browser session active'
-
-		element = await self.browser_session.get_dom_element_by_index(index)
-		if not element:
-			return f'Element with index {index} not found'
-
-		from openbrowser.browser.events import TypeTextEvent
-
-		# Conservative heuristic to detect potentially sensitive data
-		# Only flag very obvious patterns to minimize false positives
-		is_potentially_sensitive = len(text) >= 6 and (
-			# Email pattern: contains @ and a domain-like suffix
-			('@' in text and '.' in text.split('@')[-1] if '@' in text else False)
-			# Mixed alphanumeric with reasonable complexity (likely API keys/tokens)
-			or (
-				len(text) >= 16
-				and any(char.isdigit() for char in text)
-				and any(char.isalpha() for char in text)
-				and any(char in '.-_' for char in text)
-			)
+		# Create CodeAgent tools and namespace
+		self._tools = CodeAgentTools()
+		self._namespace = create_namespace(
+			browser_session=self.browser_session,
+			tools=self._tools,
 		)
 
-		# Use generic key names to avoid information leakage about detection patterns
-		sensitive_key_name = None
-		if is_potentially_sensitive:
-			if '@' in text and '.' in text.split('@')[-1]:
-				sensitive_key_name = 'email'
-			else:
-				sensitive_key_name = 'credential'
+	async def _execute_code(self, code: str) -> str:
+		"""Execute Python code in the persistent namespace.
 
-		event = self.browser_session.event_bus.dispatch(
-			TypeTextEvent(node=element, text=text, is_sensitive=is_potentially_sensitive, sensitive_key_name=sensitive_key_name)
-		)
-		await event
-
-		if is_potentially_sensitive:
-			if sensitive_key_name:
-				return f'Typed <{sensitive_key_name}> into element {index}'
-			else:
-				return f'Typed <sensitive> into element {index}'
-		else:
-			return f"Typed '{text}' into element {index}"
-
-	async def _get_browser_state(self, compact: bool = True) -> str:
-		"""Get current browser state."""
-		if not self.browser_session:
-			return 'Error: No browser session active'
-
-		state = await self.browser_session.get_browser_state_summary(include_screenshot=False)
-
-		element_count = len(state.dom_state.selector_map)
-
-		result: dict[str, Any] = {
-			'url': state.url,
-			'title': state.title,
-			'tabs': [{'url': tab.url, 'title': tab.title} for tab in state.tabs],
-			'interactive_element_count': element_count,
-		}
-
-		if not compact:
-			elements = []
-			for index, element in state.dom_state.selector_map.items():
-				elem_info: dict[str, Any] = {
-					'index': index,
-					'tag': element.tag_name,
-					'text': element.get_all_children_text(max_depth=2)[:100],
-				}
-				if element.attributes.get('placeholder'):
-					elem_info['placeholder'] = element.attributes['placeholder']
-				if element.attributes.get('href'):
-					elem_info['href'] = element.attributes['href']
-				if element.attributes.get('id'):
-					elem_info['id'] = element.attributes['id']
-				if element.attributes.get('class'):
-					elem_info['class'] = element.attributes['class']
-				elements.append(elem_info)
-			result['interactive_elements'] = elements
-
-		return json.dumps(result, indent=2)
-
-	async def _scroll(self, direction: str = 'down') -> str:
-		"""Scroll the page."""
-		if not self.browser_session:
-			return 'Error: No browser session active'
-
-		from openbrowser.browser.events import ScrollEvent
-
-		# Scroll by a standard amount (500 pixels)
-		event = self.browser_session.event_bus.dispatch(
-			ScrollEvent(
-				direction=direction,  # type: ignore
-				amount=500,
-			)
-		)
-		await event
-		return f'Scrolled {direction}'
-
-	async def _go_back(self) -> str:
-		"""Go back in browser history."""
-		if not self.browser_session:
-			return 'Error: No browser session active'
-
-		from openbrowser.browser.events import GoBackEvent
-
-		event = self.browser_session.event_bus.dispatch(GoBackEvent())
-		await event
-		return 'Navigated back'
-
-	async def _close_browser(self) -> str:
-		"""Close the browser session."""
-		if self.browser_session:
-			from openbrowser.browser.events import BrowserStopEvent
-
-			event = self.browser_session.event_bus.dispatch(BrowserStopEvent())
-			await event
-			self.browser_session = None
-			return 'Browser closed'
-		return 'No browser session to close'
-
-	async def _list_tabs(self) -> str:
-		"""List all open tabs."""
-		if not self.browser_session:
-			return 'Error: No browser session active'
-
-		tabs_info = await self.browser_session.get_tabs()
-		tabs = []
-		for i, tab in enumerate(tabs_info):
-			tabs.append({'tab_id': tab.target_id[-4:], 'url': tab.url, 'title': tab.title or ''})
-		return json.dumps(tabs, indent=2)
-
-	async def _switch_tab(self, tab_id: str) -> str:
-		"""Switch to a different tab."""
-		if not self.browser_session:
-			return 'Error: No browser session active'
-
-		from openbrowser.browser.events import SwitchTabEvent
-
-		target_id = await self.browser_session.get_target_id_from_tab_id(tab_id)
-		event = self.browser_session.event_bus.dispatch(SwitchTabEvent(target_id=target_id))
-		await event
-		state = await self.browser_session.get_browser_state_summary()
-		return f'Switched to tab {tab_id}: {state.url}'
-
-	async def _switch_from_about_blank_if_needed(self) -> str:
-		"""Check if current tab is about:blank and switch to a real tab if available.
-
-		Returns the current URL after any switch.
+		The code is wrapped in an async function so ``await`` expressions work.
+		stdout is captured and returned as the result text.  Variables defined
+		in user code are persisted back to the namespace after execution.
 		"""
-		from openbrowser.browser.events import SwitchTabEvent
+		await self._ensure_namespace()
+		assert self._namespace is not None
 
-		current_url = await self.browser_session.get_current_page_url()
-		if current_url and current_url.startswith('about:'):
-			tabs = await self.browser_session.get_tabs()
-			for tab in tabs:
-				if tab.url and not tab.url.startswith('about:'):
-					switch_event = self.browser_session.event_bus.dispatch(SwitchTabEvent(target_id=tab.target_id))
-					await switch_event
-					return tab.url
-		return current_url
+		self._last_activity = time.time()
 
-	async def _close_tab(self, tab_id: str) -> str:
-		"""Close a specific tab.
+		# Capture stdout
+		stdout_capture = io.StringIO()
 
-		After closing, uses a two-phase settle to handle both Chrome's tab state
-		update and the AboutBlankWatchdog's asynchronous about:blank tab creation.
-		Phase 1: Wait for Chrome to settle the active tab after close.
-		Phase 2: Wait for AboutBlankWatchdog to potentially create and focus
-		         an about:blank keepalive tab, then switch away from it.
-		"""
-		if not self.browser_session:
-			return 'Error: No browser session active'
-
-		import asyncio
-
-		from openbrowser.browser.events import CloseTabEvent
-
-		target_id = await self.browser_session.get_target_id_from_tab_id(tab_id)
-		event = self.browser_session.event_bus.dispatch(CloseTabEvent(target_id=target_id))
-		await event
-
-		# Phase 1: Wait for Chrome to settle tab state after close
-		# Without this, get_current_page_url() may still return the closed tab's URL
-		await asyncio.sleep(0.3)
-		current_url = await self._switch_from_about_blank_if_needed()
-
-		# Phase 2: AboutBlankWatchdog may asynchronously create and focus an
-		# about:blank tab after the TabClosedEvent propagates. If we landed on
-		# a real tab in phase 1, wait briefly and re-check in case the watchdog
-		# stole focus.
-		if current_url and not current_url.startswith('about:'):
-			await asyncio.sleep(0.5)
-			current_url = await self._switch_from_about_blank_if_needed()
-
-		return f'Closed tab # {tab_id}, now on {current_url}'
-
-	async def _get_text(self, extract_links: bool = False) -> str:
-		"""Get page content as clean markdown text."""
-		if not self.browser_session:
-			return 'Error: No browser session active'
+		# Wrap code in an async function so await works.
+		# We inject a __locals_capture__ dict and copy locals into it at
+		# the end so we can persist user-defined variables back to the
+		# namespace after the function returns.
+		indented_code = '\n'.join(f'    {line}' for line in code.split('\n'))
+		wrapped = (
+			f"async def __mcp_exec__(__ns__):\n"
+			f"{indented_code}\n"
+			f"    __ns__.update({{k: v for k, v in locals().items() if not k.startswith('__')}})\n"
+		)
 
 		try:
-			content, stats = await extract_clean_markdown(
-				browser_session=self.browser_session,
-				extract_links=extract_links,
-			)
-			if not content or not content.strip():
-				return 'No text content found on page'
-			return content
-		except Exception as e:
-			logger.error(f'Failed to extract text: {e}', exc_info=True)
-			return f'Error extracting text: {str(e)}'
+			# Compile and exec the async function definition
+			compiled = compile(wrapped, '<execute_code>', 'exec')
+			exec(compiled, self._namespace)
 
-	async def _grep(
-		self,
-		pattern: str,
-		context_lines: int = 2,
-		max_matches: int = 20,
-		case_insensitive: bool = True,
-	) -> str:
-		"""Search page text content using regex or string pattern."""
-		if not self.browser_session:
-			return 'Error: No browser session active'
-
-		try:
-			content, _ = await extract_clean_markdown(browser_session=self.browser_session)
-			if not content or not content.strip():
-				return json.dumps({'matches': [], 'total_matches': 0, 'message': 'No text content on page'})
-
-			lines = content.split('\n')
-			flags = re.IGNORECASE if case_insensitive else 0
-
+			# Call the async function with stdout capture, passing namespace
+			# so locals get persisted
+			old_stdout = sys.stdout
+			sys.stdout = stdout_capture
 			try:
-				compiled = re.compile(pattern, flags)
-			except re.error:
-				# Fall back to literal string search
-				escaped = re.escape(pattern)
-				compiled = re.compile(escaped, flags)
+				result = await self._namespace['__mcp_exec__'](self._namespace)
+			finally:
+				sys.stdout = old_stdout
 
-			matches = []
-			for i, line in enumerate(lines):
-				if compiled.search(line):
-					context_before = lines[max(0, i - context_lines) : i]
-					context_after = lines[i + 1 : min(len(lines), i + 1 + context_lines)]
-					matches.append(
-						{
-							'line_number': i + 1,
-							'line': line.strip(),
-							'context_before': [l.strip() for l in context_before],
-							'context_after': [l.strip() for l in context_after],
-						}
-					)
-					if len(matches) >= max_matches:
-						break
+			output = stdout_capture.getvalue()
 
-			total_found = sum(1 for line in lines if compiled.search(line))
+			# If the function returned a value and nothing was printed, show the return value
+			if result is not None and not output.strip():
+				output = repr(result)
 
-			return json.dumps(
-				{
-					'pattern': pattern,
-					'matches': matches,
-					'matches_shown': len(matches),
-					'total_matches': total_found,
-				},
-				indent=2,
-			)
-		except Exception as e:
-			logger.error(f'Grep failed: {e}', exc_info=True)
-			return f'Error during grep: {str(e)}'
+			# If nothing was printed and no return value, confirm execution
+			if not output.strip():
+				output = '(executed successfully, no output)'
 
-	async def _search_elements(self, query: str, by: str = 'text', max_results: int = 20) -> str:
-		"""Search interactive DOM elements by various criteria."""
-		if not self.browser_session:
-			return 'Error: No browser session active'
-
-		try:
-			# Use get_browser_state_summary() for a fresh DOM extraction instead of
-			# get_selector_map() which may return stale cached data
-			state = await self.browser_session.get_browser_state_summary(include_screenshot=False)
-			selector_map = state.dom_state.selector_map if state.dom_state else {}
-			results = []
-			query_lower = query.lower()
-
-			for index, element in selector_map.items():
-				matched = False
-
-				if by == 'text':
-					elem_text = element.get_all_children_text(max_depth=3).lower()
-					matched = query_lower in elem_text
-				elif by == 'tag':
-					matched = query_lower == element.tag_name.lower()
-				elif by == 'id':
-					elem_id = element.attributes.get('id', '').lower()
-					matched = query_lower in elem_id
-				elif by == 'class':
-					elem_class = element.attributes.get('class', '').lower()
-					matched = query_lower in elem_class
-				elif by == 'attribute':
-					for attr_val in element.attributes.values():
-						if query_lower in str(attr_val).lower():
-							matched = True
-							break
-
-				if matched:
-					elem_info: dict[str, Any] = {
-						'index': index,
-						'tag': element.tag_name,
-						'text': element.get_all_children_text(max_depth=2)[:100],
-					}
-					if element.attributes.get('id'):
-						elem_info['id'] = element.attributes['id']
-					if element.attributes.get('class'):
-						elem_info['class'] = element.attributes['class']
-					if element.attributes.get('placeholder'):
-						elem_info['placeholder'] = element.attributes['placeholder']
-					if element.attributes.get('href'):
-						elem_info['href'] = element.attributes['href']
-					if element.attributes.get('type'):
-						elem_info['type'] = element.attributes['type']
-					results.append(elem_info)
-
-					if len(results) >= max_results:
-						break
-
-			return json.dumps(
-				{
-					'query': query,
-					'by': by,
-					'results': results,
-					'count': len(results),
-				},
-				indent=2,
-			)
-		except Exception as e:
-			logger.error(f'Element search failed: {e}', exc_info=True)
-			return f'Error searching elements: {str(e)}'
-
-	async def _find_and_scroll(self, text: str) -> str:
-		"""Find text on the page and scroll to it."""
-		if not self.browser_session:
-			return 'Error: No browser session active'
-
-		try:
-			event = self.browser_session.event_bus.dispatch(ScrollToTextEvent(text=text))
-			await event
-			return f"Found and scrolled to: '{text}'"
-		except Exception as e:
-			logger.error(f'Find and scroll failed: {e}', exc_info=True)
-			return f"Text '{text}' not found or not visible on page"
-
-	async def _get_accessibility_tree(self, max_depth: int = -1, include_ignored: bool = False, output_format: str = 'tree') -> str:
-		"""Get the accessibility tree of the current page."""
-		if not self.browser_session:
-			return 'Error: No browser session active'
-
-		try:
-			target_id = self.browser_session.current_target_id
-			if not target_id:
-				return 'Error: No active page target'
-
-			dom_service = DomService(self.browser_session)
-			ax_tree_result = await dom_service._get_ax_tree_for_all_frames(target_id)
-
-			nodes = []
-			node_map: dict[str, dict[str, Any]] = {}
-
-			for ax_node in ax_tree_result.get('nodes', []):
-				if not include_ignored and ax_node.get('ignored', False):
-					continue
-
-				enhanced = dom_service._build_enhanced_ax_node(ax_node)
-				node_info: dict[str, Any] = {
-					'id': enhanced.ax_node_id,
-					'role': enhanced.role,
-					'name': enhanced.name,
-				}
-				if enhanced.description:
-					node_info['description'] = enhanced.description
-				if enhanced.properties:
-					props = {}
-					for prop in enhanced.properties:
-						if prop.value is not None:
-							props[prop.name] = prop.value
-					if props:
-						node_info['properties'] = props
-				if enhanced.child_ids:
-					node_info['children'] = enhanced.child_ids
-
-				node_map[enhanced.ax_node_id] = node_info
-				nodes.append(node_info)
-
-			total_nodes_in_page = len(nodes)
-
-			# Build parent map for flat format
-			parent_map: dict[str, str | None] = {}
-			for node in nodes:
-				for child_id in node.get('children', []):
-					parent_map[child_id] = node['id']
-
-			def _count_tree_nodes(node_id: str, depth: int) -> int:
-				"""Count nodes in the depth-limited tree."""
-				node = node_map.get(node_id)
-				if not node:
-					return 0
-				if max_depth >= 0 and depth > max_depth:
-					return 0
-				count = 1
-				for child_id in node.get('children', []):
-					count += _count_tree_nodes(child_id, depth + 1)
-				return count
-
-			def _build_tree(node_id: str, depth: int) -> dict[str, Any] | None:
-				"""Recursively build tree structure with depth limit."""
-				node = node_map.get(node_id)
-				if not node:
-					return None
-				if max_depth >= 0 and depth > max_depth:
-					return None
-
-				result = {k: v for k, v in node.items() if k != 'children'}
-				child_ids = node.get('children', [])
-				if child_ids:
-					children = []
-					for child_id in child_ids:
-						child = _build_tree(child_id, depth + 1)
-						if child:
-							children.append(child)
-					if children:
-						result['children'] = children
-				return result
-
-			def _collect_flat_nodes(node_id: str, depth: int) -> list[dict[str, Any]]:
-				"""Collect nodes in flat format respecting depth limit."""
-				node = node_map.get(node_id)
-				if not node:
-					return []
-				if max_depth >= 0 and depth > max_depth:
-					return []
-
-				flat_node = {k: v for k, v in node.items() if k != 'children'}
-				flat_node['parent_id'] = parent_map.get(node_id)
-				result = [flat_node]
-				for child_id in node.get('children', []):
-					result.extend(_collect_flat_nodes(child_id, depth + 1))
-				return result
-
-			# Build tree from root nodes (nodes not referenced as children)
-			all_child_ids = set()
-			for node in nodes:
-				for child_id in node.get('children', []):
-					all_child_ids.add(child_id)
-
-			root_nodes = [n for n in nodes if n['id'] not in all_child_ids]
-
-			# Count depth-limited nodes
-			total_nodes = 0
-			for root in root_nodes:
-				total_nodes += _count_tree_nodes(root['id'], 0)
-
-			if output_format == 'flat':
-				flat_nodes: list[dict[str, Any]] = []
-				for root in root_nodes:
-					flat_nodes.extend(_collect_flat_nodes(root['id'], 0))
-				return json.dumps(
-					{
-						'nodes': flat_nodes,
-						'total_nodes': total_nodes,
-						'total_nodes_in_page': total_nodes_in_page,
-					},
-					indent=2,
-				)
-
-			if root_nodes:
-				tree = []
-				for root in root_nodes:
-					built = _build_tree(root['id'], 0)
-					if built:
-						tree.append(built)
-
-				return json.dumps(
-					{
-						'tree': tree if len(tree) > 1 else tree[0] if tree else {},
-						'total_nodes': total_nodes,
-						'total_nodes_in_page': total_nodes_in_page,
-					},
-					indent=2,
-				)
-			else:
-				return json.dumps({'nodes': nodes, 'total_nodes': total_nodes, 'total_nodes_in_page': total_nodes_in_page}, indent=2)
+			return output
 
 		except Exception as e:
-			logger.error(f'Accessibility tree extraction failed: {e}', exc_info=True)
-			return f'Error getting accessibility tree: {str(e)}'
+			# Restore stdout in case of exception during capture
+			sys.stdout = sys.__stdout__
 
-	async def _execute_js(self, expression: str, await_promise: bool = True, return_by_value: bool = True) -> str:
-		"""Execute JavaScript on the current page and return the result."""
-		if not self.browser_session:
-			return 'Error: No browser session active'
+			captured_output = stdout_capture.getvalue()
 
-		try:
-			target_id = self.browser_session.current_target_id
-			if not target_id:
-				return 'Error: No active page target'
+			# Format the error with traceback
+			tb = traceback.format_exc()
+			# Strip the wrapper function frames from traceback for cleaner output
+			error_output = f'Error: {type(e).__name__}: {e}\n\nTraceback:\n{tb}'
 
-			cdp_session = await self.browser_session.get_or_create_cdp_session(target_id=target_id, focus=False)
+			if captured_output.strip():
+				error_output = f'Output before error:\n{captured_output}\n\n{error_output}'
 
-			result = await cdp_session.cdp_client.send.Runtime.evaluate(
-				params={
-					'expression': expression,
-					'returnByValue': return_by_value,
-					'awaitPromise': await_promise,
-				},
-				session_id=cdp_session.session_id,
-			)
+			return error_output
 
-			if 'exceptionDetails' in result:
-				exception = result['exceptionDetails']
-				error_text = exception.get('text', 'Unknown error')
-				if 'exception' in exception:
-					error_text = exception['exception'].get('description', error_text)
-				return json.dumps({'error': error_text})
-
-			if not return_by_value:
-				remote_obj = result.get('result', {})
-				return json.dumps({
-					'objectId': remote_obj.get('objectId'),
-					'type': remote_obj.get('type', 'undefined'),
-					'subtype': remote_obj.get('subtype'),
-					'className': remote_obj.get('className'),
-					'description': remote_obj.get('description'),
-				}, indent=2)
-
-			value = result.get('result', {}).get('value')
-			result_type = result.get('result', {}).get('type', 'undefined')
-
-			if result_type == 'undefined':
-				return json.dumps({'result': None, 'type': 'undefined'})
-
-			return json.dumps({'result': value, 'type': result_type}, indent=2, default=str)
-
-		except Exception as e:
-			logger.error(f'JavaScript execution failed: {e}', exc_info=True)
-			return f'Error executing JavaScript: {str(e)}'
-
-	def _track_session(self, session: BrowserSession) -> None:
-		"""Track a browser session for management."""
-		self.active_sessions[session.id] = {
-			'session': session,
-			'created_at': time.time(),
-			'last_activity': time.time(),
-			'url': getattr(session, 'current_url', None),
-		}
-
-	def _update_session_activity(self, session_id: str) -> None:
-		"""Update the last activity time for a session."""
-		if session_id in self.active_sessions:
-			self.active_sessions[session_id]['last_activity'] = time.time()
-
-	async def _read_session_resource(self, session_id: str, resource_type: str) -> str:
-		"""Read a resource from a specific session by temporarily swapping the active session.
-
-		NOTE: This session swap is safe because MCP stdio transport processes requests sequentially.
-		If switching to a concurrent transport (SSE, WebSocket), use a lock or pass the session directly.
-		"""
-		if session_id not in self.active_sessions:
-			return f'Session {session_id} not found'
-		session_data = self.active_sessions[session_id]
-		session = session_data['session']
-		original = self.browser_session
-		self.browser_session = session
-		try:
-			if resource_type == 'content':
-				return await self._get_text(extract_links=True)
-			elif resource_type == 'state':
-				return await self._get_browser_state(compact=False)
-			elif resource_type == 'accessibility':
-				return await self._get_accessibility_tree()
-			else:
-				return f'Unknown resource type: {resource_type}'
 		finally:
-			self.browser_session = original
+			# Clean up the temporary function from namespace
+			self._namespace.pop('__mcp_exec__', None)
 
-	async def _list_sessions(self) -> str:
-		"""List all active browser sessions."""
-		if not self.active_sessions:
-			return 'No active browser sessions'
+	async def _cleanup_expired_session(self) -> None:
+		"""Close browser session if idle beyond timeout."""
+		if not self.browser_session:
+			return
 
-		sessions_info = []
-		for session_id, session_data in self.active_sessions.items():
-			session = session_data['session']
-			created_at = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(session_data['created_at']))
-			last_activity = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(session_data['last_activity']))
-
-			# Check if session is still active
-			is_active = hasattr(session, 'cdp_client') and session.cdp_client is not None
-
-			sessions_info.append(
-				{
-					'session_id': session_id,
-					'created_at': created_at,
-					'last_activity': last_activity,
-					'active': is_active,
-					'current_url': session_data.get('url', 'Unknown'),
-					'age_minutes': (time.time() - session_data['created_at']) / 60,
-				}
-			)
-
-		return json.dumps(sessions_info, indent=2)
-
-	async def _close_session(self, session_id: str) -> str:
-		"""Close a specific browser session."""
-		if session_id not in self.active_sessions:
-			return f'Session {session_id} not found'
-
-		session_data = self.active_sessions[session_id]
-		session = session_data['session']
-
-		try:
-			# Close the session
-			if hasattr(session, 'kill'):
-				await session.kill()
-			elif hasattr(session, 'close'):
-				await session.close()
-
-			# Remove from tracking
-			del self.active_sessions[session_id]
-
-			# If this was the current session, clear it
-			if self.browser_session and self.browser_session.id == session_id:
-				self.browser_session = None
-
-			return f'Successfully closed session {session_id}'
-		except Exception as e:
-			return f'Error closing session {session_id}: {str(e)}'
-
-	async def _close_all_sessions(self) -> str:
-		"""Close all active browser sessions."""
-		if not self.active_sessions and not self.browser_session:
-			return 'No active sessions to close'
-
-		closed_count = 0
-		errors = []
-
-		for session_id in list(self.active_sessions.keys()):
-			try:
-				result = await self._close_session(session_id)
-				if 'Successfully closed' in result:
-					closed_count += 1
-				else:
-					errors.append(f'{session_id}: {result}')
-			except Exception as e:
-				errors.append(f'{session_id}: {str(e)}')
-
-		# Clear current session references
-		self.browser_session = None
-
-		result = f'Closed {closed_count} sessions'
-		if errors:
-			result += f'. Errors: {"; ".join(errors)}'
-
-		return result
-
-	async def _cleanup_expired_sessions(self) -> None:
-		"""Background task to clean up expired sessions."""
 		current_time = time.time()
 		timeout_seconds = self.session_timeout_minutes * 60
 
-		expired_sessions = []
-		for session_id, session_data in self.active_sessions.items():
-			last_activity = session_data['last_activity']
-			if current_time - last_activity > timeout_seconds:
-				expired_sessions.append(session_id)
-
-		for session_id in expired_sessions:
+		if current_time - self._last_activity > timeout_seconds:
+			logger.info('Auto-closing idle browser session')
 			try:
-				await self._close_session(session_id)
-				logger.info(f'Auto-closed expired session {session_id}')
+				from openbrowser.browser.events import BrowserStopEvent
+				event = self.browser_session.event_bus.dispatch(BrowserStopEvent())
+				await event
 			except Exception as e:
-				logger.error(f'Error auto-closing session {session_id}: {e}')
-
-	async def _send_resource_notifications(self) -> None:
-		"""Send resource updated notifications. If subscriptions exist, only notify subscribed URIs."""
-		if not self._mcp_session:
-			return
-		all_uris = [
-			'browser://current-page/content',
-			'browser://current-page/state',
-			'browser://current-page/accessibility',
-		]
-		uris_to_notify = [u for u in all_uris if u in self._subscribed_resources] if self._subscribed_resources else all_uris
-		for uri_str in uris_to_notify:
-			try:
-				await self._mcp_session.send_resource_updated(AnyUrl(uri_str))
-			except Exception:
-				logger.debug('Failed to send resource notification for %s', uri_str, exc_info=True)
+				logger.error(f'Error closing idle session: {e}')
+			finally:
+				self.browser_session = None
+				self._namespace = None
 
 	async def _start_cleanup_task(self) -> None:
 		"""Start the background cleanup task."""
@@ -1535,8 +492,7 @@ class OpenBrowserServer:
 		async def cleanup_loop():
 			while True:
 				try:
-					await self._cleanup_expired_sessions()
-					# Check every 2 minutes
+					await self._cleanup_expired_session()
 					await asyncio.sleep(120)
 				except Exception as e:
 					logger.error(f'Error in cleanup task: {e}')
@@ -1546,7 +502,6 @@ class OpenBrowserServer:
 
 	async def run(self):
 		"""Run the MCP server."""
-		# Start the cleanup task
 		await self._start_cleanup_task()
 
 		async with mcp.server.stdio.stdio_server() as (read_stream, write_stream):
