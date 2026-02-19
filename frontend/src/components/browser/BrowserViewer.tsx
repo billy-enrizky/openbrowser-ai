@@ -74,8 +74,13 @@ export function BrowserViewer({ className }: BrowserViewerProps) {
         return;
       }
 
-      // Relative path -- construct full WebSocket URL via the API proxy
-      const wsBase = API_BASE_URL.replace(/^https/, "wss").replace(/^http/, "ws");
+      // Relative path -- construct full WebSocket URL via the API proxy.
+      // In production, VNC WebSocket routes through CloudFront (same origin)
+      // to avoid API Gateway's 30s WebSocket timeout. In local dev, use
+      // API_BASE_URL which points to the local backend.
+      const isLocalDev = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+      const base = isLocalDev ? API_BASE_URL : window.location.origin;
+      const wsBase = base.replace(/^https/, "wss").replace(/^http/, "ws");
       let token = "";
       if (authEnabled) {
         token = (await getValidIdToken()) || "";
@@ -332,22 +337,10 @@ export function BrowserViewer({ className }: BrowserViewerProps) {
           </div>
         </div>
 
-        {/* Browser View Container - screenshot fallback when VNC unavailable */}
+        {/* Browser View Container - VNC takes priority, screenshot as fallback/overlay */}
         <div ref={containerRef} className="flex-1 relative bg-black overflow-hidden">
-          {latestScreenshot ? (
-            /* Show latest screenshot from task execution */
-            <div className="absolute inset-0 flex items-center justify-center overflow-hidden">
-              <img
-                src={`data:image/png;base64,${latestScreenshot}`}
-                alt="Browser view"
-                className="max-w-full max-h-full object-contain"
-              />
-              <div className="absolute top-2 right-2 px-2 py-1 bg-zinc-900/80 rounded text-xs text-zinc-400 backdrop-blur-sm">
-                Live screenshot
-              </div>
-            </div>
-          ) : vncInfo && resolvedVncUrl && connectionStatus !== "error" ? (
-            /* Try VNC connection when available */
+          {vncInfo && resolvedVncUrl && connectionStatus !== "error" ? (
+            /* VNC connection -- always render when available */
             <div ref={vncContainerRef} className="absolute inset-0 flex items-center justify-center overflow-hidden">
               <div
                 className="relative"
@@ -385,6 +378,20 @@ export function BrowserViewer({ className }: BrowserViewerProps) {
                 />
               </div>
 
+              {/* Screenshot overlay while VNC is still connecting */}
+              {connectionStatus !== "connected" && latestScreenshot && (
+                <div className="absolute inset-0 flex items-center justify-center overflow-hidden z-10">
+                  <img
+                    src={`data:image/png;base64,${latestScreenshot}`}
+                    alt="Browser preview"
+                    className="max-w-full max-h-full object-contain"
+                  />
+                  <div className="absolute top-2 right-2 px-2 py-1 bg-zinc-900/80 rounded text-xs text-zinc-400 backdrop-blur-sm">
+                    Connecting to live view...
+                  </div>
+                </div>
+              )}
+
               {/* Take control button overlay */}
               {connectionStatus === "connected" && !isInteractive && (
                 <div className="absolute bottom-4 right-4 z-20">
@@ -397,6 +404,18 @@ export function BrowserViewer({ className }: BrowserViewerProps) {
                   </Button>
                 </div>
               )}
+            </div>
+          ) : latestScreenshot ? (
+            /* Screenshot fallback when VNC is not available */
+            <div className="absolute inset-0 flex items-center justify-center overflow-hidden">
+              <img
+                src={`data:image/png;base64,${latestScreenshot}`}
+                alt="Browser view"
+                className="max-w-full max-h-full object-contain"
+              />
+              <div className="absolute top-2 right-2 px-2 py-1 bg-zinc-900/80 rounded text-xs text-zinc-400 backdrop-blur-sm">
+                Live screenshot
+              </div>
             </div>
           ) : (
             /* No browser session active */
