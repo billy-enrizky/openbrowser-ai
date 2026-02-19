@@ -2,13 +2,16 @@
 
 import React, { useState, useCallback, useEffect } from "react";
 import { motion } from "framer-motion";
+import { useRouter } from "next/navigation";
 import { Sidebar, Header } from "@/components/layout";
 import { ChatInput, ChatMessages, getFileTypeFromName, LogPanel } from "@/components/chat";
 import { BrowserViewer } from "@/components/browser";
+import { useAuth } from "@/components/auth";
 import { useAppStore } from "@/store";
-import { useWebSocket } from "@/hooks/useWebSocket";
+import { useTaskStream } from "@/hooks/useTaskStream";
 import { API_BASE_URL } from "@/lib/config";
-import type { Message, WSMessage, FileAttachment, LogEntry, VncInfo, AvailableModelsResponse } from "@/types";
+import { fetchChatList, fetchConversationDetail, setActiveConversation, deleteConversation } from "@/lib/chat-api";
+import type { WSMessage, FileAttachment, LogEntry, VncInfo, AvailableModelsResponse } from "@/types";
 import { cn } from "@/lib/utils";
 
 // Helper function to get file type - use backend-provided type or derive from filename
@@ -108,20 +111,30 @@ function parseAttachments(data: Record<string, unknown>): FileAttachment[] {
 }
 
 export default function Home() {
-  const { 
-    sidebarOpen, 
-    messages, 
-    addMessage, 
-    agentType, 
-    maxSteps, 
-    useVision, 
-    logs, 
-    addLog, 
-    clearLogs, 
-    showLogs, 
+  const router = useRouter();
+  const { authEnabled, isLoading: authLoading, isAuthenticated, idToken, getValidIdToken } = useAuth();
+  const {
+    sidebarOpen,
+    messages,
+    addMessage,
+    setMessages,
+    setConversations,
+    upsertConversation,
+    removeConversation,
+    activeConversationId,
+    setActiveConversationId,
+    agentType,
+    maxSteps,
+    useVision,
+    logs,
+    addLog,
+    clearLogs,
+    showLogs,
     setShowLogs,
     setVncInfo,
+    setBrowserViewerOpen,
     browserViewerOpen,
+    setLatestScreenshot,
     // Model selection
     selectedModel,
     setSelectedModel,
@@ -135,15 +148,32 @@ export default function Home() {
   } = useAppStore();
   const [isLoading, setIsLoading] = useState(false);
   const [currentTaskId, setCurrentTaskId] = useState<string | null>(null);
+  const [chatsLoading, setChatsLoading] = useState(false);
+  const [chatError, setChatError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!authLoading && authEnabled && !isAuthenticated) {
+      router.replace("/login");
+    }
+  }, [authEnabled, authLoading, isAuthenticated, router]);
 
   // Fetch available models on mount
   useEffect(() => {
     async function fetchModels() {
+      if (authEnabled && !isAuthenticated) {
+        return;
+      }
+
       setModelsLoading(true);
       setModelsError(null);
       
       try {
-        const response = await fetch(`${API_BASE_URL}/api/v1/models`);
+        const token = await getValidIdToken();
+        const headers: HeadersInit = token
+          ? { Authorization: `Bearer ${token}` }
+          : {};
+
+        const response = await fetch(`${API_BASE_URL}/api/v1/models`, { headers });
         if (!response.ok) {
           throw new Error("Failed to fetch models");
         }
@@ -167,8 +197,132 @@ export default function Home() {
       }
     }
     
-    fetchModels();
-  }, [setAvailableModels, setAvailableProviders, setModelsLoading, setModelsError, setSelectedModel, selectedModel]);
+    if (!authLoading) {
+      fetchModels();
+    }
+  }, [
+    authEnabled,
+    authLoading,
+    isAuthenticated,
+    getValidIdToken,
+    setAvailableModels,
+    setAvailableProviders,
+    setModelsLoading,
+    setModelsError,
+    setSelectedModel,
+    selectedModel,
+  ]);
+
+  const refreshChatList = useCallback(async () => {
+    if (authEnabled && !isAuthenticated) {
+      return;
+    }
+    try {
+      const token = await getValidIdToken();
+      const data = await fetchChatList(token);
+      setConversations(data.conversations);
+      if (data.activeConversationId) {
+        setActiveConversationId(data.activeConversationId);
+      }
+    } catch (error) {
+      setChatError(error instanceof Error ? error.message : "Failed to load chats");
+    }
+  }, [authEnabled, getValidIdToken, isAuthenticated, setActiveConversationId, setConversations]);
+
+  const loadConversation = useCallback(async (conversationId: string) => {
+    const token = await getValidIdToken();
+    const detail = await fetchConversationDetail(token, conversationId);
+    setMessages(detail.messages);
+    setActiveConversationId(detail.conversation.id);
+    upsertConversation(detail.conversation);
+  }, [getValidIdToken, setMessages, setActiveConversationId, upsertConversation]);
+
+  useEffect(() => {
+    if (authLoading) {
+      return;
+    }
+    if (authEnabled && !isAuthenticated) {
+      return;
+    }
+
+    (async () => {
+      setChatsLoading(true);
+      setChatError(null);
+      try {
+        const token = await getValidIdToken();
+        const data = await fetchChatList(token);
+        setConversations(data.conversations);
+
+        const conversationIdToLoad = data.activeConversationId ?? null;
+        if (conversationIdToLoad) {
+          const detail = await fetchConversationDetail(token, conversationIdToLoad);
+          setMessages(detail.messages);
+          setActiveConversationId(detail.conversation.id);
+          upsertConversation(detail.conversation);
+        } else {
+          setActiveConversationId(null);
+          setMessages([]);
+        }
+      } catch (error) {
+        setChatError(error instanceof Error ? error.message : "Failed to load chats");
+      } finally {
+        setChatsLoading(false);
+      }
+    })();
+  }, [
+    authEnabled,
+    authLoading,
+    getValidIdToken,
+    isAuthenticated,
+    setActiveConversationId,
+    setConversations,
+    setMessages,
+    upsertConversation,
+  ]);
+
+  const handleSelectConversation = useCallback(async (conversationId: string) => {
+    setChatError(null);
+    try {
+      await loadConversation(conversationId);
+      const token = await getValidIdToken();
+      await setActiveConversation(token, conversationId);
+    } catch (error) {
+      setChatError(error instanceof Error ? error.message : "Failed to open conversation");
+    }
+  }, [getValidIdToken, loadConversation]);
+
+  const handleNewChat = useCallback(async () => {
+    setMessages([]);
+    setActiveConversationId(null);
+    setCurrentTaskId(null);
+    setVncInfo(null);
+    setChatError(null);
+    try {
+      const token = await getValidIdToken();
+      await setActiveConversation(token, null);
+    } catch (error) {
+      setChatError(error instanceof Error ? error.message : "Failed to reset active chat");
+    }
+  }, [getValidIdToken, setActiveConversationId, setMessages, setVncInfo]);
+
+  const handleDeleteConversation = useCallback(async (conversationId: string) => {
+    setChatError(null);
+    try {
+      const token = await getValidIdToken();
+      await deleteConversation(token, conversationId);
+      removeConversation(conversationId);
+      // If the deleted conversation was active, clear the view
+      if (conversationId === activeConversationId) {
+        setMessages([]);
+        setActiveConversationId(null);
+        setCurrentTaskId(null);
+        setVncInfo(null);
+        await setActiveConversation(token, null);
+      }
+    } catch (error) {
+      setChatError(error instanceof Error ? error.message : "Failed to delete conversation");
+    }
+  }, [activeConversationId, getValidIdToken, removeConversation, setActiveConversationId, setMessages, setVncInfo]);
 
   // Handle incoming WebSocket messages
   const handleWSMessage = useCallback((wsMessage: WSMessage) => {
@@ -177,12 +331,17 @@ export default function Home() {
     switch (type) {
       case "task_started":
         setCurrentTaskId(task_id || null);
-        // Clear logs when a new task starts
+        if (typeof data.conversation_id === "string") {
+          setActiveConversationId(data.conversation_id);
+        }
+        // Clear logs and screenshots when a new task starts
         clearLogs();
+        setLatestScreenshot(null);
+        void refreshChatList();
         break;
 
       case "vnc_info": {
-        // Handle VNC connection info
+        // Handle VNC connection info and auto-open browser viewer
         const vncInfo: VncInfo = {
           vnc_url: data.vnc_url as string,
           password: data.password as string,
@@ -191,6 +350,7 @@ export default function Home() {
           display: data.display as string | undefined,
         };
         setVncInfo(vncInfo);
+        setBrowserViewerOpen(true);
         break;
       }
 
@@ -208,58 +368,59 @@ export default function Home() {
         break;
       }
 
-      case "step_update":
-        // Update with step info
-        if (data.thinking) {
-          addMessage({
+      case "step_update": {
+        // Route step details to backend logs panel only (not chat)
+        // The backend also emits a "log" event with a summary, but
+        // step_update carries the full code which we add here.
+        const code = data.code as string | undefined;
+        if (code) {
+          const firstLine = code.split("\n").find(l => l.trim() && !l.trim().startsWith("#"))?.trim() || "";
+          const preview = firstLine.length > 100 ? firstLine.slice(0, 100) + "..." : firstLine;
+          addLog({
             id: crypto.randomUUID(),
-            role: "assistant",
-            content: data.thinking as string,
+            level: "info",
+            message: preview ? `Executing: ${preview}` : "Executing step...",
+            source: "code",
+            stepNumber: data.step_number as number,
             timestamp: new Date(),
-            taskId: task_id,
-            metadata: {
-              stepNumber: data.step_number as number,
-              isThinking: true,
-            },
           });
         }
         break;
+      }
 
-      case "output":
-        // Skip final outputs - they will be included in task_completed with attachments
-        if (data.is_final) {
-          break;
-        }
-        addMessage({
-          id: crypto.randomUUID(),
-          role: "assistant",
-          content: data.content as string,
-          timestamp: new Date(),
-          taskId: task_id,
-          metadata: {
+      case "output": {
+        // Route output to backend logs panel only (not chat)
+        // Final outputs will be included in task_completed message
+        if (data.is_final) break;
+        const outputContent = (data.content as string) || "";
+        if (outputContent) {
+          const truncated = outputContent.length > 200
+            ? outputContent.slice(0, 200) + "..."
+            : outputContent;
+          addLog({
+            id: crypto.randomUUID(),
+            level: "info",
+            message: `Output: ${truncated}`,
+            source: "output",
             stepNumber: data.step_number as number,
-          },
-        });
+            timestamp: new Date(),
+          });
+        }
         break;
+      }
 
       case "screenshot":
-        // Add screenshot to the last message or create new one
-        addMessage({
-          id: crypto.randomUUID(),
-          role: "assistant",
-          content: "Browser screenshot captured",
-          timestamp: new Date(),
-          taskId: task_id,
-          metadata: {
-            stepNumber: data.step_number as number,
-            screenshot: data.base64 as string,
-          },
-        });
+        // Store latest screenshot for the browser viewer panel
+        setLatestScreenshot(data.base64 as string);
+        // Auto-open browser viewer on first screenshot if not already open
+        if (!browserViewerOpen) {
+          setBrowserViewerOpen(true);
+        }
         break;
 
       case "task_completed": {
         setIsLoading(false);
-        // Clear VNC info when task completes
+        // Clear VNC info when task completes (keep latestScreenshot for review)
         setVncInfo(null);
         const attachments = parseAttachments(data);
         addMessage({
@@ -272,13 +433,13 @@ export default function Home() {
             attachments: attachments.length > 0 ? attachments : undefined,
           },
         });
+        void refreshChatList();
         break;
       }
 
       case "task_failed":
       case "error":
         setIsLoading(false);
-        // Clear VNC info on error
         setVncInfo(null);
         addMessage({
           id: crypto.randomUUID(),
@@ -290,11 +451,11 @@ export default function Home() {
             isError: true,
           },
         });
+        void refreshChatList();
         break;
 
       case "task_cancelled":
         setIsLoading(false);
-        // Clear VNC info when cancelled
         setVncInfo(null);
         addMessage({
           id: crypto.randomUUID(),
@@ -303,6 +464,7 @@ export default function Home() {
           timestamp: new Date(),
           taskId: task_id,
         });
+        void refreshChatList();
         break;
 
       case "extension_status": {
@@ -311,34 +473,38 @@ export default function Home() {
         break;
       }
     }
-  }, [addMessage, addLog, clearLogs, setVncInfo, setExtensionConnected]);
+  }, [addMessage, addLog, clearLogs, refreshChatList, setActiveConversationId, setVncInfo, setBrowserViewerOpen, setLatestScreenshot, setExtensionConnected, browserViewerOpen]);
 
-  const { isConnected, sendMessage } = useWebSocket({
+  const { isConnected, startTask, cancelTask } = useTaskStream({
     onMessage: handleWSMessage,
-    autoConnect: true,
+    onConnect: () => setIsLoading(true),
+    getToken: authEnabled ? getValidIdToken : undefined,
   });
 
-  const handleSendMessage = useCallback((content: string) => {
+  const handleSendMessage = useCallback(async (content: string) => {
+    setChatError(null);
     // Add user message
     addMessage({
       id: crypto.randomUUID(),
       role: "user",
       content,
       timestamp: new Date(),
+      taskId: currentTaskId || undefined,
     });
 
-    // Send to backend
+    // Start task via REST + SSE
     setIsLoading(true);
-    const sent = sendMessage("start_task", undefined, {
+    const taskId = await startTask({
       task: content,
       agent_type: agentType,
       max_steps: maxSteps,
       use_vision: useVision,
       llm_model: selectedModel,
       use_current_browser: useCurrentBrowser,
+      conversation_id: activeConversationId,
     });
 
-    if (!sent) {
+    if (!taskId) {
       setIsLoading(false);
       addMessage({
         id: crypto.randomUUID(),
@@ -348,14 +514,30 @@ export default function Home() {
         metadata: { isError: true },
       });
     }
-  }, [addMessage, sendMessage, agentType, maxSteps, useVision, selectedModel, useCurrentBrowser]);
+  }, [activeConversationId, addMessage, startTask, agentType, currentTaskId, maxSteps, useVision, selectedModel, useCurrentBrowser]);
 
   const hasMessages = messages.length > 0;
+
+  if (authEnabled && (authLoading || !isAuthenticated)) {
+    return (
+      <main className="min-h-screen bg-zinc-950 text-zinc-100 flex items-center justify-center px-6">
+        <div className="w-full max-w-md rounded-2xl border border-zinc-800 bg-zinc-900/60 p-8 backdrop-blur text-center">
+          <h1 className="text-lg font-semibold">Checking authentication...</h1>
+          <p className="mt-2 text-sm text-zinc-400">Redirecting to sign-in if needed.</p>
+        </div>
+      </main>
+    );
+  }
 
   return (
     <div className="flex h-screen overflow-hidden bg-zinc-950">
       {/* Sidebar */}
-      <Sidebar />
+      <Sidebar
+        onNewChat={handleNewChat}
+        onSelectConversation={handleSelectConversation}
+        onDeleteConversation={handleDeleteConversation}
+        chatsLoading={chatsLoading}
+      />
 
       {/* Main Content */}
       <main
@@ -368,6 +550,12 @@ export default function Home() {
         <div className="flex-1 flex flex-col min-h-0">
           {/* Header */}
           <Header />
+
+          {chatError && (
+            <div className="mx-4 mt-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">
+              {chatError}
+            </div>
+          )}
 
           <div className="flex-1 flex flex-col min-h-0">
             {hasMessages ? (
@@ -443,11 +631,11 @@ export default function Home() {
                     <div
                       className={cn(
                         "w-2 h-2 rounded-full",
-                        isConnected ? "bg-green-500" : "bg-red-500"
+                        isConnected ? "bg-green-500 animate-pulse" : "bg-green-500"
                       )}
                     />
                     <span className="text-sm text-zinc-500">
-                      {isConnected ? "Connected to server" : "Connecting..."}
+                      {isConnected ? "Task streaming..." : "Ready"}
                     </span>
                   </motion.div>
 
