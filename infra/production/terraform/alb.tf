@@ -5,9 +5,12 @@
 resource "aws_lb" "backend" {
   name               = "${var.project_name}-alb"
   load_balancer_type = "application"
-  internal           = true
-  subnets            = aws_subnet.private[*].id
+  internal           = false
+  subnets            = aws_subnet.public[*].id
   security_groups    = [aws_security_group.alb.id]
+
+  # Long idle timeout for persistent VNC WebSocket connections
+  idle_timeout = 3600
 
   tags = { Name = "${var.project_name}-alb" }
 }
