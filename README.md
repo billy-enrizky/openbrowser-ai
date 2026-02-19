@@ -400,7 +400,16 @@ The MCP server exposes a single `execute_code` tool that runs Python code in a p
 
 ### E2E LLM Benchmark (6 Real-World Tasks, N=5 runs)
 
-Six browser tasks run through Claude Sonnet 4.6 on AWS Bedrock with a server-agnostic system prompt. 5 runs per server with 10,000-sample bootstrap CIs.
+Six real-world browser tasks run through Claude Sonnet 4.6 on AWS Bedrock (Converse API) with a server-agnostic system prompt. The LLM autonomously decides which tools to call and when the task is complete. 5 runs per server with 10,000-sample bootstrap CIs. All tasks run against live websites.
+
+| # | Task | Description | Target Site |
+|:-:|------|-------------|-------------|
+| 1 | **fact_lookup** | Navigate to a Wikipedia article and extract specific facts (creator and year) | en.wikipedia.org |
+| 2 | **form_fill** | Fill out a multi-field form (text input, radio button, checkbox) and submit | httpbin.org/forms/post |
+| 3 | **multi_page_extract** | Extract the titles of the top 5 stories from a dynamic page | news.ycombinator.com |
+| 4 | **search_navigate** | Search Wikipedia, click a result, and extract specific information | en.wikipedia.org |
+| 5 | **deep_navigation** | Navigate to a GitHub repo and find the latest release version number | github.com |
+| 6 | **content_analysis** | Analyze page structure: count headings, links, and paragraphs | example.com |
 
 <p align="center">
   <img src="benchmarks/benchmark_comparison.png" alt="E2E LLM Benchmark: MCP Server Comparison" width="800" />
