@@ -1,32 +1,61 @@
 #!/bin/bash
 set -euo pipefail
 
-# Push API keys from local .env to SSM Parameter Store
+# Push API keys from local .env to SSM Parameter Store.
+#
+# SSM parameter names and region are read from Terraform outputs.
 #
 # Usage:
 #   bash infra/production/scripts/push_api_keys.sh
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+TF_DIR="$PROJECT_ROOT/infra/production/terraform"
 ENV_FILE="$PROJECT_ROOT/.env"
-AWS_REGION="${AWS_REGION:-ca-central-1}"
-PROJECT_NAME="${PROJECT_NAME:-openbrowser}"
 
-echo "--- Syncing API keys from .env to SSM Parameter Store ---"
+if ! command -v terraform >/dev/null 2>&1; then
+    echo "ERROR: terraform is not installed."
+    exit 1
+fi
 
 if [ ! -f "$ENV_FILE" ]; then
     echo "ERROR: .env file not found at $ENV_FILE"
     exit 1
 fi
 
-push_key_to_ssm() {
+tf_output_raw() {
+    terraform -chdir="$TF_DIR" output -raw "$1"
+}
+
+echo "--- Reading Terraform outputs ---"
+AWS_REGION="$(tf_output_raw aws_region)"
+SSM_GOOGLE="$(tf_output_raw ssm_google_api_key_name)"
+SSM_OPENAI="$(tf_output_raw ssm_openai_api_key_name)"
+SSM_ANTHROPIC="$(tf_output_raw ssm_anthropic_api_key_name)"
+
+echo "--- Syncing API keys from .env to SSM Parameter Store ---"
+
+# Extract a key value from the .env file, stripping surrounding quotes.
+extract_env_value() {
     local key_name="$1"
-    local ssm_name="$2"
     local value
     value=$(grep "^${key_name}=" "$ENV_FILE" | head -1 | cut -d= -f2-)
+    # Strip surrounding single or double quotes
+    value="${value#\"}"
+    value="${value%\"}"
+    value="${value#\'}"
+    value="${value%\'}"
+    echo "$value"
+}
 
-    if [ -z "$value" ] || [ "$value" = "PLACEHOLDER" ]; then
-        echo "  SKIP: $key_name not set in .env"
+push_key_to_ssm() {
+    local env_key="$1"
+    local ssm_name="$2"
+    local value
+    value="$(extract_env_value "$env_key")"
+
+    if [ -z "$value" ] || [ "$value" = "PLACEHOLDER" ] || [ "$value" = "replace-me" ]; then
+        echo "  SKIP: $env_key not set in .env"
         return
     fi
 
@@ -38,28 +67,26 @@ push_key_to_ssm() {
         --region "$AWS_REGION" \
         --output text > /dev/null 2>&1
 
-    echo "  OK: $key_name -> $ssm_name"
+    echo "  OK: $env_key -> $ssm_name"
 }
 
-push_key_to_ssm "GOOGLE_API_KEY"    "/${PROJECT_NAME}/GOOGLE_API_KEY"
-push_key_to_ssm "OPENAI_API_KEY"    "/${PROJECT_NAME}/OPENAI_API_KEY"
-push_key_to_ssm "ANTHROPIC_API_KEY" "/${PROJECT_NAME}/ANTHROPIC_API_KEY"
+push_key_to_ssm "GOOGLE_API_KEY"    "$SSM_GOOGLE"
+push_key_to_ssm "OPENAI_API_KEY"    "$SSM_OPENAI"
+push_key_to_ssm "ANTHROPIC_API_KEY" "$SSM_ANTHROPIC"
 
-# Also push GEMINI_API_KEY if present (some configs use this name)
-GEMINI_KEY=$(grep "^GEMINI_API_KEY=" "$ENV_FILE" | head -1 | cut -d= -f2- || echo "")
-if [ -n "$GEMINI_KEY" ] && [ "$GEMINI_KEY" != "PLACEHOLDER" ]; then
-    GOOGLE_KEY=$(grep "^GOOGLE_API_KEY=" "$ENV_FILE" | head -1 | cut -d= -f2- || echo "")
-    if [ -z "$GOOGLE_KEY" ]; then
-        aws ssm put-parameter \
-            --name "/${PROJECT_NAME}/GOOGLE_API_KEY" \
-            --value "$GEMINI_KEY" \
-            --type SecureString \
-            --overwrite \
-            --region "$AWS_REGION" \
-            --output text > /dev/null 2>&1
-        echo "  OK: GEMINI_API_KEY -> /${PROJECT_NAME}/GOOGLE_API_KEY"
-    fi
+# Fallback: push GEMINI_API_KEY as GOOGLE_API_KEY if GOOGLE is not set
+GEMINI_VALUE="$(extract_env_value "GEMINI_API_KEY")"
+GOOGLE_VALUE="$(extract_env_value "GOOGLE_API_KEY")"
+if [ -n "$GEMINI_VALUE" ] && [ "$GEMINI_VALUE" != "PLACEHOLDER" ] && [ -z "$GOOGLE_VALUE" ]; then
+    aws ssm put-parameter \
+        --name "$SSM_GOOGLE" \
+        --value "$GEMINI_VALUE" \
+        --type SecureString \
+        --overwrite \
+        --region "$AWS_REGION" \
+        --output text > /dev/null 2>&1
+    echo "  OK: GEMINI_API_KEY -> $SSM_GOOGLE"
 fi
 
 echo ""
-echo "=== API keys synced successfully ==="
+echo "=== API keys synced to SSM ($AWS_REGION) ==="
