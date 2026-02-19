@@ -39,9 +39,36 @@ RE_TYPE_COLON = re.compile(_P + r"Type(?:\s+the\s+full\s+\w+)?[:\s]+['\"`](.+?)[
 RE_ENTER_VALUE_ONLY = re.compile(_P + r"(?:Enter|Input|Type) ['\"](.+?)['\"]$")
 
 
+# Common field name aliases: model output -> possible DOM element keys.
+# Covers standard abbreviations and semantic equivalences that fuzzy
+# matching alone cannot resolve.
+_FIELD_ALIASES: dict[str, list[str]] = {
+    "social security number": ["ssn", "socialsecuritynumber", "social_security_number"],
+    "date of birth": ["dob", "dateofbirth", "date_of_birth", "birthdate"],
+    "phone number": ["phone", "phonenumber", "phone_number", "tel", "telephone"],
+    "email address": ["email", "emailaddress", "email_address"],
+    "zip code": ["zipcode", "zip_code", "zip", "postalcode", "postal_code"],
+    "street address": ["streetaddress", "street_address", "address", "street"],
+    "first name": ["firstname", "first_name", "fname"],
+    "last name": ["lastname", "last_name", "lname"],
+    "middle name": ["middlename", "middle_name", "mname"],
+    # Checkbox semantic aliases (model generates label text, DOM has short keys)
+    "i authorize": ["authorization", "authorize", "auth"],
+    "i understand": ["truthfulness", "understand", "acknowledgement", "acknowledge"],
+    "i agree": ["agreement", "agree", "consent", "terms"],
+    "i certify": ["certification", "certify"],
+    "i consent": ["consent", "patientconsent", "patient_consent"],
+}
+
+
 def _normalize(s: str) -> str:
-    """Normalize a string for fuzzy matching: lowercase, strip punctuation."""
+    """Normalize a string for fuzzy matching: lowercase, replace separators with spaces."""
     return re.sub(r"[_\-\s()]+", " ", s.lower()).strip()
+
+
+def _collapse(s: str) -> str:
+    """Collapse a string to alphanumeric only for matching 'First Name' to 'firstname'."""
+    return re.sub(r"[^a-z0-9]", "", s.lower())
 
 
 def _find_element_index(
@@ -49,8 +76,11 @@ def _find_element_index(
 ) -> int | None:
     """Look up element index by field name (case-insensitive, fuzzy).
 
-    Tries exact match, then normalized match (ignoring underscores/hyphens),
-    then substring containment in both directions.
+    Matching priority:
+      1. Exact lowercase match
+      2. Normalized match (underscores/hyphens/spaces treated as equivalent)
+      3. Collapsed match (all non-alphanumeric removed: "First Name" == "firstname")
+      4. Substring containment in both directions
     """
     key = field_name.lower().strip()
     if key in element_map:
@@ -62,10 +92,23 @@ def _find_element_index(
         if _normalize(map_key) == norm_key:
             return idx
 
-    # Partial/substring matching with normalization
+    # Collapsed matching: "First Name" matches "firstname", "first_name", etc.
+    col_key = _collapse(key)
     for map_key, idx in element_map.items():
-        norm_map = _normalize(map_key)
-        if norm_key in norm_map or norm_map in norm_key:
+        if _collapse(map_key) == col_key:
+            return idx
+
+    # Alias lookup: "Social Security Number" -> "ssn", "I authorize..." -> "authorization"
+    for alias_prefix, alias_keys in _FIELD_ALIASES.items():
+        if norm_key == alias_prefix or norm_key.startswith(alias_prefix):
+            for alias in alias_keys:
+                if alias in element_map:
+                    return element_map[alias]
+
+    # Partial/substring matching with collapsed form
+    for map_key, idx in element_map.items():
+        col_map = _collapse(map_key)
+        if col_key in col_map or col_map in col_key:
             return idx
 
     return None
