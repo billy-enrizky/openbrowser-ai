@@ -75,8 +75,10 @@ GRPO_CONFIG = {
 ONLINE_GRPO_CONFIG = {
     **GRPO_CONFIG,
     "group_size": 4,  # G=4 for robust GRPO advantages (v10 used G=2, saw reward variance)
-    "kl_coeff": 0.25,  # Increased from 0.1 -- v10 showed policy divergence (kl=-1.35 at step 25)
+    "kl_coeff": 0.1,  # Lowered from 0.25 -- strong SFT checkpoint means pg_loss=0 most steps, so KL-only updates degrade model
     "formfactory_port": int(os.environ.get("FORMFACTORY_PORT", "5050")),
+    "temperature": 1.0,  # Higher temp for rollout diversity -- at 0.7 the SFT model produces identical outputs
+    "min_reward_variance": 0.01,  # Skip gradient update when within-group reward variance is below this
     "browser_headless": True,
     "action_timeout_s": 10,  # Increased from 5s -- v10 hit timeouts on long descriptions
     "reward_weights": {
