@@ -220,7 +220,7 @@ claude plugin marketplace add billy-enrizky/openbrowser-ai
 claude plugin install openbrowser@openbrowser-ai
 ```
 
-This installs the MCP server (11 tools) and 5 built-in skills:
+This installs the MCP server and 5 built-in skills:
 
 | Skill | Description |
 |-------|-------------|
@@ -325,7 +325,7 @@ bridges MCP servers to OpenClaw agents.
 }
 ```
 
-All 11 browser tools will be registered as native OpenClaw agent tools.
+The `execute_code` tool will be registered as a native OpenClaw agent tool.
 
 For OpenClaw plugin documentation, see [docs.openclaw.ai/tools/plugin](https://docs.openclaw.ai/tools/plugin).
 
@@ -370,49 +370,24 @@ OpenBrowser includes an MCP (Model Context Protocol) server that exposes browser
 uvx openbrowser-ai[mcp] --mcp
 ```
 
-### Tools (11)
+### Tool
 
-#### Navigation
+The MCP server exposes a single `execute_code` tool that runs Python code in a persistent namespace with browser automation functions. The LLM writes Python code to navigate, interact, and extract data -- returning only what was explicitly requested.
 
-| Tool | Description |
-|------|-------------|
-| `browser_navigate` | Navigate to a URL, optionally in a new tab |
-| `browser_go_back` | Go back to the previous page |
-| `browser_scroll` | Scroll the page up or down. Use `target_text` to find text and scroll to it |
+**Available functions** (all async, use `await`):
 
-#### Interaction
+| Category | Functions |
+|----------|-----------|
+| **Navigation** | `navigate(url, new_tab)`, `go_back()`, `wait(seconds)` |
+| **Interaction** | `click(index)`, `input_text(index, text, clear)`, `scroll(down, pages, index)`, `send_keys(keys)`, `upload_file(index, path)` |
+| **Dropdowns** | `select_dropdown(index, text)`, `dropdown_options(index)` |
+| **Tabs** | `switch(tab_id)`, `close(tab_id)` |
+| **JavaScript** | `evaluate(code)` -- run JS in page context, returns Python objects |
+| **State** | `browser.get_browser_state_summary()` -- get page metadata and interactive elements |
+| **CSS** | `get_selector_from_index(index)` -- get CSS selector for an element |
+| **Completion** | `done(text, success)` -- signal task completion |
 
-| Tool | Description |
-|------|-------------|
-| `browser_click` | Click an element by its index |
-| `browser_type` | Type text into an input field |
-
-#### Content Extraction
-
-| Tool | Description |
-|------|-------------|
-| `browser_get_state` | Get page metadata and interactive elements. Use `filter_by`/`filter_query` to search elements by text, tag, id, class, or attribute |
-| `browser_get_text` | Get page content as clean markdown. Use `search` param to grep for regex patterns with context |
-| `browser_get_accessibility_tree` | Get page a11y tree (tree or flat format, depth limit) |
-| `browser_execute_js` | Execute JavaScript in page context (await/fire-and-forget, by-value/by-reference) |
-
-#### Tab and Session Management
-
-| Tool | Description |
-|------|-------------|
-| `browser_tab` | Manage tabs: `action=list` / `switch` / `close` with `tab_id` |
-| `browser_session` | Manage sessions: `action=list` / `close` / `close_all` with `session_id` |
-
-### MCP Resources
-
-| URI | Type | Description |
-|-----|------|-------------|
-| `browser://current-page/content` | text/markdown | Current page as markdown |
-| `browser://current-page/state` | application/json | Interactive elements and metadata |
-| `browser://current-page/accessibility` | application/json | Accessibility tree |
-| `browser://sessions/{id}/content` | text/markdown | Specific session page content |
-| `browser://sessions/{id}/state` | application/json | Specific session state |
-| `browser://sessions/{id}/accessibility` | application/json | Specific session a11y tree |
+**Pre-imported libraries**: `json`, `csv`, `re`, `datetime`, `asyncio`, `Path`, `requests`, `numpy`, `pandas`, `matplotlib`, `BeautifulSoup`
 
 ### Configuration
 
