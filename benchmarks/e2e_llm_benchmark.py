@@ -336,6 +336,8 @@ async def run_task(
 
     tool_call_count = 0
     total_response_chars = 0
+    total_input_tokens = 0
+    total_output_tokens = 0
     result_text = ""
     error_msg = None
     start = time.monotonic()
@@ -371,6 +373,13 @@ async def run_task(
                 error_msg = f"Bedrock API error: {e}"
                 logger.error("  [%s/%s] %s", server_name, task_name, error_msg)
                 break
+
+            # Accumulate token usage from Bedrock API
+            usage = response.get("usage", {})
+            turn_input = usage.get("inputTokens", 0)
+            turn_output = usage.get("outputTokens", 0)
+            total_input_tokens += turn_input
+            total_output_tokens += turn_output
 
             stop_reason = response.get("stopReason", "")
             output_message = response.get("output", {}).get("message", {})
@@ -452,11 +461,13 @@ async def run_task(
     response_tokens_est = total_response_chars // 4
 
     logger.info(
-        "  [%s/%s] %s in %.1fs (%d tool calls, %d response chars, ~%d tokens)",
+        "  [%s/%s] %s in %.1fs (%d tool calls, %d resp chars, "
+        "bedrock: %d input + %d output = %d total tokens)",
         server_name, task_name,
         "PASS" if success else "FAIL",
-        duration_s, tool_call_count,
-        total_response_chars, response_tokens_est,
+        duration_s, tool_call_count, total_response_chars,
+        total_input_tokens, total_output_tokens,
+        total_input_tokens + total_output_tokens,
     )
 
     return {
@@ -466,6 +477,8 @@ async def run_task(
         "tool_calls": tool_call_count,
         "response_chars": total_response_chars,
         "response_tokens_est": response_tokens_est,
+        "bedrock_input_tokens": total_input_tokens,
+        "bedrock_output_tokens": total_output_tokens,
         "result": result_text[:500],
         "error": error_msg,
     }
@@ -483,6 +496,8 @@ def aggregate_results(task_results: list[dict]) -> dict:
     total_tools = sum(t["tool_calls"] for t in task_results)
     total_resp_chars = sum(t.get("response_chars", 0) for t in task_results)
     total_resp_tokens = sum(t.get("response_tokens_est", 0) for t in task_results)
+    total_bedrock_input = sum(t.get("bedrock_input_tokens", 0) for t in task_results)
+    total_bedrock_output = sum(t.get("bedrock_output_tokens", 0) for t in task_results)
     return {
         "total_tasks": total,
         "passed": passed,
@@ -491,6 +506,9 @@ def aggregate_results(task_results: list[dict]) -> dict:
         "avg_tool_calls": round(total_tools / total, 1) if total else 0,
         "total_response_chars": total_resp_chars,
         "total_response_tokens_est": total_resp_tokens,
+        "total_bedrock_input_tokens": total_bedrock_input,
+        "total_bedrock_output_tokens": total_bedrock_output,
+        "total_bedrock_tokens": total_bedrock_input + total_bedrock_output,
     }
 
 
@@ -512,6 +530,9 @@ def format_summary_table(server_results: dict) -> str:
         ("Avg Tool Calls/Task", "avg_tool_calls", ".1f"),
         ("Total Response Chars", "total_response_chars", ",d"),
         ("Est. Response Tokens", "total_response_tokens_est", ",d"),
+        ("Bedrock Input Tokens", "total_bedrock_input_tokens", ",d"),
+        ("Bedrock Output Tokens", "total_bedrock_output_tokens", ",d"),
+        ("Bedrock Total Tokens", "total_bedrock_tokens", ",d"),
     ]:
         row = f"{label:<25s}"
         for name in names:
@@ -597,10 +618,14 @@ async def run_benchmark(
         }
 
         logger.info(
-            "  Server %s: %d/%d passed, %.1fs total, %d tool calls, %d response chars (~%d tokens)",
+            "  Server %s: %d/%d passed, %.1fs total, %d tool calls, "
+            "%d resp chars, bedrock: %d input + %d output = %d total tokens",
             server_name, summary["passed"], summary["total_tasks"],
             summary["total_duration_s"], summary["total_tool_calls"],
-            summary["total_response_chars"], summary["total_response_tokens_est"],
+            summary["total_response_chars"],
+            summary["total_bedrock_input_tokens"],
+            summary["total_bedrock_output_tokens"],
+            summary["total_bedrock_tokens"],
         )
         logger.info("")
 
