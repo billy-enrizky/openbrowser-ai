@@ -36,6 +36,7 @@ interface AppState {
   conversations: ChatConversation[];
   setConversations: (conversations: ChatConversation[]) => void;
   upsertConversation: (conversation: ChatConversation) => void;
+  removeConversation: (id: string) => void;
   activeConversationId: string | null;
   setActiveConversationId: (id: string | null) => void;
 
@@ -147,6 +148,10 @@ export const useAppStore = create<AppState>()(
           next.sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
           return { conversations: next };
         }),
+      removeConversation: (id) =>
+        set((state) => ({
+          conversations: state.conversations.filter((c) => c.id !== id),
+        })),
       activeConversationId: null,
       setActiveConversationId: (id) => set({ activeConversationId: id }),
 
