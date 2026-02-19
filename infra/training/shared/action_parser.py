@@ -182,7 +182,8 @@ def _find_element_index(
 
     # Alias lookup: "Social Security Number" -> "ssn", "I authorize..." -> "authorization"
     for alias_prefix, alias_keys in _FIELD_ALIASES.items():
-        if norm_key == alias_prefix or norm_key.startswith(alias_prefix):
+        norm_alias = _normalize(alias_prefix)
+        if norm_key == norm_alias or norm_key.startswith(norm_alias):
             for alias in alias_keys:
                 if alias in element_map:
                     return element_map[alias]
