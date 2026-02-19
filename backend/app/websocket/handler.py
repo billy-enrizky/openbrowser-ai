@@ -368,10 +368,18 @@ async def handle_start_task(client_id: str, message: WSMessage, principal: AuthP
                 )
             )
         
+        # Load conversation history for context
+        task_with_context = task_data.task
+        if conversation_id:
+            from app.api.stream import _load_conversation_history
+            history = await _load_conversation_history(principal, conversation_id)
+            if history:
+                task_with_context = f"{history}\n\nCurrent request:\n{task_data.task}"
+
         # Create agent session with pre-generated task_id
         session = await agent_manager.create_session_with_id(
             task_id=task_id,
-            task=task_data.task,
+            task=task_with_context,
             agent_type=task_data.agent_type.value,
             max_steps=task_data.max_steps,
             use_vision=task_data.use_vision,
