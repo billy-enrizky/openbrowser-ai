@@ -62,9 +62,19 @@ resource "aws_cloudfront_function" "rewrite_uri" {
   EOF
 }
 
+# Managed cache policies for CloudFront
+data "aws_cloudfront_cache_policy" "caching_disabled" {
+  name = "Managed-CachingDisabled"
+}
+
+data "aws_cloudfront_origin_request_policy" "all_viewer" {
+  name = "Managed-AllViewer"
+}
+
 # CloudFront distribution
 locals {
   frontend_aliases = var.frontend_domain_name != "" ? [var.frontend_domain_name] : []
+  alb_origin_id    = "ALB-${aws_lb.backend.name}"
 }
 
 resource "aws_cloudfront_distribution" "frontend" {
@@ -78,6 +88,31 @@ resource "aws_cloudfront_distribution" "frontend" {
     domain_name              = aws_s3_bucket.frontend.bucket_regional_domain_name
     origin_id                = "S3-${aws_s3_bucket.frontend.id}"
     origin_access_control_id = aws_cloudfront_origin_access_control.frontend.id
+  }
+
+  # ALB origin for VNC WebSocket proxying (bypasses API Gateway 30s timeout)
+  origin {
+    domain_name = aws_lb.backend.dns_name
+    origin_id   = local.alb_origin_id
+
+    custom_origin_config {
+      http_port              = 80
+      https_port             = 443
+      origin_protocol_policy = "http-only"
+      origin_ssl_protocols   = ["TLSv1.2"]
+    }
+  }
+
+  # VNC WebSocket traffic routed directly to ALB (not API Gateway)
+  ordered_cache_behavior {
+    path_pattern             = "/api/v1/vnc/*"
+    allowed_methods          = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
+    cached_methods           = ["GET", "HEAD"]
+    target_origin_id         = local.alb_origin_id
+    viewer_protocol_policy   = "https-only"
+    compress                 = false
+    cache_policy_id          = data.aws_cloudfront_cache_policy.caching_disabled.id
+    origin_request_policy_id = data.aws_cloudfront_origin_request_policy.all_viewer.id
   }
 
   default_cache_behavior {
