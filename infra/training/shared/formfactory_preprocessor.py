@@ -14,6 +14,8 @@ Usage:
 import argparse
 import json
 import logging
+import random
+from collections import defaultdict
 from pathlib import Path
 
 logging.basicConfig(
@@ -170,6 +172,49 @@ def format_for_flow(sft_data: list[dict]) -> list[dict]:
     return flow_data
 
 
+def split_dataset(
+    data: list[dict],
+    train_ratio: float = 0.8,
+    val_ratio: float = 0.1,
+    seed: int = 42,
+) -> tuple[list[dict], list[dict], list[dict]]:
+    """Split dataset into train/val/test, stratified by form_name.
+
+    Groups examples by form_name (25 form types, ~50 each), shuffles each
+    group with a fixed seed, then splits each group 80/10/10. Guarantees
+    at least 1 example per split per form type.
+
+    Returns:
+        (train, val, test) tuple.
+    """
+    rng = random.Random(seed)
+
+    groups: dict[str, list[dict]] = defaultdict(list)
+    for item in data:
+        groups[item.get("form_name", "unknown")].append(item)
+
+    train, val, test = [], [], []
+
+    for form_name in sorted(groups.keys()):
+        items = groups[form_name]
+        rng.shuffle(items)
+
+        n = len(items)
+        n_val = max(1, round(n * val_ratio))
+        n_test = max(1, round(n * (1.0 - train_ratio - val_ratio)))
+        n_train = n - n_val - n_test
+
+        train.extend(items[:n_train])
+        val.extend(items[n_train:n_train + n_val])
+        test.extend(items[n_train + n_val:])
+
+    logger.info(
+        "Split %d examples into train=%d, val=%d, test=%d (seed=%d)",
+        len(data), len(train), len(val), len(test), seed,
+    )
+    return train, val, test
+
+
 def preprocess(
     data_dir: str = "data/formfactory",
     output_path: str = "data/processed/formfactory_sft.jsonl",
@@ -189,12 +234,23 @@ def preprocess(
         logger.error("No data produced. Check that FormFactory is downloaded.")
         return
 
+    # Save unsplit files (backward compatibility)
     save_jsonl(sft_data, out_path)
 
-    # Also produce flow matching format
     flow_data = format_for_flow(sft_data)
     flow_out_path = out_path.parent / "formfactory_flow.jsonl"
     save_jsonl(flow_data, flow_out_path)
+
+    # Generate stratified train/val/test splits
+    sft_train, sft_val, sft_test = split_dataset(sft_data)
+    save_jsonl(sft_train, out_path.parent / "formfactory_sft_train.jsonl")
+    save_jsonl(sft_val, out_path.parent / "formfactory_sft_val.jsonl")
+    save_jsonl(sft_test, out_path.parent / "formfactory_sft_test.jsonl")
+
+    flow_train, flow_val, flow_test = split_dataset(flow_data)
+    save_jsonl(flow_train, out_path.parent / "formfactory_flow_train.jsonl")
+    save_jsonl(flow_val, out_path.parent / "formfactory_flow_val.jsonl")
+    save_jsonl(flow_test, out_path.parent / "formfactory_flow_test.jsonl")
 
     logger.info("FormFactory preprocessing complete")
 
