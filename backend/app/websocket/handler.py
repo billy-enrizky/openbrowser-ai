@@ -6,7 +6,8 @@ from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
 
-from app.core.auth import AuthConfigError, AuthTokenError, authenticate_websocket
+from app.core.auth import AuthConfigError, AuthPrincipal, AuthTokenError, authenticate_websocket
+from app.db.session import get_session_factory, is_database_configured
 from app.models.schemas import (
     AgentType,
     FileAttachment,
@@ -21,6 +22,7 @@ from app.models.schemas import (
     WSVncInfoData,
 )
 from app.services.agent_service import agent_manager
+from app.services.chat_service import ChatService, conversation_title_from_prompt
 from app.services.vnc_service import vnc_service
 
 logger = logging.getLogger(__name__)
@@ -116,10 +118,86 @@ class ConnectionManager:
 connection_manager = ConnectionManager()
 
 
+def _principal_to_identity(principal: AuthPrincipal | None) -> tuple[str, str | None, str | None]:
+    """Map principal to stable identity for persistence."""
+    if principal is None:
+        return "anonymous-local-user", None, "local"
+    return principal.subject, principal.email, principal.username
+
+
+async def _persist_task_user_message(
+    *,
+    principal: AuthPrincipal | None,
+    task_id: str,
+    task: str,
+    conversation_id: str | None,
+) -> str | None:
+    """Persist initial user prompt for a task and return conversation id."""
+    if not is_database_configured():
+        return conversation_id
+
+    session_factory = get_session_factory()
+    async with session_factory() as db:
+        service = ChatService(db)
+        sub, email, username = _principal_to_identity(principal)
+        user = await service.ensure_user(cognito_sub=sub, email=email, username=username)
+        conversation = None
+        if conversation_id:
+            conversation = await service.get_conversation(user=user, conversation_id=conversation_id)
+        if conversation is None:
+            conversation = await service.create_conversation(
+                user=user,
+                title=conversation_title_from_prompt(task) or "New chat",
+            )
+
+        await service.append_message(
+            user=user,
+            conversation=conversation,
+            role="user",
+            content=task,
+            task_id=task_id,
+            metadata={"source": "start_task"},
+        )
+        await service.set_active_conversation(user=user, conversation_id=conversation.id)
+        await db.commit()
+        return conversation.id
+
+
+async def _persist_assistant_message(
+    *,
+    principal: AuthPrincipal | None,
+    task_id: str,
+    conversation_id: str | None,
+    content: str,
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    """Persist assistant message if chat persistence is enabled."""
+    if not is_database_configured() or not conversation_id:
+        return
+
+    session_factory = get_session_factory()
+    async with session_factory() as db:
+        service = ChatService(db)
+        sub, email, username = _principal_to_identity(principal)
+        user = await service.ensure_user(cognito_sub=sub, email=email, username=username)
+        conversation = await service.get_conversation(user=user, conversation_id=conversation_id)
+        if conversation is None:
+            return
+        await service.append_message(
+            user=user,
+            conversation=conversation,
+            role="assistant",
+            content=content,
+            task_id=task_id,
+            metadata=metadata or {},
+        )
+        await db.commit()
+
+
 async def handle_websocket(websocket: WebSocket, client_id: str):
     """Handle WebSocket connection for a client."""
     try:
-        await authenticate_websocket(websocket)
+        principal = await authenticate_websocket(websocket)
     except AuthConfigError as e:
         logger.error("WebSocket auth misconfigured: %s", e)
         await websocket.close(code=1011, reason="Authentication misconfigured")
@@ -152,7 +230,7 @@ async def handle_websocket(websocket: WebSocket, client_id: str):
             
             # Handle message based on type
             if message.type == WSMessageType.START_TASK:
-                await handle_start_task(client_id, message)
+                await handle_start_task(client_id, message, principal)
             elif message.type == WSMessageType.CANCEL_TASK:
                 await handle_cancel_task(client_id, message)
             elif message.type == WSMessageType.PAUSE_TASK:
@@ -172,7 +250,7 @@ async def handle_websocket(websocket: WebSocket, client_id: str):
         await connection_manager.disconnect(client_id)
 
 
-async def handle_start_task(client_id: str, message: WSMessage):
+async def handle_start_task(client_id: str, message: WSMessage, principal: AuthPrincipal | None):
     """Handle START_TASK message."""
     try:
         task_data = WSStartTaskData(**message.data)
@@ -180,6 +258,7 @@ async def handle_start_task(client_id: str, message: WSMessage):
         # Generate task_id early so we can use it for logging
         from uuid import uuid4
         task_id = str(uuid4())
+        conversation_id = task_data.conversation_id
         
         # Set up WebSocket log handler for this task
         ws_log_handler = WebSocketLogHandler(client_id, task_id, connection_manager)
@@ -306,6 +385,16 @@ async def handle_start_task(client_id: str, message: WSMessage):
             on_log_callback=on_log,
             on_vnc_info_callback=on_vnc_info,
         )
+
+        try:
+            conversation_id = await _persist_task_user_message(
+                principal=principal,
+                task_id=task_id,
+                task=task_data.task,
+                conversation_id=conversation_id,
+            )
+        except Exception as persistence_error:
+            logger.exception("Failed to persist start_task message: %s", persistence_error)
         
         # Send task started message
         await connection_manager.send_message(
@@ -313,12 +402,24 @@ async def handle_start_task(client_id: str, message: WSMessage):
             WSMessage(
                 type=WSMessageType.TASK_STARTED,
                 task_id=session.task_id,
-                data={"task": task_data.task, "agent_type": task_data.agent_type.value},
+                data={
+                    "task": task_data.task,
+                    "agent_type": task_data.agent_type.value,
+                    "conversation_id": conversation_id,
+                },
             ),
         )
         
         # Run agent in background
-        asyncio.create_task(run_agent_task(client_id, session, ws_log_handler))
+        asyncio.create_task(
+            run_agent_task(
+                client_id=client_id,
+                session=session,
+                ws_log_handler=ws_log_handler,
+                principal=principal,
+                conversation_id=conversation_id,
+            )
+        )
         
     except Exception as e:
         logger.exception(f"Failed to start task: {e}")
@@ -332,7 +433,13 @@ async def handle_start_task(client_id: str, message: WSMessage):
         )
 
 
-async def run_agent_task(client_id: str, session, ws_log_handler: WebSocketLogHandler | None = None):
+async def run_agent_task(
+    client_id: str,
+    session,
+    ws_log_handler: WebSocketLogHandler | None = None,
+    principal: AuthPrincipal | None = None,
+    conversation_id: str | None = None,
+):
     """Run the agent task and send completion message."""
     try:
         result = await session.start()
@@ -372,6 +479,21 @@ async def run_agent_task(client_id: str, session, ws_log_handler: WebSocketLogHa
                 ).model_dump(),
             ),
         )
+        try:
+            await _persist_assistant_message(
+                principal=principal,
+                task_id=session.task_id,
+                conversation_id=conversation_id,
+                content=result.get("result", "") or "Task completed successfully.",
+                metadata={
+                    "success": result.get("success", False),
+                    "total_steps": result.get("total_steps", 0),
+                    "duration_seconds": result.get("duration_seconds", 0),
+                    "attachments": [a.model_dump() for a in attachments],
+                },
+            )
+        except Exception as persistence_error:
+            logger.exception("Failed to persist task completion message: %s", persistence_error)
     except asyncio.CancelledError:
         await connection_manager.send_message(
             client_id,
@@ -381,6 +503,16 @@ async def run_agent_task(client_id: str, session, ws_log_handler: WebSocketLogHa
                 data={"reason": "Task was cancelled"},
             ),
         )
+        try:
+            await _persist_assistant_message(
+                principal=principal,
+                task_id=session.task_id,
+                conversation_id=conversation_id,
+                content="Task was cancelled",
+                metadata={"cancelled": True},
+            )
+        except Exception as persistence_error:
+            logger.exception("Failed to persist cancellation message: %s", persistence_error)
     except Exception as e:
         logger.exception(f"Task failed: {e}")
         await connection_manager.send_message(
@@ -391,6 +523,16 @@ async def run_agent_task(client_id: str, session, ws_log_handler: WebSocketLogHa
                 data={"error": str(e)},
             ),
         )
+        try:
+            await _persist_assistant_message(
+                principal=principal,
+                task_id=session.task_id,
+                conversation_id=conversation_id,
+                content=f"Error: {e}",
+                metadata={"is_error": True},
+            )
+        except Exception as persistence_error:
+            logger.exception("Failed to persist error message: %s", persistence_error)
     finally:
         # Remove WebSocket log handler
         if ws_log_handler:
