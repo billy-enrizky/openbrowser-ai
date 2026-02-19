@@ -2,7 +2,7 @@
 
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { Task, Project, Message, AgentType, LogEntry, VncInfo, BrowserViewerMode, LLMModel } from "@/types";
+import type { Task, Project, Message, AgentType, LogEntry, VncInfo, BrowserViewerMode, LLMModel, ChatConversation } from "@/types";
 
 interface AppState {
   // Sidebar
@@ -31,7 +31,13 @@ interface AppState {
   // Messages (conversation history)
   messages: Message[];
   addMessage: (message: Message) => void;
+  setMessages: (messages: Message[]) => void;
   clearMessages: () => void;
+  conversations: ChatConversation[];
+  setConversations: (conversations: ChatConversation[]) => void;
+  upsertConversation: (conversation: ChatConversation) => void;
+  activeConversationId: string | null;
+  setActiveConversationId: (id: string | null) => void;
 
   // Backend logs
   logs: LogEntry[];
@@ -126,7 +132,23 @@ export const useAppStore = create<AppState>()(
       messages: [],
       addMessage: (message) =>
         set((state) => ({ messages: [...state.messages, message] })),
+      setMessages: (messages) => set({ messages }),
       clearMessages: () => set({ messages: [] }),
+      conversations: [],
+      setConversations: (conversations) => set({ conversations }),
+      upsertConversation: (conversation) =>
+        set((state) => {
+          const existingIndex = state.conversations.findIndex((c) => c.id === conversation.id);
+          if (existingIndex === -1) {
+            return { conversations: [conversation, ...state.conversations] };
+          }
+          const next = [...state.conversations];
+          next[existingIndex] = conversation;
+          next.sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
+          return { conversations: next };
+        }),
+      activeConversationId: null,
+      setActiveConversationId: (id) => set({ activeConversationId: id }),
 
       // Backend logs
       logs: [],
@@ -175,10 +197,19 @@ export const useAppStore = create<AppState>()(
     }),
     {
       name: "openbrowser-storage",
+      version: 2,
+      migrate: (persistedState: unknown) => {
+        const state = persistedState as Record<string, unknown>;
+        return {
+          ...state,
+          messages: [],
+          conversations: [],
+          activeConversationId: null,
+        } as ReturnType<typeof useAppStore.getState>;
+      },
       partialize: (state) => ({
         tasks: state.tasks.slice(0, 50), // Keep last 50 tasks
         projects: state.projects,
-        messages: state.messages.slice(-100), // Keep last 100 messages
         agentType: state.agentType,
         maxSteps: state.maxSteps,
         useVision: state.useVision,
