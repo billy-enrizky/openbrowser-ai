@@ -462,6 +462,10 @@ pytest tests/
 pytest tests/ -v
 ```
 
+## Production deployment
+
+AWS production infrastructure (VPC, EC2 backend, API Gateway, Cognito, DynamoDB, ECR, S3 + CloudFront) is defined in Terraform. See **[infra/production/terraform/README.md](infra/production/terraform/README.md)** for architecture, prerequisites, and step-by-step deploy (ECR → build/push image → `terraform apply`).
+
 ## Contributing
 
 Contributions are welcome! Please:
