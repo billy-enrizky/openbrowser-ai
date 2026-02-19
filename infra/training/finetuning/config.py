@@ -78,7 +78,8 @@ ONLINE_GRPO_CONFIG = {
     "kl_coeff": 0.1,  # Lowered from 0.25 -- strong SFT checkpoint means pg_loss=0 most steps, so KL-only updates degrade model
     "formfactory_port": int(os.environ.get("FORMFACTORY_PORT", "5050")),
     "temperature": 1.0,  # Higher temp for rollout diversity -- at 0.7 the SFT model produces identical outputs
-    "min_reward_variance": 0.01,  # Skip gradient update when within-group reward variance is below this
+    "min_reward_variance": float(os.environ.get("MIN_REWARD_VARIANCE", "0.01")),  # Skip gradient update when within-group reward variance is below this
+    "temperature_spread": float(os.environ.get("TEMPERATURE_SPREAD", "0.0")),  # Per-rollout temperature spread for diversity (0 = uniform temp)
     "browser_headless": True,
     "action_timeout_s": 10,  # Increased from 5s -- v10 hit timeouts on long descriptions
     "reward_weights": {
