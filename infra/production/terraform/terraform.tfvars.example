@@ -1,0 +1,57 @@
+# -----------------------------------------------------------------------------
+# OpenBrowser production Terraform variables (example)
+# -----------------------------------------------------------------------------
+
+aws_region   = "ca-central-1"
+project_name = "openbrowser"
+
+# Backend runtime
+backend_instance_type = "t3.small"
+backend_port          = 8000
+
+# Backend container image:
+# - Leave empty to use the ECR repo created by Terraform.
+# - Or set a full URI, e.g.:
+#   backend_image = "123456789012.dkr.ecr.ca-central-1.amazonaws.com/openbrowser-backend:latest"
+backend_image     = ""
+backend_image_tag = "latest"
+
+# PostgreSQL (RDS)
+postgres_db_name              = "openbrowser"
+postgres_username             = "openbrowser"
+postgres_instance_class       = "db.t4g.micro"
+postgres_allocated_storage    = 20
+postgres_backup_retention_days = 7
+postgres_skip_final_snapshot  = true
+
+# CORS origins: additional origins beyond the auto-derived CloudFront domain.
+# The CloudFront domain and localhost:3000 are always included automatically.
+# Add any extra origins here (e.g., staging domains, custom domains).
+cors_origins = []
+
+# Frontend custom domain (optional)
+# frontend_domain_name         = "app.example.com"
+# frontend_acm_certificate_arn = "arn:aws:acm:us-east-1:123456789012:certificate/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+
+# Cognito hosted UI domain prefix (optional)
+# cognito_domain_prefix = "openbrowser"
+
+# Cognito app client OAuth config (optional overrides)
+# cognito_callback_urls = [
+#   "https://app.example.com/auth/callback",
+#   "http://localhost:3000/auth/callback",
+# ]
+# cognito_logout_urls = [
+#   "https://app.example.com/login",
+#   "http://localhost:3000/login",
+# ]
+# cognito_oauth_scopes = ["openid", "email", "profile"]
+
+# Auth enforcement:
+# - enable_backend_auth: verify JWT in FastAPI (REST + WebSocket)
+# - enable_api_auth: optional extra JWT validation at API Gateway
+enable_backend_auth = true
+enable_api_auth     = false
+
+# Optional: use an existing Secrets Manager secret for backend LLM keys
+# secrets_manager_secret_name = "openbrowser/backend-api-keys"
