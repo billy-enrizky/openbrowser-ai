@@ -27,18 +27,31 @@ resource "aws_security_group" "backend" {
   tags = { Name = "${var.project_name}-backend-sg" }
 }
 
-# ALB: allow HTTP from anywhere (API Gateway and optional direct access)
+# CloudFront managed prefix list for restricting ALB ingress
+data "aws_ec2_managed_prefix_list" "cloudfront" {
+  name = "com.amazonaws.global.cloudfront.origin-facing"
+}
+
+# ALB: allow HTTP from CloudFront (VNC WebSocket) and VPC (API Gateway VPC Link)
 resource "aws_security_group" "alb" {
   name        = "${var.project_name}-alb-sg"
-  description = "ALB: HTTP from API Gateway and internet"
+  description = "ALB: HTTP from CloudFront and VPC Link"
   vpc_id      = aws_vpc.main.id
 
   ingress {
-    description = "HTTP"
+    description = "HTTP from VPC (API Gateway VPC Link)"
     from_port   = 80
     to_port     = 80
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+    cidr_blocks = [var.vpc_cidr]
+  }
+
+  ingress {
+    description     = "HTTP from CloudFront (VNC WebSocket)"
+    from_port       = 80
+    to_port         = 80
+    protocol        = "tcp"
+    prefix_list_ids = [data.aws_ec2_managed_prefix_list.cloudfront.id]
   }
 
   egress {
