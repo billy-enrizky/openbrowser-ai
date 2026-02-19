@@ -8,9 +8,13 @@ from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, Field
-from reportlab.lib.pagesizes import letter
-from reportlab.lib.styles import getSampleStyleSheet
-from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
+try:
+	from reportlab.lib.pagesizes import letter
+	from reportlab.lib.styles import getSampleStyleSheet
+	from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
+	REPORTLAB_AVAILABLE = True
+except ImportError:
+	REPORTLAB_AVAILABLE = False
 
 INVALID_FILENAME_ERROR_MESSAGE = 'Error: Invalid filename format. Must be alphanumeric with supported extension.'
 DEFAULT_FILE_SYSTEM_PATH = 'openbrowser_agent_data'
@@ -130,6 +134,8 @@ class PdfFile(BaseFile):
 
 	def sync_to_disk_sync(self, path: Path) -> None:
 		file_path = path / self.full_name
+		if not REPORTLAB_AVAILABLE:
+			raise FileSystemError('PDF generation requires reportlab. Install with: pip install openbrowser-ai[pdf]')
 		try:
 			# Create PDF document
 			doc = SimpleDocTemplate(str(file_path), pagesize=letter)
