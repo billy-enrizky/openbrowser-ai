@@ -22,7 +22,7 @@ Path Setup:
 
 import sys
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -50,15 +50,6 @@ class DummyServer:
         return lambda f: f
 
     def list_resources(self):
-        return lambda f: f
-
-    def read_resource(self):
-        return lambda f: f
-
-    def subscribe_resource(self):
-        return lambda f: f
-
-    def unsubscribe_resource(self):
         return lambda f: f
 
     def list_resource_templates(self):
@@ -103,12 +94,6 @@ class DummyTypes:
         def __init__(self, type: str, text: str):
             self.type = type
             self.text = text
-
-    class TextResourceContents:
-        def __init__(self, **kwargs):
-            self.uri = kwargs.get("uri")
-            self.text = kwargs.get("text")
-            self.mimeType = kwargs.get("mimeType")
 
 
 # ---------------------------------------------------------------------------
