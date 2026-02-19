@@ -42,7 +42,8 @@ DB_HOST="$(tf_output_raw postgres_endpoint)"
 DB_PORT="$(tf_output_raw postgres_port)"
 DB_NAME="$(tf_output_raw postgres_db_name)"
 DB_USER="$(tf_output_raw postgres_username)"
-DB_PASS="$(terraform -chdir="$TF_DIR" output -raw postgres_password)"
+# Sensitive outputs require -json; extract the raw value with python
+DB_PASS="$(terraform -chdir="$TF_DIR" output -json postgres_password | python3 -c 'import sys,json; print(json.load(sys.stdin))')"
 
 DATABASE_URL="postgresql+asyncpg://${DB_USER}:${DB_PASS}@${DB_HOST}:${DB_PORT}/${DB_NAME}"
 
@@ -131,7 +132,7 @@ REMOTEOF
 COMMAND_ID=$(aws ssm send-command \
   --instance-ids "$INSTANCE_ID" \
   --document-name "AWS-RunShellScript" \
-  --parameters "commands=[$(echo "$DEPLOY_SCRIPT" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read().strip().split("\n")))[1:-1]')]" \
+  --parameters "commands=[$(echo "$DEPLOY_SCRIPT" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read().strip().split("\n"))[1:-1])')]" \
   --timeout-seconds 300 \
   --region "$REGION" \
   --query 'Command.CommandId' \
