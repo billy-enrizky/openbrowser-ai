@@ -15,8 +15,9 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/store";
+import { useAuth } from "@/components/auth/AuthProvider";
 import { Button } from "@/components/ui";
-import { BROWSER_VIEWER_DEFAULT_WIDTH, BROWSER_VIEWER_MIN_WIDTH } from "@/lib/config";
+import { API_BASE_URL, BROWSER_VIEWER_DEFAULT_WIDTH, BROWSER_VIEWER_MIN_WIDTH } from "@/lib/config";
 import dynamic from "next/dynamic";
 
 // Dynamically import VncScreen to avoid SSR issues
@@ -38,7 +39,10 @@ export function BrowserViewer({ className }: BrowserViewerProps) {
     setBrowserViewerOpen,
     browserViewerMode,
     setBrowserViewerMode,
+    latestScreenshot,
   } = useAppStore();
+
+  const { authEnabled, getValidIdToken } = useAuth();
 
   const containerRef = useRef<HTMLDivElement>(null);
   const vncContainerRef = useRef<HTMLDivElement>(null);
@@ -51,6 +55,44 @@ export function BrowserViewer({ className }: BrowserViewerProps) {
   const [isResizing, setIsResizing] = useState(false);
   const [isInteractive, setIsInteractive] = useState(false);
   const [isReconnecting, setIsReconnecting] = useState(false);
+  const [resolvedVncUrl, setResolvedVncUrl] = useState<string>("");
+
+  // Build full WebSocket URL from the relative proxy path returned by the backend.
+  // Re-runs on vncInfo change (new session) and key change (reconnect) to get a fresh token.
+  useEffect(() => {
+    let cancelled = false;
+    async function buildUrl() {
+      if (!vncInfo) {
+        setResolvedVncUrl("");
+        return;
+      }
+      const rawUrl = vncInfo.vnc_url;
+
+      // Already a full ws:// URL (e.g. local dev connecting directly to websockify)
+      if (rawUrl.startsWith("ws://") || rawUrl.startsWith("wss://")) {
+        setResolvedVncUrl(rawUrl);
+        return;
+      }
+
+      // Relative path -- construct full WebSocket URL via the API proxy.
+      // In production, VNC WebSocket routes through CloudFront (same origin)
+      // to avoid API Gateway's 30s WebSocket timeout. In local dev, use
+      // API_BASE_URL which points to the local backend.
+      const isLocalDev = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+      const base = isLocalDev ? API_BASE_URL : window.location.origin;
+      const wsBase = base.replace(/^https/, "wss").replace(/^http/, "ws");
+      let token = "";
+      if (authEnabled) {
+        token = (await getValidIdToken()) || "";
+      }
+      if (cancelled) return;
+      const separator = rawUrl.includes("?") ? "&" : "?";
+      const tokenParam = token ? `${separator}token=${token}` : "";
+      setResolvedVncUrl(`${wsBase}${rawUrl}${tokenParam}`);
+    }
+    buildUrl();
+    return () => { cancelled = true; };
+  }, [vncInfo, key, authEnabled, getValidIdToken]);
 
   // Track mounted state
   useEffect(() => {
@@ -116,7 +158,7 @@ export function BrowserViewer({ className }: BrowserViewerProps) {
 
   // Handle opening in popup window
   const openInPopup = useCallback(() => {
-    if (!vncInfo) return;
+    if (!vncInfo || !resolvedVncUrl) return;
 
     const width = vncInfo.width || 1280;
     const height = vncInfo.height || 1024;
@@ -144,9 +186,9 @@ export function BrowserViewer({ className }: BrowserViewerProps) {
           <div id="vnc-container"></div>
           <script type="module">
             import RFB from 'https://cdn.jsdelivr.net/npm/@novnc/novnc@1.4.0/core/rfb.js';
-            
+
             const container = document.getElementById('vnc-container');
-            const rfb = new RFB(container, '${vncInfo.vnc_url}', {
+            const rfb = new RFB(container, '${resolvedVncUrl}', {
               credentials: { password: '${vncInfo.password}' },
               shared: true,
             });
@@ -162,7 +204,7 @@ export function BrowserViewer({ className }: BrowserViewerProps) {
       setBrowserViewerMode("popup");
       setBrowserViewerOpen(false);
     }
-  }, [vncInfo, setBrowserViewerMode, setBrowserViewerOpen]);
+  }, [vncInfo, resolvedVncUrl, setBrowserViewerMode, setBrowserViewerOpen]);
 
   // Toggle fullscreen
   const toggleFullscreen = useCallback(() => {
@@ -295,37 +337,12 @@ export function BrowserViewer({ className }: BrowserViewerProps) {
           </div>
         </div>
 
-        {/* VNC Canvas Container */}
+        {/* Browser View Container - VNC takes priority, screenshot as fallback/overlay */}
         <div ref={containerRef} className="flex-1 relative bg-black overflow-hidden">
-          {!vncInfo ? (
-            <div className="absolute inset-0 flex flex-col items-center justify-center text-zinc-500">
-              <Monitor className="w-12 h-12 mb-4 opacity-50" />
-              <p className="text-sm">No browser session active</p>
-              <p className="text-xs mt-1 text-zinc-600">Start a task to view the browser</p>
-              <p className="text-xs mt-4 text-zinc-700 max-w-xs text-center">
-                Note: VNC requires Xvfb, x11vnc, and websockify (available in Docker deployment)
-              </p>
-            </div>
-          ) : connectionStatus === "error" ? (
-            <div className="absolute inset-0 flex flex-col items-center justify-center text-red-400">
-              <X className="w-12 h-12 mb-4 opacity-50" />
-              <p className="text-sm">Connection failed</p>
-              {errorMessage && (
-                <p className="text-xs mt-1 text-red-500">{errorMessage}</p>
-              )}
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={reconnect}
-                className="mt-4"
-              >
-                <RefreshCw className="w-4 h-4 mr-2" />
-                Retry
-              </Button>
-            </div>
-          ) : (
+          {vncInfo && resolvedVncUrl && connectionStatus !== "error" ? (
+            /* VNC connection -- always render when available */
             <div ref={vncContainerRef} className="absolute inset-0 flex items-center justify-center overflow-hidden">
-              <div 
+              <div
                 className="relative"
                 style={{
                   width: "100%",
@@ -336,9 +353,9 @@ export function BrowserViewer({ className }: BrowserViewerProps) {
               >
                 <VncScreen
                   key={key}
-                  url={vncInfo.vnc_url}
+                  url={resolvedVncUrl}
                   rfbOptions={{
-                    credentials: { 
+                    credentials: {
                       password: vncInfo.password,
                       username: "",
                       target: "",
@@ -360,7 +377,21 @@ export function BrowserViewer({ className }: BrowserViewerProps) {
                   onSecurityFailure={handleSecurityFailure}
                 />
               </div>
-              
+
+              {/* Screenshot overlay while VNC is still connecting */}
+              {connectionStatus !== "connected" && latestScreenshot && (
+                <div className="absolute inset-0 flex items-center justify-center overflow-hidden z-10">
+                  <img
+                    src={`data:image/png;base64,${latestScreenshot}`}
+                    alt="Browser preview"
+                    className="max-w-full max-h-full object-contain"
+                  />
+                  <div className="absolute top-2 right-2 px-2 py-1 bg-zinc-900/80 rounded text-xs text-zinc-400 backdrop-blur-sm">
+                    Connecting to live view...
+                  </div>
+                </div>
+              )}
+
               {/* Take control button overlay */}
               {connectionStatus === "connected" && !isInteractive && (
                 <div className="absolute bottom-4 right-4 z-20">
@@ -373,6 +404,25 @@ export function BrowserViewer({ className }: BrowserViewerProps) {
                   </Button>
                 </div>
               )}
+            </div>
+          ) : latestScreenshot ? (
+            /* Screenshot fallback when VNC is not available */
+            <div className="absolute inset-0 flex items-center justify-center overflow-hidden">
+              <img
+                src={`data:image/png;base64,${latestScreenshot}`}
+                alt="Browser view"
+                className="max-w-full max-h-full object-contain"
+              />
+              <div className="absolute top-2 right-2 px-2 py-1 bg-zinc-900/80 rounded text-xs text-zinc-400 backdrop-blur-sm">
+                Live screenshot
+              </div>
+            </div>
+          ) : (
+            /* No browser session active */
+            <div className="absolute inset-0 flex flex-col items-center justify-center text-zinc-500">
+              <Monitor className="w-12 h-12 mb-4 opacity-50" />
+              <p className="text-sm">No browser session active</p>
+              <p className="text-xs mt-1 text-zinc-600">Start a task to view the browser</p>
             </div>
           )}
         </div>
