@@ -8,169 +8,162 @@ description: |
 
 # End-to-End Testing
 
-Simulate real user interactions in a browser and verify that web applications behave correctly. Covers navigation, form interaction, content assertions, and multi-page flows.
+Simulate real user interactions and verify web application behavior using Python code execution. Covers navigation, form interaction, content assertions, and multi-page flows.
+
+All code runs in a persistent namespace via `execute_code`. All browser functions are async -- use `await`.
 
 ## Workflow
 
-### Step 1 -- Navigate to the application
+### Step 1 -- Navigate and verify page load
 
-Open the application under test:
+```python
+await navigate('https://staging.example.com')
+state = await browser.get_browser_state_summary()
 
-```
-browser_navigate(url="https://staging.example.com")
-```
-
-Verify the page loaded correctly by checking title and URL:
-
-```
-browser_get_state(compact=true)
+assert 'example' in state.url.lower(), f'Unexpected URL: {state.url}'
+assert state.title, 'Page title is empty'
+print(f'Page loaded: {state.title} ({state.url})')
 ```
 
-### Step 2 -- Define test assertions
+### Step 2 -- Content assertions
 
-Before interacting, establish what success looks like. Use `browser_get_text` to assert that expected content is present:
+```python
+# Check for expected text using JS
+has_welcome = await evaluate('''
+(function(){ return !!document.body.textContent.match(/Welcome to Example App/i) })()
+''')
+assert has_welcome, 'Welcome message not found'
 
-```
-browser_get_text(search="Welcome to Example App", case_insensitive=false)
-```
+# Check specific element content
+h1_text = await evaluate('document.querySelector("h1")?.textContent?.trim()')
+assert h1_text == 'Example App', f'Expected "Example App", got "{h1_text}"'
 
-Use `browser_get_state` with filter params to assert that required UI elements exist:
+# Check no error messages
+error_count = await evaluate('document.querySelectorAll(".error-message").length')
+assert error_count == 0, f'Found {error_count} error messages on page'
 
-```
-browser_get_state(filter_by="text", filter_query="Sign In")
-browser_get_state(filter_by="tag", filter_query="nav")
-```
-
-Use `browser_execute_js` for precise assertions on DOM state:
-
-```
-browser_execute_js(expression="document.querySelector('h1')?.textContent?.trim()")
-browser_execute_js(expression="document.querySelectorAll('.error-message').length === 0")
+print('All content assertions passed')
 ```
 
-### Step 3 -- Test user interactions
+### Step 3 -- Test user interactions (login flow)
 
-Simulate a typical user flow. For example, a login flow:
+```python
+# Get form fields
+state = await browser.get_browser_state_summary()
+for idx, el in state.dom_state.selector_map.items():
+    if el.attributes.get('type') in ('email', 'text', 'password') or el.tag_name == 'button':
+        print(f'[{idx}] <{el.tag_name}> type={el.attributes.get("type", "")} placeholder="{el.attributes.get("placeholder", "")}"')
 
-1. Find and fill the email field:
-   ```
-   browser_get_state(compact=false)
-   browser_type(index=<email_index>, text="test@example.com")
-   ```
+# Fill and submit
+await input_text(index=3, text='test@example.com')
+await input_text(index=4, text='test-password')
+await click(index=5)  # Login button
+await wait(2)
 
-2. Fill the password field:
-   ```
-   browser_type(index=<password_index>, text="test-password")
-   ```
-
-3. Click the login button:
-   ```
-   browser_get_state(filter_by="text", filter_query="Log In")
-   browser_click(index=<login_button_index>)
-   ```
-
-4. Assert the user is now logged in:
-   ```
-   browser_get_text(search="Dashboard|Welcome back", case_insensitive=true)
-   ```
+# Assert logged in
+state = await browser.get_browser_state_summary()
+assert 'dashboard' in state.url.lower() or 'welcome' in state.title.lower(), \
+    f'Login may have failed. URL: {state.url}, Title: {state.title}'
+print('Login test passed')
+```
 
 ### Step 4 -- Test navigation flows
 
-Verify that links and navigation work correctly:
+```python
+# Click settings link
+state = await browser.get_browser_state_summary()
+for idx, el in state.dom_state.selector_map.items():
+    if 'settings' in el.get_all_children_text(max_depth=1).lower():
+        await click(index=idx)
+        break
 
-```
-browser_get_state(filter_by="text", filter_query="Settings")
-browser_click(index=<settings_link_index>)
-browser_get_state(compact=true)
-```
+await wait(1)
 
-Assert the URL changed to the expected path:
+# Assert URL changed
+path = await evaluate('window.location.pathname')
+assert '/settings' in path, f'Expected /settings path, got {path}'
 
-```
-browser_execute_js(expression="window.location.pathname")
-```
-
-Test the back button:
-
-```
-browser_go_back()
-browser_get_state(compact=true)
-```
-
-### Step 5 -- Test error states
-
-Verify that the application handles errors gracefully. For example, submit a form with invalid data:
-
-```
-browser_type(index=<email_index>, text="not-an-email")
-browser_click(index=<submit_index>)
+# Test back button
+await go_back()
+await wait(1)
+state = await browser.get_browser_state_summary()
+print(f'After back: {state.url}')
 ```
 
-Assert that validation errors appear:
+### Step 5 -- Test error handling
 
-```
-browser_get_text(search="valid email|invalid|required", case_insensitive=true)
-browser_get_state(filter_by="class", filter_query="error")
-```
+```python
+# Submit form with invalid data
+await input_text(index=3, text='not-an-email')
+await click(index=5)
+await wait(1)
 
-Assert that the page did not navigate away:
+# Assert validation errors appear
+errors = await evaluate('''
+(function(){
+  const errs = document.querySelectorAll('.error, .invalid-feedback, [aria-invalid="true"]');
+  return Array.from(errs).map(e => e.textContent.trim());
+})()
+''')
+assert len(errors) > 0, 'Expected validation errors but found none'
+print(f'Validation errors shown: {errors}')
 
-```
-browser_execute_js(expression="window.location.pathname")
+# Assert page did not navigate
+path = await evaluate('window.location.pathname')
+print(f'Still on: {path}')
 ```
 
 ### Step 6 -- Test responsive behavior
 
-Use `browser_execute_js` to check viewport-dependent behavior:
+```python
+viewport = await evaluate('''
+(function(){
+  return {
+    width: window.innerWidth,
+    height: window.innerHeight
+  }
+})()
+''')
+print(f'Viewport: {viewport["width"]}x{viewport["height"]}')
 
-```
-browser_execute_js(expression="window.innerWidth")
-```
-
-Check that mobile navigation elements exist or are hidden as expected:
-
-```
-browser_execute_js(expression="window.getComputedStyle(document.querySelector('.mobile-menu')).display")
-```
-
-### Step 7 -- Test across multiple pages
-
-For multi-page flows (e.g., checkout), open pages in sequence and verify state at each step:
-
-```
-browser_navigate(url="https://staging.example.com/cart")
-browser_get_text(search="Your Cart", case_insensitive=false)
-browser_click(index=<checkout_button_index>)
-browser_get_text(search="Shipping Address", case_insensitive=false)
+# Check mobile menu visibility
+mobile_display = await evaluate('''
+(function(){
+  const el = document.querySelector('.mobile-menu');
+  return el ? window.getComputedStyle(el).display : 'not found';
+})()
+''')
+print(f'Mobile menu display: {mobile_display}')
 ```
 
-Use `browser_execute_js` to verify application state (e.g., cart contents, session data):
+### Step 7 -- Test multi-page flows
 
-```
-browser_execute_js(expression="JSON.parse(localStorage.getItem('cart'))?.items?.length")
-```
+```python
+test_results = []
 
-### Step 8 -- Report results
+# Cart page
+await navigate('https://staging.example.com/cart')
+await wait(1)
+cart_title = await evaluate('document.querySelector("h1")?.textContent?.trim()')
+test_results.append({'test': 'cart_page_loads', 'passed': cart_title is not None, 'detail': cart_title})
 
-After running all test steps, compile results. Use `browser_get_state` and `browser_get_text` to collect final state. Summarize:
+# Checkout
+cart_count = await evaluate('JSON.parse(localStorage.getItem("cart"))?.items?.length || 0')
+test_results.append({'test': 'cart_has_items', 'passed': cart_count > 0, 'detail': f'{cart_count} items'})
 
-- Which assertions passed
-- Which assertions failed (with details)
-- Screenshots or page content at failure points (use `browser_get_text` to capture page state)
-
-### Step 9 -- Clean up
-
-Close all browser sessions after testing:
-
-```
-browser_session(action="close_all")
+# Print results
+import json
+passed = sum(1 for t in test_results if t['passed'])
+total = len(test_results)
+print(f'\nResults: {passed}/{total} passed')
+print(json.dumps(test_results, indent=2))
 ```
 
 ## Tips
 
-- Always verify page state after each interaction before proceeding to the next step.
-- Use `browser_get_text` with `search` for content assertions and `browser_execute_js` for DOM state assertions.
+- Use Python `assert` statements for test assertions -- they produce clear error messages on failure.
+- Always verify page state after each interaction before proceeding.
 - Test both happy paths and error paths for thorough coverage.
-- For flaky elements, use `browser_scroll(target_text=...)` to ensure elements are in view before clicking.
-- Use `browser_tab(action="list")` to verify no unexpected popups or new tabs opened during testing.
-- Capture page content with `browser_get_text` at failure points for debugging.
+- Use `await wait(N)` after interactions that trigger page loads or animations.
+- Variables persist between `execute_code` calls, so you can accumulate test results across calls.
+- Use `evaluate()` for DOM state assertions and `browser.get_browser_state_summary()` for page metadata.
