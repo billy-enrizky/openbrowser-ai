@@ -86,6 +86,9 @@ ONLINE_GRPO_CONFIG = {
         "field_accuracy": 0.4,
         "execution_completeness": 0.2,
     },
+    # Early stopping: stop after patience gradient updates without improvement
+    "early_stopping_patience": int(os.environ.get("EARLY_STOPPING_PATIENCE", "50")),
+    "early_stopping_window": int(os.environ.get("EARLY_STOPPING_WINDOW", "20")),
 }
 
 # Data Config
