@@ -400,7 +400,24 @@ def create_namespace(
 				or (stripped.startswith('(async () =>') and ')()' in stripped[-10:])
 			)
 			if not is_wrapped:
-				code = f'(function(){{{code}}})()'
+				# For simple single-expression code (no newlines, no semicolons,
+				# not a statement keyword), wrap with return so the value is
+				# returned from the IIFE.  Multi-statement code gets wrapped
+				# without return (caller should include explicit return).
+				_statement_prefixes = (
+					'var ', 'let ', 'const ', 'if ', 'if(', 'for ', 'for(',
+					'while ', 'while(', 'switch ', 'switch(', 'try ', 'try{',
+					'class ', 'function ', 'async function', 'throw ', 'return ',
+				)
+				is_single_expr = (
+					'\n' not in stripped
+					and ';' not in stripped
+					and not stripped.startswith(_statement_prefixes)
+				)
+				if is_single_expr:
+					code = f'(function(){{return {code}}})()'
+				else:
+					code = f'(function(){{{code}}})()'
 
 		# Execute and track failures
 		try:
