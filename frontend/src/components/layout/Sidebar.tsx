@@ -14,6 +14,7 @@ import {
   ChevronRight,
   Gift,
   Loader2,
+  Trash2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/store";
@@ -28,10 +29,11 @@ const navItems = [
 interface SidebarProps {
   onNewChat?: () => void;
   onSelectConversation?: (conversationId: string) => void;
+  onDeleteConversation?: (conversationId: string) => void;
   chatsLoading?: boolean;
 }
 
-export function Sidebar({ onNewChat, onSelectConversation, chatsLoading = false }: SidebarProps) {
+export function Sidebar({ onNewChat, onSelectConversation, onDeleteConversation, chatsLoading = false }: SidebarProps) {
   const { sidebarOpen, toggleSidebar, conversations, activeConversationId } = useAppStore();
 
   return (
@@ -199,20 +201,35 @@ export function Sidebar({ onNewChat, onSelectConversation, chatsLoading = false 
                     <div className="px-3 py-2 text-xs text-zinc-500">No saved chats yet</div>
                   )}
                   {conversations.map((conversation: ChatConversation) => (
-                    <button
-                      type="button"
+                    <div
                       key={conversation.id}
-                      onClick={() => onSelectConversation?.(conversation.id)}
                       className={cn(
-                        "w-full flex items-center gap-3 px-3 py-2 rounded-xl transition-colors text-left",
+                        "group w-full flex items-center gap-1 px-3 py-2 rounded-xl transition-colors",
                         conversation.id === activeConversationId
                           ? "bg-cyan-500/10 text-cyan-300"
                           : "text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/50"
                       )}
                     >
-                      <MessageSquare className="w-4 h-4 shrink-0" />
-                      <span className="text-sm truncate">{conversation.title}</span>
-                    </button>
+                      <button
+                        type="button"
+                        onClick={() => onSelectConversation?.(conversation.id)}
+                        className="flex-1 flex items-center gap-3 text-left min-w-0"
+                      >
+                        <MessageSquare className="w-4 h-4 shrink-0" />
+                        <span className="text-sm truncate">{conversation.title}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onDeleteConversation?.(conversation.id);
+                        }}
+                        className="shrink-0 p-1 rounded-md opacity-0 group-hover:opacity-100 hover:bg-red-500/20 hover:text-red-400 transition-all"
+                        title="Delete conversation"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   ))}
                 </div>
               </div>
