@@ -293,6 +293,10 @@ SERVERS = {
         "command": "uvx",
         "args": ["openbrowser-ai[mcp]", "--mcp"],
     },
+    "openbrowser-1tools": {
+        "command": "uvx",
+        "args": ["openbrowser-ai[mcp]==0.1.21", "--mcp"],
+    },
     "playwright": {
         "command": "npx",
         "args": ["@playwright/mcp@latest"],
@@ -305,7 +309,7 @@ SERVERS = {
 }
 
 DEFAULT_MODEL = "us.anthropic.claude-sonnet-4-6"
-MAX_TURNS = 20
+MAX_TURNS = 50
 SYSTEM_PROMPT = (
     "You are a browser automation agent. Complete the task using the available "
     "browser tools. Be concise in your final answer."
