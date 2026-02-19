@@ -13,11 +13,25 @@ import argparse
 import asyncio
 import json
 import logging
+import os
 import re
 import time
 from datetime import datetime, timezone
 
-from claude_agent_sdk import query, ClaudeAgentOptions
+# Agent SDK spawns a Claude Code CLI subprocess. If this script is run from
+# inside a Claude Code session the CLAUDECODE env var causes the subprocess to
+# refuse to start ("cannot be launched inside another Claude Code session").
+# Unsetting it before the import is safe -- this script does not need to run
+# as a nested session.
+os.environ.pop("CLAUDECODE", None)
+
+from claude_agent_sdk import (
+    query,
+    ClaudeAgentOptions,
+    AssistantMessage,
+    ResultMessage,
+    ToolUseBlock,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -138,7 +152,7 @@ SERVERS = {
     },
 }
 
-MODEL = "claude-sonnet-4-5"
+MODEL = None  # Use CLI default; override with --model
 MAX_TURNS = 20
 SYSTEM_PROMPT = (
     "You are a browser automation agent. Complete the task using the available "
@@ -150,7 +164,12 @@ SYSTEM_PROMPT = (
 # Agent runner
 # ---------------------------------------------------------------------------
 
-async def run_task(server_name: str, server_config: dict, task: dict) -> dict:
+async def run_task(
+    server_name: str,
+    server_config: dict,
+    task: dict,
+    model: str | None = None,
+) -> dict:
     """Run a single task against a single MCP server via Claude Agent SDK.
 
     Returns dict with: name, success, duration_s, tool_calls, result, error.
@@ -163,30 +182,35 @@ async def run_task(server_name: str, server_config: dict, task: dict) -> dict:
     error_msg = None
     start = time.monotonic()
 
+    opts = ClaudeAgentOptions(
+        mcp_servers={server_name: server_config},
+        max_turns=MAX_TURNS,
+        system_prompt=SYSTEM_PROMPT,
+        permission_mode="bypassPermissions",
+    )
+    if model:
+        opts.model = model
+
     try:
         async for message in query(
             prompt=task["prompt"],
-            options=ClaudeAgentOptions(
-                model=MODEL,
-                mcp_servers={server_name: server_config},
-                max_turns=MAX_TURNS,
-                system_prompt=SYSTEM_PROMPT,
-            ),
+            options=opts,
         ):
             # Count tool calls from assistant messages
-            if message.type == "assistant":
+            if isinstance(message, AssistantMessage):
                 for block in message.content:
-                    if hasattr(block, "type") and block.type == "tool_use":
+                    if isinstance(block, ToolUseBlock):
                         tool_call_count += 1
 
             # Capture final result
-            if message.type == "result":
+            if isinstance(message, ResultMessage):
                 result_text = message.result or ""
-                if hasattr(message, "num_turns"):
-                    logger.info(
-                        "  [%s/%s] Finished: %d turns",
-                        server_name, task_name, message.num_turns,
-                    )
+                logger.info(
+                    "  [%s/%s] Finished: %d turns, cost=$%.4f",
+                    server_name, task_name,
+                    message.num_turns,
+                    message.total_cost_usd or 0,
+                )
 
     except Exception as exc:
         error_msg = str(exc)
@@ -262,10 +286,10 @@ def format_summary_table(server_results: dict) -> str:
     return "\n".join(rows)
 
 
-def write_results(server_results: dict, output_path: str):
+def write_results(server_results: dict, output_path: str, model: str | None = None):
     """Write structured results to JSON."""
     output = {
-        "model": MODEL,
+        "model": model or "default",
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "servers": {},
     }
@@ -288,6 +312,7 @@ async def run_benchmark(
     server_names: list[str] | None = None,
     task_names: list[str] | None = None,
     output_path: str = "benchmarks/e2e_llm_results.json",
+    model: str | None = None,
 ):
     """Run the full benchmark suite."""
     servers_to_run = {
@@ -300,7 +325,7 @@ async def run_benchmark(
     ]
 
     logger.info("E2E LLM Benchmark")
-    logger.info("Model: %s", MODEL)
+    logger.info("Model: %s", model or "default")
     logger.info("Servers: %s", ", ".join(servers_to_run.keys()))
     logger.info("Tasks: %s", ", ".join(t["name"] for t in tasks_to_run))
     logger.info("")
@@ -314,7 +339,7 @@ async def run_benchmark(
 
         task_results = []
         for task in tasks_to_run:
-            result = await run_task(server_name, server_config, task)
+            result = await run_task(server_name, server_config, task, model=model)
             task_results.append(result)
 
         summary = aggregate_results(task_results)
@@ -332,11 +357,11 @@ async def run_benchmark(
 
     # Output
     logger.info("=" * 60)
-    logger.info("E2E LLM Benchmark Results (%s)", MODEL)
+    logger.info("E2E LLM Benchmark Results (%s)", model or "default")
     logger.info("=" * 60)
     logger.info("\n%s", format_summary_table(server_results))
 
-    write_results(server_results, output_path)
+    write_results(server_results, output_path, model=model)
 
     return server_results
 
@@ -353,6 +378,10 @@ def main():
         help="Tasks to run (default: all)",
     )
     parser.add_argument(
+        "--model", default=None,
+        help="Model ID to use (default: CLI default)",
+    )
+    parser.add_argument(
         "--output", default="benchmarks/e2e_llm_results.json",
         help="Output JSON path (default: benchmarks/e2e_llm_results.json)",
     )
@@ -362,6 +391,7 @@ def main():
         server_names=args.servers,
         task_names=args.tasks,
         output_path=args.output,
+        model=args.model,
     ))
 
 
