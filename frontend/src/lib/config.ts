@@ -1,6 +1,13 @@
 // API Configuration
-export const API_BASE_URL = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(/\/+$/, "");
-export const WS_BASE_URL = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8000/ws";
+// In production, API traffic routes through CloudFront (same origin) to ALB.
+// In local dev, point to the local backend directly.
+const isLocalDev = typeof window !== "undefined" && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
+export const API_BASE_URL = isLocalDev
+  ? (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(/\/+$/, "")
+  : (typeof window !== "undefined" ? window.location.origin : "");
+export const WS_BASE_URL = isLocalDev
+  ? (process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8000/ws")
+  : (typeof window !== "undefined" ? window.location.origin.replace(/^https/, "wss").replace(/^http/, "ws") + "/ws" : "");
 
 // Authentication Configuration
 export const AUTH_ENABLED = process.env.NEXT_PUBLIC_AUTH_ENABLED === "true";
