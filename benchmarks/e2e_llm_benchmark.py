@@ -369,13 +369,24 @@ async def run_task(
                 tool_input = tool_use.get("input", {})
                 tool_use_id = tool_use["toolUseId"]
 
+                # Log the code being sent (first 200 chars)
+                code_preview = tool_input.get("code", "")[:200]
                 logger.info(
-                    "    [%s/%s] Turn %d: %s",
+                    "    [%s/%s] Turn %d: %s -- %s",
                     server_name, task_name, turn + 1, tool_name,
+                    code_preview.replace("\n", " | "),
                 )
 
-                # Call MCP tool
+                # Call MCP tool with timing
+                tool_start = time.monotonic()
                 tool_output = await mcp.call_tool(tool_name, tool_input)
+                tool_duration = time.monotonic() - tool_start
+                logger.info(
+                    "    [%s/%s] Turn %d result (%.1fs, %d chars): %s",
+                    server_name, task_name, turn + 1,
+                    tool_duration, len(tool_output),
+                    tool_output[:200].replace("\n", " | "),
+                )
 
                 # Truncate large outputs to avoid token limits
                 if len(tool_output) > 50000:
