@@ -119,7 +119,7 @@ class MCPClient:
         return "\n".join(texts) if texts else "(no output)"
 
     async def stop(self) -> None:
-        """Stop the MCP server subprocess."""
+        """Stop the MCP server subprocess and kill any browser it launched."""
         if self._process:
             try:
                 self._process.terminate()
@@ -127,6 +127,13 @@ class MCPClient:
             except Exception:
                 self._process.kill()
             self._process = None
+        # Kill Chrome to avoid profile lock conflicts between tasks
+        for sig_name in ["chromium", "chrome"]:
+            subprocess.run(
+                ["pkill", "-f", sig_name],
+                capture_output=True, timeout=5,
+            )
+        await asyncio.sleep(1)
 
     def _send_request(self, method: str, params: dict) -> dict:
         """Send a JSON-RPC request and read the response."""
