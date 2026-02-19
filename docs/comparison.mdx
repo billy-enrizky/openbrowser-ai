@@ -202,9 +202,20 @@ print(data)  # ~900 chars instead of ~97K
 
 ### Methodology
 
-Six real-world browser tasks run through Claude Sonnet 4.6 on AWS Bedrock (Converse API) with a server-agnostic system prompt. Each task uses a single MCP server as tool provider. The LLM decides which tools to call and when the task is complete. All tasks run against live websites. Each server is benchmarked over 5 independent runs; statistics below report mean +/- standard deviation with 95% bootstrap confidence intervals (10,000 samples).
+Six real-world browser tasks run through Claude Sonnet 4.6 on AWS Bedrock (Converse API) with a server-agnostic system prompt. Each task uses a single MCP server as tool provider. The LLM autonomously decides which tools to call and when the task is complete. All tasks run against live websites. Each server is benchmarked over 5 independent runs; statistics below report mean +/- standard deviation with 95% bootstrap confidence intervals (10,000 samples).
 
-**Tasks**: Wikipedia fact lookup, httpbin form fill, Hacker News data extraction, Wikipedia search + navigation, GitHub release lookup, example.com content analysis.
+**Benchmark Tasks:**
+
+| # | Task | What the LLM must do | Target Site | Verification |
+|:-:|------|----------------------|-------------|--------------|
+| 1 | **fact_lookup** | Navigate to the Python Wikipedia article and extract who created it and when | en.wikipedia.org | Must mention "Guido van Rossum" and "1991" |
+| 2 | **form_fill** | Navigate to a form, fill in customer name, select pizza size and topping, submit | httpbin.org/forms/post | POST response must contain `custname=John Doe`, `size=medium`, `topping=mushroom` |
+| 3 | **multi_page_extract** | Extract the titles of the top 5 stories from the Hacker News front page | news.ycombinator.com | Must return at least 3 non-empty story titles |
+| 4 | **search_navigate** | Go to Wikipedia, search for "Rust programming language", click the result, identify the original developer | en.wikipedia.org | Must mention "Mozilla" |
+| 5 | **deep_navigation** | Navigate to the claude-code GitHub repo and find the latest release version | github.com/anthropics/claude-code | Must contain a version pattern like "v1.2.3" |
+| 6 | **content_analysis** | Visit example.com and describe the page structure: count headings, links, and paragraphs | example.com | Must mention "1" heading and "1" link |
+
+The tasks span different browser automation capabilities: reading content, filling forms, navigating search results, extracting structured data, and analyzing page structure. The system prompt is server-agnostic -- it gives no hints about which tools are available or how to use them.
 
 <img src="/images/benchmark_comparison.png" alt="E2E LLM Benchmark: MCP Server Comparison" style={{width: "100%", maxWidth: 800}} />
 
