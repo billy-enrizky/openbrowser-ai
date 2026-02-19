@@ -84,7 +84,8 @@ def load_quantized_model(model_name: str, config: dict):
 
 
 def generate_rollouts(
-    model, tokenizer, prompt: str, group_size: int, max_new_tokens: int = 512
+    model, tokenizer, prompt: str, group_size: int, max_new_tokens: int = 512,
+    temperature: float = 1.0,
 ) -> tuple[list[str], torch.Tensor, int]:
     """Generate G rollouts for a single prompt.
 
@@ -108,8 +109,8 @@ def generate_rollouts(
             max_new_tokens=max_new_tokens,
             num_return_sequences=group_size,
             do_sample=True,
-            temperature=0.7,
-            top_p=0.9,
+            temperature=temperature,
+            top_p=0.95,
             return_dict_in_generate=True,
             output_scores=False,
         )
@@ -262,6 +263,8 @@ async def train():
     kl_coeff = config["kl_coeff"]
     max_new_tokens = config.get("max_new_tokens", 512)
     action_timeout = config.get("action_timeout_s", 5.0)
+    temperature = config.get("temperature", 1.0)
+    min_reward_variance = config.get("min_reward_variance", 0.01)
 
     # Start FormFactory server
     formfactory_dir = PROJECT_ROOT / "data" / "formfactory"
@@ -327,6 +330,7 @@ async def train():
                 rollouts, sequences, prompt_length = generate_rollouts(
                     model, tokenizer, prompt_text, group_size,
                     max_new_tokens=max_new_tokens,
+                    temperature=temperature,
                 )
                 model.train()
 
@@ -385,23 +389,34 @@ async def train():
 
                 epoch_rewards.extend(rewards)
 
-                # Skip gradient update when all rollouts failed -- avoids
-                # KL-only updates that push policy back toward reference
-                # without any reward signal, which degrades the model.
+                # Skip gradient update when all rollouts failed or reward
+                # variance is too low.  Without reward variance, GRPO
+                # advantages are all zero and the only gradient signal is
+                # the KL penalty, which pushes the policy back toward
+                # the reference model and degrades performance.
                 all_zero = all(r == 0.0 for r in rewards)
-                if all_zero:
+                reward_mean = sum(rewards) / len(rewards) if rewards else 0
+                reward_var = (
+                    sum((r - reward_mean) ** 2 for r in rewards) / max(len(rewards) - 1, 1)
+                    if len(rewards) > 1 else 0.0
+                )
+                low_variance = reward_var < min_reward_variance
+
+                if all_zero or low_variance:
                     consecutive_zero_reward += 1
                     total_steps += 1
+                    skip_reason = "all-zero" if all_zero else f"low-var={reward_var:.6f}"
                     if total_steps % config["logging_steps"] == 0:
                         logger.info(
                             f"  Step {total_steps} (prompt {i+1}/{len(prompts)}): "
-                            f"avg_reward=0.000 [SKIPPED update, {consecutive_zero_reward} consecutive zeros]"
+                            f"avg_reward={reward_mean:.3f} [SKIPPED: {skip_reason}, "
+                            f"{consecutive_zero_reward} consecutive]"
                         )
-                    # If too many consecutive zeros, force server health check
+                    # If too many consecutive skips, force browser restart
                     if consecutive_zero_reward >= 3 and ff_server.is_healthy():
                         logger.warning(
-                            f"{consecutive_zero_reward} consecutive zero-reward prompts "
-                            "despite healthy server -- browser may be stuck"
+                            f"{consecutive_zero_reward} consecutive skipped prompts "
+                            "despite healthy server -- restarting browser"
                         )
                         await browser_env.close()
                         browser_env = await BrowserEnvironment.create(headless=headless)
