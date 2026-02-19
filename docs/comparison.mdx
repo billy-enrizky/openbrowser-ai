@@ -66,9 +66,9 @@ All three MCP servers were started as subprocesses and tested via JSON-RPC stdio
 | Navigate response | Full a11y snapshot | URL confirmation | URL confirmation |
 | State query | Always full snapshot | Full a11y snapshot (`take_snapshot`) | Compact (105 tokens) or full |
 | Click response | Updated snapshot | Action confirmation | Action confirmation |
-| Text extraction | No dedicated tool | No dedicated tool | `browser_get_text` (markdown) |
-| Content search | Dump full snapshot | `evaluate_script` (JS) | `search` param (regex grep) |
-| Element search | Part of snapshot | `uid` from snapshot | `filter_by` param (text/tag/id) |
+| Text extraction | No dedicated tool | No dedicated tool | `evaluate()` + Python processing |
+| Content search | Dump full snapshot | `evaluate_script` (JS) | `evaluate()` + Python regex/string matching |
+| Element search | Part of snapshot | `uid` from snapshot | `browser.get_browser_state_summary()` |
 
 **Playwright MCP**: Every navigation returns the full page accessibility snapshot (~124K tokens for Wikipedia). Consistent, but forces the LLM to process the entire page with every action.
 
@@ -144,18 +144,19 @@ uid=1_0 RootWebArea url="https://httpbin.org/forms/post"
   ... (entire page tree)
 ```
 
-**OpenBrowser MCP** `browser_get_state(compact=true)` -- metadata only (~105 chars on httpbin, ~250 chars on Wikipedia):
+**OpenBrowser MCP** -- the LLM writes Python code to query exactly what it needs:
 
-```json
-{
-  "url": "https://httpbin.org/forms/post",
-  "title": "httpbin.org/forms/post",
-  "tabs": [{"url": "...", "title": "..."}],
-  "interactive_element_count": 13
-}
+```python
+# Get page metadata
+state = await browser.get_browser_state_summary()
+print(json.dumps({"url": state.url, "title": state.title}))
 ```
 
-The agent requests more detail only when needed: `compact=false` adds the element list, `browser_get_text` returns full page markdown, `browser_get_text(search="pattern")` returns only matching lines.
+```json
+{"url": "https://httpbin.org/forms/post", "title": "httpbin.org/forms/post"}
+```
+
+The agent requests only the data it needs via Python code -- page title, specific element attributes, or targeted JS evaluation. No full-page dumps.
 
 #### Click / Type / Go Back
 
@@ -167,67 +168,25 @@ All three servers return short confirmations for actions:
 | Type | Updated snapshot (~526 chars) | `Filled element uid=1_2` | `Typed 'John Doe' into element 4` |
 | Go back | ~198 chars | ~149 chars | `Navigated back` |
 
-#### Filter / Search (OpenBrowser only)
+#### Targeted Extraction (OpenBrowser only)
 
-No equivalent in Playwright or Chrome DevTools MCP -- both require dumping the full snapshot or running JavaScript.
+No equivalent in Playwright or Chrome DevTools MCP -- both require dumping the full snapshot or running JavaScript from the client side.
 
-**Element filter** -- find interactive elements by text, tag, id, class, or attribute:
+**Element search** -- the LLM writes Python to find specific elements:
 
-```json
-browser_get_state(filter_by="text", filter_query="Submit")
+```python
+state = await browser.get_browser_state_summary()
+for idx, el in state.dom_state.selector_map.items():
+    if 'submit' in el.get_all_children_text(max_depth=1).lower():
+        print(f"Found submit button at index {idx}")
 ```
 
-```json
-{"query": "Submit", "by": "text", "results": [{"index": 94, "tag": "button", "text": "Submit order"}], "count": 1}
-```
+**Data extraction** -- extract specific data via JS evaluation, not full-page dumps:
 
-**Regex content search** -- returns only matching lines with context, not the full page.
-
-The Wikipedia Python page is ~97K chars as full markdown. Searching for "Guido van Rossum" returns only the 11 matching lines with context (~3.9K chars -- 25x smaller):
-
-```json
-browser_get_text(search="Guido van Rossum", context_lines=1)
-```
-
-```json
-{
-  "pattern": "Guido van Rossum",
-  "matches": [
-    {
-      "line_number": 244,
-      "line": "| Designed by | Guido van Rossum |",
-      "context_before": ["| Paradigm | Multi-paradigm: object-oriented,... |"],
-      "context_after": ["| Developer | Python Software Foundation |"]
-    },
-    {
-      "line_number": 278,
-      "line": "Guido van Rossum began working on Python in the late 1980s...",
-      "context_before": ["**Python** is a high-level, general-purpose programming language..."],
-      "context_after": ["Python has gained widespread use in the machine learning community..."]
-    }
-  ],
-  "matches_shown": 11,
-  "total_matches": 11
-}
-```
-
-Regex patterns also work -- `search="released in \\d{4}"` finds lines with release years, and `max_matches` limits results:
-
-```json
-browser_get_text(search="released in \\d{4}", context_lines=0, max_matches=3)
-```
-
-```json
-{
-  "pattern": "released in \\d{4}",
-  "matches": [
-    {"line_number": 278, "line": "...Python 3.0, released in 2008, was a major revision..."},
-    {"line_number": 287, "line": "...Python 2.7.18, released in 2020, was the last release of Python 2..."},
-    {"line_number": 463, "line": "...IronPython...An alpha version (released in 2021)..."}
-  ],
-  "matches_shown": 3,
-  "total_matches": 4
-}
+```python
+# Extract only what's needed from a 97K-char Wikipedia page
+data = await evaluate('document.querySelector(".infobox")?.innerText')
+print(data)  # ~900 chars instead of ~97K
 ```
 
 **Comparison for finding "Guido van Rossum" on Wikipedia:**
@@ -236,7 +195,7 @@ browser_get_text(search="released in \\d{4}", context_lines=0, max_matches=3)
 |--------|--------|-------------:|
 | Playwright MCP | `browser_snapshot` (dump full tree, search client-side) | ~495K chars |
 | Chrome DevTools MCP | `take_snapshot` (dump full tree, search client-side) | ~538K chars |
-| OpenBrowser MCP | `browser_get_text(search="Guido van Rossum")` | ~3.9K chars |
+| OpenBrowser MCP | `evaluate()` + Python string matching | ~900 chars |
 
 ## Cost Comparison
 
@@ -370,9 +329,9 @@ Features no competitor offers:
 | Wait conditions | No | Yes | No |
 | Code generation | Yes | No | No |
 | Incremental snapshots | Yes | No | No |
-| Accessibility tree | Via snapshot | Via snapshot | Yes (dedicated tool) |
-| Content grep/search | No | No | Yes |
-| Progressive disclosure | No | No | Yes |
+| Accessibility tree | Via snapshot | Via snapshot | Via `evaluate()` JS queries |
+| Content grep/search | No | No | Via `evaluate()` + Python |
+| Progressive disclosure | No | No | Yes (code extracts only what's needed) |
 | Session reuse | No | Puppeteer-managed | Yes (existing Chrome) |
 
 ## Benchmark Methodology Notes
