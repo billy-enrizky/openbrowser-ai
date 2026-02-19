@@ -1,10 +1,10 @@
-name: openbrowser-fsdfm-sft
-entrypoint: python -m infra.training.flow_matching.fsdfm_sft_trainer
-containerfile: infra/training/anyscale/Containerfile.online-fsdfm-grpo
+name: openbrowser-refusion-flow-grpo
+entrypoint: bash -c "python -m infra.eval.scripts.download_datasets --datasets formfactory && python -m infra.training.flow_matching.refusion_flow_grpo_trainer"
+containerfile: infra/training/anyscale/Containerfile.online-grpo
 compute_config:
   cloud: "Anyscale Cloud"
   head_node:
-    instance_type: g5.xlarge
+    instance_type: g6e.xlarge
   worker_nodes: []
 working_dir: .
 excludes:
@@ -26,11 +26,12 @@ excludes:
 env_vars:
   FLOW_TRAIN_FILE: "data/processed/formfactory_sft_train.jsonl"
   MAX_TRAIN_SAMPLES: "992"
-  NUM_EPOCHS: "5"
+  NUM_EPOCHS: "1"
+  FLOW_LLM_SFT_CHECKPOINT: "/mnt/user_storage/openbrowser/checkpoints/flow-llm-sft/adapter"
   # HF_TOKEN injected from .env at submission time by submit_job.py
 max_retries: 1
 timeout_s: 14400
 tags:
   project: openbrowser
-  task: fsdfm-sft
-  model: fsdfm-1.3b-dfm
+  task: refusion-flow-grpo
+  model: refusion-8b-mdm
