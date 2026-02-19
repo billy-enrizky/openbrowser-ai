@@ -573,6 +573,8 @@ class AgentSession:
             }
             if step_info.get("thinking"):
                 step_data["thinking"] = step_info["thinking"]
+            if step_info.get("code"):
+                step_data["code"] = step_info["code"]
             self.on_step_callback(step_data)
 
         # 2. Emit code execution output
@@ -584,8 +586,17 @@ class AgentSession:
         if self.on_screenshot_callback and step_info.get("screenshot_base64"):
             self.on_screenshot_callback(step_info["screenshot_base64"], step_num)
 
-        # 4. Emit log events for step progress
-        self._log("info", f"Step {step_num}/{total} executed", "code", step_num)
+        # 4. Emit log events for step progress with code preview
+        code = step_info.get("code", "")
+        code_preview = ""
+        if code:
+            first_line = next(
+                (l.strip() for l in code.split("\n") if l.strip() and not l.strip().startswith("#")),
+                "",
+            )
+            if first_line:
+                code_preview = f": {first_line[:120]}"
+        self._log("info", f"Step {step_num}/{total} executed{code_preview}", "code", step_num)
         if step_info.get("error"):
             error_preview = step_info["error"][:200]
             self._log("warning", f"Code error: {error_preview}", "code", step_num)
