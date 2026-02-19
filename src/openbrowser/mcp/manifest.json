@@ -24,7 +24,7 @@
     "entry_point": "python",
     "mcp_config": {
       "command": "uvx",
-      "args": ["openbrowser", "--mcp"],
+      "args": ["openbrowser-ai[mcp]", "--mcp"],
       "env": {
         "OPENBROWSER_HEADLESS": "${user_config.headless}",
         "OPENBROWSER_ALLOWED_DOMAINS": "${user_config.allowed_domains}"
