@@ -1,5 +1,5 @@
 name: openbrowser-online-flow-grpo
-entrypoint: python -m infra.training.flow_matching.online_flow_grpo_trainer
+entrypoint: bash -c "python -m infra.eval.scripts.download_datasets --datasets formfactory && python -m infra.training.flow_matching.online_flow_grpo_trainer"
 containerfile: infra/training/anyscale/Containerfile.online-flow-grpo
 compute_config:
   cloud: "Anyscale Cloud"
@@ -22,8 +22,8 @@ excludes:
   - openbrowser_agent_data/
   - "*.pyc"
 env_vars:
-  FLOW_TRAIN_FILE: "data/processed/formfactory_flow.jsonl"
-  MAX_TRAIN_SAMPLES: "25"
+  FLOW_TRAIN_FILE: "data/processed/formfactory_flow_train.jsonl"
+  MAX_TRAIN_SAMPLES: "992"
   NUM_EPOCHS: "1"
   FLOW_SFT_CHECKPOINT: "/mnt/user_storage/openbrowser/checkpoints/flow-sft/model.pt"
   # HF_TOKEN injected from .env at submission time by submit_job.py
