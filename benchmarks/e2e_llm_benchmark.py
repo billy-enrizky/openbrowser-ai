@@ -1,13 +1,20 @@
 """
 E2E LLM Performance Benchmark: OpenBrowser vs Playwright vs Chrome DevTools MCP.
 
-Runs identical browser tasks through Claude (via claude-agent-sdk) and measures
-task success, tool call count, wall-clock time, and cost.
+Runs identical browser tasks through Claude on Bedrock (via boto3 Converse API)
+with MCP servers as tool providers. Measures task success, tool call count, and
+wall-clock time.
+
+Requires AWS credentials with Bedrock access:
+    export AWS_ACCESS_KEY_ID=...
+    export AWS_SECRET_ACCESS_KEY=...
+    export AWS_DEFAULT_REGION=us-west-2
 
 Usage:
     uv run python benchmarks/e2e_llm_benchmark.py
     uv run python benchmarks/e2e_llm_benchmark.py --servers openbrowser
     uv run python benchmarks/e2e_llm_benchmark.py --tasks content_analysis fact_lookup
+    uv run python benchmarks/e2e_llm_benchmark.py --model us.anthropic.claude-sonnet-4-6
 """
 import argparse
 import asyncio
@@ -15,29 +22,150 @@ import json
 import logging
 import os
 import re
+import subprocess
+import sys
 import time
 from datetime import datetime, timezone
 
-# Agent SDK spawns a Claude Code CLI subprocess. If this script is run from
-# inside a Claude Code session the CLAUDECODE env var causes the subprocess to
-# refuse to start ("cannot be launched inside another Claude Code session").
-# Unsetting it before the import is safe -- this script does not need to run
-# as a nested session.
-os.environ.pop("CLAUDECODE", None)
-
-from claude_agent_sdk import (
-    query,
-    ClaudeAgentOptions,
-    AssistantMessage,
-    ResultMessage,
-    ToolUseBlock,
-)
+import boto3
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(message)s",
 )
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# MCP Client -- communicates with MCP servers via JSON-RPC over stdio
+# ---------------------------------------------------------------------------
+
+class MCPClient:
+    """Minimal MCP client that starts a server subprocess and communicates
+    via JSON-RPC 2.0 over stdin/stdout."""
+
+    def __init__(self, command: str, args: list[str], env: dict | None = None):
+        self._command = command
+        self._args = args
+        self._env = env
+        self._process: subprocess.Popen | None = None
+        self._request_id = 0
+        self._tools: list[dict] = []
+
+    async def start(self) -> None:
+        """Start the MCP server subprocess and initialize."""
+        proc_env = os.environ.copy()
+        if self._env:
+            proc_env.update(self._env)
+
+        self._process = subprocess.Popen(
+            [self._command] + self._args,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=proc_env,
+        )
+
+        # Initialize
+        resp = self._send_request("initialize", {
+            "protocolVersion": "2024-11-05",
+            "capabilities": {},
+            "clientInfo": {"name": "benchmark", "version": "1.0"},
+        })
+        if "error" in resp:
+            raise RuntimeError(f"MCP initialize failed: {resp['error']}")
+
+        # Send initialized notification
+        self._send_notification("notifications/initialized", {})
+
+        # Get tools
+        tools_resp = self._send_request("tools/list", {})
+        if "error" in tools_resp:
+            raise RuntimeError(f"MCP tools/list failed: {tools_resp['error']}")
+        self._tools = tools_resp.get("result", {}).get("tools", [])
+        logger.info("    MCP server started with %d tools", len(self._tools))
+
+    def get_bedrock_tools(self) -> list[dict]:
+        """Convert MCP tools to Bedrock Converse toolConfig format."""
+        bedrock_tools = []
+        for tool in self._tools:
+            schema = tool.get("inputSchema", {"type": "object", "properties": {}})
+            # Bedrock requires properties to exist
+            if "properties" not in schema:
+                schema["properties"] = {}
+            bedrock_tools.append({
+                "toolSpec": {
+                    "name": tool["name"],
+                    "description": tool.get("description", "")[:4096],
+                    "inputSchema": {"json": schema},
+                }
+            })
+        return bedrock_tools
+
+    async def call_tool(self, name: str, arguments: dict) -> str:
+        """Call an MCP tool and return the text result."""
+        resp = self._send_request("tools/call", {
+            "name": name,
+            "arguments": arguments,
+        })
+        if "error" in resp:
+            return f"Error: {resp['error']}"
+        result = resp.get("result", {})
+        content = result.get("content", [])
+        texts = []
+        for item in content:
+            if item.get("type") == "text":
+                texts.append(item.get("text", ""))
+        return "\n".join(texts) if texts else "(no output)"
+
+    async def stop(self) -> None:
+        """Stop the MCP server subprocess."""
+        if self._process:
+            try:
+                self._process.terminate()
+                self._process.wait(timeout=5)
+            except Exception:
+                self._process.kill()
+            self._process = None
+
+    def _send_request(self, method: str, params: dict) -> dict:
+        """Send a JSON-RPC request and read the response."""
+        self._request_id += 1
+        request = {
+            "jsonrpc": "2.0",
+            "method": method,
+            "params": params,
+            "id": self._request_id,
+        }
+        return self._send_and_read(request)
+
+    def _send_notification(self, method: str, params: dict) -> None:
+        """Send a JSON-RPC notification (no response expected)."""
+        notification = {
+            "jsonrpc": "2.0",
+            "method": method,
+            "params": params,
+        }
+        assert self._process and self._process.stdin
+        line = json.dumps(notification) + "\n"
+        self._process.stdin.write(line.encode())
+        self._process.stdin.flush()
+
+    def _send_and_read(self, request: dict) -> dict:
+        """Send request and read response line."""
+        assert self._process and self._process.stdin and self._process.stdout
+        line = json.dumps(request) + "\n"
+        self._process.stdin.write(line.encode())
+        self._process.stdin.flush()
+
+        # Read response line
+        response_line = self._process.stdout.readline()
+        if not response_line:
+            return {"error": "No response from MCP server"}
+        try:
+            return json.loads(response_line)
+        except json.JSONDecodeError as e:
+            return {"error": f"Invalid JSON response: {e}"}
 
 
 # ---------------------------------------------------------------------------
@@ -152,7 +280,7 @@ SERVERS = {
     },
 }
 
-MODEL = None  # Use CLI default; override with --model
+DEFAULT_MODEL = "us.anthropic.claude-sonnet-4-6"
 MAX_TURNS = 20
 SYSTEM_PROMPT = (
     "You are a browser automation agent. Complete the task using the available "
@@ -161,16 +289,17 @@ SYSTEM_PROMPT = (
 
 
 # ---------------------------------------------------------------------------
-# Agent runner
+# Agent runner using Bedrock Converse API
 # ---------------------------------------------------------------------------
 
 async def run_task(
+    bedrock_client,
     server_name: str,
     server_config: dict,
     task: dict,
-    model: str | None = None,
+    model_id: str,
 ) -> dict:
-    """Run a single task against a single MCP server via Claude Agent SDK.
+    """Run a single task against a single MCP server via Bedrock Converse API.
 
     Returns dict with: name, success, duration_s, tool_calls, result, error.
     """
@@ -182,39 +311,96 @@ async def run_task(
     error_msg = None
     start = time.monotonic()
 
-    opts = ClaudeAgentOptions(
-        mcp_servers={server_name: server_config},
-        max_turns=MAX_TURNS,
-        system_prompt=SYSTEM_PROMPT,
-        permission_mode="bypassPermissions",
+    # Start MCP server
+    mcp = MCPClient(
+        command=server_config["command"],
+        args=server_config["args"],
+        env=server_config.get("env"),
     )
-    if model:
-        opts.model = model
 
     try:
-        async for message in query(
-            prompt=task["prompt"],
-            options=opts,
-        ):
-            # Count tool calls from assistant messages
-            if isinstance(message, AssistantMessage):
-                for block in message.content:
-                    if isinstance(block, ToolUseBlock):
-                        tool_call_count += 1
+        await mcp.start()
+        bedrock_tools = mcp.get_bedrock_tools()
 
-            # Capture final result
-            if isinstance(message, ResultMessage):
-                result_text = message.result or ""
+        messages = [
+            {"role": "user", "content": [{"text": task["prompt"]}]}
+        ]
+
+        for turn in range(MAX_TURNS):
+            # Call Bedrock Converse
+            converse_kwargs = {
+                "modelId": model_id,
+                "messages": messages,
+                "system": [{"text": SYSTEM_PROMPT}],
+            }
+            if bedrock_tools:
+                converse_kwargs["toolConfig"] = {"tools": bedrock_tools}
+
+            try:
+                response = bedrock_client.converse(**converse_kwargs)
+            except Exception as e:
+                error_msg = f"Bedrock API error: {e}"
+                logger.error("  [%s/%s] %s", server_name, task_name, error_msg)
+                break
+
+            stop_reason = response.get("stopReason", "")
+            output_message = response.get("output", {}).get("message", {})
+            content_blocks = output_message.get("content", [])
+
+            # Add assistant message to history
+            messages.append({"role": "assistant", "content": content_blocks})
+
+            # Check for tool use
+            tool_uses = [b for b in content_blocks if "toolUse" in b]
+
+            if not tool_uses or stop_reason == "end_turn":
+                # No tool calls -- extract final text response
+                for block in content_blocks:
+                    if "text" in block:
+                        result_text += block["text"] + "\n"
+                break
+
+            # Execute tool calls and collect results
+            tool_results = []
+            for block in tool_uses:
+                tool_use = block["toolUse"]
+                tool_call_count += 1
+                tool_name = tool_use["name"]
+                tool_input = tool_use.get("input", {})
+                tool_use_id = tool_use["toolUseId"]
+
                 logger.info(
-                    "  [%s/%s] Finished: %d turns, cost=$%.4f",
-                    server_name, task_name,
-                    message.num_turns,
-                    message.total_cost_usd or 0,
+                    "    [%s/%s] Turn %d: %s",
+                    server_name, task_name, turn + 1, tool_name,
                 )
+
+                # Call MCP tool
+                tool_output = await mcp.call_tool(tool_name, tool_input)
+
+                # Truncate large outputs to avoid token limits
+                if len(tool_output) > 50000:
+                    tool_output = tool_output[:50000] + "\n...(truncated)"
+
+                tool_results.append({
+                    "toolResult": {
+                        "toolUseId": tool_use_id,
+                        "content": [{"text": tool_output}],
+                    }
+                })
+
+            # Add tool results to messages
+            messages.append({"role": "user", "content": tool_results})
+
+        else:
+            # Hit MAX_TURNS without natural completion
+            error_msg = f"Hit max turns ({MAX_TURNS})"
+            logger.warning("  [%s/%s] %s", server_name, task_name, error_msg)
 
     except Exception as exc:
         error_msg = str(exc)
         logger.error("  [%s/%s] Error: %s", server_name, task_name, error_msg)
+    finally:
+        await mcp.stop()
 
     duration_s = time.monotonic() - start
     success = task["verify"](result_text) if not error_msg else False
@@ -289,7 +475,7 @@ def format_summary_table(server_results: dict) -> str:
 def write_results(server_results: dict, output_path: str, model: str | None = None):
     """Write structured results to JSON."""
     output = {
-        "model": model or "default",
+        "model": model or DEFAULT_MODEL,
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "servers": {},
     }
@@ -315,6 +501,8 @@ async def run_benchmark(
     model: str | None = None,
 ):
     """Run the full benchmark suite."""
+    model_id = model or DEFAULT_MODEL
+
     servers_to_run = {
         name: config for name, config in SERVERS.items()
         if server_names is None or name in server_names
@@ -324,11 +512,14 @@ async def run_benchmark(
         if task_names is None or t["name"] in task_names
     ]
 
-    logger.info("E2E LLM Benchmark")
-    logger.info("Model: %s", model or "default")
+    logger.info("E2E LLM Benchmark (Bedrock Converse API)")
+    logger.info("Model: %s", model_id)
     logger.info("Servers: %s", ", ".join(servers_to_run.keys()))
     logger.info("Tasks: %s", ", ".join(t["name"] for t in tasks_to_run))
     logger.info("")
+
+    # Create Bedrock client
+    bedrock_client = boto3.client("bedrock-runtime", region_name="us-west-2")
 
     server_results = {}
 
@@ -339,7 +530,9 @@ async def run_benchmark(
 
         task_results = []
         for task in tasks_to_run:
-            result = await run_task(server_name, server_config, task, model=model)
+            result = await run_task(
+                bedrock_client, server_name, server_config, task, model_id,
+            )
             task_results.append(result)
 
         summary = aggregate_results(task_results)
@@ -357,11 +550,11 @@ async def run_benchmark(
 
     # Output
     logger.info("=" * 60)
-    logger.info("E2E LLM Benchmark Results (%s)", model or "default")
+    logger.info("E2E LLM Benchmark Results (%s)", model_id)
     logger.info("=" * 60)
     logger.info("\n%s", format_summary_table(server_results))
 
-    write_results(server_results, output_path, model=model)
+    write_results(server_results, output_path, model=model_id)
 
     return server_results
 
@@ -379,7 +572,7 @@ def main():
     )
     parser.add_argument(
         "--model", default=None,
-        help="Model ID to use (default: CLI default)",
+        help=f"Bedrock model ID (default: {DEFAULT_MODEL})",
     )
     parser.add_argument(
         "--output", default="benchmarks/e2e_llm_results.json",
