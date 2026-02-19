@@ -63,8 +63,12 @@ class VncSession:
     
     @property
     def websocket_url(self) -> str:
-        """Get the WebSocket URL for noVNC connection."""
-        return f"ws://localhost:{self.websockify_port}"
+        """Get the WebSocket proxy path for noVNC connection.
+
+        Returns a relative path that the frontend combines with its
+        API base URL and auth token to form the full wss:// URL.
+        """
+        return f"/api/v1/vnc/ws?task_id={self.task_id}"
     
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for WebSocket transmission."""
