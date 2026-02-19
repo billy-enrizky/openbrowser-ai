@@ -167,6 +167,11 @@ def load_model_with_qlora(model_config: dict):
 
 def train():
     """Run flow LLM SFT training."""
+    seed = int(os.environ.get("RANDOM_SEED", "42"))
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
     model_config = FLOW_LLM_CONFIG
     train_config = FLOW_LLM_SFT_CONFIG
 
