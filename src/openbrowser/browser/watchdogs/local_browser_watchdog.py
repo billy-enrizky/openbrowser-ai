@@ -247,6 +247,7 @@ class LocalBrowserWatchdog(BaseWatchdog):
 				'/usr/bin/google-chrome',
 				'/usr/local/bin/google-chrome',
 				f'{playwright_path}/chromium-*/chrome-linux/chrome',
+				f'{playwright_path}/chromium-*/chrome-linux64/chrome',
 				'/usr/bin/chromium',
 				'/usr/bin/chromium-browser',
 				'/usr/local/bin/chromium',
@@ -255,6 +256,7 @@ class LocalBrowserWatchdog(BaseWatchdog):
 				'/usr/bin/google-chrome-dev',
 				'/usr/bin/brave-browser',
 				f'{playwright_path}/chromium_headless_shell-*/chrome-linux/chrome',
+				f'{playwright_path}/chromium_headless_shell-*/chrome-linux64/chrome',
 			]
 		elif system == 'Windows':
 			if not playwright_path:
