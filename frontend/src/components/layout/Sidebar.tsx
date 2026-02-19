@@ -9,27 +9,29 @@ import {
   Search,
   Library,
   FolderPlus,
-  ListFilter,
-  Settings,
+  MessageSquare,
   ChevronLeft,
   ChevronRight,
   Gift,
+  Loader2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/store";
 import { Button } from "@/components/ui";
 
 const navItems = [
-  { icon: PenSquare, label: "New task", href: "/" },
   { icon: Search, label: "Search", href: "/search" },
   { icon: Library, label: "Library", href: "/library" },
 ];
 
-export function Sidebar() {
-  const { sidebarOpen, toggleSidebar, tasks } = useAppStore();
+interface SidebarProps {
+  onNewChat?: () => void;
+  onSelectConversation?: (conversationId: string) => void;
+  chatsLoading?: boolean;
+}
 
-  // Get recent tasks (last 5)
-  const recentTasks = tasks.slice(0, 5);
+export function Sidebar({ onNewChat, onSelectConversation, chatsLoading = false }: SidebarProps) {
+  const { sidebarOpen, toggleSidebar, conversations, activeConversationId } = useAppStore();
 
   return (
     <motion.aside
@@ -98,6 +100,32 @@ export function Sidebar() {
       {/* Navigation */}
       <nav className="flex-1 overflow-y-auto p-2">
         <div className="space-y-1">
+          <motion.button
+            type="button"
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+            onClick={onNewChat}
+            className={cn(
+              "w-full flex items-center gap-3 px-3 py-2.5 rounded-xl",
+              "text-cyan-400 hover:text-cyan-300 hover:bg-zinc-800/50",
+              "transition-colors cursor-pointer bg-gradient-to-r from-cyan-500/10 to-blue-600/10"
+            )}
+          >
+            <PenSquare className="w-5 h-5 shrink-0" />
+            <AnimatePresence mode="wait">
+              {sidebarOpen && (
+                <motion.span
+                  initial={{ opacity: 0, width: 0 }}
+                  animate={{ opacity: 1, width: "auto" }}
+                  exit={{ opacity: 0, width: 0 }}
+                  className="text-sm font-medium whitespace-nowrap overflow-hidden"
+                >
+                  New chat
+                </motion.span>
+              )}
+            </AnimatePresence>
+          </motion.button>
+
           {navItems.map((item) => (
             <Link key={item.label} href={item.href}>
               <motion.div
@@ -107,7 +135,6 @@ export function Sidebar() {
                   "flex items-center gap-3 px-3 py-2.5 rounded-xl",
                   "text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/50",
                   "transition-colors cursor-pointer",
-                  item.label === "New task" && "bg-gradient-to-r from-cyan-500/10 to-blue-600/10 text-cyan-400 hover:text-cyan-300"
                 )}
               >
                 <item.icon className="w-5 h-5 shrink-0" />
@@ -153,34 +180,42 @@ export function Sidebar() {
                     <span className="text-sm">New project</span>
                   </div>
                 </Link>
-                <Link href="/tasks">
-                  <div className="flex items-center gap-3 px-3 py-2 rounded-xl text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/50 transition-colors cursor-pointer">
-                    <ListFilter className="w-4 h-4" />
-                    <span className="text-sm">All tasks</span>
-                  </div>
-                </Link>
               </div>
 
-              {/* Recent Tasks */}
-              {recentTasks.length > 0 && (
-                <div className="mt-4">
-                  <span className="px-3 text-xs font-semibold text-zinc-500 uppercase tracking-wider">
-                    Recent
-                  </span>
-                  <div className="mt-2 space-y-1">
-                    {recentTasks.map((task) => (
-                      <Link key={task.id} href={`/task/${task.id}`}>
-                        <div className="flex items-center gap-3 px-3 py-2 rounded-xl text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/50 transition-colors cursor-pointer">
-                          <Settings className="w-4 h-4 shrink-0" />
-                          <span className="text-sm truncate">
-                            {task.task.slice(0, 30)}...
-                          </span>
-                        </div>
-                      </Link>
-                    ))}
-                  </div>
+              {/* Conversations */}
+              <div className="mt-4">
+                <span className="px-3 text-xs font-semibold text-zinc-500 uppercase tracking-wider">
+                  Chats
+                </span>
+                <div className="mt-2 space-y-1">
+                  {chatsLoading && (
+                    <div className="flex items-center gap-2 px-3 py-2 text-xs text-zinc-500">
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      Loading chats...
+                    </div>
+                  )}
+                  {!chatsLoading && conversations.length === 0 && (
+                    <div className="px-3 py-2 text-xs text-zinc-500">No saved chats yet</div>
+                  )}
+                  {conversations.map((conversation) => (
+                    <button
+                      type="button"
+                      key={conversation.id}
+                      onClick={() => onSelectConversation?.(conversation.id)}
+                      className={cn(
+                        "w-full flex items-center gap-3 px-3 py-2 rounded-xl transition-colors text-left",
+                        conversation.id === activeConversationId
+                          ? "bg-cyan-500/10 text-cyan-300"
+                          : "text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/50"
+                      )}
+                    >
+                      <MessageSquare className="w-4 h-4 shrink-0" />
+                      <span className="text-sm truncate">{conversation.title}</span>
+                    </button>
+                  ))}
                 </div>
-              )}
+              </div>
+
             </motion.div>
           )}
         </AnimatePresence>

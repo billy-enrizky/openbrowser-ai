@@ -51,6 +51,7 @@ export function useTaskStream(options: UseTaskStreamOptions = {}) {
       use_vision: boolean;
       llm_model?: string | null;
       use_current_browser?: boolean;
+      conversation_id?: string | null;
     }): Promise<string | null> => {
       setIsStarting(true);
 
