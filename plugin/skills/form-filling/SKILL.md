@@ -8,144 +8,148 @@ description: |
 
 # Form Filling
 
-Automate filling web forms including login, registration, checkout, and multi-step form wizards.
+Automate filling web forms including login, registration, checkout, and multi-step form wizards using Python code execution.
+
+All code runs in a persistent namespace via `execute_code`. All browser functions are async -- use `await`.
 
 ## Workflow
 
 ### Step 1 -- Navigate to the form page
 
-Use `browser_navigate` to open the page containing the form.
-
-```
-browser_navigate(url="https://example.com/login")
+```python
+await navigate('https://example.com/login')
+state = await browser.get_browser_state_summary()
+print(f'Page: {state.title} ({state.url})')
+print(f'Interactive elements: {len(state.dom_state.selector_map)}')
 ```
 
 ### Step 2 -- Discover form fields
 
-Use `browser_get_state` with `compact=false` to get a full list of interactive elements on the page, including input fields, dropdowns, checkboxes, and buttons.
-
-```
-browser_get_state(compact=false)
-```
-
-This returns each element with an index number, tag type, and any label or placeholder text.
-
-For complex forms, use `browser_get_state` with filter params to find specific fields:
-
-```
-browser_get_state(filter_by="tag", filter_query="input")
-browser_get_state(filter_by="text", filter_query="email")
-browser_get_state(filter_by="attribute", filter_query="password")
+```python
+# List all interactive elements with their indices
+state = await browser.get_browser_state_summary()
+for index, element in state.dom_state.selector_map.items():
+    tag = element.tag_name
+    text = element.get_all_children_text(max_depth=2)[:60]
+    placeholder = element.attributes.get('placeholder', '')
+    input_type = element.attributes.get('type', '')
+    name = element.attributes.get('name', '')
+    print(f'[{index}] <{tag}> type={input_type} name={name} placeholder="{placeholder}" text="{text}"')
 ```
 
 ### Step 3 -- Fill text inputs
 
-Use `browser_type` with the element index from Step 2 to enter text into each field.
-
-```
-browser_type(index=<email_field_index>, text="user@example.com")
-browser_type(index=<password_field_index>, text="secure-password")
-```
-
-For fields that need to be cleared before typing, click the field first, select all, then type:
-
-```
-browser_click(index=<field_index>)
-browser_execute_js(expression="document.activeElement.select()")
-browser_type(index=<field_index>, text="new value")
+```python
+# Fill fields using their indices from Step 2
+await input_text(index=5, text='user@example.com')
+await input_text(index=7, text='secure-password')
 ```
 
-### Step 4 -- Handle dropdowns and select elements
+For fields that need clearing first:
 
-For standard HTML `<select>` elements, use `browser_click` to open the dropdown, then click the desired option:
-
-```
-browser_click(index=<select_index>)
-browser_get_state(filter_by="text", filter_query="Option Text")
-browser_click(index=<option_index>)
+```python
+await click(index=5)
+await evaluate('document.activeElement.select()')
+await input_text(index=5, text='new-value')
 ```
 
-For custom dropdown components, use `browser_execute_js`:
+### Step 4 -- Handle dropdowns
 
+Standard HTML select elements:
+
+```python
+await select_dropdown(index=12, text='United States')
 ```
-browser_execute_js(expression="document.querySelector('select#country').value = 'US'; document.querySelector('select#country').dispatchEvent(new Event('change', { bubbles: true }))")
+
+To see available options first:
+
+```python
+options = await dropdown_options(index=12)
+print(options)
+```
+
+Custom dropdown components:
+
+```python
+await evaluate('''
+(function(){
+  const select = document.querySelector('select#country');
+  select.value = 'US';
+  select.dispatchEvent(new Event('change', { bubbles: true }));
+})()
+''')
 ```
 
 ### Step 5 -- Handle checkboxes and radio buttons
 
-Click the checkbox or radio button element directly:
+```python
+await click(index=15)  # Click checkbox/radio
 
-```
-browser_click(index=<checkbox_index>)
-```
-
-Verify the state after clicking:
-
-```
-browser_execute_js(expression="document.querySelector('input[name=\"agree\"]').checked")
+# Verify state
+checked = await evaluate('document.querySelector("input[name=\\"agree\\"]").checked')
+print(f'Checkbox checked: {checked}')
 ```
 
 ### Step 6 -- Submit the form
 
-Find and click the submit button:
+```python
+await click(index=20)  # Click submit button
+await wait(2)
 
-```
-browser_get_state(filter_by="text", filter_query="Submit")
-browser_click(index=<submit_button_index>)
-```
-
-Alternatively, submit via JavaScript if the button is hard to locate:
-
-```
-browser_execute_js(expression="document.querySelector('form').submit()")
+# Verify submission
+state = await browser.get_browser_state_summary()
+print(f'After submit: {state.url}')
 ```
 
-### Step 7 -- Verify submission
+Or submit via JavaScript:
 
-After submission, verify the result by checking the page content:
-
-```
-browser_get_state(compact=true)
+```python
+await evaluate('document.querySelector("form").submit()')
 ```
 
-Check for success or error messages:
+### Step 7 -- Verify submission result
 
-```
-browser_get_text(search="success|thank you|welcome", case_insensitive=true)
-browser_get_text(search="error|invalid|failed", case_insensitive=true)
-```
-
-For redirects after login, verify the URL changed:
-
-```
-browser_get_state(compact=true)
+```python
+# Check for success/error messages
+result = await evaluate('''
+(function(){
+  const success = document.querySelector('.success, .alert-success, [role="alert"]');
+  const error = document.querySelector('.error, .alert-danger, .validation-error');
+  return {
+    success: success?.textContent?.trim(),
+    error: error?.textContent?.trim(),
+    url: window.location.href
+  };
+})()
+''')
+print(result)
 ```
 
 ### Step 8 -- Handle multi-step forms
 
-For form wizards with multiple pages:
+```python
+for step in range(1, 5):
+    # Discover fields for current step
+    state = await browser.get_browser_state_summary()
+    print(f'Step {step}: {len(state.dom_state.selector_map)} elements')
 
-1. Fill fields on the current step (Steps 3-5).
-2. Click "Next" or "Continue":
-   ```
-   browser_get_state(filter_by="text", filter_query="Next")
-   browser_click(index=<next_button_index>)
-   ```
-3. Wait for the next step to load, then call `browser_get_state(compact=false)` again to discover new fields.
-4. Repeat until all steps are complete, then submit on the final step.
+    # Fill fields (indices vary per step)
+    # ... fill fields here ...
 
-### Step 9 -- Clean up
-
-Close the browser session when done:
-
-```
-browser_session(action="close_all")
+    # Click Next/Continue
+    # Find the next button
+    for idx, el in state.dom_state.selector_map.items():
+        text = el.get_all_children_text(max_depth=1).lower()
+        if 'next' in text or 'continue' in text:
+            await click(index=idx)
+            await wait(2)
+            break
 ```
 
 ## Tips
 
-- Always use `browser_get_state(compact=false)` to discover fields before typing; do not guess element indices.
+- Always discover fields with `browser.get_browser_state_summary()` before typing -- do not guess element indices.
 - For sensitive data (passwords, tokens), confirm with the user before entering values.
+- Use `evaluate()` to bypass custom components that do not respond to standard click/type.
+- Variables persist between calls, so you can store field indices in one call and use them in the next.
 - Check for CAPTCHA or bot detection; notify the user if manual intervention is needed.
-- For forms with client-side validation, use `browser_get_text` with `search` to check for validation error messages after each field.
-- Use `browser_execute_js` to bypass tricky custom components that do not respond to standard click/type interactions.
