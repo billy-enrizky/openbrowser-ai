@@ -18,6 +18,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/store";
 import { Button } from "@/components/ui";
+import type { ChatConversation } from "@/types";
 
 const navItems = [
   { icon: Search, label: "Search", href: "/search" },
@@ -197,7 +198,7 @@ export function Sidebar({ onNewChat, onSelectConversation, chatsLoading = false 
                   {!chatsLoading && conversations.length === 0 && (
                     <div className="px-3 py-2 text-xs text-zinc-500">No saved chats yet</div>
                   )}
-                  {conversations.map((conversation) => (
+                  {conversations.map((conversation: ChatConversation) => (
                     <button
                       type="button"
                       key={conversation.id}
