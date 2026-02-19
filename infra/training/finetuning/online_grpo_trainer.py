@@ -20,6 +20,7 @@ import asyncio
 import json
 import logging
 import os
+import random
 from pathlib import Path
 
 import torch
@@ -48,12 +49,24 @@ logger = logging.getLogger(__name__)
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
 
-def load_prompts(file_path: str, max_samples: int = 0) -> list[dict]:
-    """Load prompts for GRPO rollouts."""
+def load_prompts(file_path: str, max_samples: int = 0, shuffle: bool = True) -> list[dict]:
+    """Load prompts for GRPO rollouts.
+
+    Args:
+        file_path: Path to JSONL file with training prompts.
+        max_samples: Truncate to this many samples (0 = use all).
+        shuffle: Shuffle prompts to avoid long blocks of identical form types.
+            The raw FormFactory data has 40 consecutive samples per form type,
+            which causes GRPO to skip most steps (zero reward variance).
+    """
     records = []
     with open(file_path) as f:
         for line in f:
             records.append(json.loads(line))
+    if shuffle:
+        random.seed(42)
+        random.shuffle(records)
+        logger.info("Shuffled training prompts to break sequential form-type blocks")
     if max_samples > 0:
         records = records[:max_samples]
     logger.info(f"Loaded {len(records)} prompts for online GRPO")
