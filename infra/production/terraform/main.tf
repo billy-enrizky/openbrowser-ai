@@ -9,6 +9,7 @@
 #     - security_groups.tf
 #     - alb.tf
 #     - backend.tf
+#     - rds.tf
 #     - api_gateway.tf
 #     - iam.tf
 #     - ecr.tf
@@ -52,4 +53,3 @@ resource "aws_ssm_parameter" "anthropic_api_key" {
   lifecycle { ignore_changes = [value] }
   tags = { Name = "${var.project_name}-anthropic-api-key" }
 }
-

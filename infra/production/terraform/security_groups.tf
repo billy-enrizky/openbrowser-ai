@@ -64,3 +64,28 @@ resource "aws_security_group" "alb" {
 
   tags = { Name = "${var.project_name}-alb-sg" }
 }
+
+# PostgreSQL RDS: allow backend EC2 only
+resource "aws_security_group" "postgres" {
+  name        = "${var.project_name}-postgres-sg"
+  description = "PostgreSQL access from backend EC2"
+  vpc_id      = aws_vpc.main.id
+
+  ingress {
+    description     = "PostgreSQL from backend EC2"
+    from_port       = 5432
+    to_port         = 5432
+    protocol        = "tcp"
+    security_groups = [aws_security_group.backend.id]
+  }
+
+  egress {
+    description = "All outbound"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = { Name = "${var.project_name}-postgres-sg" }
+}

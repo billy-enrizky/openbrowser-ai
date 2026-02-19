@@ -70,6 +70,42 @@ variable "secrets_manager_secret_name" {
   description = "Name or ARN of Secrets Manager secret containing LLM API keys. Leave empty if not using secrets yet."
 }
 
+variable "postgres_db_name" {
+  type        = string
+  default     = "openbrowser"
+  description = "PostgreSQL database name."
+}
+
+variable "postgres_username" {
+  type        = string
+  default     = "openbrowser"
+  description = "Master username for PostgreSQL."
+}
+
+variable "postgres_instance_class" {
+  type        = string
+  default     = "db.t4g.micro"
+  description = "RDS instance class for PostgreSQL."
+}
+
+variable "postgres_allocated_storage" {
+  type        = number
+  default     = 20
+  description = "Allocated storage (GiB) for PostgreSQL."
+}
+
+variable "postgres_backup_retention_days" {
+  type        = number
+  default     = 7
+  description = "Backup retention period for PostgreSQL."
+}
+
+variable "postgres_skip_final_snapshot" {
+  type        = bool
+  default     = true
+  description = "Skip final snapshot on destroy (set false for production safety)."
+}
+
 ## -----------------------------------------------------------------------------
 ## Frontend (S3 + CloudFront)
 ## -----------------------------------------------------------------------------

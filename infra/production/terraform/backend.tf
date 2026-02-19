@@ -21,6 +21,7 @@ locals {
     "VNC_WIDTH=1920",
     "VNC_HEIGHT=1080",
     "DEBUG=false",
+    "DATABASE_URL=postgresql+asyncpg://${var.postgres_username}:${random_password.postgres.result}@${aws_db_instance.postgres.address}:5432/${var.postgres_db_name}",
     "AUTH_ENABLED=${var.enable_backend_auth}",
     "COGNITO_REGION=${var.aws_region}",
     "COGNITO_USER_POOL_ID=${aws_cognito_user_pool.main.id}",
