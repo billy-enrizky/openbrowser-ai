@@ -141,7 +141,8 @@ async def evaluate():
 
     # Load prompts from val or test split
     eval_split = os.environ.get("EVAL_SPLIT", "val")
-    eval_file_key = "test_file" if eval_split == "test" else "val_file"
+    split_to_key = {"test": "test_file", "train": "train_file", "val": "val_file"}
+    eval_file_key = split_to_key.get(eval_split, "val_file")
     eval_file = resolve_data_path(DATA_CONFIG[eval_file_key])
     max_samples = int(os.environ.get("MAX_EVAL_SAMPLES", DATA_CONFIG.get("max_eval_samples", 0)))
     prompts = load_prompts(eval_file, max_samples=max_samples)
