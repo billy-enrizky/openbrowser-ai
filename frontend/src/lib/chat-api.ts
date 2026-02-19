@@ -115,6 +115,17 @@ export async function createConversation(idToken: string | null, title?: string)
   return mapConversation(data);
 }
 
+export async function deleteConversation(idToken: string | null, conversationId: string): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/chats/${conversationId}`, {
+    method: "DELETE",
+    headers: authHeaders(idToken),
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Failed to delete conversation: ${text}`);
+  }
+}
+
 export async function setActiveConversation(idToken: string | null, conversationId: string | null): Promise<void> {
   const response = await fetch(`${API_BASE_URL}/api/v1/chats/active`, {
     method: "POST",
