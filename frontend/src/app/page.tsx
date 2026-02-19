@@ -10,7 +10,8 @@ import { useAuth } from "@/components/auth";
 import { useAppStore } from "@/store";
 import { useTaskStream } from "@/hooks/useTaskStream";
 import { API_BASE_URL } from "@/lib/config";
-import type { Message, WSMessage, FileAttachment, LogEntry, VncInfo, AvailableModelsResponse } from "@/types";
+import { fetchChatList, fetchConversationDetail, setActiveConversation } from "@/lib/chat-api";
+import type { WSMessage, FileAttachment, LogEntry, VncInfo, AvailableModelsResponse } from "@/types";
 import { cn } from "@/lib/utils";
 
 // Helper function to get file type - use backend-provided type or derive from filename
@@ -116,6 +117,11 @@ export default function Home() {
     sidebarOpen,
     messages,
     addMessage,
+    setMessages,
+    setConversations,
+    upsertConversation,
+    activeConversationId,
+    setActiveConversationId,
     agentType,
     maxSteps,
     useVision,
@@ -141,6 +147,8 @@ export default function Home() {
   } = useAppStore();
   const [isLoading, setIsLoading] = useState(false);
   const [currentTaskId, setCurrentTaskId] = useState<string | null>(null);
+  const [chatsLoading, setChatsLoading] = useState(false);
+  const [chatError, setChatError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!authLoading && authEnabled && !isAuthenticated) {
@@ -204,6 +212,98 @@ export default function Home() {
     selectedModel,
   ]);
 
+  const refreshChatList = useCallback(async () => {
+    if (authEnabled && !isAuthenticated) {
+      return;
+    }
+    try {
+      const token = await getValidIdToken();
+      const data = await fetchChatList(token);
+      setConversations(data.conversations);
+      if (data.activeConversationId) {
+        setActiveConversationId(data.activeConversationId);
+      }
+    } catch (error) {
+      setChatError(error instanceof Error ? error.message : "Failed to load chats");
+    }
+  }, [authEnabled, getValidIdToken, isAuthenticated, setActiveConversationId, setConversations]);
+
+  const loadConversation = useCallback(async (conversationId: string) => {
+    const token = await getValidIdToken();
+    const detail = await fetchConversationDetail(token, conversationId);
+    setMessages(detail.messages);
+    setActiveConversationId(detail.conversation.id);
+    upsertConversation(detail.conversation);
+  }, [getValidIdToken, setMessages, setActiveConversationId, upsertConversation]);
+
+  useEffect(() => {
+    if (authLoading) {
+      return;
+    }
+    if (authEnabled && !isAuthenticated) {
+      return;
+    }
+
+    (async () => {
+      setChatsLoading(true);
+      setChatError(null);
+      try {
+        const token = await getValidIdToken();
+        const data = await fetchChatList(token);
+        setConversations(data.conversations);
+
+        const conversationIdToLoad = data.activeConversationId ?? null;
+        if (conversationIdToLoad) {
+          const detail = await fetchConversationDetail(token, conversationIdToLoad);
+          setMessages(detail.messages);
+          setActiveConversationId(detail.conversation.id);
+          upsertConversation(detail.conversation);
+        } else {
+          setActiveConversationId(null);
+          setMessages([]);
+        }
+      } catch (error) {
+        setChatError(error instanceof Error ? error.message : "Failed to load chats");
+      } finally {
+        setChatsLoading(false);
+      }
+    })();
+  }, [
+    authEnabled,
+    authLoading,
+    getValidIdToken,
+    isAuthenticated,
+    setActiveConversationId,
+    setConversations,
+    setMessages,
+    upsertConversation,
+  ]);
+
+  const handleSelectConversation = useCallback(async (conversationId: string) => {
+    setChatError(null);
+    try {
+      await loadConversation(conversationId);
+      const token = await getValidIdToken();
+      await setActiveConversation(token, conversationId);
+    } catch (error) {
+      setChatError(error instanceof Error ? error.message : "Failed to open conversation");
+    }
+  }, [getValidIdToken, loadConversation]);
+
+  const handleNewChat = useCallback(async () => {
+    setMessages([]);
+    setActiveConversationId(null);
+    setCurrentTaskId(null);
+    setVncInfo(null);
+    setChatError(null);
+    try {
+      const token = await getValidIdToken();
+      await setActiveConversation(token, null);
+    } catch (error) {
+      setChatError(error instanceof Error ? error.message : "Failed to reset active chat");
+    }
+  }, [getValidIdToken, setActiveConversationId, setMessages, setVncInfo]);
+
   // Handle incoming WebSocket messages
   const handleWSMessage = useCallback((wsMessage: WSMessage) => {
     const { type, task_id, data } = wsMessage;
@@ -211,9 +311,13 @@ export default function Home() {
     switch (type) {
       case "task_started":
         setCurrentTaskId(task_id || null);
+        if (typeof data.conversation_id === "string") {
+          setActiveConversationId(data.conversation_id);
+        }
         // Clear logs and screenshots when a new task starts
         clearLogs();
         setLatestScreenshot(null);
+        void refreshChatList();
         break;
 
       case "vnc_info": {
@@ -309,6 +413,7 @@ export default function Home() {
             attachments: attachments.length > 0 ? attachments : undefined,
           },
         });
+        void refreshChatList();
         break;
       }
 
@@ -326,6 +431,7 @@ export default function Home() {
             isError: true,
           },
         });
+        void refreshChatList();
         break;
 
       case "task_cancelled":
@@ -338,6 +444,7 @@ export default function Home() {
           timestamp: new Date(),
           taskId: task_id,
         });
+        void refreshChatList();
         break;
 
       case "extension_status": {
@@ -346,7 +453,7 @@ export default function Home() {
         break;
       }
     }
-  }, [addMessage, addLog, clearLogs, setVncInfo, setBrowserViewerOpen, setLatestScreenshot, setExtensionConnected, browserViewerOpen]);
+  }, [addMessage, addLog, clearLogs, refreshChatList, setActiveConversationId, setVncInfo, setBrowserViewerOpen, setLatestScreenshot, setExtensionConnected, browserViewerOpen]);
 
   const { isConnected, startTask, cancelTask } = useTaskStream({
     onMessage: handleWSMessage,
@@ -355,12 +462,14 @@ export default function Home() {
   });
 
   const handleSendMessage = useCallback(async (content: string) => {
+    setChatError(null);
     // Add user message
     addMessage({
       id: crypto.randomUUID(),
       role: "user",
       content,
       timestamp: new Date(),
+      taskId: currentTaskId || undefined,
     });
 
     // Start task via REST + SSE
@@ -372,6 +481,7 @@ export default function Home() {
       use_vision: useVision,
       llm_model: selectedModel,
       use_current_browser: useCurrentBrowser,
+      conversation_id: activeConversationId,
     });
 
     if (!taskId) {
@@ -384,7 +494,7 @@ export default function Home() {
         metadata: { isError: true },
       });
     }
-  }, [addMessage, startTask, agentType, maxSteps, useVision, selectedModel, useCurrentBrowser]);
+  }, [activeConversationId, addMessage, startTask, agentType, currentTaskId, maxSteps, useVision, selectedModel, useCurrentBrowser]);
 
   const hasMessages = messages.length > 0;
 
@@ -402,7 +512,11 @@ export default function Home() {
   return (
     <div className="flex h-screen overflow-hidden bg-zinc-950">
       {/* Sidebar */}
-      <Sidebar />
+      <Sidebar
+        onNewChat={handleNewChat}
+        onSelectConversation={handleSelectConversation}
+        chatsLoading={chatsLoading}
+      />
 
       {/* Main Content */}
       <main
@@ -415,6 +529,12 @@ export default function Home() {
         <div className="flex-1 flex flex-col min-h-0">
           {/* Header */}
           <Header />
+
+          {chatError && (
+            <div className="mx-4 mt-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">
+              {chatError}
+            </div>
+          )}
 
           <div className="flex-1 flex flex-col min-h-0">
             {hasMessages ? (
