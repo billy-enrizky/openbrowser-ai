@@ -423,70 +423,48 @@ uvx openbrowser-ai[mcp] --mcp
 
 ## MCP Benchmark: Why OpenBrowser
 
-Benchmark on identical 5-step workflow (navigate Wikipedia, get state, click, go back, get state). All numbers are real measurements via JSON-RPC stdio transport -- no estimates.
+### E2E LLM Benchmark (6 Real-World Tasks)
 
-### Token Usage (5-Step Workflow, Wikipedia)
+Six browser tasks run through Claude Sonnet 4.6 on AWS Bedrock. The LLM autonomously decides which tools to call. All three servers pass **6/6 tasks**. Token usage measured from actual MCP tool response sizes.
 
-| MCP Server | Tools | Response Tokens | vs OpenBrowser |
-|------------|------:|----------------:|---------------:|
-| **Playwright MCP** (Microsoft) | 22 | 248,016 | 877x more |
-| **Chrome DevTools MCP** (Google) | 26 | 134,802 | 476x more |
-| **OpenBrowser MCP** | 11 | **283** | baseline |
+| MCP Server | Tools | Response Tokens | Tool Calls | vs OpenBrowser |
+|------------|------:|----------------:|-----------:|---------------:|
+| **Playwright MCP** (Microsoft) | 22 | 283,853 | 10 | **170x more tokens** |
+| **Chrome DevTools MCP** (Google) | 26 | 301,030 | 21 | **181x more tokens** |
+| **OpenBrowser MCP** | 1 | **1,665** | 20 | baseline |
 
-### Cost per Workflow
+### Cost per Benchmark Run (6 Tasks)
 
 | Model | Playwright MCP | Chrome DevTools MCP | OpenBrowser MCP |
 |-------|---------------:|--------------------:|----------------:|
-| Claude Sonnet ($3/M) | $0.744 | $0.404 | **$0.001** |
-| Claude Opus ($15/M) | $3.720 | $2.022 | **$0.004** |
-| GPT-4o ($2.50/M) | $0.620 | $0.337 | **$0.001** |
+| Claude Sonnet ($3/M) | $0.852 | $0.903 | **$0.005** |
+| Claude Opus ($15/M) | $4.258 | $4.515 | **$0.025** |
+| GPT-4o ($2.50/M) | $0.710 | $0.753 | **$0.004** |
 
-### Per-Operation Comparison (Wikipedia)
+### Per-Task Response Size
 
-| Operation | Playwright MCP | Chrome DevTools MCP | OpenBrowser MCP |
-|-----------|---------------:|--------------------:|----------------:|
-| Navigate | ~124,000 tokens | ~60 tokens | ~34 tokens |
-| Get page state | ~124,000 tokens | ~135,000 tokens | ~105 tokens |
-| Click element | ~85 tokens | ~55 tokens | ~20 tokens |
+| Task | Playwright MCP | Chrome DevTools MCP | OpenBrowser MCP |
+|------|---------------:|--------------------:|----------------:|
+| fact_lookup | 477,003 chars | 509,059 chars | 1,041 chars |
+| form_fill | 4,075 chars | 3,150 chars | 2,410 chars |
+| multi_page_extract | 58,099 chars | 38,593 chars | 513 chars |
+| search_navigate | 518,461 chars | 594,458 chars | 1,996 chars |
+| deep_navigation | 77,292 chars | 58,359 chars | 113 chars |
+| content_analysis | 493 chars | 513 chars | 594 chars |
 
-**Why?** Compare what each server returns for the same navigate operation:
+### Why the Difference
 
-```
-Playwright MCP browser_navigate:
-  -> Full a11y snapshot with every navigation (~496K chars on Wikipedia):
-     "- generic [ref=e2]:
-        - paragraph [ref=e3]:
-          - text: 'Customer name:'
-          - textbox 'Customer name:' [ref=e5]
-        ... (entire page tree)"
+Playwright completes tasks in fewer tool calls (1-2 per task) because it dumps the full a11y snapshot on every navigation (~478K chars for Wikipedia). The LLM sees everything immediately but pays massively in tokens.
 
-Chrome DevTools MCP navigate_page:
-  -> URL confirmation only (~136 chars):
-     "Successfully navigated to https://httpbin.org/forms/post.
-      ## Pages
-      1: https://httpbin.org/forms/post [selected]"
-
-OpenBrowser MCP browser_navigate:
-  -> URL confirmation only (~105 chars):
-     "Navigated to: https://httpbin.org/forms/post"
-```
-
-OpenBrowser returns minimal confirmations. The agent decides when it needs more: `compact=false` adds the element list (~51K chars), `browser_get_text` returns full page markdown (~100K chars). Search returns only matching lines -- not the full page:
+OpenBrowser uses a CodeAgent architecture (single `execute_code` tool). The LLM writes Python code that navigates, extracts specific data via JS evaluation, and processes results -- returning only what was explicitly requested (~30-1,000 chars per call).
 
 ```
-browser_get_text(search="Guido van Rossum", context_lines=1)
--> {
-     "pattern": "Guido van Rossum",
-     "matches": [
-       {"line_number": 244, "line": "| Designed by | Guido van Rossum |", ...},
-       {"line_number": 278, "line": "Guido van Rossum began working on Python...", ...}
-     ],
-     "total_matches": 11
-   }
-
-Full page text: ~97K chars.  Search result: ~3.9K chars (25x smaller).
-Playwright/CDP have no equivalent -- both require dumping the full snapshot.
+Playwright: navigate to Wikipedia -> 478,793 chars (full a11y tree)
+OpenBrowser: navigate to Wikipedia -> 42 chars ("Python (programming language) - Wikipedia")
+             evaluate JS for infobox -> 896 chars (just the data rows)
 ```
+
+At scale (thousands of workflows, complex pages), the token cost difference is 170x+.
 
 [Full comparison with methodology](https://docs.openbrowser.me/comparison)
 
