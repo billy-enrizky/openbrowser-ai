@@ -232,19 +232,18 @@ class TestIntegrationJavaScript:
     def test_extract_data_from_table(self, mcp_server_with_browser):
         """Extracts structured data from a table via JavaScript."""
         server, loop = mcp_server_with_browser
-        result = loop.run_until_complete(server._execute_code(
-            "data = await evaluate(\"\"\"\n"
-            "Array.from(document.querySelectorAll('#data-section tbody tr')).map(row => {\n"
-            "    const cells = row.querySelectorAll('td');\n"
-            "    return {name: cells[0].textContent, value: parseInt(cells[1].textContent)};\n"
-            "})\n"
-            "\"\"\")\n"
-            "print(json.dumps(data))"
-        ))
-        data = json.loads(result)
-        assert len(data) == 3
-        assert data[0]["name"] == "Alpha"
-        assert data[0]["value"] == 100
+        code = "\n".join([
+            'js = \'Array.from(document.querySelectorAll("#data-section tbody tr"))'
+            '.map(row => { const cells = row.querySelectorAll("td");'
+            ' return {name: cells[0].textContent, value: parseInt(cells[1].textContent)}; })\'',
+            "data = await evaluate(js)",
+            "for row in data:",
+            "    print(row['name'], row['value'])",
+        ])
+        result = loop.run_until_complete(server._execute_code(code))
+        assert "Alpha" in result and "100" in result
+        assert "Beta" in result and "200" in result
+        assert "Gamma" in result and "300" in result
 
 
 class TestIntegrationBrowserState:
