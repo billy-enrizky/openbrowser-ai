@@ -54,10 +54,11 @@ resource "aws_instance" "backend" {
     ssm_anthropic_key = aws_ssm_parameter.anthropic_api_key.name
   })
 
-  # Prevent instance replacement when a newer AMI becomes available.
-  # AMI upgrades should be done deliberately, not as a side-effect.
+  # Prevent instance replacement when AMI or user_data changes.
+  # AMI upgrades and env changes should be done deliberately via SSM,
+  # not as a side-effect that destroys the running instance.
   lifecycle {
-    ignore_changes = [ami]
+    ignore_changes = [ami, user_data]
   }
 
   tags = { Name = "${var.project_name}-backend" }
