@@ -8,139 +8,163 @@ description: |
 
 # Web Scraping
 
-Extract structured data from websites using browser automation. Handles JavaScript-rendered content, pagination, and multi-tab scraping.
+Extract structured data from websites using Python code execution with browser automation functions. Handles JavaScript-rendered content, pagination, and multi-page scraping.
+
+All code runs in a persistent namespace via `execute_code`. All browser functions are async -- use `await`.
 
 ## Workflow
 
-### Step 1 -- Navigate to the target page
+### Step 1 -- Navigate and get content overview
 
-Use `browser_navigate` to open the target URL.
+```python
+await navigate('https://example.com/data')
 
-```
-browser_navigate(url="https://example.com/data")
-```
-
-If the page requires interaction before data is visible (e.g., accepting cookies or closing a modal), use `browser_get_state(compact=false)` to find the dismiss button, then `browser_click` to close it.
-
-### Step 2 -- Get a content overview
-
-Use `browser_get_text` to retrieve the full page content as clean markdown. This gives you a quick overview of the page structure and available data.
-
-```
-browser_get_text()
+# Get browser state to see page title, URL, element count
+state = await browser.get_browser_state_summary()
+print(f'Title: {state.title}')
+print(f'URL: {state.url}')
+print(f'Elements: {len(state.dom_state.selector_map)}')
 ```
 
-For pages with links you need to follow, add `extract_links=true` to include href URLs in the output.
+### Step 2 -- Extract data with JavaScript
 
-```
-browser_get_text(extract_links=true)
-```
+Use `evaluate()` to run JS in the browser and return structured data directly as Python objects:
 
-### Step 3 -- Search for specific data
+```python
+data = await evaluate('''
+(function(){
+  return Array.from(document.querySelectorAll('.product-card')).map(el => ({
+    name: el.querySelector('.title')?.textContent?.trim(),
+    price: el.querySelector('.price')?.textContent?.trim(),
+    url: el.querySelector('a')?.href
+  }))
+})()
+''')
 
-Use `browser_get_text` with the `search` param to find targeted content on the page. Supports regex patterns for flexible matching.
-
-```
-browser_get_text(search="Price:\\s*\\$[\\d.]+", case_insensitive=true)
-```
-
-Adjust `context_lines` to capture surrounding data:
-
-```
-browser_get_text(search="product-name", context_lines=5, max_matches=50)
-```
-
-### Step 4 -- Extract structured elements
-
-Use `browser_get_state` with `filter_by`/`filter_query` to find specific DOM elements by text, tag, class, or attribute.
-
-```
-browser_get_state(filter_by="class", filter_query="product", max_results=50)
+import json
+print(json.dumps(data, indent=2))
 ```
 
-For more precise extraction, use `browser_execute_js` to run JavaScript that collects data into a structured format:
+### Step 3 -- Process data with Python
 
-```
-browser_execute_js(expression="(() => { const items = document.querySelectorAll('.product-card'); return Array.from(items).map(el => ({ name: el.querySelector('.title')?.textContent?.trim(), price: el.querySelector('.price')?.textContent?.trim(), url: el.querySelector('a')?.href })); })()")
-```
+Use pandas, regex, or other Python tools to clean and transform extracted data:
 
-### Step 5 -- Handle pagination
+```python
+import json
 
-Check for pagination controls using `browser_get_state`:
+# Filter and transform
+filtered = [item for item in data if item.get('price')]
+for item in filtered:
+    # Extract numeric price
+    price_str = item['price'].replace('$', '').replace(',', '')
+    item['price_float'] = float(price_str)
 
-```
-browser_get_state(filter_by="text", filter_query="Next")
-```
-
-Or search for pagination by class:
-
-```
-browser_get_state(filter_by="class", filter_query="pagination")
-```
-
-Click the next page button using the element index returned:
-
-```
-browser_click(index=<next_button_index>)
+# Sort by price
+filtered.sort(key=lambda x: x['price_float'])
+print(json.dumps(filtered, indent=2))
 ```
 
-After each page loads, repeat Steps 2-4 to extract data from the new page. Continue until no more pages are available.
+Or with pandas if available:
 
-### Step 6 -- Multi-tab scraping
-
-For scraping data from multiple URLs, open each in a new tab:
-
-```
-browser_navigate(url="https://example.com/page-1", new_tab=true)
-browser_navigate(url="https://example.com/page-2", new_tab=true)
+```python
+import pandas as pd
+df = pd.DataFrame(data)
+print(df.to_string())
 ```
 
-List open tabs to track progress:
+### Step 4 -- Handle pagination
 
+```python
+results = []
+page = 1
+
+while True:
+    # Extract data from current page
+    page_data = await evaluate('''
+    (function(){
+      return Array.from(document.querySelectorAll('.item')).map(el => ({
+        name: el.textContent.trim()
+      }))
+    })()
+    ''')
+    results.extend(page_data)
+    print(f'Page {page}: {len(page_data)} items')
+
+    # Check for next button
+    has_next = await evaluate('''
+    (function(){ return !!document.querySelector('.pagination .next:not(.disabled)') })()
+    ''')
+
+    if not has_next:
+        break
+
+    await click(next_button_index)
+    await wait(2)
+    page += 1
+
+print(f'Total: {len(results)} items')
 ```
-browser_tab(action="list")
+
+### Step 5 -- Handle infinite scroll
+
+```python
+results = []
+prev_count = 0
+
+for _ in range(20):  # Max 20 scroll attempts
+    # Get current items
+    count = await evaluate('''
+    (function(){ return document.querySelectorAll('.item').length })()
+    ''')
+
+    if count == prev_count:
+        break  # No new content loaded
+
+    prev_count = count
+    await scroll(down=True, pages=3)
+    await wait(1)
+
+# Now extract all loaded items
+results = await evaluate('''
+(function(){
+  return Array.from(document.querySelectorAll('.item')).map(el => ({
+    text: el.textContent.trim()
+  }))
+})()
+''')
+print(f'Extracted {len(results)} items')
 ```
 
-Switch between tabs to extract data from each:
+### Step 6 -- Multi-page scraping
 
-```
-browser_tab(action="switch", tab_id="<tab_id>")
-browser_get_text()
-```
+```python
+urls = [
+    'https://example.com/page-1',
+    'https://example.com/page-2',
+    'https://example.com/page-3',
+]
 
-Close tabs when done:
+all_data = []
+for url in urls:
+    await navigate(url)
+    await wait(1)
 
-```
-browser_tab(action="close", tab_id="<tab_id>")
-```
+    page_data = await evaluate('''
+    (function(){
+      return document.querySelector('h1')?.textContent?.trim()
+    })()
+    ''')
+    all_data.append({'url': url, 'title': page_data})
+    print(f'{url}: {page_data}')
 
-### Step 7 -- Handle infinite scroll pages
-
-Some pages load content dynamically as you scroll. Use a scroll-and-collect loop:
-
-```
-browser_scroll(direction="down")
-browser_get_text()
-```
-
-Use `browser_get_text` with `search` after each scroll to check if new content appeared, and `browser_execute_js` to detect when you have reached the bottom:
-
-```
-browser_execute_js(expression="window.innerHeight + window.scrollY >= document.body.scrollHeight")
-```
-
-### Step 8 -- Clean up
-
-Close the browser session when scraping is complete:
-
-```
-browser_session(action="close_all")
+import json
+print(json.dumps(all_data, indent=2))
 ```
 
 ## Tips
 
-- Use `browser_get_text` for a quick content overview before targeted extraction.
-- Use `browser_get_text` with `search` and regex for pattern-based data extraction (prices, dates, emails).
-- Use `browser_execute_js` when you need structured JSON output from complex DOM structures.
-- For large datasets, process pages incrementally rather than loading all tabs at once.
-- Check for rate limiting or bot detection; add reasonable delays between page loads if needed.
+- Use `evaluate()` for structured DOM extraction -- it returns Python objects directly.
+- Use Python for post-processing: filtering, sorting, deduplication, format conversion.
+- For large datasets, process pages incrementally rather than loading everything into memory.
+- Check for rate limiting; add `await wait(2)` between page loads if needed.
+- Variables persist between `execute_code` calls, so you can build up results across multiple calls.
