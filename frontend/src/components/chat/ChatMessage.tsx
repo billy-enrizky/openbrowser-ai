@@ -76,13 +76,18 @@ export function ChatMessage({ message }: ChatMessageProps) {
           )}
         >
           {isThinking ? (
-            <div className="flex items-center gap-2 text-zinc-500">
-              <span>Thinking</span>
-              <span className="flex gap-1">
-                <span className="w-1.5 h-1.5 bg-zinc-500 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
-                <span className="w-1.5 h-1.5 bg-zinc-500 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
-                <span className="w-1.5 h-1.5 bg-zinc-500 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
-              </span>
+            <div>
+              <div className="flex items-center gap-2 text-zinc-500 mb-2">
+                <span>Executing</span>
+                <span className="flex gap-1">
+                  <span className="w-1.5 h-1.5 bg-zinc-500 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
+                  <span className="w-1.5 h-1.5 bg-zinc-500 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
+                  <span className="w-1.5 h-1.5 bg-zinc-500 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
+                </span>
+              </div>
+              {message.content && (
+                <MessageContent content={message.content} />
+              )}
             </div>
           ) : (
             <MessageContent content={message.content} />
