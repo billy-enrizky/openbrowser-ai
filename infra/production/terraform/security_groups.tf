@@ -35,7 +35,7 @@ data "aws_ec2_managed_prefix_list" "cloudfront" {
 # ALB: allow HTTP from CloudFront (VNC WebSocket) and VPC (API Gateway VPC Link)
 resource "aws_security_group" "alb" {
   name        = "${var.project_name}-alb-sg"
-  description = "ALB: HTTP from CloudFront and VPC Link"
+  description = "ALB: HTTP from API Gateway and internet"
   vpc_id      = aws_vpc.main.id
 
   ingress {
