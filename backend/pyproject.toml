@@ -13,6 +13,8 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "redis>=5.0.0",
     "httpx>=0.27.0",
+    "sqlalchemy[asyncio]>=2.0.36",
+    "asyncpg>=0.30.0",
 ]
 
 [project.optional-dependencies]
@@ -27,4 +29,3 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["app"]
-
