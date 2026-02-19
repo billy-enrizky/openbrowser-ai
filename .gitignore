@@ -5,6 +5,8 @@ __pycache__
 *.pyc
 !README.md
 *.png
+!benchmarks/benchmark_comparison.png
+!docs/images/*.png
 .env
 !.github/workflows/*.yml
 .DS_Store
