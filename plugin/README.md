@@ -103,35 +103,26 @@ The MCP server exposes a single `execute_code` tool that runs Python code in a p
 
 ### E2E LLM Benchmark (6 Real-World Tasks, N=5 runs)
 
-Six browser tasks run through Claude Sonnet 4.6 on AWS Bedrock with a server-agnostic system prompt. 5 runs per server with 10,000-sample bootstrap CIs. Token usage measured from actual MCP tool response sizes.
+Six browser tasks run through Claude Sonnet 4.6 on AWS Bedrock with a server-agnostic system prompt. 5 runs per server with 10,000-sample bootstrap CIs.
 
-| MCP Server | Pass Rate | Duration (mean +/- std) | Tool Calls | Response Tokens |
-|------------|:---------:|------------------------:|-----------:|----------------:|
-| **Playwright MCP** | 100% | 92.2 +/- 11.4s | 11.0 +/- 1.4 | 283,853 |
-| **Chrome DevTools MCP** (Google) | 100% | 128.8 +/- 6.2s | 19.8 +/- 0.4 | 301,030 |
-| **OpenBrowser MCP** | 100% | 103.1 +/- 16.4s | 15.0 +/- 3.9 | **1,665** |
+| MCP Server | Pass Rate | Duration (mean +/- std) | Tool Calls | Bedrock API Tokens |
+|------------|:---------:|------------------------:|-----------:|-------------------:|
+| **Playwright MCP** | 100% | 92.2 +/- 11.4s | 11.0 +/- 1.4 | 150,248 |
+| **Chrome DevTools MCP** (Google) | 100% | 128.8 +/- 6.2s | 19.8 +/- 0.4 | 310,856 |
+| **OpenBrowser MCP** | 100% | 103.1 +/- 16.4s | 15.0 +/- 3.9 | **49,423** |
 
-OpenBrowser uses **170x fewer tokens** than Playwright and **181x fewer** than Chrome DevTools.
+OpenBrowser uses **3x fewer tokens** than Playwright and **6.3x fewer** than Chrome DevTools (Bedrock Converse API `usage` -- the actual billed tokens).
 
 ### Cost per Benchmark Run (6 Tasks)
 
+Based on Bedrock API token usage (input + output tokens at respective rates).
+
 | Model | Playwright MCP | Chrome DevTools MCP | OpenBrowser MCP |
 |-------|---------------:|--------------------:|----------------:|
-| Claude Sonnet ($3/M) | $0.852 | $0.903 | **$0.005** |
-| Claude Opus ($15/M) | $4.258 | $4.515 | **$0.025** |
+| Claude Sonnet ($3/$15 per M) | $0.47 | $0.96 | **$0.18** |
+| Claude Opus ($15/$75 per M) | $2.35 | $4.78 | **$0.91** |
 
-### Per-Task Response Size
-
-| Task | Playwright MCP | Chrome DevTools MCP | OpenBrowser MCP |
-|------|---------------:|--------------------:|----------------:|
-| fact_lookup | 477,003 chars | 509,059 chars | 1,041 chars |
-| form_fill | 4,075 chars | 3,150 chars | 2,410 chars |
-| multi_page_extract | 58,099 chars | 38,593 chars | 513 chars |
-| search_navigate | 518,461 chars | 594,458 chars | 1,996 chars |
-| deep_navigation | 77,292 chars | 58,359 chars | 113 chars |
-| content_analysis | 493 chars | 513 chars | 594 chars |
-
-Playwright completes tasks in fewer tool calls (1-2 per task) because it dumps the full a11y snapshot on every navigation. OpenBrowser takes more round-trips but each response is compact -- the code extracts only what's needed.
+Playwright and Chrome DevTools return full page accessibility snapshots as tool output, which the LLM must process. OpenBrowser's CodeAgent processes browser state server-side in Python code, returning only extracted results to the LLM.
 
 [Full comparison with methodology](https://docs.openbrowser.me/comparison)
 
