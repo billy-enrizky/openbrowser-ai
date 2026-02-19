@@ -2,6 +2,11 @@
 # Outputs
 # -----------------------------------------------------------------------------
 
+output "aws_region" {
+  description = "AWS region for all resources"
+  value       = var.aws_region
+}
+
 output "api_base_url" {
   description = "API Gateway HTTP API base URL (use for NEXT_PUBLIC_API_URL)"
   value       = aws_apigatewayv2_api.http.api_endpoint
@@ -97,6 +102,17 @@ output "postgres_db_name" {
   value       = aws_db_instance.postgres.db_name
 }
 
+output "postgres_username" {
+  description = "RDS PostgreSQL master username"
+  value       = aws_db_instance.postgres.username
+}
+
+output "postgres_password" {
+  description = "RDS PostgreSQL master password (sensitive)"
+  value       = random_password.postgres.result
+  sensitive   = true
+}
+
 output "backend_secret_name" {
   description = "Secrets Manager secret name for backend API keys (if created)"
   value       = length(aws_secretsmanager_secret.backend_keys) > 0 ? aws_secretsmanager_secret.backend_keys[0].name : null
@@ -116,6 +132,12 @@ output "cloudfront_distribution_id" {
   description = "CloudFront distribution ID (for cache invalidations)"
   value       = aws_cloudfront_distribution.frontend.id
 }
+
+output "backend_instance_id" {
+  description = "EC2 instance ID for the backend (used by deploy scripts via SSM)"
+  value       = aws_instance.backend.id
+}
+
 output "vpc_id" {
   description = "VPC ID"
   value       = aws_vpc.main.id
