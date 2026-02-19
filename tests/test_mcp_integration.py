@@ -233,7 +233,7 @@ class TestIntegrationJavaScript:
         """Extracts structured data from a table via JavaScript."""
         server, loop = mcp_server_with_browser
         code = "\n".join([
-            'js = \'Array.from(document.querySelectorAll("#data-section tbody tr"))'
+            'js = \'return Array.from(document.querySelectorAll("#data-section tbody tr"))'
             '.map(row => { const cells = row.querySelectorAll("td");'
             ' return {name: cells[0].textContent, value: parseInt(cells[1].textContent)}; })\'',
             "data = await evaluate(js)",
