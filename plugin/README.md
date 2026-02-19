@@ -115,32 +115,37 @@ Add to your project's `.mcp.json`:
 
 ## Benchmark: Token Efficiency
 
-Measured on a 5-step workflow (navigate Wikipedia, get state, click, go back, get state) via JSON-RPC stdio. All numbers are real measurements -- no estimates.
+### E2E LLM Benchmark (6 Real-World Tasks)
 
-| MCP Server | Tools | Response Tokens | Cost (Sonnet) | vs OpenBrowser |
-|------------|------:|----------------:|--------------:|---------------:|
-| **Playwright MCP** | 22 | 248,016 | $0.744 | 877x more |
-| **Chrome DevTools MCP** (Google) | 26 | 134,802 | $0.404 | 476x more |
-| **OpenBrowser MCP** | 11 | **283** | **$0.001** | baseline |
+Six browser tasks run through Claude Sonnet 4.6 on AWS Bedrock. The LLM autonomously decides which tools to call. All three servers pass **6/6 tasks**. Token usage measured from actual MCP tool response sizes.
 
-**What each server returns for navigate:**
+| MCP Server | Tools | Response Tokens | Tool Calls | vs OpenBrowser |
+|------------|------:|----------------:|-----------:|---------------:|
+| **Playwright MCP** | 22 | 283,853 | 10 | **170x more tokens** |
+| **Chrome DevTools MCP** (Google) | 26 | 301,030 | 21 | **181x more tokens** |
+| **OpenBrowser MCP** | 1 | **1,665** | 20 | baseline |
 
-| Server | Navigate Response | Size |
-|--------|------------------|-----:|
-| Playwright MCP | Full a11y snapshot (entire page tree with `[ref=eXX]` identifiers) | ~496K chars |
-| Chrome DevTools MCP | `"Successfully navigated to URL. ## Pages 1: URL [selected]"` | ~136 chars |
-| OpenBrowser MCP | `"Navigated to: URL"` | ~105 chars |
+### Cost per Benchmark Run (6 Tasks)
 
-OpenBrowser returns minimal confirmations for actions and lets the agent request only the detail level it needs. Search returns only matching lines -- Playwright and Chrome DevTools MCP have no equivalent:
+| Model | Playwright MCP | Chrome DevTools MCP | OpenBrowser MCP |
+|-------|---------------:|--------------------:|----------------:|
+| Claude Sonnet ($3/M) | $0.852 | $0.903 | **$0.005** |
+| Claude Opus ($15/M) | $4.258 | $4.515 | **$0.025** |
 
-| Detail Level | Example | Wikipedia Size |
-|-------------|---------|---------------:|
-| Compact state | `browser_get_state(compact=true)` | ~250 chars |
-| Search result | `browser_get_text(search="Guido van Rossum")` | ~3.9K chars |
-| Full page text | `browser_get_text()` | ~97K chars |
-| Full a11y snapshot (Playwright/CDP) | `browser_snapshot` / `take_snapshot` | ~495-538K chars |
+### Per-Task Response Size
 
-[Full comparison](https://docs.openbrowser.me/comparison)
+| Task | Playwright MCP | Chrome DevTools MCP | OpenBrowser MCP |
+|------|---------------:|--------------------:|----------------:|
+| fact_lookup | 477,003 chars | 509,059 chars | 1,041 chars |
+| form_fill | 4,075 chars | 3,150 chars | 2,410 chars |
+| multi_page_extract | 58,099 chars | 38,593 chars | 513 chars |
+| search_navigate | 518,461 chars | 594,458 chars | 1,996 chars |
+| deep_navigation | 77,292 chars | 58,359 chars | 113 chars |
+| content_analysis | 493 chars | 513 chars | 594 chars |
+
+Playwright completes tasks in fewer tool calls (1-2 per task) because it dumps the full a11y snapshot on every navigation. OpenBrowser takes more round-trips but each response is compact -- the code extracts only what's needed.
+
+[Full comparison with methodology](https://docs.openbrowser.me/comparison)
 
 ## Configuration
 
