@@ -40,6 +40,7 @@ class CreateTaskRequest(BaseModel):
     llm_model: str | None = Field(default=None, description="LLM model to use")
     project_id: str | None = Field(default=None, description="Project to associate task with")
     use_current_browser: bool = Field(default=False, description="Use current browser via Chrome extension")
+    conversation_id: str | None = Field(default=None, description="Existing conversation to append messages to")
 
 
 class CreateProjectRequest(BaseModel):
