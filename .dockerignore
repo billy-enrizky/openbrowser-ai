@@ -1,0 +1,22 @@
+# Do not bake local .env files into Docker images
+backend/.env
+.env
+*.env.local
+*.env.production.local
+
+# IDE and tool configs
+.git
+.github
+.claude
+.cursor
+.vscode
+__pycache__
+*.pyc
+node_modules
+frontend/node_modules
+frontend/.next
+local_docs
+docs
+*.md
+!backend/README.md
+!README.md
