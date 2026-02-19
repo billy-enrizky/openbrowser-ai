@@ -108,6 +108,11 @@ def load_refusion_sft(config: dict):
 
 async def evaluate():
     """Run ReFusion SFT-only evaluation with browser execution."""
+    seed = int(os.environ.get("RANDOM_SEED", "42"))
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
     llm_config = FLOW_LLM_CONFIG
     grpo_config = ONLINE_FLOW_GRPO_CONFIG
 
@@ -116,10 +121,13 @@ async def evaluate():
     mask_token_id = llm_config.get("mask_token_id", 151670)
     flow_llm = FlowLLM(model, tokenizer, mask_token_id=mask_token_id)
 
-    # Load prompts
-    train_file = resolve_data_path(DATA_CONFIG["train_file"])
-    max_samples = int(os.environ.get("MAX_EVAL_SAMPLES", DATA_CONFIG.get("max_train_samples", 0)))
-    prompts = load_prompts(train_file, max_samples=max_samples)
+    # Load prompts from val or test split
+    eval_split = os.environ.get("EVAL_SPLIT", "val")
+    eval_file_key = "test_file" if eval_split == "test" else "val_file"
+    eval_file = resolve_data_path(DATA_CONFIG[eval_file_key])
+    max_samples = int(os.environ.get("MAX_EVAL_SAMPLES", DATA_CONFIG.get("max_eval_samples", 0)))
+    prompts = load_prompts(eval_file, max_samples=max_samples)
+    logger.info("Evaluating on %s split (%s)", eval_split, eval_file)
 
     max_new_tokens = llm_config.get("max_new_tokens", 512)
     num_denoising_steps = llm_config.get("num_denoising_steps", 64)

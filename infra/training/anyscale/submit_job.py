@@ -13,12 +13,16 @@ Usage:
     uv run infra/training/anyscale/submit_job.py online-grpo
     uv run infra/training/anyscale/submit_job.py fsdfm-sft
     uv run infra/training/anyscale/submit_job.py online-fsdfm-grpo
+    uv run infra/training/anyscale/submit_job.py fsdfm-flow-grpo
     uv run infra/training/anyscale/submit_job.py eval-sft
     uv run infra/training/anyscale/submit_job.py eval-grpo
     uv run infra/training/anyscale/submit_job.py eval-fsdfm-sft
     uv run infra/training/anyscale/submit_job.py eval-refusion-sft
     uv run infra/training/anyscale/submit_job.py eval-fsdfm-grpo
     uv run infra/training/anyscale/submit_job.py eval-refusion-grpo
+    uv run infra/training/anyscale/submit_job.py eval-fsdfm-flow-grpo
+    uv run infra/training/anyscale/submit_job.py refusion-flow-grpo
+    uv run infra/training/anyscale/submit_job.py eval-refusion-flow-grpo
     uv run infra/training/anyscale/submit_job.py --list
 """
 
@@ -45,12 +49,16 @@ JOB_CONFIGS = {
     "online-grpo": JOBS_DIR / "online_grpo_job.yaml",
     "fsdfm-sft": JOBS_DIR / "fsdfm_sft_job.yaml",
     "online-fsdfm-grpo": JOBS_DIR / "online_fsdfm_grpo_job.yaml",
+    "fsdfm-flow-grpo": JOBS_DIR / "fsdfm_flow_grpo_job.yaml",
     "eval-sft": JOBS_DIR / "eval_sft_job.yaml",
     "eval-grpo": JOBS_DIR / "eval_grpo_job.yaml",
     "eval-fsdfm-sft": JOBS_DIR / "eval_fsdfm_sft_job.yaml",
     "eval-refusion-sft": JOBS_DIR / "eval_refusion_sft_job.yaml",
     "eval-fsdfm-grpo": JOBS_DIR / "eval_fsdfm_grpo_job.yaml",
     "eval-refusion-grpo": JOBS_DIR / "eval_refusion_grpo_job.yaml",
+    "eval-fsdfm-flow-grpo": JOBS_DIR / "eval_fsdfm_flow_grpo_job.yaml",
+    "refusion-flow-grpo": JOBS_DIR / "refusion_flow_grpo_job.yaml",
+    "eval-refusion-flow-grpo": JOBS_DIR / "eval_refusion_flow_grpo_job.yaml",
 }
 
 # Secret env vars to inject from .env into Anyscale jobs
