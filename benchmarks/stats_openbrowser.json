@@ -1,0 +1,135 @@
+{
+  "n_runs": 5,
+  "n_bootstrap": 10000,
+  "servers": {
+    "openbrowser": {
+      "raw_durations": [
+        117.5,
+        82.8,
+        88.5,
+        109.4,
+        117.3
+      ],
+      "raw_tool_calls": [
+        21,
+        12,
+        12,
+        13,
+        17
+      ],
+      "raw_passes": [
+        6,
+        6,
+        6,
+        6,
+        6
+      ],
+      "stats": {
+        "duration_s": {
+          "mean": 103.1,
+          "std": 16.4,
+          "ci_low": 90.4,
+          "ci_high": 115.8
+        },
+        "tool_calls": {
+          "mean": 15.0,
+          "std": 3.9,
+          "ci_low": 12.2,
+          "ci_high": 18.4
+        },
+        "pass_count": {
+          "mean": 6.0,
+          "std": 0.0,
+          "ci_low": 6.0,
+          "ci_high": 6.0
+        }
+      }
+    },
+    "playwright": {
+      "raw_durations": [
+        81.3,
+        76.9,
+        90.8,
+        91.7,
+        97.4
+      ],
+      "raw_tool_calls": [
+        10,
+        10,
+        14,
+        14,
+        16
+      ],
+      "raw_passes": [
+        6,
+        6,
+        6,
+        6,
+        6
+      ],
+      "stats": {
+        "duration_s": {
+          "mean": 87.6,
+          "std": 8.3,
+          "ci_low": 81.4,
+          "ci_high": 93.8
+        },
+        "tool_calls": {
+          "mean": 12.8,
+          "std": 2.7,
+          "ci_low": 10.8,
+          "ci_high": 14.8
+        },
+        "pass_count": {
+          "mean": 6.0,
+          "std": 0.0,
+          "ci_low": 6.0,
+          "ci_high": 6.0
+        }
+      }
+    },
+    "chrome-devtools": {
+      "raw_durations": [
+        136.1,
+        118.6,
+        126.9,
+        115.6,
+        113.0
+      ],
+      "raw_tool_calls": [
+        20,
+        19,
+        19,
+        19,
+        20
+      ],
+      "raw_passes": [
+        6,
+        6,
+        6,
+        6,
+        6
+      ],
+      "stats": {
+        "duration_s": {
+          "mean": 122.0,
+          "std": 9.4,
+          "ci_low": 115.2,
+          "ci_high": 130.2
+        },
+        "tool_calls": {
+          "mean": 19.4,
+          "std": 0.5,
+          "ci_low": 19.0,
+          "ci_high": 19.8
+        },
+        "pass_count": {
+          "mean": 6.0,
+          "std": 0.0,
+          "ci_low": 6.0,
+          "ci_high": 6.0
+        }
+      }
+    }
+  }
+}

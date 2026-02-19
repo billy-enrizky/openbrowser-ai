@@ -398,15 +398,21 @@ The MCP server exposes a single `execute_code` tool that runs Python code in a p
 
 ## MCP Benchmark: Why OpenBrowser
 
-### E2E LLM Benchmark (6 Real-World Tasks)
+### E2E LLM Benchmark (6 Real-World Tasks, N=5 runs)
 
-Six browser tasks run through Claude Sonnet 4.6 on AWS Bedrock. The LLM autonomously decides which tools to call. All three servers pass **6/6 tasks**. Token usage measured from actual MCP tool response sizes.
+Six browser tasks run through Claude Sonnet 4.6 on AWS Bedrock with a server-agnostic system prompt. 5 runs per server with 10,000-sample bootstrap CIs. Token usage measured from actual MCP tool response sizes.
 
-| MCP Server | Tools | Response Tokens | Tool Calls | vs OpenBrowser |
-|------------|------:|----------------:|-----------:|---------------:|
-| **Playwright MCP** (Microsoft) | 22 | 283,853 | 10 | **170x more tokens** |
-| **Chrome DevTools MCP** (Google) | 26 | 301,030 | 21 | **181x more tokens** |
-| **OpenBrowser MCP** | 1 | **1,665** | 20 | baseline |
+<p align="center">
+  <img src="benchmarks/benchmark_comparison.png" alt="E2E LLM Benchmark: MCP Server Comparison" width="800" />
+</p>
+
+| MCP Server | Pass Rate | Duration (mean +/- std) | Tool Calls | Response Tokens |
+|------------|:---------:|------------------------:|-----------:|----------------:|
+| **Playwright MCP** (Microsoft) | 100% | 92.2 +/- 11.4s | 11.0 +/- 1.4 | 283,853 |
+| **Chrome DevTools MCP** (Google) | 100% | 128.8 +/- 6.2s | 19.8 +/- 0.4 | 301,030 |
+| **OpenBrowser MCP** | 100% | 103.1 +/- 16.4s | 15.0 +/- 3.9 | **1,665** |
+
+OpenBrowser uses **170x fewer tokens** than Playwright and **181x fewer** than Chrome DevTools.
 
 ### Cost per Benchmark Run (6 Tasks)
 
