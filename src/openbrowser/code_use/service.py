@@ -75,6 +75,8 @@ class CodeAgent:
 		max_validations: int = 0,
 		use_vision: bool = True,
 		calculate_cost: bool = False,
+		# Callbacks for real-time streaming
+		register_new_step_callback: Any | None = None,
 		**kwargs,
 	):
 		"""
@@ -97,6 +99,9 @@ class CodeAgent:
 			calculate_cost: Whether to calculate token costs (default: False)
 			llm: Optional LLM instance (ChatBrowserUse, ChatOpenAI, etc.). If not provided,
 			     will try ChatBrowserUse first, then fall back to ChatOpenAI.
+			register_new_step_callback: Optional callback called after each execution step
+			     with a dict containing step_number, total_steps, code, output, error,
+			     thinking, screenshot_base64, and is_done.
 			**kwargs: Additional keyword arguments for compatibility (ignored)
 		"""
 		# Log and ignore unknown kwargs for compatibility
@@ -153,6 +158,7 @@ class CodeAgent:
 		self.max_failures = max_failures
 		self.max_validations = max_validations
 		self.use_vision = use_vision
+		self.register_new_step_callback = register_new_step_callback
 
 		self.session = NotebookSession()
 		self.namespace: dict[str, Any] = {}
@@ -361,7 +367,7 @@ class CodeAgent:
 							full_llm_response=full_llm_response,
 							output=full_llm_response,  # Treat the explanation as output
 							error=None,
-							screenshot_path=await self._capture_screenshot(step + 1),
+							screenshot_path=(await self._capture_screenshot(step + 1))[0],
 						)
 						break  # Exit the loop since task is done
 
@@ -517,7 +523,21 @@ class CodeAgent:
 				# Browser state is now only logged when fetched before LLM call (not after execution)
 
 				# Take screenshot for eval tracking
-				screenshot_path = await self._capture_screenshot(step + 1)
+				screenshot_path, screenshot_base64 = await self._capture_screenshot(step + 1)
+
+				# Notify step callback for real-time streaming
+				if self.register_new_step_callback:
+					step_info = {
+						'step_number': step + 1,
+						'total_steps': self.max_steps,
+						'code': code,
+						'output': output,
+						'error': error,
+						'thinking': full_llm_response,
+						'screenshot_base64': screenshot_base64,
+						'is_done': self._is_task_done(),
+					}
+					self.register_new_step_callback(step_info)
 
 				# Add step to complete_history for eval system
 				await self._add_step_to_complete_history(
@@ -1136,10 +1156,14 @@ __code_exec_coro__ = __code_exec__()
 		# Check if 'done' was called by looking for a special marker in namespace
 		return self.namespace.get('_task_done', False)
 
-	async def _capture_screenshot(self, step_number: int) -> str | None:
-		"""Capture and store screenshot for eval tracking."""
+	async def _capture_screenshot(self, step_number: int) -> tuple[str | None, str | None]:
+		"""Capture and store screenshot for eval tracking.
+
+		Returns:
+			Tuple of (screenshot_file_path, screenshot_base64)
+		"""
 		if not self.browser_session:
-			return None
+			return None, None
 
 		try:
 			# Get browser state summary which includes screenshot
@@ -1147,10 +1171,12 @@ __code_exec_coro__ = __code_exec__()
 			if state and state.screenshot:
 				# Store screenshot using screenshot service
 				screenshot_path = await self.screenshot_service.store_screenshot(state.screenshot, step_number)
-				return str(screenshot_path) if screenshot_path else None
+				path_str = str(screenshot_path) if screenshot_path else None
+				return path_str, state.screenshot
 		except Exception as e:
 			logger.warning(f'Failed to capture screenshot for step {step_number}: {e}')
-			return None
+			return None, None
+		return None, None
 
 	async def _add_step_to_complete_history(
 		self,
