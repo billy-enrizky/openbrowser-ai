@@ -112,20 +112,22 @@ function parseAttachments(data: Record<string, unknown>): FileAttachment[] {
 export default function Home() {
   const router = useRouter();
   const { authEnabled, isLoading: authLoading, isAuthenticated, idToken, getValidIdToken } = useAuth();
-  const { 
-    sidebarOpen, 
-    messages, 
-    addMessage, 
-    agentType, 
-    maxSteps, 
-    useVision, 
-    logs, 
-    addLog, 
-    clearLogs, 
-    showLogs, 
+  const {
+    sidebarOpen,
+    messages,
+    addMessage,
+    agentType,
+    maxSteps,
+    useVision,
+    logs,
+    addLog,
+    clearLogs,
+    showLogs,
     setShowLogs,
     setVncInfo,
+    setBrowserViewerOpen,
     browserViewerOpen,
+    setLatestScreenshot,
     // Model selection
     selectedModel,
     setSelectedModel,
@@ -209,12 +211,13 @@ export default function Home() {
     switch (type) {
       case "task_started":
         setCurrentTaskId(task_id || null);
-        // Clear logs when a new task starts
+        // Clear logs and screenshots when a new task starts
         clearLogs();
+        setLatestScreenshot(null);
         break;
 
       case "vnc_info": {
-        // Handle VNC connection info
+        // Handle VNC connection info and auto-open browser viewer
         const vncInfo: VncInfo = {
           vnc_url: data.vnc_url as string,
           password: data.password as string,
@@ -223,6 +226,7 @@ export default function Home() {
           display: data.display as string | undefined,
         };
         setVncInfo(vncInfo);
+        setBrowserViewerOpen(true);
         break;
       }
 
@@ -240,58 +244,59 @@ export default function Home() {
         break;
       }
 
-      case "step_update":
-        // Update with step info
-        if (data.thinking) {
-          addMessage({
+      case "step_update": {
+        // Route step details to backend logs panel only (not chat)
+        // The backend also emits a "log" event with a summary, but
+        // step_update carries the full code which we add here.
+        const code = data.code as string | undefined;
+        if (code) {
+          const firstLine = code.split("\n").find(l => l.trim() && !l.trim().startsWith("#"))?.trim() || "";
+          const preview = firstLine.length > 100 ? firstLine.slice(0, 100) + "..." : firstLine;
+          addLog({
             id: crypto.randomUUID(),
-            role: "assistant",
-            content: data.thinking as string,
+            level: "info",
+            message: preview ? `Executing: ${preview}` : "Executing step...",
+            source: "code",
+            stepNumber: data.step_number as number,
             timestamp: new Date(),
-            taskId: task_id,
-            metadata: {
-              stepNumber: data.step_number as number,
-              isThinking: true,
-            },
           });
         }
         break;
+      }
 
-      case "output":
-        // Skip final outputs - they will be included in task_completed with attachments
-        if (data.is_final) {
-          break;
-        }
-        addMessage({
-          id: crypto.randomUUID(),
-          role: "assistant",
-          content: data.content as string,
-          timestamp: new Date(),
-          taskId: task_id,
-          metadata: {
+      case "output": {
+        // Route output to backend logs panel only (not chat)
+        // Final outputs will be included in task_completed message
+        if (data.is_final) break;
+        const outputContent = (data.content as string) || "";
+        if (outputContent) {
+          const truncated = outputContent.length > 200
+            ? outputContent.slice(0, 200) + "..."
+            : outputContent;
+          addLog({
+            id: crypto.randomUUID(),
+            level: "info",
+            message: `Output: ${truncated}`,
+            source: "output",
             stepNumber: data.step_number as number,
-          },
-        });
+            timestamp: new Date(),
+          });
+        }
         break;
+      }
 
       case "screenshot":
-        // Add screenshot to the last message or create new one
-        addMessage({
-          id: crypto.randomUUID(),
-          role: "assistant",
-          content: "Browser screenshot captured",
-          timestamp: new Date(),
-          taskId: task_id,
-          metadata: {
-            stepNumber: data.step_number as number,
-            screenshot: data.base64 as string,
-          },
-        });
+        // Store latest screenshot for the browser viewer panel
+        setLatestScreenshot(data.base64 as string);
+        // Auto-open browser viewer on first screenshot if not already open
+        if (!browserViewerOpen) {
+          setBrowserViewerOpen(true);
+        }
         break;
 
       case "task_completed": {
         setIsLoading(false);
-        // Clear VNC info when task completes
+        // Clear VNC info when task completes (keep latestScreenshot for review)
         setVncInfo(null);
         const attachments = parseAttachments(data);
         addMessage({
@@ -310,7 +315,6 @@ export default function Home() {
       case "task_failed":
       case "error":
         setIsLoading(false);
-        // Clear VNC info on error
         setVncInfo(null);
         addMessage({
           id: crypto.randomUUID(),
@@ -326,7 +330,6 @@ export default function Home() {
 
       case "task_cancelled":
         setIsLoading(false);
-        // Clear VNC info when cancelled
         setVncInfo(null);
         addMessage({
           id: crypto.randomUUID(),
@@ -343,7 +346,7 @@ export default function Home() {
         break;
       }
     }
-  }, [addMessage, addLog, clearLogs, setVncInfo, setExtensionConnected]);
+  }, [addMessage, addLog, clearLogs, setVncInfo, setBrowserViewerOpen, setLatestScreenshot, setExtensionConnected, browserViewerOpen]);
 
   const { isConnected, startTask, cancelTask } = useTaskStream({
     onMessage: handleWSMessage,
