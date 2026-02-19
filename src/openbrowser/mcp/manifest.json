@@ -4,8 +4,8 @@
   "name": "openbrowser",
   "display_name": "OpenBrowser AI Browser Automation",
   "version": "0.5.0",
-  "description": "AI-powered browser automation that lets Claude control web browsers to complete tasks autonomously",
-  "long_description": "OpenBrowser is a powerful extension that enables Claude to control real web browsers through an AI agent. It can navigate websites, fill forms, extract data, and perform complex multi-step tasks autonomously. Perfect for web scraping, testing, research, and automation workflows.\n\n### Key Features:\n- **Autonomous AI Agent**: High-level task execution with minimal supervision\n- **Direct Browser Control**: Navigate, click, type, and interact with any website\n- **Content Extraction**: Smart extraction of structured data from web pages\n- **Tab Management**: Handle multiple tabs and complex workflows\n- **Vision Capabilities**: Use screenshots for visual understanding\n- **Security Features**: Domain restrictions and secure execution\n\n### Use Cases:\n- Web scraping and data extraction\n- Automated testing and QA\n- Research and information gathering\n- Form filling and submissions\n- Multi-step workflow automation",
+  "description": "CodeAgent MCP server -- execute Python code with browser automation functions in a persistent namespace",
+  "long_description": "OpenBrowser CodeAgent exposes a single execute_code tool that runs Python code in a persistent namespace with browser automation functions. Write multi-step workflows in Python with full access to navigate, click, type, evaluate JS, and more.\n\n### Key Features:\n- **Code Execution**: Write Python code with async browser functions (await navigate, click, evaluate, etc.)\n- **Persistent Namespace**: Variables and state persist between execute_code calls\n- **Browser Automation**: Full browser control via CodeAgent functions\n- **JavaScript Evaluation**: Run JS in page context via evaluate()\n- **Data Libraries**: numpy, pandas, matplotlib, BeautifulSoup available\n- **Standard Libraries**: json, csv, re, datetime, requests, asyncio, Path\n\n### Use Cases:\n- Web scraping with Python data processing\n- Automated testing with assertions\n- Research and information gathering\n- Form filling and multi-step workflows\n- DOM extraction via evaluate() + Python post-processing",
   "icon": "icon.png",
   "homepage": "https://github.com/billy-enrizky/openbrowser-ai",
   "documentation": "https://github.com/billy-enrizky/openbrowser-ai",
@@ -33,65 +33,25 @@
   },
   "tools": [
     {
-      "name": "browser_navigate",
-      "description": "Navigate to a URL in the current tab or open a new tab"
-    },
-    {
-      "name": "browser_click",
-      "description": "Click on an element by its index from browser_get_state"
-    },
-    {
-      "name": "browser_type",
-      "description": "Type text into an input field identified by its index"
-    },
-    {
-      "name": "browser_get_state",
-      "description": "Get page state summary. Use filter_by/filter_query to search interactive elements by text, tag, id, class, or attribute"
-    },
-    {
-      "name": "browser_scroll",
-      "description": "Scroll the page up or down. Use target_text to find text and scroll to it"
-    },
-    {
-      "name": "browser_go_back",
-      "description": "Navigate back to the previous page in browser history"
-    },
-    {
-      "name": "browser_get_text",
-      "description": "Get page content as clean markdown text. Use search param to grep for a regex pattern and return matching lines with context"
-    },
-    {
-      "name": "browser_tab",
-      "description": "Manage browser tabs: list, switch, or close tabs by action param"
-    },
-    {
-      "name": "browser_session",
-      "description": "Manage browser sessions: list, close, or close_all by action param"
-    },
-    {
-      "name": "browser_get_accessibility_tree",
-      "description": "Get the page accessibility tree in tree or flat format with depth limiting"
-    },
-    {
-      "name": "browser_execute_js",
-      "description": "Execute JavaScript in the page context and return the result"
+      "name": "execute_code",
+      "description": "Execute Python code in a persistent namespace with browser automation functions (navigate, click, evaluate, etc.). All functions are async -- use await."
     }
   ],
   "prompts": [
     {
       "name": "scrape_data",
       "description": "Extract structured data from a website",
-      "text": "Use browser_navigate to go to {url}, then use browser_get_text to get page content as markdown. Use browser_get_text with search={data_type} to find specific data. If the page requires interaction, use browser_get_state to find elements and browser_click/browser_type as needed."
+      "text": "Use execute_code to write Python that navigates to {url}, extracts data using evaluate() for JS DOM queries or Python string processing, and prints structured results."
     },
     {
       "name": "fill_form",
       "description": "Fill out and submit a web form",
-      "text": "Navigate to {url}, use browser_get_state to identify form fields, then use browser_type to fill in: {field_data}. Finally, click the submit button."
+      "text": "Use execute_code to navigate to {url}, get browser state to find form fields, then use input_text() and click() to fill and submit the form with: {field_data}."
     },
     {
       "name": "research_topic",
       "description": "Research a topic across multiple websites",
-      "text": "Open multiple tabs using browser_navigate with new_tab=true for sites: {sites}. Use browser_get_text on each to gather information about {topic}. Switch between tabs with browser_tab action=switch."
+      "text": "Use execute_code to navigate to multiple sites, extract content using evaluate() or page text, and aggregate findings about {topic} using Python data structures."
     }
   ],
   "keywords": ["browser", "automation", "web-scraping", "testing", "ai-agent", "playwright", "selenium-alternative", "rpa", "web-automation", "mcp", "openbrowser"],
