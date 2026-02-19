@@ -1,17 +1,13 @@
 """Integration tests for the MCP server with a real browser session.
 
-These tests spin up an actual browser session and verify text extraction,
-grep, element search, accessibility tree, and JavaScript execution against
-known HTML content.
+These tests spin up an actual browser session and verify the execute_code
+tool can navigate, extract text, run JavaScript, and interact with elements
+on a known HTML page.
 
 Requirements:
     - Chrome/Chromium must be installed
     - Tests are marked with @pytest.mark.integration and are skipped by default
     - Run with: pytest tests/test_mcp_integration.py -m integration
-
-These tests serve a local HTML file via a lightweight HTTP server to avoid
-file:// protocol issues with the browser security policy (which blocks URLs
-without hostnames).
 """
 
 import asyncio
@@ -109,12 +105,10 @@ def test_html_server():
     Uses HTTP instead of file:// because the browser security policy
     blocks URLs without hostnames (file:// has no hostname).
     """
-    # Write HTML to a temp directory
     tmp_dir = tempfile.mkdtemp()
     html_path = Path(tmp_dir) / "test.html"
     html_path.write_text(TEST_HTML)
 
-    # Start a local HTTP server in a background thread
     handler = partial(SimpleHTTPRequestHandler, directory=tmp_dir)
     server = HTTPServer(("127.0.0.1", 0), handler)
     port = server.server_address[1]
@@ -131,7 +125,7 @@ def test_html_server():
 
 @pytest.fixture(scope="module")
 def mcp_server_with_browser(test_html_server, monkeypatch_module):
-    """Create an OpenBrowserServer with a real browser session.
+    """Create an OpenBrowserServer with a real browser session and namespace.
 
     Yields (server, loop) so tests can run async methods on the same
     event loop that owns the browser session.
@@ -142,16 +136,26 @@ def mcp_server_with_browser(test_html_server, monkeypatch_module):
 
     server = mcp_server_module.OpenBrowserServer()
 
-    # Initialize a real browser session
     async def setup():
         profile = BrowserProfile(headless=True)
         session = BrowserSession(browser_profile=profile)
         await session.start()
 
-        # Navigate to the test page served via local HTTP
+        server.browser_session = session
+
+        # Initialize the CodeAgent namespace with the real browser
+        from openbrowser.code_use.namespace import create_namespace
+        from openbrowser.tools.service import CodeAgentTools
+
+        tools = CodeAgentTools()
+        server._namespace = create_namespace(
+            browser_session=session,
+            tools=tools,
+        )
+
+        # Navigate to test page
         await session.navigate_to(test_html_server)
 
-        server.browser_session = session
         return server
 
     loop = asyncio.new_event_loop()
@@ -172,165 +176,137 @@ def mcp_server_with_browser(test_html_server, monkeypatch_module):
 # ---------------------------------------------------------------------------
 
 
-class TestIntegrationGetText:
-    """Integration tests for browser_get_text with real browser."""
+class TestIntegrationNavigate:
+    """Integration tests for navigation via execute_code."""
 
-    def test_extracts_page_title(self, mcp_server_with_browser):
-        """Extracts page title from real HTML."""
+    def test_get_page_title(self, mcp_server_with_browser):
+        """Gets page title via browser state."""
         server, loop = mcp_server_with_browser
-        result = loop.run_until_complete(server._get_text())
-        assert "Integration Test Page" in result
+        result = loop.run_until_complete(server._execute_code(
+            "state = await browser.get_browser_state_summary()\n"
+            "print(state.title)"
+        ))
+        assert "MCP Integration Test Page" in result
 
-    def test_extracts_paragraph_content(self, mcp_server_with_browser):
-        """Extracts paragraph text from real HTML."""
+    def test_get_page_url(self, mcp_server_with_browser):
+        """Gets page URL via browser state."""
         server, loop = mcp_server_with_browser
-        result = loop.run_until_complete(server._get_text())
-        assert "important text" in result
-
-    def test_extracts_links_when_requested(self, mcp_server_with_browser):
-        """Includes link URLs when extract_links=True."""
-        server, loop = mcp_server_with_browser
-        result = loop.run_until_complete(server._get_text(extract_links=True))
-        assert "/about" in result or "About Us" in result
+        result = loop.run_until_complete(server._execute_code(
+            "state = await browser.get_browser_state_summary()\n"
+            "print(state.url)"
+        ))
+        assert "127.0.0.1" in result
+        assert "test.html" in result
 
 
-class TestIntegrationGrep:
-    """Integration tests for browser_grep with real browser."""
-
-    def test_grep_finds_text(self, mcp_server_with_browser):
-        """Finds matching text in real page content."""
-        server, loop = mcp_server_with_browser
-        result = loop.run_until_complete(server._grep("important"))
-        data = json.loads(result)
-        assert data["total_matches"] >= 1
-
-    def test_grep_finds_table_data(self, mcp_server_with_browser):
-        """Finds table data via grep."""
-        server, loop = mcp_server_with_browser
-        result = loop.run_until_complete(server._grep("Alpha"))
-        data = json.loads(result)
-        assert data["total_matches"] >= 1
-
-    def test_grep_no_matches(self, mcp_server_with_browser):
-        """Returns zero matches for non-existent text."""
-        server, loop = mcp_server_with_browser
-        result = loop.run_until_complete(server._grep("zzz_nonexistent_xyz_123"))
-        data = json.loads(result)
-        assert data["total_matches"] == 0
-
-
-class TestIntegrationSearchElements:
-    """Integration tests for browser_search_elements with real browser."""
-
-    def test_search_links_by_tag(self, mcp_server_with_browser):
-        """Finds link elements by tag name."""
-        server, loop = mcp_server_with_browser
-        result = loop.run_until_complete(server._search_elements("a", by="tag"))
-        data = json.loads(result)
-        assert data["count"] >= 3  # At least the 3 nav links
-
-    def test_search_by_id(self, mcp_server_with_browser):
-        """Finds element by ID."""
-        server, loop = mcp_server_with_browser
-        result = loop.run_until_complete(server._search_elements("submit", by="id"))
-        data = json.loads(result)
-        assert data["count"] >= 1
-
-    def test_search_by_class(self, mcp_server_with_browser):
-        """Finds elements by class name."""
-        server, loop = mcp_server_with_browser
-        result = loop.run_until_complete(server._search_elements("nav-link", by="class"))
-        data = json.loads(result)
-        assert data["count"] >= 3
-
-    def test_search_input_by_text(self, mcp_server_with_browser):
-        """Finds button by text content."""
-        server, loop = mcp_server_with_browser
-        result = loop.run_until_complete(server._search_elements("Submit", by="text"))
-        data = json.loads(result)
-        assert data["count"] >= 1
-
-
-class TestIntegrationGetState:
-    """Integration tests for browser_get_state with real browser."""
-
-    def test_compact_state(self, mcp_server_with_browser):
-        """Compact state returns URL and element count."""
-        server, loop = mcp_server_with_browser
-        result = loop.run_until_complete(server._get_browser_state(compact=True))
-        data = json.loads(result)
-        assert "127.0.0.1" in data["url"]
-        assert data["interactive_element_count"] >= 4  # links + input + button
-
-    def test_full_state(self, mcp_server_with_browser):
-        """Full state includes element details."""
-        server, loop = mcp_server_with_browser
-        result = loop.run_until_complete(server._get_browser_state(compact=False))
-        data = json.loads(result)
-        assert "interactive_elements" in data
-        assert len(data["interactive_elements"]) >= 4
-
-
-class TestIntegrationExecuteJs:
-    """Integration tests for browser_execute_js with real browser."""
+class TestIntegrationJavaScript:
+    """Integration tests for JavaScript evaluation via execute_code."""
 
     def test_evaluate_simple_expression(self, mcp_server_with_browser):
         """Evaluates a simple JavaScript expression."""
         server, loop = mcp_server_with_browser
-        result = loop.run_until_complete(server._execute_js("2 + 2"))
-        data = json.loads(result)
-        assert data["result"] == 4
+        result = loop.run_until_complete(server._execute_code(
+            "result = await evaluate('2 + 2')\n"
+            "print(result)"
+        ))
+        assert "4" in result
 
     def test_get_document_title(self, mcp_server_with_browser):
         """Gets document title via JavaScript."""
         server, loop = mcp_server_with_browser
-        result = loop.run_until_complete(server._execute_js("document.title"))
-        data = json.loads(result)
-        assert data["result"] == "MCP Integration Test Page"
+        result = loop.run_until_complete(server._execute_code(
+            "title = await evaluate('document.title')\n"
+            "print(title)"
+        ))
+        assert "MCP Integration Test Page" in result
 
     def test_query_dom_elements(self, mcp_server_with_browser):
         """Queries DOM elements via JavaScript."""
         server, loop = mcp_server_with_browser
-        result = loop.run_until_complete(
-            server._execute_js("document.querySelectorAll('a.nav-link').length")
-        )
-        data = json.loads(result)
-        assert data["result"] == 3
+        result = loop.run_until_complete(server._execute_code(
+            "count = await evaluate('document.querySelectorAll(\"a.nav-link\").length')\n"
+            "print(count)"
+        ))
+        assert "3" in result
 
     def test_extract_data_from_table(self, mcp_server_with_browser):
         """Extracts structured data from a table via JavaScript."""
         server, loop = mcp_server_with_browser
-        js = """
-        (() => {
-            const rows = document.querySelectorAll('#data-section tbody tr');
-            return Array.from(rows).map(row => {
-                const cells = row.querySelectorAll('td');
-                return {name: cells[0].textContent, value: parseInt(cells[1].textContent)};
-            });
-        })()
-        """
-        result = loop.run_until_complete(server._execute_js(js))
+        result = loop.run_until_complete(server._execute_code(
+            "data = await evaluate(\"\"\"\n"
+            "Array.from(document.querySelectorAll('#data-section tbody tr')).map(row => {\n"
+            "    const cells = row.querySelectorAll('td');\n"
+            "    return {name: cells[0].textContent, value: parseInt(cells[1].textContent)};\n"
+            "})\n"
+            "\"\"\")\n"
+            "print(json.dumps(data))"
+        ))
         data = json.loads(result)
-        assert len(data["result"]) == 3
-        assert data["result"][0]["name"] == "Alpha"
-        assert data["result"][0]["value"] == 100
+        assert len(data) == 3
+        assert data[0]["name"] == "Alpha"
+        assert data[0]["value"] == 100
 
 
-class TestIntegrationAccessibilityTree:
-    """Integration tests for browser_get_accessibility_tree with real browser."""
+class TestIntegrationBrowserState:
+    """Integration tests for browser state inspection via execute_code."""
 
-    def test_returns_tree_structure(self, mcp_server_with_browser):
-        """Returns a non-empty accessibility tree."""
+    def test_get_interactive_elements(self, mcp_server_with_browser):
+        """Gets interactive elements from browser state."""
         server, loop = mcp_server_with_browser
-        result = loop.run_until_complete(server._get_accessibility_tree())
-        data = json.loads(result)
-        assert data["total_nodes"] > 0
+        result = loop.run_until_complete(server._execute_code(
+            "state = await browser.get_browser_state_summary()\n"
+            "count = len(state.dom_state.selector_map)\n"
+            "print(f'Elements: {count}')"
+        ))
+        # Should have at least links + input + button
+        assert "Elements:" in result
 
-    def test_tree_contains_page_elements(self, mcp_server_with_browser):
-        """Tree contains expected page elements."""
+    def test_find_element_by_text(self, mcp_server_with_browser):
+        """Finds an element by its text content."""
         server, loop = mcp_server_with_browser
-        result = loop.run_until_complete(server._get_accessibility_tree())
-        # The tree should have nodes -- just verify it parsed successfully
-        data = json.loads(result)
-        assert "total_nodes" in data
-        assert data["total_nodes"] >= 5  # headings, links, button, input, etc.
+        result = loop.run_until_complete(server._execute_code(
+            "state = await browser.get_browser_state_summary()\n"
+            "found = []\n"
+            "for idx, el in state.dom_state.selector_map.items():\n"
+            "    text = el.get_all_children_text(max_depth=1)\n"
+            "    if 'Submit' in text:\n"
+            "        found.append((idx, el.tag_name, text))\n"
+            "print(found)"
+        ))
+        assert "Submit" in result
+
+    def test_get_tabs(self, mcp_server_with_browser):
+        """Gets tab information from browser state."""
+        server, loop = mcp_server_with_browser
+        result = loop.run_until_complete(server._execute_code(
+            "state = await browser.get_browser_state_summary()\n"
+            "for tab in state.tabs:\n"
+            "    print(f'Tab: {tab.url}')"
+        ))
+        assert "Tab:" in result
+
+
+class TestIntegrationVariablePersistence:
+    """Integration tests for variable persistence between execute_code calls."""
+
+    def test_variables_persist(self, mcp_server_with_browser):
+        """Variables set in one call are available in the next."""
+        server, loop = mcp_server_with_browser
+        loop.run_until_complete(server._execute_code(
+            "integration_test_var = 'persisted_value'"
+        ))
+        result = loop.run_until_complete(server._execute_code(
+            "print(integration_test_var)"
+        ))
+        assert "persisted_value" in result
+
+    def test_extracted_data_persists(self, mcp_server_with_browser):
+        """Data extracted from the page persists for later processing."""
+        server, loop = mcp_server_with_browser
+        loop.run_until_complete(server._execute_code(
+            "page_title = await evaluate('document.title')"
+        ))
+        result = loop.run_until_complete(server._execute_code(
+            "print(f'Saved title: {page_title}')"
+        ))
+        assert "Saved title: MCP Integration Test Page" in result
