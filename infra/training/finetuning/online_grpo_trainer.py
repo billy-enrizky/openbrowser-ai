@@ -17,6 +17,7 @@ Usage:
 """
 
 import asyncio
+import collections
 import json
 import logging
 import os
@@ -279,6 +280,16 @@ async def train():
     temperature = config.get("temperature", 1.0)
     min_reward_variance = config.get("min_reward_variance", 0.01)
 
+    # Early stopping config
+    es_patience = config.get("early_stopping_patience", 50)
+    es_window = config.get("early_stopping_window", 20)
+    # Track rewards from gradient-update steps only
+    es_reward_window: collections.deque[float] = collections.deque(maxlen=es_window)
+    best_running_avg = -float("inf")
+    steps_without_improvement = 0
+    gradient_update_count = 0
+    best_checkpoint_dir = "outputs/finetuning_online_grpo/best"
+
     # Start FormFactory server
     formfactory_dir = PROJECT_ROOT / "data" / "formfactory"
     port = config.get("formfactory_port", 5050)
@@ -503,15 +514,60 @@ async def train():
                     model.save_pretrained(ckpt_dir)
                     logger.info(f"Saved checkpoint to {ckpt_dir}")
 
-            # Epoch summary
-            if epoch_rewards:
-                epoch_avg = sum(epoch_rewards) / len(epoch_rewards)
-                nonzero = sum(1 for r in epoch_rewards if r > 0)
-                logger.info(
-                    f"Epoch {epoch + 1} complete: avg_reward={epoch_avg:.3f}, "
-                    f"nonzero_rewards={nonzero}/{len(epoch_rewards)}, "
-                    f"avg_kl={sum(epoch_kl)/len(epoch_kl):.4f}"
-                )
+                # --- Early stopping: track running avg of gradient-update rewards ---
+                gradient_update_count += 1
+                es_reward_window.append(avg_reward)
+
+                if len(es_reward_window) >= es_window:
+                    running_avg = sum(es_reward_window) / len(es_reward_window)
+
+                    if running_avg > best_running_avg + 1e-4:
+                        best_running_avg = running_avg
+                        steps_without_improvement = 0
+                        # Save best checkpoint
+                        Path(best_checkpoint_dir).mkdir(parents=True, exist_ok=True)
+                        model.save_pretrained(best_checkpoint_dir)
+                        tokenizer.save_pretrained(best_checkpoint_dir)
+                        logger.info(
+                            f"  New best running avg: {running_avg:.4f} "
+                            f"(gradient update {gradient_update_count}). "
+                            f"Saved best checkpoint."
+                        )
+                    else:
+                        steps_without_improvement += 1
+                        if steps_without_improvement % 10 == 0:
+                            logger.info(
+                                f"  No improvement for {steps_without_improvement}/"
+                                f"{es_patience} gradient updates "
+                                f"(running_avg={running_avg:.4f}, "
+                                f"best={best_running_avg:.4f})"
+                            )
+
+                    if steps_without_improvement >= es_patience:
+                        logger.info(
+                            f"Early stopping: no improvement for "
+                            f"{es_patience} gradient updates. "
+                            f"Best running avg: {best_running_avg:.4f} "
+                            f"at gradient update "
+                            f"{gradient_update_count - steps_without_improvement}"
+                        )
+                        # Persist best checkpoint
+                        persist_checkpoint(best_checkpoint_dir, "online-grpo")
+                        break
+
+            else:
+                # for-else: inner loop completed without early stopping break
+                if epoch_rewards:
+                    epoch_avg = sum(epoch_rewards) / len(epoch_rewards)
+                    nonzero = sum(1 for r in epoch_rewards if r > 0)
+                    logger.info(
+                        f"Epoch {epoch + 1} complete: avg_reward={epoch_avg:.3f}, "
+                        f"nonzero_rewards={nonzero}/{len(epoch_rewards)}, "
+                        f"avg_kl={sum(epoch_kl)/len(epoch_kl):.4f}"
+                    )
+                continue
+            # break out of epoch loop if early stopping triggered
+            break
 
         # Save final model
         final_dir = "outputs/finetuning_online_grpo/final"
@@ -520,8 +576,15 @@ async def train():
         tokenizer.save_pretrained(final_dir)
         logger.info(f"Online GRPO training complete. Model saved to {final_dir}")
 
-        # Persist checkpoint to Anyscale storage
-        persist_checkpoint(final_dir, "online-grpo")
+        # Persist best checkpoint (or final if no best was saved)
+        if Path(best_checkpoint_dir).exists():
+            logger.info(
+                f"Persisting best checkpoint (running_avg={best_running_avg:.4f}) "
+                f"from {gradient_update_count - steps_without_improvement} gradient updates"
+            )
+            persist_checkpoint(best_checkpoint_dir, "online-grpo")
+        else:
+            persist_checkpoint(final_dir, "online-grpo")
 
     finally:
         await browser_env.close()
