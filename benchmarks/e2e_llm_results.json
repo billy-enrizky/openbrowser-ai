@@ -1,64 +1,24 @@
 {
   "model": "us.anthropic.claude-sonnet-4-6",
-  "timestamp": "2026-02-19T17:07:06.141756+00:00",
+  "timestamp": "2026-02-19T18:03:16.060046+00:00",
   "servers": {
     "openbrowser": {
       "tasks": [
         {
-          "name": "fact_lookup",
-          "success": true,
-          "duration_s": 10.8,
-          "tool_calls": 1,
-          "result": "Python was created by **Guido van Rossum**, and it first appeared in **1991** (specifically on **20 February 1991**).\n",
-          "error": null
-        },
-        {
-          "name": "form_fill",
-          "success": true,
-          "duration_s": 16.6,
-          "tool_calls": 2,
-          "result": "The form has been successfully filled out and submitted! Here's a summary of what was done:\n\n1. **Navigated** to `https://httpbin.org/forms/post`\n2. **Customer Name**: Entered `John Doe` in the customer name field\n3. **Pizza Size**: Selected `Medium` (radio button)\n4. **Topping**: Checked `Mushroom` (checkbox)\n5. **Submitted** the form by clicking the submit button\n\nThe form was posted to `https://httpbin.org/post`, and the server's response confirms the submitted data:\n\n```json\n\"form\": {\n  \"cus",
-          "error": null
-        },
-        {
-          "name": "multi_page_extract",
-          "success": true,
-          "duration_s": 8.1,
-          "tool_calls": 1,
-          "result": "Here are the **top 5 stories** currently on Hacker News:\n\n1. **Gemini 3.1 Pro**\n2. **America vs. Singapore: You Can't Save Your Way Out of Economic Shocks**\n3. **Dinosaur Food: 100M year old foods we still eat today**\n4. **Pebble Production: February Update**\n5. **AI made coding more enjoyable**\n",
-          "error": null
-        },
-        {
-          "name": "search_navigate",
-          "success": true,
-          "duration_s": 18.4,
-          "tool_calls": 3,
-          "result": "Rust was originally developed by **Mozilla**. Specifically, software developer **Graydon Hoare** created Rust in 2006 while working at Mozilla, and Mozilla officially sponsored the project in 2009. The first stable release (Rust 1.0) came out in May 2015. Later, following Mozilla layoffs in 2020, the **Rust Foundation** was established in February 2021, with Mozilla and four other companies as sponsors \u2014 and today the language is maintained by **The Rust Team** under that foundation.\n",
-          "error": null
-        },
-        {
-          "name": "deep_navigation",
-          "success": true,
-          "duration_s": 11.7,
-          "tool_calls": 1,
-          "result": "The latest release version of **claude-code** on GitHub is:\n\n**v2.1.47**\n\nYou can view it at: https://github.com/anthropics/claude-code/releases/tag/v2.1.47\n",
-          "error": null
-        },
-        {
           "name": "content_analysis",
           "success": true,
-          "duration_s": 13.4,
+          "duration_s": 15.8,
           "tool_calls": 1,
-          "result": "Here's the full breakdown of the **example.com** page structure:\n\n---\n\n### \ud83d\udccc Headings \u2014 1 total\n| Tag | Text |\n|-----|------|\n| `<h1>` | Example Domain |\n\n---\n\n### \ud83d\udd17 Links \u2014 1 total\n| Text | URL |\n|------|-----|\n| More information... | https://iana.org/domains/example |\n\n---\n\n### \ud83d\udcc4 Paragraphs \u2014 2 total\n1. *\"This domain is for use in illustrative examples in documents. You may use this domain in literature without prior coordination or asking for permission.\"*\n2. *\"More information...\"* (wraps th",
+          "result": "Here's the structure of **example.com**:\n\n---\n\n### \ud83d\udcc4 Page: *Example Domain*\n\n| Element | Count | Details |\n|---|---|---|\n| **Headings** | 1 | `<h1>`: \"Example Domain\" |\n| **Links** | 1 | \"Learn more\" \u2192 `https://iana.org/domains/example` |\n| **Paragraphs** | 2 | See below |\n\n### Paragraph Content:\n1. *\"This domain is for use in documentation examples without needing permission. Avoid using it in production...\"* \u2014 a brief explanation of the domain's purpose.\n2. A short paragraph containing the **\"",
           "error": null
         }
       ],
       "summary": {
-        "total_tasks": 6,
-        "passed": 6,
-        "total_duration_s": 79.0,
-        "total_tool_calls": 9,
-        "avg_tool_calls": 1.5
+        "total_tasks": 1,
+        "passed": 1,
+        "total_duration_s": 15.8,
+        "total_tool_calls": 1,
+        "avg_tool_calls": 1.0
       }
     }
   }
