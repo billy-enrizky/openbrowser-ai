@@ -100,8 +100,22 @@ def load_quantized_model(model_name: str, config: dict):
 def generate_rollouts(
     model, tokenizer, prompt: str, group_size: int, max_new_tokens: int = 512,
     temperature: float = 1.0,
+    temperature_spread: float = 0.0,
 ) -> tuple[list[str], torch.Tensor, int]:
     """Generate G rollouts for a single prompt.
+
+    Args:
+        model: The language model.
+        tokenizer: The tokenizer.
+        prompt: The formatted chat prompt.
+        group_size: Number of rollouts (G).
+        max_new_tokens: Max tokens per rollout.
+        temperature: Base sampling temperature.
+        temperature_spread: If > 0, generate each rollout with a different
+            temperature spread around the base. E.g. with temperature=1.0
+            and temperature_spread=0.4, G=4 rollouts use temperatures
+            [0.8, 0.93, 1.07, 1.2]. This increases rollout diversity and
+            reduces the skip rate from identical rewards.
 
     Returns:
         responses: list of decoded response strings
@@ -114,31 +128,65 @@ def generate_rollouts(
     inputs = tokenizer(prompt_with_skip, return_tensors="pt").to(model.device)
     prompt_length = inputs.input_ids.shape[1]
 
-    # Enable KV cache for generation (disabled during training for gradient checkpointing)
     model.eval()
     model.config.use_cache = True
-    with torch.no_grad():
-        outputs = model.generate(
-            **inputs,
-            max_new_tokens=max_new_tokens,
-            num_return_sequences=group_size,
-            do_sample=True,
-            temperature=temperature,
-            top_p=0.95,
-            return_dict_in_generate=True,
-            output_scores=False,
+
+    if temperature_spread > 0 and group_size > 1:
+        # Generate each rollout at a different temperature for diversity
+        all_seqs = []
+        responses = []
+        temps = [
+            temperature + temperature_spread * (2 * i / (group_size - 1) - 1)
+            for i in range(group_size)
+        ]
+        for t in temps:
+            t = max(t, 0.1)  # Floor to avoid degenerate sampling
+            with torch.no_grad():
+                out = model.generate(
+                    **inputs,
+                    max_new_tokens=max_new_tokens,
+                    num_return_sequences=1,
+                    do_sample=True,
+                    temperature=t,
+                    top_p=0.95,
+                    return_dict_in_generate=True,
+                    output_scores=False,
+                )
+            all_seqs.append(out.sequences[0])
+            text = tokenizer.decode(
+                out.sequences[0][prompt_length:], skip_special_tokens=True
+            )
+            responses.append(text)
+        # Pad to same length
+        max_len = max(s.shape[0] for s in all_seqs)
+        all_sequences = torch.zeros(
+            group_size, max_len, dtype=torch.long, device=all_seqs[0].device
         )
+        for j, seq in enumerate(all_seqs):
+            all_sequences[j, :seq.shape[0]] = seq
+    else:
+        # Standard batch generation at uniform temperature
+        with torch.no_grad():
+            outputs = model.generate(
+                **inputs,
+                max_new_tokens=max_new_tokens,
+                num_return_sequences=group_size,
+                do_sample=True,
+                temperature=temperature,
+                top_p=0.95,
+                return_dict_in_generate=True,
+                output_scores=False,
+            )
+        all_sequences = outputs.sequences  # [G, total_len]
+        responses = []
+        for seq in all_sequences:
+            text = tokenizer.decode(
+                seq[prompt_length:], skip_special_tokens=True
+            )
+            responses.append(text)
+
     model.config.use_cache = False
     model.train()
-
-    all_sequences = outputs.sequences  # [G, total_len]
-
-    responses = []
-    for seq in all_sequences:
-        text = tokenizer.decode(
-            seq[prompt_length:], skip_special_tokens=True
-        )
-        responses.append(text)
 
     return responses, all_sequences, prompt_length
 
@@ -279,6 +327,7 @@ async def train():
     action_timeout = config.get("action_timeout_s", 5.0)
     temperature = config.get("temperature", 1.0)
     min_reward_variance = config.get("min_reward_variance", 0.01)
+    temperature_spread = config.get("temperature_spread", 0.0)
 
     # Early stopping config
     es_patience = config.get("early_stopping_patience", 50)
@@ -355,6 +404,7 @@ async def train():
                     model, tokenizer, prompt_text, group_size,
                     max_new_tokens=max_new_tokens,
                     temperature=temperature,
+                    temperature_spread=temperature_spread,
                 )
                 model.train()
 
