@@ -287,6 +287,8 @@ async def train():
             epoch_rewards = []
             epoch_kl = []
 
+            consecutive_zero_reward = 0
+
             for i, prompt_data in enumerate(prompts):
                 # Periodically restart browser to reset DOM element indices.
                 # DOMWatchdog assigns monotonically increasing indices across
@@ -296,6 +298,17 @@ async def train():
                     logger.info(f"Periodic browser restart (prompt {i}) to reset DOM indices")
                     await browser_env.close()
                     browser_env = await BrowserEnvironment.create(headless=headless)
+
+                # Health check: restart FormFactory server if it died
+                if not ff_server.is_healthy():
+                    logger.warning("FormFactory server is not responding, restarting...")
+                    if not ff_server.restart():
+                        logger.error("Failed to restart FormFactory server, aborting training")
+                        break
+                    # Also restart browser after server restart
+                    await browser_env.close()
+                    browser_env = await BrowserEnvironment.create(headless=headless)
+                    consecutive_zero_reward = 0
 
                 instruction = prompt_data.get("instruction", "")
                 form_url = prompt_data.get("url", "")
@@ -371,6 +384,31 @@ async def train():
                     rewards.append(reward)
 
                 epoch_rewards.extend(rewards)
+
+                # Skip gradient update when all rollouts failed -- avoids
+                # KL-only updates that push policy back toward reference
+                # without any reward signal, which degrades the model.
+                all_zero = all(r == 0.0 for r in rewards)
+                if all_zero:
+                    consecutive_zero_reward += 1
+                    total_steps += 1
+                    if total_steps % config["logging_steps"] == 0:
+                        logger.info(
+                            f"  Step {total_steps} (prompt {i+1}/{len(prompts)}): "
+                            f"avg_reward=0.000 [SKIPPED update, {consecutive_zero_reward} consecutive zeros]"
+                        )
+                    # If too many consecutive zeros, force server health check
+                    if consecutive_zero_reward >= 3 and ff_server.is_healthy():
+                        logger.warning(
+                            f"{consecutive_zero_reward} consecutive zero-reward prompts "
+                            "despite healthy server -- browser may be stuck"
+                        )
+                        await browser_env.close()
+                        browser_env = await BrowserEnvironment.create(headless=headless)
+                        consecutive_zero_reward = 0
+                    continue
+                else:
+                    consecutive_zero_reward = 0
 
                 # Compute group-relative advantages
                 advantages = compute_grpo_advantages(rewards, group_size)
