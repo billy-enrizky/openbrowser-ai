@@ -12,6 +12,9 @@
        serve-vllm serve-ollama export-gguf \
        docker-build-eval docker-run-eval \
        terraform-plan-eval terraform-apply-eval terraform-destroy-eval \
+       terraform-plan-prod terraform-apply-prod terraform-destroy-prod \
+       prod-push-api-keys prod-get-url prod-build-frontend prod-deploy-frontend \
+       prod-deploy-backend-script prod-deploy-frontend-script \
        clean
 
 # Configuration
@@ -61,10 +64,21 @@ help:
 	@echo "  docker-build-eval   Build eval Docker image"
 	@echo "  docker-run-eval     Run eval in Docker container"
 	@echo ""
-	@echo "Terraform:"
+	@echo "Terraform (Eval):"
 	@echo "  terraform-plan-eval   Plan eval infrastructure"
 	@echo "  terraform-apply-eval  Apply eval infrastructure"
 	@echo "  terraform-destroy-eval Destroy eval infrastructure"
+	@echo ""
+	@echo "Terraform (Production):"
+	@echo "  terraform-plan-prod   Plan production infrastructure (EC2 + API Gateway)"
+	@echo "  terraform-apply-prod  Apply production infrastructure"
+	@echo "  terraform-destroy-prod Destroy production infrastructure"
+	@echo "  prod-push-api-keys    Push API keys from .env to SSM"
+	@echo "  prod-get-url          Get API Gateway URL"
+	@echo "  prod-build-frontend   Build frontend using Terraform outputs"
+	@echo "  prod-deploy-frontend  Build + upload frontend + CloudFront invalidation"
+	@echo "  prod-deploy-backend-script  Run infra/production/scripts/deploy-backend.sh"
+	@echo "  prod-deploy-frontend-script Run infra/production/scripts/deploy-frontend.sh"
 	@echo ""
 	@echo "Other:"
 	@echo "  clean               Remove local output files"
@@ -218,6 +232,39 @@ terraform-apply-eval:
 
 terraform-destroy-eval:
 	cd $(TF_EVAL_DIR) && terraform destroy
+
+# -------------------------------------------------------------------
+# Terraform (production)
+# -------------------------------------------------------------------
+
+TF_PROD_DIR = infra/production/terraform
+
+terraform-plan-prod:
+	cd $(TF_PROD_DIR) && terraform init && terraform plan
+
+terraform-apply-prod:
+	cd $(TF_PROD_DIR) && terraform init && terraform apply
+
+terraform-destroy-prod:
+	cd $(TF_PROD_DIR) && terraform destroy
+
+prod-push-api-keys:
+	bash infra/production/scripts/push_api_keys.sh
+
+prod-get-url:
+	@cd $(TF_PROD_DIR) && terraform output -raw api_base_url 2>/dev/null || echo "Run 'terraform apply' first"
+
+prod-build-frontend:
+	bash infra/production/scripts/build_frontend_from_tf.sh
+
+prod-deploy-frontend:
+	bash infra/production/scripts/build_frontend_from_tf.sh --deploy
+
+prod-deploy-backend-script:
+	bash infra/production/scripts/deploy-backend.sh
+
+prod-deploy-frontend-script:
+	bash infra/production/scripts/deploy-frontend.sh
 
 # -------------------------------------------------------------------
 # Cleanup

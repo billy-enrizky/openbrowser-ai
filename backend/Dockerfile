@@ -57,7 +57,6 @@ RUN playwright install-deps chromium
 
 # Set environment variable to tell openbrowser where the browser is
 ENV PLAYWRIGHT_BROWSERS_PATH=/root/.cache/ms-playwright
-ENV BROWSER_PATH=/root/.cache/ms-playwright/chromium-1200/chrome-linux/chrome
 
 # Copy backend code
 COPY backend/ backend/
