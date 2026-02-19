@@ -172,6 +172,7 @@ class WSStartTaskData(BaseModel):
     use_vision: bool = True
     llm_model: str | None = None
     use_current_browser: bool = False
+    conversation_id: str | None = None
 
 
 class WSStepUpdateData(BaseModel):
@@ -249,3 +250,52 @@ class AvailableModelsResponse(BaseModel):
     providers: list[str] = Field(default_factory=list, description="List of available providers")
     default_model: str | None = Field(default=None, description="Default model to use")
 
+
+# Chat persistence API models
+
+class ChatConversation(BaseModel):
+    """Conversation list/detail record."""
+    id: str
+    title: str
+    status: str
+    created_at: datetime
+    updated_at: datetime
+    last_message_at: datetime | None = None
+
+
+class ChatMessage(BaseModel):
+    """Persisted chat message."""
+    id: str
+    conversation_id: str
+    role: MessageRole
+    content: str
+    task_id: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime
+
+
+class ChatListResponse(BaseModel):
+    """List conversations response."""
+    conversations: list[ChatConversation]
+    active_conversation_id: str | None = None
+
+
+class ChatConversationResponse(BaseModel):
+    """Conversation with messages response."""
+    conversation: ChatConversation
+    messages: list[ChatMessage]
+
+
+class CreateChatRequest(BaseModel):
+    """Create conversation request."""
+    title: str | None = Field(default=None, max_length=200)
+
+
+class RenameChatRequest(BaseModel):
+    """Rename conversation request."""
+    title: str = Field(..., min_length=1, max_length=200)
+
+
+class SetActiveChatRequest(BaseModel):
+    """Set active conversation request."""
+    conversation_id: str | None = None
