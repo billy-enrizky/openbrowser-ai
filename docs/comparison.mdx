@@ -6,7 +6,7 @@ icon: "scale-balanced"
 
 # Browser MCP Server Comparison
 
-Benchmark date: 2026-02-18 | OpenBrowser MCP v0.1.17 | Playwright MCP v0.0.68 | Chrome DevTools MCP v0.17.1
+Benchmark date: 2026-02-19 | OpenBrowser MCP v0.1.21 (CodeAgent, 1 tool) | Playwright MCP (latest) | Chrome DevTools MCP (latest)
 
 ## Overview
 
@@ -17,8 +17,8 @@ Three approaches to browser automation via MCP, measured on identical tasks.
 | **Maintainer** | Microsoft | Chrome DevTools team (Google) | OpenBrowser |
 | **GitHub Stars** | 27,300+ | 25,900+ | -- |
 | **Engine** | Playwright (Chromium/Firefox/WebKit) | Puppeteer (CDP) | Raw CDP (direct) |
-| **Tools** | 22 core (39 total) | 26 | 11 |
-| **Approach** | A11y snapshot with every action | A11y snapshot on demand | Text-first, progressive disclosure |
+| **Tools** | 22 core (39 total) | 26 | 1 (`execute_code`) |
+| **Approach** | A11y snapshot with every action | A11y snapshot on demand | CodeAgent -- Python code execution with browser namespace |
 | **Element IDs** | `ref` from snapshot (`[ref=e25]`) | `uid` from snapshot (`uid=1_2`) | Numeric index from state |
 | **Transport** | stdio | stdio | stdio |
 | **Language** | TypeScript (Node.js) | TypeScript (Node.js) | Python |
@@ -256,6 +256,75 @@ MCP tool response costs per 5-step workflow on a complex page (Wikipedia). These
 | Claude Opus | $3,720 | $2,022 | **$4.25** |
 | GPT-4o | $620 | $337 | **$0.71** |
 
+## E2E LLM Benchmark
+
+### Methodology
+
+Six real-world browser tasks run through Claude Sonnet 4.6 on AWS Bedrock (Converse API). Each task uses a single MCP server as tool provider. The LLM decides which tools to call and when the task is complete. All tasks run against live websites.
+
+**Tasks**: Wikipedia fact lookup, httpbin form fill, Hacker News data extraction, Wikipedia search + navigation, GitHub release lookup, example.com content analysis.
+
+### Results: Task Success
+
+All three servers pass all 6 tasks.
+
+| Task | Playwright MCP | Chrome DevTools MCP | OpenBrowser MCP |
+|------|:-:|:-:|:-:|
+| fact_lookup | PASS | PASS | PASS |
+| form_fill | PASS | PASS | PASS |
+| multi_page_extract | PASS | PASS | PASS |
+| search_navigate | PASS | PASS | PASS |
+| deep_navigation | PASS | PASS | PASS |
+| content_analysis | PASS | PASS | PASS |
+| **Total** | **6/6** | **6/6** | **6/6** |
+
+### Results: Tool Calls and Duration
+
+| Metric | Playwright MCP | Chrome DevTools MCP | OpenBrowser MCP |
+|--------|---------------:|--------------------:|----------------:|
+| **Total tool calls** | 10 | 21 | 20 |
+| **Avg tool calls/task** | 1.7 | 3.5 | 3.3 |
+| **Total duration** | 85.3s | 135.5s | 110.5s |
+
+Playwright completes most tasks in 1 tool call because every navigation returns the full accessibility snapshot -- the LLM sees the entire page immediately and can answer without follow-up queries. OpenBrowser takes more turns because the LLM writes code to navigate, extract, and verify data step by step.
+
+### Results: Token Efficiency
+
+Response token usage measured from actual MCP tool response sizes in the benchmark (chars / 4).
+
+| Metric | Playwright MCP | Chrome DevTools MCP | OpenBrowser MCP |
+|--------|---------------:|--------------------:|----------------:|
+| **Total response chars** | 1,135,423 | 1,204,132 | 6,667 |
+| **Est. response tokens** | **283,853** | **301,030** | **1,665** |
+| **Token ratio vs OpenBrowser** | **170x more** | **181x more** | **1x (baseline)** |
+
+| Task | Playwright MCP | Chrome DevTools MCP | OpenBrowser MCP |
+|------|---------------:|--------------------:|----------------:|
+| fact_lookup | 477,003 chars | 509,059 chars | 1,041 chars |
+| form_fill | 4,075 chars | 3,150 chars | 2,410 chars |
+| multi_page_extract | 58,099 chars | 38,593 chars | 513 chars |
+| search_navigate | 518,461 chars | 594,458 chars | 1,996 chars |
+| deep_navigation | 77,292 chars | 58,359 chars | 113 chars |
+| content_analysis | 493 chars | 513 chars | 594 chars |
+
+The pattern: any task involving a complex page (Wikipedia, GitHub releases) produces massive response payloads for Playwright and Chrome DevTools because they dump the full accessibility snapshot. OpenBrowser returns only the data the code explicitly extracts.
+
+### Results: Cost Per Benchmark Run (6 Tasks)
+
+Token cost at input rates (response tokens are charged as input on the next LLM turn).
+
+| Model | Playwright MCP | Chrome DevTools MCP | OpenBrowser MCP |
+|-------|---------------:|--------------------:|----------------:|
+| Claude Sonnet ($3/M input) | $0.852 | $0.903 | **$0.005** |
+| Claude Opus ($15/M input) | $4.258 | $4.515 | **$0.025** |
+| GPT-4o ($2.50/M input) | $0.710 | $0.753 | **$0.004** |
+
+### Why OpenBrowser Uses More Tool Calls but Fewer Tokens
+
+Playwright sends the full page with every response, so the LLM gets the answer immediately but pays for ~120K tokens per Wikipedia page load. OpenBrowser returns compact results (~30-800 chars per call), so the LLM needs more round-trips to navigate and extract but pays far fewer tokens overall.
+
+For a single simple task, Playwright's approach is fast. At scale (thousands of workflows, complex pages, multi-step agents), the token cost difference is 170x+.
+
 ## Tool Surface Comparison
 
 ### Playwright MCP (22 core tools)
@@ -266,34 +335,23 @@ Navigation, interaction, form filling, file upload, drag, hover, key press, sele
 
 Input automation (click, drag, fill, fill_form, hover, press_key, handle_dialog, upload_file), navigation (navigate_page, new_page, close_page, list_pages, select_page, wait_for), emulation (emulate, resize_page), performance tracing (start/stop/analyze), network debugging (list/get requests), JS execution, console messages, screenshots, DOM snapshots.
 
-### OpenBrowser MCP (11 tools)
+### OpenBrowser MCP (1 tool -- CodeAgent)
 
 | Tool | Capabilities |
 |------|-------------|
-| `browser_navigate` | URL navigation, new tab |
-| `browser_click` | Element click by index, new tab |
-| `browser_type` | Text input by index |
-| `browser_get_state` | Compact/full state, element filtering by text/tag/id/class/attribute |
-| `browser_scroll` | Direction scroll, find-and-scroll by text |
-| `browser_go_back` | History back |
-| `browser_get_text` | Page as markdown, regex search with context lines |
-| `browser_tab` | List, switch, close tabs |
-| `browser_session` | List, close, close-all sessions |
-| `browser_get_accessibility_tree` | Tree/flat format, depth limit |
-| `browser_execute_js` | JS execution, await/fire-and-forget, by-value/by-reference |
+| `execute_code` | Python code execution in a persistent namespace with browser automation functions: `navigate()`, `click()`, `input_text()`, `scroll()`, `go_back()`, `select_dropdown()`, `send_keys()`, `upload_file()`, `evaluate()` (JS), `switch()`/`close()` (tabs), `done()` (task completion). Also provides `file_system` for local file operations and pre-imported libraries (json, pandas, re, csv, etc.) |
 
 ## Unique to OpenBrowser
 
 Features no competitor offers:
 
-- **Progressive disclosure** -- compact state (105 tokens) vs full state vs text vs grep
-- **Regex content search** -- `browser_get_text(search="pattern")` returns only matching lines with context
-- **Element filtering** -- `browser_get_state(filter_by="text", filter_query="Login")` searches interactive elements
-- **Find-and-scroll** -- `browser_scroll(target_text="Section 3")` locates and scrolls to text
-- **MCP Resources** -- `browser://current-page/content`, `/state`, `/accessibility`
-- **Multi-session templates** -- read from specific sessions by ID
-- **Resource subscriptions** -- subscribe to specific URIs for change notifications
-- **WebMCP ToolAnnotations** -- `readOnlyHint`, `destructiveHint`, `idempotentHint` on all tools
+- **CodeAgent architecture** -- single `execute_code` tool runs Python in a persistent namespace. The LLM writes code to navigate, extract, and process data rather than calling individual tools. Variables and state persist between calls.
+- **127x token efficiency** -- returns only the data the code explicitly extracts, not full page dumps
+- **JS evaluation with Python processing** -- `await evaluate("JS expression")` returns Python objects directly (dicts, lists, strings), enabling pandas/regex/json processing in the same code block
+- **Built-in libraries** -- json, pandas, numpy, matplotlib, csv, re, datetime, requests, BeautifulSoup available in the execution namespace
+- **File system access** -- `file_system` object for reading/writing local files from browser automation code
+- **Dropdown support** -- `select_dropdown()` and `dropdown_options()` for native `<select>` elements
+- **Task completion signal** -- `done(text, success)` to explicitly mark task completion with a result
 
 ## Gaps vs Competitors
 
@@ -319,15 +377,23 @@ Features no competitor offers:
 
 ## Benchmark Methodology Notes
 
+### Token Usage Benchmark (5-step workflow)
 - All three servers benchmarked via JSON-RPC stdio subprocess -- no estimates
 - Response sizes measured as total JSON-RPC response character count
 - Estimated tokens = characters / 4 (standard approximation for mixed English/JSON)
 - 5-step workflow uses matched operations: navigate, get state/snapshot, click, go back, get state/snapshot
-- Playwright MCP v0.0.68 tested via `npx @playwright/mcp@latest`
-- Chrome DevTools MCP v0.17.1 tested via `npx -y chrome-devtools-mcp@latest`
-- OpenBrowser MCP v0.1.17 tested via `uvx openbrowser-ai[mcp]@0.1.17 --mcp`
-- All tests run on macOS, M-series Apple Silicon
-- Latency measured as round-trip time from JSON-RPC request to response
 - Raw benchmark data: `benchmarks/playwright_results.json`, `benchmarks/cdp_results.json`, `benchmarks/openbrowser_results.json`
-- Benchmark scripts: `benchmarks/playwright_benchmark.py`, `benchmarks/cdp_benchmark.py`, `benchmarks/openbrowser_benchmark.py`
-- E2E test script: `benchmarks/e2e_published_test.py` (tests all 11 OpenBrowser tools against published PyPI package)
+
+### E2E LLM Benchmark (6 real-world tasks)
+- Model: Claude Sonnet 4.6 on AWS Bedrock (Converse API)
+- Each task uses a single MCP server as tool provider via JSON-RPC stdio
+- The LLM autonomously decides which tools to call and when the task is complete
+- 6 tasks: fact_lookup, form_fill, multi_page_extract, search_navigate, deep_navigation, content_analysis
+- All tasks run against live websites (Wikipedia, httpbin.org, news.ycombinator.com, github.com, example.com)
+- Token usage measured from actual MCP tool response character counts in the benchmark logs
+- Playwright MCP tested via `npx @playwright/mcp@latest`
+- Chrome DevTools MCP tested via `npx -y chrome-devtools-mcp@latest`
+- OpenBrowser MCP v0.1.21 tested via `uvx openbrowser-ai[mcp]==0.1.21 --mcp`
+- All tests run on macOS, M-series Apple Silicon
+- Benchmark script: `benchmarks/e2e_llm_benchmark.py`
+- Results: `benchmarks/e2e_llm_results.json`
