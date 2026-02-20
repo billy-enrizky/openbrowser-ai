@@ -12,6 +12,19 @@ from app.services.vnc_service import vnc_service, VncSession, VNC_AVAILABLE
 
 logger = logging.getLogger(__name__)
 
+# Chromium kiosk flags applied when VNC is enabled to prevent users from
+# closing the browser or accessing browser chrome (address bar, menus, etc.)
+KIOSK_CHROME_ARGS = [
+    "--kiosk",
+    "--noerrdialogs",
+    "--disable-translate",
+    "--disable-infobars",
+    "--disable-session-crashed-bubble",
+    "--disable-features=TranslateUI",
+    "--check-for-update-interval=31536000",
+    "--disable-component-update",
+]
+
 
 class AgentSession:
     """Manages a single agent session."""
@@ -147,10 +160,14 @@ class AgentSession:
     async def _setup_new_browser(self, BrowserSession, BrowserProfile):
         """Set up a new browser instance (standard flow)."""
         # Create browser session with profile
-        # When VNC is enabled, we need headless=False and set DISPLAY
+        # When VNC is enabled, we need headless=False and set DISPLAY.
+        # Kiosk flags prevent users from closing the browser or accessing
+        # browser chrome when they take interactive control via VNC.
+        extra_args = KIOSK_CHROME_ARGS if self.enable_vnc else []
         browser_profile = BrowserProfile(
             headless=False,  # Always headful when VNC is enabled
             keep_alive=False,
+            args=extra_args,
         )
 
         # Set up environment for VNC display
