@@ -502,7 +502,7 @@ pytest tests/
 # Run with verbose output
 pytest tests/ -v
 
-# E2E test all 11 MCP tools against the published PyPI package
+# E2E test the MCP server against the published PyPI package
 uv run python benchmarks/e2e_published_test.py
 ```
 
