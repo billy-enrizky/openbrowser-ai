@@ -35,7 +35,6 @@ graph LR
 
 - **Frontend**: Static Next.js export on S3, served via CloudFront with Origin Access Control.
 - **Backend**: Single EC2 instance (t3.medium, 4 GB RAM + 2 GB swap) in a private subnet running a Docker container with FastAPI, Playwright/Chromium, and a VNC stack (Xvfb, Openbox, x11vnc, websockify).
-- **API Gateway**: Present in Terraform but **bypassed** by CloudFront. CloudFront routes directly to the ALB to avoid the 30-second API Gateway integration timeout that kills WebSocket connections.
 
 ## File layout
 
@@ -47,7 +46,6 @@ graph LR
 | `alb.tf` | Internet-facing ALB, target group, HTTP listener (idle timeout 3600s) |
 | `backend.tf` | EC2 instance, user_data, target group attachment |
 | `rds.tf` | PostgreSQL RDS instance and subnet group |
-| `api_gateway.tf` | HTTP API, VPC Link, routes (legacy, bypassed by CloudFront) |
 | `iam.tf` | Backend EC2 IAM role: ECR, DynamoDB, Secrets, SSM permissions |
 | `ecr.tf` | ECR repository and lifecycle policy for backend image |
 | `dynamodb.tf` | Sessions table + VPC endpoint |
@@ -138,7 +136,6 @@ bash infra/production/scripts/deploy-frontend.sh
 | **PostgreSQL (RDS)** | db.t4g.micro, v16.4; chat/conversation persistence |
 | **ALB** | Internet-facing, 3600s idle timeout (persistent VNC WebSocket), health check `/health` |
 | **CloudFront** | Primary entry point; routes API to ALB, static to S3; CloudFront Function for SPA URI rewrite |
-| **API Gateway** | HTTP API with VPC Link to ALB (legacy, bypassed by CloudFront) |
 | **Cognito** | User pool, app client, hosted domain for PKCE auth |
 | **DynamoDB** | Table `{project_name}-sessions`; VPC endpoint for private access |
 | **ECR** | Backend image repo; EC2 pulls from here on deploy |
@@ -155,7 +152,6 @@ See `variables.tf`. Key ones:
 - **backend_port** -- Port the backend listens on (default `8000`).
 - **postgres_db_name** / **postgres_username** / **postgres_instance_class** -- PostgreSQL settings.
 - **enable_backend_auth** -- Set `true` to require Cognito JWT in FastAPI (REST + WebSocket).
-- **enable_api_auth** -- Optional JWT check at API Gateway (default `false`; API Gateway is bypassed anyway).
 - **cognito_callback_urls** / **cognito_logout_urls** -- Optional explicit OAuth URLs. If empty, Terraform auto-generates from frontend domain + localhost.
 - **frontend_domain_name** / **frontend_acm_certificate_arn** -- Optional custom domain for CloudFront.
 
@@ -176,16 +172,12 @@ graph LR
     style S3 fill:#e8a838,color:#fff
 ```
 
-API Gateway exists but receives zero traffic. CloudFront routes directly to ALB.
-
 ## Auth (Cognito + Hosted UI + PKCE)
 
 - **AUTHENTICATION.md** -- Env values and deploy steps for frontend PKCE implementation.
 - **COGNITO_SETUP.md** -- Callback/logout URL behavior and when to override Terraform defaults.
 
-For parity with local auth, use:
-- `enable_backend_auth = true`
-- `enable_api_auth = false`
+Auth is enforced in the backend (`enable_backend_auth = true`).
 
 CORS origins are auto-derived from the CloudFront domain (no manual configuration needed).
 
@@ -210,8 +202,6 @@ The script reads all Terraform outputs, writes `.env.production.local`, builds w
 | Output | Purpose |
 |--------|---------|
 | `frontend_url` | CloudFront URL (primary entry point) |
-| `api_base_url` | API Gateway endpoint (legacy, not primary) |
-| `api_ws_url` | WebSocket URL |
 | `frontend_s3_bucket` | Deploy static files here |
 | `cloudfront_distribution_id` | For cache invalidation |
 | `backend_ecr_repository_url` | Where to push the Docker image |

@@ -2,7 +2,7 @@
 
 ## Architecture Overview
 
-CloudFront is the single entry point for all traffic. API Gateway exists in Terraform but is **completely bypassed** -- CloudFront routes directly to the ALB to avoid the 30-second integration timeout that kills persistent WebSocket connections.
+CloudFront is the single entry point for all traffic. It routes API/WebSocket requests to the ALB and serves static frontend assets from S3.
 
 ## Complete Request Flow
 
@@ -141,15 +141,6 @@ graph TD
     style F fill:#4a90d9,color:#fff
     style G fill:#50b86c,color:#fff
 ```
-
-## Why API Gateway Is Bypassed
-
-API Gateway (HTTP API) still exists in Terraform but receives **zero traffic**:
-
-1. **30-second integration timeout**: API Gateway kills long-lived connections (VNC WebSocket, SSE) after 30 seconds. This is a hard limit that cannot be increased.
-2. **CloudFront direct-to-ALB**: CloudFront routes all `/api/*` and `/ws/*` traffic directly to the ALB, which has a 3600-second idle timeout.
-3. **JWT auth in FastAPI**: Authentication is handled by the backend, not API Gateway.
-4. **Candidate for removal**: API Gateway can be removed from Terraform to simplify the architecture.
 
 ## EC2 Instance Details
 
