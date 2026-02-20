@@ -47,6 +47,7 @@ JOB_CONFIGS = {
     "online-flow-grpo": JOBS_DIR / "online_flow_grpo_job.yaml",
     "online-flow-llm-grpo": JOBS_DIR / "online_flow_llm_grpo_job.yaml",
     "online-grpo": JOBS_DIR / "online_grpo_job.yaml",
+    "online-grpo-v7": JOBS_DIR / "online_grpo_v7_job.yaml",
     "fsdfm-sft": JOBS_DIR / "fsdfm_sft_job.yaml",
     "online-fsdfm-grpo": JOBS_DIR / "online_fsdfm_grpo_job.yaml",
     "fsdfm-flow-grpo": JOBS_DIR / "fsdfm_flow_grpo_job.yaml",
