@@ -60,8 +60,8 @@ variable "backend_image_tag" {
 
 variable "backend_instance_type" {
   type        = string
-  default     = "t3.small"
-  description = "EC2 instance type for the backend (needs 2GB+ memory for Chromium/Playwright)."
+  default     = "t3.medium"
+  description = "EC2 instance type for the backend (needs 4GB+ memory for Chromium/Playwright)."
 }
 
 variable "secrets_manager_secret_name" {
