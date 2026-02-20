@@ -104,6 +104,9 @@ async def run_multi(
         run_durations = []
         run_tool_calls = []
         run_pass_counts = []
+        run_bedrock_input_tokens = []
+        run_bedrock_output_tokens = []
+        run_total_bedrock_tokens = []
         per_task_durations = {t["name"]: [] for t in tasks_to_run}
         per_task_tool_calls = {t["name"]: [] for t in tasks_to_run}
         per_task_pass = {t["name"]: [] for t in tasks_to_run}
@@ -124,6 +127,9 @@ async def run_multi(
             run_durations.append(summary["total_duration_s"])
             run_tool_calls.append(summary["total_tool_calls"])
             run_pass_counts.append(summary["passed"])
+            run_bedrock_input_tokens.append(summary.get("bedrock_input_tokens", 0))
+            run_bedrock_output_tokens.append(summary.get("bedrock_output_tokens", 0))
+            run_total_bedrock_tokens.append(summary.get("total_bedrock_tokens", 0))
 
             for tr in task_results:
                 per_task_durations[tr["name"]].append(tr["duration_s"])
@@ -137,15 +143,19 @@ async def run_multi(
             })
 
             logger.info(
-                "  Run %d: %d/%d passed, %.1fs, %d tool calls",
+                "  Run %d: %d/%d passed, %.1fs, %d tool calls, %d bedrock tokens",
                 run_idx + 1, summary["passed"], summary["total_tasks"],
                 summary["total_duration_s"], summary["total_tool_calls"],
+                summary.get("total_bedrock_tokens", 0),
             )
 
         # Compute statistics
         duration_stats = bootstrap_ci(run_durations, n_bootstrap)
         tool_call_stats = bootstrap_ci(run_tool_calls, n_bootstrap)
         pass_stats = bootstrap_ci(run_pass_counts, n_bootstrap)
+        input_token_stats = bootstrap_ci(run_bedrock_input_tokens, n_bootstrap)
+        output_token_stats = bootstrap_ci(run_bedrock_output_tokens, n_bootstrap)
+        total_token_stats = bootstrap_ci(run_total_bedrock_tokens, n_bootstrap)
 
         per_task_stats = {}
         for task_name in per_task_durations:
@@ -163,6 +173,9 @@ async def run_multi(
                 "duration_s": duration_stats,
                 "tool_calls": tool_call_stats,
                 "pass_count": pass_stats,
+                "bedrock_input_tokens": input_token_stats,
+                "bedrock_output_tokens": output_token_stats,
+                "total_bedrock_tokens": total_token_stats,
             },
             "per_task": per_task_stats,
         }
@@ -182,6 +195,11 @@ async def run_multi(
         logger.info(
             "  Pass count: %.1f +/- %.1f / %d",
             pass_stats["mean"], pass_stats["std"], len(tasks_to_run),
+        )
+        logger.info(
+            "  Bedrock tokens: %.0f +/- %.0f (95%% CI: %.0f - %.0f)",
+            total_token_stats["mean"], total_token_stats["std"],
+            total_token_stats["ci_low"], total_token_stats["ci_high"],
         )
 
     # Print comparison table
@@ -203,6 +221,7 @@ async def run_multi(
         ("Duration (s)", "duration_s", ".1f"),
         ("Tool Calls", "tool_calls", ".1f"),
         ("Pass Count", "pass_count", ".1f"),
+        ("Bedrock Tokens", "total_bedrock_tokens", ".0f"),
     ]:
         row = f"{label:<35s}"
         for name in names:
@@ -216,6 +235,7 @@ async def run_multi(
     for label, stat_key, fmt in [
         ("Duration (s)", "duration_s", ".1f"),
         ("Tool Calls", "tool_calls", ".1f"),
+        ("Bedrock Tokens", "total_bedrock_tokens", ".0f"),
     ]:
         row = f"  {label:<33s}"
         for name in names:
