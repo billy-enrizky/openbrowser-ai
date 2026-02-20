@@ -43,13 +43,8 @@ COPY backend/README.md backend/
 # Install backend dependencies
 RUN cd backend && uv pip install -e . --system
 
-# Copy and install openbrowser from local path
-# Set version via environment variable since .git is not available
-COPY pyproject.toml .
-COPY src/ src/
-COPY README.md .
-ENV SETUPTOOLS_SCM_PRETEND_VERSION=0.2.94
-RUN uv pip install -e . --system
+# Install openbrowser from PyPI
+RUN uv pip install openbrowser-ai==0.1.22 --system
 
 # Install Playwright and browsers (chromium works better in Docker)
 RUN playwright install chromium
@@ -57,7 +52,6 @@ RUN playwright install-deps chromium
 
 # Set environment variable to tell openbrowser where the browser is
 ENV PLAYWRIGHT_BROWSERS_PATH=/root/.cache/ms-playwright
-ENV BROWSER_PATH=/root/.cache/ms-playwright/chromium-1200/chrome-linux/chrome
 
 # Copy backend code
 COPY backend/ backend/

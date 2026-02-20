@@ -240,7 +240,7 @@ pip install openbrowser-ai[video]
 ### Install Browser
 
 ```bash
-uvx openbrowser install
+uvx openbrowser-ai install
 # or
 playwright install chromium
 ```
@@ -400,13 +400,13 @@ Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_
 
 ```bash
 # Run a browser automation task
-uvx openbrowser run "Search for Python tutorials on Google"
+uvx openbrowser-ai -p "Search for Python tutorials on Google"
 
 # Install browser
-uvx openbrowser install
+uvx openbrowser-ai install
 
 # Run MCP server
-uvx openbrowser mcp
+uvx openbrowser-ai[mcp] --mcp
 ```
 
 ## Project Structure
@@ -925,7 +925,7 @@ source .venv/bin/activate
 ```
 ```bash install openbrowser & chromium
 uv pip install openbrowser-ai
-uvx openbrowser install
+uvx openbrowser-ai install
 ```
 
 

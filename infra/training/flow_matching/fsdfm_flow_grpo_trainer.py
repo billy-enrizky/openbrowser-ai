@@ -18,7 +18,7 @@ Architecture:
     1. Generate G rollouts via discrete Euler solver, recording trajectories
     2. Execute rollouts in headless browser against FormFactory
     3. Compute group-relative advantages from browser rewards
-    4. For each rollout, iterate over ALL trajectory steps (denoising reduction):
+    4. For each rollout, sample K random trajectory steps (denoising reduction):
        a. Recompute policy log-prob at that step (with gradients)
        b. REINFORCE loss: -advantage * log_prob (per-step backward)
        c. KL penalty from Schulman k3 approximation (ref model swapped
@@ -35,6 +35,7 @@ import asyncio
 import json
 import logging
 import os
+import random
 from pathlib import Path
 
 import torch
@@ -166,6 +167,7 @@ async def train():
     gen_temperature = grpo_config.get("generation_temperature", 1.0)
     action_timeout = grpo_config.get("action_timeout_s", 5.0)
     grad_clip = grpo_config.get("grad_clip", 1.0)
+    num_sampled_timesteps = grpo_config.get("num_sampled_timesteps", 8)
     dt = 1.0 / num_gen_steps
 
     # ---------------------------------------------------------------
@@ -326,16 +328,11 @@ async def train():
                 optimizer.zero_grad()
                 total_loss_val = 0.0
                 total_kl_val = 0.0
-                valid_terms = 0
+                kl_terms = 0
 
-                # Count total terms for loss normalization
-                for g in range(group_size):
-                    traj = trajectories[g]
-                    if len(traj.steps) > 0:
-                        valid_terms += len(traj.steps)
-
-                if valid_terms == 0:
-                    valid_terms = 1  # avoid division by zero
+                # Move ref_model to GPU once for all KL computations
+                if kl_coeff > 0:
+                    ref_model.to(device)
 
                 for g in range(group_size):
                     traj = trajectories[g]
@@ -346,10 +343,25 @@ async def train():
                     if len(traj.steps) == 0:
                         continue
 
+                    # Skip gradient computation when advantage is exactly 0
+                    # (no learning signal). This avoids 0 * NaN = NaN when
+                    # log_prob has numerical issues from bf16 overflow.
+                    if adv_g.abs().item() < 1e-10:
+                        continue
+
                     # Response mask from the trajectory edit_mask (float)
                     response_mask = traj.edit_mask.float()  # [1, L]
 
-                    for step in traj.steps:
+                    # Denoising reduction: sample K random timesteps
+                    # instead of processing all T steps (Flow-GRPO paper)
+                    num_sampled = min(num_sampled_timesteps, len(traj.steps))
+                    sampled_indices = sorted(
+                        random.sample(range(len(traj.steps)), num_sampled)
+                    )
+                    sampled_steps = [traj.steps[idx] for idx in sampled_indices]
+                    num_steps_g = max(len(sampled_steps), 1)
+
+                    for step in sampled_steps:
                         # Current policy log-prob (WITH gradients)
                         log_prob = compute_discrete_step_log_prob(
                             model=policy_model,
@@ -360,7 +372,16 @@ async def train():
                             scheduler=scheduler,
                             vocab_size=vocab_size,
                             response_mask=response_mask,
+                            temperature=gen_temperature,
                         )  # [1]
+
+                        # Guard: skip if log_prob is NaN/Inf
+                        if torch.isnan(log_prob).any() or torch.isinf(log_prob).any():
+                            logger.warning(
+                                "NaN/Inf log_prob at rollout %d, step t=%.4f, skipping",
+                                g, step.t_value,
+                            )
+                            continue
 
                         # REINFORCE policy loss (ratio=1 simplification)
                         policy_loss = (-adv_g * log_prob).mean()
@@ -368,8 +389,6 @@ async def train():
                         # KL penalty (Schulman k3: r - log(r) - 1 >= 0)
                         kl_loss = torch.tensor(0.0, device=device)
                         if kl_coeff > 0:
-                            # Move ref_model to GPU for KL computation
-                            ref_model.to(device)
                             with torch.no_grad():
                                 ref_log_prob = compute_discrete_step_log_prob(
                                     model=ref_model,
@@ -380,20 +399,30 @@ async def train():
                                     scheduler=scheduler,
                                     vocab_size=vocab_size,
                                     response_mask=response_mask,
+                                    temperature=gen_temperature,
                                 )  # [1]
-                            ref_model.to("cpu")
-                            torch.cuda.empty_cache()
                             log_r = ref_log_prob - log_prob
                             kl_loss = (torch.exp(log_r) - log_r - 1).mean()
+                            # Guard: replace NaN KL with 0
+                            if torch.isnan(kl_loss):
+                                kl_loss = torch.tensor(0.0, device=device)
                             total_kl_val += kl_loss.detach().item()
+                            kl_terms += 1
 
-                        step_loss = (policy_loss + kl_coeff * kl_loss) / valid_terms
+                        step_loss = (policy_loss + kl_coeff * kl_loss) / num_steps_g
                         # Per-step backward to release activations immediately
                         step_loss.backward()
                         total_loss_val += step_loss.detach().item()
 
-                # Clip gradients and step
-                if total_loss_val != 0.0:
+                # Move ref_model back to CPU after all KL computations
+                if kl_coeff > 0:
+                    ref_model.to("cpu")
+                    torch.cuda.empty_cache()
+
+                # Clip gradients and step (guard against NaN accumulated loss)
+                if total_loss_val != 0.0 and not (
+                    total_loss_val != total_loss_val  # NaN check
+                ):
                     torch.nn.utils.clip_grad_norm_(trainable_params, grad_clip)
                     optimizer.step()
 
@@ -401,7 +430,7 @@ async def train():
 
                 total_steps += 1
                 avg_reward = sum(rewards) / len(rewards) if rewards else 0
-                avg_kl = total_kl_val / max(valid_terms, 1)
+                avg_kl = total_kl_val / max(kl_terms, 1)
                 epoch_kl.append(avg_kl)
 
                 if total_steps % grpo_config["logging_steps"] == 0:
