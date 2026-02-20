@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Locked-down Openbox configuration for VNC kiosk mode.
+
+  Security features:
+  - Zero keyboard shortcuts (empty <keyboard> section)
+  - No window decorations (no close/minimize/maximize buttons)
+  - All windows forced to maximized
+  - No desktop/root mouse bindings (no right-click menu)
+  - Single desktop, no animations
+-->
+<openbox_config xmlns="http://openbox.org/3.4/rc"
+                xmlns:xi="http://www.w3.org/2001/XInclude">
+
+  <resistance>
+    <strength>0</strength>
+    <screen_edge_strength>0</screen_edge_strength>
+  </resistance>
+
+  <focus>
+    <focusNew>yes</focusNew>
+    <followMouse>no</followMouse>
+    <focusLast>yes</focusLast>
+    <underMouse>no</underMouse>
+    <focusDelay>0</focusDelay>
+    <raiseOnFocus>no</raiseOnFocus>
+  </focus>
+
+  <placement>
+    <policy>Smart</policy>
+    <center>yes</center>
+    <monitor>Primary</monitor>
+    <primaryMonitor>1</primaryMonitor>
+  </placement>
+
+  <theme>
+    <name>Clearlooks</name>
+    <!-- Empty titleLayout: no buttons (close, maximize, minimize, iconify) -->
+    <titleLayout></titleLayout>
+    <keepBorder>no</keepBorder>
+    <animateIconify>no</animateIconify>
+    <font place="ActiveWindow"><name>sans</name><size>8</size></font>
+    <font place="InactiveWindow"><name>sans</name><size>8</size></font>
+  </theme>
+
+  <desktops>
+    <number>1</number>
+    <firstdesk>1</firstdesk>
+    <popupTime>0</popupTime>
+  </desktops>
+
+  <!-- SECURITY: Empty keyboard section - no shortcuts at all.
+       This prevents Alt+F4, Alt+Tab, Ctrl+Alt+anything, Super key, etc. -->
+  <keyboard>
+  </keyboard>
+
+  <!-- SECURITY: Minimal mouse bindings.
+       Only allow focus/raise on client windows. No root/desktop context
+       means no right-click menu on the desktop background. -->
+  <mouse>
+    <dragThreshold>1</dragThreshold>
+    <doubleClickTime>500</doubleClickTime>
+    <screenEdgeWarpTime>0</screenEdgeWarpTime>
+    <screenEdgeWarpMouse>false</screenEdgeWarpMouse>
+
+    <!-- Allow clicking inside application windows -->
+    <context name="Client">
+      <mousebind button="Left" action="Press">
+        <action name="Focus"/>
+        <action name="Raise"/>
+      </mousebind>
+    </context>
+
+    <context name="Frame">
+      <mousebind button="Left" action="Press">
+        <action name="Focus"/>
+        <action name="Raise"/>
+      </mousebind>
+    </context>
+
+    <!-- SECURITY: No Root context = no desktop right-click menu -->
+    <!-- SECURITY: No Titlebar context = no titlebar interactions -->
+    <!-- SECURITY: No Top/Bottom/Left/Right context = no window resizing -->
+  </mouse>
+
+  <!-- SECURITY: Force ALL windows to be maximized and undecorated -->
+  <applications>
+    <application class="*">
+      <decor>no</decor>
+      <maximized>true</maximized>
+      <focus>yes</focus>
+      <layer>normal</layer>
+      <skip_pager>yes</skip_pager>
+      <skip_taskbar>yes</skip_taskbar>
+    </application>
+  </applications>
+
+</openbox_config>
