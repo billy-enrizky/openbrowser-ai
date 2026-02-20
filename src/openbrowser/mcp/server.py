@@ -394,20 +394,106 @@ class OpenBrowserServer:
 			tools=self._tools,
 		)
 
+	async def _is_cdp_alive(self) -> bool:
+		"""Check if the browser session's CDP WebSocket is still connected."""
+		if not self.browser_session:
+			return False
+		root = getattr(self.browser_session, '_cdp_client_root', None)
+		if root is None:
+			return False
+		try:
+			await root.send.Browser.getVersion()
+			return True
+		except Exception:
+			return False
+
+	async def _recover_browser_session(self) -> None:
+		"""Kill the dead browser session and create a fresh one.
+
+		Called when we detect the CDP WebSocket has disconnected (e.g. Chrome
+		crashed or a navigation broke the connection).  Re-creates the
+		BrowserSession and rebuilds the namespace so the next execute_code
+		call works transparently.
+		"""
+		logger.info('CDP connection lost -- recovering browser session')
+
+		# 1. Tear down the old session
+		if self.browser_session:
+			try:
+				await self.browser_session.kill()
+			except Exception:
+				# Session may already be half-dead; best-effort cleanup
+				try:
+					await self.browser_session.reset()
+				except Exception:
+					pass
+
+		# 2. Kill any stale Chrome holding the profile lock
+		from openbrowser.browser.watchdogs.local_browser_watchdog import LocalBrowserWatchdog
+
+		user_data_dir = '~/.config/openbrowser/profiles/default'
+		if self.browser_session and self.browser_session.browser_profile.user_data_dir:
+			user_data_dir = self.browser_session.browser_profile.user_data_dir
+		await LocalBrowserWatchdog._kill_stale_chrome_for_profile(user_data_dir)
+
+		# 3. Create a brand-new session
+		profile_config = get_default_profile(self.config)
+		profile_data = {
+			'downloads_path': str(Path.home() / 'Downloads' / 'openbrowser-mcp'),
+			'wait_between_actions': 0.5,
+			'keep_alive': True,
+			'user_data_dir': '~/.config/openbrowser/profiles/default',
+			'device_scale_factor': 1.0,
+			'disable_security': False,
+			'headless': False,
+			**profile_config,
+		}
+		profile = BrowserProfile(**profile_data)
+		session = BrowserSession(browser_profile=profile)
+		await session.start()
+		self.browser_session = session
+
+		# 4. Rebuild namespace with the new session (preserving user variables)
+		old_ns = self._namespace or {}
+		self._tools = CodeAgentTools()
+		self._namespace = create_namespace(
+			browser_session=self.browser_session,
+			tools=self._tools,
+		)
+		# Copy user-defined variables from old namespace
+		for key, val in old_ns.items():
+			if not key.startswith('__') and key not in self._namespace:
+				self._namespace[key] = val
+
+		logger.info('Browser session recovered successfully')
+
+	def _is_connection_error(self, exc: BaseException) -> bool:
+		"""Return True if *exc* (or its chain) indicates a dead CDP connection."""
+		keywords = ('connectionclosederror', 'no close frame', 'websocket', 'connection closed')
+		text = f'{type(exc).__name__}: {exc}'.lower()
+		return any(kw in text for kw in keywords)
+
 	async def _execute_code(self, code: str) -> str:
 		"""Execute Python code in the persistent namespace.
 
 		The code is wrapped in an async function so ``await`` expressions work.
 		stdout is captured and returned as the result text.  Variables defined
 		in user code are persisted back to the namespace after execution.
+
+		If a CDP connection error is detected, the browser session is
+		automatically recovered and the code is retried once.
 		"""
 		await self._ensure_namespace()
 		assert self._namespace is not None
 
 		self._last_activity = time.time()
 
-		# Capture stdout
-		stdout_capture = io.StringIO()
+		# Pre-flight: check if CDP is still alive and recover if needed
+		if not await self._is_cdp_alive():
+			try:
+				await self._recover_browser_session()
+			except Exception as recovery_err:
+				logger.error(f'Pre-flight CDP recovery failed: {recovery_err}')
 
 		# Wrap code in an async function so await works.
 		# We inject a __locals_capture__ dict and copy locals into it at
@@ -420,51 +506,68 @@ class OpenBrowserServer:
 			f"    __ns__.update({{k: v for k, v in locals().items() if not k.startswith('__')}})\n"
 		)
 
-		try:
-			# Compile and exec the async function definition
-			compiled = compile(wrapped, '<execute_code>', 'exec')
-			exec(compiled, self._namespace)
+		for attempt in range(2):
+			# Capture stdout
+			stdout_capture = io.StringIO()
 
-			# Call the async function with stdout capture, passing namespace
-			# so locals get persisted
-			old_stdout = sys.stdout
-			sys.stdout = stdout_capture
 			try:
-				result = await self._namespace['__mcp_exec__'](self._namespace)
+				# Compile and exec the async function definition
+				compiled = compile(wrapped, '<execute_code>', 'exec')
+				exec(compiled, self._namespace)
+
+				# Call the async function with stdout capture, passing namespace
+				# so locals get persisted
+				old_stdout = sys.stdout
+				sys.stdout = stdout_capture
+				try:
+					result = await self._namespace['__mcp_exec__'](self._namespace)
+				finally:
+					sys.stdout = old_stdout
+
+				output = stdout_capture.getvalue()
+
+				# If the function returned a value and nothing was printed, show the return value
+				if result is not None and not output.strip():
+					output = repr(result)
+
+				# If nothing was printed and no return value, confirm execution
+				if not output.strip():
+					output = '(executed successfully, no output)'
+
+				return output
+
+			except Exception as e:
+				# Restore stdout in case of exception during capture
+				sys.stdout = sys.__stdout__
+
+				# On first attempt, if this is a connection error, recover and retry
+				if attempt == 0 and self._is_connection_error(e):
+					logger.info(f'CDP connection error during execution, recovering: {e}')
+					try:
+						await self._recover_browser_session()
+						continue  # retry
+					except Exception as recovery_err:
+						logger.error(f'CDP recovery failed: {recovery_err}')
+						# Fall through to return the original error
+
+				captured_output = stdout_capture.getvalue()
+
+				# Format the error with traceback
+				tb = traceback.format_exc()
+				# Strip the wrapper function frames from traceback for cleaner output
+				error_output = f'Error: {type(e).__name__}: {e}\n\nTraceback:\n{tb}'
+
+				if captured_output.strip():
+					error_output = f'Output before error:\n{captured_output}\n\n{error_output}'
+
+				return error_output
+
 			finally:
-				sys.stdout = old_stdout
+				# Clean up the temporary function from namespace
+				self._namespace.pop('__mcp_exec__', None)
 
-			output = stdout_capture.getvalue()
-
-			# If the function returned a value and nothing was printed, show the return value
-			if result is not None and not output.strip():
-				output = repr(result)
-
-			# If nothing was printed and no return value, confirm execution
-			if not output.strip():
-				output = '(executed successfully, no output)'
-
-			return output
-
-		except Exception as e:
-			# Restore stdout in case of exception during capture
-			sys.stdout = sys.__stdout__
-
-			captured_output = stdout_capture.getvalue()
-
-			# Format the error with traceback
-			tb = traceback.format_exc()
-			# Strip the wrapper function frames from traceback for cleaner output
-			error_output = f'Error: {type(e).__name__}: {e}\n\nTraceback:\n{tb}'
-
-			if captured_output.strip():
-				error_output = f'Output before error:\n{captured_output}\n\n{error_output}'
-
-			return error_output
-
-		finally:
-			# Clean up the temporary function from namespace
-			self._namespace.pop('__mcp_exec__', None)
+		# Should not reach here, but just in case
+		return 'Error: unexpected state in _execute_code retry loop'
 
 	async def _cleanup_expired_session(self) -> None:
 		"""Close browser session if idle beyond timeout."""
