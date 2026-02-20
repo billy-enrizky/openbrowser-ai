@@ -10,6 +10,7 @@ Usage:
 
 import json
 import logging
+import os
 
 import torch
 from datasets import Dataset
@@ -112,6 +113,12 @@ def train():
     """Run SFT training with QLoRA."""
     config = SFT_CONFIG
 
+    seed = int(os.environ.get("RANDOM_SEED", "42"))
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+    logger.info("Set random seed to %d", seed)
+
     logger.info(f"Loading model: {config['model_name']}")
     tokenizer = AutoTokenizer.from_pretrained(config["model_name"])
     if tokenizer.pad_token is None:
@@ -153,30 +160,40 @@ def train():
     model = get_peft_model(model, lora_config)
     model.print_trainable_parameters()
 
-    # Load data
+    # Load pre-split train and val data
     train_file = resolve_data_path(DATA_CONFIG["train_file"])
+    val_file = resolve_data_path(DATA_CONFIG["val_file"])
 
-    dataset = load_sft_data(
+    train_raw = load_sft_data(
         train_file,
         max_samples=DATA_CONFIG.get("max_train_samples", 0),
     )
+    # Shuffle training data to break sequential form-type blocks
+    train_raw = train_raw.shuffle(seed=seed)
+    logger.info("Shuffled training data (seed=%d)", seed)
 
-    # Split train/eval
-    split = dataset.train_test_split(
-        test_size=DATA_CONFIG.get("eval_split", 0.1)
+    val_raw = load_sft_data(
+        val_file,
+        max_samples=DATA_CONFIG.get("max_eval_samples", 0),
     )
+
     train_dataset = tokenize_dataset(
-        split["train"], tokenizer, config["max_seq_length"]
+        train_raw, tokenizer, config["max_seq_length"]
     )
     eval_dataset = tokenize_dataset(
-        split["test"], tokenizer, config["max_seq_length"]
+        val_raw, tokenizer, config["max_seq_length"]
     )
 
     # Training args
     output_dir = "outputs/finetuning_sft"
+    max_steps = config.get("max_steps", -1)
+    if max_steps > 0:
+        logger.info("Using max_steps=%d (overrides num_epochs)", max_steps)
+
     training_args = TrainingArguments(
         output_dir=output_dir,
         num_train_epochs=config["num_epochs"],
+        max_steps=max_steps,
         per_device_train_batch_size=config["batch_size"],
         gradient_accumulation_steps=config["gradient_accumulation_steps"],
         learning_rate=config["learning_rate"],
