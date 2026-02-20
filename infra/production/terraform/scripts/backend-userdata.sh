@@ -7,6 +7,16 @@ dnf install -y docker
 systemctl enable docker
 systemctl start docker
 
+# Create 2GB swap file to prevent OOM when Chromium/Playwright runs
+if [ ! -f /swapfile ]; then
+  fallocate -l 2G /swapfile
+  chmod 600 /swapfile
+  mkswap /swapfile
+  swapon /swapfile
+  echo '/swapfile swap swap defaults 0 0' >> /etc/fstab
+  echo "Swap enabled: 2GB"
+fi
+
 # Optional: install jq for parsing Secrets Manager JSON
 if [ -n "${secrets_secret_id}" ]; then
   dnf install -y jq
