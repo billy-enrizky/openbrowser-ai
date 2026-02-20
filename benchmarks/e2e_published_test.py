@@ -1,403 +1,368 @@
 """
-E2E test of published openbrowser-ai[mcp]@0.1.17 via JSON-RPC stdio.
-Tests all 11 consolidated tools against the published PyPI package.
+E2E test for the published openbrowser-ai[mcp]==0.1.22 package.
+
+Starts the MCP server via uvx as a subprocess, communicates via JSON-RPC 2.0
+over stdio, and validates:
+  1. initialize handshake
+  2. tools/list returns exactly 1 tool named "execute_code"
+  3. execute_code with navigation to example.com
+  4. execute_code with variable persistence across calls
+  5. execute_code with evaluate() for JS execution
+
+Usage:
+    uv run python benchmarks/e2e_published_test.py
 """
-import asyncio
+
 import json
 import logging
+import os
 import subprocess
 import sys
 import time
 
-logging.basicConfig(level=logging.INFO, format='%(message)s')
-logger = logging.getLogger(__name__)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+)
+logger = logging.getLogger("e2e_published_test")
 
-PASS = "PASS"
-FAIL = "FAIL"
-SKIP = "SKIP"
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
-class MCPClient:
-    def __init__(self, command: list[str]):
-        self.command = command
-        self.process = None
-        self._id = 0
+def kill_browsers():
+    """Kill all Chrome/Chromium processes and wait until they are fully gone."""
+    for pattern in ["chromium", "chrome", "Chromium", "Google Chrome"]:
+        try:
+            subprocess.run(
+                ["pkill", "-9", "-f", pattern],
+                capture_output=True, timeout=5,
+            )
+        except Exception:
+            pass
 
-    async def start(self):
-        self.process = await asyncio.create_subprocess_exec(
-            *self.command,
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+    for _ in range(20):
+        result = subprocess.run(
+            ["pgrep", "-f", "chrom"],
+            capture_output=True, timeout=5,
         )
-        # Initialize
-        resp = await self._send("initialize", {
-            "protocolVersion": "2024-11-05",
-            "capabilities": {},
-            "clientInfo": {"name": "e2e-test", "version": "1.0"},
-        })
-        # Send initialized notification
-        self._write({"jsonrpc": "2.0", "method": "notifications/initialized"})
-        return resp
+        if result.returncode != 0:
+            break
+        time.sleep(0.5)
+    else:
+        logger.warning("Chrome processes still alive after 10s wait")
 
-    async def call_tool(self, name: str, arguments: dict = None) -> dict:
-        return await self._send("tools/call", {
-            "name": name,
-            "arguments": arguments or {},
-        })
+    time.sleep(1)
 
-    async def list_tools(self) -> dict:
-        return await self._send("tools/list", {})
 
-    async def _send(self, method: str, params: dict) -> dict:
-        self._id += 1
-        msg = {"jsonrpc": "2.0", "id": self._id, "method": method, "params": params}
-        self._write(msg)
-        return await self._read_response(self._id)
+# ---------------------------------------------------------------------------
+# Minimal MCP/JSON-RPC client over stdio
+# ---------------------------------------------------------------------------
 
-    def _write(self, msg: dict):
-        line = json.dumps(msg) + "\n"
-        self.process.stdin.write(line.encode())
+class MCPStdioClient:
+    """Communicates with an MCP server via JSON-RPC 2.0 over stdin/stdout."""
 
-    async def _read_response(self, expected_id: int) -> dict:
-        while True:
-            line = await asyncio.wait_for(self.process.stdout.readline(), timeout=60)
-            if not line:
-                raise RuntimeError("Server closed stdout")
-            data = json.loads(line.decode())
-            if data.get("id") == expected_id:
-                return data
-            # Skip notifications
+    def __init__(self, command: list[str]):
+        self._command = command
+        self._process: subprocess.Popen | None = None
+        self._request_id = 0
 
-    async def stop(self):
-        if self.process:
-            self.process.stdin.close()
+    def start_process(self) -> None:
+        """Launch the server subprocess."""
+        env = os.environ.copy()
+        self._process = subprocess.Popen(
+            self._command,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=env,
+        )
+        logger.info("Server process started (pid=%s)", self._process.pid)
+
+    def stop(self) -> None:
+        """Terminate the server subprocess."""
+        if self._process:
             try:
-                await asyncio.wait_for(self.process.wait(), timeout=5)
-            except asyncio.TimeoutError:
-                self.process.kill()
+                self._process.terminate()
+                self._process.wait(timeout=5)
+            except Exception:
+                self._process.kill()
+            logger.info("Server process stopped")
+            self._process = None
+
+    def send_request(self, method: str, params: dict, timeout: float = 60.0) -> dict:
+        """Send a JSON-RPC request and return the parsed response dict."""
+        self._request_id += 1
+        request = {
+            "jsonrpc": "2.0",
+            "method": method,
+            "params": params,
+            "id": self._request_id,
+        }
+        return self._write_and_read(request, timeout=timeout)
+
+    def send_notification(self, method: str, params: dict) -> None:
+        """Send a JSON-RPC notification (no id, no response expected)."""
+        notification = {
+            "jsonrpc": "2.0",
+            "method": method,
+            "params": params,
+        }
+        assert self._process and self._process.stdin
+        line = json.dumps(notification) + "\n"
+        self._process.stdin.write(line.encode())
+        self._process.stdin.flush()
+
+    # ------------------------------------------------------------------
+
+    def _write_and_read(self, request: dict, timeout: float = 60.0) -> dict:
+        """Write a JSON-RPC line and read the next response line.
+
+        Skips any notification lines (lines without an 'id' field) that the
+        server may emit before the actual response.
+        """
+        assert self._process and self._process.stdin and self._process.stdout
+        line = json.dumps(request) + "\n"
+        self._process.stdin.write(line.encode())
+        self._process.stdin.flush()
+
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            response_line = self._process.stdout.readline()
+            if not response_line:
+                return {"error": "No response from server (EOF)"}
+            try:
+                data = json.loads(response_line)
+            except json.JSONDecodeError:
+                logger.debug("Non-JSON line from server: %s", response_line[:200])
+                continue
+
+            # Skip server-initiated notifications (no 'id')
+            if "id" not in data:
+                logger.debug("Skipping server notification: %s", data.get("method", "?"))
+                continue
+
+            return data
+
+        return {"error": f"Timeout waiting for response to request {request.get('id')}"}
 
 
-def get_text(resp: dict) -> str:
-    """Extract text from tool call response."""
-    result = resp.get("result", {})
-    content = result.get("content", [])
-    if content:
-        return content[0].get("text", "")
-    return ""
+# ---------------------------------------------------------------------------
+# Test runner
+# ---------------------------------------------------------------------------
+
+class TestResult:
+    def __init__(self, name: str, passed: bool, detail: str = ""):
+        self.name = name
+        self.passed = passed
+        self.detail = detail
 
 
-async def run_tests():
-    results = []
-
-    logger.info("=" * 60)
-    logger.info("E2E Test: openbrowser-ai[mcp]@0.1.17 (published)")
-    logger.info("=" * 60)
-
-    client = MCPClient(["uvx", "openbrowser-ai[mcp]@0.1.17", "--mcp"])
+def run_tests() -> list[TestResult]:
+    results: list[TestResult] = []
+    client = MCPStdioClient(["uvx", "openbrowser-ai[mcp]==0.1.22", "--mcp"])
 
     try:
-        logger.info("\nStarting MCP server...")
-        init = await client.start()
-        server_info = init.get("result", {}).get("serverInfo", {})
-        logger.info(f"Server: {server_info.get('name')} v{server_info.get('version')}")
+        client.start_process()
+        # Give the server a moment to boot
+        time.sleep(2)
 
-        # Test 0: Verify tool count and annotations
-        logger.info("\n--- Tool List & Annotations ---")
-        tools_resp = await client.list_tools()
-        tools = tools_resp.get("result", {}).get("tools", [])
-        logger.info(f"Tool count: {len(tools)}")
-        assert len(tools) == 11, f"Expected 11 tools, got {len(tools)}"
-
-        annotations_ok = True
-        for t in tools:
-            a = t.get("annotations", {})
-            if not a or "readOnlyHint" not in a:
-                logger.info(f"  MISSING annotations: {t['name']}")
-                annotations_ok = False
+        # ---------------------------------------------------------------
+        # Test 1: initialize handshake
+        # ---------------------------------------------------------------
+        test_name = "1. initialize handshake"
+        logger.info("--- %s ---", test_name)
+        try:
+            resp = client.send_request("initialize", {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {},
+                "clientInfo": {"name": "e2e_published_test", "version": "1.0"},
+            })
+            if "error" in resp:
+                results.append(TestResult(test_name, False, f"Error: {resp['error']}"))
+            elif "result" in resp:
+                proto = resp["result"].get("protocolVersion", "?")
+                server_name = resp["result"].get("serverInfo", {}).get("name", "?")
+                logger.info("Server: %s, protocol: %s", server_name, proto)
+                results.append(TestResult(test_name, True, f"server={server_name}, proto={proto}"))
             else:
-                ro = a.get("readOnlyHint")
-                dest = a.get("destructiveHint")
-                idem = a.get("idempotentHint")
-                logger.info(f"  {t['name']:40s} readOnly={str(ro):5s} destructive={str(dest):5s} idempotent={str(idem):5s}")
+                results.append(TestResult(test_name, False, f"Unexpected response: {resp}"))
+        except Exception as exc:
+            results.append(TestResult(test_name, False, str(exc)))
 
-        status = PASS if annotations_ok else FAIL
-        results.append(("ToolAnnotations (11 tools)", status))
-        logger.info(f"  [{status}] ToolAnnotations on all 11 tools")
+        # Send initialized notification
+        client.send_notification("notifications/initialized", {})
+        time.sleep(0.5)
 
-        # Test 1: browser_navigate
-        logger.info("\n--- 1/11: browser_navigate ---")
-        resp = await client.call_tool("browser_navigate", {"url": "https://httpbin.org"})
-        text = get_text(resp)
-        status = PASS if "Navigated to" in text or "httpbin" in text.lower() else FAIL
-        results.append(("browser_navigate", status))
-        logger.info(f"  [{status}] {text[:80]}")
+        # ---------------------------------------------------------------
+        # Test 2: tools/list -- exactly 1 tool named "execute_code"
+        # ---------------------------------------------------------------
+        test_name = "2. tools/list returns execute_code"
+        logger.info("--- %s ---", test_name)
+        try:
+            resp = client.send_request("tools/list", {})
+            if "error" in resp:
+                results.append(TestResult(test_name, False, f"Error: {resp['error']}"))
+            else:
+                tools = resp.get("result", {}).get("tools", [])
+                tool_names = [t["name"] for t in tools]
+                logger.info("Tools: %s", tool_names)
+                if len(tools) == 1 and tools[0]["name"] == "execute_code":
+                    results.append(TestResult(test_name, True, "1 tool: execute_code"))
+                else:
+                    results.append(TestResult(
+                        test_name, False,
+                        f"Expected exactly 1 tool 'execute_code', got {tool_names}"
+                    ))
+        except Exception as exc:
+            results.append(TestResult(test_name, False, str(exc)))
 
-        # Give browser time to load
-        await asyncio.sleep(2)
+        # ---------------------------------------------------------------
+        # Test 3: execute_code -- navigate to example.com and get title
+        # Uses the namespace-level navigate() and browser.get_browser_state_summary()
+        # ---------------------------------------------------------------
+        test_name = "3. execute_code: navigate to example.com"
+        logger.info("--- %s ---", test_name)
+        try:
+            code = (
+                'await navigate("https://example.com")\n'
+                'state = await browser.get_browser_state_summary()\n'
+                'print(state.title)'
+            )
+            resp = client.send_request("tools/call", {
+                "name": "execute_code",
+                "arguments": {"code": code},
+            }, timeout=60)
+            if "error" in resp:
+                results.append(TestResult(test_name, False, f"Error: {resp['error']}"))
+            else:
+                content = resp.get("result", {}).get("content", [])
+                text = " ".join(item.get("text", "") for item in content if item.get("type") == "text")
+                logger.info("Response text: %s", text[:500])
+                if "Example Domain" in text:
+                    results.append(TestResult(test_name, True, "Title contains 'Example Domain'"))
+                else:
+                    results.append(TestResult(test_name, False, f"Expected 'Example Domain' in: {text[:300]}"))
+        except Exception as exc:
+            results.append(TestResult(test_name, False, str(exc)))
 
-        # Test 2: browser_get_state (compact)
-        logger.info("\n--- 2/11: browser_get_state ---")
-        resp = await client.call_tool("browser_get_state", {"compact": True})
-        text = get_text(resp)
-        state = json.loads(text) if text.startswith("{") else {}
-        status = PASS if "httpbin" in state.get("url", "") else FAIL
-        results.append(("browser_get_state (compact)", status))
-        logger.info(f"  [{status}] url={state.get('url', 'N/A')}, elements={state.get('interactive_element_count', 'N/A')}")
+        # ---------------------------------------------------------------
+        # Test 4: execute_code -- variable persistence across calls
+        # Set a variable in one call, read it back in the next call.
+        # ---------------------------------------------------------------
+        test_name = "4. execute_code: variable persistence"
+        logger.info("--- %s ---", test_name)
+        try:
+            # Call 1: set a variable
+            set_code = 'my_test_var = "hello_from_e2e_test"'
+            resp1 = client.send_request("tools/call", {
+                "name": "execute_code",
+                "arguments": {"code": set_code},
+            }, timeout=30)
+            if "error" in resp1:
+                results.append(TestResult(test_name, False, f"Set var error: {resp1['error']}"))
+            else:
+                # Call 2: read the variable back using print()
+                get_code = 'print(my_test_var)'
+                resp2 = client.send_request("tools/call", {
+                    "name": "execute_code",
+                    "arguments": {"code": get_code},
+                }, timeout=30)
+                if "error" in resp2:
+                    results.append(TestResult(test_name, False, f"Get var error: {resp2['error']}"))
+                else:
+                    content = resp2.get("result", {}).get("content", [])
+                    text = " ".join(
+                        item.get("text", "") for item in content if item.get("type") == "text"
+                    )
+                    logger.info("Persistence result: %s", text[:300])
+                    if "hello_from_e2e_test" in text:
+                        results.append(TestResult(test_name, True, "Variable persisted across calls"))
+                    else:
+                        results.append(TestResult(
+                            test_name, False,
+                            f"Expected 'hello_from_e2e_test' in: {text[:300]}"
+                        ))
+        except Exception as exc:
+            results.append(TestResult(test_name, False, str(exc)))
 
-        # browser_get_state (full)
-        resp = await client.call_tool("browser_get_state", {"compact": False})
-        text = get_text(resp)
-        state_full = json.loads(text) if text.startswith("{") else {}
-        has_elements = "interactive_elements" in state_full
-        status = PASS if has_elements else FAIL
-        results.append(("browser_get_state (full)", status))
-        logger.info(f"  [{status}] interactive_elements present={has_elements}")
+        # ---------------------------------------------------------------
+        # Test 5: execute_code -- evaluate() for JS execution
+        # Uses the namespace-level evaluate() which runs JS via CDP.
+        # Page should still be on example.com from test 3.
+        # ---------------------------------------------------------------
+        test_name = "5. execute_code: evaluate() JS execution"
+        logger.info("--- %s ---", test_name)
+        try:
+            js_code = (
+                'result = await evaluate("document.title")\n'
+                'print(result)'
+            )
+            resp = client.send_request("tools/call", {
+                "name": "execute_code",
+                "arguments": {"code": js_code},
+            }, timeout=30)
+            if "error" in resp:
+                results.append(TestResult(test_name, False, f"Error: {resp['error']}"))
+            else:
+                content = resp.get("result", {}).get("content", [])
+                text = " ".join(item.get("text", "") for item in content if item.get("type") == "text")
+                logger.info("JS evaluate result: %s", text[:300])
+                # Page should still be on example.com from test 3
+                if "Example Domain" in text:
+                    results.append(TestResult(test_name, True, "JS evaluate returned page title"))
+                else:
+                    results.append(TestResult(
+                        test_name, False,
+                        f"Expected 'Example Domain' in: {text[:300]}"
+                    ))
+        except Exception as exc:
+            results.append(TestResult(test_name, False, str(exc)))
 
-        # browser_get_state (filter)
-        resp = await client.call_tool("browser_get_state", {"filter_by": "tag", "filter_query": "a"})
-        text = get_text(resp)
-        filter_result = json.loads(text) if text.startswith("{") else {}
-        status = PASS if filter_result.get("count", 0) > 0 else FAIL
-        results.append(("browser_get_state (filter)", status))
-        logger.info(f"  [{status}] filter by tag 'a': count={filter_result.get('count', 0)}")
-
-        # Test 3: browser_get_text (plain)
-        logger.info("\n--- 3/11: browser_get_text ---")
-        resp = await client.call_tool("browser_get_text", {})
-        text = get_text(resp)
-        status = PASS if "httpbin" in text.lower() or "HTTP" in text else FAIL
-        results.append(("browser_get_text (plain)", status))
-        logger.info(f"  [{status}] text length={len(text)}, contains httpbin")
-
-        # browser_get_text (search)
-        resp = await client.call_tool("browser_get_text", {
-            "search": "HTTP Methods",
-            "context_lines": 1,
-            "case_insensitive": True,
-        })
-        text = get_text(resp)
-        search_result = json.loads(text) if text.startswith("{") else {}
-        status = PASS if search_result.get("total_matches", 0) > 0 else FAIL
-        results.append(("browser_get_text (search)", status))
-        logger.info(f"  [{status}] search 'HTTP Methods': matches={search_result.get('total_matches', 0)}")
-
-        # Test 4: browser_click
-        logger.info("\n--- 4/11: browser_click ---")
-        # Find a link to click
-        resp = await client.call_tool("browser_get_state", {"filter_by": "text", "filter_query": "HTTP Methods"})
-        text = get_text(resp)
-        filter_r = json.loads(text) if text.startswith("{") else {}
-        click_results = filter_r.get("results", [])
-        if click_results:
-            # Find the <a> tag
-            link = next((r for r in click_results if r.get("tag") == "a"), click_results[0])
-            idx = link["index"]
-            resp = await client.call_tool("browser_click", {"index": idx})
-            text = get_text(resp)
-            status = PASS if "Clicked" in text else FAIL
-            results.append(("browser_click", status))
-            logger.info(f"  [{status}] {text[:80]}")
-        else:
-            results.append(("browser_click", SKIP))
-            logger.info(f"  [SKIP] No clickable element found")
-
-        await asyncio.sleep(1)
-
-        # Test 5: browser_go_back
-        logger.info("\n--- 5/11: browser_go_back ---")
-        resp = await client.call_tool("browser_go_back", {})
-        text = get_text(resp)
-        status = PASS if "Navigated back" in text else FAIL
-        results.append(("browser_go_back", status))
-        logger.info(f"  [{status}] {text[:80]}")
-
-        await asyncio.sleep(1)
-
-        # Test 6: browser_scroll (direction + target_text)
-        logger.info("\n--- 6/11: browser_scroll ---")
-        resp = await client.call_tool("browser_scroll", {"direction": "down"})
-        text = get_text(resp)
-        status = PASS if "Scrolled" in text else FAIL
-        results.append(("browser_scroll (down)", status))
-        logger.info(f"  [{status}] {text[:80]}")
-
-        resp = await client.call_tool("browser_scroll", {"direction": "up"})
-        text = get_text(resp)
-        status = PASS if "Scrolled" in text else FAIL
-        results.append(("browser_scroll (up)", status))
-        logger.info(f"  [{status}] {text[:80]}")
-
-        resp = await client.call_tool("browser_scroll", {"target_text": "Other Utilities"})
-        text = get_text(resp)
-        status = PASS if "Found and scrolled" in text or "scrolled" in text.lower() else FAIL
-        results.append(("browser_scroll (target_text)", status))
-        logger.info(f"  [{status}] {text[:80]}")
-
-        # Test 7: browser_type
-        logger.info("\n--- 7/11: browser_type ---")
-        # Navigate to form page
-        await client.call_tool("browser_navigate", {"url": "https://httpbin.org/forms/post"})
-        await asyncio.sleep(2)
-
-        resp = await client.call_tool("browser_get_state", {"filter_by": "tag", "filter_query": "input"})
-        text = get_text(resp)
-        inputs = json.loads(text) if text.startswith("{") else {}
-        input_results = inputs.get("results", [])
-        # Find the text input (first one without a type or type=text)
-        text_input = next((r for r in input_results if r.get("tag") == "input" and not r.get("type")), None)
-        if text_input:
-            resp = await client.call_tool("browser_type", {"index": text_input["index"], "text": "E2E test v0.1.17"})
-            text = get_text(resp)
-            status = PASS if "Typed" in text else FAIL
-            results.append(("browser_type", status))
-            logger.info(f"  [{status}] {text[:80]}")
-        else:
-            results.append(("browser_type", SKIP))
-            logger.info(f"  [SKIP] No text input found")
-
-        # Test 8: browser_tab (list + switch + close)
-        logger.info("\n--- 8/11: browser_tab ---")
-        # Open new tab
-        await client.call_tool("browser_navigate", {"url": "https://httpbin.org/get", "new_tab": True})
-        await asyncio.sleep(2)
-
-        # List tabs
-        resp = await client.call_tool("browser_tab", {"action": "list"})
-        text = get_text(resp)
-        tabs = json.loads(text) if text.startswith("[") else []
-        status = PASS if len(tabs) >= 2 else FAIL
-        results.append(("browser_tab (list)", status))
-        logger.info(f"  [{status}] tab count={len(tabs)}")
-
-        if len(tabs) >= 2:
-            # Switch to first tab
-            first_tab_id = tabs[0]["tab_id"]
-            resp = await client.call_tool("browser_tab", {"action": "switch", "tab_id": first_tab_id})
-            text = get_text(resp)
-            status = PASS if "Switched" in text else FAIL
-            results.append(("browser_tab (switch)", status))
-            logger.info(f"  [{status}] {text[:80]}")
-
-            # Close second tab
-            second_tab_id = tabs[1]["tab_id"]
-            resp = await client.call_tool("browser_tab", {"action": "close", "tab_id": second_tab_id})
-            text = get_text(resp)
-            status = PASS if "Closed" in text else FAIL
-            results.append(("browser_tab (close)", status))
-            logger.info(f"  [{status}] {text[:80]}")
-        else:
-            results.append(("browser_tab (switch)", SKIP))
-            results.append(("browser_tab (close)", SKIP))
-
-        # Test 9: browser_get_accessibility_tree (tree + flat)
-        logger.info("\n--- 9/11: browser_get_accessibility_tree ---")
-        resp = await client.call_tool("browser_get_accessibility_tree", {"format": "tree", "max_depth": 2})
-        text = get_text(resp)
-        tree_result = json.loads(text) if text.startswith("{") else {}
-        status = PASS if "tree" in tree_result and tree_result.get("total_nodes_in_page", 0) > 0 else FAIL
-        results.append(("browser_get_accessibility_tree (tree)", status))
-        logger.info(f"  [{status}] tree nodes={tree_result.get('total_nodes', 0)}, page_nodes={tree_result.get('total_nodes_in_page', 0)}")
-
-        resp = await client.call_tool("browser_get_accessibility_tree", {"format": "flat", "max_depth": 1})
-        text = get_text(resp)
-        flat_result = json.loads(text) if text.startswith("{") else {}
-        has_parent_id = any("parent_id" in n for n in flat_result.get("nodes", []))
-        status = PASS if "nodes" in flat_result and has_parent_id else FAIL
-        results.append(("browser_get_accessibility_tree (flat)", status))
-        logger.info(f"  [{status}] flat nodes={len(flat_result.get('nodes', []))}, has parent_id={has_parent_id}")
-
-        # Test 10: browser_execute_js
-        logger.info("\n--- 10/11: browser_execute_js ---")
-        # Simple expression
-        resp = await client.call_tool("browser_execute_js", {"expression": "window.location.href"})
-        text = get_text(resp)
-        js_result = json.loads(text) if text.startswith("{") else {}
-        status = PASS if js_result.get("type") == "string" else FAIL
-        results.append(("browser_execute_js (simple)", status))
-        logger.info(f"  [{status}] result={js_result.get('result', 'N/A')[:60]}")
-
-        # IIFE
-        resp = await client.call_tool("browser_execute_js", {
-            "expression": "(()=>{ return {count: document.querySelectorAll('input').length}; })()"
-        })
-        text = get_text(resp)
-        js_result = json.loads(text) if text.startswith("{") else {}
-        status = PASS if js_result.get("type") == "object" and isinstance(js_result.get("result"), dict) else FAIL
-        results.append(("browser_execute_js (IIFE)", status))
-        logger.info(f"  [{status}] result={js_result.get('result', 'N/A')}")
-
-        # await_promise=false
-        resp = await client.call_tool("browser_execute_js", {
-            "expression": "new Promise(r => setTimeout(() => r('done'), 5000))",
-            "await_promise": False,
-        })
-        text = get_text(resp)
-        js_result = json.loads(text) if text.startswith("{") else {}
-        status = PASS if js_result.get("type") == "object" else FAIL
-        results.append(("browser_execute_js (await_promise=false)", status))
-        logger.info(f"  [{status}] returned immediately, type={js_result.get('type')}")
-
-        # return_by_value=false
-        resp = await client.call_tool("browser_execute_js", {
-            "expression": "document.querySelector('button')",
-            "return_by_value": False,
-        })
-        text = get_text(resp)
-        js_result = json.loads(text) if text.startswith("{") else {}
-        has_object_id = "objectId" in js_result
-        status = PASS if has_object_id else FAIL
-        results.append(("browser_execute_js (return_by_value=false)", status))
-        logger.info(f"  [{status}] objectId present={has_object_id}, className={js_result.get('className', 'N/A')}")
-
-        # Test 11: browser_session (list + close + close_all)
-        logger.info("\n--- 11/11: browser_session ---")
-        resp = await client.call_tool("browser_session", {"action": "list"})
-        text = get_text(resp)
-        sessions = json.loads(text) if text.startswith("[") else []
-        status = PASS if len(sessions) >= 1 else FAIL
-        results.append(("browser_session (list)", status))
-        logger.info(f"  [{status}] active sessions={len(sessions)}")
-
-        if sessions:
-            session_id = sessions[0]["session_id"]
-            resp = await client.call_tool("browser_session", {"action": "close", "session_id": session_id})
-            text = get_text(resp)
-            status = PASS if "Successfully closed" in text else FAIL
-            results.append(("browser_session (close)", status))
-            logger.info(f"  [{status}] {text[:80]}")
-
-        # Create new session for close_all test
-        await client.call_tool("browser_navigate", {"url": "https://httpbin.org/get"})
-        await asyncio.sleep(2)
-
-        resp = await client.call_tool("browser_session", {"action": "close_all"})
-        text = get_text(resp)
-        status = PASS if "Closed" in text else FAIL
-        results.append(("browser_session (close_all)", status))
-        logger.info(f"  [{status}] {text[:80]}")
-
-    except Exception as e:
-        logger.info(f"\nFATAL ERROR: {e}")
-        import traceback
-        traceback.print_exc()
     finally:
-        await client.stop()
+        client.stop()
+
+    return results
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
+def main() -> None:
+    logger.info("=== E2E Published Package Test (openbrowser-ai[mcp]==0.1.22) ===")
+
+    # Kill any pre-existing browser processes
+    kill_browsers()
+
+    results = run_tests()
+
+    # Kill browsers after tests
+    kill_browsers()
 
     # Summary
-    logger.info("\n" + "=" * 60)
-    logger.info("RESULTS SUMMARY")
+    logger.info("")
     logger.info("=" * 60)
-    pass_count = sum(1 for _, s in results if s == PASS)
-    fail_count = sum(1 for _, s in results if s == FAIL)
-    skip_count = sum(1 for _, s in results if s == SKIP)
-    for name, status in results:
-        logger.info(f"  [{status}] {name}")
-    logger.info(f"\nTotal: {pass_count} PASS, {fail_count} FAIL, {skip_count} SKIP out of {len(results)} tests")
+    logger.info("TEST RESULTS SUMMARY")
     logger.info("=" * 60)
 
-    return fail_count == 0
+    passed = 0
+    failed = 0
+    for r in results:
+        status = "PASS" if r.passed else "FAIL"
+        if r.passed:
+            passed += 1
+        else:
+            failed += 1
+        logger.info("  [%s] %s -- %s", status, r.name, r.detail)
+
+    logger.info("-" * 60)
+    logger.info("  Total: %d | Passed: %d | Failed: %d", len(results), passed, failed)
+    logger.info("=" * 60)
+
+    if failed > 0:
+        sys.exit(1)
 
 
 if __name__ == "__main__":
-    success = asyncio.run(run_tests())
-    sys.exit(0 if success else 1)
+    main()
