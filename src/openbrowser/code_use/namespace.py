@@ -418,9 +418,9 @@ def create_namespace(
 					and not stripped.startswith(_statement_prefixes)
 				)
 				if is_single_expr:
-					code = f'(function(){{return {code}}})()'
+					code = f'(function(){{return {stripped}}})()'
 				else:
-					code = f'(function(){{{code}}})()'
+					code = f'(function(){{{stripped}}})()'
 
 		# Execute and track failures
 		try:
