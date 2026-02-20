@@ -33,6 +33,7 @@ import asyncio
 import json
 import logging
 import os
+import random
 from pathlib import Path
 
 import torch
@@ -197,8 +198,10 @@ async def train():
     max_seq_length = model_config["max_seq_length"]
     num_gen_steps = grpo_config.get("num_generation_steps", 10)
     gen_temperature = grpo_config.get("generation_temperature", 0.7)
+    confidence_noise_std = grpo_config.get("confidence_noise_std", 0.0)
     action_timeout = grpo_config.get("action_timeout_s", 5.0)
     grad_clip = grpo_config.get("grad_clip", 1.0)
+    num_sampled_timesteps = grpo_config.get("num_sampled_timesteps", 8)
 
     # ---------------------------------------------------------------
     # Start FormFactory server and browser
@@ -250,7 +253,7 @@ async def train():
                 # Tokenize condition
                 condition_enc = tokenizer(
                     instruction,
-                    add_special_tokens=True,
+                    add_special_tokens=False,  # Must match eval (no special tokens for ReFusion)
                     truncation=True,
                     max_length=max_seq_length,
                     return_tensors="pt",
@@ -272,6 +275,7 @@ async def train():
                         seq_length=gen_length,
                         num_steps=num_gen_steps,
                         temperature=gen_temperature,
+                        confidence_noise_std=confidence_noise_std,
                     )
                     trajectories.append(trajectory)
                     text = tokenizer.decode(
@@ -354,16 +358,7 @@ async def train():
                 optimizer.zero_grad()
                 total_loss_val = 0.0
                 total_kl_val = 0.0
-                valid_terms = 0
-
-                # Count total terms for loss normalization
-                for g in range(group_size):
-                    traj = trajectories[g]
-                    if len(traj.steps) > 0:
-                        valid_terms += len(traj.steps)
-
-                if valid_terms == 0:
-                    valid_terms = 1  # avoid division by zero
+                kl_terms = 0
 
                 for g in range(group_size):
                     traj = trajectories[g]
@@ -374,13 +369,37 @@ async def train():
                     if len(traj.steps) == 0:
                         continue
 
-                    for step in traj.steps:
+                    # Skip gradient computation when advantage is exactly 0
+                    # (no learning signal). This avoids 0 * NaN = NaN when
+                    # log_prob has numerical issues.
+                    if adv_g.abs().item() < 1e-10:
+                        continue
+
+                    # Denoising reduction: sample K random timesteps
+                    # instead of processing all T steps (Flow-GRPO paper)
+                    num_sampled = min(num_sampled_timesteps, len(traj.steps))
+                    sampled_indices = sorted(
+                        random.sample(range(len(traj.steps)), num_sampled)
+                    )
+                    sampled_steps = [traj.steps[idx] for idx in sampled_indices]
+                    num_steps_g = max(len(sampled_steps), 1)
+
+                    for step in sampled_steps:
                         # Current policy log-prob (WITH gradients)
                         log_prob = compute_unmasking_step_log_prob(
                             model=policy_model,
                             step=step,
                             condition_length=traj.condition_length,
+                            temperature=gen_temperature,
                         )  # [B]
+
+                        # Guard: skip if log_prob is NaN/Inf
+                        if torch.isnan(log_prob).any() or torch.isinf(log_prob).any():
+                            logger.warning(
+                                "NaN/Inf log_prob at rollout %d, skipping",
+                                g,
+                            )
+                            continue
 
                         # REINFORCE policy loss (ratio=1 simplification)
                         policy_loss = (-adv_g * log_prob).mean()
@@ -393,18 +412,25 @@ async def train():
                                     model=ref_model,
                                     step=step,
                                     condition_length=traj.condition_length,
+                                    temperature=gen_temperature,
                                 )  # [B]
                             log_r = ref_log_prob - log_prob
                             kl_loss = (torch.exp(log_r) - log_r - 1).mean()
+                            # Guard: replace NaN KL with 0
+                            if torch.isnan(kl_loss):
+                                kl_loss = torch.tensor(0.0, device=flow_policy.device)
                             total_kl_val += kl_loss.detach().item()
+                            kl_terms += 1
 
-                        step_loss = (policy_loss + kl_coeff * kl_loss) / valid_terms
+                        step_loss = (policy_loss + kl_coeff * kl_loss) / num_steps_g
                         # Per-step backward to release activations immediately
                         step_loss.backward()
                         total_loss_val += step_loss.detach().item()
 
-                # Clip gradients and step
-                if total_loss_val != 0.0:
+                # Clip gradients and step (guard against NaN accumulated loss)
+                if total_loss_val != 0.0 and not (
+                    total_loss_val != total_loss_val  # NaN check
+                ):
                     torch.nn.utils.clip_grad_norm_(trainable_params, grad_clip)
                     optimizer.step()
 
@@ -412,7 +438,7 @@ async def train():
 
                 total_steps += 1
                 avg_reward = sum(rewards) / len(rewards) if rewards else 0
-                avg_kl = total_kl_val / max(valid_terms, 1)
+                avg_kl = total_kl_val / max(kl_terms, 1)
                 epoch_kl.append(avg_kl)
 
                 if total_steps % grpo_config["logging_steps"] == 0:

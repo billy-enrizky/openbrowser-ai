@@ -222,6 +222,7 @@ class FlowLLM:
         seq_length: int,
         num_steps: int = 10,
         temperature: float = 0.7,
+        confidence_noise_std: float = 0.0,
     ) -> UnmaskingTrajectory:
         """Generate via iterative unmasking, recording the trajectory.
 
@@ -295,6 +296,12 @@ class FlowLLM:
             confidences = probs.gather(2, predicted.unsqueeze(-1)).squeeze(-1)
             confidences[is_unmasked] = -float("inf")
 
+            # Add noise to confidence scores for diverse position selection
+            if confidence_noise_std > 0:
+                noise = torch.randn_like(confidences) * confidence_noise_std
+                noise[is_unmasked] = 0.0
+                confidences = confidences + noise
+
             if num_to_unmask > 0:
                 remaining_masked = (~is_unmasked).sum(dim=-1).min().item()
                 k = min(num_to_unmask, int(remaining_masked))
@@ -351,6 +358,7 @@ def compute_unmasking_step_log_prob(
     model,
     step: UnmaskingTrajectoryStep,
     condition_length: int,
+    temperature: float = 1.0,
 ) -> torch.Tensor:
     """Compute log-probability for one unmasking step (with gradient flow).
 
@@ -377,6 +385,9 @@ def compute_unmasking_step_log_prob(
     # Response logits only -- delete full outputs to free memory
     response_logits = outputs.logits[:, condition_length:, :]  # [B, L_r, V]
     del outputs
+    # Apply same temperature as generation to match the sampling distribution
+    if temperature != 1.0 and temperature > 0:
+        response_logits = response_logits / temperature
     log_probs = F.log_softmax(response_logits, dim=-1)  # [B, L_r, V]
     del response_logits  # Free [B, L_r, V] logits
 

@@ -198,8 +198,8 @@ ONLINE_FSDFM_GRPO_CONFIG = {
 # clipped policy gradients aligned with the actual generation trajectory.
 # Reference: github.com/yifan123/flow_grpo
 FLOW_GRPO_FSDFM_CONFIG = {
-    "group_size": 2,
-    "learning_rate": 1e-5,            # Lower than SFT (2e-4) per PPO convention
+    "group_size": 4,                   # Increased from 2: G=2 gave zero advantages (both rollouts same reward)
+    "learning_rate": 5e-5,            # v8: increased from 1e-5 after per-rollout normalization fix
     "num_epochs": int(os.environ.get("NUM_EPOCHS", "1")),
     "kl_coeff": 0.04,                 # Matches reference geneval config
     "clip_range": 0.2,                # Standard PPO clip
@@ -207,8 +207,9 @@ FLOW_GRPO_FSDFM_CONFIG = {
     "bf16": True,
     "logging_steps": 5,
     "grad_clip": 1.0,
-    "num_generation_steps": 10,        # Denoising reduction (T=10, inference uses 64)
-    "generation_temperature": 1.0,     # Full temperature for exploration
+    "num_generation_steps": 64,        # Denoising steps (T=64, must match eval; T=32 still produces noise)
+    "generation_temperature": 1.0,     # Increased from 0.7: old GRPO at 1.0 achieved 74% nonzero, 0.7 got 18%, 0.3 got 7%
+    "num_sampled_timesteps": 8,        # Denoising reduction: sample K random steps from T-step trajectory (Flow-GRPO paper)
     "formfactory_port": int(os.environ.get("FORMFACTORY_PORT", "5050")),
     "browser_headless": True,
     "action_timeout_s": 5,
@@ -227,8 +228,8 @@ FLOW_GRPO_FSDFM_CONFIG = {
 # Fixes the generation/optimization mismatch in the existing GRPO trainer
 # which used autoregressive log-probs despite masked diffusion generation.
 FLOW_GRPO_REFUSION_CONFIG = {
-    "group_size": 2,
-    "learning_rate": 1e-5,
+    "group_size": 4,                   # Increased from 2: G=2 gave zero advantages (both rollouts same reward)
+    "learning_rate": 5e-5,            # v8: increased from 1e-5 after per-rollout normalization fix
     "num_epochs": int(os.environ.get("NUM_EPOCHS", "1")),
     "kl_coeff": 0.04,
     "clip_range": 0.2,
@@ -236,8 +237,10 @@ FLOW_GRPO_REFUSION_CONFIG = {
     "bf16": True,
     "logging_steps": 5,
     "grad_clip": 1.0,
-    "num_generation_steps": 10,
-    "generation_temperature": 0.7,
+    "num_generation_steps": 64,        # Denoising steps (T=64, must match eval; T=20 produces garbled text)
+    "generation_temperature": 1.0,     # Increased from 0.7: masked diffusion too deterministic at 0.7, near-identical rollouts
+    "confidence_noise_std": 0.1,       # Noise on confidence scores for diverse position unmasking order
+    "num_sampled_timesteps": 8,        # Denoising reduction: sample K random steps from trajectory (Flow-GRPO paper)
     "formfactory_port": int(os.environ.get("FORMFACTORY_PORT", "5050")),
     "browser_headless": True,
     "action_timeout_s": 5,
@@ -319,7 +322,9 @@ ESPO_FSDFM_CONFIG = {
 }
 
 DATA_CONFIG = {
-    "train_file": os.environ.get("FLOW_TRAIN_FILE", "data/processed/formfactory_sft.jsonl"),
-    "eval_split": 0.1,
+    "train_file": os.environ.get("FLOW_TRAIN_FILE", "data/processed/formfactory_sft_train.jsonl"),
+    "val_file": os.environ.get("FLOW_VAL_FILE", "data/processed/formfactory_sft_val.jsonl"),
+    "test_file": os.environ.get("FLOW_TEST_FILE", "data/processed/formfactory_sft_test.jsonl"),
     "max_train_samples": int(os.environ.get("MAX_TRAIN_SAMPLES", "5000")),
+    "max_eval_samples": int(os.environ.get("MAX_EVAL_SAMPLES", "500")),
 }

@@ -19,6 +19,27 @@ https://github.com/user-attachments/assets/632128f6-3d09-497f-9e7d-e29b9cb65e0f
 
 OpenBrowser is a framework for intelligent browser automation. It combines direct CDP communication with LangGraph orchestration to create AI agents that can navigate, interact with, and extract information from web pages autonomously.
 
+## Table of Contents
+
+- [Documentation](#documentation)
+- [Key Features](#key-features)
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [Configuration](#configuration)
+- [Supported LLM Providers](#supported-llm-providers)
+- [Claude Code Plugin](#claude-code-plugin)
+- [Codex](#codex)
+- [OpenCode](#opencode)
+- [OpenClaw](#openclaw)
+- [MCP Server](#mcp-server)
+- [MCP Benchmark: Why OpenBrowser](#mcp-benchmark-why-openbrowser)
+- [CLI Usage](#cli-usage)
+- [Project Structure](#project-structure)
+- [Testing](#testing)
+- [Contributing](#contributing)
+- [License](#license)
+- [Contact](#contact)
+
 ## Documentation
 
 **Full documentation**: [https://docs.openbrowser.me](https://docs.openbrowser.me)
@@ -59,7 +80,7 @@ pip install openbrowser-ai[video]
 ### Install Browser
 
 ```bash
-uvx openbrowser install
+uvx openbrowser-ai install
 # or
 playwright install chromium
 ```
@@ -187,87 +208,319 @@ profile = BrowserProfile(
 | **OCI** | `ChatOCIRaw` | Oracle Cloud GenAI models |
 | **Browser-Use** | `ChatBrowserUse` | External LLM service |
 
-## MCP Server (Claude Desktop Integration)
+## Claude Code Plugin
 
-OpenBrowser includes an MCP server for integration with Claude Desktop.
-
-### Running the MCP Server
+Install OpenBrowser as a Claude Code plugin:
 
 ```bash
-python -m openbrowser.mcp
+# Add the marketplace (one-time)
+claude plugin marketplace add billy-enrizky/openbrowser-ai
+
+# Install the plugin
+claude plugin install openbrowser@openbrowser-ai
 ```
 
-### Claude Desktop Configuration
+This installs the MCP server and 5 built-in skills:
 
-Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_desktop_config.json`):
+| Skill | Description |
+|-------|-------------|
+| `web-scraping` | Extract structured data, handle pagination |
+| `form-filling` | Fill forms, login flows, multi-step wizards |
+| `e2e-testing` | Test web apps by simulating user interactions |
+| `page-analysis` | Analyze page content, structure, metadata |
+| `accessibility-audit` | Audit pages for WCAG compliance |
+
+See [plugin/README.md](plugin/README.md) for detailed tool parameter documentation.
+
+## Codex
+
+OpenBrowser works with OpenAI Codex via native skill discovery.
+
+### Quick Install
+
+Tell Codex:
+
+```
+Fetch and follow instructions from https://raw.githubusercontent.com/billy-enrizky/openbrowser-ai/refs/heads/main/.codex/INSTALL.md
+```
+
+### Manual Install
+
+```bash
+# Clone the repository
+git clone https://github.com/billy-enrizky/openbrowser-ai.git ~/.codex/openbrowser
+
+# Symlink skills for native discovery
+mkdir -p ~/.agents/skills
+ln -s ~/.codex/openbrowser/plugin/skills ~/.agents/skills/openbrowser
+
+# Restart Codex
+```
+
+Then configure the MCP server in your project (see [MCP Server](#mcp-server) below).
+
+Detailed docs: [.codex/INSTALL.md](.codex/INSTALL.md)
+
+## OpenCode
+
+OpenBrowser works with [OpenCode.ai](https://opencode.ai) via plugin and skill symlinks.
+
+### Quick Install
+
+Tell OpenCode:
+
+```
+Fetch and follow instructions from https://raw.githubusercontent.com/billy-enrizky/openbrowser-ai/refs/heads/main/.opencode/INSTALL.md
+```
+
+### Manual Install
+
+```bash
+# Clone the repository
+git clone https://github.com/billy-enrizky/openbrowser-ai.git ~/.config/opencode/openbrowser
+
+# Create directories
+mkdir -p ~/.config/opencode/plugins ~/.config/opencode/skills
+
+# Symlink plugin and skills
+ln -s ~/.config/opencode/openbrowser/.opencode/plugins/openbrowser.js ~/.config/opencode/plugins/openbrowser.js
+ln -s ~/.config/opencode/openbrowser/plugin/skills ~/.config/opencode/skills/openbrowser
+
+# Restart OpenCode
+```
+
+Then configure the MCP server in your project (see [MCP Server](#mcp-server) below).
+
+Detailed docs: [.opencode/INSTALL.md](.opencode/INSTALL.md)
+
+## OpenClaw
+
+[OpenClaw](https://openclaw.ai) does not natively support MCP servers, but the community
+[openclaw-mcp-adapter](https://github.com/androidStern-personal/openclaw-mcp-adapter) plugin
+bridges MCP servers to OpenClaw agents.
+
+1. Install the MCP adapter plugin (see its README for setup).
+
+2. Add OpenBrowser as an MCP server in `~/.openclaw/openclaw.json`:
 
 ```json
 {
-  "mcpServers": {
-    "openbrowser": {
-      "command": "uvx",
-      "args": ["openbrowser-ai", "mcp"],
-      "env": {
-        "GOOGLE_API_KEY": "..."
+  "plugins": {
+    "entries": {
+      "mcp-adapter": {
+        "enabled": true,
+        "config": {
+          "servers": [
+            {
+              "name": "openbrowser",
+              "transport": "stdio",
+              "command": "uvx",
+              "args": ["openbrowser-ai[mcp]", "--mcp"]
+            }
+          ]
+        }
       }
     }
   }
 }
 ```
 
+The `execute_code` tool will be registered as a native OpenClaw agent tool.
+
+For OpenClaw plugin documentation, see [docs.openclaw.ai/tools/plugin](https://docs.openclaw.ai/tools/plugin).
+
+## MCP Server
+
+OpenBrowser includes an MCP (Model Context Protocol) server that exposes browser automation as tools for AI assistants like Claude. No external LLM API keys required -- the MCP client (Claude) provides the intelligence.
+
+### Quick Setup
+
+**Claude Code** -- add to your project's `.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "openbrowser": {
+      "command": "uvx",
+      "args": ["openbrowser-ai[mcp]", "--mcp"]
+    }
+  }
+}
+```
+
+**Claude Desktop** -- add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "openbrowser": {
+      "command": "uvx",
+      "args": ["openbrowser-ai[mcp]", "--mcp"],
+      "env": {
+        "OPENBROWSER_HEADLESS": "true"
+      }
+    }
+  }
+}
+```
+
+**Run directly:**
+
+```bash
+uvx openbrowser-ai[mcp] --mcp
+```
+
+### Tool
+
+The MCP server exposes a single `execute_code` tool that runs Python code in a persistent namespace with browser automation functions. The LLM writes Python code to navigate, interact, and extract data -- returning only what was explicitly requested.
+
+**Available functions** (all async, use `await`):
+
+| Category | Functions |
+|----------|-----------|
+| **Navigation** | `navigate(url, new_tab)`, `go_back()`, `wait(seconds)` |
+| **Interaction** | `click(index)`, `input_text(index, text, clear)`, `scroll(down, pages, index)`, `send_keys(keys)`, `upload_file(index, path)` |
+| **Dropdowns** | `select_dropdown(index, text)`, `dropdown_options(index)` |
+| **Tabs** | `switch(tab_id)`, `close(tab_id)` |
+| **JavaScript** | `evaluate(code)` -- run JS in page context, returns Python objects |
+| **State** | `browser.get_browser_state_summary()` -- get page metadata and interactive elements |
+| **CSS** | `get_selector_from_index(index)` -- get CSS selector for an element |
+| **Completion** | `done(text, success)` -- signal task completion |
+
+**Pre-imported libraries**: `json`, `csv`, `re`, `datetime`, `asyncio`, `Path`, `requests`, `numpy`, `pandas`, `matplotlib`, `BeautifulSoup`
+
+### Configuration
+
+| Environment Variable | Description | Default |
+|---------------------|-------------|---------|
+| `OPENBROWSER_HEADLESS` | Run browser without GUI | `false` |
+| `OPENBROWSER_ALLOWED_DOMAINS` | Comma-separated domain whitelist | (none) |
+
+## MCP Benchmark: Why OpenBrowser
+
+### E2E LLM Benchmark (6 Real-World Tasks, N=5 runs)
+
+Six real-world browser tasks run through Claude Sonnet 4.6 on AWS Bedrock (Converse API) with a server-agnostic system prompt. The LLM autonomously decides which tools to call and when the task is complete. 5 runs per server with 10,000-sample bootstrap CIs. All tasks run against live websites.
+
+| # | Task | Description | Target Site |
+|:-:|------|-------------|-------------|
+| 1 | **fact_lookup** | Navigate to a Wikipedia article and extract specific facts (creator and year) | en.wikipedia.org |
+| 2 | **form_fill** | Fill out a multi-field form (text input, radio button, checkbox) and submit | httpbin.org/forms/post |
+| 3 | **multi_page_extract** | Extract the titles of the top 5 stories from a dynamic page | news.ycombinator.com |
+| 4 | **search_navigate** | Search Wikipedia, click a result, and extract specific information | en.wikipedia.org |
+| 5 | **deep_navigation** | Navigate to a GitHub repo and find the latest release version number | github.com |
+| 6 | **content_analysis** | Analyze page structure: count headings, links, and paragraphs | example.com |
+
+<p align="center">
+  <img src="benchmarks/benchmark_comparison.png" alt="E2E LLM Benchmark: MCP Server Comparison" width="800" />
+</p>
+
+| MCP Server | Pass Rate | Duration (mean +/- std) | Tool Calls | Bedrock API Tokens |
+|------------|:---------:|------------------------:|-----------:|-------------------:|
+| **Playwright MCP** (Microsoft) | 100% | 92.2 +/- 11.4s | 11.0 +/- 1.4 | 150,248 |
+| **Chrome DevTools MCP** (Google) | 100% | 128.8 +/- 6.2s | 19.8 +/- 0.4 | 310,856 |
+| **OpenBrowser MCP** | 100% | 103.1 +/- 16.4s | 15.0 +/- 3.9 | **49,423** |
+
+OpenBrowser uses **3x fewer tokens** than Playwright and **6.3x fewer** than Chrome DevTools (measured via Bedrock Converse API `usage` field -- the actual billed tokens including system prompt, tool schemas, conversation history, and tool results).
+
+### Cost per Benchmark Run (6 Tasks)
+
+Based on Bedrock API token usage (input + output tokens at respective rates).
+
+| Model | Playwright MCP | Chrome DevTools MCP | OpenBrowser MCP |
+|-------|---------------:|--------------------:|----------------:|
+| Claude Sonnet ($3/$15 per M) | $0.47 | $0.96 | **$0.18** |
+| Claude Opus ($15/$75 per M) | $2.35 | $4.78 | **$0.91** |
+
+### Why the Difference
+
+Playwright and Chrome DevTools return full page accessibility snapshots as tool output (~124K-135K tokens for Wikipedia). The LLM reads the entire snapshot to find what it needs.
+
+OpenBrowser uses a CodeAgent architecture (single `execute_code` tool). The LLM writes Python code that processes browser state server-side and returns only extracted results (~30-1,000 chars per call). The full page content never enters the LLM context window.
+
+```
+Playwright: navigate to Wikipedia -> 478,793 chars (full a11y tree returned to LLM)
+OpenBrowser: navigate to Wikipedia -> 42 chars (page title only -- state processed in code)
+             evaluate JS for infobox -> 896 chars (just the extracted data)
+```
+
+[Full comparison with methodology](https://docs.openbrowser.me/comparison)
+
 ## CLI Usage
 
 ```bash
 # Run a browser automation task
-uvx openbrowser run "Search for Python tutorials on Google"
+uvx openbrowser-ai -p "Search for Python tutorials on Google"
 
 # Install browser
-uvx openbrowser install
+uvx openbrowser-ai install
 
 # Run MCP server
-uvx openbrowser mcp
+uvx openbrowser-ai[mcp] --mcp
 ```
 
 ## Project Structure
 
 ```
 openbrowser-ai/
+├── .claude-plugin/            # Claude Code marketplace config
+├── .codex/                    # Codex integration
+│   └── INSTALL.md
+├── .opencode/                 # OpenCode integration
+│   ├── INSTALL.md
+│   └── plugins/openbrowser.js
+├── plugin/                    # Plugin package (skills + MCP config)
+│   ├── .claude-plugin/
+│   ├── .mcp.json
+│   └── skills/                # 5 browser automation skills
 ├── src/openbrowser/
-│   ├── __init__.py          # Main exports
-│   ├── cli.py                # CLI commands
-│   ├── config.py             # Configuration
-│   ├── actor/                # Element interaction
-│   ├── agent/                # LangGraph agent
-│   │   ├── graph.py          # Agent workflow
-│   │   ├── service.py        # Agent class
-│   │   └── views.py          # Data models
-│   ├── browser/              # CDP browser control
-│   │   ├── session.py        # BrowserSession
-│   │   └── profile.py        # BrowserProfile
-│   ├── code_use/             # Code agent
-│   ├── dom/                  # DOM extraction
-│   ├── llm/                  # LLM providers
-│   │   ├── openai/
-│   │   ├── anthropic/
-│   │   ├── google/
-│   │   ├── groq/
-│   │   ├── aws/
-│   │   ├── azure/
-│   │   └── ...
-│   ├── mcp/                  # MCP server
-│   └── tools/                # Action registry
-└── tests/                    # Test suite
+│   ├── __init__.py            # Main exports
+│   ├── cli.py                 # CLI commands
+│   ├── config.py              # Configuration
+│   ├── actor/                 # Element interaction
+│   ├── agent/                 # LangGraph agent
+│   ├── browser/               # CDP browser control
+│   ├── code_use/              # Code agent
+│   ├── dom/                   # DOM extraction
+│   ├── llm/                   # LLM providers
+│   ├── mcp/                   # MCP server
+│   └── tools/                 # Action registry
+├── benchmarks/                # MCP benchmarks and E2E tests
+│   ├── playwright_benchmark.py
+│   ├── cdp_benchmark.py
+│   ├── openbrowser_benchmark.py
+│   └── e2e_published_test.py
+└── tests/                     # Test suite
 ```
 
 ## Testing
 
 ```bash
-# Run tests
+# Run unit tests
 pytest tests/
 
 # Run with verbose output
 pytest tests/ -v
+
+# E2E test the MCP server against the published PyPI package
+uv run python benchmarks/e2e_published_test.py
 ```
+
+### Benchmarks
+
+Run individual MCP server benchmarks (JSON-RPC stdio, 5-step Wikipedia workflow):
+
+```bash
+uv run python benchmarks/openbrowser_benchmark.py   # OpenBrowser MCP
+uv run python benchmarks/playwright_benchmark.py     # Playwright MCP
+uv run python benchmarks/cdp_benchmark.py            # Chrome DevTools MCP
+```
+
+Results are written to `benchmarks/*_results.json`. See [full comparison](https://docs.openbrowser.me/comparison) for methodology.
+
+## Production deployment
+
+AWS production infrastructure (VPC, EC2 backend, API Gateway, Cognito, DynamoDB, ECR, S3 + CloudFront) is defined in Terraform. See **[infra/production/terraform/README.md](infra/production/terraform/README.md)** for architecture, prerequisites, and step-by-step deploy (ECR -> build/push image -> `terraform apply`).
 
 ## Contributing
 

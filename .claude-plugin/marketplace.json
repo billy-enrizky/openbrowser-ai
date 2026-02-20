@@ -1,0 +1,18 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "openbrowser-ai",
+  "description": "AI-powered browser automation for Claude Code -- navigate, click, type, extract content, and automate workflows in real browsers",
+  "owner": {
+    "name": "OpenBrowser Team",
+    "url": "https://github.com/billy-enrizky/openbrowser-ai"
+  },
+  "plugins": [
+    {
+      "name": "openbrowser",
+      "description": "Browser automation MCP server with 11 tools for navigation, interaction, content extraction, and session management. Progressive disclosure design returns minimal tokens -- 877x fewer than Playwright MCP on Wikipedia.",
+      "source": "./plugin",
+      "category": "development",
+      "homepage": "https://github.com/billy-enrizky/openbrowser-ai"
+    }
+  ]
+}

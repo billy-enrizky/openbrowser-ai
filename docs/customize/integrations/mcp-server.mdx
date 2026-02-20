@@ -7,21 +7,21 @@ mode: "wide"
 
 ## Overview
 
-The MCP (Model Context Protocol) Server allows you to expose openbrowser's browser automation capabilities to AI assistants like Claude Desktop, Cline, and other MCP-compatible clients. This enables AI assistants to perform web automation tasks directly through openbrowser.
+The MCP (Model Context Protocol) Server exposes OpenBrowser's browser automation as a single `execute_code` tool for AI assistants like Claude Desktop, Claude Code, and other MCP-compatible clients. The LLM writes Python code to navigate, interact with, and extract data from web pages. No external LLM API keys required -- the MCP client provides the intelligence.
 
 ## Quick Start
 
 ### Start MCP Server
 
 ```bash
-uvx openbrowser --mcp
+uvx openbrowser-ai[mcp] --mcp
 ```
 
 The server will start in stdio mode, ready to accept MCP connections.
 
 ## Claude Desktop Integration
 
-The most common use case is integrating with Claude Desktop. Add this configuration to your Claude Desktop config file:
+Add this configuration to your Claude Desktop config file:
 
 ### macOS
 Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
@@ -29,11 +29,11 @@ Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
 ```json
 {
   "mcpServers": {
-    "openbrowser-ai": {
+    "openbrowser": {
       "command": "uvx",
-      "args": ["openbrowser-ai", "--mcp"],
+      "args": ["openbrowser-ai[mcp]", "--mcp"],
       "env": {
-        "OPENAI_API_KEY": "your-openai-api-key-here"
+        "OPENBROWSER_HEADLESS": "true"
       }
     }
   }
@@ -46,12 +46,27 @@ Edit `%APPDATA%\Claude\claude_desktop_config.json`:
 ```json
 {
   "mcpServers": {
-    "openbrowser-ai": {
+    "openbrowser": {
       "command": "uvx",
-      "args": ["openbrowser-ai", "--mcp"],
+      "args": ["openbrowser-ai[mcp]", "--mcp"],
       "env": {
-        "OPENAI_API_KEY": "your-openai-api-key-here"
+        "OPENBROWSER_HEADLESS": "true"
       }
+    }
+  }
+}
+```
+
+### Claude Code
+
+Add to your project's `.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "openbrowser": {
+      "command": "uvx",
+      "args": ["openbrowser-ai[mcp]", "--mcp"]
     }
   }
 }
@@ -59,54 +74,45 @@ Edit `%APPDATA%\Claude\claude_desktop_config.json`:
 
 ### Environment Variables
 
-You can configure openbrowser through environment variables:
+Optional configuration:
 
-- `OPENAI_API_KEY` - Your OpenAI API key (required)
-- `ANTHROPIC_API_KEY` - Your Anthropic API key (alternative to OpenAI)
-- `OPENBROWSER_HEADLESS` - Set to `false` to show browser window
-- `OPENBROWSER_DISABLE_SECURITY` - Set to `true` to disable browser security features
+- `OPENBROWSER_HEADLESS` - Set to `true` to run browser without GUI (default: `false`)
+- `OPENBROWSER_ALLOWED_DOMAINS` - Comma-separated domain whitelist
 
-## Available Tools
+## The `execute_code` Tool
 
-The MCP server exposes these browser automation tools:
+The MCP server exposes a single tool that runs Python code in a persistent namespace with browser automation functions. All functions are async -- use `await`.
 
-### Autonomous Agent Tools
-- **`retry_with_openbrowser_agent`** - Run a complete browser automation task with an AI agent (use as last resort when direct control fails)
+### Available Functions
 
-### Direct Browser Control
-- **`browser_navigate`** - Navigate to a URL
-- **`browser_click`** - Click on an element by index
-- **`browser_type`** - Type text into an element
-- **`browser_get_state`** - Get current page state and interactive elements
-- **`browser_scroll`** - Scroll the page
-- **`browser_go_back`** - Go back in browser history
+| Category | Functions |
+|----------|-----------|
+| **Navigation** | `navigate(url, new_tab)`, `go_back()`, `wait(seconds)` |
+| **Interaction** | `click(index)`, `input_text(index, text, clear)`, `scroll(down, pages, index)`, `send_keys(keys)`, `upload_file(index, path)` |
+| **Dropdowns** | `select_dropdown(index, text)`, `dropdown_options(index)` |
+| **Tabs** | `switch(tab_id)`, `close(tab_id)` |
+| **JavaScript** | `evaluate(code)` -- run JS in page context, returns Python objects |
+| **State** | `browser.get_browser_state_summary()` -- page metadata and interactive elements |
+| **CSS** | `get_selector_from_index(index)` -- CSS selector for an element |
+| **Completion** | `done(text, success)` -- signal task completion |
 
-### Tab Management
-- **`browser_list_tabs`** - List all open browser tabs
-- **`browser_switch_tab`** - Switch to a specific tab
-- **`browser_close_tab`** - Close a tab
+**Pre-imported libraries**: `json`, `csv`, `re`, `datetime`, `asyncio`, `Path`, `requests`, `numpy`, `pandas`, `matplotlib`, `BeautifulSoup`
 
-### Content Extraction
-- **`browser_extract_content`** - Extract structured content from the current page
-
-### Session Management
-- **`browser_list_sessions`** - List all active browser sessions with details
-- **`browser_close_session`** - Close a specific browser session by ID
-- **`browser_close_all`** - Close all active browser sessions
+Variables and state persist between `execute_code` calls within the same session.
 
 ## Example Usage
 
-Once configured with Claude Desktop, you can ask Claude to perform browser automation tasks:
+Once configured with Claude Desktop or Claude Code, you can ask the AI to perform browser automation tasks:
 
 ```
-"Please navigate to example.com and take a screenshot"
+"Navigate to example.com and extract all the links"
 
 "Search for 'browser automation' on Google and summarize the first 3 results"
 
 "Go to GitHub, find the openbrowser repository, and tell me about the latest release"
 ```
 
-Claude will use the MCP server to execute these tasks through openbrowser.
+The AI will use the `execute_code` tool to write Python code that navigates, interacts, and extracts data.
 
 ## Programmatic Usage
 
@@ -118,29 +124,37 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 async def use_browser_mcp():
-    # Connect to openbrowser MCP server
     server_params = StdioServerParameters(
-        command="uvx", 
-        args=["openbrowser-ai", "--mcp"]
+        command="uvx",
+        args=["openbrowser-ai[mcp]", "--mcp"]
     )
-    
+
     async with stdio_client(server_params) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
-            
-            # Navigate to a website
+
+            # Navigate and extract page title
             result = await session.call_tool(
-                "browser_navigate", 
-                arguments={"url": "https://example.com"}
+                "execute_code",
+                arguments={"code": """
+await navigate('https://example.com')
+state = await browser.get_browser_state_summary()
+print(f"Title: {state.title}")
+print(f"URL: {state.url}")
+"""}
             )
             print(result.content[0].text)
-            
-            # Get page state
+
+            # Extract data with JavaScript
             result = await session.call_tool(
-                "browser_get_state", 
-                arguments={"include_screenshot": True}
+                "execute_code",
+                arguments={"code": """
+links = await evaluate('Array.from(document.querySelectorAll("a")).map(a => ({text: a.textContent, href: a.href}))')
+for link in links:
+    print(f"{link['text']}: {link['href']}")
+"""}
             )
-            print("Page state retrieved!")
+            print(result.content[0].text)
 
 asyncio.run(use_browser_mcp())
 ```
@@ -151,18 +165,13 @@ asyncio.run(use_browser_mcp())
 
 **"MCP SDK is required" Error**
 ```bash
-uv pip install 'openbrowser-ai'
+pip install 'openbrowser-ai[mcp]'
 ```
 
 **Browser doesn't start**
 - Check that you have Chrome/Chromium installed
 - Try setting `OPENBROWSER_HEADLESS=false` to see browser window
 - Ensure no other browser instances are using the same profile
-
-**API Key Issues**
-- Verify your `OPENAI_API_KEY` is set correctly
-- Check API key permissions and billing status
-- Try using `ANTHROPIC_API_KEY` as an alternative
 
 **Connection Issues in Claude Desktop**
 - Restart Claude Desktop after config changes
@@ -174,7 +183,7 @@ uv pip install 'openbrowser-ai'
 Enable debug logging by setting:
 ```bash
 export OPENBROWSER_LOG_LEVEL=DEBUG
-uvx openbrowser --mcp
+uvx openbrowser-ai[mcp] --mcp
 ```
 
 ## Security Considerations
@@ -182,6 +191,7 @@ uvx openbrowser --mcp
 - The MCP server has access to your browser and file system
 - Only connect trusted MCP clients
 - Be cautious with sensitive websites and data
+- Use `OPENBROWSER_ALLOWED_DOMAINS` to restrict navigation
 
 ## Next Steps
 

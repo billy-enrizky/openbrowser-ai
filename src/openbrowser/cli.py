@@ -4,12 +4,35 @@
 import sys
 
 if '--mcp' in sys.argv:
+	import asyncio
 	import logging
 	import os
 
 	os.environ['OPENBROWSER_LOGGING_LEVEL'] = 'critical'
 	os.environ['OPENBROWSER_SETUP_LOGGING'] = 'false'
 	logging.disable(logging.CRITICAL)
+
+	# Early exit: run MCP server directly without loading heavy CLI dependencies
+	# (anthropic, openai, textual, etc. are not needed for MCP server mode)
+	try:
+		from openbrowser.telemetry import CLITelemetryEvent, ProductTelemetry
+		from openbrowser.utils import get_openbrowser_version
+
+		telemetry = ProductTelemetry()
+		telemetry.capture(
+			CLITelemetryEvent(
+				version=get_openbrowser_version(),
+				action='start',
+				mode='mcp_server',
+			)
+		)
+	except Exception:
+		pass
+
+	from openbrowser.mcp.server import main as mcp_main
+
+	asyncio.run(mcp_main())
+	sys.exit(0)
 
 # Special case: install command doesn't need CLI dependencies
 if len(sys.argv) > 1 and sys.argv[1] == 'install':
@@ -29,7 +52,7 @@ if len(sys.argv) > 1 and sys.argv[1] == 'install':
 
 	if result.returncode == 0:
 		print('\n✅ Installation complete!')
-		print('Ready to use! Run: uvx openbrowser')
+		print('Ready to use! Run: uvx openbrowser-ai')
 	else:
 		print('\n❌ Installation failed')
 		sys.exit(1)
@@ -147,10 +170,6 @@ from typing import Any
 
 from dotenv import load_dotenv
 
-from openbrowser.llm.anthropic.chat import ChatAnthropic
-from openbrowser.llm.google.chat import ChatGoogle
-from openbrowser.llm.openai.chat import ChatOpenAI
-
 load_dotenv()
 
 from openbrowser import Agent, Controller
@@ -212,12 +231,12 @@ BROWSER_LOGO = """
 				   [white] +++     ++++++    +++  [/]                                
 				   [white]   ++++++    +++++++    [/]                                
 
-[white]██████╗ ██████╗  ██████╗ ██╗    ██╗███████╗███████╗██████╗[/]     [darkorange]██╗   ██╗███████╗███████╗[/]
-[white]██╔══██╗██╔══██╗██╔═══██╗██║    ██║██╔════╝██╔════╝██╔══██╗[/]    [darkorange]██║   ██║██╔════╝██╔════╝[/]
-[white]██████╔╝██████╔╝██║   ██║██║ █╗ ██║███████╗█████╗  ██████╔╝[/]    [darkorange]██║   ██║███████╗█████╗[/]  
-[white]██╔══██╗██╔══██╗██║   ██║██║███╗██║╚════██║██╔══╝  ██╔══██╗[/]    [darkorange]██║   ██║╚════██║██╔══╝[/]  
-[white]██████╔╝██║  ██║╚██████╔╝╚███╔███╔╝███████║███████╗██║  ██║[/]    [darkorange]╚██████╔╝███████║███████╗[/]
-[white]╚═════╝ ╚═╝  ╚═╝ ╚═════╝  ╚══╝╚══╝ ╚══════╝╚══════╝╚═╝  ╚═╝[/]     [darkorange]╚═════╝ ╚══════╝╚══════╝[/]
+[darkorange] ██████╗ ██████╗ ███████╗███╗   ██╗[/][white]██████╗ ██████╗  ██████╗ ██╗    ██╗███████╗███████╗██████╗[/]
+[darkorange]██╔═══██╗██╔══██╗██╔════╝████╗  ██║[/][white]██╔══██╗██╔══██╗██╔═══██╗██║    ██║██╔════╝██╔════╝██╔══██╗[/]
+[darkorange]██║   ██║██████╔╝█████╗  ██╔██╗ ██║[/][white]██████╔╝██████╔╝██║   ██║██║ █╗ ██║███████╗█████╗  ██████╔╝[/]
+[darkorange]██║   ██║██╔═══╝ ██╔══╝  ██║╚██╗██║[/][white]██╔══██╗██╔══██╗██║   ██║██║███╗██║╚════██║██╔══╝  ██╔══██╗[/]
+[darkorange]╚██████╔╝██║     ███████╗██║ ╚████║[/][white]██████╔╝██║  ██║╚██████╔╝╚███╔███╔╝███████║███████╗██║  ██║[/]
+[darkorange] ╚═════╝ ╚═╝     ╚══════╝╚═╝  ╚═══╝[/][white]╚═════╝ ╚═╝  ╚═╝ ╚═════╝  ╚══╝╚══╝ ╚══════╝╚══════╝╚═╝  ╚═╝[/]
 """
 
 
@@ -348,6 +367,11 @@ def setup_readline_history(history: list[str]) -> None:
 
 def get_llm(config: dict[str, Any]):
 	"""Get the language model based on config and available API keys."""
+	# Lazy imports: these are only needed when actually creating an LLM instance.
+	# Importing at module level causes ModuleNotFoundError when optional deps
+	# (e.g. anthropic) are not installed, breaking commands like --version.
+	from openbrowser.llm.openai.chat import ChatOpenAI
+
 	model_config = config.get('model', {})
 	model_name = model_config.get('name')
 	temperature = model_config.get('temperature', 0.0)
@@ -358,23 +382,27 @@ def get_llm(config: dict[str, Any]):
 	if model_name:
 		if model_name.startswith('gpt'):
 			if not api_key and not CONFIG.OPENAI_API_KEY:
-				print('⚠️  OpenAI API key not found. Please update your config or set OPENAI_API_KEY environment variable.')
+				print('OpenAI API key not found. Please update your config or set OPENAI_API_KEY environment variable.')
 				sys.exit(1)
 			return ChatOpenAI(model=model_name, temperature=temperature, api_key=api_key or CONFIG.OPENAI_API_KEY)
 		elif model_name.startswith('claude'):
+			from openbrowser.llm.anthropic.chat import ChatAnthropic
+
 			if not CONFIG.ANTHROPIC_API_KEY:
-				print('⚠️  Anthropic API key not found. Please update your config or set ANTHROPIC_API_KEY environment variable.')
+				print('Anthropic API key not found. Please update your config or set ANTHROPIC_API_KEY environment variable.')
 				sys.exit(1)
 			return ChatAnthropic(model=model_name, temperature=temperature)
 		elif model_name.startswith('gemini'):
+			from openbrowser.llm.google.chat import ChatGoogle
+
 			if not CONFIG.GOOGLE_API_KEY:
-				print('⚠️  Google API key not found. Please update your config or set GOOGLE_API_KEY environment variable.')
+				print('Google API key not found. Please update your config or set GOOGLE_API_KEY environment variable.')
 				sys.exit(1)
 			return ChatGoogle(model=model_name, temperature=temperature)
 		elif model_name.startswith('oci'):
 			# OCI models require additional configuration
 			print(
-				'⚠️  OCI models require manual configuration. Please use the ChatOCIRaw class directly with your OCI credentials.'
+				'OCI models require manual configuration. Please use the ChatOCIRaw class directly with your OCI credentials.'
 			)
 			sys.exit(1)
 
@@ -382,12 +410,16 @@ def get_llm(config: dict[str, Any]):
 	if api_key or CONFIG.OPENAI_API_KEY:
 		return ChatOpenAI(model='gpt-5-mini', temperature=temperature, api_key=api_key or CONFIG.OPENAI_API_KEY)
 	elif CONFIG.ANTHROPIC_API_KEY:
+		from openbrowser.llm.anthropic.chat import ChatAnthropic
+
 		return ChatAnthropic(model='claude-4-sonnet', temperature=temperature)
 	elif CONFIG.GOOGLE_API_KEY:
+		from openbrowser.llm.google.chat import ChatGoogle
+
 		return ChatGoogle(model='gemini-2.5-pro', temperature=temperature)
 	else:
 		print(
-			'⚠️  No API keys found. Please update your config or set one of: OPENAI_API_KEY, ANTHROPIC_API_KEY, or GOOGLE_API_KEY.'
+			'No API keys found. Please update your config or set one of: OPENAI_API_KEY, ANTHROPIC_API_KEY, or GOOGLE_API_KEY.'
 		)
 		sys.exit(1)
 
@@ -1753,8 +1785,8 @@ def main(ctx: click.Context, debug: bool = False, **kwargs):
 	Run without arguments to start the interactive TUI.
 
 	Examples:
-	  uvx openbrowser --template default
-	  uvx openbrowser --template advanced --output my_script.py
+	  uvx openbrowser-ai --template default
+	  uvx openbrowser-ai --template advanced --output my_script.py
 	"""
 
 	# Handle template generation
@@ -1903,7 +1935,7 @@ def install():
 
 	if result.returncode == 0:
 		print('\n✅ Installation complete!')
-		print('Ready to use! Run: uvx openbrowser')
+		print('Ready to use! Run: uvx openbrowser-ai')
 	else:
 		print('\n❌ Installation failed')
 		sys.exit(1)
@@ -2022,19 +2054,19 @@ def init(
 
 	\b
 	# Interactive mode - prompts for template selection
-	uvx openbrowser init
+	uvx openbrowser-ai init
 
 	\b
 	# Generate default template
-	uvx openbrowser init --template default
+	uvx openbrowser-ai init --template default
 
 	\b
 	# Generate advanced template with custom filename
-	uvx openbrowser init --template advanced --output my_script.py
+	uvx openbrowser-ai init --template advanced --output my_script.py
 
 	\b
 	# List available templates
-	uvx openbrowser init --list
+	uvx openbrowser-ai init --list
 	"""
 
 	# Handle --list flag

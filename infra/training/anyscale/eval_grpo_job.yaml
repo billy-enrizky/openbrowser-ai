@@ -24,8 +24,8 @@ excludes:
   - data/formfactory/img/
   - "*.pyc"
 env_vars:
-  TRAIN_FILE: "data/processed/formfactory_sft.jsonl"
-  MAX_EVAL_SAMPLES: "25"
+  EVAL_SPLIT: "val"
+  MAX_EVAL_SAMPLES: "124"
   SFT_CHECKPOINT_PATH: "/mnt/user_storage/openbrowser/checkpoints/online-grpo"
   EVAL_LABEL: "GRPO"
   # HF_TOKEN injected from .env at submission time by submit_job.py
