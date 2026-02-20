@@ -3,9 +3,11 @@
 import asyncio
 import logging
 import os
+import pathlib
 import secrets
 import shutil
 import socket
+import sys
 from dataclasses import dataclass
 from typing import Any
 
@@ -54,7 +56,8 @@ class VncSession:
     xvfb_process: asyncio.subprocess.Process | None = None
     x11vnc_process: asyncio.subprocess.Process | None = None
     websockify_process: asyncio.subprocess.Process | None = None
-    fluxbox_process: asyncio.subprocess.Process | None = None
+    wm_process: asyncio.subprocess.Process | None = None
+    key_grabber_process: asyncio.subprocess.Process | None = None
     
     @property
     def display(self) -> str:
@@ -207,20 +210,53 @@ class VncService:
         # Set DISPLAY environment for subsequent processes
         env = os.environ.copy()
         env["DISPLAY"] = session.display
-        
-        # 2. Start fluxbox (minimal window manager) - optional but helps with window management
+
+        # Point Openbox at the kiosk config directory.
+        # Openbox reads $XDG_CONFIG_HOME/openbox/rc.xml and menu.xml.
+        kiosk_dir = pathlib.Path(__file__).resolve().parent.parent.parent / "kiosk"
+        env["XDG_CONFIG_HOME"] = str(kiosk_dir)
+
+        # 2. Start openbox (locked-down window manager: no decorations,
+        #    no keyboard shortcuts, no desktop menu, force maximized)
         try:
-            fluxbox_cmd = ["fluxbox"]
-            logger.debug(f"Starting fluxbox on {session.display}")
-            session.fluxbox_process = await asyncio.create_subprocess_exec(
-                *fluxbox_cmd,
+            openbox_cmd = ["openbox"]
+            logger.debug("Starting openbox on %s (config: %s)", session.display, kiosk_dir)
+            session.wm_process = await asyncio.create_subprocess_exec(
+                *openbox_cmd,
                 env=env,
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.DEVNULL,
             )
             await asyncio.sleep(0.3)
         except FileNotFoundError:
-            logger.warning("fluxbox not found, continuing without window manager")
+            logger.warning("openbox not found, continuing without window manager")
+
+        # 2b. Start X11 key grabber daemon to intercept dangerous shortcuts
+        #     (Alt+F4, Ctrl+W, Ctrl+Q, Alt+Tab, etc.) at the root window level
+        key_grabber_path = kiosk_dir / "key_grabber.py"
+        if key_grabber_path.exists():
+            try:
+                logger.debug("Starting key grabber on %s", session.display)
+                session.key_grabber_process = await asyncio.create_subprocess_exec(
+                    sys.executable, str(key_grabber_path),
+                    env=env,
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                # Check that the key grabber didn't exit immediately
+                # (e.g. python-xlib not installed)
+                await asyncio.sleep(0.3)
+                if session.key_grabber_process.returncode is not None:
+                    stderr = await session.key_grabber_process.stderr.read()
+                    logger.warning(
+                        "Key grabber exited immediately (code=%d): %s",
+                        session.key_grabber_process.returncode,
+                        stderr.decode().strip(),
+                    )
+            except Exception as e:
+                logger.warning("Key grabber failed to start: %s", e)
+        else:
+            logger.debug("Key grabber not found at %s, skipping", key_grabber_path)
         
         # 3. Start x11vnc
         x11vnc_cmd = [
@@ -228,15 +264,18 @@ class VncService:
             "-display", session.display,
             "-rfbport", str(session.vnc_port),
             "-passwd", session.password,
-            "-forever",  # Don't exit after first client disconnects
-            "-shared",   # Allow multiple clients
-            "-noxdamage",  # Disable XDAMAGE for better compatibility
+            "-forever",        # Don't exit after first client disconnects
+            "-shared",         # Allow multiple clients
+            "-noxdamage",      # Disable XDAMAGE for better compatibility
             "-noxfixes",
             "-noxrecord",
-            "-nowf",     # No wireframe
+            "-nowf",           # No wireframe
             "-cursor", "arrow",
-            "-nopw",     # Don't prompt for password file
-            "-q",        # Quiet mode
+            "-nopw",           # Don't prompt for password file
+            "-q",              # Quiet mode
+            "-input", "KM",    # Keyboard + Mouse only (no clipboard/file transfer)
+            "-noclipboard",    # Disable clipboard sharing
+            "-nosetclipboard", # Prevent VNC client from setting clipboard
         ]
         
         logger.debug(f"Starting x11vnc: {' '.join(x11vnc_cmd)}")
@@ -293,7 +332,8 @@ class VncService:
         processes = [
             ("websockify", session.websockify_process),
             ("x11vnc", session.x11vnc_process),
-            ("fluxbox", session.fluxbox_process),
+            ("key_grabber", session.key_grabber_process),
+            ("openbox", session.wm_process),
             ("Xvfb", session.xvfb_process),
         ]
         
