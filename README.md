@@ -400,52 +400,49 @@ The MCP server exposes a single `execute_code` tool that runs Python code in a p
 
 ### E2E LLM Benchmark (6 Real-World Tasks, N=5 runs)
 
-Six browser tasks run through Claude Sonnet 4.6 on AWS Bedrock with a server-agnostic system prompt. 5 runs per server with 10,000-sample bootstrap CIs. Token usage measured from actual MCP tool response sizes.
+Six real-world browser tasks run through Claude Sonnet 4.6 on AWS Bedrock (Converse API) with a server-agnostic system prompt. The LLM autonomously decides which tools to call and when the task is complete. 5 runs per server with 10,000-sample bootstrap CIs. All tasks run against live websites.
+
+| # | Task | Description | Target Site |
+|:-:|------|-------------|-------------|
+| 1 | **fact_lookup** | Navigate to a Wikipedia article and extract specific facts (creator and year) | en.wikipedia.org |
+| 2 | **form_fill** | Fill out a multi-field form (text input, radio button, checkbox) and submit | httpbin.org/forms/post |
+| 3 | **multi_page_extract** | Extract the titles of the top 5 stories from a dynamic page | news.ycombinator.com |
+| 4 | **search_navigate** | Search Wikipedia, click a result, and extract specific information | en.wikipedia.org |
+| 5 | **deep_navigation** | Navigate to a GitHub repo and find the latest release version number | github.com |
+| 6 | **content_analysis** | Analyze page structure: count headings, links, and paragraphs | example.com |
 
 <p align="center">
   <img src="benchmarks/benchmark_comparison.png" alt="E2E LLM Benchmark: MCP Server Comparison" width="800" />
 </p>
 
-| MCP Server | Pass Rate | Duration (mean +/- std) | Tool Calls | Response Tokens |
-|------------|:---------:|------------------------:|-----------:|----------------:|
-| **Playwright MCP** (Microsoft) | 100% | 92.2 +/- 11.4s | 11.0 +/- 1.4 | 283,853 |
-| **Chrome DevTools MCP** (Google) | 100% | 128.8 +/- 6.2s | 19.8 +/- 0.4 | 301,030 |
-| **OpenBrowser MCP** | 100% | 103.1 +/- 16.4s | 15.0 +/- 3.9 | **1,665** |
+| MCP Server | Pass Rate | Duration (mean +/- std) | Tool Calls | Bedrock API Tokens |
+|------------|:---------:|------------------------:|-----------:|-------------------:|
+| **Playwright MCP** (Microsoft) | 100% | 92.2 +/- 11.4s | 11.0 +/- 1.4 | 150,248 |
+| **Chrome DevTools MCP** (Google) | 100% | 128.8 +/- 6.2s | 19.8 +/- 0.4 | 310,856 |
+| **OpenBrowser MCP** | 100% | 103.1 +/- 16.4s | 15.0 +/- 3.9 | **49,423** |
 
-OpenBrowser uses **170x fewer tokens** than Playwright and **181x fewer** than Chrome DevTools.
+OpenBrowser uses **3x fewer tokens** than Playwright and **6.3x fewer** than Chrome DevTools (measured via Bedrock Converse API `usage` field -- the actual billed tokens including system prompt, tool schemas, conversation history, and tool results).
 
 ### Cost per Benchmark Run (6 Tasks)
 
+Based on Bedrock API token usage (input + output tokens at respective rates).
+
 | Model | Playwright MCP | Chrome DevTools MCP | OpenBrowser MCP |
 |-------|---------------:|--------------------:|----------------:|
-| Claude Sonnet ($3/M) | $0.852 | $0.903 | **$0.005** |
-| Claude Opus ($15/M) | $4.258 | $4.515 | **$0.025** |
-| GPT-4o ($2.50/M) | $0.710 | $0.753 | **$0.004** |
-
-### Per-Task Response Size
-
-| Task | Playwright MCP | Chrome DevTools MCP | OpenBrowser MCP |
-|------|---------------:|--------------------:|----------------:|
-| fact_lookup | 477,003 chars | 509,059 chars | 1,041 chars |
-| form_fill | 4,075 chars | 3,150 chars | 2,410 chars |
-| multi_page_extract | 58,099 chars | 38,593 chars | 513 chars |
-| search_navigate | 518,461 chars | 594,458 chars | 1,996 chars |
-| deep_navigation | 77,292 chars | 58,359 chars | 113 chars |
-| content_analysis | 493 chars | 513 chars | 594 chars |
+| Claude Sonnet ($3/$15 per M) | $0.47 | $0.96 | **$0.18** |
+| Claude Opus ($15/$75 per M) | $2.35 | $4.78 | **$0.91** |
 
 ### Why the Difference
 
-Playwright completes tasks in fewer tool calls (1-2 per task) because it dumps the full a11y snapshot on every navigation (~478K chars for Wikipedia). The LLM sees everything immediately but pays massively in tokens.
+Playwright and Chrome DevTools return full page accessibility snapshots as tool output (~124K-135K tokens for Wikipedia). The LLM reads the entire snapshot to find what it needs.
 
-OpenBrowser uses a CodeAgent architecture (single `execute_code` tool). The LLM writes Python code that navigates, extracts specific data via JS evaluation, and processes results -- returning only what was explicitly requested (~30-1,000 chars per call).
+OpenBrowser uses a CodeAgent architecture (single `execute_code` tool). The LLM writes Python code that processes browser state server-side and returns only extracted results (~30-1,000 chars per call). The full page content never enters the LLM context window.
 
 ```
-Playwright: navigate to Wikipedia -> 478,793 chars (full a11y tree)
-OpenBrowser: navigate to Wikipedia -> 42 chars ("Python (programming language) - Wikipedia")
-             evaluate JS for infobox -> 896 chars (just the data rows)
+Playwright: navigate to Wikipedia -> 478,793 chars (full a11y tree returned to LLM)
+OpenBrowser: navigate to Wikipedia -> 42 chars (page title only -- state processed in code)
+             evaluate JS for infobox -> 896 chars (just the extracted data)
 ```
-
-At scale (thousands of workflows, complex pages), the token cost difference is 170x+.
 
 [Full comparison with methodology](https://docs.openbrowser.me/comparison)
 
@@ -505,7 +502,7 @@ pytest tests/
 # Run with verbose output
 pytest tests/ -v
 
-# E2E test all 11 MCP tools against the published PyPI package
+# E2E test the MCP server against the published PyPI package
 uv run python benchmarks/e2e_published_test.py
 ```
 
