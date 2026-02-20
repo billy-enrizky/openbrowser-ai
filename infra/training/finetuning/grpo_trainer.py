@@ -81,8 +81,8 @@ def generate_rollouts(
             max_new_tokens=max_new_tokens,
             num_return_sequences=group_size,
             do_sample=True,
-            temperature=0.7,
-            top_p=0.9,
+            temperature=1.0,
+            top_p=0.95,
             return_dict_in_generate=True,
             output_scores=False,
         )
