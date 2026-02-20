@@ -1,5 +1,5 @@
 """
-E2E test for the published openbrowser-ai[mcp]==0.1.22 package.
+E2E test for the published openbrowser-ai[mcp]==0.1.24 package.
 
 Starts the MCP server via uvx as a subprocess, communicates via JSON-RPC 2.0
 over stdio, and validates:
@@ -160,7 +160,7 @@ class TestResult:
 
 def run_tests() -> list[TestResult]:
     results: list[TestResult] = []
-    client = MCPStdioClient(["uvx", "openbrowser-ai[mcp]==0.1.22", "--mcp"])
+    client = MCPStdioClient(["uvx", "openbrowser-ai[mcp]==0.1.24", "--mcp"])
 
     try:
         client.start_process()
@@ -330,7 +330,7 @@ def run_tests() -> list[TestResult]:
 # ---------------------------------------------------------------------------
 
 def main() -> None:
-    logger.info("=== E2E Published Package Test (openbrowser-ai[mcp]==0.1.22) ===")
+    logger.info("=== E2E Published Package Test (openbrowser-ai[mcp]==0.1.24) ===")
 
     # Kill any pre-existing browser processes
     kill_browsers()
