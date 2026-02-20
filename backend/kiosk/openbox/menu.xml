@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Empty Openbox menu for kiosk mode.
+  No items means right-clicking on any exposed desktop area shows nothing.
+-->
+<openbox_menu xmlns="http://openbox.org/3.4/rc">
+  <menu id="root-menu" label="Menu">
+  </menu>
+</openbox_menu>
