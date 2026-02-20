@@ -54,7 +54,7 @@ async def main():
 
 
 if __name__ == '__main__':
-	print('🌐 Browser-use LangChain Integration Example')
+	print('🌐 Openbrowser LangChain Integration Example')
 	print('=' * 45)
 
 	asyncio.run(main())
