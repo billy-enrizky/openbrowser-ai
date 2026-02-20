@@ -6,7 +6,7 @@ aws_region   = "ca-central-1"
 project_name = "openbrowser"
 
 # Backend runtime
-backend_instance_type = "t3.small"
+backend_instance_type = "t3.medium"
 backend_port          = 8000
 
 # Backend container image:
