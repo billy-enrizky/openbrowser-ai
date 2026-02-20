@@ -351,6 +351,8 @@ async def run_task(
     _kill_stale_browsers()
 
     tool_call_count = 0
+    bedrock_input_tokens = 0
+    bedrock_output_tokens = 0
     result_text = ""
     error_msg = None
     start = time.monotonic()
@@ -386,6 +388,11 @@ async def run_task(
                 error_msg = f"Bedrock API error: {e}"
                 logger.error("  [%s/%s] %s", server_name, task_name, error_msg)
                 break
+
+            # Track Bedrock API token usage
+            usage = response.get("usage", {})
+            bedrock_input_tokens += usage.get("inputTokens", 0)
+            bedrock_output_tokens += usage.get("outputTokens", 0)
 
             stop_reason = response.get("stopReason", "")
             output_message = response.get("output", {}).get("message", {})
@@ -484,11 +491,21 @@ async def run_task(
         duration_s, tool_call_count,
     )
 
+    total_bedrock_tokens = bedrock_input_tokens + bedrock_output_tokens
+    logger.info(
+        "  [%s/%s] Bedrock tokens: %d input + %d output = %d total",
+        server_name, task_name,
+        bedrock_input_tokens, bedrock_output_tokens, total_bedrock_tokens,
+    )
+
     return {
         "name": task_name,
         "success": success,
         "duration_s": round(duration_s, 1),
         "tool_calls": tool_call_count,
+        "bedrock_input_tokens": bedrock_input_tokens,
+        "bedrock_output_tokens": bedrock_output_tokens,
+        "total_bedrock_tokens": total_bedrock_tokens,
         "result": result_text[:500],
         "error": error_msg,
     }
@@ -504,12 +521,17 @@ def aggregate_results(task_results: list[dict]) -> dict:
     passed = sum(1 for t in task_results if t["success"])
     total_duration = sum(t["duration_s"] for t in task_results)
     total_tools = sum(t["tool_calls"] for t in task_results)
+    total_input = sum(t.get("bedrock_input_tokens", 0) for t in task_results)
+    total_output = sum(t.get("bedrock_output_tokens", 0) for t in task_results)
     return {
         "total_tasks": total,
         "passed": passed,
         "total_duration_s": round(total_duration, 1),
         "total_tool_calls": total_tools,
         "avg_tool_calls": round(total_tools / total, 1) if total else 0,
+        "bedrock_input_tokens": total_input,
+        "bedrock_output_tokens": total_output,
+        "total_bedrock_tokens": total_input + total_output,
     }
 
 
@@ -529,6 +551,9 @@ def format_summary_table(server_results: dict) -> str:
         ("Total Duration (s)", "total_duration_s", ".1f"),
         ("Total Tool Calls", "total_tool_calls", "d"),
         ("Avg Tool Calls/Task", "avg_tool_calls", ".1f"),
+        ("Bedrock Input Tokens", "bedrock_input_tokens", ",d"),
+        ("Bedrock Output Tokens", "bedrock_output_tokens", ",d"),
+        ("Total Bedrock Tokens", "total_bedrock_tokens", ",d"),
     ]:
         row = f"{label:<25s}"
         for name in names:
@@ -614,9 +639,10 @@ async def run_benchmark(
         }
 
         logger.info(
-            "  Server %s: %d/%d passed, %.1fs total, %d tool calls",
+            "  Server %s: %d/%d passed, %.1fs total, %d tool calls, %d bedrock tokens",
             server_name, summary["passed"], summary["total_tasks"],
             summary["total_duration_s"], summary["total_tool_calls"],
+            summary["total_bedrock_tokens"],
         )
         logger.info("")
 
