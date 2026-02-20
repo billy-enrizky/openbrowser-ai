@@ -255,19 +255,28 @@ class BrowserEnvironment:
             {"action": "click_element", "params": {"index": 5}}
             {"action": "select_dropdown_option", "params": {"index": 7, "text": "CA"}}
 
+        Actions may include a "field_name" key in params (set by action_parser)
+        to track which form fields were filled. This enables the field_accuracy
+        reward component even when form submission does not occur.
+
         Args:
             actions: List of action dicts from action_parser.
             timeout_per_action: Max seconds per action before timeout.
 
         Returns:
-            BrowserOutcome with execution results.
+            BrowserOutcome with execution results and filled field values.
         """
         executed = 0
         total = len(actions)
+        filled_values: dict[str, str] = {}
 
         for action_dict in actions:
             action_name = action_dict.get("action", "")
             params = action_dict.get("params", {})
+
+            # Extract field tracking metadata before passing to openbrowser
+            field_name = params.pop("field_name", None)
+            is_checkbox = params.pop("is_checkbox", False)
 
             # Map parser action names to openbrowser Tools method names
             tools_method = ACTION_NAME_MAP.get(action_name, action_name)
@@ -287,7 +296,7 @@ class BrowserEnvironment:
                     logger.debug(f"Action {action_name} error: {result.error}")
                     return BrowserOutcome(
                         success_page_detected=False,
-                        submitted_values={},
+                        submitted_values=filled_values,
                         error=result.error,
                         actions_executed=executed,
                         total_actions=total,
@@ -295,11 +304,18 @@ class BrowserEnvironment:
 
                 executed += 1
 
+                # Track filled values for field_accuracy reward
+                if field_name:
+                    if action_name in ("input_text", "select_dropdown_option"):
+                        filled_values[field_name] = params.get("text", "")
+                    elif is_checkbox:
+                        filled_values[field_name] = "true"
+
             except asyncio.TimeoutError:
                 logger.warning(f"Action {action_name} timed out after {timeout_per_action}s")
                 return BrowserOutcome(
                     success_page_detected=False,
-                    submitted_values={},
+                    submitted_values=filled_values,
                     error=f"Timeout on action {action_name}",
                     actions_executed=executed,
                     total_actions=total,
@@ -308,7 +324,7 @@ class BrowserEnvironment:
                 logger.warning(f"Action {action_name} failed: {e}")
                 return BrowserOutcome(
                     success_page_detected=False,
-                    submitted_values={},
+                    submitted_values=filled_values,
                     error=str(e),
                     actions_executed=executed,
                     total_actions=total,
@@ -319,7 +335,7 @@ class BrowserEnvironment:
 
         return BrowserOutcome(
             success_page_detected=success,
-            submitted_values={},
+            submitted_values=filled_values,
             error=None,
             actions_executed=executed,
             total_actions=total,
