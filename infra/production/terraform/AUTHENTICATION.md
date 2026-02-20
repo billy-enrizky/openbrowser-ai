@@ -3,9 +3,8 @@
 This repository uses:
 - Cognito Hosted UI + OAuth2 Authorization Code flow (PKCE) in the frontend
 - JWT verification in the backend (`AUTH_ENABLED=true`)
-- Optional additional JWT enforcement at API Gateway (`enable_api_auth`, default `false`)
 
-All traffic flows through CloudFront, which routes API requests to the ALB (bypassing API Gateway).
+All traffic flows through CloudFront, which routes API requests to the ALB.
 
 ## 1. Terraform settings
 
@@ -13,7 +12,6 @@ In `terraform.tfvars`:
 
 ```hcl
 enable_backend_auth = true
-enable_api_auth     = false
 
 # CORS origins are auto-derived from CloudFront domain.
 # Only set cors_origins if you need additional origins beyond CloudFront + localhost:
@@ -80,8 +78,6 @@ Frontend sends JWT as query param: `wss://<cloudfront-domain>/api/v1/vnc/ws?task
 Backend validates this token in the VNC proxy endpoint.
 
 For the task polling endpoint (`GET /api/v1/tasks/{id}/events`), JWT is sent in the `Authorization` header as usual.
-
-Note: API Gateway JWT authorizer is not used in the active traffic path because CloudFront routes directly to ALB.
 
 ## 5. Quick verification
 
