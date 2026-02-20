@@ -16,13 +16,21 @@ Code-Use Mode is a Notebook-like code execution system for browser automation. I
 The namespace is initialized with:
 
 **Browser Control Functions:**
-- `navigate(url)` - Navigate to a URL
-- `click(index)` - Click an element
-- `input(index, text)` - Type text
-- `scroll(down, pages)` - Scroll the page
-- `upload_file(path)` - Upload a file
-- `evaluate(code, variables={})` - Execute JavaScript
-- `done(text, success, files_to_display=[])` - Mark task complete
+- `navigate(url, new_tab=False)` - Navigate to a URL
+- `go_back()` - Go back to the previous page
+- `wait(seconds=3)` - Wait for specified seconds
+- `click(index)` - Click an element by index
+- `input_text(index, text, clear=True)` - Type text into an input field
+- `scroll(down=True, pages=1.0, index=None)` - Scroll the page or a container
+- `send_keys(keys)` - Send keyboard keys or shortcuts
+- `upload_file(index, path)` - Upload a file to a file input element
+- `select_dropdown(index, text)` - Select an option in a `<select>` dropdown
+- `dropdown_options(index)` - Get all options for a `<select>` dropdown
+- `switch(tab_id)` - Switch to a different browser tab
+- `close(tab_id)` - Close a browser tab
+- `evaluate(code, variables={})` - Execute JavaScript and return Python objects
+- `get_selector_from_index(index)` - Get CSS selector for an element by index
+- `done(text, success)` - Mark task complete
 
 **Custom evaluate() Function:**
 ```python

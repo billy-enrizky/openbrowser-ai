@@ -1,6 +1,7 @@
 """Local browser watchdog for managing browser subprocess lifecycle."""
 
 import asyncio
+import logging
 import os
 import shutil
 import tempfile
@@ -22,6 +23,8 @@ from openbrowser.observability import observe_debug
 
 if TYPE_CHECKING:
 	pass
+
+_logger = logging.getLogger(__name__)
 
 
 class LocalBrowserWatchdog(BaseWatchdog):
@@ -91,7 +94,9 @@ class LocalBrowserWatchdog(BaseWatchdog):
 	async def _launch_browser(self, max_retries: int = 3) -> tuple[psutil.Process, str]:
 		"""Launch browser process and return (process, cdp_url).
 
-		Handles launch errors by falling back to temporary directories if needed.
+		Before launching, proactively kills any stale Chrome processes that
+		hold the profile directory lock (e.g. from a crashed MCP server).
+		On launch failures, retries with a temporary directory as fallback.
 
 		Returns:
 			Tuple of (psutil.Process, cdp_url)
@@ -100,6 +105,16 @@ class LocalBrowserWatchdog(BaseWatchdog):
 		profile = self.browser_session.browser_profile
 		self._original_user_data_dir = str(profile.user_data_dir) if profile.user_data_dir else None
 		self._temp_dirs_to_cleanup = []
+
+		# Proactively kill stale Chrome processes holding the profile lock.
+		# This prevents a 30s CDP timeout when a previous MCP server crashed
+		# and left Chrome running with the same user data directory.
+		if self._original_user_data_dir:
+			killed = await self._kill_stale_chrome_for_profile(self._original_user_data_dir)
+			if killed:
+				self.logger.info(
+					f'[LocalBrowserWatchdog] Killed stale Chrome process(es) holding profile lock on {self._original_user_data_dir}'
+				)
 
 		for attempt in range(max_retries):
 			try:
@@ -121,25 +136,24 @@ class LocalBrowserWatchdog(BaseWatchdog):
 				# Priority: custom executable > fallback paths > playwright subprocess
 				if profile.executable_path:
 					browser_path = profile.executable_path
-					self.logger.debug(f'[LocalBrowserWatchdog] 📦 Using custom local browser executable_path= {browser_path}')
+					self.logger.debug(f'[LocalBrowserWatchdog] Using custom local browser executable_path= {browser_path}')
 				else:
-					# self.logger.debug('[LocalBrowserWatchdog] 🔍 Looking for local browser binary path...')
 					# Try fallback paths first (system browsers preferred)
 					browser_path = self._find_installed_browser_path()
 					if not browser_path:
 						self.logger.error(
-							'[LocalBrowserWatchdog] ⚠️ No local browser binary found, installing browser using playwright subprocess...'
+							'[LocalBrowserWatchdog] No local browser binary found, installing browser using playwright subprocess...'
 						)
 						browser_path = await self._install_browser_with_playwright()
 
-				self.logger.debug(f'[LocalBrowserWatchdog] 📦 Found local browser installed at executable_path= {browser_path}')
+				self.logger.debug(f'[LocalBrowserWatchdog] Found local browser installed at executable_path= {browser_path}')
 				if not browser_path:
 					raise RuntimeError('No local Chrome/Chromium install found, and failed to install with playwright')
 
 				# Launch browser subprocess directly
-				self.logger.debug(f'[LocalBrowserWatchdog] 🚀 Launching browser subprocess with {len(launch_args)} args...')
+				self.logger.debug(f'[LocalBrowserWatchdog] Launching browser subprocess with {len(launch_args)} args...')
 				self.logger.debug(
-					f'[LocalBrowserWatchdog] 📂 user_data_dir={profile.user_data_dir}, profile_directory={profile.profile_directory}'
+					f'[LocalBrowserWatchdog] user_data_dir={profile.user_data_dir}, profile_directory={profile.profile_directory}'
 				)
 				subprocess = await asyncio.create_subprocess_exec(
 					browser_path,
@@ -148,7 +162,7 @@ class LocalBrowserWatchdog(BaseWatchdog):
 					stderr=asyncio.subprocess.PIPE,
 				)
 				self.logger.debug(
-					f'[LocalBrowserWatchdog] 🎭 Browser running with browser_pid= {subprocess.pid} 🔗 listening on CDP port :{debug_port}'
+					f'[LocalBrowserWatchdog] Browser running with browser_pid= {subprocess.pid} listening on CDP port :{debug_port}'
 				)
 
 				# Convert to psutil.Process
@@ -169,21 +183,27 @@ class LocalBrowserWatchdog(BaseWatchdog):
 			except Exception as e:
 				error_str = str(e).lower()
 
-				# Check if this is a user_data_dir related error
-				if any(err in error_str for err in ['singletonlock', 'user data directory', 'cannot create', 'already in use']):
+				# Check if this is a user_data_dir related error (profile lock,
+				# timeout waiting for CDP, or other startup failure)
+				is_profile_error = any(
+					err in error_str
+					for err in ['singletonlock', 'user data directory', 'cannot create', 'already in use', 'did not start within']
+				)
+				if is_profile_error:
 					self.logger.warning(f'Browser launch failed (attempt {attempt + 1}/{max_retries}): {e}')
 
 					if attempt < max_retries - 1:
-						# Create a temporary directory for next attempt
+						# Kill any stale Chrome that may have appeared, then
+						# fall back to a temporary directory for next attempt.
+						if self._original_user_data_dir:
+							await self._kill_stale_chrome_for_profile(self._original_user_data_dir)
+
 						tmp_dir = Path(tempfile.mkdtemp(prefix='openbrowser-tmp-'))
 						self._temp_dirs_to_cleanup.append(tmp_dir)
-
-						# Update profile to use temp directory
 						profile.user_data_dir = str(tmp_dir)
 						self.logger.debug(f'Retrying with temporary user_data_dir: {tmp_dir}')
 
-						# Small delay before retry
-						await asyncio.sleep(0.5)
+						await asyncio.sleep(1.0)
 						continue
 
 				# Not a recoverable error or last attempt failed
@@ -433,6 +453,72 @@ class LocalBrowserWatchdog(BaseWatchdog):
 				shutil.rmtree(temp_path, ignore_errors=True)
 		except Exception as e:
 			self.logger.debug(f'Failed to cleanup temp dir {temp_dir}: {e}')
+
+	@staticmethod
+	async def _kill_stale_chrome_for_profile(user_data_dir: str) -> bool:
+		"""Find and kill Chrome processes using the given user data directory.
+
+		Scans running Chrome/Chromium processes for a matching --user-data-dir
+		argument, terminates them, and waits for the profile lock to be released.
+
+		Returns:
+			True if any stale processes were killed, False otherwise.
+		"""
+		resolved_dir = str(Path(user_data_dir).expanduser().resolve())
+		killed_any = False
+
+		for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+			try:
+				name = (proc.info.get('name') or '').lower()
+				if not any(browser_name in name for browser_name in ('chrome', 'chromium', 'brave')):
+					continue
+
+				cmdline = proc.info.get('cmdline') or []
+				for arg in cmdline:
+					if arg.startswith('--user-data-dir='):
+						proc_dir = str(Path(arg.split('=', 1)[1]).expanduser().resolve())
+						if proc_dir == resolved_dir:
+							_logger.info(
+								f'[LocalBrowserWatchdog] Killing stale Chrome process pid={proc.pid} '
+								f'holding profile lock on {resolved_dir}'
+							)
+							proc.kill()
+							killed_any = True
+							break
+			except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+				continue
+
+		if not killed_any:
+			return False
+
+		# Wait for killed processes to fully exit and release profile locks.
+		# Chrome may hold SingletonLock and CDP ports briefly after receiving
+		# SIGKILL -- poll until no matching processes remain (up to 5s).
+		for _ in range(50):
+			still_alive = False
+			for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+				try:
+					name = (proc.info.get('name') or '').lower()
+					if not any(browser_name in name for browser_name in ('chrome', 'chromium', 'brave')):
+						continue
+					cmdline = proc.info.get('cmdline') or []
+					for arg in cmdline:
+						if arg.startswith('--user-data-dir='):
+							proc_dir = str(Path(arg.split('=', 1)[1]).expanduser().resolve())
+							if proc_dir == resolved_dir:
+								still_alive = True
+								break
+				except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+					continue
+				if still_alive:
+					break
+			if not still_alive:
+				break
+			await asyncio.sleep(0.1)
+
+		# Extra settle time for OS to release file locks
+		await asyncio.sleep(0.5)
+		return True
 
 	@property
 	def browser_pid(self) -> int | None:
