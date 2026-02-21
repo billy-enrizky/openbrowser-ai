@@ -35,6 +35,7 @@ OpenBrowser is a framework for intelligent browser automation. It combines direc
 - [MCP Benchmark: Why OpenBrowser](#mcp-benchmark-why-openbrowser)
 - [CLI Usage](#cli-usage)
 - [Project Structure](#project-structure)
+- [Backend and Frontend Deployment](#backend-and-frontend-deployment)
 - [Testing](#testing)
 - [Contributing](#contributing)
 - [License](#license)
@@ -517,6 +518,94 @@ uv run python benchmarks/cdp_benchmark.py            # Chrome DevTools MCP
 ```
 
 Results are written to `benchmarks/*_results.json`. See [full comparison](https://docs.openbrowser.me/comparison) for methodology.
+
+## Backend and Frontend Deployment
+
+The project includes a FastAPI backend and a Next.js frontend, both containerized with Docker.
+
+### Prerequisites
+
+- Docker and Docker Compose
+- A `.env` file in the project root with `POSTGRES_PASSWORD` and any LLM API keys (see `backend/env.example`)
+
+### Local Development (Docker Compose)
+
+```bash
+# Start backend + PostgreSQL (frontend runs locally)
+docker-compose -f docker-compose.dev.yml up --build
+
+# In a separate terminal, start the frontend
+cd frontend && npm install && npm run dev
+```
+
+| Service | URL | Description |
+|---------|-----|-------------|
+| Backend | http://localhost:8000 | FastAPI + WebSocket + VNC |
+| Frontend | http://localhost:3000 | Next.js dev server |
+| PostgreSQL | localhost:5432 | Chat persistence |
+| VNC | ws://localhost:6080 | Live browser view |
+
+The dev compose mounts `backend/app/` and `src/` as volumes for hot-reload. API keys are loaded from `backend/.env` via `env_file`. The `POSTGRES_PASSWORD` is read from the root `.env` file.
+
+### Full Stack (Docker Compose)
+
+```bash
+# Start all services (backend + frontend + PostgreSQL)
+docker-compose up --build
+```
+
+This builds and runs both the backend and frontend containers together with PostgreSQL.
+
+### Backend
+
+The backend is a FastAPI application in `backend/` with a Dockerfile at `backend/Dockerfile`. It includes:
+
+- REST API on port 8000
+- WebSocket endpoint at `/ws` for real-time agent communication
+- VNC support (Xvfb + x11vnc + websockify) for live browser viewing on ports 6080-6090
+- Kiosk security: Openbox window manager, Chromium enterprise policies, X11 key grabber daemon
+- Health check at `/health`
+
+```bash
+# Build the backend image
+docker build -f backend/Dockerfile -t openbrowser-backend .
+
+# Run standalone
+docker run -p 8000:8000 -p 6080:6080 \
+  --env-file backend/.env \
+  -e VNC_ENABLED=true \
+  -e AUTH_ENABLED=false \
+  --shm-size=2g \
+  openbrowser-backend
+```
+
+### Frontend
+
+The frontend is a Next.js application in `frontend/` with a Dockerfile at `frontend/Dockerfile`.
+
+```bash
+# Build the frontend image
+cd frontend && docker build -t openbrowser-frontend .
+
+# Run standalone
+docker run -p 3000:3000 \
+  -e NEXT_PUBLIC_API_URL=http://localhost:8000 \
+  -e NEXT_PUBLIC_WS_URL=ws://localhost:8000/ws \
+  openbrowser-frontend
+```
+
+### Environment Variables
+
+Key environment variables for the backend (see `backend/env.example` for the full list):
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `GOOGLE_API_KEY` | Google/Gemini API key | (required) |
+| `DEFAULT_LLM_MODEL` | Default model for agents | `gemini-3-flash-preview` |
+| `AUTH_ENABLED` | Enable Cognito JWT auth | `false` |
+| `VNC_ENABLED` | Enable VNC browser viewing | `true` |
+| `DATABASE_URL` | PostgreSQL connection string | (optional) |
+| `POSTGRES_PASSWORD` | PostgreSQL password (root `.env`) | (required for compose) |
 
 ## Production deployment
 
