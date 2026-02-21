@@ -1,6 +1,23 @@
 version: '3.8'
 
 services:
+  db:
+    image: postgres:16-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: openbrowser
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   backend:
     build:
       context: .
@@ -8,19 +25,22 @@ services:
     ports:
       - "8000:8000"      # FastAPI backend
       - "6080-6090:6080-6090"  # VNC websockify ports
+    env_file:
+      - ./backend/.env
     environment:
       - VNC_ENABLED=true
       - VNC_WIDTH=1920
       - VNC_HEIGHT=1080
       - DEBUG=true
-      # Add your API keys here or use .env file
-      # - OPENAI_API_KEY=${OPENAI_API_KEY}
-      # - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      # - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - AUTH_ENABLED=false
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/openbrowser
     volumes:
       # Mount for development (optional - remove for production)
       - ./backend/app:/app/backend/app:ro
       - ./src:/app/src:ro
+    depends_on:
+      db:
+        condition: service_healthy
     restart: unless-stopped
     # Required for Xvfb to work properly
     shm_size: '2gb'
@@ -38,9 +58,13 @@ services:
       - NEXT_PUBLIC_API_URL=http://localhost:8000
       - NEXT_PUBLIC_WS_URL=ws://localhost:8000/ws
       - NEXT_PUBLIC_VNC_ENABLED=true
+      - NEXT_PUBLIC_AUTH_ENABLED=false
     depends_on:
       - backend
     restart: unless-stopped
+
+volumes:
+  pgdata:
 
 networks:
   default:
