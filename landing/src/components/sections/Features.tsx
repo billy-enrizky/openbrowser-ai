@@ -323,8 +323,8 @@ export function Features() {
               One Tool, Full Control
             </h3>
             <p className="text-slate-400 mt-2">
-              A single <code className="text-cyan-400/80 text-sm">execute_code</code> tool
-              with persistent Python namespace. Navigate, click, type, extract -- all via code.
+              One <code className="text-cyan-400/80 text-sm">execute_code</code> tool, persistent
+              Python namespace. Navigate, click, type, extract.
             </p>
             <CodeSnippet />
           </FeatureCard>
