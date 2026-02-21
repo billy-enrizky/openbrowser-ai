@@ -17,7 +17,7 @@ import asyncio
 import os
 import sys
 
-# Ensure local repository (browser_use) is accessible
+# Ensure local repository (openbrowser) is accessible
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from dotenv import load_dotenv
