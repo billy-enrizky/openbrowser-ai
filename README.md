@@ -15,9 +15,9 @@ https://github.com/user-attachments/assets/632128f6-3d09-497f-9e7d-e29b9cb65e0f
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Tests](https://github.com/billy-enrizky/openbrowser-ai/actions/workflows/test.yml/badge.svg)](https://github.com/billy-enrizky/openbrowser-ai/actions)
 
-**AI-powered browser automation using LangGraph and CDP (Chrome DevTools Protocol)**
+**AI-powered browser automation using CodeAgent and CDP (Chrome DevTools Protocol)**
 
-OpenBrowser is a framework for intelligent browser automation. It combines direct CDP communication with LangGraph orchestration to create AI agents that can navigate, interact with, and extract information from web pages autonomously.
+OpenBrowser is a framework for intelligent browser automation. It combines direct CDP communication with a CodeAgent architecture, where the LLM writes Python code executed in a persistent namespace, to navigate, interact with, and extract information from web pages autonomously.
 
 ## Table of Contents
 
@@ -46,11 +46,10 @@ OpenBrowser is a framework for intelligent browser automation. It combines direc
 
 ## Key Features
 
-- **LangGraph-Powered Agents** - Stateful workflow orchestration with perceive-plan-execute loop
+- **CodeAgent Architecture** - LLM writes Python code in a persistent Jupyter-like namespace for browser automation
 - **Raw CDP Communication** - Direct Chrome DevTools Protocol for maximum control and speed
 - **Vision Support** - Screenshot analysis for visual understanding of pages
 - **12+ LLM Providers** - OpenAI, Anthropic, Google, Groq, AWS Bedrock, Azure OpenAI, Ollama, and more
-- **Code Agent Mode** - Jupyter notebook-like code execution for complex automation
 - **MCP Server** - Model Context Protocol support for Claude Desktop integration
 - **Video Recording** - Record browser sessions as video files
 
@@ -91,14 +90,14 @@ playwright install chromium
 
 ```python
 import asyncio
-from openbrowser import Agent, ChatGoogle
+from openbrowser import CodeAgent, ChatGoogle
 
 async def main():
-    agent = Agent(
+    agent = CodeAgent(
         task="Go to google.com and search for 'Python tutorials'",
-        llm=ChatGoogle(),
+        llm=ChatGoogle(model="gemini-3-flash"),
     )
-    
+
     result = await agent.run()
     print(f"Result: {result}")
 
@@ -108,16 +107,16 @@ asyncio.run(main())
 ### With Different LLM Providers
 
 ```python
-from openbrowser import Agent, ChatOpenAI, ChatAnthropic, ChatGoogle
+from openbrowser import CodeAgent, ChatOpenAI, ChatAnthropic, ChatGoogle
 
 # OpenAI
-agent = Agent(task="...", llm=ChatOpenAI(model="gpt-4o"))
+agent = CodeAgent(task="...", llm=ChatOpenAI(model="gpt-5.2"))
 
 # Anthropic
-agent = Agent(task="...", llm=ChatAnthropic(model="claude-sonnet-4-0"))
+agent = CodeAgent(task="...", llm=ChatAnthropic(model="claude-sonnet-4-6"))
 
 # Google Gemini
-agent = Agent(task="...", llm=ChatGoogle(model="gemini-2.0-flash"))
+agent = CodeAgent(task="...", llm=ChatGoogle(model="gemini-3-flash"))
 ```
 
 ### Using Browser Session Directly
@@ -169,9 +168,6 @@ export AWS_DEFAULT_REGION="us-west-2"
 # Azure OpenAI
 export AZURE_OPENAI_API_KEY="..."
 export AZURE_OPENAI_ENDPOINT="https://your-resource.openai.azure.com/"
-
-# Browser-Use LLM (external service)
-export BROWSER_USE_API_KEY="..."
 ```
 
 ### BrowserProfile Options
@@ -198,13 +194,17 @@ profile = BrowserProfile(
 
 | Provider | Class | Models |
 |----------|-------|--------|
-| **Google** | `ChatGoogle` | gemini-2.0-flash, gemini-1.5-pro |
-| **OpenAI** | `ChatOpenAI` | gpt-4o, o3, gpt-4-turbo |
-| **Anthropic** | `ChatAnthropic` | claude-sonnet-4-0, claude-3-opus |
-| **Groq** | `ChatGroq` | llama-3.3-70b-versatile, mixtral-8x7b |
-| **AWS Bedrock** | `ChatAWSBedrock` | claude-3, amazon.titan |
+| **Google** | `ChatGoogle` | gemini-3-flash, gemini-3-pro |
+| **OpenAI** | `ChatOpenAI` | gpt-5.2, o4-mini, o3 |
+| **Anthropic** | `ChatAnthropic` | claude-sonnet-4-6, claude-opus-4-6 |
+| **Groq** | `ChatGroq` | llama-4-scout, qwen3-32b |
+| **AWS Bedrock** | `ChatAWSBedrock` | anthropic.claude-sonnet-4-6, amazon.nova-pro |
+| **AWS Bedrock (Anthropic)** | `ChatAnthropicBedrock` | Claude models via Anthropic Bedrock SDK |
 | **Azure OpenAI** | `ChatAzureOpenAI` | Any Azure-deployed model |
-| **Ollama** | `ChatOllama` | llama3, mistral (local) |
+| **OpenRouter** | `ChatOpenRouter` | Any model on openrouter.ai |
+| **DeepSeek** | `ChatDeepSeek` | deepseek-chat, deepseek-r1 |
+| **Cerebras** | `ChatCerebras` | llama-4-scout, qwen-3-235b |
+| **Ollama** | `ChatOllama` | llama-4-scout, deepseek-r1 (local) |
 | **OCI** | `ChatOCIRaw` | Oracle Cloud GenAI models |
 | **Browser-Use** | `ChatBrowserUse` | External LLM service |
 
@@ -331,11 +331,11 @@ For OpenClaw plugin documentation, see [docs.openclaw.ai/tools/plugin](https://d
 
 ## MCP Server
 
-OpenBrowser includes an MCP (Model Context Protocol) server that exposes browser automation as tools for AI assistants like Claude. No external LLM API keys required -- the MCP client (Claude) provides the intelligence.
+OpenBrowser includes an MCP (Model Context Protocol) server that exposes browser automation as tools for AI assistants like Claude. No external LLM API keys required. The MCP client (Claude) provides the intelligence.
 
 ### Quick Setup
 
-**Claude Code** -- add to your project's `.mcp.json`:
+**Claude Code**: add to your project's `.mcp.json`:
 
 ```json
 {
@@ -348,7 +348,7 @@ OpenBrowser includes an MCP (Model Context Protocol) server that exposes browser
 }
 ```
 
-**Claude Desktop** -- add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
+**Claude Desktop**: add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
 ```json
 {
@@ -372,7 +372,7 @@ uvx openbrowser-ai[mcp] --mcp
 
 ### Tool
 
-The MCP server exposes a single `execute_code` tool that runs Python code in a persistent namespace with browser automation functions. The LLM writes Python code to navigate, interact, and extract data -- returning only what was explicitly requested.
+The MCP server exposes a single `execute_code` tool that runs Python code in a persistent namespace with browser automation functions. The LLM writes Python code to navigate, interact, and extract data, returning only what was explicitly requested.
 
 **Available functions** (all async, use `await`):
 
@@ -382,10 +382,10 @@ The MCP server exposes a single `execute_code` tool that runs Python code in a p
 | **Interaction** | `click(index)`, `input_text(index, text, clear)`, `scroll(down, pages, index)`, `send_keys(keys)`, `upload_file(index, path)` |
 | **Dropdowns** | `select_dropdown(index, text)`, `dropdown_options(index)` |
 | **Tabs** | `switch(tab_id)`, `close(tab_id)` |
-| **JavaScript** | `evaluate(code)` -- run JS in page context, returns Python objects |
-| **State** | `browser.get_browser_state_summary()` -- get page metadata and interactive elements |
-| **CSS** | `get_selector_from_index(index)` -- get CSS selector for an element |
-| **Completion** | `done(text, success)` -- signal task completion |
+| **JavaScript** | `evaluate(code)`: run JS in page context, returns Python objects |
+| **State** | `browser.get_browser_state_summary()`: get page metadata and interactive elements |
+| **CSS** | `get_selector_from_index(index)`: get CSS selector for an element |
+| **Completion** | `done(text, success)`: signal task completion |
 
 **Pre-imported libraries**: `json`, `csv`, `re`, `datetime`, `asyncio`, `Path`, `requests`, `numpy`, `pandas`, `matplotlib`, `BeautifulSoup`
 
@@ -417,11 +417,11 @@ Six real-world browser tasks run through Claude Sonnet 4.6 on AWS Bedrock (Conve
 
 | MCP Server | Pass Rate | Duration (mean +/- std) | Tool Calls | Bedrock API Tokens |
 |------------|:---------:|------------------------:|-----------:|-------------------:|
-| **Playwright MCP** (Microsoft) | 100% | 92.2 +/- 11.4s | 11.0 +/- 1.4 | 150,248 |
-| **Chrome DevTools MCP** (Google) | 100% | 128.8 +/- 6.2s | 19.8 +/- 0.4 | 310,856 |
-| **OpenBrowser MCP** | 100% | 103.1 +/- 16.4s | 15.0 +/- 3.9 | **49,423** |
+| **Playwright MCP** (Microsoft) | 100% | 62.7 +/- 4.8s | 9.4 +/- 0.9 | 158,787 |
+| **Chrome DevTools MCP** (Google) | 100% | 103.4 +/- 2.7s | 19.4 +/- 0.5 | 299,486 |
+| **OpenBrowser MCP** | 100% | 77.0 +/- 6.7s | 13.8 +/- 2.0 | **50,195** |
 
-OpenBrowser uses **3x fewer tokens** than Playwright and **6.3x fewer** than Chrome DevTools (measured via Bedrock Converse API `usage` field -- the actual billed tokens including system prompt, tool schemas, conversation history, and tool results).
+OpenBrowser uses **3.2x fewer tokens** than Playwright and **6.0x fewer** than Chrome DevTools, measured via Bedrock Converse API `usage` field (the actual billed tokens including system prompt, tool schemas, conversation history, and tool results).
 
 ### Cost per Benchmark Run (6 Tasks)
 
@@ -429,18 +429,18 @@ Based on Bedrock API token usage (input + output tokens at respective rates).
 
 | Model | Playwright MCP | Chrome DevTools MCP | OpenBrowser MCP |
 |-------|---------------:|--------------------:|----------------:|
-| Claude Sonnet ($3/$15 per M) | $0.47 | $0.96 | **$0.18** |
-| Claude Opus ($15/$75 per M) | $2.35 | $4.78 | **$0.91** |
+| Claude Sonnet 4.6 ($3/$15 per M) | $0.50 | $0.92 | **$0.18** |
+| Claude Opus 4.6 ($5/$25 per M) | $0.83 | $1.53 | **$0.30** |
 
 ### Why the Difference
 
-Playwright and Chrome DevTools return full page accessibility snapshots as tool output (~124K-135K tokens for Wikipedia). The LLM reads the entire snapshot to find what it needs.
+Playwright and Chrome DevTools return full page accessibility snapshots as tool output (~124K-135K tokens for Wikipedia). The LLM reads the entire snapshot to find what it needs. MCP response sizes: Playwright 1,132,173 chars, Chrome DevTools 1,147,244 chars, OpenBrowser 7,853 chars -- a **144x difference**.
 
 OpenBrowser uses a CodeAgent architecture (single `execute_code` tool). The LLM writes Python code that processes browser state server-side and returns only extracted results (~30-1,000 chars per call). The full page content never enters the LLM context window.
 
 ```
-Playwright: navigate to Wikipedia -> 478,793 chars (full a11y tree returned to LLM)
-OpenBrowser: navigate to Wikipedia -> 42 chars (page title only -- state processed in code)
+Playwright: navigate to Wikipedia -> 520,742 chars (full a11y tree returned to LLM)
+OpenBrowser: navigate to Wikipedia -> 42 chars (page title only, state processed in code)
              evaluate JS for infobox -> 896 chars (just the extracted data)
 ```
 
