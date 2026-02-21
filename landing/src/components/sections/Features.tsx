@@ -172,7 +172,7 @@ function TokenBars() {
 /* ------------------------------------------------------------------ */
 
 function ProviderPills() {
-  const providers = ["Gemini", "GPT-4", "Claude", "LiteLLM"];
+  const providers = ["Gemini", "GPT-4", "Claude", "DeepSeek", "Groq", "Ollama", "Qwen", "Azure", "Bedrock", "OpenRouter", "Novita", "LiteLLM"];
   return (
     <div className="flex flex-wrap gap-2 mt-4">
       {providers.map((p) => (
