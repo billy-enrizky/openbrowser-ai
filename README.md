@@ -194,13 +194,13 @@ profile = BrowserProfile(
 
 | Provider | Class | Models |
 |----------|-------|--------|
-| **Google** | `ChatGoogle` | gemini-2.0-flash, gemini-1.5-pro |
-| **OpenAI** | `ChatOpenAI` | gpt-4o, o3, gpt-4-turbo |
+| **Google** | `ChatGoogle` | gemini-2.5-flash, gemini-2.5-pro |
+| **OpenAI** | `ChatOpenAI` | gpt-4.1, o4-mini, o3 |
 | **Anthropic** | `ChatAnthropic` | claude-sonnet-4-6, claude-opus-4-6 |
-| **Groq** | `ChatGroq` | llama-3.3-70b-versatile, mixtral-8x7b |
-| **AWS Bedrock** | `ChatAWSBedrock` | claude-sonnet-4-6, amazon.titan |
+| **Groq** | `ChatGroq` | llama-4-scout, qwen3-32b |
+| **AWS Bedrock** | `ChatAWSBedrock` | anthropic.claude-sonnet-4-6, amazon.nova-pro |
 | **Azure OpenAI** | `ChatAzureOpenAI` | Any Azure-deployed model |
-| **Ollama** | `ChatOllama` | llama3, mistral (local) |
+| **Ollama** | `ChatOllama` | llama3.1, deepseek-r1 (local) |
 | **OCI** | `ChatOCIRaw` | Oracle Cloud GenAI models |
 | **Browser-Use** | `ChatBrowserUse` | External LLM service |
 
