@@ -1,6 +1,8 @@
 FROM python:3.12-slim
 
 # Install system dependencies for Playwright and VNC
+# Note: wget and gnupg are needed only during build (for playwright install-deps).
+# They are removed later in a hardening step.
 RUN apt-get update && apt-get install -y \
     wget \
     gnupg \
@@ -23,10 +25,10 @@ RUN apt-get update && apt-get install -y \
     libxkbcommon0 \
     libxrandr2 \
     xdg-utils \
-    # VNC dependencies
+    # VNC dependencies (openbox replaces fluxbox for kiosk lockdown)
     xvfb \
     x11vnc \
-    fluxbox \
+    openbox \
     novnc \
     websockify \
     && rm -rf /var/lib/apt/lists/*
@@ -46,6 +48,9 @@ RUN cd backend && uv pip install -e . --system
 # Install openbrowser from PyPI
 RUN uv pip install openbrowser-ai==0.1.22 --system
 
+# Install python-xlib for the X11 key grabber daemon (kiosk security)
+RUN uv pip install python-xlib --system
+
 # Install Playwright and browsers (chromium works better in Docker)
 RUN playwright install chromium
 RUN playwright install-deps chromium
@@ -53,10 +58,22 @@ RUN playwright install-deps chromium
 # Set environment variable to tell openbrowser where the browser is
 ENV PLAYWRIGHT_BROWSERS_PATH=/root/.cache/ms-playwright
 
-# Copy backend code
+# Copy backend code (includes kiosk/ directory with openbox config, key grabber, etc.)
 COPY backend/ backend/
 
 WORKDIR /app/backend
+
+# Install Chromium enterprise policies for kiosk lockdown
+# (disables dev tools, downloads, file:// URLs, chrome:// pages)
+RUN mkdir -p /etc/chromium/policies/managed && \
+    cp /app/backend/kiosk/chromium-policies.json /etc/chromium/policies/managed/kiosk.json && \
+    chmod 644 /etc/chromium/policies/managed/kiosk.json
+
+# Harden: remove tools that could be abused if someone escapes the browser.
+# wget/gnupg were only needed during build (playwright install-deps).
+RUN apt-get purge -y wget gnupg && \
+    apt-get autoremove -y && \
+    rm -rf /var/lib/apt/lists/*
 
 # Create directories and set permissions BEFORE switching user
 RUN mkdir -p /home/appuser/.cache/ms-playwright && \
@@ -76,8 +93,8 @@ ENV HOME=/home/appuser
 EXPOSE 8000
 EXPOSE 6080-6090
 
-# Health check
+# Health check (uses Python since wget is removed during hardening)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD wget --no-verbose --tries=1 --spider http://localhost:8000/health || exit 1
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')" || exit 1
 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
