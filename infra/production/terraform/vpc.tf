@@ -25,7 +25,7 @@ resource "aws_subnet" "public" {
   tags                    = { Name = "${var.project_name}-public-${count.index}" }
 }
 
-# Private subnets (one per AZ, for backend and VPC Link)
+# Private subnets (one per AZ, for backend and RDS)
 resource "aws_subnet" "private" {
   count             = min(length(var.private_subnet_cidrs), length(data.aws_availability_zones.available.names))
   vpc_id            = aws_vpc.main.id

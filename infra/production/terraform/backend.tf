@@ -13,6 +13,16 @@ data "aws_ami" "al2023" {
 }
 
 locals {
+  # CORS origins: auto-derived CloudFront + optional custom domain + localhost + extras
+  cloudfront_origin    = "https://${aws_cloudfront_distribution.frontend.domain_name}"
+  custom_domain_origin = var.frontend_domain_name != "" ? ["https://${var.frontend_domain_name}"] : []
+  effective_cors_origins = distinct(concat(
+    [local.cloudfront_origin],
+    local.custom_domain_origin,
+    ["http://localhost:3000"],
+    var.cors_origins,
+  ))
+
   backend_env = [
     "AWS_REGION=${var.aws_region}",
     "DDB_TABLE=${aws_dynamodb_table.main.name}",

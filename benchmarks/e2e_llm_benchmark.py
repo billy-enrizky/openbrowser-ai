@@ -36,7 +36,11 @@ logger = logging.getLogger(__name__)
 
 
 def _kill_stale_browsers():
-    """Kill all Chrome/Chromium processes to ensure a clean browser state."""
+    """Kill all Chrome/Chromium processes and wait until they are fully dead.
+
+    A 0.5s sleep is not enough -- Chrome may still hold profile locks and CDP
+    ports, causing the next MCP server to connect to a dying browser.
+    """
     for pattern in ["chromium", "chrome", "Chromium", "Google Chrome"]:
         try:
             subprocess.run(
@@ -45,7 +49,22 @@ def _kill_stale_browsers():
             )
         except Exception:
             pass
-    time.sleep(0.5)
+
+    # Wait until no Chrome/Chromium processes remain (up to 10s)
+    for _ in range(20):
+        result = subprocess.run(
+            ["pgrep", "-f", "chrom"],
+            capture_output=True, timeout=5,
+        )
+        if result.returncode != 0:
+            # No matching processes found
+            break
+        time.sleep(0.5)
+    else:
+        logger.warning("Chrome processes still alive after 10s wait")
+
+    # Extra settle time for profile locks and port release
+    time.sleep(1)
 
 
 # ---------------------------------------------------------------------------
@@ -279,7 +298,8 @@ TASKS = [
 SERVERS = {
     "openbrowser": {
         "command": "uvx",
-        "args": ["openbrowser-ai[mcp]==0.1.21", "--mcp"],
+        "args": ["openbrowser-ai[mcp]==0.1.26", "--mcp"],
+        "env": {"TIMEOUT_BrowserStartEvent": "60"},
     },
     "playwright": {
         "command": "npx",
@@ -295,19 +315,16 @@ SERVERS = {
 DEFAULT_MODEL = "us.anthropic.claude-sonnet-4-6"
 MAX_TURNS = 20
 SYSTEM_PROMPT = (
-    "You are a browser automation agent. Use the execute_code tool. "
-    "Give the answer directly, no markdown.\n\n"
+    "You are a browser automation agent. Use the provided tools to complete "
+    "browser tasks. Give the answer directly, no markdown.\n\n"
     "RULES:\n"
-    "1. Do EVERYTHING in 1-2 execute_code calls max. Combine navigate + get state + interact + extract + print answer in ONE call.\n"
-    "2. ALWAYS `await wait(2)` after navigate() before reading the page.\n"
-    "3. ALWAYS get state with `state = await browser.get_browser_state_summary()` to find element indices before click/input.\n"
-    "4. evaluate() JS tips: ALWAYS wrap multi-line JS in an explicit IIFE with return: "
-    "`(function(){ var x = ...; return x; })()`. "
-    "Arrow functions like `.map(e => e.text)` work fine inside an IIFE. "
-    "Single-line expressions like `document.title` work directly. "
-    "For returning objects, use: `(function(){ return {key: value}; })()`.\n"
-    "5. NEVER call done(). Just print() your final answer.\n"
-    "6. Do NOT make separate calls to verify or summarize."
+    "1. Be efficient -- minimize the number of tool calls. Combine multiple "
+    "operations into as few calls as possible.\n"
+    "2. After navigating to a page, wait for it to load before interacting.\n"
+    "3. Always inspect page state to find element identifiers before clicking "
+    "or typing.\n"
+    "4. Give your final answer as plain text.\n"
+    "5. Do NOT make separate calls to verify or summarize what you already found."
 )
 
 
@@ -334,6 +351,9 @@ async def run_task(
     _kill_stale_browsers()
 
     tool_call_count = 0
+    bedrock_input_tokens = 0
+    bedrock_output_tokens = 0
+    response_chars = 0
     result_text = ""
     error_msg = None
     start = time.monotonic()
@@ -369,6 +389,11 @@ async def run_task(
                 error_msg = f"Bedrock API error: {e}"
                 logger.error("  [%s/%s] %s", server_name, task_name, error_msg)
                 break
+
+            # Track Bedrock API token usage
+            usage = response.get("usage", {})
+            bedrock_input_tokens += usage.get("inputTokens", 0)
+            bedrock_output_tokens += usage.get("outputTokens", 0)
 
             stop_reason = response.get("stopReason", "")
             output_message = response.get("output", {}).get("message", {})
@@ -422,6 +447,7 @@ async def run_task(
 
                 # Call MCP tool
                 tool_output = await mcp.call_tool(tool_name, tool_input)
+                response_chars += len(tool_output)
 
                 # Debug: log the tool output
                 output_preview = tool_output[:2000] if len(tool_output) > 2000 else tool_output
@@ -454,6 +480,8 @@ async def run_task(
         logger.error("  [%s/%s] Error: %s", server_name, task_name, error_msg)
     finally:
         await mcp.stop()
+        # Kill any browser the MCP server spawned so the next task starts clean
+        _kill_stale_browsers()
 
     duration_s = time.monotonic() - start
     success = task["verify"](result_text) if not error_msg else False
@@ -465,11 +493,25 @@ async def run_task(
         duration_s, tool_call_count,
     )
 
+    total_bedrock_tokens = bedrock_input_tokens + bedrock_output_tokens
+    logger.info(
+        "  [%s/%s] Bedrock tokens: %d input + %d output = %d total",
+        server_name, task_name,
+        bedrock_input_tokens, bedrock_output_tokens, total_bedrock_tokens,
+    )
+
+    response_tokens_est = response_chars // 4
+
     return {
         "name": task_name,
         "success": success,
         "duration_s": round(duration_s, 1),
         "tool_calls": tool_call_count,
+        "bedrock_input_tokens": bedrock_input_tokens,
+        "bedrock_output_tokens": bedrock_output_tokens,
+        "total_bedrock_tokens": total_bedrock_tokens,
+        "response_chars": response_chars,
+        "response_tokens_est": response_tokens_est,
         "result": result_text[:500],
         "error": error_msg,
     }
@@ -485,12 +527,21 @@ def aggregate_results(task_results: list[dict]) -> dict:
     passed = sum(1 for t in task_results if t["success"])
     total_duration = sum(t["duration_s"] for t in task_results)
     total_tools = sum(t["tool_calls"] for t in task_results)
+    total_input = sum(t.get("bedrock_input_tokens", 0) for t in task_results)
+    total_output = sum(t.get("bedrock_output_tokens", 0) for t in task_results)
+    total_response_chars = sum(t.get("response_chars", 0) for t in task_results)
+    total_response_tokens_est = total_response_chars // 4
     return {
         "total_tasks": total,
         "passed": passed,
         "total_duration_s": round(total_duration, 1),
         "total_tool_calls": total_tools,
         "avg_tool_calls": round(total_tools / total, 1) if total else 0,
+        "bedrock_input_tokens": total_input,
+        "bedrock_output_tokens": total_output,
+        "total_bedrock_tokens": total_input + total_output,
+        "response_chars": total_response_chars,
+        "response_tokens_est": total_response_tokens_est,
     }
 
 
@@ -510,6 +561,11 @@ def format_summary_table(server_results: dict) -> str:
         ("Total Duration (s)", "total_duration_s", ".1f"),
         ("Total Tool Calls", "total_tool_calls", "d"),
         ("Avg Tool Calls/Task", "avg_tool_calls", ".1f"),
+        ("Bedrock Input Tokens", "bedrock_input_tokens", ",d"),
+        ("Bedrock Output Tokens", "bedrock_output_tokens", ",d"),
+        ("Total Bedrock Tokens", "total_bedrock_tokens", ",d"),
+        ("Response Chars", "response_chars", ",d"),
+        ("Response Tokens (est)", "response_tokens_est", ",d"),
     ]:
         row = f"{label:<25s}"
         for name in names:
@@ -595,9 +651,10 @@ async def run_benchmark(
         }
 
         logger.info(
-            "  Server %s: %d/%d passed, %.1fs total, %d tool calls",
+            "  Server %s: %d/%d passed, %.1fs total, %d tool calls, %d bedrock tokens",
             server_name, summary["passed"], summary["total_tasks"],
             summary["total_duration_s"], summary["total_tool_calls"],
+            summary["total_bedrock_tokens"],
         )
         logger.info("")
 

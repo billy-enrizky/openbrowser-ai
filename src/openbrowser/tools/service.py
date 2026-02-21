@@ -366,7 +366,7 @@ class Tools(Generic[Context]):
 			param_model=UploadFileAction,
 		)
 		async def upload_file(
-			params: UploadFileAction, browser_session: BrowserSession, available_file_paths: list[str], file_system: FileSystem
+			params: UploadFileAction, browser_session: BrowserSession, available_file_paths: list[str], file_system: FileSystem | None = None
 		):
 			# Check if file is in available_file_paths (user-provided or downloaded files)
 			# For remote browsers (is_local=False), we allow absolute remote paths even if not tracked locally
@@ -387,13 +387,21 @@ class Tools(Generic[Context]):
 							# If browser is remote, allow passing a remote-accessible absolute path
 							if not browser_session.is_local:
 								pass
+							elif os.path.isabs(params.path) and os.path.exists(params.path):
+								# MCP mode: file_system tracks the file but it's not in get_file();
+								# allow absolute paths that exist on disk for local browsers
+								pass
 							else:
 								msg = f'File path {params.path} is not available. To fix: The user must add this file path to the available_file_paths parameter when creating the Agent. Example: Agent(task="...", llm=llm, browser=browser, available_file_paths=["{params.path}"])'
-								logger.error(f'❌ {msg}')
+								logger.error(msg)
 								return ActionResult(error=msg)
 					else:
-						# If browser is remote, allow passing a remote-accessible absolute path
+						# file_system is None (MCP mode) or has no directory
 						if not browser_session.is_local:
+							pass
+						elif os.path.isabs(params.path) and os.path.exists(params.path):
+							# MCP mode: no file_system provided; allow absolute paths
+							# that exist on disk for local browsers
 							pass
 						else:
 							msg = f'File path {params.path} is not available. To fix: The user must add this file path to the available_file_paths parameter when creating the Agent. Example: Agent(task="...", llm=llm, browser=browser, available_file_paths=["{params.path}"])'
@@ -1439,7 +1447,7 @@ class CodeAgentTools(Tools[Context]):
 			'Complete task.',
 			param_model=DoneAction,
 		)
-		async def done(params: DoneAction, file_system: FileSystem = None):
+		async def done(params: DoneAction, file_system: FileSystem | None = None):
 			user_message = params.text
 
 			len_text = len(params.text)
@@ -1556,7 +1564,7 @@ class CodeAgentTools(Tools[Context]):
 			params: UploadFileAction,
 			browser_session: BrowserSession,
 			available_file_paths: list[str],
-			file_system: FileSystem,
+			file_system: FileSystem | None = None,
 		):
 			# Path validation logic for code-use mode:
 			# 1. If available_file_paths provided (security mode), enforce it as a whitelist
@@ -1582,17 +1590,21 @@ class CodeAgentTools(Tools[Context]):
 								# If browser is remote, allow passing a remote-accessible absolute path
 								if not browser_session.is_local:
 									pass
+								elif os.path.isabs(params.path) and os.path.exists(params.path):
+									pass
 								else:
 									msg = f'File path {params.path} is not available. To fix: add this file path to the available_file_paths parameter when creating the Agent. Example: Agent(task="...", llm=llm, browser=browser, available_file_paths=["{params.path}"])'
-									logger.error(f'❌ {msg}')
+									logger.error(msg)
 									return ActionResult(error=msg)
 						else:
-							# If browser is remote, allow passing a remote-accessible absolute path
+							# file_system is None (MCP mode) or has no directory
 							if not browser_session.is_local:
+								pass
+							elif os.path.isabs(params.path) and os.path.exists(params.path):
 								pass
 							else:
 								msg = f'File path {params.path} is not available. To fix: add this file path to the available_file_paths parameter when creating the Agent. Example: Agent(task="...", llm=llm, browser=browser, available_file_paths=["{params.path}"])'
-								logger.error(f'❌ {msg}')
+								logger.error(msg)
 								return ActionResult(error=msg)
 
 			# For local browsers, ensure the file exists on the local filesystem
