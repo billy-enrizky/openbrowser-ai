@@ -296,14 +296,14 @@ TASKS = [
 # ---------------------------------------------------------------------------
 
 SERVERS = {
-    "openbrowser": {
-        "command": "uvx",
-        "args": ["openbrowser-ai[mcp]==0.1.22", "--mcp"],
-        "env": {"TIMEOUT_BrowserStartEvent": "60"},
-    },
     "playwright": {
         "command": "npx",
         "args": ["@playwright/mcp@latest"],
+    },
+    "openbrowser": {
+        "command": "uvx",
+        "args": ["openbrowser-ai[mcp]==0.1.26", "--mcp"],
+        "env": {"TIMEOUT_BrowserStartEvent": "60"},
     },
     "chrome-devtools": {
         "command": "npx",
@@ -353,6 +353,7 @@ async def run_task(
     tool_call_count = 0
     bedrock_input_tokens = 0
     bedrock_output_tokens = 0
+    response_chars = 0
     result_text = ""
     error_msg = None
     start = time.monotonic()
@@ -446,6 +447,7 @@ async def run_task(
 
                 # Call MCP tool
                 tool_output = await mcp.call_tool(tool_name, tool_input)
+                response_chars += len(tool_output)
 
                 # Debug: log the tool output
                 output_preview = tool_output[:2000] if len(tool_output) > 2000 else tool_output
@@ -498,6 +500,8 @@ async def run_task(
         bedrock_input_tokens, bedrock_output_tokens, total_bedrock_tokens,
     )
 
+    response_tokens_est = response_chars // 4
+
     return {
         "name": task_name,
         "success": success,
@@ -506,6 +510,8 @@ async def run_task(
         "bedrock_input_tokens": bedrock_input_tokens,
         "bedrock_output_tokens": bedrock_output_tokens,
         "total_bedrock_tokens": total_bedrock_tokens,
+        "response_chars": response_chars,
+        "response_tokens_est": response_tokens_est,
         "result": result_text[:500],
         "error": error_msg,
     }
@@ -523,6 +529,8 @@ def aggregate_results(task_results: list[dict]) -> dict:
     total_tools = sum(t["tool_calls"] for t in task_results)
     total_input = sum(t.get("bedrock_input_tokens", 0) for t in task_results)
     total_output = sum(t.get("bedrock_output_tokens", 0) for t in task_results)
+    total_response_chars = sum(t.get("response_chars", 0) for t in task_results)
+    total_response_tokens_est = total_response_chars // 4
     return {
         "total_tasks": total,
         "passed": passed,
@@ -532,6 +540,8 @@ def aggregate_results(task_results: list[dict]) -> dict:
         "bedrock_input_tokens": total_input,
         "bedrock_output_tokens": total_output,
         "total_bedrock_tokens": total_input + total_output,
+        "response_chars": total_response_chars,
+        "response_tokens_est": total_response_tokens_est,
     }
 
 
@@ -554,6 +564,8 @@ def format_summary_table(server_results: dict) -> str:
         ("Bedrock Input Tokens", "bedrock_input_tokens", ",d"),
         ("Bedrock Output Tokens", "bedrock_output_tokens", ",d"),
         ("Total Bedrock Tokens", "total_bedrock_tokens", ",d"),
+        ("Response Chars", "response_chars", ",d"),
+        ("Response Tokens (est)", "response_tokens_est", ",d"),
     ]:
         row = f"{label:<25s}"
         for name in names:
