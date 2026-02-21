@@ -157,6 +157,22 @@ variable "cognito_oauth_scopes" {
 }
 
 ## -----------------------------------------------------------------------------
+## Landing Page (S3 + CloudFront)
+## -----------------------------------------------------------------------------
+
+variable "landing_domain_name" {
+  type        = string
+  default     = ""
+  description = "Custom domain for the landing page (e.g. openbrowser.me). Leave empty to use CloudFront default domain."
+}
+
+variable "landing_acm_certificate_arn" {
+  type        = string
+  default     = ""
+  description = "ACM certificate ARN for landing page domain (must be in us-east-1 for CloudFront). Must cover the landing domain and www variant."
+}
+
+## -----------------------------------------------------------------------------
 ## CORS
 ## -----------------------------------------------------------------------------
 

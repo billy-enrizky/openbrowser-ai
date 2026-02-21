@@ -152,3 +152,22 @@ output "ssm_anthropic_api_key_name" {
   description = "SSM parameter name for Anthropic API key"
   value       = aws_ssm_parameter.anthropic_api_key.name
 }
+
+# -----------------------------------------------------------------------------
+# Landing Page
+# -----------------------------------------------------------------------------
+
+output "landing_url" {
+  description = "CloudFront distribution URL for the landing page"
+  value       = "https://${aws_cloudfront_distribution.landing.domain_name}"
+}
+
+output "landing_s3_bucket" {
+  description = "S3 bucket name for landing page static files"
+  value       = aws_s3_bucket.landing.id
+}
+
+output "landing_cloudfront_distribution_id" {
+  description = "CloudFront distribution ID for landing page (for cache invalidations)"
+  value       = aws_cloudfront_distribution.landing.id
+}
