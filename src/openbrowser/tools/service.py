@@ -366,7 +366,7 @@ class Tools(Generic[Context]):
 			param_model=UploadFileAction,
 		)
 		async def upload_file(
-			params: UploadFileAction, browser_session: BrowserSession, available_file_paths: list[str], file_system: FileSystem = None
+			params: UploadFileAction, browser_session: BrowserSession, available_file_paths: list[str], file_system: FileSystem | None = None
 		):
 			# Check if file is in available_file_paths (user-provided or downloaded files)
 			# For remote browsers (is_local=False), we allow absolute remote paths even if not tracked locally
@@ -1447,7 +1447,7 @@ class CodeAgentTools(Tools[Context]):
 			'Complete task.',
 			param_model=DoneAction,
 		)
-		async def done(params: DoneAction, file_system: FileSystem = None):
+		async def done(params: DoneAction, file_system: FileSystem | None = None):
 			user_message = params.text
 
 			len_text = len(params.text)
@@ -1564,7 +1564,7 @@ class CodeAgentTools(Tools[Context]):
 			params: UploadFileAction,
 			browser_session: BrowserSession,
 			available_file_paths: list[str],
-			file_system: FileSystem = None,
+			file_system: FileSystem | None = None,
 		):
 			# Path validation logic for code-use mode:
 			# 1. If available_file_paths provided (security mode), enforce it as a whitelist
