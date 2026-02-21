@@ -57,6 +57,9 @@ class DomService:
 		self.paint_order_filtering = paint_order_filtering
 		self.max_iframes = max_iframes
 		self.max_iframe_depth = max_iframe_depth
+		self._last_cdp_timing: dict[str, float] = {}
+		self._last_ax_node_count: int = 0
+		self._last_snapshot_node_count: int = 0
 
 	async def __aenter__(self):
 		return self
@@ -465,6 +468,11 @@ class DomService:
 		"""
 
 		trees = await self._get_all_trees(target_id)
+		self._last_cdp_timing = trees.cdp_timing
+		self._last_ax_node_count = len(trees.ax_tree.get('nodes', []))
+		self._last_snapshot_node_count = sum(
+			len(doc.get('nodes', [])) for doc in trees.snapshot.get('documents', [])
+		)
 
 		dom_tree = trees.dom_tree
 		ax_tree = trees.ax_tree
@@ -733,7 +741,9 @@ class DomService:
 
 		# Use current target (None means use current)
 		assert self.browser_session.current_target_id is not None
+		dom_tree_start = time.time()
 		enhanced_dom_tree = await self.get_dom_tree(target_id=self.browser_session.current_target_id)
+		dom_tree_end = time.time()
 
 		start = time.time()
 		serialized_dom_state, serializer_timing = DOMTreeSerializer(
@@ -743,8 +753,13 @@ class DomService:
 		end = time.time()
 		serialize_total_timing = {'serialize_dom_tree_total': end - start}
 
-		# Combine all timing info
-		all_timing = {**serializer_timing, **serialize_total_timing}
+		# Combine all timing info (CDP + tree construction + serialization)
+		all_timing = {
+			**self._last_cdp_timing,
+			'get_dom_tree_total': dom_tree_end - dom_tree_start,
+			**serializer_timing,
+			**serialize_total_timing,
+		}
 
 		return serialized_dom_state, enhanced_dom_tree, all_timing
 
