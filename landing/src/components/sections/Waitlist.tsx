@@ -37,8 +37,10 @@ export function Waitlist() {
   };
 
   return (
-    <section id="waitlist" className="py-24 px-6">
-      <div className="max-w-2xl mx-auto text-center">
+    <section id="waitlist" className="relative py-24 px-6 overflow-hidden">
+      {/* Background glow */}
+      <div className="pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-gradient-to-br from-cyan-500/[0.06] via-transparent to-violet-500/[0.06] rounded-full blur-3xl" />
+      <div className="relative max-w-2xl mx-auto text-center">
         {/* Heading */}
         <div className="mb-12">
           <h2 className="text-3xl md:text-5xl font-bold text-white">

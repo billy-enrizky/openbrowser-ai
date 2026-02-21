@@ -17,7 +17,7 @@ interface IntegrationCardProps {
 
 function IntegrationCard({ name, abbr, color, icon }: IntegrationCardProps) {
   return (
-    <div className="flex items-center gap-3 rounded-xl border border-white/5 bg-zinc-900/50 px-6 py-4 mx-2">
+    <div className="flex items-center gap-3 rounded-xl border border-white/[0.08] bg-zinc-900/60 px-6 py-4 mx-2 hover:border-white/15 transition-colors">
       <div
         className={cn(
           "flex h-10 w-10 items-center justify-center rounded-lg text-white text-xs font-bold",
@@ -170,7 +170,8 @@ const row2 = [...integrations].reverse();
 
 export function Integrations() {
   return (
-    <section id="integrations" className="py-24 px-6">
+    <section id="integrations" className="relative py-24 px-6 overflow-hidden">
+      <div className="pointer-events-none absolute bottom-0 left-1/2 -translate-x-1/2 w-[800px] h-[400px] bg-gradient-to-t from-cyan-500/[0.03] to-transparent rounded-full blur-3xl" />
       <div className="max-w-7xl mx-auto text-center">
         {/* Section heading */}
         <div className="mb-12">

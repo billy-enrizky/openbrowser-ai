@@ -258,7 +258,7 @@ function FeatureCard({ children, className, index }: FeatureCardProps) {
       viewport={{ once: true }}
       transition={{ duration: 0.5, delay: index * 0.1 }}
       className={cn(
-        "relative group rounded-xl border border-white/5 bg-zinc-900/50 p-6 md:p-8 hover:border-white/10 transition-colors overflow-hidden",
+        "relative group rounded-xl border border-white/[0.08] bg-zinc-900/60 p-6 md:p-8 hover:border-white/15 transition-colors overflow-hidden",
         className
       )}
     >
@@ -275,7 +275,9 @@ function FeatureCard({ children, className, index }: FeatureCardProps) {
 
 export function Features() {
   return (
-    <section id="features" className="py-24 px-6">
+    <section id="features" className="relative py-24 px-6 overflow-hidden">
+      {/* Subtle radial glow */}
+      <div className="pointer-events-none absolute top-0 left-1/2 -translate-x-1/2 w-[800px] h-[400px] bg-gradient-to-b from-cyan-500/[0.04] to-transparent rounded-full blur-3xl" />
       <div className="max-w-7xl mx-auto">
         {/* Section heading */}
         <div className="text-center mb-16">

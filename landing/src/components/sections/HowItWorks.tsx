@@ -111,7 +111,8 @@ function Step({ number, title, children, isLast = false }: StepProps) {
 
 export function HowItWorks() {
   return (
-    <section id="how-it-works" className="py-24 px-6">
+    <section id="how-it-works" className="relative py-24 px-6 overflow-hidden">
+      <div className="pointer-events-none absolute top-0 left-1/2 -translate-x-1/2 w-[600px] h-[300px] bg-gradient-to-b from-violet-500/[0.04] to-transparent rounded-full blur-3xl" />
       <div className="max-w-7xl mx-auto">
         {/* Section heading */}
         <div className="text-center mb-16">

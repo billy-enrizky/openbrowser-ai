@@ -2,7 +2,7 @@ import Image from "next/image";
 
 export function Footer() {
   return (
-    <footer className="border-t border-white/5 bg-zinc-950 py-12 px-6">
+    <footer className="border-t border-white/[0.06] bg-zinc-950 py-12 px-6">
       <div className="max-w-7xl mx-auto">
         {/* Top row */}
         <div className="flex flex-col md:flex-row justify-between gap-8">
@@ -77,7 +77,7 @@ export function Footer() {
         </div>
 
         {/* Bottom row */}
-        <div className="border-t border-white/5 mt-8 pt-8 flex flex-col md:flex-row justify-between text-sm text-slate-500">
+        <div className="border-t border-white/[0.06] mt-8 pt-8 flex flex-col md:flex-row justify-between text-sm text-slate-500">
           <span>2026 OpenBrowser. All rights reserved.</span>
           <span className="mt-2 md:mt-0">Open source under MIT license.</span>
         </div>

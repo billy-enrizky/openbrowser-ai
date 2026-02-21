@@ -9,7 +9,8 @@ import { motion } from "framer-motion";
 
 export function VideoDemo() {
   return (
-    <section id="demo" className="py-24 px-6">
+    <section id="demo" className="relative py-24 px-6 overflow-hidden">
+      <div className="pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[500px] bg-gradient-to-br from-cyan-500/[0.05] via-transparent to-violet-500/[0.05] rounded-full blur-3xl" />
       <div className="max-w-7xl mx-auto text-center">
         {/* Section heading */}
         <div className="mb-12">
@@ -30,10 +31,10 @@ export function VideoDemo() {
           className="max-w-4xl mx-auto"
         >
           <div
-            className="rounded-2xl overflow-hidden border border-white/10"
+            className="rounded-2xl overflow-hidden border border-white/[0.08]"
             style={{
               boxShadow:
-                "0 0 80px rgba(14, 165, 233, 0.15), 0 0 160px rgba(139, 92, 246, 0.1)",
+                "0 0 60px rgba(14, 165, 233, 0.12), 0 0 120px rgba(139, 92, 246, 0.08)",
             }}
           >
             <iframe
