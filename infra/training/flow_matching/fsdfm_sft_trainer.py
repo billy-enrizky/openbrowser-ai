@@ -181,6 +181,13 @@ def compute_fsdfm_loss(
 
 def train():
     """Run FS-DFM SFT training with LoRA."""
+    import os
+
+    seed = int(os.environ.get("RANDOM_SEED", "42"))
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
     model_config = FSDFM_MODEL_CONFIG
     train_config = FSDFM_SFT_CONFIG
     vocab_size = model_config["vocab_size"]
