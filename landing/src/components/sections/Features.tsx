@@ -297,8 +297,7 @@ export function Features() {
               Text-First Architecture
             </h3>
             <p className="text-slate-400 mt-2">
-              3x fewer tokens than Playwright MCP. 6.3x fewer than Chrome
-              DevTools MCP. Your AI agent processes text, not screenshots.
+              3x fewer tokens than Playwright MCP. 6.3x fewer than Chrome DevTools MCP. Text, not screenshots.
             </p>
             <TokenBars />
           </FeatureCard>
