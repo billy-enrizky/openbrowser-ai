@@ -125,6 +125,11 @@ async def evaluate():
     config = ONLINE_GRPO_CONFIG
     eval_label = os.environ.get("EVAL_LABEL", "SFT-ONLY")
 
+    seed = int(os.environ.get("RANDOM_SEED", "42"))
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
     # Load tokenizer
     logger.info(f"Loading tokenizer from: {config['model_name']}")
     tokenizer = AutoTokenizer.from_pretrained(config["model_name"])
@@ -134,10 +139,14 @@ async def evaluate():
     # Load SFT model (inference only)
     model = load_sft_model(config)
 
-    # Load prompts
-    train_file = resolve_data_path(DATA_CONFIG["train_file"])
-    max_samples = int(os.environ.get("MAX_EVAL_SAMPLES", DATA_CONFIG.get("max_train_samples", 0)))
-    prompts = load_prompts(train_file, max_samples=max_samples)
+    # Load prompts from val or test split
+    eval_split = os.environ.get("EVAL_SPLIT", "val")
+    split_to_key = {"test": "test_file", "train": "train_file", "val": "val_file"}
+    eval_file_key = split_to_key.get(eval_split, "val_file")
+    eval_file = resolve_data_path(DATA_CONFIG[eval_file_key])
+    max_samples = int(os.environ.get("MAX_EVAL_SAMPLES", DATA_CONFIG.get("max_eval_samples", 0)))
+    prompts = load_prompts(eval_file, max_samples=max_samples)
+    logger.info("Evaluating on %s split (%s)", eval_split, eval_file)
 
     max_new_tokens = config.get("max_new_tokens", 512)
     action_timeout = config.get("action_timeout_s", 10.0)

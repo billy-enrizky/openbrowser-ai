@@ -61,7 +61,7 @@ bridges MCP servers to OpenClaw agents.
 }
 ```
 
-All 11 browser tools will be registered as native OpenClaw agent tools.
+The `execute_code` tool will be registered as a native OpenClaw agent tool.
 
 For OpenClaw plugin documentation, see [docs.openclaw.ai/tools/plugin](https://docs.openclaw.ai/tools/plugin).
 
@@ -80,67 +80,92 @@ Add to your project's `.mcp.json`:
 }
 ```
 
-## Available Tools
+## Available Tool
 
-### Navigation
+The MCP server exposes a single `execute_code` tool that runs Python code in a persistent namespace with browser automation functions. The LLM writes Python code to navigate, interact, and extract data.
 
-| Tool | Description |
-|------|-------------|
-| `browser_navigate` | Navigate to a URL, optionally in a new tab |
-| `browser_go_back` | Go back to the previous page |
-| `browser_scroll` | Scroll the page. Use `target_text` to find text and scroll to it |
+**Functions** (all async, use `await`):
 
-### Interaction
+| Category | Functions |
+|----------|-----------|
+| **Navigation** | `navigate(url, new_tab)`, `go_back()`, `wait(seconds)` |
+| **Interaction** | `click(index)`, `input_text(index, text, clear)`, `scroll(down, pages, index)`, `send_keys(keys)`, `upload_file(index, path)` |
+| **Dropdowns** | `select_dropdown(index, text)`, `dropdown_options(index)` |
+| **Tabs** | `switch(tab_id)`, `close(tab_id)` |
+| **JavaScript** | `evaluate(code)` -- run JS in page context, returns Python objects |
+| **State** | `browser.get_browser_state_summary()` -- page metadata and interactive elements |
+| **CSS** | `get_selector_from_index(index)` -- CSS selector for an element |
+| **Completion** | `done(text, success)` -- signal task completion |
 
-| Tool | Description |
-|------|-------------|
-| `browser_click` | Click an element by its index |
-| `browser_type` | Type text into an input field |
-
-### Content Extraction
-
-| Tool | Description |
-|------|-------------|
-| `browser_get_state` | Get page metadata and interactive elements. Use `filter_by`/`filter_query` to search elements |
-| `browser_get_text` | Get page content as markdown. Use `search` param to grep with regex |
-| `browser_get_accessibility_tree` | Get the page accessibility tree |
-| `browser_execute_js` | Execute JavaScript in the page context |
-
-### Tab and Session Management
-
-| Tool | Description |
-|------|-------------|
-| `browser_tab` | Manage tabs: `action=list` / `switch` / `close` |
-| `browser_session` | Manage sessions: `action=list` / `close` / `close_all` |
+**Pre-imported libraries**: `json`, `csv`, `re`, `datetime`, `asyncio`, `Path`, `requests`, `numpy`, `pandas`, `matplotlib`, `BeautifulSoup`
 
 ## Benchmark: Token Efficiency
 
-Measured on a 5-step workflow (navigate Wikipedia, get state, click, go back, get state) via JSON-RPC stdio. All numbers are real measurements -- no estimates.
+<<<<<<< HEAD
+### E2E LLM Benchmark (6 Real-World Tasks, N=5 runs)
 
-| MCP Server | Tools | Response Tokens | Cost (Sonnet) | vs OpenBrowser |
-|------------|------:|----------------:|--------------:|---------------:|
-| **Playwright MCP** | 22 | 248,016 | $0.744 | 877x more |
-| **Chrome DevTools MCP** (Google) | 26 | 134,802 | $0.404 | 476x more |
-| **OpenBrowser MCP** | 11 | **283** | **$0.001** | baseline |
+Six browser tasks run through Claude Sonnet 4.6 on AWS Bedrock (Converse API). The LLM autonomously decides which tools to call. All three servers pass **6/6 tasks**. 5 runs per server with 10,000-sample bootstrap CIs. Bedrock API tokens measured from the Converse API `usage` field.
 
-**What each server returns for navigate:**
+| MCP Server | Tools | Bedrock API Tokens | Tool Calls (mean) | vs OpenBrowser |
+|------------|------:|-------------------:|-----------:|---------------:|
+| **Playwright MCP** | 22 | 158,787 | 9.4 | **3.2x more tokens** |
+| **Chrome DevTools MCP** (Google) | 26 | 299,486 | 19.4 | **6.0x more tokens** |
+| **OpenBrowser MCP** | 1 | **50,195** | 13.8 | baseline |
 
-| Server | Navigate Response | Size |
-|--------|------------------|-----:|
-| Playwright MCP | Full a11y snapshot (entire page tree with `[ref=eXX]` identifiers) | ~496K chars |
-| Chrome DevTools MCP | `"Successfully navigated to URL. ## Pages 1: URL [selected]"` | ~136 chars |
-| OpenBrowser MCP | `"Navigated to: URL"` | ~105 chars |
+### Cost per Benchmark Run (6 Tasks)
 
-OpenBrowser returns minimal confirmations for actions and lets the agent request only the detail level it needs. Search returns only matching lines -- Playwright and Chrome DevTools MCP have no equivalent:
+Based on Bedrock API token usage (input + output tokens at respective rates).
 
-| Detail Level | Example | Wikipedia Size |
-|-------------|---------|---------------:|
-| Compact state | `browser_get_state(compact=true)` | ~250 chars |
-| Search result | `browser_get_text(search="Guido van Rossum")` | ~3.9K chars |
-| Full page text | `browser_get_text()` | ~97K chars |
-| Full a11y snapshot (Playwright/CDP) | `browser_snapshot` / `take_snapshot` | ~495-538K chars |
+| Model | Playwright MCP | Chrome DevTools MCP | OpenBrowser MCP |
+|-------|---------------:|--------------------:|----------------:|
+| Claude Sonnet 4.6 ($3/$15 per M) | $0.50 | $0.92 | **$0.18** |
+| Claude Opus 4.6 ($5/$25 per M) | $0.83 | $1.53 | **$0.30** |
 
-[Full comparison](https://docs.openbrowser.me/comparison)
+### Per-Task MCP Response Size
+
+MCP tool response sizes show the architectural difference. Playwright and Chrome DevTools dump full page snapshots; OpenBrowser returns only extracted data.
+
+| Task | Playwright MCP | Chrome DevTools MCP | OpenBrowser MCP |
+|------|---------------:|--------------------:|----------------:|
+| fact_lookup | 520,742 chars | 509,058 chars | 3,144 chars |
+| form_fill | 4,075 chars | 3,150 chars | 2,305 chars |
+| multi_page_extract | 58,392 chars | 38,880 chars | 294 chars |
+| search_navigate | 519,241 chars | 595,590 chars | 2,848 chars |
+| deep_navigation | 14,875 chars | 195 chars | 113 chars |
+| content_analysis | 485 chars | 501 chars | 499 chars |
+=======
+### E2E LLM Benchmark (6 Real-World Tasks)
+
+Six browser tasks run through Claude Sonnet 4.6 on AWS Bedrock. The LLM autonomously decides which tools to call. All three servers pass **6/6 tasks**. Token usage measured from actual MCP tool response sizes.
+
+| MCP Server | Tools | Response Tokens | Tool Calls | vs OpenBrowser |
+|------------|------:|----------------:|-----------:|---------------:|
+| **Playwright MCP** | 22 | 283,853 | 10 | **170x more tokens** |
+| **Chrome DevTools MCP** (Google) | 26 | 301,030 | 21 | **181x more tokens** |
+| **OpenBrowser MCP** | 1 | **1,665** | 20 | baseline |
+
+### Cost per Benchmark Run (6 Tasks)
+
+| Model | Playwright MCP | Chrome DevTools MCP | OpenBrowser MCP |
+|-------|---------------:|--------------------:|----------------:|
+| Claude Sonnet ($3/M) | $0.852 | $0.903 | **$0.005** |
+| Claude Opus ($15/M) | $4.258 | $4.515 | **$0.025** |
+
+### Per-Task Response Size
+
+| Task | Playwright MCP | Chrome DevTools MCP | OpenBrowser MCP |
+|------|---------------:|--------------------:|----------------:|
+| fact_lookup | 477,003 chars | 509,059 chars | 1,041 chars |
+| form_fill | 4,075 chars | 3,150 chars | 2,410 chars |
+| multi_page_extract | 58,099 chars | 38,593 chars | 513 chars |
+| search_navigate | 518,461 chars | 594,458 chars | 1,996 chars |
+| deep_navigation | 77,292 chars | 58,359 chars | 113 chars |
+| content_analysis | 493 chars | 513 chars | 594 chars |
+>>>>>>> origin/main
+
+Playwright completes tasks in fewer tool calls (1-2 per task) because it dumps the full a11y snapshot on every navigation. OpenBrowser takes more round-trips but each response is compact -- the code extracts only what's needed.
+
+[Full comparison with methodology](https://docs.openbrowser.me/comparison)
 
 ## Configuration
 
@@ -167,16 +192,6 @@ Set these in your `.mcp.json`:
 }
 ```
 
-## MCP Resources
-
-When a browser session is active, three MCP resources are available:
-
-| URI | Type | Description |
-|-----|------|-------------|
-| `browser://current-page/content` | text/markdown | Page content as markdown |
-| `browser://current-page/state` | application/json | Interactive elements and metadata |
-| `browser://current-page/accessibility` | application/json | Accessibility tree |
-
 ## Skills
 
 The plugin includes 5 built-in skills that provide guided workflows for common browser automation tasks. Each skill is triggered automatically when the user's request matches its description.
@@ -189,12 +204,12 @@ The plugin includes 5 built-in skills that provide guided workflows for common b
 | `page-analysis` | `skills/page-analysis/` | Analyze page content, structure, metadata, and interactive elements |
 | `accessibility-audit` | `skills/accessibility-audit/` | Audit pages for WCAG compliance, heading structure, labels, alt text, ARIA, and landmarks |
 
-Each skill file (`SKILL.md`) contains YAML frontmatter with trigger conditions and a step-by-step workflow that references the MCP tools listed above.
+Each skill file (`SKILL.md`) contains YAML frontmatter with trigger conditions and a step-by-step workflow using the `execute_code` tool.
 
 ## Testing and Benchmarks
 
 ```bash
-# E2E test all 11 MCP tools against the published PyPI package
+# E2E test the MCP server against the published PyPI package
 uv run python benchmarks/e2e_published_test.py
 
 # Run MCP benchmarks (5-step Wikipedia workflow)
