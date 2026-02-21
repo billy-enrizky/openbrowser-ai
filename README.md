@@ -91,14 +91,14 @@ playwright install chromium
 
 ```python
 import asyncio
-from openbrowser import Agent, ChatGoogle
+from openbrowser import CodeAgent, ChatGoogle
 
 async def main():
-    agent = Agent(
+    agent = CodeAgent(
         task="Go to google.com and search for 'Python tutorials'",
-        llm=ChatGoogle(),
+        llm=ChatGoogle(model="gemini-2.0-flash"),
     )
-    
+
     result = await agent.run()
     print(f"Result: {result}")
 
@@ -108,16 +108,16 @@ asyncio.run(main())
 ### With Different LLM Providers
 
 ```python
-from openbrowser import Agent, ChatOpenAI, ChatAnthropic, ChatGoogle
+from openbrowser import CodeAgent, ChatOpenAI, ChatAnthropic, ChatGoogle
 
 # OpenAI
-agent = Agent(task="...", llm=ChatOpenAI(model="gpt-4o"))
+agent = CodeAgent(task="...", llm=ChatOpenAI(model="gpt-4o"))
 
 # Anthropic
-agent = Agent(task="...", llm=ChatAnthropic(model="claude-sonnet-4-0"))
+agent = CodeAgent(task="...", llm=ChatAnthropic(model="claude-sonnet-4-0"))
 
 # Google Gemini
-agent = Agent(task="...", llm=ChatGoogle(model="gemini-2.0-flash"))
+agent = CodeAgent(task="...", llm=ChatGoogle(model="gemini-2.0-flash"))
 ```
 
 ### Using Browser Session Directly
