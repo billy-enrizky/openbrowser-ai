@@ -104,7 +104,7 @@ async def run_code_agent_task(instruction: str):
 
 async def main():
     task = """
-    Navigate to https://browser-use.github.io/stress-tests/challenges/product-configurator.html
+    Navigate to https://openbrowser.me/openbrowser-ai/challenges/product-configurator.html
     Configure: MacBook Pro, Space Gray, 1TB, 32GB
     Click Add to Cart
     """
@@ -133,19 +133,19 @@ from openbrowser.code_use import CodeAgent
 TEST_TASKS = [
     {
         "name": "Vanilla Form",
-        "instruction": """Navigate to https://browser-use.github.io/stress-tests/challenges/vanilla-form.html
+        "instruction": """Navigate to https://openbrowser.me/openbrowser-ai/challenges/vanilla-form.html
 Fill out: Email: test@example.com, Country: United States, Date: 2026-02-15
 Click Submit""",
     },
     {
         "name": "Product Configurator",
-        "instruction": """Navigate to https://browser-use.github.io/stress-tests/challenges/product-configurator.html
+        "instruction": """Navigate to https://openbrowser.me/openbrowser-ai/challenges/product-configurator.html
 Configure: MacBook Pro, Space Gray, 1TB, 32GB
 Click Add to Cart""",
     },
     {
         "name": "Flight Booking",
-        "instruction": """Navigate to https://browser-use.github.io/stress-tests/challenges/flight-booking-flow.html
+        "instruction": """Navigate to https://openbrowser.me/openbrowser-ai/challenges/flight-booking-flow.html
 Book flight: NYC to LON, 2026-03-15, 2 Adults, Business
 Complete all steps through payment""",
     },
