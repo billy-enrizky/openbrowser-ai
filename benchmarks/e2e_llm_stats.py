@@ -107,6 +107,8 @@ async def run_multi(
         run_bedrock_input_tokens = []
         run_bedrock_output_tokens = []
         run_total_bedrock_tokens = []
+        run_response_chars = []
+        run_response_tokens_est = []
         per_task_durations = {t["name"]: [] for t in tasks_to_run}
         per_task_tool_calls = {t["name"]: [] for t in tasks_to_run}
         per_task_pass = {t["name"]: [] for t in tasks_to_run}
@@ -130,6 +132,8 @@ async def run_multi(
             run_bedrock_input_tokens.append(summary.get("bedrock_input_tokens", 0))
             run_bedrock_output_tokens.append(summary.get("bedrock_output_tokens", 0))
             run_total_bedrock_tokens.append(summary.get("total_bedrock_tokens", 0))
+            run_response_chars.append(summary.get("response_chars", 0))
+            run_response_tokens_est.append(summary.get("response_tokens_est", 0))
 
             for tr in task_results:
                 per_task_durations[tr["name"]].append(tr["duration_s"])
@@ -156,6 +160,8 @@ async def run_multi(
         input_token_stats = bootstrap_ci(run_bedrock_input_tokens, n_bootstrap)
         output_token_stats = bootstrap_ci(run_bedrock_output_tokens, n_bootstrap)
         total_token_stats = bootstrap_ci(run_total_bedrock_tokens, n_bootstrap)
+        response_chars_stats = bootstrap_ci(run_response_chars, n_bootstrap)
+        response_tokens_est_stats = bootstrap_ci(run_response_tokens_est, n_bootstrap)
 
         per_task_stats = {}
         for task_name in per_task_durations:
@@ -176,6 +182,8 @@ async def run_multi(
                 "bedrock_input_tokens": input_token_stats,
                 "bedrock_output_tokens": output_token_stats,
                 "total_bedrock_tokens": total_token_stats,
+                "response_chars": response_chars_stats,
+                "response_tokens_est": response_tokens_est_stats,
             },
             "per_task": per_task_stats,
         }
@@ -222,6 +230,8 @@ async def run_multi(
         ("Tool Calls", "tool_calls", ".1f"),
         ("Pass Count", "pass_count", ".1f"),
         ("Bedrock Tokens", "total_bedrock_tokens", ".0f"),
+        ("Response Chars", "response_chars", ".0f"),
+        ("Response Tokens (est)", "response_tokens_est", ".0f"),
     ]:
         row = f"{label:<35s}"
         for name in names:
@@ -236,6 +246,8 @@ async def run_multi(
         ("Duration (s)", "duration_s", ".1f"),
         ("Tool Calls", "tool_calls", ".1f"),
         ("Bedrock Tokens", "total_bedrock_tokens", ".0f"),
+        ("Response Chars", "response_chars", ".0f"),
+        ("Response Tokens (est)", "response_tokens_est", ".0f"),
     ]:
         row = f"  {label:<33s}"
         for name in names:
