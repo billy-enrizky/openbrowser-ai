@@ -300,13 +300,6 @@ export function Features() {
               3.2x fewer tokens than Playwright MCP. 6x fewer than Chrome DevTools MCP. Text, not screenshots.
             </p>
             <TokenBars />
-            <div className="mt-6 rounded-xl overflow-hidden border border-white/[0.08]">
-              <img
-                src="/benchmark_comparison.png"
-                alt="MCP Server Benchmark: Duration vs Token Usage -- OpenBrowser uses 144x fewer response tokens"
-                className="w-full"
-              />
-            </div>
           </FeatureCard>
 
           {/* Card 2: Any LLM Provider */}
