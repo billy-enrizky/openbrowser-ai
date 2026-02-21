@@ -5,6 +5,8 @@ __pycache__
 *.pyc
 !README.md
 *.png
+!benchmarks/benchmark_comparison.png
+!docs/images/*.png
 .env
 !.github/workflows/*.yml
 .DS_Store
@@ -80,3 +82,7 @@ feature-store-ui/
 
 # Drawio diagrams
 *.drawio
+
+# Benchmark plot scripts (generated images are tracked, scripts are local-only)
+benchmarks/plot_benchmark.py
+benchmarks/plot_all_benchmarks.py

@@ -101,6 +101,39 @@ The MCP server exposes a single `execute_code` tool that runs Python code in a p
 
 ## Benchmark: Token Efficiency
 
+<<<<<<< HEAD
+### E2E LLM Benchmark (6 Real-World Tasks, N=5 runs)
+
+Six browser tasks run through Claude Sonnet 4.6 on AWS Bedrock (Converse API). The LLM autonomously decides which tools to call. All three servers pass **6/6 tasks**. 5 runs per server with 10,000-sample bootstrap CIs. Bedrock API tokens measured from the Converse API `usage` field.
+
+| MCP Server | Tools | Bedrock API Tokens | Tool Calls (mean) | vs OpenBrowser |
+|------------|------:|-------------------:|-----------:|---------------:|
+| **Playwright MCP** | 22 | 158,787 | 9.4 | **3.2x more tokens** |
+| **Chrome DevTools MCP** (Google) | 26 | 299,486 | 19.4 | **6.0x more tokens** |
+| **OpenBrowser MCP** | 1 | **50,195** | 13.8 | baseline |
+
+### Cost per Benchmark Run (6 Tasks)
+
+Based on Bedrock API token usage (input + output tokens at respective rates).
+
+| Model | Playwright MCP | Chrome DevTools MCP | OpenBrowser MCP |
+|-------|---------------:|--------------------:|----------------:|
+| Claude Sonnet 4.6 ($3/$15 per M) | $0.50 | $0.92 | **$0.18** |
+| Claude Opus 4.6 ($5/$25 per M) | $0.83 | $1.53 | **$0.30** |
+
+### Per-Task MCP Response Size
+
+MCP tool response sizes show the architectural difference. Playwright and Chrome DevTools dump full page snapshots; OpenBrowser returns only extracted data.
+
+| Task | Playwright MCP | Chrome DevTools MCP | OpenBrowser MCP |
+|------|---------------:|--------------------:|----------------:|
+| fact_lookup | 520,742 chars | 509,058 chars | 3,144 chars |
+| form_fill | 4,075 chars | 3,150 chars | 2,305 chars |
+| multi_page_extract | 58,392 chars | 38,880 chars | 294 chars |
+| search_navigate | 519,241 chars | 595,590 chars | 2,848 chars |
+| deep_navigation | 14,875 chars | 195 chars | 113 chars |
+| content_analysis | 485 chars | 501 chars | 499 chars |
+=======
 ### E2E LLM Benchmark (6 Real-World Tasks)
 
 Six browser tasks run through Claude Sonnet 4.6 on AWS Bedrock. The LLM autonomously decides which tools to call. All three servers pass **6/6 tasks**. Token usage measured from actual MCP tool response sizes.
@@ -128,6 +161,7 @@ Six browser tasks run through Claude Sonnet 4.6 on AWS Bedrock. The LLM autonomo
 | search_navigate | 518,461 chars | 594,458 chars | 1,996 chars |
 | deep_navigation | 77,292 chars | 58,359 chars | 113 chars |
 | content_analysis | 493 chars | 513 chars | 594 chars |
+>>>>>>> origin/main
 
 Playwright completes tasks in fewer tool calls (1-2 per task) because it dumps the full a11y snapshot on every navigation. OpenBrowser takes more round-trips but each response is compact -- the code extracts only what's needed.
 
