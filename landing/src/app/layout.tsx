@@ -15,11 +15,11 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "OpenBrowser - The General-Purpose Agentic Browser",
   description:
-    "Control any browser with natural language. 877x more token-efficient than alternatives. Open source.",
+    "Control any browser with natural language. 6x fewer tokens than Chrome DevTools MCP. 144x fewer response tokens. Open source.",
   openGraph: {
     title: "OpenBrowser - The General-Purpose Agentic Browser",
     description:
-      "Control any browser with natural language. 877x more token-efficient than alternatives. Open source.",
+      "Control any browser with natural language. 6x fewer tokens than Chrome DevTools MCP. 144x fewer response tokens. Open source.",
     url: "https://openbrowser.me",
     siteName: "OpenBrowser",
     type: "website",

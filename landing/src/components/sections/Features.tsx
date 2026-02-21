@@ -137,30 +137,30 @@ function TokenBars() {
       <div>
         <div className="flex items-center justify-between text-xs text-slate-400 mb-1">
           <span>Chrome DevTools MCP</span>
-          <span>310,856 tokens</span>
+          <span>299,486 tokens</span>
         </div>
         <div className="h-8 rounded-lg bg-red-500/80 w-full flex items-center px-3">
-          <span className="text-xs font-medium text-white/90">310,856</span>
+          <span className="text-xs font-medium text-white/90">299,486</span>
         </div>
       </div>
       {/* Playwright MCP */}
       <div>
         <div className="flex items-center justify-between text-xs text-slate-400 mb-1">
           <span>Playwright MCP</span>
-          <span>150,248 tokens</span>
+          <span>158,787 tokens</span>
         </div>
-        <div className="h-8 rounded-lg bg-yellow-500/80 w-[48%] flex items-center px-3">
-          <span className="text-xs font-medium text-white/90">150,248</span>
+        <div className="h-8 rounded-lg bg-yellow-500/80 w-[53%] flex items-center px-3">
+          <span className="text-xs font-medium text-white/90">158,787</span>
         </div>
       </div>
       {/* OpenBrowser MCP */}
       <div>
         <div className="flex items-center justify-between text-xs text-slate-400 mb-1">
           <span>OpenBrowser MCP</span>
-          <span>49,423 tokens</span>
+          <span>50,195 tokens</span>
         </div>
-        <div className="h-8 rounded-lg bg-cyan-500 w-[16%] min-w-[5rem] flex items-center px-2">
-          <span className="text-xs font-medium text-white/90">49,423</span>
+        <div className="h-8 rounded-lg bg-cyan-500 w-[17%] min-w-[5rem] flex items-center px-2">
+          <span className="text-xs font-medium text-white/90">50,195</span>
         </div>
       </div>
     </div>
@@ -172,7 +172,7 @@ function TokenBars() {
 /* ------------------------------------------------------------------ */
 
 function ProviderPills() {
-  const providers = ["Gemini", "GPT-4", "Claude", "DeepSeek", "Groq", "Ollama", "Qwen", "Azure", "Bedrock", "OpenRouter", "Novita", "LiteLLM"];
+  const providers = ["Gemini", "GPT 5.2", "Claude", "DeepSeek", "Groq", "Ollama", "Qwen", "Azure", "Bedrock", "OpenRouter", "Novita", "LiteLLM"];
   return (
     <div className="flex flex-wrap gap-2 mt-4">
       {providers.map((p) => (
@@ -297,9 +297,16 @@ export function Features() {
               Text-First Architecture
             </h3>
             <p className="text-slate-400 mt-2">
-              3x fewer tokens than Playwright MCP. 6.3x fewer than Chrome DevTools MCP. Text, not screenshots.
+              3.2x fewer tokens than Playwright MCP. 6x fewer than Chrome DevTools MCP. Text, not screenshots.
             </p>
             <TokenBars />
+            <div className="mt-6 rounded-xl overflow-hidden border border-white/[0.08]">
+              <img
+                src="/benchmark_comparison.png"
+                alt="MCP Server Benchmark: Duration vs Token Usage -- OpenBrowser uses 144x fewer response tokens"
+                className="w-full"
+              />
+            </div>
           </FeatureCard>
 
           {/* Card 2: Any LLM Provider */}
