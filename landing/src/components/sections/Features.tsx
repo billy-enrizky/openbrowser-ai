@@ -133,34 +133,34 @@ function CodeIcon({ className }: { className?: string }) {
 function TokenBars() {
   return (
     <div className="mt-6 space-y-3">
-      {/* Playwright MCP */}
-      <div>
-        <div className="flex items-center justify-between text-xs text-slate-400 mb-1">
-          <span>Playwright MCP</span>
-          <span>248,016 tokens</span>
-        </div>
-        <div className="h-8 rounded-lg bg-red-500/80 w-full flex items-center px-3">
-          <span className="text-xs font-medium text-white/90">248,016</span>
-        </div>
-      </div>
       {/* Chrome DevTools MCP */}
       <div>
         <div className="flex items-center justify-between text-xs text-slate-400 mb-1">
           <span>Chrome DevTools MCP</span>
-          <span>134,802 tokens</span>
+          <span>310,856 tokens</span>
         </div>
-        <div className="h-8 rounded-lg bg-yellow-500/80 w-[55%] flex items-center px-3">
-          <span className="text-xs font-medium text-white/90">134,802</span>
+        <div className="h-8 rounded-lg bg-red-500/80 w-full flex items-center px-3">
+          <span className="text-xs font-medium text-white/90">310,856</span>
+        </div>
+      </div>
+      {/* Playwright MCP */}
+      <div>
+        <div className="flex items-center justify-between text-xs text-slate-400 mb-1">
+          <span>Playwright MCP</span>
+          <span>150,248 tokens</span>
+        </div>
+        <div className="h-8 rounded-lg bg-yellow-500/80 w-[48%] flex items-center px-3">
+          <span className="text-xs font-medium text-white/90">150,248</span>
         </div>
       </div>
       {/* OpenBrowser MCP */}
       <div>
         <div className="flex items-center justify-between text-xs text-slate-400 mb-1">
           <span>OpenBrowser MCP</span>
-          <span>283 tokens</span>
+          <span>49,423 tokens</span>
         </div>
-        <div className="h-8 rounded-lg bg-cyan-500 w-[3%] min-w-[3rem] flex items-center px-2">
-          <span className="text-xs font-medium text-white/90">283</span>
+        <div className="h-8 rounded-lg bg-cyan-500 w-[16%] min-w-[5rem] flex items-center px-2">
+          <span className="text-xs font-medium text-white/90">49,423</span>
         </div>
       </div>
     </div>
@@ -297,7 +297,7 @@ export function Features() {
               Text-First Architecture
             </h3>
             <p className="text-slate-400 mt-2">
-              877x fewer tokens than Playwright MCP. 476x fewer than Chrome
+              3x fewer tokens than Playwright MCP. 6.3x fewer than Chrome
               DevTools MCP. Your AI agent processes text, not screenshots.
             </p>
             <TokenBars />
@@ -355,7 +355,7 @@ export function Features() {
           </FeatureCard>
 
           {/* Card 6: Open Source */}
-          <FeatureCard index={5}>
+          <FeatureCard index={5} className="lg:col-span-2">
             <CodeIcon className="text-violet-400 mb-4" />
             <h3 className="text-xl font-semibold text-white">Open Source</h3>
             <p className="text-slate-400 mt-2">

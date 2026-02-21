@@ -33,8 +33,8 @@ export function Hero() {
 
         {/* Subheadline */}
         <p className="text-lg md:text-xl text-slate-400 max-w-2xl">
-          Control any browser with natural language. 877x more token-efficient
-          than alternatives.
+          Give your AI agent a real browser. 3x more token-efficient
+          than Playwright MCP. 6x more than Chrome DevTools MCP.
         </p>
 
         {/* CTA buttons */}
