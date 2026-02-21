@@ -1,0 +1,440 @@
+{
+  "model": "us.anthropic.claude-sonnet-4-6",
+  "n_runs": 5,
+  "n_bootstrap": 10000,
+  "servers": {
+    "chrome-devtools": {
+      "n_runs": 5,
+      "n_bootstrap": 10000,
+      "raw_runs": [
+        {
+          "run": 1,
+          "tasks": [
+            {
+              "name": "fact_lookup",
+              "success": true,
+              "duration_s": 16.1,
+              "tool_calls": 2,
+              "result": "Python was created by **Guido van Rossum**, and it first appeared in **1991** (Python 0.9.0 was first released in 1991, with development beginning in the late 1980s \u2014 implementation started in December 1989).\n",
+              "error": null
+            },
+            {
+              "name": "form_fill",
+              "success": true,
+              "duration_s": 29.6,
+              "tool_calls": 7,
+              "result": "The form was successfully filled out and submitted! Here's a summary of what was done and the confirmation from the server:\n\n- **Customer name:** `John Doe` \u2705\n- **Pizza Size:** `medium` \u2705\n- **Topping:** `mushroom` \u2705\n\nThe form was submitted to `https://httpbin.org/post`, and the server's JSON response confirms all the data was received correctly in the `\"form\"` field:\n- `\"custname\": \"John Doe\"`\n- `\"size\": \"medium\"`\n- `\"topping\": \"mushroom\"`\n",
+              "error": null
+            },
+            {
+              "name": "multi_page_extract",
+              "success": true,
+              "duration_s": 15.3,
+              "tool_calls": 2,
+              "result": "Here are the titles of the top 5 stories on Hacker News:\n\n1. **AI Makes You Boring** (marginalia.nu)\n2. **Gemini 3.1 Pro** (deepmind.google)\n3. **Show HN: Micasa \u2013 track your house from the terminal** (micasa.dev)\n4. **Pebble Production: February Update** (repebble.com)\n5. **Paged Out Issue #8 [pdf]** (pagedout.institute)\n",
+              "error": null
+            },
+            {
+              "name": "search_navigate",
+              "success": true,
+              "duration_s": 40.6,
+              "tool_calls": 6,
+              "result": "The page has loaded directly on the Rust programming language Wikipedia article. From the article text, I can already see the answer clearly in the introductory paragraph:\n\n> \"Software developer Graydon Hoare created Rust in 2006 while working at **Mozilla**, which officially sponsored the project in 2009.\"\n\nRust was originally developed by **Mozilla**. Specifically, it was created by software developer Graydon Hoare in 2006 while he was a Mozilla employee, and Mozilla officially sponsored the p",
+              "error": null
+            },
+            {
+              "name": "deep_navigation",
+              "success": true,
+              "duration_s": 12.9,
+              "tool_calls": 1,
+              "result": "The latest release version of **claude-code** on GitHub is **v2.1.47**.\n",
+              "error": null
+            },
+            {
+              "name": "content_analysis",
+              "success": true,
+              "duration_s": 16.2,
+              "tool_calls": 2,
+              "result": "Here's the page structure of **example.com**:\n\n- **Headings: 1**\n  - `<h1>`: \"Example Domain\"\n\n- **Paragraphs: 1**\n  - \"This domain is for use in documentation examples without needing permission. Avoid use in operations.\"\n\n- **Links: 1**\n  - \"Learn more\" \u2192 pointing to `https://iana.org/domains/example`\n\nIn summary, it's a very minimal page with just **1 heading**, **1 paragraph**, and **1 link**.\n",
+              "error": null
+            }
+          ],
+          "summary": {
+            "total_tasks": 6,
+            "passed": 6,
+            "total_duration_s": 130.7,
+            "total_tool_calls": 20,
+            "avg_tool_calls": 3.3
+          }
+        },
+        {
+          "run": 2,
+          "tasks": [
+            {
+              "name": "fact_lookup",
+              "success": true,
+              "duration_s": 14.4,
+              "tool_calls": 2,
+              "result": "Python was created by **Guido van Rossum**, and it first appeared in **1991** (Python 0.9.0 was first released by Van Rossum in 1991, though he began working on it in the late 1980s).\n",
+              "error": null
+            },
+            {
+              "name": "form_fill",
+              "success": true,
+              "duration_s": 27.9,
+              "tool_calls": 7,
+              "result": "The form was successfully filled out and submitted! Here's a summary of what was done and the confirmed results from the server response:\n\n- **Customer name:** `John Doe` \u2705\n- **Pizza Size:** `medium` \u2705\n- **Topping:** `mushroom` \u2705\n\nThe form was submitted to `https://httpbin.org/post`, and the server echoed back the form data confirming all three fields were correctly sent.\n",
+              "error": null
+            },
+            {
+              "name": "multi_page_extract",
+              "success": true,
+              "duration_s": 16.0,
+              "tool_calls": 2,
+              "result": "Here are the top 5 stories currently on Hacker News:\n\n1. **AI Makes You Boring** (marginalia.nu)\n2. **Gemini 3.1 Pro** (deepmind.google)\n3. **Show HN: Micasa \u2013 track your house from the terminal** (micasa.dev)\n4. **South Korean ex president Yoon Suk Yeol jailed for life for leading insurrection** (theguardian.com)\n5. **Pebble Production: February Update** (repebble.com)\n",
+              "error": null
+            },
+            {
+              "name": "search_navigate",
+              "success": true,
+              "duration_s": 32.3,
+              "tool_calls": 6,
+              "result": "The Wikipedia page for Rust (programming language) has loaded, and the answer is clearly visible in the article text. According to the page:\n\n**Mozilla** originally developed the Rust programming language. Specifically, software developer Graydon Hoare created Rust in 2006 while working at Mozilla, and Mozilla officially sponsored the project in 2009.\n",
+              "error": null
+            },
+            {
+              "name": "deep_navigation",
+              "success": true,
+              "duration_s": 18.2,
+              "tool_calls": 1,
+              "result": "The latest release version of **claude-code** on GitHub is **v2.1.47**.\n",
+              "error": null
+            },
+            {
+              "name": "content_analysis",
+              "success": true,
+              "duration_s": 14.2,
+              "tool_calls": 2,
+              "result": "Here's the page structure of **example.com**:\n\n- **Headings: 1**\n  - `<h1>`: \"Example Domain\"\n\n- **Paragraphs: 1**\n  - \"This domain is for use in documentation examples without needing permission. Avoid use in operations.\"\n\n- **Links: 1**\n  - \"Learn more\" \u2192 linking to `https://iana.org/domains/example`\n\nIn summary, it's a very minimal page with **1 heading**, **1 paragraph**, and **1 link**.\n",
+              "error": null
+            }
+          ],
+          "summary": {
+            "total_tasks": 6,
+            "passed": 6,
+            "total_duration_s": 123.0,
+            "total_tool_calls": 20,
+            "avg_tool_calls": 3.3
+          }
+        },
+        {
+          "run": 3,
+          "tasks": [
+            {
+              "name": "fact_lookup",
+              "success": true,
+              "duration_s": 17.5,
+              "tool_calls": 2,
+              "result": "Python was created by **Guido van Rossum**, and it first appeared in **1991** (with implementation beginning in December 1989). Specifically, Van Rossum first released it in 1991 as Python 0.9.0, after conceiving the language in the late 1980s at Centrum Wiskunde & Informatica (CWI) in the Netherlands.\n",
+              "error": null
+            },
+            {
+              "name": "form_fill",
+              "success": true,
+              "duration_s": 27.2,
+              "tool_calls": 7,
+              "result": "The form has been successfully filled out and submitted! Here's a summary of what was done and the confirmed results from the server response:\n\n- \u2705 **Customer name:** `John Doe` (`custname: \"John Doe\"`)\n- \u2705 **Pizza Size:** `Medium` (`size: \"medium\"`)\n- \u2705 **Topping:** `Mushroom` (`topping: \"mushroom\"`)\n- \u2705 **Form submitted** to `https://httpbin.org/post`\n\nThe server response confirms all three values were correctly received and processed.\n",
+              "error": null
+            },
+            {
+              "name": "multi_page_extract",
+              "success": true,
+              "duration_s": 17.4,
+              "tool_calls": 2,
+              "result": "Here are the top 5 stories currently on Hacker News:\n\n1. **AI Makes You Boring** (marginalia.nu)\n2. **Gemini 3.1 Pro** (deepmind.google)\n3. **Show HN: Micasa \u2013 track your house from the terminal** (micasa.dev)\n4. **South Korean ex president Yoon Suk Yeol jailed for life for leading insurrection** (theguardian.com)\n5. **Pebble Production: February Update** (repebble.com)\n",
+              "error": null
+            },
+            {
+              "name": "search_navigate",
+              "success": true,
+              "duration_s": 29.4,
+              "tool_calls": 6,
+              "result": "The page has loaded and I can already see the answer clearly in the article's introductory paragraph. It states:\n\n\"Software developer Graydon Hoare created Rust in 2006 while working at **Mozilla**, which officially sponsored the project in 2009.\"\n\nRust was originally developed by **Mozilla**. It started as a personal project by Mozilla employee Graydon Hoare in 2006, and Mozilla officially sponsored the project in 2009.\n",
+              "error": null
+            },
+            {
+              "name": "deep_navigation",
+              "success": true,
+              "duration_s": 16.4,
+              "tool_calls": 1,
+              "result": "The latest release version of **claude-code** on GitHub is **v2.1.47**.\n",
+              "error": null
+            },
+            {
+              "name": "content_analysis",
+              "success": true,
+              "duration_s": 13.6,
+              "tool_calls": 2,
+              "result": "Here's the structure of **example.com**:\n\n- **Headings: 1**\n  - `<h1>` \u2014 \"Example Domain\"\n\n- **Paragraphs: 1**\n  - \"This domain is for use in documentation examples without needing permission. Avoid use in operations.\"\n\n- **Links: 1**\n  - \"Learn more\" \u2192 linking to `https://iana.org/domains/example`\n\nIn summary, example.com is a very minimal page with just **1 heading**, **1 paragraph**, and **1 link**.\n",
+              "error": null
+            }
+          ],
+          "summary": {
+            "total_tasks": 6,
+            "passed": 6,
+            "total_duration_s": 121.5,
+            "total_tool_calls": 20,
+            "avg_tool_calls": 3.3
+          }
+        },
+        {
+          "run": 4,
+          "tasks": [
+            {
+              "name": "fact_lookup",
+              "success": true,
+              "duration_s": 16.6,
+              "tool_calls": 2,
+              "result": "Python was created by **Guido van Rossum**, and it first appeared in **1991** (with implementation beginning in December 1989). According to the Wikipedia page, Python was conceived in the late 1980s and Van Rossum first released it in 1991 as Python 0.9.0.\n",
+              "error": null
+            },
+            {
+              "name": "form_fill",
+              "success": true,
+              "duration_s": 32.3,
+              "tool_calls": 7,
+              "result": "The form was successfully submitted! Here's a summary of what was done and the confirmed results from the server response:\n\n- \u2705 **Customer name:** `John Doe` (`custname: \"John Doe\"`)\n- \u2705 **Pizza Size:** Medium (`size: \"medium\"`)\n- \u2705 **Topping:** Mushroom (`topping: \"mushroom\"`)\n\nThe form was submitted to `https://httpbin.org/post` and the server echoed back the form data, confirming all three fields were correctly filled in and submitted.\n",
+              "error": null
+            },
+            {
+              "name": "multi_page_extract",
+              "success": true,
+              "duration_s": 20.2,
+              "tool_calls": 2,
+              "result": "Here are the top 5 stories currently on Hacker News:\n\n1. **AI Makes You Boring** (marginalia.nu)\n2. **Gemini 3.1 Pro** (deepmind.google)\n3. **Show HN: Micasa \u2013 track your house from the terminal** (micasa.dev)\n4. **South Korean ex president Yoon Suk Yeol jailed for life for leading insurrection** (theguardian.com)\n5. **Pebble Production: February Update** (repebble.com)\n",
+              "error": null
+            },
+            {
+              "name": "search_navigate",
+              "success": true,
+              "duration_s": 32.5,
+              "tool_calls": 6,
+              "result": "The page has loaded directly to the Rust (programming language) Wikipedia article. The answer is clearly stated in the article's introduction:\n\n**Mozilla** originally developed the Rust programming language. Specifically, software developer Graydon Hoare created Rust in 2006 while working at Mozilla, and Mozilla officially sponsored the project in 2009.\n",
+              "error": null
+            },
+            {
+              "name": "deep_navigation",
+              "success": true,
+              "duration_s": 16.1,
+              "tool_calls": 1,
+              "result": "The latest release version of **claude-code** on GitHub is **v2.1.47**.\n",
+              "error": null
+            },
+            {
+              "name": "content_analysis",
+              "success": true,
+              "duration_s": 17.0,
+              "tool_calls": 2,
+              "result": "Here's the page structure of **example.com**:\n\n- **Headings: 1**\n  - `<h1>`: \"Example Domain\"\n\n- **Paragraphs: 1**\n  - \"This domain is for use in documentation examples without needing permission. Avoid use in operations.\"\n\n- **Links: 1**\n  - \"Learn more\" \u2192 linking to `https://iana.org/domains/example`\n\nIn summary, it's a very minimal page with just **1 heading**, **1 paragraph**, and **1 link**.\n",
+              "error": null
+            }
+          ],
+          "summary": {
+            "total_tasks": 6,
+            "passed": 6,
+            "total_duration_s": 134.7,
+            "total_tool_calls": 20,
+            "avg_tool_calls": 3.3
+          }
+        },
+        {
+          "run": 5,
+          "tasks": [
+            {
+              "name": "fact_lookup",
+              "success": true,
+              "duration_s": 17.8,
+              "tool_calls": 2,
+              "result": "Python was created by **Guido van Rossum**, and he first released it in **1991** (specifically on 20 February 1991, as Python 0.9.0). He originally conceived it in the **late 1980s** while working at Centrum Wiskunde & Informatica (CWI) in the Netherlands.\n",
+              "error": null
+            },
+            {
+              "name": "form_fill",
+              "success": true,
+              "duration_s": 28.2,
+              "tool_calls": 6,
+              "result": "The form has been successfully filled out and submitted! Here's a summary of what was done and the result:\n\n- \u2705 **Customer name**: `John Doe`\n- \u2705 **Pizza Size**: `medium`\n- \u2705 **Topping**: `mushroom`\n\nThe form was submitted to `https://httpbin.org/post`, and the server's response confirms the data was received correctly in the `\"form\"` section of the JSON response:\n```json\n\"form\": {\n  \"custname\": \"John Doe\",\n  \"size\": \"medium\",\n  \"topping\": \"mushroom\"\n}\n```\n",
+              "error": null
+            },
+            {
+              "name": "multi_page_extract",
+              "success": true,
+              "duration_s": 16.7,
+              "tool_calls": 2,
+              "result": "Here are the titles of the top 5 stories on Hacker News:\n\n1. **AI Makes You Boring** (marginalia.nu)\n2. **Gemini 3.1 Pro** (deepmind.google)\n3. **Show HN: Micasa \u2013 track your house from the terminal** (micasa.dev)\n4. **Pebble Production: February Update** (repebble.com)\n5. **A terminal weather app with ASCII animations driven by real-time weather data** (github.com/veirt)\n",
+              "error": null
+            },
+            {
+              "name": "search_navigate",
+              "success": true,
+              "duration_s": 35.7,
+              "tool_calls": 6,
+              "result": "The page has loaded directly on the Rust programming language Wikipedia article. I can already see the answer in the article's introduction text. The key sentence is:\n\n> \"Software developer Graydon Hoare created Rust in 2006 while working at **Mozilla**, which officially sponsored the project in 2009.\"\n\nRust (the programming language) was originally developed by **Mozilla**. Specifically, it was created in 2006 by software developer Graydon Hoare while he was working at Mozilla, and Mozilla offi",
+              "error": null
+            },
+            {
+              "name": "deep_navigation",
+              "success": true,
+              "duration_s": 15.9,
+              "tool_calls": 1,
+              "result": "The latest release version of **claude-code** on GitHub is **v2.1.47**.\n",
+              "error": null
+            },
+            {
+              "name": "content_analysis",
+              "success": true,
+              "duration_s": 19.6,
+              "tool_calls": 2,
+              "result": "Here's the structure of **example.com**:\n\n- **Headings: 1**\n  - One `<h1>` heading: *\"Example Domain\"*\n\n- **Paragraphs: 1**\n  - One paragraph: *\"This domain is for use in documentation examples without needing permission. Avoid use in operations.\"*\n\n- **Links: 1**\n  - One link: *\"Learn more\"* \u2192 pointing to `https://iana.org/domains/example`\n\nIn summary, it's a very minimal page with just 1 heading, 1 paragraph, and 1 link.\n",
+              "error": null
+            }
+          ],
+          "summary": {
+            "total_tasks": 6,
+            "passed": 6,
+            "total_duration_s": 133.9,
+            "total_tool_calls": 19,
+            "avg_tool_calls": 3.2
+          }
+        }
+      ],
+      "stats": {
+        "duration_s": {
+          "mean": 128.8,
+          "std": 6.2,
+          "ci_low": 123.9,
+          "ci_high": 133.6,
+          "bootstrap_mean": 128.7
+        },
+        "tool_calls": {
+          "mean": 19.8,
+          "std": 0.4,
+          "ci_low": 19.4,
+          "ci_high": 20.0,
+          "bootstrap_mean": 19.8
+        },
+        "pass_count": {
+          "mean": 6.0,
+          "std": 0.0,
+          "ci_low": 6.0,
+          "ci_high": 6.0,
+          "bootstrap_mean": 6.0
+        }
+      },
+      "per_task": {
+        "fact_lookup": {
+          "duration": {
+            "mean": 16.5,
+            "std": 1.3,
+            "ci_low": 15.4,
+            "ci_high": 17.4,
+            "bootstrap_mean": 16.5
+          },
+          "tool_calls": {
+            "mean": 2.0,
+            "std": 0.0,
+            "ci_low": 2.0,
+            "ci_high": 2.0,
+            "bootstrap_mean": 2.0
+          },
+          "pass_rate": 1.0
+        },
+        "form_fill": {
+          "duration": {
+            "mean": 29.0,
+            "std": 2.0,
+            "ci_low": 27.7,
+            "ci_high": 30.7,
+            "bootstrap_mean": 29.0
+          },
+          "tool_calls": {
+            "mean": 6.8,
+            "std": 0.4,
+            "ci_low": 6.4,
+            "ci_high": 7.0,
+            "bootstrap_mean": 6.8
+          },
+          "pass_rate": 1.0
+        },
+        "multi_page_extract": {
+          "duration": {
+            "mean": 17.1,
+            "std": 1.9,
+            "ci_low": 15.9,
+            "ci_high": 18.8,
+            "bootstrap_mean": 17.1
+          },
+          "tool_calls": {
+            "mean": 2.0,
+            "std": 0.0,
+            "ci_low": 2.0,
+            "ci_high": 2.0,
+            "bootstrap_mean": 2.0
+          },
+          "pass_rate": 1.0
+        },
+        "search_navigate": {
+          "duration": {
+            "mean": 34.1,
+            "std": 4.3,
+            "ci_low": 31.2,
+            "ci_high": 37.7,
+            "bootstrap_mean": 34.1
+          },
+          "tool_calls": {
+            "mean": 6.0,
+            "std": 0.0,
+            "ci_low": 6.0,
+            "ci_high": 6.0,
+            "bootstrap_mean": 6.0
+          },
+          "pass_rate": 1.0
+        },
+        "deep_navigation": {
+          "duration": {
+            "mean": 15.9,
+            "std": 1.9,
+            "ci_low": 14.2,
+            "ci_high": 17.4,
+            "bootstrap_mean": 15.9
+          },
+          "tool_calls": {
+            "mean": 1.0,
+            "std": 0.0,
+            "ci_low": 1.0,
+            "ci_high": 1.0,
+            "bootstrap_mean": 1.0
+          },
+          "pass_rate": 1.0
+        },
+        "content_analysis": {
+          "duration": {
+            "mean": 16.1,
+            "std": 2.4,
+            "ci_low": 14.4,
+            "ci_high": 18.0,
+            "bootstrap_mean": 16.1
+          },
+          "tool_calls": {
+            "mean": 2.0,
+            "std": 0.0,
+            "ci_low": 2.0,
+            "ci_high": 2.0,
+            "bootstrap_mean": 2.0
+          },
+          "pass_rate": 1.0
+        }
+      }
+    }
+  }
+}
