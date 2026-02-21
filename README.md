@@ -113,7 +113,7 @@ from openbrowser import CodeAgent, ChatOpenAI, ChatAnthropic, ChatGoogle
 agent = CodeAgent(task="...", llm=ChatOpenAI(model="gpt-4o"))
 
 # Anthropic
-agent = CodeAgent(task="...", llm=ChatAnthropic(model="claude-sonnet-4-0"))
+agent = CodeAgent(task="...", llm=ChatAnthropic(model="claude-sonnet-4-6"))
 
 # Google Gemini
 agent = CodeAgent(task="...", llm=ChatGoogle(model="gemini-2.0-flash"))
@@ -199,9 +199,9 @@ profile = BrowserProfile(
 |----------|-------|--------|
 | **Google** | `ChatGoogle` | gemini-2.0-flash, gemini-1.5-pro |
 | **OpenAI** | `ChatOpenAI` | gpt-4o, o3, gpt-4-turbo |
-| **Anthropic** | `ChatAnthropic` | claude-sonnet-4-0, claude-3-opus |
+| **Anthropic** | `ChatAnthropic` | claude-sonnet-4-6, claude-opus-4-6 |
 | **Groq** | `ChatGroq` | llama-3.3-70b-versatile, mixtral-8x7b |
-| **AWS Bedrock** | `ChatAWSBedrock` | claude-3, amazon.titan |
+| **AWS Bedrock** | `ChatAWSBedrock` | claude-sonnet-4-6, amazon.titan |
 | **Azure OpenAI** | `ChatAzureOpenAI` | Any Azure-deployed model |
 | **Ollama** | `ChatOllama` | llama3, mistral (local) |
 | **OCI** | `ChatOCIRaw` | Oracle Cloud GenAI models |
@@ -428,8 +428,8 @@ Based on Bedrock API token usage (input + output tokens at respective rates).
 
 | Model | Playwright MCP | Chrome DevTools MCP | OpenBrowser MCP |
 |-------|---------------:|--------------------:|----------------:|
-| Claude Sonnet ($3/$15 per M) | $0.47 | $0.96 | **$0.18** |
-| Claude Opus ($15/$75 per M) | $2.35 | $4.78 | **$0.91** |
+| Claude Sonnet 4.6 ($3/$15 per M) | $0.47 | $0.96 | **$0.18** |
+| Claude Opus 4.6 ($5/$25 per M) | $0.78 | $1.59 | **$0.30** |
 
 ### Why the Difference
 
