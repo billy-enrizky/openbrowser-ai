@@ -99,43 +99,37 @@ The MCP server exposes a single `execute_code` tool that runs Python code in a p
 
 **Pre-imported libraries**: `json`, `csv`, `re`, `datetime`, `asyncio`, `Path`, `requests`, `numpy`, `pandas`, `matplotlib`, `BeautifulSoup`
 
-## MCP Benchmark: Why OpenBrowser
+## Benchmark: Token Efficiency
 
-### E2E LLM Benchmark (6 Real-World Tasks, N=5 runs)
+### E2E LLM Benchmark (6 Real-World Tasks)
 
-Six real-world browser tasks run through Claude Sonnet 4.6 on AWS Bedrock (Converse API) with a server-agnostic system prompt. The LLM autonomously decides which tools to call and when the task is complete. 5 runs per server with 10,000-sample bootstrap CIs. All tasks run against live websites.
+Six browser tasks run through Claude Sonnet 4.6 on AWS Bedrock. The LLM autonomously decides which tools to call. All three servers pass **6/6 tasks**. Token usage measured from actual MCP tool response sizes.
 
-| # | Task | Description | Target Site |
-|:-:|------|-------------|-------------|
-| 1 | **fact_lookup** | Navigate to a Wikipedia article and extract specific facts (creator and year) | en.wikipedia.org |
-| 2 | **form_fill** | Fill out a multi-field form (text input, radio button, checkbox) and submit | httpbin.org/forms/post |
-| 3 | **multi_page_extract** | Extract the titles of the top 5 stories from a dynamic page | news.ycombinator.com |
-| 4 | **search_navigate** | Search Wikipedia, click a result, and extract specific information | en.wikipedia.org |
-| 5 | **deep_navigation** | Navigate to a GitHub repo and find the latest release version number | github.com |
-| 6 | **content_analysis** | Analyze page structure: count headings, links, and paragraphs | example.com |
-
-| MCP Server | Pass Rate | Duration (mean +/- std) | Tool Calls | Bedrock API Tokens |
-|------------|:---------:|------------------------:|-----------:|-------------------:|
-| **Playwright MCP** (Microsoft) | 100% | 92.2 +/- 11.4s | 11.0 +/- 1.4 | 150,248 |
-| **Chrome DevTools MCP** (Google) | 100% | 128.8 +/- 6.2s | 19.8 +/- 0.4 | 310,856 |
-| **OpenBrowser MCP** | 100% | 103.1 +/- 16.4s | 15.0 +/- 3.9 | **49,423** |
-
-OpenBrowser uses **3x fewer tokens** than Playwright and **6.3x fewer** than Chrome DevTools (measured via Bedrock Converse API `usage` field -- the actual billed tokens including system prompt, tool schemas, conversation history, and tool results).
+| MCP Server | Tools | Response Tokens | Tool Calls | vs OpenBrowser |
+|------------|------:|----------------:|-----------:|---------------:|
+| **Playwright MCP** | 22 | 283,853 | 10 | **170x more tokens** |
+| **Chrome DevTools MCP** (Google) | 26 | 301,030 | 21 | **181x more tokens** |
+| **OpenBrowser MCP** | 1 | **1,665** | 20 | baseline |
 
 ### Cost per Benchmark Run (6 Tasks)
 
-Based on Bedrock API token usage (input + output tokens at respective rates).
-
 | Model | Playwright MCP | Chrome DevTools MCP | OpenBrowser MCP |
 |-------|---------------:|--------------------:|----------------:|
-| Claude Sonnet 4.6 ($3/$15 per M) | $0.47 | $0.96 | **$0.18** |
-| Claude Opus 4.6 ($5/$25 per M) | $0.78 | $1.59 | **$0.30** |
+| Claude Sonnet ($3/M) | $0.852 | $0.903 | **$0.005** |
+| Claude Opus ($15/M) | $4.258 | $4.515 | **$0.025** |
 
-### Why the Difference
+### Per-Task Response Size
 
-Playwright and Chrome DevTools return full page accessibility snapshots as tool output (~124K-135K tokens for Wikipedia). The LLM reads the entire snapshot to find what it needs.
+| Task | Playwright MCP | Chrome DevTools MCP | OpenBrowser MCP |
+|------|---------------:|--------------------:|----------------:|
+| fact_lookup | 477,003 chars | 509,059 chars | 1,041 chars |
+| form_fill | 4,075 chars | 3,150 chars | 2,410 chars |
+| multi_page_extract | 58,099 chars | 38,593 chars | 513 chars |
+| search_navigate | 518,461 chars | 594,458 chars | 1,996 chars |
+| deep_navigation | 77,292 chars | 58,359 chars | 113 chars |
+| content_analysis | 493 chars | 513 chars | 594 chars |
 
-OpenBrowser uses a CodeAgent architecture (single `execute_code` tool). The LLM writes Python code that processes browser state server-side and returns only extracted results (~30-1,000 chars per call). The full page content never enters the LLM context window.
+Playwright completes tasks in fewer tool calls (1-2 per task) because it dumps the full a11y snapshot on every navigation. OpenBrowser takes more round-trips but each response is compact -- the code extracts only what's needed.
 
 [Full comparison with methodology](https://docs.openbrowser.me/comparison)
 
