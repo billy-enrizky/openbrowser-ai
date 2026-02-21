@@ -3,6 +3,11 @@
 .terraform.lock.hcl
 terraform.tfstate
 terraform.tfstate.backup
+terraform.tfstate.*.backup
 *.tfvars
 !terraform.tfvars.example
 .terraform.tfvars.local
+
+# Build artifacts
+tfplan
+lambda/*.zip
