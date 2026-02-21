@@ -1,133 +1,648 @@
 {
+  "model": "us.anthropic.claude-sonnet-4-6",
   "n_runs": 5,
   "n_bootstrap": 10000,
   "servers": {
     "openbrowser": {
-      "raw_durations": [
-        117.5,
-        82.8,
-        88.5,
-        109.4,
-        117.3
-      ],
-      "raw_tool_calls": [
-        21,
-        12,
-        12,
-        13,
-        17
-      ],
-      "raw_passes": [
-        6,
-        6,
-        6,
-        6,
-        6
+      "n_runs": 5,
+      "n_bootstrap": 10000,
+      "raw_runs": [
+        {
+          "run": 1,
+          "tasks": [
+            {
+              "name": "fact_lookup",
+              "success": true,
+              "duration_s": 13.5,
+              "tool_calls": 3,
+              "bedrock_input_tokens": 9642,
+              "bedrock_output_tokens": 432,
+              "total_bedrock_tokens": 10074,
+              "response_chars": 3144,
+              "response_tokens_est": 786,
+              "result": "Python was created by **Guido van Rossum**, and it first appeared in **1991** (specifically on **20 February 1991**).\n",
+              "error": null
+            },
+            {
+              "name": "form_fill",
+              "success": true,
+              "duration_s": 14.9,
+              "tool_calls": 3,
+              "bedrock_input_tokens": 10597,
+              "bedrock_output_tokens": 597,
+              "total_bedrock_tokens": 11194,
+              "response_chars": 2305,
+              "response_tokens_est": 576,
+              "result": "The form has been successfully filled out and submitted! Here's a summary of what was done and the confirmed response from httpbin.org:\n\n\u2705 **Form Submitted Successfully!**\n\n| Field | Value |\n|---|---|\n| **Customer Name** | John Doe |\n| **Pizza Size** | Medium |\n| **Topping** | Mushroom |\n\nThe server's response at `https://httpbin.org/post` confirms the form data was received correctly:\n- `\"custname\": \"John Doe\"`\n- `\"size\": \"medium\"`\n- `\"topping\": \"mushroom\"`\n",
+              "error": null
+            },
+            {
+              "name": "multi_page_extract",
+              "success": true,
+              "duration_s": 8.2,
+              "tool_calls": 1,
+              "bedrock_input_tokens": 4076,
+              "bedrock_output_tokens": 213,
+              "total_bedrock_tokens": 4289,
+              "response_chars": 294,
+              "response_tokens_est": 73,
+              "result": "Here are the **top 5 stories** currently on Hacker News:\n\n1. **Keep Android Open**\n2. **Meta Deployed AI and It Is Killing Our Agency**\n3. **Turn Dependabot Off**\n4. **I found a Vulnerability. They found a Lawyer**\n5. **Facebook is cooked**\n",
+              "error": null
+            },
+            {
+              "name": "search_navigate",
+              "success": true,
+              "duration_s": 19.7,
+              "tool_calls": 4,
+              "bedrock_input_tokens": 12513,
+              "bedrock_output_tokens": 718,
+              "total_bedrock_tokens": 13231,
+              "response_chars": 2848,
+              "response_tokens_est": 712,
+              "result": "Rust was originally developed by **Mozilla**. Specifically, it began as a personal project by Mozilla employee **Graydon Hoare** in 2006, and Mozilla officially sponsored the project in 2009. After a round of Mozilla layoffs in 2020, the **Rust Foundation** was created in February 2021 with Mozilla and four other companies as sponsors to continue supporting the language.\n",
+              "error": null
+            },
+            {
+              "name": "deep_navigation",
+              "success": true,
+              "duration_s": 8.0,
+              "tool_calls": 1,
+              "bedrock_input_tokens": 3996,
+              "bedrock_output_tokens": 135,
+              "total_bedrock_tokens": 4131,
+              "response_chars": 113,
+              "response_tokens_est": 28,
+              "result": "The latest release version of **anthropics/claude-code** on GitHub is **v2.1.50**.\n",
+              "error": null
+            },
+            {
+              "name": "content_analysis",
+              "success": true,
+              "duration_s": 10.6,
+              "tool_calls": 1,
+              "bedrock_input_tokens": 4227,
+              "bedrock_output_tokens": 432,
+              "total_bedrock_tokens": 4659,
+              "response_chars": 499,
+              "response_tokens_est": 124,
+              "result": "Here's the structure of **example.com**:\n\n---\n\n### Page Title\n**Example Domain**\n\n---\n\n### Headings \u2014 1 total\n- **H1:** \"Example Domain\"\n\n---\n\n### Links \u2014 1 total\n- **\"Learn more\"** \u2192 `https://iana.org/domains/example`\n\n---\n\n### Paragraphs \u2014 2 total\n1. *\"This domain is for use in documentation examples without needing permission. Avoid use in operations.\"*\n2. *\"Learn more\"* (the link text, wrapped in a `<p>` tag)\n\n---\n\n**Summary:** example.com is a very minimal page \u2014 just 1 heading, 1 link, and",
+              "error": null
+            }
+          ],
+          "summary": {
+            "total_tasks": 6,
+            "passed": 6,
+            "total_duration_s": 74.9,
+            "total_tool_calls": 13,
+            "avg_tool_calls": 2.2,
+            "bedrock_input_tokens": 45051,
+            "bedrock_output_tokens": 2527,
+            "total_bedrock_tokens": 47578,
+            "response_chars": 9203,
+            "response_tokens_est": 2300
+          }
+        },
+        {
+          "run": 2,
+          "tasks": [
+            {
+              "name": "fact_lookup",
+              "success": true,
+              "duration_s": 12.3,
+              "tool_calls": 2,
+              "bedrock_input_tokens": 7376,
+              "bedrock_output_tokens": 402,
+              "total_bedrock_tokens": 7778,
+              "response_chars": 3893,
+              "response_tokens_est": 973,
+              "result": "Python was created by **Guido van Rossum** and first released in **1991** (specifically on **20 February 1991** as version 0.9.0). Van Rossum conceived Python in the late 1980s while working at Centrum Wiskunde & Informatica (CWI) in the Netherlands, with implementation beginning in December 1989.\n",
+              "error": null
+            },
+            {
+              "name": "form_fill",
+              "success": true,
+              "duration_s": 15.7,
+              "tool_calls": 3,
+              "bedrock_input_tokens": 10685,
+              "bedrock_output_tokens": 633,
+              "total_bedrock_tokens": 11318,
+              "response_chars": 2370,
+              "response_tokens_est": 592,
+              "result": "The form was successfully filled out and submitted! Here's a summary of what was done:\n\n1. **Customer Name**: Typed **\"John Doe\"** into the `custname` field.\n2. **Pizza Size**: Selected the **Medium** radio button (`size: medium`).\n3. **Topping**: Checked the **Mushroom** checkbox (`topping: mushroom`).\n4. **Submitted** the form by clicking the \"Submit order\" button.\n\nThe server response at `https://httpbin.org/post` confirms the form data was received correctly:\n```json\n\"form\": {\n    \"custname\"",
+              "error": null
+            },
+            {
+              "name": "multi_page_extract",
+              "success": true,
+              "duration_s": 8.4,
+              "tool_calls": 1,
+              "bedrock_input_tokens": 4076,
+              "bedrock_output_tokens": 213,
+              "total_bedrock_tokens": 4289,
+              "response_chars": 294,
+              "response_tokens_est": 73,
+              "result": "Here are the **top 5 stories** currently on Hacker News:\n\n1. **Keep Android Open**\n2. **Meta Deployed AI and It Is Killing Our Agency**\n3. **Turn Dependabot Off**\n4. **I found a Vulnerability. They found a Lawyer**\n5. **Facebook is cooked**\n",
+              "error": null
+            },
+            {
+              "name": "search_navigate",
+              "success": true,
+              "duration_s": 18.1,
+              "tool_calls": 4,
+              "bedrock_input_tokens": 42094,
+              "bedrock_output_tokens": 654,
+              "total_bedrock_tokens": 42748,
+              "response_chars": 20685,
+              "response_tokens_est": 5171,
+              "result": "Rust was originally developed by **Mozilla**. Software developer Graydon Hoare created Rust in 2006 while working at Mozilla, and Mozilla officially sponsored the project in 2009.\n",
+              "error": null
+            },
+            {
+              "name": "deep_navigation",
+              "success": true,
+              "duration_s": 8.2,
+              "tool_calls": 1,
+              "bedrock_input_tokens": 3990,
+              "bedrock_output_tokens": 129,
+              "total_bedrock_tokens": 4119,
+              "response_chars": 113,
+              "response_tokens_est": 28,
+              "result": "The latest release version of **anthropics/claude-code** on GitHub is **v2.1.50**.\n",
+              "error": null
+            },
+            {
+              "name": "content_analysis",
+              "success": true,
+              "duration_s": 10.7,
+              "tool_calls": 1,
+              "bedrock_input_tokens": 4260,
+              "bedrock_output_tokens": 436,
+              "total_bedrock_tokens": 4696,
+              "response_chars": 533,
+              "response_tokens_est": 133,
+              "result": "Here's the structure of **example.com**:\n\n---\n\n### \ud83d\udcc4 Page: *Example Domain*\n\n**Headings \u2014 1 total**\n- `<h1>`: \"Example Domain\"\n\n**Links \u2014 1 total**\n- \"Learn more\" \u2192 `https://iana.org/domains/example`\n\n**Paragraphs \u2014 2 total**\n1. \"This domain is for use in documentation examples without needing permission. Avoid use in operations.\"\n2. \"Learn more\" *(the paragraph wrapping the link)*\n\n---\n\nOverall, it's a very minimal page with just **1 heading**, **1 link**, and **2 paragraphs** \u2014 intentionally s",
+              "error": null
+            }
+          ],
+          "summary": {
+            "total_tasks": 6,
+            "passed": 6,
+            "total_duration_s": 73.4,
+            "total_tool_calls": 12,
+            "avg_tool_calls": 2.0,
+            "bedrock_input_tokens": 72481,
+            "bedrock_output_tokens": 2467,
+            "total_bedrock_tokens": 74948,
+            "response_chars": 27888,
+            "response_tokens_est": 6972
+          }
+        },
+        {
+          "run": 3,
+          "tasks": [
+            {
+              "name": "fact_lookup",
+              "success": true,
+              "duration_s": 12.9,
+              "tool_calls": 3,
+              "bedrock_input_tokens": 9149,
+              "bedrock_output_tokens": 436,
+              "total_bedrock_tokens": 9585,
+              "response_chars": 1200,
+              "response_tokens_est": 300,
+              "result": "Python was created by **Guido van Rossum**, and it first appeared on **20 February 1991**.\n",
+              "error": null
+            },
+            {
+              "name": "form_fill",
+              "success": true,
+              "duration_s": 15.1,
+              "tool_calls": 3,
+              "bedrock_input_tokens": 10592,
+              "bedrock_output_tokens": 591,
+              "total_bedrock_tokens": 11183,
+              "response_chars": 2307,
+              "response_tokens_est": 576,
+              "result": "The form has been successfully filled out and submitted! Here's a summary of what was done and the confirmed response from the server:\n\n| Field | Value |\n|---|---|\n| **Customer Name** | John Doe |\n| **Pizza Size** | Medium |\n| **Topping** | Mushroom |\n\nThe form was submitted to `https://httpbin.org/post`, and the server's JSON response confirms all the data was received correctly:\n- `\"custname\": \"John Doe\"`\n- `\"size\": \"medium\"`\n- `\"topping\": \"mushroom\"`\n",
+              "error": null
+            },
+            {
+              "name": "multi_page_extract",
+              "success": true,
+              "duration_s": 8.6,
+              "tool_calls": 1,
+              "bedrock_input_tokens": 4083,
+              "bedrock_output_tokens": 229,
+              "total_bedrock_tokens": 4312,
+              "response_chars": 294,
+              "response_tokens_est": 73,
+              "result": "Here are the **top 5 stories** currently on Hacker News (news.ycombinator.com):\n\n1. **Keep Android Open**\n2. **Meta Deployed AI and It Is Killing Our Agency**\n3. **Turn Dependabot Off**\n4. **I found a Vulnerability. They found a Lawyer**\n5. **Facebook is cooked**\n",
+              "error": null
+            },
+            {
+              "name": "search_navigate",
+              "success": true,
+              "duration_s": 27.7,
+              "tool_calls": 8,
+              "bedrock_input_tokens": 26044,
+              "bedrock_output_tokens": 1111,
+              "total_bedrock_tokens": 27155,
+              "response_chars": 4653,
+              "response_tokens_est": 1163,
+              "result": "The answer is clear from the Wikipedia article. Rust was originally developed by **Mozilla**. Specifically, software developer **Graydon Hoare** created Rust in 2006 while working at Mozilla, and Mozilla officially sponsored the project in 2009. After Mozilla laid off employees in August 2020, the **Rust Foundation** was created in February 2021, with Amazon Web Services, Google, Huawei, Microsoft, and Mozilla as founding sponsors.\n",
+              "error": null
+            },
+            {
+              "name": "deep_navigation",
+              "success": true,
+              "duration_s": 8.0,
+              "tool_calls": 1,
+              "bedrock_input_tokens": 3990,
+              "bedrock_output_tokens": 129,
+              "total_bedrock_tokens": 4119,
+              "response_chars": 113,
+              "response_tokens_est": 28,
+              "result": "The latest release version of **anthropics/claude-code** on GitHub is **v2.1.50**.\n",
+              "error": null
+            },
+            {
+              "name": "content_analysis",
+              "success": true,
+              "duration_s": 9.9,
+              "tool_calls": 1,
+              "bedrock_input_tokens": 4183,
+              "bedrock_output_tokens": 376,
+              "total_bedrock_tokens": 4559,
+              "response_chars": 405,
+              "response_tokens_est": 101,
+              "result": "Here's the structure of **example.com**:\n\n- **Headings: 1**\n  - `<h1>`: \"Example Domain\"\n\n- **Links: 1**\n  - \"Learn more\" \u2014 linking to the IANA documentation page\n\n- **Paragraphs: 2**\n  1. \"This domain is for use in documentation examples without needing permission. Avoid use in operations.\"\n  2. \"Learn more\" (the link is wrapped in a `<p>` tag)\n\nOverall, it's a very minimal page with a single heading, one link, and two paragraphs \u2014 designed as a simple placeholder domain for use in documentatio",
+              "error": null
+            }
+          ],
+          "summary": {
+            "total_tasks": 6,
+            "passed": 6,
+            "total_duration_s": 82.2,
+            "total_tool_calls": 17,
+            "avg_tool_calls": 2.8,
+            "bedrock_input_tokens": 58041,
+            "bedrock_output_tokens": 2872,
+            "total_bedrock_tokens": 60913,
+            "response_chars": 8972,
+            "response_tokens_est": 2243
+          }
+        },
+        {
+          "run": 4,
+          "tasks": [
+            {
+              "name": "fact_lookup",
+              "success": true,
+              "duration_s": 13.9,
+              "tool_calls": 3,
+              "bedrock_input_tokens": 9235,
+              "bedrock_output_tokens": 494,
+              "total_bedrock_tokens": 9729,
+              "response_chars": 1239,
+              "response_tokens_est": 309,
+              "result": "Python was created by **Guido van Rossum**, and it first appeared in **1991** (specifically on **20 February 1991**), as listed in the infobox on the Wikipedia page.\n",
+              "error": null
+            },
+            {
+              "name": "form_fill",
+              "success": true,
+              "duration_s": 18.3,
+              "tool_calls": 4,
+              "bedrock_input_tokens": 13995,
+              "bedrock_output_tokens": 685,
+              "total_bedrock_tokens": 14680,
+              "response_chars": 2314,
+              "response_tokens_est": 578,
+              "result": "The form has been successfully filled out and submitted! Here's a summary of what was done:\n\n1. **Customer Name** \u2192 Typed `John Doe` into the name field.\n2. **Pizza Size** \u2192 Selected the `Medium` radio button.\n3. **Topping** \u2192 Checked the `Mushroom` checkbox.\n4. **Submitted** \u2192 Clicked the submit button.\n\nThe form was posted to `https://httpbin.org/post`, and the response confirms the submitted data:\n- `custname`: **John Doe**\n- `size`: **medium**\n- `topping`: **mushroom**\n",
+              "error": null
+            },
+            {
+              "name": "multi_page_extract",
+              "success": true,
+              "duration_s": 8.7,
+              "tool_calls": 1,
+              "bedrock_input_tokens": 4076,
+              "bedrock_output_tokens": 222,
+              "total_bedrock_tokens": 4298,
+              "response_chars": 294,
+              "response_tokens_est": 73,
+              "result": "Here are the **top 5 stories** currently on Hacker News (news.ycombinator.com):\n\n1. **Keep Android Open**\n2. **Meta Deployed AI and It Is Killing Our Agency**\n3. **Turn Dependabot Off**\n4. **I found a Vulnerability. They found a Lawyer**\n5. **Facebook is cooked**\n",
+              "error": null
+            },
+            {
+              "name": "search_navigate",
+              "success": true,
+              "duration_s": 29.3,
+              "tool_calls": 7,
+              "bedrock_input_tokens": 24366,
+              "bedrock_output_tokens": 1420,
+              "total_bedrock_tokens": 25786,
+              "response_chars": 4094,
+              "response_tokens_est": 1023,
+              "result": "Rust was originally developed by **Mozilla**. Specifically, software developer **Graydon Hoare** created Rust in 2006 while working at Mozilla, and Mozilla officially sponsored the project in 2009. After Mozilla laid off many employees in 2020, the **Rust Foundation** was established in February 2021 \u2014 with Mozilla joined by Amazon Web Services, Google, Huawei, and Microsoft \u2014 to continue stewarding the language.\n",
+              "error": null
+            },
+            {
+              "name": "deep_navigation",
+              "success": true,
+              "duration_s": 8.0,
+              "tool_calls": 1,
+              "bedrock_input_tokens": 3990,
+              "bedrock_output_tokens": 129,
+              "total_bedrock_tokens": 4119,
+              "response_chars": 113,
+              "response_tokens_est": 28,
+              "result": "The latest release version of **anthropics/claude-code** on GitHub is **v2.1.50**.\n",
+              "error": null
+            },
+            {
+              "name": "content_analysis",
+              "success": true,
+              "duration_s": 14.2,
+              "tool_calls": 2,
+              "bedrock_input_tokens": 6840,
+              "bedrock_output_tokens": 769,
+              "total_bedrock_tokens": 7609,
+              "response_chars": 571,
+              "response_tokens_est": 142,
+              "result": "Here's the full structure of **example.com**:\n\n---\n\n### \ud83d\udd24 Headings \u2014 1 total\n| Tag | Text |\n|-----|------|\n| `<h1>` | Example Domain |\n\n---\n\n### \ud83d\udd17 Links \u2014 1 total\n| Text | URL |\n|------|-----|\n| Learn more | https://iana.org/domains/example |\n\n---\n\n### \ud83d\udcdd Paragraphs \u2014 2 total\n1. *\"This domain is for use in documentation examples without needing permission. Avoid use in operations.\"*\n2. *\"Learn more\"* (wraps the link)\n\n---\n\n**Summary:** Example.com is a minimal, single-page site maintained by IANA",
+              "error": null
+            }
+          ],
+          "summary": {
+            "total_tasks": 6,
+            "passed": 6,
+            "total_duration_s": 92.4,
+            "total_tool_calls": 18,
+            "avg_tool_calls": 3.0,
+            "bedrock_input_tokens": 62502,
+            "bedrock_output_tokens": 3719,
+            "total_bedrock_tokens": 66221,
+            "response_chars": 8625,
+            "response_tokens_est": 2156
+          }
+        },
+        {
+          "run": 5,
+          "tasks": [
+            {
+              "name": "fact_lookup",
+              "success": true,
+              "duration_s": 8.8,
+              "tool_calls": 1,
+              "bedrock_input_tokens": 4407,
+              "bedrock_output_tokens": 148,
+              "total_bedrock_tokens": 4555,
+              "response_chars": 1124,
+              "response_tokens_est": 281,
+              "result": "Python was created by **Guido van Rossum**, and it first appeared on **20 February 1991**.\n",
+              "error": null
+            },
+            {
+              "name": "form_fill",
+              "success": true,
+              "duration_s": 15.7,
+              "tool_calls": 3,
+              "bedrock_input_tokens": 10575,
+              "bedrock_output_tokens": 575,
+              "total_bedrock_tokens": 11150,
+              "response_chars": 2340,
+              "response_tokens_est": 585,
+              "result": "The form was successfully filled out and submitted! Here's a summary of what was done and confirmed in the response:\n\n| Field | Value |\n|---|---|\n| **Customer Name** (`custname`) | John Doe |\n| **Pizza Size** (`size`) | medium |\n| **Topping** (`topping`) | mushroom |\n\nThe form was submitted to `https://httpbin.org/post`, and the server response confirms all three values were received correctly. \u2705\n",
+              "error": null
+            },
+            {
+              "name": "multi_page_extract",
+              "success": true,
+              "duration_s": 8.3,
+              "tool_calls": 1,
+              "bedrock_input_tokens": 4076,
+              "bedrock_output_tokens": 213,
+              "total_bedrock_tokens": 4289,
+              "response_chars": 294,
+              "response_tokens_est": 73,
+              "result": "Here are the **top 5 stories** currently on Hacker News:\n\n1. **Keep Android Open**\n2. **Meta Deployed AI and It Is Killing Our Agency**\n3. **Turn Dependabot Off**\n4. **I found a Vulnerability. They found a Lawyer**\n5. **Facebook is cooked**\n",
+              "error": null
+            },
+            {
+              "name": "search_navigate",
+              "success": true,
+              "duration_s": 19.6,
+              "tool_calls": 5,
+              "bedrock_input_tokens": 14792,
+              "bedrock_output_tokens": 746,
+              "total_bedrock_tokens": 15538,
+              "response_chars": 2973,
+              "response_tokens_est": 743,
+              "result": "Rust was originally developed by **Mozilla**. It began as a personal project by Mozilla employee **Graydon Hoare** in 2006, and Mozilla officially sponsored the project in 2009. The language was created while Hoare was working at Mozilla, and the company placed additional engineers on the project to help develop it further.\n",
+              "error": null
+            },
+            {
+              "name": "deep_navigation",
+              "success": true,
+              "duration_s": 7.7,
+              "tool_calls": 1,
+              "bedrock_input_tokens": 3990,
+              "bedrock_output_tokens": 129,
+              "total_bedrock_tokens": 4119,
+              "response_chars": 113,
+              "response_tokens_est": 28,
+              "result": "The latest release version of **anthropics/claude-code** on GitHub is **v2.1.50**.\n",
+              "error": null
+            },
+            {
+              "name": "content_analysis",
+              "success": true,
+              "duration_s": 10.9,
+              "tool_calls": 1,
+              "bedrock_input_tokens": 4227,
+              "bedrock_output_tokens": 434,
+              "total_bedrock_tokens": 4661,
+              "response_chars": 499,
+              "response_tokens_est": 124,
+              "result": "Here's the full structure of **example.com**:\n\n---\n\n### Page Title\n**Example Domain**\n\n---\n\n### Headings \u2014 1 total\n- **H1:** \"Example Domain\"\n\n---\n\n### Links \u2014 1 total\n- **\"Learn more\"** \u2192 `https://iana.org/domains/example`\n\n---\n\n### Paragraphs \u2014 2 total\n1. *\"This domain is for use in documentation examples without needing permission. Avoid use in operations.\"*\n2. *\"Learn more\"* (the link text wrapped in a `<p>` tag)\n\n---\n\n### Summary\nExample.com is a very minimal page maintained by IANA. It con",
+              "error": null
+            }
+          ],
+          "summary": {
+            "total_tasks": 6,
+            "passed": 6,
+            "total_duration_s": 71.0,
+            "total_tool_calls": 12,
+            "avg_tool_calls": 2.0,
+            "bedrock_input_tokens": 42067,
+            "bedrock_output_tokens": 2245,
+            "total_bedrock_tokens": 44312,
+            "response_chars": 7343,
+            "response_tokens_est": 1835
+          }
+        }
       ],
       "stats": {
         "duration_s": {
-          "mean": 103.1,
-          "std": 16.4,
-          "ci_low": 90.4,
-          "ci_high": 115.8
+          "mean": 78.8,
+          "std": 8.7,
+          "ci_low": 72.7,
+          "ci_high": 86.1,
+          "bootstrap_mean": 78.8
         },
         "tool_calls": {
-          "mean": 15.0,
-          "std": 3.9,
+          "mean": 14.4,
+          "std": 2.9,
           "ci_low": 12.2,
-          "ci_high": 18.4
+          "ci_high": 16.6,
+          "bootstrap_mean": 14.4
         },
         "pass_count": {
           "mean": 6.0,
           "std": 0.0,
           "ci_low": 6.0,
-          "ci_high": 6.0
+          "ci_high": 6.0,
+          "bootstrap_mean": 6.0
+        },
+        "bedrock_input_tokens": {
+          "mean": 56028.4,
+          "std": 12570.5,
+          "ci_low": 46455.4,
+          "ci_high": 65601.4,
+          "bootstrap_mean": 56050.8
+        },
+        "bedrock_output_tokens": {
+          "mean": 2766.0,
+          "std": 578.2,
+          "ci_low": 2390.2,
+          "ci_high": 3254.8,
+          "bootstrap_mean": 2767.8
+        },
+        "total_bedrock_tokens": {
+          "mean": 58794.4,
+          "std": 12807.5,
+          "ci_low": 48938.6,
+          "ci_high": 68650.2,
+          "bootstrap_mean": 58843.8
+        },
+        "response_chars": {
+          "mean": 12406.2,
+          "std": 8684.4,
+          "ci_low": 8040.8,
+          "ci_high": 20298.4,
+          "bootstrap_mean": 12424.8
+        },
+        "response_tokens_est": {
+          "mean": 3101.2,
+          "std": 2171.3,
+          "ci_low": 2009.6,
+          "ci_high": 5063.0,
+          "bootstrap_mean": 3102.7
         }
-      }
-    },
-    "playwright": {
-      "raw_durations": [
-        81.3,
-        76.9,
-        90.8,
-        91.7,
-        97.4
-      ],
-      "raw_tool_calls": [
-        10,
-        10,
-        14,
-        14,
-        16
-      ],
-      "raw_passes": [
-        6,
-        6,
-        6,
-        6,
-        6
-      ],
-      "stats": {
-        "duration_s": {
-          "mean": 87.6,
-          "std": 8.3,
-          "ci_low": 81.4,
-          "ci_high": 93.8
+      },
+      "per_task": {
+        "fact_lookup": {
+          "duration": {
+            "mean": 12.3,
+            "std": 2.0,
+            "ci_low": 10.4,
+            "ci_high": 13.5,
+            "bootstrap_mean": 12.3
+          },
+          "tool_calls": {
+            "mean": 2.4,
+            "std": 0.9,
+            "ci_low": 1.6,
+            "ci_high": 3.0,
+            "bootstrap_mean": 2.4
+          },
+          "pass_rate": 1.0
         },
-        "tool_calls": {
-          "mean": 12.8,
-          "std": 2.7,
-          "ci_low": 10.8,
-          "ci_high": 14.8
+        "form_fill": {
+          "duration": {
+            "mean": 15.9,
+            "std": 1.4,
+            "ci_low": 15.1,
+            "ci_high": 17.1,
+            "bootstrap_mean": 15.9
+          },
+          "tool_calls": {
+            "mean": 3.2,
+            "std": 0.4,
+            "ci_low": 3.0,
+            "ci_high": 3.6,
+            "bootstrap_mean": 3.2
+          },
+          "pass_rate": 1.0
         },
-        "pass_count": {
-          "mean": 6.0,
-          "std": 0.0,
-          "ci_low": 6.0,
-          "ci_high": 6.0
-        }
-      }
-    },
-    "chrome-devtools": {
-      "raw_durations": [
-        136.1,
-        118.6,
-        126.9,
-        115.6,
-        113.0
-      ],
-      "raw_tool_calls": [
-        20,
-        19,
-        19,
-        19,
-        20
-      ],
-      "raw_passes": [
-        6,
-        6,
-        6,
-        6,
-        6
-      ],
-      "stats": {
-        "duration_s": {
-          "mean": 122.0,
-          "std": 9.4,
-          "ci_low": 115.2,
-          "ci_high": 130.2
+        "multi_page_extract": {
+          "duration": {
+            "mean": 8.4,
+            "std": 0.2,
+            "ci_low": 8.3,
+            "ci_high": 8.6,
+            "bootstrap_mean": 8.4
+          },
+          "tool_calls": {
+            "mean": 1.0,
+            "std": 0.0,
+            "ci_low": 1.0,
+            "ci_high": 1.0,
+            "bootstrap_mean": 1.0
+          },
+          "pass_rate": 1.0
         },
-        "tool_calls": {
-          "mean": 19.4,
-          "std": 0.5,
-          "ci_low": 19.0,
-          "ci_high": 19.8
+        "search_navigate": {
+          "duration": {
+            "mean": 22.9,
+            "std": 5.2,
+            "ci_low": 19.0,
+            "ci_high": 27.0,
+            "bootstrap_mean": 22.9
+          },
+          "tool_calls": {
+            "mean": 5.6,
+            "std": 1.8,
+            "ci_low": 4.2,
+            "ci_high": 7.0,
+            "bootstrap_mean": 5.6
+          },
+          "pass_rate": 1.0
         },
-        "pass_count": {
-          "mean": 6.0,
-          "std": 0.0,
-          "ci_low": 6.0,
-          "ci_high": 6.0
+        "deep_navigation": {
+          "duration": {
+            "mean": 8.0,
+            "std": 0.2,
+            "ci_low": 7.8,
+            "ci_high": 8.1,
+            "bootstrap_mean": 8.0
+          },
+          "tool_calls": {
+            "mean": 1.0,
+            "std": 0.0,
+            "ci_low": 1.0,
+            "ci_high": 1.0,
+            "bootstrap_mean": 1.0
+          },
+          "pass_rate": 1.0
+        },
+        "content_analysis": {
+          "duration": {
+            "mean": 11.3,
+            "std": 1.7,
+            "ci_low": 10.3,
+            "ci_high": 12.8,
+            "bootstrap_mean": 11.3
+          },
+          "tool_calls": {
+            "mean": 1.2,
+            "std": 0.4,
+            "ci_low": 1.0,
+            "ci_high": 1.6,
+            "bootstrap_mean": 1.2
+          },
+          "pass_rate": 1.0
         }
       }
     }
