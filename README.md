@@ -168,9 +168,6 @@ export AWS_DEFAULT_REGION="us-west-2"
 # Azure OpenAI
 export AZURE_OPENAI_API_KEY="..."
 export AZURE_OPENAI_ENDPOINT="https://your-resource.openai.azure.com/"
-
-# Browser-Use LLM (external service)
-export BROWSER_USE_API_KEY="..."
 ```
 
 ### BrowserProfile Options
