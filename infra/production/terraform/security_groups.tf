@@ -5,7 +5,7 @@
 # Backend EC2: allow ALB to reach the app
 resource "aws_security_group" "backend" {
   name        = "${var.project_name}-backend-sg"
-  description = "Backend EC2: ALB traffic"
+  description = "Backend EC2: ALB and VPC Link traffic"
   vpc_id      = aws_vpc.main.id
 
   ingress {
@@ -35,7 +35,7 @@ data "aws_ec2_managed_prefix_list" "cloudfront" {
 # ALB: allow HTTP from CloudFront and VPC
 resource "aws_security_group" "alb" {
   name        = "${var.project_name}-alb-sg"
-  description = "ALB: HTTP from CloudFront and VPC"
+  description = "ALB: HTTP from API Gateway and internet"
   vpc_id      = aws_vpc.main.id
 
   ingress {
