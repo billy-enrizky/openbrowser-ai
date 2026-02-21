@@ -65,14 +65,14 @@ export function Navbar() {
           </Link>
 
           {/* Center: Desktop links */}
-          <div className="hidden md:flex items-center gap-8">
+          <div className="hidden md:flex items-center gap-6">
             {navLinks.map((link) => (
               <a
                 key={link.name}
                 href={link.href}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-sm text-slate-400 hover:text-white transition"
+                className="text-sm text-slate-300 hover:text-white transition font-medium"
               >
                 {link.name}
               </a>

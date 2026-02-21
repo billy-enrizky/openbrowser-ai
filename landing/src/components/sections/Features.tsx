@@ -194,11 +194,10 @@ function ProviderPills() {
 function CodeSnippet() {
   return (
     <div className="mt-4 bg-zinc-950 rounded-lg p-3 font-mono text-sm overflow-x-auto">
-      <span className="text-cyan-400">browser_get_text</span>
+      <span className="text-cyan-400">await</span>
+      <span className="text-slate-300"> navigate</span>
       <span className="text-slate-400">(</span>
-      <span className="text-violet-400">search</span>
-      <span className="text-slate-400">=</span>
-      <span className="text-green-400">&quot;Guido&quot;</span>
+      <span className="text-green-400">&quot;https://news.ycombinator.com&quot;</span>
       <span className="text-slate-400">)</span>
     </div>
   );
@@ -317,13 +316,15 @@ export function Features() {
             <ProviderPills />
           </FeatureCard>
 
-          {/* Card 3: 11 MCP Tools */}
+          {/* Card 3: One Tool, Full Control */}
           <FeatureCard index={2}>
             <WrenchIcon className="text-cyan-400 mb-4" />
-            <h3 className="text-xl font-semibold text-white">11 MCP Tools</h3>
+            <h3 className="text-xl font-semibold text-white">
+              One Tool, Full Control
+            </h3>
             <p className="text-slate-400 mt-2">
-              Progressive disclosure: from 105 tokens (compact state) to full
-              page grep.
+              A single <code className="text-cyan-400/80 text-sm">execute_code</code> tool
+              with persistent Python namespace. Navigate, click, type, extract -- all via code.
             </p>
             <CodeSnippet />
           </FeatureCard>
