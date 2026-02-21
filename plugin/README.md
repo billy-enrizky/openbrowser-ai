@@ -128,8 +128,8 @@ Based on Bedrock API token usage (input + output tokens at respective rates).
 
 | Model | Playwright MCP | Chrome DevTools MCP | OpenBrowser MCP |
 |-------|---------------:|--------------------:|----------------:|
-| Claude Sonnet ($3/$15 per M) | $0.47 | $0.96 | **$0.18** |
-| Claude Opus ($15/$75 per M) | $2.35 | $4.78 | **$0.91** |
+| Claude Sonnet 4.6 ($3/$15 per M) | $0.47 | $0.96 | **$0.18** |
+| Claude Opus 4.6 ($5/$25 per M) | $0.78 | $1.59 | **$0.30** |
 
 ### Why the Difference
 
