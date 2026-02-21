@@ -15,9 +15,9 @@ https://github.com/user-attachments/assets/632128f6-3d09-497f-9e7d-e29b9cb65e0f
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Tests](https://github.com/billy-enrizky/openbrowser-ai/actions/workflows/test.yml/badge.svg)](https://github.com/billy-enrizky/openbrowser-ai/actions)
 
-**AI-powered browser automation using LangGraph and CDP (Chrome DevTools Protocol)**
+**AI-powered browser automation using CodeAgent and CDP (Chrome DevTools Protocol)**
 
-OpenBrowser is a framework for intelligent browser automation. It combines direct CDP communication with LangGraph orchestration to create AI agents that can navigate, interact with, and extract information from web pages autonomously.
+OpenBrowser is a framework for intelligent browser automation. It combines direct CDP communication with a CodeAgent architecture -- where the LLM writes Python code executed in a persistent namespace -- to navigate, interact with, and extract information from web pages autonomously.
 
 ## Table of Contents
 
@@ -46,11 +46,10 @@ OpenBrowser is a framework for intelligent browser automation. It combines direc
 
 ## Key Features
 
-- **LangGraph-Powered Agents** - Stateful workflow orchestration with perceive-plan-execute loop
+- **CodeAgent Architecture** - LLM writes Python code in a persistent Jupyter-like namespace for browser automation
 - **Raw CDP Communication** - Direct Chrome DevTools Protocol for maximum control and speed
 - **Vision Support** - Screenshot analysis for visual understanding of pages
 - **12+ LLM Providers** - OpenAI, Anthropic, Google, Groq, AWS Bedrock, Azure OpenAI, Ollama, and more
-- **Code Agent Mode** - Jupyter notebook-like code execution for complex automation
 - **MCP Server** - Model Context Protocol support for Claude Desktop integration
 - **Video Recording** - Record browser sessions as video files
 
