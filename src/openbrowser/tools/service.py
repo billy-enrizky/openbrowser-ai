@@ -1447,7 +1447,11 @@ class CodeAgentTools(Tools[Context]):
 			'Complete task.',
 			param_model=DoneAction,
 		)
+<<<<<<< HEAD
 		async def done(params: DoneAction, file_system: FileSystem | None = None):
+=======
+		async def done(params: DoneAction, file_system: FileSystem = None):
+>>>>>>> origin/main
 			user_message = params.text
 
 			len_text = len(params.text)
