@@ -23,48 +23,14 @@ Three approaches to browser automation via MCP, measured on identical tasks.
 | **Transport** | stdio | stdio | stdio |
 | **Language** | TypeScript (Node.js) | TypeScript (Node.js) | Python |
 
-## Token Usage: What Gets Measured
-
-There are two distinct token metrics. They tell very different stories.
-
-### Metric 1: Bedrock API Tokens (What You Actually Pay For)
-
-This is the real LLM cost -- `inputTokens` + `outputTokens` from the Bedrock Converse API `usage` field. Includes system prompt, tool schemas, conversation history, and tool results. This is what shows up on your AWS bill.
-
-From a single benchmark run across 6 tasks (Claude Sonnet 4.6, Bedrock Converse API):
-
-| Metric | Playwright MCP | Chrome DevTools MCP | OpenBrowser MCP |
-|--------|---------------:|--------------------:|----------------:|
-| **Input tokens** | 148,709 | 308,947 | 46,566 |
-| **Output tokens** | 1,539 | 1,909 | 2,857 |
-| **Total** | **150,248** | **310,856** | **49,423** |
-| **Ratio vs OpenBrowser** | 3.0x more | 6.3x more | 1x (baseline) |
-
-OpenBrowser uses **3x fewer tokens** than Playwright and **6.3x fewer** than Chrome DevTools.
-
-### Metric 2: MCP Response Size (Tool Output Only)
-
-This measures the character count of text returned from MCP tool calls (chars / 4 as token estimate). This is a subset of the Bedrock API input tokens -- it does not include system prompts, tool schemas, conversation history, or LLM output.
-
-5-step workflow on Wikipedia (JSON-RPC stdio, same operations):
-
-| Metric | Playwright MCP | Chrome DevTools MCP | OpenBrowser MCP |
-|--------|---------------:|--------------------:|----------------:|
-| **Tool calls** | 5 | 5 | 5 |
-| **Total response chars** | 992,065 | 539,209 | 1,131 |
-| **Est. response tokens** | **248,016** | **134,802** | **283** |
-| **Response size ratio** | 877x more | 476x more | 1x (baseline) |
-
-The response size difference is real and large, but **response size is not the same as total LLM cost**. The LLM also pays for system prompt, tool schemas (Playwright has 22 tools, Chrome DevTools has 26, OpenBrowser has 1), and accumulated conversation history.
-
-### Why the Difference Exists
+## Why OpenBrowser Uses Fewer Tokens
 
 OpenBrowser's CodeAgent architecture processes browser state **server-side** in a Python runtime. The LLM writes code that navigates, inspects DOM, and extracts data -- the full page content never enters the LLM context window. Only `print()` output comes back.
 
 With Playwright and Chrome DevTools, the full page accessibility snapshot (124K-135K tokens for Wikipedia) is returned directly as tool output. The LLM reads the entire snapshot to find what it needs.
 
 | Design Decision | Playwright MCP | Chrome DevTools MCP | OpenBrowser MCP |
-|----------------|---------------:|--------------------:|----------------:|
+|----------------|---------------|---------------------|-----------------|
 | Navigate response | Full a11y snapshot | URL confirmation | URL confirmation |
 | State query | Always full snapshot | Full a11y snapshot (`take_snapshot`) | Code processes state server-side |
 | Click response | Updated snapshot | Action confirmation | Action confirmation |
@@ -75,7 +41,7 @@ With Playwright and Chrome DevTools, the full page accessibility snapshot (124K-
 
 **Chrome DevTools MCP**: Returns minimal confirmations for navigation. The agent must explicitly call `take_snapshot` to see the page (~135K tokens for Wikipedia). Snapshot size is comparable to Playwright's, but only sent on demand.
 
-**OpenBrowser MCP**: The LLM writes Python code that processes browser state inside the server-side runtime. Only extracted results come back. The LLM relies on general web knowledge to write speculative code, and gets compact feedback (~30-1,000 chars per call) rather than full page dumps.
+**OpenBrowser MCP**: The LLM writes Python code that processes browser state inside the server-side runtime. Only extracted results come back. The LLM relies on general web knowledge to write speculative code, and gets compact feedback (~30-800 chars per call) rather than full page dumps.
 
 ### What Each Server Returns (Verbatim)
 
@@ -217,7 +183,7 @@ Six real-world browser tasks run through Claude Sonnet 4.6 on AWS Bedrock (Conve
 
 The tasks span different browser automation capabilities: reading content, filling forms, navigating search results, extracting structured data, and analyzing page structure. The system prompt is server-agnostic -- it gives no hints about which tools are available or how to use them.
 
-<img src="/images/benchmark_comparison.png" alt="E2E LLM Benchmark: MCP Server Comparison" style={{width: "100%", maxWidth: 800}} />
+<img src="/images/benchmark_comparison.png" alt="E2E LLM Benchmark: Duration vs Bedrock API Token Usage" style={{width: "100%", maxWidth: 800}} />
 
 ### Results: Task Success (N=5 runs)
 
@@ -233,6 +199,10 @@ All three servers achieve **100% pass rate** (6/6 tasks) across all 5 runs.
 
 Playwright completes most tasks in 1 tool call because every navigation returns the full accessibility snapshot -- the LLM sees the entire page immediately and can answer without follow-up queries. Chrome DevTools requires separate navigate + take_snapshot calls, resulting in more tool calls. OpenBrowser's CodeAgent batches navigation, extraction, and processing into single execute_code calls, achieving comparable speed with fewer total tokens.
 
+<img src="/images/benchmark_tool_calls.png" alt="Tool Calls Per Task by MCP Server" style={{width: "100%", maxWidth: 800}} />
+
+<img src="/images/benchmark_per_task_duration.png" alt="Per-Task Duration by MCP Server" style={{width: "100%", maxWidth: 800}} />
+
 ### Results: Bedrock API Token Usage
 
 Total tokens billed by the Bedrock Converse API across 6 tasks (input + output). This is the actual LLM cost -- includes system prompt, tool schemas, conversation history, and tool results.
@@ -243,6 +213,8 @@ Total tokens billed by the Bedrock Converse API across 6 tasks (input + output).
 | **Output tokens** | 1,539 | 1,909 | 2,857 |
 | **Total tokens** | **150,248** | **310,856** | **49,423** |
 | **Ratio vs OpenBrowser** | **3.0x more** | **6.3x more** | **1x (baseline)** |
+
+<img src="/images/benchmark_token_breakdown.png" alt="Total Bedrock API Token Usage" style={{width: "100%", maxWidth: 800}} />
 
 Per-task Bedrock API input tokens:
 
@@ -255,6 +227,8 @@ Per-task Bedrock API input tokens:
 | deep_navigation | 17,144 | 11,921 | 3,996 |
 | content_analysis | 8,391 | 18,093 | 7,566 |
 
+<img src="/images/benchmark_per_task_tokens.png" alt="Per-Task Input Token Usage by MCP Server" style={{width: "100%", maxWidth: 800}} />
+
 ### Results: Cost Per Benchmark Run (6 Tasks)
 
 Based on Bedrock API token usage. Input tokens at input rate, output tokens at output rate.
@@ -263,6 +237,8 @@ Based on Bedrock API token usage. Input tokens at input rate, output tokens at o
 |-------|---------------:|--------------------:|----------------:|
 | Claude Sonnet ($3/$15 per M) | $0.47 | $0.96 | **$0.18** |
 | Claude Opus ($15/$75 per M) | $2.35 | $4.78 | **$0.91** |
+
+<img src="/images/benchmark_cost.png" alt="Cost Per Benchmark Run by Model" style={{width: "100%", maxWidth: 800}} />
 
 ### Results: MCP Response Size (Tool Output Only)
 
@@ -275,6 +251,8 @@ This measures only the text returned from MCP tool calls -- a subset of the tota
 | **Response size ratio** | 170x more | 181x more | 1x (baseline) |
 
 The large response size difference (170x) reflects the architectural difference: Playwright and Chrome DevTools dump full page accessibility snapshots as tool output, while OpenBrowser processes page state server-side and returns only extracted results. However, the actual LLM cost difference is **3x-6.3x** (not 170x), because total cost also includes system prompts, tool schemas, and conversation history that are similar across servers.
+
+<img src="/images/benchmark_response_size.png" alt="MCP Response Size Comparison" style={{width: "100%", maxWidth: 800}} />
 
 ### Why OpenBrowser Uses More Tool Calls but Fewer Tokens
 
