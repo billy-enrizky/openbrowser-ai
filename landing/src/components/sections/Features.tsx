@@ -366,7 +366,7 @@ export function Features() {
               href="https://github.com/billy-enrizky/openbrowser-ai"
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 mt-4 rounded-lg border border-white/10 bg-white/5 px-4 py-2 text-sm text-slate-300 hover:bg-white/10 transition"
+              className="inline-flex items-center gap-2 mt-4 rounded-lg bg-gradient-to-r from-cyan-600/70 to-violet-600/70 px-4 py-2 text-sm text-white font-medium hover:opacity-90 transition"
             >
               Star on GitHub
               <svg
