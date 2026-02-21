@@ -142,9 +142,6 @@ export default function Home() {
     setAvailableProviders,
     setModelsLoading,
     setModelsError,
-    // Current browser
-    useCurrentBrowser,
-    setExtensionConnected,
   } = useAppStore();
   const [isLoading, setIsLoading] = useState(false);
   const [currentTaskId, setCurrentTaskId] = useState<string | null>(null);
@@ -468,12 +465,10 @@ export default function Home() {
         break;
 
       case "extension_status": {
-        const connected = data.connected as boolean;
-        setExtensionConnected(connected);
         break;
       }
     }
-  }, [addMessage, addLog, clearLogs, refreshChatList, setActiveConversationId, setVncInfo, setBrowserViewerOpen, setLatestScreenshot, setExtensionConnected, browserViewerOpen]);
+  }, [addMessage, addLog, clearLogs, refreshChatList, setActiveConversationId, setVncInfo, setBrowserViewerOpen, setLatestScreenshot, browserViewerOpen]);
 
   const { isConnected, startTask, cancelTask } = useTaskStream({
     onMessage: handleWSMessage,
@@ -500,7 +495,7 @@ export default function Home() {
       max_steps: maxSteps,
       use_vision: useVision,
       llm_model: selectedModel,
-      use_current_browser: useCurrentBrowser,
+      use_current_browser: false,
       conversation_id: activeConversationId,
     });
 
@@ -514,7 +509,7 @@ export default function Home() {
         metadata: { isError: true },
       });
     }
-  }, [activeConversationId, addMessage, startTask, agentType, currentTaskId, maxSteps, useVision, selectedModel, useCurrentBrowser]);
+  }, [activeConversationId, addMessage, startTask, agentType, currentTaskId, maxSteps, useVision, selectedModel]);
 
   const hasMessages = messages.length > 0;
 
