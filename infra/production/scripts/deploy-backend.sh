@@ -102,6 +102,9 @@ ANTHROPIC_API_KEY=\$(aws ssm get-parameter --name "$SSM_ANTHROPIC" --with-decryp
 docker stop openbrowser-backend || true
 docker rm openbrowser-backend || true
 
+# Prune unused images to prevent disk fill-up
+docker image prune -af --filter "until=24h" || true
+
 # Start new container with all env vars
 docker run -d \
   --name openbrowser-backend \
