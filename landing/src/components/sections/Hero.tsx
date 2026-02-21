@@ -49,7 +49,7 @@ export function Hero() {
             href="https://docs.openbrowser.me"
             target="_blank"
             rel="noopener noreferrer"
-            className="rounded-full bg-zinc-800/80 px-8 py-3 text-lg text-slate-200 hover:bg-zinc-700/80 transition text-center font-semibold"
+            className="rounded-full bg-gradient-to-r from-cyan-600/60 to-violet-600/60 px-8 py-3 text-lg text-white hover:opacity-80 transition text-center font-semibold"
           >
             Read the Docs
           </a>

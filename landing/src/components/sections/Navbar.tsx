@@ -72,7 +72,7 @@ export function Navbar() {
                 href={link.href}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-sm text-slate-300 hover:text-white hover:bg-zinc-800 transition font-medium rounded-full px-4 py-2 bg-zinc-800/60"
+                className="text-sm text-white hover:opacity-80 transition font-medium rounded-full px-4 py-2 bg-gradient-to-r from-cyan-600/70 to-violet-600/70"
               >
                 {link.name}
               </a>
