@@ -1,12 +1,13 @@
 import { Navbar } from "@/components/sections/Navbar";
+import { Hero } from "@/components/sections/Hero";
+import { Features } from "@/components/sections/Features";
 
 export default function Home() {
   return (
-    <main className="bg-zinc-950 text-white min-h-screen">
+    <div className="bg-zinc-950 text-white">
       <Navbar />
-      <div className="flex items-center justify-center min-h-screen">
-        <h1 className="text-4xl font-bold">OpenBrowser</h1>
-      </div>
-    </main>
+      <Hero />
+      <Features />
+    </div>
   );
 }
