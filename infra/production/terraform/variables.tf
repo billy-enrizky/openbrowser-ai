@@ -126,6 +126,12 @@ variable "frontend_acm_certificate_arn" {
 ## Cognito authentication
 ## -----------------------------------------------------------------------------
 
+variable "enable_api_auth" {
+  type        = bool
+  default     = false
+  description = "Require JWT (Cognito) on API routes. Set to true when auth is implemented."
+}
+
 variable "enable_backend_auth" {
   type        = bool
   default     = true
@@ -157,7 +163,7 @@ variable "cognito_oauth_scopes" {
 }
 
 ## -----------------------------------------------------------------------------
-## CORS
+## API Gateway CORS
 ## -----------------------------------------------------------------------------
 
 variable "cors_origins" {
