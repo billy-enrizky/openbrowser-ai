@@ -199,7 +199,11 @@ profile = BrowserProfile(
 | **Anthropic** | `ChatAnthropic` | claude-sonnet-4-6, claude-opus-4-6 |
 | **Groq** | `ChatGroq` | llama-4-scout, qwen3-32b |
 | **AWS Bedrock** | `ChatAWSBedrock` | anthropic.claude-sonnet-4-6, amazon.nova-pro |
+| **AWS Bedrock (Anthropic)** | `ChatAnthropicBedrock` | Claude models via Anthropic Bedrock SDK |
 | **Azure OpenAI** | `ChatAzureOpenAI` | Any Azure-deployed model |
+| **OpenRouter** | `ChatOpenRouter` | Any model on openrouter.ai |
+| **DeepSeek** | `ChatDeepSeek` | deepseek-chat, deepseek-reasoner |
+| **Cerebras** | `ChatCerebras` | llama3.1-8b, qwen-3-coder-480b |
 | **Ollama** | `ChatOllama` | llama3.1, deepseek-r1 (local) |
 | **OCI** | `ChatOCIRaw` | Oracle Cloud GenAI models |
 | **Browser-Use** | `ChatBrowserUse` | External LLM service |
