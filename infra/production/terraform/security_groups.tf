@@ -2,14 +2,14 @@
 # Security groups
 # -----------------------------------------------------------------------------
 
-# Backend EC2: allow ALB and VPC Link (API Gateway) to reach the app
+# Backend EC2: allow ALB to reach the app
 resource "aws_security_group" "backend" {
   name        = "${var.project_name}-backend-sg"
   description = "Backend EC2: ALB and VPC Link traffic"
   vpc_id      = aws_vpc.main.id
 
   ingress {
-    description = "Backend port from VPC (ALB and VPC Link)"
+    description = "Backend port from VPC (ALB)"
     from_port   = var.backend_port
     to_port     = var.backend_port
     protocol    = "tcp"
@@ -32,14 +32,14 @@ data "aws_ec2_managed_prefix_list" "cloudfront" {
   name = "com.amazonaws.global.cloudfront.origin-facing"
 }
 
-# ALB: allow HTTP from CloudFront (VNC WebSocket) and VPC (API Gateway VPC Link)
+# ALB: allow HTTP from CloudFront and VPC
 resource "aws_security_group" "alb" {
   name        = "${var.project_name}-alb-sg"
   description = "ALB: HTTP from API Gateway and internet"
   vpc_id      = aws_vpc.main.id
 
   ingress {
-    description = "HTTP from VPC (API Gateway VPC Link)"
+    description = "HTTP from VPC"
     from_port   = 80
     to_port     = 80
     protocol    = "tcp"
