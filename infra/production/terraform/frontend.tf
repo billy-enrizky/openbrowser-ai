@@ -90,7 +90,7 @@ resource "aws_cloudfront_distribution" "frontend" {
     origin_access_control_id = aws_cloudfront_origin_access_control.frontend.id
   }
 
-  # ALB origin for API and VNC WebSocket proxying
+  # ALB origin for VNC WebSocket proxying (bypasses API Gateway 30s timeout)
   origin {
     domain_name = aws_lb.backend.dns_name
     origin_id   = local.alb_origin_id

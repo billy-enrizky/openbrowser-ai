@@ -1,182 +1,183 @@
-# Request Flow: CloudFront -> ALB -> EC2 Docker Container
-
-## Architecture Overview
-
-CloudFront is the single entry point for all traffic. It routes API/WebSocket requests to the ALB and serves static frontend assets from S3.
+# Request Flow: API Gateway → EC2 Docker Container
 
 ## Complete Request Flow
 
-```mermaid
-graph LR
-    Client[Client Browser] -->|HTTPS| CF[CloudFront]
-    CF -->|"/api/*, /ws/*, /health"| ALB[ALB :80]
-    CF -->|"/api/v1/vnc/*<br>persistent WS"| ALB
-    CF -->|"/* static<br>CF Function URI rewrite"| S3[S3 Bucket]
-    ALB --> FastAPI
+When you send a query/task request to API Gateway, here's exactly what happens:
 
-    subgraph EC2["EC2 Private Subnet - Docker"]
-        FastAPI["FastAPI :8000"]
-        Chromium["Playwright/Chromium kiosk"]
-        VNC["Xvfb + x11vnc + websockify"]
-    end
-
-    FastAPI --> RDS[(PostgreSQL RDS)]
-
-    style Client fill:#4a90d9,color:#fff
-    style CF fill:#7b68ee,color:#fff
-    style ALB fill:#7b68ee,color:#fff
-    style S3 fill:#e8a838,color:#fff
-    style FastAPI fill:#50b86c,color:#fff
-    style Chromium fill:#50b86c,color:#fff
-    style VNC fill:#50b86c,color:#fff
-    style RDS fill:#e8a838,color:#fff
+```
+1. Frontend/Client
+   │
+   │ POST /api/v1/tasks
+   │ WebSocket: wss://api-gateway-url/ws
+   │
+   ▼
+2. API Gateway (HTTP API)
+   │
+   │ Routes ALL requests to ALB
+   │ (via HTTP_PROXY integration)
+   │
+   ▼
+3. Application Load Balancer (ALB)
+   │
+   │ Path-based routing:
+   │ - /ws, /ws/* → Backend Target Group (port 8000)
+   │ - /api/* → Backend Target Group (port 8000)
+   │ - /health → Backend Target Group (port 8000)
+   │ - /* → Frontend Target Group (port 3000)
+   │
+   ▼
+4. EC2 Instance (Auto Scaling Group)
+   │
+   │ Docker Compose running:
+   │ - Backend container (FastAPI) :8000
+   │ - Frontend container (Next.js) :3000
+   │
+   ▼
+5. Backend FastAPI Application
+   │
+   │ Receives request on port 8000
+   │
+   │ For REST API:
+   │ - /api/v1/tasks → tasks.py router
+   │ - /api/v1/projects → projects.py router
+   │ - /api/v1/models → main.py endpoint
+   │
+   │ For WebSocket:
+   │ - /ws → websocket handler
+   │ - Creates agent session
+   │ - Runs OpenBrowser task
+   │ - Streams updates back via WebSocket
+   │
+   ▼
+6. OpenBrowser Framework
+   │
+   │ Executes browser automation task
+   │ - Opens browser (Playwright/Chromium)
+   │ - Performs actions
+   │ - Captures screenshots
+   │ - Returns results
+   │
+   ▼
+7. Response flows back
+   │
+   │ Backend → ALB → API Gateway → Frontend/Client
+   │
+   │ Real-time updates via WebSocket:
+   │ - step_update
+   │ - screenshot
+   │ - output
+   │ - task_completed
 ```
 
-## CloudFront Cache Behaviors
+## Example: Sending a Task
 
-| Priority | Path Pattern     | Origin | Caching  | Methods              | Purpose                       |
-|----------|-----------------|--------|----------|----------------------|-------------------------------|
-| 1        | `/api/v1/vnc/*` | ALB    | Disabled | All + WebSocket      | Persistent VNC WebSocket      |
-| 2        | `/api/*`        | ALB    | Disabled | All                  | REST API + event polling      |
-| 3        | `/ws/*`         | ALB    | Disabled | All                  | WebSocket connections         |
-| 4        | `/health`       | ALB    | Disabled | GET/HEAD/OPTIONS     | Health check                  |
-| default  | `/*`            | S3     | 1 hour   | GET/HEAD             | Static frontend (Next.js SPA) |
+### Via WebSocket (Real-time)
 
-## API Request Flow (REST)
+```javascript
+// Frontend connects to API Gateway WebSocket endpoint
+const ws = new WebSocket('wss://<api-gateway-url>/ws');
 
-```mermaid
-graph TD
-    A["Client: POST /api/v1/tasks/start"] --> B["CloudFront HTTPS termination"]
-    B -->|"HTTP :80"| C["ALB, idle timeout 3600s"]
-    C -->|"HTTP :8000"| D["EC2 Docker - FastAPI"]
-    D --> E["JWT verification via Cognito"]
-    E --> F["Create agent task, return task_id"]
-    F --> G["Client polls GET /tasks/id/events?since=N\nevery 1.5s"]
+// Send task request
+ws.send(JSON.stringify({
+  type: 'start_task',
+  data: {
+    task: 'Search for OpenBrowser on GitHub',
+    agent_type: 'code',
+    max_steps: 50,
+    use_vision: true,
+    llm_model: 'gemini-2.5-flash'
+  }
+}));
 
-    style A fill:#4a90d9,color:#fff
-    style B fill:#7b68ee,color:#fff
-    style C fill:#7b68ee,color:#fff
-    style D fill:#50b86c,color:#fff
-    style E fill:#50b86c,color:#fff
-    style F fill:#8fbc8f,color:#fff
-    style G fill:#4a90d9,color:#fff
+// Receive real-time updates
+ws.onmessage = (event) => {
+  const message = JSON.parse(event.data);
+  // message.type: 'task_started', 'step_update', 'screenshot', 'task_completed'
+};
 ```
 
-## VNC Browser Viewer Flow
+**Flow:**
+1. WebSocket connection: `wss://api-gateway-url/ws`
+2. API Gateway → ALB → Backend container (port 8000)
+3. Backend creates agent session
+4. Task runs on EC2 instance (browser automation)
+5. Updates streamed back via WebSocket
 
-```mermaid
-graph TD
-    A["Client opens VNC viewer"] --> B["Frontend constructs WS URL\nwss://domain/api/v1/vnc/ws?task_id=X&token=Y"]
-    B --> C["CloudFront routes /api/v1/vnc/*\nCachingDisabled, AllViewer"]
-    C --> D["ALB forwards to EC2:8000\nidle timeout 3600s"]
-    D --> E["FastAPI VNC proxy\nJWT auth + session lookup"]
-    E --> F["websockify\nconnects to x11vnc on localhost"]
-    F --> G["Xvfb display streamed\nto client via noVNC"]
+### Via REST API
 
-    style A fill:#4a90d9,color:#fff
-    style B fill:#4a90d9,color:#fff
-    style C fill:#7b68ee,color:#fff
-    style D fill:#7b68ee,color:#fff
-    style E fill:#50b86c,color:#fff
-    style F fill:#50b86c,color:#fff
-    style G fill:#8fbc8f,color:#fff
+```javascript
+// Frontend calls API Gateway REST endpoint
+const response = await fetch('https://<api-gateway-url>/api/v1/tasks', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    task: 'Search for OpenBrowser on GitHub',
+    agent_type: 'code',
+    max_steps: 50
+  })
+});
 ```
 
-## Browser Task Execution (Inside Docker)
+**Flow:**
+1. REST request: `https://api-gateway-url/api/v1/tasks`
+2. API Gateway → ALB → Backend container (port 8000)
+3. Backend processes request
+4. Response returned
 
-When a task starts, the following runs inside the Docker container:
+## Where Tasks Actually Run
 
-```mermaid
-graph TD
-    A["FastAPI receives start_task"] --> B["AgentService creates CodeAgent"]
-    B --> C["CodeAgent launches\nPlaywright + Chromium"]
-    C --> D["6-layer kiosk security lockdown"]
-    D --> E["Agent executes steps\nbrowse, click, type, extract"]
-    E --> F["Events emitted to EventBuffer"]
-    F --> G["Client polls /tasks/id/events?since=N"]
+**YES - Tasks run on the dockerized EC2 instance!**
 
-    style A fill:#50b86c,color:#fff
-    style B fill:#50b86c,color:#fff
-    style C fill:#50b86c,color:#fff
-    style D fill:#e85d75,color:#fff
-    style E fill:#50b86c,color:#fff
-    style F fill:#e8a838,color:#fff
-    style G fill:#4a90d9,color:#fff
-```
+- The EC2 instance runs Docker Compose
+- Docker Compose starts the backend container
+- The backend container runs FastAPI + OpenBrowser
+- When you send a task, it executes on that EC2 instance
+- The browser automation happens on that EC2 instance
+- Screenshots are captured on that EC2 instance
+- Results are computed on that EC2 instance
 
-Kiosk security layers:
-1. Openbox WM (no shortcuts, no decorations, forced maximize)
-2. Chromium kiosk mode + enterprise policies
-3. X11 key grabber daemon (intercepts Alt+F4, Ctrl+W, etc.)
-4. x11vnc input filtering (-input KM, no clipboard)
-5. Docker hardening (wget/gnupg removed post-build)
-6. Enterprise policies JSON (/etc/chromium/policies/managed/)
+## Multi-Instance Behavior
 
-## Data Persistence
+If you have multiple EC2 instances (Auto Scaling):
 
-| Data              | Storage                | Access                         |
-|-------------------|------------------------|--------------------------------|
-| Chat messages     | PostgreSQL RDS         | Backend via SQLAlchemy async   |
-| Conversations     | PostgreSQL RDS         | Backend via SQLAlchemy async   |
-| User state        | PostgreSQL RDS         | Backend via SQLAlchemy async   |
-| LLM API keys      | SSM Parameter Store    | EC2 fetches at container start |
-| Session data      | DynamoDB               | EC2 via IAM instance profile   |
+- ALB distributes requests across instances (round-robin)
+- Each instance can handle multiple concurrent tasks
+- WebSocket connections are sticky (same instance for duration)
+- Tasks run independently on each instance
 
-## Authentication Flow
+## Important Notes
 
-```mermaid
-graph TD
-    A["User visits CloudFront URL"] --> B["Frontend redirects to\nCognito Hosted UI, PKCE"]
-    B --> C["User signs in"]
-    C --> D["Cognito redirects to /auth/callback"]
-    D --> E["Frontend exchanges code\nfor JWT tokens"]
-    E --> F["API requests include JWT\nin Authorization header"]
-    F --> G["FastAPI validates JWT\nagainst Cognito User Pool"]
+1. **WebSocket Support**: API Gateway HTTP API supports WebSocket connections, so real-time updates work through the API Gateway.
 
-    style A fill:#4a90d9,color:#fff
-    style B fill:#4a90d9,color:#fff
-    style C fill:#e85d75,color:#fff
-    style D fill:#e85d75,color:#fff
-    style E fill:#4a90d9,color:#fff
-    style F fill:#4a90d9,color:#fff
-    style G fill:#50b86c,color:#fff
-```
+2. **Health Checks**: ALB continuously checks backend health at `/health`. Unhealthy instances are removed from rotation.
 
-## EC2 Instance Details
+3. **Scaling**: If traffic increases, Auto Scaling Group can add more EC2 instances automatically.
 
-- **Type**: t3.medium (4 GB RAM)
-- **Memory**: 4 GB RAM + 2 GB swap = 6 GB addressable
-- **Subnet**: Private (no public IP)
-- **AMI**: Amazon Linux 2023 (x86_64)
-- **Container**: Single Docker container (FastAPI + Playwright + VNC stack)
-- **Deployment**: Hot-deploy via SSM RunShellScript (ECR pull + container restart)
+4. **State**: Each EC2 instance maintains its own state. For persistent storage, consider adding a database or Redis.
 
-## Network Security
+5. **VNC**: If enabled, VNC connections for live browser viewing also go through the same infrastructure.
 
-| Component    | Inbound Rules                                     |
-|-------------|---------------------------------------------------|
-| ALB SG      | HTTP :80 from CloudFront prefix list + VPC CIDR   |
-| Backend SG  | :8000 from VPC CIDR only                          |
-| PostgreSQL  | :5432 from Backend SG only                        |
+## Testing the Flow
+
+1. Deploy infrastructure: `make terraform-apply-prod`
+2. Get API Gateway URL: `make prod-get-url`
+3. Test health endpoint:
+   ```bash
+   curl https://<api-gateway-url>/health
+   ```
+4. Test WebSocket connection:
+   ```javascript
+   const ws = new WebSocket('wss://<api-gateway-url>/ws');
+   ```
 
 ## Troubleshooting
 
-### Health check fails
-```bash
-curl -s https://d3p903fxpmjf8v.cloudfront.net/health
-# Expected: {"status":"healthy"}
-```
+If tasks aren't running:
 
-### Check EC2 via SSM
-```bash
-aws ssm send-command --region ca-central-1 \
-  --instance-ids i-052e44a607d603f36 \
-  --document-name "AWS-RunShellScript" \
-  --parameters commands='["docker ps -a","free -m","docker logs openbrowser-backend --tail 50"]'
-```
-
-### Common issues
-- **504 Gateway Timeout**: EC2 OOM -- check `free -m` via SSM, verify swap exists
-- **VNC disconnects**: ALB idle timeout may have been exceeded (3600s limit)
-- **SSM command "Delayed"**: EC2 is unresponsive (OOM, disk full) -- reboot via `aws ec2 reboot-instances`
-- **Docker ModuleNotFoundError after instance restart**: Stale overlay -- redeploy fresh container from ECR
+1. **Check ALB target health**: Ensure backend target group shows healthy instances
+2. **Check EC2 logs**: SSH to instance and check Docker logs
+   ```bash
+   docker compose -f docker-compose.prod.yml logs backend
+   ```
+3. **Check API Gateway logs**: CloudWatch logs at `/aws/apigateway/openbrowser`
+4. **Verify routing**: Ensure ALB listener rules are correct (check AWS Console)

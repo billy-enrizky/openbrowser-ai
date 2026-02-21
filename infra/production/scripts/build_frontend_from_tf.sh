@@ -36,9 +36,8 @@ tf_output_raw() {
 }
 
 echo "--- Reading Terraform outputs ---"
-CF_DOMAIN="$(tf_output_raw frontend_url | sed 's|https://||')"
-API_URL="https://${CF_DOMAIN}"
-WS_URL="wss://${CF_DOMAIN}"
+API_URL="$(tf_output_raw api_base_url)"
+WS_URL="$(tf_output_raw api_ws_url)"
 COGNITO_DOMAIN="$(tf_output_raw cognito_domain_url)"
 COGNITO_CLIENT_ID="$(tf_output_raw cognito_app_client_id)"
 REDIRECT_URI="$(tf_output_raw cognito_primary_callback_url)"
