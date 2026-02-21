@@ -1,7 +1,7 @@
 """
 Comprehensive Agent vs CodeAgent Performance Comparison.
 
-Tests both agent types on multiple tasks using browser-use.github.io stress tests.
+Tests both agent types on multiple tasks using openbrowser.me stress tests.
 
 Usage:
     uv run examples/benchmarks/comprehensive_benchmark.py
@@ -22,11 +22,11 @@ load_dotenv(override=True)
 
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY') or os.getenv('GOOGLE_API_KEY')
 
-# Test tasks using browser-use.github.io
+# Test tasks using openbrowser.me
 TEST_TASKS = [
     {
         "name": "Vanilla Form",
-        "instruction": """Navigate to https://browser-use.github.io/stress-tests/challenges/vanilla-form.html
+        "instruction": """Navigate to https://openbrowser.me/openbrowser-ai/challenges/vanilla-form.html
 Wait for the page to fully load.
 
 Fill out the form with:
@@ -40,7 +40,7 @@ The form is complete when you see the success message.""",
     },
     {
         "name": "Product Configurator",
-        "instruction": """Navigate to https://browser-use.github.io/stress-tests/challenges/product-configurator.html
+        "instruction": """Navigate to https://openbrowser.me/openbrowser-ai/challenges/product-configurator.html
 Wait for the page to fully load.
 
 Configure a product with:
@@ -54,7 +54,7 @@ The configuration is complete when you see the success message.""",
     },
     {
         "name": "Flight Booking Flow",
-        "instruction": """Navigate to https://browser-use.github.io/stress-tests/challenges/flight-booking-flow.html
+        "instruction": """Navigate to https://openbrowser.me/openbrowser-ai/challenges/flight-booking-flow.html
 Wait for the page to fully load.
 
 Step 1 - Search Flights:
@@ -204,7 +204,7 @@ async def run_code_agent_task(task_name: str, instruction: str) -> dict:
 async def main():
     logger.info("="*70)
     logger.info("COMPREHENSIVE AGENT vs CODEAGENT COMPARISON")
-    logger.info("Using browser-use.github.io stress tests")
+    logger.info("Using openbrowser.me stress tests")
     logger.info("="*70)
     
     all_results = []

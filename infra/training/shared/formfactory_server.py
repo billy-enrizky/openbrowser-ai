@@ -84,6 +84,19 @@ class FormFactoryServer:
             logger.info("FormFactory server stopped")
             self.process = None
 
+    def restart(self) -> bool:
+        """Stop and restart the FormFactory server.
+
+        Returns True if the server restarted successfully.
+        """
+        logger.info("Restarting FormFactory server...")
+        self.stop()
+        return self.start()
+
+    def is_healthy(self) -> bool:
+        """Check if the server is alive and responding."""
+        return self._is_running()
+
     def _is_running(self) -> bool:
         """Check if the server is responding."""
         try:
