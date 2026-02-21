@@ -1,6 +1,6 @@
-name: openbrowser-eval-fsdfm-flow-grpo
+name: openbrowser-eval-espo-fsdfm
 entrypoint: bash -c "python -m infra.eval.scripts.download_datasets --datasets formfactory && python -m infra.training.flow_matching.eval_fsdfm_sft"
-containerfile: infra/training/anyscale/Containerfile.online-fsdfm-grpo
+containerfile: infra/training/anyscale/Containerfile.online-flow-grpo
 compute_config:
   cloud: "Anyscale Cloud"
   head_node:
@@ -26,8 +26,8 @@ excludes:
 env_vars:
   FLOW_VAL_FILE: "data/processed/formfactory_sft_val.jsonl"
   MAX_EVAL_SAMPLES: "124"
-  # v18 best checkpoint (mu=1 ablation: wd1 + k2, no multi-epoch, no ref reset)
-  FSDFM_SFT_CHECKPOINT: "/mnt/user_storage/openbrowser/checkpoints/fsdfm-flow-grpo-best"
+  # v19 ESPO best checkpoint
+  FSDFM_SFT_CHECKPOINT: "/mnt/user_storage/openbrowser/checkpoints/espo-fsdfm-best"
   # Set EVAL_SPLIT=test for test split evaluation; omit for val (default)
   # EVAL_SPLIT: "test"
   # HF_TOKEN injected from .env at submission time by submit_job.py
@@ -35,5 +35,6 @@ max_retries: 1
 timeout_s: 7200
 tags:
   project: openbrowser
-  task: eval-fsdfm-flow-grpo
-  model: fsdfm-1.3b-dfm
+  task: eval-espo-fsdfm
+  model: fsdfm-1.3b-dit
+  method: espo-sequence-level

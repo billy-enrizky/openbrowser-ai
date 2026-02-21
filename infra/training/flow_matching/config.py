@@ -252,6 +252,76 @@ FLOW_GRPO_REFUSION_CONFIG = {
     },
 }
 
+# --- ESPO for ReFusion 8B (sequence-level ELBO policy optimization) ---
+# Implements ESPO (Li et al., 2025, arXiv:2512.03759): replaces token-level
+# per-step REINFORCE with sequence-level ELBO importance ratios. The ELBO is
+# computed by randomly re-masking the completed output and measuring cross-entropy.
+# Key: k2 KL estimator, sequence-level ratio normalized by L, coupled perturbation.
+ESPO_REFUSION_CONFIG = {
+    "group_size": int(os.environ.get("GROUP_SIZE", "4")),
+    "learning_rate": float(os.environ.get("LR", "1e-5")),
+    "num_epochs": int(os.environ.get("NUM_EPOCHS", "1")),
+    "kl_coeff": float(os.environ.get("KL_COEFF", "3e-3")),
+    "epsilon_low": float(os.environ.get("EPSILON_LOW", "0.2")),
+    "epsilon_high": float(os.environ.get("EPSILON_HIGH", "0.2")),
+    "mu": int(os.environ.get("MU", "1")),
+    "num_mc_samples": int(os.environ.get("NUM_MC", "2")),
+    "coupled_perturbation": os.environ.get("COUPLED", "true").lower() == "true",
+    "bf16": True,
+    "logging_steps": 1,
+    "grad_clip": float(os.environ.get("GRAD_CLIP", "1.0")),
+    "weight_decay": 0.01,
+    "num_generation_steps": int(os.environ.get("GEN_STEPS", "64")),
+    "generation_temperature": float(os.environ.get("GEN_TEMP", "1.0")),
+    "formfactory_port": int(os.environ.get("FORMFACTORY_PORT", "5050")),
+    "browser_headless": True,
+    "action_timeout_s": 5,
+    "rollout_timeout_s": 30,
+    "shuffle_prompts": os.environ.get("SHUFFLE", "true").lower() == "true",
+    "min_nonzero_for_update": int(os.environ.get("MIN_NONZERO", "1")),
+    "early_stop_max_steps": int(os.environ.get("EARLY_STOP_MAX_STEPS", "40")),
+    "reward_weights": {
+        "task_completion": 0.4,
+        "field_accuracy": 0.4,
+        "execution_completeness": 0.2,
+    },
+}
+
+# --- ESPO for FS-DFM 1.3B (sequence-level GKL-based ELBO) ---
+# Adapts ESPO to FS-DFM's Poisson jump process. The ELBO is computed using
+# the GKL loss as a proxy: sample random timestep, noise via forward process,
+# compute GKL loss, negate to get ELBO. Same sequence-level importance ratio.
+ESPO_FSDFM_CONFIG = {
+    "group_size": int(os.environ.get("GROUP_SIZE", "4")),
+    "learning_rate": float(os.environ.get("LR", "1e-5")),
+    "num_epochs": int(os.environ.get("NUM_EPOCHS", "1")),
+    "kl_coeff": float(os.environ.get("KL_COEFF", "3e-3")),
+    "epsilon_low": float(os.environ.get("EPSILON_LOW", "0.2")),
+    "epsilon_high": float(os.environ.get("EPSILON_HIGH", "0.2")),
+    "mu": int(os.environ.get("MU", "1")),
+    "num_mc_samples": int(os.environ.get("NUM_MC", "2")),
+    "coupled_perturbation": os.environ.get("COUPLED", "true").lower() == "true",
+    "bf16": True,
+    "logging_steps": 1,
+    "grad_clip": float(os.environ.get("GRAD_CLIP", "1.0")),
+    "weight_decay": 0.01,
+    "num_generation_steps": int(os.environ.get("GEN_STEPS", "64")),
+    "generation_temperature": float(os.environ.get("GEN_TEMP", "1.0")),
+    "formfactory_port": int(os.environ.get("FORMFACTORY_PORT", "5050")),
+    "browser_headless": True,
+    "action_timeout_s": 5,
+    "rollout_timeout_s": 30,
+    "shuffle_prompts": os.environ.get("SHUFFLE", "true").lower() == "true",
+    "min_nonzero_for_update": int(os.environ.get("MIN_NONZERO", "1")),
+    "early_stop_max_steps": int(os.environ.get("EARLY_STOP_MAX_STEPS", "40")),
+    "reward_weights": {
+        "task_completion": 0.4,
+        "field_accuracy": 0.4,
+        "execution_completeness": 0.2,
+    },
+}
+
+
 DATA_CONFIG = {
     "train_file": os.environ.get("FLOW_TRAIN_FILE", "data/processed/formfactory_sft_train.jsonl"),
     "val_file": os.environ.get("FLOW_VAL_FILE", "data/processed/formfactory_sft_val.jsonl"),
