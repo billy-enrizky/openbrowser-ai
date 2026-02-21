@@ -47,8 +47,11 @@ cors_origins = []
 # ]
 # cognito_oauth_scopes = ["openid", "email", "profile"]
 
-# Auth enforcement: verify JWT in FastAPI (REST + WebSocket)
+# Auth enforcement:
+# - enable_backend_auth: verify JWT in FastAPI (REST + WebSocket)
+# - enable_api_auth: optional extra JWT validation at API Gateway
 enable_backend_auth = true
+enable_api_auth     = false
 
 # Optional: use an existing Secrets Manager secret for backend LLM keys
 # secrets_manager_secret_name = "openbrowser/backend-api-keys"

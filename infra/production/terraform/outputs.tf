@@ -7,6 +7,16 @@ output "aws_region" {
   value       = var.aws_region
 }
 
+output "api_base_url" {
+  description = "API Gateway HTTP API base URL (use for NEXT_PUBLIC_API_URL)"
+  value       = aws_apigatewayv2_api.http.api_endpoint
+}
+
+output "api_ws_url" {
+  description = "WebSocket URL (use for NEXT_PUBLIC_WS_URL)"
+  value       = "wss://${replace(replace(aws_apigatewayv2_api.http.api_endpoint, "https://", ""), "http://", "")}/ws"
+}
+
 output "frontend_url" {
   description = "CloudFront distribution URL for the frontend"
   value       = "https://${aws_cloudfront_distribution.frontend.domain_name}"
