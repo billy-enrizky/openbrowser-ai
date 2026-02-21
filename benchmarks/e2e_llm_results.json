@@ -1,182 +1,24 @@
 {
-  "model": "default",
-  "timestamp": "2026-02-19T01:59:27.607977+00:00",
+  "model": "us.anthropic.claude-sonnet-4-6",
+  "timestamp": "2026-02-19T18:03:16.060046+00:00",
   "servers": {
     "openbrowser": {
       "tasks": [
         {
-          "name": "fact_lookup",
-          "success": true,
-          "duration_s": 264.0,
-          "tool_calls": 11,
-          "result": "Based on the Python Wikipedia page, here's what I found:\n\n- **Creator:** **Guido van Rossum**\n- **Year:** Python was conceived in the **late 1980s** and its implementation began in **December 1989**. It was first released on **20 February 1991** (version 0.9.0).\n\nGuido van Rossum designed Python while working at Centrum Wiskunde & Informatica (CWI) in the Netherlands, as a successor to the ABC programming language.",
-          "error": null
-        },
-        {
-          "name": "form_fill",
-          "success": false,
-          "duration_s": 692.4,
-          "tool_calls": 41,
-          "result": "",
-          "error": null
-        },
-        {
-          "name": "multi_page_extract",
-          "success": true,
-          "duration_s": 156.6,
-          "tool_calls": 4,
-          "result": "Here are the **top 5 stories** currently on Hacker News:\n\n1. **Ladybird: Closing this as we are no longer pursuing Swift adoption**\n2. **Sizing chaos**\n3. **27-year-old Apple iBooks can connect to Wi-Fi and download official updates**\n4. **Cosmologically Unique IDs**\n5. **Zero-day CSS: CVE-2026-2441 exists in the wild**",
-          "error": null
-        },
-        {
-          "name": "search_navigate",
-          "success": true,
-          "duration_s": 306.0,
-          "tool_calls": 11,
-          "result": "Based on the Wikipedia article for **Rust (programming language)**, the answer is:\n\n**Mozilla** originally developed Rust. Specifically, software developer **Graydon Hoare** created Rust in 2006 as a personal project while working at Mozilla. Mozilla then officially sponsored the project in 2009, placing engineers on it to explore using Rust for building a safe web browser engine. The first stable release, Rust 1.0, was published in May 2015. Following Mozilla layoffs in 2020, the **Rust Foundat",
-          "error": null
-        },
-        {
-          "name": "deep_navigation",
-          "success": true,
-          "duration_s": 201.7,
-          "tool_calls": 4,
-          "result": "The latest release of **claude-code** is **v2.1.47**, published today (February 18, 2026).",
-          "error": null
-        },
-        {
           "name": "content_analysis",
           "success": true,
-          "duration_s": 94.4,
-          "tool_calls": 4,
-          "result": "Unfortunately, network access appears to be restricted in this environment, so I can't fetch the page live. However, **example.com** is a well-known, stable page maintained by IANA (Internet Assigned Numbers Authority) whose structure has remained consistent for years. Here is its structure:\n\n---\n\n### Headings: **1**\n| Level | Text |\n|-------|------|\n| `<h1>` | \"Example Domain\" |\n\n### Paragraphs: **2**\n1. *\"This domain is for use in illustrative examples in documents. You may use this domain in ",
+          "duration_s": 15.8,
+          "tool_calls": 1,
+          "result": "Here's the structure of **example.com**:\n\n---\n\n### \ud83d\udcc4 Page: *Example Domain*\n\n| Element | Count | Details |\n|---|---|---|\n| **Headings** | 1 | `<h1>`: \"Example Domain\" |\n| **Links** | 1 | \"Learn more\" \u2192 `https://iana.org/domains/example` |\n| **Paragraphs** | 2 | See below |\n\n### Paragraph Content:\n1. *\"This domain is for use in documentation examples without needing permission. Avoid using it in production...\"* \u2014 a brief explanation of the domain's purpose.\n2. A short paragraph containing the **\"",
           "error": null
         }
       ],
       "summary": {
-        "total_tasks": 6,
-        "passed": 5,
-        "total_duration_s": 1715.1,
-        "total_tool_calls": 75,
-        "avg_tool_calls": 12.5
-      }
-    },
-    "playwright": {
-      "tasks": [
-        {
-          "name": "fact_lookup",
-          "success": true,
-          "duration_s": 85.8,
-          "tool_calls": 8,
-          "result": "I found the answer from the Wikipedia infobox:\n\n**Python was created by Guido van Rossum**, and it **first appeared on 20 February 1991** (34 years ago). He designed the language while working at Centrum Wiskunde & Informatica (CWI) in the Netherlands.",
-          "error": null
-        },
-        {
-          "name": "form_fill",
-          "success": true,
-          "duration_s": 28.1,
-          "tool_calls": 3,
-          "result": "The form was successfully submitted. The response from httpbin.org confirms the data was posted correctly:\n\n- **Customer name**: John Doe\n- **Pizza size**: medium\n- **Topping**: mushroom\n\nAll three fields were received as expected in the form data.",
-          "error": null
-        },
-        {
-          "name": "multi_page_extract",
-          "success": true,
-          "duration_s": 28.2,
-          "tool_calls": 1,
-          "result": "Here are the top 5 stories currently on Hacker News:\n\n1. **Sizing chaos** (pudding.cool) \u2014 266 points, 140 comments\n2. **Ladybird: Closing this as we are no longer pursuing Swift adoption** (github.com/ladybirdbrowser) \u2014 171 points, 117 comments\n3. **27-year-old Apple iBooks can connect to Wi-Fi and download official updates** (reddit.com) \u2014 133 points, 70 comments\n4. **Cosmologically Unique IDs** (jasonfantl.com) \u2014 275 points, 82 comments\n5. **Zero-day CSS: CVE-2026-2441 exists in the wild** (g",
-          "error": null
-        },
-        {
-          "name": "search_navigate",
-          "success": true,
-          "duration_s": 118.6,
-          "tool_calls": 8,
-          "result": "Based on the Wikipedia article for **Rust (programming language)**, the language was originally developed at **Mozilla**. Specifically, software developer **Graydon Hoare** created Rust in 2006 while working at Mozilla, which officially sponsored the project in 2009. The first stable release (Rust 1.0) was published in May 2015. After a Mozilla layoff in August 2020, the **Rust Foundation** was created in February 2021 with sponsorship from Mozilla and four other companies.",
-          "error": null
-        },
-        {
-          "name": "deep_navigation",
-          "success": true,
-          "duration_s": 76.7,
-          "tool_calls": 1,
-          "result": "The latest release of **claude-code** is **v2.1.47**, published on February 18, 2026. It is tagged as \"Latest\" on the releases page.",
-          "error": null
-        },
-        {
-          "name": "content_analysis",
-          "success": true,
-          "duration_s": 82.7,
-          "tool_calls": 4,
-          "result": "Unfortunately, I wasn't able to load example.com due to network restrictions in this environment. However, **example.com** is a well-known, static page maintained by IANA (Internet Assigned Numbers Authority) with a very stable structure. Based on its long-standing content:\n\n### Page Structure of example.com\n\n| Element | Count | Details |\n|---------|-------|---------|\n| **Headings** | **1** | A single `<h1>`: *\"Example Domain\"* |\n| **Paragraphs** | **2** | One explaining it's for use in examples",
-          "error": null
-        }
-      ],
-      "summary": {
-        "total_tasks": 6,
-        "passed": 6,
-        "total_duration_s": 420.1,
-        "total_tool_calls": 25,
-        "avg_tool_calls": 4.2
-      }
-    },
-    "chrome-devtools": {
-      "tasks": [
-        {
-          "name": "fact_lookup",
-          "success": true,
-          "duration_s": 46.7,
-          "tool_calls": 3,
-          "result": "Based on the Python Wikipedia page, here are the key facts:\n\n- **Creator:** **Guido van Rossum**\n- **Year first released:** **1991** (specifically February 20, 1991)\n\nGuido van Rossum designed Python, and it was first released on 20 February 1991. The language is developed and maintained by the **Python Software Foundation**.",
-          "error": null
-        },
-        {
-          "name": "form_fill",
-          "success": true,
-          "duration_s": 49.3,
-          "tool_calls": 3,
-          "result": "The form was successfully submitted. Here's a summary:\n\n- **URL**: `https://httpbin.org/forms/post` \u2192 submitted to `https://httpbin.org/post`\n- **Customer name**: John Doe \u2705\n- **Pizza size**: medium \u2705\n- **Topping**: mushroom \u2705\n\nThe httpbin.org response confirms all three form fields were received correctly in the `form` object:\n- `\"custname\": \"John Doe\"`\n- `\"size\": \"medium\"`\n- `\"topping\": \"mushroom\"`",
-          "error": null
-        },
-        {
-          "name": "multi_page_extract",
-          "success": true,
-          "duration_s": 14.3,
-          "tool_calls": 1,
-          "result": "Here are the top 5 stories currently on Hacker News:\n\n1. **Sizing chaos**\n2. **Ladybird: Closing this as we are no longer pursuing Swift adoption**\n3. **27-year-old Apple iBooks can connect to Wi-Fi and download official updates**\n4. **Cosmologically Unique IDs**\n5. **Zero-day CSS: CVE-2026-2441 exists in the wild**",
-          "error": null
-        },
-        {
-          "name": "search_navigate",
-          "success": true,
-          "duration_s": 22.8,
-          "tool_calls": 3,
-          "result": "Based on my research of the Wikipedia article for **Rust (programming language)**:\n\n**Mozilla** originally developed Rust. The language was created by software developer Graydon Hoare in 2006 while he was working at Mozilla, which then officially sponsored the project in 2009. The first stable release (Rust 1.0) was published in May 2015. After Mozilla layoffs in August 2020, the **Rust Foundation** was created in February 2021, with four other companies joining Mozilla to sponsor the language.",
-          "error": null
-        },
-        {
-          "name": "deep_navigation",
-          "success": true,
-          "duration_s": 13.1,
-          "tool_calls": 1,
-          "result": "The latest release version of **anthropics/claude-code** is **v2.1.47**.",
-          "error": null
-        },
-        {
-          "name": "content_analysis",
-          "success": true,
-          "duration_s": 28.0,
-          "tool_calls": 3,
-          "result": "Unfortunately, I'm unable to directly reach example.com from this environment due to network restrictions. However, **example.com** is a well-known, standardized reference page maintained by IANA (Internet Assigned Numbers Authority). Its structure is extremely simple and stable:\n\n---\n\n### Page Structure of example.com\n\n| Element | Count | Details |\n|---------|-------|---------|\n| **Headings** | **1** | A single `<h1>`: *\"Example Domain\"* |\n| **Paragraphs** | **2** | 1) *\"This domain is for use ",
-          "error": null
-        }
-      ],
-      "summary": {
-        "total_tasks": 6,
-        "passed": 6,
-        "total_duration_s": 174.2,
-        "total_tool_calls": 14,
-        "avg_tool_calls": 2.3
+        "total_tasks": 1,
+        "passed": 1,
+        "total_duration_s": 15.8,
+        "total_tool_calls": 1,
+        "avg_tool_calls": 1.0
       }
     }
   }

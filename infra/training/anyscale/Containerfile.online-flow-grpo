@@ -5,7 +5,7 @@ RUN sudo apt-get update && sudo apt-get install -y \
     libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 \
     libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libgbm1 \
     libasound2 libpango-1.0-0 libpangocairo-1.0-0 libgtk-3-0 \
-    fonts-liberation xdg-utils wget && \
+    fonts-liberation xdg-utils wget git && \
     sudo rm -rf /var/lib/apt/lists/*
 
 # Upgrade numpy + reinstall scipy/pyarrow so all C extensions are
