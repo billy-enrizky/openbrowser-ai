@@ -171,3 +171,17 @@ output "landing_cloudfront_distribution_id" {
   description = "CloudFront distribution ID for landing page (for cache invalidations)"
   value       = aws_cloudfront_distribution.landing.id
 }
+
+# -----------------------------------------------------------------------------
+# Waitlist
+# -----------------------------------------------------------------------------
+
+output "waitlist_api_url" {
+  description = "API Gateway URL for waitlist submissions"
+  value       = aws_apigatewayv2_api.waitlist.api_endpoint
+}
+
+output "waitlist_dynamodb_table" {
+  description = "DynamoDB table name for waitlist entries"
+  value       = aws_dynamodb_table.waitlist.name
+}
