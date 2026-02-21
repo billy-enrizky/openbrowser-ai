@@ -39,7 +39,7 @@ export function VideoDemo() {
           >
             <iframe
               className="aspect-video w-full"
-              src="https://www.youtube.com/embed/4_I53tt1S4Q"
+              src="https://www.youtube.com/embed/ov1rSYd42hE?si=9bu2-9Jx-eV6jPg-"
               title="OpenBrowser Demo"
               allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
               allowFullScreen
