@@ -160,9 +160,6 @@ const integrations: IntegrationCardProps[] = [
   { name: "Roo Code", abbr: "R", color: "bg-amber-600/80", icon: <TerminalSvg /> },
 ];
 
-/* Split into two rows */
-const row1 = integrations;
-const row2 = [...integrations].reverse();
 
 /* ------------------------------------------------------------------ */
 /* Integrations section                                               */
@@ -183,20 +180,12 @@ export function Integrations() {
           </p>
         </div>
 
-        {/* Marquee rows */}
-        <div className="space-y-4">
-          <Marquee pauseOnHover className="[--duration:30s]">
-            {row1.map((item) => (
-              <IntegrationCard key={item.name} {...item} />
-            ))}
-          </Marquee>
-
-          <Marquee pauseOnHover reverse className="[--duration:30s]">
-            {row2.map((item) => (
-              <IntegrationCard key={item.name} {...item} />
-            ))}
-          </Marquee>
-        </div>
+        {/* Marquee */}
+        <Marquee pauseOnHover className="[--duration:30s]">
+          {integrations.map((item) => (
+            <IntegrationCard key={item.name} {...item} />
+          ))}
+        </Marquee>
       </div>
     </section>
   );
