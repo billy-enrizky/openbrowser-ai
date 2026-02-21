@@ -1,7 +1,7 @@
 # OpenBrowser-AI Production Infrastructure (Terraform root)
 #
 # NOTE:
-# - Core infrastructure (VPC, ALB, backend EC2, Cognito, DynamoDB,
+# - Core infrastructure (VPC, ALB, backend EC2, API Gateway, Cognito, DynamoDB,
 #   ECR, Secrets Manager, IAM, etc.) is defined in the other *.tf files in
 #   this directory:
 #     - versions.tf
@@ -10,6 +10,7 @@
 #     - alb.tf
 #     - backend.tf
 #     - rds.tf
+#     - api_gateway.tf
 #     - iam.tf
 #     - ecr.tf
 #     - dynamodb.tf
