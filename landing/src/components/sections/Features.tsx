@@ -336,8 +336,8 @@ export function Features() {
               Live Browser View
             </h3>
             <p className="text-slate-400 mt-2">
-              Watch the agent browse in real-time via VNC streaming. See every
-              click, scroll, and navigation as it happens.
+              Watch your agent browse in real-time via VNC streaming.
+              See every click, scroll, and navigation live.
             </p>
             <BrowserMockup />
           </FeatureCard>
