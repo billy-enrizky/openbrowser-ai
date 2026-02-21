@@ -23,7 +23,7 @@ function TaskCodeBlock() {
         <span className="text-cyan-400">from</span>
         <span className="text-slate-300"> openbrowser </span>
         <span className="text-cyan-400">import</span>
-        <span className="text-slate-300"> Agent, ChatBrowserUse</span>
+        <span className="text-slate-300"> CodeAgent</span>
       </div>
       <div>
         <span className="text-cyan-400">from</span>
@@ -45,22 +45,13 @@ function TaskCodeBlock() {
         <span className="text-slate-400">():</span>
       </div>
       <div>
-        <span className="text-slate-300">    llm = </span>
-        <span className="text-violet-400">ChatBrowserUse</span>
-        <span className="text-slate-400">()</span>
-      </div>
-      <div>
         <span className="text-slate-300">    agent = </span>
-        <span className="text-violet-400">Agent</span>
+        <span className="text-violet-400">CodeAgent</span>
         <span className="text-slate-400">(</span>
       </div>
       <div>
         <span className="text-slate-300">        task=</span>
         <span className="text-green-400">&quot;Find the #1 post on Show HN&quot;</span>
-        <span className="text-slate-400">,</span>
-      </div>
-      <div>
-        <span className="text-slate-300">        llm=llm</span>
         <span className="text-slate-400">,</span>
       </div>
       <div>
