@@ -296,14 +296,14 @@ TASKS = [
 # ---------------------------------------------------------------------------
 
 SERVERS = {
+    "playwright": {
+        "command": "npx",
+        "args": ["@playwright/mcp@latest"],
+    },
     "openbrowser": {
         "command": "uvx",
         "args": ["openbrowser-ai[mcp]==0.1.26", "--mcp"],
         "env": {"TIMEOUT_BrowserStartEvent": "60"},
-    },
-    "playwright": {
-        "command": "npx",
-        "args": ["@playwright/mcp@latest"],
     },
     "chrome-devtools": {
         "command": "npx",
