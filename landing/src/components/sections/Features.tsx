@@ -309,8 +309,7 @@ export function Features() {
               Any LLM Provider
             </h3>
             <p className="text-slate-400 mt-2">
-              Works with Google Gemini, OpenAI GPT, Anthropic Claude, and any
-              OpenAI-compatible endpoint.
+              Works with 12 LLM providers out of the box, plus any OpenAI-compatible endpoint.
             </p>
             <ProviderPills />
           </FeatureCard>
