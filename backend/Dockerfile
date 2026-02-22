@@ -50,7 +50,7 @@ RUN cd backend && uv pip install -e . --system
 COPY pyproject.toml .
 COPY src/ src/
 COPY README.md .
-ENV SETUPTOOLS_SCM_PRETEND_VERSION=0.1.26
+ENV SETUPTOOLS_SCM_PRETEND_VERSION=0.1.27
 RUN uv pip install -e . --system
 
 # Install python-xlib for the X11 key grabber daemon (kiosk security)
