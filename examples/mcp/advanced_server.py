@@ -2,33 +2,37 @@
 Advanced example of building an AI assistant that uses openbrowser MCP server.
 
 This example shows how to build a more sophisticated MCP client that:
-- Connects to multiple MCP servers (openbrowser + filesystem)
-- Orchestrates complex multi-step workflows
-- Handles errors and retries
-- Provides a conversational interface
+- Connects to the openbrowser MCP server via stdio
+- Orchestrates complex multi-step workflows using execute_code
+- Leverages persistent namespace for stateful automation
+- Handles errors gracefully
 
 Prerequisites:
 1. Install required packages:
-   pip install 'openbrowser-ai[cli]'
+   pip install mcp
 
-2. Start the openbrowser MCP server:
-   uvx 'openbrowser[cli]' --mcp
-
-3. Run this example:
+2. Run this example (it starts the server automatically):
    python advanced_server.py
 
-This demonstrates real-world usage patterns for the MCP protocol.
+This demonstrates real-world usage patterns for the MCP protocol
+with openbrowser's single execute_code tool.
 """
 
 import asyncio
-import json
-from dataclasses import dataclass
+import logging
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
-from mcp.types import TextContent, Tool
+from mcp.types import TextContent
+
+logging.basicConfig(
+	level=logging.INFO,
+	format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+)
+logger = logging.getLogger("advanced_server")
 
 
 @dataclass
@@ -38,287 +42,251 @@ class TaskResult:
 	success: bool
 	data: Any
 	error: str | None = None
-	timestamp: datetime | None = None
-
-	def __post_init__(self):
-		if self.timestamp is None:
-			self.timestamp = datetime.now()
+	timestamp: datetime = field(default_factory=datetime.now)
 
 
-class AIAssistant:
-	"""An AI assistant that uses MCP servers to perform complex tasks."""
+class BrowserAssistant:
+	"""An assistant that uses openbrowser MCP server for complex browser workflows."""
 
 	def __init__(self):
-		self.servers: dict[str, ClientSession] = {}
-		self.tools: dict[str, Tool] = {}
+		self._session: ClientSession | None = None
 		self.history: list[TaskResult] = []
 
-	async def connect_server(self, name: str, command: str, args: list[str], env: dict[str, str] | None = None):
-		"""Connect to an MCP server and discover its tools."""
-		print(f'\n🔌 Connecting to {name} server...')
-
-		server_params = StdioServerParameters(command=command, args=args, env=env or {})
-
-		try:
-			# Create connection
-			read, write = await stdio_client(server_params).__aenter__()
-			session = ClientSession(read, write)
-			await session.__aenter__()
-			await session.initialize()
-
-			# Store session
-			self.servers[name] = session
-
-			# Discover tools
-			tools_result = await session.list_tools()
-			tools = tools_result.tools
-			for tool in tools:
-				# Prefix tool names with server name to avoid conflicts
-				prefixed_name = f'{name}.{tool.name}'
-				self.tools[prefixed_name] = tool
-				print(f'  ✓ Discovered: {prefixed_name}')
-
-			print(f'✅ Connected to {name} with {len(tools)} tools')
-
-		except Exception as e:
-			print(f'❌ Failed to connect to {name}: {e}')
-			raise
-
-	async def disconnect_all(self):
-		"""Disconnect from all MCP servers."""
-		for name, session in self.servers.items():
-			try:
-				await session.__aexit__(None, None, None)
-				print(f'📴 Disconnected from {name}')
-			except Exception as e:
-				print(f'⚠️ Error disconnecting from {name}: {e}')
-
-	async def call_tool(self, tool_name: str, arguments: dict[str, Any]) -> TaskResult:
-		"""Call a tool on the appropriate MCP server."""
-		# Parse server and tool name
-		if '.' not in tool_name:
-			return TaskResult(False, None, "Invalid tool name format. Use 'server.tool'")
-
-		server_name, actual_tool_name = tool_name.split('.', 1)
-
-		# Check if server is connected
-		if server_name not in self.servers:
-			return TaskResult(False, None, f"Server '{server_name}' not connected")
-
-		# Call the tool
-		try:
-			session = self.servers[server_name]
-			result = await session.call_tool(actual_tool_name, arguments)
-
-			# Extract text content
-			text_content = [c.text for c in result.content if isinstance(c, TextContent)]
-			data = text_content[0] if text_content else str(result.content)
-
-			task_result = TaskResult(True, data)
-			self.history.append(task_result)
-			return task_result
-
-		except Exception as e:
-			error_result = TaskResult(False, None, str(e))
-			self.history.append(error_result)
-			return error_result
-
-	async def search_and_save(self, query: str, output_file: str) -> TaskResult:
-		"""Search for information and save results to a file."""
-		print(f'\n🔍 Searching for: {query}')
-
-		# Step 1: Navigate to search engine
-		print('  1️⃣ Opening DuckDuckGo...')
-		nav_result = await self.call_tool('browser.browser_navigate', {'url': f'https://duckduckgo.com/?q={query}'})
-		if not nav_result.success:
-			return nav_result
-
-		await asyncio.sleep(2)  # Wait for page load
-
-		# Step 2: Get search results
-		print('  2️⃣ Extracting search results...')
-		extract_result = await self.call_tool(
-			'browser.browser_extract_content',
-			{'query': 'Extract the top 5 search results with titles and descriptions', 'extract_links': True},
+	async def connect(self):
+		"""Connect to the openbrowser MCP server."""
+		logger.info("Connecting to openbrowser MCP server...")
+		server_params = StdioServerParameters(
+			command="uvx", args=["openbrowser-ai[mcp]", "--mcp"], env={}
 		)
-		if not extract_result.success:
-			return extract_result
+		self._read_ctx = stdio_client(server_params)
+		read, write = await self._read_ctx.__aenter__()
+		self._session_ctx = ClientSession(read, write)
+		self._session = await self._session_ctx.__aenter__()
+		await self._session.initialize()
 
-		# Step 3: Save to file (if filesystem server is connected)
-		if 'filesystem' in self.servers:
-			print(f'  3️⃣ Saving results to {output_file}...')
-			save_result = await self.call_tool(
-				'filesystem.write_file',
-				{'path': output_file, 'content': f'Search Query: {query}\n\nResults:\n{extract_result.data}'},
+		tools_result = await self._session.list_tools()
+		logger.info(
+			"Connected. Tools: %s",
+			[t.name for t in tools_result.tools],
+		)
+
+	async def disconnect(self):
+		"""Disconnect from the MCP server."""
+		if self._session:
+			try:
+				await self._session_ctx.__aexit__(None, None, None)
+				await self._read_ctx.__aexit__(None, None, None)
+				logger.info("Disconnected from openbrowser server")
+			except Exception:
+				logger.exception("Error during disconnect")
+			self._session = None
+
+	async def execute(self, code: str) -> TaskResult:
+		"""Execute Python code via the execute_code tool and return a TaskResult."""
+		if not self._session:
+			return TaskResult(False, None, "Not connected")
+		try:
+			result = await self._session.call_tool(
+				"execute_code", arguments={"code": code}
 			)
-			if save_result.success:
-				print(f'  ✅ Results saved to {output_file}')
-		else:
-			print('  ⚠️ Filesystem server not connected, skipping save')
+			text_parts = [
+				c.text for c in result.content if isinstance(c, TextContent)
+			]
+			data = "\n".join(text_parts) if text_parts else str(result.content)
+			task_result = TaskResult(True, data)
+		except Exception as exc:
+			task_result = TaskResult(False, None, str(exc))
+		self.history.append(task_result)
+		return task_result
 
-		return extract_result
+	async def search_and_extract(self, query: str) -> TaskResult:
+		"""Search DuckDuckGo and extract top results."""
+		logger.info("Searching for: %s", query)
 
-	async def monitor_page_changes(self, url: str, duration: int = 10, interval: int = 2):
+		# Navigate to search results
+		result = await self.execute(
+			f'await navigate("https://duckduckgo.com/?q={query}")\n'
+			"await wait(2)"
+		)
+		if not result.success:
+			return result
+
+		# Extract search results using JS
+		result = await self.execute(
+			"results = await evaluate(\"\"\"\n"
+			"  Array.from(document.querySelectorAll('.result__title, .result__a, [data-testid=\"result-title-a\"]'))\n"
+			"    .slice(0, 5)\n"
+			"    .map(el => ({text: el.textContent.trim(), href: el.href}))\n"
+			"\"\"\")\n"
+			"for i, r in enumerate(results, 1):\n"
+			"    print(f'{i}. {r[\"text\"]}')\n"
+			"    print(f'   {r[\"href\"]}')"
+		)
+		logger.info("Search results extracted: %s", "OK" if result.success else "FAILED")
+		return result
+
+	async def monitor_page(self, url: str, duration: int = 10, interval: int = 3) -> TaskResult:
 		"""Monitor a webpage for changes over time."""
-		print(f'\n📊 Monitoring {url} for {duration} seconds...')
+		logger.info("Monitoring %s for %ds...", url, duration)
 
-		# Navigate to page
-		await self.call_tool('browser.browser_navigate', {'url': url})
-		await asyncio.sleep(2)
+		# Navigate and set up monitoring state
+		result = await self.execute(
+			f'await navigate("{url}")\n'
+			"await wait(2)\n"
+			"monitor_snapshots = []"
+		)
+		if not result.success:
+			return result
 
-		changes = []
-		start_time = datetime.now()
+		# Collect snapshots
+		n_snapshots = duration // interval
+		for i in range(n_snapshots):
+			result = await self.execute(
+				"import datetime as _dt\n"
+				"state = await browser.get_browser_state_summary()\n"
+				"monitor_snapshots.append({\n"
+				"    'timestamp': _dt.datetime.now().isoformat(),\n"
+				"    'title': state.title,\n"
+				"    'n_elements': len(state.dom_state.selector_map),\n"
+				"})\n"
+				f'print(f"Snapshot {len(monitor_snapshots)}: {{state.title}} ({{len(state.dom_state.selector_map)}} elements)")'
+			)
+			if i < n_snapshots - 1:
+				await asyncio.sleep(interval)
 
-		while (datetime.now() - start_time).seconds < duration:
-			# Get current state
-			state_result = await self.call_tool('browser.browser_get_state', {'include_screenshot': False})
+		# Summary
+		result = await self.execute(
+			"print(f'Collected {len(monitor_snapshots)} snapshots')\n"
+			"for s in monitor_snapshots:\n"
+			"    print(f'  {s[\"timestamp\"]}: {s[\"title\"]} ({s[\"n_elements\"]} elements)')"
+		)
+		return result
 
-			if state_result.success:
-				state = json.loads(state_result.data)
-				changes.append(
-					{
-						'timestamp': datetime.now().isoformat(),
-						'title': state.get('title', ''),
-						'element_count': len(state.get('interactive_elements', [])),
-					}
-				)
-				print(f'  📸 Captured state at {changes[-1]["timestamp"]}')
+	async def fill_form(self, url: str, form_data: dict[str, str]) -> TaskResult:
+		"""Navigate to a form, discover fields, and fill them."""
+		logger.info("Form filling workflow for %s", url)
 
-			await asyncio.sleep(interval)
+		# Navigate
+		result = await self.execute(
+			f'await navigate("{url}")\n'
+			"await wait(2)"
+		)
+		if not result.success:
+			return result
 
-		return TaskResult(True, changes)
+		# Discover form fields
+		result = await self.execute(
+			"state = await browser.get_browser_state_summary()\n"
+			"form_fields = []\n"
+			"for idx, elem in state.dom_state.selector_map.items():\n"
+			"    if elem.tag_name in ('input', 'textarea', 'select'):\n"
+			"        attrs = elem.attributes\n"
+			"        name = attrs.get('name', attrs.get('id', attrs.get('placeholder', '')))\n"
+			"        form_fields.append({'index': idx, 'tag': elem.tag_name, 'name': name, 'type': attrs.get('type', '')})\n"
+			"        print(f'  [{idx}] <{elem.tag_name}> name={name} type={attrs.get(\"type\", \"\")}')\n"
+			"print(f'Found {len(form_fields)} form fields')"
+		)
+		if not result.success:
+			return result
 
-	async def fill_form_workflow(self, form_url: str, form_data: dict[str, str]):
-		"""Navigate to a form and fill it out."""
-		print(f'\n📝 Form filling workflow for {form_url}')
+		# Fill each field by matching name
+		for field_name, field_value in form_data.items():
+			result = await self.execute(
+				"matched = False\n"
+				"for f in form_fields:\n"
+				f"    if '{field_name}'.lower() in f['name'].lower():\n"
+				f"        await input_text(f['index'], '{field_value}')\n"
+				f"        print(f'Filled {{f[\"name\"]}} with {field_value}')\n"
+				"        matched = True\n"
+				"        break\n"
+				"if not matched:\n"
+				f"    print(f'No match for field: {field_name}')"
+			)
 
-		# Step 1: Navigate to form
-		print('  1️⃣ Navigating to form...')
-		nav_result = await self.call_tool('browser.browser_navigate', {'url': form_url})
-		if not nav_result.success:
-			return nav_result
+		return TaskResult(True, {"url": url, "fields": list(form_data.keys())})
 
-		await asyncio.sleep(2)
+	async def multi_tab_comparison(self, sites: list[tuple[str, str]]) -> TaskResult:
+		"""Open multiple sites in tabs and compare their titles."""
+		logger.info("Multi-tab comparison: %d sites", len(sites))
 
-		# Step 2: Get form elements
-		print('  2️⃣ Analyzing form elements...')
-		state_result = await self.call_tool('browser.browser_get_state', {'include_screenshot': False})
+		for i, (name, url) in enumerate(sites):
+			new_tab = "True" if i > 0 else "False"
+			result = await self.execute(
+				f'await navigate("{url}", new_tab={new_tab})\n'
+				"await wait(2)\n"
+				"state = await browser.get_browser_state_summary()\n"
+				f'print(f"{name}: {{state.title}}")'
+			)
+			if not result.success:
+				logger.warning("Failed to open %s: %s", name, result.error)
 
-		if not state_result.success:
-			return state_result
-
-		state = json.loads(state_result.data)
-
-		# Step 3: Fill form fields
-		print('  3️⃣ Filling form fields...')
-		filled_fields = []
-
-		for element in state.get('interactive_elements', []):
-			# Look for input fields
-			if element.get('tag') in ['input', 'textarea']:
-				# Try to match field by placeholder or nearby text
-				for field_name, field_value in form_data.items():
-					element_text = str(element).lower()
-					if field_name.lower() in element_text:
-						print(f'    ✏️ Filling {field_name}...')
-						type_result = await self.call_tool(
-							'browser.browser_type', {'index': element['index'], 'text': field_value}
-						)
-						if type_result.success:
-							filled_fields.append(field_name)
-						await asyncio.sleep(0.5)
-						break
-
-		return TaskResult(True, {'filled_fields': filled_fields, 'form_data': form_data, 'url': form_url})
+		# List all tabs
+		result = await self.execute(
+			"state = await browser.get_browser_state_summary()\n"
+			"print(f'Open tabs: {len(state.tabs)}')\n"
+			"for tab in state.tabs:\n"
+			"    print(f'  {tab.title} - {tab.url}')"
+		)
+		return result
 
 
 async def main():
 	"""Main demonstration of advanced MCP client usage."""
-	print('OpenBrowser MCP Client - Advanced Example')
-	print('=' * 50)
+	logger.info("OpenBrowser MCP Client - Advanced Example")
+	logger.info("=" * 50)
 
-	assistant = AIAssistant()
+	assistant = BrowserAssistant()
 
 	try:
-		# Connect to openbrowser MCP server
-		await assistant.connect_server(name='browser', command='uvx', args=['openbrowser[cli]', '--mcp'])
-
-		# Optionally connect to filesystem server
-		# Note: Uncomment to enable file operations
-		# await assistant.connect_server(
-		#     name="filesystem",
-		#     command="npx",
-		#     args=["@modelcontextprotocol/server-filesystem", "."]
-		# )
-
-		print('\n' + '=' * 50)
-		print('Starting demonstration workflows...')
-		print('=' * 50)
+		await assistant.connect()
 
 		# Demo 1: Search and extract
-		print('\n📌 Demo 1: Web Search and Extraction')
-		search_result = await assistant.search_and_save(query='MCP protocol browser automation', output_file='search_results.txt')
-		print(f'Search completed: {"✅" if search_result.success else "❌"}')
+		logger.info("--- Demo 1: Web Search and Extraction ---")
+		await assistant.search_and_extract("MCP protocol browser automation")
 
 		# Demo 2: Multi-tab comparison
-		print('\n📌 Demo 2: Multi-tab News Comparison')
-		news_sites = [('BBC News', 'https://bbc.com/news'), ('CNN', 'https://cnn.com'), ('Reuters', 'https://reuters.com')]
-
-		for i, (name, url) in enumerate(news_sites):
-			print(f'\n  📰 Opening {name}...')
-			await assistant.call_tool('browser.browser_navigate', {'url': url, 'new_tab': i > 0})
-			await asyncio.sleep(2)
-
-		# List all tabs
-		tabs_result = await assistant.call_tool('browser.browser_list_tabs', {})
-		if tabs_result.success:
-			tabs = json.loads(tabs_result.data)
-			print(f'\n  📑 Opened {len(tabs)} news sites:')
-			for tab in tabs:
-				print(f'    - Tab {tab["index"]}: {tab["title"]}')
+		logger.info("--- Demo 2: Multi-tab Comparison ---")
+		await assistant.multi_tab_comparison([
+			("BBC News", "https://bbc.com/news"),
+			("CNN", "https://cnn.com"),
+			("Reuters", "https://reuters.com"),
+		])
 
 		# Demo 3: Form filling
-		print('\n📌 Demo 3: Automated Form Filling')
-		form_result = await assistant.fill_form_workflow(
-			form_url='https://httpbin.org/forms/post',
-			form_data={
-				'custname': 'AI Assistant',
-				'custtel': '555-0123',
-				'custemail': 'ai@example.com',
-				'comments': 'Testing MCP browser automation',
+		logger.info("--- Demo 3: Automated Form Filling ---")
+		await assistant.fill_form(
+			"https://httpbin.org/forms/post",
+			{
+				"custname": "AI Assistant",
+				"custtel": "555-0123",
+				"custemail": "ai@example.com",
+				"comments": "Testing MCP browser automation",
 			},
 		)
-		if form_result.success:
-			print(f'  ✅ Filled {len(form_result.data["filled_fields"])} fields')
 
 		# Demo 4: Page monitoring
-		print('\n📌 Demo 4: Dynamic Page Monitoring')
-		monitor_result = await assistant.monitor_page_changes(url='https://time.is/', duration=10, interval=3)
-		if monitor_result.success:
-			print(f'  📊 Collected {len(monitor_result.data)} snapshots')
+		logger.info("--- Demo 4: Page Monitoring ---")
+		await assistant.monitor_page("https://time.is/", duration=9, interval=3)
 
-		# Summary
-		print('\n' + '=' * 50)
-		print('📊 Session Summary')
-		print('=' * 50)
-
+		# Session summary
 		success_count = sum(1 for r in assistant.history if r.success)
 		total_count = len(assistant.history)
+		logger.info("=" * 50)
+		logger.info("Session Summary")
+		logger.info("  Total operations: %d", total_count)
+		logger.info("  Successful: %d", success_count)
+		logger.info("  Failed: %d", total_count - success_count)
+		if total_count > 0:
+			logger.info("  Success rate: %.1f%%", success_count / total_count * 100)
 
-		print(f'Total operations: {total_count}')
-		print(f'Successful: {success_count}')
-		print(f'Failed: {total_count - success_count}')
-		print(f'Success rate: {success_count / total_count * 100:.1f}%')
-
-	except Exception as e:
-		print(f'\n❌ Fatal error: {e}')
+	except Exception:
+		logger.exception("Fatal error")
 
 	finally:
-		# Always disconnect
-		print('\n🧹 Cleaning up...')
-		await assistant.disconnect_all()
-		print('✨ Demo complete!')
+		logger.info("Cleaning up...")
+		await assistant.disconnect()
+		logger.info("Demo complete")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
 	asyncio.run(main())
