@@ -101,7 +101,6 @@ The MCP server exposes a single `execute_code` tool that runs Python code in a p
 
 ## Benchmark: Token Efficiency
 
-<<<<<<< HEAD
 ### E2E LLM Benchmark (6 Real-World Tasks, N=5 runs)
 
 Six browser tasks run through Claude Sonnet 4.6 on AWS Bedrock (Converse API). The LLM autonomously decides which tools to call. All three servers pass **6/6 tasks**. 5 runs per server with 10,000-sample bootstrap CIs. Bedrock API tokens measured from the Converse API `usage` field.
@@ -133,35 +132,6 @@ MCP tool response sizes show the architectural difference. Playwright and Chrome
 | search_navigate | 519,241 chars | 595,590 chars | 2,848 chars |
 | deep_navigation | 14,875 chars | 195 chars | 113 chars |
 | content_analysis | 485 chars | 501 chars | 499 chars |
-=======
-### E2E LLM Benchmark (6 Real-World Tasks)
-
-Six browser tasks run through Claude Sonnet 4.6 on AWS Bedrock. The LLM autonomously decides which tools to call. All three servers pass **6/6 tasks**. Token usage measured from actual MCP tool response sizes.
-
-| MCP Server | Tools | Response Tokens | Tool Calls | vs OpenBrowser |
-|------------|------:|----------------:|-----------:|---------------:|
-| **Playwright MCP** | 22 | 283,853 | 10 | **170x more tokens** |
-| **Chrome DevTools MCP** (Google) | 26 | 301,030 | 21 | **181x more tokens** |
-| **OpenBrowser MCP** | 1 | **1,665** | 20 | baseline |
-
-### Cost per Benchmark Run (6 Tasks)
-
-| Model | Playwright MCP | Chrome DevTools MCP | OpenBrowser MCP |
-|-------|---------------:|--------------------:|----------------:|
-| Claude Sonnet ($3/M) | $0.852 | $0.903 | **$0.005** |
-| Claude Opus ($15/M) | $4.258 | $4.515 | **$0.025** |
-
-### Per-Task Response Size
-
-| Task | Playwright MCP | Chrome DevTools MCP | OpenBrowser MCP |
-|------|---------------:|--------------------:|----------------:|
-| fact_lookup | 477,003 chars | 509,059 chars | 1,041 chars |
-| form_fill | 4,075 chars | 3,150 chars | 2,410 chars |
-| multi_page_extract | 58,099 chars | 38,593 chars | 513 chars |
-| search_navigate | 518,461 chars | 594,458 chars | 1,996 chars |
-| deep_navigation | 77,292 chars | 58,359 chars | 113 chars |
-| content_analysis | 493 chars | 513 chars | 594 chars |
->>>>>>> origin/main
 
 Playwright completes tasks in fewer tool calls (1-2 per task) because it dumps the full a11y snapshot on every navigation. OpenBrowser takes more round-trips but each response is compact -- the code extracts only what's needed.
 
