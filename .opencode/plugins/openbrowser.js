@@ -52,13 +52,23 @@ export const OpenBrowserPlugin = async ({ client, directory }) => {
       : 'No OpenBrowser skills found in skills directory.';
 
     return `<openbrowser-context>
-You have access to OpenBrowser -- AI-powered browser automation tools via MCP.
+You have access to OpenBrowser -- AI-powered browser automation via MCP.
 
-The OpenBrowser MCP server provides browser control tools: browser_navigate, browser_click,
-browser_type, browser_get_state, browser_get_text, browser_grep, browser_search_elements,
-browser_find_and_scroll, browser_get_accessibility_tree, browser_execute_js, browser_scroll,
-browser_go_back, browser_list_tabs, browser_switch_tab, browser_close_tab,
-browser_list_sessions, browser_close_session, browser_close_all.
+The OpenBrowser MCP server exposes a single \`execute_code\` tool that runs Python code
+in a persistent namespace with async browser automation functions. Variables and state
+persist between calls. All browser functions are async -- use \`await\`.
+
+Available functions in the execute_code namespace:
+- Navigation: navigate(url, new_tab=False), go_back(), wait(seconds)
+- Interaction: click(index), input_text(index, text, clear=True), send_keys(keys)
+- Dropdowns: select_dropdown(index, text), dropdown_options(index)
+- Scrolling: scroll(down=True, pages=1.0, index=None)
+- Tabs: switch(tab_id), close(tab_id)
+- Files: upload_file(index, path)
+- JavaScript: evaluate(code) -- execute JS in page context, returns Python objects
+- State: browser.get_browser_state_summary() -- get page state with interactive elements
+- Completion: done(text, success=True) -- signal task complete
+- Libraries: json, csv, re, datetime, requests, asyncio, Path, numpy, pandas, matplotlib, BeautifulSoup
 
 ${skillList}
 
