@@ -2,8 +2,7 @@
 
 **Automating Walmart Product Scraping:**
 
-https://github.com/user-attachments/assets/ae5d74ce-0ac6-46b0-b02b-ff5518b4b20d
-
+https://github.com/user-attachments/assets/c517c739-9199-47b0-bac7-c2c642a21094
 
 **OpenBrowserAI Automatic Flight Booking:**
 
