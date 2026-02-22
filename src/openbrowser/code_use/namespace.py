@@ -560,6 +560,15 @@ def create_namespace(
 						if i < len(field_names):
 							kwargs[field_names[i]] = arg
 
+				# Guard: catch index=None before Pydantic validation for a clear error
+				if 'index' in kwargs and kwargs['index'] is None:
+					field_info = par_model.model_fields.get('index')
+					if field_info and field_info.is_required():
+						raise ValueError(
+							f'{act_name}() requires a valid element index, got index=None. '
+							f'Read the current browser state and use an [i_N] index from the DOM tree.'
+						)
+
 				# Create params from kwargs
 				try:
 					params = par_model(**kwargs)
