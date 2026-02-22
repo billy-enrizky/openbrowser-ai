@@ -60,10 +60,6 @@ JOB_CONFIGS = {
     "eval-fsdfm-flow-grpo": JOBS_DIR / "eval_fsdfm_flow_grpo_job.yaml",
     "refusion-flow-grpo": JOBS_DIR / "refusion_flow_grpo_job.yaml",
     "eval-refusion-flow-grpo": JOBS_DIR / "eval_refusion_flow_grpo_job.yaml",
-    "espo-refusion": JOBS_DIR / "espo_refusion_job.yaml",
-    "espo-fsdfm": JOBS_DIR / "espo_fsdfm_job.yaml",
-    "eval-espo-refusion": JOBS_DIR / "eval_espo_refusion_job.yaml",
-    "eval-espo-fsdfm": JOBS_DIR / "eval_espo_fsdfm_job.yaml",
 }
 
 # Secret env vars to inject from .env into Anyscale jobs
