@@ -2,16 +2,13 @@
 Simple example of connecting to openbrowser MCP server as a client.
 
 This example demonstrates how to use the MCP client library to connect to
-a running openbrowser MCP server and call its browser automation tools.
+a running openbrowser MCP server and call its single execute_code tool.
 
 Prerequisites:
 1. Install required packages:
-   pip install 'openbrowser-ai[cli]'
+   pip install mcp
 
-2. Start the openbrowser MCP server in a separate terminal:
-   uvx openbrowser-ai[mcp] --mcp
-
-3. Run this client example:
+2. Run this client example (it starts the server automatically via stdio):
    python simple_server.py
 
 This shows the actual MCP protocol flow between a client and the openbrowser server.
@@ -19,120 +16,138 @@ This shows the actual MCP protocol flow between a client and the openbrowser ser
 
 import asyncio
 import json
+import logging
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from mcp.types import TextContent
+
+logging.basicConfig(
+	level=logging.INFO,
+	format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+)
+logger = logging.getLogger("simple_server")
 
 
 async def run_simple_browser_automation():
 	"""Connect to openbrowser MCP server and perform basic browser automation."""
 
 	# Create connection parameters for the openbrowser MCP server
-	server_params = StdioServerParameters(command='uvx', args=['openbrowser', '--mcp'], env={})
+	server_params = StdioServerParameters(
+		command="uvx", args=["openbrowser-ai[mcp]", "--mcp"], env={}
+	)
 
 	async with stdio_client(server_params) as (read, write):
 		async with ClientSession(read, write) as session:
 			# Initialize the connection
 			await session.initialize()
 
-			print('✅ Connected to openbrowser MCP server')
+			logger.info("Connected to openbrowser MCP server")
 
-			# List available tools
+			# List available tools -- should be exactly 1: execute_code
 			tools_result = await session.list_tools()
 			tools = tools_result.tools
-			print(f'\n📋 Available tools: {len(tools)}')
+			logger.info("Available tools: %d", len(tools))
 			for tool in tools:
-				print(f'  - {tool.name}: {tool.description}')
+				logger.info("  - %s: %s", tool.name, tool.description[:80])
 
-			# Example 1: Navigate to a website
-			print('\n🌐 Navigating to example.com...')
-			result = await session.call_tool('browser_navigate', arguments={'url': 'https://example.com'})
-			# Handle different content types
+			# Example 1: Navigate to a website and get the title
+			logger.info("Navigating to example.com...")
+			result = await session.call_tool(
+				"execute_code",
+				arguments={
+					"code": (
+						'await navigate("https://example.com")\n'
+						"state = await browser.get_browser_state_summary()\n"
+						'print(f"Title: {state.title}")\n'
+						'print(f"URL: {state.url}")'
+					)
+				},
+			)
 			content = result.content[0]
 			if isinstance(content, TextContent):
-				print(f'Result: {content.text}')
-			else:
-				print(f'Result: {content}')
+				logger.info("Result:\n%s", content.text)
 
-			# Example 2: Get the current browser state
-			print('\n🔍 Getting browser state...')
-			result = await session.call_tool('browser_get_state', arguments={'include_screenshot': False})
-			# Handle different content types
+			# Example 2: Variable persistence across calls
+			logger.info("Testing variable persistence...")
+			await session.call_tool(
+				"execute_code",
+				arguments={"code": 'saved_title = "example.com visited"'},
+			)
+			result = await session.call_tool(
+				"execute_code",
+				arguments={"code": "print(saved_title)"},
+			)
 			content = result.content[0]
 			if isinstance(content, TextContent):
-				state = json.loads(content.text)
-			else:
-				state = json.loads(str(content))
-			print(f'Page title: {state["title"]}')
-			print(f'URL: {state["url"]}')
-			print(f'Interactive elements found: {len(state["interactive_elements"])}')
+				logger.info("Persisted variable: %s", content.text)
 
-			# Example 3: Open a new tab
-			print('\n📑 Opening Python.org in a new tab...')
-			result = await session.call_tool('browser_navigate', arguments={'url': 'https://python.org', 'new_tab': True})
-			# Handle different content types
+			# Example 3: Use evaluate() for JS execution
+			logger.info("Running JavaScript in page context...")
+			result = await session.call_tool(
+				"execute_code",
+				arguments={
+					"code": (
+						"links = await evaluate(\n"
+						'    "Array.from(document.querySelectorAll(\'a\')).map(a => ({text: a.textContent, href: a.href}))"\n'
+						")\n"
+						"for link in links:\n"
+						'    print(f"  {link[\'text\']}: {link[\'href\']}")'
+					)
+				},
+			)
 			content = result.content[0]
 			if isinstance(content, TextContent):
-				print(f'Result: {content.text}')
-			else:
-				print(f'Result: {content}')
+				logger.info("Links found:\n%s", content.text)
 
-			# Example 4: List all open tabs
-			print('\n📋 Listing all tabs...')
-			result = await session.call_tool('browser_list_tabs', arguments={})
-			# Handle different content types
+			# Example 4: Get interactive elements and click one
+			logger.info("Getting interactive elements...")
+			result = await session.call_tool(
+				"execute_code",
+				arguments={
+					"code": (
+						"state = await browser.get_browser_state_summary()\n"
+						"for idx, elem in state.dom_state.selector_map.items():\n"
+						'    print(f"  [{idx}] <{elem.tag_name}> {elem.get_all_children_text(max_depth=1)[:60]}")'
+					)
+				},
+			)
 			content = result.content[0]
 			if isinstance(content, TextContent):
-				tabs = json.loads(content.text)
-			else:
-				tabs = json.loads(str(content))
-			for tab in tabs:
-				print(f'  Tab {tab["index"]}: {tab["title"]} - {tab["url"]}')
+				logger.info("Elements:\n%s", content.text)
 
-			# Example 5: Click on an element
-			print('\n👆 Looking for clickable elements...')
-			state_result = await session.call_tool('browser_get_state', arguments={'include_screenshot': False})
-			# Handle different content types
-			content = state_result.content[0]
+			# Example 5: Open a new tab and list tabs
+			logger.info("Opening python.org in a new tab...")
+			result = await session.call_tool(
+				"execute_code",
+				arguments={
+					"code": (
+						'await navigate("https://python.org", new_tab=True)\n'
+						"state = await browser.get_browser_state_summary()\n"
+						'print(f"Current page: {state.title}")\n'
+						"for tab in state.tabs:\n"
+						'    print(f"  Tab: {tab.title} - {tab.url}")'
+					)
+				},
+			)
+			content = result.content[0]
 			if isinstance(content, TextContent):
-				state = json.loads(content.text)
-			else:
-				state = json.loads(str(content))
+				logger.info("Tabs:\n%s", content.text)
 
-			# Find a link to click
-			link_element = None
-			for elem in state['interactive_elements']:
-				if elem['tag'] == 'a' and elem.get('href'):
-					link_element = elem
-					break
-
-			if link_element:
-				print(f'Clicking on link: {link_element.get("text", "unnamed")[:50]}...')
-				result = await session.call_tool('browser_click', arguments={'index': link_element['index']})
-				# Handle different content types
-				content = result.content[0]
-				if isinstance(content, TextContent):
-					print(f'Result: {content.text}')
-				else:
-					print(f'Result: {content}')
-
-			print('\n✨ Simple browser automation demo complete!')
+			logger.info("Simple browser automation demo complete")
 
 
 async def main():
 	"""Main entry point."""
-	print('OpenBrowser MCP Client - Simple Example')
-	print('=' * 50)
-	print('\nConnecting to openbrowser MCP server...\n')
+	logger.info("OpenBrowser MCP Client - Simple Example")
+	logger.info("=" * 50)
 
 	try:
 		await run_simple_browser_automation()
-	except Exception as e:
-		print(f'\n❌ Error: {e}')
-		print('\nMake sure the openbrowser MCP server is running:')
-		print("  uvx 'openbrowser[cli]' --mcp")
+	except Exception:
+		logger.exception("Error running demo")
+		logger.info("Make sure openbrowser-ai[mcp] is installed: pip install openbrowser-ai[mcp]")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
 	asyncio.run(main())
