@@ -13,12 +13,13 @@ from pathlib import Path
 
 labels = ["Playwright MCP", "Chrome DevTools MCP", "OpenBrowser MCP"]
 
-# Duration (seconds) -- mean +/- std
-duration_mean = np.array([92.2, 128.8, 103.1])
-duration_std = np.array([11.4, 6.2, 16.4])
+# Duration (seconds) -- mean +/- std (from docs/comparison.mdx E2E benchmark)
+duration_mean = np.array([62.7, 103.4, 77.0])
+duration_std = np.array([4.8, 2.7, 6.7])
 
 # Response tokens (estimated from MCP tool response chars / 4)
-response_tokens = np.array([283_853, 301_030, 1_665])
+# Playwright: 1,132,173/4 = 283,043 | Chrome DevTools: 1,147,244/4 = 286,811 | OpenBrowser: 7,853/4 = 1,963
+response_tokens = np.array([283_043, 286_811, 1_963])
 
 # Colors
 COLORS = ["#818cf8", "#fbbf24", "#34d399"]       # indigo-400, amber-400, emerald-400
@@ -98,9 +99,9 @@ for i, (tok, dur, label) in enumerate(zip(response_tokens, duration_mean, labels
 
 # "170x fewer tokens" callout arrow from mid-chart to OpenBrowser dot
 ax.annotate(
-    "170x fewer tokens",
+    "144x fewer response tokens",
     xy=(response_tokens[2] * 1.5, duration_mean[2] + 2),
-    xytext=(15_000, 150),
+    xytext=(15_000, 120),
     fontsize=13,
     fontweight="800",
     color="#34d399",
@@ -122,7 +123,7 @@ ax.set_ylabel("Duration (seconds)", fontsize=12, fontweight="600",
               color=TEXT, labelpad=10)
 ax.set_xscale("log")
 ax.set_xlim(800, 600_000)
-ax.set_ylim(55, 160)
+ax.set_ylim(40, 130)
 
 # X-axis formatter
 def token_fmt(val, pos):
@@ -152,21 +153,21 @@ ax.text(
 # Ideal zone
 ax.annotate(
     "ideal",
-    xy=(1_200, 62),
+    xy=(1_200, 46),
     fontsize=10, fontstyle="italic", fontweight="500",
     color="#4ade80", alpha=0.5,
     ha="center",
 )
 ax.annotate(
     "",
-    xy=(900, 58),
-    xytext=(1_800, 58),
+    xy=(900, 42),
+    xytext=(1_800, 42),
     arrowprops=dict(arrowstyle="<-", color="#4ade80", linewidth=1.2, alpha=0.4),
 )
 ax.annotate(
     "",
-    xy=(900, 58),
-    xytext=(900, 66),
+    xy=(900, 42),
+    xytext=(900, 50),
     arrowprops=dict(arrowstyle="<-", color="#4ade80", linewidth=1.2, alpha=0.4),
 )
 
@@ -178,5 +179,9 @@ fig.savefig(out_path, dpi=200, bbox_inches="tight", facecolor=fig.get_facecolor(
 docs_path = Path(__file__).parent.parent / "docs" / "images" / "benchmark_comparison.png"
 fig.savefig(docs_path, dpi=200, bbox_inches="tight", facecolor=fig.get_facecolor())
 
+landing_path = Path(__file__).parent.parent / "landing" / "public" / "benchmark_comparison.png"
+fig.savefig(landing_path, dpi=200, bbox_inches="tight", facecolor=fig.get_facecolor())
+
 print(f"Saved to {out_path}")
 print(f"Saved to {docs_path}")
+print(f"Saved to {landing_path}")
