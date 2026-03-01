@@ -10,6 +10,7 @@ import os
 import subprocess
 
 from openbrowser import BrowserSession, Tools
+from openbrowser.code_use.namespace import evaluate as js_evaluate
 
 from infra.training.shared.online_reward import BrowserOutcome
 
@@ -362,6 +363,24 @@ class BrowserEnvironment:
         except Exception as e:
             logger.warning(f"Failed to check success page: {e}")
             return False
+
+    async def bypass_html5_validation(self) -> None:
+        """Inject novalidate on all forms to bypass HTML5 client-side validation.
+
+        Construction-manufacturing forms have required file upload fields the
+        agent cannot populate.  Without novalidate, the browser blocks the
+        POST request entirely, producing task_completion=0 regardless of
+        field accuracy.
+        """
+        try:
+            await js_evaluate(
+                "(function(){ document.querySelectorAll('form').forEach("
+                "f => f.setAttribute('novalidate', '')); return 'ok'; })()",
+                self.browser_session,
+            )
+            logger.debug("Injected novalidate on all forms")
+        except Exception as e:
+            logger.warning("Failed to inject novalidate: %s", e)
 
     async def reset(self) -> None:
         """Reset browser state between rollouts."""
