@@ -330,6 +330,7 @@ async def train():
     min_reward_variance = config.get("min_reward_variance", 0.01)
     temperature_spread = config.get("temperature_spread", 0.0)
     top_p = config.get("top_p", 0.95)
+    epsilon = config.get("epsilon", 0.0)
 
     # Early stopping config
     es_patience = config.get("early_stopping_patience", 50)
@@ -454,7 +455,8 @@ async def train():
 
                     # Execute actions in browser
                     outcome = await browser_env.execute_actions(
-                        actions, timeout_per_action=action_timeout
+                        actions, timeout_per_action=action_timeout,
+                        epsilon=epsilon,
                     )
 
                     # Compute reward from browser outcome
