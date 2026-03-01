@@ -230,6 +230,45 @@ def generate_rollouts(
     return responses, all_sequences, prompt_length
 
 
+def generate_single_action(
+    model, tokenizer, prompt: str, max_new_tokens: int = 64,
+    temperature: float = 1.0, top_p: float = 0.95,
+) -> tuple[str, torch.Tensor, int]:
+    """Generate a single action response for multi-turn mode.
+
+    Returns:
+        response_text: The generated action text.
+        sequence: Full input+output token IDs [1, seq_len].
+        prompt_length: Number of prompt tokens.
+    """
+    prompt_with_skip = prompt + "<think>\n</think>\n"
+    inputs = tokenizer(prompt_with_skip, return_tensors="pt").to(model.device)
+    prompt_length = inputs.input_ids.shape[1]
+
+    model.eval()
+    model.config.use_cache = True
+
+    with torch.no_grad():
+        outputs = model.generate(
+            **inputs,
+            max_new_tokens=max_new_tokens,
+            num_return_sequences=1,
+            do_sample=True,
+            temperature=temperature,
+            top_p=top_p,
+            return_dict_in_generate=True,
+            output_scores=False,
+        )
+
+    model.config.use_cache = False
+
+    response_text = tokenizer.decode(
+        outputs.sequences[0][prompt_length:], skip_special_tokens=True
+    ).strip()
+
+    return response_text, outputs.sequences, prompt_length
+
+
 def compute_per_token_log_probs(
     model, input_ids: torch.Tensor, attention_mask: torch.Tensor, prompt_length: int
 ) -> tuple[torch.Tensor, torch.Tensor]:
