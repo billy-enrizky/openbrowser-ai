@@ -66,9 +66,10 @@ Available functions in the execute_code namespace:
 - Tabs: switch(tab_id), close(tab_id)
 - Files: upload_file(index, path)
 - JavaScript: evaluate(code) -- execute JS in page context, returns Python objects
+- Downloads: download_file(url, filename=None) -- download files using browser cookies, list_downloads() -- list downloaded files
 - State: browser.get_browser_state_summary() -- get page state with interactive elements
 - Completion: done(text, success=True) -- signal task complete
-- Libraries: json, csv, re, datetime, requests, asyncio, Path, numpy, pandas, matplotlib, BeautifulSoup
+- Libraries: json, csv, re, datetime, requests, asyncio, Path, numpy, pandas, matplotlib, BeautifulSoup, pypdf
 
 ${skillList}
 
@@ -78,6 +79,7 @@ Use OpenCode's native skill tool to load OpenBrowser skills when relevant:
   skill load openbrowser/e2e-testing
   skill load openbrowser/page-analysis
   skill load openbrowser/accessibility-audit
+  skill load openbrowser/file-download
 
 **Tool Mapping:**
 - Read, Write, Edit, Bash -- use your native tools

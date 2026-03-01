@@ -58,6 +58,7 @@ You should see a symlink pointing to the openbrowser plugin skills directory.
 | `e2e-testing` | Test web apps by simulating user interactions |
 | `page-analysis` | Analyze page content, structure, metadata |
 | `accessibility-audit` | Audit pages for WCAG compliance |
+| `file-download` | Download files (PDFs, CSVs) using browser session |
 
 ## Updating
 
