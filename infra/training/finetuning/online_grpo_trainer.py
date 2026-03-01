@@ -505,6 +505,10 @@ async def train():
     temperature_spread = config.get("temperature_spread", 0.0)
     top_p = config.get("top_p", 0.95)
     epsilon = config.get("epsilon", 0.0)
+    multi_turn = config.get("multi_turn", False)
+    max_turns = config.get("max_turns", 15)
+    if multi_turn:
+        logger.info("Multi-turn mode enabled: max_turns=%d", max_turns)
 
     # Early stopping config
     es_patience = config.get("early_stopping_patience", 50)
@@ -573,6 +577,93 @@ async def train():
                     )
                     continue
 
+                if multi_turn:
+                    # Multi-turn: generate one action at a time with DOM re-observation
+                    rewards = []
+                    all_turn_sequences = []
+                    all_turn_prompt_lengths = []
+
+                    for g in range(group_size):
+                        reward, seqs, pls = await execute_multiturn_rollout(
+                            model, tokenizer, browser_env,
+                            instruction, form_url, ground_truth_fields,
+                            config, rollout_idx=g,
+                        )
+                        rewards.append(reward)
+                        all_turn_sequences.append(seqs)
+                        all_turn_prompt_lengths.append(pls)
+
+                    epoch_rewards.extend(rewards)
+
+                    # Same skip logic as single-turn
+                    all_zero = all(r == 0.0 for r in rewards)
+                    reward_mean = sum(rewards) / len(rewards) if rewards else 0
+                    reward_var = (
+                        sum((r - reward_mean) ** 2 for r in rewards)
+                        / max(len(rewards) - 1, 1)
+                        if len(rewards) > 1 else 0.0
+                    )
+
+                    if all_zero or reward_var < min_reward_variance:
+                        total_steps += 1
+                        continue
+
+                    advantages = compute_grpo_advantages(rewards, group_size)
+                    advantages_t = torch.tensor(
+                        advantages, dtype=torch.float32, device=model.device
+                    )
+
+                    total_pg_loss = torch.tensor(0.0, device=model.device)
+                    total_kl = torch.tensor(0.0, device=model.device)
+                    total_tokens = 0
+
+                    for g in range(group_size):
+                        for seq, pl in zip(
+                            all_turn_sequences[g], all_turn_prompt_lengths[g]
+                        ):
+                            attn = torch.ones_like(seq)
+                            policy_lp, mask = compute_per_token_log_probs(
+                                model, seq, attn, pl
+                            )
+                            with torch.no_grad():
+                                ref_lp, _ = compute_per_token_log_probs(
+                                    ref_model, seq, attn, pl
+                                )
+                            tokens = mask.sum().clamp(min=1)
+                            turn_lp = (policy_lp * mask).sum() / tokens
+                            total_pg_loss = total_pg_loss - advantages_t[g] * turn_lp
+
+                            log_r = ref_lp - policy_lp
+                            r = torch.exp(log_r)
+                            kl_per_token = r - log_r - 1
+                            total_kl = total_kl + (kl_per_token * mask).sum()
+                            total_tokens += int(tokens.item())
+
+                    if total_tokens > 0:
+                        pg_loss = total_pg_loss / group_size
+                        kl_div = total_kl / max(total_tokens, 1)
+                        loss = pg_loss + kl_coeff * kl_div
+
+                        optimizer.zero_grad()
+                        loss.backward()
+                        torch.nn.utils.clip_grad_norm_(trainable_params, 1.0)
+                        optimizer.step()
+
+                        gradient_update_count += 1
+                        avg_reward = sum(rewards) / len(rewards)
+                        es_reward_window.append(avg_reward)
+                        logger.info(
+                            "Step %d [multi-turn]: avg_reward=%.3f, "
+                            "pg_loss=%.4f, kl=%.4f, grad_update=%d",
+                            total_steps, avg_reward,
+                            pg_loss.item(), kl_div.item(),
+                            gradient_update_count,
+                        )
+
+                    total_steps += 1
+                    continue  # Skip the single-turn code below
+
+                # --- Single-turn mode (default) ---
                 prompt_text = format_chat_prompt(instruction)
 
                 # Generate G rollouts
