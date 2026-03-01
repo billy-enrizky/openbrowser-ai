@@ -7,9 +7,12 @@ interface for executing parsed action sequences in a real browser.
 import asyncio
 import logging
 import os
+import random
+import string
 import subprocess
 
 from openbrowser import BrowserSession, Tools
+from openbrowser.code_use.namespace import evaluate as js_evaluate
 
 from infra.training.shared.online_reward import BrowserOutcome
 
@@ -102,6 +105,26 @@ SUCCESS_INDICATORS = [
     "form submitted",
     "success",
 ]
+
+
+def _perturb_text_value(value: str) -> str:
+    """Apply a random perturbation to a text value for epsilon-greedy exploration."""
+    if not value or len(value) < 2:
+        return value
+    perturbation = random.choice(["swap", "truncate", "append", "delete"])
+    if perturbation == "swap":
+        idx = random.randint(0, len(value) - 2)
+        chars = list(value)
+        chars[idx], chars[idx + 1] = chars[idx + 1], chars[idx]
+        return "".join(chars)
+    elif perturbation == "truncate":
+        cut = max(1, int(len(value) * 0.75))
+        return value[:cut]
+    elif perturbation == "append":
+        return value + random.choice(string.ascii_lowercase)
+    else:  # delete
+        idx = random.randint(0, len(value) - 1)
+        return value[:idx] + value[idx + 1:]
 
 
 class BrowserEnvironment:
@@ -246,6 +269,7 @@ class BrowserEnvironment:
         self,
         actions: list[dict],
         timeout_per_action: float = 5.0,
+        epsilon: float = 0.0,
     ) -> BrowserOutcome:
         """Execute a sequence of parsed action dicts in the browser.
 
@@ -277,6 +301,16 @@ class BrowserEnvironment:
             # Extract field tracking metadata before passing to openbrowser
             field_name = params.pop("field_name", None)
             is_checkbox = params.pop("is_checkbox", False)
+
+            # Epsilon-greedy: perturb text values for exploration diversity
+            if epsilon > 0 and random.random() < epsilon:
+                if action_name == "input_text" and "text" in params:
+                    original = params["text"]
+                    params["text"] = _perturb_text_value(original)
+                    logger.debug(
+                        "Epsilon-greedy: perturbed '%s' -> '%s' for %s",
+                        original, params["text"], field_name or "unknown",
+                    )
 
             # Map parser action names to openbrowser Tools method names
             tools_method = ACTION_NAME_MAP.get(action_name, action_name)
@@ -362,6 +396,44 @@ class BrowserEnvironment:
         except Exception as e:
             logger.warning(f"Failed to check success page: {e}")
             return False
+
+    async def get_dom_summary(self, max_chars: int = 800) -> str:
+        """Get a truncated DOM text representation for multi-turn prompts.
+
+        Uses openbrowser's llm_representation() and truncates to stay within
+        the token budget (~200 tokens at ~4 chars/token).
+        """
+        try:
+            state = await self.browser_session.get_browser_state_summary(
+                include_screenshot=False
+            )
+            if state.dom_state:
+                dom_text = state.dom_state.llm_representation()
+                if len(dom_text) > max_chars:
+                    dom_text = dom_text[:max_chars] + "\n[DOM truncated]"
+                return dom_text
+            return ""
+        except Exception as e:
+            logger.warning("Failed to get DOM summary: %s", e)
+            return ""
+
+    async def bypass_html5_validation(self) -> None:
+        """Inject novalidate on all forms to bypass HTML5 client-side validation.
+
+        Construction-manufacturing forms have required file upload fields the
+        agent cannot populate.  Without novalidate, the browser blocks the
+        POST request entirely, producing task_completion=0 regardless of
+        field accuracy.
+        """
+        try:
+            await js_evaluate(
+                "(function(){ document.querySelectorAll('form').forEach("
+                "f => f.setAttribute('novalidate', '')); return 'ok'; })()",
+                self.browser_session,
+            )
+            logger.debug("Injected novalidate on all forms")
+        except Exception as e:
+            logger.warning("Failed to inject novalidate: %s", e)
 
     async def reset(self) -> None:
         """Reset browser state between rollouts."""
