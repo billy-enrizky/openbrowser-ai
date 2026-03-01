@@ -86,7 +86,25 @@ from openbrowser.code_use.namespace import create_namespace
 from openbrowser.config import get_default_profile, load_openbrowser_config
 from openbrowser.tools.service import CodeAgentTools
 
+try:
+	from openbrowser.filesystem.file_system import FileSystem
+
+	FILESYSTEM_AVAILABLE = True
+except ModuleNotFoundError:
+	FILESYSTEM_AVAILABLE = False
+except Exception:
+	FILESYSTEM_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
+
+_MCP_WORKSPACE_DIR = Path.home() / 'Downloads' / 'openbrowser-mcp' / 'workspace'
+
+
+def _create_mcp_file_system() -> Any:
+	"""Create a FileSystem instance for MCP mode, or None if unavailable."""
+	if not FILESYSTEM_AVAILABLE:
+		return None
+	return FileSystem(base_dir=str(_MCP_WORKSPACE_DIR), create_default_files=False)
 
 
 def _ensure_all_loggers_use_stderr():
@@ -202,6 +220,15 @@ _EXECUTE_CODE_DESCRIPTION = """Execute Python code in a persistent namespace wit
 - `await evaluate(code: str)` -- Execute JavaScript in the browser page context and return the result as a Python object. Auto-wraps code in an IIFE if not already wrapped. Returns Python dicts/lists/primitives directly. Raises EvaluateError on JS errors.
   Example: `data = await evaluate('document.title')` returns the page title string.
   Example: `items = await evaluate('Array.from(document.querySelectorAll(".item")).map(e => e.textContent)')` returns a Python list of strings.
+
+## File Downloads
+
+- `await download_file(url: str, filename: str | None = None)` -- Download a file from a URL using the browser's cookies and session. Returns the absolute path to the downloaded file. Preserves authentication -- uses the browser's JavaScript fetch internally, so cookies and login sessions carry over. Falls back to Python requests if browser fetch fails.
+  IMPORTANT: When you need to download a PDF or any file, use download_file() -- do NOT use navigate() for downloads. navigate() opens the PDF in the browser viewer but does not save the file.
+  Example: `path = await download_file('https://example.com/report.pdf')`
+  Example: `path = await download_file('https://example.com/data', filename='export.csv')`
+  After downloading, read PDFs with: `reader = PdfReader(path); text = reader.pages[0].extract_text()`
+- `list_downloads()` -- List all files in the downloads directory. Returns a list of absolute file paths.
 
 ## CSS Selectors
 
@@ -392,6 +419,7 @@ class OpenBrowserServer:
 		self._namespace = create_namespace(
 			browser_session=self.browser_session,
 			tools=self._tools,
+			file_system=_create_mcp_file_system(),
 		)
 
 	async def _is_cdp_alive(self) -> bool:
@@ -455,10 +483,12 @@ class OpenBrowserServer:
 
 		# 4. Rebuild namespace with the new session (preserving user variables)
 		old_ns = self._namespace or {}
+
 		self._tools = CodeAgentTools()
 		self._namespace = create_namespace(
 			browser_session=self.browser_session,
 			tools=self._tools,
+			file_system=_create_mcp_file_system(),
 		)
 		# Copy user-defined variables from old namespace
 		for key, val in old_ns.items():
