@@ -66,6 +66,7 @@ Both should show symlinks pointing to the openbrowser directories.
 | `e2e-testing` | Test web apps by simulating user interactions |
 | `page-analysis` | Analyze page content, structure, metadata |
 | `accessibility-audit` | Audit pages for WCAG compliance |
+| `file-download` | Download files (PDFs, CSVs) using browser session |
 
 ## Usage
 
