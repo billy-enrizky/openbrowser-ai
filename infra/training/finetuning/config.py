@@ -82,6 +82,8 @@ ONLINE_GRPO_CONFIG = {
     "temperature_spread": float(os.environ.get("TEMPERATURE_SPREAD", "0.0")),  # Per-rollout temperature spread for diversity (0 = uniform temp)
     "top_p": float(os.environ.get("TOP_P", "0.95")),
     "epsilon": float(os.environ.get("EPSILON", "0.0")),  # Epsilon-greedy action perturbation rate
+    "multi_turn": os.environ.get("MULTI_TURN", "false").lower() == "true",
+    "max_turns": int(os.environ.get("MAX_TURNS", "15")),
     "browser_headless": True,
     "action_timeout_s": 10,  # Increased from 5s -- v10 hit timeouts on long descriptions
     "reward_weights": {
