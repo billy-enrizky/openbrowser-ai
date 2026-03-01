@@ -33,7 +33,7 @@ from infra.training.finetuning.config import DATA_CONFIG, ONLINE_GRPO_CONFIG
 from infra.training.shared.action_parser import parse_rollout_to_actions
 from infra.training.shared.browser_env import BrowserEnvironment
 from infra.training.shared.formfactory_server import FormFactoryServer
-from infra.training.shared.online_reward import compute_online_reward
+from infra.training.shared.online_reward import BrowserOutcome, compute_online_reward
 from infra.training.shared.reward_functions import compute_grpo_advantages
 from infra.training.shared.utils import (
     format_chat_prompt,
@@ -267,6 +267,103 @@ def generate_single_action(
     ).strip()
 
     return response_text, outputs.sequences, prompt_length
+
+
+async def execute_multiturn_rollout(
+    model, tokenizer, browser_env, instruction, form_url,
+    ground_truth_fields, config, rollout_idx,
+):
+    """Execute a single multi-turn rollout: one action per turn with DOM re-observation.
+
+    Returns:
+        reward: Terminal reward for the full episode.
+        all_sequences: List of [1, seq_len] tensors (one per turn).
+        all_prompt_lengths: List of prompt lengths (one per turn).
+    """
+    max_turns = config.get("max_turns", 15)
+    temperature = config.get("temperature", 1.0)
+    top_p = config.get("top_p", 0.95)
+    action_timeout = config.get("action_timeout_s", 10.0)
+
+    action_history = []
+    all_sequences = []
+    all_prompt_lengths = []
+    filled_values = {}
+    total_executed = 0
+    total_attempted = 0
+    success_detected = False
+
+    await browser_env.reset()
+    try:
+        await browser_env.tools.navigate(
+            url=form_url, new_tab=False,
+            browser_session=browser_env.browser_session,
+        )
+        await asyncio.sleep(0.5)
+        await browser_env.bypass_html5_validation()
+    except Exception as e:
+        logger.warning("Multi-turn nav failed for rollout %d: %s", rollout_idx, e)
+        return 0.0, [], []
+
+    for turn in range(1, max_turns + 1):
+        dom_state = await browser_env.get_dom_summary(max_chars=800)
+        element_map = await browser_env.get_element_map()
+
+        prompt = format_multiturn_prompt(
+            instruction, dom_state, action_history, turn
+        )
+
+        response_text, sequences, prompt_length = generate_single_action(
+            model, tokenizer, prompt,
+            max_new_tokens=64, temperature=temperature, top_p=top_p,
+        )
+
+        all_sequences.append(sequences)
+        all_prompt_lengths.append(prompt_length)
+
+        if "DONE" in response_text.upper():
+            logger.debug("Rollout %d: DONE at turn %d", rollout_idx, turn)
+            break
+
+        actions = parse_rollout_to_actions(response_text, element_map)
+
+        if not actions:
+            action_history.append(f"Turn {turn}: {response_text[:50]} -> PARSE_FAILED")
+            total_attempted += 1
+            continue
+
+        total_attempted += 1
+        outcome = await browser_env.execute_actions(
+            [actions[0]], timeout_per_action=action_timeout
+        )
+
+        if outcome.actions_executed > 0:
+            total_executed += 1
+            filled_values.update(outcome.submitted_values)
+            action_history.append(f"Turn {turn}: {response_text[:60]} -> OK")
+        else:
+            action_history.append(
+                f"Turn {turn}: {response_text[:60]} -> ERROR: {outcome.error}"
+            )
+
+        if outcome.success_page_detected:
+            success_detected = True
+            break
+
+    final_outcome = BrowserOutcome(
+        success_page_detected=success_detected,
+        submitted_values=filled_values,
+        error=None,
+        actions_executed=total_executed,
+        total_actions=max(total_attempted, 1),
+    )
+
+    reward = compute_online_reward(
+        final_outcome, ground_truth_fields,
+        weights=config.get("reward_weights"),
+    )
+
+    return reward, all_sequences, all_prompt_lengths
 
 
 def compute_per_token_log_probs(
