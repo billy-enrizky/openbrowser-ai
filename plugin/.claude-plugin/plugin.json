@@ -1,6 +1,6 @@
 {
   "name": "openbrowser",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "description": "AI-powered browser automation -- lets Claude control real web browsers to navigate, click, type, extract content, and automate workflows",
   "author": {
     "name": "OpenBrowser Team",
@@ -17,6 +17,7 @@
     "mcp",
     "openbrowser",
     "web-automation",
-    "ai-agent"
+    "ai-agent",
+    "file-download"
   ]
 }
