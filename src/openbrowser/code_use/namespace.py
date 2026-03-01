@@ -5,13 +5,16 @@ similar to a Jupyter notebook environment.
 """
 
 import asyncio
+import base64
 import csv
 import datetime
 import json
 import logging
+import os
 import re
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote, urlparse
 
 import requests
 
@@ -540,6 +543,160 @@ def create_namespace(
 		raise ValueError(f'Could not generate selector for element index {index}')
 
 	namespace['get_selector_from_index'] = get_selector_from_index_wrapper
+
+	# Add download_file function for downloading files via browser session
+	async def download_file(url: str, filename: str | None = None) -> str:
+		"""Download a file from a URL using the browser's cookies and session.
+
+		Uses JavaScript fetch in the browser context to preserve authentication
+		and cookies. Falls back to Python requests if browser fetch fails.
+
+		Args:
+			url: The URL to download
+			filename: Optional filename. Auto-derived from URL if not provided.
+
+		Returns:
+			Absolute path to the downloaded file
+		"""
+		# Validate URL
+		parsed_url = urlparse(url)
+		if not parsed_url.scheme or not parsed_url.netloc:
+			raise ValueError(f'Invalid URL: {url}')
+		if parsed_url.scheme not in ('http', 'https'):
+			raise ValueError(f'Unsupported URL scheme: {parsed_url.scheme}')
+
+		# Determine downloads directory
+		dl_path = browser_session.browser_profile.downloads_path
+		if not dl_path:
+			dl_path = str(Path.home() / 'Downloads' / 'openbrowser-mcp')
+		dl_dir = Path(str(dl_path)).expanduser().resolve()
+		dl_dir.mkdir(parents=True, exist_ok=True)
+
+		# Determine filename from URL if not provided
+		if not filename:
+			filename = Path(unquote(parsed_url.path)).name or 'download'
+			if '.' not in filename:
+				filename = filename + '.pdf'
+
+		# Sanitize filename: strip path components to prevent traversal
+		filename = Path(filename).name
+		if not filename or filename in ('.', '..'):
+			filename = 'download.pdf'
+
+		# Resolve and verify final path stays inside downloads directory
+		final_path = (dl_dir / filename).resolve()
+		if not str(final_path).startswith(str(dl_dir)):
+			raise ValueError(f'Invalid filename: path traversal detected')
+
+		# Handle filename conflicts
+		if final_path.exists():
+			stem = final_path.stem
+			ext = final_path.suffix
+			counter = 1
+			while (dl_dir / f'{stem} ({counter}){ext}').exists():
+				counter += 1
+			filename = f'{stem} ({counter}){ext}'
+			final_path = dl_dir / filename
+
+		# Strategy 1: Browser JS fetch (preserves cookies/auth)
+		js_error = None
+		try:
+			cdp_session = await browser_session.get_or_create_cdp_session()
+			escaped_url = json.dumps(url)
+
+			result = await asyncio.wait_for(
+				cdp_session.cdp_client.send.Runtime.evaluate(
+					params={
+						'expression': f"""(async () => {{
+	const response = await fetch({escaped_url}, {{ cache: 'force-cache' }});
+	if (!response.ok) throw new Error('HTTP ' + response.status);
+	const buf = await response.arrayBuffer();
+	const bytes = new Uint8Array(buf);
+	let binary = '';
+	const chunkSize = 32768;
+	for (let i = 0; i < bytes.length; i += chunkSize) {{
+		const chunk = bytes.subarray(i, Math.min(i + chunkSize, bytes.length));
+		let s = '';
+		for (let j = 0; j < chunk.length; j++) s += String.fromCharCode(chunk[j]);
+		binary += s;
+	}}
+	return {{ base64: btoa(binary), size: bytes.length, type: response.headers.get('content-type') || '' }};
+}})()""",
+						'awaitPromise': True,
+						'returnByValue': True,
+					},
+					session_id=cdp_session.session_id,
+				),
+				timeout=120.0,
+			)
+
+			# Check for JS exception
+			if result.get('exceptionDetails'):
+				exc_details = result['exceptionDetails']
+				js_error = exc_details.get('text', '') or str(
+					exc_details.get('exception', {}).get('description', 'Unknown JS error')
+				)
+			else:
+				data = result.get('result', {}).get('value', {})
+				if data and data.get('base64'):
+					try:
+						file_bytes = base64.b64decode(data['base64'])
+					except Exception as b64_err:
+						js_error = f'Invalid base64 encoding: {b64_err}'
+					else:
+						with open(final_path, 'wb') as f:
+							f.write(file_bytes)
+						size_kb = len(file_bytes) / 1024
+						logger.info(f'Downloaded {filename} ({size_kb:.1f} KB) via browser fetch')
+						return str(final_path)
+				else:
+					js_error = 'No data received from browser fetch'
+		except asyncio.TimeoutError:
+			js_error = 'Browser fetch timed out after 120s'
+		except Exception as e:
+			js_error = f'{type(e).__name__}: {e}'
+
+		# Strategy 2: Python requests fallback (no browser cookies)
+		try:
+			response = requests.get(url, timeout=120, stream=True)
+			response.raise_for_status()
+			with open(final_path, 'wb') as f:
+				for chunk in response.iter_content(chunk_size=8192):
+					f.write(chunk)
+			file_size = final_path.stat().st_size
+			size_kb = file_size / 1024
+			logger.info(f'Downloaded {filename} ({size_kb:.1f} KB) via Python requests (fallback)')
+			return str(final_path)
+		except Exception as req_error:
+			if js_error:
+				raise RuntimeError(
+					f'Download failed.\n'
+					f'  Browser fetch error: {js_error}\n'
+					f'  Python requests error: {req_error}'
+				)
+			raise
+
+	namespace['download_file'] = download_file
+
+	# Add list_downloads helper
+	def list_downloads() -> list[str]:
+		"""List all files in the downloads directory.
+
+		Returns:
+			List of absolute paths to downloaded files, sorted by name.
+		"""
+		dl_path = browser_session.browser_profile.downloads_path
+		if not dl_path:
+			return []
+		dl_dir = Path(str(dl_path)).expanduser().resolve()
+		try:
+			if not dl_dir.exists():
+				return []
+			return sorted([str(f) for f in dl_dir.iterdir() if f.is_file()])
+		except (FileNotFoundError, PermissionError):
+			return []
+
+	namespace['list_downloads'] = list_downloads
 
 	# Inject all tools as functions into the namespace
 	# Skip 'evaluate' since we have a custom implementation above

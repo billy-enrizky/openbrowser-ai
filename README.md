@@ -220,7 +220,7 @@ claude plugin marketplace add billy-enrizky/openbrowser-ai
 claude plugin install openbrowser@openbrowser-ai
 ```
 
-This installs the MCP server and 5 built-in skills:
+This installs the MCP server and 6 built-in skills:
 
 | Skill | Description |
 |-------|-------------|
@@ -229,6 +229,7 @@ This installs the MCP server and 5 built-in skills:
 | `e2e-testing` | Test web apps by simulating user interactions |
 | `page-analysis` | Analyze page content, structure, metadata |
 | `accessibility-audit` | Audit pages for WCAG compliance |
+| `file-download` | Download files (PDFs, CSVs) using browser session |
 
 See [plugin/README.md](plugin/README.md) for detailed tool parameter documentation.
 
@@ -383,6 +384,7 @@ The MCP server exposes a single `execute_code` tool that runs Python code in a p
 | **Dropdowns** | `select_dropdown(index, text)`, `dropdown_options(index)` |
 | **Tabs** | `switch(tab_id)`, `close(tab_id)` |
 | **JavaScript** | `evaluate(code)`: run JS in page context, returns Python objects |
+| **Downloads** | `download_file(url, filename)`: download a file using browser cookies, `list_downloads()`: list downloaded files |
 | **State** | `browser.get_browser_state_summary()`: get page metadata and interactive elements |
 | **CSS** | `get_selector_from_index(index)`: get CSS selector for an element |
 | **Completion** | `done(text, success)`: signal task completion |
