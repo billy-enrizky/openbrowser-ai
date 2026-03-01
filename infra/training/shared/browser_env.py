@@ -397,6 +397,26 @@ class BrowserEnvironment:
             logger.warning(f"Failed to check success page: {e}")
             return False
 
+    async def get_dom_summary(self, max_chars: int = 800) -> str:
+        """Get a truncated DOM text representation for multi-turn prompts.
+
+        Uses openbrowser's llm_representation() and truncates to stay within
+        the token budget (~200 tokens at ~4 chars/token).
+        """
+        try:
+            state = await self.browser_session.get_browser_state_summary(
+                include_screenshot=False
+            )
+            if state.dom_state:
+                dom_text = state.dom_state.llm_representation()
+                if len(dom_text) > max_chars:
+                    dom_text = dom_text[:max_chars] + "\n[DOM truncated]"
+                return dom_text
+            return ""
+        except Exception as e:
+            logger.warning("Failed to get DOM summary: %s", e)
+            return ""
+
     async def bypass_html5_validation(self) -> None:
         """Inject novalidate on all forms to bypass HTML5 client-side validation.
 
