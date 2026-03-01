@@ -49,6 +49,44 @@ logger = logging.getLogger(__name__)
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
+MULTI_TURN_SYSTEM_PROMPT = (
+    "You are a web browser automation agent. You will be given a task and the "
+    "current state of a web page. Generate exactly ONE action to perform next.\n"
+    "Available actions:\n"
+    "- Type 'value' into the 'field' field\n"
+    "- Select 'option' from the 'field' field\n"
+    "- Click on the 'field' checkbox\n"
+    "- Click the 'Submit' button\n"
+    "When all fields are filled and the form is submitted, output: DONE"
+)
+
+
+def format_multiturn_prompt(
+    instruction: str,
+    dom_state: str,
+    action_history: list[str],
+    turn: int,
+) -> str:
+    """Format a multi-turn prompt with DOM state and action history."""
+    history_text = ""
+    if action_history:
+        history_text = "\n\nPrevious actions:\n" + "\n".join(action_history)
+
+    user_content = (
+        f"Task: {instruction}\n\n"
+        f"Current page state (turn {turn}):\n{dom_state}"
+        f"{history_text}\n\n"
+        f"Generate the next action:"
+    )
+
+    return (
+        "<|im_start|>system\n"
+        f"{MULTI_TURN_SYSTEM_PROMPT}\n"
+        "<|im_end|>\n"
+        f"<|im_start|>user\n{user_content}\n<|im_end|>\n"
+        "<|im_start|>assistant\n"
+    )
+
 
 def load_prompts(file_path: str, max_samples: int = 0, shuffle: bool = True) -> list[dict]:
     """Load prompts for GRPO rollouts.
