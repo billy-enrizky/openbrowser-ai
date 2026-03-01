@@ -7,6 +7,8 @@ interface for executing parsed action sequences in a real browser.
 import asyncio
 import logging
 import os
+import random
+import string
 import subprocess
 
 from openbrowser import BrowserSession, Tools
@@ -103,6 +105,26 @@ SUCCESS_INDICATORS = [
     "form submitted",
     "success",
 ]
+
+
+def _perturb_text_value(value: str) -> str:
+    """Apply a random perturbation to a text value for epsilon-greedy exploration."""
+    if not value or len(value) < 2:
+        return value
+    perturbation = random.choice(["swap", "truncate", "append", "delete"])
+    if perturbation == "swap":
+        idx = random.randint(0, len(value) - 2)
+        chars = list(value)
+        chars[idx], chars[idx + 1] = chars[idx + 1], chars[idx]
+        return "".join(chars)
+    elif perturbation == "truncate":
+        cut = max(1, int(len(value) * 0.75))
+        return value[:cut]
+    elif perturbation == "append":
+        return value + random.choice(string.ascii_lowercase)
+    else:  # delete
+        idx = random.randint(0, len(value) - 1)
+        return value[:idx] + value[idx + 1:]
 
 
 class BrowserEnvironment:
@@ -247,6 +269,7 @@ class BrowserEnvironment:
         self,
         actions: list[dict],
         timeout_per_action: float = 5.0,
+        epsilon: float = 0.0,
     ) -> BrowserOutcome:
         """Execute a sequence of parsed action dicts in the browser.
 
@@ -278,6 +301,16 @@ class BrowserEnvironment:
             # Extract field tracking metadata before passing to openbrowser
             field_name = params.pop("field_name", None)
             is_checkbox = params.pop("is_checkbox", False)
+
+            # Epsilon-greedy: perturb text values for exploration diversity
+            if epsilon > 0 and random.random() < epsilon:
+                if action_name == "input_text" and "text" in params:
+                    original = params["text"]
+                    params["text"] = _perturb_text_value(original)
+                    logger.debug(
+                        "Epsilon-greedy: perturbed '%s' -> '%s' for %s",
+                        original, params["text"], field_name or "unknown",
+                    )
 
             # Map parser action names to openbrowser Tools method names
             tools_method = ACTION_NAME_MAP.get(action_name, action_name)
