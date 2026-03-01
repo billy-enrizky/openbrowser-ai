@@ -101,6 +101,7 @@ def generate_rollouts(
     model, tokenizer, prompt: str, group_size: int, max_new_tokens: int = 512,
     temperature: float = 1.0,
     temperature_spread: float = 0.0,
+    top_p: float = 0.95,
 ) -> tuple[list[str], torch.Tensor, int]:
     """Generate G rollouts for a single prompt.
 
@@ -148,7 +149,7 @@ def generate_rollouts(
                     num_return_sequences=1,
                     do_sample=True,
                     temperature=t,
-                    top_p=0.95,
+                    top_p=top_p,
                     return_dict_in_generate=True,
                     output_scores=False,
                 )
@@ -328,6 +329,7 @@ async def train():
     temperature = config.get("temperature", 1.0)
     min_reward_variance = config.get("min_reward_variance", 0.01)
     temperature_spread = config.get("temperature_spread", 0.0)
+    top_p = config.get("top_p", 0.95)
 
     # Early stopping config
     es_patience = config.get("early_stopping_patience", 50)
@@ -405,6 +407,7 @@ async def train():
                     max_new_tokens=max_new_tokens,
                     temperature=temperature,
                     temperature_spread=temperature_spread,
+                    top_p=top_p,
                 )
                 model.train()
 
