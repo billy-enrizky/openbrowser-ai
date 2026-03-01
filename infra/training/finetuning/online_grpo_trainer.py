@@ -33,7 +33,7 @@ from infra.training.finetuning.config import DATA_CONFIG, ONLINE_GRPO_CONFIG
 from infra.training.shared.action_parser import parse_rollout_to_actions
 from infra.training.shared.browser_env import BrowserEnvironment
 from infra.training.shared.formfactory_server import FormFactoryServer
-from infra.training.shared.online_reward import compute_online_reward
+from infra.training.shared.online_reward import BrowserOutcome, compute_online_reward
 from infra.training.shared.reward_functions import compute_grpo_advantages
 from infra.training.shared.utils import (
     format_chat_prompt,
@@ -48,6 +48,44 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+
+MULTI_TURN_SYSTEM_PROMPT = (
+    "You are a web browser automation agent. You will be given a task and the "
+    "current state of a web page. Generate exactly ONE action to perform next.\n"
+    "Available actions:\n"
+    "- Type 'value' into the 'field' field\n"
+    "- Select 'option' from the 'field' field\n"
+    "- Click on the 'field' checkbox\n"
+    "- Click the 'Submit' button\n"
+    "When all fields are filled and the form is submitted, output: DONE"
+)
+
+
+def format_multiturn_prompt(
+    instruction: str,
+    dom_state: str,
+    action_history: list[str],
+    turn: int,
+) -> str:
+    """Format a multi-turn prompt with DOM state and action history."""
+    history_text = ""
+    if action_history:
+        history_text = "\n\nPrevious actions:\n" + "\n".join(action_history)
+
+    user_content = (
+        f"Task: {instruction}\n\n"
+        f"Current page state (turn {turn}):\n{dom_state}"
+        f"{history_text}\n\n"
+        f"Generate the next action:"
+    )
+
+    return (
+        "<|im_start|>system\n"
+        f"{MULTI_TURN_SYSTEM_PROMPT}\n"
+        "<|im_end|>\n"
+        f"<|im_start|>user\n{user_content}\n<|im_end|>\n"
+        "<|im_start|>assistant\n"
+    )
 
 
 def load_prompts(file_path: str, max_samples: int = 0, shuffle: bool = True) -> list[dict]:
@@ -101,6 +139,7 @@ def generate_rollouts(
     model, tokenizer, prompt: str, group_size: int, max_new_tokens: int = 512,
     temperature: float = 1.0,
     temperature_spread: float = 0.0,
+    top_p: float = 0.95,
 ) -> tuple[list[str], torch.Tensor, int]:
     """Generate G rollouts for a single prompt.
 
@@ -148,7 +187,7 @@ def generate_rollouts(
                     num_return_sequences=1,
                     do_sample=True,
                     temperature=t,
-                    top_p=0.95,
+                    top_p=top_p,
                     return_dict_in_generate=True,
                     output_scores=False,
                 )
@@ -189,6 +228,142 @@ def generate_rollouts(
     model.train()
 
     return responses, all_sequences, prompt_length
+
+
+def generate_single_action(
+    model, tokenizer, prompt: str, max_new_tokens: int = 64,
+    temperature: float = 1.0, top_p: float = 0.95,
+) -> tuple[str, torch.Tensor, int]:
+    """Generate a single action response for multi-turn mode.
+
+    Returns:
+        response_text: The generated action text.
+        sequence: Full input+output token IDs [1, seq_len].
+        prompt_length: Number of prompt tokens.
+    """
+    prompt_with_skip = prompt + "<think>\n</think>\n"
+    inputs = tokenizer(prompt_with_skip, return_tensors="pt").to(model.device)
+    prompt_length = inputs.input_ids.shape[1]
+
+    model.eval()
+    model.config.use_cache = True
+
+    with torch.no_grad():
+        outputs = model.generate(
+            **inputs,
+            max_new_tokens=max_new_tokens,
+            num_return_sequences=1,
+            do_sample=True,
+            temperature=temperature,
+            top_p=top_p,
+            return_dict_in_generate=True,
+            output_scores=False,
+        )
+
+    model.config.use_cache = False
+
+    response_text = tokenizer.decode(
+        outputs.sequences[0][prompt_length:], skip_special_tokens=True
+    ).strip()
+
+    return response_text, outputs.sequences, prompt_length
+
+
+async def execute_multiturn_rollout(
+    model, tokenizer, browser_env, instruction, form_url,
+    ground_truth_fields, config, rollout_idx,
+):
+    """Execute a single multi-turn rollout: one action per turn with DOM re-observation.
+
+    Returns:
+        reward: Terminal reward for the full episode.
+        all_sequences: List of [1, seq_len] tensors (one per turn).
+        all_prompt_lengths: List of prompt lengths (one per turn).
+    """
+    max_turns = config.get("max_turns", 15)
+    temperature = config.get("temperature", 1.0)
+    top_p = config.get("top_p", 0.95)
+    action_timeout = config.get("action_timeout_s", 10.0)
+
+    action_history = []
+    all_sequences = []
+    all_prompt_lengths = []
+    filled_values = {}
+    total_executed = 0
+    total_attempted = 0
+    success_detected = False
+
+    await browser_env.reset()
+    try:
+        await browser_env.tools.navigate(
+            url=form_url, new_tab=False,
+            browser_session=browser_env.browser_session,
+        )
+        await asyncio.sleep(0.5)
+        await browser_env.bypass_html5_validation()
+    except Exception as e:
+        logger.warning("Multi-turn nav failed for rollout %d: %s", rollout_idx, e)
+        return 0.0, [], []
+
+    for turn in range(1, max_turns + 1):
+        dom_state = await browser_env.get_dom_summary(max_chars=800)
+        element_map = await browser_env.get_element_map()
+
+        prompt = format_multiturn_prompt(
+            instruction, dom_state, action_history, turn
+        )
+
+        response_text, sequences, prompt_length = generate_single_action(
+            model, tokenizer, prompt,
+            max_new_tokens=64, temperature=temperature, top_p=top_p,
+        )
+
+        all_sequences.append(sequences)
+        all_prompt_lengths.append(prompt_length)
+
+        if "DONE" in response_text.upper():
+            logger.debug("Rollout %d: DONE at turn %d", rollout_idx, turn)
+            break
+
+        actions = parse_rollout_to_actions(response_text, element_map)
+
+        if not actions:
+            action_history.append(f"Turn {turn}: {response_text[:50]} -> PARSE_FAILED")
+            total_attempted += 1
+            continue
+
+        total_attempted += 1
+        outcome = await browser_env.execute_actions(
+            [actions[0]], timeout_per_action=action_timeout
+        )
+
+        if outcome.actions_executed > 0:
+            total_executed += 1
+            filled_values.update(outcome.submitted_values)
+            action_history.append(f"Turn {turn}: {response_text[:60]} -> OK")
+        else:
+            action_history.append(
+                f"Turn {turn}: {response_text[:60]} -> ERROR: {outcome.error}"
+            )
+
+        if outcome.success_page_detected:
+            success_detected = True
+            break
+
+    final_outcome = BrowserOutcome(
+        success_page_detected=success_detected,
+        submitted_values=filled_values,
+        error=None,
+        actions_executed=total_executed,
+        total_actions=max(total_attempted, 1),
+    )
+
+    reward = compute_online_reward(
+        final_outcome, ground_truth_fields,
+        weights=config.get("reward_weights"),
+    )
+
+    return reward, all_sequences, all_prompt_lengths
 
 
 def compute_per_token_log_probs(
@@ -328,6 +503,12 @@ async def train():
     temperature = config.get("temperature", 1.0)
     min_reward_variance = config.get("min_reward_variance", 0.01)
     temperature_spread = config.get("temperature_spread", 0.0)
+    top_p = config.get("top_p", 0.95)
+    epsilon = config.get("epsilon", 0.0)
+    multi_turn = config.get("multi_turn", False)
+    max_turns = config.get("max_turns", 15)
+    if multi_turn:
+        logger.info("Multi-turn mode enabled: max_turns=%d", max_turns)
 
     # Early stopping config
     es_patience = config.get("early_stopping_patience", 50)
@@ -396,6 +577,93 @@ async def train():
                     )
                     continue
 
+                if multi_turn:
+                    # Multi-turn: generate one action at a time with DOM re-observation
+                    rewards = []
+                    all_turn_sequences = []
+                    all_turn_prompt_lengths = []
+
+                    for g in range(group_size):
+                        reward, seqs, pls = await execute_multiturn_rollout(
+                            model, tokenizer, browser_env,
+                            instruction, form_url, ground_truth_fields,
+                            config, rollout_idx=g,
+                        )
+                        rewards.append(reward)
+                        all_turn_sequences.append(seqs)
+                        all_turn_prompt_lengths.append(pls)
+
+                    epoch_rewards.extend(rewards)
+
+                    # Same skip logic as single-turn
+                    all_zero = all(r == 0.0 for r in rewards)
+                    reward_mean = sum(rewards) / len(rewards) if rewards else 0
+                    reward_var = (
+                        sum((r - reward_mean) ** 2 for r in rewards)
+                        / max(len(rewards) - 1, 1)
+                        if len(rewards) > 1 else 0.0
+                    )
+
+                    if all_zero or reward_var < min_reward_variance:
+                        total_steps += 1
+                        continue
+
+                    advantages = compute_grpo_advantages(rewards, group_size)
+                    advantages_t = torch.tensor(
+                        advantages, dtype=torch.float32, device=model.device
+                    )
+
+                    total_pg_loss = torch.tensor(0.0, device=model.device)
+                    total_kl = torch.tensor(0.0, device=model.device)
+                    total_tokens = 0
+
+                    for g in range(group_size):
+                        for seq, pl in zip(
+                            all_turn_sequences[g], all_turn_prompt_lengths[g]
+                        ):
+                            attn = torch.ones_like(seq)
+                            policy_lp, mask = compute_per_token_log_probs(
+                                model, seq, attn, pl
+                            )
+                            with torch.no_grad():
+                                ref_lp, _ = compute_per_token_log_probs(
+                                    ref_model, seq, attn, pl
+                                )
+                            tokens = mask.sum().clamp(min=1)
+                            turn_lp = (policy_lp * mask).sum() / tokens
+                            total_pg_loss = total_pg_loss - advantages_t[g] * turn_lp
+
+                            log_r = ref_lp - policy_lp
+                            r = torch.exp(log_r)
+                            kl_per_token = r - log_r - 1
+                            total_kl = total_kl + (kl_per_token * mask).sum()
+                            total_tokens += int(tokens.item())
+
+                    if total_tokens > 0:
+                        pg_loss = total_pg_loss / group_size
+                        kl_div = total_kl / max(total_tokens, 1)
+                        loss = pg_loss + kl_coeff * kl_div
+
+                        optimizer.zero_grad()
+                        loss.backward()
+                        torch.nn.utils.clip_grad_norm_(trainable_params, 1.0)
+                        optimizer.step()
+
+                        gradient_update_count += 1
+                        avg_reward = sum(rewards) / len(rewards)
+                        es_reward_window.append(avg_reward)
+                        logger.info(
+                            "Step %d [multi-turn]: avg_reward=%.3f, "
+                            "pg_loss=%.4f, kl=%.4f, grad_update=%d",
+                            total_steps, avg_reward,
+                            pg_loss.item(), kl_div.item(),
+                            gradient_update_count,
+                        )
+
+                    total_steps += 1
+                    continue  # Skip the single-turn code below
+
+                # --- Single-turn mode (default) ---
                 prompt_text = format_chat_prompt(instruction)
 
                 # Generate G rollouts
@@ -405,6 +673,7 @@ async def train():
                     max_new_tokens=max_new_tokens,
                     temperature=temperature,
                     temperature_spread=temperature_spread,
+                    top_p=top_p,
                 )
                 model.train()
 
@@ -434,6 +703,7 @@ async def train():
                         )
                         # Brief wait for page to load
                         await asyncio.sleep(0.5)
+                        await browser_env.bypass_html5_validation()
                         element_map = await browser_env.get_element_map()
                     except Exception as e:
                         logger.warning(f"Navigation failed for rollout {g}: {e}")
@@ -450,7 +720,8 @@ async def train():
 
                     # Execute actions in browser
                     outcome = await browser_env.execute_actions(
-                        actions, timeout_per_action=action_timeout
+                        actions, timeout_per_action=action_timeout,
+                        epsilon=epsilon,
                     )
 
                     # Compute reward from browser outcome
