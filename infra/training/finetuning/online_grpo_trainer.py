@@ -434,6 +434,7 @@ async def train():
                         )
                         # Brief wait for page to load
                         await asyncio.sleep(0.5)
+                        await browser_env.bypass_html5_validation()
                         element_map = await browser_env.get_element_map()
                     except Exception as e:
                         logger.warning(f"Navigation failed for rollout {g}: {e}")

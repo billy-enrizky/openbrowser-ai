@@ -201,6 +201,7 @@ async def evaluate():
                     browser_session=browser_env.browser_session,
                 )
                 await asyncio.sleep(0.5)
+                await browser_env.bypass_html5_validation()
                 element_map = await browser_env.get_element_map()
             except Exception as e:
                 logger.warning(f"Navigation failed for prompt {i}: {e}")
