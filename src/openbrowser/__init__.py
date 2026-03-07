@@ -59,7 +59,9 @@ if TYPE_CHECKING:
 	from openbrowser.agent.service import Agent as BrowserAgent  # Alias
 
 	# from openbrowser.agent.service import Agent
-	from openbrowser.agent.views import ActionModel, ActionResult, AgentHistoryList
+	from openbrowser.agent.views import AgentHistoryList
+	from openbrowser.models import ActionResult
+	from openbrowser.tools.registry.views import ActionModel
 	from openbrowser.browser import BrowserProfile, BrowserSession
 	from openbrowser.browser import BrowserSession as Browser
 	from openbrowser.code_use.service import CodeAgent
@@ -87,8 +89,8 @@ _LAZY_IMPORTS: dict[str, tuple[str, str | None]] = {
 	# System prompt (moderate weight due to agent.views imports)
 	'SystemPrompt': ('openbrowser.agent.prompts', 'SystemPrompt'),
 	# Agent views (very heavy - over 1 second!)
-	'ActionModel': ('openbrowser.agent.views', 'ActionModel'),
-	'ActionResult': ('openbrowser.agent.views', 'ActionResult'),
+	'ActionModel': ('openbrowser.tools.registry.views', 'ActionModel'),
+	'ActionResult': ('openbrowser.models', 'ActionResult'),
 	'AgentHistoryList': ('openbrowser.agent.views', 'AgentHistoryList'),
 	# Browser session
 	'BrowserSession': ('openbrowser.browser', 'BrowserSession'),

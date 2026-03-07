@@ -56,7 +56,7 @@ class BrowserAssistant:
 		"""Connect to the openbrowser MCP server."""
 		logger.info("Connecting to openbrowser MCP server...")
 		server_params = StdioServerParameters(
-			command="uvx", args=["openbrowser-ai[mcp]", "--mcp"], env={}
+			command="uvx", args=["openbrowser-ai", "--mcp"], env={}
 		)
 		self._read_ctx = stdio_client(server_params)
 		read, write = await self._read_ctx.__aenter__()

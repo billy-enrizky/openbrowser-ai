@@ -3,7 +3,7 @@
   "dxt_version": "0.1",
   "name": "openbrowser",
   "display_name": "OpenBrowser AI Browser Automation",
-  "version": "0.5.0",
+  "version": "0.1.29",
   "description": "CodeAgent MCP server -- execute Python code with browser automation functions in a persistent namespace",
   "long_description": "OpenBrowser CodeAgent exposes a single execute_code tool that runs Python code in a persistent namespace with browser automation functions. Write multi-step workflows in Python with full access to navigate, click, type, evaluate JS, and more.\n\n### Key Features:\n- **Code Execution**: Write Python code with async browser functions (await navigate, click, evaluate, etc.)\n- **Persistent Namespace**: Variables and state persist between execute_code calls\n- **Browser Automation**: Full browser control via CodeAgent functions\n- **JavaScript Evaluation**: Run JS in page context via evaluate()\n- **Data Libraries**: numpy, pandas, matplotlib, BeautifulSoup available\n- **Standard Libraries**: json, csv, re, datetime, requests, asyncio, Path\n\n### Use Cases:\n- Web scraping with Python data processing\n- Automated testing with assertions\n- Research and information gathering\n- Form filling and multi-step workflows\n- DOM extraction via evaluate() + Python post-processing",
   "icon": "icon.png",
@@ -24,7 +24,7 @@
     "entry_point": "python",
     "mcp_config": {
       "command": "uvx",
-      "args": ["openbrowser-ai[mcp]", "--mcp"],
+      "args": ["openbrowser-ai", "--mcp"],
       "env": {
         "OPENBROWSER_HEADLESS": "${user_config.headless}",
         "OPENBROWSER_ALLOWED_DOMAINS": "${user_config.allowed_domains}"

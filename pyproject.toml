@@ -5,9 +5,7 @@ description = "Agentic browser automation using LangGraph and raw CDP"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "langgraph",
-    "langchain-core>=0.3.0",
-    "langchain-openai>=0.2.0",
+    # Core browser automation
     "pydantic>=2.0.0",
     "pydantic-settings>=2.0.0",
     "playwright",
@@ -16,26 +14,32 @@ dependencies = [
     "websockets>=15.0.1",
     "aiofiles",
     "cdp-use",
-    "google-genai>=0.2.0",
     "bubus>=1.5.6",
-    "litellm==1.80.0",
-    "pillow>=11.0.0",
-    "pyotp",
-    "rich>=13.0.0",
-    "click>=8.1.8",
     "psutil>=7.2.0",
-    "markdownify>=0.11.6",
-    "imageio>=2.37.2",
-    "imageio-ffmpeg>=0.6.0",
-    "numpy>=2.4.0",
-    "openai>=1.99.5,<2.0.0",
-    "pandas>=2.2.0",
-    "boto3>=1.36.0",
+    "click>=8.1.8",
+    "pillow>=11.0.0",
+    # MCP protocol
+    "mcp>=1.0.0",
+    # Telemetry
     "posthog>=3.7.0",
-    "reportlab",
 ]
 
 [project.optional-dependencies]
+agent = [
+    "langgraph",
+    "langchain-core>=0.3.0",
+    "langchain-openai>=0.2.0",
+    "google-genai>=0.2.0",
+    "litellm==1.80.0",
+    "openai>=1.99.5,<2.0.0",
+    "pyotp",
+    "rich>=13.0.0",
+    "markdownify>=0.11.6",
+    "numpy>=2.4.0",
+    "pandas>=2.2.0",
+    "boto3>=1.36.0",
+    "reportlab",
+]
 cli = ["textual>=3.2.0"]
 video = ["imageio[ffmpeg]", "numpy"]
 anthropic = ["anthropic>=0.68.0"]
@@ -53,17 +57,7 @@ dev = [
     "mcp>=1.0.0",
 ]
 all = [
-    "textual>=3.2.0",
-    "imageio[ffmpeg]",
-    "numpy",
-    "anthropic>=0.68.0",
-    "groq>=0.30.0",
-    "ollama>=0.5.1",
-    "boto3",
-    "posthog>=3.7.0",
-    "pypdf",
-    "reportlab",
-    "mcp>=1.0.0",
+    "openbrowser-ai[agent,cli,video,anthropic,groq,ollama,aws,azure,pdf]",
 ]
 
 [project.scripts]

@@ -51,7 +51,7 @@ bridges MCP servers to OpenClaw agents.
               "name": "openbrowser",
               "transport": "stdio",
               "command": "uvx",
-              "args": ["openbrowser-ai[mcp]", "--mcp"]
+              "args": ["openbrowser-ai", "--mcp"]
             }
           ]
         }
@@ -74,7 +74,7 @@ Add to your project's `.mcp.json`:
   "mcpServers": {
     "openbrowser": {
       "command": "uvx",
-      "args": ["openbrowser-ai[mcp]", "--mcp"]
+      "args": ["openbrowser-ai", "--mcp"]
     }
   }
 }
@@ -154,7 +154,7 @@ Set these in your `.mcp.json`:
   "mcpServers": {
     "openbrowser": {
       "command": "uvx",
-      "args": ["openbrowser-ai[mcp]", "--mcp"],
+      "args": ["openbrowser-ai", "--mcp"],
       "env": {
         "OPENBROWSER_HEADLESS": "true"
       }
@@ -194,7 +194,7 @@ uv run python benchmarks/cdp_benchmark.py
 
 **Browser does not launch**: Ensure Chrome or Chromium is installed and accessible from PATH.
 
-**MCP server not found**: Verify `uvx` is installed (`pip install uv`) and the MCP server starts (`uvx openbrowser-ai[mcp] --mcp`).
+**MCP server not found**: Verify `uvx` is installed (`pip install uv`) and the MCP server starts (`uvx openbrowser-ai --mcp`).
 
 **Session timeout**: Browser sessions auto-close after 10 minutes of inactivity. Use any tool to keep the session alive.
 
