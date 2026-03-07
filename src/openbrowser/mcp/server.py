@@ -330,7 +330,12 @@ class OpenBrowserServer:
 						},
 						'required': ['code'],
 					},
-					annotations=types.ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False),
+					annotations=types.ToolAnnotations(
+					readOnlyHint=False,
+					destructiveHint=True,
+					openWorldHint=True,
+					idempotentHint=False,
+				),
 				),
 			]
 
@@ -643,7 +648,7 @@ class OpenBrowserServer:
 				write_stream,
 				InitializationOptions(
 					server_name='openbrowser',
-					server_version='0.1.0',
+					server_version=get_openbrowser_version(),
 					capabilities=self.server.get_capabilities(
 						notification_options=NotificationOptions(),
 						experimental_capabilities={},
