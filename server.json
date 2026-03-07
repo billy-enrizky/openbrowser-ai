@@ -1,0 +1,45 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "me.openbrowser/openbrowser-ai",
+  "description": "AI browser automation via a single execute_code tool. Write Python with async browser functions (navigate, click, evaluate, etc.) in a persistent namespace.",
+  "repository": {
+    "url": "https://github.com/billy-enrizky/openbrowser-ai.git",
+    "source": "github"
+  },
+  "version": "0.1.30",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "openbrowser-ai",
+      "version": "0.1.30",
+      "runtimeHint": "uvx",
+      "transport": {
+        "type": "stdio"
+      },
+      "packageArguments": ["--mcp"],
+      "environmentVariables": [
+        {
+          "name": "OPENBROWSER_HEADLESS",
+          "description": "Run browser in headless mode (true/false)",
+          "isRequired": false,
+          "isSecret": false,
+          "default": "false"
+        },
+        {
+          "name": "OPENBROWSER_ALLOWED_DOMAINS",
+          "description": "Comma-separated list of allowed domains (empty for no restrictions)",
+          "isRequired": false,
+          "isSecret": false,
+          "default": ""
+        },
+        {
+          "name": "ANONYMIZED_TELEMETRY",
+          "description": "Enable anonymized usage telemetry (true/false)",
+          "isRequired": false,
+          "isSecret": false,
+          "default": "true"
+        }
+      ]
+    }
+  ]
+}
