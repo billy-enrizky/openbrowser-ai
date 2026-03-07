@@ -80,3 +80,39 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           repository-url: https://test.pypi.org/legacy/
+
+  publish-to-mcp-registry:
+    name: Publish to MCP Registry
+    needs: publish-to-pypi
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install mcp-publisher
+        run: |
+          curl -sSL https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher-linux-amd64 -o mcp-publisher
+          chmod +x mcp-publisher
+
+      - name: Update server.json version
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          python3 -c "
+          import json
+          with open('server.json') as f:
+              data = json.load(f)
+          data['version'] = '${VERSION}'
+          for pkg in data.get('packages', []):
+              pkg['version'] = '${VERSION}'
+          with open('server.json', 'w') as f:
+              json.dump(data, f, indent=2)
+          "
+          cat server.json
+
+      - name: Authenticate to MCP Registry
+        run: ./mcp-publisher login github-oidc
+
+      - name: Publish to MCP Registry
+        run: ./mcp-publisher publish
