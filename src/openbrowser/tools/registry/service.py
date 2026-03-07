@@ -8,7 +8,6 @@ from inspect import Parameter, iscoroutinefunction, signature
 from types import UnionType
 from typing import Any, Generic, Optional, TypeVar, Union, get_args, get_origin
 
-import pyotp
 from pydantic import BaseModel, Field, RootModel, create_model
 
 from openbrowser.browser import BrowserSession
@@ -443,6 +442,7 @@ class Registry(Generic[Context]):
 					if placeholder in applicable_secrets:
 						# generate a totp code if secret is a 2fa secret
 						if 'bu_2fa_code' in placeholder:
+							import pyotp
 							totp = pyotp.TOTP(applicable_secrets[placeholder], digits=6)
 							replacement_value = totp.now()
 						else:
