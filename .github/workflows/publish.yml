@@ -93,8 +93,9 @@ jobs:
 
       - name: Install mcp-publisher
         run: |
-          curl -sSL https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher-linux-amd64 -o mcp-publisher
+          curl -sSL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_linux_amd64.tar.gz" | tar xz mcp-publisher
           chmod +x mcp-publisher
+          ./mcp-publisher --help
 
       - name: Update server.json version
         run: |
@@ -112,7 +113,7 @@ jobs:
           cat server.json
 
       - name: Authenticate to MCP Registry
-        run: ./mcp-publisher login github-oidc
+        run: ./mcp-publisher login dns --domain=openbrowser.me --private-key=${{ secrets.MCP_DNS_PRIVATE_KEY }}
 
       - name: Publish to MCP Registry
         run: ./mcp-publisher publish
