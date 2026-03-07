@@ -117,3 +117,43 @@ jobs:
 
       - name: Publish to MCP Registry
         run: ./mcp-publisher publish
+
+  sync-plugin-version:
+    name: Sync Claude Code Plugin Version
+    needs: publish-to-pypi
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release'
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update plugin version to match release
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          python3 -c "
+          import json
+          path = 'plugin/.claude-plugin/plugin.json'
+          with open(path) as f:
+              data = json.load(f)
+          if data['version'] != '${VERSION}':
+              data['version'] = '${VERSION}'
+              with open(path, 'w') as f:
+                  json.dump(data, f, indent=2)
+                  f.write('\n')
+              print(f'Updated plugin version to ${VERSION}')
+          else:
+              print(f'Plugin already at ${VERSION}, no update needed')
+          "
+
+      - name: Commit and push if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add plugin/.claude-plugin/plugin.json
+          git diff --cached --quiet && echo "No changes to commit" || \
+            git commit -m "chore(plugin): sync version to ${GITHUB_REF_NAME#v}" && \
+            git push origin main
