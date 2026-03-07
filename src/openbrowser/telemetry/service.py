@@ -45,8 +45,8 @@ class ProductTelemetry:
 	__slots__ = ('_posthog_client', '_curr_user_id', 'debug_logging', '_telemetry_disabled')
 
 	USER_ID_PATH = str(CONFIG.OPENBROWSER_CONFIG_DIR / 'device_id')
-	PROJECT_API_KEY = 'phc_F8JMNjW1i2KbGUTaW1unnDdLSPCoyc52SGRU0JecaUh'
-	HOST = 'https://eu.posthog.com'
+	PROJECT_API_KEY = 'phc_YFRPrOQanuqzz8McN0eIlQZCmGxaEhqqosdGFpBPpze'
+	HOST = 'https://us.posthog.com'
 	UNKNOWN_USER_ID = 'UNKNOWN'
 
 	def __init__(self) -> None:

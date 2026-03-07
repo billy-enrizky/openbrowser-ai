@@ -11,7 +11,8 @@ except ImportError:
 	Laminar = None  # type: ignore
 from pydantic import BaseModel
 
-from openbrowser.agent.views import ActionModel, ActionResult
+from openbrowser.models import ActionResult
+from openbrowser.tools.registry.views import ActionModel
 from openbrowser.browser import BrowserSession
 from openbrowser.browser.events import (
 	ClickElementEvent,

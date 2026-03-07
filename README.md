@@ -63,6 +63,9 @@ pip install openbrowser-ai
 ### With Optional Dependencies
 
 ```bash
+# Install with LLM agent support (langgraph, langchain, litellm, etc.)
+pip install openbrowser-ai[agent]
+
 # Install with all LLM providers
 pip install openbrowser-ai[all]
 
@@ -317,7 +320,7 @@ bridges MCP servers to OpenClaw agents.
               "name": "openbrowser",
               "transport": "stdio",
               "command": "uvx",
-              "args": ["openbrowser-ai[mcp]", "--mcp"]
+              "args": ["openbrowser-ai", "--mcp"]
             }
           ]
         }
@@ -333,7 +336,9 @@ For OpenClaw plugin documentation, see [docs.openclaw.ai/tools/plugin](https://d
 
 ## MCP Server
 
-OpenBrowser includes an MCP (Model Context Protocol) server that exposes browser automation as tools for AI assistants like Claude. No external LLM API keys required. The MCP client (Claude) provides the intelligence.
+[![MCP Registry](https://img.shields.io/badge/MCP-Registry-blue)](https://registry.modelcontextprotocol.io/servers/me.openbrowser/openbrowser-ai)
+
+OpenBrowser includes an MCP (Model Context Protocol) server that exposes browser automation as tools for AI assistants like Claude. Listed on the [MCP Registry](https://registry.modelcontextprotocol.io/servers/me.openbrowser/openbrowser-ai) as `me.openbrowser/openbrowser-ai`. No external LLM API keys required -- the MCP client provides the intelligence.
 
 ### Quick Setup
 
@@ -344,7 +349,7 @@ OpenBrowser includes an MCP (Model Context Protocol) server that exposes browser
   "mcpServers": {
     "openbrowser": {
       "command": "uvx",
-      "args": ["openbrowser-ai[mcp]", "--mcp"]
+      "args": ["openbrowser-ai", "--mcp"]
     }
   }
 }
@@ -357,7 +362,7 @@ OpenBrowser includes an MCP (Model Context Protocol) server that exposes browser
   "mcpServers": {
     "openbrowser": {
       "command": "uvx",
-      "args": ["openbrowser-ai[mcp]", "--mcp"],
+      "args": ["openbrowser-ai", "--mcp"],
       "env": {
         "OPENBROWSER_HEADLESS": "true"
       }
@@ -369,7 +374,7 @@ OpenBrowser includes an MCP (Model Context Protocol) server that exposes browser
 **Run directly:**
 
 ```bash
-uvx openbrowser-ai[mcp] --mcp
+uvx openbrowser-ai --mcp
 ```
 
 ### Tool
@@ -459,7 +464,7 @@ uvx openbrowser-ai -p "Search for Python tutorials on Google"
 uvx openbrowser-ai install
 
 # Run MCP server
-uvx openbrowser-ai[mcp] --mcp
+uvx openbrowser-ai --mcp
 ```
 
 ## Project Structure
