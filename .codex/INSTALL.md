@@ -33,7 +33,7 @@ Browser automation skills for Codex via native skill discovery. Clone and symlin
      "mcpServers": {
        "openbrowser": {
          "command": "uvx",
-         "args": ["openbrowser-ai[mcp]", "--mcp"]
+         "args": ["openbrowser-ai", "--mcp"]
        }
      }
    }

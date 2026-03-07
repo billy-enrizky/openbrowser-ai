@@ -14,7 +14,7 @@ The MCP (Model Context Protocol) Server exposes OpenBrowser's browser automation
 ### Start MCP Server
 
 ```bash
-uvx openbrowser-ai[mcp] --mcp
+uvx openbrowser-ai --mcp
 ```
 
 The server will start in stdio mode, ready to accept MCP connections.
@@ -31,7 +31,7 @@ Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
   "mcpServers": {
     "openbrowser": {
       "command": "uvx",
-      "args": ["openbrowser-ai[mcp]", "--mcp"],
+      "args": ["openbrowser-ai", "--mcp"],
       "env": {
         "OPENBROWSER_HEADLESS": "true"
       }
@@ -48,7 +48,7 @@ Edit `%APPDATA%\Claude\claude_desktop_config.json`:
   "mcpServers": {
     "openbrowser": {
       "command": "uvx",
-      "args": ["openbrowser-ai[mcp]", "--mcp"],
+      "args": ["openbrowser-ai", "--mcp"],
       "env": {
         "OPENBROWSER_HEADLESS": "true"
       }
@@ -66,7 +66,7 @@ Add to your project's `.mcp.json`:
   "mcpServers": {
     "openbrowser": {
       "command": "uvx",
-      "args": ["openbrowser-ai[mcp]", "--mcp"]
+      "args": ["openbrowser-ai", "--mcp"]
     }
   }
 }
@@ -126,7 +126,7 @@ from mcp.client.stdio import stdio_client
 async def use_browser_mcp():
     server_params = StdioServerParameters(
         command="uvx",
-        args=["openbrowser-ai[mcp]", "--mcp"]
+        args=["openbrowser-ai", "--mcp"]
     )
 
     async with stdio_client(server_params) as (read, write):
@@ -164,8 +164,10 @@ asyncio.run(use_browser_mcp())
 ### Common Issues
 
 **"MCP SDK is required" Error**
+
+MCP is included in the base package since v0.1.30. Update to the latest version:
 ```bash
-pip install 'openbrowser-ai[mcp]'
+pip install --upgrade openbrowser-ai
 ```
 
 **Browser doesn't start**
@@ -183,7 +185,7 @@ pip install 'openbrowser-ai[mcp]'
 Enable debug logging by setting:
 ```bash
 export OPENBROWSER_LOG_LEVEL=DEBUG
-uvx openbrowser-ai[mcp] --mcp
+uvx openbrowser-ai --mcp
 ```
 
 ## Security Considerations

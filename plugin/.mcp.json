@@ -2,7 +2,7 @@
   "mcpServers": {
     "openbrowser": {
       "command": "uvx",
-      "args": ["openbrowser-ai[mcp]", "--mcp"]
+      "args": ["openbrowser-ai", "--mcp"]
     }
   }
 }
