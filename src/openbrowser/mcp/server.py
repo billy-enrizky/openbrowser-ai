@@ -4,14 +4,14 @@ Exposes a single ``execute_code`` tool that runs Python code in a persistent
 namespace with browser automation functions (navigate, click, evaluate, etc.).
 
 Usage:
-    uvx openbrowser-ai[mcp] --mcp
+    uvx openbrowser-ai --mcp
 
 Or as an MCP server in Claude Desktop or other MCP clients:
     {
         "mcpServers": {
             "openbrowser": {
                 "command": "uvx",
-                "args": ["openbrowser-ai[mcp]", "--mcp"]
+                "args": ["openbrowser-ai", "--mcp"]
             }
         }
     }

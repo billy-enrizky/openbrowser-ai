@@ -34,7 +34,7 @@ async def run_simple_browser_automation():
 
 	# Create connection parameters for the openbrowser MCP server
 	server_params = StdioServerParameters(
-		command="uvx", args=["openbrowser-ai[mcp]", "--mcp"], env={}
+		command="uvx", args=["openbrowser-ai", "--mcp"], env={}
 	)
 
 	async with stdio_client(server_params) as (read, write):
@@ -146,7 +146,7 @@ async def main():
 		await run_simple_browser_automation()
 	except Exception:
 		logger.exception("Error running demo")
-		logger.info("Make sure openbrowser-ai[mcp] is installed: pip install openbrowser-ai[mcp]")
+		logger.info("Make sure openbrowser-ai is installed: pip install openbrowser-ai")
 
 
 if __name__ == "__main__":
