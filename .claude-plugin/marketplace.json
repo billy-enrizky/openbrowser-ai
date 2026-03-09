@@ -1,9 +1,11 @@
 {
   "name": "openbrowser-ai",
-  "description": "AI-powered browser automation for Claude Code -- navigate, click, type, extract content, and automate workflows in real browsers",
   "owner": {
     "name": "OpenBrowser Team",
     "email": "billy.enrizky@gmail.com"
+  },
+  "metadata": {
+    "description": "AI-powered browser automation for Claude Code -- navigate, click, type, extract content, and automate workflows in real browsers"
   },
   "plugins": [
     {
