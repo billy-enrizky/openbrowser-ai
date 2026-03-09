@@ -10,6 +10,7 @@
   "plugins": [
     {
       "name": "openbrowser",
+      "version": "0.1.33",
       "description": "Browser automation MCP server with progressive disclosure design -- returns minimal tokens (877x fewer than Playwright MCP on Wikipedia). Single execute_code tool runs Python with async browser functions.",
       "source": "./plugin",
       "category": "development",
