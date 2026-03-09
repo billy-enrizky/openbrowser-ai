@@ -131,29 +131,50 @@ jobs:
           ref: main
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Update plugin version to match release
+      - name: Update plugin and marketplace versions to match release
         run: |
           VERSION=${GITHUB_REF_NAME#v}
-          python3 -c "
-          import json
-          path = 'plugin/.claude-plugin/plugin.json'
-          with open(path) as f:
-              data = json.load(f)
-          if data['version'] != '${VERSION}':
-              data['version'] = '${VERSION}'
-              with open(path, 'w') as f:
-                  json.dump(data, f, indent=2)
-                  f.write('\n')
-              print(f'Updated plugin version to ${VERSION}')
-          else:
-              print(f'Plugin already at ${VERSION}, no update needed')
-          "
+          python3 << PYEOF
+          import json, sys
+
+          version = "${VERSION}"
+          changed = []
+
+          # Update plugin manifest
+          plugin_path = "plugin/.claude-plugin/plugin.json"
+          with open(plugin_path) as f:
+              plugin = json.load(f)
+          if plugin.get("version") != version:
+              plugin["version"] = version
+              with open(plugin_path, "w") as f:
+                  json.dump(plugin, f, indent=2)
+                  f.write("\n")
+              changed.append(plugin_path)
+              print(f"Updated {plugin_path} to {version}")
+
+          # Update marketplace plugin entry
+          market_path = ".claude-plugin/marketplace.json"
+          with open(market_path) as f:
+              market = json.load(f)
+          for entry in market.get("plugins", []):
+              if entry.get("name") == "openbrowser" and entry.get("version") != version:
+                  entry["version"] = version
+                  with open(market_path, "w") as f:
+                      json.dump(market, f, indent=2)
+                      f.write("\n")
+                  changed.append(market_path)
+                  print(f"Updated {market_path} to {version}")
+                  break
+
+          if not changed:
+              print(f"All files already at {version}, no update needed")
+          PYEOF
 
       - name: Commit and push if changed
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add plugin/.claude-plugin/plugin.json
+          git add plugin/.claude-plugin/plugin.json .claude-plugin/marketplace.json
           git diff --cached --quiet && echo "No changes to commit" || \
             git commit -m "chore(plugin): sync version to ${GITHUB_REF_NAME#v}" && \
             git push origin main
