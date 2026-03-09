@@ -10,7 +10,7 @@
   "plugins": [
     {
       "name": "openbrowser",
-      "description": "Browser automation MCP server with 11 tools for navigation, interaction, content extraction, and session management. Progressive disclosure design returns minimal tokens -- 877x fewer than Playwright MCP on Wikipedia.",
+      "description": "Browser automation MCP server with progressive disclosure design -- returns minimal tokens (877x fewer than Playwright MCP on Wikipedia). Single execute_code tool runs Python with async browser functions.",
       "source": "./plugin",
       "category": "development",
       "homepage": "https://github.com/billy-enrizky/openbrowser-ai"
