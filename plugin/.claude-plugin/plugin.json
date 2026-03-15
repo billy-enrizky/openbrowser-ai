@@ -18,6 +18,8 @@
     "openbrowser",
     "web-automation",
     "ai-agent",
-    "file-download"
+    "file-download",
+    "cli-execute",
+    "cli-daemon"
   ]
 }

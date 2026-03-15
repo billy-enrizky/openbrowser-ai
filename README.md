@@ -35,6 +35,7 @@ OpenBrowser is a framework for intelligent browser automation. It combines direc
 - [OpenClaw](#openclaw)
 - [MCP Server](#mcp-server)
 - [MCP Benchmark: Why OpenBrowser](#mcp-benchmark-why-openbrowser)
+- [CLI Benchmark: 4-Way Comparison](#cli-benchmark-4-way-comparison)
 - [CLI Usage](#cli-usage)
 - [Project Structure](#project-structure)
 - [Backend and Frontend Deployment](#backend-and-frontend-deployment)
@@ -54,32 +55,81 @@ OpenBrowser is a framework for intelligent browser automation. It combines direc
 - **Vision Support** - Screenshot analysis for visual understanding of pages
 - **12+ LLM Providers** - OpenAI, Anthropic, Google, Groq, AWS Bedrock, Azure OpenAI, Ollama, and more
 - **MCP Server** - Model Context Protocol support for Claude Desktop integration
+- **CLI Daemon** - Persistent browser daemon with `-c` flag for direct code execution from Bash
 - **Video Recording** - Record browser sessions as video files
 
 ## Installation
+
+### Homebrew (macOS / Linux)
+
+```bash
+brew tap billy-enrizky/openbrowser
+brew install openbrowser-ai
+```
+
+### Quick install (macOS / Linux)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/billy-enrizky/openbrowser-ai/main/install.sh | sh
+```
+
+Detects `uv`, `pipx`, or `pip` and installs OpenBrowser + Chromium automatically.
+
+Install to `~/.local/bin` without sudo:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/billy-enrizky/openbrowser-ai/main/install.sh | sh -s -- --local
+```
+
+### pip
 
 ```bash
 pip install openbrowser-ai
 ```
 
-### With Optional Dependencies
+### uv (recommended)
 
 ```bash
-# Install with LLM agent support (langgraph, langchain, litellm, etc.)
-pip install openbrowser-ai[agent]
+uv pip install openbrowser-ai
+```
 
-# Install with all LLM providers
-pip install openbrowser-ai[all]
+### uvx (zero install)
 
-# Install specific providers
+Run directly without installing -- `uvx` downloads and caches the package automatically:
+
+```bash
+# MCP server mode
+uvx openbrowser-ai --mcp
+
+# CLI daemon mode
+uvx openbrowser-ai -c "await navigate('https://example.com')"
+```
+
+### pipx
+
+```bash
+pipx install openbrowser-ai
+```
+
+### From source
+
+```bash
+git clone https://github.com/billy-enrizky/openbrowser-ai.git
+cd openbrowser-ai
+uv pip install -e ".[agent]"
+```
+
+### Optional Dependencies
+
+```bash
+pip install openbrowser-ai[agent]      # LLM agent support (langgraph, langchain, litellm)
+pip install openbrowser-ai[all]        # All LLM providers
 pip install openbrowser-ai[anthropic]  # Anthropic Claude
 pip install openbrowser-ai[groq]       # Groq
 pip install openbrowser-ai[ollama]     # Ollama (local models)
 pip install openbrowser-ai[aws]        # AWS Bedrock
 pip install openbrowser-ai[azure]      # Azure OpenAI
-
-# Install with video recording support
-pip install openbrowser-ai[video]
+pip install openbrowser-ai[video]      # Video recording support
 ```
 
 ### Install Browser
@@ -226,7 +276,7 @@ claude plugin marketplace add billy-enrizky/openbrowser-ai
 claude plugin install openbrowser@openbrowser-ai
 ```
 
-This installs the MCP server and 6 built-in skills:
+This installs the MCP server and 7 built-in skills:
 
 | Skill | Description |
 |-------|-------------|
@@ -236,6 +286,7 @@ This installs the MCP server and 6 built-in skills:
 | `page-analysis` | Analyze page content, structure, metadata |
 | `accessibility-audit` | Audit pages for WCAG compliance |
 | `file-download` | Download files (PDFs, CSVs) using browser session |
+| `cli-execute` | Execute browser automation via `openbrowser-ai -c` with persistent daemon |
 
 See [plugin/README.md](plugin/README.md) for detailed tool parameter documentation.
 
@@ -405,6 +456,8 @@ The MCP server exposes a single `execute_code` tool that runs Python code in a p
 |---------------------|-------------|---------|
 | `OPENBROWSER_HEADLESS` | Run browser without GUI | `false` |
 | `OPENBROWSER_ALLOWED_DOMAINS` | Comma-separated domain whitelist | (none) |
+| `OPENBROWSER_COMPACT_DESCRIPTION` | Minimal tool description (~500 tokens) | `false` |
+| `OPENBROWSER_MAX_OUTPUT` | Max output characters per execution | `10000` |
 
 ## MCP Benchmark: Why OpenBrowser
 
@@ -456,11 +509,60 @@ OpenBrowser: navigate to Wikipedia -> 42 chars (page title only, state processed
 
 [Full comparison with methodology](https://docs.openbrowser.me/comparison)
 
+## CLI Benchmark: 4-Way Comparison
+
+### E2E LLM Benchmark (6 Tasks, N=3 runs, Single Bash Tool)
+
+Four CLI browser automation tools compared head-to-head. Each tool gets a single generic Bash tool (identical overhead) with an optimized system prompt. Claude Sonnet 4.6 on AWS Bedrock drives all 4 approaches. Task and approach order randomized per run. Persistent browser daemon across all 6 tasks. 10,000-sample bootstrap CIs.
+
+| CLI Tool | Duration (mean +/- std) | Tool Calls | Bedrock API Tokens | Response Chars |
+|----------|------------------------:|-----------:|-------------------:|---------------:|
+| **openbrowser-ai** | **84.8 +/- 10.9s** | **15.3 +/- 2.3** | **36,010 +/- 6,063** | **9,452 +/- 472** |
+| browser-use | 106.0 +/- 9.5s | 20.7 +/- 6.4 | 77,123 +/- 33,354 | 36,241 +/- 12,940 |
+| agent-browser | 99.0 +/- 6.8s | 25.0 +/- 4.0 | 90,107 +/- 3,698 | 56,009 +/- 39,733 |
+| playwright-cli | 118.3 +/- 21.4s | 25.7 +/- 8.1 | 94,130 +/- 35,982 | 84,065 +/- 49,713 |
+
+All 4 tools achieve **100% accuracy** (18/18 task executions). openbrowser-ai uses **2.1x fewer tokens** than browser-use, **2.5x fewer** than agent-browser, and **2.6x fewer** than playwright-cli.
+
+### Per-Task Token Usage
+
+| Task | openbrowser-ai | browser-use | playwright-cli | agent-browser |
+|------|---------------:|------------:|---------------:|--------------:|
+| fact_lookup | **2,504** | 4,710 | 16,857 | 9,676 |
+| form_fill | **7,887** | 15,811 | 31,757 | 19,226 |
+| multi_page_extract | **2,354** | 2,405 | 8,886 | 8,117 |
+| search_navigate | **16,539** | 47,936 | 27,779 | 44,367 |
+| deep_navigation | **2,178** | 3,747 | 4,705 | 5,534 |
+| content_analysis | 4,548 | **2,515** | 4,147 | 3,189 |
+
+openbrowser-ai wins 5 of 6 tasks on tokens. The advantage is largest on complex pages (search_navigate: 2.9x fewer tokens than browser-use) where code batching avoids repeated page state dumps.
+
+### Why the Difference
+
+Each tool uses the same single Bash tool. The key differences:
+
+- **openbrowser-ai**: Python code batching via `-c` flag. Multiple operations in one `openbrowser-ai -c '...'` call. DOM with `[i_N]` indices (~450 chars per page state). Variables persist across calls.
+- **browser-use**: Individual CLI commands (`open`, `click`, `input`). DOM with `[N]` indices (~880 chars). `input` combines click+type but no multi-operation batching.
+- **playwright-cli**: `run-code` enables JS batching, but snapshots save to `.yml` files requiring extra `cat` to read. Accessibility tree (~1,420 chars per snapshot).
+- **agent-browser**: Individual commands with `&&` chaining. `snapshot -i` flag for compact output (~590 chars). Accessibility tree with `@eN` refs.
+
+[Full 4-way comparison](https://docs.openbrowser.me/cli-comparison)
+
 ## CLI Usage
 
 ```bash
-# Run a browser automation task
+# Run a browser automation task with an LLM agent
 uvx openbrowser-ai -p "Search for Python tutorials on Google"
+
+# Execute code directly via persistent daemon
+uvx openbrowser-ai -c "await navigate('https://example.com')"
+uvx openbrowser-ai -c "print(await evaluate('document.title'))"
+
+# Daemon management
+uvx openbrowser-ai daemon start     # Start daemon (auto-starts on first -c call)
+uvx openbrowser-ai daemon stop      # Stop daemon and browser
+uvx openbrowser-ai daemon status    # Show daemon info
+uvx openbrowser-ai daemon restart   # Restart daemon
 
 # Install browser
 uvx openbrowser-ai install
@@ -468,6 +570,8 @@ uvx openbrowser-ai install
 # Run MCP server
 uvx openbrowser-ai --mcp
 ```
+
+The `-c` flag connects to a persistent browser daemon over a Unix socket (localhost TCP on Windows). Variables persist across calls while the daemon is running. The daemon starts automatically on first use and shuts down after 10 minutes of inactivity.
 
 ## Project Structure
 
@@ -482,7 +586,7 @@ openbrowser-ai/
 ├── plugin/                    # Plugin package (skills + MCP config)
 │   ├── .claude-plugin/
 │   ├── .mcp.json
-│   └── skills/                # 5 browser automation skills
+│   └── skills/                # 7 browser automation skills
 ├── src/openbrowser/
 │   ├── __init__.py            # Main exports
 │   ├── cli.py                 # CLI commands
@@ -490,7 +594,8 @@ openbrowser-ai/
 │   ├── actor/                 # Element interaction
 │   ├── agent/                 # LangGraph agent
 │   ├── browser/               # CDP browser control
-│   ├── code_use/              # Code agent
+│   ├── code_use/              # Code agent + shared executor
+│   ├── daemon/                # Persistent browser daemon (Unix socket)
 │   ├── dom/                   # DOM extraction
 │   ├── llm/                   # LLM providers
 │   ├── mcp/                   # MCP server
@@ -526,7 +631,7 @@ uv run python benchmarks/playwright_benchmark.py     # Playwright MCP
 uv run python benchmarks/cdp_benchmark.py            # Chrome DevTools MCP
 ```
 
-Results are written to `benchmarks/*_results.json`. See [full comparison](https://docs.openbrowser.me/comparison) for methodology.
+Raw results are in [`benchmarks/e2e_4way_cli_results.json`](benchmarks/e2e_4way_cli_results.json). See [full comparison](https://docs.openbrowser.me/comparison) for methodology.
 
 ## Backend and Frontend Deployment
 

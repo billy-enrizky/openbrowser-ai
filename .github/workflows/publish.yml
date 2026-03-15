@@ -118,6 +118,150 @@ jobs:
       - name: Publish to MCP Registry
         run: ./mcp-publisher publish
 
+  update-homebrew-formula:
+    name: Update Homebrew Formula
+    needs: publish-to-pypi
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release'
+    steps:
+      - name: Wait for PyPI availability
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          echo "Waiting for openbrowser-ai $VERSION on PyPI..."
+          for i in $(seq 1 30); do
+            if curl -sf "https://pypi.org/pypi/openbrowser-ai/$VERSION/json" > /dev/null 2>&1; then
+              echo "Package available on PyPI (attempt $i)"
+              exit 0
+            fi
+            echo "Attempt $i/30 -- not available yet, waiting 10s..."
+            sleep 10
+          done
+          echo "ERROR: Package not available on PyPI after 5 minutes"
+          exit 1
+
+      - name: Fetch PyPI metadata and update formula
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          python3 << PYEOF
+          import json, subprocess, sys, base64, urllib.request
+
+          version = "${VERSION}"
+
+          # Fetch sdist metadata from PyPI
+          with urllib.request.urlopen(f"https://pypi.org/pypi/openbrowser-ai/{version}/json") as resp:
+              data = json.load(resp)
+
+          sdist_url = None
+          sdist_sha = None
+          for url_info in data["urls"]:
+              if url_info["packagetype"] == "sdist":
+                  sdist_url = url_info["url"]
+                  sdist_sha = url_info["digests"]["sha256"]
+                  break
+
+          if not sdist_url or not sdist_sha:
+              print("ERROR: Could not find sdist in PyPI response")
+              sys.exit(1)
+
+          print(f"Version: {version}")
+          print(f"URL: {sdist_url}")
+          print(f"SHA: {sdist_sha}")
+
+          # Generate formula using template substitution (avoids f-string escaping issues with Ruby #{} syntax)
+          FORMULA_TEMPLATE = '''\
+          class OpenbrowserAi < Formula
+            desc "AI-powered browser automation using CodeAgent and CDP"
+            homepage "https://docs.openbrowser.me"
+            url "URL_PLACEHOLDER"
+            sha256 "SHA_PLACEHOLDER"
+            license "MIT"
+
+            depends_on "python@3.12"
+
+            def install
+              python3 = Formula["python@3.12"].opt_bin/"python3.12"
+              venv = Utils.safe_popen_read(python3, "-c", "import venv; print('ok')").strip
+              if venv != "ok"
+                odie "Python venv module not available"
+              end
+
+              # Create virtualenv
+              system python3, "-m", "venv", libexec
+              # Install from PyPI (includes all dependencies)
+              system libexec/"bin/pip", "install", "--no-cache-dir", "openbrowser-ai==#{version}"
+              # Symlink the CLI entry point
+              bin.install_symlink Dir[libexec/"bin/openbrowser*"]
+            end
+
+            def post_install
+              # Install Chromium for browser automation
+              system bin/"openbrowser-ai", "install"
+            rescue StandardError
+              opoo "Chromium install skipped. Run 'openbrowser-ai install' manually."
+            end
+
+            test do
+              assert_match "usage", shell_output("#{bin}/openbrowser-ai --help 2>&1", 0).downcase
+            end
+          end
+          '''
+          import textwrap
+          formula = textwrap.dedent(FORMULA_TEMPLATE)
+          formula = formula.replace("URL_PLACEHOLDER", sdist_url)
+          formula = formula.replace("SHA_PLACEHOLDER", sdist_sha)
+
+          content_b64 = base64.b64encode(formula.encode()).decode()
+
+          # Get current file SHA from homebrew repo
+          import os
+          token = os.environ["GH_TOKEN"]
+          req = urllib.request.Request(
+              "https://api.github.com/repos/billy-enrizky/homebrew-openbrowser/contents/Formula/openbrowser-ai.rb",
+              headers={"Authorization": f"token {token}", "Accept": "application/vnd.github.v3+json"},
+          )
+          with urllib.request.urlopen(req) as resp:
+              current_sha = json.load(resp)["sha"]
+
+          # Update via GitHub Contents API
+          update_data = json.dumps({
+              "message": f"chore: bump openbrowser-ai to {version}",
+              "content": content_b64,
+              "sha": current_sha,
+          }).encode()
+
+          req = urllib.request.Request(
+              "https://api.github.com/repos/billy-enrizky/homebrew-openbrowser/contents/Formula/openbrowser-ai.rb",
+              data=update_data,
+              method="PUT",
+              headers={
+                  "Authorization": f"token {token}",
+                  "Accept": "application/vnd.github.v3+json",
+                  "Content-Type": "application/json",
+              },
+          )
+          with urllib.request.urlopen(req) as resp:
+              result = json.load(resp)
+              print(f"Formula updated: {result['content']['html_url']}")
+          PYEOF
+
+  upload-install-script:
+    name: Upload install.sh Release Asset
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release'
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Upload install.sh to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "$GITHUB_REF_NAME" install.sh --clobber
+
   sync-plugin-version:
     name: Sync Claude Code Plugin Version
     needs: publish-to-pypi

@@ -142,6 +142,7 @@
           "quickstart_llm",
           "supported-models",
           "comparison",
+          "cli-comparison",
           "production"
         ]
       },
@@ -210,6 +211,7 @@
             "pages": [
               "customize/integrations/docs-mcp",
               "customize/integrations/mcp-server",
+              "customize/integrations/cli-daemon",
               "development/n8n-integration"
             ]
           }

@@ -34,6 +34,112 @@ if '--mcp' in sys.argv:
 	asyncio.run(mcp_main())
 	sys.exit(0)
 
+# Check for -c (execute code) mode early -- minimal imports for fast startup
+if '-c' in sys.argv:
+	import os
+	os.environ['OPENBROWSER_SETUP_LOGGING'] = 'false'
+	try:
+		from dotenv import load_dotenv
+		load_dotenv()
+	except ImportError:
+		pass
+
+	import asyncio
+
+	c_idx = sys.argv.index('-c')
+	code = sys.argv[c_idx + 1] if c_idx + 1 < len(sys.argv) else None
+	if code is None:
+		# No code argument: print the function reference and auto-start daemon
+		from openbrowser.code_use.descriptions import (
+			EXECUTE_CODE_DESCRIPTION,
+			EXECUTE_CODE_DESCRIPTION_COMPACT,
+		)
+		from openbrowser.daemon.client import DaemonClient
+
+		client = DaemonClient()
+		status = asyncio.run(client.status())
+		if status.success:
+			# Daemon already running (warm) -- compact description
+			print(EXECUTE_CODE_DESCRIPTION_COMPACT)
+		else:
+			# Daemon not running (cold) -- verbose description, then start it
+			print(EXECUTE_CODE_DESCRIPTION)
+			asyncio.run(client._start_daemon())
+		sys.exit(0)
+
+	from openbrowser.daemon.client import execute_code_via_daemon
+
+	result = asyncio.run(execute_code_via_daemon(code))
+	if result.success:
+		if result.output:
+			print(result.output)
+	else:
+		print(result.output or result.error, file=sys.stderr)
+		sys.exit(1)
+	sys.exit(0)
+
+# Check for daemon subcommand early
+if len(sys.argv) > 1 and sys.argv[1] == 'daemon':
+	import os
+	os.environ['OPENBROWSER_SETUP_LOGGING'] = 'false'
+	try:
+		from dotenv import load_dotenv
+		load_dotenv()
+	except ImportError:
+		pass
+
+	import asyncio
+
+	from openbrowser.daemon.client import DaemonClient
+
+	sub = sys.argv[2] if len(sys.argv) > 2 else 'status'
+	client = DaemonClient()
+
+	if sub == 'start':
+		async def _start():
+			status = await client.status()
+			if status.success:
+				print('Daemon is already running')
+				return
+			await client._start_daemon()
+			print('Daemon started')
+		asyncio.run(_start())
+	elif sub == 'stop':
+		resp = asyncio.run(client.stop())
+		print(resp.output or resp.error)
+		if not resp.success:
+			sys.exit(1)
+	elif sub == 'status':
+		resp = asyncio.run(client.status())
+		print(resp.output or resp.error)
+		if not resp.success:
+			sys.exit(1)
+	elif sub == 'restart':
+		import time as _time
+
+		async def _restart():
+			await client.stop()
+			# Wait for old daemon to fully shut down
+			stopped = False
+			deadline = _time.time() + 5.0
+			while _time.time() < deadline:
+				resp = await client.status()
+				if not resp.success:
+					stopped = True
+					break
+				await asyncio.sleep(0.3)
+			if not stopped:
+				print('Old daemon did not stop within timeout', file=sys.stderr)
+				sys.exit(1)
+			await client._start_daemon()
+			print('Daemon restarted')
+		asyncio.run(_restart())
+	else:
+		print(f'Unknown daemon command: {sub}', file=sys.stderr)
+		print('Usage: openbrowser-ai daemon [start|stop|status|restart]', file=sys.stderr)
+		sys.exit(1)
+	sys.exit(0)
+
 # Special case: install command doesn't need CLI dependencies
 if len(sys.argv) > 1 and sys.argv[1] == 'install':
 	import platform

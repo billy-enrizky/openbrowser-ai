@@ -76,8 +76,12 @@ Add to your project's `.mcp.json`:
 
 Optional configuration:
 
-- `OPENBROWSER_HEADLESS` - Set to `true` to run browser without GUI (default: `false`)
-- `OPENBROWSER_ALLOWED_DOMAINS` - Comma-separated domain whitelist
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `OPENBROWSER_HEADLESS` | Run browser without GUI | `false` |
+| `OPENBROWSER_ALLOWED_DOMAINS` | Comma-separated domain whitelist | (none) |
+| `OPENBROWSER_COMPACT_DESCRIPTION` | Minimal tool description (~500 tokens vs ~1,430) | `false` |
+| `OPENBROWSER_MAX_OUTPUT` | Maximum output characters per execution | `10000` |
 
 ## The `execute_code` Tool
 
@@ -158,6 +162,10 @@ for link in links:
 
 asyncio.run(use_browser_mcp())
 ```
+
+## CLI Execute Mode
+
+For Bash-based workflows without an MCP client, use the [CLI Daemon](/customize/integrations/cli-daemon) instead. It provides the same `execute_code` functions via `openbrowser-ai -c "code"` with a persistent browser daemon.
 
 ## Troubleshooting
 

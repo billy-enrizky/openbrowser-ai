@@ -20,7 +20,7 @@ claude plugin marketplace add billy-enrizky/openbrowser-ai
 claude plugin install openbrowser@openbrowser-ai
 ```
 
-This installs the MCP server, 6 skills, and auto-enables the plugin. Restart Claude Code to activate.
+This installs the MCP server, 7 skills, and auto-enables the plugin. Restart Claude Code to activate.
 
 ### Local development
 
@@ -138,6 +138,34 @@ Playwright completes tasks in fewer tool calls (1-2 per task) because it dumps t
 
 [Full comparison with methodology](https://docs.openbrowser.me/comparison)
 
+### CLI Benchmark: 4-Way Comparison (6 Tasks, N=3 runs)
+
+Four CLI tools compared with a single Bash tool each. Claude Sonnet 4.6 on Bedrock. Randomized order. All achieve 100% accuracy.
+
+| CLI Tool | Duration | Tool Calls | Bedrock API Tokens |
+|----------|----------|-----------|-------------------|
+| **openbrowser-ai** | **84.8 +/- 10.9s** | **15.3 +/- 2.3** | **36,010 +/- 6,063** |
+| browser-use | 106.0 +/- 9.5s | 20.7 +/- 6.4 | 77,123 +/- 33,354 |
+| agent-browser | 99.0 +/- 6.8s | 25.0 +/- 4.0 | 90,107 +/- 3,698 |
+| playwright-cli | 118.3 +/- 21.4s | 25.7 +/- 8.1 | 94,130 +/- 35,982 |
+
+openbrowser-ai uses **2.1-2.6x fewer tokens** than all competitors via Python code batching and compact DOM representation. Raw data: [`benchmarks/e2e_4way_cli_results.json`](../benchmarks/e2e_4way_cli_results.json).
+
+## CLI Execute Mode
+
+Run browser automation directly from Bash without the MCP server:
+
+```bash
+# Execute code via persistent daemon
+openbrowser-ai -c "await navigate('https://example.com')"
+openbrowser-ai -c "print(await evaluate('document.title'))"
+
+# Daemon management
+openbrowser-ai daemon start|stop|status|restart
+```
+
+Variables persist across `-c` calls while the daemon is running. The daemon starts automatically on first use and shuts down after 10 minutes of inactivity.
+
 ## Configuration
 
 Optional environment variables:
@@ -146,6 +174,8 @@ Optional environment variables:
 |----------|-------------|
 | `OPENBROWSER_HEADLESS` | Set to `true` to run browser without GUI |
 | `OPENBROWSER_ALLOWED_DOMAINS` | Comma-separated domain whitelist |
+| `OPENBROWSER_COMPACT_DESCRIPTION` | Set to `true` for minimal tool description (~500 tokens) |
+| `OPENBROWSER_MAX_OUTPUT` | Maximum output characters per execution (default: 10,000) |
 
 Set these in your `.mcp.json`:
 
@@ -165,7 +195,7 @@ Set these in your `.mcp.json`:
 
 ## Skills
 
-The plugin includes 6 built-in skills that provide guided workflows for common browser automation tasks. Each skill is triggered automatically when the user's request matches its description.
+The plugin includes 7 built-in skills that provide guided workflows for common browser automation tasks. Each skill is triggered automatically when the user's request matches its description.
 
 | Skill | Directory | Description |
 |-------|-----------|-------------|
@@ -175,8 +205,9 @@ The plugin includes 6 built-in skills that provide guided workflows for common b
 | `page-analysis` | `skills/page-analysis/` | Analyze page content, structure, metadata, and interactive elements |
 | `accessibility-audit` | `skills/accessibility-audit/` | Audit pages for WCAG compliance, heading structure, labels, alt text, ARIA, and landmarks |
 | `file-download` | `skills/file-download/` | Download files (PDFs, CSVs, images) using the browser's authenticated session and read content |
+| `cli-execute` | `skills/cli-execute/` | Execute browser automation code via `openbrowser-ai -c` with persistent daemon session |
 
-Each skill file (`SKILL.md`) contains YAML frontmatter with trigger conditions and a step-by-step workflow using the `execute_code` tool.
+Each skill file (`SKILL.md`) contains YAML frontmatter with trigger conditions and a step-by-step workflow. Most skills use the MCP `execute_code` tool; `cli-execute` uses Bash with `openbrowser-ai -c` instead.
 
 ## Testing and Benchmarks
 
