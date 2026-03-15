@@ -19,7 +19,6 @@
     "web-automation",
     "ai-agent",
     "file-download",
-    "cli-execute",
     "cli-daemon"
   ]
 }

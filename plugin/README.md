@@ -20,7 +20,7 @@ claude plugin marketplace add billy-enrizky/openbrowser-ai
 claude plugin install openbrowser@openbrowser-ai
 ```
 
-This installs the MCP server, 7 skills, and auto-enables the plugin. Restart Claude Code to activate.
+This installs the MCP server, 6 skills, and auto-enables the plugin. Restart Claude Code to activate.
 
 ### Local development
 
@@ -162,7 +162,7 @@ Set these in your `.mcp.json`:
 
 ## Skills
 
-The plugin includes 7 built-in skills that provide guided workflows for common browser automation tasks. Each skill is triggered automatically when the user's request matches its description.
+The plugin includes 6 built-in skills that provide guided workflows for common browser automation tasks. All skills use the CLI-first approach via `openbrowser-ai -c` for direct code execution. Each skill is triggered automatically when the user's request matches its description.
 
 | Skill | Directory | Description |
 |-------|-----------|-------------|
@@ -172,9 +172,8 @@ The plugin includes 7 built-in skills that provide guided workflows for common b
 | `page-analysis` | `skills/page-analysis/` | Analyze page content, structure, metadata, and interactive elements |
 | `accessibility-audit` | `skills/accessibility-audit/` | Audit pages for WCAG compliance, heading structure, labels, alt text, ARIA, and landmarks |
 | `file-download` | `skills/file-download/` | Download files (PDFs, CSVs, images) using the browser's authenticated session and read content |
-| `cli-execute` | `skills/cli-execute/` | Execute browser automation code via `openbrowser-ai -c` with persistent daemon session |
 
-Each skill file (`SKILL.md`) contains YAML frontmatter with trigger conditions and a step-by-step workflow. Most skills use the MCP `execute_code` tool; `cli-execute` uses Bash with `openbrowser-ai -c` instead.
+Each skill file (`SKILL.md`) contains YAML frontmatter with trigger conditions and a step-by-step workflow. All skills use `openbrowser-ai -c` via the Bash tool for CLI-first browser automation.
 
 ## Testing and Benchmarks
 
