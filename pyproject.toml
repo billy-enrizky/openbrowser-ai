@@ -39,7 +39,6 @@ agent = [
     "boto3>=1.36.0",
     "reportlab",
 ]
-cli = ["textual>=3.2.0"]
 video = ["imageio[ffmpeg]", "numpy"]
 anthropic = ["anthropic>=0.68.0"]
 groq = ["groq>=0.30.0"]
@@ -56,7 +55,7 @@ dev = [
     "mcp>=1.0.0",
 ]
 all = [
-    "openbrowser-ai[agent,cli,video,anthropic,groq,ollama,aws,azure,pdf]",
+    "openbrowser-ai[agent,video,anthropic,groq,ollama,aws,azure,pdf]",
 ]
 
 [project.scripts]
