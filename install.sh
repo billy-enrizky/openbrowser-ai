@@ -160,7 +160,7 @@ if [ "$SKIP_BROWSER" = false ]; then
   elif command -v uvx >/dev/null 2>&1; then
     uvx playwright install chromium 2>/dev/null || warn "Chromium install failed (run 'openbrowser-ai install' manually)"
   else
-    warn "Chromium install skipped (run 'openbrowser-ai install' after installing uv)"
+    warn "Chromium install skipped. Please run 'openbrowser-ai install' manually after installation completes."
   fi
 fi
 
