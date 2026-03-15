@@ -44,8 +44,23 @@ if '-c' in sys.argv:
 	c_idx = sys.argv.index('-c')
 	code = sys.argv[c_idx + 1] if c_idx + 1 < len(sys.argv) else None
 	if not code:
-		print('Error: -c requires a code argument', file=sys.stderr)
-		sys.exit(1)
+		# No code argument: print the function reference and auto-start daemon
+		from openbrowser.code_use.descriptions import (
+			EXECUTE_CODE_DESCRIPTION,
+			EXECUTE_CODE_DESCRIPTION_COMPACT,
+		)
+		from openbrowser.daemon.client import DaemonClient
+
+		client = DaemonClient()
+		status = asyncio.run(client.status())
+		if status.success:
+			# Daemon already running (warm) -- compact description
+			print(EXECUTE_CODE_DESCRIPTION_COMPACT)
+		else:
+			# Daemon not running (cold) -- verbose description, then start it
+			print(EXECUTE_CODE_DESCRIPTION)
+			asyncio.run(client._start_daemon())
+		sys.exit(0)
 
 	from openbrowser.daemon.client import execute_code_via_daemon
 
