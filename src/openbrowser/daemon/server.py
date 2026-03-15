@@ -16,7 +16,7 @@ import signal
 import time
 from pathlib import Path
 
-from openbrowser.daemon import DAEMON_DIR, IS_WINDOWS, PID_PATH, WINDOWS_PORT, get_socket_path
+from openbrowser.daemon import DAEMON_DIR, IS_WINDOWS, WINDOWS_PORT, get_pid_path, get_socket_path
 
 logger = logging.getLogger(__name__)
 
@@ -26,28 +26,29 @@ DEFAULT_EXEC_TIMEOUT = 300  # 5 minutes max per code execution
 
 def _read_pid() -> int | None:
     """Read PID from file, return None if stale or missing."""
-    if not PID_PATH.exists():
+    pid_path = get_pid_path()
+    if not pid_path.exists():
         return None
     try:
-        pid = int(PID_PATH.read_text().strip())
+        pid = int(pid_path.read_text().strip())
         # Check if process is alive
         os.kill(pid, 0)
         return pid
     except (ValueError, OSError):
-        PID_PATH.unlink(missing_ok=True)
+        pid_path.unlink(missing_ok=True)
         return None
 
 
 def _write_pid() -> None:
     DAEMON_DIR.mkdir(parents=True, exist_ok=True)
-    PID_PATH.write_text(str(os.getpid()))
-    PID_PATH.chmod(0o600)
+    pid_path = get_pid_path()
+    pid_path.write_text(str(os.getpid()))
+    pid_path.chmod(0o600)
 
 
 def _cleanup_pid() -> None:
-    PID_PATH.unlink(missing_ok=True)
-    sock = get_socket_path()
-    sock.unlink(missing_ok=True)
+    get_pid_path().unlink(missing_ok=True)
+    get_socket_path().unlink(missing_ok=True)
 
 
 class DaemonServer:
@@ -100,10 +101,10 @@ class DaemonServer:
             namespace = create_namespace(browser_session=session, tools=tools)
 
             try:
-                max_output = int(os.environ.get('OPENBROWSER_MAX_OUTPUT', '0')) or None
+                max_output = int(os.environ.get('OPENBROWSER_MAX_OUTPUT', '0'))
             except (ValueError, TypeError):
-                max_output = None
-            self._executor = CodeExecutor(max_output_chars=max_output if max_output else DEFAULT_MAX_OUTPUT_CHARS)
+                max_output = 0
+            self._executor = CodeExecutor(max_output_chars=max_output if max_output > 0 else DEFAULT_MAX_OUTPUT_CHARS)
             self._executor.set_namespace(namespace)
             self._session = session
         except Exception:
@@ -141,7 +142,7 @@ class DaemonServer:
                 'id': req_id,
                 'success': result.success,
                 'output': result.output,
-                'error': None if result.success else result.output,
+                'error': result.error,
             }
 
         elif action == 'status':

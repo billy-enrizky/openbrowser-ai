@@ -26,13 +26,12 @@ def daemon_env():
 
     with patch.dict(os.environ, {'OPENBROWSER_SOCKET': str(sock)}), \
          patch('openbrowser.daemon.server.DAEMON_DIR', tmp_dir), \
-         patch('openbrowser.daemon.server.PID_PATH', tmp_dir / 'daemon.pid'), \
          patch('openbrowser.daemon.client.DAEMON_DIR', tmp_dir):
         yield sock
 
-    # Cleanup
+    # Cleanup -- PID path is derived from socket path (d.sock -> d.pid)
     sock.unlink(missing_ok=True)
-    (tmp_dir / 'daemon.pid').unlink(missing_ok=True)
+    (tmp_dir / 'd.pid').unlink(missing_ok=True)
     try:
         tmp_dir.rmdir()
     except OSError:

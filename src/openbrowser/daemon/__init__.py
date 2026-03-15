@@ -16,3 +16,12 @@ WINDOWS_PORT = 19222
 def get_socket_path() -> Path:
     """Return the daemon socket path, respecting OPENBROWSER_SOCKET env var."""
     return Path(os.environ.get('OPENBROWSER_SOCKET', str(SOCKET_PATH)))
+
+
+def get_pid_path() -> Path:
+    """Return the PID file path, derived from the socket path to avoid collisions."""
+    custom_socket = os.environ.get('OPENBROWSER_SOCKET')
+    if custom_socket:
+        sock = Path(custom_socket)
+        return sock.parent / (sock.stem + '.pid')
+    return PID_PATH
