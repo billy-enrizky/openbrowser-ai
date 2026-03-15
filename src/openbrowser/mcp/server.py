@@ -188,6 +188,30 @@ def get_parent_process_cmdline() -> str | None:
 		return None
 
 
+_EXECUTE_CODE_DESCRIPTION_COMPACT = """Execute Python code with browser automation. All functions are async (use await). Use print() to return output. Variables persist between calls.
+
+## Core Functions
+- `await navigate(url, new_tab=False)` -- Go to URL
+- `await click(index)` -- Click element by index
+- `await input_text(index, text, clear=True)` -- Type into input field
+- `await scroll(down=True, pages=1.0)` -- Scroll page
+- `await send_keys(keys)` -- Keyboard input (e.g. "Enter", "Escape")
+- `await evaluate(code)` -- Run JavaScript, returns Python objects
+- `await select_dropdown(index, text)` -- Select dropdown option
+- `await done(text, success=True)` -- Signal task complete
+
+## State
+- `state = await browser.get_browser_state_summary()` -- Get page URL, title, interactive elements
+- Elements shown as `[i_N]` -- use N as the index for click/input_text
+
+## Libraries
+json, asyncio, Path, csv, re, datetime, requests (pre-imported)
+Optional: numpy/np, pandas/pd, BeautifulSoup, PdfReader
+
+## Reset Namespace
+To clear all user variables and start fresh, execute: `for k in [k for k in dir() if not k.startswith('_')]: exec(f'del {k}') if k not in ('browser', 'navigate', 'click', 'input_text', 'scroll', 'send_keys', 'evaluate', 'select_dropdown', 'done', 'go_back', 'wait', 'switch', 'close', 'upload_file', 'download_file', 'list_downloads', 'get_selector_from_index', 'dropdown_options', 'state', 'json', 'asyncio', 'Path', 'csv', 're', 'datetime', 'requests') else None`
+"""
+
 _EXECUTE_CODE_DESCRIPTION = """Execute Python code in a persistent namespace with browser automation functions. All functions are async -- use `await`. Use print() to return output. Variables persist between calls.
 
 ## Navigation
@@ -316,10 +340,13 @@ class OpenBrowserServer:
 		@self.server.list_tools()
 		async def handle_list_tools() -> list[types.Tool]:
 			"""List the single execute_code tool."""
+			description = _EXECUTE_CODE_DESCRIPTION
+			if os.environ.get('OPENBROWSER_COMPACT_DESCRIPTION', '').lower() in ('1', 'true', 'yes'):
+				description = _EXECUTE_CODE_DESCRIPTION_COMPACT
 			return [
 				types.Tool(
 					name='execute_code',
-					description=_EXECUTE_CODE_DESCRIPTION,
+					description=description,
 					inputSchema={
 						'type': 'object',
 						'properties': {
