@@ -448,7 +448,10 @@ class OpenBrowserServer:
 		self._last_activity = time.time()
 
 		# Pre-flight: check if CDP is still alive and recover if needed
-		if not await self._is_cdp_alive():
+		# Only attempt recovery when we already had a browser session (i.e. it died).
+		# If browser_session is None, _ensure_namespace hasn't launched one yet
+		# or the code doesn't need a browser -- skip recovery to avoid hanging.
+		if self.browser_session and not await self._is_cdp_alive():
 			try:
 				await self._recover_browser_session()
 			except Exception as recovery_err:
