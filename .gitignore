@@ -6,6 +6,9 @@ __pycache__
 !README.md
 *.png
 !benchmarks/benchmark_comparison.png
+!benchmarks/cli_benchmark_scatter.png
+!benchmarks/cli_benchmark_overview.png
+!benchmarks/cli_benchmark_per_task.png
 !docs/images/*.png
 .env
 !.github/workflows/*.yml

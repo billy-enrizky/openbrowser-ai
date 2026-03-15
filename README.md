@@ -353,45 +353,23 @@ Detailed docs: [.opencode/INSTALL.md](.opencode/INSTALL.md)
 
 ## OpenClaw
 
-[OpenClaw](https://openclaw.ai) does not natively support MCP servers, but the community
-[openclaw-mcp-adapter](https://github.com/androidStern-personal/openclaw-mcp-adapter) plugin
-bridges MCP servers to OpenClaw agents.
+[OpenClaw](https://openclaw.ai) supports OpenBrowser via the CLI daemon. Install OpenBrowser,
+then use `openbrowser-ai -c` from the Bash tool:
 
-1. Install the MCP adapter plugin (see its README for setup).
-
-2. Add OpenBrowser as an MCP server in `~/.openclaw/openclaw.json`:
-
-```json
-{
-  "plugins": {
-    "entries": {
-      "mcp-adapter": {
-        "enabled": true,
-        "config": {
-          "servers": [
-            {
-              "name": "openbrowser",
-              "transport": "stdio",
-              "command": "uvx",
-              "args": ["openbrowser-ai", "--mcp"]
-            }
-          ]
-        }
-      }
-    }
-  }
-}
+```bash
+openbrowser-ai -c "await navigate('https://example.com')"
+openbrowser-ai -c "print(await evaluate('document.title'))"
 ```
 
-The `execute_code` tool will be registered as a native OpenClaw agent tool.
+The daemon starts automatically on first use and persists variables across calls.
 
 For OpenClaw plugin documentation, see [docs.openclaw.ai/tools/plugin](https://docs.openclaw.ai/tools/plugin).
 
 ## MCP Server
 
-[![MCP Registry](https://img.shields.io/badge/MCP-Registry-blue)](https://registry.modelcontextprotocol.io/servers/me.openbrowser/openbrowser-ai)
+[![MCP Registry](https://img.shields.io/badge/MCP-Registry-blue)](https://registry.modelcontextprotocol.io/?q=openbrowser)
 
-OpenBrowser includes an MCP (Model Context Protocol) server that exposes browser automation as tools for AI assistants like Claude. Listed on the [MCP Registry](https://registry.modelcontextprotocol.io/servers/me.openbrowser/openbrowser-ai) as `me.openbrowser/openbrowser-ai`. No external LLM API keys required -- the MCP client provides the intelligence.
+OpenBrowser includes an MCP (Model Context Protocol) server that exposes browser automation as tools for AI assistants like Claude. Listed on the [MCP Registry](https://registry.modelcontextprotocol.io/?q=openbrowser) as `me.openbrowser/openbrowser-ai`. No external LLM API keys required -- the MCP client provides the intelligence.
 
 ### Quick Setup
 
