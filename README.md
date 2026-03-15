@@ -73,6 +73,13 @@ brew install openbrowser-ai
 curl -fsSL https://raw.githubusercontent.com/billy-enrizky/openbrowser-ai/main/install.sh | sh
 ```
 
+### Quick install (Windows PowerShell)
+
+```powershell
+# Windows (PowerShell)
+irm https://raw.githubusercontent.com/billy-enrizky/openbrowser-ai/main/install.ps1 | iex
+```
+
 Detects `uv`, `pipx`, or `pip` and installs OpenBrowser + Chromium automatically.
 
 Install to `~/.local/bin` without sudo:
@@ -276,7 +283,7 @@ claude plugin marketplace add billy-enrizky/openbrowser-ai
 claude plugin install openbrowser@openbrowser-ai
 ```
 
-This installs the MCP server and 7 built-in skills:
+This installs the MCP server and 6 built-in skills:
 
 | Skill | Description |
 |-------|-------------|
@@ -286,7 +293,6 @@ This installs the MCP server and 7 built-in skills:
 | `page-analysis` | Analyze page content, structure, metadata |
 | `accessibility-audit` | Audit pages for WCAG compliance |
 | `file-download` | Download files (PDFs, CSVs) using browser session |
-| `cli-execute` | Execute browser automation via `openbrowser-ai -c` with persistent daemon |
 
 See [plugin/README.md](plugin/README.md) for detailed tool parameter documentation.
 
@@ -540,7 +546,7 @@ openbrowser-ai/
 ├── plugin/                    # Plugin package (skills + MCP config)
 │   ├── .claude-plugin/
 │   ├── .mcp.json
-│   └── skills/                # 7 browser automation skills
+│   └── skills/                # 6 browser automation skills
 ├── src/openbrowser/
 │   ├── __init__.py            # Main exports
 │   ├── cli.py                 # CLI commands
