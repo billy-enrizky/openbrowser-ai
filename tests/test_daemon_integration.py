@@ -27,10 +27,8 @@ def daemon_env():
 
     with patch.dict(os.environ, {'OPENBROWSER_SOCKET': str(sock)}), \
          patch('openbrowser.daemon.server.DAEMON_DIR', tmp_dir), \
-         patch('openbrowser.daemon.server.SOCKET_PATH', sock), \
          patch('openbrowser.daemon.server.PID_PATH', tmp_dir / 'daemon.pid'), \
-         patch('openbrowser.daemon.client.DAEMON_DIR', tmp_dir), \
-         patch('openbrowser.daemon.client.SOCKET_PATH', sock):
+         patch('openbrowser.daemon.client.DAEMON_DIR', tmp_dir):
         yield sock
 
     # Cleanup

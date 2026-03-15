@@ -13,29 +13,17 @@ import asyncio
 import json
 import logging
 import os
-import platform
 import signal
 import sys
 import time
 from pathlib import Path
 
+from openbrowser.daemon import DAEMON_DIR, IS_WINDOWS, PID_PATH, SOCKET_PATH, WINDOWS_PORT, get_socket_path
+
 logger = logging.getLogger(__name__)
-
-# Daemon files directory
-DAEMON_DIR = Path.home() / '.openbrowser'
-SOCKET_PATH = DAEMON_DIR / 'daemon.sock'
-PID_PATH = DAEMON_DIR / 'daemon.pid'
-
-# Windows fallback: TCP on localhost
-IS_WINDOWS = platform.system() == 'Windows'
-WINDOWS_PORT = 19222
 
 DEFAULT_IDLE_TIMEOUT = 600  # 10 minutes
 DEFAULT_EXEC_TIMEOUT = 300  # 5 minutes max per code execution
-
-
-def _get_socket_path() -> Path:
-    return Path(os.environ.get('OPENBROWSER_SOCKET', str(SOCKET_PATH)))
 
 
 def _read_pid() -> int | None:
@@ -60,7 +48,7 @@ def _write_pid() -> None:
 
 def _cleanup_pid() -> None:
     PID_PATH.unlink(missing_ok=True)
-    sock = _get_socket_path()
+    sock = get_socket_path()
     sock.unlink(missing_ok=True)
 
 
@@ -225,7 +213,7 @@ class DaemonServer:
         self._running = True
         self._last_activity = time.time()
 
-        sock_path = _get_socket_path()
+        sock_path = get_socket_path()
         DAEMON_DIR.mkdir(parents=True, exist_ok=True)
 
         # Check if another daemon is already running
