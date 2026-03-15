@@ -69,10 +69,11 @@ class DaemonClient:
     async def _start_daemon(self):
         """Spawn the daemon process in the background."""
         DAEMON_DIR.mkdir(parents=True, exist_ok=True)
+        log_file = DAEMON_DIR / 'daemon.log'
         subprocess.Popen(
             [sys.executable, '-m', 'openbrowser.daemon.server'],
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stderr=open(log_file, 'w'),
             start_new_session=True,
         )
         # Wait for socket to appear
@@ -109,7 +110,7 @@ class DaemonClient:
         """Execute code via the daemon. Auto-starts if needed."""
         try:
             resp = await self._send({'id': 1, 'action': 'execute', 'code': code})
-        except (ConnectionRefusedError, FileNotFoundError, OSError):
+        except (ConnectionRefusedError, FileNotFoundError, ConnectionResetError):
             await self._start_daemon()
             resp = await self._send({'id': 1, 'action': 'execute', 'code': code})
 
