@@ -34,8 +34,7 @@ OpenBrowser is a framework for intelligent browser automation. It combines direc
 - [OpenCode](#opencode)
 - [OpenClaw](#openclaw)
 - [MCP Server](#mcp-server)
-- [MCP Benchmark: Why OpenBrowser](#mcp-benchmark-why-openbrowser)
-- [CLI Benchmark: 4-Way Comparison](#cli-benchmark-4-way-comparison)
+- [Benchmark: Token Efficiency](#benchmark-token-efficiency)
 - [CLI Usage](#cli-usage)
 - [Project Structure](#project-structure)
 - [Backend and Frontend Deployment](#backend-and-frontend-deployment)
@@ -481,7 +480,7 @@ openbrowser-ai uses **2.1-2.6x fewer tokens** than all competitors via Python co
 | deep_navigation | **2,178** | 3,747 | 4,705 | 5,534 |
 | content_analysis | 4,548 | **2,515** | 4,147 | 3,189 |
 
-openbrowser-ai wins 5 of 6 tasks. The advantage is largest on complex pages (search_navigate: 2.9x fewer tokens) where code batching avoids repeated page state dumps.
+openbrowser-ai wins 5 of 6 tasks. The advantage is largest on complex pages (search_navigate: 2.9x fewer tokens than browser-use) where code batching avoids repeated page state dumps.
 
 #### Cost per Benchmark Run (6 Tasks)
 
