@@ -353,45 +353,23 @@ Detailed docs: [.opencode/INSTALL.md](.opencode/INSTALL.md)
 
 ## OpenClaw
 
-[OpenClaw](https://openclaw.ai) does not natively support MCP servers, but the community
-[openclaw-mcp-adapter](https://github.com/androidStern-personal/openclaw-mcp-adapter) plugin
-bridges MCP servers to OpenClaw agents.
+[OpenClaw](https://openclaw.ai) supports OpenBrowser via the CLI daemon. Install OpenBrowser,
+then use `openbrowser-ai -c` from the Bash tool:
 
-1. Install the MCP adapter plugin (see its README for setup).
-
-2. Add OpenBrowser as an MCP server in `~/.openclaw/openclaw.json`:
-
-```json
-{
-  "plugins": {
-    "entries": {
-      "mcp-adapter": {
-        "enabled": true,
-        "config": {
-          "servers": [
-            {
-              "name": "openbrowser",
-              "transport": "stdio",
-              "command": "uvx",
-              "args": ["openbrowser-ai", "--mcp"]
-            }
-          ]
-        }
-      }
-    }
-  }
-}
+```bash
+openbrowser-ai -c "await navigate('https://example.com')"
+openbrowser-ai -c "print(await evaluate('document.title'))"
 ```
 
-The `execute_code` tool will be registered as a native OpenClaw agent tool.
+The daemon starts automatically on first use and persists variables across calls.
 
 For OpenClaw plugin documentation, see [docs.openclaw.ai/tools/plugin](https://docs.openclaw.ai/tools/plugin).
 
 ## MCP Server
 
-[![MCP Registry](https://img.shields.io/badge/MCP-Registry-blue)](https://registry.modelcontextprotocol.io/servers/me.openbrowser/openbrowser-ai)
+[![MCP Registry](https://img.shields.io/badge/MCP-Registry-blue)](https://registry.modelcontextprotocol.io/?q=openbrowser)
 
-OpenBrowser includes an MCP (Model Context Protocol) server that exposes browser automation as tools for AI assistants like Claude. Listed on the [MCP Registry](https://registry.modelcontextprotocol.io/servers/me.openbrowser/openbrowser-ai) as `me.openbrowser/openbrowser-ai`. No external LLM API keys required -- the MCP client provides the intelligence.
+OpenBrowser includes an MCP (Model Context Protocol) server that exposes browser automation as tools for AI assistants like Claude. Listed on the [MCP Registry](https://registry.modelcontextprotocol.io/?q=openbrowser) as `me.openbrowser/openbrowser-ai`. No external LLM API keys required -- the MCP client provides the intelligence.
 
 ### Quick Setup
 
@@ -459,20 +437,56 @@ The MCP server exposes a single `execute_code` tool that runs Python code in a p
 | `OPENBROWSER_COMPACT_DESCRIPTION` | Minimal tool description (~500 tokens) | `false` |
 | `OPENBROWSER_MAX_OUTPUT` | Max output characters per execution | `10000` |
 
-## MCP Benchmark: Why OpenBrowser
+## Benchmark: Token Efficiency
 
-### E2E LLM Benchmark (6 Real-World Tasks, N=5 runs)
+### CLI Benchmark: 4-Way Comparison (6 Tasks, N=3 runs)
 
-Six real-world browser tasks run through Claude Sonnet 4.6 on AWS Bedrock (Converse API) with a server-agnostic system prompt. The LLM autonomously decides which tools to call and when the task is complete. 5 runs per server with 10,000-sample bootstrap CIs. All tasks run against live websites.
+Four CLI tools compared with a single Bash tool each. Claude Sonnet 4.6 on Bedrock. Randomized order. All achieve 100% accuracy.
 
-| # | Task | Description | Target Site |
-|:-:|------|-------------|-------------|
-| 1 | **fact_lookup** | Navigate to a Wikipedia article and extract specific facts (creator and year) | en.wikipedia.org |
-| 2 | **form_fill** | Fill out a multi-field form (text input, radio button, checkbox) and submit | httpbin.org/forms/post |
-| 3 | **multi_page_extract** | Extract the titles of the top 5 stories from a dynamic page | news.ycombinator.com |
-| 4 | **search_navigate** | Search Wikipedia, click a result, and extract specific information | en.wikipedia.org |
-| 5 | **deep_navigation** | Navigate to a GitHub repo and find the latest release version number | github.com |
-| 6 | **content_analysis** | Analyze page structure: count headings, links, and paragraphs | example.com |
+<p align="center">
+  <img src="benchmarks/cli_benchmark_scatter.png" alt="CLI Benchmark: Token Usage vs Duration" width="800" />
+</p>
+
+| CLI Tool | Duration (mean +/- std) | Tool Calls | Bedrock API Tokens | Response Chars |
+|----------|------------------------:|-----------:|-------------------:|---------------:|
+| **openbrowser-ai** | **84.8 +/- 10.9s** | **15.3 +/- 2.3** | **36,010 +/- 6,063** | **9,452 +/- 472** |
+| browser-use | 106.0 +/- 9.5s | 20.7 +/- 6.4 | 77,123 +/- 33,354 | 36,241 +/- 12,940 |
+| agent-browser | 99.0 +/- 6.8s | 25.0 +/- 4.0 | 90,107 +/- 3,698 | 56,009 +/- 39,733 |
+| playwright-cli | 118.3 +/- 21.4s | 25.7 +/- 8.1 | 94,130 +/- 35,982 | 84,065 +/- 49,713 |
+
+openbrowser-ai uses **2.1-2.6x fewer tokens** than all competitors via Python code batching and compact DOM representation.
+
+<p align="center">
+  <img src="benchmarks/cli_benchmark_overview.png" alt="CLI Benchmark: Overview" width="800" />
+</p>
+
+#### Per-Task Token Usage
+
+<p align="center">
+  <img src="benchmarks/cli_benchmark_per_task.png" alt="CLI Benchmark: Per-Task Token Usage" width="800" />
+</p>
+
+| Task | openbrowser-ai | browser-use | playwright-cli | agent-browser |
+|------|---------------:|------------:|---------------:|--------------:|
+| fact_lookup | **2,504** | 4,710 | 16,857 | 9,676 |
+| form_fill | **7,887** | 15,811 | 31,757 | 19,226 |
+| multi_page_extract | **2,354** | 2,405 | 8,886 | 8,117 |
+| search_navigate | **16,539** | 47,936 | 27,779 | 44,367 |
+| deep_navigation | **2,178** | 3,747 | 4,705 | 5,534 |
+| content_analysis | 4,548 | **2,515** | 4,147 | 3,189 |
+
+openbrowser-ai wins 5 of 6 tasks. The advantage is largest on complex pages (search_navigate: 2.9x fewer tokens) where code batching avoids repeated page state dumps.
+
+#### Cost per Benchmark Run (6 Tasks)
+
+| Model | openbrowser-ai | browser-use | playwright-cli | agent-browser |
+|-------|---------------:|------------:|---------------:|--------------:|
+| Claude Sonnet 4.6 ($3/$15 per M) | **$0.12** | $0.24 | $0.29 | $0.27 |
+| Claude Opus 4.6 ($5/$25 per M) | **$0.24** | $0.45 | $0.56 | $0.51 |
+
+Raw results are in [`benchmarks/e2e_4way_cli_results.json`](benchmarks/e2e_4way_cli_results.json). [Full 4-way comparison with methodology](https://docs.openbrowser.me/cli-comparison).
+
+### E2E LLM Benchmark: MCP Server Comparison (6 Tasks, N=5 runs)
 
 <p align="center">
   <img src="benchmarks/benchmark_comparison.png" alt="E2E LLM Benchmark: MCP Server Comparison" width="800" />
@@ -484,69 +498,9 @@ Six real-world browser tasks run through Claude Sonnet 4.6 on AWS Bedrock (Conve
 | **Chrome DevTools MCP** (Google) | 100% | 103.4 +/- 2.7s | 19.4 +/- 0.5 | 299,486 |
 | **OpenBrowser MCP** | 100% | 77.0 +/- 6.7s | 13.8 +/- 2.0 | **50,195** |
 
-OpenBrowser uses **3.2x fewer tokens** than Playwright and **6.0x fewer** than Chrome DevTools, measured via Bedrock Converse API `usage` field (the actual billed tokens including system prompt, tool schemas, conversation history, and tool results).
+OpenBrowser uses **3.2x fewer tokens** than Playwright and **6.0x fewer** than Chrome DevTools. MCP response sizes: Playwright 1,132,173 chars, Chrome DevTools 1,147,244 chars, OpenBrowser 7,853 chars -- a **144x difference**.
 
-### Cost per Benchmark Run (6 Tasks)
-
-Based on Bedrock API token usage (input + output tokens at respective rates).
-
-| Model | Playwright MCP | Chrome DevTools MCP | OpenBrowser MCP |
-|-------|---------------:|--------------------:|----------------:|
-| Claude Sonnet 4.6 ($3/$15 per M) | $0.50 | $0.92 | **$0.18** |
-| Claude Opus 4.6 ($5/$25 per M) | $0.83 | $1.53 | **$0.30** |
-
-### Why the Difference
-
-Playwright and Chrome DevTools return full page accessibility snapshots as tool output (~124K-135K tokens for Wikipedia). The LLM reads the entire snapshot to find what it needs. MCP response sizes: Playwright 1,132,173 chars, Chrome DevTools 1,147,244 chars, OpenBrowser 7,853 chars -- a **144x difference**.
-
-OpenBrowser uses a CodeAgent architecture (single `execute_code` tool). The LLM writes Python code that processes browser state server-side and returns only extracted results (~30-1,000 chars per call). The full page content never enters the LLM context window.
-
-```
-Playwright: navigate to Wikipedia -> 520,742 chars (full a11y tree returned to LLM)
-OpenBrowser: navigate to Wikipedia -> 42 chars (page title only, state processed in code)
-             evaluate JS for infobox -> 896 chars (just the extracted data)
-```
-
-[Full comparison with methodology](https://docs.openbrowser.me/comparison)
-
-## CLI Benchmark: 4-Way Comparison
-
-### E2E LLM Benchmark (6 Tasks, N=3 runs, Single Bash Tool)
-
-Four CLI browser automation tools compared head-to-head. Each tool gets a single generic Bash tool (identical overhead) with an optimized system prompt. Claude Sonnet 4.6 on AWS Bedrock drives all 4 approaches. Task and approach order randomized per run. Persistent browser daemon across all 6 tasks. 10,000-sample bootstrap CIs.
-
-| CLI Tool | Duration (mean +/- std) | Tool Calls | Bedrock API Tokens | Response Chars |
-|----------|------------------------:|-----------:|-------------------:|---------------:|
-| **openbrowser-ai** | **84.8 +/- 10.9s** | **15.3 +/- 2.3** | **36,010 +/- 6,063** | **9,452 +/- 472** |
-| browser-use | 106.0 +/- 9.5s | 20.7 +/- 6.4 | 77,123 +/- 33,354 | 36,241 +/- 12,940 |
-| agent-browser | 99.0 +/- 6.8s | 25.0 +/- 4.0 | 90,107 +/- 3,698 | 56,009 +/- 39,733 |
-| playwright-cli | 118.3 +/- 21.4s | 25.7 +/- 8.1 | 94,130 +/- 35,982 | 84,065 +/- 49,713 |
-
-All 4 tools achieve **100% accuracy** (18/18 task executions). openbrowser-ai uses **2.1x fewer tokens** than browser-use, **2.5x fewer** than agent-browser, and **2.6x fewer** than playwright-cli.
-
-### Per-Task Token Usage
-
-| Task | openbrowser-ai | browser-use | playwright-cli | agent-browser |
-|------|---------------:|------------:|---------------:|--------------:|
-| fact_lookup | **2,504** | 4,710 | 16,857 | 9,676 |
-| form_fill | **7,887** | 15,811 | 31,757 | 19,226 |
-| multi_page_extract | **2,354** | 2,405 | 8,886 | 8,117 |
-| search_navigate | **16,539** | 47,936 | 27,779 | 44,367 |
-| deep_navigation | **2,178** | 3,747 | 4,705 | 5,534 |
-| content_analysis | 4,548 | **2,515** | 4,147 | 3,189 |
-
-openbrowser-ai wins 5 of 6 tasks on tokens. The advantage is largest on complex pages (search_navigate: 2.9x fewer tokens than browser-use) where code batching avoids repeated page state dumps.
-
-### Why the Difference
-
-Each tool uses the same single Bash tool. The key differences:
-
-- **openbrowser-ai**: Python code batching via `-c` flag. Multiple operations in one `openbrowser-ai -c '...'` call. DOM with `[i_N]` indices (~450 chars per page state). Variables persist across calls.
-- **browser-use**: Individual CLI commands (`open`, `click`, `input`). DOM with `[N]` indices (~880 chars). `input` combines click+type but no multi-operation batching.
-- **playwright-cli**: `run-code` enables JS batching, but snapshots save to `.yml` files requiring extra `cat` to read. Accessibility tree (~1,420 chars per snapshot).
-- **agent-browser**: Individual commands with `&&` chaining. `snapshot -i` flag for compact output (~590 chars). Accessibility tree with `@eN` refs.
-
-[Full 4-way comparison](https://docs.openbrowser.me/cli-comparison)
+[Full MCP comparison with methodology](https://docs.openbrowser.me/comparison)
 
 ## CLI Usage
 
