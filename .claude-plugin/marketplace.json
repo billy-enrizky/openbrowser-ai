@@ -10,11 +10,19 @@
   "plugins": [
     {
       "name": "openbrowser",
-      "version": "0.1.34",
+      "version": "0.1.35",
       "description": "Browser automation MCP server with progressive disclosure design -- returns minimal tokens (877x fewer than Playwright MCP on Wikipedia). Single execute_code tool runs Python with async browser functions. Includes CLI daemon for Bash-based workflows and compact description mode for token optimization.",
       "source": "./plugin",
       "category": "development",
-      "tags": ["browser", "automation", "web-scraping", "mcp", "testing", "cli", "daemon"],
+      "tags": [
+        "browser",
+        "automation",
+        "web-scraping",
+        "mcp",
+        "testing",
+        "cli",
+        "daemon"
+      ],
       "homepage": "https://github.com/billy-enrizky/openbrowser-ai",
       "repository": "https://github.com/billy-enrizky/openbrowser-ai",
       "license": "MIT"
