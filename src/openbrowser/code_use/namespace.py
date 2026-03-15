@@ -428,36 +428,6 @@ def create_namespace(
 		# Execute and track failures
 		try:
 			result = await evaluate(code, browser_session)
-
-			# Print result structure for debugging
-			if isinstance(result, list) and result and isinstance(result[0], dict):
-				result_preview = f'list of dicts - len={len(result)}, example 1:\n'
-				sample_result = result[0]
-				for key, value in list(sample_result.items())[:10]:
-					value_str = str(value)[:10] if not isinstance(value, (int, float, bool, type(None))) else str(value)
-					result_preview += f'  {key}: {value_str}...\n'
-				if len(sample_result) > 10:
-					result_preview += f'  ... {len(sample_result) - 10} more keys'
-				print(result_preview)
-
-			elif isinstance(result, list):
-				if len(result) == 0:
-					print('type=list, len=0')
-				else:
-					result_preview = str(result)[:100]
-					print(f'type=list, len={len(result)}, preview={result_preview}...')
-			elif isinstance(result, dict):
-				result_preview = f'type=dict, len={len(result)}, sample keys:\n'
-				for key, value in list(result.items())[:10]:
-					value_str = str(value)[:10] if not isinstance(value, (int, float, bool, type(None))) else str(value)
-					result_preview += f'  {key}: {value_str}...\n'
-				if len(result) > 10:
-					result_preview += f'  ... {len(result) - 10} more keys'
-				print(result_preview)
-
-			else:
-				print(f'type={type(result).__name__}, value={repr(result)[:50]}')
-
 			return result
 		except Exception as e:
 			# Track errors for pattern detection
