@@ -39,18 +39,6 @@ def _get_socket_path() -> Path:
     return Path(os.environ.get('OPENBROWSER_SOCKET', str(SOCKET_PATH)))
 
 
-def _daemon_is_running() -> bool:
-    pid_path = DAEMON_DIR / 'daemon.pid'
-    if not pid_path.exists():
-        return False
-    try:
-        pid = int(pid_path.read_text().strip())
-        os.kill(pid, 0)
-        return True
-    except (ValueError, OSError):
-        return False
-
-
 class DaemonClient:
     """Client that communicates with the OpenBrowser daemon."""
 
@@ -70,12 +58,14 @@ class DaemonClient:
         """Spawn the daemon process in the background."""
         DAEMON_DIR.mkdir(parents=True, exist_ok=True)
         log_file = DAEMON_DIR / 'daemon.log'
+        log_handle = open(log_file, 'w')
         subprocess.Popen(
             [sys.executable, '-m', 'openbrowser.daemon.server'],
             stdout=subprocess.DEVNULL,
-            stderr=open(log_file, 'w'),
+            stderr=log_handle,
             start_new_session=True,
         )
+        log_handle.close()
         # Wait for socket to appear
         sock = _get_socket_path()
         deadline = time.time() + DAEMON_START_TIMEOUT

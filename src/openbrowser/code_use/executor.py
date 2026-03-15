@@ -5,6 +5,7 @@ Wraps user Python code in an async function, executes it against a
 persistent namespace, captures stdout, and returns structured results.
 """
 
+import asyncio
 import io
 import logging
 import sys
@@ -35,6 +36,7 @@ class CodeExecutor:
     def __init__(self, max_output_chars: int = DEFAULT_MAX_OUTPUT_CHARS):
         self._namespace: dict[str, Any] | None = None
         self._max_output_chars = max_output_chars
+        self._lock = asyncio.Lock()
 
     @property
     def initialized(self) -> bool:
@@ -49,53 +51,55 @@ class CodeExecutor:
 
         Code is wrapped in an async function so ``await`` works.
         stdout is captured and returned. Variables persist across calls.
+        Serialized via asyncio.Lock to protect sys.stdout from concurrent access.
         """
         if self._namespace is None:
             return ExecutionResult(success=False, output='Error: namespace not initialized')
 
-        indented = '\n'.join(f'    {line}' for line in code.split('\n'))
-        wrapped = (
-            'async def __ob_exec__(__ns__):\n'
-            f'{indented}\n'
-            '    __ns__.update({k: v for k, v in locals().items() if not k.startswith("__")})\n'
-        )
+        async with self._lock:
+            indented = '\n'.join(f'    {line}' for line in code.split('\n'))
+            wrapped = (
+                'async def __ob_exec__(__ns__):\n'
+                f'{indented}\n'
+                '    __ns__.update({k: v for k, v in locals().items() if not k.startswith("__")})\n'
+            )
 
-        stdout_capture = io.StringIO()
-        old_stdout = sys.stdout
+            stdout_capture = io.StringIO()
+            old_stdout = sys.stdout
 
-        try:
-            compiled = compile(wrapped, '<execute_code>', 'exec')
-            exec(compiled, self._namespace)
-
-            sys.stdout = stdout_capture
             try:
-                result = await self._namespace['__ob_exec__'](self._namespace)
-            finally:
+                compiled = compile(wrapped, '<execute_code>', 'exec')
+                exec(compiled, self._namespace)
+
+                sys.stdout = stdout_capture
+                try:
+                    result = await self._namespace['__ob_exec__'](self._namespace)
+                finally:
+                    sys.stdout = old_stdout
+
+                output = stdout_capture.getvalue()
+
+                if result is not None and not output.strip():
+                    output = repr(result)
+
+                if not output.strip():
+                    output = '(executed successfully, no output)'
+
+                output = self._truncate(output)
+                return ExecutionResult(success=True, output=output)
+
+            except Exception as e:
                 sys.stdout = old_stdout
+                captured = stdout_capture.getvalue()
+                tb = traceback.format_exc()
+                error_output = f'Error: {type(e).__name__}: {e}\n\nTraceback:\n{tb}'
+                if captured.strip():
+                    error_output = f'Output before error:\n{captured}\n\n{error_output}'
+                error_output = self._truncate(error_output)
+                return ExecutionResult(success=False, output=error_output)
 
-            output = stdout_capture.getvalue()
-
-            if result is not None and not output.strip():
-                output = repr(result)
-
-            if not output.strip():
-                output = '(executed successfully, no output)'
-
-            output = self._truncate(output)
-            return ExecutionResult(success=True, output=output)
-
-        except Exception as e:
-            sys.stdout = old_stdout
-            captured = stdout_capture.getvalue()
-            tb = traceback.format_exc()
-            error_output = f'Error: {type(e).__name__}: {e}\n\nTraceback:\n{tb}'
-            if captured.strip():
-                error_output = f'Output before error:\n{captured}\n\n{error_output}'
-            error_output = self._truncate(error_output)
-            return ExecutionResult(success=False, output=error_output)
-
-        finally:
-            self._namespace.pop('__ob_exec__', None)
+            finally:
+                self._namespace.pop('__ob_exec__', None)
 
     def _truncate(self, text: str) -> str:
         if self._max_output_chars and len(text) > self._max_output_chars:

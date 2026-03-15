@@ -40,28 +40,26 @@ def _get_socket_path() -> Path:
 
 def _read_pid() -> int | None:
     """Read PID from file, return None if stale or missing."""
-    pid_path = DAEMON_DIR / 'daemon.pid'
-    if not pid_path.exists():
+    if not PID_PATH.exists():
         return None
     try:
-        pid = int(pid_path.read_text().strip())
+        pid = int(PID_PATH.read_text().strip())
         # Check if process is alive
         os.kill(pid, 0)
         return pid
     except (ValueError, OSError):
-        pid_path.unlink(missing_ok=True)
+        PID_PATH.unlink(missing_ok=True)
         return None
 
 
 def _write_pid() -> None:
     DAEMON_DIR.mkdir(parents=True, exist_ok=True)
-    pid_file = DAEMON_DIR / 'daemon.pid'
-    pid_file.write_text(str(os.getpid()))
-    pid_file.chmod(0o600)
+    PID_PATH.write_text(str(os.getpid()))
+    PID_PATH.chmod(0o600)
 
 
 def _cleanup_pid() -> None:
-    (DAEMON_DIR / 'daemon.pid').unlink(missing_ok=True)
+    PID_PATH.unlink(missing_ok=True)
     sock = _get_socket_path()
     sock.unlink(missing_ok=True)
 
@@ -90,7 +88,7 @@ class DaemonServer:
         logging.getLogger('openbrowser').setLevel(logging.ERROR)
 
         from openbrowser.browser import BrowserProfile, BrowserSession
-        from openbrowser.code_use.executor import CodeExecutor
+        from openbrowser.code_use.executor import DEFAULT_MAX_OUTPUT_CHARS, CodeExecutor
         from openbrowser.code_use.namespace import create_namespace
         from openbrowser.config import get_default_profile, load_openbrowser_config
         from openbrowser.tools.service import CodeAgentTools
@@ -115,7 +113,8 @@ class DaemonServer:
         tools = CodeAgentTools()
         namespace = create_namespace(browser_session=session, tools=tools)
 
-        self._executor = CodeExecutor()
+        max_output = int(os.environ.get('OPENBROWSER_MAX_OUTPUT', '0')) or None
+        self._executor = CodeExecutor(max_output_chars=max_output if max_output else DEFAULT_MAX_OUTPUT_CHARS)
         self._executor.set_namespace(namespace)
 
     async def _handle_request(self, data: dict) -> dict:
@@ -183,6 +182,8 @@ class DaemonServer:
             if not raw:
                 return
             data = json.loads(raw.decode())
+            if not isinstance(data, dict):
+                raise ValueError('Request must be a JSON object')
             response = await self._handle_request(data)
             writer.write(json.dumps(response).encode() + b'\n')
             await writer.drain()
