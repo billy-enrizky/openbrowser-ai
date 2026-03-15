@@ -76,8 +76,17 @@ if len(sys.argv) > 1 and sys.argv[1] == 'daemon':
 		resp = asyncio.run(client.status())
 		print(resp.output or resp.error)
 	elif sub == 'restart':
-		asyncio.run(client.stop())
+		import time as _time
+
 		async def _restart():
+			await client.stop()
+			# Wait for old daemon to fully shut down
+			deadline = _time.time() + 5.0
+			while _time.time() < deadline:
+				resp = await client.status()
+				if not resp.success:
+					break
+				await asyncio.sleep(0.3)
 			await client._start_daemon()
 			print('Daemon restarted')
 		asyncio.run(_restart())
