@@ -31,37 +31,15 @@ claude --plugin-dir /path/to/openbrowser-ai/plugin
 
 ### OpenClaw
 
-[OpenClaw](https://openclaw.ai) does not natively support MCP servers, but the community
-[openclaw-mcp-adapter](https://github.com/androidStern-personal/openclaw-mcp-adapter) plugin
-bridges MCP servers to OpenClaw agents.
+[OpenClaw](https://openclaw.ai) supports OpenBrowser via the CLI daemon. Install OpenBrowser,
+then use `openbrowser-ai -c` from the Bash tool:
 
-1. Install the MCP adapter plugin (see its README for setup).
-
-2. Add OpenBrowser as an MCP server in `~/.openclaw/openclaw.json`:
-
-```json
-{
-  "plugins": {
-    "entries": {
-      "mcp-adapter": {
-        "enabled": true,
-        "config": {
-          "servers": [
-            {
-              "name": "openbrowser",
-              "transport": "stdio",
-              "command": "uvx",
-              "args": ["openbrowser-ai", "--mcp"]
-            }
-          ]
-        }
-      }
-    }
-  }
-}
+```bash
+openbrowser-ai -c "await navigate('https://example.com')"
+openbrowser-ai -c "print(await evaluate('document.title'))"
 ```
 
-The `execute_code` tool will be registered as a native OpenClaw agent tool.
+The daemon starts automatically on first use and persists variables across calls.
 
 For OpenClaw plugin documentation, see [docs.openclaw.ai/tools/plugin](https://docs.openclaw.ai/tools/plugin).
 
@@ -102,45 +80,13 @@ The MCP server exposes a single `execute_code` tool that runs Python code in a p
 
 ## Benchmark: Token Efficiency
 
-### E2E LLM Benchmark (6 Real-World Tasks, N=5 runs)
-
-Six browser tasks run through Claude Sonnet 4.6 on AWS Bedrock (Converse API). The LLM autonomously decides which tools to call. All three servers pass **6/6 tasks**. 5 runs per server with 10,000-sample bootstrap CIs. Bedrock API tokens measured from the Converse API `usage` field.
-
-| MCP Server | Tools | Bedrock API Tokens | Tool Calls (mean) | vs OpenBrowser |
-|------------|------:|-------------------:|-----------:|---------------:|
-| **Playwright MCP** | 22 | 158,787 | 9.4 | **3.2x more tokens** |
-| **Chrome DevTools MCP** (Google) | 26 | 299,486 | 19.4 | **6.0x more tokens** |
-| **OpenBrowser MCP** | 1 | **50,195** | 13.8 | baseline |
-
-### Cost per Benchmark Run (6 Tasks)
-
-Based on Bedrock API token usage (input + output tokens at respective rates).
-
-| Model | Playwright MCP | Chrome DevTools MCP | OpenBrowser MCP |
-|-------|---------------:|--------------------:|----------------:|
-| Claude Sonnet 4.6 ($3/$15 per M) | $0.50 | $0.92 | **$0.18** |
-| Claude Opus 4.6 ($5/$25 per M) | $0.83 | $1.53 | **$0.30** |
-
-### Per-Task MCP Response Size
-
-MCP tool response sizes show the architectural difference. Playwright and Chrome DevTools dump full page snapshots; OpenBrowser returns only extracted data.
-
-| Task | Playwright MCP | Chrome DevTools MCP | OpenBrowser MCP |
-|------|---------------:|--------------------:|----------------:|
-| fact_lookup | 520,742 chars | 509,058 chars | 3,144 chars |
-| form_fill | 4,075 chars | 3,150 chars | 2,305 chars |
-| multi_page_extract | 58,392 chars | 38,880 chars | 294 chars |
-| search_navigate | 519,241 chars | 595,590 chars | 2,848 chars |
-| deep_navigation | 14,875 chars | 195 chars | 113 chars |
-| content_analysis | 485 chars | 501 chars | 499 chars |
-
-Playwright completes tasks in fewer tool calls (1-2 per task) because it dumps the full a11y snapshot on every navigation. OpenBrowser takes more round-trips but each response is compact -- the code extracts only what's needed.
-
-[Full comparison with methodology](https://docs.openbrowser.me/comparison)
-
 ### CLI Benchmark: 4-Way Comparison (6 Tasks, N=3 runs)
 
 Four CLI tools compared with a single Bash tool each. Claude Sonnet 4.6 on Bedrock. Randomized order. All achieve 100% accuracy.
+
+<p align="center">
+  <img src="../benchmarks/cli_benchmark_scatter.png" alt="CLI Benchmark: Token Usage vs Duration" width="700" />
+</p>
 
 | CLI Tool | Duration | Tool Calls | Bedrock API Tokens |
 |----------|----------|-----------|-------------------|
@@ -150,6 +96,27 @@ Four CLI tools compared with a single Bash tool each. Claude Sonnet 4.6 on Bedro
 | playwright-cli | 118.3 +/- 21.4s | 25.7 +/- 8.1 | 94,130 +/- 35,982 |
 
 openbrowser-ai uses **2.1-2.6x fewer tokens** than all competitors via Python code batching and compact DOM representation. Raw data: [`benchmarks/e2e_4way_cli_results.json`](../benchmarks/e2e_4way_cli_results.json).
+
+<p align="center">
+  <img src="../benchmarks/cli_benchmark_per_task.png" alt="CLI Benchmark: Per-Task Token Usage" width="700" />
+</p>
+
+[Full 4-way comparison](https://docs.openbrowser.me/cli-comparison)
+
+### E2E LLM Benchmark: MCP Server Comparison (6 Tasks, N=5 runs)
+
+| MCP Server | Tools | Bedrock API Tokens | Tool Calls (mean) | vs OpenBrowser |
+|------------|------:|-------------------:|-----------:|---------------:|
+| **Playwright MCP** | 22 | 158,787 | 9.4 | **3.2x more tokens** |
+| **Chrome DevTools MCP** (Google) | 26 | 299,486 | 19.4 | **6.0x more tokens** |
+| **OpenBrowser MCP** | 1 | **50,195** | 13.8 | baseline |
+
+| Model | Playwright MCP | Chrome DevTools MCP | OpenBrowser MCP |
+|-------|---------------:|--------------------:|----------------:|
+| Claude Sonnet 4.6 ($3/$15 per M) | $0.50 | $0.92 | **$0.18** |
+| Claude Opus 4.6 ($5/$25 per M) | $0.83 | $1.53 | **$0.30** |
+
+[Full MCP comparison with methodology](https://docs.openbrowser.me/comparison)
 
 ## CLI Execute Mode
 
