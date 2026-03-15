@@ -94,6 +94,15 @@ except ModuleNotFoundError:
 except Exception:
 	FILESYSTEM_AVAILABLE = False
 
+try:
+	from openbrowser.filesystem.file_system import FileSystem
+
+	FILESYSTEM_AVAILABLE = True
+except ModuleNotFoundError:
+	FILESYSTEM_AVAILABLE = False
+except Exception:
+	FILESYSTEM_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 _MCP_WORKSPACE_DIR = Path.home() / 'Downloads' / 'openbrowser-mcp' / 'workspace'
