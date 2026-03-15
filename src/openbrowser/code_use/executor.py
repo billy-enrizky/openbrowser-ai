@@ -9,7 +9,6 @@ import asyncio
 import contextlib
 import io
 import logging
-import sys
 import traceback
 from dataclasses import dataclass
 from typing import Any
@@ -24,6 +23,7 @@ class ExecutionResult:
     """Result of a code execution."""
     success: bool
     output: str
+    error: str | None = None  # raw exception message (not truncated), for callers to inspect
 
 
 class CodeExecutor:
@@ -58,11 +58,17 @@ class CodeExecutor:
             return ExecutionResult(success=False, output='Error: namespace not initialized')
 
         async with self._lock:
-            indented = '\n'.join(f'    {line}' for line in code.split('\n'))
+            # Use try/finally so namespace update always runs, even if user code
+            # contains an early ``return``.
+            indented = '\n'.join(f'        {line}' for line in code.split('\n'))
             wrapped = (
                 'async def __ob_exec__(__ns__):\n'
+                '    __ob_result__ = None\n'
+                '    try:\n'
                 f'{indented}\n'
-                '    __ns__.update({k: v for k, v in locals().items() if not k.startswith("__")})\n'
+                '    finally:\n'
+                '        __ns__.update({k: v for k, v in locals().items() if not k.startswith("__")})\n'
+                '    return __ob_result__\n'
             )
 
             stdout_capture = io.StringIO()
@@ -87,15 +93,17 @@ class CodeExecutor:
 
             except Exception as e:
                 captured = stdout_capture.getvalue()
+                raw_error = f'{type(e).__name__}: {e}'
                 tb = traceback.format_exc()
-                error_output = f'Error: {type(e).__name__}: {e}\n\nTraceback:\n{tb}'
+                error_output = f'Error: {raw_error}\n\nTraceback:\n{tb}'
                 if captured.strip():
                     error_output = f'Output before error:\n{captured}\n\n{error_output}'
                 error_output = self._truncate(error_output)
-                return ExecutionResult(success=False, output=error_output)
+                return ExecutionResult(success=False, output=error_output, error=raw_error)
 
             finally:
                 self._namespace.pop('__ob_exec__', None)
+                self._namespace.pop('__ob_result__', None)
 
     def _truncate(self, text: str) -> str:
         if self._max_output_chars and len(text) > self._max_output_chars:

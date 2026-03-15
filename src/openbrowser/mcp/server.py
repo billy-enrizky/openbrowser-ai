@@ -321,7 +321,10 @@ class OpenBrowserServer:
 
 		# CodeAgent namespace -- persistent across execute_code calls
 		self._namespace: dict[str, Any] | None = None
-		max_output = int(os.environ.get('OPENBROWSER_MAX_OUTPUT', '10000'))
+		try:
+			max_output = int(os.environ.get('OPENBROWSER_MAX_OUTPUT', '10000'))
+		except (ValueError, TypeError):
+			max_output = 10000
 		self._executor = CodeExecutor(max_output_chars=max_output)
 		self._tools: CodeAgentTools | None = None
 
@@ -560,8 +563,11 @@ class OpenBrowserServer:
 		# Execute via shared CodeExecutor
 		result = await self._executor.execute(code)
 
-		# If error looks like CDP connection issue, recover and retry once
-		if not result.success and self._is_connection_error(result.output):
+		# If error looks like CDP connection issue, recover and retry once.
+		# Check result.error (raw, not truncated) to avoid missing errors
+		# when large stdout causes the error message to be truncated away.
+		error_text = result.error or result.output
+		if not result.success and self._is_connection_error(error_text):
 			logger.info('CDP connection error during execution, recovering')
 			try:
 				await self._recover_browser_session()
