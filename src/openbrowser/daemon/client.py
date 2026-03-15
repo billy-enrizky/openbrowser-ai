@@ -10,12 +10,13 @@ modules so the -c CLI path stays fast (<50ms import time).
 
 import asyncio
 import json
+import os
 import subprocess
 import sys
 import time
 from dataclasses import dataclass
 
-from openbrowser.daemon import DAEMON_DIR, IS_WINDOWS, SOCKET_PATH, WINDOWS_PORT, get_socket_path
+from openbrowser.daemon import DAEMON_DIR, IS_WINDOWS, WINDOWS_PORT, get_socket_path
 
 CONNECT_TIMEOUT = 10.0
 READ_TIMEOUT = 300.0  # 5 min for long-running code
@@ -48,7 +49,7 @@ class DaemonClient:
         """Spawn the daemon process in the background."""
         DAEMON_DIR.mkdir(parents=True, exist_ok=True)
         log_file = DAEMON_DIR / 'daemon.log'
-        with open(log_file, 'w') as log_handle:
+        with open(os.open(str(log_file), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), 'w') as log_handle:
             subprocess.Popen(
                 [sys.executable, '-m', 'openbrowser.daemon.server'],
                 stdout=subprocess.DEVNULL,
