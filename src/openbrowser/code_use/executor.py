@@ -55,7 +55,10 @@ class CodeExecutor:
         Serialized via asyncio.Lock to protect sys.stdout from concurrent access.
         """
         if self._namespace is None:
-            return ExecutionResult(success=False, output='Error: namespace not initialized')
+            return ExecutionResult(success=False, output='Error: namespace not initialized', error='namespace not initialized')
+
+        if not code.strip():
+            return ExecutionResult(success=False, output='Error: No code provided', error='No code provided')
 
         async with self._lock:
             # Use try/finally so namespace update always runs, even if user code
