@@ -5,8 +5,7 @@ Holds a browser session and CodeAgent namespace in memory.
 CLI clients connect via Unix socket to execute code.
 
 Usage:
-    python -m openbrowser.daemon.server          # foreground
-    python -m openbrowser.daemon.server --bg     # background (called by client auto-start)
+    python -m openbrowser.daemon.server
 """
 
 import asyncio
@@ -14,11 +13,10 @@ import json
 import logging
 import os
 import signal
-import sys
 import time
 from pathlib import Path
 
-from openbrowser.daemon import DAEMON_DIR, IS_WINDOWS, PID_PATH, SOCKET_PATH, WINDOWS_PORT, get_socket_path
+from openbrowser.daemon import DAEMON_DIR, IS_WINDOWS, PID_PATH, WINDOWS_PORT, get_socket_path
 
 logger = logging.getLogger(__name__)
 
@@ -97,14 +95,24 @@ class DaemonServer:
         profile = BrowserProfile(**profile_data)
         session = BrowserSession(browser_profile=profile)
         await session.start()
-        self._session = session
+        try:
+            tools = CodeAgentTools()
+            namespace = create_namespace(browser_session=session, tools=tools)
 
-        tools = CodeAgentTools()
-        namespace = create_namespace(browser_session=session, tools=tools)
-
-        max_output = int(os.environ.get('OPENBROWSER_MAX_OUTPUT', '0')) or None
-        self._executor = CodeExecutor(max_output_chars=max_output if max_output else DEFAULT_MAX_OUTPUT_CHARS)
-        self._executor.set_namespace(namespace)
+            try:
+                max_output = int(os.environ.get('OPENBROWSER_MAX_OUTPUT', '0')) or None
+            except (ValueError, TypeError):
+                max_output = None
+            self._executor = CodeExecutor(max_output_chars=max_output if max_output else DEFAULT_MAX_OUTPUT_CHARS)
+            self._executor.set_namespace(namespace)
+            self._session = session
+        except Exception:
+            # Kill the browser if namespace/executor setup fails to prevent leak
+            try:
+                await session.kill()
+            except Exception:
+                pass
+            raise
 
     async def _handle_request(self, data: dict) -> dict:
         """Handle a single JSON request."""
