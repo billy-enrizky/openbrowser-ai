@@ -138,6 +138,19 @@ Playwright completes tasks in fewer tool calls (1-2 per task) because it dumps t
 
 [Full comparison with methodology](https://docs.openbrowser.me/comparison)
 
+### CLI Benchmark: 4-Way Comparison (6 Tasks, N=3 runs)
+
+Four CLI tools compared with a single Bash tool each. Claude Sonnet 4.6 on Bedrock. Randomized order. All achieve 100% accuracy.
+
+| CLI Tool | Duration | Tool Calls | Bedrock API Tokens |
+|----------|----------|-----------|-------------------|
+| **openbrowser-ai** | **84.8 +/- 10.9s** | **15.3 +/- 2.3** | **36,010 +/- 6,063** |
+| browser-use | 106.0 +/- 9.5s | 20.7 +/- 6.4 | 77,123 +/- 33,354 |
+| agent-browser | 99.0 +/- 6.8s | 25.0 +/- 4.0 | 90,107 +/- 3,698 |
+| playwright-cli | 118.3 +/- 21.4s | 25.7 +/- 8.1 | 94,130 +/- 35,982 |
+
+openbrowser-ai uses **2.1-2.6x fewer tokens** than all competitors via Python code batching and compact DOM representation.
+
 ## CLI Execute Mode
 
 Run browser automation directly from Bash without the MCP server:
