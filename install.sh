@@ -47,11 +47,12 @@ done
 # --- Detect OS ---
 OS="$(uname -s)"
 case "$OS" in
-  Linux*)  OS_NAME="Linux" ;;
-  Darwin*) OS_NAME="macOS" ;;
+  Linux*)                    OS_NAME="Linux" ;;
+  Darwin*)                   OS_NAME="macOS" ;;
+  MINGW*|MSYS*|CYGWIN*)     OS_NAME="Windows" ;;
   *)
     error "Unsupported OS: $OS"
-    echo "OpenBrowser supports macOS and Linux."
+    echo "OpenBrowser supports macOS, Linux, and Windows."
     exit 1
     ;;
 esac
@@ -59,12 +60,24 @@ esac
 # --- Find Python 3.12+ ---
 PYTHON=""
 find_python() {
+  # On Windows (Git Bash), try the py launcher first
+  if [ "$OS_NAME" = "Windows" ] && command -v py >/dev/null 2>&1; then
+    for pyver in "-3" "-3.13" "-3.12"; do
+      version=$(py "$pyver" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>/dev/null) || continue
+      major=$(echo "$version" | cut -d. -f1)
+      minor=$(echo "$version" | cut -d. -f2)
+      if [ "$major" -gt "$MIN_PYTHON_MAJOR" ] || { [ "$major" -eq "$MIN_PYTHON_MAJOR" ] && [ "$minor" -ge "$MIN_PYTHON_MINOR" ]; }; then
+        PYTHON=$(py "$pyver" -c "import sys; print(sys.executable)" 2>/dev/null)
+        return 0
+      fi
+    done
+  fi
   for cmd in python3.13 python3.12 python3 python; do
     if command -v "$cmd" >/dev/null 2>&1; then
       version=$("$cmd" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>/dev/null) || continue
       major=$(echo "$version" | cut -d. -f1)
       minor=$(echo "$version" | cut -d. -f2)
-      if [ "$major" -ge "$MIN_PYTHON_MAJOR" ] && [ "$minor" -ge "$MIN_PYTHON_MINOR" ]; then
+      if [ "$major" -gt "$MIN_PYTHON_MAJOR" ] || { [ "$major" -eq "$MIN_PYTHON_MAJOR" ] && [ "$minor" -ge "$MIN_PYTHON_MINOR" ]; }; then
         PYTHON="$cmd"
         return 0
       fi
@@ -91,10 +104,10 @@ install_with_pip() {
   # Use the discovered Python's pip module to ensure version match
   info "Installing with $PYTHON -m pip..."
   if [ "$LOCAL_INSTALL" = true ]; then
-    $PYTHON -m pip install --user "$PACKAGE"
+    "$PYTHON" -m pip install --user "$PACKAGE"
     warn "Installed to ~/.local/bin -- make sure it is in your PATH"
   else
-    $PYTHON -m pip install "$PACKAGE"
+    "$PYTHON" -m pip install "$PACKAGE"
   fi
 }
 
@@ -110,6 +123,8 @@ if ! find_python; then
   echo "Install Python:"
   if [ "$OS_NAME" = "macOS" ]; then
     echo "  brew install python@3.12"
+  elif [ "$OS_NAME" = "Windows" ]; then
+    echo "  winget install Python.Python.3.12"
   else
     echo "  sudo apt install python3.12   # Debian/Ubuntu"
     echo "  sudo dnf install python3.12   # Fedora"
@@ -118,7 +133,7 @@ if ! find_python; then
   exit 1
 fi
 
-echo "  Python:  $PYTHON ($($PYTHON --version 2>&1))"
+echo "  Python:  $PYTHON ($("$PYTHON" --version 2>&1))"
 echo ""
 
 if install_with_uv; then
@@ -145,7 +160,7 @@ if [ "$SKIP_BROWSER" = false ]; then
   elif command -v playwright >/dev/null 2>&1; then
     playwright install chromium 2>/dev/null || warn "Chromium install failed (run 'playwright install chromium' manually)"
   else
-    $PYTHON -m playwright install chromium 2>/dev/null || warn "Chromium install skipped (run 'openbrowser-ai install' manually)"
+    "$PYTHON" -m playwright install chromium 2>/dev/null || warn "Chromium install skipped (run 'openbrowser-ai install' manually)"
   fi
 fi
 

@@ -34,8 +34,7 @@ OpenBrowser is a framework for intelligent browser automation. It combines direc
 - [OpenCode](#opencode)
 - [OpenClaw](#openclaw)
 - [MCP Server](#mcp-server)
-- [MCP Benchmark: Why OpenBrowser](#mcp-benchmark-why-openbrowser)
-- [CLI Benchmark: 4-Way Comparison](#cli-benchmark-4-way-comparison)
+- [Benchmark: Token Efficiency](#benchmark-token-efficiency)
 - [CLI Usage](#cli-usage)
 - [Project Structure](#project-structure)
 - [Backend and Frontend Deployment](#backend-and-frontend-deployment)
@@ -71,6 +70,13 @@ brew install openbrowser-ai
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/billy-enrizky/openbrowser-ai/main/install.sh | sh
+```
+
+### Quick install (Windows PowerShell)
+
+```powershell
+# Windows (PowerShell)
+irm https://raw.githubusercontent.com/billy-enrizky/openbrowser-ai/main/install.ps1 | iex
 ```
 
 Detects `uv`, `pipx`, or `pip` and installs OpenBrowser + Chromium automatically.
@@ -276,7 +282,7 @@ claude plugin marketplace add billy-enrizky/openbrowser-ai
 claude plugin install openbrowser@openbrowser-ai
 ```
 
-This installs the MCP server and 7 built-in skills:
+This installs the MCP server and 6 built-in skills:
 
 | Skill | Description |
 |-------|-------------|
@@ -286,7 +292,6 @@ This installs the MCP server and 7 built-in skills:
 | `page-analysis` | Analyze page content, structure, metadata |
 | `accessibility-audit` | Audit pages for WCAG compliance |
 | `file-download` | Download files (PDFs, CSVs) using browser session |
-| `cli-execute` | Execute browser automation via `openbrowser-ai -c` with persistent daemon |
 
 See [plugin/README.md](plugin/README.md) for detailed tool parameter documentation.
 
@@ -475,7 +480,7 @@ openbrowser-ai uses **2.1-2.6x fewer tokens** than all competitors via Python co
 | deep_navigation | **2,178** | 3,747 | 4,705 | 5,534 |
 | content_analysis | 4,548 | **2,515** | 4,147 | 3,189 |
 
-openbrowser-ai wins 5 of 6 tasks. The advantage is largest on complex pages (search_navigate: 2.9x fewer tokens) where code batching avoids repeated page state dumps.
+openbrowser-ai wins 5 of 6 tasks. The advantage is largest on complex pages (search_navigate: 2.9x fewer tokens than browser-use) where code batching avoids repeated page state dumps.
 
 #### Cost per Benchmark Run (6 Tasks)
 
@@ -540,7 +545,7 @@ openbrowser-ai/
 ├── plugin/                    # Plugin package (skills + MCP config)
 │   ├── .claude-plugin/
 │   ├── .mcp.json
-│   └── skills/                # 7 browser automation skills
+│   └── skills/                # 6 browser automation skills
 ├── src/openbrowser/
 │   ├── __init__.py            # Main exports
 │   ├── cli.py                 # CLI commands
