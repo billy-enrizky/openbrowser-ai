@@ -4,134 +4,176 @@ description: |
   Fill out web forms, submit data, and handle login or registration flows.
   Trigger when the user asks to: fill a form, submit data on a website, log in to a site,
   register an account, complete a checkout, enter information into fields, or automate form submission.
+allowed-tools: Bash(openbrowser-ai:*) Bash(curl:*) Bash(uv:*) Bash(irm:*)
 ---
 
 # Form Filling
 
 Automate filling web forms including login, registration, checkout, and multi-step form wizards using Python code execution.
 
-All code runs in a persistent namespace via `execute_code`. All browser functions are async -- use `await`.
+All code runs via `openbrowser-ai -c`. The daemon starts automatically and persists variables across calls. All browser functions are async -- use `await`.
+
+## Setup
+
+Before running, verify openbrowser-ai is installed:
+
+```bash
+openbrowser-ai --help
+```
+
+If not found, install:
+
+```bash
+# macOS/Linux
+curl -fsSL https://raw.githubusercontent.com/billy-enrizky/openbrowser-ai/main/install.sh | sh
+
+# Windows (PowerShell)
+irm https://raw.githubusercontent.com/billy-enrizky/openbrowser-ai/main/install.ps1 | iex
+```
 
 ## Workflow
 
 ### Step 1 -- Navigate to the form page
 
-```python
-await navigate('https://example.com/login')
+```bash
+openbrowser-ai -c '
+await navigate("https://example.com/login")
 state = await browser.get_browser_state_summary()
-print(f'Page: {state.title} ({state.url})')
-print(f'Interactive elements: {len(state.dom_state.selector_map)}')
+print(f"Page: {state.title} ({state.url})")
+print(f"Interactive elements: {len(state.dom_state.selector_map)}")
+'
 ```
 
 ### Step 2 -- Discover form fields
 
-```python
+```bash
+openbrowser-ai -c '
 # List all interactive elements with their indices
 state = await browser.get_browser_state_summary()
 for index, element in state.dom_state.selector_map.items():
     tag = element.tag_name
     text = element.get_all_children_text(max_depth=2)[:60]
-    placeholder = element.attributes.get('placeholder', '')
-    input_type = element.attributes.get('type', '')
-    name = element.attributes.get('name', '')
-    print(f'[{index}] <{tag}> type={input_type} name={name} placeholder="{placeholder}" text="{text}"')
+    placeholder = element.attributes.get("placeholder", "")
+    input_type = element.attributes.get("type", "")
+    name = element.attributes.get("name", "")
+    print(f"[{index}] <{tag}> type={input_type} name={name} placeholder=\"{placeholder}\" text=\"{text}\"")
+'
 ```
 
 ### Step 3 -- Fill text inputs
 
-```python
+```bash
+openbrowser-ai -c '
 # Fill fields using their indices from Step 2
-await input_text(index=5, text='user@example.com')
-await input_text(index=7, text='secure-password')
+await input_text(index=5, text="user@example.com")
+await input_text(index=7, text="secure-password")
+'
 ```
 
 For fields that need clearing first:
 
-```python
+```bash
+openbrowser-ai -c '
 await click(index=5)
-await evaluate('document.activeElement.select()')
-await input_text(index=5, text='new-value')
+await evaluate("document.activeElement.select()")
+await input_text(index=5, text="new-value")
+'
 ```
 
 ### Step 4 -- Handle dropdowns
 
 Standard HTML select elements:
 
-```python
-await select_dropdown(index=12, text='United States')
+```bash
+openbrowser-ai -c '
+await select_dropdown(index=12, text="United States")
+'
 ```
 
 To see available options first:
 
-```python
+```bash
+openbrowser-ai -c '
 options = await dropdown_options(index=12)
 print(options)
+'
 ```
 
 Custom dropdown components:
 
-```python
-await evaluate('''
+```bash
+openbrowser-ai -c '
+await evaluate("""
 (function(){
-  const select = document.querySelector('select#country');
-  select.value = 'US';
-  select.dispatchEvent(new Event('change', { bubbles: true }));
+  const select = document.querySelector("select#country");
+  select.value = "US";
+  select.dispatchEvent(new Event("change", { bubbles: true }));
 })()
-''')
+""")
+'
 ```
 
 ### Step 5 -- Handle checkboxes and radio buttons
 
-```python
+```bash
+openbrowser-ai -c '
 await click(index=15)  # Click checkbox/radio
 
 # Verify state
-checked = await evaluate('document.querySelector("input[name=\\"agree\\"]").checked')
-print(f'Checkbox checked: {checked}')
+checked = await evaluate("document.querySelector(\"input[name=\\\"agree\\\"]\").checked")
+print(f"Checkbox checked: {checked}")
+'
 ```
 
 ### Step 6 -- Submit the form
 
-```python
+```bash
+openbrowser-ai -c '
 await click(index=20)  # Click submit button
 await wait(2)
 
 # Verify submission
 state = await browser.get_browser_state_summary()
-print(f'After submit: {state.url}')
+print(f"After submit: {state.url}")
+'
 ```
 
 Or submit via JavaScript:
 
-```python
-await evaluate('document.querySelector("form").submit()')
+```bash
+openbrowser-ai -c '
+await evaluate("document.querySelector(\"form\").submit()")
+'
 ```
 
 ### Step 7 -- Verify submission result
 
-```python
+```bash
+openbrowser-ai -c '
 # Check for success/error messages
-result = await evaluate('''
+result = await evaluate("""
 (function(){
-  const success = document.querySelector('.success, .alert-success, [role="alert"]');
-  const error = document.querySelector('.error, .alert-danger, .validation-error');
+  const success = document.querySelector(".success, .alert-success, [role=\"alert\"]");
+  const error = document.querySelector(".error, .alert-danger, .validation-error");
   return {
     success: success?.textContent?.trim(),
     error: error?.textContent?.trim(),
     url: window.location.href
   };
 })()
-''')
+""")
 print(result)
+'
 ```
 
 ### Step 8 -- Handle multi-step forms
 
-```python
+```bash
+openbrowser-ai -c '
 for step in range(1, 5):
     # Discover fields for current step
     state = await browser.get_browser_state_summary()
-    print(f'Step {step}: {len(state.dom_state.selector_map)} elements')
+    print(f"Step {step}: {len(state.dom_state.selector_map)} elements")
 
     # Fill fields (indices vary per step)
     # ... fill fields here ...
@@ -140,10 +182,11 @@ for step in range(1, 5):
     # Find the next button
     for idx, el in state.dom_state.selector_map.items():
         text = el.get_all_children_text(max_depth=1).lower()
-        if 'next' in text or 'continue' in text:
+        if "next" in text or "continue" in text:
             await click(index=idx)
             await wait(2)
             break
+'
 ```
 
 ## Tips
@@ -151,5 +194,5 @@ for step in range(1, 5):
 - Always discover fields with `browser.get_browser_state_summary()` before typing -- do not guess element indices.
 - For sensitive data (passwords, tokens), confirm with the user before entering values.
 - Use `evaluate()` to bypass custom components that do not respond to standard click/type.
-- Variables persist between calls, so you can store field indices in one call and use them in the next.
+- Variables persist between `-c` calls while the daemon is running, so you can store field indices in one call and use them in the next.
 - Check for CAPTCHA or bot detection; notify the user if manual intervention is needed.
