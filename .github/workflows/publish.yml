@@ -260,7 +260,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release upload "$GITHUB_REF_NAME" install.sh --clobber
+          gh release upload "$GITHUB_REF_NAME" install.sh install.ps1 --clobber
 
   sync-plugin-version:
     name: Sync Claude Code Plugin Version

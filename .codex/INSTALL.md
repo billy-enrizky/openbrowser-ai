@@ -27,16 +27,9 @@ Browser automation skills for Codex via native skill discovery. Clone and symlin
    cmd /c mklink /J "$env:USERPROFILE\.agents\skills\openbrowser" "$env:USERPROFILE\.codex\openbrowser\plugin\skills"
    ```
 
-3. **Set up the MCP server** by adding to your project configuration:
-   ```json
-   {
-     "mcpServers": {
-       "openbrowser": {
-         "command": "uvx",
-         "args": ["openbrowser-ai", "--mcp"]
-       }
-     }
-   }
+3. **Install OpenBrowser CLI:**
+   ```bash
+   uv pip install openbrowser-ai && openbrowser-ai install
    ```
 
 4. **Restart Codex** to discover the skills.
@@ -59,7 +52,6 @@ You should see a symlink pointing to the openbrowser plugin skills directory.
 | `page-analysis` | Analyze page content, structure, metadata |
 | `accessibility-audit` | Audit pages for WCAG compliance |
 | `file-download` | Download files (PDFs, CSVs) using browser session |
-| `cli-execute` | Execute browser automation via `openbrowser-ai -c` with persistent daemon |
 
 ## Updating
 
