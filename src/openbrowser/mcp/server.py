@@ -288,7 +288,7 @@ class OpenBrowserServer:
 				return [types.TextContent(type='text', text=result)]
 			except Exception as e:
 				error_msg = str(e)
-				logger.error(f'Tool execution failed: {e}', exc_info=True)
+				logger.error('Tool execution failed: %s', e, exc_info=True)
 				return [types.TextContent(type='text', text=f'Error: {str(e)}')]
 			finally:
 				if self._telemetry and TELEMETRY_AVAILABLE:
@@ -303,14 +303,8 @@ class OpenBrowserServer:
 						)
 					)
 
-	async def _ensure_namespace(self):
-		"""Lazily initialize browser session, tools, and namespace on first use."""
-		if self._namespace is not None:
-			return
-
-		_ensure_all_loggers_use_stderr()
-
-		# Initialize browser session
+	def _build_browser_profile(self):
+		"""Build a BrowserProfile from config with MCP defaults."""
 		profile_config = get_default_profile(self.config)
 		profile_data = {
 			'downloads_path': str(Path.home() / 'Downloads' / 'openbrowser-mcp'),
@@ -322,13 +316,23 @@ class OpenBrowserServer:
 			'headless': False,
 			**profile_config,
 		}
-		profile = BrowserProfile(**profile_data)
+		return BrowserProfile(**profile_data)
+
+	async def _ensure_namespace(self):
+		"""Lazily initialize browser session, tools, and namespace on first use."""
+		if self._namespace is not None:
+			return
+
+		_ensure_all_loggers_use_stderr()
+
+		# Initialize browser session
+		profile = self._build_browser_profile()
 		session = BrowserSession(browser_profile=profile)
 
 		try:
 			await session.start()
 		except Exception as e:
-			logger.error(f'Failed to start browser session: {e}')
+			logger.error('Failed to start browser session: %s', e)
 			try:
 				from openbrowser.browser.events import BrowserStopEvent
 				event = session.event_bus.dispatch(BrowserStopEvent())
@@ -391,18 +395,7 @@ class OpenBrowserServer:
 		await LocalBrowserWatchdog._kill_stale_chrome_for_profile(user_data_dir)
 
 		# 3. Create a brand-new session
-		profile_config = get_default_profile(self.config)
-		profile_data = {
-			'downloads_path': str(Path.home() / 'Downloads' / 'openbrowser-mcp'),
-			'wait_between_actions': 0.5,
-			'keep_alive': True,
-			'user_data_dir': '~/.config/openbrowser/profiles/default',
-			'device_scale_factor': 1.0,
-			'disable_security': False,
-			'headless': False,
-			**profile_config,
-		}
-		profile = BrowserProfile(**profile_data)
+		profile = self._build_browser_profile()
 		session = BrowserSession(browser_profile=profile)
 		await session.start()
 		self.browser_session = session
@@ -450,7 +443,7 @@ class OpenBrowserServer:
 			try:
 				await self._recover_browser_session()
 			except Exception as recovery_err:
-				logger.error(f'Pre-flight CDP recovery failed: {recovery_err}')
+				logger.error('Pre-flight CDP recovery failed: %s', recovery_err)
 
 		# Execute via shared CodeExecutor
 		result = await self._executor.execute(code)
@@ -465,7 +458,7 @@ class OpenBrowserServer:
 				await self._recover_browser_session()
 				result = await self._executor.execute(code)
 			except Exception as recovery_err:
-				logger.error(f'CDP recovery failed: {recovery_err}')
+				logger.error('CDP recovery failed: %s', recovery_err)
 
 		return result.output
 
@@ -484,7 +477,7 @@ class OpenBrowserServer:
 				event = self.browser_session.event_bus.dispatch(BrowserStopEvent())
 				await event
 			except Exception as e:
-				logger.error(f'Error closing idle session: {e}')
+				logger.error('Error closing idle session: %s', e)
 			finally:
 				self.browser_session = None
 				self._namespace = None
@@ -498,7 +491,7 @@ class OpenBrowserServer:
 					await self._cleanup_expired_session()
 					await asyncio.sleep(120)
 				except Exception as e:
-					logger.error(f'Error in cleanup task: {e}')
+					logger.error('Error in cleanup task: %s', e)
 					await asyncio.sleep(120)
 
 		self._cleanup_task = asyncio.create_task(cleanup_loop())

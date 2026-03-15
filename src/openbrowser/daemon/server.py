@@ -64,22 +64,12 @@ class DaemonServer:
         self._server = None
         self._stop_event = asyncio.Event()
         self._exec_lock = asyncio.Lock()  # serialize code execution (stdout safety)
+        self._init_lock = asyncio.Lock()  # guard lazy initialization
 
-    async def _ensure_executor(self):
-        """Lazy-initialize browser + namespace on first request."""
-        if self._executor is not None:
-            return
-
-        # Suppress verbose logging for clean daemon output
-        os.environ['OPENBROWSER_LOGGING_LEVEL'] = 'critical'
-        os.environ['OPENBROWSER_SETUP_LOGGING'] = 'false'
-        logging.getLogger('openbrowser').setLevel(logging.ERROR)
-
-        from openbrowser.browser import BrowserProfile, BrowserSession
-        from openbrowser.code_use.executor import DEFAULT_MAX_OUTPUT_CHARS, CodeExecutor
-        from openbrowser.code_use.namespace import create_namespace
+    def _build_browser_profile(self):
+        """Build a BrowserProfile from config with daemon defaults."""
+        from openbrowser.browser import BrowserProfile
         from openbrowser.config import get_default_profile, load_openbrowser_config
-        from openbrowser.tools.service import CodeAgentTools
 
         config = load_openbrowser_config()
         profile_config = get_default_profile(config)
@@ -93,27 +83,47 @@ class DaemonServer:
             'headless': False,
             **profile_config,
         }
-        profile = BrowserProfile(**profile_data)
-        session = BrowserSession(browser_profile=profile)
-        await session.start()
-        try:
-            tools = CodeAgentTools()
-            namespace = create_namespace(browser_session=session, tools=tools)
+        return BrowserProfile(**profile_data)
 
+    async def _ensure_executor(self):
+        """Lazy-initialize browser + namespace on first request."""
+        if self._executor is not None:
+            return
+        async with self._init_lock:
+            if self._executor is not None:
+                return  # another coroutine initialized while we waited
+
+            # Suppress verbose logging for clean daemon output
+            os.environ['OPENBROWSER_LOGGING_LEVEL'] = 'critical'
+            os.environ['OPENBROWSER_SETUP_LOGGING'] = 'false'
+            logging.getLogger('openbrowser').setLevel(logging.ERROR)
+
+            from openbrowser.browser import BrowserSession
+            from openbrowser.code_use.executor import DEFAULT_MAX_OUTPUT_CHARS, CodeExecutor
+            from openbrowser.code_use.namespace import create_namespace
+            from openbrowser.tools.service import CodeAgentTools
+
+            profile = self._build_browser_profile()
+            session = BrowserSession(browser_profile=profile)
+            await session.start()
             try:
-                max_output = int(os.environ.get('OPENBROWSER_MAX_OUTPUT', '0'))
-            except (ValueError, TypeError):
-                max_output = 0
-            self._executor = CodeExecutor(max_output_chars=max_output if max_output > 0 else DEFAULT_MAX_OUTPUT_CHARS)
-            self._executor.set_namespace(namespace)
-            self._session = session
-        except Exception:
-            # Kill the browser if namespace/executor setup fails to prevent leak
-            try:
-                await session.kill()
+                tools = CodeAgentTools()
+                namespace = create_namespace(browser_session=session, tools=tools)
+
+                try:
+                    max_output = int(os.environ.get('OPENBROWSER_MAX_OUTPUT', '0'))
+                except (ValueError, TypeError):
+                    max_output = 0
+                self._executor = CodeExecutor(max_output_chars=max_output if max_output > 0 else DEFAULT_MAX_OUTPUT_CHARS)
+                self._executor.set_namespace(namespace)
+                self._session = session
             except Exception:
-                pass
-            raise
+                # Kill the browser if namespace/executor setup fails to prevent leak
+                try:
+                    await session.kill()
+                except Exception:
+                    pass
+                raise
 
     _CDP_ERROR_KEYWORDS = ('connectionclosederror', 'no close frame', 'websocket', 'connection closed')
 
@@ -131,24 +141,11 @@ class DaemonServer:
             except Exception:
                 pass
 
-        from openbrowser.browser import BrowserProfile, BrowserSession
+        from openbrowser.browser import BrowserSession
         from openbrowser.code_use.namespace import create_namespace
-        from openbrowser.config import get_default_profile, load_openbrowser_config
         from openbrowser.tools.service import CodeAgentTools
 
-        config = load_openbrowser_config()
-        profile_config = get_default_profile(config)
-        profile_data = {
-            'downloads_path': str(Path.home() / 'Downloads' / 'openbrowser-daemon'),
-            'wait_between_actions': 0.5,
-            'keep_alive': True,
-            'user_data_dir': '~/.config/openbrowser/profiles/daemon',
-            'device_scale_factor': 1.0,
-            'disable_security': False,
-            'headless': False,
-            **profile_config,
-        }
-        profile = BrowserProfile(**profile_data)
+        profile = self._build_browser_profile()
         session = BrowserSession(browser_profile=profile)
         await session.start()
         try:
@@ -290,7 +287,7 @@ class DaemonServer:
         # Check if another daemon is already running
         existing_pid = _read_pid()
         if existing_pid and existing_pid != os.getpid():
-            logger.error(f'Another daemon is already running (PID {existing_pid})')
+            logger.error('Another daemon is already running (PID %d)', existing_pid)
             return
 
         # Clean up stale socket
