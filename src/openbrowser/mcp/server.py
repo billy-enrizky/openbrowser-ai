@@ -26,10 +26,8 @@ os.environ['OPENBROWSER_LOGGING_LEVEL'] = 'critical'
 os.environ['OPENBROWSER_SETUP_LOGGING'] = 'false'
 
 import asyncio
-import io
 import logging
 import time
-import traceback
 from pathlib import Path
 from typing import Any
 
@@ -85,6 +83,16 @@ from openbrowser.browser import BrowserProfile, BrowserSession
 from openbrowser.code_use.namespace import create_namespace
 from openbrowser.config import get_default_profile, load_openbrowser_config
 from openbrowser.tools.service import CodeAgentTools
+from openbrowser.code_use.executor import DEFAULT_MAX_OUTPUT_CHARS, CodeExecutor
+
+try:
+	from openbrowser.filesystem.file_system import FileSystem
+
+	FILESYSTEM_AVAILABLE = True
+except ModuleNotFoundError:
+	FILESYSTEM_AVAILABLE = False
+except Exception:
+	FILESYSTEM_AVAILABLE = False
 
 try:
 	from openbrowser.filesystem.file_system import FileSystem
@@ -189,97 +197,10 @@ def get_parent_process_cmdline() -> str | None:
 		return None
 
 
-_EXECUTE_CODE_DESCRIPTION = """Execute Python code in a persistent namespace with browser automation functions. All functions are async -- use `await`. Use print() to return output. Variables persist between calls.
-
-## Navigation
-
-- `await navigate(url: str, new_tab: bool = False)` -- Navigate to a URL. Set new_tab=True to open in a new tab.
-- `await go_back()` -- Go back to the previous page in browser history.
-- `await wait(seconds: int = 3)` -- Wait for specified seconds (max 30). Use after actions that trigger page loads.
-
-## Element Interaction
-
-- `await click(index: int)` -- Click an element by its index from browser state. Index must be >= 1. Works for buttons, links, checkboxes, radio buttons. Does NOT work for <select> elements (use select_dropdown instead).
-- `await input_text(index: int, text: str, clear: bool = True)` -- Type text into an input field. clear=True (default) clears the field first; clear=False appends.
-- `await scroll(down: bool = True, pages: float = 1.0, index: int | None = None)` -- Scroll the page. down=True scrolls down, down=False scrolls up. pages=0.5 for half page, 1 for full page, 10 for top/bottom. Pass index to scroll within a specific container element.
-- `await send_keys(keys: str)` -- Send keyboard keys or shortcuts. Examples: "Escape", "Enter", "PageDown", "Control+o", "Control+a", "ArrowDown".
-- `await upload_file(index: int, path: str)` -- Upload a file to a file input element. index is the file input element index, path is the local file path.
-
-## Dropdowns
-
-- `await select_dropdown(index: int, text: str)` -- Select an option in a <select> dropdown by its visible text. text must be the exact option text.
-- `await dropdown_options(index: int)` -- Get all available options for a <select> dropdown. Returns the options as text. Call this first to see what options are available.
-
-## Tab Management
-
-- `await switch(tab_id: str)` -- Switch to a different browser tab. tab_id is a 4-character ID (get IDs from browser state tabs list).
-- `await close(tab_id: str)` -- Close a browser tab by its 4-character tab_id.
-
-## JavaScript Execution
-
-- `await evaluate(code: str)` -- Execute JavaScript in the browser page context and return the result as a Python object. Auto-wraps code in an IIFE if not already wrapped. Returns Python dicts/lists/primitives directly. Raises EvaluateError on JS errors.
-  Example: `data = await evaluate('document.title')` returns the page title string.
-  Example: `items = await evaluate('Array.from(document.querySelectorAll(".item")).map(e => e.textContent)')` returns a Python list of strings.
-
-## File Downloads
-
-- `await download_file(url: str, filename: str | None = None)` -- Download a file from a URL using the browser's cookies and session. Returns the absolute path to the downloaded file. Preserves authentication -- uses the browser's JavaScript fetch internally, so cookies and login sessions carry over. Falls back to Python requests if browser fetch fails.
-  IMPORTANT: When you need to download a PDF or any file, use download_file() -- do NOT use navigate() for downloads. navigate() opens the PDF in the browser viewer but does not save the file.
-  Example: `path = await download_file('https://example.com/report.pdf')`
-  Example: `path = await download_file('https://example.com/data', filename='export.csv')`
-  After downloading, read PDFs with: `reader = PdfReader(path); text = reader.pages[0].extract_text()`
-- `list_downloads()` -- List all files in the downloads directory. Returns a list of absolute file paths.
-
-## CSS Selectors
-
-- `await get_selector_from_index(index: int)` -- Get the CSS selector for an element by its interactive index. Useful for building JS queries targeting specific elements. Returns a CSS selector string.
-
-## Task Completion
-
-- `await done(text: str, success: bool = True)` -- Signal that the task is complete. text is the final output/result. success=True if the task completed successfully. Call this only when the task is truly finished.
-
-## Browser State
-
-- `browser` -- The BrowserSession object. Use `state = await browser.get_browser_state_summary()` to get current page state including:
-  - `state.url` -- current URL
-  - `state.title` -- page title
-  - `state.tabs` -- list of open tabs (each has .target_id, .url, .title). For switch()/close(), use the LAST 4 CHARS of target_id as tab_id.
-  - `state.dom_state.selector_map` -- dict of {index: element} for all interactive elements
-  - Each element has: `.tag_name`, `.attributes` (dict), `.get_all_children_text(max_depth=N)` (text content)
-
-## File System
-
-- `file_system` -- FileSystem object for file operations.
-
-## Libraries (pre-imported)
-
-- `json` -- JSON encoding/decoding
-- `asyncio` -- async utilities
-- `Path` -- pathlib.Path for file paths
-- `csv` -- CSV reading/writing
-- `re` -- regular expressions
-- `datetime` -- date/time operations
-- `requests` -- HTTP requests (synchronous)
-
-## Optional Libraries (available if installed)
-
-- `numpy` / `np` -- numerical computing
-- `pandas` / `pd` -- data analysis and DataFrames
-- `matplotlib` / `plt` -- plotting and charts
-- `BeautifulSoup` / `bs4` -- HTML parsing
-- `PdfReader` / `pypdf` -- PDF reading
-- `tabulate` -- table formatting
-
-## Typical Workflow
-
-1. Navigate: `await navigate('https://example.com')`
-2. Get state: `state = await browser.get_browser_state_summary()`
-3. Inspect elements: iterate `state.dom_state.selector_map` to find element indices
-4. Interact: `await click(index)`, `await input_text(index, 'text')`, etc.
-5. Extract data: `data = await evaluate('JS expression')` -- returns Python objects
-6. Process with Python: use json, pandas, re, etc.
-7. Print results: `print(output)` -- this is what gets returned to the client
-"""
+from openbrowser.code_use.descriptions import (
+	EXECUTE_CODE_DESCRIPTION as _EXECUTE_CODE_DESCRIPTION,
+	EXECUTE_CODE_DESCRIPTION_COMPACT as _EXECUTE_CODE_DESCRIPTION_COMPACT,
+)
 
 
 class OpenBrowserServer:
@@ -301,6 +222,11 @@ class OpenBrowserServer:
 
 		# CodeAgent namespace -- persistent across execute_code calls
 		self._namespace: dict[str, Any] | None = None
+		try:
+			max_output = int(os.environ.get('OPENBROWSER_MAX_OUTPUT', '0'))
+		except (ValueError, TypeError):
+			max_output = 0
+		self._executor = CodeExecutor(max_output_chars=max_output if max_output > 0 else DEFAULT_MAX_OUTPUT_CHARS)
 		self._tools: CodeAgentTools | None = None
 
 		# Session management
@@ -316,10 +242,13 @@ class OpenBrowserServer:
 		@self.server.list_tools()
 		async def handle_list_tools() -> list[types.Tool]:
 			"""List the single execute_code tool."""
+			description = _EXECUTE_CODE_DESCRIPTION
+			if os.environ.get('OPENBROWSER_COMPACT_DESCRIPTION', '').lower() in ('1', 'true', 'yes'):
+				description = _EXECUTE_CODE_DESCRIPTION_COMPACT
 			return [
 				types.Tool(
 					name='execute_code',
-					description=_EXECUTE_CODE_DESCRIPTION,
+					description=description,
 					inputSchema={
 						'type': 'object',
 						'properties': {
@@ -368,7 +297,7 @@ class OpenBrowserServer:
 				return [types.TextContent(type='text', text=result)]
 			except Exception as e:
 				error_msg = str(e)
-				logger.error(f'Tool execution failed: {e}', exc_info=True)
+				logger.error('Tool execution failed: %s', e, exc_info=True)
 				return [types.TextContent(type='text', text=f'Error: {str(e)}')]
 			finally:
 				if self._telemetry and TELEMETRY_AVAILABLE:
@@ -383,14 +312,8 @@ class OpenBrowserServer:
 						)
 					)
 
-	async def _ensure_namespace(self):
-		"""Lazily initialize browser session, tools, and namespace on first use."""
-		if self._namespace is not None:
-			return
-
-		_ensure_all_loggers_use_stderr()
-
-		# Initialize browser session
+	def _build_browser_profile(self):
+		"""Build a BrowserProfile from config with MCP defaults."""
 		profile_config = get_default_profile(self.config)
 		profile_data = {
 			'downloads_path': str(Path.home() / 'Downloads' / 'openbrowser-mcp'),
@@ -402,13 +325,23 @@ class OpenBrowserServer:
 			'headless': False,
 			**profile_config,
 		}
-		profile = BrowserProfile(**profile_data)
+		return BrowserProfile(**profile_data)
+
+	async def _ensure_namespace(self):
+		"""Lazily initialize browser session, tools, and namespace on first use."""
+		if self._namespace is not None:
+			return
+
+		_ensure_all_loggers_use_stderr()
+
+		# Initialize browser session
+		profile = self._build_browser_profile()
 		session = BrowserSession(browser_profile=profile)
 
 		try:
 			await session.start()
 		except Exception as e:
-			logger.error(f'Failed to start browser session: {e}')
+			logger.error('Failed to start browser session: %s', e)
 			try:
 				from openbrowser.browser.events import BrowserStopEvent
 				event = session.event_bus.dispatch(BrowserStopEvent())
@@ -426,6 +359,7 @@ class OpenBrowserServer:
 			tools=self._tools,
 			file_system=_create_mcp_file_system(),
 		)
+		self._executor.set_namespace(self._namespace)
 
 	async def _is_cdp_alive(self) -> bool:
 		"""Check if the browser session's CDP WebSocket is still connected."""
@@ -470,18 +404,7 @@ class OpenBrowserServer:
 		await LocalBrowserWatchdog._kill_stale_chrome_for_profile(user_data_dir)
 
 		# 3. Create a brand-new session
-		profile_config = get_default_profile(self.config)
-		profile_data = {
-			'downloads_path': str(Path.home() / 'Downloads' / 'openbrowser-mcp'),
-			'wait_between_actions': 0.5,
-			'keep_alive': True,
-			'user_data_dir': '~/.config/openbrowser/profiles/default',
-			'device_scale_factor': 1.0,
-			'disable_security': False,
-			'headless': False,
-			**profile_config,
-		}
-		profile = BrowserProfile(**profile_data)
+		profile = self._build_browser_profile()
 		session = BrowserSession(browser_profile=profile)
 		await session.start()
 		self.browser_session = session
@@ -500,26 +423,27 @@ class OpenBrowserServer:
 			if not key.startswith('__') and key not in self._namespace:
 				self._namespace[key] = val
 
+		self._executor.set_namespace(self._namespace)
+
 		logger.info('Browser session recovered successfully')
 
-	def _is_connection_error(self, exc: BaseException) -> bool:
-		"""Return True if *exc* (or its chain) indicates a dead CDP connection."""
+	def _is_connection_error(self, exc_or_text) -> bool:
+		"""Return True if the error indicates a dead CDP connection."""
 		keywords = ('connectionclosederror', 'no close frame', 'websocket', 'connection closed')
-		text = f'{type(exc).__name__}: {exc}'.lower()
+		if isinstance(exc_or_text, str):
+			text = exc_or_text.lower()
+		else:
+			text = f'{type(exc_or_text).__name__}: {exc_or_text}'.lower()
 		return any(kw in text for kw in keywords)
 
 	async def _execute_code(self, code: str) -> str:
-		"""Execute Python code in the persistent namespace.
-
-		The code is wrapped in an async function so ``await`` expressions work.
-		stdout is captured and returned as the result text.  Variables defined
-		in user code are persisted back to the namespace after execution.
-
-		If a CDP connection error is detected, the browser session is
-		automatically recovered and the code is retried once.
-		"""
+		"""Execute Python code in the persistent namespace."""
 		await self._ensure_namespace()
 		assert self._namespace is not None
+
+		# Keep executor in sync (namespace may be set externally, e.g. tests)
+		if not self._executor.initialized:
+			self._executor.set_namespace(self._namespace)
 
 		self._last_activity = time.time()
 
@@ -528,81 +452,24 @@ class OpenBrowserServer:
 			try:
 				await self._recover_browser_session()
 			except Exception as recovery_err:
-				logger.error(f'Pre-flight CDP recovery failed: {recovery_err}')
+				logger.error('Pre-flight CDP recovery failed: %s', recovery_err)
 
-		# Wrap code in an async function so await works.
-		# We inject a __locals_capture__ dict and copy locals into it at
-		# the end so we can persist user-defined variables back to the
-		# namespace after the function returns.
-		indented_code = '\n'.join(f'    {line}' for line in code.split('\n'))
-		wrapped = (
-			f"async def __mcp_exec__(__ns__):\n"
-			f"{indented_code}\n"
-			f"    __ns__.update({{k: v for k, v in locals().items() if not k.startswith('__')}})\n"
-		)
+		# Execute via shared CodeExecutor
+		result = await self._executor.execute(code)
 
-		for attempt in range(2):
-			# Capture stdout
-			stdout_capture = io.StringIO()
-
+		# If error looks like CDP connection issue, recover and retry once.
+		# Check result.error (raw, not truncated) to avoid missing errors
+		# when large stdout causes the error message to be truncated away.
+		error_text = result.error or result.output
+		if not result.success and self._is_connection_error(error_text):
+			logger.info('CDP connection error during execution, recovering')
 			try:
-				# Compile and exec the async function definition
-				compiled = compile(wrapped, '<execute_code>', 'exec')
-				exec(compiled, self._namespace)
+				await self._recover_browser_session()
+				result = await self._executor.execute(code)
+			except Exception as recovery_err:
+				logger.error('CDP recovery failed: %s', recovery_err)
 
-				# Call the async function with stdout capture, passing namespace
-				# so locals get persisted
-				old_stdout = sys.stdout
-				sys.stdout = stdout_capture
-				try:
-					result = await self._namespace['__mcp_exec__'](self._namespace)
-				finally:
-					sys.stdout = old_stdout
-
-				output = stdout_capture.getvalue()
-
-				# If the function returned a value and nothing was printed, show the return value
-				if result is not None and not output.strip():
-					output = repr(result)
-
-				# If nothing was printed and no return value, confirm execution
-				if not output.strip():
-					output = '(executed successfully, no output)'
-
-				return output
-
-			except Exception as e:
-				# Restore stdout in case of exception during capture
-				sys.stdout = sys.__stdout__
-
-				# On first attempt, if this is a connection error, recover and retry
-				if attempt == 0 and self._is_connection_error(e):
-					logger.info(f'CDP connection error during execution, recovering: {e}')
-					try:
-						await self._recover_browser_session()
-						continue  # retry
-					except Exception as recovery_err:
-						logger.error(f'CDP recovery failed: {recovery_err}')
-						# Fall through to return the original error
-
-				captured_output = stdout_capture.getvalue()
-
-				# Format the error with traceback
-				tb = traceback.format_exc()
-				# Strip the wrapper function frames from traceback for cleaner output
-				error_output = f'Error: {type(e).__name__}: {e}\n\nTraceback:\n{tb}'
-
-				if captured_output.strip():
-					error_output = f'Output before error:\n{captured_output}\n\n{error_output}'
-
-				return error_output
-
-			finally:
-				# Clean up the temporary function from namespace
-				self._namespace.pop('__mcp_exec__', None)
-
-		# Should not reach here, but just in case
-		return 'Error: unexpected state in _execute_code retry loop'
+		return result.output
 
 	async def _cleanup_expired_session(self) -> None:
 		"""Close browser session if idle beyond timeout."""
@@ -619,7 +486,7 @@ class OpenBrowserServer:
 				event = self.browser_session.event_bus.dispatch(BrowserStopEvent())
 				await event
 			except Exception as e:
-				logger.error(f'Error closing idle session: {e}')
+				logger.error('Error closing idle session: %s', e)
 			finally:
 				self.browser_session = None
 				self._namespace = None
@@ -633,7 +500,7 @@ class OpenBrowserServer:
 					await self._cleanup_expired_session()
 					await asyncio.sleep(120)
 				except Exception as e:
-					logger.error(f'Error in cleanup task: {e}')
+					logger.error('Error in cleanup task: %s', e)
 					await asyncio.sleep(120)
 
 		self._cleanup_task = asyncio.create_task(cleanup_loop())
