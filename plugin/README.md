@@ -77,7 +77,7 @@ The MCP server exposes a single `execute_code` tool that runs Python code in a p
 
 **Pre-imported libraries**: `json`, `csv`, `re`, `datetime`, `asyncio`, `Path`, `requests`
 
-**Available if installed**: `numpy`/`np`, `pandas`/`pd`, `matplotlib`, `BeautifulSoup`, `PdfReader` (requires `pip install openbrowser-ai[pdf]` or `openbrowser-ai[agent]`)
+**Available if installed**: `numpy`/`np`, `pandas`/`pd`, `matplotlib`, `BeautifulSoup`, `PdfReader` (requires `pip install openbrowser-ai[pdf]`)
 
 ## Benchmark: Token Efficiency
 
