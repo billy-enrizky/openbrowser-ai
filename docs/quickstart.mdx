@@ -4,27 +4,76 @@ description: ""
 icon: "rocket"
 ---
 
-To get started with OpenBrowser you need to install the package and create an `.env` file with your API key.
+To get started with OpenBrowser you need to install the package and set up an API key.
 
 ## 1. Installing OpenBrowser
 
+<Tabs>
+  <Tab title="pip">
+    ```bash
+    pip install openbrowser-ai
+    ```
 
-```bash create environment
-pip install uv
-uv venv --python 3.12
-```
-```bash activate environment
-source .venv/bin/activate
-# On Windows use `.venv\Scripts\activate`
-```
-```bash install openbrowser & chromium
-uv pip install openbrowser-ai
+    With LLM agent support:
+
+    ```bash
+    pip install openbrowser-ai[agent]
+    ```
+  </Tab>
+  <Tab title="uv (recommended)">
+    ```bash
+    uv pip install openbrowser-ai
+    ```
+
+    Or create an isolated environment first:
+
+    ```bash
+    uv venv --python 3.12
+    source .venv/bin/activate
+    uv pip install openbrowser-ai
+    ```
+  </Tab>
+  <Tab title="uvx (zero install)">
+    Run directly without installing -- `uvx` downloads and caches the package automatically:
+
+    ```bash
+    # MCP server mode
+    uvx openbrowser-ai --mcp
+
+    # CLI daemon mode
+    uvx openbrowser-ai -c "await navigate('https://example.com')"
+    ```
+
+    No virtual environment needed. Ideal for Claude Code, Cursor, and other MCP clients.
+  </Tab>
+  <Tab title="pipx">
+    ```bash
+    pipx install openbrowser-ai
+    ```
+
+    Installs into an isolated environment with the `openbrowser` command available globally.
+  </Tab>
+  <Tab title="From source">
+    ```bash
+    git clone https://github.com/billy-enrizky/openbrowser-ai.git
+    cd openbrowser-ai
+    uv pip install -e ".[agent]"
+    ```
+  </Tab>
+</Tabs>
+
+### Install Browser
+
+After installing, set up Chromium:
+
+```bash
 uvx openbrowser-ai install
+# or
+playwright install chromium
 ```
-
 
 ## 2. Choose your favorite LLM
-Create a `.env` file and add your API key. 
+Create a `.env` file and add your API key.
 
 ```bash .env
 touch .env

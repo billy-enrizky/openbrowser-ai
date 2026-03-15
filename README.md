@@ -59,28 +59,55 @@ OpenBrowser is a framework for intelligent browser automation. It combines direc
 
 ## Installation
 
+### pip
+
 ```bash
 pip install openbrowser-ai
 ```
 
-### With Optional Dependencies
+### uv (recommended)
 
 ```bash
-# Install with LLM agent support (langgraph, langchain, litellm, etc.)
-pip install openbrowser-ai[agent]
+uv pip install openbrowser-ai
+```
 
-# Install with all LLM providers
-pip install openbrowser-ai[all]
+### uvx (zero install)
 
-# Install specific providers
+Run directly without installing -- `uvx` downloads and caches the package automatically:
+
+```bash
+# MCP server mode
+uvx openbrowser-ai --mcp
+
+# CLI daemon mode
+uvx openbrowser-ai -c "await navigate('https://example.com')"
+```
+
+### pipx
+
+```bash
+pipx install openbrowser-ai
+```
+
+### From source
+
+```bash
+git clone https://github.com/billy-enrizky/openbrowser-ai.git
+cd openbrowser-ai
+uv pip install -e ".[agent]"
+```
+
+### Optional Dependencies
+
+```bash
+pip install openbrowser-ai[agent]      # LLM agent support (langgraph, langchain, litellm)
+pip install openbrowser-ai[all]        # All LLM providers
 pip install openbrowser-ai[anthropic]  # Anthropic Claude
 pip install openbrowser-ai[groq]       # Groq
 pip install openbrowser-ai[ollama]     # Ollama (local models)
 pip install openbrowser-ai[aws]        # AWS Bedrock
 pip install openbrowser-ai[azure]      # Azure OpenAI
-
-# Install with video recording support
-pip install openbrowser-ai[video]
+pip install openbrowser-ai[video]      # Video recording support
 ```
 
 ### Install Browser
