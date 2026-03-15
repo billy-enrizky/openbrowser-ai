@@ -16,7 +16,7 @@ import signal
 import time
 from pathlib import Path
 
-from openbrowser.daemon import DAEMON_DIR, IS_WINDOWS, WINDOWS_PORT, get_pid_path, get_socket_path
+from openbrowser.daemon import IS_WINDOWS, WINDOWS_PORT, get_pid_path, get_socket_path
 
 logger = logging.getLogger(__name__)
 
@@ -40,8 +40,8 @@ def _read_pid() -> int | None:
 
 
 def _write_pid() -> None:
-    DAEMON_DIR.mkdir(parents=True, exist_ok=True)
     pid_path = get_pid_path()
+    pid_path.parent.mkdir(parents=True, exist_ok=True)
     pid_path.write_text(str(os.getpid()))
     pid_path.chmod(0o600)
 
@@ -163,6 +163,7 @@ class DaemonServer:
 
     async def _handle_request(self, data: dict) -> dict:
         """Handle a single JSON request."""
+        self._last_activity = time.time()
         action = data.get('action', '')
         req_id = data.get('id', 0)
 
@@ -196,7 +197,6 @@ class DaemonServer:
                 except Exception as recovery_err:
                     logger.error('CDP recovery failed: %s', recovery_err)
 
-            self._last_activity = time.time()
             return {
                 'id': req_id,
                 'success': result.success,
@@ -282,7 +282,7 @@ class DaemonServer:
         self._last_activity = time.time()
 
         sock_path = get_socket_path()
-        DAEMON_DIR.mkdir(parents=True, exist_ok=True)
+        sock_path.parent.mkdir(parents=True, exist_ok=True)
 
         # Check if another daemon is already running
         existing_pid = _read_pid()
@@ -297,6 +297,9 @@ class DaemonServer:
 
         try:
             if IS_WINDOWS:
+                # Windows: TCP on loopback only (no Unix sockets available).
+                # Any local process can connect; consider a shared-secret
+                # auth token if multi-user security is required.
                 self._server = await asyncio.start_server(
                     self._handle_client, '127.0.0.1', WINDOWS_PORT
                 )
