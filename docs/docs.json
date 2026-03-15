@@ -141,8 +141,8 @@
           "quickstart",
           "quickstart_llm",
           "supported-models",
-          "comparison",
           "cli-comparison",
+          "comparison",
           "production"
         ]
       },
