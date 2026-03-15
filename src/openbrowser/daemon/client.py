@@ -48,14 +48,13 @@ class DaemonClient:
         """Spawn the daemon process in the background."""
         DAEMON_DIR.mkdir(parents=True, exist_ok=True)
         log_file = DAEMON_DIR / 'daemon.log'
-        log_handle = open(log_file, 'w')
-        subprocess.Popen(
-            [sys.executable, '-m', 'openbrowser.daemon.server'],
-            stdout=subprocess.DEVNULL,
-            stderr=log_handle,
-            start_new_session=True,
-        )
-        log_handle.close()
+        with open(log_file, 'w') as log_handle:
+            subprocess.Popen(
+                [sys.executable, '-m', 'openbrowser.daemon.server'],
+                stdout=subprocess.DEVNULL,
+                stderr=log_handle,
+                start_new_session=True,
+            )
         # Wait for socket to appear
         sock = get_socket_path()
         deadline = time.time() + DAEMON_START_TIMEOUT
@@ -78,6 +77,8 @@ class DaemonClient:
             writer.write(json.dumps(request).encode() + b'\n')
             await writer.drain()
             raw = await asyncio.wait_for(reader.readline(), timeout=READ_TIMEOUT)
+            if not raw:
+                raise ConnectionResetError('Daemon closed the connection without responding')
             return json.loads(raw.decode())
         finally:
             writer.close()
@@ -103,21 +104,33 @@ class DaemonClient:
     async def status(self) -> DaemonResponse:
         try:
             resp = await self._send({'id': 1, 'action': 'status'})
-            return DaemonResponse(success=True, output=resp.get('output', ''), error=None)
+            return DaemonResponse(
+                success=resp.get('success', True),
+                output=resp.get('output', ''),
+                error=resp.get('error'),
+            )
         except (ConnectionRefusedError, FileNotFoundError, OSError):
             return DaemonResponse(success=False, output='', error='Daemon not running')
 
     async def stop(self) -> DaemonResponse:
         try:
             resp = await self._send({'id': 1, 'action': 'stop'})
-            return DaemonResponse(success=True, output='Daemon stopped', error=None)
+            return DaemonResponse(
+                success=resp.get('success', True),
+                output=resp.get('output', 'Daemon stopped'),
+                error=resp.get('error'),
+            )
         except (ConnectionRefusedError, FileNotFoundError, OSError):
             return DaemonResponse(success=False, output='', error='Daemon not running')
 
     async def reset(self) -> DaemonResponse:
         try:
             resp = await self._send({'id': 1, 'action': 'reset'})
-            return DaemonResponse(success=True, output=resp.get('output', ''), error=None)
+            return DaemonResponse(
+                success=resp.get('success', True),
+                output=resp.get('output', ''),
+                error=resp.get('error'),
+            )
         except (ConnectionRefusedError, FileNotFoundError, OSError):
             return DaemonResponse(success=False, output='', error='Daemon not running')
 
