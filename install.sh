@@ -47,11 +47,12 @@ done
 # --- Detect OS ---
 OS="$(uname -s)"
 case "$OS" in
-  Linux*)  OS_NAME="Linux" ;;
-  Darwin*) OS_NAME="macOS" ;;
+  Linux*)                    OS_NAME="Linux" ;;
+  Darwin*)                   OS_NAME="macOS" ;;
+  MINGW*|MSYS*|CYGWIN*)     OS_NAME="Windows" ;;
   *)
     error "Unsupported OS: $OS"
-    echo "OpenBrowser supports macOS and Linux."
+    echo "OpenBrowser supports macOS, Linux, and Windows."
     exit 1
     ;;
 esac
@@ -110,6 +111,8 @@ if ! find_python; then
   echo "Install Python:"
   if [ "$OS_NAME" = "macOS" ]; then
     echo "  brew install python@3.12"
+  elif [ "$OS_NAME" = "Windows" ]; then
+    echo "  winget install Python.Python.3.12"
   else
     echo "  sudo apt install python3.12   # Debian/Ubuntu"
     echo "  sudo dnf install python3.12   # Fedora"
