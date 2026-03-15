@@ -104,10 +104,10 @@ install_with_pip() {
   # Use the discovered Python's pip module to ensure version match
   info "Installing with $PYTHON -m pip..."
   if [ "$LOCAL_INSTALL" = true ]; then
-    $PYTHON -m pip install --user "$PACKAGE"
+    "$PYTHON" -m pip install --user "$PACKAGE"
     warn "Installed to ~/.local/bin -- make sure it is in your PATH"
   else
-    $PYTHON -m pip install "$PACKAGE"
+    "$PYTHON" -m pip install "$PACKAGE"
   fi
 }
 
@@ -133,7 +133,7 @@ if ! find_python; then
   exit 1
 fi
 
-echo "  Python:  $PYTHON ($($PYTHON --version 2>&1))"
+echo "  Python:  $PYTHON ($("$PYTHON" --version 2>&1))"
 echo ""
 
 if install_with_uv; then
@@ -160,7 +160,7 @@ if [ "$SKIP_BROWSER" = false ]; then
   elif command -v playwright >/dev/null 2>&1; then
     playwright install chromium 2>/dev/null || warn "Chromium install failed (run 'playwright install chromium' manually)"
   else
-    $PYTHON -m playwright install chromium 2>/dev/null || warn "Chromium install skipped (run 'openbrowser-ai install' manually)"
+    "$PYTHON" -m playwright install chromium 2>/dev/null || warn "Chromium install skipped (run 'openbrowser-ai install' manually)"
   fi
 fi
 
