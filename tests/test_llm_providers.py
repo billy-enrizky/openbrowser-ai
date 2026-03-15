@@ -14,26 +14,31 @@ class TestLLMImports:
 
     def test_import_openai(self):
         """Test OpenAI import."""
+        pytest.importorskip("openai")
         from openbrowser.llm import ChatOpenAI
         assert ChatOpenAI is not None
 
     def test_import_google(self):
         """Test Google import."""
+        pytest.importorskip("google.genai")
         from openbrowser.llm import ChatGoogle
         assert ChatGoogle is not None
 
     def test_import_anthropic(self):
         """Test Anthropic import."""
+        pytest.importorskip("anthropic")
         from openbrowser.llm import ChatAnthropic
         assert ChatAnthropic is not None
 
     def test_import_groq(self):
         """Test Groq import."""
+        pytest.importorskip("groq")
         from openbrowser.llm import ChatGroq
         assert ChatGroq is not None
 
     def test_import_ollama(self):
         """Test Ollama import."""
+        pytest.importorskip("ollama")
         from openbrowser.llm import ChatOllama
         assert ChatOllama is not None
 
@@ -44,6 +49,7 @@ class TestLLMImports:
 
     def test_import_azure(self):
         """Test Azure OpenAI import."""
+        pytest.importorskip("openai")
         from openbrowser.llm import ChatAzureOpenAI
         assert ChatAzureOpenAI is not None
 
@@ -58,6 +64,7 @@ class TestGetLLMByName:
 
     def test_get_llm_models_import(self):
         """Test models module import."""
+        pytest.importorskip("openai")
         from openbrowser.llm import models
         assert models is not None
 
