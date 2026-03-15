@@ -6,6 +6,7 @@ persistent namespace, captures stdout, and returns structured results.
 """
 
 import asyncio
+import contextlib
 import io
 import logging
 import sys
@@ -65,17 +66,13 @@ class CodeExecutor:
             )
 
             stdout_capture = io.StringIO()
-            old_stdout = sys.stdout
 
             try:
                 compiled = compile(wrapped, '<execute_code>', 'exec')
                 exec(compiled, self._namespace)
 
-                sys.stdout = stdout_capture
-                try:
+                with contextlib.redirect_stdout(stdout_capture):
                     result = await self._namespace['__ob_exec__'](self._namespace)
-                finally:
-                    sys.stdout = old_stdout
 
                 output = stdout_capture.getvalue()
 
@@ -89,7 +86,6 @@ class CodeExecutor:
                 return ExecutionResult(success=True, output=output)
 
             except Exception as e:
-                sys.stdout = old_stdout
                 captured = stdout_capture.getvalue()
                 tb = traceback.format_exc()
                 error_output = f'Error: {type(e).__name__}: {e}\n\nTraceback:\n{tb}'
