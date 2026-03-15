@@ -24,8 +24,9 @@ if os.environ.get('OPENBROWSER_SETUP_LOGGING', 'true').lower() != 'false':
 		info_log_file = getattr(CONFIG, 'OPENBROWSER_INFO_LOG_FILE', None)
 
 		logger = setup_logging(debug_log_file=debug_log_file, info_log_file=info_log_file)
-	except Exception:
-		pass
+	except Exception as e:
+		import warnings
+		warnings.warn(f'Failed to set up openbrowser logging: {e}', stacklevel=2)
 
 # Monkeypatch BaseSubprocessTransport.__del__ to handle closed event loops gracefully
 from asyncio import base_subprocess
