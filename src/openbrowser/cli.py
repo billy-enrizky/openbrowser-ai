@@ -72,15 +72,23 @@ if len(sys.argv) > 1 and sys.argv[1] == 'daemon':
 
 	if sub == 'start':
 		async def _start():
+			status = await client.status()
+			if status.success:
+				print('Daemon is already running')
+				return
 			await client._start_daemon()
 			print('Daemon started')
 		asyncio.run(_start())
 	elif sub == 'stop':
 		resp = asyncio.run(client.stop())
 		print(resp.output or resp.error)
+		if not resp.success:
+			sys.exit(1)
 	elif sub == 'status':
 		resp = asyncio.run(client.status())
 		print(resp.output or resp.error)
+		if not resp.success:
+			sys.exit(1)
 	elif sub == 'restart':
 		import time as _time
 
@@ -98,7 +106,7 @@ if len(sys.argv) > 1 and sys.argv[1] == 'daemon':
 		asyncio.run(_restart())
 	else:
 		print(f'Unknown daemon command: {sub}', file=sys.stderr)
-		print('Usage: openbrowser daemon [start|stop|status|restart]', file=sys.stderr)
+		print('Usage: openbrowser-ai daemon [start|stop|status|restart]', file=sys.stderr)
 		sys.exit(1)
 	sys.exit(0)
 
