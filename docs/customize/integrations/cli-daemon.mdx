@@ -52,7 +52,7 @@ uvx openbrowser-ai daemon restart   # Restart with fresh browser session
 
 The daemon runs in the background and communicates via a Unix socket at `~/.openbrowser/daemon.sock`. Logs are written to `~/.openbrowser/daemon.log`.
 
-> **Windows**: On Windows, the daemon uses a localhost TCP connection on port 19222 instead of a Unix socket.
+> **Windows**: On Windows, the daemon uses a localhost TCP connection on port 19222 instead of a Unix socket. This means any process on the same machine can connect. The Unix socket on macOS/Linux is restricted to the file owner (mode `0600`).
 
 ## Available Functions
 
@@ -129,7 +129,7 @@ graph LR
 | **Startup** | ~30ms (thin client) | ~150ms (full MCP init) |
 | **Protocol** | Unix socket (JSON lines) | MCP over stdio |
 | **Persistence** | Variables persist across `-c` calls | Variables persist across tool calls |
-| **Idle timeout** | 10 minutes (configurable) | Session-based |
+| **Idle timeout** | 10 minutes | Session-based |
 
 Both use the same `CodeExecutor` engine and browser automation functions.
 

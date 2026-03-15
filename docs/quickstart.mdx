@@ -42,12 +42,12 @@ To get started with OpenBrowser you need to install the package and set up an AP
     With LLM agent support:
 
     ```bash
-    pip install openbrowser-ai[agent]
+    pip install "openbrowser-ai[agent]"
     ```
   </Tab>
   <Tab title="uv (recommended)">
     ```bash
-    uv pip install openbrowser-ai
+    uv pip install "openbrowser-ai[agent]"
     ```
 
     Or create an isolated environment first:
@@ -55,7 +55,7 @@ To get started with OpenBrowser you need to install the package and set up an AP
     ```bash
     uv venv --python 3.12
     source .venv/bin/activate
-    uv pip install openbrowser-ai
+    uv pip install "openbrowser-ai[agent]"
     ```
   </Tab>
   <Tab title="uvx (zero install)">

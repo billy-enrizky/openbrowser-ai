@@ -571,7 +571,7 @@ uvx openbrowser-ai install
 uvx openbrowser-ai --mcp
 ```
 
-The `-c` flag connects to a persistent browser daemon over a Unix socket. Variables persist across calls while the daemon is running. The daemon starts automatically on first use and shuts down after 10 minutes of inactivity.
+The `-c` flag connects to a persistent browser daemon over a Unix socket (localhost TCP on Windows). Variables persist across calls while the daemon is running. The daemon starts automatically on first use and shuts down after 10 minutes of inactivity.
 
 ## Project Structure
 

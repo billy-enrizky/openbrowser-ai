@@ -83,25 +83,18 @@ install_with_uv() {
 install_with_pipx() {
   command -v pipx >/dev/null 2>&1 || return 1
   info "Installing with pipx..."
-  pipx install "$PACKAGE"
+  pipx install --python "$PYTHON" "$PACKAGE"
 }
 
 install_with_pip() {
-  PIP=""
-  for cmd in pip3 pip; do
-    if command -v "$cmd" >/dev/null 2>&1; then
-      PIP="$cmd"
-      break
-    fi
-  done
-  [ -n "$PIP" ] || return 1
-
-  info "Installing with $PIP..."
+  [ -n "$PYTHON" ] || return 1
+  # Use the discovered Python's pip module to ensure version match
+  info "Installing with $PYTHON -m pip..."
   if [ "$LOCAL_INSTALL" = true ]; then
-    $PIP install --user "$PACKAGE"
+    $PYTHON -m pip install --user "$PACKAGE"
     warn "Installed to ~/.local/bin -- make sure it is in your PATH"
   else
-    $PIP install "$PACKAGE"
+    $PYTHON -m pip install "$PACKAGE"
   fi
 }
 
@@ -148,9 +141,9 @@ if [ "$SKIP_BROWSER" = false ]; then
   echo ""
   info "Installing Chromium browser..."
   if command -v openbrowser-ai >/dev/null 2>&1; then
-    openbrowser-ai install 2>/dev/null || true
+    openbrowser-ai install 2>/dev/null || warn "Chromium install failed (run 'openbrowser-ai install' manually)"
   elif command -v playwright >/dev/null 2>&1; then
-    playwright install chromium 2>/dev/null || true
+    playwright install chromium 2>/dev/null || warn "Chromium install failed (run 'playwright install chromium' manually)"
   else
     $PYTHON -m playwright install chromium 2>/dev/null || warn "Chromium install skipped (run 'openbrowser-ai install' manually)"
   fi
