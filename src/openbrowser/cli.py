@@ -38,6 +38,11 @@ if '--mcp' in sys.argv:
 if '-c' in sys.argv:
 	import os
 	os.environ['OPENBROWSER_SETUP_LOGGING'] = 'false'
+	try:
+		from dotenv import load_dotenv
+		load_dotenv()
+	except ImportError:
+		pass
 
 	import asyncio
 
@@ -77,6 +82,11 @@ if '-c' in sys.argv:
 if len(sys.argv) > 1 and sys.argv[1] == 'daemon':
 	import os
 	os.environ['OPENBROWSER_SETUP_LOGGING'] = 'false'
+	try:
+		from dotenv import load_dotenv
+		load_dotenv()
+	except ImportError:
+		pass
 
 	import asyncio
 
@@ -110,12 +120,17 @@ if len(sys.argv) > 1 and sys.argv[1] == 'daemon':
 		async def _restart():
 			await client.stop()
 			# Wait for old daemon to fully shut down
+			stopped = False
 			deadline = _time.time() + 5.0
 			while _time.time() < deadline:
 				resp = await client.status()
 				if not resp.success:
+					stopped = True
 					break
 				await asyncio.sleep(0.3)
+			if not stopped:
+				print('Old daemon did not stop within timeout', file=sys.stderr)
+				sys.exit(1)
 			await client._start_daemon()
 			print('Daemon restarted')
 		asyncio.run(_restart())
