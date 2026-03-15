@@ -247,7 +247,7 @@ jobs:
           PYEOF
 
   upload-install-script:
-    name: Upload install.sh Release Asset
+    name: Upload Installer Scripts
     needs: build
     runs-on: ubuntu-latest
     if: github.event_name == 'release'
@@ -256,7 +256,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Upload install.sh to release
+      - name: Upload install scripts to release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
