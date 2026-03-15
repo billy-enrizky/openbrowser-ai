@@ -5,13 +5,13 @@
     "email": "billy.enrizky@gmail.com"
   },
   "metadata": {
-    "description": "AI-powered browser automation for Claude Code -- navigate, click, type, extract content, and automate workflows in real browsers"
+    "description": "AI-powered browser automation for Claude Code -- navigate, click, type, extract content, and automate workflows in real browsers. Supports MCP server and CLI daemon modes."
   },
   "plugins": [
     {
       "name": "openbrowser",
       "version": "0.1.34",
-      "description": "Browser automation MCP server with progressive disclosure design -- returns minimal tokens (877x fewer than Playwright MCP on Wikipedia). Single execute_code tool runs Python with async browser functions.",
+      "description": "Browser automation MCP server with progressive disclosure design -- returns minimal tokens (877x fewer than Playwright MCP on Wikipedia). Single execute_code tool runs Python with async browser functions. Includes CLI daemon for Bash-based workflows and compact description mode for token optimization.",
       "source": "./plugin",
       "category": "development",
       "tags": ["browser", "automation", "web-scraping", "mcp", "testing", "cli", "daemon"],
