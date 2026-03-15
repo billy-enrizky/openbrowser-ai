@@ -86,3 +86,7 @@ feature-store-ui/
 # Benchmark plot scripts (generated images are tracked, scripts are local-only)
 benchmarks/plot_benchmark.py
 benchmarks/plot_all_benchmarks.py
+
+# Local-only benchmark scripts and 3-way results
+benchmarks/e2e_mcp_vs_cli_benchmark.py
+benchmarks/e2e_mcp_vs_cli_results.json
