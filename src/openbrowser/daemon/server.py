@@ -77,16 +77,17 @@ class DaemonServer:
         self._session = None
         self._running = False
         self._server = None
+        self._exec_lock = asyncio.Lock()  # serialize code execution (stdout safety)
 
     async def _ensure_executor(self):
         """Lazy-initialize browser + namespace on first request."""
         if self._executor is not None:
             return
 
-        # Suppress logging for clean daemon output
+        # Suppress verbose logging for clean daemon output
         os.environ['OPENBROWSER_LOGGING_LEVEL'] = 'critical'
         os.environ['OPENBROWSER_SETUP_LOGGING'] = 'false'
-        logging.disable(logging.CRITICAL)
+        logging.getLogger('openbrowser').setLevel(logging.ERROR)
 
         from openbrowser.browser import BrowserProfile, BrowserSession
         from openbrowser.code_use.executor import CodeExecutor
@@ -128,9 +129,10 @@ class DaemonServer:
                 return {'id': req_id, 'success': False, 'output': '', 'error': 'No code provided'}
             await self._ensure_executor()
             try:
-                result = await asyncio.wait_for(
-                    self._executor.execute(code), timeout=self._exec_timeout
-                )
+                async with self._exec_lock:
+                    result = await asyncio.wait_for(
+                        self._executor.execute(code), timeout=self._exec_timeout
+                    )
             except asyncio.TimeoutError:
                 return {
                     'id': req_id,
@@ -200,6 +202,12 @@ class DaemonServer:
             except Exception:
                 pass
 
+    def _signal_shutdown(self):
+        """Signal handler: mark daemon for shutdown."""
+        self._running = False
+        if self._server:
+            self._server.close()
+
     async def _idle_check_loop(self):
         """Shut down daemon if idle beyond timeout."""
         while self._running:
@@ -242,12 +250,20 @@ class DaemonServer:
                 # Restrict socket permissions to owner only
                 os.chmod(str(sock_path), 0o600)
 
+            # Register signal handlers on the running event loop
+            loop = asyncio.get_running_loop()
+            for sig in (signal.SIGTERM, signal.SIGINT):
+                try:
+                    loop.add_signal_handler(sig, self._signal_shutdown)
+                except NotImplementedError:
+                    pass  # Windows
+
             # Start idle timeout checker
             idle_task = asyncio.create_task(self._idle_check_loop())
 
             async with self._server:
                 while self._running:
-                    await asyncio.sleep(0.1)
+                    await asyncio.sleep(0.5)
 
             idle_task.cancel()
 
@@ -262,14 +278,6 @@ class DaemonServer:
 
 async def _main():
     daemon = DaemonServer()
-
-    loop = asyncio.get_event_loop()
-    for sig in (signal.SIGTERM, signal.SIGINT):
-        try:
-            loop.add_signal_handler(sig, lambda: setattr(daemon, '_running', False))
-        except NotImplementedError:
-            pass  # Windows
-
     await daemon.run()
 
 
