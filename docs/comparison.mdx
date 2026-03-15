@@ -1,14 +1,21 @@
 ---
-title: "MCP Server Comparison"
-description: "Benchmark comparison of OpenBrowser MCP vs Playwright MCP vs Chrome DevTools MCP"
+title: "Benchmark Comparison"
+description: "Benchmark comparison of OpenBrowser vs Playwright vs Chrome DevTools vs browser-use vs agent-browser"
 icon: "scale-balanced"
 ---
 
-# Browser MCP Server Comparison
+# Browser Automation Comparison
+
+Two benchmark suites measuring OpenBrowser against competitors:
+
+1. **[CLI Benchmark](/cli-comparison)** (2026-03-15) -- 4-way comparison of CLI tools driven by an LLM via a single Bash tool
+2. **MCP Benchmark** (below) -- 3-way comparison of MCP servers as tool providers
+
+## MCP Server Comparison
 
 Benchmark date: 2026-02-21 | OpenBrowser MCP v0.1.26 (CodeAgent, 1 tool) | Playwright MCP (latest) | Chrome DevTools MCP (latest)
 
-## Overview
+### Overview
 
 Three approaches to browser automation via MCP, measured on identical tasks.
 
@@ -23,15 +30,15 @@ Three approaches to browser automation via MCP, measured on identical tasks.
 | **Transport** | stdio | stdio | stdio |
 | **Language** | TypeScript (Node.js) | TypeScript (Node.js) | Python |
 
-## Token Usage Benchmark
+### Token Usage Benchmark
 
-### Methodology
+#### Methodology
 
 All three MCP servers were started as subprocesses and tested via JSON-RPC stdio transport. Same 5-step workflow, same pages, same measurement method. All numbers are real measurements, not estimates.
 
 **Workflow**: Navigate to Wikipedia Python page -> get page state -> click link -> go back -> get state again.
 
-### Results: 5-Step Workflow on Wikipedia (Complex Page)
+#### Results: 5-Step Workflow on Wikipedia (Complex Page)
 
 | Metric | Playwright MCP | Chrome DevTools MCP | OpenBrowser MCP |
 |--------|---------------:|--------------------:|----------------:|
@@ -40,7 +47,7 @@ All three MCP servers were started as subprocesses and tested via JSON-RPC stdio
 | **Est. response tokens** | **248,016** | **134,802** | **283** |
 | **Token ratio vs OpenBrowser** | 877x more | 476x more | 1x (baseline) |
 
-### Results: Small Page (httpbin.org/forms/post)
+#### Results: Small Page (httpbin.org/forms/post)
 
 | Operation | Playwright MCP | Chrome DevTools MCP | OpenBrowser MCP |
 |-----------|---------------:|--------------------:|----------------:|
@@ -49,7 +56,7 @@ All three MCP servers were started as subprocesses and tested via JSON-RPC stdio
 | Type/fill | 526 chars | 95 chars | 92 chars |
 | List tabs/pages | 367 chars | 120 chars | 195 chars |
 
-### Per-Operation Token Breakdown (Wikipedia)
+#### Per-Operation Token Breakdown (Wikipedia)
 
 | Operation | Playwright MCP | Chrome DevTools MCP | OpenBrowser MCP |
 |-----------|---------------:|--------------------:|----------------:|
@@ -59,7 +66,7 @@ All three MCP servers were started as subprocesses and tested via JSON-RPC stdio
 | Go back | 198 chars (~50 tokens) | 149 chars (~37 tokens) | 75 chars (~19 tokens) |
 | Get state (2nd) | 139 chars (~35 tokens) | 135 chars (~34 tokens) | 421 chars (~105 tokens) |
 
-## Why the Difference
+### Why the Difference
 
 | Design Decision | Playwright MCP | Chrome DevTools MCP | OpenBrowser MCP |
 |----------------|---------------:|--------------------:|----------------:|
@@ -197,7 +204,7 @@ print(data)  # ~900 chars instead of ~97K
 | Chrome DevTools MCP | `take_snapshot` (dump full tree, search client-side) | ~538K chars |
 | OpenBrowser MCP | `evaluate()` + Python string matching | ~900 chars |
 
-## Cost Comparison
+### Cost Comparison
 
 MCP tool response costs per 5-step workflow on a complex page (Wikipedia). These tokens are added to the LLM's context window, charged at input token rates. All numbers based on real measurements.
 
@@ -215,15 +222,15 @@ MCP tool response costs per 5-step workflow on a complex page (Wikipedia). These
 | Claude Opus 4.6 | $1,240 | $674 | **$1.42** |
 | GPT-5.2 | $434 | $236 | **$0.50** |
 
-## E2E LLM Benchmark
+### E2E LLM Benchmark
 
-### Methodology
+#### Methodology
 
 Six real-world browser tasks run through Claude Sonnet 4.6 on AWS Bedrock (Converse API). Each task uses a single MCP server as tool provider. The LLM decides which tools to call and when the task is complete. All tasks run against live websites.
 
 **Tasks**: Wikipedia fact lookup, httpbin form fill, Hacker News data extraction, Wikipedia search + navigation, GitHub release lookup, example.com content analysis.
 
-### Results: Task Success
+#### Results: Task Success
 
 All three servers pass all 6 tasks.
 
@@ -237,7 +244,7 @@ All three servers pass all 6 tasks.
 | content_analysis | PASS | PASS | PASS |
 | **Total** | **6/6** | **6/6** | **6/6** |
 
-### Results: Tool Calls and Duration
+#### Results: Tool Calls and Duration
 
 | Metric | Playwright MCP | Chrome DevTools MCP | OpenBrowser MCP |
 |--------|---------------:|--------------------:|----------------:|
@@ -257,7 +264,7 @@ Playwright completes most tasks in 1 tool call because every navigation returns 
 
 <img src="/images/benchmark_tool_calls.png" alt="Tool Calls Per Task by MCP Server" />
 
-### Results: Token Efficiency
+#### Results: Token Efficiency
 
 Bedrock API token usage measured from the Converse API `usage` field (mean across 5 runs, 10,000-sample bootstrap CIs).
 
@@ -289,7 +296,7 @@ The pattern: any task involving a complex page (Wikipedia, GitHub releases) prod
 
 <img src="/images/benchmark_per_task_tokens.png" alt="Per-Task Input Token Usage by MCP Server" />
 
-### Results: Cost Per Benchmark Run (6 Tasks)
+#### Results: Cost Per Benchmark Run (6 Tasks)
 
 Cost per benchmark run based on Bedrock API token usage (input + output tokens at respective rates).
 
@@ -300,29 +307,29 @@ Cost per benchmark run based on Bedrock API token usage (input + output tokens a
 
 <img src="/images/benchmark_cost.png" alt="Cost Per Benchmark Run by Model" />
 
-### Why OpenBrowser Uses More Tool Calls but Fewer Tokens
+#### Why OpenBrowser Uses More Tool Calls but Fewer Tokens
 
 Playwright sends the full page with every response, so the LLM gets the answer immediately but pays for ~120K tokens per Wikipedia page load. OpenBrowser returns compact results (~30-800 chars per call), so the LLM needs more round-trips to navigate and extract but pays far fewer tokens overall.
 
 For a single simple task, Playwright's approach is fast. At scale (thousands of workflows, complex pages, multi-step agents), the MCP response size difference is 144x.
 
-## Tool Surface Comparison
+### Tool Surface Comparison
 
-### Playwright MCP (22 core tools, 34 total)
+#### Playwright MCP (22 core tools, 34 total)
 
 Navigation, interaction, form filling, file upload, drag and drop, hover, key press, select option, screenshots, snapshots, console messages, dialog handling, network requests, tab management, code execution, PDF export, wait conditions, resize, vision-mode coordinate tools, test assertions.
 
-### Chrome DevTools MCP (26 tools)
+#### Chrome DevTools MCP (26 tools)
 
 Input automation (click, drag, fill, fill_form, hover, press_key, handle_dialog, upload_file), navigation (navigate_page, new_page, close_page, list_pages, select_page, wait_for), emulation (emulate, resize_page), performance tracing (start/stop/analyze), network debugging (list/get requests), JS execution, console messages, screenshots, DOM snapshots.
 
-### OpenBrowser MCP (1 tool -- CodeAgent)
+#### OpenBrowser MCP (1 tool -- CodeAgent)
 
 | Tool | Capabilities |
 |------|-------------|
 | `execute_code` | Python code execution in a persistent namespace with browser automation functions: `navigate()`, `click()`, `input_text()`, `scroll()`, `go_back()`, `select_dropdown()`, `send_keys()`, `upload_file()`, `evaluate()` (JS), `switch()`/`close()` (tabs), `done()` (task completion). Also provides `file_system` for local file operations and pre-imported libraries (json, pandas, re, csv, etc.) |
 
-## Unique to OpenBrowser
+### Unique to OpenBrowser
 
 Features no competitor offers:
 
@@ -334,7 +341,7 @@ Features no competitor offers:
 - **Dropdown support** -- `select_dropdown()` and `dropdown_options()` for native `<select>` elements
 - **Task completion signal** -- `done(text, success)` to explicitly mark task completion with a result
 
-## Gaps vs Competitors
+### Gaps vs Competitors
 
 | Capability | Playwright MCP | Chrome DevTools MCP | OpenBrowser MCP |
 |-----------|:-:|:-:|:-:|
@@ -356,16 +363,16 @@ Features no competitor offers:
 | Progressive disclosure | No | No | Yes (code extracts only what's needed) |
 | Session reuse | No | Puppeteer-managed | Yes (existing Chrome) |
 
-## Benchmark Methodology Notes
+### Benchmark Methodology Notes
 
-### Token Usage Benchmark (5-step workflow)
+#### Token Usage Benchmark (5-step workflow)
 - All three servers benchmarked via JSON-RPC stdio subprocess -- no estimates
 - Response sizes measured as total JSON-RPC response character count
 - Estimated tokens = characters / 4 (standard approximation for mixed English/JSON)
 - 5-step workflow uses matched operations: navigate, get state/snapshot, click, go back, get state/snapshot
 - Raw benchmark data: `benchmarks/playwright_results.json`, `benchmarks/cdp_results.json`, `benchmarks/openbrowser_results.json`
 
-### E2E LLM Benchmark (6 real-world tasks, N=5 runs)
+#### E2E LLM Benchmark (6 real-world tasks, N=5 runs)
 - Model: Claude Sonnet 4.6 on AWS Bedrock (Converse API)
 - Each task uses a single MCP server as tool provider via JSON-RPC stdio
 - The LLM autonomously decides which tools to call and when the task is complete

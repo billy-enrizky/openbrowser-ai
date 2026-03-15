@@ -10,22 +10,23 @@ Performance optimizations:
 import os
 from typing import TYPE_CHECKING
 
-from openbrowser.logging_config import setup_logging
+import logging
 
-# Only set up logging if not in MCP mode or if explicitly requested
+logger = logging.getLogger('openbrowser')
+
+# Only set up logging if not in MCP mode or daemon mode
 if os.environ.get('OPENBROWSER_SETUP_LOGGING', 'true').lower() != 'false':
-	from openbrowser.config import CONFIG
+	try:
+		from openbrowser.logging_config import setup_logging
+		from openbrowser.config import CONFIG
 
-	# Get log file paths from config/environment
-	debug_log_file = getattr(CONFIG, 'OPENBROWSER_DEBUG_LOG_FILE', None)
-	info_log_file = getattr(CONFIG, 'OPENBROWSER_INFO_LOG_FILE', None)
+		debug_log_file = getattr(CONFIG, 'OPENBROWSER_DEBUG_LOG_FILE', None)
+		info_log_file = getattr(CONFIG, 'OPENBROWSER_INFO_LOG_FILE', None)
 
-	# Set up logging with file handlers if specified
-	logger = setup_logging(debug_log_file=debug_log_file, info_log_file=info_log_file)
-else:
-	import logging
-
-	logger = logging.getLogger('openbrowser')
+		logger = setup_logging(debug_log_file=debug_log_file, info_log_file=info_log_file)
+	except Exception as e:
+		import warnings
+		warnings.warn(f'Failed to set up openbrowser logging: {e}', stacklevel=2)
 
 # Monkeypatch BaseSubprocessTransport.__del__ to handle closed event loops gracefully
 from asyncio import base_subprocess

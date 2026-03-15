@@ -109,6 +109,21 @@ class BrowserStateSummary:
 	pagination_buttons: list[PaginationButton] = field(default_factory=list)  # Detected pagination buttons
 	closed_popup_messages: list[str] = field(default_factory=list)  # Messages from auto-closed JavaScript dialogs
 
+	def __str__(self) -> str:
+		"""Return a concise text summary suitable for LLM consumption."""
+		lines = [f'URL: {self.url}', f'Title: {self.title}']
+		if len(self.tabs) > 1:
+			lines.append(f'Tabs: {len(self.tabs)}')
+		if self.dom_state:
+			if self.dom_state.selector_map:
+				n_elements = len(self.dom_state.selector_map)
+				lines.append(f'Interactive elements: {n_elements}')
+			dom_repr = self.dom_state.eval_representation()
+			if dom_repr:
+				lines.append('')
+				lines.append(dom_repr)
+		return '\n'.join(lines)
+
 
 @dataclass
 class BrowserStateHistory:
