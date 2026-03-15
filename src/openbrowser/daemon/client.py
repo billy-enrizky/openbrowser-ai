@@ -48,6 +48,7 @@ class DaemonClient:
     async def _start_daemon(self):
         """Spawn the daemon process in the background."""
         get_socket_path().parent.mkdir(parents=True, exist_ok=True)
+        DAEMON_DIR.mkdir(parents=True, exist_ok=True)
         log_file = DAEMON_DIR / 'daemon.log'
         with open(os.open(str(log_file), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), 'w') as log_handle:
             subprocess.Popen(
@@ -92,7 +93,7 @@ class DaemonClient:
         """Execute code via the daemon. Auto-starts if needed."""
         try:
             resp = await self._send({'id': 1, 'action': 'execute', 'code': code})
-        except (ConnectionRefusedError, FileNotFoundError, ConnectionResetError, OSError, asyncio.TimeoutError):
+        except (ConnectionRefusedError, FileNotFoundError, ConnectionResetError, OSError):
             await self._start_daemon()
             resp = await self._send({'id': 1, 'action': 'execute', 'code': code})
 

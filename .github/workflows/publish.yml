@@ -197,13 +197,13 @@ jobs:
 
             def post_install
               # Install Chromium for browser automation
-              system bin/"openbrowser", "install"
+              system bin/"openbrowser-ai", "install"
             rescue StandardError
-              opoo "Chromium install skipped. Run 'openbrowser install' manually."
+              opoo "Chromium install skipped. Run 'openbrowser-ai install' manually."
             end
 
             test do
-              assert_match "usage", shell_output("#{bin}/openbrowser --help 2>&1", 0).downcase
+              assert_match "usage", shell_output("#{bin}/openbrowser-ai --help 2>&1", 0).downcase
             end
           end
           '''
