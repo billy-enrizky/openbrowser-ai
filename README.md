@@ -59,6 +59,27 @@ OpenBrowser is a framework for intelligent browser automation. It combines direc
 
 ## Installation
 
+### Homebrew (macOS / Linux)
+
+```bash
+brew tap billy-enrizky/openbrowser
+brew install openbrowser-ai
+```
+
+### Quick install (macOS / Linux)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/billy-enrizky/openbrowser-ai/main/install.sh | sh
+```
+
+Detects `uv`, `pipx`, or `pip` and installs OpenBrowser + Chromium automatically.
+
+Install to `~/.local/bin` without sudo:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/billy-enrizky/openbrowser-ai/main/install.sh | sh -s -- --local
+```
+
 ### pip
 
 ```bash

@@ -9,6 +9,31 @@ To get started with OpenBrowser you need to install the package and set up an AP
 ## 1. Installing OpenBrowser
 
 <Tabs>
+  <Tab title="Homebrew">
+    **macOS / Linux**
+
+    ```bash
+    brew tap billy-enrizky/openbrowser
+    brew install openbrowser-ai
+    ```
+
+    Installs OpenBrowser and Chromium into a Homebrew-managed virtualenv.
+  </Tab>
+  <Tab title="Quick install">
+    **macOS / Linux**
+
+    ```bash
+    curl -fsSL https://raw.githubusercontent.com/billy-enrizky/openbrowser-ai/main/install.sh | sh
+    ```
+
+    Detects `uv`, `pipx`, or `pip` and installs OpenBrowser + Chromium automatically.
+
+    Install to `~/.local/bin` without sudo:
+
+    ```bash
+    curl -fsSL https://raw.githubusercontent.com/billy-enrizky/openbrowser-ai/main/install.sh | sh -s -- --local
+    ```
+  </Tab>
   <Tab title="pip">
     ```bash
     pip install openbrowser-ai
