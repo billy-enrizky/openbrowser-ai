@@ -9,7 +9,6 @@ mocked so no real Chrome is needed.
 import asyncio
 import json
 import os
-import tempfile
 import pytest
 import uuid
 from pathlib import Path
@@ -70,6 +69,9 @@ async def _start_daemon_with_mock(daemon_env, mock_namespace, idle_timeout=600):
         if daemon_env.exists():
             break
         await asyncio.sleep(0.05)
+    else:
+        task.cancel()
+        pytest.fail('Daemon socket never appeared within timeout')
     return server, task
 
 
@@ -81,7 +83,7 @@ async def _cleanup(server, task):
     task.cancel()
     try:
         await task
-    except (asyncio.CancelledError, Exception):
+    except asyncio.CancelledError:
         pass
 
 

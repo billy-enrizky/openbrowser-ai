@@ -1,5 +1,4 @@
 # tests/test_daemon.py
-import asyncio
 import json
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
@@ -29,6 +28,11 @@ class TestDaemonClient:
             result = await client.execute('print("hello")')
             assert result.success is True
             assert result.output == 'hello'
+            # Verify the correct request was written to the socket
+            written = mock_writer.write.call_args[0][0]
+            request = json.loads(written.rstrip(b'\n').decode())
+            assert request['action'] == 'execute'
+            assert request['code'] == 'print("hello")'
 
     @pytest.mark.asyncio
     async def test_auto_start_on_connection_refused(self):
@@ -54,7 +58,8 @@ class TestDaemonClient:
             return mock_reader, mock_writer
 
         with patch('asyncio.open_unix_connection', side_effect=mock_connect), \
-             patch('openbrowser.daemon.client.DaemonClient._start_daemon', new_callable=AsyncMock):
+             patch('openbrowser.daemon.client.DaemonClient._start_daemon', new_callable=AsyncMock) as mock_start:
             client = DaemonClient()
             result = await client.execute('pass')
             assert result.success is True
+            mock_start.assert_awaited_once()
