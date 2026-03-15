@@ -89,17 +89,21 @@ print(f'Results page: {state.title}')
 
 ## Architecture
 
-```
-  CLI (-c flag)           Daemon Server           Browser
-  +-----------+       +------------------+     +----------+
-  | openbrowser -c |-->| Unix socket      |---->| Chrome   |
-  | "code..."  |   | ~/.openbrowser/  |     | (CDP)    |
-  +-----------+   | daemon.sock      |     +----------+
-                  |                  |
-                  | CodeExecutor     |
-                  | (persistent      |
-                  |  namespace)      |
-                  +------------------+
+```mermaid
+graph LR
+    CLI["CLI (-c flag)<br/><code>openbrowser -c 'code...'</code>"]
+    SOCK["Unix Socket<br/>~/.openbrowser/daemon.sock"]
+    EXEC["CodeExecutor<br/>(persistent namespace)"]
+    CHROME["Chrome<br/>(CDP)"]
+
+    CLI -->|JSON request| SOCK
+    SOCK --> EXEC
+    EXEC -->|DevTools Protocol| CHROME
+
+    subgraph Daemon Server
+        SOCK
+        EXEC
+    end
 ```
 
 - The **CLI** is a thin client (~30ms startup) that sends code over the Unix socket
