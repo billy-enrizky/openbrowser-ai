@@ -76,6 +76,7 @@ async def _start_daemon_with_mock(daemon_env, mock_namespace, idle_timeout=600):
 async def _cleanup(server, task):
     """Gracefully stop a daemon server and cancel its task."""
     server._running = False
+    server._stop_event.set()
     await asyncio.sleep(0.3)
     task.cancel()
     try:
