@@ -120,7 +120,7 @@ openbrowser-ai -c '
 await click(index=15)  # Click checkbox/radio
 
 # Verify state
-checked = await evaluate("""document.querySelector('input[name="agree"]').checked""")
+checked = await evaluate("""document.querySelector("input[name=agree]").checked""")
 print(f"Checkbox checked: {checked}")
 '
 ```
