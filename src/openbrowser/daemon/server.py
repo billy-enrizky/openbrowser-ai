@@ -31,6 +31,7 @@ IS_WINDOWS = platform.system() == 'Windows'
 WINDOWS_PORT = 19222
 
 DEFAULT_IDLE_TIMEOUT = 600  # 10 minutes
+DEFAULT_EXEC_TIMEOUT = 300  # 5 minutes max per code execution
 
 
 def _get_socket_path() -> Path:
@@ -54,7 +55,9 @@ def _read_pid() -> int | None:
 
 def _write_pid() -> None:
     DAEMON_DIR.mkdir(parents=True, exist_ok=True)
-    (DAEMON_DIR / 'daemon.pid').write_text(str(os.getpid()))
+    pid_file = DAEMON_DIR / 'daemon.pid'
+    pid_file.write_text(str(os.getpid()))
+    pid_file.chmod(0o600)
 
 
 def _cleanup_pid() -> None:
@@ -66,8 +69,9 @@ def _cleanup_pid() -> None:
 class DaemonServer:
     """Persistent browser automation daemon."""
 
-    def __init__(self, idle_timeout: int = DEFAULT_IDLE_TIMEOUT):
+    def __init__(self, idle_timeout: int = DEFAULT_IDLE_TIMEOUT, exec_timeout: int = DEFAULT_EXEC_TIMEOUT):
         self._idle_timeout = idle_timeout
+        self._exec_timeout = exec_timeout
         self._last_activity = time.time()
         self._executor = None  # lazy
         self._session = None
@@ -123,7 +127,17 @@ class DaemonServer:
             if not code.strip():
                 return {'id': req_id, 'success': False, 'output': '', 'error': 'No code provided'}
             await self._ensure_executor()
-            result = await self._executor.execute(code)
+            try:
+                result = await asyncio.wait_for(
+                    self._executor.execute(code), timeout=self._exec_timeout
+                )
+            except asyncio.TimeoutError:
+                return {
+                    'id': req_id,
+                    'success': False,
+                    'output': '',
+                    'error': f'Execution timed out after {self._exec_timeout}s',
+                }
             self._last_activity = time.time()
             return {
                 'id': req_id,
@@ -205,6 +219,12 @@ class DaemonServer:
         sock_path = _get_socket_path()
         DAEMON_DIR.mkdir(parents=True, exist_ok=True)
 
+        # Check if another daemon is already running
+        existing_pid = _read_pid()
+        if existing_pid and existing_pid != os.getpid():
+            logger.error(f'Another daemon is already running (PID {existing_pid})')
+            return
+
         # Clean up stale socket
         sock_path.unlink(missing_ok=True)
 
@@ -219,6 +239,8 @@ class DaemonServer:
                 self._server = await asyncio.start_unix_server(
                     self._handle_client, path=str(sock_path)
                 )
+                # Restrict socket permissions to owner only
+                os.chmod(str(sock_path), 0o600)
 
             # Start idle timeout checker
             idle_task = asyncio.create_task(self._idle_check_loop())
