@@ -1,7 +1,6 @@
 # tests/test_executor.py
-import asyncio
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 
 @pytest.fixture
@@ -44,7 +43,7 @@ class TestCodeExecutor:
         assert 'hello world' in result.output
 
     @pytest.mark.asyncio
-    async def test_execute_return_value(self, mock_namespace):
+    async def test_execute_variable_assignment(self, mock_namespace):
         from openbrowser.code_use.executor import CodeExecutor
 
         executor = CodeExecutor()
@@ -52,6 +51,7 @@ class TestCodeExecutor:
 
         result = await executor.execute('x = 42')
         assert result.success is True
+        assert mock_namespace.get('x') == 42
 
     @pytest.mark.asyncio
     async def test_execute_variable_persistence(self, mock_namespace):
