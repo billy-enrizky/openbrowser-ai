@@ -36,6 +36,9 @@ if '--mcp' in sys.argv:
 
 # Check for -c (execute code) mode early -- minimal imports for fast startup
 if '-c' in sys.argv:
+	import os
+	os.environ['OPENBROWSER_SETUP_LOGGING'] = 'false'
+
 	import asyncio
 
 	c_idx = sys.argv.index('-c')
@@ -57,6 +60,9 @@ if '-c' in sys.argv:
 
 # Check for daemon subcommand early
 if len(sys.argv) > 1 and sys.argv[1] == 'daemon':
+	import os
+	os.environ['OPENBROWSER_SETUP_LOGGING'] = 'false'
+
 	import asyncio
 
 	from openbrowser.daemon.client import DaemonClient
