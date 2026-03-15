@@ -83,7 +83,7 @@ from openbrowser.browser import BrowserProfile, BrowserSession
 from openbrowser.code_use.namespace import create_namespace
 from openbrowser.config import get_default_profile, load_openbrowser_config
 from openbrowser.tools.service import CodeAgentTools
-from openbrowser.code_use.executor import CodeExecutor
+from openbrowser.code_use.executor import DEFAULT_MAX_OUTPUT_CHARS, CodeExecutor
 
 try:
 	from openbrowser.filesystem.file_system import FileSystem
@@ -322,10 +322,10 @@ class OpenBrowserServer:
 		# CodeAgent namespace -- persistent across execute_code calls
 		self._namespace: dict[str, Any] | None = None
 		try:
-			max_output = int(os.environ.get('OPENBROWSER_MAX_OUTPUT', '10000'))
+			max_output = int(os.environ.get('OPENBROWSER_MAX_OUTPUT', '0'))
 		except (ValueError, TypeError):
-			max_output = 10000
-		self._executor = CodeExecutor(max_output_chars=max_output)
+			max_output = 0
+		self._executor = CodeExecutor(max_output_chars=max_output if max_output > 0 else DEFAULT_MAX_OUTPUT_CHARS)
 		self._tools: CodeAgentTools | None = None
 
 		# Session management
