@@ -144,11 +144,11 @@ Run browser automation directly from Bash without the MCP server:
 
 ```bash
 # Execute code via persistent daemon
-openbrowser -c "await navigate('https://example.com')"
-openbrowser -c "print(await evaluate('document.title'))"
+openbrowser-ai -c "await navigate('https://example.com')"
+openbrowser-ai -c "print(await evaluate('document.title'))"
 
 # Daemon management
-openbrowser daemon start|stop|status|restart
+openbrowser-ai daemon start|stop|status|restart
 ```
 
 Variables persist across `-c` calls while the daemon is running. The daemon starts automatically on first use and shuts down after 10 minutes of inactivity.
@@ -192,9 +192,9 @@ The plugin includes 7 built-in skills that provide guided workflows for common b
 | `page-analysis` | `skills/page-analysis/` | Analyze page content, structure, metadata, and interactive elements |
 | `accessibility-audit` | `skills/accessibility-audit/` | Audit pages for WCAG compliance, heading structure, labels, alt text, ARIA, and landmarks |
 | `file-download` | `skills/file-download/` | Download files (PDFs, CSVs, images) using the browser's authenticated session and read content |
-| `cli-execute` | `skills/cli-execute/` | Execute browser automation code via `openbrowser -c` with persistent daemon session |
+| `cli-execute` | `skills/cli-execute/` | Execute browser automation code via `openbrowser-ai -c` with persistent daemon session |
 
-Each skill file (`SKILL.md`) contains YAML frontmatter with trigger conditions and a step-by-step workflow using the `execute_code` tool.
+Each skill file (`SKILL.md`) contains YAML frontmatter with trigger conditions and a step-by-step workflow. Most skills use the MCP `execute_code` tool; `cli-execute` uses Bash with `openbrowser-ai -c` instead.
 
 ## Testing and Benchmarks
 

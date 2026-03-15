@@ -52,6 +52,8 @@ uvx openbrowser-ai daemon restart   # Restart with fresh browser session
 
 The daemon runs in the background and communicates via a Unix socket at `~/.openbrowser/daemon.sock`. Logs are written to `~/.openbrowser/daemon.log`.
 
+> **Windows**: On Windows, the daemon uses a localhost TCP connection on port 19222 instead of a Unix socket.
+
 ## Available Functions
 
 All functions from the MCP `execute_code` tool are available in `-c` mode:
@@ -91,7 +93,7 @@ print(f'Results page: {state.title}')
 
 ```mermaid
 graph LR
-    CLI["CLI (-c flag)<br/><code>openbrowser -c 'code...'</code>"]
+    CLI["CLI (-c flag)<br/><code>openbrowser-ai -c 'code...'</code>"]
     SOCK["Unix Socket<br/>~/.openbrowser/daemon.sock"]
     EXEC["CodeExecutor<br/>(persistent namespace)"]
     CHROME["Chrome<br/>(CDP)"]
@@ -148,4 +150,4 @@ Both use the same `CodeExecutor` engine and browser automation functions.
 
 **Variables lost between calls**
 - The daemon may have restarted (idle timeout or crash)
-- Use `openbrowser daemon status` to check if the daemon is running
+- Use `openbrowser-ai daemon status` to check if the daemon is running
