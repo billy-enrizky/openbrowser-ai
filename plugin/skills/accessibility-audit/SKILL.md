@@ -127,7 +127,9 @@ for issue in images_result.get("issues", []):
     print(f"[IMAGES] {issue}")
 
 if not images_result.get("issues"):
-    print(f"[IMAGES] PASS ({images_result[\"total\"]} images, {images_result[\"withAlt\"]} with alt)")
+    total = images_result["total"]
+    with_alt = images_result["withAlt"]
+    print(f"[IMAGES] PASS ({total} images, {with_alt} with alt)")
 '
 ```
 
@@ -166,11 +168,15 @@ forms_result = await evaluate("""
 
 audit["checks"]["forms"] = forms_result
 for issue in forms_result.get("issues", []):
-    audit["issues"].append({"check": "forms", "wcag": "1.3.1", "issue": f"Unlabeled {issue[\"tag\"]} name={issue[\"name\"]}"})
-    print(f"[FORMS] Unlabeled: <{issue[\"tag\"]}> type={issue[\"type\"]} name={issue[\"name\"]}")
+    tag = issue["tag"]
+    name = issue["name"]
+    itype = issue["type"]
+    audit["issues"].append({"check": "forms", "wcag": "1.3.1", "issue": f"Unlabeled {tag} name={name}"})
+    print(f"[FORMS] Unlabeled: <{tag}> type={itype} name={name}")
 
 if not forms_result.get("issues"):
-    print(f"[FORMS] PASS ({forms_result[\"totalInputs\"]} inputs, all labeled)")
+    total_inputs = forms_result["totalInputs"]
+    print(f"[FORMS] PASS ({total_inputs} inputs, all labeled)")
 '
 ```
 
@@ -211,11 +217,13 @@ aria_result = await evaluate("""
 
 audit["checks"]["aria"] = aria_result
 for issue in aria_result.get("issues", []):
-    audit["issues"].append({"check": "aria", "wcag": "4.1.2", "issue": issue["issue"]})
-    print(f"[ARIA] {issue[\"issue\"]}")
+    msg = issue["issue"]
+    audit["issues"].append({"check": "aria", "wcag": "4.1.2", "issue": msg})
+    print(f"[ARIA] {msg}")
 
 if not aria_result.get("issues"):
-    print(f"[ARIA] PASS ({aria_result[\"totalAriaElements\"]} ARIA elements)")
+    total_aria = aria_result["totalAriaElements"]
+    print(f"[ARIA] PASS ({total_aria} ARIA elements)")
 '
 ```
 
@@ -276,8 +284,9 @@ links_result = await evaluate("""
 
 audit["checks"]["links_buttons"] = links_result
 for issue in links_result.get("issues", []):
-    audit["issues"].append({"check": "links_buttons", "wcag": "2.4.4", "issue": issue["issue"]})
-    print(f"[LINKS/BUTTONS] {issue[\"issue\"]}")
+    msg = issue["issue"]
+    audit["issues"].append({"check": "links_buttons", "wcag": "2.4.4", "issue": msg})
+    print(f"[LINKS/BUTTONS] {msg}")
 
 if not links_result.get("issues"):
     print("[LINKS/BUTTONS] PASS")
@@ -313,7 +322,8 @@ for issue in keyboard_result.get("issues", []):
     print(f"[KEYBOARD] {issue}")
 
 if not keyboard_result.get("issues"):
-    print(f"[KEYBOARD] PASS ({keyboard_result[\"totalFocusable\"]} focusable elements)")
+    total_focusable = keyboard_result["totalFocusable"]
+    print(f"[KEYBOARD] PASS ({total_focusable} focusable elements)")
 '
 ```
 
@@ -327,9 +337,11 @@ total_issues = len(audit["issues"])
 checks_passed = sum(1 for c in audit["checks"].values() if not c.get("issues"))
 checks_total = len(audit["checks"])
 
+url = audit["url"]
+title = audit["title"]
 print(f"\n=== Accessibility Audit Report ===")
-print(f"URL: {audit[\"url\"]}")
-print(f"Title: {audit[\"title\"]}")
+print(f"URL: {url}")
+print(f"Title: {title}")
 print(f"Checks: {checks_passed}/{checks_total} passed")
 print(f"Total issues: {total_issues}")
 
@@ -341,7 +353,8 @@ if total_issues > 0:
     for wcag, issues in sorted(by_wcag.items()):
         print(f"  {wcag}: {len(issues)} issues")
         for i in issues[:3]:
-            print(f"    - {i[\"issue\"]}")
+            msg = i["issue"]
+            print(f"    - {msg}")
         if len(issues) > 3:
             print(f"    ... and {len(issues) - 3} more")
 '

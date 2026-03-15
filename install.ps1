@@ -89,8 +89,8 @@ function Install-WithUv {
 function Install-WithPipx {
     try { $null = Get-Command 'pipx' -ErrorAction Stop } catch { return $false }
     Write-Info "Installing with pipx..."
-    $pythonCmd = Get-PythonDisplay
-    & pipx install --python $pythonCmd $PACKAGE
+    $pythonExe = (Invoke-Python -Arguments @('-c', 'import sys; print(sys.executable)')).Trim()
+    & pipx install --python $pythonExe $PACKAGE
     if ($LASTEXITCODE -ne 0) { return $false }
     return $true
 }
