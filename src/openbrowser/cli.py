@@ -64,7 +64,10 @@ if '-c' in sys.argv:
 		else:
 			# Daemon not running (cold) -- verbose description, then start it
 			print(EXECUTE_CODE_DESCRIPTION)
-			asyncio.run(client._start_daemon())
+			try:
+				asyncio.run(client._start_daemon())
+			except (TimeoutError, OSError):
+				pass  # Best-effort daemon pre-start; failure is not fatal for help output
 		sys.exit(0)
 
 	from openbrowser.daemon.client import execute_code_via_daemon
