@@ -25,7 +25,7 @@ uvx openbrowser-ai -c "
 await navigate('https://news.ycombinator.com')
 state = await browser.get_browser_state_summary()
 print(state.title)
-print(f'{len(state.selector_map)} interactive elements')
+print(f'{len(state.dom_state.selector_map)} interactive elements')
 "
 ```
 
