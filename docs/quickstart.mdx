@@ -9,6 +9,27 @@ To get started with OpenBrowser you need to install the package and set up an AP
 ## 1. Installing OpenBrowser
 
 <Tabs>
+  <Tab title="Quick install">
+    **macOS / Linux**
+
+    ```bash
+    curl -fsSL https://raw.githubusercontent.com/billy-enrizky/openbrowser-ai/main/install.sh | sh
+    ```
+
+    **Windows (PowerShell)**
+
+    ```powershell
+    irm https://raw.githubusercontent.com/billy-enrizky/openbrowser-ai/main/install.ps1 | iex
+    ```
+
+    Detects `uv`, `pipx`, or `pip` and installs OpenBrowser automatically.
+
+    Install to `~/.local/bin` without sudo:
+
+    ```bash
+    curl -fsSL https://raw.githubusercontent.com/billy-enrizky/openbrowser-ai/main/install.sh | sh -s -- --local
+    ```
+  </Tab>
   <Tab title="Homebrew">
     **macOS / Linux**
 
@@ -17,22 +38,7 @@ To get started with OpenBrowser you need to install the package and set up an AP
     brew install openbrowser-ai
     ```
 
-    Installs OpenBrowser and Chromium into a Homebrew-managed virtualenv.
-  </Tab>
-  <Tab title="Quick install">
-    **macOS / Linux**
-
-    ```bash
-    curl -fsSL https://raw.githubusercontent.com/billy-enrizky/openbrowser-ai/main/install.sh | sh
-    ```
-
-    Detects `uv`, `pipx`, or `pip` and installs OpenBrowser + Chromium automatically.
-
-    Install to `~/.local/bin` without sudo:
-
-    ```bash
-    curl -fsSL https://raw.githubusercontent.com/billy-enrizky/openbrowser-ai/main/install.sh | sh -s -- --local
-    ```
+    Installs OpenBrowser into a Homebrew-managed virtualenv.
   </Tab>
   <Tab title="pip">
     ```bash
@@ -87,15 +93,9 @@ To get started with OpenBrowser you need to install the package and set up an AP
   </Tab>
 </Tabs>
 
-### Install Browser
-
-After installing, set up Chromium:
-
-```bash
-uvx openbrowser-ai install
-# or
-playwright install chromium
-```
+<Info>
+**No separate browser install needed.** OpenBrowser auto-detects any installed Chromium-based browser (Chrome, Edge, Brave, Chromium) and uses it directly. If none is found, Chromium is installed automatically on first run. To pre-install manually: `openbrowser-ai install`
+</Info>
 
 ## 2. Choose your favorite LLM
 Create a `.env` file and add your API key.
