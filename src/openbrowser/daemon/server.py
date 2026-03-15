@@ -315,8 +315,8 @@ class DaemonServer:
             for sig in (signal.SIGTERM, signal.SIGINT):
                 try:
                     loop.add_signal_handler(sig, self._signal_shutdown)
-                except NotImplementedError:
-                    pass  # Windows
+                except (NotImplementedError, RuntimeError):
+                    pass  # Windows or non-main thread
 
             # Start idle timeout checker
             idle_task = asyncio.create_task(self._idle_check_loop())

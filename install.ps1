@@ -161,22 +161,14 @@ if (-not $SkipBrowser) {
     }
     catch {
         try {
-            $null = Get-Command 'playwright' -ErrorAction Stop
-            & playwright install chromium 2>$null
+            $null = Get-Command 'uvx' -ErrorAction Stop
+            & uvx playwright install chromium 2>$null
             if ($LASTEXITCODE -ne 0) {
-                Write-Warn "Chromium install failed (run 'playwright install chromium' manually)"
+                Write-Warn "Chromium install failed (run 'openbrowser-ai install' manually)"
             }
         }
         catch {
-            try {
-                Invoke-Python -Arguments @('-m', 'playwright', 'install', 'chromium') 2>$null
-                if ($LASTEXITCODE -ne 0) {
-                    Write-Warn "Chromium install skipped (run 'openbrowser-ai install' manually)"
-                }
-            }
-            catch {
-                Write-Warn "Chromium install skipped (run 'openbrowser-ai install' manually)"
-            }
+            Write-Warn "Chromium install skipped. Please run 'openbrowser-ai install' manually after installation completes."
         }
     }
 }

@@ -59,13 +59,6 @@ OpenBrowser is a framework for intelligent browser automation. It combines direc
 
 ## Installation
 
-### Homebrew (macOS / Linux)
-
-```bash
-brew tap billy-enrizky/openbrowser
-brew install openbrowser-ai
-```
-
 ### Quick install (macOS / Linux)
 
 ```bash
@@ -75,16 +68,22 @@ curl -fsSL https://raw.githubusercontent.com/billy-enrizky/openbrowser-ai/main/i
 ### Quick install (Windows PowerShell)
 
 ```powershell
-# Windows (PowerShell)
 irm https://raw.githubusercontent.com/billy-enrizky/openbrowser-ai/main/install.ps1 | iex
 ```
 
-Detects `uv`, `pipx`, or `pip` and installs OpenBrowser + Chromium automatically.
+Detects `uv`, `pipx`, or `pip` and installs OpenBrowser automatically.
 
 Install to `~/.local/bin` without sudo:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/billy-enrizky/openbrowser-ai/main/install.sh | sh -s -- --local
+```
+
+### Homebrew (macOS / Linux)
+
+```bash
+brew tap billy-enrizky/openbrowser
+brew install openbrowser-ai
 ```
 
 ### pip
@@ -138,13 +137,7 @@ pip install openbrowser-ai[azure]      # Azure OpenAI
 pip install openbrowser-ai[video]      # Video recording support
 ```
 
-### Install Browser
-
-```bash
-uvx openbrowser-ai install
-# or
-playwright install chromium
-```
+> **No separate browser install needed.** OpenBrowser auto-detects any installed Chromium-based browser (Chrome, Edge, Brave, Chromium) and uses it directly. If none is found and `uvx` is available, Chromium is installed automatically on first run. To pre-install manually (requires `uvx`): `openbrowser-ai install`
 
 ## Quick Start
 
