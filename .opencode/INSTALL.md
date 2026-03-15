@@ -67,6 +67,7 @@ Both should show symlinks pointing to the openbrowser directories.
 | `page-analysis` | Analyze page content, structure, metadata |
 | `accessibility-audit` | Audit pages for WCAG compliance |
 | `file-download` | Download files (PDFs, CSVs) using browser session |
+| `cli-execute` | Execute browser automation via `openbrowser -c` with persistent daemon |
 
 ## Usage
 

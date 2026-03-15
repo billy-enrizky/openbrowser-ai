@@ -54,6 +54,7 @@ OpenBrowser is a framework for intelligent browser automation. It combines direc
 - **Vision Support** - Screenshot analysis for visual understanding of pages
 - **12+ LLM Providers** - OpenAI, Anthropic, Google, Groq, AWS Bedrock, Azure OpenAI, Ollama, and more
 - **MCP Server** - Model Context Protocol support for Claude Desktop integration
+- **CLI Daemon** - Persistent browser daemon with `-c` flag for direct code execution from Bash
 - **Video Recording** - Record browser sessions as video files
 
 ## Installation
@@ -226,7 +227,7 @@ claude plugin marketplace add billy-enrizky/openbrowser-ai
 claude plugin install openbrowser@openbrowser-ai
 ```
 
-This installs the MCP server and 6 built-in skills:
+This installs the MCP server and 7 built-in skills:
 
 | Skill | Description |
 |-------|-------------|
@@ -236,6 +237,7 @@ This installs the MCP server and 6 built-in skills:
 | `page-analysis` | Analyze page content, structure, metadata |
 | `accessibility-audit` | Audit pages for WCAG compliance |
 | `file-download` | Download files (PDFs, CSVs) using browser session |
+| `cli-execute` | Execute browser automation via `openbrowser -c` with persistent daemon |
 
 See [plugin/README.md](plugin/README.md) for detailed tool parameter documentation.
 
@@ -405,6 +407,8 @@ The MCP server exposes a single `execute_code` tool that runs Python code in a p
 |---------------------|-------------|---------|
 | `OPENBROWSER_HEADLESS` | Run browser without GUI | `false` |
 | `OPENBROWSER_ALLOWED_DOMAINS` | Comma-separated domain whitelist | (none) |
+| `OPENBROWSER_COMPACT_DESCRIPTION` | Minimal tool description (~500 tokens) | `false` |
+| `OPENBROWSER_MAX_OUTPUT` | Max output characters per execution | `10000` |
 
 ## MCP Benchmark: Why OpenBrowser
 
@@ -459,8 +463,18 @@ OpenBrowser: navigate to Wikipedia -> 42 chars (page title only, state processed
 ## CLI Usage
 
 ```bash
-# Run a browser automation task
+# Run a browser automation task with an LLM agent
 uvx openbrowser-ai -p "Search for Python tutorials on Google"
+
+# Execute code directly via persistent daemon
+uvx openbrowser-ai -c "await navigate('https://example.com')"
+uvx openbrowser-ai -c "print(await evaluate('document.title'))"
+
+# Daemon management
+uvx openbrowser-ai daemon start     # Start daemon (auto-starts on first -c call)
+uvx openbrowser-ai daemon stop      # Stop daemon and browser
+uvx openbrowser-ai daemon status    # Show daemon info
+uvx openbrowser-ai daemon restart   # Restart daemon
 
 # Install browser
 uvx openbrowser-ai install
@@ -468,6 +482,8 @@ uvx openbrowser-ai install
 # Run MCP server
 uvx openbrowser-ai --mcp
 ```
+
+The `-c` flag connects to a persistent browser daemon over a Unix socket. Variables persist across calls while the daemon is running. The daemon starts automatically on first use and shuts down after 10 minutes of inactivity.
 
 ## Project Structure
 
@@ -482,7 +498,7 @@ openbrowser-ai/
 ├── plugin/                    # Plugin package (skills + MCP config)
 │   ├── .claude-plugin/
 │   ├── .mcp.json
-│   └── skills/                # 5 browser automation skills
+│   └── skills/                # 7 browser automation skills
 ├── src/openbrowser/
 │   ├── __init__.py            # Main exports
 │   ├── cli.py                 # CLI commands
@@ -490,7 +506,8 @@ openbrowser-ai/
 │   ├── actor/                 # Element interaction
 │   ├── agent/                 # LangGraph agent
 │   ├── browser/               # CDP browser control
-│   ├── code_use/              # Code agent
+│   ├── code_use/              # Code agent + shared executor
+│   ├── daemon/                # Persistent browser daemon (Unix socket)
 │   ├── dom/                   # DOM extraction
 │   ├── llm/                   # LLM providers
 │   ├── mcp/                   # MCP server
