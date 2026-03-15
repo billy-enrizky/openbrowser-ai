@@ -178,24 +178,28 @@ class TestNewLLMProviders:
 
     def test_chat_browser_use_import(self):
         """Test ChatBrowserUse import."""
+        pytest.importorskip("litellm")
         from openbrowser.llm import ChatBrowserUse
 
         assert ChatBrowserUse is not None
 
     def test_chat_google_import(self):
         """Test ChatGoogle import."""
+        pytest.importorskip("google.genai")
         from openbrowser.llm import ChatGoogle
 
         assert ChatGoogle is not None
 
     def test_chat_openai_import(self):
         """Test ChatOpenAI import."""
+        pytest.importorskip("openai")
         from openbrowser.llm import ChatOpenAI
 
         assert ChatOpenAI is not None
 
     def test_chat_anthropic_import(self):
         """Test ChatAnthropic import."""
+        pytest.importorskip("anthropic")
         from openbrowser.llm import ChatAnthropic
 
         assert ChatAnthropic is not None

@@ -157,10 +157,10 @@ if [ "$SKIP_BROWSER" = false ]; then
   info "Installing Chromium browser..."
   if command -v openbrowser-ai >/dev/null 2>&1; then
     openbrowser-ai install 2>/dev/null || warn "Chromium install failed (run 'openbrowser-ai install' manually)"
-  elif command -v playwright >/dev/null 2>&1; then
-    playwright install chromium 2>/dev/null || warn "Chromium install failed (run 'playwright install chromium' manually)"
+  elif command -v uvx >/dev/null 2>&1; then
+    uvx playwright install chromium 2>/dev/null || warn "Chromium install failed (run 'openbrowser-ai install' manually)"
   else
-    "$PYTHON" -m playwright install chromium 2>/dev/null || warn "Chromium install skipped (run 'openbrowser-ai install' manually)"
+    warn "Chromium install skipped. Please run 'openbrowser-ai install' manually after installation completes."
   fi
 fi
 
