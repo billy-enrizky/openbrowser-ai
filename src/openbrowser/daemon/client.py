@@ -10,18 +10,12 @@ modules so the -c CLI path stays fast (<50ms import time).
 
 import asyncio
 import json
-import os
-import platform
 import subprocess
 import sys
 import time
 from dataclasses import dataclass
-from pathlib import Path
 
-DAEMON_DIR = Path.home() / '.openbrowser'
-SOCKET_PATH = DAEMON_DIR / 'daemon.sock'
-IS_WINDOWS = platform.system() == 'Windows'
-WINDOWS_PORT = 19222
+from openbrowser.daemon import DAEMON_DIR, IS_WINDOWS, SOCKET_PATH, WINDOWS_PORT, get_socket_path
 
 CONNECT_TIMEOUT = 10.0
 READ_TIMEOUT = 300.0  # 5 min for long-running code
@@ -35,15 +29,11 @@ class DaemonResponse:
     error: str | None
 
 
-def _get_socket_path() -> Path:
-    return Path(os.environ.get('OPENBROWSER_SOCKET', str(SOCKET_PATH)))
-
-
 class DaemonClient:
     """Client that communicates with the OpenBrowser daemon."""
 
     async def _connect(self):
-        sock = _get_socket_path()
+        sock = get_socket_path()
         if IS_WINDOWS:
             return await asyncio.wait_for(
                 asyncio.open_connection('127.0.0.1', WINDOWS_PORT),
@@ -67,7 +57,7 @@ class DaemonClient:
         )
         log_handle.close()
         # Wait for socket to appear
-        sock = _get_socket_path()
+        sock = get_socket_path()
         deadline = time.time() + DAEMON_START_TIMEOUT
         while time.time() < deadline:
             if IS_WINDOWS or sock.exists():
