@@ -207,9 +207,6 @@ _EXECUTE_CODE_DESCRIPTION_COMPACT = """Execute Python code with browser automati
 ## Libraries
 json, asyncio, Path, csv, re, datetime, requests (pre-imported)
 Optional: numpy/np, pandas/pd, BeautifulSoup, PdfReader
-
-## Reset Namespace
-To clear all user variables and start fresh, execute: `for k in [k for k in dir() if not k.startswith('_')]: exec(f'del {k}') if k not in ('browser', 'navigate', 'click', 'input_text', 'scroll', 'send_keys', 'evaluate', 'select_dropdown', 'done', 'go_back', 'wait', 'switch', 'close', 'upload_file', 'download_file', 'list_downloads', 'get_selector_from_index', 'dropdown_options', 'state', 'json', 'asyncio', 'Path', 'csv', 're', 'datetime', 'requests') else None`
 """
 
 _EXECUTE_CODE_DESCRIPTION = """Execute Python code in a persistent namespace with browser automation functions. All functions are async -- use `await`. Use print() to return output. Variables persist between calls.
