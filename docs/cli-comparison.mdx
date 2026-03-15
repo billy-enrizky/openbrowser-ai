@@ -60,6 +60,8 @@ Additional fairness measures:
 
 All 4 tools achieve **100% accuracy** (18/18 task executions across 3 runs).
 
+<img src="/images/cli_benchmark_scatter.png" alt="CLI Benchmark: Token Usage vs Duration" />
+
 | Metric | openbrowser-ai | browser-use | playwright-cli | agent-browser |
 |--------|---------------:|------------:|---------------:|--------------:|
 | **Duration (mean +/- std)** | **84.8 +/- 10.9s** | 106.0 +/- 9.5s | 118.3 +/- 21.4s | 99.0 +/- 6.8s |
@@ -67,6 +69,8 @@ All 4 tools achieve **100% accuracy** (18/18 task executions across 3 runs).
 | **Bedrock API Tokens (mean +/- std)** | **36,010 +/- 6,063** | 77,123 +/- 33,354 | 94,130 +/- 35,982 | 90,107 +/- 3,698 |
 | **Response Chars (mean +/- std)** | **9,452 +/- 472** | 36,241 +/- 12,940 | 84,065 +/- 49,713 | 56,009 +/- 39,733 |
 | **Token ratio vs openbrowser-ai** | 1x (baseline) | 2.1x more | 2.6x more | 2.5x more |
+
+<img src="/images/cli_benchmark_overview.png" alt="CLI Benchmark: 4-Way Comparison Overview" />
 
 ## Results: Per-Task Token Usage
 
@@ -80,6 +84,8 @@ All 4 tools achieve **100% accuracy** (18/18 task executions across 3 runs).
 | content_analysis | 4,548 | **2,515** | 4,147 | 3,189 |
 
 openbrowser-ai wins 5 of 6 tasks on tokens. The advantage is largest on complex pages (search_navigate: 2.9x fewer tokens than browser-use) where code batching avoids repeated page state dumps. browser-use edges ahead on content_analysis -- a trivial task where all approaches use minimal tokens.
+
+<img src="/images/cli_benchmark_per_task.png" alt="CLI Benchmark: Per-Task Token Usage" />
 
 ## Results: Cost Per Benchmark Run (6 Tasks)
 
