@@ -55,7 +55,7 @@ class CodeExecutor:
 
         indented = '\n'.join(f'    {line}' for line in code.split('\n'))
         wrapped = (
-            'async def __exec__(__ns__):\n'
+            'async def __ob_exec__(__ns__):\n'
             f'{indented}\n'
             '    __ns__.update({k: v for k, v in locals().items() if not k.startswith("__")})\n'
         )
@@ -69,7 +69,7 @@ class CodeExecutor:
 
             sys.stdout = stdout_capture
             try:
-                result = await self._namespace['__exec__'](self._namespace)
+                result = await self._namespace['__ob_exec__'](self._namespace)
             finally:
                 sys.stdout = old_stdout
 
@@ -95,7 +95,7 @@ class CodeExecutor:
             return ExecutionResult(success=False, output=error_output)
 
         finally:
-            self._namespace.pop('__exec__', None)
+            self._namespace.pop('__ob_exec__', None)
 
     def _truncate(self, text: str) -> str:
         if self._max_output_chars and len(text) > self._max_output_chars:
