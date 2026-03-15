@@ -1,19 +1,27 @@
 # tests/test_cli_c_help.py
 """Tests for `openbrowser-ai -c` (no argument) self-documenting behaviour."""
 
+import asyncio
+import os
 import subprocess
 import sys
+import threading
+import time
+import uuid
+from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 
-def _run_cli(*args: str) -> subprocess.CompletedProcess:
+def _run_cli(*args: str, env: dict | None = None) -> subprocess.CompletedProcess:
     """Run the CLI entry-point as a subprocess."""
     return subprocess.run(
         [sys.executable, '-m', 'openbrowser.cli', *args],
         capture_output=True,
         text=True,
         timeout=30,
+        env=env,
     )
 
 
@@ -78,7 +86,68 @@ class TestCliCHelp:
         )
 
     def test_c_with_code_still_works(self):
-        """openbrowser-ai -c 'print(1+1)' should still execute code."""
-        result = _run_cli('-c', 'print(1+1)')
-        assert result.returncode == 0
-        assert '2' in result.stdout
+        """openbrowser-ai -c 'print(1+1)' should execute code via a mock daemon."""
+        from openbrowser.code_use.executor import CodeExecutor
+        from openbrowser.daemon.server import DaemonServer
+
+        # Set up a unique temp socket for isolation
+        test_id = uuid.uuid4().hex[:8]
+        tmp_dir = Path(f'/tmp/ob_test_{test_id}')
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+        sock = tmp_dir / 'd.sock'
+        sock_str = str(sock)
+
+        # Build a daemon with pre-initialized executor (no browser needed)
+        server = DaemonServer(idle_timeout=60)
+        executor = CodeExecutor()
+        executor.set_namespace({
+            'json': __import__('json'),
+            'asyncio': __import__('asyncio'),
+        })
+        server._executor = executor
+
+        loop = asyncio.new_event_loop()
+
+        def run_daemon():
+            asyncio.set_event_loop(loop)
+            os.environ['OPENBROWSER_SOCKET'] = sock_str
+            try:
+                loop.run_until_complete(server.run())
+            finally:
+                os.environ.pop('OPENBROWSER_SOCKET', None)
+
+        t = threading.Thread(target=run_daemon, daemon=True)
+        t.start()
+
+        # Wait for socket to appear
+        for _ in range(50):
+            if sock.exists():
+                break
+            time.sleep(0.05)
+        else:
+            server._running = False
+            server._stop_event.set()
+            t.join(timeout=5)
+            pytest.fail('Mock daemon socket never appeared')
+
+        try:
+            env = {**os.environ, 'OPENBROWSER_SOCKET': sock_str}
+            result = subprocess.run(
+                [sys.executable, '-m', 'openbrowser.cli', '-c', 'print(1+1)'],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                env=env,
+            )
+            assert result.returncode == 0, f'stderr: {result.stderr}'
+            assert '2' in result.stdout
+        finally:
+            server._running = False
+            server._stop_event.set()
+            t.join(timeout=5)
+            sock.unlink(missing_ok=True)
+            (tmp_dir / 'd.pid').unlink(missing_ok=True)
+            try:
+                tmp_dir.rmdir()
+            except OSError:
+                pass
