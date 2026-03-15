@@ -631,7 +631,7 @@ uv run python benchmarks/playwright_benchmark.py     # Playwright MCP
 uv run python benchmarks/cdp_benchmark.py            # Chrome DevTools MCP
 ```
 
-Results are written to `benchmarks/*_results.json`. See [full comparison](https://docs.openbrowser.me/comparison) for methodology.
+Raw results are in [`benchmarks/e2e_4way_cli_results.json`](benchmarks/e2e_4way_cli_results.json). See [full comparison](https://docs.openbrowser.me/comparison) for methodology.
 
 ## Backend and Frontend Deployment
 
