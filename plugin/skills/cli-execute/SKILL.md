@@ -1,7 +1,7 @@
 ---
 name: cli-execute
 description: Execute browser automation code via OpenBrowser CLI
-allowed-tools: Bash(openbrowser -c:*), Bash(openbrowser daemon:*)
+allowed-tools: Bash(openbrowser-ai -c:*), Bash(openbrowser-ai daemon:*)
 ---
 
 # OpenBrowser CLI Execute
@@ -13,17 +13,17 @@ The daemon starts automatically on first use and persists the browser session.
 
 ```bash
 # Navigate to a page
-openbrowser -c "await navigate('https://example.com')"
+openbrowser-ai -c "await navigate('https://example.com')"
 
 # Get page state and interact
-openbrowser -c "
+openbrowser-ai -c "
 state = await browser.get_browser_state_summary()
 print(state.url)
 print(state.title)
 "
 
 # Click an element and extract data
-openbrowser -c "
+openbrowser-ai -c "
 await click(3)
 data = await evaluate('document.querySelector(\"h1\").textContent')
 print(data)
@@ -67,18 +67,18 @@ print(data)
 Variables persist across `-c` calls while the daemon is running:
 
 ```bash
-openbrowser -c "await navigate('https://example.com')"
-openbrowser -c "title = await evaluate('document.title'); print(title)"
-openbrowser -c "print(title)"  # still available
+openbrowser-ai -c "await navigate('https://example.com')"
+openbrowser-ai -c "title = await evaluate('document.title'); print(title)"
+openbrowser-ai -c "print(title)"  # still available
 ```
 
 ## Daemon Management
 
 ```bash
-openbrowser daemon start     # Start daemon (auto-starts on first -c call)
-openbrowser daemon stop      # Stop daemon and browser
-openbrowser daemon status    # Show daemon info
-openbrowser daemon restart   # Restart daemon
+openbrowser-ai daemon start     # Start daemon (auto-starts on first -c call)
+openbrowser-ai daemon stop      # Stop daemon and browser
+openbrowser-ai daemon status    # Show daemon info
+openbrowser-ai daemon restart   # Restart daemon
 ```
 
 ## Multi-Action Batching
@@ -86,7 +86,7 @@ openbrowser daemon restart   # Restart daemon
 Batch multiple actions in one call for efficiency:
 
 ```bash
-openbrowser -c "
+openbrowser-ai -c "
 await navigate('https://example.com/search')
 await input_text(1, 'python automation')
 await click(2)

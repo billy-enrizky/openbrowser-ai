@@ -285,7 +285,7 @@ This installs the MCP server and 7 built-in skills:
 | `page-analysis` | Analyze page content, structure, metadata |
 | `accessibility-audit` | Audit pages for WCAG compliance |
 | `file-download` | Download files (PDFs, CSVs) using browser session |
-| `cli-execute` | Execute browser automation via `openbrowser -c` with persistent daemon |
+| `cli-execute` | Execute browser automation via `openbrowser-ai -c` with persistent daemon |
 
 See [plugin/README.md](plugin/README.md) for detailed tool parameter documentation.
 
