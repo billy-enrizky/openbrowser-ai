@@ -60,12 +60,24 @@ esac
 # --- Find Python 3.12+ ---
 PYTHON=""
 find_python() {
+  # On Windows (Git Bash), try the py launcher first
+  if [ "$OS_NAME" = "Windows" ] && command -v py >/dev/null 2>&1; then
+    for pyver in "-3" "-3.13" "-3.12"; do
+      version=$(py "$pyver" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>/dev/null) || continue
+      major=$(echo "$version" | cut -d. -f1)
+      minor=$(echo "$version" | cut -d. -f2)
+      if [ "$major" -gt "$MIN_PYTHON_MAJOR" ] || { [ "$major" -eq "$MIN_PYTHON_MAJOR" ] && [ "$minor" -ge "$MIN_PYTHON_MINOR" ]; }; then
+        PYTHON=$(py "$pyver" -c "import sys; print(sys.executable)" 2>/dev/null)
+        return 0
+      fi
+    done
+  fi
   for cmd in python3.13 python3.12 python3 python; do
     if command -v "$cmd" >/dev/null 2>&1; then
       version=$("$cmd" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>/dev/null) || continue
       major=$(echo "$version" | cut -d. -f1)
       minor=$(echo "$version" | cut -d. -f2)
-      if [ "$major" -ge "$MIN_PYTHON_MAJOR" ] && [ "$minor" -ge "$MIN_PYTHON_MINOR" ]; then
+      if [ "$major" -gt "$MIN_PYTHON_MAJOR" ] || { [ "$major" -eq "$MIN_PYTHON_MAJOR" ] && [ "$minor" -ge "$MIN_PYTHON_MINOR" ]; }; then
         PYTHON="$cmd"
         return 0
       fi

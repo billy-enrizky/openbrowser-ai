@@ -36,6 +36,7 @@ $Python = $null
 function Find-Python {
     # Try py launcher with specific versions first, then generic commands
     $candidates = @(
+        @{ Cmd = 'py'; Args = @('-3', '--version')    ; Run = 'py'; RunArgs = @('-3') },
         @{ Cmd = 'py'; Args = @('-3.13', '--version') ; Run = 'py'; RunArgs = @('-3.13') },
         @{ Cmd = 'py'; Args = @('-3.12', '--version') ; Run = 'py'; RunArgs = @('-3.12') },
         @{ Cmd = 'python3'; Args = @('--version')     ; Run = 'python3'; RunArgs = @() },
@@ -49,7 +50,7 @@ function Find-Python {
             if ($versionOutput -match '(\d+)\.(\d+)\.(\d+)') {
                 $major = [int]$Matches[1]
                 $minor = [int]$Matches[2]
-                if ($major -ge $MIN_PYTHON_MAJOR -and $minor -ge $MIN_PYTHON_MINOR) {
+                if ($major -gt $MIN_PYTHON_MAJOR -or ($major -eq $MIN_PYTHON_MAJOR -and $minor -ge $MIN_PYTHON_MINOR)) {
                     $script:Python = @{ Cmd = $c.Run; RunArgs = $c.RunArgs; Version = "$major.$minor.$($Matches[3])" }
                     return $true
                 }
@@ -142,7 +143,8 @@ else {
     Write-Host ""
     Write-Host "Install one of: uv, pipx, or pip"
     Write-Host "  powershell -ExecutionPolicy ByPass -c `"irm https://astral.sh/uv/install.ps1 | iex`""
-    Write-Host "  pip install pipx && pipx ensurepath"
+    Write-Host "  pip install pipx"
+    Write-Host "  pipx ensurepath"
     exit 1
 }
 
@@ -168,6 +170,9 @@ if (-not $SkipBrowser) {
         catch {
             try {
                 Invoke-Python -Arguments @('-m', 'playwright', 'install', 'chromium') 2>$null
+                if ($LASTEXITCODE -ne 0) {
+                    Write-Warn "Chromium install skipped (run 'openbrowser-ai install' manually)"
+                }
             }
             catch {
                 Write-Warn "Chromium install skipped (run 'openbrowser-ai install' manually)"

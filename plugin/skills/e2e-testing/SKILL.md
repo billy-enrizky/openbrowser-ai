@@ -76,7 +76,9 @@ openbrowser-ai -c '
 state = await browser.get_browser_state_summary()
 for idx, el in state.dom_state.selector_map.items():
     if el.attributes.get("type") in ("email", "text", "password") or el.tag_name == "button":
-        print(f"[{idx}] <{el.tag_name}> type={el.attributes.get(\"type\", \"\")} placeholder=\"{el.attributes.get(\"placeholder\", \"\")}\"")
+        etype = el.attributes.get("type", "")
+        placeholder = el.attributes.get("placeholder", "")
+        print(f"[{idx}] <{el.tag_name}> type={etype} placeholder=\"{placeholder}\"")
 
 # Fill and submit
 await input_text(index=3, text="test@example.com")

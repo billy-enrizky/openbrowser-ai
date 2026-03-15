@@ -29,7 +29,8 @@ Browser automation skills for Codex via native skill discovery. Clone and symlin
 
 3. **Install OpenBrowser CLI:**
    ```bash
-   uv pip install openbrowser-ai && openbrowser-ai install
+   uv tool install openbrowser-ai
+   openbrowser-ai install
    ```
 
 4. **Restart Codex** to discover the skills.

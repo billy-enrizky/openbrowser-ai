@@ -71,7 +71,8 @@ Both should show symlinks pointing to the openbrowser directories.
 ## Install OpenBrowser CLI
 
 ```bash
-uv pip install openbrowser-ai && openbrowser-ai install
+uv tool install openbrowser-ai
+openbrowser-ai install
 ```
 
 ## Usage
