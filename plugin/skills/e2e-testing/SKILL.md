@@ -154,7 +154,9 @@ viewport = await evaluate("""
   }
 })()
 """)
-print(f"Viewport: {viewport[\"width\"]}x{viewport[\"height\"]}")
+vw = viewport["width"]
+vh = viewport["height"]
+print(f"Viewport: {vw}x{vh}")
 
 # Check mobile menu visibility
 mobile_display = await evaluate("""

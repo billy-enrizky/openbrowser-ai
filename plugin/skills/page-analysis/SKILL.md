@@ -133,8 +133,10 @@ headings = await evaluate("""
 """)
 
 for h in headings:
-    indent = "  " * (int(h["tag"][1]) - 1)
-    print(f"{indent}{h[\"tag\"]}: {h[\"text\"]}")
+    htag = h["tag"]
+    htext = h["text"]
+    indent = "  " * (int(htag[1]) - 1)
+    print(f"{indent}{htag}: {htext}")
 '
 ```
 
@@ -156,7 +158,11 @@ for idx, el in state.dom_state.selector_map.items():
 for tag, elems in sorted(elements_by_tag.items()):
     print(f"\n{tag} ({len(elems)} elements):")
     for e in elems[:5]:
-        print(f"  [{e[\"index\"]}] text=\"{e[\"text\"]}\" type={e[\"type\"]} href={e[\"href\"]}")
+        eidx = e["index"]
+        etxt = e["text"]
+        etype = e["type"]
+        ehref = e["href"]
+        print(f"  [{eidx}] text=\"{etxt}\" type={etype} href={ehref}")
     if len(elems) > 5:
         print(f"  ... and {len(elems) - 5} more")
 '
