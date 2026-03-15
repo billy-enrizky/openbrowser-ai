@@ -34,6 +34,59 @@ if '--mcp' in sys.argv:
 	asyncio.run(mcp_main())
 	sys.exit(0)
 
+# Check for -c (execute code) mode early -- minimal imports for fast startup
+if '-c' in sys.argv:
+	import asyncio
+
+	c_idx = sys.argv.index('-c')
+	code = sys.argv[c_idx + 1] if c_idx + 1 < len(sys.argv) else None
+	if not code:
+		print('Error: -c requires a code argument', file=sys.stderr)
+		sys.exit(1)
+
+	from openbrowser.daemon.client import execute_code_via_daemon
+
+	result = asyncio.run(execute_code_via_daemon(code))
+	if result.success:
+		if result.output:
+			print(result.output)
+	else:
+		print(result.output or result.error, file=sys.stderr)
+		sys.exit(1)
+	sys.exit(0)
+
+# Check for daemon subcommand early
+if len(sys.argv) > 1 and sys.argv[1] == 'daemon':
+	import asyncio
+
+	from openbrowser.daemon.client import DaemonClient
+
+	sub = sys.argv[2] if len(sys.argv) > 2 else 'status'
+	client = DaemonClient()
+
+	if sub == 'start':
+		async def _start():
+			await client._start_daemon()
+			print('Daemon started')
+		asyncio.run(_start())
+	elif sub == 'stop':
+		resp = asyncio.run(client.stop())
+		print(resp.output or resp.error)
+	elif sub == 'status':
+		resp = asyncio.run(client.status())
+		print(resp.output or resp.error)
+	elif sub == 'restart':
+		asyncio.run(client.stop())
+		async def _restart():
+			await client._start_daemon()
+			print('Daemon restarted')
+		asyncio.run(_restart())
+	else:
+		print(f'Unknown daemon command: {sub}', file=sys.stderr)
+		print('Usage: openbrowser daemon [start|stop|status|restart]', file=sys.stderr)
+		sys.exit(1)
+	sys.exit(0)
+
 # Special case: install command doesn't need CLI dependencies
 if len(sys.argv) > 1 and sys.argv[1] == 'install':
 	import platform
