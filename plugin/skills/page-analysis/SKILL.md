@@ -4,7 +4,7 @@ description: |
   Analyze web page content, structure, and layout to understand what a page contains and how it is organized.
   Trigger when the user asks to: analyze a page, understand page structure, inspect a website,
   summarize page content, examine page layout, review a web page, or describe what is on a page.
-allowed-tools: Bash(openbrowser-ai:*) Bash(curl:*) Bash(uv:*) Bash(irm:*)
+allowed-tools: Bash(openbrowser-ai:*) Bash(curl:*) Bash(uv:*) Bash(irm:*) Read Write
 ---
 
 # Page Analysis
