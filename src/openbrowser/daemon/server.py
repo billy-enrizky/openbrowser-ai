@@ -115,6 +115,55 @@ class DaemonServer:
                 pass
             raise
 
+    _CDP_ERROR_KEYWORDS = ('connectionclosederror', 'no close frame', 'websocket', 'connection closed')
+
+    def _is_connection_error(self, text: str) -> bool:
+        """Return True if the error indicates a dead CDP/browser connection."""
+        lower = text.lower()
+        return any(kw in lower for kw in self._CDP_ERROR_KEYWORDS)
+
+    async def _recover_browser_session(self):
+        """Tear down dead browser and rebuild session + namespace."""
+        logger.info('CDP connection lost -- recovering browser session')
+        if self._session:
+            try:
+                await self._session.kill()
+            except Exception:
+                pass
+
+        from openbrowser.browser import BrowserProfile, BrowserSession
+        from openbrowser.code_use.namespace import create_namespace
+        from openbrowser.config import get_default_profile, load_openbrowser_config
+        from openbrowser.tools.service import CodeAgentTools
+
+        config = load_openbrowser_config()
+        profile_config = get_default_profile(config)
+        profile_data = {
+            'downloads_path': str(Path.home() / 'Downloads' / 'openbrowser-daemon'),
+            'wait_between_actions': 0.5,
+            'keep_alive': True,
+            'user_data_dir': '~/.config/openbrowser/profiles/daemon',
+            'device_scale_factor': 1.0,
+            'disable_security': False,
+            'headless': False,
+            **profile_config,
+        }
+        profile = BrowserProfile(**profile_data)
+        session = BrowserSession(browser_profile=profile)
+        await session.start()
+        try:
+            tools = CodeAgentTools()
+            namespace = create_namespace(browser_session=session, tools=tools)
+            self._executor.set_namespace(namespace)
+            self._session = session
+        except Exception:
+            try:
+                await session.kill()
+            except Exception:
+                pass
+            raise
+        logger.info('Browser session recovered successfully')
+
     async def _handle_request(self, data: dict) -> dict:
         """Handle a single JSON request."""
         action = data.get('action', '')
@@ -137,6 +186,19 @@ class DaemonServer:
                     'output': '',
                     'error': f'Execution timed out after {self._exec_timeout}s',
                 }
+
+            # If error looks like dead CDP connection, recover and retry once
+            error_text = result.error or result.output
+            if not result.success and self._is_connection_error(error_text):
+                try:
+                    await self._recover_browser_session()
+                    async with self._exec_lock:
+                        result = await asyncio.wait_for(
+                            self._executor.execute(code), timeout=self._exec_timeout
+                        )
+                except Exception as recovery_err:
+                    logger.error('CDP recovery failed: %s', recovery_err)
+
             self._last_activity = time.time()
             return {
                 'id': req_id,
