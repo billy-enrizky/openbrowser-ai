@@ -4,7 +4,7 @@ description: |
   Download files from websites, save PDFs, and read downloaded content.
   Trigger when the user asks to: download a file, save a PDF, export a document,
   fetch a file from a URL, grab a report, download and read a PDF, or save page content as a file.
-allowed-tools: Bash(openbrowser-ai:*) Bash(curl:*) Bash(uv:*) Bash(irm:*)
+allowed-tools: Bash(openbrowser-ai:*) Bash(curl:*) Bash(uv:*) Bash(irm:*) Read Write
 ---
 
 # File Download
@@ -95,7 +95,7 @@ else:
 
 ### Step 4 -- Read a downloaded PDF
 
-After downloading, use `pypdf` (pre-installed) to extract text:
+After downloading, use `pypdf` to extract text (requires `pip install openbrowser-ai[pdf]`):
 
 ```bash
 openbrowser-ai -c '
