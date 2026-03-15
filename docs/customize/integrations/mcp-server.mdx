@@ -165,25 +165,7 @@ asyncio.run(use_browser_mcp())
 
 ## CLI Execute Mode
 
-For Bash-based workflows, OpenBrowser provides a `-c` flag that connects to a persistent browser daemon over a Unix socket. No MCP server required.
-
-```bash
-# Execute code directly
-uvx openbrowser-ai -c "await navigate('https://example.com')"
-uvx openbrowser-ai -c "print(await evaluate('document.title'))"
-
-# Variables persist across calls
-uvx openbrowser-ai -c "results = await evaluate('document.querySelectorAll(\"h2\").length')"
-uvx openbrowser-ai -c "print(results)"
-
-# Daemon management
-uvx openbrowser-ai daemon start     # Start (auto-starts on first -c call)
-uvx openbrowser-ai daemon stop      # Stop daemon and browser
-uvx openbrowser-ai daemon status    # Show daemon info
-uvx openbrowser-ai daemon restart   # Restart with fresh session
-```
-
-The daemon starts automatically on first `-c` call and shuts down after 10 minutes of inactivity. It uses a Unix socket at `~/.openbrowser/daemon.sock`.
+For Bash-based workflows without an MCP client, use the [CLI Daemon](/customize/integrations/cli-daemon) instead. It provides the same `execute_code` functions via `openbrowser -c "code"` with a persistent browser daemon.
 
 ## Troubleshooting
 
