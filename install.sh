@@ -147,12 +147,12 @@ fi
 if [ "$SKIP_BROWSER" = false ]; then
   echo ""
   info "Installing Chromium browser..."
-  if command -v openbrowser >/dev/null 2>&1; then
-    openbrowser install 2>/dev/null || true
+  if command -v openbrowser-ai >/dev/null 2>&1; then
+    openbrowser-ai install 2>/dev/null || true
   elif command -v playwright >/dev/null 2>&1; then
     playwright install chromium 2>/dev/null || true
   else
-    $PYTHON -m playwright install chromium 2>/dev/null || warn "Chromium install skipped (run 'openbrowser install' manually)"
+    $PYTHON -m playwright install chromium 2>/dev/null || warn "Chromium install skipped (run 'openbrowser-ai install' manually)"
   fi
 fi
 
@@ -161,8 +161,8 @@ echo ""
 info "OpenBrowser installed successfully! (via $INSTALLER)"
 echo ""
 echo "  Get started:"
-echo "    openbrowser --help"
-echo "    openbrowser -c \"await navigate('https://example.com')\""
+echo "    openbrowser-ai --help"
+echo "    openbrowser-ai -c \"await navigate('https://example.com')\""
 echo ""
 echo "  Docs: https://docs.openbrowser.me"
 echo ""
