@@ -59,7 +59,11 @@ if '-c' in sys.argv:
 		client = DaemonClient()
 		try:
 			status = asyncio.run(client.status())
-		except (TimeoutError, OSError, asyncio.CancelledError):
+		except TimeoutError:
+			# Daemon is alive but slow to respond -- show compact help
+			print(EXECUTE_CODE_DESCRIPTION_COMPACT)
+			sys.exit(0)
+		except (OSError, asyncio.CancelledError, ValueError):
 			status = None
 		if status and status.success:
 			# Daemon already running (warm) -- compact description
@@ -634,7 +638,7 @@ async def run_prompt_mode(prompt: str, ctx: click.Context, debug: bool = False):
 @click.option('--no-proxy', type=str, help='Comma-separated hosts to bypass proxy (e.g. localhost,127.0.0.1,*.internal)')
 @click.option('--proxy-username', type=str, help='Proxy auth username')
 @click.option('--proxy-password', type=str, help='Proxy auth password')
-@click.option('-p', '--prompt', type=str, help='Run a single task in headless mode')
+@click.option('-p', '--prompt', type=str, help='Run a single task in one-shot mode')
 @click.option('--mcp', is_flag=True, help='Run as MCP server (exposes JSON RPC via stdin/stdout)')
 @click.pass_context
 def main(ctx: click.Context, debug: bool = False, **kwargs):
