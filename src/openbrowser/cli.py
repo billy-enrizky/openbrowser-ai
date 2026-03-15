@@ -281,8 +281,13 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from openbrowser import Agent, Controller
-from openbrowser.agent.views import AgentSettings
+try:
+	from openbrowser import Agent, Controller
+	from openbrowser.agent.views import AgentSettings
+except ImportError:
+	Agent = None  # type: ignore[assignment,misc]
+	Controller = None  # type: ignore[assignment,misc]
+	AgentSettings = None  # type: ignore[assignment,misc]
 from openbrowser.browser import BrowserProfile, BrowserSession
 from openbrowser.logging_config import addLoggingLevel
 from openbrowser.telemetry import CLITelemetryEvent, ProductTelemetry
@@ -1940,11 +1945,24 @@ def run_main_interface(ctx: click.Context, debug: bool = False, **kwargs):
 
 	# Check if prompt mode is activated
 	if kwargs.get('prompt'):
+		if Agent is None:
+			print('Error: Agent dependencies not installed.')
+			print('Install with: pip install "openbrowser-ai[agent]"')
+			sys.exit(1)
 		# Set environment variable for prompt mode before running
 		os.environ['OPENBROWSER_LOGGING_LEVEL'] = 'result'
 		# Run in non-interactive mode
 		asyncio.run(run_prompt_mode(kwargs['prompt'], ctx, debug))
 		return
+
+	# The TUI/agent mode requires the [agent] extra
+	if Agent is None:
+		print('Error: Agent dependencies not installed.')
+		print('Install with: pip install "openbrowser-ai[agent]"')
+		print('')
+		print('For MCP server mode (no agent deps needed): openbrowser-ai --mcp')
+		print('For CLI daemon mode: openbrowser-ai -c "await navigate(\'https://example.com\')"')
+		sys.exit(1)
 
 	# Configure console logging
 	console_handler = logging.StreamHandler(sys.stdout)
