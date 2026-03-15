@@ -101,6 +101,19 @@ class TestCodeExecutor:
         assert 'RuntimeError' in result.output
 
     @pytest.mark.asyncio
+    async def test_execute_return_value_display(self, mock_namespace):
+        """Test that __ob_result__ triggers the return-value display path."""
+        from openbrowser.code_use.executor import CodeExecutor
+
+        executor = CodeExecutor()
+        executor._namespace = mock_namespace
+
+        result = await executor.execute('__ob_result__ = {"answer": 42}')
+        assert result.success is True
+        assert '42' in result.output
+        assert 'answer' in result.output
+
+    @pytest.mark.asyncio
     async def test_output_truncation(self, mock_namespace):
         from openbrowser.code_use.executor import CodeExecutor
 
