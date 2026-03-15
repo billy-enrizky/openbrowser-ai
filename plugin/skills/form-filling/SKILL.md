@@ -4,7 +4,7 @@ description: |
   Fill out web forms, submit data, and handle login or registration flows.
   Trigger when the user asks to: fill a form, submit data on a website, log in to a site,
   register an account, complete a checkout, enter information into fields, or automate form submission.
-allowed-tools: Bash(openbrowser-ai:*) Bash(curl:*) Bash(uv:*) Bash(irm:*)
+allowed-tools: Bash(openbrowser-ai:*) Bash(curl:*) Bash(uv:*) Bash(irm:*) Read Write
 ---
 
 # Form Filling
