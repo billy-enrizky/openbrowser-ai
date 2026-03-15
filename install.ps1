@@ -168,7 +168,7 @@ if (-not $SkipBrowser) {
             }
         }
         catch {
-            Write-Warn "Chromium install skipped (run 'openbrowser-ai install' after installing uv)"
+            Write-Warn "Chromium install skipped. Please run 'openbrowser-ai install' manually after installation completes."
         }
     }
 }

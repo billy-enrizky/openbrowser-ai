@@ -137,7 +137,7 @@ pip install openbrowser-ai[azure]      # Azure OpenAI
 pip install openbrowser-ai[video]      # Video recording support
 ```
 
-> **No separate browser install needed.** OpenBrowser auto-detects any installed Chromium-based browser (Chrome, Edge, Brave, Chromium) and uses it directly. If none is found, Chromium is installed automatically on first run. To pre-install manually: `openbrowser-ai install`
+> **No separate browser install needed.** OpenBrowser auto-detects any installed Chromium-based browser (Chrome, Edge, Brave, Chromium) and uses it directly. If none is found and `uvx` is available, Chromium is installed automatically on first run. To pre-install manually: `openbrowser-ai install`
 
 ## Quick Start
 

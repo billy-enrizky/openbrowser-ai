@@ -57,8 +57,11 @@ if '-c' in sys.argv:
 		from openbrowser.daemon.client import DaemonClient
 
 		client = DaemonClient()
-		status = asyncio.run(client.status())
-		if status.success:
+		try:
+			status = asyncio.run(client.status())
+		except (TimeoutError, OSError, asyncio.CancelledError):
+			status = None
+		if status and status.success:
 			# Daemon already running (warm) -- compact description
 			print(EXECUTE_CODE_DESCRIPTION_COMPACT)
 		else:
@@ -66,8 +69,8 @@ if '-c' in sys.argv:
 			print(EXECUTE_CODE_DESCRIPTION)
 			try:
 				asyncio.run(client._start_daemon())
-			except (TimeoutError, OSError):
-				pass  # Best-effort daemon pre-start; failure is not fatal for help output
+			except (TimeoutError, OSError, asyncio.CancelledError):
+				pass  # Best-effort; daemon may still be starting in background
 		sys.exit(0)
 
 	from openbrowser.daemon.client import execute_code_via_daemon
