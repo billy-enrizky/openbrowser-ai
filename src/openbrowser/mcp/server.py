@@ -324,7 +324,8 @@ class OpenBrowserServer:
 
 		# CodeAgent namespace -- persistent across execute_code calls
 		self._namespace: dict[str, Any] | None = None
-		self._executor = CodeExecutor(max_output_chars=10_000)
+		max_output = int(os.environ.get('OPENBROWSER_MAX_OUTPUT', '10000'))
+		self._executor = CodeExecutor(max_output_chars=max_output)
 		self._tools: CodeAgentTools | None = None
 
 		# Session management
