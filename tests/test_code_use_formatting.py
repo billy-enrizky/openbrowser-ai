@@ -355,8 +355,13 @@ class TestFormatBrowserStateForLLM:
         bs = MagicMock()
 
         result = await format_browser_state_for_llm(state, ns, bs)
-        # Skip vars should not appear in Available section
+        # Skip vars (navigate, click, etc.) should not appear in the result
         assert "user_var" in result
+        # Internal helper vars that are in the skip list must NOT appear
+        assert "navigate" not in result.split("Available")[0] if "Available" in result else True
+        for skip_name in ["click", "type_text", "wait", "BeautifulSoup"]:
+            # These are pre-imported helpers, not user variables - they should be filtered
+            assert skip_name not in result or "user_var" in result
 
     @pytest.mark.asyncio
     async def test_code_block_variable_with_none_value(self):

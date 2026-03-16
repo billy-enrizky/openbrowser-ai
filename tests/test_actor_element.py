@@ -381,12 +381,18 @@ class TestElementClick:
         await elem.click(modifiers=['Shift', 'Control'])
 
         # Check that modifier bitmask was computed (Shift=8 | Control=2 = 10)
-        press_calls = [
-            c for c in client.send.Input.dispatchMouseEvent.call_args_list
-            if c[1].get('params', c[0][0] if c[0] else {}).get('type') == 'mousePressed'
-            or (c[0] and c[0][0].get('type') == 'mousePressed')
-        ]
-        assert len(press_calls) >= 1
+        # Verify dispatchMouseEvent was called with correct modifier bitmask
+        # Shift=8, Control=2 => combined modifiers=10
+        dispatch_calls = client.send.Input.dispatchMouseEvent.call_args_list
+        assert len(dispatch_calls) >= 1
+        # Check at least one mousePressed call includes modifiers
+        found_modifiers = False
+        for call in dispatch_calls:
+            params = call[0][0] if call[0] else call[1].get('params', {})
+            if params.get('type') == 'mousePressed' and params.get('modifiers', 0) > 0:
+                found_modifiers = True
+                break
+        assert found_modifiers, "Expected mousePressed call with non-zero modifiers bitmask"
 
 
 @pytest.mark.asyncio
@@ -848,9 +854,10 @@ class TestElementSelectOption:
             {'node': {'backendNodeId': 100}},
         ]
         elem = Element(session, backend_node_id=42, session_id='sid-abc')
-        # Mock the click method on option element to avoid CDP calls
-        with patch.object(Element, 'click', new_callable=AsyncMock):
+        # Mock the click method on option element to verify it gets called
+        with patch.object(Element, 'click', new_callable=AsyncMock) as mock_click:
             await elem.select_option('opt1')
+            mock_click.assert_called_once()
 
     async def test_select_option_converts_string_to_list(self):
         """Test that a single string value is converted to a list."""

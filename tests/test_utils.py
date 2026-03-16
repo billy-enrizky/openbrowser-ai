@@ -343,9 +343,19 @@ class TestGetOpenbrowserVersion:
 class TestCheckLatestVersion:
     @pytest.mark.asyncio
     async def test_returns_string_or_none(self):
-        result = await check_latest_openbrowser_version()
-        # May succeed or fail based on network - just check type
-        assert result is None or isinstance(result, str)
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"info": {"version": "0.1.37"}}
+
+        mock_client = AsyncMock()
+        mock_client.get.return_value = mock_response
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            result = await check_latest_openbrowser_version()
+            assert isinstance(result, str)
+            assert result == "0.1.37"
 
 
 # ---------------------------------------------------------------------------

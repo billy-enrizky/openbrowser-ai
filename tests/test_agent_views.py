@@ -189,12 +189,10 @@ class TestAgentOutput:
 
 class TestAgentError:
     def test_format_validation_error(self):
-        try:
-            # Create an intentional validation error
+        with pytest.raises(ValidationError) as exc_info:
             AgentSettings(max_failures="not_a_number")
-        except ValidationError as e:
-            result = AgentError.format_error(e)
-            assert AgentError.VALIDATION_ERROR in result
+        result = AgentError.format_error(exc_info.value)
+        assert AgentError.VALIDATION_ERROR in result
 
     def test_format_rate_limit_error(self):
         from unittest.mock import MagicMock
