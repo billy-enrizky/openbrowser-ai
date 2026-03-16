@@ -63,7 +63,7 @@ jobs:
 
       - name: Run tests with coverage
         run: |
-          pytest tests/ -v --tb=short -m "not integration" --cov=src/openbrowser --cov-branch --cov-report=xml --cov-report=term-missing
+          pytest tests/ -v --tb=short -m "not integration" --cov=src/openbrowser --cov-report=xml --cov-report=term-missing
         env:
           PYTHONPATH: ${{ github.workspace }}
 
