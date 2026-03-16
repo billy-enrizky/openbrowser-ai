@@ -25,12 +25,13 @@ def _make_mock_browser_session():
 
     session.browser_profile = MagicMock()
     session.browser_profile.executable_path = None
-    session.browser_profile.user_data_dir = tempfile.mkdtemp(prefix='openbrowser-test-')
+    user_data_dir = tempfile.mkdtemp(prefix='openbrowser-test-')
+    session.browser_profile.user_data_dir = user_data_dir
     session.browser_profile.profile_directory = None
     session.browser_profile.get_args = MagicMock(return_value=[
         '--no-first-run',
         '--disable-default-apps',
-        f'--user-data-dir={session.browser_profile.user_data_dir}',
+        f'--user-data-dir={user_data_dir}',
     ])
 
     return session
@@ -162,7 +163,8 @@ class TestCleanupProcess:
         mock_process.terminate = MagicMock()
         mock_process.is_running.return_value = False
 
-        await LocalBrowserWatchdog._cleanup_process(mock_process)
+        with patch('asyncio.sleep', new_callable=AsyncMock):
+            await LocalBrowserWatchdog._cleanup_process(mock_process)
 
         mock_process.terminate.assert_called_once()
 
@@ -174,7 +176,8 @@ class TestCleanupProcess:
         mock_process.kill = MagicMock()
         mock_process.is_running.return_value = True  # Never stops
 
-        await LocalBrowserWatchdog._cleanup_process(mock_process)
+        with patch('asyncio.sleep', new_callable=AsyncMock):
+            await LocalBrowserWatchdog._cleanup_process(mock_process)
 
         mock_process.terminate.assert_called_once()
         mock_process.kill.assert_called_once()
@@ -185,8 +188,9 @@ class TestCleanupProcess:
         mock_process = MagicMock()
         mock_process.terminate.side_effect = psutil.NoSuchProcess(pid=99999)
 
-        # Should not raise
-        await LocalBrowserWatchdog._cleanup_process(mock_process)
+        with patch('asyncio.sleep', new_callable=AsyncMock):
+            # Should not raise
+            await LocalBrowserWatchdog._cleanup_process(mock_process)
 
 
 @pytest.mark.asyncio

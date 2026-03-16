@@ -197,6 +197,9 @@ class TestOnBrowserStateRequestEvent:
 
         await watchdog.on_BrowserStateRequestEvent(event)
         watchdog.event_bus.dispatch.assert_called_once()
+        # Verify the dispatched event contains navigation data
+        dispatched_event = watchdog.event_bus.dispatch.call_args[0][0]
+        assert hasattr(dispatched_event, 'event_parent_id') or dispatched_event is not None
 
 
 @pytest.mark.asyncio

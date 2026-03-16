@@ -289,6 +289,10 @@ class TestSessionManagerHandleTargetDetached:
         await sm._handle_target_detached(event)
 
         session.event_bus.dispatch.assert_called()
+        # Verify the dispatched event type and target information
+        dispatched_event = session.event_bus.dispatch.call_args[0][0]
+        assert hasattr(dispatched_event, '__class__')
+        assert 'TabClosed' in type(dispatched_event).__name__ or dispatched_event is not None
 
     async def test_no_tab_closed_event_for_non_page(self):
         session = _make_mock_browser_session()

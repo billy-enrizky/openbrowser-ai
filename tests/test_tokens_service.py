@@ -64,7 +64,7 @@ class TestXdgCacheHome:
 
 class TestTokenCostInit:
     def test_default_init(self):
-        with patch.dict("os.environ", {}, clear=False):
+        with patch.dict("os.environ", {}, clear=True):
             tc = TokenCost(include_cost=False)
             assert tc.include_cost is False
             assert tc.usage_history == []

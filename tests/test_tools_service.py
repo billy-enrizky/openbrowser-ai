@@ -158,9 +158,9 @@ class TestToolsValidateAndFixJavascript:
     def test_fixes_xpath_mixed_quotes(self, tools):
         code = """document.evaluate("//div[@class='test']")"""
         # The single quotes inside double quotes should be converted to template literal
-        # (only if the pattern matches - xpath with single quotes in double quotes)
         fixed = tools._validate_and_fix_javascript(code)
-        assert "`" in fixed or "'" in fixed
+        # Verify that the result uses backtick template literal to avoid nested quote conflicts
+        assert "`" in fixed
 
     def test_fixes_queryselector_mixed_quotes(self, tools):
         code = """document.querySelector("input[type='text']")"""
@@ -219,8 +219,9 @@ class TestToolsAct:
         async def noop():
             return None
 
-        # Execute through registry
+        # Execute through the registry's execute_action (which is what act() delegates to)
         result = await tools.registry.execute_action("noop", {})
+        # Registry returns None for actions that return None
         assert result is None
 
     @pytest.mark.asyncio
@@ -231,6 +232,7 @@ class TestToolsAct:
         async def string_action():
             return "hello"
 
+        # Execute through registry
         result = await tools.registry.execute_action("string_action", {})
         assert result == "hello"
 
@@ -332,8 +334,18 @@ class TestToolsWaitAction:
     @pytest.mark.asyncio
     async def test_wait_caps_at_30_seconds(self):
         tools = Tools()
-        # We can't actually wait 30 seconds in a test, so verify the logic
-        # by executing with a small value
+        # Test that wait(1) works
         result = await tools.registry.execute_action("wait", {"seconds": 1})
         assert isinstance(result, ActionResult)
         assert "Waited for 1 second" in result.extracted_content
+
+    @pytest.mark.asyncio
+    async def test_wait_caps_at_30_seconds_for_large_values(self):
+        tools = Tools()
+        # The wait action caps at 30 seconds via min() — no validation error
+        with patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+            result = await tools.registry.execute_action("wait", {"seconds": 60})
+            # actual_seconds = min(max(60 - 3, 0), 30) = 30
+            mock_sleep.assert_called_once_with(30)
+            assert isinstance(result, ActionResult)
+            assert "60 second" in result.extracted_content
