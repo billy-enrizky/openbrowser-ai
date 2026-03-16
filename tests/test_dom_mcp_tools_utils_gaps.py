@@ -794,10 +794,10 @@ class TestUtilsInitGaps:
 class TestToolsServiceGaps:
 
     def test_detect_sensitive_key_323(self):
-        sd = {"example.com": {"username": "admin", "password": "secret123"}}
-        assert _detect_sensitive_key_name("secret123", sd) == "password"
-        sd_old = {"my_password": "secret456"}
-        assert _detect_sensitive_key_name("secret456", sd_old) == "my_password"
+        sd = {"example.com": {"username": "testuser", "password": "FAKE_TEST_VALUE_123"}}
+        assert _detect_sensitive_key_name("FAKE_TEST_VALUE_123", sd) == "password"
+        sd_old = {"my_password": "FAKE_TEST_VALUE_456"}
+        assert _detect_sensitive_key_name("FAKE_TEST_VALUE_456", sd_old) == "my_password"
         assert _detect_sensitive_key_name("unknown", sd) is None
         assert _detect_sensitive_key_name("", None) is None
         assert _detect_sensitive_key_name("", {}) is None

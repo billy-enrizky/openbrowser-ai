@@ -1093,9 +1093,9 @@ class TestToolsServiceGaps:
         from openbrowser.tools.service import _detect_sensitive_key_name
 
         sensitive_data = {
-            "example.com": {"username": "admin", "password": "secret123"}
+            "example.com": {"username": "testuser", "password": "FAKE_TEST_VALUE_123"}
         }
-        result = _detect_sensitive_key_name("secret123", sensitive_data)
+        result = _detect_sensitive_key_name("FAKE_TEST_VALUE_123", sensitive_data)
         assert result == "password"
 
     def test_detect_sensitive_key_name_flat_dict(self):
