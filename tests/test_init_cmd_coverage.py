@@ -23,6 +23,8 @@ from unittest.mock import MagicMock, mock_open, patch
 
 import pytest
 
+pytest.importorskip("InquirerPy", reason="InquirerPy not installed")
+
 logger = logging.getLogger(__name__)
 
 # Import the module first so we can patch attributes on it
