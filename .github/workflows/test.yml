@@ -77,6 +77,19 @@ jobs:
           fail_ci_if_error: false
           verbose: true
 
+      - name: Generate coverage badge
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12' && github.ref == 'refs/heads/main'
+        uses: tj-actions/coverage-badge-py@v2
+        with:
+          output: coverage-badge.svg
+
+      - name: Add coverage PR comment
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12' && github.event_name == 'pull_request'
+        uses: MishaKav/pytest-coverage-comment@main
+        with:
+          pytest-xml-coverage-path: ./coverage.xml
+          title: Test Coverage Report
+
   lint:
     name: Lint
     runs-on: ubuntu-latest
