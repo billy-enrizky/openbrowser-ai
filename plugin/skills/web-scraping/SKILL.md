@@ -4,7 +4,7 @@ description: |
   Extract structured data from websites, scrape page content, and collect information across multiple pages.
   Trigger when the user asks to: extract data from a website, scrape a page, collect information from URLs,
   pull content from web pages, gather data across multiple pages, or download page content.
-allowed-tools: Bash(openbrowser-ai:*) Bash(curl:*) Bash(uv:*) Bash(irm:*)
+allowed-tools: Bash(openbrowser-ai:*) Bash(curl:*) Bash(uv:*) Bash(irm:*) Read Write
 ---
 
 # Web Scraping
@@ -126,6 +126,7 @@ while True:
     if not has_next:
         break
 
+    # Replace with the actual index from browser.get_browser_state_summary()
     await click(next_button_index)
     await wait(2)
     page += 1

@@ -6,12 +6,12 @@
     "url": "https://github.com/billy-enrizky/openbrowser-ai.git",
     "source": "github"
   },
-  "version": "0.1.31",
+  "version": "0.1.36",
   "packages": [
     {
       "registryType": "pypi",
       "identifier": "openbrowser-ai",
-      "version": "0.1.31",
+      "version": "0.1.36",
       "runtimeHint": "uvx",
       "transport": {
         "type": "stdio"
@@ -33,6 +33,20 @@
           "isRequired": false,
           "isSecret": false,
           "default": ""
+        },
+        {
+          "name": "OPENBROWSER_COMPACT_DESCRIPTION",
+          "description": "Use minimal tool description (~500 tokens instead of ~1,430)",
+          "isRequired": false,
+          "isSecret": false,
+          "default": "false"
+        },
+        {
+          "name": "OPENBROWSER_MAX_OUTPUT",
+          "description": "Maximum output characters per code execution (default: 10000)",
+          "isRequired": false,
+          "isSecret": false,
+          "default": "10000"
         },
         {
           "name": "ANONYMIZED_TELEMETRY",

@@ -5,7 +5,7 @@ description: |
   Trigger when the user asks to: check accessibility, run an a11y audit, test WCAG compliance,
   check screen reader support, audit ARIA attributes, verify keyboard navigation,
   find accessibility issues, or check for missing alt text or labels.
-allowed-tools: Bash(openbrowser-ai:*) Bash(curl:*) Bash(uv:*) Bash(irm:*)
+allowed-tools: Bash(openbrowser-ai:*) Bash(curl:*) Bash(uv:*) Bash(irm:*) Read Write
 ---
 
 # Accessibility Audit

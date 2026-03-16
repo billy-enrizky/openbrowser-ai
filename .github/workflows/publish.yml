@@ -310,6 +310,25 @@ jobs:
                   print(f"Updated {market_path} to {version}")
                   break
 
+          # Update MCP registry server.json
+          server_path = "server.json"
+          with open(server_path) as f:
+              server = json.load(f)
+          needs_update = False
+          if server.get("version") != version:
+              server["version"] = version
+              needs_update = True
+          for pkg in server.get("packages", []):
+              if pkg.get("version") != version:
+                  pkg["version"] = version
+                  needs_update = True
+          if needs_update:
+              with open(server_path, "w") as f:
+                  json.dump(server, f, indent=2)
+                  f.write("\n")
+              changed.append(server_path)
+              print(f"Updated {server_path} to {version}")
+
           if not changed:
               print(f"All files already at {version}, no update needed")
           PYEOF
@@ -318,7 +337,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add plugin/.claude-plugin/plugin.json .claude-plugin/marketplace.json
+          git add plugin/.claude-plugin/plugin.json .claude-plugin/marketplace.json server.json
           git diff --cached --quiet && echo "No changes to commit" || \
             git commit -m "chore(plugin): sync version to ${GITHUB_REF_NAME#v}" && \
             git push origin main

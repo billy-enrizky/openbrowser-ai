@@ -71,12 +71,13 @@ The MCP server exposes a single `execute_code` tool that runs Python code in a p
 | **Dropdowns** | `select_dropdown(index, text)`, `dropdown_options(index)` |
 | **Tabs** | `switch(tab_id)`, `close(tab_id)` |
 | **JavaScript** | `evaluate(code)` -- run JS in page context, returns Python objects |
-| **Downloads** | `download_file(url, filename)` -- download a file using browser cookies, `list_downloads()` -- list downloaded files |
+| **Downloads** | `download_file(url, filename)` -- download a file using browser cookies, `list_downloads()` (sync, no await) -- list downloaded files |
 | **State** | `browser.get_browser_state_summary()` -- page metadata and interactive elements |
 | **CSS** | `get_selector_from_index(index)` -- CSS selector for an element |
-| **Completion** | `done(text, success)` -- signal task completion |
 
-**Pre-imported libraries**: `json`, `csv`, `re`, `datetime`, `asyncio`, `Path`, `requests`, `numpy`, `pandas`, `matplotlib`, `BeautifulSoup`
+**Pre-imported libraries**: `json`, `csv`, `re`, `datetime`, `asyncio`, `Path`, `requests`
+
+**Available if installed**: `numpy`/`np`, `pandas`/`pd`, `matplotlib`, `BeautifulSoup`, `PdfReader` (requires `pip install openbrowser-ai[pdf]`)
 
 ## Benchmark: Token Efficiency
 
@@ -143,6 +144,7 @@ Optional environment variables:
 | `OPENBROWSER_ALLOWED_DOMAINS` | Comma-separated domain whitelist |
 | `OPENBROWSER_COMPACT_DESCRIPTION` | Set to `true` for minimal tool description (~500 tokens) |
 | `OPENBROWSER_MAX_OUTPUT` | Maximum output characters per execution (default: 10,000) |
+| `ANONYMIZED_TELEMETRY` | Set to `false` to disable anonymized usage telemetry (default: `true`) |
 
 Set these in your `.mcp.json`:
 
