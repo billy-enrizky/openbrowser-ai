@@ -85,10 +85,9 @@ class TestPositive:
         expressions are legal. This test confirms that async stdlib
         utilities like asyncio.sleep can be awaited without error.
         """
-        result = await executor.execute("await asyncio.sleep(0)\nimport asyncio")
-        # asyncio is already available in builtins; the wrapped function is async
-        # So we need asyncio in the namespace for this to work.
-        executor._namespace["asyncio"] = asyncio
+        # asyncio must be available in the namespace for await to work
+        import asyncio as _asyncio_mod
+        executor._namespace["asyncio"] = _asyncio_mod
         result = await executor.execute("await asyncio.sleep(0)\nresult_val = 'async_ok'")
         assert result.success is True
         assert executor._namespace.get("result_val") == "async_ok"

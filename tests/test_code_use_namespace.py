@@ -464,73 +464,101 @@ class TestEvaluateWrapper:
         mock_tools.registry.registry.actions = {}
 
         ns = create_namespace(mock_session, tools=mock_tools)
-        return ns
+        return ns, mock_cdp
+
+    def _get_sent_expression(self, mock_cdp):
+        """Extract the JavaScript expression that was sent to CDP."""
+        call_args = mock_cdp.cdp_client.send.Runtime.evaluate.call_args
+        return call_args.kwargs["params"]["expression"]
 
     @pytest.mark.asyncio
     async def test_evaluate_wrapper_no_code_raises(self):
-        ns = self._make_ns()
+        ns, _ = self._make_ns()
         with pytest.raises(ValueError, match="No JavaScript code"):
             await ns["evaluate"]()
 
     @pytest.mark.asyncio
     async def test_evaluate_wrapper_auto_wraps_single_expression(self):
-        ns = self._make_ns()
+        ns, mock_cdp = self._make_ns()
         result = await ns["evaluate"]("document.title")
         assert result == "ok"
+        sent = self._get_sent_expression(mock_cdp)
+        assert "document.title" in sent
 
     @pytest.mark.asyncio
     async def test_evaluate_wrapper_auto_wraps_multi_statement(self):
-        ns = self._make_ns()
+        ns, mock_cdp = self._make_ns()
         result = await ns["evaluate"]("var x = 1;\nreturn x;")
         assert result == "ok"
+        sent = self._get_sent_expression(mock_cdp)
+        assert "var x = 1" in sent
+        assert "return x" in sent
 
     @pytest.mark.asyncio
     async def test_evaluate_wrapper_does_not_double_wrap_iife(self):
-        ns = self._make_ns()
+        ns, mock_cdp = self._make_ns()
         result = await ns["evaluate"]("(function(){return 1})()")
         assert result == "ok"
+        sent = self._get_sent_expression(mock_cdp)
+        # Should not be double-wrapped — the IIFE should appear directly
+        assert "(function(){return 1})()" in sent
 
     @pytest.mark.asyncio
     async def test_evaluate_wrapper_with_variables(self):
-        ns = self._make_ns()
+        ns, mock_cdp = self._make_ns()
         result = await ns["evaluate"]("return params.x", variables={"x": 10})
         assert result == "ok"
+        sent = self._get_sent_expression(mock_cdp)
+        assert "params" in sent
+        assert "10" in sent
 
     @pytest.mark.asyncio
     async def test_evaluate_wrapper_with_variables_and_iife(self):
-        ns = self._make_ns()
+        ns, mock_cdp = self._make_ns()
         result = await ns["evaluate"]("(function(){return params.x})()", variables={"x": 5})
         assert result == "ok"
+        sent = self._get_sent_expression(mock_cdp)
+        assert "params.x" in sent
 
     @pytest.mark.asyncio
     async def test_evaluate_wrapper_with_variables_and_arrow_iife(self):
-        ns = self._make_ns()
+        ns, mock_cdp = self._make_ns()
         result = await ns["evaluate"]("(() => { return params.x })()", variables={"x": 5})
         assert result == "ok"
+        sent = self._get_sent_expression(mock_cdp)
+        assert "params.x" in sent
 
     @pytest.mark.asyncio
     async def test_evaluate_wrapper_with_parameterized_function(self):
-        ns = self._make_ns()
+        ns, mock_cdp = self._make_ns()
         result = await ns["evaluate"]("(function(params){ return params.x })", variables={"x": 5})
         assert result == "ok"
+        sent = self._get_sent_expression(mock_cdp)
+        assert "params" in sent
 
     @pytest.mark.asyncio
     async def test_evaluate_wrapper_keyword_arg_code(self):
-        ns = self._make_ns()
+        ns, mock_cdp = self._make_ns()
         result = await ns["evaluate"](code="document.title")
         assert result == "ok"
+        sent = self._get_sent_expression(mock_cdp)
+        assert "document.title" in sent
 
     @pytest.mark.asyncio
     async def test_evaluate_wrapper_keyword_js_code(self):
-        ns = self._make_ns()
+        ns, mock_cdp = self._make_ns()
         result = await ns["evaluate"](js_code="document.title")
         assert result == "ok"
+        sent = self._get_sent_expression(mock_cdp)
+        assert "document.title" in sent
 
     @pytest.mark.asyncio
     async def test_evaluate_wrapper_keyword_expression(self):
-        ns = self._make_ns()
+        ns, mock_cdp = self._make_ns()
         result = await ns["evaluate"](expression="document.title")
         assert result == "ok"
+        sent = self._get_sent_expression(mock_cdp)
+        assert "document.title" in sent
 
     @pytest.mark.asyncio
     async def test_evaluate_wrapper_tracks_failures(self):
@@ -551,35 +579,47 @@ class TestEvaluateWrapper:
     @pytest.mark.asyncio
     async def test_evaluate_wrapper_does_not_wrap_statement_prefixes(self):
         """Multi-statement code starting with var/let/const should not get 'return' prepended."""
-        ns = self._make_ns()
+        ns, mock_cdp = self._make_ns()
         result = await ns["evaluate"]("var x = 1")
         assert result == "ok"
+        sent = self._get_sent_expression(mock_cdp)
+        assert "var x = 1" in sent
+        # Should NOT have 'return var x = 1' which would be a syntax error
+        assert "return var" not in sent
 
     @pytest.mark.asyncio
     async def test_evaluate_wrapper_async_iife(self):
-        ns = self._make_ns()
+        ns, mock_cdp = self._make_ns()
         result = await ns["evaluate"]("(async function(){return 1})()")
         assert result == "ok"
+        sent = self._get_sent_expression(mock_cdp)
+        assert "async function" in sent
 
     @pytest.mark.asyncio
     async def test_evaluate_wrapper_async_arrow_iife(self):
-        ns = self._make_ns()
+        ns, mock_cdp = self._make_ns()
         result = await ns["evaluate"]("(async () => { return 1 })()")
         assert result == "ok"
+        sent = self._get_sent_expression(mock_cdp)
+        assert "async" in sent
 
     @pytest.mark.asyncio
     async def test_evaluate_wrapper_variables_with_arrow_expression_fallback(self):
         """Arrow function with expression body falls back to outer wrapper."""
-        ns = self._make_ns()
+        ns, mock_cdp = self._make_ns()
         result = await ns["evaluate"]("(() => 42)()", variables={"x": 1})
         assert result == "ok"
+        sent = self._get_sent_expression(mock_cdp)
+        assert "42" in sent
 
     @pytest.mark.asyncio
     async def test_evaluate_wrapper_variables_with_non_wrapped_code(self):
         """Non-IIFE code with variables gets wrapped with params."""
-        ns = self._make_ns()
+        ns, mock_cdp = self._make_ns()
         result = await ns["evaluate"]("return params.x", variables={"x": 10})
         assert result == "ok"
+        sent = self._get_sent_expression(mock_cdp)
+        assert "params" in sent
 
 
 # ---------------------------------------------------------------------------

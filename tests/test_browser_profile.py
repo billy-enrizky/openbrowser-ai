@@ -324,32 +324,32 @@ class TestBrowserProfile:
 
 
     def test_disable_security(self, tmp_path):
-        profile = BrowserProfile(disable_security=True, user_data_dir=str(tmp_path / "data"))
+        profile = BrowserProfile(disable_security=True, enable_default_extensions=False, user_data_dir=str(tmp_path / "data"))
         args = profile.get_args()
         assert any("--disable-web-security" in arg for arg in args)
 
     def test_headless_mode(self, tmp_path):
-        profile = BrowserProfile(headless=True, user_data_dir=str(tmp_path / "data"))
+        profile = BrowserProfile(headless=True, enable_default_extensions=False, user_data_dir=str(tmp_path / "data"))
         args = profile.get_args()
         assert any("--headless" in arg for arg in args)
 
     def test_custom_window_size(self, tmp_path):
-        profile = BrowserProfile(window_size=ViewportSize(width=1920, height=1080), headless=False, user_data_dir=str(tmp_path / "data"))
+        profile = BrowserProfile(window_size=ViewportSize(width=1920, height=1080), headless=False, enable_default_extensions=False, user_data_dir=str(tmp_path / "data"))
         args = profile.get_args()
         assert any("--window-size=1920,1080" in arg for arg in args)
 
     def test_proxy_settings_in_args(self, tmp_path):
         profile = BrowserProfile(
             proxy=ProxySettings(server="http://proxy:8080", bypass="localhost"),
+            enable_default_extensions=False,
             user_data_dir=str(tmp_path / "data"),
         )
         args = profile.get_args()
         assert any("--proxy-server" in arg for arg in args)
         assert any("--proxy-bypass-list" in arg for arg in args)
 
-
     def test_user_agent_in_args(self, tmp_path):
-        profile = BrowserProfile(user_agent="Custom Agent/1.0", user_data_dir=str(tmp_path / "data"))
+        profile = BrowserProfile(user_agent="Custom Agent/1.0", enable_default_extensions=False, user_data_dir=str(tmp_path / "data"))
         args = profile.get_args()
         assert any("--user-agent=Custom Agent/1.0" in arg for arg in args)
 

@@ -9,6 +9,7 @@ import base64
 import logging
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -81,7 +82,8 @@ class TestCodeCell:
         assert cell.browser_state == "some state"
 
     def test_extra_fields_forbidden(self):
-        with pytest.raises(Exception):
+        from pydantic import ValidationError
+        with pytest.raises(ValidationError):
             CodeCell(source="x", extra_field="bad")
 
 
@@ -232,15 +234,12 @@ class TestCodeAgentState:
     def test_get_screenshot_permission_error(self, tmp_path):
         img_path = tmp_path / "screenshot.png"
         img_path.write_bytes(b"data")
-        img_path.chmod(0o000)
 
         state = CodeAgentState(screenshot_path=str(img_path))
-        result = state.get_screenshot()
+        with patch("builtins.open", side_effect=PermissionError("mocked permission denied")):
+            result = state.get_screenshot()
         # Should return None on permission error
         assert result is None
-
-        # Cleanup
-        img_path.chmod(0o644)
 
 
 # ---------------------------------------------------------------------------

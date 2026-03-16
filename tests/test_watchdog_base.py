@@ -182,8 +182,11 @@ class TestAttachToSession:
         setattr(events_module, 'SampleEventB', SampleEventB)
 
         try:
+            # attach_to_session should log a warning about missing on_SampleEventB handler
+            # but still register the handlers that exist
             watchdog.attach_to_session()
-            # Should log a warning about missing SampleEventB handler
+            handlers = session.event_bus.handlers.get('SampleEventA', [])
+            assert len(handlers) == 1
         finally:
             delattr(events_module, 'SampleEventA')
             delattr(events_module, 'SampleEventB')
