@@ -234,7 +234,7 @@ class TestLoggingHelpers:
 
         msg = UserMessage(content="test")
         emoji = _log_get_message_emoji(msg)
-        assert isinstance(emoji, str)
+        assert emoji == "\U0001f4ac", f"Expected speech balloon emoji for UserMessage, got {emoji!r}"
 
     def test_get_message_emoji_system(self):
         from openbrowser.agent.message_manager.service import _log_get_message_emoji
@@ -242,7 +242,7 @@ class TestLoggingHelpers:
 
         msg = SystemMessage(content="test")
         emoji = _log_get_message_emoji(msg)
-        assert isinstance(emoji, str)
+        assert emoji == "\U0001f9e0", f"Expected brain emoji for SystemMessage, got {emoji!r}"
 
     def test_get_message_emoji_unknown(self):
         from openbrowser.agent.message_manager.service import _log_get_message_emoji
@@ -250,7 +250,7 @@ class TestLoggingHelpers:
         msg = MagicMock()
         msg.__class__.__name__ = "UnknownMessage"
         emoji = _log_get_message_emoji(msg)
-        assert isinstance(emoji, str)
+        assert emoji == "\U0001f3ae", f"Expected game controller emoji for unknown message, got {emoji!r}"
 
     def test_format_message_line_short(self):
         from openbrowser.agent.message_manager.service import _log_format_message_line

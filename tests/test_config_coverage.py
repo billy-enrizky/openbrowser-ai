@@ -162,7 +162,7 @@ class TestCachedEnvFunctions:
 class TestOldConfig:
     """Test OldConfig class properties."""
 
-    def test_all_properties(self):
+    def test_all_properties(self, tmp_path):
         """Lines 107-198: all OldConfig properties."""
         from openbrowser.config import OldConfig, _get_env_cached, _get_env_bool_cached, _get_path_cached
 
@@ -171,18 +171,36 @@ class TestOldConfig:
         _get_env_bool_cached.cache_clear()
         _get_path_cached.cache_clear()
 
-        config = OldConfig()
+        # Redirect config dirs to tmp_path so we never touch real user directories
+        OldConfig._dirs_created = False
+        with patch.dict(os.environ, {
+            "OPENBROWSER_CONFIG_DIR": str(tmp_path / "config"),
+            "XDG_CONFIG_HOME": str(tmp_path / "xdg_config"),
+            "XDG_CACHE_HOME": str(tmp_path / "xdg_cache"),
+        }):
+            # Clear caches again after setting env vars
+            _get_env_cached.cache_clear()
+            _get_env_bool_cached.cache_clear()
+            _get_path_cached.cache_clear()
 
-        # Test each property (covers all @property lines)
-        assert isinstance(config.OPENBROWSER_LOGGING_LEVEL, str)  # line 88
-        assert isinstance(config.ANONYMIZED_TELEMETRY, bool)  # line 92
-        assert isinstance(config.XDG_CACHE_HOME, Path)  # line 97
-        assert isinstance(config.XDG_CONFIG_HOME, Path)  # line 101
-        assert isinstance(config.OPENBROWSER_CONFIG_DIR, Path)  # line 107
-        assert isinstance(config.OPENBROWSER_CONFIG_FILE, Path)  # line 115
-        assert isinstance(config.OPENBROWSER_PROFILES_DIR, Path)  # line 119
-        assert isinstance(config.OPENBROWSER_DEFAULT_USER_DATA_DIR, Path)  # line 125
-        assert isinstance(config.OPENBROWSER_EXTENSIONS_DIR, Path)  # line 129
+            config = OldConfig()
+
+            # Test each property (covers all @property lines)
+            assert isinstance(config.OPENBROWSER_LOGGING_LEVEL, str)  # line 88
+            assert isinstance(config.ANONYMIZED_TELEMETRY, bool)  # line 92
+            assert isinstance(config.XDG_CACHE_HOME, Path)  # line 97
+            assert isinstance(config.XDG_CONFIG_HOME, Path)  # line 101
+            assert isinstance(config.OPENBROWSER_CONFIG_DIR, Path)  # line 107
+            assert isinstance(config.OPENBROWSER_CONFIG_FILE, Path)  # line 115
+            assert isinstance(config.OPENBROWSER_PROFILES_DIR, Path)  # line 119
+            assert isinstance(config.OPENBROWSER_DEFAULT_USER_DATA_DIR, Path)  # line 125
+            assert isinstance(config.OPENBROWSER_EXTENSIONS_DIR, Path)  # line 129
+
+        # Clear caches and reset after test
+        _get_env_cached.cache_clear()
+        _get_env_bool_cached.cache_clear()
+        _get_path_cached.cache_clear()
+        OldConfig._dirs_created = False
 
         # API key properties
         assert isinstance(config.OPENAI_API_KEY, str)  # line 149
@@ -533,11 +551,16 @@ class TestConfigClass:
 class TestHelperFunctions:
     """Test module-level helper functions."""
 
-    def test_load_openbrowser_config(self):
-        """Test load_openbrowser_config."""
+    def test_load_openbrowser_config(self, tmp_path):
+        """Test load_openbrowser_config with isolated config path."""
         from openbrowser.config import load_openbrowser_config
 
-        result = load_openbrowser_config()
+        # Redirect config to tmp_path so we never touch the real user config
+        with patch.dict(os.environ, {
+            "OPENBROWSER_CONFIG_DIR": str(tmp_path / "config"),
+            "XDG_CONFIG_HOME": str(tmp_path / "xdg"),
+        }):
+            result = load_openbrowser_config()
         assert isinstance(result, dict)
         assert "browser_profile" in result
 

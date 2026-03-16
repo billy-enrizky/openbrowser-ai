@@ -352,13 +352,28 @@ class TestAgentHistoryModelDump:
         assert "thinking" not in dump["model_output"]
 
     def test_dump_with_sensitive_data(self):
-        output = _make_agent_output()
-        # Create action that has 'input' key
-        CustomAction = _make_action_model()
-        output.action = [CustomAction(done={"text": "password is hunter2"})]
+        """Sensitive data filtering only runs for actions with 'input' key in their dump."""
+        # Create an action model that includes an 'input' field
+        InputAction = create_model(
+            "InputAction",
+            __base__=ActionModel,
+            input=(Optional[dict], None),
+        )
+        action = InputAction(input={"text": "password is hunter2"})
+        output = AgentOutput(
+            evaluation_previous_goal="ok",
+            memory="mem",
+            next_goal="next",
+            action=[action],
+        )
         h = _make_history_item(model_output=output)
         dump = h.model_dump(sensitive_data={"password": "hunter2"})
         assert dump["model_output"] is not None
+        # The sensitive value should be redacted in the action's input
+        action_dump = dump["model_output"]["action"][0]
+        assert "input" in action_dump
+        assert "hunter2" not in json.dumps(action_dump)
+        assert "<secret>password</secret>" in json.dumps(action_dump)
 
     def test_dump_with_metadata(self):
         metadata = StepMetadata(step_number=1, step_start_time=1.0, step_end_time=2.0)
@@ -1064,10 +1079,12 @@ class TestLoadFromDictEdgeCases:
         assert result.history[0].model_output is None
 
     def test_load_from_dict_missing_interacted_element(self):
-        """When state doesn't have interacted_element, load_from_dict adds it as None.
+        """When state doesn't have interacted_element, load_from_dict adds it.
 
-        Note: The code sets it to None, but model_validate may coerce it.
-        We verify the code path that adds the key.
+        Actually calls load_from_dict() to exercise the code path.
+        The source sets interacted_element=None which causes a Pydantic
+        validation error (expects a list), so we verify the branch runs
+        and the key is set, catching the expected validation error.
         """
         CustomAction = create_model(
             "CA", __base__=ActionModel, done=(Optional[dict], None)
@@ -1089,15 +1106,15 @@ class TestLoadFromDictEdgeCases:
                 }
             ]
         }
-        # The code sets interacted_element=None, but the Pydantic model may reject it.
-        # Patch the internal behavior to verify the code path is reached.
-        original_load = AgentHistoryList.load_from_dict.__func__
-
-        # Just verify the key gets added
+        # Verify the key is initially missing
         assert "interacted_element" not in data["history"][0]["state"]
-        for h in data["history"]:
-            if "interacted_element" not in h["state"]:
-                h["state"]["interacted_element"] = None
+
+        # Call load_from_dict -- it sets interacted_element=None, which fails
+        # Pydantic validation (expects list), but the branch was exercised
+        with pytest.raises(ValidationError, match="interacted_element"):
+            AgentHistoryList.load_from_dict(data, OutputModel)
+
+        # Verify the code path added the key (mutation is visible in the dict)
         assert data["history"][0]["state"]["interacted_element"] is None
 
 

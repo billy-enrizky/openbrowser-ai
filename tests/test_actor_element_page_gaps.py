@@ -658,20 +658,22 @@ class TestEvaluateJsonFallback:
     """Cover lines 842-843: json.dumps TypeError/ValueError."""
 
     async def test_evaluate_json_dumps_type_error(self):
-        """When json.dumps raises TypeError, fall back to str()."""
+        """When json.dumps raises TypeError on a dict/list, fall back to str()."""
         session, client = _make_mock_browser_session()
         client.send.DOM.pushNodesByBackendIdsToFrontend.return_value = {"nodeIds": [10]}
         client.send.DOM.resolveNode.return_value = {"object": {"objectId": "obj-1"}}
 
-        # Return a set (not JSON-serializable, not str, not None, not dict/list)
-        # A boolean triggers str() path since isinstance(True, (dict, list)) is False
+        # Return a dict containing a set -- isinstance(dict, (dict, list)) is True,
+        # so json.dumps is called, which raises TypeError for the set value
+        bad_dict = {"key": {1, 2, 3}}
         client.send.Runtime.callFunctionOn.return_value = {
-            "result": {"value": True}
+            "result": {"value": bad_dict}
         }
 
         elem = Element(session, backend_node_id=42, session_id="sid-abc")
-        result = await elem.evaluate("() => true")
-        assert result == "True"
+        result = await elem.evaluate("() => ({})")
+        # Falls back to str() since json.dumps raises TypeError for sets
+        assert "key" in result
 
     async def test_evaluate_json_dumps_value_error(self):
         """Force the json path with a dict containing non-serializable values."""
@@ -736,15 +738,18 @@ class TestPageEvaluateJsonFallback:
     """Cover lines 157-158: json.dumps TypeError/ValueError in page.evaluate."""
 
     async def test_evaluate_json_type_error(self):
-        """Return a non-serializable type (bool) that goes through str()."""
+        """Return a dict containing a non-serializable type that triggers json.dumps TypeError."""
         session, client = _make_mock_browser_session()
+        # Return a dict with a set value -- isinstance(dict, (dict, list)) is True,
+        # so json.dumps is called, which raises TypeError for the set
         client.send.Runtime.evaluate.return_value = {
-            "result": {"value": False}
+            "result": {"value": {"items": {1, 2, 3}}}
         }
         page = Page(session, target_id="tid-123", session_id="sid-abc")
 
-        result = await page.evaluate("() => false")
-        assert result == "False"
+        result = await page.evaluate("() => ({})")
+        # Falls back to str() since json.dumps raises TypeError for sets
+        assert "items" in result
 
     async def test_evaluate_json_value_error(self):
         """Return a dict with inf that causes ValueError in json.dumps."""

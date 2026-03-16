@@ -64,6 +64,13 @@ class TestCodeUseLazyImports:
     def test_all_list_matches_lazy_imports(self):
         """__all__ should list the same names as _LAZY_IMPORTS."""
         import openbrowser.code_use as code_use_mod
+        all_set = set(code_use_mod.__all__)
+        lazy_set = set(code_use_mod._LAZY_IMPORTS.keys())
+        assert all_set == lazy_set, (
+            f"__all__ and _LAZY_IMPORTS are out of sync: "
+            f"in __all__ only: {all_set - lazy_set}, "
+            f"in _LAZY_IMPORTS only: {lazy_set - all_set}"
+        )
         for name in code_use_mod.__all__:
             # Each name should be importable
             obj = getattr(code_use_mod, name)

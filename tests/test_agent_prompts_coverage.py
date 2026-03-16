@@ -505,8 +505,10 @@ class TestGetBrowserStateDescription:
             file_system=_make_file_system(),
         )
         desc = prompt._get_browser_state_description()
-        # Ambiguous match, should not show "Current tab"
-        # It only shows if there's exactly one match
+        # Ambiguous match (2 tabs with same URL+title), should NOT show "Current tab"
+        assert "Current tab" not in desc, (
+            "With ambiguous tab matches, current tab should not be identified"
+        )
 
     def test_low_element_count_spa_warning(self):
         from openbrowser.dom.views import NodeType

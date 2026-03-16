@@ -385,14 +385,16 @@ class TestElementClick:
         # Shift=8, Control=2 => combined modifiers=10
         dispatch_calls = client.send.Input.dispatchMouseEvent.call_args_list
         assert len(dispatch_calls) >= 1
-        # Check at least one mousePressed call includes modifiers
-        found_modifiers = False
+        # Check that mousePressed call has correct combined bitmask: Shift=8 | Control=2 = 10
+        found_correct_modifiers = False
         for call in dispatch_calls:
             params = call[0][0] if call[0] else call[1].get('params', {})
-            if params.get('type') == 'mousePressed' and params.get('modifiers', 0) > 0:
-                found_modifiers = True
+            if params.get('type') == 'mousePressed' and params.get('modifiers', 0) == 10:
+                found_correct_modifiers = True
                 break
-        assert found_modifiers, "Expected mousePressed call with non-zero modifiers bitmask"
+        assert found_correct_modifiers, (
+            "Expected mousePressed call with modifiers=10 (Shift=8|Control=2)"
+        )
 
 
 @pytest.mark.asyncio
