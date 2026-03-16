@@ -227,11 +227,12 @@ class TestGetClickDescription:
     def test_attribute_value_truncated_at_20_chars(self):
         node = self._make_node(
             tag_name="div",
-            attributes={"id": "a" * 30},
+            attributes={"id": "a" * 10 + "b" * 20},
         )
         desc = get_click_description(node)
-        # The id should be truncated to 20 chars
-        assert f"id={'a' * 20}" in desc
+        # The id should be truncated to 20 chars — the full 30-char value must NOT appear
+        assert "a" * 10 + "b" * 20 not in desc
+        assert "a" * 10 + "b" * 10 in desc
 
     # -- Empty text --
 

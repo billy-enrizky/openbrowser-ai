@@ -14,6 +14,7 @@ https://github.com/user-attachments/assets/632128f6-3d09-497f-9e7d-e29b9cb65e0f
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Tests](https://github.com/billy-enrizky/openbrowser-ai/actions/workflows/test.yml/badge.svg)](https://github.com/billy-enrizky/openbrowser-ai/actions)
+[![Coverage](https://codecov.io/gh/billy-enrizky/openbrowser-ai/branch/main/graph/badge.svg)](https://codecov.io/gh/billy-enrizky/openbrowser-ai)
 
 <!-- mcp-name: me.openbrowser/openbrowser-ai -->
 

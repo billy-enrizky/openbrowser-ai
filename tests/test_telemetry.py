@@ -398,7 +398,8 @@ class TestProductTelemetry:
 
         instance = self._make_instance(posthog_client=None, user_id=None)
         type(instance).user_id = _OrigClass.user_id
-        type(instance).USER_ID_PATH = "/nonexistent/deeply/nested/path/device_id"
 
-        uid = instance.user_id
+        with patch("builtins.open", side_effect=PermissionError("mocked permission denied")):
+            with patch("pathlib.Path.exists", return_value=True):
+                uid = instance.user_id
         assert uid == "UNKNOWN_USER_ID"

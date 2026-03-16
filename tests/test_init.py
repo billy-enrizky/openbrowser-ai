@@ -33,15 +33,11 @@ class TestPatchedDel:
         """When transport has no _loop, should attempt original __del__."""
         mock_transport = MagicMock(spec=[])
 
-        # Remove _loop if present
-        if hasattr(mock_transport, "_loop"):
-            delattr(mock_transport, "_loop")
-
-        # This may raise but should not crash with AttributeError
-        try:
+        # Mock _original_del to avoid calling real __del__ on a mock without _closed
+        with patch("openbrowser._original_del") as mock_orig_del:
             _patched_del(mock_transport)
-        except Exception:
-            pass  # Original __del__ may fail, that's ok
+            # Without _loop, it falls through to _original_del
+            mock_orig_del.assert_called_once_with(mock_transport)
 
     def test_runtime_error_event_loop_closed_silenced(self):
         """RuntimeError with 'Event loop is closed' should be silenced."""
@@ -152,5 +148,6 @@ class TestLazyImports:
 
 class TestModuleAttributes:
     def test_logger_exists(self):
-        """openbrowser should have a logger."""
-        assert hasattr(openbrowser, "logger") or logging.getLogger("openbrowser") is not None
+        """openbrowser should have a logger attribute."""
+        assert hasattr(openbrowser, "logger")
+        assert openbrowser.logger.name == "openbrowser"
