@@ -17,6 +17,7 @@ dependencies = [
     "psutil>=7.2.0",
     "click>=8.1.8",
     "pillow>=11.0.0",
+    "InquirerPy>=0.3.4",
     # MCP protocol
     "mcp>=1.0.0",
     # Telemetry
