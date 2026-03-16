@@ -113,7 +113,13 @@ class BrowserStateSummary:
 		"""Return a concise text summary suitable for LLM consumption."""
 		lines = [f'URL: {self.url}', f'Title: {self.title}']
 		if len(self.tabs) > 1:
-			lines.append(f'Tabs: {len(self.tabs)}')
+			lines.append(f'Tabs ({len(self.tabs)}):')
+			for tab in self.tabs:
+				tid = tab.target_id[-4:]
+				# URL match is approximate; tabs with identical URLs will all show (active)
+				marker = ' (active)' if tab.url == self.url else ''
+				title = tab.title[:60] + ('...' if len(tab.title) > 60 else '')
+				lines.append(f'  [{tid}] {title}{marker}')
 		if self.dom_state:
 			if self.dom_state.selector_map:
 				n_elements = len(self.dom_state.selector_map)
