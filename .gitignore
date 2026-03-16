@@ -71,6 +71,11 @@ terraform/*_override.tf.json
 
 data/formfactory/
 
+# Test coverage artifacts
+.coverage
+coverage.xml
+coverage-badge.svg
+
 # Extension build artifacts and secrets
 *.pem
 *.crx
