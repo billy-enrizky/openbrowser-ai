@@ -398,7 +398,7 @@ class TestBaseChatModel:
         from openbrowser.llm.base import BaseChatModel
 
         # BaseChatModel is a runtime_checkable Protocol
-        assert hasattr(BaseChatModel, "__protocol_attrs__") or hasattr(BaseChatModel, "__abstractmethods__") or True
+        assert hasattr(BaseChatModel, "__protocol_attrs__") or hasattr(BaseChatModel, "__abstractmethods__")
         # The protocol is defined and importable
         assert BaseChatModel is not None
 

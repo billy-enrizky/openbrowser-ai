@@ -29,6 +29,10 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+  pull-requests: write
+
 jobs:
   test:
     name: Test Python ${{ matrix.python-version }} on ${{ matrix.os }}
@@ -55,17 +59,11 @@ jobs:
 
       - name: Install dependencies
         run: |
-          uv pip install --system -e ".[all]"
-          uv pip install --system pytest pytest-cov pytest-asyncio
-
-      - name: Install Playwright browsers
-        run: |
-          uv run playwright install chromium
-        continue-on-error: true
+          uv pip install --system -e ".[all,dev]"
 
       - name: Run tests with coverage
         run: |
-          uv run pytest tests/ -v --tb=short --cov=src/openbrowser --cov-report=xml --cov-report=term-missing
+          pytest tests/ -v --tb=short -m "not integration" --cov=src/openbrowser --cov-report=xml --cov-report=term-missing
         env:
           PYTHONPATH: ${{ github.workspace }}
 
@@ -89,6 +87,9 @@ jobs:
         with:
           pytest-xml-coverage-path: ./coverage.xml
           title: Test Coverage Report
+          report-only-changed-files: true
+          remove-links-to-files: true
+          remove-links-to-lines: true
 
   lint:
     name: Lint

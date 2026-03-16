@@ -1,7 +1,7 @@
 """Tests for MCP server helpers and error detection."""
 
 import logging
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -17,10 +17,18 @@ class TestMCPServerHelpers:
         """get_parent_process_cmdline returns a string when psutil available."""
         from openbrowser.mcp.server import get_parent_process_cmdline
 
-        with patch("openbrowser.mcp.server.PSUTIL_AVAILABLE", True):
+        mock_parent = MagicMock()
+        mock_parent.cmdline.return_value = ["/usr/bin/python", "test.py"]
+        mock_parent.parent.return_value = None  # stop recursion
+
+        mock_process = MagicMock()
+        mock_process.parent.return_value = mock_parent
+
+        with patch("openbrowser.mcp.server.PSUTIL_AVAILABLE", True), \
+             patch("openbrowser.mcp.server.psutil.Process", return_value=mock_process):
             result = get_parent_process_cmdline()
-            # Should return something (parent process exists) or None on error
-            assert result is None or isinstance(result, str)
+            assert isinstance(result, str)
+            assert "python" in result
 
     def test_get_parent_process_cmdline_no_psutil(self):
         """get_parent_process_cmdline returns None when psutil unavailable."""
