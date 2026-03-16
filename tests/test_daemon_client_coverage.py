@@ -41,6 +41,11 @@ class TestDaemonClientConnect:
         mock_reader = AsyncMock()
         mock_writer = AsyncMock()
 
+        async def fake_wait_for(coro, **kwargs):
+            """Await the inner coroutine and return the mock result."""
+            await coro
+            return (mock_reader, mock_writer)
+
         with patch("openbrowser.daemon.client.IS_WINDOWS", False):
             with patch("openbrowser.daemon.client.get_socket_path", return_value=Path("/tmp/test.sock")):
                 with patch(
@@ -48,7 +53,7 @@ class TestDaemonClientConnect:
                     new_callable=AsyncMock,
                     return_value=(mock_reader, mock_writer),
                 ):
-                    with patch("asyncio.wait_for", new_callable=AsyncMock, return_value=(mock_reader, mock_writer)):
+                    with patch("asyncio.wait_for", side_effect=fake_wait_for):
                         reader, writer = await client._connect()
                         assert reader is mock_reader
 
@@ -61,14 +66,16 @@ class TestDaemonClientConnect:
         mock_reader = AsyncMock()
         mock_writer = AsyncMock()
 
+        async def fake_wait_for(coro, **kwargs):
+            """Await the inner coroutine and return the mock result."""
+            await coro
+            return (mock_reader, mock_writer)
+
         with patch("openbrowser.daemon.client.IS_WINDOWS", True):
-            with patch(
-                "asyncio.wait_for",
-                new_callable=AsyncMock,
-                return_value=(mock_reader, mock_writer),
-            ):
-                reader, writer = await client._connect()
-                assert reader is mock_reader
+            with patch("asyncio.open_connection", new_callable=AsyncMock, return_value=(mock_reader, mock_writer)):
+                with patch("asyncio.wait_for", side_effect=fake_wait_for):
+                    reader, writer = await client._connect()
+                    assert reader is mock_reader
 
 
 class TestDaemonClientStartDaemon:

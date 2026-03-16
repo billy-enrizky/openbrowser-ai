@@ -156,7 +156,9 @@ class TestDecodeUnicodeEscapesToUtf8:
         # Cyrillic char cannot encode to latin1 -> UnicodeEncodeError -> returns original
         text = r"\u0041" + "\u0410"
         result = decode_unicode_escapes_to_utf8(text)
-        assert isinstance(result, str)
+        assert result == text, (
+            f"On decode failure, expected original text {text!r} but got {result!r}"
+        )
 
     def test_empty_string(self):
         from openbrowser.agent.gif import decode_unicode_escapes_to_utf8
@@ -938,7 +940,15 @@ class TestStepNode:
         bs = MagicMock(); bs.url = "https://example.com"
         agent.browser_session.get_browser_state_summary.return_value = bs
 
-        with patch('asyncio.wait_for', new_callable=AsyncMock, side_effect=asyncio.TimeoutError()):
+        async def wait_for_timeout(coro, **kwargs):
+            """Await (and thus consume) the inner coroutine, then raise TimeoutError."""
+            try:
+                await coro
+            except Exception:
+                pass
+            raise asyncio.TimeoutError()
+
+        with patch('asyncio.wait_for', side_effect=wait_for_timeout):
             result = await builder._step_node({"step_number": 1, "max_steps": 100, "is_done": False, "consecutive_failures": 0})
 
         assert result["consecutive_failures"] == 1
@@ -958,13 +968,12 @@ class TestStepNode:
         agent.browser_session.get_browser_state_summary.return_value = None
 
         mo = MagicMock(); mo.action = [MagicMock()]
-        agent._get_model_output_with_retry.return_value = mo
+        agent._get_model_output_with_retry = AsyncMock(return_value=mo)
 
         r = MagicMock(); r.is_done = False; r.error = None
         agent.multi_act.return_value = [r]
 
-        with patch('asyncio.wait_for', new_callable=AsyncMock, return_value=mo):
-            result = await builder._step_node({"step_number": 0, "max_steps": 100, "is_done": False, "consecutive_failures": 0})
+        result = await builder._step_node({"step_number": 0, "max_steps": 100, "is_done": False, "consecutive_failures": 0})
 
         assert result["step_number"] == 1
         agent._make_history_item.assert_not_called()

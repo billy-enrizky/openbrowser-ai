@@ -94,28 +94,36 @@ class TestLLMAutoDetection:
     @patch("openbrowser.code_use.service.ScreenshotService")
     @patch("openbrowser.code_use.service.get_openbrowser_version", return_value="0.1.0")
     def test_auto_detect_chatbrowseruse(self, *mocks):
+        """Verify _is_browser_use_llm is True when LLM class name contains ChatBrowserUse."""
+        mock_cbu = _make_mock_llm(class_name="ChatBrowserUse")
+        browser = _make_mock_session()
         from openbrowser.code_use.service import CodeAgent
 
-        mock_cbu = MagicMock()
-        mock_cbu.__class__.__name__ = "ChatBrowserUse"
-        mock_cbu.model = "cbu"
-        mock_cbu.provider = "cbu"
-
-        with patch("openbrowser.code_use.service.CodeAgent.__init__", return_value=None):
-            pass  # Just testing the import path
+        agent = CodeAgent(task="Test", llm=mock_cbu, browser=browser)
+        assert agent._is_browser_use_llm is True
 
     @patch("openbrowser.code_use.service.ProductTelemetry")
     @patch("openbrowser.code_use.service.ScreenshotService")
     @patch("openbrowser.code_use.service.get_openbrowser_version", return_value="0.1.0")
     def test_llm_fallback_both_fail(self, *mocks):
+        """When llm=None and both ChatBrowserUse and ChatGoogle imports fail, raise RuntimeError."""
         from openbrowser.code_use.service import CodeAgent
+        import builtins
 
-        with patch.dict("sys.modules", {"openbrowser": MagicMock()}):
-            # This tests the fallback path when llm=None
-            # We need both ChatBrowserUse and ChatGoogle to fail
-            with patch("openbrowser.code_use.service.CodeAgent.__init__", side_effect=RuntimeError("LLM fail")):
-                with pytest.raises(RuntimeError):
-                    CodeAgent.__init__(MagicMock(), task="Test")
+        real_import = builtins.__import__
+
+        def blocking_import(name, globals=None, locals=None, fromlist=(), level=0):
+            # Block the two specific from-imports used by the auto-detect code
+            if fromlist:
+                if name == "openbrowser" and "ChatBrowserUse" in fromlist:
+                    raise ImportError("mocked: no ChatBrowserUse")
+                if name == "openbrowser.llm" and "ChatGoogle" in fromlist:
+                    raise ImportError("mocked: no ChatGoogle")
+            return real_import(name, globals, locals, fromlist, level)
+
+        with patch("builtins.__import__", side_effect=blocking_import):
+            with pytest.raises(RuntimeError, match="Failed to initialize"):
+                CodeAgent(task="Test", llm=None, browser=_make_mock_session())
 
 
 # ---------------------------------------------------------------------------
@@ -592,6 +600,7 @@ class TestExecuteCode:
 
     @pytest.mark.asyncio
     async def test_code_with_global_declaration(self):
+        """Exercise the global declaration path in _execute_code with await code."""
         agent = _create_agent()
         agent.session = MagicMock()
         mock_cell = MagicMock()
@@ -599,11 +608,14 @@ class TestExecuteCode:
         agent.session.increment_execution_count = MagicMock(return_value=1)
         agent.namespace = {"asyncio": asyncio, "counter": 0}
 
+        # Use await so the has_await branch is taken, which triggers global declaration logic
+        # for existing namespace vars like 'counter'
         output, error, state = await agent._execute_code(
-            "global counter\ncounter = await asyncio.coroutine(lambda: 10)()"
-            if False else "counter = 10"
+            "global counter\ncounter = await asyncio.sleep(0) or 10"
         )
         assert error is None
+        # Verify the global declaration was actually processed
+        assert agent.namespace.get("counter") == 10
 
     @pytest.mark.asyncio
     async def test_fstring_syntax_error_hint(self):
@@ -1051,32 +1063,39 @@ class TestRun:
         agent.dom_service = MagicMock()
 
         mock_navigate = AsyncMock(return_value="Navigated")
-        agent.namespace = {
-            "navigate": mock_navigate,
-            "_task_done": False,
-            "asyncio": asyncio,
-        }
 
-        with patch.object(agent, "_get_browser_state", new_callable=AsyncMock, return_value=("state", None)):
-            mock_response = MagicMock()
-            mock_response.completion = '```python\nawait done("Done", success=True)\n```'
-            mock_response.usage = MagicMock(prompt_tokens=50, completion_tokens=20)
-            mock_response.stop_reason = "end_turn"
-            agent.llm.ainvoke = AsyncMock(return_value=mock_response)
+        # Patch create_namespace so run() gets our mock navigate in the fresh namespace
+        def fake_create_namespace(**kwargs):
+            return {
+                "navigate": mock_navigate,
+                "_task_done": False,
+                "asyncio": asyncio,
+            }
 
-            async def mock_execute(code):
-                agent.namespace["_task_done"] = True
-                agent.namespace["_task_result"] = "Done"
-                return "Done", None, None
+        with patch("openbrowser.code_use.service.create_namespace", side_effect=fake_create_namespace):
+            with patch.object(agent, "_get_browser_state", new_callable=AsyncMock, return_value=("state", None)):
+                mock_response = MagicMock()
+                mock_response.completion = '```python\nawait done("Done", success=True)\n```'
+                mock_response.usage = MagicMock(prompt_tokens=50, completion_tokens=20)
+                mock_response.stop_reason = "end_turn"
+                agent.llm.ainvoke = AsyncMock(return_value=mock_response)
 
-            with patch.object(agent, "_execute_code", side_effect=mock_execute):
-                with patch.object(agent, "_capture_screenshot", new_callable=AsyncMock, return_value=(None, None)):
-                    with patch.object(agent, "_add_step_to_complete_history", new_callable=AsyncMock):
-                        with patch.object(agent, "_log_agent_event"):
-                            agent.token_cost_service = MagicMock()
-                            agent.token_cost_service.get_usage_summary = AsyncMock(return_value=None)
-                            agent.token_cost_service.log_usage_summary = AsyncMock()
-                            session = await agent.run(max_steps=5)
+                async def mock_execute(code):
+                    agent.namespace["_task_done"] = True
+                    agent.namespace["_task_result"] = "Done"
+                    return "Done", None, None
+
+                with patch.object(agent, "_execute_code", side_effect=mock_execute):
+                    with patch.object(agent, "_capture_screenshot", new_callable=AsyncMock, return_value=(None, None)):
+                        with patch.object(agent, "_add_step_to_complete_history", new_callable=AsyncMock):
+                            with patch.object(agent, "_log_agent_event"):
+                                agent.token_cost_service = MagicMock()
+                                agent.token_cost_service.get_usage_summary = AsyncMock(return_value=None)
+                                agent.token_cost_service.log_usage_summary = AsyncMock()
+                                session = await agent.run(max_steps=5)
+
+        # Verify navigate was actually called with the extracted URL
+        mock_navigate.assert_called_once_with("https://example.com")
 
     @pytest.mark.asyncio
     async def test_run_max_steps_reached(self):

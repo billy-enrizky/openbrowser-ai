@@ -556,8 +556,14 @@ class TestDownloadFile:
             result = await ns["download_file"](
                 "https://example.com/file.pdf", filename="../../etc/passwd"
             )
-            # Should be sanitized to just "passwd"
-            assert "etc" not in result
+            # Should be sanitized: the filename should be "passwd", not contain path traversal
+            saved_filename = os.path.basename(result)
+            assert "etc" not in saved_filename, (
+                f"Path traversal not sanitized in filename: {saved_filename}"
+            )
+            assert saved_filename == "passwd", (
+                f"Expected sanitized filename 'passwd', got '{saved_filename}'"
+            )
 
     @pytest.mark.asyncio
     async def test_download_empty_filename(self):

@@ -245,9 +245,11 @@ class TestFixJavascriptString:
         # Use a raw string with replace to build: 3x \" and 0x standalone "
         input_str = 'return \\\"x\\\"'  # contains \" sequences
         result = page._fix_javascript_string(input_str)
-        # Function processes it — verify it returns valid JS
-        assert 'return' in result
-        assert 'x' in result
+        # The condition count('\"') > count('"') is never true because every \"
+        # contains a ", so the string passes through unchanged.
+        assert result == input_str, (
+            f"Expected input to pass through unchanged, got: {result!r}"
+        )
 
     def test_fixes_escaped_single_quotes_when_dominant(self):
         session, _ = _make_mock_browser_session()

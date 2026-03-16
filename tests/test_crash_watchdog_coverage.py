@@ -115,12 +115,15 @@ class TestOnBrowserConnectedEvent:
         watchdog = _make_crash_watchdog(session=session)
 
         event = MagicMock()
-        with patch.object(watchdog, "_start_monitoring", new_callable=AsyncMock) as mock_start:
-            # on_BrowserConnectedEvent calls asyncio.create_task(_start_monitoring())
-            # We need to actually run it, so patch _start_monitoring on the instance
+        with patch("asyncio.create_task") as mock_create_task:
             await watchdog.on_BrowserConnectedEvent(event)
-            # create_task was called internally; we verify _start_monitoring would be called
-            # The actual test: no exception should be raised
+            # on_BrowserConnectedEvent should call asyncio.create_task(_start_monitoring())
+            mock_create_task.assert_called_once()
+            # Verify the coroutine passed to create_task is from _start_monitoring
+            coro = mock_create_task.call_args[0][0]
+            assert coro is not None, "Expected a coroutine to be passed to create_task"
+            # Clean up the coroutine to avoid RuntimeWarning
+            coro.close()
 
 
 # ---------------------------------------------------------------------------
@@ -135,10 +138,15 @@ class TestOnBrowserStoppedEvent:
         mock_task = MagicMock()
         mock_task.done.return_value = True
         watchdog._monitoring_task = mock_task
+        # Pre-populate tracking state to verify cleanup
+        watchdog._targets_with_listeners.add("target-1")
+        watchdog._last_responsive_checks["target-1"] = 1000.0
 
         event = MagicMock()
         await watchdog.on_BrowserStoppedEvent(event)
-        # Should call _stop_monitoring
+        # _stop_monitoring should clear all tracking state
+        assert len(watchdog._targets_with_listeners) == 0, "targets_with_listeners not cleaned up"
+        assert len(watchdog._last_responsive_checks) == 0, "last_responsive_checks not cleaned up"
 
 
 # ---------------------------------------------------------------------------

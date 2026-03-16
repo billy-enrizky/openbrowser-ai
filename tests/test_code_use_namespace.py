@@ -500,8 +500,13 @@ class TestEvaluateWrapper:
         result = await ns["evaluate"]("(function(){return 1})()")
         assert result == "ok"
         sent = self._get_sent_expression(mock_cdp)
-        # Should not be double-wrapped — the IIFE should appear directly
+        # Should not be double-wrapped -- the IIFE should appear directly
         assert "(function(){return 1})()" in sent
+        # Verify no double-wrapping: the expression should NOT contain a nested
+        # (async function(){ ... (function(){return 1})() ... })() wrapper
+        assert sent.count("(function()") == 1, (
+            f"IIFE was double-wrapped: {sent}"
+        )
 
     @pytest.mark.asyncio
     async def test_evaluate_wrapper_with_variables(self):
