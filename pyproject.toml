@@ -89,3 +89,8 @@ markers = [
     "asyncio: mark tests as async tests",
     "integration: integration tests requiring a real browser",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest-timeout>=2.4.0",
+]
