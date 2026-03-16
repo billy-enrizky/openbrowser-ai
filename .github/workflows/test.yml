@@ -57,11 +57,6 @@ jobs:
         run: |
           uv pip install --system -e ".[all,dev]"
 
-      - name: Install Playwright browsers
-        run: |
-          playwright install chromium
-        continue-on-error: true
-
       - name: Run tests with coverage
         run: |
           pytest tests/ -v --tb=short -m "not integration" --cov=src/openbrowser --cov-report=xml --cov-report=term-missing
