@@ -54,6 +54,8 @@ CSC490/A1/high_level_architecture.pdf
 
 !docker-compose.dev.yml
 !docker-compose.yml
+docker-compose.override.yml
+Dockerfile.local
 
 # Terraform
 terraform/.terraform/
