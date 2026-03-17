@@ -42,19 +42,19 @@ RUN pip install uv
 COPY backend/pyproject.toml backend/
 COPY backend/README.md backend/
 
-# Install backend dependencies
-RUN cd backend && uv pip install -e . --system
+# Install backend dependencies (pip used instead of uv for QEMU cross-compile compat)
+RUN cd backend && pip install -e .
 
 # Copy and install openbrowser from local path
 # Set version via environment variable since .git is not available
 COPY pyproject.toml .
 COPY src/ src/
 COPY README.md .
-ENV SETUPTOOLS_SCM_PRETEND_VERSION=0.1.29
-RUN uv pip install -e . --system
+ENV SETUPTOOLS_SCM_PRETEND_VERSION=0.1.38
+RUN pip install -e .
 
 # Install python-xlib for the X11 key grabber daemon (kiosk security)
-RUN uv pip install python-xlib --system
+RUN pip install python-xlib
 
 # Install Playwright and browsers (chromium works better in Docker)
 RUN playwright install chromium
