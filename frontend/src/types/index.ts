@@ -174,3 +174,37 @@ export interface ChatDetailApiResponse {
   conversation: BackendChatConversation;
   messages: BackendChatMessage[];
 }
+
+// UI Configuration Types
+
+export interface QuickAction {
+  icon: string; // Lucide icon name
+  label: string;
+  prompt?: string; // Optional prompt to send when clicked
+  color: string;
+  enabled: boolean;
+}
+
+export interface Integration {
+  name: string;
+  icon?: string;
+  enabled: boolean;
+  url?: string; // Link to integration setup
+}
+
+export interface UserInfo {
+  planName: string;
+  planType?: "free" | "pro" | "enterprise";
+  credits: number;
+  creditsUsed: number;
+  notifications: number;
+  displayName?: string;
+  avatarUrl?: string;
+}
+
+export interface AppConfig {
+  appName: string;
+  version: string;
+  quickActions: QuickAction[];
+  integrations: Integration[];
+}
