@@ -537,12 +537,12 @@ export default function Home() {
       {/* Main Content */}
       <main
         className={cn(
-          "flex-1 flex transition-all duration-200",
+          "flex-1 flex min-w-0 transition-all duration-200",
           sidebarOpen ? "ml-[280px]" : "ml-16"
         )}
       >
         {/* Chat Area */}
-        <div className="flex-1 flex flex-col min-h-0">
+        <div className="flex-1 flex flex-col min-w-0 min-h-0">
           {/* Header */}
           <Header />
 
