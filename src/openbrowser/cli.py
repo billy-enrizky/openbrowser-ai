@@ -48,6 +48,8 @@ if '-c' in sys.argv:
 
 	c_idx = sys.argv.index('-c')
 	code = sys.argv[c_idx + 1] if c_idx + 1 < len(sys.argv) else None
+	if code == '-':
+		code = sys.stdin.read().strip()
 	if code is None:
 		# No code argument: print the function reference and auto-start daemon
 		from openbrowser.code_use.descriptions import (

@@ -37,7 +37,7 @@ irm https://raw.githubusercontent.com/billy-enrizky/openbrowser-ai/main/install.
 ### Step 1 -- Navigate and initialize audit
 
 ```bash
-openbrowser-ai -c '
+openbrowser-ai -c - <<'EOF'
 await navigate("https://example.com")
 state = await browser.get_browser_state_summary()
 print(f"Auditing: {state.title} ({state.url})")
@@ -49,13 +49,13 @@ audit = {
     "issues": [],
     "checks": {}
 }
-'
+EOF
 ```
 
 ### Step 2 -- Check heading structure
 
 ```bash
-openbrowser-ai -c '
+openbrowser-ai -c - <<'EOF'
 headings_result = await evaluate("""
 (function(){
   const headings = Array.from(document.querySelectorAll("h1,h2,h3,h4,h5,h6"));
@@ -91,13 +91,13 @@ for issue in headings_result.get("issues", []):
 
 if not headings_result.get("issues"):
     print("[HEADINGS] PASS")
-'
+EOF
 ```
 
 ### Step 3 -- Check images for alt text
 
 ```bash
-openbrowser-ai -c '
+openbrowser-ai -c - <<'EOF'
 images_result = await evaluate("""
 (function(){
   const images = Array.from(document.querySelectorAll("img"));
@@ -130,13 +130,13 @@ if not images_result.get("issues"):
     total = images_result["total"]
     with_alt = images_result["withAlt"]
     print(f"[IMAGES] PASS ({total} images, {with_alt} with alt)")
-'
+EOF
 ```
 
 ### Step 4 -- Check form labels
 
 ```bash
-openbrowser-ai -c '
+openbrowser-ai -c - <<'EOF'
 forms_result = await evaluate("""
 (function(){
   const inputs = Array.from(document.querySelectorAll("input:not([type=\"hidden\"]),select,textarea"));
@@ -177,13 +177,13 @@ for issue in forms_result.get("issues", []):
 if not forms_result.get("issues"):
     total_inputs = forms_result["totalInputs"]
     print(f"[FORMS] PASS ({total_inputs} inputs, all labeled)")
-'
+EOF
 ```
 
 ### Step 5 -- Check ARIA attributes
 
 ```bash
-openbrowser-ai -c '
+openbrowser-ai -c - <<'EOF'
 aria_result = await evaluate("""
 (function(){
   const issues = [];
@@ -194,13 +194,13 @@ aria_result = await evaluate("""
     const ariaDescribedBy = el.getAttribute("aria-describedby");
 
     if (ariaLabelledBy) {
-      ariaLabelledBy.split(/\\s+/).forEach(id => {
+      ariaLabelledBy.split(/\s+/).forEach(id => {
         if (!document.getElementById(id))
           issues.push({ element: el.tagName, issue: "aria-labelledby references missing id: " + id });
       });
     }
     if (ariaDescribedBy) {
-      ariaDescribedBy.split(/\\s+/).forEach(id => {
+      ariaDescribedBy.split(/\s+/).forEach(id => {
         if (!document.getElementById(id))
           issues.push({ element: el.tagName, issue: "aria-describedby references missing id: " + id });
       });
@@ -224,13 +224,13 @@ for issue in aria_result.get("issues", []):
 if not aria_result.get("issues"):
     total_aria = aria_result["totalAriaElements"]
     print(f"[ARIA] PASS ({total_aria} ARIA elements)")
-'
+EOF
 ```
 
 ### Step 6 -- Check landmark regions
 
 ```bash
-openbrowser-ai -c '
+openbrowser-ai -c - <<'EOF'
 landmarks_result = await evaluate("""
 (function(){
   const landmarks = {
@@ -258,13 +258,13 @@ for issue in landmarks_result.get("issues", []):
 
 if not landmarks_result.get("issues"):
     print("[LANDMARKS] PASS")
-'
+EOF
 ```
 
 ### Step 7 -- Check links and buttons
 
 ```bash
-openbrowser-ai -c '
+openbrowser-ai -c - <<'EOF'
 links_result = await evaluate("""
 (function(){
   const issues = [];
@@ -290,13 +290,13 @@ for issue in links_result.get("issues", []):
 
 if not links_result.get("issues"):
     print("[LINKS/BUTTONS] PASS")
-'
+EOF
 ```
 
 ### Step 8 -- Check keyboard navigation
 
 ```bash
-openbrowser-ai -c '
+openbrowser-ai -c - <<'EOF'
 keyboard_result = await evaluate("""
 (function(){
   const focusable = Array.from(document.querySelectorAll("a[href],button,input:not([type=\"hidden\"]),select,textarea,[tabindex]"));
@@ -324,13 +324,13 @@ for issue in keyboard_result.get("issues", []):
 if not keyboard_result.get("issues"):
     total_focusable = keyboard_result["totalFocusable"]
     print(f"[KEYBOARD] PASS ({total_focusable} focusable elements)")
-'
+EOF
 ```
 
 ### Step 9 -- Compile audit report
 
 ```bash
-openbrowser-ai -c '
+openbrowser-ai -c - <<'EOF'
 import json
 
 total_issues = len(audit["issues"])
@@ -357,7 +357,7 @@ if total_issues > 0:
             print(f"    - {msg}")
         if len(issues) > 3:
             print(f"    ... and {len(issues) - 3} more")
-'
+EOF
 ```
 
 ## WCAG Quick Reference
@@ -374,6 +374,7 @@ if total_issues > 0:
 
 ## Tips
 
+- Code is piped via stdin using heredoc (`-c - <<'EOF'`), so all Python syntax works without shell escaping issues.
 - Store results in the `audit` dict -- variables persist between `-c` calls while the daemon is running.
 - Run audits on multiple pages, not just the homepage.
 - ARIA misuse is often worse than no ARIA at all.

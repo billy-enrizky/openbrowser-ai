@@ -36,28 +36,28 @@ irm https://raw.githubusercontent.com/billy-enrizky/openbrowser-ai/main/install.
 ### Step 1 -- Navigate and get overview
 
 ```bash
-openbrowser-ai -c '
+openbrowser-ai -c - <<'EOF'
 await navigate("https://example.com")
 state = await browser.get_browser_state_summary()
 print(f"Title: {state.title}")
 print(f"URL: {state.url}")
 print(f"Interactive elements: {len(state.dom_state.selector_map)}")
 print(f"Tabs: {len(state.tabs)}")
-'
+EOF
 ```
 
 ### Step 2 -- Extract page metadata
 
 ```bash
-openbrowser-ai -c '
+openbrowser-ai -c - <<'EOF'
 meta = await evaluate("""
 (function(){
   return {
     title: document.title,
-    description: document.querySelector("meta[name=\"description\"]")?.content,
-    canonical: document.querySelector("link[rel=\"canonical\"]")?.href,
-    ogTitle: document.querySelector("meta[property=\"og:title\"]")?.content,
-    ogImage: document.querySelector("meta[property=\"og:image\"]")?.content,
+    description: document.querySelector("meta[name='description']")?.content,
+    canonical: document.querySelector("link[rel='canonical']")?.href,
+    ogTitle: document.querySelector("meta[property='og:title']")?.content,
+    ogImage: document.querySelector("meta[property='og:image']")?.content,
     lang: document.documentElement.lang,
     charset: document.characterSet
   };
@@ -66,13 +66,13 @@ meta = await evaluate("""
 
 import json
 print(json.dumps(meta, indent=2))
-'
+EOF
 ```
 
 ### Step 3 -- Detect frameworks and technologies
 
 ```bash
-openbrowser-ai -c '
+openbrowser-ai -c - <<'EOF'
 tech = await evaluate("""
 (function(){
   const t = [];
@@ -87,13 +87,13 @@ tech = await evaluate("""
 })()
 """)
 print(f"Technologies detected: {tech}")
-'
+EOF
 ```
 
 ### Step 4 -- Content summary and statistics
 
 ```bash
-openbrowser-ai -c '
+openbrowser-ai -c - <<'EOF'
 stats = await evaluate("""
 (function(){
   return {
@@ -104,11 +104,11 @@ stats = await evaluate("""
     forms: document.querySelectorAll("form").length,
     tables: document.querySelectorAll("table").length,
     lists: document.querySelectorAll("ul,ol").length,
-    buttons: document.querySelectorAll("button,[role=\"button\"]").length,
+    buttons: document.querySelectorAll("button,[role='button']").length,
     inputs: document.querySelectorAll("input,textarea,select").length,
     iframes: document.querySelectorAll("iframe").length,
     scripts: document.querySelectorAll("script").length,
-    stylesheets: document.querySelectorAll("link[rel=\"stylesheet\"]").length
+    stylesheets: document.querySelectorAll("link[rel='stylesheet']").length
   };
 })()
 """)
@@ -116,13 +116,13 @@ stats = await evaluate("""
 import json
 print("Content statistics:")
 print(json.dumps(stats, indent=2))
-'
+EOF
 ```
 
 ### Step 5 -- Analyze heading structure
 
 ```bash
-openbrowser-ai -c '
+openbrowser-ai -c - <<'EOF'
 headings = await evaluate("""
 (function(){
   return Array.from(document.querySelectorAll("h1,h2,h3,h4,h5,h6")).map(h => ({
@@ -137,13 +137,13 @@ for h in headings:
     htext = h["text"]
     indent = "  " * (int(htag[1]) - 1)
     print(f"{indent}{htag}: {htext}")
-'
+EOF
 ```
 
 ### Step 6 -- Analyze interactive elements
 
 ```bash
-openbrowser-ai -c '
+openbrowser-ai -c - <<'EOF'
 state = await browser.get_browser_state_summary()
 elements_by_tag = {}
 for idx, el in state.dom_state.selector_map.items():
@@ -165,13 +165,13 @@ for tag, elems in sorted(elements_by_tag.items()):
         print(f"  [{eidx}] text=\"{etxt}\" type={etype} href={ehref}")
     if len(elems) > 5:
         print(f"  ... and {len(elems) - 5} more")
-'
+EOF
 ```
 
 ### Step 7 -- Page dimensions and scroll analysis
 
 ```bash
-openbrowser-ai -c '
+openbrowser-ai -c - <<'EOF'
 dims = await evaluate("""
 (function(){
   return {
@@ -189,13 +189,13 @@ print(json.dumps(dims, indent=2))
 if dims["scrollable"]:
     pages = dims["scrollHeight"] / dims["viewportHeight"]
     print(f"Page is approximately {pages:.1f} viewport heights long")
-'
+EOF
 ```
 
 ### Step 8 -- Search for specific content patterns
 
 ```bash
-openbrowser-ai -c '
+openbrowser-ai -c - <<'EOF'
 import re
 
 # Get page text for Python-side analysis
@@ -212,11 +212,12 @@ print(f"Phone numbers found: {phones}")
 # Find dates
 dates = re.findall(r"\d{4}-\d{2}-\d{2}|\w+ \d{1,2},? \d{4}", text_content)
 print(f"Dates found: {dates}")
-'
+EOF
 ```
 
 ## Tips
 
+- Code is piped via stdin using heredoc (`-c - <<'EOF'`), so all Python syntax works without shell escaping issues.
 - Start with `evaluate()` for metadata and DOM statistics -- gives a fast structured overview.
 - Use `browser.get_browser_state_summary()` for interactive element analysis.
 - Use Python regex on extracted text for pattern matching (emails, phones, dates, prices).

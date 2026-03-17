@@ -36,7 +36,7 @@ irm https://raw.githubusercontent.com/billy-enrizky/openbrowser-ai/main/install.
 ### Step 1 -- Navigate and get content overview
 
 ```bash
-openbrowser-ai -c '
+openbrowser-ai -c - <<'EOF'
 await navigate("https://example.com/data")
 
 # Get browser state to see page title, URL, element count
@@ -44,7 +44,7 @@ state = await browser.get_browser_state_summary()
 print(f"Title: {state.title}")
 print(f"URL: {state.url}")
 print(f"Elements: {len(state.dom_state.selector_map)}")
-'
+EOF
 ```
 
 ### Step 2 -- Extract data with JavaScript
@@ -52,7 +52,7 @@ print(f"Elements: {len(state.dom_state.selector_map)}")
 Use `evaluate()` to run JS in the browser and return structured data directly as Python objects:
 
 ```bash
-openbrowser-ai -c '
+openbrowser-ai -c - <<'EOF'
 data = await evaluate("""
 (function(){
   return Array.from(document.querySelectorAll(".product-card")).map(el => ({
@@ -65,7 +65,7 @@ data = await evaluate("""
 
 import json
 print(json.dumps(data, indent=2))
-'
+EOF
 ```
 
 ### Step 3 -- Process data with Python
@@ -73,7 +73,7 @@ print(json.dumps(data, indent=2))
 Use pandas, regex, or other Python tools to clean and transform extracted data:
 
 ```bash
-openbrowser-ai -c '
+openbrowser-ai -c - <<'EOF'
 import json
 
 # Filter and transform
@@ -86,23 +86,23 @@ for item in filtered:
 # Sort by price
 filtered.sort(key=lambda x: x["price_float"])
 print(json.dumps(filtered, indent=2))
-'
+EOF
 ```
 
 Or with pandas if available:
 
 ```bash
-openbrowser-ai -c '
+openbrowser-ai -c - <<'EOF'
 import pandas as pd
 df = pd.DataFrame(data)
 print(df.to_string())
-'
+EOF
 ```
 
 ### Step 4 -- Handle pagination
 
 ```bash
-openbrowser-ai -c '
+openbrowser-ai -c - <<'EOF'
 results = []
 page = 1
 
@@ -132,13 +132,13 @@ while True:
     page += 1
 
 print(f"Total: {len(results)} items")
-'
+EOF
 ```
 
 ### Step 5 -- Handle infinite scroll
 
 ```bash
-openbrowser-ai -c '
+openbrowser-ai -c - <<'EOF'
 results = []
 prev_count = 0
 
@@ -164,13 +164,13 @@ results = await evaluate("""
 })()
 """)
 print(f"Extracted {len(results)} items")
-'
+EOF
 ```
 
 ### Step 6 -- Multi-page scraping
 
 ```bash
-openbrowser-ai -c '
+openbrowser-ai -c - <<'EOF'
 urls = [
     "https://example.com/page-1",
     "https://example.com/page-2",
@@ -192,11 +192,12 @@ for url in urls:
 
 import json
 print(json.dumps(all_data, indent=2))
-'
+EOF
 ```
 
 ## Tips
 
+- Code is piped via stdin using heredoc (`-c - <<'EOF'`), so all Python syntax works without shell escaping issues.
 - Use `evaluate()` for structured DOM extraction -- it returns Python objects directly.
 - Use Python for post-processing: filtering, sorting, deduplication, format conversion.
 - For large datasets, process pages incrementally rather than loading everything into memory.

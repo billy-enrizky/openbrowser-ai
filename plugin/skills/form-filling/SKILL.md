@@ -36,18 +36,18 @@ irm https://raw.githubusercontent.com/billy-enrizky/openbrowser-ai/main/install.
 ### Step 1 -- Navigate to the form page
 
 ```bash
-openbrowser-ai -c '
+openbrowser-ai -c - <<'EOF'
 await navigate("https://example.com/login")
 state = await browser.get_browser_state_summary()
 print(f"Page: {state.title} ({state.url})")
 print(f"Interactive elements: {len(state.dom_state.selector_map)}")
-'
+EOF
 ```
 
 ### Step 2 -- Discover form fields
 
 ```bash
-openbrowser-ai -c '
+openbrowser-ai -c - <<'EOF'
 # List all interactive elements with their indices
 state = await browser.get_browser_state_summary()
 for index, element in state.dom_state.selector_map.items():
@@ -57,27 +57,27 @@ for index, element in state.dom_state.selector_map.items():
     input_type = element.attributes.get("type", "")
     name = element.attributes.get("name", "")
     print(f"[{index}] <{tag}> type={input_type} name={name} placeholder=\"{placeholder}\" text=\"{text}\"")
-'
+EOF
 ```
 
 ### Step 3 -- Fill text inputs
 
 ```bash
-openbrowser-ai -c '
+openbrowser-ai -c - <<'EOF'
 # Fill fields using their indices from Step 2
 await input_text(index=5, text="user@example.com")
 await input_text(index=7, text="secure-password")
-'
+EOF
 ```
 
 For fields that need clearing first:
 
 ```bash
-openbrowser-ai -c '
+openbrowser-ai -c - <<'EOF'
 await click(index=5)
 await evaluate("document.activeElement.select()")
 await input_text(index=5, text="new-value")
-'
+EOF
 ```
 
 ### Step 4 -- Handle dropdowns
@@ -85,24 +85,24 @@ await input_text(index=5, text="new-value")
 Standard HTML select elements:
 
 ```bash
-openbrowser-ai -c '
+openbrowser-ai -c - <<'EOF'
 await select_dropdown(index=12, text="United States")
-'
+EOF
 ```
 
 To see available options first:
 
 ```bash
-openbrowser-ai -c '
+openbrowser-ai -c - <<'EOF'
 options = await dropdown_options(index=12)
 print(options)
-'
+EOF
 ```
 
 Custom dropdown components:
 
 ```bash
-openbrowser-ai -c '
+openbrowser-ai -c - <<'EOF'
 await evaluate("""
 (function(){
   const select = document.querySelector("select#country");
@@ -110,46 +110,46 @@ await evaluate("""
   select.dispatchEvent(new Event("change", { bubbles: true }));
 })()
 """)
-'
+EOF
 ```
 
 ### Step 5 -- Handle checkboxes and radio buttons
 
 ```bash
-openbrowser-ai -c '
+openbrowser-ai -c - <<'EOF'
 await click(index=15)  # Click checkbox/radio
 
 # Verify state
 checked = await evaluate("""document.querySelector("input[name=agree]").checked""")
 print(f"Checkbox checked: {checked}")
-'
+EOF
 ```
 
 ### Step 6 -- Submit the form
 
 ```bash
-openbrowser-ai -c '
+openbrowser-ai -c - <<'EOF'
 await click(index=20)  # Click submit button
 await wait(2)
 
 # Verify submission
 state = await browser.get_browser_state_summary()
 print(f"After submit: {state.url}")
-'
+EOF
 ```
 
 Or submit via JavaScript:
 
 ```bash
-openbrowser-ai -c '
+openbrowser-ai -c - <<'EOF'
 await evaluate("document.querySelector(\"form\").submit()")
-'
+EOF
 ```
 
 ### Step 7 -- Verify submission result
 
 ```bash
-openbrowser-ai -c '
+openbrowser-ai -c - <<'EOF'
 # Check for success/error messages
 result = await evaluate("""
 (function(){
@@ -163,13 +163,13 @@ result = await evaluate("""
 })()
 """)
 print(result)
-'
+EOF
 ```
 
 ### Step 8 -- Handle multi-step forms
 
 ```bash
-openbrowser-ai -c '
+openbrowser-ai -c - <<'EOF'
 for step in range(1, 5):
     # Discover fields for current step
     state = await browser.get_browser_state_summary()
@@ -186,11 +186,12 @@ for step in range(1, 5):
             await click(index=idx)
             await wait(2)
             break
-'
+EOF
 ```
 
 ## Tips
 
+- Code is piped via stdin using heredoc (`-c - <<'EOF'`), so all Python syntax works without shell escaping issues.
 - Always discover fields with `browser.get_browser_state_summary()` before typing -- do not guess element indices.
 - For sensitive data (passwords, tokens), confirm with the user before entering values.
 - Use `evaluate()` to bypass custom components that do not respond to standard click/type.

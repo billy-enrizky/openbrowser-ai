@@ -36,20 +36,20 @@ irm https://raw.githubusercontent.com/billy-enrizky/openbrowser-ai/main/install.
 ### Step 1 -- Navigate and verify page load
 
 ```bash
-openbrowser-ai -c '
+openbrowser-ai -c - <<'EOF'
 await navigate("https://staging.example.com")
 state = await browser.get_browser_state_summary()
 
 assert "example" in state.url.lower(), f"Unexpected URL: {state.url}"
 assert state.title, "Page title is empty"
 print(f"Page loaded: {state.title} ({state.url})")
-'
+EOF
 ```
 
 ### Step 2 -- Content assertions
 
 ```bash
-openbrowser-ai -c '
+openbrowser-ai -c - <<'EOF'
 # Check for expected text using JS
 has_welcome = await evaluate("""
 (function(){ return !!document.body.textContent.match(/Welcome to Example App/i) })()
@@ -57,21 +57,21 @@ has_welcome = await evaluate("""
 assert has_welcome, "Welcome message not found"
 
 # Check specific element content
-h1_text = await evaluate("document.querySelector(\"h1\")?.textContent?.trim()")
-assert h1_text == "Example App", f"Expected \"Example App\", got \"{h1_text}\""
+h1_text = await evaluate("document.querySelector('h1')?.textContent?.trim()")
+assert h1_text == "Example App", f'Expected "Example App", got "{h1_text}"'
 
 # Check no error messages
-error_count = await evaluate("document.querySelectorAll(\".error-message\").length")
+error_count = await evaluate("document.querySelectorAll('.error-message').length")
 assert error_count == 0, f"Found {error_count} error messages on page"
 
 print("All content assertions passed")
-'
+EOF
 ```
 
 ### Step 3 -- Test user interactions (login flow)
 
 ```bash
-openbrowser-ai -c '
+openbrowser-ai -c - <<'EOF'
 # Get form fields
 state = await browser.get_browser_state_summary()
 for idx, el in state.dom_state.selector_map.items():
@@ -91,13 +91,13 @@ state = await browser.get_browser_state_summary()
 assert "dashboard" in state.url.lower() or "welcome" in state.title.lower(), \
     f"Login may have failed. URL: {state.url}, Title: {state.title}"
 print("Login test passed")
-'
+EOF
 ```
 
 ### Step 4 -- Test navigation flows
 
 ```bash
-openbrowser-ai -c '
+openbrowser-ai -c - <<'EOF'
 # Click settings link
 state = await browser.get_browser_state_summary()
 for idx, el in state.dom_state.selector_map.items():
@@ -116,13 +116,13 @@ await go_back()
 await wait(1)
 state = await browser.get_browser_state_summary()
 print(f"After back: {state.url}")
-'
+EOF
 ```
 
 ### Step 5 -- Test error handling
 
 ```bash
-openbrowser-ai -c '
+openbrowser-ai -c - <<'EOF'
 # Submit form with invalid data
 await input_text(index=3, text="not-an-email")
 await click(index=5)
@@ -141,13 +141,13 @@ print(f"Validation errors shown: {errors}")
 # Assert page did not navigate
 path = await evaluate("window.location.pathname")
 print(f"Still on: {path}")
-'
+EOF
 ```
 
 ### Step 6 -- Test responsive behavior
 
 ```bash
-openbrowser-ai -c '
+openbrowser-ai -c - <<'EOF'
 viewport = await evaluate("""
 (function(){
   return {
@@ -168,23 +168,23 @@ mobile_display = await evaluate("""
 })()
 """)
 print(f"Mobile menu display: {mobile_display}")
-'
+EOF
 ```
 
 ### Step 7 -- Test multi-page flows
 
 ```bash
-openbrowser-ai -c '
+openbrowser-ai -c - <<'EOF'
 test_results = []
 
 # Cart page
 await navigate("https://staging.example.com/cart")
 await wait(1)
-cart_title = await evaluate("document.querySelector(\"h1\")?.textContent?.trim()")
+cart_title = await evaluate("document.querySelector('h1')?.textContent?.trim()")
 test_results.append({"test": "cart_page_loads", "passed": cart_title is not None, "detail": cart_title})
 
 # Checkout
-cart_count = await evaluate("JSON.parse(localStorage.getItem(\"cart\"))?.items?.length || 0")
+cart_count = await evaluate("JSON.parse(localStorage.getItem('cart'))?.items?.length || 0")
 test_results.append({"test": "cart_has_items", "passed": cart_count > 0, "detail": f"{cart_count} items"})
 
 # Print results
@@ -193,11 +193,12 @@ passed = sum(1 for t in test_results if t["passed"])
 total = len(test_results)
 print(f"\nResults: {passed}/{total} passed")
 print(json.dumps(test_results, indent=2))
-'
+EOF
 ```
 
 ## Tips
 
+- Code is piped via stdin using heredoc (`-c - <<'EOF'`), so all Python syntax works without shell escaping issues.
 - Use Python `assert` statements for test assertions -- they produce clear error messages on failure.
 - Always verify page state after each interaction before proceeding.
 - Test both happy paths and error paths for thorough coverage.

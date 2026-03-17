@@ -36,7 +36,7 @@ irm https://raw.githubusercontent.com/billy-enrizky/openbrowser-ai/main/install.
 ### Step 1 -- Navigate and find download links
 
 ```bash
-openbrowser-ai -c '
+openbrowser-ai -c - <<'EOF'
 await navigate("https://example.com/reports")
 
 # Get browser state to find clickable download links
@@ -45,7 +45,7 @@ for idx, el in state.dom_state.selector_map.items():
     text = el.get_all_children_text(max_depth=1)
     if "download" in text.lower() or "pdf" in text.lower() or "export" in text.lower():
         print(f"[{idx}] {el.tag_name}: {text}")
-'
+EOF
 ```
 
 ### Step 2 -- Download a file by URL
@@ -53,22 +53,22 @@ for idx, el in state.dom_state.selector_map.items():
 Use `download_file()` to download directly. This uses the browser's JavaScript `fetch` internally, preserving cookies and authentication:
 
 ```bash
-openbrowser-ai -c '
+openbrowser-ai -c - <<'EOF'
 path = await download_file("https://example.com/reports/annual-report.pdf")
 print(f"Saved to: {path}")
-'
+EOF
 ```
 
 With a custom filename:
 
 ```bash
-openbrowser-ai -c '
+openbrowser-ai -c - <<'EOF'
 path = await download_file(
     "https://example.com/api/export?format=csv",
     filename="sales-data.csv"
 )
 print(f"Saved to: {path}")
-'
+EOF
 ```
 
 ### Step 3 -- Extract a download URL from the page
@@ -76,7 +76,7 @@ print(f"Saved to: {path}")
 When the download URL is not directly visible, extract it from a link or button:
 
 ```bash
-openbrowser-ai -c '
+openbrowser-ai -c - <<'EOF'
 # Extract href from a download link
 download_url = await evaluate("""
 (function(){
@@ -90,7 +90,7 @@ if download_url:
     print(f"Downloaded: {path}")
 else:
     print("No PDF link found")
-'
+EOF
 ```
 
 ### Step 4 -- Read a downloaded PDF
@@ -98,7 +98,7 @@ else:
 After downloading, use `pypdf` to extract text (requires `pip install openbrowser-ai[pdf]`):
 
 ```bash
-openbrowser-ai -c '
+openbrowser-ai -c - <<'EOF'
 from pypdf import PdfReader
 
 reader = PdfReader(path)
@@ -109,13 +109,13 @@ for i, page in enumerate(reader.pages):
     text = page.extract_text()
     print(f"--- Page {i+1} ---")
     print(text[:500])
-'
+EOF
 ```
 
 ### Step 5 -- Read other file types
 
 ```bash
-openbrowser-ai -c '
+openbrowser-ai -c - <<'EOF'
 from pathlib import Path
 
 file_path = Path(path)
@@ -135,13 +135,13 @@ if file_path.suffix == ".json":
 # Plain text
 if file_path.suffix in (".txt", ".md", ".log"):
     print(file_path.read_text())
-'
+EOF
 ```
 
 ### Step 6 -- Download multiple files
 
 ```bash
-openbrowser-ai -c '
+openbrowser-ai -c - <<'EOF'
 urls = [
     "https://example.com/report-q1.pdf",
     "https://example.com/report-q2.pdf",
@@ -155,18 +155,18 @@ for url in urls:
     print(f"Downloaded: {path}")
 
 print(f"Total files: {len(paths)}")
-'
+EOF
 ```
 
 ### Step 7 -- List all downloads
 
 ```bash
-openbrowser-ai -c '
+openbrowser-ai -c - <<'EOF'
 files = list_downloads()
 for f in files:
     print(f)
 print(f"Total: {len(files)} files")
-'
+EOF
 ```
 
 ### Step 8 -- Download from authenticated pages
@@ -174,7 +174,7 @@ print(f"Total: {len(files)} files")
 `download_file()` preserves the browser's login session. Log in first, then download:
 
 ```bash
-openbrowser-ai -c '
+openbrowser-ai -c - <<'EOF'
 # Navigate and log in
 await navigate("https://portal.example.com/login")
 await input_text(username_index, "user@example.com")
@@ -185,11 +185,12 @@ await wait(2)
 # Now download an authenticated resource
 path = await download_file("https://portal.example.com/api/reports/confidential.pdf")
 print(f"Downloaded: {path}")
-'
+EOF
 ```
 
 ## Tips
 
+- Code is piped via stdin using heredoc (`-c - <<'EOF'`), so all Python syntax works without shell escaping issues.
 - Use `download_file(url)` instead of `navigate(url)` for files. `navigate()` opens PDFs in the browser viewer but does not save them.
 - `download_file()` preserves cookies and authentication -- no need to re-authenticate.
 - Filename conflicts are handled automatically with `(N)` suffix (e.g., `report (1).pdf`).
