@@ -26,7 +26,7 @@ export function ChatMessages({ messages }: ChatMessagesProps) {
   return (
     <div
       ref={containerRef}
-      className="h-full overflow-y-auto scrollbar-thin scrollbar-thumb-zinc-700 scrollbar-track-transparent"
+      className="h-full overflow-y-auto overflow-x-hidden scrollbar-thin scrollbar-thumb-zinc-700 scrollbar-track-transparent"
     >
       <AnimatePresence mode="popLayout">
         {messages.map((message) => (
