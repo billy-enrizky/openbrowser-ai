@@ -195,3 +195,54 @@ export interface BackendAuthProfile {
   created_at: string;
   updated_at: string;
 }
+
+// Scheduled job types
+export interface ScheduledJob {
+  id: string;
+  title: string;
+  taskDescription: string;
+  workflowId: string | null;
+  authProfileId: string | null;
+  scheduleExpression: string;
+  scheduleTimezone: string;
+  status: "testing" | "active" | "paused" | "failed";
+  lastRunAt: string | null;
+  nextRunAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface BackendScheduledJob {
+  id: string;
+  title: string;
+  task_description: string;
+  workflow_id: string | null;
+  auth_profile_id: string | null;
+  schedule_expression: string;
+  schedule_timezone: string;
+  status: string;
+  last_run_at: string | null;
+  next_run_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface JobExecution {
+  id: string;
+  status: "running" | "success" | "failed" | "auth_expired";
+  startedAt: string;
+  completedAt: string | null;
+  errorMessage: string | null;
+  taskId: string | null;
+  createdAt: string;
+}
+
+export interface BackendJobExecution {
+  id: string;
+  status: string;
+  started_at: string;
+  completed_at: string | null;
+  error_message: string | null;
+  task_id: string | null;
+  created_at: string;
+}
