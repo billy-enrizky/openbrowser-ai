@@ -1,4 +1,5 @@
 import { API_BASE_URL } from "@/lib/config";
+import { authHeaders } from "@/lib/api-utils";
 import type {
   BackendChatConversation,
   BackendChatMessage,
@@ -8,10 +9,6 @@ import type {
   FileAttachment,
   Message,
 } from "@/types";
-
-function authHeaders(token: string | null): HeadersInit {
-  return token ? { Authorization: `Bearer ${token}` } : {};
-}
 
 function mapConversation(conversation: BackendChatConversation): ChatConversation {
   return {

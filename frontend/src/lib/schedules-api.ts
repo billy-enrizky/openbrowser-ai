@@ -1,14 +1,11 @@
 import { API_BASE_URL } from "@/lib/config";
+import { authHeaders } from "@/lib/api-utils";
 import type {
   BackendJobExecution,
   BackendScheduledJob,
   JobExecution,
   ScheduledJob,
 } from "@/types";
-
-function authHeaders(token: string | null): HeadersInit {
-  return token ? { Authorization: `Bearer ${token}` } : {};
-}
 
 function mapJob(j: BackendScheduledJob): ScheduledJob {
   return {
