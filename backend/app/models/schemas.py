@@ -41,6 +41,7 @@ class CreateTaskRequest(BaseModel):
     project_id: str | None = Field(default=None, description="Project to associate task with")
     use_current_browser: bool = Field(default=False, description="Use current browser via Chrome extension")
     conversation_id: str | None = Field(default=None, description="Existing conversation to append messages to")
+    auth_profile_id: str | None = Field(default=None, description="Auth profile to load into browser session")
 
 
 class CreateProjectRequest(BaseModel):
@@ -128,6 +129,42 @@ class TaskListResponse(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+# Auth profile models
+
+class StartAuthSessionRequest(BaseModel):
+    """Request to start a browser session for auth capture."""
+    domain: str = Field(..., description="Domain to navigate to for login", min_length=1, max_length=500)
+    label: str = Field(..., description="Label for this auth profile", min_length=1, max_length=100)
+
+
+class SaveAuthProfileRequest(BaseModel):
+    """Request to capture auth state from active browser session."""
+    task_id: str = Field(..., description="Task ID of the active browser session")
+    domain: str = Field(..., description="Domain to capture cookies for")
+    label: str = Field(..., description="Label for this auth profile", min_length=1, max_length=100)
+
+
+class AuthProfileResponse(BaseModel):
+    """Response containing auth profile details."""
+    id: str
+    domain: str
+    label: str
+    status: str
+    last_verified_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class AuthProfileListResponse(BaseModel):
+    """Response containing list of auth profiles."""
+    profiles: list[AuthProfileResponse]
+
+
+class UpdateAuthProfileRequest(BaseModel):
+    """Request to update auth profile label."""
+    label: str = Field(..., min_length=1, max_length=100)
 
 
 # WebSocket Message Models
