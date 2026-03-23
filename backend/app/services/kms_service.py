@@ -10,6 +10,7 @@ The encryption context includes user_id to prevent cross-user decryption.
 import json
 import logging
 import os
+from functools import lru_cache
 from typing import Any
 
 from app.core.config import settings
@@ -19,8 +20,9 @@ logger = logging.getLogger(__name__)
 _NONCE_SIZE = 12
 
 
+@lru_cache(maxsize=1)
 def _get_kms_client():
-    """Get boto3 KMS client."""
+    """Get boto3 KMS client (cached for reuse)."""
     import boto3
     return boto3.client("kms", region_name=os.getenv("AWS_REGION", "ca-central-1"))
 
