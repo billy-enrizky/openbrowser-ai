@@ -52,6 +52,7 @@ export function useTaskStream(options: UseTaskStreamOptions = {}) {
       llm_model?: string | null;
       use_current_browser?: boolean;
       conversation_id?: string | null;
+      auth_profile_id?: string | null;
     }): Promise<string | null> => {
       setIsStarting(true);
 
@@ -83,7 +84,7 @@ export function useTaskStream(options: UseTaskStreamOptions = {}) {
         _pollEvents(task_id, abort.signal, token);
         return task_id;
       } catch (err) {
-        console.error("startTask error:", err);
+        // Surfaced to user via the "Failed to connect" assistant message in page.tsx
         return null;
       } finally {
         setIsStarting(false);
@@ -109,8 +110,8 @@ export function useTaskStream(options: UseTaskStreamOptions = {}) {
           method: "POST",
           headers,
         });
-      } catch (err) {
-        console.error("cancelTask error:", err);
+      } catch {
+        // Cancel is best-effort; failure is non-critical
       }
     },
     [getToken],
@@ -194,14 +195,10 @@ export function useTaskStream(options: UseTaskStreamOptions = {}) {
           if (err instanceof DOMException && err.name === "AbortError") break;
 
           consecutiveErrors++;
-          if (consecutiveErrors >= maxErrors) {
-            console.error("Polling: max consecutive errors reached", err);
-            break;
-          }
+          if (consecutiveErrors >= maxErrors) break;
 
           // Backoff on errors
           const delay = Math.min(1000 * 2 ** (consecutiveErrors - 1), 10000);
-          console.warn(`Poll error (${consecutiveErrors}/${maxErrors}), retrying in ${delay}ms...`, err);
           await new Promise((r) => setTimeout(r, delay));
         }
       }

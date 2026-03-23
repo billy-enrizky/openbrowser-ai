@@ -145,6 +145,7 @@ export default function Home() {
     setModelsLoading,
     setModelsError,
     // Auth profiles + schedules
+    selectedAuthProfileId,
     setAuthProfiles,
     setScheduledJobs,
   } = useAppStore();
@@ -520,6 +521,7 @@ export default function Home() {
       llm_model: selectedModel,
       use_current_browser: false,
       conversation_id: activeConversationId,
+      auth_profile_id: selectedAuthProfileId,
     });
 
     if (!taskId) {
@@ -532,7 +534,7 @@ export default function Home() {
         metadata: { isError: true },
       });
     }
-  }, [activeConversationId, addMessage, startTask, agentType, currentTaskId, maxSteps, useVision, selectedModel]);
+  }, [activeConversationId, addMessage, startTask, agentType, currentTaskId, maxSteps, useVision, selectedModel, selectedAuthProfileId]);
 
   const hasMessages = messages.length > 0;
 
