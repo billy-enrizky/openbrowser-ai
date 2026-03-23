@@ -11,6 +11,8 @@ import { useAppStore } from "@/store";
 import { useTaskStream } from "@/hooks/useTaskStream";
 import { API_BASE_URL } from "@/lib/config";
 import { fetchChatList, fetchConversationDetail, setActiveConversation, deleteConversation } from "@/lib/chat-api";
+import { fetchAuthProfiles } from "@/lib/auth-profiles-api";
+import { fetchScheduledJobs } from "@/lib/schedules-api";
 import type { WSMessage, FileAttachment, LogEntry, VncInfo, AvailableModelsResponse } from "@/types";
 import { cn } from "@/lib/utils";
 
@@ -142,6 +144,9 @@ export default function Home() {
     setAvailableProviders,
     setModelsLoading,
     setModelsError,
+    // Auth profiles + schedules
+    setAuthProfiles,
+    setScheduledJobs,
   } = useAppStore();
   const [isLoading, setIsLoading] = useState(false);
   const [currentTaskId, setCurrentTaskId] = useState<string | null>(null);
@@ -276,6 +281,24 @@ export default function Home() {
     setMessages,
     upsertConversation,
   ]);
+
+  // Fetch auth profiles and scheduled jobs on mount
+  useEffect(() => {
+    if (authLoading || (authEnabled && !isAuthenticated)) return;
+    (async () => {
+      try {
+        const token = await getValidIdToken();
+        const [profiles, jobs] = await Promise.all([
+          fetchAuthProfiles(token),
+          fetchScheduledJobs(token),
+        ]);
+        setAuthProfiles(profiles);
+        setScheduledJobs(jobs);
+      } catch {
+        // Non-critical -- sidebar will show empty lists
+      }
+    })();
+  }, [authEnabled, authLoading, isAuthenticated, getValidIdToken, setAuthProfiles, setScheduledJobs]);
 
   const handleSelectConversation = useCallback(async (conversationId: string) => {
     setChatError(null);

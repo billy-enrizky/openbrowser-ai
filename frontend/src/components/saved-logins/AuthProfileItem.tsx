@@ -18,17 +18,19 @@ interface AuthProfileItemProps {
 
 export function AuthProfileItem({ profile, isSelected, onSelect, onDelete }: AuthProfileItemProps) {
   return (
-    <button
-      type="button"
+    <div
+      role="button"
+      tabIndex={0}
       onClick={onSelect}
-      className={`group flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm transition-colors duration-200 ${
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") onSelect(); }}
+      className={`group flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm transition-colors duration-200 cursor-pointer ${
         isSelected
           ? "bg-zinc-700/60 text-zinc-100"
           : "text-zinc-400 hover:bg-zinc-800/60 hover:text-zinc-200"
       }`}
     >
       <img
-        src={`https://www.google.com/s2/favicons?domain=${profile.domain}&sz=16`}
+        src={`https://www.google.com/s2/favicons?domain=${encodeURIComponent(profile.domain)}&sz=16`}
         alt=""
         width={16}
         height={16}
@@ -50,6 +52,6 @@ export function AuthProfileItem({ profile, isSelected, onSelect, onDelete }: Aut
       >
         <Trash2 size={14} />
       </button>
-    </button>
+    </div>
   );
 }

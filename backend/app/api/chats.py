@@ -16,16 +16,10 @@ from app.models.schemas import (
     RenameChatRequest,
     SetActiveChatRequest,
 )
+from app.api.deps import principal_to_identity as _principal_to_identity
 from app.services.chat_service import ChatService
 
 router = APIRouter(prefix="/chats", tags=["chats"])
-
-
-def _principal_to_identity(principal: AuthPrincipal | None) -> tuple[str, str | None, str | None]:
-    """Map principal to stable identity. Supports AUTH_ENABLED=false local mode."""
-    if principal is None:
-        return "anonymous-local-user", None, "local"
-    return principal.subject, principal.email, principal.username
 
 
 def _conversation_to_response(conversation) -> ChatConversation:

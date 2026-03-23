@@ -118,11 +118,7 @@ class ConnectionManager:
 connection_manager = ConnectionManager()
 
 
-def _principal_to_identity(principal: AuthPrincipal | None) -> tuple[str, str | None, str | None]:
-    """Map principal to stable identity for persistence."""
-    if principal is None:
-        return "anonymous-local-user", None, "local"
-    return principal.subject, principal.email, principal.username
+from app.api.deps import principal_to_identity as _principal_to_identity
 
 
 async def _persist_task_user_message(

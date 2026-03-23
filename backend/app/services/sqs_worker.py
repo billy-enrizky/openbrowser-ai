@@ -69,7 +69,7 @@ async def _poll_loop(queue_url: str) -> None:
 
     while not _shutdown_event.is_set():
         try:
-            response = await asyncio.get_event_loop().run_in_executor(
+            response = await asyncio.get_running_loop().run_in_executor(
                 None,
                 lambda: client.receive_message(
                     QueueUrl=queue_url,
@@ -90,7 +90,7 @@ async def _poll_loop(queue_url: str) -> None:
 
 async def _delete_message(client, queue_url: str, receipt_handle: str) -> None:
     """Delete an SQS message without blocking the event loop."""
-    await asyncio.get_event_loop().run_in_executor(
+    await asyncio.get_running_loop().run_in_executor(
         None,
         lambda: client.delete_message(QueueUrl=queue_url, ReceiptHandle=receipt_handle),
     )
@@ -150,10 +150,9 @@ async def _process_message(msg: dict, queue_url: str, client) -> None:
             execution.error_message = str(e)[:2000]
             job.last_run_at = datetime.now(timezone.utc)
 
-            # Check for consecutive failures
+            # Auto-pause after 3 consecutive failures (all of the 3 most recent must be failed)
             recent = await schedule_service.get_executions(db, job_id, limit=3)
-            consecutive_failures = sum(1 for ex in recent if ex.status == "failed")
-            if consecutive_failures >= 3:
+            if len(recent) >= 3 and all(ex.status == "failed" for ex in recent):
                 job.status = "paused"
                 logger.warning("Job %s auto-paused after 3 consecutive failures", job_id)
 

@@ -1,9 +1,10 @@
 """Schedule service -- job lifecycle and EventBridge Scheduler integration."""
 
+import asyncio
 import json
 import logging
 import os
-from functools import lru_cache
+from functools import lru_cache, partial
 
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,12 +15,19 @@ from app.db.models import JobExecution, ScheduledJob
 logger = logging.getLogger(__name__)
 
 
+async def _run_sync(func, *args, **kwargs):
+    """Run a blocking boto3 call without blocking the event loop."""
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, partial(func, *args, **kwargs))
+
+
 @lru_cache(maxsize=1)
 def _get_scheduler_client():
     import boto3
     return boto3.client("scheduler", region_name=os.getenv("AWS_REGION", "ca-central-1"))
 
 
+@lru_cache(maxsize=1)
 def _get_sqs_arn() -> str:
     """Derive SQS ARN from queue URL.
 
@@ -90,7 +98,8 @@ async def activate_job(db: AsyncSession, job: ScheduledJob, workflow_id: str) ->
     client = _get_scheduler_client()
     schedule_name = f"openbrowser-job-{job.id}"
 
-    response = client.create_schedule(
+    response = await _run_sync(
+        client.create_schedule,
         Name=schedule_name,
         ScheduleExpression=f"cron({job.schedule_expression})",
         ScheduleExpressionTimezone=job.schedule_timezone,
@@ -112,7 +121,8 @@ async def pause_job(db: AsyncSession, job: ScheduledJob) -> None:
         try:
             client = _get_scheduler_client()
             sqs_arn = _get_sqs_arn()
-            client.update_schedule(
+            await _run_sync(
+                client.update_schedule,
                 Name=f"openbrowser-job-{job.id}",
                 ScheduleExpression=f"cron({job.schedule_expression})",
                 ScheduleExpressionTimezone=job.schedule_timezone,
@@ -136,7 +146,8 @@ async def resume_job(db: AsyncSession, job: ScheduledJob) -> None:
             client = _get_scheduler_client()
             sqs_arn = _get_sqs_arn()
 
-            client.update_schedule(
+            await _run_sync(
+                client.update_schedule,
                 Name=f"openbrowser-job-{job.id}",
                 ScheduleExpression=f"cron({job.schedule_expression})",
                 ScheduleExpressionTimezone=job.schedule_timezone,
@@ -168,7 +179,8 @@ async def update_eventbridge_schedule(job: ScheduledJob) -> None:
         sqs_arn = _get_sqs_arn()
         state = "ENABLED" if job.status == "active" else "DISABLED"
 
-        client.update_schedule(
+        await _run_sync(
+            client.update_schedule,
             Name=f"openbrowser-job-{job.id}",
             ScheduleExpression=f"cron({job.schedule_expression})",
             ScheduleExpressionTimezone=job.schedule_timezone,
@@ -189,7 +201,7 @@ async def delete_job(db: AsyncSession, job: ScheduledJob) -> None:
     if job.eventbridge_schedule_arn:
         try:
             client = _get_scheduler_client()
-            client.delete_schedule(Name=f"openbrowser-job-{job.id}")
+            await _run_sync(client.delete_schedule, Name=f"openbrowser-job-{job.id}")
         except Exception as e:
             logger.warning("Failed to delete EventBridge schedule: %s", e)
     await db.delete(job)

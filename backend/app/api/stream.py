@@ -179,17 +179,14 @@ async def start_task(
     storage_state = None
     if req.auth_profile_id:
         try:
-            from app.db.session import get_session_factory
+            from app.api.deps import resolve_user_id
             from app.services import auth_profile_service
 
             session_factory = get_session_factory()
             async with session_factory() as auth_db:
-                sub, email, username = _principal_to_identity(principal)
-                from app.services.chat_service import ChatService
-                chat_svc = ChatService(auth_db)
-                user = await chat_svc.ensure_user(cognito_sub=sub, email=email, username=username)
+                user_id = await resolve_user_id(principal, auth_db)
                 storage_state = await auth_profile_service.load_auth_state(
-                    auth_db, req.auth_profile_id, user.id
+                    auth_db, req.auth_profile_id, user_id
                 )
         except Exception as e:
             logger.warning("Failed to load auth profile %s: %s", req.auth_profile_id, e)

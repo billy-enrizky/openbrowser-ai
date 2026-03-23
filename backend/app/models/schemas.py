@@ -144,7 +144,7 @@ class StartAuthSessionRequest(BaseModel):
 class SaveAuthProfileRequest(BaseModel):
     """Request to capture auth state from active browser session."""
     task_id: str = Field(..., description="Task ID of the active browser session")
-    domain: str = Field(..., description="Domain to capture cookies for")
+    domain: str = Field(..., description="Domain to capture cookies for", min_length=1, max_length=500)
     label: str = Field(..., description="Label for this auth profile", min_length=1, max_length=100)
 
 
@@ -172,7 +172,7 @@ class UpdateAuthProfileRequest(BaseModel):
 # Scheduled job models
 
 _CRON_FIELD_RE = re.compile(
-    r"^[0-9*/,\-?LW#]+$"
+    r"^[0-9A-Z*/,\-?LW#]+$"
 )
 
 
@@ -256,6 +256,11 @@ class ScheduledJobListResponse(BaseModel):
 class ScheduledJobDetailResponse(BaseModel):
     """Response containing scheduled job + recent executions."""
     job: ScheduledJobResponse
+    executions: list[JobExecutionResponse]
+
+
+class JobExecutionListResponse(BaseModel):
+    """Response containing list of job executions."""
     executions: list[JobExecutionResponse]
 
 

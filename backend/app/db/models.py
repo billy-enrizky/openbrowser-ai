@@ -126,7 +126,12 @@ class AuthProfile(Base):
 
 
 class Workflow(Base):
-    """Recorded browser automation workflow."""
+    """Recorded browser automation workflow.
+
+    Scaffolding for workflow record/replay. ScheduledJob.workflow_id references
+    this table; actual recording logic will be added when the replay feature is
+    implemented.
+    """
 
     __tablename__ = "workflows"
 
@@ -157,7 +162,10 @@ class Workflow(Base):
 
 
 class WorkflowStep(Base):
-    """A single step in a recorded workflow."""
+    """A single step in a recorded workflow.
+
+    Part of the workflow record/replay scaffolding -- see Workflow docstring.
+    """
 
     __tablename__ = "workflow_steps"
 

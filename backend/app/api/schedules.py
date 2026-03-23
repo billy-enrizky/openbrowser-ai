@@ -17,6 +17,7 @@ from app.core.auth import AuthPrincipal, get_current_user
 from app.db.session import get_db_session, is_database_configured
 from app.models.schemas import (
     CreateScheduledJobRequest,
+    JobExecutionListResponse,
     JobExecutionResponse,
     ScheduledJobDetailResponse,
     ScheduledJobListResponse,
@@ -184,7 +185,7 @@ async def delete_scheduled_job(
     await db.commit()
 
 
-@router.get("/{job_id}/executions")
+@router.get("/{job_id}/executions", response_model=JobExecutionListResponse)
 async def list_executions(
     job_id: str,
     principal: AuthPrincipal | None = Depends(get_current_user),

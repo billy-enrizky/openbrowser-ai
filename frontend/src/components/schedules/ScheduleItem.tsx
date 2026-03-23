@@ -19,10 +19,12 @@ interface ScheduleItemProps {
 
 export function ScheduleItem({ job, onSelect, onTogglePause, onDelete }: ScheduleItemProps) {
   return (
-    <button
-      type="button"
+    <div
+      role="button"
+      tabIndex={0}
       onClick={onSelect}
-      className="group flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm text-zinc-400 transition-colors duration-200 hover:bg-zinc-800/60 hover:text-zinc-200"
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") onSelect(); }}
+      className="group flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm text-zinc-400 transition-colors duration-200 hover:bg-zinc-800/60 hover:text-zinc-200 cursor-pointer"
     >
       <div className="min-w-0 flex-1">
         <div className="truncate text-sm font-medium">{job.title}</div>
@@ -55,6 +57,6 @@ export function ScheduleItem({ job, onSelect, onTogglePause, onDelete }: Schedul
           <Trash2 size={14} />
         </button>
       </div>
-    </button>
+    </div>
   );
 }

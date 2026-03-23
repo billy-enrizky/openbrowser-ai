@@ -73,7 +73,9 @@ export function Sidebar({ onNewChat, onSelectConversation, onDeleteConversation,
     setShowScheduleModal(true);
   };
 
-  const handleSelectSchedule = (jobId: string) => {
+  const handleSelectSchedule = async (jobId: string) => {
+    const token = await getValidIdToken();
+    setAuthToken(token);
     setSelectedJobId(jobId);
     setShowExecutionHistory(true);
   };
