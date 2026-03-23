@@ -167,6 +167,63 @@ class UpdateAuthProfileRequest(BaseModel):
     label: str = Field(..., min_length=1, max_length=100)
 
 
+# Scheduled job models
+
+class CreateScheduledJobRequest(BaseModel):
+    """Request to create a scheduled job (starts test run)."""
+    title: str = Field(..., min_length=1, max_length=200)
+    task_description: str = Field(..., min_length=1, max_length=50000)
+    schedule_expression: str = Field(..., description="Cron or rate expression for EventBridge")
+    schedule_timezone: str = Field(default="UTC", max_length=50)
+    auth_profile_id: str | None = Field(default=None, description="Optional auth profile for the job")
+
+
+class UpdateScheduledJobRequest(BaseModel):
+    """Request to update a scheduled job."""
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    schedule_expression: str | None = Field(default=None)
+    schedule_timezone: str | None = Field(default=None, max_length=50)
+    status: str | None = Field(default=None, description="active | paused")
+
+
+class JobExecutionResponse(BaseModel):
+    """Response for a single job execution."""
+    id: str
+    status: str
+    started_at: datetime
+    completed_at: datetime | None = None
+    error_message: str | None = None
+    task_id: str | None = None
+    created_at: datetime
+
+
+class ScheduledJobResponse(BaseModel):
+    """Response containing scheduled job details."""
+    id: str
+    title: str
+    task_description: str
+    workflow_id: str | None = None
+    auth_profile_id: str | None = None
+    schedule_expression: str
+    schedule_timezone: str
+    status: str
+    last_run_at: datetime | None = None
+    next_run_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class ScheduledJobListResponse(BaseModel):
+    """Response containing list of scheduled jobs."""
+    jobs: list[ScheduledJobResponse]
+
+
+class ScheduledJobDetailResponse(BaseModel):
+    """Response containing scheduled job + recent executions."""
+    job: ScheduledJobResponse
+    executions: list[JobExecutionResponse]
+
+
 # WebSocket Message Models
 
 class WSMessageType(str, Enum):
