@@ -95,7 +95,17 @@ class Settings(BaseSettings):
         default=None,
         description="Optional Cognito issuer override. If not set, built from region + user pool id.",
     )
-    
+
+    # Auth profile / KMS settings
+    KMS_AUTH_KEY_ARN: str | None = Field(default=None, description="KMS CMK ARN for auth profile envelope encryption")
+    MAX_AUTH_PROFILES_PER_USER: int = Field(default=10, description="Max auth profiles per user")
+
+    # Scheduled jobs settings
+    SQS_SCHEDULE_QUEUE_URL: str | None = Field(default=None, description="SQS queue URL for scheduled job messages")
+    SCHEDULER_ROLE_ARN: str | None = Field(default=None, description="EventBridge Scheduler IAM role ARN")
+    MAX_SCHEDULED_JOBS_PER_USER: int = Field(default=5, description="Max active scheduled jobs per user")
+    MAX_CONCURRENT_SCHEDULED_EXECUTIONS: int = Field(default=1, description="Max concurrent scheduled executions")
+
     def get_google_api_key(self) -> str | None:
         """Get Google/Gemini API key (supports both GOOGLE_API_KEY and GEMINI_API_KEY)."""
         return self.GOOGLE_API_KEY or self.GEMINI_API_KEY
