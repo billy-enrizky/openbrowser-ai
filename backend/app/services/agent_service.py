@@ -209,7 +209,7 @@ class AgentSession:
             raise RuntimeError("Agent is already running")
         
         self.is_running = True
-        self.started_at = datetime.utcnow()
+        self.started_at = datetime.now(timezone.utc)
         self._log("info", f"Starting task: {self.task[:100]}...", "agent")
         
         try:
@@ -284,7 +284,7 @@ class AgentSession:
             else:
                 result = await self._run_browser_agent()
             
-            self.completed_at = datetime.utcnow()
+            self.completed_at = datetime.now(timezone.utc)
             self._log("info", f"Task completed successfully", "agent")
             return result
             

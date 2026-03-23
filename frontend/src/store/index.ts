@@ -233,23 +233,14 @@ export const useAppStore = create<AppState>()(
     }),
     {
       name: "openbrowser-storage",
-      version: 3,
-      migrate: (persistedState: unknown, version: number) => {
+      version: 2,
+      migrate: (persistedState: unknown) => {
         const state = persistedState as Record<string, unknown>;
-        if (version < 2) {
-          return {
-            ...state,
-            messages: [],
-            conversations: [],
-            activeConversationId: null,
-          } as unknown as AppState;
-        }
-        // v2 -> v3: added authProfiles and scheduledJobs slices
         return {
           ...state,
-          authProfiles: [],
-          scheduledJobs: [],
-          selectedAuthProfileId: null,
+          messages: [],
+          conversations: [],
+          activeConversationId: null,
         } as unknown as AppState;
       },
       partialize: (state) => ({
