@@ -7,7 +7,7 @@ from uuid import uuid4
 from fastapi import Depends, FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import auth_profiles, chats, projects, stream, tasks, vnc
+from app.api import auth_profiles, chats, projects, schedules, stream, tasks, vnc
 from app.core.auth import get_current_user
 from app.core.config import settings
 from app.db.init_db import init_database
@@ -28,7 +28,10 @@ async def lifespan(app: FastAPI):
     """Application lifespan handler."""
     logger.info("Starting OpenBrowser Backend API")
     await init_database()
+    from app.services import sqs_worker
+    await sqs_worker.start()
     yield
+    await sqs_worker.stop()
     logger.info("Shutting down OpenBrowser Backend API")
 
 
@@ -60,6 +63,7 @@ app.include_router(projects.router, prefix="/api/v1", dependencies=[Depends(get_
 app.include_router(vnc.router, prefix="/api/v1")
 app.include_router(chats.router, prefix="/api/v1")
 app.include_router(auth_profiles.router, prefix="/api/v1", dependencies=[Depends(get_current_user)])
+app.include_router(schedules.router, prefix="/api/v1", dependencies=[Depends(get_current_user)])
 
 
 @app.get("/")
