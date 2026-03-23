@@ -246,3 +246,37 @@ export interface BackendJobExecution {
   task_id: string | null;
   created_at: string;
 }
+
+// UI Configuration Types
+
+export interface QuickAction {
+  icon: string;
+  label: string;
+  prompt?: string;
+  color: string;
+  enabled: boolean;
+}
+
+export interface Integration {
+  name: string;
+  icon?: string;
+  enabled: boolean;
+  url?: string;
+}
+
+export interface UserInfo {
+  planName: string;
+  planType?: "free" | "pro" | "enterprise";
+  credits: number;
+  creditsUsed: number;
+  notifications: number;
+  displayName?: string;
+  avatarUrl?: string;
+}
+
+export interface AppConfig {
+  appName: string;
+  version: string;
+  quickActions: QuickAction[];
+  integrations: Integration[];
+}

@@ -2,7 +2,7 @@
 
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { Task, Project, Message, AgentType, LogEntry, VncInfo, BrowserViewerMode, LLMModel, ChatConversation, AuthProfile, ScheduledJob } from "@/types";
+import type { Task, Project, Message, AgentType, LogEntry, VncInfo, BrowserViewerMode, LLMModel, ChatConversation, AuthProfile, ScheduledJob, UserInfo } from "@/types";
 
 interface AppState {
   // Sidebar
@@ -13,6 +13,11 @@ interface AppState {
   // Current task
   currentTaskId: string | null;
   setCurrentTaskId: (id: string | null) => void;
+
+  // User Info
+  userInfo: UserInfo | null;
+  setUserInfo: (info: UserInfo | null) => void;
+  updateCredits: (credits: number, used: number) => void;
 
   // Tasks
   tasks: Task[];
@@ -105,6 +110,16 @@ export const useAppStore = create<AppState>()(
       // Current task
       currentTaskId: null,
       setCurrentTaskId: (id) => set({ currentTaskId: id }),
+
+      // User Info
+      userInfo: null,
+      setUserInfo: (info) => set({ userInfo: info }),
+      updateCredits: (credits, used) =>
+        set((state) => ({
+          userInfo: state.userInfo
+            ? { ...state.userInfo, credits, creditsUsed: used }
+            : null,
+        })),
 
       // Tasks
       tasks: [],
