@@ -2,18 +2,20 @@
 
 import React, { useState, useEffect } from "react";
 import { motion } from "framer-motion";
-import { Bell, Sparkles, User, Monitor, LogOut } from "lucide-react";
+import { Bell, Sparkles, User, Monitor, LogOut, CalendarClock } from "lucide-react";
 import { Button } from "@/components/ui";
 import { ModelSelector } from "./ModelSelector";
 import { useAppStore } from "@/store";
 import { useAuth } from "@/components/auth";
 import { cn } from "@/lib/utils";
 import { SaveAuthButton } from "@/components/saved-logins/SaveAuthButton";
+import { AddScheduleModal } from "@/components/schedules/AddScheduleModal";
 
 export function Header() {
   const { vncInfo, browserViewerOpen, toggleBrowserViewer } = useAppStore();
   const { authEnabled, user, logout, getValidIdToken } = useAuth();
   const [authToken, setAuthToken] = useState<string | null>(null);
+  const [showScheduleModal, setShowScheduleModal] = useState(false);
   const hasVncSession = !!vncInfo;
   const userLabel = user?.email || user?.name || user?.username || "User";
 
@@ -85,6 +87,16 @@ export function Header() {
 
           <SaveAuthButton isVisible={hasVncSession} token={authToken} />
 
+          <motion.button
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+            onClick={() => setShowScheduleModal(true)}
+            className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-zinc-800/50 text-zinc-300 hover:bg-zinc-700/50 transition-colors"
+          >
+            <CalendarClock className="w-4 h-4" />
+            <span className="text-sm font-medium">New Schedule</span>
+          </motion.button>
+
           <span className="text-zinc-700">|</span>
           <span className="text-sm text-zinc-500">Free plan</span>
           <span className="text-zinc-700">|</span>
@@ -128,6 +140,8 @@ export function Header() {
           )}
         </div>
       </div>
+
+      <AddScheduleModal isOpen={showScheduleModal} onClose={() => setShowScheduleModal(false)} token={authToken} />
     </header>
   );
 }

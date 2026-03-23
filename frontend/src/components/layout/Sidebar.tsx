@@ -22,8 +22,12 @@ import { Button } from "@/components/ui";
 import type { ChatConversation } from "@/types";
 import { AuthProfileList } from "@/components/saved-logins/AuthProfileList";
 import { AddAuthModal } from "@/components/saved-logins/AddAuthModal";
+import { ScheduleList } from "@/components/schedules/ScheduleList";
+import { AddScheduleModal } from "@/components/schedules/AddScheduleModal";
+import { ExecutionHistory } from "@/components/schedules/ExecutionHistory";
 import { useAuth } from "@/components/auth";
 import { deleteAuthProfile } from "@/lib/auth-profiles-api";
+import { updateScheduledJob, deleteScheduledJob } from "@/lib/schedules-api";
 
 const navItems = [
   { icon: Search, label: "Search", href: "/search" },
@@ -38,9 +42,12 @@ interface SidebarProps {
 }
 
 export function Sidebar({ onNewChat, onSelectConversation, onDeleteConversation, chatsLoading = false }: SidebarProps) {
-  const { sidebarOpen, toggleSidebar, conversations, activeConversationId, removeAuthProfile } = useAppStore();
+  const { sidebarOpen, toggleSidebar, conversations, activeConversationId, removeAuthProfile, scheduledJobs, updateScheduledJob: updateStoreJob, removeScheduledJob } = useAppStore();
   const { getValidIdToken } = useAuth();
   const [showAddAuthModal, setShowAddAuthModal] = useState(false);
+  const [showScheduleModal, setShowScheduleModal] = useState(false);
+  const [showExecutionHistory, setShowExecutionHistory] = useState(false);
+  const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [authToken, setAuthToken] = useState<string | null>(null);
 
   const handleAddAuthProfile = async () => {
@@ -57,6 +64,52 @@ export function Sidebar({ onNewChat, onSelectConversation, onDeleteConversation,
     } catch (e) {
       console.error("Failed to delete auth profile:", e);
     }
+  };
+
+  const handleAddSchedule = async () => {
+    const token = await getValidIdToken();
+    setAuthToken(token);
+    setShowScheduleModal(true);
+  };
+
+  const handleSelectSchedule = (jobId: string) => {
+    setSelectedJobId(jobId);
+    setShowExecutionHistory(true);
+  };
+
+  const handleTogglePauseSchedule = async (jobId: string, currentStatus: string) => {
+    try {
+      const token = await getValidIdToken();
+      const newStatus = currentStatus === "active" ? "paused" : "active";
+      const updatedJob = await updateScheduledJob(token, jobId, { status: newStatus });
+      updateStoreJob(jobId, updatedJob);
+    } catch (e) {
+      console.error("Failed to toggle schedule:", e);
+    }
+  };
+
+  const handleDeleteSchedule = async (jobId: string) => {
+    try {
+      const token = await getValidIdToken();
+      await deleteScheduledJob(token, jobId);
+      removeScheduledJob(jobId);
+    } catch (e) {
+      console.error("Failed to delete schedule:", e);
+    }
+  };
+
+  const handleTogglePauseFromHistory = async () => {
+    if (!selectedJobId) return;
+    const job = scheduledJobs.find((j) => j.id === selectedJobId);
+    if (!job) return;
+    await handleTogglePauseSchedule(selectedJobId, job.status);
+  };
+
+  const handleDeleteFromHistory = async () => {
+    if (!selectedJobId) return;
+    await handleDeleteSchedule(selectedJobId);
+    setShowExecutionHistory(false);
+    setSelectedJobId(null);
   };
 
   return (
@@ -215,10 +268,12 @@ export function Sidebar({ onNewChat, onSelectConversation, onDeleteConversation,
 
               {/* Schedules */}
               <div className="mt-4">
-                <div className="flex items-center px-3 py-2 text-xs font-semibold uppercase tracking-wider text-zinc-500">
-                  Schedules
-                </div>
-                <p className="px-3 py-3 text-xs text-zinc-500">Coming soon</p>
+                <ScheduleList
+                  onAdd={handleAddSchedule}
+                  onSelect={handleSelectSchedule}
+                  onTogglePause={handleTogglePauseSchedule}
+                  onDelete={handleDeleteSchedule}
+                />
               </div>
 
               {/* Conversations */}
@@ -277,6 +332,22 @@ export function Sidebar({ onNewChat, onSelectConversation, onDeleteConversation,
 
       {/* Add Auth Modal */}
       <AddAuthModal isOpen={showAddAuthModal} onClose={() => setShowAddAuthModal(false)} token={authToken} />
+
+      {/* Add Schedule Modal */}
+      <AddScheduleModal isOpen={showScheduleModal} onClose={() => setShowScheduleModal(false)} token={authToken} />
+
+      {/* Execution History */}
+      <ExecutionHistory
+        job={scheduledJobs.find((j) => j.id === selectedJobId) ?? null}
+        isOpen={showExecutionHistory}
+        onClose={() => {
+          setShowExecutionHistory(false);
+          setSelectedJobId(null);
+        }}
+        onTogglePause={handleTogglePauseFromHistory}
+        onDelete={handleDeleteFromHistory}
+        token={authToken}
+      />
 
       {/* Footer */}
       <AnimatePresence mode="wait">
