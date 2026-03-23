@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import DateTime, ForeignKey, Index, String, Text
+from sqlalchemy import DateTime, ForeignKey, Index, LargeBinary, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -35,6 +35,7 @@ class User(Base):
     conversations: Mapped[list["Conversation"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     messages: Mapped[list["ConversationMessage"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     state: Mapped["UserState | None"] = relationship(back_populates="user", cascade="all, delete-orphan", uselist=False)
+    auth_profiles: Mapped[list["AuthProfile"]] = relationship(back_populates="user", cascade="all, delete-orphan")
 
 
 class Conversation(Base):
@@ -98,4 +99,28 @@ class UserState(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
 
     user: Mapped[User] = relationship(back_populates="state")
+
+
+class AuthProfile(Base):
+    """Saved browser auth state (cookies/localStorage) for a domain."""
+
+    __tablename__ = "auth_profiles"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    domain: Mapped[str] = mapped_column(Text, nullable=False)
+    label: Mapped[str] = mapped_column(Text, nullable=False)
+    encrypted_key: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    encrypted_state: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="active")  # active | expired | revoked
+    last_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+    user: Mapped["User"] = relationship(back_populates="auth_profiles")
+
+    __table_args__ = (
+        Index("ix_auth_profiles_user_domain", "user_id", "domain"),
+        UniqueConstraint("user_id", "domain", "label", name="uq_auth_profiles_user_domain_label"),
+    )
 
