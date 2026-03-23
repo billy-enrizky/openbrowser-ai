@@ -16,6 +16,7 @@ import {
   Loader2,
   Trash2,
 } from "lucide-react";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/store";
 import { Button } from "@/components/ui";
@@ -62,7 +63,7 @@ export function Sidebar({ onNewChat, onSelectConversation, onDeleteConversation,
       await deleteAuthProfile(token, id);
       removeAuthProfile(id);
     } catch (e) {
-      console.error("Failed to delete auth profile:", e);
+      toast.error("Failed to delete saved login");
     }
   };
 
@@ -84,7 +85,7 @@ export function Sidebar({ onNewChat, onSelectConversation, onDeleteConversation,
       const updatedJob = await updateScheduledJob(token, jobId, { status: newStatus });
       updateStoreJob(jobId, updatedJob);
     } catch (e) {
-      console.error("Failed to toggle schedule:", e);
+      toast.error("Failed to update schedule");
     }
   };
 
@@ -94,7 +95,7 @@ export function Sidebar({ onNewChat, onSelectConversation, onDeleteConversation,
       await deleteScheduledJob(token, jobId);
       removeScheduledJob(jobId);
     } catch (e) {
-      console.error("Failed to delete schedule:", e);
+      toast.error("Failed to delete schedule");
     }
   };
 
