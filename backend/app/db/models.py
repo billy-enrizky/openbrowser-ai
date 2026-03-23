@@ -124,3 +124,56 @@ class AuthProfile(Base):
         UniqueConstraint("user_id", "domain", "label", name="uq_auth_profiles_user_domain_label"),
     )
 
+
+class Workflow(Base):
+    """Recorded browser automation workflow."""
+
+    __tablename__ = "workflows"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    source_task_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    domain: Mapped[str | None] = mapped_column(Text, nullable=True)
+    tags: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    replay_mode: Mapped[str] = mapped_column(String(20), default="compiled")  # compiled | guided
+    total_steps: Mapped[int] = mapped_column(default=0)
+    success_count: Mapped[int] = mapped_column(default=0)
+    failure_count: Mapped[int] = mapped_column(default=0)
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+    user: Mapped["User"] = relationship()
+    steps: Mapped[list["WorkflowStep"]] = relationship(
+        back_populates="workflow",
+        cascade="all, delete-orphan",
+        order_by="WorkflowStep.step_number",
+    )
+
+    __table_args__ = (
+        Index("ix_workflows_user_domain", "user_id", "domain"),
+    )
+
+
+class WorkflowStep(Base):
+    """A single step in a recorded workflow."""
+
+    __tablename__ = "workflow_steps"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    workflow_id: Mapped[str] = mapped_column(String(36), ForeignKey("workflows.id", ondelete="CASCADE"))
+    step_number: Mapped[int] = mapped_column(nullable=False)
+    step_type: Mapped[str] = mapped_column(String(20), nullable=False)  # code | navigate | click | fill | scroll | extract
+    target_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    action_data: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    screenshot_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+    workflow: Mapped["Workflow"] = relationship(back_populates="steps")
+
+    __table_args__ = (
+        UniqueConstraint("workflow_id", "step_number", name="uq_workflow_steps_workflow_step"),
+        Index("ix_workflow_steps_workflow_step", "workflow_id", "step_number"),
+    )
+
