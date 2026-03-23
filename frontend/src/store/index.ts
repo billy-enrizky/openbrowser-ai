@@ -2,7 +2,7 @@
 
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { Task, Project, Message, AgentType, LogEntry, VncInfo, BrowserViewerMode, LLMModel, ChatConversation, AuthProfile } from "@/types";
+import type { Task, Project, Message, AgentType, LogEntry, VncInfo, BrowserViewerMode, LLMModel, ChatConversation, AuthProfile, ScheduledJob } from "@/types";
 
 interface AppState {
   // Sidebar
@@ -85,6 +85,13 @@ interface AppState {
   removeAuthProfile: (id: string) => void;
   selectedAuthProfileId: string | null;
   setSelectedAuthProfileId: (id: string | null) => void;
+
+  // Scheduled Jobs
+  scheduledJobs: ScheduledJob[];
+  setScheduledJobs: (jobs: ScheduledJob[]) => void;
+  addScheduledJob: (job: ScheduledJob) => void;
+  updateScheduledJob: (id: string, updates: Partial<ScheduledJob>) => void;
+  removeScheduledJob: (id: string) => void;
 }
 
 export const useAppStore = create<AppState>()(
@@ -207,6 +214,22 @@ export const useAppStore = create<AppState>()(
         })),
       selectedAuthProfileId: null,
       setSelectedAuthProfileId: (id) => set({ selectedAuthProfileId: id }),
+
+      // Scheduled Jobs
+      scheduledJobs: [],
+      setScheduledJobs: (jobs) => set({ scheduledJobs: jobs }),
+      addScheduledJob: (job) =>
+        set((state) => ({ scheduledJobs: [job, ...state.scheduledJobs] })),
+      updateScheduledJob: (id, updates) =>
+        set((state) => ({
+          scheduledJobs: state.scheduledJobs.map((j) =>
+            j.id === id ? { ...j, ...updates } : j
+          ),
+        })),
+      removeScheduledJob: (id) =>
+        set((state) => ({
+          scheduledJobs: state.scheduledJobs.filter((j) => j.id !== id),
+        })),
     }),
     {
       name: "openbrowser-storage",
