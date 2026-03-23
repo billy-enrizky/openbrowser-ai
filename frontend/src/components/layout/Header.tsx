@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { Bell, Sparkles, User, Monitor, LogOut } from "lucide-react";
 import { Button } from "@/components/ui";
@@ -8,12 +8,22 @@ import { ModelSelector } from "./ModelSelector";
 import { useAppStore } from "@/store";
 import { useAuth } from "@/components/auth";
 import { cn } from "@/lib/utils";
+import { SaveAuthButton } from "@/components/saved-logins/SaveAuthButton";
 
 export function Header() {
   const { vncInfo, browserViewerOpen, toggleBrowserViewer } = useAppStore();
-  const { authEnabled, user, logout } = useAuth();
+  const { authEnabled, user, logout, getValidIdToken } = useAuth();
+  const [authToken, setAuthToken] = useState<string | null>(null);
   const hasVncSession = !!vncInfo;
   const userLabel = user?.email || user?.name || user?.username || "User";
+
+  useEffect(() => {
+    const fetchToken = async () => {
+      const token = await getValidIdToken();
+      setAuthToken(token);
+    };
+    void fetchToken();
+  }, [getValidIdToken]);
 
   return (
     <header className="h-16 border-b border-zinc-800/50 bg-zinc-900/50 backdrop-blur-xl relative z-[9999]">
@@ -72,6 +82,8 @@ export function Header() {
               )} />
             )}
           </motion.button>
+
+          <SaveAuthButton isVisible={hasVncSession} token={authToken} />
 
           <span className="text-zinc-700">|</span>
           <span className="text-sm text-zinc-500">Free plan</span>

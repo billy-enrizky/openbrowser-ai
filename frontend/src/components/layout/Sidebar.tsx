@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { motion, AnimatePresence } from "framer-motion";
@@ -20,6 +20,10 @@ import { cn } from "@/lib/utils";
 import { useAppStore } from "@/store";
 import { Button } from "@/components/ui";
 import type { ChatConversation } from "@/types";
+import { AuthProfileList } from "@/components/saved-logins/AuthProfileList";
+import { AddAuthModal } from "@/components/saved-logins/AddAuthModal";
+import { useAuth } from "@/components/auth";
+import { deleteAuthProfile } from "@/lib/auth-profiles-api";
 
 const navItems = [
   { icon: Search, label: "Search", href: "/search" },
@@ -34,7 +38,26 @@ interface SidebarProps {
 }
 
 export function Sidebar({ onNewChat, onSelectConversation, onDeleteConversation, chatsLoading = false }: SidebarProps) {
-  const { sidebarOpen, toggleSidebar, conversations, activeConversationId } = useAppStore();
+  const { sidebarOpen, toggleSidebar, conversations, activeConversationId, removeAuthProfile } = useAppStore();
+  const { getValidIdToken } = useAuth();
+  const [showAddAuthModal, setShowAddAuthModal] = useState(false);
+  const [authToken, setAuthToken] = useState<string | null>(null);
+
+  const handleAddAuthProfile = async () => {
+    const token = await getValidIdToken();
+    setAuthToken(token);
+    setShowAddAuthModal(true);
+  };
+
+  const handleDeleteAuthProfile = async (id: string) => {
+    try {
+      const token = await getValidIdToken();
+      await deleteAuthProfile(token, id);
+      removeAuthProfile(id);
+    } catch (e) {
+      console.error("Failed to delete auth profile:", e);
+    }
+  };
 
   return (
     <motion.aside
@@ -185,6 +208,19 @@ export function Sidebar({ onNewChat, onSelectConversation, onDeleteConversation,
                 </Link>
               </div>
 
+              {/* Saved Logins */}
+              <div className="mt-4">
+                <AuthProfileList onAdd={handleAddAuthProfile} onDelete={handleDeleteAuthProfile} />
+              </div>
+
+              {/* Schedules */}
+              <div className="mt-4">
+                <div className="flex items-center px-3 py-2 text-xs font-semibold uppercase tracking-wider text-zinc-500">
+                  Schedules
+                </div>
+                <p className="px-3 py-3 text-xs text-zinc-500">Coming soon</p>
+              </div>
+
               {/* Conversations */}
               <div className="mt-4">
                 <span className="px-3 text-xs font-semibold text-zinc-500 uppercase tracking-wider">
@@ -238,6 +274,9 @@ export function Sidebar({ onNewChat, onSelectConversation, onDeleteConversation,
           )}
         </AnimatePresence>
       </nav>
+
+      {/* Add Auth Modal */}
+      <AddAuthModal isOpen={showAddAuthModal} onClose={() => setShowAddAuthModal(false)} token={authToken} />
 
       {/* Footer */}
       <AnimatePresence mode="wait">
