@@ -1,24 +1,18 @@
 """Schedule service -- job lifecycle and EventBridge Scheduler integration."""
 
-import asyncio
 import json
 import logging
 import os
-from functools import lru_cache, partial
+from functools import lru_cache
 
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.db.models import JobExecution, ScheduledJob
+from app.utils.async_helpers import run_sync as _run_sync
 
 logger = logging.getLogger(__name__)
-
-
-async def _run_sync(func, *args, **kwargs):
-    """Run a blocking boto3 call without blocking the event loop."""
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(None, partial(func, *args, **kwargs))
 
 
 @lru_cache(maxsize=1)
@@ -32,6 +26,9 @@ def _get_sqs_arn() -> str:
     """Derive SQS ARN from queue URL.
 
     URL format: https://sqs.{region}.amazonaws.com/{account}/{name}
+
+    Note: assumes standard AWS partition. GovCloud (amazonaws-us-gov.com) and
+    China (amazonaws.com.cn) partition URLs are not supported.
     """
     queue_url = settings.SQS_SCHEDULE_QUEUE_URL
     if not queue_url:

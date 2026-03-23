@@ -54,7 +54,7 @@ async def save_profile(
         "origins": storage_state.get("origins", []),
     }
 
-    encrypted_key, encrypted_state = encrypt_auth_state(user_id, filtered_state)
+    encrypted_key, encrypted_state = await encrypt_auth_state(user_id, filtered_state)
 
     profile = AuthProfile(
         user_id=user_id,
@@ -100,7 +100,7 @@ async def load_auth_state(db: AsyncSession, profile_id: str, user_id: str) -> di
         raise ValueError(f"Auth profile {profile_id} not found")
     if profile.status != "active":
         raise ValueError(f"Auth profile {profile_id} is {profile.status}")
-    return decrypt_auth_state(user_id, profile.encrypted_key, profile.encrypted_state)
+    return await decrypt_auth_state(user_id, profile.encrypted_key, profile.encrypted_state)
 
 
 async def revoke_profile(db: AsyncSession, profile_id: str, user_id: str) -> bool:
@@ -149,6 +149,8 @@ async def check_auth_validity(browser_session, domain: str) -> bool:
             return True
 
         await page.goto(f"https://{domain}")
+        # Heuristic wait for page load; a CDP Page.loadEventFired listener would
+        # be more reliable but is not exposed by openbrowser's page API.
         await _asyncio.sleep(3)
 
         login_indicators = await page.evaluate("""() => {

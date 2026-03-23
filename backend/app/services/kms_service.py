@@ -14,6 +14,7 @@ from functools import lru_cache
 from typing import Any
 
 from app.core.config import settings
+from app.utils.async_helpers import run_sync
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +28,7 @@ def _get_kms_client():
     return boto3.client("kms", region_name=os.getenv("AWS_REGION", "ca-central-1"))
 
 
-def encrypt_auth_state(user_id: str, state: dict[str, Any]) -> tuple[bytes, bytes]:
+async def encrypt_auth_state(user_id: str, state: dict[str, Any]) -> tuple[bytes, bytes]:
     """Encrypt auth state with KMS envelope encryption.
 
     Returns:
@@ -40,7 +41,8 @@ def encrypt_auth_state(user_id: str, state: dict[str, Any]) -> tuple[bytes, byte
     client = _get_kms_client()
     context = {"purpose": "auth_profile", "user_id": user_id}
 
-    response = client.generate_data_key(
+    response = await run_sync(
+        client.generate_data_key,
         KeyId=key_arn,
         KeySpec="AES_256",
         EncryptionContext=context,
@@ -61,7 +63,7 @@ def encrypt_auth_state(user_id: str, state: dict[str, Any]) -> tuple[bytes, byte
     return encrypted_key, nonce + ciphertext
 
 
-def decrypt_auth_state(user_id: str, encrypted_key: bytes, ciphertext: bytes) -> dict[str, Any]:
+async def decrypt_auth_state(user_id: str, encrypted_key: bytes, ciphertext: bytes) -> dict[str, Any]:
     """Decrypt auth state using KMS envelope decryption.
 
     Returns:
@@ -74,7 +76,8 @@ def decrypt_auth_state(user_id: str, encrypted_key: bytes, ciphertext: bytes) ->
     client = _get_kms_client()
     context = {"purpose": "auth_profile", "user_id": user_id}
 
-    response = client.decrypt(
+    response = await run_sync(
+        client.decrypt,
         CiphertextBlob=encrypted_key,
         EncryptionContext=context,
     )
