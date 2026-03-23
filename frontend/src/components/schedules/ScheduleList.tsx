@@ -18,10 +18,12 @@ export function ScheduleList({ onAdd, onSelect, onTogglePause, onDelete }: Sched
 
   return (
     <div className="flex flex-col">
-      <button
-        type="button"
+      <div
+        role="button"
+        tabIndex={0}
         onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center justify-between px-3 py-2 text-xs font-semibold uppercase tracking-wider text-zinc-500 hover:text-zinc-300 transition-colors duration-200"
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setIsOpen(!isOpen); }}
+        className="flex items-center justify-between px-3 py-2 text-xs font-semibold uppercase tracking-wider text-zinc-500 hover:text-zinc-300 transition-colors duration-200 cursor-pointer"
       >
         <span className="flex items-center gap-1.5">
           {isOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
@@ -38,7 +40,7 @@ export function ScheduleList({ onAdd, onSelect, onTogglePause, onDelete }: Sched
         >
           <Plus size={14} />
         </button>
-      </button>
+      </div>
       {isOpen && (
         <div className="max-h-48 overflow-y-auto px-1.5 pb-2 scrollbar-thin scrollbar-track-transparent scrollbar-thumb-zinc-700">
           {scheduledJobs.length === 0 ? (
