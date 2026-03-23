@@ -46,6 +46,7 @@ class AgentSession:
         on_error_callback: Callable[[str], None] | None = None,
         on_log_callback: Callable[[str, str, str | None, int | None], None] | None = None,
         on_vnc_info_callback: Callable[[dict[str, Any]], None] | None = None,
+        storage_state: dict[str, Any] | None = None,
     ):
         self.task_id = task_id
         self.task = task
@@ -65,6 +66,7 @@ class AgentSession:
         self.on_error_callback = on_error_callback
         self.on_log_callback = on_log_callback
         self.on_vnc_info_callback = on_vnc_info_callback
+        self.storage_state = storage_state
 
         # State
         self.agent: Any = None
@@ -169,6 +171,9 @@ class AgentSession:
             keep_alive=False,
             args=extra_args,
         )
+
+        if self.storage_state:
+            browser_profile.storage_state = self.storage_state
 
         # Set up environment for VNC display
         browser_env = None
@@ -741,6 +746,7 @@ class AgentManager:
         on_error_callback: Callable[[str], None] | None = None,
         on_log_callback: Callable[[str, str, str | None, int | None], None] | None = None,
         on_vnc_info_callback: Callable[[dict[str, Any]], None] | None = None,
+        storage_state: dict[str, Any] | None = None,
     ) -> AgentSession:
         """Create a new agent session with a specific task ID."""
         async with self._lock:
@@ -763,6 +769,7 @@ class AgentManager:
                 on_error_callback=on_error_callback,
                 on_log_callback=on_log_callback,
                 on_vnc_info_callback=on_vnc_info_callback,
+                storage_state=storage_state,
             )
             self.sessions[task_id] = session
             return session

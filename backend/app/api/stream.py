@@ -175,6 +175,25 @@ async def start_task(
         if history:
             task_with_context = f"{history}\n\nCurrent request:\n{req.task}"
 
+    # ---- load auth profile if specified ----
+    storage_state = None
+    if req.auth_profile_id:
+        try:
+            from app.db.session import get_session_factory
+            from app.services import auth_profile_service
+
+            session_factory = get_session_factory()
+            async with session_factory() as auth_db:
+                sub, email, username = _principal_to_identity(principal)
+                from app.services.chat_service import ChatService
+                chat_svc = ChatService(auth_db)
+                user = await chat_svc.ensure_user(cognito_sub=sub, email=email, username=username)
+                storage_state = await auth_profile_service.load_auth_state(
+                    auth_db, req.auth_profile_id, user.id
+                )
+        except Exception as e:
+            logger.warning("Failed to load auth profile %s: %s", req.auth_profile_id, e)
+
     # ---- create session ----
 
     session = await agent_manager.create_session_with_id(
@@ -192,6 +211,7 @@ async def start_task(
         on_error_callback=on_error,
         on_log_callback=on_log,
         on_vnc_info_callback=on_vnc_info,
+        storage_state=storage_state,
     )
 
     # ---- persist user message ----
