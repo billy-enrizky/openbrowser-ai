@@ -7,7 +7,7 @@ from uuid import uuid4
 from fastapi import Depends, FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import chats, projects, stream, tasks, vnc
+from app.api import auth_profiles, chats, projects, stream, tasks, vnc
 from app.core.auth import get_current_user
 from app.core.config import settings
 from app.db.init_db import init_database
@@ -59,6 +59,7 @@ app.include_router(projects.router, prefix="/api/v1", dependencies=[Depends(get_
 # since WebSocket connections cannot send custom HTTP headers).
 app.include_router(vnc.router, prefix="/api/v1")
 app.include_router(chats.router, prefix="/api/v1")
+app.include_router(auth_profiles.router, prefix="/api/v1", dependencies=[Depends(get_current_user)])
 
 
 @app.get("/")
