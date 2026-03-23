@@ -4,7 +4,9 @@ from datetime import datetime
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, Field
+import re
+
+from pydantic import BaseModel, Field, field_validator
 
 
 class AgentType(str, Enum):
@@ -169,13 +171,39 @@ class UpdateAuthProfileRequest(BaseModel):
 
 # Scheduled job models
 
+_CRON_FIELD_RE = re.compile(
+    r"^[0-9*/,\-?LW#]+$"
+)
+
+
+def _validate_cron_expression(value: str) -> str:
+    """Validate a basic 6-field EventBridge cron expression (min hr dom mon dow yr)."""
+    fields = value.strip().split()
+    if len(fields) != 6:
+        raise ValueError(
+            "Cron expression must have exactly 6 fields: "
+            "minute hour day-of-month month day-of-week year"
+        )
+    for i, field in enumerate(fields):
+        if not _CRON_FIELD_RE.match(field):
+            raise ValueError(
+                f"Invalid characters in cron field {i + 1}: '{field}'"
+            )
+    return value.strip()
+
+
 class CreateScheduledJobRequest(BaseModel):
     """Request to create a scheduled job (starts test run)."""
     title: str = Field(..., min_length=1, max_length=200)
     task_description: str = Field(..., min_length=1, max_length=50000)
-    schedule_expression: str = Field(..., description="Cron or rate expression for EventBridge")
+    schedule_expression: str = Field(..., description="Cron expression for EventBridge (6 fields)")
     schedule_timezone: str = Field(default="UTC", max_length=50)
     auth_profile_id: str | None = Field(default=None, description="Optional auth profile for the job")
+
+    @field_validator("schedule_expression")
+    @classmethod
+    def check_cron(cls, v: str) -> str:
+        return _validate_cron_expression(v)
 
 
 class UpdateScheduledJobRequest(BaseModel):
@@ -184,6 +212,13 @@ class UpdateScheduledJobRequest(BaseModel):
     schedule_expression: str | None = Field(default=None)
     schedule_timezone: str | None = Field(default=None, max_length=50)
     status: str | None = Field(default=None, description="active | paused")
+
+    @field_validator("schedule_expression")
+    @classmethod
+    def check_cron(cls, v: str | None) -> str | None:
+        if v is not None:
+            return _validate_cron_expression(v)
+        return v
 
 
 class JobExecutionResponse(BaseModel):
