@@ -2,7 +2,7 @@
 
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { Task, Project, Message, AgentType, LogEntry, VncInfo, BrowserViewerMode, LLMModel, ChatConversation } from "@/types";
+import type { Task, Project, Message, AgentType, LogEntry, VncInfo, BrowserViewerMode, LLMModel, ChatConversation, AuthProfile } from "@/types";
 
 interface AppState {
   // Sidebar
@@ -77,6 +77,14 @@ interface AppState {
   setModelsLoading: (loading: boolean) => void;
   modelsError: string | null;
   setModelsError: (error: string | null) => void;
+
+  // Auth Profiles
+  authProfiles: AuthProfile[];
+  setAuthProfiles: (profiles: AuthProfile[]) => void;
+  addAuthProfile: (profile: AuthProfile) => void;
+  removeAuthProfile: (id: string) => void;
+  selectedAuthProfileId: string | null;
+  setSelectedAuthProfileId: (id: string | null) => void;
 }
 
 export const useAppStore = create<AppState>()(
@@ -187,6 +195,18 @@ export const useAppStore = create<AppState>()(
       setModelsLoading: (loading) => set({ modelsLoading: loading }),
       modelsError: null,
       setModelsError: (error) => set({ modelsError: error }),
+
+      // Auth Profiles
+      authProfiles: [],
+      setAuthProfiles: (profiles) => set({ authProfiles: profiles }),
+      addAuthProfile: (profile) =>
+        set((state) => ({ authProfiles: [profile, ...state.authProfiles] })),
+      removeAuthProfile: (id) =>
+        set((state) => ({
+          authProfiles: state.authProfiles.filter((p) => p.id !== id),
+        })),
+      selectedAuthProfileId: null,
+      setSelectedAuthProfileId: (id) => set({ selectedAuthProfileId: id }),
     }),
     {
       name: "openbrowser-storage",
