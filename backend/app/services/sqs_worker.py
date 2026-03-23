@@ -9,6 +9,7 @@ import json
 import logging
 import os
 from datetime import datetime, timezone
+from functools import lru_cache
 
 from app.core.config import settings
 
@@ -18,6 +19,7 @@ _worker_task: asyncio.Task | None = None
 _shutdown_event = asyncio.Event()
 
 
+@lru_cache(maxsize=1)
 def _get_sqs_client():
     import boto3
     return boto3.client("sqs", region_name=os.getenv("AWS_REGION", "ca-central-1"))
@@ -54,13 +56,19 @@ async def stop() -> None:
 
 
 async def _poll_loop(queue_url: str) -> None:
-    """Long-poll SQS and process messages."""
+    """Long-poll SQS and process messages concurrently up to the semaphore limit."""
     semaphore = asyncio.Semaphore(settings.MAX_CONCURRENT_SCHEDULED_EXECUTIONS)
     client = _get_sqs_client()
 
+    async def _guarded_process(msg: dict) -> None:
+        async with semaphore:
+            try:
+                await _process_message(msg, queue_url, client)
+            except Exception as e:
+                logger.exception("Failed to process SQS message: %s", e)
+
     while not _shutdown_event.is_set():
         try:
-            # Long poll (20s timeout, set on queue)
             response = await asyncio.get_event_loop().run_in_executor(
                 None,
                 lambda: client.receive_message(
@@ -70,13 +78,8 @@ async def _poll_loop(queue_url: str) -> None:
                 ),
             )
 
-            messages = response.get("Messages", [])
-            for msg in messages:
-                async with semaphore:
-                    try:
-                        await _process_message(msg, queue_url, client)
-                    except Exception as e:
-                        logger.exception("Failed to process SQS message: %s", e)
+            for msg in response.get("Messages", []):
+                asyncio.create_task(_guarded_process(msg))
 
         except asyncio.CancelledError:
             break
