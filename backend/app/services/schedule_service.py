@@ -149,6 +149,37 @@ async def resume_job(db: AsyncSession, job: ScheduledJob) -> None:
     await db.flush()
 
 
+async def update_eventbridge_schedule(job: ScheduledJob) -> None:
+    """Sync schedule expression/timezone to EventBridge after a PATCH update."""
+    if not job.eventbridge_schedule_arn:
+        return
+
+    queue_url = settings.SQS_SCHEDULE_QUEUE_URL
+    role_arn = settings.SCHEDULER_ROLE_ARN
+    if not queue_url or not role_arn:
+        return
+
+    try:
+        client = _get_scheduler_client()
+        sqs_arn = _get_sqs_arn()
+        state = "ENABLED" if job.status == "active" else "DISABLED"
+
+        client.update_schedule(
+            Name=f"openbrowser-job-{job.id}",
+            ScheduleExpression=f"cron({job.schedule_expression})",
+            ScheduleExpressionTimezone=job.schedule_timezone,
+            FlexibleTimeWindow={"Mode": "OFF"},
+            Target={
+                "Arn": sqs_arn,
+                "RoleArn": role_arn,
+                "Input": json.dumps({"job_id": job.id, "user_id": job.user_id}),
+            },
+            State=state,
+        )
+    except Exception as e:
+        logger.warning("Failed to update EventBridge schedule for job %s: %s", job.id, e)
+
+
 async def delete_job(db: AsyncSession, job: ScheduledJob) -> None:
     """Delete job and its EventBridge schedule."""
     if job.eventbridge_schedule_arn:

@@ -85,6 +85,14 @@ async def _poll_loop(queue_url: str) -> None:
             await asyncio.sleep(5)
 
 
+async def _delete_message(client, queue_url: str, receipt_handle: str) -> None:
+    """Delete an SQS message without blocking the event loop."""
+    await asyncio.get_event_loop().run_in_executor(
+        None,
+        lambda: client.delete_message(QueueUrl=queue_url, ReceiptHandle=receipt_handle),
+    )
+
+
 async def _process_message(msg: dict, queue_url: str, client) -> None:
     """Process a single SQS message: load job, replay workflow, update execution."""
     body = json.loads(msg["Body"])
@@ -95,7 +103,7 @@ async def _process_message(msg: dict, queue_url: str, client) -> None:
 
     if not job_id or not user_id:
         logger.warning("Malformed SQS message (missing job_id/user_id), deleting: %s", body)
-        client.delete_message(QueueUrl=queue_url, ReceiptHandle=receipt_handle)
+        await _delete_message(client, queue_url, receipt_handle)
         return
 
     logger.info("Processing scheduled job %s for user %s", job_id, user_id)
@@ -108,21 +116,25 @@ async def _process_message(msg: dict, queue_url: str, client) -> None:
         job = await schedule_service.get_job(db, job_id, user_id)
         if not job:
             logger.warning("Job %s not found, deleting SQS message", job_id)
-            client.delete_message(QueueUrl=queue_url, ReceiptHandle=receipt_handle)
+            await _delete_message(client, queue_url, receipt_handle)
             return
 
         if job.status not in ("active",):
             logger.info("Job %s is %s, skipping", job_id, job.status)
-            client.delete_message(QueueUrl=queue_url, ReceiptHandle=receipt_handle)
+            await _delete_message(client, queue_url, receipt_handle)
             return
 
         # Create execution record
         execution = await schedule_service.record_execution(db, job_id, "running")
+        now = datetime.now(timezone.utc)
+        execution.heartbeat_at = now
         await db.commit()
 
         try:
-            # TODO: Implement actual workflow replay here
-            # For now, mark as success placeholder
+            # TODO: Implement actual workflow replay here.
+            # When workflow replay is added, update execution.heartbeat_at
+            # periodically (every ~60s) so _cleanup_stale_executions can
+            # detect truly stale runs vs. long-running ones.
             execution.status = "success"
             execution.completed_at = datetime.now(timezone.utc)
             job.last_run_at = datetime.now(timezone.utc)
@@ -146,7 +158,7 @@ async def _process_message(msg: dict, queue_url: str, client) -> None:
             logger.exception("Job %s execution failed: %s", job_id, e)
 
     # Delete message from queue (processed successfully or failed but recorded)
-    client.delete_message(QueueUrl=queue_url, ReceiptHandle=receipt_handle)
+    await _delete_message(client, queue_url, receipt_handle)
 
 
 async def _cleanup_stale_executions() -> None:
@@ -157,7 +169,7 @@ async def _cleanup_stale_executions() -> None:
         if not is_database_configured():
             return
 
-        from sqlalchemy import update
+        from sqlalchemy import update, func
         from app.db.models import JobExecution
 
         session_factory = get_session_factory()
@@ -167,11 +179,14 @@ async def _cleanup_stale_executions() -> None:
             from datetime import timedelta
             stale_cutoff = cutoff - timedelta(minutes=15)
 
+            # Use heartbeat_at if set, fall back to started_at
+            last_active = func.coalesce(JobExecution.heartbeat_at, JobExecution.started_at)
+
             result = await db.execute(
                 update(JobExecution)
                 .where(
                     JobExecution.status == "running",
-                    JobExecution.heartbeat_at < stale_cutoff,
+                    last_active < stale_cutoff,
                 )
                 .values(
                     status="failed",

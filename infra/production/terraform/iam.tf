@@ -18,7 +18,7 @@ resource "aws_iam_policy" "backend_kms_auth" {
 }
 
 resource "aws_iam_role_policy_attachment" "backend_kms_auth" {
-  role       = aws_iam_role.backend.name
+  role       = var.backend_iam_role_name
   policy_arn = aws_iam_policy.backend_kms_auth.arn
 }
 
@@ -42,7 +42,7 @@ resource "aws_iam_policy" "backend_sqs" {
 }
 
 resource "aws_iam_role_policy_attachment" "backend_sqs" {
-  role       = aws_iam_role.backend.name
+  role       = var.backend_iam_role_name
   policy_arn = aws_iam_policy.backend_sqs.arn
 }
 
@@ -78,6 +78,6 @@ resource "aws_iam_policy" "backend_scheduler" {
 }
 
 resource "aws_iam_role_policy_attachment" "backend_scheduler" {
-  role       = aws_iam_role.backend.name
+  role       = var.backend_iam_role_name
   policy_arn = aws_iam_policy.backend_scheduler.arn
 }

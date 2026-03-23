@@ -23,24 +23,12 @@ from app.models.schemas import (
     ScheduledJobResponse,
     UpdateScheduledJobRequest,
 )
+from app.api.deps import resolve_user_id
 from app.services import schedule_service
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/schedules", tags=["schedules"])
-
-
-async def _get_user_id(principal: AuthPrincipal | None, db: AsyncSession) -> str:
-    """Resolve principal to user_id (ensures user row exists)."""
-    from app.services.chat_service import ChatService
-
-    if principal is None:
-        sub, email, username = "anonymous-local-user", None, "local"
-    else:
-        sub, email, username = principal.subject, principal.email, principal.username
-    service = ChatService(db)
-    user = await service.ensure_user(cognito_sub=sub, email=email, username=username)
-    return user.id
 
 
 def _job_to_response(job) -> ScheduledJobResponse:
@@ -82,7 +70,7 @@ async def create_scheduled_job(
     if not is_database_configured():
         raise HTTPException(status_code=503, detail="Database not configured")
 
-    user_id = await _get_user_id(principal, db)
+    user_id = await resolve_user_id(principal, db)
 
     try:
         job = await schedule_service.create_job(
@@ -110,7 +98,7 @@ async def list_scheduled_jobs(
     if not is_database_configured():
         return ScheduledJobListResponse(jobs=[])
 
-    user_id = await _get_user_id(principal, db)
+    user_id = await resolve_user_id(principal, db)
     jobs = await schedule_service.list_jobs(db, user_id)
     return ScheduledJobListResponse(jobs=[_job_to_response(j) for j in jobs])
 
@@ -125,7 +113,7 @@ async def get_scheduled_job(
     if not is_database_configured():
         raise HTTPException(status_code=503, detail="Database not configured")
 
-    user_id = await _get_user_id(principal, db)
+    user_id = await resolve_user_id(principal, db)
     job = await schedule_service.get_job(db, job_id, user_id)
     if not job:
         raise HTTPException(status_code=404, detail="Scheduled job not found")
@@ -148,23 +136,30 @@ async def update_scheduled_job(
     if not is_database_configured():
         raise HTTPException(status_code=503, detail="Database not configured")
 
-    user_id = await _get_user_id(principal, db)
+    user_id = await resolve_user_id(principal, db)
     job = await schedule_service.get_job(db, job_id, user_id)
     if not job:
         raise HTTPException(status_code=404, detail="Scheduled job not found")
 
     if req.title is not None:
         job.title = req.title
+
+    schedule_changed = False
     if req.schedule_expression is not None:
         job.schedule_expression = req.schedule_expression
+        schedule_changed = True
     if req.schedule_timezone is not None:
         job.schedule_timezone = req.schedule_timezone
+        schedule_changed = True
 
     if req.status is not None:
         if req.status == "paused" and job.status == "active":
             await schedule_service.pause_job(db, job)
         elif req.status == "active" and job.status == "paused":
             await schedule_service.resume_job(db, job)
+    elif schedule_changed:
+        # Sync expression/timezone change to EventBridge (if no status change already did it)
+        await schedule_service.update_eventbridge_schedule(job)
 
     await db.commit()
     return _job_to_response(job)
@@ -180,7 +175,7 @@ async def delete_scheduled_job(
     if not is_database_configured():
         raise HTTPException(status_code=503, detail="Database not configured")
 
-    user_id = await _get_user_id(principal, db)
+    user_id = await resolve_user_id(principal, db)
     job = await schedule_service.get_job(db, job_id, user_id)
     if not job:
         raise HTTPException(status_code=404, detail="Scheduled job not found")
@@ -199,7 +194,7 @@ async def list_executions(
     if not is_database_configured():
         raise HTTPException(status_code=503, detail="Database not configured")
 
-    user_id = await _get_user_id(principal, db)
+    user_id = await resolve_user_id(principal, db)
     job = await schedule_service.get_job(db, job_id, user_id)
     if not job:
         raise HTTPException(status_code=404, detail="Scheduled job not found")

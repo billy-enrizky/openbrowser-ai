@@ -10,7 +10,7 @@ PATCH  /api/v1/auth/profiles/{id}   -- Update label
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import AuthPrincipal, get_current_user
@@ -22,28 +22,13 @@ from app.models.schemas import (
     StartAuthSessionRequest,
     UpdateAuthProfileRequest,
 )
+from app.api.deps import resolve_user_id
 from app.services import auth_profile_service
 from app.services.agent_service import agent_manager
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth/profiles", tags=["auth-profiles"])
-
-
-def _principal_to_identity(principal: AuthPrincipal | None) -> tuple[str, str | None, str | None]:
-    if principal is None:
-        return "anonymous-local-user", None, "local"
-    return principal.subject, principal.email, principal.username
-
-
-async def _get_user_id(principal: AuthPrincipal | None, db: AsyncSession) -> str:
-    """Resolve principal to user_id (ensures user row exists)."""
-    from app.services.chat_service import ChatService
-
-    sub, email, username = _principal_to_identity(principal)
-    service = ChatService(db)
-    user = await service.ensure_user(cognito_sub=sub, email=email, username=username)
-    return user.id
 
 
 def _profile_to_response(profile) -> AuthProfileResponse:
@@ -80,17 +65,28 @@ async def start_auth_session(
         use_vision=False,
     )
 
-    # Start VNC + browser but don't run the agent
-    from openbrowser import BrowserSession, BrowserProfile
+    try:
+        # Start VNC + browser but don't run the agent
+        from openbrowser import BrowserSession, BrowserProfile
 
-    session.vnc_session = await session._setup_vnc()
-    await session._setup_new_browser(BrowserSession, BrowserProfile)
+        session.vnc_session = await session._setup_vnc()
+        await session._setup_new_browser(BrowserSession, BrowserProfile)
 
-    # Navigate to the domain
-    page = await session.browser_session.get_current_page()
-    if not page:
-        raise HTTPException(status_code=500, detail="Failed to get browser page")
-    await page.goto(f"https://{req.domain}")
+        # Navigate to the domain
+        page = await session.browser_session.get_current_page()
+        if not page:
+            raise HTTPException(status_code=500, detail="Failed to get browser page")
+        await page.goto(f"https://{req.domain}")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Failed to set up auth browser session: %s", e)
+        try:
+            await session._cleanup()
+            await agent_manager.remove_session(task_id)
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail="Failed to start browser session")
 
     vnc_url = session.vnc_session.websocket_url if session.vnc_session else None
 
@@ -112,7 +108,7 @@ async def save_auth_profile(
     if not is_database_configured():
         raise HTTPException(status_code=503, detail="Database not configured")
 
-    user_id = await _get_user_id(principal, db)
+    user_id = await resolve_user_id(principal, db)
 
     # Get the browser session
     session = await agent_manager.get_session(req.task_id)
@@ -125,7 +121,7 @@ async def save_auth_profile(
         storage_state = await session.browser_session.export_storage_state()
     except Exception as e:
         logger.exception("Failed to export storage state: %s", e)
-        raise HTTPException(status_code=500, detail=f"Failed to capture auth state: {e}")
+        raise HTTPException(status_code=500, detail="Failed to capture auth state")
 
     # Save profile
     try:
@@ -159,7 +155,7 @@ async def list_auth_profiles(
     if not is_database_configured():
         return AuthProfileListResponse(profiles=[])
 
-    user_id = await _get_user_id(principal, db)
+    user_id = await resolve_user_id(principal, db)
     profiles = await auth_profile_service.list_profiles(db, user_id)
     return AuthProfileListResponse(profiles=[_profile_to_response(p) for p in profiles])
 
@@ -174,7 +170,7 @@ async def get_auth_profile(
     if not is_database_configured():
         raise HTTPException(status_code=503, detail="Database not configured")
 
-    user_id = await _get_user_id(principal, db)
+    user_id = await resolve_user_id(principal, db)
     profile = await auth_profile_service.get_profile(db, profile_id, user_id)
     if not profile:
         raise HTTPException(status_code=404, detail="Auth profile not found")
@@ -191,7 +187,7 @@ async def delete_auth_profile(
     if not is_database_configured():
         raise HTTPException(status_code=503, detail="Database not configured")
 
-    user_id = await _get_user_id(principal, db)
+    user_id = await resolve_user_id(principal, db)
     deleted = await auth_profile_service.revoke_profile(db, profile_id, user_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Auth profile not found")
@@ -209,7 +205,7 @@ async def update_auth_profile(
     if not is_database_configured():
         raise HTTPException(status_code=503, detail="Database not configured")
 
-    user_id = await _get_user_id(principal, db)
+    user_id = await resolve_user_id(principal, db)
     profile = await auth_profile_service.update_label(db, profile_id, user_id, req.label)
     if not profile:
         raise HTTPException(status_code=404, detail="Auth profile not found")
