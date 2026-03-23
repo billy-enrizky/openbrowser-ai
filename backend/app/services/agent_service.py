@@ -3,7 +3,7 @@
 import asyncio
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 from uuid import uuid4
 
@@ -80,6 +80,7 @@ class AgentSession:
         self.result: str | None = None
         self.success: bool | None = None
         self.error: str | None = None
+        self.created_at: datetime = datetime.now(timezone.utc)
         self.started_at: datetime | None = None
         self.completed_at: datetime | None = None
     
@@ -795,6 +796,56 @@ class AgentManager:
             ]
             for task_id in to_remove:
                 del self.sessions[task_id]
+
+    async def cleanup_stale_sessions(self, max_age_minutes: int = 30):
+        """Remove idle sessions older than max_age_minutes (e.g. orphaned auth sessions)."""
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=max_age_minutes)
+        async with self._lock:
+            stale = [
+                task_id for task_id, session in self.sessions.items()
+                if not session.is_running
+                and session.completed_at is None
+                and session.created_at < cutoff
+            ]
+        for task_id in stale:
+            logger.info("Cleaning up stale session %s (idle > %d min)", task_id, max_age_minutes)
+            try:
+                session = self.sessions.get(task_id)
+                if session:
+                    await session._cleanup()
+                await self.remove_session(task_id)
+            except Exception as e:
+                logger.warning("Error cleaning up stale session %s: %s", task_id, e)
+
+
+_cleanup_task: asyncio.Task | None = None
+
+
+async def _session_cleanup_loop():
+    """Background loop that periodically cleans up stale and completed sessions."""
+    while True:
+        try:
+            await asyncio.sleep(300)  # Check every 5 minutes
+            await agent_manager.cleanup_stale_sessions(max_age_minutes=30)
+            await agent_manager.cleanup_completed()
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.warning("Session cleanup error: %s", e)
+
+
+def start_cleanup_task():
+    """Start the background cleanup loop. Call from app lifespan."""
+    global _cleanup_task
+    _cleanup_task = asyncio.create_task(_session_cleanup_loop())
+
+
+def stop_cleanup_task():
+    """Stop the background cleanup loop. Call from app lifespan."""
+    global _cleanup_task
+    if _cleanup_task:
+        _cleanup_task.cancel()
+        _cleanup_task = None
 
 
 # Global agent manager instance

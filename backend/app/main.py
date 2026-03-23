@@ -29,8 +29,11 @@ async def lifespan(app: FastAPI):
     logger.info("Starting OpenBrowser Backend API")
     await init_database()
     from app.services import sqs_worker
+    from app.services.agent_service import start_cleanup_task, stop_cleanup_task
     await sqs_worker.start()
+    start_cleanup_task()
     yield
+    stop_cleanup_task()
     await sqs_worker.stop()
     logger.info("Shutting down OpenBrowser Backend API")
 
