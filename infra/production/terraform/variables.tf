@@ -14,3 +14,7 @@ variable "backend_iam_role_name" {
   description = "Name of the existing backend ECS task IAM role to attach new policies to"
   type        = string
 }
+
+data "aws_iam_role" "backend" {
+  name = var.backend_iam_role_name
+}

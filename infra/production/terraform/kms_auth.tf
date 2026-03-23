@@ -23,7 +23,7 @@ resource "aws_kms_key" "auth_data" {
         Sid    = "BackendEnvelopeEncryption"
         Effect = "Allow"
         Principal = {
-          AWS = aws_iam_role.backend.arn
+          AWS = data.aws_iam_role.backend.arn
         }
         Action = [
           "kms:GenerateDataKey",
