@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+from functools import lru_cache
 
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,6 +14,7 @@ from app.db.models import JobExecution, ScheduledJob
 logger = logging.getLogger(__name__)
 
 
+@lru_cache(maxsize=1)
 def _get_scheduler_client():
     import boto3
     return boto3.client("scheduler", region_name=os.getenv("AWS_REGION", "ca-central-1"))
@@ -27,6 +29,8 @@ def _get_sqs_arn() -> str:
     if not queue_url:
         raise RuntimeError("SQS_SCHEDULE_QUEUE_URL not configured")
     parts = queue_url.rstrip("/").split("/")
+    if len(parts) < 5 or not parts[-2].isdigit():
+        raise RuntimeError(f"Cannot parse SQS queue URL (expected standard format): {queue_url}")
     account_id = parts[-2]
     queue_name = parts[-1]
     region = queue_url.split(".")[1]
