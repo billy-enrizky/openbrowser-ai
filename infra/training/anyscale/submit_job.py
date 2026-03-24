@@ -68,6 +68,7 @@ JOB_CONFIGS = {
     "espo-fsdfm": JOBS_DIR / "espo_fsdfm_job.yaml",
     "eval-espo-refusion": JOBS_DIR / "eval_espo_refusion_job.yaml",
     "eval-espo-fsdfm": JOBS_DIR / "eval_espo_fsdfm_job.yaml",
+    "push-to-hf": JOBS_DIR / "push_to_hf_job.yaml",
 }
 
 # Secret env vars to inject from .env into Anyscale jobs
@@ -96,6 +97,19 @@ def _load_dotenv() -> dict[str, str]:
     return env_vars
 
 
+def _ensure_anyscale_auth():
+    """Load ANYSCALE_CLI_TOKEN from .env into os.environ if not already set."""
+    if os.environ.get("ANYSCALE_CLI_TOKEN"):
+        return
+    dotenv = _load_dotenv()
+    token = dotenv.get("ANYSCALE_CLI_TOKEN")
+    if token:
+        os.environ["ANYSCALE_CLI_TOKEN"] = token
+        logger.info("Loaded ANYSCALE_CLI_TOKEN from .env")
+    else:
+        logger.warning("ANYSCALE_CLI_TOKEN not found -- run 'anyscale login' if auth fails")
+
+
 def _get_secret_env_flags() -> list[str]:
     """Build --env KEY=VALUE flags for secrets from .env or os.environ."""
     dotenv = _load_dotenv()
@@ -112,6 +126,7 @@ def _get_secret_env_flags() -> list[str]:
 
 def submit_job(job_name: str, wait: bool = False):
     """Submit a job to Anyscale."""
+    _ensure_anyscale_auth()
     config_path = JOB_CONFIGS.get(job_name)
     if not config_path:
         logger.error(f"Unknown job: {job_name}. Available: {list(JOB_CONFIGS.keys())}")
