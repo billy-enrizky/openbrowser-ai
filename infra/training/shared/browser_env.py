@@ -460,13 +460,29 @@ class BrowserEnvironment:
 
         Chromium accumulates memory and event handler state over many
         navigations, eventually causing timeouts.  A full restart clears
-        all of that.
+        all of that.  We force-kill all chromium/chrome processes at the
+        OS level to ensure no zombie processes linger.
         """
         logger.info("Restarting browser (killing old session)")
         try:
-            await self.browser_session.kill()
+            await asyncio.wait_for(self.browser_session.kill(), timeout=5.0)
+        except asyncio.TimeoutError:
+            logger.warning("browser_session.kill() timed out after 5s")
         except Exception as e:
             logger.warning("Error killing browser during restart: %s", e)
+
+        # Force-kill any lingering chromium/chrome processes at OS level
+        for proc_name in ("chromium", "chrome", "headless_shell"):
+            try:
+                subprocess.run(
+                    ["pkill", "-9", "-f", proc_name],
+                    capture_output=True, timeout=3,
+                )
+            except Exception:
+                pass
+
+        # Brief pause to let OS reclaim resources
+        await asyncio.sleep(1.0)
 
         # Re-create session and tools
         executable = _find_chromium_binary()
