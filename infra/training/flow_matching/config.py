@@ -171,10 +171,10 @@ FSDFM_SFT_CONFIG = {
 }
 
 ONLINE_FSDFM_GRPO_CONFIG = {
-    "group_size": 2,
+    "group_size": 4,                   # G=2 gave zero advantages; G=4 for better signal
     "learning_rate": 5e-5,
     "num_epochs": int(os.environ.get("NUM_EPOCHS", "1")),
-    "kl_coeff": 0.05,
+    "kl_coeff": 0.04,                 # Aligned with Flow-GRPO config
     "clip_range": 0.2,
     "bf16": True,
     "logging_steps": 5,
