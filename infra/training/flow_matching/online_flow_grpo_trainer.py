@@ -133,6 +133,11 @@ async def train():
                     logger.warning(f"Skipping prompt {i}: missing condition or url")
                     continue
 
+                # Periodic browser restart to prevent session degradation
+                if i > 0 and i % 5 == 0:
+                    logger.info("Periodic browser restart (prompt %d)", i)
+                    await browser_env.restart()
+
                 # Tokenize condition
                 condition_ids = tokenize_for_flow(
                     [condition_text], max_seq_length, vocab_size, device
@@ -169,8 +174,24 @@ async def train():
                         element_map = await browser_env.get_element_map()
                     except Exception as e:
                         logger.warning(f"Navigation failed for rollout {g}: {e}")
-                        rewards.append(0.0)
-                        continue
+                        # Reactive restart: browser likely degraded
+                        logger.info("Restarting browser after navigation failure")
+                        await browser_env.restart()
+                        try:
+                            await browser_env.tools.navigate(
+                                url=form_url,
+                                new_tab=False,
+                                browser_session=browser_env.browser_session,
+                            )
+                            await asyncio.sleep(0.5)
+                            element_map = await browser_env.get_element_map()
+                        except Exception as e2:
+                            logger.warning(
+                                "Navigation still failed after restart for rollout %d: %s",
+                                g, e2,
+                            )
+                            rewards.append(0.0)
+                            continue
 
                     # Parse rollout text into executable actions
                     actions = parse_rollout_to_actions(rollout_text, element_map)

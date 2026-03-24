@@ -452,6 +452,37 @@ class BrowserEnvironment:
             except Exception as e:
                 logger.warning(f"Browser reset failed: {e}")
 
+    async def restart(self) -> None:
+        """Kill and relaunch the browser to prevent session degradation.
+
+        Chromium accumulates memory and event handler state over many
+        navigations, eventually causing timeouts.  A full restart clears
+        all of that.
+        """
+        headless = self.browser_session.headless
+        logger.info("Restarting browser (killing old session)")
+        try:
+            await self.browser_session.kill()
+        except Exception as e:
+            logger.warning("Error killing browser during restart: %s", e)
+
+        # Re-create session and tools
+        executable = _find_chromium_binary()
+        allowed = ["localhost", "127.0.0.1", "about:blank"]
+        if executable:
+            self.browser_session = BrowserSession(
+                headless=headless,
+                executable_path=executable,
+                allowed_domains=allowed,
+            )
+        else:
+            self.browser_session = BrowserSession(
+                headless=headless, allowed_domains=allowed
+            )
+        await self.browser_session.start()
+        self.tools = Tools()
+        logger.info("Browser restarted successfully")
+
     async def close(self) -> None:
         """Shutdown browser."""
         try:
