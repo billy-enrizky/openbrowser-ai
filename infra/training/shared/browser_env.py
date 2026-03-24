@@ -135,9 +135,12 @@ class BrowserEnvironment:
     sequences are executed against FormFactory forms.
     """
 
-    def __init__(self, browser_session: BrowserSession, tools: Tools):
+    def __init__(
+        self, browser_session: BrowserSession, tools: Tools, headless: bool = True
+    ):
         self.browser_session = browser_session
         self.tools = tools
+        self._headless = headless
 
     @classmethod
     async def create(cls, headless: bool = True) -> "BrowserEnvironment":
@@ -163,7 +166,7 @@ class BrowserEnvironment:
         await browser_session.start()
         tools = Tools()
         logger.info("Browser environment created")
-        return cls(browser_session, tools)
+        return cls(browser_session, tools, headless=headless)
 
     async def get_element_map(self) -> dict[str, int]:
         """Build field_name -> element_index mapping from current page DOM.
@@ -459,7 +462,6 @@ class BrowserEnvironment:
         navigations, eventually causing timeouts.  A full restart clears
         all of that.
         """
-        headless = self.browser_session.headless
         logger.info("Restarting browser (killing old session)")
         try:
             await self.browser_session.kill()
@@ -471,13 +473,13 @@ class BrowserEnvironment:
         allowed = ["localhost", "127.0.0.1", "about:blank"]
         if executable:
             self.browser_session = BrowserSession(
-                headless=headless,
+                headless=self._headless,
                 executable_path=executable,
                 allowed_domains=allowed,
             )
         else:
             self.browser_session = BrowserSession(
-                headless=headless, allowed_domains=allowed
+                headless=self._headless, allowed_domains=allowed
             )
         await self.browser_session.start()
         self.tools = Tools()
