@@ -421,6 +421,15 @@ async def train():
                         f"kl={avg_kl:.4f}"
                     )
 
+                # Intermediate checkpoint every 25 steps
+                if total_steps % 25 == 0:
+                    ckpt_dir = Path("outputs/fsdfm_online_grpo/final")
+                    ckpt_dir.mkdir(parents=True, exist_ok=True)
+                    save_lora_weights(policy_model, str(ckpt_dir / "lora_weights.pt"))
+                    tokenizer.save_pretrained(str(ckpt_dir))
+                    persist_checkpoint(str(ckpt_dir.parent), "online-fsdfm-grpo")
+                    logger.info(f"  Intermediate checkpoint saved at step {total_steps}")
+
             # Epoch summary
             if epoch_rewards:
                 epoch_avg = sum(epoch_rewards) / len(epoch_rewards)

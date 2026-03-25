@@ -249,6 +249,14 @@ async def train():
                         f"loss={loss.item():.4f}"
                     )
 
+                # Intermediate checkpoint every 25 steps
+                if total_steps % 25 == 0:
+                    ckpt_dir = Path("outputs/flow_matching_online_grpo")
+                    ckpt_dir.mkdir(parents=True, exist_ok=True)
+                    torch.save(model.state_dict(), str(ckpt_dir / "model.pt"))
+                    persist_checkpoint(str(ckpt_dir), "online-flow-grpo")
+                    logger.info(f"  Intermediate checkpoint saved at step {total_steps}")
+
             # Epoch summary
             if epoch_rewards:
                 epoch_avg = sum(epoch_rewards) / len(epoch_rewards)
