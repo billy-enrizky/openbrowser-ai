@@ -40,7 +40,6 @@ Usage:
 """
 
 import asyncio
-import json
 import logging
 import os
 import random
@@ -68,7 +67,7 @@ from infra.training.shared.browser_env import BrowserEnvironment
 from infra.training.shared.formfactory_server import FormFactoryServer
 from infra.training.shared.online_reward import compute_online_reward
 from infra.training.shared.reward_functions import compute_grpo_advantages
-from infra.training.shared.utils import persist_checkpoint, resolve_data_path
+from infra.training.shared.utils import load_prompts, persist_checkpoint, resolve_data_path
 
 logging.basicConfig(
     level=logging.INFO,
@@ -78,17 +77,6 @@ logger = logging.getLogger(__name__)
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
-
-def load_prompts(file_path: str, max_samples: int = 0) -> list[dict]:
-    """Load prompts for CJ-GRPO rollouts."""
-    records = []
-    with open(file_path) as f:
-        for line in f:
-            records.append(json.loads(line))
-    if max_samples > 0:
-        records = records[:max_samples]
-    logger.info("Loaded %d prompts for FS-DFM CJ-GRPO", len(records))
-    return records
 
 
 def cache_discrete_step_logprobs(

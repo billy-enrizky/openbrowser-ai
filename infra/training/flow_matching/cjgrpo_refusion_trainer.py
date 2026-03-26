@@ -40,7 +40,6 @@ Usage:
 """
 
 import asyncio
-import json
 import logging
 import os
 import random
@@ -49,7 +48,7 @@ from pathlib import Path
 import torch
 import torch.nn.functional as F
 from peft import LoraConfig, PeftModel, get_peft_model, prepare_model_for_kbit_training
-from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+from transformers import AutoTokenizer
 
 from infra.training.flow_matching.config import (
     CJGRPO_REFUSION_CONFIG,
@@ -65,7 +64,12 @@ from infra.training.shared.browser_env import BrowserEnvironment
 from infra.training.shared.formfactory_server import FormFactoryServer
 from infra.training.shared.online_reward import compute_online_reward
 from infra.training.shared.reward_functions import compute_grpo_advantages
-from infra.training.shared.utils import persist_checkpoint, resolve_data_path
+from infra.training.shared.utils import (
+    load_prompts,
+    load_quantized_model,
+    persist_checkpoint,
+    resolve_data_path,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -75,41 +79,6 @@ logger = logging.getLogger(__name__)
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
-
-def load_quantized_model(model_name: str, config: dict):
-    """Load ReFusion with 4-bit quantization."""
-    compute_dtype = (
-        torch.bfloat16
-        if config["bnb_4bit_compute_dtype"] == "bfloat16"
-        else torch.float16
-    )
-    trust_remote_code = config.get("trust_remote_code", True)
-    bnb_config = BitsAndBytesConfig(
-        load_in_4bit=config["load_in_4bit"],
-        bnb_4bit_quant_type=config["bnb_4bit_quant_type"],
-        bnb_4bit_use_double_quant=config["bnb_4bit_use_double_quant"],
-        bnb_4bit_compute_dtype=compute_dtype,
-    )
-    model = AutoModelForCausalLM.from_pretrained(
-        model_name,
-        quantization_config=bnb_config,
-        device_map="auto",
-        torch_dtype=compute_dtype,
-        trust_remote_code=trust_remote_code,
-    )
-    return model
-
-
-def load_prompts(file_path: str, max_samples: int = 0) -> list[dict]:
-    """Load prompts for CJ-GRPO rollouts."""
-    records = []
-    with open(file_path) as f:
-        for line in f:
-            records.append(json.loads(line))
-    if max_samples > 0:
-        records = records[:max_samples]
-    logger.info("Loaded %d prompts for ReFusion CJ-GRPO", len(records))
-    return records
 
 
 def cache_step_logprobs(

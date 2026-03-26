@@ -43,7 +43,6 @@ Usage:
 """
 
 import asyncio
-import json
 import logging
 import os
 from pathlib import Path
@@ -51,7 +50,7 @@ from pathlib import Path
 import torch
 import torch.nn.functional as F
 from peft import LoraConfig, PeftModel, get_peft_model, prepare_model_for_kbit_training
-from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+from transformers import AutoTokenizer
 
 from infra.training.flow_matching.config import (
     DATA_CONFIG,
@@ -67,7 +66,14 @@ from infra.training.shared.browser_env import BrowserEnvironment
 from infra.training.shared.formfactory_server import FormFactoryServer
 from infra.training.shared.online_reward import compute_online_reward
 from infra.training.shared.proxy_reward import compute_proxy_reward
-from infra.training.shared.utils import persist_checkpoint, resolve_data_path
+from infra.training.shared.utils import (
+    compute_temporal_advantages,
+    load_prompts,
+    load_quantized_model,
+    persist_checkpoint,
+    resolve_data_path,
+    select_training_steps,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -77,152 +83,6 @@ logger = logging.getLogger(__name__)
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
-
-# ---------------------------------------------------------------------------
-# Model loading (same as CJ-GRPO)
-# ---------------------------------------------------------------------------
-
-
-def load_quantized_model(model_name: str, config: dict):
-    """Load ReFusion with 4-bit quantization."""
-    compute_dtype = (
-        torch.bfloat16
-        if config["bnb_4bit_compute_dtype"] == "bfloat16"
-        else torch.float16
-    )
-    trust_remote_code = config.get("trust_remote_code", True)
-    bnb_config = BitsAndBytesConfig(
-        load_in_4bit=config["load_in_4bit"],
-        bnb_4bit_quant_type=config["bnb_4bit_quant_type"],
-        bnb_4bit_use_double_quant=config["bnb_4bit_use_double_quant"],
-        bnb_4bit_compute_dtype=compute_dtype,
-    )
-    model = AutoModelForCausalLM.from_pretrained(
-        model_name,
-        quantization_config=bnb_config,
-        device_map="auto",
-        torch_dtype=compute_dtype,
-        trust_remote_code=trust_remote_code,
-    )
-    return model
-
-
-def load_prompts(file_path: str, max_samples: int = 0) -> list[dict]:
-    """Load prompts for MDPO rollouts."""
-    records = []
-    with open(file_path) as f:
-        for line in f:
-            records.append(json.loads(line))
-    if max_samples > 0:
-        records = records[:max_samples]
-    logger.info("Loaded %d prompts for ReFusion MDPO", len(records))
-    return records
-
-
-# ---------------------------------------------------------------------------
-# Temporal advantage computation (adv-v3 + adv-v4)
-# ---------------------------------------------------------------------------
-
-
-def compute_temporal_advantages(rewards: torch.Tensor) -> torch.Tensor:
-    """Compute MDPO temporal advantages from per-step reward tensor.
-
-    Implements adv-v3 (reward delta + 1) and adv-v4 (cumulative future average),
-    then group-normalizes per step across G rollouts.
-
-    Args:
-        rewards: [G, T] tensor of per-step rewards (proxy for intermediate,
-                 browser for final).
-
-    Returns:
-        [G, T] tensor of group-normalized temporal advantages.
-    """
-    G, T = rewards.shape
-
-    # adv-v3: reward delta + 1
-    # First step: use raw reward; subsequent steps: delta from previous
-    deltas = torch.cat(
-        [rewards[:, 0:1], rewards[:, 1:] - rewards[:, :-1]],
-        dim=-1,
-    )
-    all_step_advantages = deltas + 1.0
-
-    # adv-v4: add cumulative future average reward
-    if T > 1:
-        future_rewards = rewards[:, 1:]  # [G, T-1]
-        cum_future = future_rewards.flip(-1).cumsum(-1).flip(-1)  # [G, T-1]
-        divisor = torch.arange(
-            T - 1, 0, -1, device=rewards.device
-        ).unsqueeze(0).float()  # [1, T-1] values: T-1, T-2, ..., 1
-        future_avg = cum_future / divisor  # [G, T-1]
-        all_step_advantages[:, :-1] += future_avg
-
-    # Add terminal reward to final step advantage
-    all_step_advantages[:, -1:] += rewards[:, -1:]
-
-    # Group-normalize per step (across G rollouts)
-    mean = all_step_advantages.mean(dim=0, keepdim=True)  # [1, T]
-    std = all_step_advantages.std(dim=0, keepdim=True)  # [1, T]
-    advantages = (all_step_advantages - mean) / (std + 1e-4)
-
-    return advantages
-
-
-# ---------------------------------------------------------------------------
-# Top-k step selection with diversity guard
-# ---------------------------------------------------------------------------
-
-
-def select_training_steps(advantages: torch.Tensor, k: int) -> list[int]:
-    """Select top-k training steps by advantage magnitude with diversity guard.
-
-    Args:
-        advantages: [G, T] tensor of temporal advantages.
-        k: Number of steps to select.
-
-    Returns:
-        Sorted list of step indices to train on.
-    """
-    T = advantages.shape[1]
-    k = min(k, T)
-
-    if k >= T:
-        return list(range(T))
-
-    # Sum absolute advantage across rollouts to get per-step importance
-    step_importance = advantages.abs().sum(dim=0)  # [T]
-    _, top_indices = step_importance.topk(k)
-    selected = top_indices.tolist()
-
-    # Diversity guard: ensure at least 2 of k steps from first half
-    midpoint = T // 2
-    if midpoint > 0:
-        first_half = [s for s in selected if s < midpoint]
-        min_first_half = min(2, midpoint)
-
-        if len(first_half) < min_first_half:
-            # Find how many first-half steps we need to add
-            needed = min_first_half - len(first_half)
-
-            # Get all first-half indices sorted by importance (descending)
-            first_half_importances = step_importance[:midpoint]
-            _, fh_sorted = first_half_importances.sort(descending=True)
-            candidates = [
-                idx.item() for idx in fh_sorted if idx.item() not in selected
-            ]
-
-            # Get second-half steps in selected, sorted by importance (ascending)
-            second_half_in_selected = [s for s in selected if s >= midpoint]
-            second_half_in_selected.sort(
-                key=lambda s: step_importance[s].item()
-            )
-
-            # Replace lowest-importance second-half steps with best first-half
-            for i in range(min(needed, len(candidates), len(second_half_in_selected))):
-                selected.remove(second_half_in_selected[i])
-                selected.append(candidates[i])
-
-    return sorted(selected)
 
 
 # ---------------------------------------------------------------------------
