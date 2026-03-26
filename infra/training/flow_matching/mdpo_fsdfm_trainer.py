@@ -507,8 +507,9 @@ async def train():
                     await asyncio.sleep(0.5)
                     element_map = await browser_env.get_element_map()
                 except Exception as e:
-                    logger.warning(
-                        "Navigation failed for proxy reward: %s", e
+                    logger.error(
+                        "Navigation failed for proxy reward (all step "
+                        "rewards will be 0 for this prompt): %s", e
                     )
                     element_map = {}
 
