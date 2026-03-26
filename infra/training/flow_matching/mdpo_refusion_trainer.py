@@ -373,6 +373,7 @@ async def train():
     prompts = load_prompts(
         train_file,
         max_samples=DATA_CONFIG.get("max_train_samples", 0),
+        shuffle=mdpo_config.get("shuffle_prompts", True),
     )
 
     trainable_params = [p for p in policy_model.parameters() if p.requires_grad]
