@@ -126,8 +126,8 @@ def compute_temporal_advantages(rewards: torch.Tensor) -> torch.Tensor:
         future_rewards = rewards[:, 1:]  # [G, T-1]
         cum_future = future_rewards.flip(-1).cumsum(-1).flip(-1)  # [G, T-1]
         divisor = torch.arange(
-            1, T, device=rewards.device
-        ).unsqueeze(0).float()  # [1, T-1] values: 1, 2, ..., T-1
+            T - 1, 0, -1, device=rewards.device
+        ).unsqueeze(0).float()  # [1, T-1] values: T-1, T-2, ..., 1
         future_avg = cum_future / divisor  # [G, T-1]
         all_step_advantages[:, :-1] += future_avg
 
