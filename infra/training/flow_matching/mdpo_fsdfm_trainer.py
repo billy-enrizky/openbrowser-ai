@@ -817,6 +817,10 @@ async def train():
                         str(step_dir / "lora_weights.pt"),
                     )
                     tokenizer.save_pretrained(str(step_dir))
+                    persist_checkpoint(
+                        str(step_dir),
+                        "mdpo-fsdfm/step_%d" % total_steps,
+                    )
                     logger.info("Intermediate checkpoint saved to %s", step_dir)
 
                 if total_steps % mdpo_config["logging_steps"] == 0:
