@@ -148,24 +148,117 @@ def load_quantized_model(model_name: str, config: dict):
         config: Model config dict with bnb_4bit_* keys.
 
     Returns:
-        Tuple of (model, tokenizer).
+        The quantized model (caller loads tokenizer separately).
     """
+    compute_dtype = (
+        torch.bfloat16
+        if config.get("bnb_4bit_compute_dtype", "bfloat16") == "bfloat16"
+        else torch.float16
+    )
+    trust_remote_code = config.get("trust_remote_code", True)
     bnb_config = BitsAndBytesConfig(
-        load_in_4bit=True,
+        load_in_4bit=config.get("load_in_4bit", True),
         bnb_4bit_quant_type=config.get("bnb_4bit_quant_type", "nf4"),
         bnb_4bit_use_double_quant=config.get("bnb_4bit_use_double_quant", True),
-        bnb_4bit_compute_dtype=torch.bfloat16,
+        bnb_4bit_compute_dtype=compute_dtype,
     )
-
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
-
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
         quantization_config=bnb_config,
         device_map="auto",
-        torch_dtype=torch.bfloat16,
+        torch_dtype=compute_dtype,
+        trust_remote_code=trust_remote_code,
     )
+    return model
 
-    return model, tokenizer
+
+def compute_temporal_advantages(rewards: torch.Tensor) -> torch.Tensor:
+    """Compute MDPO temporal advantages from per-step reward tensor.
+
+    Implements adv-v3 (reward delta + 1) and adv-v4 (cumulative future average),
+    then group-normalizes per step across G rollouts.
+
+    Args:
+        rewards: [G, T] tensor of per-step rewards (proxy for intermediate,
+                 browser for final).
+
+    Returns:
+        [G, T] tensor of group-normalized temporal advantages.
+    """
+    G, T = rewards.shape
+
+    # adv-v3: reward delta + 1
+    # First step: use raw reward; subsequent steps: delta from previous
+    deltas = torch.cat(
+        [rewards[:, 0:1], rewards[:, 1:] - rewards[:, :-1]],
+        dim=-1,
+    )
+    all_step_advantages = deltas + 1.0
+
+    # adv-v4: add cumulative future average reward
+    if T > 1:
+        future_rewards = rewards[:, 1:]  # [G, T-1]
+        cum_future = future_rewards.flip(-1).cumsum(-1).flip(-1)  # [G, T-1]
+        divisor = torch.arange(
+            T - 1, 0, -1, device=rewards.device
+        ).unsqueeze(0).float()  # [1, T-1] values: T-1, T-2, ..., 1
+        future_avg = cum_future / divisor  # [G, T-1]
+        all_step_advantages[:, :-1] += future_avg
+
+    # Add terminal reward to final step advantage
+    all_step_advantages[:, -1:] += rewards[:, -1:]
+
+    # Group-normalize per step (across G rollouts)
+    mean = all_step_advantages.mean(dim=0, keepdim=True)  # [1, T]
+    std = all_step_advantages.std(dim=0, keepdim=True)  # [1, T]
+    advantages = (all_step_advantages - mean) / (std + 1e-4)
+
+    return advantages
+
+
+def select_training_steps(advantages: torch.Tensor, k: int) -> list[int]:
+    """Select top-k training steps by advantage magnitude with diversity guard.
+
+    Args:
+        advantages: [G, T] tensor of temporal advantages.
+        k: Number of steps to select.
+
+    Returns:
+        Sorted list of step indices to train on.
+    """
+    T = advantages.shape[1]
+    k = min(k, T)
+
+    if k >= T:
+        return list(range(T))
+
+    # Sum absolute advantage across rollouts to get per-step importance
+    step_importance = advantages.abs().sum(dim=0)  # [T]
+    _, top_indices = step_importance.topk(k)
+    selected = top_indices.tolist()
+
+    # Diversity guard: ensure at least 2 of k steps from first half
+    midpoint = T // 2
+    if midpoint > 0:
+        first_half = [s for s in selected if s < midpoint]
+        min_first_half = min(2, midpoint)
+
+        if len(first_half) < min_first_half:
+            needed = min_first_half - len(first_half)
+
+            first_half_importances = step_importance[:midpoint]
+            _, fh_sorted = first_half_importances.sort(descending=True)
+            candidates = [
+                idx.item() for idx in fh_sorted if idx.item() not in selected
+            ]
+
+            second_half_in_selected = [s for s in selected if s >= midpoint]
+            second_half_in_selected.sort(
+                key=lambda s: step_importance[s].item()
+            )
+
+            for i in range(min(needed, len(candidates), len(second_half_in_selected))):
+                selected.remove(second_half_in_selected[i])
+                selected.append(candidates[i])
+
+    return sorted(selected)
