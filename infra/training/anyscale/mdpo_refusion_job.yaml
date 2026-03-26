@@ -36,6 +36,7 @@ env_vars:
   MU: "1"
   SAMPLE_TRAIN_STEPS: "8"
   WARMUP_STEPS: "5"
+  CONFIDENCE_NOISE_STD: "0.1"
   GEN_STEPS: "64"
   GEN_TEMP: "1.0"
   SHUFFLE: "true"

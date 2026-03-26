@@ -35,6 +35,7 @@ env_vars:
   EPSILON: "0.2"
   MU: "1"
   NUM_SAMPLED_TIMESTEPS: "8"
+  CONFIDENCE_NOISE_STD: "0.1"
   GEN_STEPS: "64"
   GEN_TEMP: "1.0"
   SHUFFLE: "true"
