@@ -1,7 +1,7 @@
 """Submit training jobs to Anyscale Ray.
 
-Secrets (HF_TOKEN, etc.) are loaded from .env and injected via --env flags
-so they never appear in tracked YAML files.
+Secrets (HF_TOKEN, WANDB_API_KEY, etc.) are loaded from .env and injected via
+--env flags so they never appear in tracked YAML files.
 
 Usage:
     uv run infra/training/anyscale/submit_job.py finetuning-sft
@@ -16,6 +16,14 @@ Usage:
     uv run infra/training/anyscale/submit_job.py fsdfm-sft
     uv run infra/training/anyscale/submit_job.py online-fsdfm-grpo
     uv run infra/training/anyscale/submit_job.py fsdfm-flow-grpo
+    uv run infra/training/anyscale/submit_job.py espo-refusion
+    uv run infra/training/anyscale/submit_job.py espo-fsdfm
+    uv run infra/training/anyscale/submit_job.py espo-refusion-mu8
+    uv run infra/training/anyscale/submit_job.py espo-fsdfm-mu8
+    uv run infra/training/anyscale/submit_job.py cjgrpo-refusion
+    uv run infra/training/anyscale/submit_job.py cjgrpo-fsdfm
+    uv run infra/training/anyscale/submit_job.py mdpo-refusion
+    uv run infra/training/anyscale/submit_job.py mdpo-fsdfm
     uv run infra/training/anyscale/submit_job.py eval-sft
     uv run infra/training/anyscale/submit_job.py eval-grpo
     uv run infra/training/anyscale/submit_job.py eval-fsdfm-sft
@@ -23,6 +31,14 @@ Usage:
     uv run infra/training/anyscale/submit_job.py eval-fsdfm-grpo
     uv run infra/training/anyscale/submit_job.py eval-refusion-grpo
     uv run infra/training/anyscale/submit_job.py eval-fsdfm-flow-grpo
+    uv run infra/training/anyscale/submit_job.py eval-espo-refusion
+    uv run infra/training/anyscale/submit_job.py eval-espo-fsdfm
+    uv run infra/training/anyscale/submit_job.py eval-espo-refusion-mu8
+    uv run infra/training/anyscale/submit_job.py eval-espo-fsdfm-mu8
+    uv run infra/training/anyscale/submit_job.py eval-cjgrpo-refusion
+    uv run infra/training/anyscale/submit_job.py eval-cjgrpo-fsdfm
+    uv run infra/training/anyscale/submit_job.py eval-mdpo-refusion
+    uv run infra/training/anyscale/submit_job.py eval-mdpo-fsdfm
     uv run infra/training/anyscale/submit_job.py refusion-flow-grpo
     uv run infra/training/anyscale/submit_job.py eval-refusion-flow-grpo
     uv run infra/training/anyscale/submit_job.py --list
@@ -69,11 +85,46 @@ JOB_CONFIGS = {
     "eval-espo-refusion": JOBS_DIR / "eval_espo_refusion_job.yaml",
     "eval-espo-fsdfm": JOBS_DIR / "eval_espo_fsdfm_job.yaml",
     "push-to-hf": JOBS_DIR / "push_to_hf_job.yaml",
+    # ESPO mu=8
+    "espo-refusion-mu8": JOBS_DIR / "espo_refusion_mu8_job.yaml",
+    "espo-fsdfm-mu8": JOBS_DIR / "espo_fsdfm_mu8_job.yaml",
+    # CJ-GRPO
+    "cjgrpo-refusion": JOBS_DIR / "cjgrpo_refusion_job.yaml",
+    "cjgrpo-fsdfm": JOBS_DIR / "cjgrpo_fsdfm_job.yaml",
+    # MDPO
+    "mdpo-refusion": JOBS_DIR / "mdpo_refusion_job.yaml",
+    "mdpo-fsdfm": JOBS_DIR / "mdpo_fsdfm_job.yaml",
+    # Eval (parameterized generic YAMLs with checkpoint overrides)
+    "eval-espo-refusion-mu8": {
+        "yaml": JOBS_DIR / "eval_refusion_generic_job.yaml",
+        "env_overrides": {"FLOW_LLM_SFT_CHECKPOINT": "/mnt/user_storage/openbrowser/checkpoints/espo-refusion-mu8/best"},
+    },
+    "eval-espo-fsdfm-mu8": {
+        "yaml": JOBS_DIR / "eval_fsdfm_generic_job.yaml",
+        "env_overrides": {"FSDFM_SFT_CHECKPOINT": "/mnt/user_storage/openbrowser/checkpoints/espo-fsdfm-mu8/best"},
+    },
+    "eval-cjgrpo-refusion": {
+        "yaml": JOBS_DIR / "eval_refusion_generic_job.yaml",
+        "env_overrides": {"FLOW_LLM_SFT_CHECKPOINT": "/mnt/user_storage/openbrowser/checkpoints/cjgrpo-refusion/best"},
+    },
+    "eval-cjgrpo-fsdfm": {
+        "yaml": JOBS_DIR / "eval_fsdfm_generic_job.yaml",
+        "env_overrides": {"FSDFM_SFT_CHECKPOINT": "/mnt/user_storage/openbrowser/checkpoints/cjgrpo-fsdfm/best"},
+    },
+    "eval-mdpo-refusion": {
+        "yaml": JOBS_DIR / "eval_refusion_generic_job.yaml",
+        "env_overrides": {"FLOW_LLM_SFT_CHECKPOINT": "/mnt/user_storage/openbrowser/checkpoints/mdpo-refusion/best"},
+    },
+    "eval-mdpo-fsdfm": {
+        "yaml": JOBS_DIR / "eval_fsdfm_generic_job.yaml",
+        "env_overrides": {"FSDFM_SFT_CHECKPOINT": "/mnt/user_storage/openbrowser/checkpoints/mdpo-fsdfm/best"},
+    },
 }
 
 # Secret env vars to inject from .env into Anyscale jobs
 SECRET_ENV_KEYS = [
     "HF_TOKEN",
+    "WANDB_API_KEY",
 ]
 
 
@@ -127,10 +178,18 @@ def _get_secret_env_flags() -> list[str]:
 def submit_job(job_name: str, wait: bool = False):
     """Submit a job to Anyscale."""
     _ensure_anyscale_auth()
-    config_path = JOB_CONFIGS.get(job_name)
-    if not config_path:
+    config_entry = JOB_CONFIGS.get(job_name)
+    if not config_entry:
         logger.error(f"Unknown job: {job_name}. Available: {list(JOB_CONFIGS.keys())}")
         sys.exit(1)
+
+    # Support both Path and dict entries
+    env_overrides: dict[str, str] = {}
+    if isinstance(config_entry, dict):
+        config_path = config_entry["yaml"]
+        env_overrides = config_entry.get("env_overrides", {})
+    else:
+        config_path = config_entry
 
     if not config_path.exists():
         logger.error(f"Config file not found: {config_path}")
@@ -138,6 +197,12 @@ def submit_job(job_name: str, wait: bool = False):
 
     cmd = ["anyscale", "job", "submit", "--config-file", str(config_path)]
     cmd.extend(_get_secret_env_flags())
+
+    # Apply env overrides for parameterized jobs
+    for key, value in env_overrides.items():
+        cmd.extend(["--env", f"{key}={value}"])
+        logger.info(f"Overriding env var: {key}={value}")
+
     if wait:
         cmd.append("--wait")
 
@@ -148,7 +213,7 @@ def submit_job(job_name: str, wait: bool = False):
     skip_next = False
     for part in cmd:
         if skip_next:
-            safe_cmd.append(part.split("=")[0] + "=***")
+            safe_cmd.append(part.split("=")[0] + "=***" if any(s in part for s in SECRET_ENV_KEYS) else part)
             skip_next = False
         elif part == "--env":
             safe_cmd.append(part)
@@ -169,9 +234,17 @@ def submit_job(job_name: str, wait: bool = False):
 def list_jobs():
     """List available job configs."""
     logger.info("Available job configs:")
-    for name, path in JOB_CONFIGS.items():
-        exists = "OK" if path.exists() else "MISSING"
-        logger.info(f"  {name}: {path} [{exists}]")
+    for name, config_entry in JOB_CONFIGS.items():
+        if isinstance(config_entry, dict):
+            path = config_entry["yaml"]
+            exists = "OK" if path.exists() else "MISSING"
+            overrides = config_entry.get("env_overrides", {})
+            override_str = ", ".join(f"{k}={v}" for k, v in overrides.items())
+            logger.info(f"  {name}: {path} [{exists}] (env: {override_str})")
+        else:
+            path = config_entry
+            exists = "OK" if path.exists() else "MISSING"
+            logger.info(f"  {name}: {path} [{exists}]")
 
 
 def main():
