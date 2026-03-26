@@ -228,7 +228,7 @@ async def train():
     vocab_size = model_config["vocab_size"]
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    compute_dtype = torch.bfloat16 if cjgrpo_config.get("bf16") else torch.float16
+    compute_dtype = torch.bfloat16 if cjgrpo_config.get("bf16", True) else torch.float16
 
     # Load GPT-2 tokenizer (native to FS-DFM)
     from transformers import AutoTokenizer
