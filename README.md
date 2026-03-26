@@ -1,5 +1,9 @@
 # OpenBrowser
 
+**Saved Cookies and Scheduled Tasks is available in the cloud-hosted version. Join the waitlist for early access: https://openbrowser.me** :
+
+https://github.com/user-attachments/assets/b17f97f3-f9f8-4707-8e39-abbbbe1a693b
+
 **Automating Walmart Product Scraping:**
 
 https://github.com/user-attachments/assets/c517c739-9199-47b0-bac7-c2c642a21094
