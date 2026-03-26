@@ -813,6 +813,10 @@ async def train():
                     step_dir.mkdir(parents=True, exist_ok=True)
                     policy_model.save_pretrained(str(step_dir))
                     tokenizer.save_pretrained(str(step_dir))
+                    persist_checkpoint(
+                        str(step_dir),
+                        "mdpo-refusion/step_%d" % total_steps,
+                    )
                     logger.info("Intermediate checkpoint saved to %s", step_dir)
 
                 if total_steps % mdpo_config["logging_steps"] == 0:
