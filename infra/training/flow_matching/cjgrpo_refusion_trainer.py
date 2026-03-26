@@ -432,11 +432,10 @@ async def train():
                     )
                     continue
 
-                # Periodic browser restart to reset DOM indices
-                if prompt_idx > 0 and prompt_idx % 10 == 0:
+                # Periodic browser restart to prevent session degradation
+                if prompt_idx > 0 and prompt_idx % 5 == 0:
                     logger.info("Periodic browser restart (prompt %d)", prompt_idx)
-                    await browser_env.close()
-                    browser_env = await BrowserEnvironment.create(headless=headless)
+                    await browser_env.restart()
 
                 # Tokenize condition
                 condition_enc = tokenizer(
