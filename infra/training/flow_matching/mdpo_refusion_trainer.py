@@ -152,8 +152,8 @@ def compute_temporal_advantages(rewards: torch.Tensor) -> torch.Tensor:
         future_rewards = rewards[:, 1:]  # [G, T-1]
         cum_future = future_rewards.flip(-1).cumsum(-1).flip(-1)  # [G, T-1]
         divisor = torch.arange(
-            1, T, device=rewards.device
-        ).unsqueeze(0).float()  # [1, T-1] values: 1, 2, ..., T-1
+            T - 1, 0, -1, device=rewards.device
+        ).unsqueeze(0).float()  # [1, T-1] values: T-1, T-2, ..., 1
         future_avg = cum_future / divisor  # [G, T-1]
         all_step_advantages[:, :-1] += future_avg
 
@@ -615,11 +615,10 @@ async def train():
                 # Build ground truth action strings for proxy reward
                 gt_action_strs = build_gt_action_strings(ground_truth_fields)
 
-                # Periodic browser restart to reset DOM indices
-                if prompt_idx > 0 and prompt_idx % 10 == 0:
+                # Periodic browser restart to prevent session degradation
+                if prompt_idx > 0 and prompt_idx % 5 == 0:
                     logger.info("Periodic browser restart (prompt %d)", prompt_idx)
-                    await browser_env.close()
-                    browser_env = await BrowserEnvironment.create(headless=headless)
+                    await browser_env.restart()
 
                 # Tokenize condition
                 condition_enc = tokenizer(
