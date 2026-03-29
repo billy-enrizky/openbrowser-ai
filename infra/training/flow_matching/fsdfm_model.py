@@ -268,6 +268,10 @@ class FSDFMTransformer(nn.Module):
         self.register_buffer("rotary_cos", rotary_cos, persistent=False)
         self.register_buffer("rotary_sin", rotary_sin, persistent=False)
 
+        # Gradient checkpointing: recompute block activations during backward
+        # to avoid bf16 gradient overflow through the 21-block chain.
+        self.gradient_checkpointing = False
+
         # Log parameter count
         total_params = sum(p.numel() for p in self.parameters())
         logger.info(f"FSDFMTransformer: {total_params / 1e9:.2f}B parameters")
@@ -288,8 +292,16 @@ class FSDFMTransformer(nn.Module):
         c = self.time_embedding(t)  # [B, cond_dim]
 
         # Transformer blocks
-        for block in self.blocks:
-            x = block(x, c, self.rotary_cos, self.rotary_sin)
+        if self.gradient_checkpointing and torch.is_grad_enabled():
+            from torch.utils.checkpoint import checkpoint as grad_checkpoint
+            for block in self.blocks:
+                x = grad_checkpoint(
+                    block, x, c, self.rotary_cos, self.rotary_sin,
+                    use_reentrant=False,
+                )
+        else:
+            for block in self.blocks:
+                x = block(x, c, self.rotary_cos, self.rotary_sin)
 
         # Final layer -> logits
         logits = self.output_layer(x, c)  # [B, L, V]
@@ -704,10 +716,14 @@ def discrete_euler_solve(
         # Get model predictions (posterior p_{1|t})
         logits = model(x_t, t)  # [B, L, V]
 
+        # Guard: replace NaN/Inf logits from forward pass overflow
+        if torch.isnan(logits).any() or torch.isinf(logits).any():
+            logits = torch.nan_to_num(logits, nan=0.0, posinf=1e4, neginf=-1e4)
+
         if temperature != 1.0 and temperature > 0:
             logits = logits / temperature
 
-        # float32 softmax to prevent bf16 overflow -> NaN
+        # float32 softmax to prevent overflow -> NaN in softmax itself
         probs = F.softmax(logits.float(), dim=-1)  # [B, L, V]
         del logits
 
@@ -726,8 +742,12 @@ def discrete_euler_solve(
         # Poisson jump probability: P(jump) = 1 - exp(-lambda * dt)
         jump_prob = 1.0 - torch.exp(-total_rate * dt)
 
-        # Sample which positions jump
-        jumps = torch.rand_like(jump_prob) < jump_prob  # [B, L]
+        if temperature == 0.0:
+            # Deterministic: jump where prob > 0.5, pick argmax of off-diagonal
+            jumps = jump_prob > 0.5
+        else:
+            # Stochastic: sample which positions jump
+            jumps = torch.rand_like(jump_prob) < jump_prob  # [B, L]
 
         # Apply edit mask: only editable positions can jump
         if edit_mask is not None:
@@ -747,10 +767,14 @@ def discrete_euler_solve(
             off_diag_probs / row_sums.clamp(min=1e-10),
         )
 
-        # Sample new tokens
-        new_tokens = torch.multinomial(
-            off_diag_probs.view(-1, vocab_size), num_samples=1
-        ).view(B, L)
+        if temperature == 0.0:
+            # Deterministic: argmax of off-diagonal
+            new_tokens = off_diag_probs.argmax(dim=-1)
+        else:
+            # Stochastic: sample from off-diagonal posterior
+            new_tokens = torch.multinomial(
+                off_diag_probs.view(-1, vocab_size), num_samples=1
+            ).view(B, L)
 
         # Apply jumps
         x_t = torch.where(jumps, new_tokens, x_t)
@@ -904,9 +928,21 @@ def discrete_euler_solve_with_trajectory(
 
         # Model posterior p_{1|t}
         logits = model(x_t, t)  # [B, L, V]
+
+        # Monitor: log when model forward pass produces NaN/Inf logits
+        # (common in fp16 due to activation overflow through 21 blocks)
+        if torch.isnan(logits).any() or torch.isinf(logits).any():
+            nan_frac = torch.isnan(logits).float().mean().item()
+            logger.warning(
+                "NaN/Inf logits during generation at step %d (t=%.4f), "
+                "nan=%.1f%% -- falling back to uniform for affected positions",
+                step, t_val, nan_frac * 100,
+            )
+            logits = torch.nan_to_num(logits, nan=0.0, posinf=1e4, neginf=-1e4)
+
         if temperature != 1.0 and temperature > 0:
             logits = logits / temperature
-        # float32 softmax to prevent bf16 overflow -> NaN
+        # float32 softmax to prevent overflow -> NaN in softmax itself
         probs = F.softmax(logits.float(), dim=-1)
         del logits
 
@@ -922,7 +958,13 @@ def discrete_euler_solve_with_trajectory(
 
         # Poisson jump probability
         jump_prob = 1.0 - torch.exp(-total_rate * dt)
-        jumps = torch.rand_like(jump_prob) < jump_prob
+
+        if temperature == 0.0:
+            # Deterministic: jump where prob > 0.5
+            jumps = jump_prob > 0.5
+        else:
+            # Stochastic: sample which positions jump
+            jumps = torch.rand_like(jump_prob) < jump_prob
 
         # Apply edit mask
         if edit_mask is not None:
@@ -941,9 +983,14 @@ def discrete_euler_solve_with_trajectory(
             off_diag_probs / row_sums.clamp(min=1e-10),
         )
 
-        new_tokens = torch.multinomial(
-            off_diag_probs.view(-1, vocab_size), num_samples=1
-        ).view(B, L)
+        if temperature == 0.0:
+            # Deterministic: argmax of off-diagonal
+            new_tokens = off_diag_probs.argmax(dim=-1)
+        else:
+            # Stochastic: sample from off-diagonal posterior
+            new_tokens = torch.multinomial(
+                off_diag_probs.view(-1, vocab_size), num_samples=1
+            ).view(B, L)
 
         x_t = torch.where(jumps, new_tokens, x_t)
 
@@ -1022,19 +1069,25 @@ def compute_discrete_step_log_prob(
 
     t = torch.full((B,), t_scalar, device=device, dtype=torch.float32)
 
-    # Forward pass (gradients flow if model is in train mode)
-    logits = model(x_t, t)  # [B, L, V]
+    with torch.amp.autocast(device_type="cuda", dtype=torch.float32):
+        logits = model(x_t, t)  # [B, L, V] float32
+
     # Apply same temperature as generation to match the sampling distribution
     if temperature != 1.0 and temperature > 0:
         logits = logits / temperature
-    # float32 softmax to prevent bf16 overflow -> NaN
-    probs = F.softmax(logits.float(), dim=-1)  # [B, L, V]
-    del logits  # Free [B, L, V] logits immediately
 
-    # Extract the two probability values we need, then free the full probs tensor
-    p_current = probs.gather(2, x_t.unsqueeze(-1)).squeeze(-1)  # [B, L]
-    p_jumped_to = probs.gather(2, x_next.unsqueeze(-1)).squeeze(-1)  # [B, L]
-    del probs  # Free [B, L, V] probs -- largest intermediate tensor
+    # F.log_softmax subtracts the max logit first, preventing overflow in the
+    # softmax normalization (MDPO/CJ-GRPO reference implementations do the same).
+    log_probs = F.log_softmax(logits.float(), dim=-1)  # [B, L, V]
+    del logits
+
+    # Extract log-probabilities for current and jumped-to tokens
+    log_p_current = log_probs.gather(2, x_t.unsqueeze(-1)).squeeze(-1)  # [B, L]
+    log_p_jumped_to = log_probs.gather(2, x_next.unsqueeze(-1)).squeeze(-1)  # [B, L]
+    del log_probs  # Free [B, L, V] -- largest intermediate tensor
+
+    # Derive p_current from log domain (needed for jump rates)
+    p_current = log_p_current.exp()  # [B, L]
 
     # Jump rates
     sched = scheduler(t)
@@ -1056,13 +1109,16 @@ def compute_discrete_step_log_prob(
     # log P(jump to j) = log(1 - exp(-lambda_i * dt)) + log p(j) - log(1 - p(x_t[i]))
     # Use log1p for numerical stability: log(1 - exp(-x)) = log1p(-exp(-x))
     neg_exp_term = torch.exp(-lambda_i * dt)
-    log_jump_base = torch.log1p(-neg_exp_term.clamp(max=1.0 - 1e-8))  # [B, L]
+    # Clamp MUST use eps > float32 epsilon (~1.19e-7) so 1.0-eps is representable.
+    # 1e-8 rounds to 0 in float32 near 1.0, making the clamp a no-op; log1p(-1.0)
+    # then has backward 1/(1+(-1))=1/0, and 0*inf=NaN from torch.where's zero grad.
+    log_jump_base = torch.log1p(-neg_exp_term.clamp(max=1.0 - 1e-4))  # [B, L]
 
-    # log p(j) for the actual jumped-to token
-    log_p_jumped = torch.log(p_jumped_to.clamp(min=1e-10))  # [B, L]
+    # log p(j) directly from log_softmax output (no separate log needed)
+    log_p_jumped = log_p_jumped_to  # [B, L]
 
-    # log(1 - p(x_t[i]))
-    log_one_minus_p_current = torch.log((1.0 - p_current).clamp(min=1e-8))  # [B, L]
+    # log(1 - p(x_t[i])) via log1p(-exp(log_p)) for numerical stability
+    log_one_minus_p_current = torch.log1p(-p_current.clamp(max=1.0 - 1e-4))  # [B, L]
 
     log_prob_jump = log_jump_base + log_p_jumped - log_one_minus_p_current  # [B, L]
 

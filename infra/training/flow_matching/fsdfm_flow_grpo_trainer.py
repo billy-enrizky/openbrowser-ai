@@ -129,6 +129,11 @@ async def train():
             sft_checkpoint,
         )
 
+    # Enable gradient checkpointing: recomputes block activations during
+    # backward to avoid bf16 gradient overflow through 21 DDiTBlocks.
+    policy_model.gradient_checkpointing = True
+    logger.info("Gradient checkpointing enabled for policy model")
+
     # ---------------------------------------------------------------
     # Load reference model (frozen, on CPU to save VRAM)
     # ---------------------------------------------------------------
