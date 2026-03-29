@@ -455,23 +455,8 @@ class BrowserEnvironment:
             except Exception as e:
                 logger.warning(f"Browser reset failed: {e}")
 
-    async def restart(self) -> None:
-        """Kill and relaunch the browser to prevent session degradation.
-
-        Chromium accumulates memory and event handler state over many
-        navigations, eventually causing timeouts.  A full restart clears
-        all of that.  We force-kill all chromium/chrome processes at the
-        OS level to ensure no zombie processes linger.
-        """
-        logger.info("Restarting browser (killing old session)")
-        try:
-            await asyncio.wait_for(self.browser_session.kill(), timeout=5.0)
-        except asyncio.TimeoutError:
-            logger.warning("browser_session.kill() timed out after 5s")
-        except Exception as e:
-            logger.warning("Error killing browser during restart: %s", e)
-
-        # Force-kill any lingering chromium/chrome processes at OS level
+    def _force_kill_browser_processes(self) -> None:
+        """Force-kill all chromium/chrome processes at OS level."""
         for proc_name in ("chromium", "chrome", "headless_shell"):
             try:
                 subprocess.run(
@@ -481,10 +466,8 @@ class BrowserEnvironment:
             except Exception:
                 pass
 
-        # Brief pause to let OS reclaim resources
-        await asyncio.sleep(1.0)
-
-        # Re-create session and tools
+    async def _create_fresh_session(self) -> None:
+        """Create and start a new browser session, replacing the old one."""
         executable = _find_chromium_binary()
         allowed = ["localhost", "127.0.0.1", "about:blank"]
         if executable:
@@ -499,7 +482,92 @@ class BrowserEnvironment:
             )
         await self.browser_session.start()
         self.tools = Tools()
-        logger.info("Browser restarted successfully")
+
+    async def restart(self, timeout: float = 30.0) -> None:
+        """Kill and relaunch the browser to prevent session degradation.
+
+        Chromium accumulates memory and event handler state over many
+        navigations, eventually causing timeouts.  A full restart clears
+        all of that.  We force-kill all chromium/chrome processes at the
+        OS level to ensure no zombie processes linger.
+
+        The entire restart operation is timeout-protected.  If it exceeds
+        ``timeout`` seconds, we force-kill again and retry once.
+        """
+        for attempt in range(2):
+            logger.info(
+                "Restarting browser (attempt %d, killing old session)", attempt + 1
+            )
+            try:
+                await asyncio.wait_for(self.browser_session.kill(), timeout=5.0)
+            except (asyncio.TimeoutError, Exception) as e:
+                logger.warning("browser_session.kill() failed: %s", e)
+
+            self._force_kill_browser_processes()
+            await asyncio.sleep(1.0)
+
+            try:
+                await asyncio.wait_for(
+                    self._create_fresh_session(), timeout=timeout
+                )
+                logger.info("Browser restarted successfully")
+                return
+            except asyncio.TimeoutError:
+                logger.error(
+                    "Browser restart timed out after %.0fs (attempt %d)",
+                    timeout, attempt + 1,
+                )
+                # Force-kill again before retry
+                self._force_kill_browser_processes()
+                await asyncio.sleep(2.0)
+            except Exception as e:
+                logger.error("Browser restart failed: %s (attempt %d)", e, attempt + 1)
+                self._force_kill_browser_processes()
+                await asyncio.sleep(2.0)
+
+        # If both attempts failed, raise so the caller can handle it
+        raise RuntimeError("Browser restart failed after 2 attempts")
+
+    async def safe_navigate(
+        self, url: str, nav_timeout: float = 30.0, max_retries: int = 2,
+    ) -> dict[str, int]:
+        """Navigate to a URL and build the element map, with timeout protection.
+
+        Wraps navigate + get_element_map in a hard timeout.  On failure,
+        restarts the browser and retries up to ``max_retries`` times.
+
+        Returns:
+            Element map (field_name -> element_index).
+
+        Raises:
+            RuntimeError: If all retries are exhausted.
+        """
+        last_error = None
+        for attempt in range(max_retries + 1):
+            try:
+                async with asyncio.timeout(nav_timeout):
+                    await self.tools.navigate(
+                        url=url,
+                        new_tab=False,
+                        browser_session=self.browser_session,
+                    )
+                    await asyncio.sleep(0.5)
+                    element_map = await self.get_element_map()
+                return element_map
+            except (asyncio.TimeoutError, TimeoutError, Exception) as e:
+                last_error = e
+                logger.warning(
+                    "safe_navigate attempt %d failed: %s", attempt + 1, e
+                )
+                if attempt < max_retries:
+                    try:
+                        await self.restart()
+                    except RuntimeError:
+                        logger.error("Browser restart failed during safe_navigate retry")
+
+        raise RuntimeError(
+            f"safe_navigate failed after {max_retries + 1} attempts: {last_error}"
+        )
 
     async def close(self) -> None:
         """Shutdown browser."""
