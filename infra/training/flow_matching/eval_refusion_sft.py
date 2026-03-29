@@ -155,11 +155,14 @@ async def evaluate():
 
     try:
         for i, prompt_data in enumerate(prompts):
-            # Periodic browser restart
+            # Periodic browser restart (timeout-protected)
             if i > 0 and i % 10 == 0:
                 logger.info(f"Periodic browser restart (prompt {i})")
-                await browser_env.close()
-                browser_env = await BrowserEnvironment.create(headless=headless)
+                try:
+                    await browser_env.restart()
+                except RuntimeError:
+                    logger.error("Periodic restart failed, creating fresh session")
+                    browser_env = await BrowserEnvironment.create(headless=headless)
 
             instruction = prompt_data.get("instruction", prompt_data.get("condition", ""))
             form_url = prompt_data.get("url", "")
@@ -191,18 +194,14 @@ async def evaluate():
             )
             response_text = tokenizer.decode(generated_ids[0], skip_special_tokens=True)
 
-            # Navigate to form
+            # Navigate to form (timeout-protected with retry)
             await browser_env.reset()
             try:
-                await browser_env.tools.navigate(
-                    url=form_url,
-                    new_tab=False,
-                    browser_session=browser_env.browser_session,
+                element_map = await browser_env.safe_navigate(
+                    url=form_url, nav_timeout=30.0, max_retries=2,
                 )
-                await asyncio.sleep(0.5)
-                element_map = await browser_env.get_element_map()
-            except Exception as e:
-                logger.warning(f"Navigation failed for prompt {i}: {e}")
+            except RuntimeError as e:
+                logger.warning(f"All navigation attempts failed for prompt {i}: {e}")
                 all_rewards.append(0.0)
                 results.append({"prompt_idx": i, "reward": 0.0, "error": str(e)})
                 continue
@@ -271,7 +270,8 @@ async def evaluate():
             # Persist to Anyscale storage
             anyscale_storage = Path("/mnt/user_storage/openbrowser/eval")
             if anyscale_storage.parent.parent.exists():
-                dest = anyscale_storage / "refusion-sft-only"
+                result_name = os.environ.get("EVAL_RESULT_NAME", "refusion-sft-only")
+                dest = anyscale_storage / result_name
                 dest.mkdir(parents=True, exist_ok=True)
                 import shutil
                 shutil.copy2(str(results_file), str(dest / "results.json"))
