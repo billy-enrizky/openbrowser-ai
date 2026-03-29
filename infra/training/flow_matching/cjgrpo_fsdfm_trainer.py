@@ -56,6 +56,7 @@ from infra.training.flow_matching.fsdfm_model import (
     EulerTrajectoryStep,
     PolynomialConvexScheduler,
     compute_discrete_step_log_prob,
+    generate_with_prefix_conditioning,
     generate_with_prefix_conditioning_trajectory,
     inject_lora,
     load_fsdfm_from_huggingface,
@@ -182,27 +183,46 @@ def compute_cjgrpo_discrete_step_loss(
         temperature=temperature,
     )
 
-    # Guard: skip if log-prob is NaN/Inf
+    # Guard: skip if ANY log-prob is NaN/Inf (cur, old, or ref).
+    # old_log_prob NaN was the silent killer: cur - NaN = NaN ratio,
+    # .backward() on NaN loss corrupts ALL accumulated gradients.
     if torch.isnan(cur_log_prob).any() or torch.isinf(cur_log_prob).any():
         logger.warning(
-            "NaN/Inf log_prob at step t=%.4f, skipping", step.t_value
+            "NaN/Inf cur_log_prob at step t=%.4f, skipping", step.t_value
+        )
+        return None, metrics
+    if torch.isnan(old_log_prob).any() or torch.isinf(old_log_prob).any():
+        logger.warning(
+            "NaN/Inf old_log_prob at step t=%.4f, skipping", step.t_value
+        )
+        return None, metrics
+    if torch.isnan(ref_log_prob).any() or torch.isinf(ref_log_prob).any():
+        logger.warning(
+            "NaN/Inf ref_log_prob at step t=%.4f, skipping", step.t_value
         )
         return None, metrics
 
     # Sequence-level importance ratio: exp(current - old)
     log_ratio = cur_log_prob - old_log_prob  # [B]
-    coef_1 = torch.exp(log_ratio)  # [B]
-    coef_2 = torch.clamp(coef_1, 1.0 - epsilon, 1.0 + epsilon)  # [B]
+    ratio = torch.exp(log_ratio)  # [B]
 
-    # PPO-clipped surrogate loss (sequence-level)
-    policy_loss = -torch.min(coef_1 * advantage, coef_2 * advantage).mean()
+    # StableDRL unconditional clipping: ALWAYS clip ratio, regardless of
+    # advantage sign. Standard PPO min() has a "trapdoor" when A<0 and
+    # ratio>1+eps that allows noise-induced gradient spikes (arXiv:2603.06743).
+    clipped_ratio = torch.clamp(ratio, 1.0 - epsilon, 1.0 + epsilon)  # [B]
 
-    # Reverse KL penalty (sequence-level)
-    # kl = exp(ref - current) - (ref - current) - 1
+    # Self-normalized surrogate loss: divide by sum of clipped ratios instead
+    # of fixed group size. Constrains update to convex hull of per-sample
+    # gradients, bounding gradient norm deterministically.
+    weighted = clipped_ratio * advantage  # [B]
+    policy_loss = -weighted.sum() / clipped_ratio.detach().sum().clamp(min=1e-8)
+
+    # k2 KL penalty (quadratic) -- always non-negative, bounded gradients.
+    # Replaces k3 reverse KL which has exp() terms that can explode.
     kl_loss = torch.tensor(0.0, device=cur_log_prob.device)
     if beta > 0:
-        kl_ratio = ref_log_prob - cur_log_prob  # [B]
-        kl_loss = (torch.exp(kl_ratio) - kl_ratio - 1.0).mean()
+        kl_diff = ref_log_prob - cur_log_prob  # [B]
+        kl_loss = (kl_diff ** 2 / 2.0).mean()
         # Guard: replace NaN KL with 0
         if torch.isnan(kl_loss):
             kl_loss = torch.tensor(0.0, device=cur_log_prob.device)
@@ -213,9 +233,9 @@ def compute_cjgrpo_discrete_step_loss(
     with torch.no_grad():
         metrics["policy_loss"] = policy_loss.item()
         metrics["kl_loss"] = kl_loss.item()
-        metrics["ratio_mean"] = coef_1.mean().item()
+        metrics["ratio_mean"] = ratio.mean().item()
         metrics["clipped_frac"] = (
-            (coef_1 < 1.0 - epsilon) | (coef_1 > 1.0 + epsilon)
+            (ratio < 1.0 - epsilon) | (ratio > 1.0 + epsilon)
         ).float().mean().item()
 
     return step_loss, metrics
@@ -228,7 +248,11 @@ async def train():
     vocab_size = model_config["vocab_size"]
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    compute_dtype = torch.bfloat16 if cjgrpo_config.get("bf16", True) else torch.float16
+    # bf16 (exponent range up to 3.4e38) prevents activation overflow that
+    # causes NaN in the 21-block transformer forward pass. fp16 (max 65504)
+    # overflows ~83% of per-step log-prob computations. The old concern
+    # about bf16 in log-prob chains is moot after the F.log_softmax refactor.
+    compute_dtype = torch.bfloat16 if cjgrpo_config.get("bf16", False) else torch.float16
 
     # Load GPT-2 tokenizer (native to FS-DFM)
     from transformers import AutoTokenizer
@@ -268,6 +292,11 @@ async def train():
             sft_checkpoint,
         )
 
+    # Enable gradient checkpointing: recomputes block activations during
+    # backward to avoid bf16 gradient overflow through 21 DDiTBlocks.
+    policy_model.gradient_checkpointing = True
+    logger.info("Gradient checkpointing enabled for policy model")
+
     # ---------------------------------------------------------------
     # Load reference model (frozen, on CPU to save VRAM)
     # ---------------------------------------------------------------
@@ -302,6 +331,10 @@ async def train():
     )
 
     group_size = cjgrpo_config["group_size"]
+    if group_size < 2:
+        raise ValueError(
+            "group_size must be >= 2 (1 greedy baseline + at least 1 stochastic)"
+        )
     kl_coeff = cjgrpo_config["kl_coeff"]
     epsilon = cjgrpo_config["epsilon"]
     mu = cjgrpo_config.get("mu", 1)
@@ -331,7 +364,7 @@ async def train():
 
     logger.info(
         "Starting FS-DFM CJ-GRPO: %d prompts, G=%d, kl=%.4f, eps=%.2f, "
-        "mu=%d, K=%d, T_gen=%d, temp=%.1f, max_steps=%d",
+        "mu=%d, K=%d, T_gen=%d, temp=%.1f, max_steps=%d, bf16=%s",
         len(prompts),
         group_size,
         kl_coeff,
@@ -341,7 +374,36 @@ async def train():
         num_gen_steps,
         gen_temperature,
         max_steps,
+        cjgrpo_config.get("bf16"),
     )
+
+    # ---------------------------------------------------------------
+    # Diagnostic: verify model generates coherent text before training
+    # ---------------------------------------------------------------
+    if prompts:
+        diag_prompt = prompts[0]
+        diag_inst = diag_prompt.get("instruction", diag_prompt.get("condition", ""))
+        diag_enc = tokenizer(
+            diag_inst, add_special_tokens=True, truncation=True,
+            max_length=max_seq_length // 2, return_tensors="pt",
+        )
+        diag_prefix = diag_enc["input_ids"].to(device)
+        diag_gen_len = max(1, max_seq_length - diag_prefix.shape[1])
+        policy_model.eval()
+        diag_ids = generate_with_prefix_conditioning(
+            model=policy_model,
+            prefix_ids=diag_prefix,
+            gen_length=diag_gen_len,
+            config={**model_config, "num_sampling_steps": num_gen_steps},
+            scheduler=scheduler,
+            temperature=0.0,
+        )
+        diag_text = tokenizer.decode(diag_ids[0], skip_special_tokens=True)
+        logger.info(
+            "DIAGNOSTIC greedy generation (first 300 chars): %.300s",
+            diag_text,
+        )
+        policy_model.train()
 
     total_steps = 0
     best_avg_reward = -1.0
@@ -395,26 +457,49 @@ async def train():
 
                 # ==========================================================
                 # Phase 1: Generate G rollouts with trajectory recording
+                # Rollout 0 = greedy baseline (no trajectory, reward only)
+                # Rollouts 1..G-1 = stochastic with trajectory for gradient
                 # ==========================================================
                 trajectories = []
                 rollout_texts = []
                 policy_model.eval()
                 for g in range(group_size):
-                    trajectory = generate_with_prefix_conditioning_trajectory(
-                        model=policy_model,
-                        prefix_ids=prefix_ids,
-                        gen_length=gen_length,
-                        config={
-                            **model_config,
-                            "num_generation_steps": num_gen_steps,
-                        },
-                        scheduler=scheduler,
-                        temperature=gen_temperature,
-                    )
-                    trajectories.append(trajectory)
-                    # Decode only the response portion
-                    response_ids = trajectory.final_tokens[0, prefix_len:]
-                    text = tokenizer.decode(response_ids, skip_special_tokens=True)
+                    if g == 0:
+                        # Greedy baseline: deterministic generation for reward
+                        # signal. No trajectory needed (excluded from gradient).
+                        response_ids = generate_with_prefix_conditioning(
+                            model=policy_model,
+                            prefix_ids=prefix_ids,
+                            gen_length=gen_length,
+                            config={
+                                **model_config,
+                                "num_sampling_steps": num_gen_steps,
+                            },
+                            scheduler=scheduler,
+                            temperature=0.0,
+                        )
+                        trajectories.append(None)
+                        text = tokenizer.decode(
+                            response_ids[0], skip_special_tokens=True
+                        )
+                    else:
+                        # Stochastic rollout with trajectory for gradient
+                        trajectory = generate_with_prefix_conditioning_trajectory(
+                            model=policy_model,
+                            prefix_ids=prefix_ids,
+                            gen_length=gen_length,
+                            config={
+                                **model_config,
+                                "num_generation_steps": num_gen_steps,
+                            },
+                            scheduler=scheduler,
+                            temperature=gen_temperature,
+                        )
+                        trajectories.append(trajectory)
+                        response_ids = trajectory.final_tokens[0, prefix_len:]
+                        text = tokenizer.decode(
+                            response_ids, skip_special_tokens=True
+                        )
                     rollout_texts.append(text)
                 policy_model.train()
 
@@ -426,34 +511,16 @@ async def train():
                     await browser_env.reset()
 
                     try:
-                        await browser_env.tools.navigate(
-                            url=form_url,
-                            new_tab=False,
-                            browser_session=browser_env.browser_session,
+                        element_map = await browser_env.safe_navigate(
+                            url=form_url, nav_timeout=30.0, max_retries=2,
                         )
-                        await asyncio.sleep(0.5)
-                        element_map = await browser_env.get_element_map()
-                    except Exception as e:
-                        logger.warning("Navigation failed for rollout %d: %s", g, e)
-                        # Reactive restart: browser likely degraded
-                        logger.info("Restarting browser after navigation failure")
-                        await browser_env.restart()
-                        try:
-                            await browser_env.tools.navigate(
-                                url=form_url,
-                                new_tab=False,
-                                browser_session=browser_env.browser_session,
-                            )
-                            await asyncio.sleep(0.5)
-                            element_map = await browser_env.get_element_map()
-                        except Exception as e2:
-                            logger.warning(
-                                "Navigation still failed after restart for "
-                                "rollout %d: %s",
-                                g, e2,
-                            )
-                            rewards.append(0.0)
-                            continue
+                    except RuntimeError as e:
+                        logger.error(
+                            "All navigation attempts failed for rollout %d: %s",
+                            g, e,
+                        )
+                        rewards.append(0.0)
+                        continue
 
                     actions = parse_rollout_to_actions(rollout_text, element_map)
                     if not actions:
@@ -519,9 +586,18 @@ async def train():
                 if kl_coeff > 0:
                     ref_model.to(device)
 
+                # eval mode for ALL forward passes in log-prob computation.
+                # Disables dropout (0.1) for deterministic, reproducible
+                # log-prob values across caching and optimization phases.
+                policy_model.eval()
+
                 cached_logprobs = []
                 for g in range(group_size):
                     traj = trajectories[g]
+                    if traj is None:
+                        # Greedy baseline (g=0): no trajectory, skip caching
+                        cached_logprobs.append(None)
+                        continue
                     response_mask = traj.edit_mask.float()  # [B, L]
                     rollout_cache = []
 
@@ -575,6 +651,9 @@ async def train():
 
                     for g in range(group_size):
                         traj = trajectories[g]
+                        if traj is None:
+                            # Greedy baseline (g=0): no trajectory, skip
+                            continue
                         adv_g = advantages_t[g].item()
 
                         if len(traj.steps) == 0:
@@ -635,6 +714,8 @@ async def train():
 
                     total_loss_val += iter_loss_val
 
+                # Restore train mode after all forward passes are done
+                policy_model.train()
                 torch.cuda.empty_cache()
 
                 total_steps += 1
