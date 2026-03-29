@@ -1,0 +1,28 @@
+name: openbrowser-push-to-hf
+entrypoint: pip install huggingface_hub && python -m infra.training.anyscale.push_checkpoints_to_hf
+image_uri: anyscale/ray:2.44.1-slim-py312-cu128
+compute_config:
+  cloud: "anyscale_default_cloud"
+  head_node:
+    instance_type: m5.large
+  worker_nodes: []
+working_dir: .
+excludes:
+  - .git
+  - .env
+  - __pycache__
+  - node_modules
+  - frontend
+  - .cursor
+  - presentation
+  - data/
+  - results/
+  - outputs/
+  - "*.pyc"
+env_vars:
+  # HF_TOKEN injected from .env at submission time by submit_job.py
+max_retries: 1
+timeout_s: 3600
+tags:
+  project: openbrowser
+  task: push-to-hf
