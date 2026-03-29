@@ -220,11 +220,10 @@ async def train():
                     logger.warning(f"Skipping prompt {i}: missing instruction or url")
                     continue
 
-                # Periodic browser restart to reset DOM indices
-                if i > 0 and i % 10 == 0:
-                    logger.info(f"Periodic browser restart (prompt {i})")
-                    await browser_env.close()
-                    browser_env = await BrowserEnvironment.create(headless=headless)
+                # Periodic browser restart to prevent session degradation
+                if i > 0 and i % 5 == 0:
+                    logger.info("Periodic browser restart (prompt %d)", i)
+                    await browser_env.restart()
 
                 # Tokenize instruction
                 inst_enc = tokenizer(
@@ -270,16 +269,40 @@ async def train():
                         await asyncio.sleep(0.5)
                         element_map = await browser_env.get_element_map()
                     except Exception as e:
-                        logger.warning(f"Navigation failed for rollout {g}: {e}")
-                        rewards.append(0.0)
-                        continue
+                        logger.warning("Navigation failed for rollout %d: %s", g, e)
+                        # Reactive restart: browser likely degraded
+                        logger.info("Restarting browser after navigation failure")
+                        await browser_env.restart()
+                        try:
+                            await browser_env.tools.navigate(
+                                url=form_url,
+                                new_tab=False,
+                                browser_session=browser_env.browser_session,
+                            )
+                            await asyncio.sleep(0.5)
+                            element_map = await browser_env.get_element_map()
+                        except Exception as e2:
+                            logger.warning(
+                                "Navigation still failed after restart for rollout %d: %s",
+                                g, e2,
+                            )
+                            rewards.append(0.0)
+                            continue
 
                     actions = parse_rollout_to_actions(rollout_text, element_map)
                     if not actions:
-                        logger.debug(f"No valid actions parsed from rollout {g}")
+                        logger.warning(
+                            "No valid actions parsed from rollout %d. "
+                            "Generated text (first 300 chars): %.300s",
+                            g, rollout_text,
+                        )
                         rewards.append(0.0)
                         continue
 
+                    logger.info(
+                        "Rollout %d: %d actions parsed. Text (first 200 chars): %.200s",
+                        g, len(actions), rollout_text,
+                    )
                     outcome = await browser_env.execute_actions(
                         actions, timeout_per_action=action_timeout
                     )
@@ -289,6 +312,12 @@ async def train():
                         weights=grpo_config.get("reward_weights"),
                     )
                     rewards.append(reward)
+                    logger.info(
+                        "Rollout %d: reward=%.3f (actions_executed=%d/%d)",
+                        g, reward,
+                        outcome.actions_executed if hasattr(outcome, 'actions_executed') else -1,
+                        len(actions),
+                    )
 
                 epoch_rewards.extend(rewards)
 
@@ -391,6 +420,15 @@ async def train():
                         f"loss={loss.item():.4f}, "
                         f"kl={avg_kl:.4f}"
                     )
+
+                # Intermediate checkpoint every 25 steps
+                if total_steps % 25 == 0:
+                    ckpt_dir = Path("outputs/fsdfm_online_grpo/final")
+                    ckpt_dir.mkdir(parents=True, exist_ok=True)
+                    save_lora_weights(policy_model, str(ckpt_dir / "lora_weights.pt"))
+                    tokenizer.save_pretrained(str(ckpt_dir))
+                    persist_checkpoint(str(ckpt_dir.parent), "online-fsdfm-grpo")
+                    logger.info(f"  Intermediate checkpoint saved at step {total_steps}")
 
             # Epoch summary
             if epoch_rewards:

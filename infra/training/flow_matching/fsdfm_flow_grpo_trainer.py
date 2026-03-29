@@ -129,6 +129,11 @@ async def train():
             sft_checkpoint,
         )
 
+    # Enable gradient checkpointing: recomputes block activations during
+    # backward to avoid bf16 gradient overflow through 21 DDiTBlocks.
+    policy_model.gradient_checkpointing = True
+    logger.info("Gradient checkpointing enabled for policy model")
+
     # ---------------------------------------------------------------
     # Load reference model (frozen, on CPU to save VRAM)
     # ---------------------------------------------------------------
@@ -211,11 +216,10 @@ async def train():
                     logger.warning("Skipping prompt %d: missing instruction or url", i)
                     continue
 
-                # Periodic browser restart to reset DOM indices
-                if i > 0 and i % 10 == 0:
+                # Periodic browser restart to prevent session degradation
+                if i > 0 and i % 5 == 0:
                     logger.info("Periodic browser restart (prompt %d)", i)
-                    await browser_env.close()
-                    browser_env = await BrowserEnvironment.create(headless=headless)
+                    await browser_env.restart()
 
                 # Tokenize instruction
                 inst_enc = tokenizer(
@@ -271,8 +275,24 @@ async def train():
                         element_map = await browser_env.get_element_map()
                     except Exception as e:
                         logger.warning("Navigation failed for rollout %d: %s", g, e)
-                        rewards.append(0.0)
-                        continue
+                        # Reactive restart: browser likely degraded
+                        logger.info("Restarting browser after navigation failure")
+                        await browser_env.restart()
+                        try:
+                            await browser_env.tools.navigate(
+                                url=form_url,
+                                new_tab=False,
+                                browser_session=browser_env.browser_session,
+                            )
+                            await asyncio.sleep(0.5)
+                            element_map = await browser_env.get_element_map()
+                        except Exception as e2:
+                            logger.warning(
+                                "Navigation still failed after restart for rollout %d: %s",
+                                g, e2,
+                            )
+                            rewards.append(0.0)
+                            continue
 
                     actions = parse_rollout_to_actions(rollout_text, element_map)
                     if not actions:

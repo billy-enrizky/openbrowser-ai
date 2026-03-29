@@ -171,10 +171,10 @@ FSDFM_SFT_CONFIG = {
 }
 
 ONLINE_FSDFM_GRPO_CONFIG = {
-    "group_size": 2,
+    "group_size": 4,                   # G=2 gave zero advantages; G=4 for better signal
     "learning_rate": 5e-5,
     "num_epochs": int(os.environ.get("NUM_EPOCHS", "1")),
-    "kl_coeff": 0.05,
+    "kl_coeff": 0.04,                 # Aligned with Flow-GRPO config
     "clip_range": 0.2,
     "bf16": True,
     "logging_steps": 5,
@@ -314,6 +314,137 @@ ESPO_FSDFM_CONFIG = {
     "shuffle_prompts": os.environ.get("SHUFFLE", "true").lower() == "true",
     "min_nonzero_for_update": int(os.environ.get("MIN_NONZERO", "1")),
     "early_stop_max_steps": int(os.environ.get("EARLY_STOP_MAX_STEPS", "40")),
+    "reward_weights": {
+        "task_completion": 0.4,
+        "field_accuracy": 0.4,
+        "execution_completeness": 0.2,
+    },
+}
+
+# --- CJ-GRPO for ReFusion 8B (conditional trajectory GRPO) ---
+# Implements CJ-GRPO: PPO-style clipped policy gradients with confidence-based
+# timestep sampling. Samples K random denoising steps from T-step trajectory
+# for computational efficiency.
+CJGRPO_REFUSION_CONFIG = {
+    "group_size": int(os.environ.get("GROUP_SIZE", "4")),
+    "learning_rate": float(os.environ.get("LR", "5e-5")),
+    "num_epochs": int(os.environ.get("NUM_EPOCHS", "1")),
+    "kl_coeff": float(os.environ.get("KL_COEFF", "0.04")),
+    "epsilon": float(os.environ.get("EPSILON", "0.2")),
+    "mu": int(os.environ.get("MU", "1")),
+    "num_sampled_timesteps": int(os.environ.get("NUM_SAMPLED_TIMESTEPS", "8")),
+    "confidence_noise_std": float(os.environ.get("CONFIDENCE_NOISE_STD", "0.1")),
+    "shuffle_prompts": os.environ.get("SHUFFLE", "true").lower() == "true",
+    "bf16": True,
+    "logging_steps": 1,
+    "grad_clip": float(os.environ.get("GRAD_CLIP", "1.0")),
+    "weight_decay": 0.01,
+    "num_generation_steps": int(os.environ.get("GEN_STEPS", "64")),
+    "generation_temperature": float(os.environ.get("GEN_TEMP", "1.0")),
+    "formfactory_port": int(os.environ.get("FORMFACTORY_PORT", "5050")),
+    "browser_headless": True,
+    "action_timeout_s": 5,
+    "rollout_timeout_s": 30,
+    "min_nonzero_for_update": int(os.environ.get("MIN_NONZERO", "1")),
+    "early_stop_max_steps": int(os.environ.get("EARLY_STOP_MAX_STEPS", "40")),
+    "checkpoint_every_steps": int(os.environ.get("CHECKPOINT_EVERY_STEPS", "10")),
+    "reward_weights": {
+        "task_completion": 0.4,
+        "field_accuracy": 0.4,
+        "execution_completeness": 0.2,
+    },
+}
+
+# --- CJ-GRPO for FS-DFM 1.3B (conditional trajectory GRPO) ---
+# Adapts CJ-GRPO to FS-DFM's Poisson jump discrete flow matching.
+CJGRPO_FSDFM_CONFIG = {
+    "group_size": int(os.environ.get("GROUP_SIZE", "4")),
+    "learning_rate": float(os.environ.get("LR", "5e-5")),
+    "num_epochs": int(os.environ.get("NUM_EPOCHS", "1")),
+    "kl_coeff": float(os.environ.get("KL_COEFF", "0.04")),
+    "epsilon": float(os.environ.get("EPSILON", "0.2")),
+    "mu": int(os.environ.get("MU", "1")),
+    "num_sampled_timesteps": int(os.environ.get("NUM_SAMPLED_TIMESTEPS", "8")),
+    "shuffle_prompts": os.environ.get("SHUFFLE", "true").lower() == "true",
+    "bf16": os.environ.get("BF16", "true").lower() == "true",
+    "logging_steps": 1,
+    "grad_clip": float(os.environ.get("GRAD_CLIP", "1.0")),
+    "weight_decay": 0.01,
+    "num_generation_steps": int(os.environ.get("GEN_STEPS", "64")),
+    "generation_temperature": float(os.environ.get("GEN_TEMP", "1.0")),
+    "formfactory_port": int(os.environ.get("FORMFACTORY_PORT", "5050")),
+    "browser_headless": True,
+    "action_timeout_s": 5,
+    "rollout_timeout_s": 30,
+    "min_nonzero_for_update": int(os.environ.get("MIN_NONZERO", "1")),
+    "early_stop_max_steps": int(os.environ.get("EARLY_STOP_MAX_STEPS", "40")),
+    "checkpoint_every_steps": int(os.environ.get("CHECKPOINT_EVERY_STEPS", "10")),
+    "reward_weights": {
+        "task_completion": 0.4,
+        "field_accuracy": 0.4,
+        "execution_completeness": 0.2,
+    },
+}
+
+# --- MDPO for ReFusion 8B (masked diffusion policy optimization) ---
+# Implements MDPO: policy optimization using diffusion training losses as
+# reward proxies. Lower learning rate than CJ-GRPO for stability.
+MDPO_REFUSION_CONFIG = {
+    "group_size": int(os.environ.get("GROUP_SIZE", "4")),
+    "learning_rate": float(os.environ.get("LR", "1e-5")),
+    "num_epochs": int(os.environ.get("NUM_EPOCHS", "1")),
+    "kl_coeff": float(os.environ.get("KL_COEFF", "0.04")),
+    "epsilon": float(os.environ.get("EPSILON", "0.2")),
+    "mu": int(os.environ.get("MU", "1")),
+    "sample_train_steps": int(os.environ.get("SAMPLE_TRAIN_STEPS", "8")),
+    "warmup_steps": int(os.environ.get("WARMUP_STEPS", "5")),
+    "confidence_noise_std": float(os.environ.get("CONFIDENCE_NOISE_STD", "0.1")),
+    "shuffle_prompts": os.environ.get("SHUFFLE", "true").lower() == "true",
+    "bf16": True,
+    "logging_steps": 1,
+    "grad_clip": float(os.environ.get("GRAD_CLIP", "1.0")),
+    "weight_decay": 0.01,
+    "num_generation_steps": int(os.environ.get("GEN_STEPS", "64")),
+    "generation_temperature": float(os.environ.get("GEN_TEMP", "1.0")),
+    "formfactory_port": int(os.environ.get("FORMFACTORY_PORT", "5050")),
+    "browser_headless": True,
+    "action_timeout_s": 5,
+    "rollout_timeout_s": 30,
+    "min_nonzero_for_update": int(os.environ.get("MIN_NONZERO", "1")),
+    "early_stop_max_steps": int(os.environ.get("EARLY_STOP_MAX_STEPS", "40")),
+    "checkpoint_every_steps": int(os.environ.get("CHECKPOINT_EVERY_STEPS", "10")),
+    "reward_weights": {
+        "task_completion": 0.4,
+        "field_accuracy": 0.4,
+        "execution_completeness": 0.2,
+    },
+}
+
+# --- MDPO for FS-DFM 1.3B (masked diffusion policy optimization) ---
+# Adapts MDPO to FS-DFM's Poisson jump discrete flow matching.
+MDPO_FSDFM_CONFIG = {
+    "group_size": int(os.environ.get("GROUP_SIZE", "4")),
+    "learning_rate": float(os.environ.get("LR", "1e-5")),
+    "num_epochs": int(os.environ.get("NUM_EPOCHS", "1")),
+    "kl_coeff": float(os.environ.get("KL_COEFF", "0.04")),
+    "epsilon": float(os.environ.get("EPSILON", "0.2")),
+    "mu": int(os.environ.get("MU", "1")),
+    "sample_train_steps": int(os.environ.get("SAMPLE_TRAIN_STEPS", "8")),
+    "warmup_steps": int(os.environ.get("WARMUP_STEPS", "5")),
+    "shuffle_prompts": os.environ.get("SHUFFLE", "true").lower() == "true",
+    "bf16": os.environ.get("BF16", "true").lower() == "true",
+    "logging_steps": 1,
+    "grad_clip": float(os.environ.get("GRAD_CLIP", "1.0")),
+    "weight_decay": 0.01,
+    "num_generation_steps": int(os.environ.get("GEN_STEPS", "64")),
+    "generation_temperature": float(os.environ.get("GEN_TEMP", "1.0")),
+    "formfactory_port": int(os.environ.get("FORMFACTORY_PORT", "5050")),
+    "browser_headless": True,
+    "action_timeout_s": 5,
+    "rollout_timeout_s": 30,
+    "min_nonzero_for_update": int(os.environ.get("MIN_NONZERO", "1")),
+    "early_stop_max_steps": int(os.environ.get("EARLY_STOP_MAX_STEPS", "40")),
+    "checkpoint_every_steps": int(os.environ.get("CHECKPOINT_EVERY_STEPS", "10")),
     "reward_weights": {
         "task_completion": 0.4,
         "field_accuracy": 0.4,
