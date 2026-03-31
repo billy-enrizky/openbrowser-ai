@@ -12,6 +12,10 @@ https://github.com/user-attachments/assets/c517c739-9199-47b0-bac7-c2c642a21094
 
 https://github.com/user-attachments/assets/632128f6-3d09-497f-9e7d-e29b9cb65e0f
 
+**OpenBrowserAI Automatic Form Filling:**
+
+https://github.com/user-attachments/assets/16f7ef1a-beb1-45e2-a733-9592536e0ef7
+
 
 [![PyPI version](https://badge.fury.io/py/openbrowser-ai.svg)](https://pypi.org/project/openbrowser-ai/)
 [![Downloads](https://img.shields.io/pypi/dm/openbrowser-ai?color=brightgreen&label=downloads)](https://pepy.tech/projects/openbrowser-ai)
@@ -44,6 +48,7 @@ OpenBrowser is a framework for intelligent browser automation. It combines direc
 - [Project Structure](#project-structure)
 - [Backend and Frontend Deployment](#backend-and-frontend-deployment)
 - [Testing](#testing)
+- [Research: Reinforcement Fine-Tuning for Browser Agents](#research-reinforcement-fine-tuning-for-browser-agents)
 - [Contributing](#contributing)
 - [License](#license)
 - [Contact](#contact)
@@ -677,6 +682,71 @@ Key environment variables for the backend (see `backend/env.example` for the ful
 | `VNC_ENABLED` | Enable VNC browser viewing | `true` |
 | `DATABASE_URL` | PostgreSQL connection string | (optional) |
 | `POSTGRES_PASSWORD` | PostgreSQL password (root `.env`) | (required for compose) |
+
+## Research: Reinforcement Fine-Tuning for Browser Agents
+
+Beyond the framework, we conducted two independent research studies on improving browser agents through reinforcement learning, both using the [FormFactory benchmark](https://arxiv.org/abs/2506.01520) (1,250 form-filling tasks across 8 domains) and OpenBrowser's browser execution environment.
+
+### Study 1: Browser-in-the-Loop (Autoregressive RL)
+
+We investigated whether reinforcement learning can improve a language model's ability to fill web forms beyond what supervised learning achieves.
+
+- **Method**: Two-phase pipeline -- SFT on Qwen3-8B with QLoRA (992 demonstrations), then online GRPO with live browser execution rewards (composite: 40% submission success + 40% field accuracy + 20% execution completeness)
+- **Result**: GRPO achieves 9.1% higher average reward than SFT alone on held-out validation (p=0.007, Wilcoxon signed-rank test). Improvement comes specifically from better form submission, not field filling.
+- **Key finding**: SFT is a prerequisite -- without it, the base model generates unstructured text and earns zero reward across all attempts.
+- **Paper**: [ResearchGate DOI: 10.13140/RG.2.2.24922.71360](https://doi.org/10.13140/RG.2.2.24922.71360)
+- **Models**: [Qwen3-8B-FormFactory-SFT-LoRA](https://huggingface.co/billyenrizky/Qwen3-8B-FormFactory-SFT-LoRA), [Qwen3-8B-FormFactory-GRPO-LoRA](https://huggingface.co/billyenrizky/Qwen3-8B-FormFactory-GRPO-LoRA)
+
+### Study 2: Diffusion Language Models for Web Action Planning
+
+We investigated whether diffusion language models -- which generate text by iteratively denoising an entire sequence in parallel rather than left-to-right -- can learn web action planning.
+
+- **Models tested**: ReFusion 8B (masked diffusion with causal LM backbone) and FS-DFM 1.3B (pure discrete flow matching)
+- **Result**: After SFT, diffusion models solve 60-69% of tasks vs. 100% for the AR baseline. Token-level RL is universally fragile (2/16 comparisons improve, both insignificant). Sequence-level RL succeeds: MDPO pushes ReFusion to 91.9% (+31.4pp) and ESPO pushes FS-DFM to 87.1% (+18.6pp).
+- **Key finding**: The appropriate RL formulation is architecture-dependent. ELBO-based optimization (ESPO) produces concentrated distributions across architectures, while per-step trajectory methods produce multimodal distributions.
+- **Paper**: [ResearchGate DOI: 10.13140/RG.2.2.11500.94088](https://doi.org/10.13140/RG.2.2.11500.94088)
+- **Models**: [10 trained models on HuggingFace](https://huggingface.co/billyenrizky) including ReFusion-8B-MDPO, FS-DFM-1.3B-ESPO-mu8, and more
+
+### Reproducing RL Experiments
+
+All training code is in `infra/training/`. Training runs on a single NVIDIA A10G GPU (24GB VRAM) via Anyscale.
+
+```bash
+# Study 1: Autoregressive RL (Qwen3-8B)
+# SFT phase -- QLoRA fine-tuning on 992 FormFactory demonstrations (2-4 hours)
+python infra/training/finetuning/sft_trainer.py
+
+# Online GRPO phase -- browser-in-the-loop reward (4-8 hours per epoch)
+# Requires headless Chromium + FormFactory forms server
+python infra/training/shared/formfactory_server.py &   # Start form server
+python infra/training/finetuning/online_grpo_trainer.py
+
+# Evaluate SFT and GRPO checkpoints on val/test splits
+python infra/training/finetuning/eval_sft.py
+
+# Study 2: Diffusion LM RL (ReFusion 8B, FS-DFM 1.3B)
+# SFT phase
+python infra/training/flow_matching/fsdfm_sft_trainer.py    # FS-DFM SFT
+python infra/training/flow_matching/flow_sft_trainer.py      # ReFusion SFT
+
+# Sequence-level RL (best results)
+python infra/training/flow_matching/espo_fsdfm_trainer.py    # ESPO on FS-DFM
+python infra/training/flow_matching/espo_refusion_trainer.py # ESPO on ReFusion
+python infra/training/flow_matching/mdpo_fsdfm_trainer.py    # MDPO on FS-DFM
+python infra/training/flow_matching/mdpo_refusion_trainer.py # MDPO on ReFusion
+
+# Submit jobs to Anyscale cloud
+python infra/training/anyscale/submit_job.py --config infra/training/anyscale/online_grpo_job.yaml
+
+# Push trained checkpoints to HuggingFace
+python infra/training/anyscale/push_checkpoints_to_hf.py
+
+# Serve trained model locally via vLLM or Ollama
+python infra/training/serving/serve_vllm.py
+python infra/training/serving/export_gguf.py   # Export to GGUF for Ollama
+```
+
+Reward function (in `infra/training/shared/reward_functions.py`): composite score = 0.4 * task completion + 0.4 * field accuracy + 0.2 * execution completeness. Online reward (`online_reward.py`) launches headless Chromium, executes the model's action plan, and computes the score from live browser state.
 
 ## Contributing
 

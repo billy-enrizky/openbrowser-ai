@@ -27,6 +27,14 @@ mu=8 stabilization experiments (FS-DFM only):
     modal run --detach infra/training/modal/openbrowser_modal.py::cjgrpo_fsdfm_mu8
     modal run --detach infra/training/modal/openbrowser_modal.py::mdpo_fsdfm_mu8
 
+Hyperparameter ablation (CJ-GRPO/MDPO with ESPO hyperparams):
+    modal run --detach infra/training/modal/openbrowser_modal.py::cjgrpo_fsdfm_espo_hp
+    modal run --detach infra/training/modal/openbrowser_modal.py::mdpo_fsdfm_espo_hp
+
+Stochastic eval (temperature=1.0):
+    modal run --detach infra/training/modal/openbrowser_modal.py::eval_cjgrpo_fsdfm_stochastic
+    modal run --detach infra/training/modal/openbrowser_modal.py::eval_mdpo_fsdfm_stochastic
+
 All 12 eval jobs (6 checkpoints x val+test):
     modal run infra/training/modal/openbrowser_modal.py::eval_all
 
@@ -80,6 +88,9 @@ VOLUME_MOUNT = "/mnt/user_storage"
 TRAIN_TIMEOUT = 14400  # 4 hours
 EVAL_TIMEOUT = 7200  # 2 hours
 DOWNLOAD_TIMEOUT = 3600  # 1 hour
+
+# HuggingFace org / user for checkpoint repos
+HF_ORG = "billyenrizky"
 
 # HuggingFace repos for SFT checkpoints
 HF_REFUSION_SFT = "billyenrizky/ReFusion-8B-SFT"
@@ -330,6 +341,66 @@ ENV_MDPO_FSDFM_MU8 = {
     "MU": "8",
     "LR": "1e-6",           # 10x lower (StableDRL recommendation)
     "GRAD_CLIP": "0.2",     # 5x tighter (StableDRL recommendation)
+}
+
+# --- Hyperparameter ablation: CJ-GRPO/MDPO with ESPO hyperparams ---
+# Tests whether the per-step RL failure on FS-DFM is algorithmic or
+# a hyperparameter confound (ESPO uses LR=1e-5/grad_clip=1.0 and works;
+# CJ-GRPO/MDPO used LR=1e-6/grad_clip=0.2 and failed).
+
+ENV_CJGRPO_FSDFM_ESPO_HP = {
+    **ENV_CJGRPO_FSDFM,
+    "MU": "8",
+    "LR": "1e-5",           # Match ESPO (was 1e-6)
+    "GRAD_CLIP": "1.0",     # Match ESPO (was 0.2)
+    "CHECKPOINT_NAME": "cjgrpo-fsdfm-espo-hp",
+}
+
+ENV_MDPO_FSDFM_ESPO_HP = {
+    **ENV_MDPO_FSDFM,
+    "MU": "8",
+    "LR": "1e-5",           # Match ESPO (was 1e-6)
+    "GRAD_CLIP": "1.0",     # Match ESPO (was 0.2)
+    "CHECKPOINT_NAME": "mdpo-fsdfm-espo-hp",
+}
+
+# --- Standard GRPO (AR surrogates) for Table 3 re-run from full-data SFT ---
+# ReFusion: uses causal LM log-probs (AR formulation) despite being a masked
+# diffusion model. This is the "wrong" formulation from H2.
+# FS-DFM: uses advantage-weighted GKL loss (the original Table 3 trainer).
+
+ENV_STANDARD_GRPO_REFUSION = {
+    **_COMMON_REFUSION,
+    "NUM_EPOCHS": "1",
+    "GROUP_SIZE": "4",          # Match all other experiments (config.py default is 2)
+    "KL_COEFF": "0.04",        # Match other experiments (config.py default is 0.05)
+    "CHECKPOINT_NAME": "standard-grpo-refusion",
+}
+
+ENV_STANDARD_GRPO_FSDFM = {
+    **_COMMON_FSDFM,
+    "NUM_EPOCHS": "1",
+    "CHECKPOINT_NAME": "standard-grpo-fsdfm",
+}
+
+ENV_AR_SURROGATE_FSDFM = {
+    **_COMMON_FSDFM,
+    "NUM_EPOCHS": "1",
+    "GROUP_SIZE": "4",
+    "LR": "5e-5",
+    "KL_COEFF": "0.04",
+    "CHECKPOINT_NAME": "ar-surrogate-fsdfm",
+    "CHECKPOINT_EVERY_STEPS": "10",
+}
+
+ENV_CAUSAL_DENOISING_FSDFM = {
+    **_COMMON_FSDFM,
+    "NUM_EPOCHS": "1",
+    "GROUP_SIZE": "4",
+    "LR": "5e-5",
+    "KL_COEFF": "0.04",
+    "CHECKPOINT_NAME": "causal-denoising-fsdfm",
+    "CHECKPOINT_EVERY_STEPS": "10",
 }
 
 
@@ -1676,6 +1747,130 @@ def mdpo_fsdfm_mu8():
     logger.info("mdpo_fsdfm_mu8 complete.")
 
 
+# --- Hyperparameter ablation: CJ-GRPO/MDPO with ESPO hyperparams ---
+
+@app.function(
+    image=image,
+    secrets=[secret],
+    volumes={VOLUME_MOUNT: volume},
+    gpu="H100",
+    timeout=TRAIN_TIMEOUT,
+    env=ENV_CJGRPO_FSDFM_ESPO_HP,
+)
+def cjgrpo_fsdfm_espo_hp():
+    """CJ-GRPO mu=8 on FS-DFM with ESPO hyperparams (LR=1e-5, grad_clip=1.0). HP ablation. H100."""
+    _run_trainer("infra.training.flow_matching.cjgrpo_fsdfm_trainer")
+    volume.commit()
+    logger.info("cjgrpo_fsdfm_espo_hp complete.")
+
+
+@app.function(
+    image=image,
+    secrets=[secret],
+    volumes={VOLUME_MOUNT: volume},
+    gpu=GPU_FSDFM,
+    timeout=TRAIN_TIMEOUT,
+    env=ENV_CJGRPO_FSDFM_ESPO_HP,
+)
+def cjgrpo_fsdfm_espo_hp_a10():
+    """CJ-GRPO mu=8 on FS-DFM with ESPO hyperparams. HP ablation. A10 fallback."""
+    _run_trainer("infra.training.flow_matching.cjgrpo_fsdfm_trainer")
+    volume.commit()
+    logger.info("cjgrpo_fsdfm_espo_hp_a10 complete.")
+
+
+@app.function(
+    image=image,
+    secrets=[secret],
+    volumes={VOLUME_MOUNT: volume},
+    gpu=GPU_REFUSION,
+    timeout=TRAIN_TIMEOUT,
+    env=ENV_CJGRPO_FSDFM_ESPO_HP,
+)
+def cjgrpo_fsdfm_espo_hp_l40s():
+    """CJ-GRPO mu=8 on FS-DFM with ESPO hyperparams. HP ablation. L40S."""
+    _run_trainer("infra.training.flow_matching.cjgrpo_fsdfm_trainer")
+    volume.commit()
+    logger.info("cjgrpo_fsdfm_espo_hp_l40s complete.")
+
+
+@app.function(
+    image=image,
+    secrets=[secret],
+    volumes={VOLUME_MOUNT: volume},
+    gpu=GPU_FSDFM,
+    timeout=TRAIN_TIMEOUT,
+    env=ENV_MDPO_FSDFM_ESPO_HP,
+)
+def mdpo_fsdfm_espo_hp():
+    """MDPO mu=8 on FS-DFM with ESPO hyperparams (LR=1e-5, grad_clip=1.0). HP ablation."""
+    _run_trainer("infra.training.flow_matching.mdpo_fsdfm_trainer")
+    volume.commit()
+    logger.info("mdpo_fsdfm_espo_hp complete.")
+
+
+# --- Standard GRPO (AR surrogates) -- Table 3 re-run from full-data SFT ---
+
+@app.function(
+    image=image,
+    secrets=[secret],
+    volumes={VOLUME_MOUNT: volume},
+    gpu=GPU_REFUSION,
+    timeout=TRAIN_TIMEOUT,
+    env=ENV_STANDARD_GRPO_REFUSION,
+)
+def standard_grpo_refusion():
+    """Standard GRPO (AR log-probs) on ReFusion 8B from full-data SFT (L40S)."""
+    _run_trainer("infra.training.flow_matching.online_flow_llm_grpo_trainer")
+    volume.commit()
+    logger.info("standard_grpo_refusion complete.")
+
+
+@app.function(
+    image=image,
+    secrets=[secret],
+    volumes={VOLUME_MOUNT: volume},
+    gpu=GPU_FSDFM,
+    timeout=TRAIN_TIMEOUT,
+    env=ENV_STANDARD_GRPO_FSDFM,
+)
+def standard_grpo_fsdfm():
+    """Standard GRPO (advantage-weighted GKL) on FS-DFM 1.3B from full-data SFT (A10)."""
+    _run_trainer("infra.training.flow_matching.fsdfm_online_grpo_trainer")
+    volume.commit()
+    logger.info("standard_grpo_fsdfm complete.")
+
+
+@app.function(
+    image=image,
+    secrets=[secret],
+    volumes={VOLUME_MOUNT: volume},
+    gpu=GPU_FSDFM,
+    timeout=TRAIN_TIMEOUT,
+    env=ENV_AR_SURROGATE_FSDFM,
+)
+def ar_surrogate_fsdfm():
+    """AR Surrogate GRPO on FS-DFM 1.3B (shifted CE at t~1.0) (A10)."""
+    _run_trainer("infra.training.flow_matching.fsdfm_ar_grpo_trainer")
+    volume.commit()
+    logger.info("ar_surrogate_fsdfm complete.")
+
+
+@app.function(
+    image=image,
+    secrets=[secret],
+    volumes={VOLUME_MOUNT: volume},
+    gpu=GPU_FSDFM,
+    timeout=TRAIN_TIMEOUT,
+    env=ENV_CAUSAL_DENOISING_FSDFM,
+)
+def causal_denoising_fsdfm():
+    """Causal Denoising GRPO on FS-DFM 1.3B (unshifted CE at random t) (A10)."""
+    _run_trainer("infra.training.flow_matching.fsdfm_causal_denoising_grpo_trainer")
+    volume.commit()
+    logger.info("causal_denoising_fsdfm complete.")
+
+
 # ===========================================================================
 # EVALUATION JOBS
 # ===========================================================================
@@ -1683,11 +1878,18 @@ def mdpo_fsdfm_mu8():
 # RL checkpoint paths on volume (from persist_checkpoint() calls in trainers)
 CKPT_BASE = f"{VOLUME_MOUNT}/openbrowser/checkpoints"
 ESPO_REFUSION_CKPT = f"{CKPT_BASE}/espo-refusion"
+ESPO_REFUSION_MU1_CKPT = f"{CKPT_BASE}/espo-refusion-mu1"
 ESPO_FSDFM_CKPT = f"{CKPT_BASE}/espo-fsdfm"
 CJGRPO_REFUSION_CKPT = f"{CKPT_BASE}/cjgrpo-refusion"
 CJGRPO_FSDFM_CKPT = f"{CKPT_BASE}/cjgrpo-fsdfm"
 MDPO_REFUSION_CKPT = f"{CKPT_BASE}/mdpo-refusion"
 MDPO_FSDFM_CKPT = f"{CKPT_BASE}/mdpo-fsdfm-best-262-step27"
+STANDARD_GRPO_REFUSION_CKPT = f"{CKPT_BASE}/standard-grpo-refusion"
+STANDARD_GRPO_FSDFM_CKPT = f"{CKPT_BASE}/standard-grpo-fsdfm"
+AR_SURROGATE_FSDFM_CKPT = f"{CKPT_BASE}/ar-surrogate-fsdfm/best"
+CAUSAL_DENOISING_FSDFM_CKPT = f"{CKPT_BASE}/causal-denoising-fsdfm/best"
+CJGRPO_FSDFM_ESPO_HP_CKPT = f"{CKPT_BASE}/cjgrpo-fsdfm-espo-hp"
+MDPO_FSDFM_ESPO_HP_CKPT = f"{CKPT_BASE}/mdpo-fsdfm-espo-hp"
 
 
 def _run_eval(eval_module: str, env_overrides: dict):
@@ -1696,8 +1898,39 @@ def _run_eval(eval_module: str, env_overrides: dict):
     _run(f"{env_str} python -m {eval_module}")
 
 
+# Map volume checkpoint names to HuggingFace repos for fallback download
+_CKPT_TO_HF = {
+    "espo-refusion": f"{HF_ORG}/ReFusion-8B-ESPO-mu8",
+    "espo-refusion-mu1": f"{HF_ORG}/ReFusion-8B-ESPO",
+    "cjgrpo-refusion": f"{HF_ORG}/ReFusion-8B-CJ-GRPO",
+    "mdpo-refusion": f"{HF_ORG}/ReFusion-8B-MDPO",
+    "espo-fsdfm": f"{HF_ORG}/FS-DFM-1.3B-ESPO-mu8",
+}
+
+
+def _resolve_checkpoint(checkpoint_path: str) -> str:
+    """Ensure checkpoint exists, downloading from HF if needed."""
+    from pathlib import Path
+    if Path(checkpoint_path).exists():
+        return checkpoint_path
+    # Try to find the checkpoint name from the path
+    ckpt_name = Path(checkpoint_path).name
+    hf_repo = _CKPT_TO_HF.get(ckpt_name)
+    if hf_repo:
+        from huggingface_hub import snapshot_download
+        token = os.environ.get("HF_TOKEN")
+        logger.info("Checkpoint not on volume, downloading %s -> %s", hf_repo, checkpoint_path)
+        os.makedirs(checkpoint_path, exist_ok=True)
+        snapshot_download(repo_id=hf_repo, local_dir=checkpoint_path, token=token)
+        volume.commit()
+        logger.info("Downloaded %s from HuggingFace", hf_repo)
+    return checkpoint_path
+
+
 def _eval_refusion(checkpoint_path: str, result_prefix: str):
     """Run ReFusion eval on both val and test splits."""
+    volume.reload()
+    checkpoint_path = _resolve_checkpoint(checkpoint_path)
     _download_formfactory()
     for split in ["val", "test"]:
         logger.info("Evaluating ReFusion: %s (%s)", result_prefix, split)
@@ -1713,6 +1946,8 @@ def _eval_refusion(checkpoint_path: str, result_prefix: str):
 
 def _eval_fsdfm(checkpoint_path: str, result_prefix: str):
     """Run FS-DFM eval on both val and test splits."""
+    volume.reload()
+    checkpoint_path = _resolve_checkpoint(checkpoint_path)
     _download_formfactory()
     for split in ["val", "test"]:
         logger.info("Evaluating FS-DFM: %s (%s)", result_prefix, split)
@@ -1721,6 +1956,44 @@ def _eval_fsdfm(checkpoint_path: str, result_prefix: str):
             "EVAL_SPLIT": split,
             "MAX_EVAL_SAMPLES": "124",
             "EVAL_RESULT_NAME": f"{result_prefix}-{split}",
+        })
+        volume.commit()
+        logger.info("Committed %s-%s results to volume", result_prefix, split)
+
+
+def _eval_fsdfm_stochastic(checkpoint_path: str, result_prefix: str, temperature: float = 1.0):
+    """Run FS-DFM stochastic eval (temperature > 0) on both val and test splits."""
+    volume.reload()
+    checkpoint_path = _resolve_checkpoint(checkpoint_path)
+    _download_formfactory()
+    for split in ["val", "test"]:
+        logger.info("Evaluating FS-DFM (stochastic, temp=%.1f): %s (%s)",
+                     temperature, result_prefix, split)
+        _run_eval("infra.training.flow_matching.eval_fsdfm_sft", {
+            "FSDFM_SFT_CHECKPOINT": checkpoint_path,
+            "EVAL_SPLIT": split,
+            "MAX_EVAL_SAMPLES": "124",
+            "EVAL_RESULT_NAME": f"{result_prefix}-{split}",
+            "EVAL_TEMP": str(temperature),
+        })
+        volume.commit()
+        logger.info("Committed %s-%s results to volume", result_prefix, split)
+
+
+def _eval_refusion_stochastic(checkpoint_path: str, result_prefix: str, temperature: float = 1.0):
+    """Run ReFusion stochastic eval (temperature > 0) on both val and test splits."""
+    volume.reload()
+    checkpoint_path = _resolve_checkpoint(checkpoint_path)
+    _download_formfactory()
+    for split in ["val", "test"]:
+        logger.info("Evaluating ReFusion (stochastic, temp=%.1f): %s (%s)",
+                     temperature, result_prefix, split)
+        _run_eval("infra.training.flow_matching.eval_refusion_sft", {
+            "FLOW_LLM_SFT_CHECKPOINT": checkpoint_path,
+            "EVAL_SPLIT": split,
+            "MAX_EVAL_SAMPLES": "124",
+            "EVAL_RESULT_NAME": f"{result_prefix}-{split}",
+            "EVAL_TEMP": str(temperature),
         })
         volume.commit()
         logger.info("Committed %s-%s results to volume", result_prefix, split)
@@ -1846,6 +2119,326 @@ def eval_mdpo_fsdfm_mu8():
     logger.info("eval_mdpo_fsdfm_mu8 complete.")
 
 
+# --- Stochastic eval (temperature=1.0) for ALL methods in Tables 3+5 ---
+# A fair comparison requires greedy AND stochastic eval for every method,
+# not just the ones that failed under greedy (cherry-picking concern).
+
+# FS-DFM stochastic evals (A10)
+
+@app.function(
+    image=image,
+    secrets=[secret],
+    volumes={VOLUME_MOUNT: volume},
+    gpu=GPU_FSDFM,
+    timeout=EVAL_TIMEOUT,
+)
+def eval_fsdfm_sft_stochastic():
+    """Stochastic eval (temp=1.0) of FS-DFM SFT baseline (A10)."""
+    _eval_fsdfm_stochastic(FSDFM_SFT_PATH, "fsdfm-sft-stochastic", temperature=1.0)
+    volume.commit()
+    logger.info("eval_fsdfm_sft_stochastic complete.")
+
+
+@app.function(
+    image=image,
+    secrets=[secret],
+    volumes={VOLUME_MOUNT: volume},
+    gpu=GPU_FSDFM,
+    timeout=EVAL_TIMEOUT,
+)
+def eval_espo_fsdfm_stochastic():
+    """Stochastic eval (temp=1.0) of ESPO mu=8 FS-DFM (A10)."""
+    _eval_fsdfm_stochastic(ESPO_FSDFM_CKPT, "espo-fsdfm-stochastic", temperature=1.0)
+    volume.commit()
+    logger.info("eval_espo_fsdfm_stochastic complete.")
+
+
+@app.function(
+    image=image,
+    secrets=[secret],
+    volumes={VOLUME_MOUNT: volume},
+    gpu=GPU_FSDFM,
+    timeout=EVAL_TIMEOUT,
+)
+def eval_standard_grpo_fsdfm_stochastic():
+    """Stochastic eval (temp=1.0) of Standard GRPO FS-DFM (A10)."""
+    _eval_fsdfm_stochastic(STANDARD_GRPO_FSDFM_CKPT, "standard-grpo-fsdfm-stochastic", temperature=1.0)
+    volume.commit()
+    logger.info("eval_standard_grpo_fsdfm_stochastic complete.")
+
+
+@app.function(
+    image=image,
+    secrets=[secret],
+    volumes={VOLUME_MOUNT: volume},
+    gpu=GPU_FSDFM,
+    timeout=EVAL_TIMEOUT,
+)
+def eval_ar_surrogate_fsdfm_stochastic():
+    """Stochastic eval (temp=1.0) of AR Surrogate FS-DFM (A10)."""
+    _eval_fsdfm_stochastic(AR_SURROGATE_FSDFM_CKPT, "ar-surrogate-fsdfm-stochastic", temperature=1.0)
+    volume.commit()
+    logger.info("eval_ar_surrogate_fsdfm_stochastic complete.")
+
+
+@app.function(
+    image=image,
+    secrets=[secret],
+    volumes={VOLUME_MOUNT: volume},
+    gpu=GPU_FSDFM,
+    timeout=EVAL_TIMEOUT,
+)
+def eval_causal_denoising_fsdfm_stochastic():
+    """Stochastic eval (temp=1.0) of Causal Denoising FS-DFM (A10)."""
+    _eval_fsdfm_stochastic(CAUSAL_DENOISING_FSDFM_CKPT, "causal-denoising-fsdfm-stochastic", temperature=1.0)
+    volume.commit()
+    logger.info("eval_causal_denoising_fsdfm_stochastic complete.")
+
+
+@app.function(
+    image=image,
+    secrets=[secret],
+    volumes={VOLUME_MOUNT: volume},
+    gpu=GPU_FSDFM,
+    timeout=EVAL_TIMEOUT,
+)
+def eval_cjgrpo_fsdfm_stochastic():
+    """Stochastic eval (temp=1.0) of CJ-GRPO FS-DFM checkpoint (A10)."""
+    _eval_fsdfm_stochastic(CJGRPO_FSDFM_CKPT, "cjgrpo-fsdfm-stochastic", temperature=1.0)
+    volume.commit()
+    logger.info("eval_cjgrpo_fsdfm_stochastic complete.")
+
+
+@app.function(
+    image=image,
+    secrets=[secret],
+    volumes={VOLUME_MOUNT: volume},
+    gpu=GPU_FSDFM,
+    timeout=EVAL_TIMEOUT,
+)
+def eval_mdpo_fsdfm_stochastic():
+    """Stochastic eval (temp=1.0) of MDPO FS-DFM checkpoint (A10)."""
+    _eval_fsdfm_stochastic(MDPO_FSDFM_CKPT, "mdpo-fsdfm-stochastic", temperature=1.0)
+    volume.commit()
+    logger.info("eval_mdpo_fsdfm_stochastic complete.")
+
+
+# ReFusion stochastic evals (L40S)
+
+@app.function(
+    image=image,
+    secrets=[secret],
+    volumes={VOLUME_MOUNT: volume},
+    gpu=GPU_REFUSION,
+    timeout=EVAL_TIMEOUT,
+)
+def eval_refusion_sft_stochastic():
+    """Stochastic eval (temp=1.0) of ReFusion SFT baseline (L40S)."""
+    _eval_refusion_stochastic(REFUSION_SFT_PATH, "refusion-sft-stochastic", temperature=1.0)
+    volume.commit()
+    logger.info("eval_refusion_sft_stochastic complete.")
+
+
+@app.function(
+    image=image,
+    secrets=[secret],
+    volumes={VOLUME_MOUNT: volume},
+    gpu=GPU_REFUSION,
+    timeout=EVAL_TIMEOUT,
+)
+def eval_espo_refusion_stochastic():
+    """Stochastic eval (temp=1.0) of ESPO mu=8 ReFusion (L40S)."""
+    _eval_refusion_stochastic(ESPO_REFUSION_CKPT, "espo-refusion-stochastic", temperature=1.0)
+    volume.commit()
+    logger.info("eval_espo_refusion_stochastic complete.")
+
+
+@app.function(
+    image=image,
+    secrets=[secret],
+    volumes={VOLUME_MOUNT: volume},
+    gpu=GPU_REFUSION,
+    timeout=EVAL_TIMEOUT,
+)
+def eval_standard_grpo_refusion_stochastic():
+    """Stochastic eval (temp=1.0) of Standard GRPO ReFusion (L40S)."""
+    _eval_refusion_stochastic(STANDARD_GRPO_REFUSION_CKPT, "standard-grpo-refusion-stochastic", temperature=1.0)
+    volume.commit()
+    logger.info("eval_standard_grpo_refusion_stochastic complete.")
+
+
+@app.function(
+    image=image,
+    secrets=[secret],
+    volumes={VOLUME_MOUNT: volume},
+    gpu=GPU_REFUSION,
+    timeout=EVAL_TIMEOUT,
+)
+def eval_cjgrpo_refusion_stochastic():
+    """Stochastic eval (temp=1.0) of CJ-GRPO ReFusion (L40S)."""
+    _eval_refusion_stochastic(CJGRPO_REFUSION_CKPT, "cjgrpo-refusion-stochastic", temperature=1.0)
+    volume.commit()
+    logger.info("eval_cjgrpo_refusion_stochastic complete.")
+
+
+@app.function(
+    image=image,
+    secrets=[secret],
+    volumes={VOLUME_MOUNT: volume},
+    gpu=GPU_REFUSION,
+    timeout=EVAL_TIMEOUT,
+)
+def eval_mdpo_refusion_stochastic():
+    """Stochastic eval (temp=1.0) of MDPO ReFusion (L40S)."""
+    _eval_refusion_stochastic(MDPO_REFUSION_CKPT, "mdpo-refusion-stochastic", temperature=1.0)
+    volume.commit()
+    logger.info("eval_mdpo_refusion_stochastic complete.")
+
+
+@app.function(
+    image=image,
+    secrets=[secret],
+    volumes={VOLUME_MOUNT: volume},
+    gpu=GPU_REFUSION,
+    timeout=EVAL_TIMEOUT,
+)
+def eval_espo_refusion_mu1():
+    """Greedy eval of ESPO mu=1 ReFusion on val+test (L40S)."""
+    _eval_refusion(ESPO_REFUSION_MU1_CKPT, "espo-refusion-mu1")
+    volume.commit()
+    logger.info("eval_espo_refusion_mu1 complete.")
+
+
+@app.function(
+    image=image,
+    secrets=[secret],
+    volumes={VOLUME_MOUNT: volume},
+    gpu=GPU_REFUSION,
+    timeout=EVAL_TIMEOUT,
+)
+def eval_espo_refusion_mu1_stochastic():
+    """Stochastic eval (temp=1.0) of ESPO mu=1 ReFusion (L40S)."""
+    _eval_refusion_stochastic(ESPO_REFUSION_MU1_CKPT, "espo-refusion-mu1-stochastic", temperature=1.0)
+    volume.commit()
+    logger.info("eval_espo_refusion_mu1_stochastic complete.")
+
+
+# --- ESPO hyperparameter ablation eval ---
+
+@app.function(
+    image=image,
+    secrets=[secret],
+    volumes={VOLUME_MOUNT: volume},
+    gpu=GPU_FSDFM,
+    timeout=EVAL_TIMEOUT,
+)
+def eval_cjgrpo_fsdfm_espo_hp():
+    """Greedy eval CJ-GRPO ESPO-HP FS-DFM on val+test (A10). Best was @step17, using step_20."""
+    _eval_fsdfm(CJGRPO_FSDFM_ESPO_HP_CKPT + "/step_20", "cjgrpo-fsdfm-espo-hp")
+    volume.commit()
+    logger.info("eval_cjgrpo_fsdfm_espo_hp complete.")
+
+
+@app.function(
+    image=image,
+    secrets=[secret],
+    volumes={VOLUME_MOUNT: volume},
+    gpu=GPU_FSDFM,
+    timeout=EVAL_TIMEOUT,
+)
+def eval_mdpo_fsdfm_espo_hp():
+    """Greedy eval MDPO ESPO-HP FS-DFM on val+test (A10). Using step_35 (latest)."""
+    _eval_fsdfm(MDPO_FSDFM_ESPO_HP_CKPT + "/step_35", "mdpo-fsdfm-espo-hp")
+    volume.commit()
+    logger.info("eval_mdpo_fsdfm_espo_hp complete.")
+
+
+@app.function(
+    image=image,
+    secrets=[secret],
+    volumes={VOLUME_MOUNT: volume},
+    gpu=GPU_FSDFM,
+    timeout=EVAL_TIMEOUT,
+)
+def eval_cjgrpo_fsdfm_espo_hp_stochastic():
+    """Stochastic eval (temp=1.0) CJ-GRPO ESPO-HP FS-DFM (A10). Using step_20."""
+    _eval_fsdfm_stochastic(CJGRPO_FSDFM_ESPO_HP_CKPT + "/step_20", "cjgrpo-fsdfm-espo-hp-stochastic")
+    volume.commit()
+    logger.info("eval_cjgrpo_fsdfm_espo_hp_stochastic complete.")
+
+
+@app.function(
+    image=image,
+    secrets=[secret],
+    volumes={VOLUME_MOUNT: volume},
+    gpu=GPU_FSDFM,
+    timeout=EVAL_TIMEOUT,
+)
+def eval_mdpo_fsdfm_espo_hp_stochastic():
+    """Stochastic eval (temp=1.0) MDPO ESPO-HP FS-DFM (A10). Using step_35."""
+    _eval_fsdfm_stochastic(MDPO_FSDFM_ESPO_HP_CKPT + "/step_35", "mdpo-fsdfm-espo-hp-stochastic")
+    volume.commit()
+    logger.info("eval_mdpo_fsdfm_espo_hp_stochastic complete.")
+
+
+# --- Standard GRPO eval ---
+
+@app.function(
+    image=image,
+    secrets=[secret],
+    volumes={VOLUME_MOUNT: volume},
+    gpu=GPU_REFUSION,
+    timeout=EVAL_TIMEOUT,
+)
+def eval_standard_grpo_refusion():
+    """Eval Standard GRPO ReFusion on val+test (L40S)."""
+    _eval_refusion(STANDARD_GRPO_REFUSION_CKPT, "standard-grpo-refusion")
+    volume.commit()
+    logger.info("eval_standard_grpo_refusion complete.")
+
+
+@app.function(
+    image=image,
+    secrets=[secret],
+    volumes={VOLUME_MOUNT: volume},
+    gpu=GPU_FSDFM,
+    timeout=EVAL_TIMEOUT,
+)
+def eval_standard_grpo_fsdfm():
+    """Eval Standard GRPO FS-DFM on val+test (A10)."""
+    _eval_fsdfm(STANDARD_GRPO_FSDFM_CKPT, "standard-grpo-fsdfm")
+    volume.commit()
+    logger.info("eval_standard_grpo_fsdfm complete.")
+
+
+@app.function(
+    image=image,
+    secrets=[secret],
+    volumes={VOLUME_MOUNT: volume},
+    gpu=GPU_FSDFM,
+    timeout=EVAL_TIMEOUT,
+)
+def eval_ar_surrogate_fsdfm():
+    """Eval AR Surrogate FS-DFM on val+test (A10)."""
+    _eval_fsdfm(AR_SURROGATE_FSDFM_CKPT, "ar-surrogate-fsdfm")
+    volume.commit()
+    logger.info("eval_ar_surrogate_fsdfm complete.")
+
+
+@app.function(
+    image=image,
+    secrets=[secret],
+    volumes={VOLUME_MOUNT: volume},
+    gpu=GPU_FSDFM,
+    timeout=EVAL_TIMEOUT,
+)
+def eval_causal_denoising_fsdfm():
+    """Eval Causal Denoising FS-DFM on val+test (A10)."""
+    _eval_fsdfm(CAUSAL_DENOISING_FSDFM_CKPT, "causal-denoising-fsdfm")
+    volume.commit()
+    logger.info("eval_causal_denoising_fsdfm complete.")
+
+
 # ===========================================================================
 # FULL PIPELINE (main entrypoint)
 # ===========================================================================
@@ -1951,8 +2544,6 @@ def eval_all():
 # ===========================================================================
 # PUSH CHECKPOINTS TO HUGGINGFACE
 # ===========================================================================
-
-HF_ORG = "billyenrizky"
 
 # New checkpoints to push (sequence-level results)
 HF_PUSH_MODELS = [
