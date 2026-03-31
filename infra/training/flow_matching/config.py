@@ -191,6 +191,36 @@ ONLINE_FSDFM_GRPO_CONFIG = {
     },
 }
 
+# --- AR Surrogate GRPO for FS-DFM 1.3B ---
+# Uses TRUE autoregressive surrogate log-probs (causal masking at t~1.0)
+# with REINFORCE loss and Schulman k3 KL, identical to ReFusion's Standard
+# GRPO formulation. Eliminates the confound between GKL loss (diffusion)
+# and AR log-probs (ReFusion) for fair comparison in Table 3.
+AR_SURROGATE_FSDFM_GRPO_CONFIG = {
+    "group_size": int(os.environ.get("GROUP_SIZE", "4")),
+    "learning_rate": float(os.environ.get("LR", "5e-5")),
+    "num_epochs": int(os.environ.get("NUM_EPOCHS", "1")),
+    "kl_coeff": float(os.environ.get("KL_COEFF", "0.04")),
+    "bf16": True,
+    "logging_steps": 5,
+    "grad_clip": float(os.environ.get("GRAD_CLIP", "1.0")),
+    "num_sampling_steps": int(os.environ.get("GEN_STEPS", "64")),
+    "generation_temperature": float(os.environ.get("GEN_TEMP", "1.0")),
+    "formfactory_port": int(os.environ.get("FORMFACTORY_PORT", "5050")),
+    "browser_headless": True,
+    "action_timeout_s": 5,
+    "rollout_timeout_s": 30,
+    "shuffle_prompts": os.environ.get("SHUFFLE", "true").lower() == "true",
+    "min_nonzero_for_update": int(os.environ.get("MIN_NONZERO", "1")),
+    "early_stop_max_steps": int(os.environ.get("EARLY_STOP_MAX_STEPS", "40")),
+    "checkpoint_every_steps": int(os.environ.get("CHECKPOINT_EVERY_STEPS", "10")),
+    "reward_weights": {
+        "task_completion": 0.4,
+        "field_accuracy": 0.4,
+        "execution_completeness": 0.2,
+    },
+}
+
 # --- Flow-GRPO for FS-DFM (discrete policy gradients, Liu et al. 2025) ---
 # Adapts continuous Flow-GRPO (ODE-to-SDE + Gaussian log-probs) to the
 # discrete Poisson jump process used by FS-DFM.  Per-step categorical
