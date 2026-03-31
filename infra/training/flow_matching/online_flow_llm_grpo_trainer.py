@@ -244,8 +244,8 @@ async def train():
         trainable_params, lr=grpo_config["learning_rate"]
     )
 
-    group_size = grpo_config["group_size"]
-    kl_coeff = grpo_config["kl_coeff"]
+    group_size = int(os.environ.get("GROUP_SIZE", str(grpo_config["group_size"])))
+    kl_coeff = float(os.environ.get("KL_COEFF", str(grpo_config["kl_coeff"])))
     max_seq_length = model_config["max_seq_length"]
     num_denoising_steps = grpo_config.get(
         "num_denoising_steps", model_config.get("num_denoising_steps", 20)
@@ -488,7 +488,8 @@ async def train():
         tokenizer.save_pretrained(str(final_dir))
         logger.info(f"Flow LLM GRPO complete. Model saved to {final_dir}")
 
-        persist_checkpoint(str(final_dir), "online-flow-llm-grpo")
+        ckpt_name = os.environ.get("CHECKPOINT_NAME", "online-flow-llm-grpo")
+        persist_checkpoint(str(final_dir), ckpt_name)
 
     finally:
         await browser_env.close()

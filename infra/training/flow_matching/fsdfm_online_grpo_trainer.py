@@ -427,7 +427,8 @@ async def train():
                     ckpt_dir.mkdir(parents=True, exist_ok=True)
                     save_lora_weights(policy_model, str(ckpt_dir / "lora_weights.pt"))
                     tokenizer.save_pretrained(str(ckpt_dir))
-                    persist_checkpoint(str(ckpt_dir.parent), "online-fsdfm-grpo")
+                    ckpt_name = os.environ.get("CHECKPOINT_NAME", "online-fsdfm-grpo")
+                    persist_checkpoint(str(ckpt_dir.parent), ckpt_name)
                     logger.info(f"  Intermediate checkpoint saved at step {total_steps}")
 
             # Epoch summary
@@ -447,7 +448,8 @@ async def train():
         tokenizer.save_pretrained(str(final_dir))
         logger.info(f"FS-DFM GRPO complete. Model saved to {final_dir}")
 
-        persist_checkpoint(str(final_dir.parent), "online-fsdfm-grpo")
+        ckpt_name = os.environ.get("CHECKPOINT_NAME", "online-fsdfm-grpo")
+        persist_checkpoint(str(final_dir.parent), ckpt_name)
 
     finally:
         await browser_env.close()
