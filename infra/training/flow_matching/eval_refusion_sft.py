@@ -145,9 +145,10 @@ async def evaluate():
     headless = grpo_config.get("browser_headless", True)
     browser_env = await BrowserEnvironment.create(headless=headless)
 
+    eval_temp = float(os.environ.get("EVAL_TEMP", "0.0"))
     logger.info(
         f"Starting ReFusion SFT evaluation: {len(prompts)} prompts, "
-        f"denoising_steps={num_denoising_steps}"
+        f"denoising_steps={num_denoising_steps}, eval_temperature={eval_temp}"
     )
 
     all_rewards = []
@@ -184,13 +185,14 @@ async def evaluate():
             condition_ids = cond_enc["input_ids"].to(flow_llm.device)
             condition_mask = cond_enc["attention_mask"].to(flow_llm.device)
 
-            # Generate via iterative unmasking (temperature=0 for greedy eval)
+            # Generate via iterative unmasking
+            eval_temp = float(os.environ.get("EVAL_TEMP", "0.0"))
             generated_ids = flow_llm.generate(
                 condition_ids=condition_ids,
                 condition_mask=condition_mask,
                 seq_length=max_new_tokens,
                 num_steps=num_denoising_steps,
-                temperature=0.0,  # Greedy for deterministic eval
+                temperature=eval_temp,
             )
             response_text = tokenizer.decode(generated_ids[0], skip_special_tokens=True)
 

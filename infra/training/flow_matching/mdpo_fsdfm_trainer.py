@@ -474,7 +474,8 @@ async def train():
     total_steps = 0
     best_avg_reward = -1.0
     best_step = -1
-    best_checkpoint_dir = Path("outputs/mdpo_fsdfm/best")
+    _ckpt = os.environ.get("CHECKPOINT_NAME", "mdpo-fsdfm")
+    best_checkpoint_dir = Path("outputs/%s/best" % _ckpt.replace("-", "_"))
 
     try:
         for epoch in range(mdpo_config["num_epochs"]):
@@ -685,8 +686,9 @@ async def train():
                     )
                     # Still save periodic checkpoints even when skipping
                     if total_steps % checkpoint_every == 0:
+                        ckpt_name = os.environ.get("CHECKPOINT_NAME", "mdpo-fsdfm")
                         step_dir = Path(
-                            "outputs/mdpo_fsdfm/step_%d" % total_steps
+                            "outputs/%s/step_%d" % (ckpt_name.replace("-", "_"), total_steps)
                         )
                         step_dir.mkdir(parents=True, exist_ok=True)
                         save_lora_weights(
@@ -696,7 +698,7 @@ async def train():
                         tokenizer.save_pretrained(str(step_dir))
                         persist_checkpoint(
                             str(step_dir),
-                            "mdpo-fsdfm/step_%d" % total_steps,
+                            "%s/step_%d" % (ckpt_name, total_steps),
                         )
                         logger.info(
                             "Intermediate checkpoint saved to %s", step_dir
@@ -903,8 +905,9 @@ async def train():
 
                 # Periodic intermediate checkpoint
                 if total_steps % checkpoint_every == 0:
+                    ckpt_name = os.environ.get("CHECKPOINT_NAME", "mdpo-fsdfm")
                     step_dir = Path(
-                        "outputs/mdpo_fsdfm/step_%d" % total_steps
+                        "outputs/%s/step_%d" % (ckpt_name.replace("-", "_"), total_steps)
                     )
                     step_dir.mkdir(parents=True, exist_ok=True)
                     save_lora_weights(
@@ -914,7 +917,7 @@ async def train():
                     tokenizer.save_pretrained(str(step_dir))
                     persist_checkpoint(
                         str(step_dir),
-                        "mdpo-fsdfm/step_%d" % total_steps,
+                        "%s/step_%d" % (ckpt_name, total_steps),
                     )
                     logger.info("Intermediate checkpoint saved to %s", step_dir)
 
@@ -955,7 +958,8 @@ async def train():
                 )
 
         # Save final model
-        final_dir = Path("outputs/mdpo_fsdfm/final")
+        ckpt_name = os.environ.get("CHECKPOINT_NAME", "mdpo-fsdfm")
+        final_dir = Path("outputs/%s/final" % ckpt_name.replace("-", "_"))
         final_dir.mkdir(parents=True, exist_ok=True)
         save_lora_weights(
             policy_model, str(final_dir / "lora_weights.pt")
@@ -966,7 +970,7 @@ async def train():
             final_dir, best_avg_reward, best_step, best_checkpoint_dir,
         )
 
-        persist_checkpoint(str(final_dir), "mdpo-fsdfm")
+        persist_checkpoint(str(final_dir), ckpt_name)
 
     finally:
         await browser_env.close()

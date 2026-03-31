@@ -152,11 +152,13 @@ class DDiTBlock(nn.Module):
         c: torch.Tensor,
         rotary_cos: torch.Tensor,
         rotary_sin: torch.Tensor,
+        is_causal: bool = False,
     ) -> torch.Tensor:
         """
         x: [B, L, H] hidden states
         c: [B, cond_dim] conditioning vector (from timestep)
         rotary_cos, rotary_sin: precomputed RoPE tables
+        is_causal: if True, use causal (left-to-right) attention mask
         """
         B, L, H = x.shape
 
@@ -182,7 +184,8 @@ class DDiTBlock(nn.Module):
         k = apply_rotary_emb(k, rotary_cos, rotary_sin)
 
         # Scaled dot-product attention
-        attn = F.scaled_dot_product_attention(q, k, v, dropout_p=0.0 if not self.training else 0.1)
+        dp = 0.0 if not self.training else 0.1
+        attn = F.scaled_dot_product_attention(q, k, v, dropout_p=dp, is_causal=is_causal)
         attn = attn.transpose(1, 2).contiguous().view(B, L, H)
 
         # Output projection + gated residual
@@ -276,11 +279,12 @@ class FSDFMTransformer(nn.Module):
         total_params = sum(p.numel() for p in self.parameters())
         logger.info(f"FSDFMTransformer: {total_params / 1e9:.2f}B parameters")
 
-    def forward(self, x_t: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
+    def forward(self, x_t: torch.Tensor, t: torch.Tensor, is_causal: bool = False) -> torch.Tensor:
         """
         Args:
             x_t: [B, L] noised token IDs at time t
             t: [B] timestep values in [0, 1]
+            is_causal: if True, use causal (left-to-right) attention for AR surrogate log-probs
 
         Returns:
             logits: [B, L, vocab_size] predicted posterior distribution
@@ -296,12 +300,12 @@ class FSDFMTransformer(nn.Module):
             from torch.utils.checkpoint import checkpoint as grad_checkpoint
             for block in self.blocks:
                 x = grad_checkpoint(
-                    block, x, c, self.rotary_cos, self.rotary_sin,
+                    block, x, c, self.rotary_cos, self.rotary_sin, is_causal,
                     use_reentrant=False,
                 )
         else:
             for block in self.blocks:
-                x = block(x, c, self.rotary_cos, self.rotary_sin)
+                x = block(x, c, self.rotary_cos, self.rotary_sin, is_causal)
 
         # Final layer -> logits
         logits = self.output_layer(x, c)  # [B, L, V]
@@ -667,6 +671,145 @@ def compute_generalized_kl_loss(
         return per_token_loss.sum() / loss_mask.sum().clamp(min=1)
 
     return per_token_loss.mean()
+
+
+def compute_per_token_log_probs_fsdfm(
+    model: FSDFMTransformer,
+    x_1: torch.Tensor,
+    prompt_length: int,
+    loss_mask: torch.Tensor | None = None,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Compute AR surrogate per-token log-probs for FS-DFM via causal masking.
+
+    Feeds clean text x_1 at t near 1.0 with causal (left-to-right) attention
+    and shifted cross-entropy. Despite the architectural mismatch (FS-DFM
+    predicts position i, not i+1), this provides a gradient signal that
+    empirically does not collapse FS-DFM under GRPO.
+
+    Args:
+        model: FSDFMTransformer (policy or reference, with LoRA).
+        x_1: [B, L] clean token IDs (prompt + response + padding).
+        prompt_length: Length of the prompt prefix.
+        loss_mask: [B, L] optional mask (1 = response token, 0 = prompt/padding).
+
+    Returns:
+        token_log_probs: [B, max_resp_len] per-token log-probs for response.
+        resp_mask: [B, max_resp_len] mask (1 for real response tokens, 0 otherwise).
+    """
+    B, L = x_1.shape
+    device = x_1.device
+
+    # t near 1.0: clean text, stays within training distribution [1e-4, 0.9999]
+    t = torch.full((B,), 1.0 - 1e-4, device=device, dtype=torch.float32)
+
+    # Forward with causal masking -- float32 for numerical stability
+    with torch.amp.autocast(device_type="cuda", dtype=torch.float32):
+        logits = model(x_1, t, is_causal=True)  # [B, L, V]
+
+    # Shifted cross-entropy (same formulation as ReFusion's AR log-probs)
+    shift_logits = logits[:, :-1, :]  # [B, L-1, V]
+    shift_labels = x_1[:, 1:]         # [B, L-1]
+
+    token_nll = F.cross_entropy(
+        shift_logits.reshape(-1, shift_logits.shape[-1]),
+        shift_labels.reshape(-1),
+        reduction="none",
+    ).view(B, -1)  # [B, L-1]
+    token_log_probs = -token_nll
+
+    # Extract response portion (shifted by 1 for next-token prediction)
+    response_start = max(0, prompt_length - 1)
+    max_resp_len = L - 1 - response_start
+    if max_resp_len <= 0:
+        return torch.zeros(B, 1, device=device), torch.zeros(B, 1, device=device)
+
+    resp_log_probs = token_log_probs[:, response_start:response_start + max_resp_len]
+
+    # Build response mask from loss_mask if provided
+    if loss_mask is not None:
+        resp_mask = loss_mask[:, 1:][:, response_start:response_start + max_resp_len]
+    else:
+        resp_mask = torch.ones_like(resp_log_probs)
+
+    return resp_log_probs, resp_mask
+
+
+def compute_causal_denoising_log_probs_fsdfm(
+    model: FSDFMTransformer,
+    x_1: torch.Tensor,
+    prompt_length: int,
+    loss_mask: torch.Tensor | None = None,
+    vocab_size: int = 50257,
+    scheduler: PolynomialConvexScheduler | None = None,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Compute causal denoising per-token log-probs for FS-DFM.
+
+    Computes the causal denoising log-probability:
+        log P(x_1[i] | x_t[0..i], t)
+    which measures model confidence in the clean token at position i,
+    given only the noisy LEFT context, at a random timestep t.
+
+    Unlike compute_per_token_log_probs_fsdfm (shifted CE at t~1.0), this
+    uses UNSHIFTED CE at a random t, which correctly aligns with FS-DFM's
+    native prediction target (the clean token at position i).
+
+    Args:
+        model: FSDFMTransformer (policy or reference, with LoRA).
+        x_1: [B, L] clean token IDs (prompt + response + padding).
+        prompt_length: Length of the prompt prefix.
+        loss_mask: [B, L] optional mask (1 = response token, 0 = prompt/padding).
+        vocab_size: Vocabulary size for noise sampling (default: GPT-2 50257).
+        scheduler: PolynomialConvexScheduler for creating noised input.
+
+    Returns:
+        token_log_probs: [B, resp_len] per-token log-probs for response.
+        resp_mask: [B, resp_len] mask (1 for real response tokens, 0 otherwise).
+    """
+    B, L = x_1.shape
+    device = x_1.device
+
+    # Sample random timestep in training distribution [eps, 1-eps]
+    eps = 1e-4
+    t = torch.rand(B, device=device) * (1.0 - 2 * eps) + eps
+
+    # Create noised input x_t via mixture path
+    x_0 = torch.randint(0, vocab_size, (B, L), device=device)
+    if scheduler is not None:
+        sched = scheduler(t)
+        sigma_t = sched["sigma_t"]
+        if sigma_t.dim() == 1:
+            sigma_t = sigma_t.unsqueeze(-1)
+        source_mask = torch.rand_like(x_0.float()) < sigma_t
+        x_t = torch.where(source_mask, x_0, x_1)
+    else:
+        x_t = x_1
+        t = torch.full((B,), 1.0 - eps, device=device, dtype=torch.float32)
+
+    # Forward with causal masking -- float32 for stability
+    with torch.amp.autocast(device_type="cuda", dtype=torch.float32):
+        logits = model(x_t, t, is_causal=True)  # [B, L, V]
+
+    # UNSHIFTED cross-entropy: logits[i] predicts clean token at position i
+    token_nll = F.cross_entropy(
+        logits.reshape(-1, logits.shape[-1]),
+        x_1.reshape(-1),
+        reduction="none",
+    ).view(B, L)  # [B, L]
+    token_log_probs = -token_nll
+
+    # Extract response portion (no shift -- unshifted CE)
+    resp_len = L - prompt_length
+    if resp_len <= 0:
+        return torch.zeros(B, 1, device=device), torch.zeros(B, 1, device=device)
+
+    resp_log_probs = token_log_probs[:, prompt_length:]
+
+    if loss_mask is not None:
+        resp_mask = loss_mask[:, prompt_length:]
+    else:
+        resp_mask = torch.ones_like(resp_log_probs)
+
+    return resp_log_probs, resp_mask
 
 
 # ---------------------------------------------------------------------------

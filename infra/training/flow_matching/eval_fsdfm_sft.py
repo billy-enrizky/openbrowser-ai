@@ -127,9 +127,10 @@ async def evaluate():
     headless = grpo_config.get("browser_headless", True)
     browser_env = await BrowserEnvironment.create(headless=headless)
 
+    eval_temp = float(os.environ.get("EVAL_TEMP", "0.0"))
     logger.info(
         f"Starting FS-DFM SFT evaluation: {len(prompts)} prompts, "
-        f"sampling_steps={num_sampling_steps}, temperature={gen_temperature}"
+        f"sampling_steps={num_sampling_steps}, eval_temperature={eval_temp}"
     )
 
     all_rewards = []
@@ -166,14 +167,15 @@ async def evaluate():
             prefix_len = prefix_ids.shape[1]
             gen_length = max(1, max_seq_length - prefix_len)
 
-            # Generate via discrete Euler solver (greedy: temperature=0)
+            # Generate via discrete Euler solver
+            eval_temp = float(os.environ.get("EVAL_TEMP", "0.0"))
             generated_ids = generate_with_prefix_conditioning(
                 model=model,
                 prefix_ids=prefix_ids,
                 gen_length=gen_length,
                 config={**model_config, "num_sampling_steps": num_sampling_steps},
                 scheduler=scheduler,
-                temperature=0.0,  # Greedy for deterministic eval
+                temperature=eval_temp,
             )
             response_text = tokenizer.decode(generated_ids[0], skip_special_tokens=True)
 
