@@ -694,7 +694,7 @@ We investigated whether reinforcement learning can improve a language model's ab
 - **Method**: Two-phase pipeline -- SFT on Qwen3-8B with QLoRA (992 demonstrations), then online GRPO with live browser execution rewards (composite: 40% submission success + 40% field accuracy + 20% execution completeness)
 - **Result**: GRPO achieves 9.1% higher average reward than SFT alone on held-out validation (p=0.007, Wilcoxon signed-rank test). Improvement comes specifically from better form submission, not field filling.
 - **Key finding**: SFT is a prerequisite -- without it, the base model generates unstructured text and earns zero reward across all attempts.
-- **Paper**: [ResearchGate DOI: 10.13140/RG.2.2.24922.71360](https://doi.org/10.13140/RG.2.2.24922.71360)
+- **Paper**: [Browser-in-the-Loop: Reinforcement Fine-Tuning LLM Agents for Web Form Filling](https://www.researchgate.net/profile/Muhammad-Enrizky-Brillian)
 - **Models**: [Qwen3-8B-FormFactory-SFT-LoRA](https://huggingface.co/billyenrizky/Qwen3-8B-FormFactory-SFT-LoRA), [Qwen3-8B-FormFactory-GRPO-LoRA](https://huggingface.co/billyenrizky/Qwen3-8B-FormFactory-GRPO-LoRA)
 
 ### Study 2: Diffusion Language Models for Web Action Planning
@@ -704,7 +704,7 @@ We investigated whether diffusion language models -- which generate text by iter
 - **Models tested**: ReFusion 8B (masked diffusion with causal LM backbone) and FS-DFM 1.3B (pure discrete flow matching)
 - **Result**: After SFT, diffusion models solve 60-69% of tasks vs. 100% for the AR baseline. Token-level RL is universally fragile (2/16 comparisons improve, both insignificant). Sequence-level RL succeeds: MDPO pushes ReFusion to 91.9% (+31.4pp) and ESPO pushes FS-DFM to 87.1% (+18.6pp).
 - **Key finding**: The appropriate RL formulation is architecture-dependent. ELBO-based optimization (ESPO) produces concentrated distributions across architectures, while per-step trajectory methods produce multimodal distributions.
-- **Paper**: [ResearchGate DOI: 10.13140/RG.2.2.11500.94088](https://doi.org/10.13140/RG.2.2.11500.94088)
+- **Paper**: [Concentrate or Collapse: When Reinforcement Learning Meets Diffusion Language Models for Web Planning](https://www.researchgate.net/profile/Muhammad-Enrizky-Brillian)
 - **Models**: [10 trained models on HuggingFace](https://huggingface.co/billyenrizky) including ReFusion-8B-MDPO, FS-DFM-1.3B-ESPO-mu8, and more
 
 ### Reproducing RL Experiments
