@@ -223,7 +223,7 @@ class TestBrowserConnectArgs:
 class TestBrowserLaunchArgs:
     def test_defaults(self):
         args = BrowserLaunchArgs()
-        assert args.headless is None
+        assert args.headless is True
         assert args.executable_path is None
         assert args.devtools is False
 

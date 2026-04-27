@@ -67,8 +67,8 @@
     "headless": {
       "type": "boolean",
       "title": "Headless Mode",
-      "description": "Run browser without GUI (faster but no visual feedback). Set to false to see the browser in action",
-      "default": false,
+      "description": "Run browser without GUI (faster, less memory). Set to false to see the browser window",
+      "default": true,
       "required": false
     },
     "stealth": {
