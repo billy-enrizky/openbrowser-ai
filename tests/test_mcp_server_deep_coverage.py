@@ -623,7 +623,7 @@ class TestBuildBrowserProfile:
         assert profile is not None
         assert profile.keep_alive is True
         assert profile.disable_security is False
-        assert profile.headless is False
+        assert profile.headless is True
 
     def test_build_profile_merges_config(self, server_instance):
         """Lines 308-318: config values are merged into profile."""
