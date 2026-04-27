@@ -302,7 +302,7 @@ def create_default_config() -> DBStyleConfigJSON:
 	agent_id = str(uuid4())
 
 	# Create default browser profile entry
-	new_config.browser_profile[profile_id] = BrowserProfileEntry(id=profile_id, default=True, headless=False, user_data_dir=None)
+	new_config.browser_profile[profile_id] = BrowserProfileEntry(id=profile_id, default=True, headless=True, user_data_dir=None)
 
 	# Create default LLM entry
 	new_config.llm[llm_id] = LLMEntry(id=llm_id, default=True, model='gpt-4.1-mini', api_key='your-openai-api-key-here')

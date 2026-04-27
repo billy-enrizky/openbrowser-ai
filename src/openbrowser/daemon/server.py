@@ -80,7 +80,7 @@ class DaemonServer:
             'user_data_dir': '~/.config/openbrowser/profiles/daemon',
             'device_scale_factor': 1.0,
             'disable_security': False,
-            'headless': False,
+            'headless': True,
             **profile_config,
         }
         return BrowserProfile(**profile_data)
