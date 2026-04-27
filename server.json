@@ -28,7 +28,7 @@
           "description": "Run browser in headless mode (true/false)",
           "isRequired": false,
           "isSecret": false,
-          "default": "false"
+          "default": "true"
         },
         {
           "name": "OPENBROWSER_ALLOWED_DOMAINS",
