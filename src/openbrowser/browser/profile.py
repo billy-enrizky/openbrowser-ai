@@ -371,7 +371,7 @@ class BrowserLaunchArgs(BaseModel):
 		validation_alias=AliasChoices('browser_binary_path', 'chrome_binary_path'),
 		description='Path to the chromium-based browser executable to use.',
 	)
-	headless: bool | None = Field(default=None, description='Whether to run the browser in headless or windowed mode.')
+	headless: bool | None = Field(default=True, description='Whether to run the browser in headless or windowed mode.')
 	args: list[CliArgStr] = Field(
 		default_factory=list, description='List of *extra* CLI args to pass to the browser when launching.'
 	)
@@ -1105,9 +1105,9 @@ async function initialize(checkInitialized, magic) {{
 		has_screen_available = bool(display_size)
 		self.screen = self.screen or display_size or ViewportSize(width=1920, height=1080)
 
-		# if no headless preference specified, prefer headful if there is a display available
+		# if no headless preference specified, default to headless
 		if self.headless is None:
-			self.headless = not has_screen_available
+			self.headless = True
 
 		# Determine viewport behavior based on mode and user preferences
 		user_provided_viewport = self.viewport is not None
