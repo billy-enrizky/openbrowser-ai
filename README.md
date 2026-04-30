@@ -1,4 +1,10 @@
-# OpenBrowser
+<p align="center">
+  <img src="docs/logo/icon.svg" alt="OpenBrowser" width="120" height="120" />
+</p>
+
+<h1 align="center">OpenBrowser</h1>
+
+<p align="center"><strong>AI browser automation, powered by code.</strong></p>
 
 **Saved Cookies and Scheduled Tasks is available in the cloud-hosted version. Join the waitlist for early access: https://openbrowser.me** :
 
