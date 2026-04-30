@@ -6,6 +6,8 @@
 
 <p align="center"><strong>AI browser automation, powered by code.</strong></p>
 
+---
+
 **Saved Cookies and Scheduled Tasks is available in the cloud-hosted version. Join the waitlist for early access: https://openbrowser.me** :
 
 https://github.com/user-attachments/assets/b17f97f3-f9f8-4707-8e39-abbbbe1a693b
