@@ -59,11 +59,11 @@ class RecordingWatchdog(BaseWatchdog):
 			cdp_session = await self.browser_session.get_or_create_cdp_session()
 			await cdp_session.cdp_client.send.Page.startScreencast(
 				params={
-					'format': 'png',
-					'quality': 90,
+					'format': 'jpeg',
+					'quality': 60,
 					'maxWidth': size['width'],
 					'maxHeight': size['height'],
-					'everyNthFrame': 1,
+					'everyNthFrame': 3,
 				},
 				session_id=cdp_session.session_id,
 			)
@@ -99,7 +99,8 @@ class RecordingWatchdog(BaseWatchdog):
 		"""
 		if not self._recorder:
 			return
-		self._recorder.add_frame(event['data'])
+		loop = asyncio.get_event_loop()
+		loop.run_in_executor(None, self._recorder.add_frame, event['data'])
 		asyncio.create_task(self._ack_screencast_frame(event, session_id))
 
 	async def _ack_screencast_frame(self, event: ScreencastFrameEvent, session_id: str | None) -> None:
