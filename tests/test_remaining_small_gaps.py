@@ -716,6 +716,7 @@ class TestChatAnthropicBedrock:
 
     def test_session_token_passed_to_client_params(self):
         """Line 89: aws_session_token included in client params."""
+        pytest.importorskip("anthropic", reason="anthropic package not installed")
         from openbrowser.llm.aws.chat_anthropic import ChatAnthropicBedrock
 
         model = ChatAnthropicBedrock(
@@ -1060,6 +1061,7 @@ class TestInitCmd:
 
     def test_main_entry_point_exists(self):
         """Line 376: __main__ block calls main()."""
+        pytest.importorskip("InquirerPy", reason="InquirerPy package not installed")
         from openbrowser.init_cmd import main
         assert callable(main)
 
