@@ -1219,6 +1219,7 @@ class TestInitCmdGaps:
 
     def test_main_entry_point(self):
         """Cover line 376: __name__ == '__main__' calls main()."""
+        pytest.importorskip("InquirerPy", reason="InquirerPy package not installed")
         from openbrowser.init_cmd import main
 
         assert callable(main)

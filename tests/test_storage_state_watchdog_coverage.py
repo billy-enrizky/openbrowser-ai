@@ -118,7 +118,8 @@ class TestOnSaveStorageStateEvent:
 
         with patch.object(watchdog, "_save_storage_state", new_callable=AsyncMock) as mock_save:
             await watchdog.on_SaveStorageStateEvent(event)
-            mock_save.assert_awaited_once_with("/tmp/profile_state.json")
+            # Fallback to profile path happens inside _save_storage_state
+            mock_save.assert_awaited_once_with(None)
 
     @pytest.mark.asyncio
     async def test_no_path_available(self):
@@ -160,7 +161,8 @@ class TestOnLoadStorageStateEvent:
 
         with patch.object(watchdog, "_load_storage_state", new_callable=AsyncMock) as mock_load:
             await watchdog.on_LoadStorageStateEvent(event)
-            mock_load.assert_awaited_once_with("/tmp/profile_load.json")
+            # Fallback to profile path happens inside _load_storage_state
+            mock_load.assert_awaited_once_with(None)
 
     @pytest.mark.asyncio
     async def test_no_path_available(self):
