@@ -99,7 +99,7 @@ class RecordingWatchdog(BaseWatchdog):
 		"""
 		if not self._recorder:
 			return
-		loop = asyncio.get_event_loop()
+		loop = asyncio.get_running_loop()
 		loop.run_in_executor(None, self._recorder.add_frame, event['data'])
 		asyncio.create_task(self._ack_screencast_frame(event, session_id))
 
@@ -114,14 +114,42 @@ class RecordingWatchdog(BaseWatchdog):
 		except Exception as e:
 			self.logger.debug(f'Failed to acknowledge screencast frame: {e}')
 
+	async def _capture_final_screenshot(self) -> None:
+		"""Capture a screenshot via CDP and add it as the final video frame.
+
+		CDP screencast frame delivery is unreliable after page navigation
+		(e.g. form submission). This method uses Page.captureScreenshot,
+		which is synchronous and deterministic, to guarantee the final
+		page state is recorded regardless of screencast timing.
+		"""
+		if not self._recorder:
+			return
+		try:
+			cdp_session = await self.browser_session.get_or_create_cdp_session()
+			result = await cdp_session.cdp_client.send.Page.captureScreenshot(
+				params={'format': 'png'},
+				session_id=cdp_session.session_id,
+			)
+			if result and result.get('data'):
+				loop = asyncio.get_running_loop()
+				await loop.run_in_executor(None, self._recorder.add_frame, result['data'])
+				self.logger.debug('Captured final screenshot frame')
+		except Exception as e:
+			self.logger.debug(f'Failed to capture final screenshot: {e}')
+
 	async def on_BrowserStopEvent(self, event: BrowserStopEvent) -> None:
 		"""
 		Stops the video recording and finalizes the video file.
 		"""
 		if self._recorder:
+			# Brief pause for pending fire-and-forget add_frame executor tasks
+			await asyncio.sleep(0.5)
+			# Capture final page state via screenshot (reliable, unlike screencast)
+			await self._capture_final_screenshot()
+
 			recorder = self._recorder
 			self._recorder = None
 
 			self.logger.debug('Stopping video recording and saving file...')
-			loop = asyncio.get_event_loop()
+			loop = asyncio.get_running_loop()
 			await loop.run_in_executor(None, recorder.stop_and_save)
