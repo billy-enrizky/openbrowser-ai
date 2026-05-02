@@ -195,11 +195,7 @@ async def evaluate():
             # Navigate to form
             await browser_env.reset()
             try:
-                await browser_env.tools.navigate(
-                    url=form_url,
-                    new_tab=False,
-                    browser_session=browser_env.browser_session,
-                )
+                await browser_env.navigate_with_timeout(form_url, timeout=30.0)
                 await asyncio.sleep(0.5)
                 await browser_env.bypass_html5_validation()
                 element_map = await browser_env.get_element_map()

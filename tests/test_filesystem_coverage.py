@@ -220,6 +220,7 @@ class TestFileSystem:
     @pytest.mark.asyncio
     async def test_read_file_external_pdf(self, file_system):
         """Lines 288-298: read external PDF file."""
+        pytest.importorskip("pypdf", reason="pypdf package not installed")
         mock_reader = MagicMock()
         mock_page = MagicMock()
         mock_page.extract_text.return_value = "PDF content"

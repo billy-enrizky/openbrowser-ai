@@ -534,7 +534,11 @@ class TestGetLlm:
         assert exc_info.value.code == 1
 
     def test_claude_model_explicit(self):
+        import sys
+        import types
         mock_chat = MagicMock()
+        fake_chat_mod = types.ModuleType("openbrowser.llm.anthropic.chat")
+        fake_chat_mod.ChatAnthropic = mock_chat
         config = {
             "model": {
                 "name": "claude-4-sonnet",
@@ -544,12 +548,16 @@ class TestGetLlm:
         }
         with (
             patch.object(cli_mod, "CONFIG", self._mock_config(anthropic="sk-ant-test")),
-            patch("openbrowser.llm.anthropic.chat.ChatAnthropic", mock_chat),
+            patch.dict(sys.modules, {"openbrowser.llm.anthropic.chat": fake_chat_mod}),
         ):
             result = get_llm(config)
             mock_chat.assert_called_once_with(model="claude-4-sonnet", temperature=0.0)
 
     def test_claude_model_no_api_key_exits(self):
+        import sys
+        import types
+        fake_chat_mod = types.ModuleType("openbrowser.llm.anthropic.chat")
+        fake_chat_mod.ChatAnthropic = MagicMock()
         config = {
             "model": {
                 "name": "claude-4-sonnet",
@@ -559,6 +567,7 @@ class TestGetLlm:
         }
         with (
             patch.object(cli_mod, "CONFIG", self._mock_config(anthropic="")),
+            patch.dict(sys.modules, {"openbrowser.llm.anthropic.chat": fake_chat_mod}),
             pytest.raises(SystemExit) as exc_info,
         ):
             get_llm(config)
@@ -625,7 +634,11 @@ class TestGetLlm:
             mock_chat.assert_called_once_with(model="gpt-5-mini", temperature=0.0, api_key="sk-test")
 
     def test_autodetect_anthropic(self):
+        import sys
+        import types
         mock_chat = MagicMock()
+        fake_chat_mod = types.ModuleType("openbrowser.llm.anthropic.chat")
+        fake_chat_mod.ChatAnthropic = mock_chat
         config = {
             "model": {
                 "name": None,
@@ -635,7 +648,7 @@ class TestGetLlm:
         }
         with (
             patch.object(cli_mod, "CONFIG", self._mock_config(openai="", anthropic="sk-ant")),
-            patch("openbrowser.llm.anthropic.chat.ChatAnthropic", mock_chat),
+            patch.dict(sys.modules, {"openbrowser.llm.anthropic.chat": fake_chat_mod}),
         ):
             result = get_llm(config)
             mock_chat.assert_called_once_with(model="claude-4-sonnet", temperature=0.0)
