@@ -384,19 +384,25 @@ async def _eval_async(category: str, form: str, max_prompts: int, split: str):
                     total_actions=0,
                 )
 
-            # Force repaints so screencast captures success page
-            # (static pages don't trigger compositor frames)
+            # Capture final page state directly into recorder BEFORE close.
+            # CDP screencast is unreliable after navigation (static pages
+            # generate no compositor frames). Taking an explicit screenshot
+            # while CDP is definitely alive guarantees the success page
+            # appears in the video.
             await asyncio.sleep(1.0)
             try:
                 cdp_session = await browser_env.browser_session.get_or_create_cdp_session()
-                for _ in range(30):
-                    await cdp_session.cdp_client.send.Runtime.evaluate(
-                        params={"expression": "window.scrollBy(0, 1); window.scrollBy(0, -1);"},
-                        session_id=cdp_session.session_id,
-                    )
-                    await asyncio.sleep(0.1)
+                result = await cdp_session.cdp_client.send.Page.captureScreenshot(
+                    params={"format": "png"},
+                    session_id=cdp_session.session_id,
+                )
+                if result and result.get("data"):
+                    rw = browser_env.browser_session._recording_watchdog
+                    if rw and rw._recorder:
+                        rw._recorder.add_frame(result["data"])
+                        logger.info("Injected final screenshot into video recorder")
             except Exception as e:
-                logger.debug("Repaint trigger ended: %s", e)
+                logger.debug("Final screenshot capture failed: %s", e)
             await browser_env.close()
 
             # Move UUID video to meaningful filename
