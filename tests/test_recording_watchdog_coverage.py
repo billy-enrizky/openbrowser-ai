@@ -268,10 +268,12 @@ class TestOnScreencastFrame:
 
         event = {"data": "frame-data", "sessionId": "sess2"}
 
-        with patch("asyncio.create_task") as mock_create_task:
-            watchdog.on_screencastFrame(event, "session-y")
+        mock_loop = MagicMock()
+        with patch("asyncio.get_running_loop", return_value=mock_loop):
+            with patch("asyncio.create_task") as mock_create_task:
+                watchdog.on_screencastFrame(event, "session-y")
 
-        mock_recorder.add_frame.assert_called_once_with("frame-data")
+        mock_loop.run_in_executor.assert_called_once_with(None, mock_recorder.add_frame, "frame-data")
         mock_create_task.assert_called_once()
 
 
@@ -323,12 +325,63 @@ class TestOnBrowserStopEvent:
 
         event = MagicMock()
 
-        with patch("asyncio.get_event_loop") as mock_loop:
+        with patch.object(watchdog, "_capture_final_screenshot", new_callable=AsyncMock):
+            with patch("asyncio.get_running_loop") as mock_loop:
+                loop_mock = MagicMock()
+                loop_mock.run_in_executor = AsyncMock()
+                mock_loop.return_value = loop_mock
+
+                await watchdog.on_BrowserStopEvent(event)
+
+        assert watchdog._recorder is None
+        loop_mock.run_in_executor.assert_awaited_once()
+
+
+# ---------------------------------------------------------------------------
+# _capture_final_screenshot
+# ---------------------------------------------------------------------------
+
+class TestCaptureFinalScreenshot:
+    @pytest.mark.asyncio
+    async def test_noop_if_no_recorder(self):
+        watchdog = _make_recording_watchdog()
+        watchdog._recorder = None
+        await watchdog._capture_final_screenshot()
+
+    @pytest.mark.asyncio
+    async def test_captures_and_adds_frame(self):
+        session = _make_mock_browser_session()
+        cdp_session_mock = MagicMock()
+        cdp_session_mock.cdp_client = MagicMock()
+        cdp_session_mock.cdp_client.send = MagicMock()
+        cdp_session_mock.cdp_client.send.Page = MagicMock()
+        cdp_session_mock.cdp_client.send.Page.captureScreenshot = AsyncMock(
+            return_value={"data": "screenshot-b64-data"}
+        )
+        cdp_session_mock.session_id = "sess-screenshot"
+        session.get_or_create_cdp_session = AsyncMock(return_value=cdp_session_mock)
+
+        watchdog = _make_recording_watchdog(session=session)
+        mock_recorder = MagicMock()
+        watchdog._recorder = mock_recorder
+
+        with patch("asyncio.get_running_loop") as mock_loop:
             loop_mock = MagicMock()
             loop_mock.run_in_executor = AsyncMock()
             mock_loop.return_value = loop_mock
 
-            await watchdog.on_BrowserStopEvent(event)
+            await watchdog._capture_final_screenshot()
 
-        assert watchdog._recorder is None
-        loop_mock.run_in_executor.assert_awaited_once()
+        loop_mock.run_in_executor.assert_awaited_once_with(
+            None, mock_recorder.add_frame, "screenshot-b64-data"
+        )
+
+    @pytest.mark.asyncio
+    async def test_handles_cdp_failure(self):
+        session = _make_mock_browser_session()
+        session.get_or_create_cdp_session = AsyncMock(side_effect=RuntimeError("CDP gone"))
+        watchdog = _make_recording_watchdog(session=session)
+        watchdog._recorder = MagicMock()
+
+        # Should not raise
+        await watchdog._capture_final_screenshot()

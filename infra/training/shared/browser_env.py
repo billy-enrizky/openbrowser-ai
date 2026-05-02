@@ -8,8 +8,10 @@ import asyncio
 import logging
 import os
 import random
+import signal
 import string
 import subprocess
+import threading
 
 from openbrowser import BrowserSession, Tools
 from openbrowser.code_use.namespace import evaluate as js_evaluate
@@ -17,6 +19,10 @@ from openbrowser.code_use.namespace import evaluate as js_evaluate
 from infra.training.shared.online_reward import BrowserOutcome
 
 logger = logging.getLogger(__name__)
+
+
+class BrowserResetError(Exception):
+    """Raised when browser reset fails due to an unrecoverable event bus deadlock."""
 
 
 def _find_chromium_binary() -> str | None:
@@ -136,15 +142,23 @@ class BrowserEnvironment:
     """
 
     def __init__(
-        self, browser_session: BrowserSession, tools: Tools, headless: bool = True
+        self, browser_session: BrowserSession, tools: Tools, headless: bool = True,
+        video_kwargs: dict | None = None,
     ):
         self.browser_session = browser_session
         self.tools = tools
         self._headless = headless
+        self._video_kwargs = video_kwargs or {}
 
     @classmethod
-    async def create(cls, headless: bool = True) -> "BrowserEnvironment":
-        """Create and start a browser environment."""
+    async def create(
+        cls, headless: bool = True, **video_kwargs,
+    ) -> "BrowserEnvironment":
+        """Create and start a browser environment.
+
+        Pass record_video_dir, record_video_size, etc. as kwargs
+        to forward to BrowserSession for CDP screencast recording.
+        """
         executable = _find_chromium_binary()
         # Allow localhost/127.0.0.1 for FormFactory server
         allowed = ["localhost", "127.0.0.1", "about:blank"]
@@ -154,6 +168,7 @@ class BrowserEnvironment:
                 headless=headless,
                 executable_path=executable,
                 allowed_domains=allowed,
+                **video_kwargs,
             )
         else:
             logger.warning(
@@ -161,12 +176,13 @@ class BrowserEnvironment:
                 "falling back to openbrowser auto-detection"
             )
             browser_session = BrowserSession(
-                headless=headless, allowed_domains=allowed
+                headless=headless, allowed_domains=allowed,
+                **video_kwargs,
             )
         await browser_session.start()
         tools = Tools()
         logger.info("Browser environment created")
-        return cls(browser_session, tools, headless=headless)
+        return cls(browser_session, tools, headless=headless, video_kwargs=video_kwargs)
 
     async def get_element_map(self) -> dict[str, int]:
         """Build field_name -> element_index mapping from current page DOM.
@@ -438,22 +454,45 @@ class BrowserEnvironment:
         except Exception as e:
             logger.warning("Failed to inject novalidate: %s", e)
 
+    async def navigate_with_timeout(self, url: str, timeout: float = 30.0) -> None:
+        """Navigate to a URL with an asyncio timeout.
+
+        For deadlock protection, callers should use RolloutWatchdog which
+        covers all browser operations, not just navigation.
+        """
+        await asyncio.wait_for(
+            self.tools.navigate(
+                url=url, new_tab=False,
+                browser_session=self.browser_session,
+            ),
+            timeout=timeout,
+        )
+
     async def reset(self) -> None:
         """Reset browser state between rollouts."""
         try:
-            await self.tools.go_to_url(
-                url="about:blank", browser_session=self.browser_session
+            await self.navigate_with_timeout("about:blank", timeout=20.0)
+        except Exception as e:
+            logger.warning(f"Browser reset failed: {e}")
+            raise BrowserResetError(
+                "Browser session corrupted after event bus deadlock"
+            ) from e
+
+    def _kill_chromium_processes(self) -> None:
+        """Force-kill all chromium processes owned by this user.
+
+        This is a last resort when the event bus is deadlocked and
+        asyncio.wait_for / CancelledError cannot unblock the session.
+        """
+        try:
+            subprocess.run(
+                ["pkill", "-9", "-f", "chromium"],
+                timeout=5,
+                capture_output=True,
             )
-        except Exception:
-            # Fallback: try navigate
-            try:
-                result = await self.tools.navigate(
-                    url="about:blank",
-                    new_tab=False,
-                    browser_session=self.browser_session,
-                )
-            except Exception as e:
-                logger.warning(f"Browser reset failed: {e}")
+            logger.info("Force-killed chromium processes via pkill")
+        except Exception as e:
+            logger.warning(f"pkill chromium failed: {e}")
 
     def _force_kill_browser_processes(self) -> None:
         """Force-kill all chromium/chrome processes at OS level."""
@@ -475,10 +514,12 @@ class BrowserEnvironment:
                 headless=self._headless,
                 executable_path=executable,
                 allowed_domains=allowed,
+                **self._video_kwargs,
             )
         else:
             self.browser_session = BrowserSession(
-                headless=self._headless, allowed_domains=allowed
+                headless=self._headless, allowed_domains=allowed,
+                **self._video_kwargs,
             )
         await self.browser_session.start()
         self.tools = Tools()
@@ -570,9 +611,107 @@ class BrowserEnvironment:
         )
 
     async def close(self) -> None:
-        """Shutdown browser."""
+        """Shutdown browser. Falls back to OS-level kill if graceful shutdown hangs."""
         try:
-            await self.browser_session.kill()
+            await asyncio.wait_for(
+                self.browser_session.kill(),
+                timeout=10.0,
+            )
             logger.info("Browser environment closed")
+        except asyncio.TimeoutError:
+            logger.warning(
+                "Browser kill timed out (event bus deadlock), "
+                "force-killing chromium processes"
+            )
+            self._kill_chromium_processes()
         except Exception as e:
             logger.warning(f"Error closing browser: {e}")
+            self._kill_chromium_processes()
+
+    @classmethod
+    async def force_restart(cls, env: "BrowserEnvironment", headless: bool = True) -> "BrowserEnvironment":
+        """Force-restart browser: kill everything and create fresh session.
+
+        Use when the event bus is deadlocked and normal close/create fails.
+        """
+        logger.warning("Force-restarting browser environment")
+        # Try graceful close first
+        try:
+            await asyncio.wait_for(env.browser_session.kill(), timeout=5.0)
+        except Exception:
+            pass
+        # Nuclear option: kill all chromium processes
+        env._kill_chromium_processes()
+        await asyncio.sleep(1)  # Brief pause for OS cleanup
+        return await cls.create(headless=headless)
+
+
+class RolloutWatchdog:
+    """Thread-based watchdog that kills chromium if a rollout exceeds a timeout.
+
+    The openbrowser event bus can deadlock during ANY browser operation
+    (navigation, typing, clicking, DOM queries). When it deadlocks, it blocks
+    the asyncio event loop thread, making all async recovery mechanisms
+    (asyncio.wait_for, asyncio.Event, CancelledError) ineffective.
+
+    This watchdog runs a threading.Timer completely outside asyncio. When it
+    fires, it:
+      1. Kills all chromium processes via pkill -9 (breaks the deadlock)
+      2. Cancels the current asyncio task via loop.call_soon_threadsafe
+         (unblocks the stuck coroutine once the event loop resumes)
+
+    Usage in the trainer::
+
+        watchdog = RolloutWatchdog(browser_env, timeout=120.0)
+        watchdog.start()
+        try:
+            await browser_env.reset()
+            await browser_env.navigate_with_timeout(url)
+            ...  # all browser ops covered
+        except (BrowserResetError, asyncio.CancelledError):
+            browser_env = await BrowserEnvironment.force_restart(...)
+            reward = 0.0
+        finally:
+            watchdog.disarm()
+    """
+
+    def __init__(self, browser_env: BrowserEnvironment, timeout: float = 120.0):
+        self.browser_env = browser_env
+        self.timeout = timeout
+        self._completed = threading.Event()
+        self._timer: threading.Timer | None = None
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._task: asyncio.Task | None = None
+
+    def start(self) -> None:
+        """Arm the watchdog. Must be called from the asyncio event loop thread."""
+        self._loop = asyncio.get_running_loop()
+        # Capture the current task so we can cancel it from the timer thread
+        self._task = asyncio.current_task()
+        self._completed.clear()
+
+        self._timer = threading.Timer(self.timeout, self._on_timeout)
+        self._timer.daemon = True
+        self._timer.start()
+
+    def disarm(self) -> None:
+        """Disarm the watchdog after successful rollout completion."""
+        self._completed.set()
+        if self._timer:
+            self._timer.cancel()
+            self._timer = None
+
+    def _on_timeout(self) -> None:
+        """Called from the timer thread when the rollout exceeds the timeout."""
+        if self._completed.is_set():
+            return
+        logger.warning(
+            "Rollout watchdog fired after %.0fs -- "
+            "killing chromium and cancelling task to break deadlock",
+            self.timeout,
+        )
+        # Step 1: Kill chromium processes (works even if event loop is blocked)
+        self.browser_env._kill_chromium_processes()
+        # Step 2: Cancel the asyncio task (processed once event loop unblocks)
+        if self._loop and self._task and not self._task.done():
+            self._loop.call_soon_threadsafe(self._task.cancel)

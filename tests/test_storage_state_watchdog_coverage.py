@@ -118,6 +118,7 @@ class TestOnSaveStorageStateEvent:
 
         with patch.object(watchdog, "_save_storage_state", new_callable=AsyncMock) as mock_save:
             await watchdog.on_SaveStorageStateEvent(event)
+            # Origin code resolves fallback at caller level
             mock_save.assert_awaited_once_with("/tmp/profile_state.json")
 
     @pytest.mark.asyncio
@@ -160,6 +161,7 @@ class TestOnLoadStorageStateEvent:
 
         with patch.object(watchdog, "_load_storage_state", new_callable=AsyncMock) as mock_load:
             await watchdog.on_LoadStorageStateEvent(event)
+            # Origin code resolves fallback at caller level
             mock_load.assert_awaited_once_with("/tmp/profile_load.json")
 
     @pytest.mark.asyncio

@@ -113,7 +113,7 @@ class VideoRecorderService:
 				'-f',
 				'image2pipe',  # Input format from a pipe
 				'-c:v',
-				'png',  # Specify input codec is PNG
+				'mjpeg',  # Specify input codec is JPEG
 				'-i',
 				'-',  # Input from stdin
 				'-vf',
