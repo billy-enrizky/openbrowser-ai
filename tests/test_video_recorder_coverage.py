@@ -412,21 +412,33 @@ class TestImageioAvailableFlag:
         assert isinstance(IMAGEIO_AVAILABLE, bool)
 
     def test_imageio_unavailable_path(self):
-        """Test that when imageio is not importable, IMAGEIO_AVAILABLE is False."""
+        """Test that when imageio is not importable, IMAGEIO_AVAILABLE is False.
+
+        Forces a real reimport of video_recorder with imageio blocked so the
+        except ImportError branch (lines 19-20) actually executes.
+        """
         import importlib
         import sys
 
-        # We cannot actually un-import it reliably, but we test the flag
-        # exists and works with our mock
-        with patch.dict(sys.modules, {"imageio": None, "imageio.v2": None}):
-            # The module is already loaded, just verify the flag path works
-            from openbrowser.browser.video_recorder import VideoRecorderService
+        # Block all imageio-related modules so the try/except hits ImportError
+        blocked = {
+            "imageio": None,
+            "imageio.v2": None,
+            "imageio_ffmpeg": None,
+            "imageio.core": None,
+            "imageio.core.format": None,
+            "numpy": None,
+        }
 
-            svc = VideoRecorderService(
-                output_path=Path("/tmp/test.mp4"),
-                size={"width": 640, "height": 480},
-                framerate=24,
-            )
-            with patch("openbrowser.browser.video_recorder.IMAGEIO_AVAILABLE", False):
-                svc.start()
-                assert svc._is_active is False
+        # Save and remove the cached module so importlib.reload re-executes it
+        orig_mod = sys.modules.pop("openbrowser.browser.video_recorder", None)
+        try:
+            with patch.dict(sys.modules, blocked):
+                # Remove again in case patch.dict restored it
+                sys.modules.pop("openbrowser.browser.video_recorder", None)
+                mod = importlib.import_module("openbrowser.browser.video_recorder")
+                assert mod.IMAGEIO_AVAILABLE is False
+        finally:
+            # Restore original module so other tests are unaffected
+            if orig_mod is not None:
+                sys.modules["openbrowser.browser.video_recorder"] = orig_mod
