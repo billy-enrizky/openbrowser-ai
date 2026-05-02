@@ -25,6 +25,8 @@ import pytest
 
 logger = logging.getLogger(__name__)
 
+pytest.importorskip("InquirerPy", reason="InquirerPy package not installed")
+
 # Import the module first so we can patch attributes on it
 import openbrowser.init_cmd as init_cmd_mod
 
