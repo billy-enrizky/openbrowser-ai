@@ -31,7 +31,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
 from infra.training.finetuning.config import DATA_CONFIG, ONLINE_GRPO_CONFIG
 from infra.training.shared.action_parser import parse_rollout_to_actions
-from infra.training.shared.browser_env import BrowserEnvironment
+from infra.training.shared.browser_env import BrowserEnvironment, BrowserResetError, RolloutWatchdog
 from infra.training.shared.formfactory_server import FormFactoryServer
 from infra.training.shared.online_reward import BrowserOutcome, compute_online_reward
 from infra.training.shared.reward_functions import compute_grpo_advantages
@@ -293,14 +293,13 @@ async def execute_multiturn_rollout(
     total_attempted = 0
     success_detected = False
 
-    await browser_env.reset()
+    await browser_env.reset()  # May raise BrowserResetError -- let caller handle
     try:
-        await browser_env.tools.navigate(
-            url=form_url, new_tab=False,
-            browser_session=browser_env.browser_session,
-        )
+        await browser_env.navigate_with_timeout(form_url, timeout=30.0)
         await asyncio.sleep(0.5)
         await browser_env.bypass_html5_validation()
+    except BrowserResetError:
+        raise  # Propagate deadlock errors for browser restart
     except Exception as e:
         logger.warning("Multi-turn nav failed for rollout %d: %s", rollout_idx, e)
         return 0.0, [], []
@@ -553,8 +552,9 @@ async def train():
                 # slows CDP communication and causes action timeouts.
                 if i > 0 and i % 10 == 0:
                     logger.info(f"Periodic browser restart (prompt {i}) to reset DOM indices")
-                    await browser_env.close()
-                    browser_env = await BrowserEnvironment.create(headless=headless)
+                    browser_env = await BrowserEnvironment.force_restart(
+                        browser_env, headless=headless
+                    )
 
                 # Health check: restart FormFactory server if it died
                 if not ff_server.is_healthy():
@@ -563,8 +563,9 @@ async def train():
                         logger.error("Failed to restart FormFactory server, aborting training")
                         break
                     # Also restart browser after server restart
-                    await browser_env.close()
-                    browser_env = await BrowserEnvironment.create(headless=headless)
+                    browser_env = await BrowserEnvironment.force_restart(
+                        browser_env, headless=headless
+                    )
                     consecutive_zero_reward = 0
 
                 instruction = prompt_data.get("instruction", "")
@@ -584,11 +585,31 @@ async def train():
                     all_turn_prompt_lengths = []
 
                     for g in range(group_size):
-                        reward, seqs, pls = await execute_multiturn_rollout(
-                            model, tokenizer, browser_env,
-                            instruction, form_url, ground_truth_fields,
-                            config, rollout_idx=g,
-                        )
+                        watchdog = RolloutWatchdog(browser_env, timeout=120.0)
+                        watchdog.start()
+                        try:
+                            reward, seqs, pls = await execute_multiturn_rollout(
+                                model, tokenizer, browser_env,
+                                instruction, form_url, ground_truth_fields,
+                                config, rollout_idx=g,
+                            )
+                        except (BrowserResetError, asyncio.CancelledError) as e:
+                            logger.warning(
+                                "Multi-turn rollout %d hit deadlock (%s), "
+                                "force-restarting browser", g, type(e).__name__,
+                            )
+                            browser_env = await BrowserEnvironment.force_restart(
+                                browser_env, headless=headless
+                            )
+                            reward, seqs, pls = 0.0, [], []
+                        except Exception as e:
+                            logger.warning(f"Multi-turn rollout {g} failed: {e}")
+                            browser_env = await BrowserEnvironment.force_restart(
+                                browser_env, headless=headless
+                            )
+                            reward, seqs, pls = 0.0, [], []
+                        finally:
+                            watchdog.disarm()
                         rewards.append(reward)
                         all_turn_sequences.append(seqs)
                         all_turn_prompt_lengths.append(pls)
@@ -692,45 +713,53 @@ async def train():
                 # Execute each rollout in browser and score
                 rewards = []
                 for g, rollout_text in enumerate(rollouts):
-                    # Reset browser and navigate to form page
-                    await browser_env.reset()
-
+                    # Umbrella watchdog: covers ALL browser ops in this rollout.
+                    # If any operation deadlocks the event bus, the watchdog
+                    # (running in a separate OS thread) kills chromium and
+                    # cancels this task after 120s.
+                    watchdog = RolloutWatchdog(browser_env, timeout=120.0)
+                    watchdog.start()
                     try:
-                        await browser_env.tools.navigate(
-                            url=form_url,
-                            new_tab=False,
-                            browser_session=browser_env.browser_session,
-                        )
-                        # Brief wait for page to load
+                        await browser_env.reset()
+                        await browser_env.navigate_with_timeout(form_url, timeout=30.0)
                         await asyncio.sleep(0.5)
                         await browser_env.bypass_html5_validation()
                         element_map = await browser_env.get_element_map()
+
+                        actions = parse_rollout_to_actions(rollout_text, element_map)
+                        if not actions:
+                            logger.debug(f"No valid actions parsed from rollout {g}")
+                            rewards.append(0.0)
+                            continue
+
+                        outcome = await browser_env.execute_actions(
+                            actions, timeout_per_action=action_timeout,
+                            epsilon=epsilon,
+                        )
+                        reward = compute_online_reward(
+                            outcome,
+                            ground_truth_fields,
+                            weights=config.get("reward_weights"),
+                        )
+                        rewards.append(reward)
+
+                    except (BrowserResetError, asyncio.CancelledError) as e:
+                        logger.warning(
+                            "Rollout %d hit deadlock (%s), force-restarting browser",
+                            g, type(e).__name__,
+                        )
+                        browser_env = await BrowserEnvironment.force_restart(
+                            browser_env, headless=headless
+                        )
+                        rewards.append(0.0)
                     except Exception as e:
-                        logger.warning(f"Navigation failed for rollout {g}: {e}")
+                        logger.warning(f"Rollout {g} failed: {e}")
+                        browser_env = await BrowserEnvironment.force_restart(
+                            browser_env, headless=headless
+                        )
                         rewards.append(0.0)
-                        continue
-
-                    # Parse rollout text into executable actions
-                    actions = parse_rollout_to_actions(rollout_text, element_map)
-
-                    if not actions:
-                        logger.debug(f"No valid actions parsed from rollout {g}")
-                        rewards.append(0.0)
-                        continue
-
-                    # Execute actions in browser
-                    outcome = await browser_env.execute_actions(
-                        actions, timeout_per_action=action_timeout,
-                        epsilon=epsilon,
-                    )
-
-                    # Compute reward from browser outcome
-                    reward = compute_online_reward(
-                        outcome,
-                        ground_truth_fields,
-                        weights=config.get("reward_weights"),
-                    )
-                    rewards.append(reward)
+                    finally:
+                        watchdog.disarm()
 
                 epoch_rewards.extend(rewards)
 
@@ -763,8 +792,9 @@ async def train():
                             f"{consecutive_zero_reward} consecutive skipped prompts "
                             "despite healthy server -- restarting browser"
                         )
-                        await browser_env.close()
-                        browser_env = await BrowserEnvironment.create(headless=headless)
+                        browser_env = await BrowserEnvironment.force_restart(
+                            browser_env, headless=headless
+                        )
                         consecutive_zero_reward = 0
                     continue
                 else:
