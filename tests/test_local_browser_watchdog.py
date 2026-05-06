@@ -11,6 +11,7 @@ import psutil
 import pytest
 from bubus import EventBus
 from openbrowser.browser.session import BrowserSession
+from openbrowser.config import CONFIG, _config_cache, _get_env_bool_cached, _get_env_cached, _get_path_cached
 
 logger = logging.getLogger(__name__)
 
@@ -146,6 +147,55 @@ class TestCleanupTempDir:
         os.rmdir(tmpdir)  # cleanup
 
 
+class TestCleanupProfileCache:
+    """Tests for managed profile cache cleanup."""
+
+    def test_skips_non_managed_profile_dirs(self):
+        from openbrowser.browser.watchdogs.local_browser_watchdog import LocalBrowserWatchdog
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache_dir = Path(tmpdir) / 'Default' / 'Cache'
+            cache_dir.mkdir(parents=True)
+            (cache_dir / 'data.bin').write_bytes(b'x' * 1024)
+
+            cleared = LocalBrowserWatchdog._cleanup_profile_cache(tmpdir)
+
+            assert cleared == 0
+            assert cache_dir.exists()
+
+    def test_removes_only_known_cache_dirs_for_managed_profiles(self):
+        from openbrowser.browser.watchdogs.local_browser_watchdog import LocalBrowserWatchdog
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = Path(tmpdir) / 'config'
+            managed_profile = config_dir / 'profiles' / 'daemon'
+            cache_dir = managed_profile / 'Default' / 'Cache'
+            code_cache_dir = managed_profile / 'Default' / 'Code Cache'
+            cookies_file = managed_profile / 'Default' / 'Cookies'
+
+            cache_dir.mkdir(parents=True)
+            code_cache_dir.mkdir(parents=True)
+            cookies_file.parent.mkdir(parents=True, exist_ok=True)
+
+            (cache_dir / 'data.bin').write_bytes(b'a' * 2048)
+            (code_cache_dir / 'data.bin').write_bytes(b'b' * 1024)
+            cookies_file.write_bytes(b'keep-me')
+
+            with patch.dict(os.environ, {'OPENBROWSER_CONFIG_DIR': str(config_dir)}, clear=False):
+                _config_cache.clear()
+                CONFIG._env_config = None
+                _get_env_cached.cache_clear()
+                _get_env_bool_cached.cache_clear()
+                _get_path_cached.cache_clear()
+
+                cleared = LocalBrowserWatchdog._cleanup_profile_cache(managed_profile)
+
+            assert cleared >= 3072
+            assert not cache_dir.exists()
+            assert not code_cache_dir.exists()
+            assert cookies_file.exists()
+
+
 @pytest.mark.asyncio
 class TestCleanupProcess:
     """Tests for _cleanup_process static method."""
@@ -255,6 +305,18 @@ class TestOnBrowserKillEvent:
         event = MagicMock()
         # Should not raise
         await watchdog.on_BrowserKillEvent(event)
+
+    async def test_kill_cleans_managed_profile_cache(self):
+        watchdog, session = _make_watchdog()
+        session.browser_profile.user_data_dir = '/managed/profile'
+        session.browser_profile.profile_directory = 'Default'
+
+        event = MagicMock()
+
+        with patch.object(type(watchdog), '_cleanup_profile_cache', return_value=4096) as mock_cleanup:
+            await watchdog.on_BrowserKillEvent(event)
+
+        mock_cleanup.assert_called_once_with('/managed/profile', 'Default')
 
 
 @pytest.mark.asyncio
@@ -463,6 +525,24 @@ class TestLaunchBrowser:
                         process, cdp_url = await watchdog._launch_browser(max_retries=1)
 
         assert cdp_url == 'http://localhost:9222/'
+
+    async def test_cleans_managed_profile_cache_before_launch(self):
+        watchdog, session = _make_watchdog()
+        session.browser_profile.executable_path = '/custom/chrome'
+        session.browser_profile.profile_directory = 'Default'
+
+        mock_subprocess = MagicMock()
+        mock_subprocess.pid = 12345
+
+        with patch('asyncio.create_subprocess_exec', new_callable=AsyncMock, return_value=mock_subprocess):
+            with patch('psutil.Process', return_value=MagicMock()):
+                with patch.object(type(watchdog), '_wait_for_cdp_url', new_callable=AsyncMock, return_value='http://localhost:9222/'):
+                    with patch.object(type(watchdog), '_kill_stale_chrome_for_profile', new_callable=AsyncMock, return_value=False):
+                        with patch.object(type(watchdog), '_cleanup_profile_cache', return_value=8192) as mock_cleanup:
+                            process, cdp_url = await watchdog._launch_browser(max_retries=1)
+
+        assert cdp_url == 'http://localhost:9222/'
+        mock_cleanup.assert_called_once_with(str(session.browser_profile.user_data_dir), 'Default')
 
     async def test_retries_with_temp_dir_on_profile_error(self):
         watchdog, session = _make_watchdog()

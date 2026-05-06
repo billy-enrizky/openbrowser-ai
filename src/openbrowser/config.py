@@ -237,6 +237,8 @@ class FlatEnvConfig(BaseSettings):
 	OPENBROWSER_HEADLESS: bool | None = Field(default=None)
 	OPENBROWSER_ALLOWED_DOMAINS: str | None = Field(default=None)
 	OPENBROWSER_LLM_MODEL: str | None = Field(default=None)
+	OPENBROWSER_USER_DATA_DIR: str | None = Field(default=None)
+	OPENBROWSER_STORAGE_STATE: str | None = Field(default=None)
 
 	# Proxy env vars
 	OPENBROWSER_PROXY_URL: str | None = Field(default=None)
@@ -517,6 +519,12 @@ class Config:
 			domains = [d.strip() for d in env_config.OPENBROWSER_ALLOWED_DOMAINS.split(',') if d.strip()]
 			config['browser_profile']['allowed_domains'] = domains
 
+		if env_config.OPENBROWSER_USER_DATA_DIR:
+			config['browser_profile']['user_data_dir'] = env_config.OPENBROWSER_USER_DATA_DIR
+
+		if env_config.OPENBROWSER_STORAGE_STATE:
+			config['browser_profile']['storage_state'] = env_config.OPENBROWSER_STORAGE_STATE
+
 		# Proxy settings (Chromium) -> consolidated `proxy` dict
 		proxy_dict: dict[str, Any] = {}
 		if env_config.OPENBROWSER_PROXY_URL:
@@ -560,3 +568,37 @@ def get_default_profile(config: dict[str, Any]) -> dict[str, Any]:
 def get_default_llm(config: dict[str, Any]) -> dict[str, Any]:
 	"""Get default LLM config from config dict."""
 	return config.get('llm', {})
+
+
+def is_openbrowser_managed_profile_dir(path: str | Path | None) -> bool:
+	"""Return True when the path lives under OpenBrowser's managed profiles dir."""
+	if not path:
+		return False
+
+	try:
+		resolved = Path(path).expanduser().resolve()
+	except OSError:
+		resolved = Path(path).expanduser()
+
+	try:
+		return resolved.is_relative_to(CONFIG.OPENBROWSER_PROFILES_DIR)
+	except ValueError:
+		return False
+
+
+def apply_managed_browser_profile_defaults(
+	profile_data: dict[str, Any], default_user_data_dir: str | Path | None = None
+) -> dict[str, Any]:
+	"""Fill in managed persistence defaults for OpenBrowser-owned browser profiles."""
+	resolved_profile = dict(profile_data)
+
+	if default_user_data_dir and not resolved_profile.get('user_data_dir'):
+		resolved_profile['user_data_dir'] = str(Path(default_user_data_dir).expanduser())
+
+	if not resolved_profile.get('storage_state') and is_openbrowser_managed_profile_dir(
+		resolved_profile.get('user_data_dir')
+	):
+		user_data_dir = Path(str(resolved_profile['user_data_dir'])).expanduser()
+		resolved_profile['storage_state'] = str(user_data_dir / 'storage_state.json')
+
+	return resolved_profile

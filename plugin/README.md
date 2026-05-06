@@ -2,6 +2,8 @@
 
 AI-powered browser automation for Claude Code. Control real web browsers directly from Claude -- navigate websites, fill forms, extract data, inspect accessibility trees, and automate multi-step workflows.
 
+Local OpenBrowser sessions persist cookies and login state by default. The CLI daemon saves them in `~/.config/openbrowser/profiles/daemon/storage_state.json`, and the MCP server saves them in `~/.config/openbrowser/profiles/default/storage_state.json` unless you override those paths. Managed profiles also auto-clean disposable Chromium caches so they do not grow like normal long-lived Chrome profiles.
+
 ## Prerequisites
 
 - **Chrome or Chromium** installed on your system
@@ -61,6 +63,8 @@ Add to your project's `.mcp.json`:
 ## Available Tool
 
 The MCP server exposes a single `execute_code` tool that runs Python code in a persistent namespace with browser automation functions. The LLM writes Python code to navigate, interact, and extract data.
+
+Authenticated browser state is also persisted, so once a user logs in, later MCP calls can keep using the same cookies and localStorage.
 
 **Functions** (all async, use `await`):
 
@@ -134,6 +138,8 @@ openbrowser-ai daemon start|stop|status|restart
 
 Variables persist across `-c` calls while the daemon is running. The daemon starts automatically on first use and shuts down after 10 minutes of inactivity.
 
+The CLI daemon uses `~/.config/openbrowser/profiles/daemon` as its default browser profile and writes a matching `storage_state.json`, so saved logins survive daemon restarts.
+
 ## Configuration
 
 Optional environment variables:
@@ -142,6 +148,8 @@ Optional environment variables:
 |----------|-------------|
 | `OPENBROWSER_HEADLESS` | Set to `true` to run browser without GUI |
 | `OPENBROWSER_ALLOWED_DOMAINS` | Comma-separated domain whitelist |
+| `OPENBROWSER_USER_DATA_DIR` | Chrome profile directory for saved MCP sessions |
+| `OPENBROWSER_STORAGE_STATE` | JSON file for saving and restoring cookies plus localStorage |
 | `OPENBROWSER_COMPACT_DESCRIPTION` | Set to `true` for minimal tool description (~500 tokens) |
 | `OPENBROWSER_MAX_OUTPUT` | Maximum output characters per execution (default: 10,000) |
 | `ANONYMIZED_TELEMETRY` | Set to `false` to disable anonymized usage telemetry (default: `true`) |

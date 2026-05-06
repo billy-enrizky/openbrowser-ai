@@ -111,6 +111,8 @@ class TestDaemonServerBuildProfile:
                     result = daemon_server._build_browser_profile()
                     assert result is mock_profile
                     mock_profile_class.assert_called_once()
+                    _, kwargs = mock_profile_class.call_args
+                    assert kwargs["storage_state"].endswith("profiles/daemon/storage_state.json")
 
 
 class TestDaemonServerIsConnectionError:
