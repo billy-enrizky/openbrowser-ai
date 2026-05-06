@@ -7,7 +7,7 @@ dependency-free (no openbrowser imports) so the CLI -c fast path can
 load it without pulling in heavy packages.
 """
 
-EXECUTE_CODE_DESCRIPTION_COMPACT = """Execute Python code with browser automation. All functions are async (use await). Use print() to return output. Variables persist between calls.
+EXECUTE_CODE_DESCRIPTION_COMPACT = """Execute Python code with browser automation. All functions are async (use await). Use print() to return output. Variables and browser login state persist between calls.
 
 ## Core Functions
 - `await navigate(url, new_tab=False)` -- Go to URL
@@ -28,7 +28,7 @@ json, asyncio, Path, csv, re, datetime, requests (pre-imported)
 Optional: numpy/np, pandas/pd, BeautifulSoup, PdfReader
 """
 
-EXECUTE_CODE_DESCRIPTION = """Execute Python code in a persistent namespace with browser automation functions. All functions are async -- use `await`. Use print() to return output. Variables persist between calls.
+EXECUTE_CODE_DESCRIPTION = """Execute Python code in a persistent namespace with browser automation functions. All functions are async -- use `await`. Use print() to return output. Variables and browser login state persist between calls.
 
 ## Navigation
 

@@ -1,7 +1,7 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "me.openbrowser/openbrowser-ai",
-  "description": "AI browser automation. Write async Python to navigate, click, type, and extract data.",
+  "description": "AI browser automation. Write async Python to navigate, click, type, extract data, and reuse saved login sessions.",
   "repository": {
     "url": "https://github.com/billy-enrizky/openbrowser-ai.git",
     "source": "github"
@@ -36,6 +36,20 @@
           "isRequired": false,
           "isSecret": false,
           "default": ""
+        },
+        {
+          "name": "OPENBROWSER_USER_DATA_DIR",
+          "description": "Chrome profile directory for persistent browser sessions",
+          "isRequired": false,
+          "isSecret": false,
+          "default": "~/.config/openbrowser/profiles/default"
+        },
+        {
+          "name": "OPENBROWSER_STORAGE_STATE",
+          "description": "JSON file used to save and restore cookies plus localStorage between MCP restarts",
+          "isRequired": false,
+          "isSecret": false,
+          "default": "~/.config/openbrowser/profiles/default/storage_state.json"
         },
         {
           "name": "OPENBROWSER_COMPACT_DESCRIPTION",

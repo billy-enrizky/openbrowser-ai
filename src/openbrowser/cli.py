@@ -306,7 +306,7 @@ import click
 
 os.environ['OPENBROWSER_LOGGING_LEVEL'] = 'result'
 
-from openbrowser.config import CONFIG
+from openbrowser.config import CONFIG, apply_managed_browser_profile_defaults
 
 # Set USER_DATA_DIR now that CONFIG is imported
 USER_DATA_DIR = CONFIG.OPENBROWSER_PROFILES_DIR / 'cli'
@@ -347,6 +347,7 @@ def get_default_config() -> dict[str, Any]:
 			'keep_alive': browser_profile.get('keep_alive', True),
 			'ignore_https_errors': browser_profile.get('ignore_https_errors', False),
 			'user_data_dir': browser_profile.get('user_data_dir'),
+			'storage_state': browser_profile.get('storage_state'),
 			'allowed_domains': browser_profile.get('allowed_domains'),
 			'wait_between_actions': browser_profile.get('wait_between_actions'),
 			'is_mobile': browser_profile.get('is_mobile'),
@@ -538,8 +539,8 @@ async def run_prompt_mode(prompt: str, ctx: click.Context, debug: bool = False):
 		browser_config = config.get('browser', {})
 		# Remove None values from browser_config
 		browser_config = {k: v for k, v in browser_config.items() if v is not None}
-		# Create BrowserProfile with user_data_dir
-		profile = BrowserProfile(user_data_dir=str(USER_DATA_DIR), **browser_config)
+		browser_config = apply_managed_browser_profile_defaults(browser_config, USER_DATA_DIR)
+		profile = BrowserProfile(**browser_config)
 		browser_session = BrowserSession(
 			browser_profile=profile,
 		)
