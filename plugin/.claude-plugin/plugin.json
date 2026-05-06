@@ -1,6 +1,6 @@
 {
   "name": "openbrowser",
-  "version": "0.1.39",
+  "version": "0.1.40",
   "description": "AI-powered browser automation -- lets Claude control real web browsers to navigate, click, type, extract content, automate workflows, and reuse saved login sessions",
   "author": {
     "name": "OpenBrowser Team",

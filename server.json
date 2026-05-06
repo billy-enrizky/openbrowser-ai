@@ -6,12 +6,12 @@
     "url": "https://github.com/billy-enrizky/openbrowser-ai.git",
     "source": "github"
   },
-  "version": "0.1.39",
+  "version": "0.1.40",
   "packages": [
     {
       "registryType": "pypi",
       "identifier": "openbrowser-ai",
-      "version": "0.1.39",
+      "version": "0.1.40",
       "runtimeHint": "uvx",
       "transport": {
         "type": "stdio"
