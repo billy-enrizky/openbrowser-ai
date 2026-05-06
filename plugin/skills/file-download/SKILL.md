@@ -13,6 +13,8 @@ Download files from websites using the browser's authenticated session. Handles 
 
 All code runs via `openbrowser-ai -c`. The daemon starts automatically and persists variables across calls. All browser functions are async -- use `await`.
 
+The CLI daemon also persists cookies and login state in `~/.config/openbrowser/profiles/daemon/storage_state.json`, so authenticated sessions can be reused across later runs.
+
 ## Setup
 
 Before running, verify openbrowser-ai is installed:

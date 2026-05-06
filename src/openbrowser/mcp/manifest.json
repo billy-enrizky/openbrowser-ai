@@ -4,8 +4,8 @@
   "name": "openbrowser",
   "display_name": "OpenBrowser AI Browser Automation",
   "version": "0.1.29",
-  "description": "CodeAgent MCP server -- execute Python code with browser automation functions in a persistent namespace",
-  "long_description": "OpenBrowser CodeAgent exposes a single execute_code tool that runs Python code in a persistent namespace with browser automation functions. Write multi-step workflows in Python with full access to navigate, click, type, evaluate JS, and more.\n\n### Key Features:\n- **Code Execution**: Write Python code with async browser functions (await navigate, click, evaluate, etc.)\n- **Persistent Namespace**: Variables and state persist between execute_code calls\n- **Browser Automation**: Full browser control via CodeAgent functions\n- **JavaScript Evaluation**: Run JS in page context via evaluate()\n- **Data Libraries**: numpy, pandas, matplotlib, BeautifulSoup available\n- **Standard Libraries**: json, csv, re, datetime, requests, asyncio, Path\n\n### Use Cases:\n- Web scraping with Python data processing\n- Automated testing with assertions\n- Research and information gathering\n- Form filling and multi-step workflows\n- DOM extraction via evaluate() + Python post-processing",
+  "description": "CodeAgent MCP server -- execute Python code with browser automation functions, persistent namespace, and saved login sessions",
+  "long_description": "OpenBrowser CodeAgent exposes a single execute_code tool that runs Python code in a persistent namespace with browser automation functions. Write multi-step workflows in Python with full access to navigate, click, type, evaluate JS, and more.\n\n### Key Features:\n- **Code Execution**: Write Python code with async browser functions (await navigate, click, evaluate, etc.)\n- **Persistent Namespace**: Variables and state persist between execute_code calls\n- **Saved Login Sessions**: Cookies and browser storage are saved to disk so authenticated sessions survive MCP restarts\n- **Browser Automation**: Full browser control via CodeAgent functions\n- **JavaScript Evaluation**: Run JS in page context via evaluate()\n- **Data Libraries**: numpy, pandas, matplotlib, BeautifulSoup available\n- **Standard Libraries**: json, csv, re, datetime, requests, asyncio, Path\n\n### Use Cases:\n- Web scraping with Python data processing\n- Automated testing with assertions\n- Research and information gathering\n- Form filling and multi-step workflows\n- DOM extraction via evaluate() + Python post-processing",
   "icon": "icon.png",
   "homepage": "https://github.com/billy-enrizky/openbrowser-ai",
   "documentation": "https://github.com/billy-enrizky/openbrowser-ai",
@@ -27,7 +27,9 @@
       "args": ["openbrowser-ai", "--mcp"],
       "env": {
         "OPENBROWSER_HEADLESS": "${user_config.headless}",
-        "OPENBROWSER_ALLOWED_DOMAINS": "${user_config.allowed_domains}"
+        "OPENBROWSER_ALLOWED_DOMAINS": "${user_config.allowed_domains}",
+        "OPENBROWSER_USER_DATA_DIR": "${user_config.user_data_dir}",
+        "OPENBROWSER_STORAGE_STATE": "${user_config.storage_state}"
       }
     }
   },
@@ -83,6 +85,13 @@
       "title": "User Data Directory",
       "description": "Chrome profile directory for persistent sessions (cookies, localStorage, etc)",
       "default": "${HOME}/.config/openbrowser/profiles/default",
+      "required": false
+    },
+    "storage_state": {
+      "type": "string",
+      "title": "Storage State Path",
+      "description": "Optional JSON file path used to save and reload cookies plus localStorage across MCP restarts",
+      "default": "${HOME}/.config/openbrowser/profiles/default/storage_state.json",
       "required": false
     },
     "disable_security": {

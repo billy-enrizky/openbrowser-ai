@@ -19,6 +19,7 @@ from openbrowser.browser.events import (
 	BrowserStopEvent,
 )
 from openbrowser.browser.watchdog_base import BaseWatchdog
+from openbrowser.config import is_openbrowser_managed_profile_dir
 from openbrowser.observability import observe_debug
 
 if TYPE_CHECKING:
@@ -39,6 +40,20 @@ class LocalBrowserWatchdog(BaseWatchdog):
 
 	# Events this watchdog emits
 	EMITS: ClassVar[list[type[BaseEvent[Any]]]] = []
+
+	# Disposable Chromium caches that can be safely cleared without removing
+	# cookies, login databases, local storage, or IndexedDB.
+	CACHE_PATHS: ClassVar[tuple[str, ...]] = (
+		'GraphiteDawnCache',
+		'GrShaderCache',
+		'ShaderCache',
+		'Default/Cache',
+		'Default/Code Cache',
+		'Default/GPUCache',
+		'Default/DawnGraphiteCache',
+		'Default/DawnWebGPUCache',
+		'Default/Shared Dictionary',
+	)
 
 	# Private state for subprocess management
 	_subprocess: psutil.Process | None = PrivateAttr(default=None)
@@ -70,6 +85,15 @@ class LocalBrowserWatchdog(BaseWatchdog):
 		if self._subprocess:
 			await self._cleanup_process(self._subprocess)
 			self._subprocess = None
+
+		active_user_data_dir = self.browser_session.browser_profile.user_data_dir or self._original_user_data_dir
+		profile_directory = self.browser_session.browser_profile.profile_directory or 'Default'
+		cleared_bytes = self._cleanup_profile_cache(active_user_data_dir, profile_directory)
+		if cleared_bytes > 0:
+			self.logger.info(
+				f'[LocalBrowserWatchdog] Cleared {cleared_bytes / (1024 * 1024):.1f} MB of browser cache '
+				f'from managed profile {active_user_data_dir}'
+			)
 
 		# Clean up temp directories if any were created
 		for temp_dir in self._temp_dirs_to_cleanup:
@@ -114,6 +138,16 @@ class LocalBrowserWatchdog(BaseWatchdog):
 			if killed:
 				self.logger.info(
 					f'[LocalBrowserWatchdog] Killed stale Chrome process(es) holding profile lock on {self._original_user_data_dir}'
+				)
+
+			cleared_bytes = self._cleanup_profile_cache(
+				self._original_user_data_dir,
+				profile.profile_directory or 'Default',
+			)
+			if cleared_bytes > 0:
+				self.logger.info(
+					f'[LocalBrowserWatchdog] Cleared {cleared_bytes / (1024 * 1024):.1f} MB of browser cache '
+					f'from managed profile {self._original_user_data_dir}'
 				)
 
 		for attempt in range(max_retries):
@@ -453,6 +487,56 @@ class LocalBrowserWatchdog(BaseWatchdog):
 				shutil.rmtree(temp_path, ignore_errors=True)
 		except Exception as e:
 			self.logger.debug(f'Failed to cleanup temp dir {temp_dir}: {e}')
+
+	@classmethod
+	def _iter_cache_paths(cls, user_data_dir: str | Path, profile_directory: str = 'Default') -> list[Path]:
+		"""Return the managed cache paths eligible for cleanup."""
+		root = Path(user_data_dir).expanduser()
+		profile_cache_paths: list[Path] = []
+
+		for relative_path in cls.CACHE_PATHS:
+			if relative_path.startswith('Default/'):
+				relative_path = relative_path.replace('Default/', f'{profile_directory}/', 1)
+			profile_cache_paths.append(root / relative_path)
+
+		return profile_cache_paths
+
+	@staticmethod
+	def _get_path_size_bytes(path: Path) -> int:
+		"""Return the recursive size of a file or directory in bytes."""
+		try:
+			if path.is_file():
+				return path.stat().st_size
+			if path.is_dir():
+				return sum(
+					child.stat().st_size for child in path.rglob('*') if child.exists() and not child.is_dir()
+				)
+		except OSError:
+			return 0
+		return 0
+
+	@classmethod
+	def _cleanup_profile_cache(cls, user_data_dir: str | Path | None, profile_directory: str = 'Default') -> int:
+		"""Delete disposable browser caches for OpenBrowser-managed profiles only."""
+		if not user_data_dir or not is_openbrowser_managed_profile_dir(user_data_dir):
+			return 0
+
+		total_cleared_bytes = 0
+
+		for cache_path in cls._iter_cache_paths(user_data_dir, profile_directory):
+			if not cache_path.exists():
+				continue
+
+			total_cleared_bytes += cls._get_path_size_bytes(cache_path)
+			try:
+				if cache_path.is_dir():
+					shutil.rmtree(cache_path, ignore_errors=True)
+				else:
+					cache_path.unlink(missing_ok=True)
+			except OSError:
+				continue
+
+		return total_cleared_bytes
 
 	@staticmethod
 	async def _kill_stale_chrome_for_profile(user_data_dir: str) -> bool:

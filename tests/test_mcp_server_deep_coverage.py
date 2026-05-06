@@ -624,6 +624,7 @@ class TestBuildBrowserProfile:
         assert profile.keep_alive is True
         assert profile.disable_security is False
         assert profile.headless is True
+        assert str(profile.storage_state).endswith('profiles/default/storage_state.json')
 
     def test_build_profile_merges_config(self, server_instance):
         """Lines 308-318: config values are merged into profile."""

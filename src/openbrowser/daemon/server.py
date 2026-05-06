@@ -69,20 +69,23 @@ class DaemonServer:
     def _build_browser_profile(self):
         """Build a BrowserProfile from config with daemon defaults."""
         from openbrowser.browser import BrowserProfile
-        from openbrowser.config import get_default_profile, load_openbrowser_config
+        from openbrowser.config import CONFIG, apply_managed_browser_profile_defaults, get_default_profile, load_openbrowser_config
 
         config = load_openbrowser_config()
         profile_config = get_default_profile(config)
-        profile_data = {
-            'downloads_path': str(Path.home() / 'Downloads' / 'openbrowser-daemon'),
-            'wait_between_actions': 0.5,
-            'keep_alive': True,
-            'user_data_dir': '~/.config/openbrowser/profiles/daemon',
-            'device_scale_factor': 1.0,
-            'disable_security': False,
-            'headless': True,
-            **profile_config,
-        }
+        profile_data = apply_managed_browser_profile_defaults(
+            {
+                'downloads_path': str(Path.home() / 'Downloads' / 'openbrowser-daemon'),
+                'wait_between_actions': 0.5,
+                'keep_alive': True,
+                'user_data_dir': '~/.config/openbrowser/profiles/daemon',
+                'device_scale_factor': 1.0,
+                'disable_security': False,
+                'headless': True,
+                **profile_config,
+            },
+            CONFIG.OPENBROWSER_PROFILES_DIR / 'daemon',
+        )
         return BrowserProfile(**profile_data)
 
     async def _ensure_executor(self):

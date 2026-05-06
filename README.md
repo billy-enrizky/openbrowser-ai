@@ -8,7 +8,7 @@
 
 ---
 
-**Saved Cookies and Scheduled Tasks is available in the cloud-hosted version. Join the waitlist for early access: https://openbrowser.me** :
+**Cloud dashboard for saved cookies and scheduled tasks is available in the hosted version. Join the waitlist for early access: https://openbrowser.me** :
 
 https://github.com/user-attachments/assets/b17f97f3-f9f8-4707-8e39-abbbbe1a693b
 
@@ -70,10 +70,13 @@ OpenBrowser is a framework for intelligent browser automation. It combines direc
 - **CodeAgent Architecture** - LLM writes Python code in a persistent Jupyter-like namespace for browser automation
 - **Raw CDP Communication** - Direct Chrome DevTools Protocol for maximum control and speed
 - **Vision Support** - Screenshot analysis for visual understanding of pages
-- **12+ LLM Providers** - OpenAI, Anthropic, Google, Groq, AWS Bedrock, Azure OpenAI, Ollama, and more
-- **MCP Server** - Model Context Protocol support for Claude Desktop integration
-- **CLI Daemon** - Persistent browser daemon with `-c` flag for direct code execution from Bash
-- **Video Recording** - Record browser sessions as video files
+- **15 LLM Providers** - OpenAI, Anthropic, Google, Groq, AWS Bedrock, Azure, Ollama, DeepSeek, Cerebras, OpenRouter, OCI, and more
+- **MCP Server** - Model Context Protocol for Claude Desktop, Claude Code, Codex, OpenCode, and other AI assistants, with reusable saved login sessions
+- **CLI Daemon** - Persistent browser daemon with `-c` flag for direct code execution from Bash, saved login state, and 10-minute auto-shutdown
+- **Workflow Recording** - Record, replay, and export browser sessions to Jupyter notebooks or API crawler code
+- **Video Recording** - Record browser sessions as video files with ffmpeg
+- **Cloud Platform** - Full-stack web UI with real-time VNC streaming, saved logins (KMS-encrypted), scheduled workflows (EventBridge + SQS), and email notifications (SES)
+- **Plugin System** - Claude Code plugin with 6 guided skills (web scraping, form filling, e2e testing, page analysis, accessibility audit, file download)
 
 ## Installation
 
@@ -387,6 +390,8 @@ For OpenClaw plugin documentation, see [docs.openclaw.ai/tools/plugin](https://d
 
 OpenBrowser includes an MCP (Model Context Protocol) server that exposes browser automation as tools for AI assistants like Claude. Listed on the [MCP Registry](https://registry.modelcontextprotocol.io/?q=openbrowser) as `me.openbrowser/openbrowser-ai`. No external LLM API keys required -- the MCP client provides the intelligence.
 
+By default, MCP sessions reuse `~/.config/openbrowser/profiles/default` and save cookies plus origin storage to `~/.config/openbrowser/profiles/default/storage_state.json`, so logins survive MCP restarts. OpenBrowser also auto-cleans disposable Chromium caches in managed profiles, which keeps disk usage down without deleting cookies or login state.
+
 ### Quick Setup
 
 **Claude Code**: add to your project's `.mcp.json`:
@@ -448,8 +453,10 @@ The MCP server exposes a single `execute_code` tool that runs Python code in a p
 
 | Environment Variable | Description | Default |
 |---------------------|-------------|---------|
-| `OPENBROWSER_HEADLESS` | Run browser without GUI | `false` |
+| `OPENBROWSER_HEADLESS` | Run browser without GUI | `true` |
 | `OPENBROWSER_ALLOWED_DOMAINS` | Comma-separated domain whitelist | (none) |
+| `OPENBROWSER_USER_DATA_DIR` | Chrome profile directory for persistent MCP sessions | `~/.config/openbrowser/profiles/default` |
+| `OPENBROWSER_STORAGE_STATE` | JSON file used to save and restore cookies plus localStorage | `~/.config/openbrowser/profiles/default/storage_state.json` |
 | `OPENBROWSER_COMPACT_DESCRIPTION` | Minimal tool description (~500 tokens) | `false` |
 | `OPENBROWSER_MAX_OUTPUT` | Max output characters per execution | `10000` |
 
@@ -542,6 +549,8 @@ uvx openbrowser-ai --mcp
 ```
 
 The `-c` flag connects to a persistent browser daemon over a Unix socket (localhost TCP on Windows). Variables persist across calls while the daemon is running. The daemon starts automatically on first use and shuts down after 10 minutes of inactivity.
+
+The CLI daemon stores its browser profile in `~/.config/openbrowser/profiles/daemon` and also writes `storage_state.json` there, so cookies and login sessions survive daemon restarts. One-shot `-p` runs use `~/.config/openbrowser/profiles/cli` with the same storage-state behavior. Managed profiles automatically clear disposable browser caches on startup and shutdown while keeping auth state.
 
 ## Project Structure
 
