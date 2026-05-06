@@ -81,7 +81,7 @@ logging.disable(logging.CRITICAL)
 # Import openbrowser modules
 from openbrowser.browser import BrowserProfile, BrowserSession
 from openbrowser.code_use.namespace import create_namespace
-from openbrowser.config import get_default_profile, load_openbrowser_config
+from openbrowser.config import CONFIG, apply_managed_browser_profile_defaults, get_default_profile, load_openbrowser_config
 from openbrowser.tools.service import CodeAgentTools
 from openbrowser.code_use.executor import DEFAULT_MAX_OUTPUT_CHARS, CodeExecutor
 
@@ -306,16 +306,19 @@ class OpenBrowserServer:
 	def _build_browser_profile(self):
 		"""Build a BrowserProfile from config with MCP defaults."""
 		profile_config = get_default_profile(self.config)
-		profile_data = {
-			'downloads_path': str(Path.home() / 'Downloads' / 'openbrowser-mcp'),
-			'wait_between_actions': 0.5,
-			'keep_alive': True,
-			'user_data_dir': '~/.config/openbrowser/profiles/default',
-			'device_scale_factor': 1.0,
-			'disable_security': False,
-			'headless': True,
-			**profile_config,
-		}
+		profile_data = apply_managed_browser_profile_defaults(
+			{
+				'downloads_path': str(Path.home() / 'Downloads' / 'openbrowser-mcp'),
+				'wait_between_actions': 0.5,
+				'keep_alive': True,
+				'user_data_dir': '~/.config/openbrowser/profiles/default',
+				'device_scale_factor': 1.0,
+				'disable_security': False,
+				'headless': True,
+				**profile_config,
+			},
+			CONFIG.OPENBROWSER_PROFILES_DIR / 'default',
+		)
 		return BrowserProfile(**profile_data)
 
 	async def _ensure_namespace(self):
