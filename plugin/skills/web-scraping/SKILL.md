@@ -205,3 +205,29 @@ EOF
 - For large datasets, process pages incrementally rather than loading everything into memory.
 - Check for rate limiting; add `await wait(2)` between page loads if needed.
 - Variables persist between `-c` calls while the daemon is running, so you can build up results across multiple calls.
+
+## Cleanup
+
+This step is **mandatory**. Run it after the scrape finishes, whether you collected every page or hit a rate limit halfway through. Without it, the daemon keeps Chrome running until its 10-minute idle timeout, leaving a stale browser process, a locked profile, and (on macOS/Linux desktop) a visible window.
+
+Stop the daemon, then verify it is gone:
+
+```bash
+openbrowser-ai daemon stop
+openbrowser-ai daemon status
+```
+
+`daemon stop` closes every tab, exits Chrome, flushes saved cookies/login state to the profile, and shuts down the daemon process. `daemon status` should report the daemon is not running. If it still reports running, the daemon is wedged, force-kill it:
+
+```bash
+pkill -f 'openbrowser.*daemon' || true
+```
+
+Long scrapes fail often (rate limits, network drops, pagination dead-ends). Guarantee cleanup with a shell trap so a partial run never leaks a browser:
+
+```bash
+trap 'openbrowser-ai daemon stop >/dev/null 2>&1 || true' EXIT
+# ... openbrowser-ai -c calls here ...
+```
+
+Persist scraped data to disk *before* calling `daemon stop`, in-memory variables die with the daemon. Do not rely on the idle timeout. Do not call `done()` as a substitute, `done()` only marks the task complete inside the agent loop, it does not close the browser.
