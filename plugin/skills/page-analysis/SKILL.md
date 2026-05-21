@@ -225,3 +225,29 @@ EOF
 - Use Python regex on extracted text for pattern matching (emails, phones, dates, prices).
 - For long pages, use `await scroll(down=True)` and re-extract to analyze below-fold content.
 - Variables persist between `-c` calls while the daemon is running, so you can build a comprehensive analysis incrementally.
+
+## Cleanup
+
+This step is **mandatory**. Run it after the analysis finishes, whether extraction succeeded or the page failed to load. Without it, the daemon keeps Chrome running until its 10-minute idle timeout, leaving a stale browser process, a locked profile, and (on macOS/Linux desktop) a visible window.
+
+Stop the daemon, then verify it is gone:
+
+```bash
+openbrowser-ai daemon stop
+openbrowser-ai daemon status
+```
+
+`daemon stop` closes every tab, exits Chrome, flushes saved cookies/login state to the profile, and shuts down the daemon process. `daemon status` should report the daemon is not running. If it still reports running, the daemon is wedged, force-kill it:
+
+```bash
+pkill -f 'openbrowser.*daemon' || true
+```
+
+If your invocation can fail mid-workflow (timeout, navigation error, malformed DOM), guarantee cleanup with a shell trap so the browser is never left orphaned:
+
+```bash
+trap 'openbrowser-ai daemon stop >/dev/null 2>&1 || true' EXIT
+# ... openbrowser-ai -c calls here ...
+```
+
+Do not rely on the idle timeout. Do not call `done()` as a substitute, `done()` only marks the task complete inside the agent loop, it does not close the browser.

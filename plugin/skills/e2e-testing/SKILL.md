@@ -207,3 +207,29 @@ EOF
 - Use `await wait(N)` after interactions that trigger page loads or animations.
 - Variables persist between `-c` calls while the daemon is running, so you can accumulate test results across calls.
 - Use `evaluate()` for DOM state assertions and `browser.get_browser_state_summary()` for page metadata.
+
+## Cleanup
+
+This step is **mandatory**. Run it after the test run finishes, whether assertions passed or failed. Without it, the daemon keeps Chrome running until its 10-minute idle timeout, leaving a stale browser process, a locked profile, and (on macOS/Linux desktop) a visible window.
+
+Stop the daemon, then verify it is gone:
+
+```bash
+openbrowser-ai daemon stop
+openbrowser-ai daemon status
+```
+
+`daemon stop` closes every tab, exits Chrome, flushes saved cookies/login state to the profile, and shuts down the daemon process. `daemon status` should report the daemon is not running. If it still reports running, the daemon is wedged, force-kill it:
+
+```bash
+pkill -f 'openbrowser.*daemon' || true
+```
+
+E2E runs fail often by design (that is what assertions are for). Guarantee cleanup with a shell trap so a failed assertion never leaks a browser:
+
+```bash
+trap 'openbrowser-ai daemon stop >/dev/null 2>&1 || true' EXIT
+# ... openbrowser-ai -c calls here ...
+```
+
+Do not rely on the idle timeout. Do not call `done()` as a substitute, `done()` only marks the task complete inside the agent loop, it does not close the browser.

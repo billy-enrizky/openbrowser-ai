@@ -200,3 +200,29 @@ EOF
 - Use `list_downloads()` to see all files saved in the downloads directory.
 - For large files, `download_file()` has a 120-second timeout.
 - The fallback strategy uses Python `requests` if the browser fetch fails (e.g., CORS restrictions), but without browser cookies.
+
+## Cleanup
+
+This step is **mandatory**. Run it after every download run, whether the file landed successfully or the request failed. Without it, the daemon keeps Chrome running until its 10-minute idle timeout, leaving a stale browser process, a locked profile, and (on macOS/Linux desktop) a visible window.
+
+Stop the daemon, then verify it is gone:
+
+```bash
+openbrowser-ai daemon stop
+openbrowser-ai daemon status
+```
+
+`daemon stop` closes every tab, exits Chrome, flushes saved cookies/login state to the profile, and shuts down the daemon process. `daemon status` should report the daemon is not running. If it still reports running, the daemon is wedged, force-kill it:
+
+```bash
+pkill -f 'openbrowser.*daemon' || true
+```
+
+If a download can fail mid-workflow (timeout, 4xx/5xx, CORS), guarantee cleanup with a shell trap so the browser is never left orphaned:
+
+```bash
+trap 'openbrowser-ai daemon stop >/dev/null 2>&1 || true' EXIT
+# ... openbrowser-ai -c calls here ...
+```
+
+Downloaded files in `~/.config/openbrowser/downloads/` survive `daemon stop`, only the browser process is terminated. Do not rely on the idle timeout. Do not call `done()` as a substitute, `done()` only marks the task complete inside the agent loop, it does not close the browser.

@@ -382,3 +382,29 @@ EOF
 - ARIA misuse is often worse than no ARIA at all.
 - The heading check catches the most common structural issues.
 - Missing form labels are the most common form accessibility failure.
+
+## Cleanup
+
+This step is **mandatory**. Run it after the task finishes, whether the audit succeeded or failed. Without it, the daemon keeps Chrome running until its 10-minute idle timeout, leaving a stale browser process, a locked profile, and (on macOS/Linux desktop) a visible window.
+
+Stop the daemon, then verify it is gone:
+
+```bash
+openbrowser-ai daemon stop
+openbrowser-ai daemon status
+```
+
+`daemon stop` closes every tab, exits Chrome, flushes saved cookies/login state to the profile, and shuts down the daemon process. `daemon status` should report the daemon is not running. If it still reports running, the daemon is wedged, force-kill it:
+
+```bash
+pkill -f 'openbrowser.*daemon' || true
+```
+
+If your skill invocation can fail mid-workflow (network error, assertion failure, CDP timeout), guarantee cleanup with a shell trap so the browser is never left orphaned:
+
+```bash
+trap 'openbrowser-ai daemon stop >/dev/null 2>&1 || true' EXIT
+# ... openbrowser-ai -c calls here ...
+```
+
+Do not rely on the idle timeout. Do not call `done()` as a substitute, `done()` only marks the task complete inside the agent loop, it does not close the browser.
