@@ -29,7 +29,7 @@ Hard rules:
 - Each sub-agent writes its findings to its own JSON file under `local_docs/research/_partial/<slug>-NN.json`. The orchestrator reads and merges these.
 - The orchestrator never drives tabs itself. It only plans, dispatches, merges, renders, verifies, cleans up.
 
-`-p` autonomous-agent mode is still available as a Step 2b fallback for sub-questions returning <2 findings, but it is now opt-in.
+If a first-wave sub-agent returns <2 findings, the orchestrator dispatches a Step 2b retry sub-agent with broader search strategy (alternative engines, query reformulation, lower thresholds). Still `-c`-only: the skill never calls `openbrowser-ai -p`.
 
 Variables persist across `-c` calls in the daemon namespace.
 
@@ -55,7 +55,7 @@ curl -fsSL https://openbrowser.me/install.sh | sh
 irm https://openbrowser.me/install.ps1 | iex
 ```
 
-Set `OPENAI_API_KEY` (or `ANTHROPIC_API_KEY` / `GOOGLE_API_KEY`) so spawned `-p` agents can run.
+No LLM API key required. The skill drives the daemon via `openbrowser-ai -c` only, which executes raw CDP / JS through the daemon's Python namespace and never invokes a model. (The `-p` "prompt mode" of the CLI is a separate code path that loads `get_llm()` and requires an OpenAI / Anthropic / Google key per `cli.py:434-490`. This skill explicitly avoids `-p`.)
 
 Prepare output dir at the project root (NOT user home):
 
@@ -254,67 +254,76 @@ EOF
 
 If any sub-question's partial file is missing or has <2 findings, fall through to Step 2b for that one.
 
-### Step 2b -- `-p` agent fallback (optional, per sub-question)
+### Step 2b -- Retry weak sub-questions with broader sub-agents
 
-For sub-questions that returned <2 findings in Step 2a, spawn an autonomous `-p` agent. Runs in a separate browser process so it doesn't touch the multi-tab session. Sequential, since `-p` agents are heavy.
+If a sub-question came back with <2 findings, do NOT use `openbrowser-ai -p`. The `-p` mode requires an LLM API key (OpenAI / Anthropic / Google) because it runs the full Browser Agent loop with LLM-driven navigation, see `cli.py:434-490` `get_llm()`. This skill is `-c`-only by design: the daemon executes raw CDP / JS and needs no API key.
 
-The scoped prompt below forces JSON-only output with citation-ready fields:
+Identify weak sub-questions, then dispatch a fresh round of parallel sub-agents (same `/dispatching-parallel-agents` pattern as Step 2a) with a broader prompt. The retry sub-agents reuse the same single-tab discipline and write to `agent-retry-NN.json` partials.
 
 ```bash
 openbrowser-ai -c - <<'EOF'
-import json, subprocess, re
-
-PROMPT_TEMPLATE = """Research the following question and return findings.
-
-Question: {sub_question}
-
-Constraints:
-- Visit at least 3 sources from 3 different domains.
-- For each finding capture: claim (one sentence), exact URL, supporting quote (verbatim, max 40 words), domain, confidence (low/medium/high), needs_depth (true if claim warrants deeper investigation).
-- Output ONLY a JSON array of objects with keys: claim, url, quote, domain, confidence, needs_depth.
-- No prose, no markdown fences, no preamble. Just the JSON array."""
-
-def extract_json_array(text):
-    # Find first '[' ... matching ']' block
-    m = re.search(r"\[.*\]", text, re.S)
-    if not m:
-        return None
-    try:
-        return json.loads(m.group(0))
-    except json.JSONDecodeError:
-        return None
-
-def investigate(sub_q):
-    prompt = PROMPT_TEMPLATE.format(sub_question=sub_q)
-    result = subprocess.run(
-        ["openbrowser-ai", "-p", prompt],
-        capture_output=True, text=True, timeout=600,
-    )
-    findings = extract_json_array(result.stdout)
-    if findings is None:
-        # Retry once with stricter framing
-        retry = subprocess.run(
-            ["openbrowser-ai", "-p", prompt + "\n\nReturn ONLY the JSON array. No other text."],
-            capture_output=True, text=True, timeout=600,
-        )
-        findings = extract_json_array(retry.stdout) or []
-    # Tag each finding with the sub-question
-    for f in findings:
-        f["sub_question"] = sub_q
-    return findings
-
 from collections import Counter
-counts = Counter(f["sub_question"] for f in _findings)
-weak = [sq for sq in _plan["sub_questions"] if counts[sq] < 2]
+global _retry_subqs
+counts = Counter(f.get("sub_question") for f in _findings)
+_retry_subqs = [sq for sq in _plan["sub_questions"] if counts.get(sq, 0) < 2]
+print(f"Retry targets: {len(_retry_subqs)}")
+for sq in _retry_subqs:
+    print(f"  - {sq}")
+EOF
+```
 
-print(f"Sub-questions needing fallback: {len(weak)}")
-for sq in weak:
-    print(f"--> {sq}")
-    fs = investigate(sq)
-    print(f"    got {len(fs)} findings via -p agent")
-    _findings.extend(fs)
+The orchestrator then dispatches one parallel sub-agent per weak sub-question with this retry prompt template (same single-tab rule, broader search strategy):
 
-print(f"\nTotal findings after fallback: {len(_findings)}")
+```
+You are a deep-research RETRY sub-agent. Your job: investigate ONE sub-question
+that the first-wave sub-agent could not satisfy. Use ONE Chrome tab and write
+findings to a JSON file.
+
+Sub-question: <SUB_QUESTION>
+Agent index: <AGENT_INDEX> (filename agent-retry-<AGENT_INDEX>.json)
+Project root: <PROJECT_ROOT>
+
+Hard constraints:
+
+- You own ONE tab. NEVER pass new_tab=True to navigate() after the first call.
+- Use openbrowser-ai -c only. NEVER use openbrowser-ai -p (it requires an LLM
+  API key and we explicitly avoid that path).
+- The first-wave attempt failed: heuristic sentence picker returned <2 findings.
+  This means the page text either had no high-overlap sentences for the question,
+  or the SERP returned thin sources. Try one or more of:
+  1. Reformulate the search query (try 2-3 alternative phrasings, pick the one
+     with the best SERP).
+  2. Search a different engine: try Bing or DuckDuckGo if Google was thin.
+     URLs: https://www.bing.com/search?q=... or https://duckduckgo.com/?q=...
+  3. Lower the sentence-length floor for the heuristic (e.g. 30 chars instead
+     of 40), or accept partial-match sentences with overlap >= 1 word.
+  4. For factual sub-questions ("when was X released"), check Wikipedia
+     directly: https://en.wikipedia.org/wiki/Special:Search?search=...
+- Same JSON shape as Step 2a sub-agents.
+- Write to: <PROJECT_ROOT>/local_docs/research/_partial/agent-retry-<AGENT_INDEX>.json
+- Return at least 2 findings. If still <2 after the broader strategy, write
+  whatever you got (even 0-1) and surface the limitation in your reply.
+```
+
+After all retry sub-agents return, merge their partials into `_findings`:
+
+```bash
+openbrowser-ai -c - <<'EOF'
+import os, json, glob
+global _findings
+PROJECT_ROOT = "<ABSOLUTE_PATH_TO_PROJECT_ROOT>"
+partial_dir = os.path.join(PROJECT_ROOT, "local_docs", "research", "_partial")
+extra = []
+for path in sorted(glob.glob(os.path.join(partial_dir, "agent-retry-*.json"))):
+    try:
+        with open(path) as fh:
+            arr = json.load(fh)
+        if isinstance(arr, list):
+            extra.extend(arr)
+    except Exception as e:
+        print(f"skip {path}: {e}")
+_findings.extend(extra)
+print(f"Retry added {len(extra)} findings -> total {len(_findings)}")
 EOF
 ```
 
@@ -595,7 +604,7 @@ rm -rf "<ABSOLUTE_PATH_TO_PROJECT_ROOT>/local_docs/research/_partial" 2>/dev/nul
 - **Heredoc quoting:** always use `<<'EOF'` (single-quoted) so `$`, backticks, and `!` inside Python don't expand in the shell.
 - **Daemon namespace:** `_plan`, `_findings`, `_sources` persist across orchestrator `-c` calls. Sub-agents share the same daemon and so see the same namespace, but each operates in its own tab. Don't restart the daemon mid-run.
 - **Partial files as the contract:** sub-agents write to `local_docs/research/_partial/agent-NN.json`, the orchestrator reads them back. Sub-agents do NOT communicate findings via stdout. If a partial file is missing or empty, that sub-agent failed; rerun it or fall through to Step 2b.
-- **JSON-only `-p` prompts (Step 2b only):** the autonomous agent occasionally emits a leading sentence. The regex `\[.*\]` extractor + retry handles most cases. If both fail, inspect the raw stdout (`subprocess.run` keeps it) and tighten the sub-question.
+- **No `-p`, ever:** this skill never shells out to `openbrowser-ai -p`. The `-p` mode runs the full Browser Agent loop with LLM-driven navigation and requires an OpenAI / Anthropic / Google API key (`cli.py:434-490` `get_llm()`). The `-c` daemon path needs no API key. If you see `-p` anywhere in skill code, that is a bug.
 - **Source diversity:** if dedup leaves <60% of findings (heavy domain repetition), rerun the affected sub-agent with explicit "prefer different domains than: <list>" appended to its prompt.
 - **Drilldown cost:** drilldown dispatches up to `len(sub_questions) * 3` extra parallel sub-agents. Reserve for genuinely deep topics.
 - **Rerun semantics:** rerunning Step 5 alone re-renders from current `_findings`, useful after manual edits.
