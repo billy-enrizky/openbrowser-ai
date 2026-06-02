@@ -10,18 +10,26 @@ allowed-tools: Bash(openbrowser-ai:*) Bash(curl:*) Bash(uv:*) Bash(irm:*) Bash(m
 
 Drive `openbrowser-ai` to investigate a topic across multiple web sources and produce a cited markdown report plus structured JSON. Two modes:
 
-- **flat synthesis** (default) -- decompose query into 3-7 sub-questions, investigate each, merge into one cited report.
-- **drilldown** (auto-detected from prompt phrasing: "deep dive", "exhaustive", "recursive", "drilldown", "thorough") -- same as flat, plus one recursive level on findings flagged `needs_depth=true`. Hard cap depth=2.
+- **flat synthesis** (default) -- decompose query into 3-7 sub-questions, dispatch one parallel sub-agent per sub-question (each owns one tab), merge into one cited report.
+- **drilldown** (auto-detected from prompt phrasing: "deep dive", "exhaustive", "recursive", "drilldown", "thorough") -- same as flat, plus a second wave of parallel sub-agents on findings flagged `needs_depth=true`. Hard cap depth=2, max 3 follow-up sub-agents per parent.
 
 Output paths (relative to current project root):
 
 - `local_docs/research/YYYY-MM-DD-<slug>.md`
 - `local_docs/research/YYYY-MM-DD-<slug>.json`
 
-Skill orchestrates via `openbrowser-ai -c -` (heredoc, daemon-backed Python). Two investigation paths, used together:
+**Architecture (mandatory):** the orchestrating Claude session (the one running this skill) MUST dispatch parallel sub-agents via `/dispatching-parallel-agents`, one sub-agent per sub-question. Each sub-agent owns exactly ONE tab. Sub-agents do not open additional tabs. The orchestrator merges per-agent findings into one report.
 
-- **Multi-tab parallel** inside the existing daemon: open one tab per sub-question with `navigate(url, new_tab=True)`, fan out search-and-extract via `asyncio.gather`, dedup. Fast, shares one browser session.
-- **Autonomous `-p` agent** for sub-questions that need free-form navigation (paginated archives, JS-heavy sites): `openbrowser-ai -p "<scoped prompt>"`. Returns JSON-only findings.
+Why one tab per sub-agent and not `asyncio.gather` over tabs in a single `-c` call: a single Python coroutine driving N tabs through one daemon serializes navigation events at the CDP layer, contends for the LLM-extraction worker, and cannot make independent decisions about pagination or follow-up clicks per tab. Dispatching real Claude sub-agents (each with its own context window and its own browser tab) gives true parallelism, independent reasoning per tab, and isolates failures so one bad page doesn't poison the rest.
+
+Hard rules:
+
+- One sub-agent = one tab. Sub-agents must NOT call `navigate(url, new_tab=True)` to spawn additional tabs.
+- All sub-agents share the same daemon (and so the same Chrome process). Tabs are isolated; navigation in one tab does not affect another.
+- Each sub-agent writes its findings to its own JSON file under `local_docs/research/_partial/<slug>-NN.json`. The orchestrator reads and merges these.
+- The orchestrator never drives tabs itself. It only plans, dispatches, merges, renders, verifies, cleans up.
+
+`-p` autonomous-agent mode is still available as a Step 2b fallback for sub-questions returning <2 findings, but it is now opt-in.
 
 Variables persist across `-c` calls in the daemon namespace.
 
@@ -143,95 +151,108 @@ EOF
 
 Edit the `QUERY`, `PROJECT_ROOT`, and `sub_questions` list before running. `PROJECT_ROOT` MUST be an absolute path: the daemon runs in its own working directory (usually wherever the daemon was first started), so relative paths land in the wrong place. Use the shell `pwd` output as the value. Verify output looks right before continuing.
 
-### Step 2a -- Multi-tab parallel investigation (preferred)
+### Step 2a -- Dispatch parallel sub-agents (one tab per agent)
 
-Open one new tab per sub-question, scrape SERP via `evaluate`, visit top results, capture body text. Uses `asyncio.gather` so all tabs work in parallel inside the single daemon session. Pre-existing tabs are left alone.
+The orchestrator (the Claude session running this skill) MUST invoke `/dispatching-parallel-agents` and dispatch one sub-agent per sub-question. All sub-agents share the same `openbrowser-ai` daemon. Each sub-agent owns exactly one tab, the one it opens at the start of its run.
 
-`evaluate` runs raw JS in the page; no extra LLM calls inside the loop, so the multi-tab path is fast and cheap. The Python orchestrator then selects best-fit sentences (or hands off to Step 2b for free-form synthesis).
+**Hard rules for the orchestrator:**
+
+- Send ONE message containing N parallel `Agent` tool calls, where N = `len(_plan["sub_questions"])`.
+- Each sub-agent gets the prompt template below, parameterized with: `SUB_QUESTION`, `AGENT_INDEX` (zero-padded 2 digits, used in output filename), `PROJECT_ROOT` (absolute path).
+- After dispatch, wait for all sub-agents to return. Do not begin Step 4 until every partial JSON file under `local_docs/research/_partial/` is on disk.
+- The orchestrator does NOT drive any tab in this step.
+
+**Sub-agent prompt template** (copy into each `Agent` tool call's `prompt` argument):
+
+```
+You are a deep-research sub-agent. Your job: investigate ONE sub-question
+in ONE Chrome tab and write findings to a JSON file.
+
+Sub-question: <SUB_QUESTION>
+Agent index: <AGENT_INDEX>
+Project root: <PROJECT_ROOT>
+
+Hard constraints:
+
+- You own ONE tab. The tab is the one you open at the start of this task.
+- NEVER pass new_tab=True to navigate(). Reuse your one tab for every page.
+- Do not switch to other tabs.
+- Do not call openbrowser-ai daemon stop. The orchestrator owns daemon lifecycle.
+- Visit at least 3 result URLs from at least 3 different domains.
+- For each URL, extract one finding with: claim (one sentence), exact url,
+  supporting quote (verbatim, max 40 words), domain, confidence (low|medium|high),
+  needs_depth (bool, true if a deeper follow-up would meaningfully sharpen the claim).
+- Return at least 2 findings; 3 is ideal.
+- Write the findings JSON array to:
+  <PROJECT_ROOT>/local_docs/research/_partial/agent-<AGENT_INDEX>.json
+
+Workflow (run via openbrowser-ai -c - heredocs, all in this one bash session):
+
+1. Open exactly one tab on Google search:
+   openbrowser-ai -c - <<'EOF'
+   await navigate("https://www.google.com/search?q=<URL_ENCODED_SUB_QUESTION>", new_tab=True)
+   await wait(2)
+   state = await browser.get_browser_state_summary()
+   tab_id = state.tabs[-1].target_id
+   _MY_TAB = tab_id[-4:]
+   print(f"my tab: {_MY_TAB}")
+   EOF
+
+2. Scrape the SERP for top 5 result URLs.
+
+3. For each of the top 3 results, navigate IN THE SAME TAB (no new_tab=True),
+   wait 2s, capture body innerText, pick the sentence with the most word-overlap
+   vs the sub-question (40-280 chars, >3-letter keyword overlap >= 1).
+
+4. Write the findings JSON array to the partial file.
+
+5. Print a one-line summary: "agent <AGENT_INDEX>: <N> findings written".
+
+Return: a one-line confirmation that the partial JSON file was written, and
+its absolute path. Do not include the findings in your text reply -- the
+orchestrator will read them from disk.
+```
+
+The orchestrator's pre-step (run once before dispatching agents):
 
 ```bash
 openbrowser-ai -c - <<'EOF'
-import asyncio, json, re
-from urllib.parse import urlparse
-
-SERP_JS = """(function(){
-    const out = [];
-    document.querySelectorAll('a').forEach(a => {
-        const h3 = a.querySelector('h3');
-        if (h3 && a.href && a.href.startsWith('http') && !a.href.includes('google.com')) {
-            out.push({url: a.href, title: h3.textContent});
-        }
-    });
-    return out.slice(0, 5);
-})()"""
-
-PAGE_JS = """(function(){ return (document.body.innerText || '').slice(0, 4000); })()"""
-
-KEYWORDS_RE = re.compile(r"[A-Za-z][A-Za-z0-9 ,'\-]{20,200}")
-
-def best_sentence(text, sub_q):
-    # Pick the sentence with the most word-overlap vs sub_q
-    q_words = {w.lower() for w in re.findall(r"[a-zA-Z]+", sub_q) if len(w) > 3}
-    sentences = re.split(r"(?<=[.!?])\s+", text)
-    scored = []
-    for s in sentences:
-        s = s.strip()
-        if not (40 <= len(s) <= 280): continue
-        s_words = {w.lower() for w in re.findall(r"[a-zA-Z]+", s)}
-        overlap = len(q_words & s_words)
-        if overlap == 0: continue
-        scored.append((overlap, s))
-    scored.sort(reverse=True)
-    return scored[0][1] if scored else None
-
-async def investigate_one_tab(sub_q):
-    search_url = f"https://www.google.com/search?q={sub_q.replace(' ', '+')}"
-    await navigate(search_url, new_tab=True)
-    await wait(2)
-    state = await browser.get_browser_state_summary()
-    tab_id = state.tabs[-1].target_id
-
-    serp = await evaluate(SERP_JS) or []
-    findings = []
-    for hit in serp[:3]:
-        url = hit.get("url", "")
-        if not url.startswith("http"): continue
-        try:
-            await switch(tab_id=tab_id[-4:])
-            await navigate(url)
-            await wait(2)
-            text = await evaluate(PAGE_JS) or ""
-            sentence = best_sentence(text, sub_q)
-            if not sentence: continue
-            words = sentence.split()
-            quote = " ".join(words[:40])
-            findings.append({
-                "claim": sentence,
-                "quote": quote,
-                "url": url,
-                "domain": urlparse(url).netloc,
-                "title": hit.get("title", ""),
-                "sub_question": sub_q,
-                "confidence": "medium",
-                "needs_depth": False,
-            })
-        except Exception as e:
-            print(f"  skip {url}: {type(e).__name__}: {e}")
-    return tab_id, findings
-
-results = await asyncio.gather(*[investigate_one_tab(sq) for sq in _plan["sub_questions"]])
-
-_findings = []
-_research_tab_ids = []
-for tab_id, fs in results:
-    _research_tab_ids.append(tab_id)
-    _findings.extend(fs)
-
-print(f"Opened {len(_research_tab_ids)} research tabs, gathered {len(_findings)} findings")
+import os
+PROJECT_ROOT = "<ABSOLUTE_PATH_TO_PROJECT_ROOT>"
+partial_dir = os.path.join(PROJECT_ROOT, "local_docs", "research", "_partial")
+os.makedirs(partial_dir, exist_ok=True)
+# Wipe stale partials from prior runs of the same query
+for f in os.listdir(partial_dir):
+    if f.startswith("agent-") and f.endswith(".json"):
+        os.remove(os.path.join(partial_dir, f))
+print(f"partial dir ready: {partial_dir}")
 EOF
 ```
 
-If the heuristic sentence picker returns <2 findings for any sub-question, fall through to Step 2b for that one.
+After all sub-agents return, the orchestrator collects findings:
+
+```bash
+openbrowser-ai -c - <<'EOF'
+import os, json, glob
+global _findings
+PROJECT_ROOT = "<ABSOLUTE_PATH_TO_PROJECT_ROOT>"
+partial_dir = os.path.join(PROJECT_ROOT, "local_docs", "research", "_partial")
+
+_findings = []
+for path in sorted(glob.glob(os.path.join(partial_dir, "agent-*.json"))):
+    try:
+        with open(path) as fh:
+            arr = json.load(fh)
+        if isinstance(arr, list):
+            _findings.extend(arr)
+    except Exception as e:
+        print(f"skip {path}: {e}")
+
+print(f"merged {len(_findings)} findings from {len(glob.glob(os.path.join(partial_dir, 'agent-*.json')))} partials")
+EOF
+```
+
+If any sub-question's partial file is missing or has <2 findings, fall through to Step 2b for that one.
 
 ### Step 2b -- `-p` agent fallback (optional, per sub-question)
 
@@ -299,62 +320,75 @@ EOF
 
 `_findings` lives in the daemon namespace for the next steps.
 
-### Step 3 -- Drilldown (drilldown mode only)
+### Step 3 -- Drilldown (drilldown mode only): second wave of parallel sub-agents
 
-Skip this step in flat mode. In drilldown mode, recurse one level on findings flagged `needs_depth=true`, max 3 targets per parent sub-question, total depth cap = 2.
+Skip this step in flat mode. In drilldown mode, dispatch a second wave of `/dispatching-parallel-agents` -- one sub-agent per `needs_depth=true` finding, max 3 follow-ups per parent sub-question. Each follow-up sub-agent owns ONE tab, exactly like Step 2a.
+
+The orchestrator first picks targets:
 
 ```bash
 openbrowser-ai -c - <<'EOF'
-import json, subprocess, re
-
+global _drill_targets
 if _plan["mode"] != "drilldown":
     print("flat mode, skipping drilldown")
+    _drill_targets = []
 else:
-    PROMPT_TEMPLATE = """Research the following claim in depth and return supporting / contradicting evidence.
-
-Original claim: {claim}
-Source URL: {url}
-
-Constraints:
-- Find at least 2 additional sources from different domains.
-- For each finding capture: claim (one sentence), exact URL, supporting quote (verbatim, max 40 words), domain, confidence (low/medium/high), needs_depth (always false at this depth).
-- Output ONLY a JSON array. No prose."""
-
-    def extract_json_array(text):
-        m = re.search(r"\[.*\]", text, re.S)
-        if not m:
-            return None
-        try:
-            return json.loads(m.group(0))
-        except json.JSONDecodeError:
-            return None
-
-    # Pick top 3 needs_depth=true per sub-question
     by_sq = {}
     for f in _findings:
         if f.get("needs_depth"):
             by_sq.setdefault(f["sub_question"], []).append(f)
-    targets = []
+    _drill_targets = []
     for sq, fs in by_sq.items():
-        targets.extend(fs[:3])
+        _drill_targets.extend(fs[:3])
+    print(f"Drilldown targets: {len(_drill_targets)}")
+    for t in _drill_targets:
+        print(f"  - {t['claim'][:80]}  ({t['url']})")
+EOF
+```
 
-    print(f"Drilldown targets: {len(targets)}")
-    extra = []
-    for t in targets:
-        prompt = PROMPT_TEMPLATE.format(claim=t["claim"], url=t["url"])
-        result = subprocess.run(
-            ["openbrowser-ai", "-p", prompt],
-            capture_output=True, text=True, timeout=600,
-        )
-        more = extract_json_array(result.stdout) or []
-        for m in more:
-            m["sub_question"] = t["sub_question"]
-            m["needs_depth"] = False  # cap reached
-        print(f"  {t['claim'][:60]}... -> {len(more)} findings")
-        extra.extend(more)
+Then dispatch one parallel sub-agent per drilldown target. Use the same single-tab-per-agent rule and the same partial-file output convention, but with this drilldown prompt template:
 
-    _findings.extend(extra)
-    print(f"Total after drilldown: {len(_findings)}")
+```
+You are a deep-research drilldown sub-agent. Your job: investigate ONE claim
+in ONE Chrome tab and write supporting/contradicting evidence to a JSON file.
+
+Parent claim: <CLAIM>
+Original source URL: <URL>
+Agent index: <AGENT_INDEX> (use prefix "drill-" -> filename agent-drill-<AGENT_INDEX>.json)
+Project root: <PROJECT_ROOT>
+
+Hard constraints:
+
+- You own ONE tab. NEVER pass new_tab=True to navigate() after the first call.
+- Find at least 2 additional sources from at least 2 different domains
+  (different from the original source URL above).
+- needs_depth must be false on every finding you return (depth cap reached).
+- Same JSON shape as Step 2a sub-agents: claim, url, quote, domain, confidence,
+  needs_depth, plus add sub_question = "<PARENT_SUB_QUESTION>".
+- Write to: <PROJECT_ROOT>/local_docs/research/_partial/agent-drill-<AGENT_INDEX>.json
+```
+
+After all drilldown sub-agents return, merge their partials into `_findings`:
+
+```bash
+openbrowser-ai -c - <<'EOF'
+import os, json, glob
+global _findings
+PROJECT_ROOT = "<ABSOLUTE_PATH_TO_PROJECT_ROOT>"
+partial_dir = os.path.join(PROJECT_ROOT, "local_docs", "research", "_partial")
+extra = []
+for path in sorted(glob.glob(os.path.join(partial_dir, "agent-drill-*.json"))):
+    try:
+        with open(path) as fh:
+            arr = json.load(fh)
+        if isinstance(arr, list):
+            for f in arr:
+                f["needs_depth"] = False  # cap reached
+            extra.extend(arr)
+    except Exception as e:
+        print(f"skip {path}: {e}")
+_findings.extend(extra)
+print(f"Drilldown added {len(extra)} findings -> total {len(_findings)}")
 EOF
 ```
 
@@ -548,13 +582,22 @@ fi
 
 **Case B: daemon was started fresh by this skill** (`DEEP_RESEARCH_REUSED=0`). Full daemon stop, freeing the Chrome process. See Cleanup section below.
 
+**Always:** remove the per-agent partial JSON files. They are intermediate state, not part of the report:
+
+```bash
+rm -rf "<ABSOLUTE_PATH_TO_PROJECT_ROOT>/local_docs/research/_partial" 2>/dev/null || true
+```
+
 ## Tips
 
+- **One tab per sub-agent:** the orchestrator dispatches via `/dispatching-parallel-agents` and each sub-agent must own exactly one tab. Multiple-tab sub-agents serialize navigation at the CDP layer and lose the parallelism benefit. Enforce in the agent prompt: "NEVER pass new_tab=True to navigate() after the first call."
+- **Single message, multiple Agent calls:** to actually parallelize, the orchestrator must put all N `Agent` tool calls in ONE message. Sequential `Agent` invocations across messages run serially.
 - **Heredoc quoting:** always use `<<'EOF'` (single-quoted) so `$`, backticks, and `!` inside Python don't expand in the shell.
-- **Daemon namespace:** `_plan`, `_findings`, `_sources` persist across the `-c` calls in this workflow. Don't restart the daemon mid-run.
-- **JSON-only `-p` prompts:** the agent occasionally emits a leading sentence. The regex `\[.*\]` extractor + retry handles most cases. If both fail, inspect the raw stdout (`subprocess.run` keeps it) and tighten the sub-question.
-- **Source diversity:** if dedup leaves <60% of findings (heavy domain repetition), rerun investigate for those sub-questions with explicit `prefer different domains than: <list>` appended.
-- **Drilldown cost:** drilldown spawns up to `len(sub_questions) * 3` extra `-p` agents. Reserve for genuinely deep topics.
+- **Daemon namespace:** `_plan`, `_findings`, `_sources` persist across orchestrator `-c` calls. Sub-agents share the same daemon and so see the same namespace, but each operates in its own tab. Don't restart the daemon mid-run.
+- **Partial files as the contract:** sub-agents write to `local_docs/research/_partial/agent-NN.json`, the orchestrator reads them back. Sub-agents do NOT communicate findings via stdout. If a partial file is missing or empty, that sub-agent failed; rerun it or fall through to Step 2b.
+- **JSON-only `-p` prompts (Step 2b only):** the autonomous agent occasionally emits a leading sentence. The regex `\[.*\]` extractor + retry handles most cases. If both fail, inspect the raw stdout (`subprocess.run` keeps it) and tighten the sub-question.
+- **Source diversity:** if dedup leaves <60% of findings (heavy domain repetition), rerun the affected sub-agent with explicit "prefer different domains than: <list>" appended to its prompt.
+- **Drilldown cost:** drilldown dispatches up to `len(sub_questions) * 3` extra parallel sub-agents. Reserve for genuinely deep topics.
 - **Rerun semantics:** rerunning Step 5 alone re-renders from current `_findings`, useful after manual edits.
 - **Slug collisions:** Step 1 auto-bumps `-2`, `-3` if file exists, so rerunning the same query never overwrites.
 
