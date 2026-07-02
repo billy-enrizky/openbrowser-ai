@@ -57,6 +57,12 @@ irm https://openbrowser.me/install.ps1 | iex
 
 No LLM API key required. The skill drives the daemon via `openbrowser-ai -c` only, which executes raw CDP / JS through the daemon's Python namespace and never invokes a model. (The `-p` "prompt mode" of the CLI is a separate code path that loads `get_llm()` and requires an OpenAI / Anthropic / Google key per `cli.py:434-490`. This skill explicitly avoids `-p`.)
 
+Set the headless env var so the daemon starts without a visible browser window (the default in `daemon/server.py` is already `headless: True`, but a user config file can override it; this env var wins over config):
+
+```bash
+export OPENBROWSER_HEADLESS=true
+```
+
 Prepare output dir at the project root (NOT user home):
 
 ```bash
@@ -67,14 +73,18 @@ mkdir -p local_docs/research
 
 ### Step 0 -- Session check
 
-Detect if a daemon is already running. If yes, reuse it (and operate in NEW tabs only). If no, the next `-c` call will auto-start one.
+Enforce headless mode and detect whether a daemon is already running. If yes, reuse it (operate in NEW tabs only). If no, the next `-c` call auto-starts one.
+
+`OPENBROWSER_HEADLESS=true` is set here so the daemon spawned by the first `-c` call inherits it, even if the user's config file sets `headless: false`. Already-running daemons are unaffected (their browser was opened at start time).
 
 ```bash
+export OPENBROWSER_HEADLESS=true
+
 if openbrowser-ai daemon status 2>&1 | grep -qi 'running\|listening\|pid'; then
     echo "Reusing existing daemon -- will work in new tabs"
     export DEEP_RESEARCH_REUSED=1
 else
-    echo "No daemon running -- will start fresh session"
+    echo "No daemon running -- will start fresh headless session"
     export DEEP_RESEARCH_REUSED=0
 fi
 ```
@@ -599,6 +609,7 @@ rm -rf "<ABSOLUTE_PATH_TO_PROJECT_ROOT>/local_docs/research/_partial" 2>/dev/nul
 
 ## Tips
 
+- **Headless by default:** `OPENBROWSER_HEADLESS=true` is set in Step 0 so the daemon always starts without a visible browser window. The daemon default in `daemon/server.py` is already `headless: True`, but a user config file can override it. The env var wins over config. If you need a visible window for debugging, unset or override: `export OPENBROWSER_HEADLESS=false`.
 - **One tab per sub-agent:** the orchestrator dispatches via `/dispatching-parallel-agents` and each sub-agent must own exactly one tab. Multiple-tab sub-agents serialize navigation at the CDP layer and lose the parallelism benefit. Enforce in the agent prompt: "NEVER pass new_tab=True to navigate() after the first call."
 - **Single message, multiple Agent calls:** to actually parallelize, the orchestrator must put all N `Agent` tool calls in ONE message. Sequential `Agent` invocations across messages run serially.
 - **Heredoc quoting:** always use `<<'EOF'` (single-quoted) so `$`, backticks, and `!` inside Python don't expand in the shell.
