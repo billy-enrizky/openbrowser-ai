@@ -86,6 +86,17 @@ class DaemonServer:
             },
             CONFIG.OPENBROWSER_PROFILES_DIR / 'daemon',
         )
+        # Stored config (profile_config) may have headless=False from a previous
+        # non-headless session, overriding the daemon default above. Apply the env
+        # var override last so OPENBROWSER_HEADLESS=false is the only way to opt
+        # into a visible window; omitting the var keeps daemon headless by default.
+        env_headless = os.environ.get('OPENBROWSER_HEADLESS', '').lower()
+        if env_headless in ('true', '1', 'yes'):
+            profile_data['headless'] = True
+        elif env_headless in ('false', '0', 'no'):
+            profile_data['headless'] = False
+        else:
+            profile_data['headless'] = True  # daemon default: always headless
         return BrowserProfile(**profile_data)
 
     async def _ensure_executor(self):

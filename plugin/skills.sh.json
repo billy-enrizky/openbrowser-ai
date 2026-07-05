@@ -1,0 +1,25 @@
+{
+  "$schema": "https://skills.sh/schemas/skills.sh.schema.json",
+  "notGrouped": "bottom",
+  "groupings": [
+    {
+      "title": "Research",
+      "description": "Skills for conducting deep, cited web research using a real browser.",
+      "skills": [
+        "deep-research"
+      ]
+    },
+    {
+      "title": "Browser Automation",
+      "description": "Skills for interacting with web pages: scraping, form filling, testing, and file downloading.",
+      "skills": [
+        "web-scraping",
+        "form-filling",
+        "e2e-testing",
+        "file-download",
+        "page-analysis",
+        "accessibility-audit"
+      ]
+    }
+  ]
+}

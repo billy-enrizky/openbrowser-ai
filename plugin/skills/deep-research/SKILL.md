@@ -243,22 +243,29 @@ After all sub-agents return, the orchestrator collects findings:
 
 ```bash
 openbrowser-ai -c - <<'EOF'
-import os, json, glob
+import os, json
 global _findings
 PROJECT_ROOT = "<ABSOLUTE_PATH_TO_PROJECT_ROOT>"
 partial_dir = os.path.join(PROJECT_ROOT, "local_docs", "research", "_partial")
 
 _findings = []
-for path in sorted(glob.glob(os.path.join(partial_dir, "agent-*.json"))):
+for fname in sorted(os.listdir(partial_dir)):
+    if not (fname.startswith("agent-") and fname.endswith(".json")):
+        continue
+    path = os.path.join(partial_dir, fname)
     try:
         with open(path) as fh:
             arr = json.load(fh)
         if isinstance(arr, list):
+            # normalize exact_url -> url (sub-agents may use either key)
+            for item in arr:
+                if "exact_url" in item and "url" not in item:
+                    item["url"] = item.pop("exact_url")
             _findings.extend(arr)
     except Exception as e:
         print(f"skip {path}: {e}")
 
-print(f"merged {len(_findings)} findings from {len(glob.glob(os.path.join(partial_dir, 'agent-*.json')))} partials")
+print(f"merged {len(_findings)} findings from {len(os.listdir(partial_dir))} partials")
 EOF
 ```
 
@@ -319,16 +326,22 @@ After all retry sub-agents return, merge their partials into `_findings`:
 
 ```bash
 openbrowser-ai -c - <<'EOF'
-import os, json, glob
+import os, json
 global _findings
 PROJECT_ROOT = "<ABSOLUTE_PATH_TO_PROJECT_ROOT>"
 partial_dir = os.path.join(PROJECT_ROOT, "local_docs", "research", "_partial")
 extra = []
-for path in sorted(glob.glob(os.path.join(partial_dir, "agent-retry-*.json"))):
+for fname in sorted(os.listdir(partial_dir)):
+    if not (fname.startswith("agent-retry-") and fname.endswith(".json")):
+        continue
+    path = os.path.join(partial_dir, fname)
     try:
         with open(path) as fh:
             arr = json.load(fh)
         if isinstance(arr, list):
+            for item in arr:
+                if "exact_url" in item and "url" not in item:
+                    item["url"] = item.pop("exact_url")
             extra.extend(arr)
     except Exception as e:
         print(f"skip {path}: {e}")
@@ -391,18 +404,23 @@ After all drilldown sub-agents return, merge their partials into `_findings`:
 
 ```bash
 openbrowser-ai -c - <<'EOF'
-import os, json, glob
+import os, json
 global _findings
 PROJECT_ROOT = "<ABSOLUTE_PATH_TO_PROJECT_ROOT>"
 partial_dir = os.path.join(PROJECT_ROOT, "local_docs", "research", "_partial")
 extra = []
-for path in sorted(glob.glob(os.path.join(partial_dir, "agent-drill-*.json"))):
+for fname in sorted(os.listdir(partial_dir)):
+    if not (fname.startswith("agent-drill-") and fname.endswith(".json")):
+        continue
+    path = os.path.join(partial_dir, fname)
     try:
         with open(path) as fh:
             arr = json.load(fh)
         if isinstance(arr, list):
             for f in arr:
                 f["needs_depth"] = False  # cap reached
+                if "exact_url" in f and "url" not in f:
+                    f["url"] = f.pop("exact_url")
             extra.extend(arr)
     except Exception as e:
         print(f"skip {path}: {e}")
@@ -421,6 +439,11 @@ from urllib.parse import urlparse
 
 # `global` so reassignment of daemon-namespace var doesn't shadow it
 global _findings, _sources
+
+# Normalize exact_url -> url (sub-agents may use either key)
+for f in _findings:
+    if "exact_url" in f and "url" not in f:
+        f["url"] = f.pop("exact_url")
 
 # Dedup by URL, keep first occurrence
 seen_urls = {}
@@ -540,11 +563,17 @@ Fail loud if any prose sentence outside headings, quotes, code, or source list l
 Do the verify in plain shell `python3` (not the daemon). `sys.exit` inside the daemon namespace kills the daemon.
 
 ```bash
-python3 - <<'EOF'
-import re, sys, json, glob, os
+python3 - "$PROJECT_ROOT" <<'EOF'
+import re, sys, os
 
-# Find latest report file under local_docs/research/
-files = sorted(glob.glob("local_docs/research/*.md"), key=os.path.getmtime, reverse=True)
+project_root = sys.argv[1] if len(sys.argv) > 1 else os.getcwd()
+research_dir = os.path.join(project_root, "local_docs", "research")
+
+# Find latest report file -- use os.listdir + absolute path (glob fails on non-shell CWD)
+files = sorted(
+    [os.path.join(research_dir, f) for f in os.listdir(research_dir) if f.endswith(".md")],
+    key=os.path.getmtime, reverse=True
+)
 if not files:
     print("No report found"); sys.exit(1)
 md_path = files[0]
@@ -615,6 +644,8 @@ rm -rf "<ABSOLUTE_PATH_TO_PROJECT_ROOT>/local_docs/research/_partial" 2>/dev/nul
 - **Heredoc quoting:** always use `<<'EOF'` (single-quoted) so `$`, backticks, and `!` inside Python don't expand in the shell.
 - **Daemon namespace:** `_plan`, `_findings`, `_sources` persist across orchestrator `-c` calls. Sub-agents share the same daemon and so see the same namespace, but each operates in its own tab. Don't restart the daemon mid-run.
 - **Partial files as the contract:** sub-agents write to `local_docs/research/_partial/agent-NN.json`, the orchestrator reads them back. Sub-agents do NOT communicate findings via stdout. If a partial file is missing or empty, that sub-agent failed; rerun it or fall through to Step 2b.
+- **`exact_url` normalization:** sub-agents may write `exact_url` instead of `url`. All merge steps (Step 2a, 2b, 3) normalize this automatically. Step 4 has a final safety pass. Never rely on `url` being set before the merge step runs.
+- **Daemon restart recovery:** if the daemon restarts mid-session, `_plan`/`_findings`/`_sources` are lost from namespace. The partial JSON files on disk survive. Re-run the merge step (Step 2a collect block) with `PROJECT_ROOT` hardcoded to reload `_findings` from disk. Re-run Step 1 with the same `QUERY` and `PROJECT_ROOT` to restore `_plan`; the slug-collision bump will avoid overwriting the existing output file.
 - **No `-p`, ever:** this skill never shells out to `openbrowser-ai -p`. The `-p` mode runs the full Browser Agent loop with LLM-driven navigation and requires an OpenAI / Anthropic / Google API key (`cli.py:434-490` `get_llm()`). The `-c` daemon path needs no API key. If you see `-p` anywhere in skill code, that is a bug.
 - **Source diversity:** if dedup leaves <60% of findings (heavy domain repetition), rerun the affected sub-agent with explicit "prefer different domains than: <list>" appended to its prompt.
 - **Drilldown cost:** drilldown dispatches up to `len(sub_questions) * 3` extra parallel sub-agents. Reserve for genuinely deep topics.
