@@ -262,6 +262,51 @@ jobs:
         run: |
           gh release upload "$GITHUB_REF_NAME" install.sh install.ps1 --clobber
 
+  validate-skills-manifest:
+    name: Validate skills.sh Manifest
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate plugin/skills.sh.json against schema
+        run: |
+          python3 - <<'PYEOF'
+          import json, sys, os
+
+          manifest_path = "plugin/skills.sh.json"
+          skills_dir = "plugin/skills"
+
+          with open(manifest_path) as f:
+              manifest = json.load(f)
+
+          errors = []
+
+          # Collect all skill names from groupings
+          grouped = set()
+          for group in manifest.get("groupings", []):
+              for skill in group.get("skills", []):
+                  grouped.add(skill)
+                  skill_dir = os.path.join(skills_dir, skill)
+                  if not os.path.isdir(skill_dir):
+                      errors.append(f"Skill '{skill}' in groupings but directory '{skill_dir}' not found")
+                  elif not os.path.isfile(os.path.join(skill_dir, "SKILL.md")):
+                      errors.append(f"Skill '{skill}' directory exists but SKILL.md missing")
+
+          # Check all SKILL.md files are represented
+          if os.path.isdir(skills_dir):
+              for entry in os.listdir(skills_dir):
+                  if os.path.isfile(os.path.join(skills_dir, entry, "SKILL.md")) and entry not in grouped:
+                      print(f"WARNING: skill '{entry}' has SKILL.md but is not listed in skills.sh.json groupings")
+
+          if errors:
+              for e in errors: print(f"ERROR: {e}", file=sys.stderr)
+              sys.exit(1)
+
+          print(f"OK: skills.sh.json valid ({len(grouped)} skills across {len(manifest.get('groupings',[]))} groups)")
+          PYEOF
+
   sync-plugin-version:
     name: Sync Claude Code Plugin Version
     needs: publish-to-pypi
