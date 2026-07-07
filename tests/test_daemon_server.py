@@ -48,21 +48,23 @@ class TestDaemonServerHelpers:
     def test_read_pid_alive_process(self, tmp_path):
         """_read_pid returns PID when process is alive and socket is connectable."""
         import socket as _socket
+        import tempfile
         pid_file = tmp_path / "daemon.pid"
-        sock_file = tmp_path / "daemon.sock"
         current_pid = os.getpid()
         pid_file.write_text(str(current_pid))
-        # Bind a real Unix socket so the connectivity check passes
+        # Use /tmp directly: macOS CI tmp_path can exceed the 104-char AF_UNIX limit
+        sock_path = Path(tempfile.mktemp(suffix='.sock', dir='/tmp'))
         server_sock = _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM)
-        server_sock.bind(str(sock_file))
+        server_sock.bind(str(sock_path))
         server_sock.listen(1)
         try:
             with patch("openbrowser.daemon.server.get_pid_path", return_value=pid_file), \
-                 patch("openbrowser.daemon.server.get_socket_path", return_value=sock_file):
+                 patch("openbrowser.daemon.server.get_socket_path", return_value=sock_path):
                 result = _read_pid()
                 assert result == current_pid
         finally:
             server_sock.close()
+            sock_path.unlink(missing_ok=True)
 
     def test_write_pid(self, tmp_path):
         """_write_pid creates PID file with correct content and permissions."""
