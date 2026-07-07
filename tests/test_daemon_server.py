@@ -46,13 +46,23 @@ class TestDaemonServerHelpers:
             assert result is None
 
     def test_read_pid_alive_process(self, tmp_path):
-        """_read_pid returns PID when process is alive."""
+        """_read_pid returns PID when process is alive and socket is connectable."""
+        import socket as _socket
         pid_file = tmp_path / "daemon.pid"
+        sock_file = tmp_path / "daemon.sock"
         current_pid = os.getpid()
         pid_file.write_text(str(current_pid))
-        with patch("openbrowser.daemon.server.get_pid_path", return_value=pid_file):
-            result = _read_pid()
-            assert result == current_pid
+        # Bind a real Unix socket so the connectivity check passes
+        server_sock = _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM)
+        server_sock.bind(str(sock_file))
+        server_sock.listen(1)
+        try:
+            with patch("openbrowser.daemon.server.get_pid_path", return_value=pid_file), \
+                 patch("openbrowser.daemon.server.get_socket_path", return_value=sock_file):
+                result = _read_pid()
+                assert result == current_pid
+        finally:
+            server_sock.close()
 
     def test_write_pid(self, tmp_path):
         """_write_pid creates PID file with correct content and permissions."""
