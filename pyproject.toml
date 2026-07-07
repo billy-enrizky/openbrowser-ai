@@ -34,6 +34,7 @@ dependencies = [
     "posthog>=3.7.0",
     "reportlab",
     "modal>=1.4.2",
+    "mcp>=1.0.0",
 ]
 
 [project.optional-dependencies]
@@ -44,7 +45,7 @@ groq = ["groq>=0.30.0"]
 ollama = ["ollama>=0.5.1"]
 aws = ["boto3"]
 azure = ["openai"]
-mcp = ["mcp>=1.0.0", "posthog>=3.7.0"]
+mcp = ["posthog>=3.7.0"]
 telemetry = ["posthog>=3.7.0"]
 pdf = ["pypdf", "reportlab"]
 dev = [

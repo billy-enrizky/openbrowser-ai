@@ -10,7 +10,6 @@ if '--mcp' in sys.argv:
 
 	os.environ['OPENBROWSER_LOGGING_LEVEL'] = 'critical'
 	os.environ['OPENBROWSER_SETUP_LOGGING'] = 'false'
-	logging.disable(logging.CRITICAL)
 
 	# Early exit: run MCP server directly without loading heavy CLI dependencies
 	# (anthropic, openai, etc. are not needed for MCP server mode)
@@ -29,8 +28,13 @@ if '--mcp' in sys.argv:
 	except Exception:
 		pass
 
-	from openbrowser.mcp.server import main as mcp_main
+	try:
+		from openbrowser.mcp.server import main as mcp_main
+	except ImportError as e:
+		sys.stderr.write(f"ERROR: mcp SDK not installed ({e}). Fix: pip install 'openbrowser-ai[mcp]'\n")
+		sys.exit(1)
 
+	logging.disable(logging.CRITICAL)
 	asyncio.run(mcp_main())
 	sys.exit(0)
 

@@ -25,18 +25,37 @@ DEFAULT_EXEC_TIMEOUT = 300  # 5 minutes max per code execution
 
 
 def _read_pid() -> int | None:
-    """Read PID from file, return None if stale or missing."""
+    """Read PID from file, return None if stale or missing.
+
+    A PID file with a live process is only considered valid if the daemon
+    socket is also connectable. A process killed with SIGKILL skips
+    finally/_cleanup_pid(), leaving a stale PID + dead socket.
+    """
     pid_path = get_pid_path()
     if not pid_path.exists():
         return None
     try:
         pid = int(pid_path.read_text().strip())
-        # Check if process is alive
-        os.kill(pid, 0)
-        return pid
+        os.kill(pid, 0)  # raises OSError if dead
     except (ValueError, OSError):
         pid_path.unlink(missing_ok=True)
         return None
+
+    if not IS_WINDOWS:
+        import socket as _socket
+        sock_path = str(get_socket_path())
+        try:
+            s = _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM)
+            s.settimeout(1.0)
+            s.connect(sock_path)
+            s.close()
+        except OSError:
+            logger.warning('PID %d alive but socket unresponsive -- cleaning stale lock', pid)
+            pid_path.unlink(missing_ok=True)
+            get_socket_path().unlink(missing_ok=True)
+            return None
+
+    return pid
 
 
 def _write_pid() -> None:
