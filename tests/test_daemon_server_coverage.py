@@ -39,20 +39,27 @@ class TestPidFunctions:
             assert _read_pid() is None
 
     def test_read_pid_valid(self):
-        """Test _read_pid with valid PID."""
+        """Test _read_pid with valid PID and connectable socket."""
+        import socket as _socket
         from openbrowser.daemon.server import _read_pid
 
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".pid", delete=False) as f:
-            f.write(str(os.getpid()))
-            f.flush()
-
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sock_path = Path(tmpdir) / "daemon.sock"
             mock_path = MagicMock()
             mock_path.exists.return_value = True
             mock_path.read_text.return_value = str(os.getpid())
 
-            with patch("openbrowser.daemon.server.get_pid_path", return_value=mock_path):
-                result = _read_pid()
-                assert result == os.getpid()
+            # Bind a real Unix socket so the connectivity check passes
+            server_sock = _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM)
+            server_sock.bind(str(sock_path))
+            server_sock.listen(1)
+            try:
+                with patch("openbrowser.daemon.server.get_pid_path", return_value=mock_path), \
+                     patch("openbrowser.daemon.server.get_socket_path", return_value=sock_path):
+                    result = _read_pid()
+                    assert result == os.getpid()
+            finally:
+                server_sock.close()
 
     def test_read_pid_stale(self):
         """Test _read_pid with stale PID."""
