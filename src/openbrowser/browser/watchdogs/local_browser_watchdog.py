@@ -550,6 +550,9 @@ class LocalBrowserWatchdog(BaseWatchdog):
 		"""
 		resolved_dir = str(Path(user_data_dir).expanduser().resolve())
 		killed_any = False
+		# LOCAL PATCH (claude-agents, 2026-07-25): remember whom we signalled so
+		# the wait loop below can escalate only those to SIGKILL.
+		signalled: list[psutil.Process] = []
 
 		for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
 			try:
@@ -563,10 +566,15 @@ class LocalBrowserWatchdog(BaseWatchdog):
 						proc_dir = str(Path(arg.split('=', 1)[1]).expanduser().resolve())
 						if proc_dir == resolved_dir:
 							_logger.info(
-								f'[LocalBrowserWatchdog] Killing stale Chrome process pid={proc.pid} '
+								f'[LocalBrowserWatchdog] Terminating stale Chrome process pid={proc.pid} '
 								f'holding profile lock on {resolved_dir}'
 							)
-							proc.kill()
+							# LOCAL PATCH (claude-agents, 2026-07-25): SIGTERM first.
+							# SIGKILL gives Chrome no chance to flush cookies/Local
+							# State, and this profile is shared across every session
+							# on this machine — a kill mid-write can corrupt it.
+							proc.terminate()
+							signalled.append(proc)
 							killed_any = True
 							break
 			except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
@@ -599,6 +607,21 @@ class LocalBrowserWatchdog(BaseWatchdog):
 			if not still_alive:
 				break
 			await asyncio.sleep(0.1)
+		else:
+			# LOCAL PATCH (claude-agents, 2026-07-25): the graceful window (5s)
+			# expired and something still holds the profile — escalate to SIGKILL,
+			# but only for the processes we signalled ourselves. Preserves the
+			# original guarantee: this function returns only once the lock is free.
+			for proc in signalled:
+				try:
+					if proc.is_running():
+						_logger.warning(
+							f'[LocalBrowserWatchdog] pid={proc.pid} ignored SIGTERM for 5s — escalating to SIGKILL'
+						)
+						proc.kill()
+				except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+					continue
+			await asyncio.sleep(0.5)
 
 		# Extra settle time for OS to release file locks
 		await asyncio.sleep(0.5)
