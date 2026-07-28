@@ -1,3 +1,5 @@
+[![MCP Toplist](https://mcptoplist.com/badge/me.openbrowser%2Fopenbrowser-ai.svg)](https://mcptoplist.com/server/me.openbrowser%2Fopenbrowser-ai)
+
 <p align="center">
   <img src="docs/logo/icon.svg" alt="OpenBrowser" width="120" height="120" />
 </p>
