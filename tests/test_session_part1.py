@@ -1229,27 +1229,16 @@ class TestCookies:
         session = _make_browser_session()
         client, focus, sm = _setup_session_with_cdp(session)
 
-        # Mock the import that fails in current cdp_use version
-        import sys
-        from unittest.mock import MagicMock as _MM
-        fake_module = _MM()
-        fake_module.GetCookiesParameters = dict
-        with patch.dict(sys.modules, {"cdp_use.cdp.network.library": fake_module}):
-            with patch("openbrowser.browser.session.BrowserSession.cdp_client", new_callable=PropertyMock, return_value=client):
-                result = await session.cookies()
+        with patch("openbrowser.browser.session.BrowserSession.cdp_client", new_callable=PropertyMock, return_value=client):
+            result = await session.cookies()
         assert result == []
 
     async def test_cookies_with_urls(self):
         session = _make_browser_session()
         client, focus, sm = _setup_session_with_cdp(session)
 
-        import sys
-        from unittest.mock import MagicMock as _MM
-        fake_module = _MM()
-        fake_module.GetCookiesParameters = dict
-        with patch.dict(sys.modules, {"cdp_use.cdp.network.library": fake_module}):
-            with patch("openbrowser.browser.session.BrowserSession.cdp_client", new_callable=PropertyMock, return_value=client):
-                await session.cookies(urls=["https://example.com"])
+        with patch("openbrowser.browser.session.BrowserSession.cdp_client", new_callable=PropertyMock, return_value=client):
+            await session.cookies(urls=["https://example.com"])
         call_args = client.send.Network.getCookies.call_args
         assert call_args[0][0]["urls"] == ["https://example.com"]
 
