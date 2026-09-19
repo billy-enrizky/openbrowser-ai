@@ -27,6 +27,7 @@ litellm
 .terraform.lock.hcl
 .github/copilot-instructions.md
 local_docs
+.worktrees/
 terraform.tfstate*
 
 # LaTeX build artifacts
