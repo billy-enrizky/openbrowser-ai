@@ -1666,6 +1666,7 @@ dependencies = [
     { name = "langgraph" },
     { name = "litellm" },
     { name = "markdownify" },
+    { name = "mcp" },
     { name = "modal" },
     { name = "numpy" },
     { name = "openai" },
@@ -1719,7 +1720,6 @@ groq = [
     { name = "groq" },
 ]
 mcp = [
-    { name = "mcp" },
     { name = "posthog" },
 ]
 ollama = [
@@ -1761,9 +1761,9 @@ requires-dist = [
     { name = "langgraph" },
     { name = "litellm", specifier = "==1.80.0" },
     { name = "markdownify", specifier = ">=0.11.6" },
+    { name = "mcp", specifier = ">=1.0.0" },
     { name = "mcp", marker = "extra == 'all'", specifier = ">=1.0.0" },
     { name = "mcp", marker = "extra == 'dev'", specifier = ">=1.0.0" },
-    { name = "mcp", marker = "extra == 'mcp'", specifier = ">=1.0.0" },
     { name = "modal", specifier = ">=1.4.2" },
     { name = "numpy", specifier = ">=2.4.0" },
     { name = "numpy", marker = "extra == 'all'" },
