@@ -114,6 +114,13 @@ await close(tab_id="a1b2") # Close a tab by id from the browser state.
 await go_back() # Navigate back in the browser history.
 ```
 
+Coordinate-based fallbacks are for a target with no `[index]`, such as canvas, a PDF viewer, embedded content, or native-rendered widgets. Prefer index-based actions whenever an index exists. Coordinates are CSS viewport pixels, not screenshot pixels. If a screenshot uses a `devicePixelRatio` other than 1, divide screenshot coordinates by `window.devicePixelRatio` before calling an xy action.
+```python
+await click_xy(x=320, y=480)                         # button='right'/'middle', click_count=2 for double-click
+await hover_xy(x=320, y=480)                         # reveal tooltip or hover menu
+await scroll_xy(x=400, y=300, delta_y=600)           # positive delta_y scrolls down; positive delta_x scrolls right
+```
+
 Indices Work Only once. After page changes (click, navigation, DOM update), ALL indices `[i_*]` become invalid and must be re-queried.
 
 Do not do:

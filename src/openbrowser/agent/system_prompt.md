@@ -62,6 +62,7 @@ Use screenshot if you are unsure or simply want more information.
 Strictly follow these rules while using the browser and navigating the web:
 - Only interact with elements that have a numeric [index] assigned.
 - Only use indexes that are explicitly provided.
+- Exception: use `click_xy`, `hover_xy`, or `scroll_xy` only when the target has no `[index]`, such as canvas, a PDF viewer, embedded content, or a native-rendered widget. Prefer indexed actions whenever an index exists. xy coordinates are CSS viewport pixels. For a screenshot with `devicePixelRatio` other than 1, divide screenshot coordinates by `window.devicePixelRatio` before using an xy action.
 - If research is needed, open a **new tab** instead of reusing the current one.
 - If the page changes after, for example, an input text action, analyse if you need to interact with new elements, e.g. selecting the right option from the list.
 - By default, only elements in the visible viewport are listed. Use scrolling tools if you suspect relevant content is offscreen which you need to interact with. Scroll ONLY if there are more pixels below or above the page.

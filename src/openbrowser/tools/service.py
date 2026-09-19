@@ -37,14 +37,17 @@ from openbrowser.tools.registry.service import Registry
 from openbrowser.tools.utils import get_click_description
 from openbrowser.tools.views import (
 	ClickElementAction,
+	ClickXYAction,
 	CloseTabAction,
 	DoneAction,
 	ExtractAction,
 	GetDropdownOptionsAction,
+	HoverXYAction,
 	InputTextAction,
 	NavigateAction,
 	NoParamsAction,
 	ScrollAction,
+	ScrollXYAction,
 	SearchAction,
 	SelectDropdownOptionAction,
 	SendKeysAction,
@@ -282,7 +285,7 @@ class Tools(Generic[Context]):
 
 				# Build memory with element info
 				memory = f'Clicked {element_desc}'
-				logger.info(f'🖱️ {memory}')
+				logger.info(memory)
 
 				# Include click coordinates in metadata if available
 				return ActionResult(
@@ -815,6 +818,63 @@ You will be given a query and the markdown of a webpage that has been filtered t
 			except Exception as e:
 				logger.error(f'Failed to dispatch ScrollEvent: {type(e).__name__}: {e}')
 				error_msg = 'Failed to execute scroll action.'
+				return ActionResult(error=error_msg)
+
+		@self.registry.action(
+			'Click CSS viewport coordinates. Use only when the target has no [i_N] index, such as canvas, PDF, embedded, or native-rendered content. Prefer click(index=) whenever an index exists.',
+			param_model=ClickXYAction,
+		)
+		async def click_xy(params: ClickXYAction, browser_session: BrowserSession):
+			from openbrowser.actor.mouse import Mouse
+
+			try:
+				cdp_session = await browser_session.get_or_create_cdp_session()
+				mouse = Mouse(browser_session, session_id=cdp_session.session_id, target_id=cdp_session.target_id)
+				await mouse.click(params.x, params.y, button=params.button, click_count=params.click_count)
+				memory = f'Clicked at ({params.x}, {params.y}) button={params.button} count={params.click_count}'
+				logger.info(memory)
+				return ActionResult(extracted_content=memory, long_term_memory=memory)
+			except Exception as e:
+				error_msg = f'Failed click_xy at ({params.x}, {params.y}): {type(e).__name__}: {e}'
+				logger.error(error_msg)
+				return ActionResult(error=error_msg)
+
+		@self.registry.action(
+			'Wheel-scroll at CSS viewport coordinates. Use only for no-index scroll surfaces such as canvas, PDFs, maps, or embeds. Positive delta_y scrolls down and positive delta_x scrolls right.',
+			param_model=ScrollXYAction,
+		)
+		async def scroll_xy(params: ScrollXYAction, browser_session: BrowserSession):
+			from openbrowser.actor.mouse import Mouse
+
+			try:
+				cdp_session = await browser_session.get_or_create_cdp_session()
+				mouse = Mouse(browser_session, session_id=cdp_session.session_id, target_id=cdp_session.target_id)
+				await mouse.scroll(x=params.x, y=params.y, delta_x=params.delta_x, delta_y=params.delta_y)
+				memory = f'Wheel at ({params.x}, {params.y}) dx={params.delta_x} dy={params.delta_y}'
+				logger.info(memory)
+				return ActionResult(extracted_content=memory, long_term_memory=memory)
+			except Exception as e:
+				error_msg = f'Failed scroll_xy at ({params.x}, {params.y}): {type(e).__name__}: {e}'
+				logger.error(error_msg)
+				return ActionResult(error=error_msg)
+
+		@self.registry.action(
+			'Move the pointer to CSS viewport coordinates. Use only for no-index targets to reveal hover UI such as canvas tooltips, embedded menus, or native-rendered widgets.',
+			param_model=HoverXYAction,
+		)
+		async def hover_xy(params: HoverXYAction, browser_session: BrowserSession):
+			from openbrowser.actor.mouse import Mouse
+
+			try:
+				cdp_session = await browser_session.get_or_create_cdp_session()
+				mouse = Mouse(browser_session, session_id=cdp_session.session_id, target_id=cdp_session.target_id)
+				await mouse.move(params.x, params.y)
+				memory = f'Hovered at ({params.x}, {params.y})'
+				logger.info(memory)
+				return ActionResult(extracted_content=memory, long_term_memory=memory)
+			except Exception as e:
+				error_msg = f'Failed hover_xy at ({params.x}, {params.y}): {type(e).__name__}: {e}'
+				logger.error(error_msg)
 				return ActionResult(error=error_msg)
 
 		@self.registry.action(
