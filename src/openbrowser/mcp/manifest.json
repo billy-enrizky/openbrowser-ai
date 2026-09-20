@@ -83,15 +83,13 @@
     "user_data_dir": {
       "type": "directory",
       "title": "User Data Directory",
-      "description": "Chrome profile directory for persistent sessions (cookies, localStorage, etc)",
-      "default": "${HOME}/.config/openbrowser/profiles/default",
+      "description": "Optional explicit Chrome profile directory. Omit for an isolated profile per MCP server instance",
       "required": false
     },
     "storage_state": {
       "type": "string",
       "title": "Storage State Path",
-      "description": "Optional JSON file path used to save and reload cookies plus localStorage across MCP restarts",
-      "default": "${HOME}/.config/openbrowser/profiles/default/storage_state.json",
+      "description": "Optional JSON file path used to seed and reload cookies plus localStorage across MCP restarts",
       "required": false
     },
     "disable_security": {

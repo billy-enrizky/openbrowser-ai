@@ -20,14 +20,15 @@ Or as an MCP server in Claude Desktop or other MCP clients:
 import os
 import sys
 
-
 # Set environment variables BEFORE any openbrowser imports to prevent early logging
 os.environ['OPENBROWSER_LOGGING_LEVEL'] = 'critical'
 os.environ['OPENBROWSER_SETUP_LOGGING'] = 'false'
 
 import asyncio
 import logging
+import shutil
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -80,10 +81,15 @@ logging.disable(logging.CRITICAL)
 
 # Import openbrowser modules
 from openbrowser.browser import BrowserProfile, BrowserSession
-from openbrowser.code_use.namespace import create_namespace
-from openbrowser.config import CONFIG, apply_managed_browser_profile_defaults, get_default_profile, load_openbrowser_config
-from openbrowser.tools.service import CodeAgentTools
 from openbrowser.code_use.executor import DEFAULT_MAX_OUTPUT_CHARS, CodeExecutor
+from openbrowser.code_use.namespace import create_namespace
+from openbrowser.config import (
+	CONFIG,
+	apply_managed_browser_profile_defaults,
+	get_default_profile,
+	load_openbrowser_config,
+)
+from openbrowser.tools.service import CodeAgentTools
 
 try:
 	from openbrowser.filesystem.file_system import FileSystem
@@ -190,6 +196,8 @@ def get_parent_process_cmdline() -> str | None:
 
 from openbrowser.code_use.descriptions import (
 	EXECUTE_CODE_DESCRIPTION as _EXECUTE_CODE_DESCRIPTION,
+)
+from openbrowser.code_use.descriptions import (
 	EXECUTE_CODE_DESCRIPTION_COMPACT as _EXECUTE_CODE_DESCRIPTION_COMPACT,
 )
 
@@ -208,6 +216,9 @@ class OpenBrowserServer:
 		self.server = Server('openbrowser')
 		self.config = load_openbrowser_config()
 		self.browser_session: BrowserSession | None = None
+		self._instance_id = uuid.uuid4().hex
+		self._managed_profile_dir: Path | None = None
+		self._managed_storage_state: Path | None = None
 		self._telemetry = ProductTelemetry() if TELEMETRY_AVAILABLE else None
 		self._start_time = time.time()
 
@@ -305,21 +316,56 @@ class OpenBrowserServer:
 
 	def _build_browser_profile(self):
 		"""Build a BrowserProfile from config with MCP defaults."""
-		profile_config = get_default_profile(self.config)
-		profile_data = apply_managed_browser_profile_defaults(
-			{
-				'downloads_path': str(Path.home() / 'Downloads' / 'openbrowser-mcp'),
-				'wait_between_actions': 0.5,
-				'keep_alive': True,
-				'user_data_dir': '~/.config/openbrowser/profiles/default',
-				'device_scale_factor': 1.0,
-				'disable_security': False,
-				'headless': True,
-				**profile_config,
-			},
-			CONFIG.OPENBROWSER_PROFILES_DIR / 'default',
-		)
+		profile_config = dict(get_default_profile(self.config))
+		explicit_user_data_dir = profile_config.get('user_data_dir')
+		profile_data = {
+			'downloads_path': str(Path.home() / 'Downloads' / 'openbrowser-mcp'),
+			'wait_between_actions': 0.5,
+			'keep_alive': True,
+			'device_scale_factor': 1.0,
+			'disable_security': False,
+			'headless': True,
+			**profile_config,
+		}
+
+		if explicit_user_data_dir:
+			# Explicit paths are intentionally shared and protected by the
+			# profile lease. Never silently replace one with a temporary path.
+			managed_default_dir = None
+		else:
+			managed_default_dir = self._get_managed_profile_dir()
+			profile_data['user_data_dir'] = str(managed_default_dir)
+			storage_state_path = managed_default_dir / 'storage_state.json'
+			self._seed_managed_storage_state(storage_state_path)
+			if not profile_data.get('storage_state'):
+				profile_data['storage_state'] = str(storage_state_path)
+
+		profile_data = apply_managed_browser_profile_defaults(profile_data, managed_default_dir)
+		args = list(profile_data.get('args') or [])
+		ownership_marker = f'--openbrowser-instance-id={self._instance_id}'
+		if not any(argument.startswith('--openbrowser-instance-id=') for argument in args):
+			args.append(ownership_marker)
+		profile_data['args'] = args
 		return BrowserProfile(**profile_data)
+
+	def _get_managed_profile_dir(self) -> Path:
+		"""Return the stable isolated profile directory for this MCP instance."""
+		if self._managed_profile_dir is None:
+			self._managed_profile_dir = CONFIG.OPENBROWSER_PROFILES_DIR / f'mcp-{self._instance_id}'
+		self._managed_profile_dir.mkdir(parents=True, exist_ok=True)
+		return self._managed_profile_dir
+
+	def _seed_managed_storage_state(self, destination: Path) -> None:
+		"""Copy the shared default state once into this instance's profile."""
+		if destination.exists():
+			self._managed_storage_state = destination
+			return
+
+		source = CONFIG.OPENBROWSER_PROFILES_DIR / 'default' / 'storage_state.json'
+		if source.is_file():
+			destination.parent.mkdir(parents=True, exist_ok=True)
+			shutil.copy2(source, destination)
+		self._managed_storage_state = destination
 
 	async def _ensure_namespace(self):
 		"""Lazily initialize browser session, tools, and namespace on first use."""
@@ -389,21 +435,14 @@ class OpenBrowserServer:
 				except Exception:
 					pass
 
-		# 2. Kill any stale Chrome holding the profile lock
-		from openbrowser.browser.watchdogs.local_browser_watchdog import LocalBrowserWatchdog
-
-		user_data_dir = '~/.config/openbrowser/profiles/default'
-		if self.browser_session and self.browser_session.browser_profile.user_data_dir:
-			user_data_dir = self.browser_session.browser_profile.user_data_dir
-		await LocalBrowserWatchdog._kill_stale_chrome_for_profile(user_data_dir)
-
-		# 3. Create a brand-new session
+		# 2. Create a brand-new session. The local watchdog owns its profile
+		# lease and can reclaim only its recorded browser process.
 		profile = self._build_browser_profile()
 		session = BrowserSession(browser_profile=profile)
 		await session.start()
 		self.browser_session = session
 
-		# 4. Rebuild namespace with the new session (preserving user variables)
+		# 3. Rebuild namespace with the new session (preserving user variables)
 		old_ns = self._namespace or {}
 
 		self._tools = CodeAgentTools()
