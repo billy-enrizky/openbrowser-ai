@@ -982,7 +982,8 @@ class BrowserSession(BaseModel):
 
 	async def cookies(self, urls: list[str] | None = None) -> list['Cookie']:
 		"""Get cookies, optionally filtered by URLs."""
-		from cdp_use.cdp.network.library import GetCookiesParameters
+		# `library` re-exports this only under TYPE_CHECKING; at runtime it lives in `commands`.
+		from cdp_use.cdp.network.commands import GetCookiesParameters
 
 		params: GetCookiesParameters = {}
 		if urls:
