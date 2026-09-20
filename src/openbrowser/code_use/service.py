@@ -664,11 +664,16 @@ Execute ONE code cell per step. Variables persist across steps like Jupyter.
 Available functions (all async except done):
 - await navigate(url) - Navigate to URL
 - await click(index) - Click element by index [i_123]
+- await click_xy(x, y, button="left", click_count=1) - Click a no-index canvas, PDF, embed, or native-rendered target
+- await hover_xy(x, y) - Move over a no-index canvas, PDF, embed, or native-rendered target
 - await input_text(index, text, clear=True) - Type text
 - await scroll(down=True, pages=1) - Scroll page
+- await scroll_xy(x, y, delta_x=0, delta_y=0) - Wheel-scroll a no-index surface
 - await evaluate(js_code) - Execute JavaScript
 - await send_keys(keys="Enter") - Send keyboard keys
 - await done(text, success=True, files_to_display=[]) - Complete task
+
+Prefer indexed actions whenever an index exists. Coordinate actions use CSS viewport pixels, not screenshot pixels. If a screenshot uses a devicePixelRatio other than 1, divide screenshot coordinates by window.devicePixelRatio first.
 
 Use ```js block_name for JavaScript, then await evaluate(block_name).
 Call done() in a separate final step after verifying results.'''
