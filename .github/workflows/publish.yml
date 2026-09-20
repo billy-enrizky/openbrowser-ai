@@ -4,11 +4,6 @@ on:
   release:
     types: [published]
   workflow_dispatch:
-    inputs:
-      version:
-        description: 'Version to publish (leave empty to use pyproject.toml version)'
-        required: false
-        type: string
 
 jobs:
   build:
@@ -41,6 +36,7 @@ jobs:
   publish-to-pypi:
     name: Publish to PyPI
     needs: build
+    if: github.event_name == 'release'
     runs-on: ubuntu-latest
     environment:
       name: pypi
@@ -84,6 +80,7 @@ jobs:
   publish-to-mcp-registry:
     name: Publish to MCP Registry
     needs: publish-to-pypi
+    if: github.event_name == 'release'
     runs-on: ubuntu-latest
     permissions:
       id-token: write

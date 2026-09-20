@@ -22,7 +22,7 @@ claude plugin marketplace add billy-enrizky/openbrowser-ai
 claude plugin install openbrowser@openbrowser-ai
 ```
 
-This installs the MCP server, 6 skills, and auto-enables the plugin. Restart Claude Code to activate.
+This installs the MCP server, 7 skills, and auto-enables the plugin. Restart Claude Code to activate.
 
 ### Local development
 
@@ -66,18 +66,22 @@ The MCP server exposes a single `execute_code` tool that runs Python code in a p
 
 Authenticated browser state is also persisted, so once a user logs in, later MCP calls can keep using the same cookies and localStorage.
 
-**Functions** (all async, use `await`):
+**Functions** (use `await` unless noted):
 
 | Category | Functions |
 |----------|-----------|
 | **Navigation** | `navigate(url, new_tab)`, `go_back()`, `wait(seconds)` |
 | **Interaction** | `click(index)`, `input_text(index, text, clear)`, `scroll(down, pages, index)`, `send_keys(keys)`, `upload_file(index, path)` |
+| **Coordinate interaction** | `click_xy(x, y, button, click_count)`, `hover_xy(x, y)`, `scroll_xy(x, y, delta_x, delta_y)` for no-index canvas, PDF, embedded, and native-rendered targets |
 | **Dropdowns** | `select_dropdown(index, text)`, `dropdown_options(index)` |
 | **Tabs** | `switch(tab_id)`, `close(tab_id)` |
 | **JavaScript** | `evaluate(code)` -- run JS in page context, returns Python objects |
-| **Downloads** | `download_file(url, filename)` -- download a file using browser cookies, `list_downloads()` (sync, no await) -- list downloaded files |
+| **Downloads** | `download_file(url, filename)` -- download a file using browser cookies, `list_downloads()` (sync, no `await`) -- list downloaded files |
 | **State** | `browser.get_browser_state_summary()` -- page metadata and interactive elements |
 | **CSS** | `get_selector_from_index(index)` -- CSS selector for an element |
+| **Completion** | `done(text, success)` -- signal task completion |
+
+Prefer indexed actions whenever an element index exists. Coordinate actions use CSS viewport pixels, not screenshot pixels. If a screenshot uses a `devicePixelRatio` other than 1, divide its coordinates by `window.devicePixelRatio` before calling an `*_xy` function.
 
 **Pre-imported libraries**: `json`, `csv`, `re`, `datetime`, `asyncio`, `Path`, `requests`
 
@@ -172,10 +176,11 @@ Set these in your `.mcp.json`:
 
 ## Skills
 
-The plugin includes 6 built-in skills that provide guided workflows for common browser automation tasks. All skills use the CLI-first approach via `openbrowser-ai -c` for direct code execution. Each skill is triggered automatically when the user's request matches its description.
+The plugin includes 7 built-in skills that provide guided workflows for common browser automation tasks. All skills use the CLI-first approach via `openbrowser-ai -c` for direct code execution. Each skill is triggered automatically when the user's request matches its description.
 
 | Skill | Directory | Description |
 |-------|-----------|-------------|
+| `deep-research` | `skills/deep-research/` | Conduct deep, cited web research across multiple sources and produce markdown and JSON reports |
 | `web-scraping` | `skills/web-scraping/` | Extract structured data from websites, handle pagination, and multi-tab scraping |
 | `form-filling` | `skills/form-filling/` | Fill out web forms, handle login/registration flows, and multi-step wizards |
 | `e2e-testing` | `skills/e2e-testing/` | Test web applications end-to-end by simulating user interactions and verifying outcomes |

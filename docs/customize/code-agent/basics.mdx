@@ -85,11 +85,16 @@ The agent has access to browser control functions:
 
 - `navigate(url)` - Navigate to a URL
 - `click(index)` - Click an element by index
+- `click_xy(x, y, button='left', click_count=1)` - Click a no-index canvas, PDF, embed, or native-rendered target
+- `hover_xy(x, y)` - Move over a no-index canvas, PDF, embed, or native-rendered target
 - `input(index, text)` - Type text into an input
 - `scroll(down, pages)` - Scroll the page
+- `scroll_xy(x, y, delta_x=0, delta_y=0)` - Wheel-scroll a no-index surface
 - `upload_file(path)` - Upload a file
 - `evaluate(code, variables={})` - Execute JavaScript and return results
 - `done(text, success, files_to_display=[])` - Mark task complete
+
+Prefer indexed actions whenever an element index exists. The `*_xy` coordinates are CSS viewport pixels, not screenshot pixels. If a screenshot uses a `devicePixelRatio` other than 1, divide its coordinates by `window.devicePixelRatio` first.
 
 ## Exporting Sessions
 
