@@ -20,8 +20,11 @@ The namespace is initialized with:
 - `go_back()` - Go back to the previous page
 - `wait(seconds=3)` - Wait for specified seconds
 - `click(index)` - Click an element by index
+- `click_xy(x, y, button='left', click_count=1)` - Click a no-index canvas, PDF, embed, or native-rendered target using CSS viewport pixels
+- `hover_xy(x, y)` - Move over a no-index canvas, PDF, embed, or native-rendered target using CSS viewport pixels
 - `input_text(index, text, clear=True)` - Type text into an input field
 - `scroll(down=True, pages=1.0, index=None)` - Scroll the page or a container
+- `scroll_xy(x, y, delta_x=0, delta_y=0)` - Wheel-scroll a no-index surface using CSS viewport pixels
 - `send_keys(keys)` - Send keyboard keys or shortcuts
 - `upload_file(index, path)` - Upload a file to a file input element
 - `select_dropdown(index, text)` - Select an option in a `<select>` dropdown
@@ -31,6 +34,8 @@ The namespace is initialized with:
 - `evaluate(code, variables={})` - Execute JavaScript and return Python objects
 - `get_selector_from_index(index)` - Get CSS selector for an element by index
 - `done(text, success)` - Mark task complete
+
+Indexed actions remain preferred whenever an element index exists. For screenshot-derived coordinates, divide screenshot pixels by `window.devicePixelRatio` before calling an `*_xy` function.
 
 **Custom evaluate() Function:**
 ```python

@@ -831,11 +831,11 @@ You will be given a query and the markdown of a webpage that has been filtered t
 				cdp_session = await browser_session.get_or_create_cdp_session()
 				mouse = Mouse(browser_session, session_id=cdp_session.session_id, target_id=cdp_session.target_id)
 				await mouse.click(params.x, params.y, button=params.button, click_count=params.click_count)
-				memory = f'Clicked at ({params.x}, {params.y}) button={params.button} count={params.click_count}'
+				memory = f'Clicked at ({params.x:g}, {params.y:g}) button={params.button} count={params.click_count}'
 				logger.info(memory)
 				return ActionResult(extracted_content=memory, long_term_memory=memory)
 			except Exception as e:
-				error_msg = f'Failed click_xy at ({params.x}, {params.y}): {type(e).__name__}: {e}'
+				error_msg = f'Failed click_xy at ({params.x:g}, {params.y:g}): {type(e).__name__}: {e}'
 				logger.error(error_msg)
 				return ActionResult(error=error_msg)
 
@@ -850,11 +850,11 @@ You will be given a query and the markdown of a webpage that has been filtered t
 				cdp_session = await browser_session.get_or_create_cdp_session()
 				mouse = Mouse(browser_session, session_id=cdp_session.session_id, target_id=cdp_session.target_id)
 				await mouse.scroll(x=params.x, y=params.y, delta_x=params.delta_x, delta_y=params.delta_y)
-				memory = f'Wheel at ({params.x}, {params.y}) dx={params.delta_x} dy={params.delta_y}'
+				memory = f'Wheel at ({params.x:g}, {params.y:g}) dx={params.delta_x} dy={params.delta_y}'
 				logger.info(memory)
 				return ActionResult(extracted_content=memory, long_term_memory=memory)
 			except Exception as e:
-				error_msg = f'Failed scroll_xy at ({params.x}, {params.y}): {type(e).__name__}: {e}'
+				error_msg = f'Failed scroll_xy at ({params.x:g}, {params.y:g}): {type(e).__name__}: {e}'
 				logger.error(error_msg)
 				return ActionResult(error=error_msg)
 
@@ -869,11 +869,11 @@ You will be given a query and the markdown of a webpage that has been filtered t
 				cdp_session = await browser_session.get_or_create_cdp_session()
 				mouse = Mouse(browser_session, session_id=cdp_session.session_id, target_id=cdp_session.target_id)
 				await mouse.move(params.x, params.y)
-				memory = f'Hovered at ({params.x}, {params.y})'
+				memory = f'Hovered at ({params.x:g}, {params.y:g})'
 				logger.info(memory)
 				return ActionResult(extracted_content=memory, long_term_memory=memory)
 			except Exception as e:
-				error_msg = f'Failed hover_xy at ({params.x}, {params.y}): {type(e).__name__}: {e}'
+				error_msg = f'Failed hover_xy at ({params.x:g}, {params.y:g}): {type(e).__name__}: {e}'
 				logger.error(error_msg)
 				return ActionResult(error=error_msg)
 

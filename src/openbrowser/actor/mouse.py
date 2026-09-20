@@ -82,7 +82,13 @@ class Mouse:
 		params: 'DispatchMouseEventParameters' = {'type': 'mouseMoved', 'x': x, 'y': y}
 		await self._client.send.Input.dispatchMouseEvent(params, session_id=self._session_id)
 
-	async def scroll(self, x: int = 0, y: int = 0, delta_x: int | None = None, delta_y: int | None = None) -> None:
+	async def scroll(
+		self,
+		x: float | None = None,
+		y: float | None = None,
+		delta_x: int | None = None,
+		delta_y: int | None = None,
+	) -> None:
 		"""Scroll the page using robust CDP methods."""
 		if not self._session_id:
 			raise RuntimeError('Session ID is required for scroll operations')
@@ -95,8 +101,8 @@ class Mouse:
 			viewport_height = layout_metrics['layoutViewport']['clientHeight']
 
 			# Use provided coordinates or center of viewport
-			scroll_x = x if x > 0 else viewport_width / 2
-			scroll_y = y if y > 0 else viewport_height / 2
+			scroll_x = x if x is not None else viewport_width / 2
+			scroll_y = y if y is not None else viewport_height / 2
 
 			# Calculate scroll deltas (positive = down/right)
 			scroll_delta_x = delta_x or 0

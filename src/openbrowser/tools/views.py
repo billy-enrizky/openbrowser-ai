@@ -103,8 +103,8 @@ class SelectDropdownOptionAction(BaseModel):
 class ClickXYAction(BaseModel):
 	"""Click using CSS viewport coordinates for no-index browser targets."""
 
-	x: int = Field(ge=0, description='CSS viewport x pixel from screenshot')
-	y: int = Field(ge=0, description='CSS viewport y pixel from screenshot')
+	x: float = Field(ge=0, description='CSS viewport x pixel from screenshot')
+	y: float = Field(ge=0, description='CSS viewport y pixel from screenshot')
 	button: Literal['left', 'right', 'middle'] = Field(default='left', description='mouse button')
 	click_count: int = Field(default=1, ge=1, le=3, description='1=single, 2=double, 3=triple')
 
@@ -112,8 +112,8 @@ class ClickXYAction(BaseModel):
 class ScrollXYAction(BaseModel):
 	"""Wheel scroll using CSS viewport coordinates for no-index browser targets."""
 
-	x: int = Field(ge=0, description='CSS viewport x pixel anchor for wheel event')
-	y: int = Field(ge=0, description='CSS viewport y pixel anchor for wheel event')
+	x: float = Field(ge=0, description='CSS viewport x pixel anchor for wheel event')
+	y: float = Field(ge=0, description='CSS viewport y pixel anchor for wheel event')
 	delta_x: int = Field(default=0, description='horizontal wheel delta in CSS px, positive is right')
 	delta_y: int = Field(default=0, description='vertical wheel delta in CSS px, positive is down')
 
@@ -121,5 +121,5 @@ class ScrollXYAction(BaseModel):
 class HoverXYAction(BaseModel):
 	"""Move the pointer using CSS viewport coordinates for no-index browser targets."""
 
-	x: int = Field(ge=0, description='CSS viewport x pixel from screenshot')
-	y: int = Field(ge=0, description='CSS viewport y pixel from screenshot')
+	x: float = Field(ge=0, description='CSS viewport x pixel from screenshot')
+	y: float = Field(ge=0, description='CSS viewport y pixel from screenshot')
