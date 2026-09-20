@@ -891,15 +891,13 @@ class TestCDPPageMethods:
     async def test_cookies(self):
         session = _make_browser_session()
         session._cdp_client_root = _make_mock_cdp_client()
-        with patch("cdp_use.cdp.network.library.GetCookiesParameters", create=True):
-            result = await session.cookies()
+        result = await session.cookies()
         assert result == []
 
     async def test_cookies_with_urls(self):
         session = _make_browser_session()
         session._cdp_client_root = _make_mock_cdp_client()
-        with patch("cdp_use.cdp.network.library.GetCookiesParameters", create=True):
-            result = await session.cookies(urls=["https://example.com"])
+        result = await session.cookies(urls=["https://example.com"])
         assert result == []
 
     async def test_clear_cookies(self):
