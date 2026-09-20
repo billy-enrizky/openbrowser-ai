@@ -1454,8 +1454,8 @@ class TestLocalBrowserWatchdog:
         assert result is False
 
     @pytest.mark.asyncio
-    async def test_kill_stale_chrome_match_and_wait(self):
-        """Lines 500-517: Kill matching Chrome and wait for exit."""
+    async def test_kill_stale_chrome_ignores_unrecorded_match(self):
+        """Path-only scans do not establish browser ownership."""
         from openbrowser.browser.watchdogs.local_browser_watchdog import LocalBrowserWatchdog
 
         mock_proc = MagicMock()
@@ -1467,18 +1467,10 @@ class TestLocalBrowserWatchdog:
         }
         mock_proc.kill = MagicMock()
 
-        # First iteration: process exists; second: no matching processes
-        call_count = [0]
-        def fake_process_iter(*args, **kwargs):
-            call_count[0] += 1
-            if call_count[0] <= 2:
-                return [mock_proc]
-            return []
-
-        with patch("psutil.process_iter", side_effect=fake_process_iter):
-            with patch("asyncio.sleep", new_callable=AsyncMock):
-                result = await LocalBrowserWatchdog._kill_stale_chrome_for_profile("/tmp/profile")
-        assert result is True
+        with patch("psutil.process_iter", return_value=[mock_proc]):
+            result = await LocalBrowserWatchdog._kill_stale_chrome_for_profile("/tmp/profile")
+        assert result is False
+        mock_proc.kill.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_kill_stale_chrome_access_denied(self):
