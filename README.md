@@ -76,7 +76,7 @@ OpenBrowser is a framework for intelligent browser automation. It combines direc
 - **Workflow Recording** - Record, replay, and export browser sessions to Jupyter notebooks or API crawler code
 - **Video Recording** - Record browser sessions as video files with ffmpeg
 - **Cloud Platform** - Full-stack web UI with real-time VNC streaming, saved logins (KMS-encrypted), scheduled workflows (EventBridge + SQS), and email notifications (SES)
-- **Plugin System** - Claude Code plugin with 6 guided skills (web scraping, form filling, e2e testing, page analysis, accessibility audit, file download)
+- **Plugin System** - Claude Code plugin with 7 guided skills (deep research, web scraping, form filling, e2e testing, page analysis, accessibility audit, file download)
 
 ## Installation
 
@@ -296,10 +296,11 @@ claude plugin marketplace add billy-enrizky/openbrowser-ai
 claude plugin install openbrowser@openbrowser-ai
 ```
 
-This installs the MCP server and 6 built-in skills:
+This installs the MCP server and 7 built-in skills:
 
 | Skill | Description |
 |-------|-------------|
+| `deep-research` | Conduct cited, multi-source web research and produce markdown and JSON reports |
 | `web-scraping` | Extract structured data, handle pagination |
 | `form-filling` | Fill forms, login flows, multi-step wizards |
 | `e2e-testing` | Test web apps by simulating user interactions |
@@ -433,19 +434,22 @@ uvx openbrowser-ai --mcp
 
 The MCP server exposes a single `execute_code` tool that runs Python code in a persistent namespace with browser automation functions. The LLM writes Python code to navigate, interact, and extract data, returning only what was explicitly requested.
 
-**Available functions** (all async, use `await`):
+**Available functions** (use `await` unless noted):
 
 | Category | Functions |
 |----------|-----------|
 | **Navigation** | `navigate(url, new_tab)`, `go_back()`, `wait(seconds)` |
 | **Interaction** | `click(index)`, `input_text(index, text, clear)`, `scroll(down, pages, index)`, `send_keys(keys)`, `upload_file(index, path)` |
+| **Coordinate interaction** | `click_xy(x, y, button, click_count)`, `hover_xy(x, y)`, `scroll_xy(x, y, delta_x, delta_y)` for no-index canvas, PDF, embedded, and native-rendered targets |
 | **Dropdowns** | `select_dropdown(index, text)`, `dropdown_options(index)` |
 | **Tabs** | `switch(tab_id)`, `close(tab_id)` |
 | **JavaScript** | `evaluate(code)`: run JS in page context, returns Python objects |
-| **Downloads** | `download_file(url, filename)`: download a file using browser cookies, `list_downloads()`: list downloaded files |
+| **Downloads** | `download_file(url, filename)`: download a file using browser cookies, `list_downloads()`: list downloaded files (sync, no `await`) |
 | **State** | `browser.get_browser_state_summary()`: get page metadata and interactive elements |
 | **CSS** | `get_selector_from_index(index)`: get CSS selector for an element |
 | **Completion** | `done(text, success)`: signal task completion |
+
+Prefer indexed actions whenever an element index exists. Coordinate actions use CSS viewport pixels, not screenshot pixels. If a screenshot uses a `devicePixelRatio` other than 1, divide its coordinates by `window.devicePixelRatio` before calling an `*_xy` function.
 
 **Pre-imported libraries**: `json`, `csv`, `re`, `datetime`, `asyncio`, `Path`, `requests`, `numpy`, `pandas`, `matplotlib`, `BeautifulSoup`
 
@@ -565,7 +569,7 @@ openbrowser-ai/
 ├── plugin/                    # Plugin package (skills + MCP config)
 │   ├── .claude-plugin/
 │   ├── .mcp.json
-│   └── skills/                # 6 browser automation skills
+│   └── skills/                # 7 browser automation skills
 ├── src/openbrowser/
 │   ├── __init__.py            # Main exports
 │   ├── cli.py                 # CLI commands

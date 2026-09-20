@@ -16,11 +16,16 @@ mode: "wide"
 
 ### Page Interaction
 - **`click`** - Click elements by their index
+- **`click_xy`** - Click no-index canvas, PDF, embedded, or native-rendered targets using CSS viewport coordinates
+- **`hover_xy`** - Move the pointer over no-index canvas, PDF, embedded, or native-rendered targets using CSS viewport coordinates
 - **`input`** - Input text into form fields
 - **`upload_file`** - Upload files to file inputs
 - **`scroll`** - Scroll the page up/down
+- **`scroll_xy`** - Wheel-scroll no-index surfaces using CSS viewport coordinates
 - **`find_text`** - Scroll to specific text on page
 - **`send_keys`** - Send special keys (Enter, Escape, etc.)
+
+Prefer indexed actions whenever an element index exists. If converting screenshot coordinates, divide by `window.devicePixelRatio` before using an `*_xy` tool.
 
 ### JavaScript Execution
 - **`evaluate`** - Execute custom JavaScript code on the page (for advanced interactions, shadow DOM, custom selectors, data extraction)
