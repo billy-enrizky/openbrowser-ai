@@ -435,7 +435,7 @@ class TestKillStaleChromeForProfile:
             result = await LocalBrowserWatchdog._kill_stale_chrome_for_profile('/tmp/test-profile')
             assert result is False
 
-    async def test_kills_matching_chrome(self):
+    async def test_ignores_matching_chrome_without_ownership_metadata(self):
         from openbrowser.browser.watchdogs.local_browser_watchdog import LocalBrowserWatchdog
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -449,12 +449,11 @@ class TestKillStaleChromeForProfile:
             }
             mock_proc.kill = MagicMock()
 
-            # First call returns the process, second call (after kill) returns empty
-            with patch('psutil.process_iter', side_effect=[[mock_proc], []]):
+            with patch('psutil.process_iter', return_value=[mock_proc]):
                 result = await LocalBrowserWatchdog._kill_stale_chrome_for_profile(tmpdir)
 
-            assert result is True
-            mock_proc.kill.assert_called_once()
+            assert result is False
+            mock_proc.kill.assert_not_called()
 
 
 @pytest.mark.asyncio

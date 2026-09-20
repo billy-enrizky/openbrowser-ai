@@ -1,10 +1,12 @@
 """Local browser watchdog for managing browser subprocess lifecycle."""
 
 import asyncio
+import json
 import logging
 import os
 import shutil
 import tempfile
+import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 
@@ -19,6 +21,7 @@ from openbrowser.browser.events import (
 	BrowserStopEvent,
 )
 from openbrowser.browser.watchdog_base import BaseWatchdog
+from openbrowser.browser.watchdogs.profile_lease import ProfileInUseError, ProfileLease
 from openbrowser.config import is_openbrowser_managed_profile_dir
 from openbrowser.observability import observe_debug
 
@@ -26,6 +29,8 @@ if TYPE_CHECKING:
 	pass
 
 _logger = logging.getLogger(__name__)
+IS_WINDOWS = os.name == 'nt'
+OWNERSHIP_MARKER_PREFIX = '--openbrowser-instance-id='
 
 
 class LocalBrowserWatchdog(BaseWatchdog):
@@ -60,6 +65,9 @@ class LocalBrowserWatchdog(BaseWatchdog):
 	_owns_browser_resources: bool = PrivateAttr(default=True)
 	_temp_dirs_to_cleanup: list[Path] = PrivateAttr(default_factory=list)
 	_original_user_data_dir: str | None = PrivateAttr(default=None)
+	_instance_id: str = PrivateAttr(default_factory=lambda: uuid.uuid4().hex)
+	_profile_lease: ProfileLease | None = PrivateAttr(default=None)
+	_browser_record: dict[str, Any] | None = PrivateAttr(default=None)
 
 	@observe_debug(ignore_input=True, ignore_output=True, name='browser_launch_event')
 	async def on_BrowserLaunchEvent(self, event: BrowserLaunchEvent) -> BrowserLaunchResult:
@@ -82,9 +90,23 @@ class LocalBrowserWatchdog(BaseWatchdog):
 		"""Kill the local browser subprocess."""
 		self.logger.debug('[LocalBrowserWatchdog] Killing local browser process')
 
+		cleanup_succeeded = True
 		if self._subprocess:
-			await self._cleanup_process(self._subprocess)
+			cdp_url = getattr(self.browser_session.browser_profile, 'cdp_url', None)
+			cleanup_succeeded = await self._cleanup_process(
+				self._subprocess,
+				browser_record=self._browser_record,
+				cdp_url=cdp_url,
+			)
+			if not cleanup_succeeded:
+				raise RuntimeError('Unable to safely close the owned browser process')
 			self._subprocess = None
+			self._browser_record = None
+
+		if self._profile_lease:
+			self._profile_lease.clear_browser()
+			self._profile_lease.release()
+			self._profile_lease = None
 
 		active_user_data_dir = self.browser_session.browser_profile.user_data_dir or self._original_user_data_dir
 		profile_directory = self.browser_session.browser_profile.profile_directory or 'Default'
@@ -109,7 +131,7 @@ class LocalBrowserWatchdog(BaseWatchdog):
 
 	async def on_BrowserStopEvent(self, event: BrowserStopEvent) -> None:
 		"""Listen for BrowserStopEvent and dispatch BrowserKillEvent without awaiting it."""
-		if self.browser_session.is_local and self._subprocess:
+		if self.browser_session.is_local and (self._subprocess or self._profile_lease):
 			self.logger.debug('[LocalBrowserWatchdog] BrowserStopEvent received, dispatching BrowserKillEvent')
 			# Dispatch BrowserKillEvent without awaiting so it gets processed after all BrowserStopEvent handlers
 			self.event_bus.dispatch(BrowserKillEvent())
@@ -118,9 +140,9 @@ class LocalBrowserWatchdog(BaseWatchdog):
 	async def _launch_browser(self, max_retries: int = 3) -> tuple[psutil.Process, str]:
 		"""Launch browser process and return (process, cdp_url).
 
-		Before launching, proactively kills any stale Chrome processes that
-		hold the profile directory lock (e.g. from a crashed MCP server).
-		On launch failures, retries with a temporary directory as fallback.
+		Before launching, acquire the profile lease and reclaim only a browser
+		process recorded by a previous OpenBrowser owner. On launch failures,
+		retry with a temporary directory as fallback.
 
 		Returns:
 			Tuple of (psutil.Process, cdp_url)
@@ -129,31 +151,27 @@ class LocalBrowserWatchdog(BaseWatchdog):
 		profile = self.browser_session.browser_profile
 		self._original_user_data_dir = str(profile.user_data_dir) if profile.user_data_dir else None
 		self._temp_dirs_to_cleanup = []
-
-		# Proactively kill stale Chrome processes holding the profile lock.
-		# This prevents a 30s CDP timeout when a previous MCP server crashed
-		# and left Chrome running with the same user data directory.
-		if self._original_user_data_dir:
-			killed = await self._kill_stale_chrome_for_profile(self._original_user_data_dir)
-			if killed:
-				self.logger.info(
-					f'[LocalBrowserWatchdog] Killed stale Chrome process(es) holding profile lock on {self._original_user_data_dir}'
-				)
-
-			cleared_bytes = self._cleanup_profile_cache(
-				self._original_user_data_dir,
-				profile.profile_directory or 'Default',
-			)
-			if cleared_bytes > 0:
-				self.logger.info(
-					f'[LocalBrowserWatchdog] Cleared {cleared_bytes / (1024 * 1024):.1f} MB of browser cache '
-					f'from managed profile {self._original_user_data_dir}'
-				)
+		self._browser_record = None
 
 		for attempt in range(max_retries):
+			launched_process: psutil.Process | None = None
+			cdp_url: str | None = None
 			try:
 				# Get launch args from profile
 				launch_args = profile.get_args()
+				ownership_marker = self._ensure_ownership_marker(launch_args)
+				await self._ensure_profile_lease(profile.user_data_dir, ownership_marker)
+
+				if attempt == 0 and self._original_user_data_dir:
+					cleared_bytes = self._cleanup_profile_cache(
+						self._original_user_data_dir,
+						profile.profile_directory or 'Default',
+					)
+					if cleared_bytes > 0:
+						self.logger.info(
+							f'[LocalBrowserWatchdog] Cleared {cleared_bytes / (1024 * 1024):.1f} MB of browser cache '
+							f'from managed profile {self._original_user_data_dir}'
+						)
 
 				# Add debugging port
 				debug_port = self._find_free_port()
@@ -201,36 +219,76 @@ class LocalBrowserWatchdog(BaseWatchdog):
 
 				# Convert to psutil.Process
 				process = psutil.Process(subprocess.pid)
+				launched_process = process
+				if self._profile_lease:
+					try:
+						self._browser_record = self._profile_lease.record_browser(
+							process,
+							ownership_marker=ownership_marker,
+							executable=str(browser_path),
+							cdp_port=debug_port,
+						)
+					except (TypeError, ValueError, OSError, psutil.Error):
+						# Test doubles and partially initialized process wrappers may not
+						# expose a serializable identity yet. Real processes always do.
+						self._browser_record = None
+						self._profile_lease.write_metadata()
 
 				# Wait for CDP to be ready and get the URL
 				cdp_url = await self._wait_for_cdp_url(debug_port)
 
-				# Success! Clean up any temp dirs we created but didn't use
+				# Success! Clean up temp dirs we created but did not use. Keep the
+				# active fallback profile until the browser itself is cleaned up.
+				active_profile = self._profile_lease.profile_dir if self._profile_lease else None
+				remaining_temp_dirs: list[Path] = []
 				for tmp_dir in self._temp_dirs_to_cleanup:
+					if active_profile and tmp_dir.expanduser().resolve() == active_profile:
+						remaining_temp_dirs.append(tmp_dir)
+						continue
 					try:
 						shutil.rmtree(tmp_dir, ignore_errors=True)
 					except Exception:
 						pass
+				self._temp_dirs_to_cleanup = remaining_temp_dirs
 
 				return process, cdp_url
 
+			except ProfileInUseError:
+				if launched_process:
+					await self._cleanup_process(
+						launched_process,
+						browser_record=self._browser_record,
+						cdp_url=cdp_url,
+					)
+				await self._release_profile_lease()
+				self._restore_original_profile(profile)
+				self._cleanup_temp_dirs()
+				raise
 			except Exception as e:
 				error_str = str(e).lower()
+
+				if launched_process:
+					await self._cleanup_process(
+						launched_process,
+						browser_record=self._browser_record,
+						cdp_url=cdp_url,
+					)
+					launched_process = None
+					self._browser_record = None
 
 				# Check if this is a user_data_dir related error (profile lock,
 				# timeout waiting for CDP, or other startup failure)
 				is_profile_error = any(
 					err in error_str
-					for err in ['singletonlock', 'user data directory', 'cannot create', 'already in use', 'did not start within']
+					for err in ['singletonlock', 'user data directory', 'cannot create', 'did not start within']
 				)
 				if is_profile_error:
 					self.logger.warning(f'Browser launch failed (attempt {attempt + 1}/{max_retries}): {e}')
 
 					if attempt < max_retries - 1:
-						# Kill any stale Chrome that may have appeared, then
-						# fall back to a temporary directory for next attempt.
-						if self._original_user_data_dir:
-							await self._kill_stale_chrome_for_profile(self._original_user_data_dir)
+						# Release the old profile before falling back to a temporary
+						# profile. The next attempt acquires its own lease.
+						await self._release_profile_lease()
 
 						tmp_dir = Path(tempfile.mkdtemp(prefix='openbrowser-tmp-'))
 						self._temp_dirs_to_cleanup.append(tmp_dir)
@@ -242,22 +300,98 @@ class LocalBrowserWatchdog(BaseWatchdog):
 
 				# Not a recoverable error or last attempt failed
 				# Restore original user_data_dir before raising
-				if self._original_user_data_dir is not None:
-					profile.user_data_dir = self._original_user_data_dir
+				await self._release_profile_lease()
+				self._restore_original_profile(profile)
 
 				# Clean up any temp dirs we created
-				for tmp_dir in self._temp_dirs_to_cleanup:
-					try:
-						shutil.rmtree(tmp_dir, ignore_errors=True)
-					except Exception:
-						pass
+				self._cleanup_temp_dirs()
 
 				raise
 
 		# Should not reach here, but just in case
+		self._restore_original_profile(profile)
+		await self._release_profile_lease()
+		raise RuntimeError(f'Failed to launch browser after {max_retries} attempts')
+
+	def _ensure_ownership_marker(self, launch_args: list[str]) -> str:
+		"""Return one stable marker used to prove browser ownership."""
+		for argument in launch_args:
+			if argument.startswith(OWNERSHIP_MARKER_PREFIX):
+				self._instance_id = argument.removeprefix(OWNERSHIP_MARKER_PREFIX)
+				return argument
+
+		marker = f'{OWNERSHIP_MARKER_PREFIX}{self._instance_id}'
+		launch_args.append(marker)
+		return marker
+
+	async def _ensure_profile_lease(self, user_data_dir: str | Path | None, ownership_marker: str) -> None:
+		if not user_data_dir:
+			return
+
+		resolved_profile = Path(user_data_dir).expanduser().resolve()
+		if self._profile_lease and (
+			self._profile_lease.profile_dir == resolved_profile and self._profile_lease.instance_id == self._instance_id
+		):
+			return
+
+		await self._release_profile_lease()
+		lease = ProfileLease(resolved_profile, instance_id=self._instance_id)
+		previous_metadata = lease.acquire()
+		try:
+			await self._reclaim_previous_metadata(previous_metadata, ownership_marker)
+			lease.write_metadata()
+		except Exception:
+			lease.release()
+			raise
+		self._profile_lease = lease
+
+	async def _reclaim_previous_metadata(
+		self, metadata: dict[str, Any] | None, ownership_marker: str
+	) -> None:
+		if not metadata or metadata.get('profile_dir') != str(self._profile_lease_path()):
+			return
+
+		previous_instance_id = metadata.get('instance_id')
+		owner_is_alive = ProfileLease.process_is_alive(metadata.get('owner_pid'), metadata.get('owner_start_time'))
+		if owner_is_alive and previous_instance_id != self._instance_id:
+			raise ProfileInUseError(self._profile_lease_path())
+
+		browser = metadata.get('browser')
+		if not isinstance(browser, dict):
+			return
+
+		await self._kill_stale_chrome_for_profile(
+			str(self._profile_lease_path()),
+			metadata=metadata,
+			instance_id=self._instance_id,
+		)
+
+	def _profile_lease_path(self) -> Path:
+		if self._profile_lease:
+			return self._profile_lease.profile_dir
+		return Path(self.browser_session.browser_profile.user_data_dir).expanduser().resolve()
+
+	async def _release_profile_lease(self) -> None:
+		lease = self._profile_lease
+		self._profile_lease = None
+		self._browser_record = None
+		if lease:
+			try:
+				lease.clear_browser()
+			except (OSError, RuntimeError):
+				pass
+			lease.release()
+
+	def _restore_original_profile(self, profile) -> None:
 		if self._original_user_data_dir is not None:
 			profile.user_data_dir = self._original_user_data_dir
-		raise RuntimeError(f'Failed to launch browser after {max_retries} attempts')
+
+	def _cleanup_temp_dirs(self) -> None:
+		for temp_dir in self._temp_dirs_to_cleanup:
+			try:
+				shutil.rmtree(temp_dir, ignore_errors=True)
+			except Exception:
+				pass
 
 	@staticmethod
 	def _find_installed_browser_path() -> str | None:
@@ -439,37 +573,87 @@ class LocalBrowserWatchdog(BaseWatchdog):
 		raise TimeoutError(f'Browser did not start within {timeout} seconds')
 
 	@staticmethod
-	async def _cleanup_process(process: psutil.Process) -> None:
-		"""Clean up browser process.
-
-		Args:
-			process: psutil.Process to terminate
-		"""
+	async def _cleanup_process(
+		process: psutil.Process | None,
+		*,
+		browser_record: dict[str, Any] | None = None,
+		cdp_url: str | None = None,
+	) -> bool:
+		"""Safely stop an owned browser process and report whether it exited."""
 		if not process:
-			return
+			return True
+
+		if browser_record and not ProfileLease.process_matches_identity(
+			process,
+			browser_record.get('pid'),
+			browser_record.get('start_time'),
+		):
+			return False
 
 		try:
-			# Try graceful shutdown first
+			if IS_WINDOWS:
+				if not cdp_url and browser_record and browser_record.get('cdp_port'):
+					cdp_url = f"http://127.0.0.1:{browser_record['cdp_port']}/"
+				if not cdp_url or not await LocalBrowserWatchdog._close_browser_via_cdp(cdp_url):
+					return False
+				return await LocalBrowserWatchdog._wait_for_process_exit(process)
+
+			# POSIX: give the owned browser its normal shutdown path first.
 			process.terminate()
+			if await LocalBrowserWatchdog._wait_for_process_exit(process):
+				return True
 
-			# Use async wait instead of blocking wait
-			for _ in range(50):  # Wait up to 5 seconds (50 * 0.1)
-				if not process.is_running():
-					return
-				await asyncio.sleep(0.1)
-
-			# If still running after 5 seconds, force kill
-			if process.is_running():
-				process.kill()
-				# Give it a moment to die
-				await asyncio.sleep(0.1)
-
+			# Re-check identity immediately before SIGKILL to protect against PID reuse.
+			if browser_record and not ProfileLease.process_matches_identity(
+				process,
+				browser_record.get('pid'),
+				browser_record.get('start_time'),
+			):
+				return False
+			process.kill()
+			return await LocalBrowserWatchdog._wait_for_process_exit(process)
 		except psutil.NoSuchProcess:
-			# Process already gone
-			pass
+			return True
+		except (psutil.AccessDenied, psutil.ZombieProcess):
+			return False
 		except Exception:
-			# Ignore any other errors during cleanup
-			pass
+			return False
+
+	@staticmethod
+	async def _wait_for_process_exit(process: psutil.Process, attempts: int = 50) -> bool:
+		"""Poll a process without blocking the event loop."""
+		for _ in range(attempts):
+			try:
+				if not process.is_running():
+					return True
+			except psutil.NoSuchProcess:
+				return True
+			await asyncio.sleep(0.1)
+		try:
+			return not process.is_running()
+		except psutil.NoSuchProcess:
+			return True
+
+	@staticmethod
+	async def _close_browser_via_cdp(cdp_url: str) -> bool:
+		"""Ask an owned Windows browser to close through its CDP endpoint."""
+		try:
+			import httpx
+			import websockets
+
+			version_url = f'{cdp_url.rstrip("/")}/json/version'
+			async with httpx.AsyncClient(timeout=httpx.Timeout(2.0)) as client:
+				response = await client.get(version_url)
+				response.raise_for_status()
+				websocket_url = response.json().get('webSocketDebuggerUrl')
+			if not websocket_url:
+				return False
+
+			async with websockets.connect(websocket_url) as websocket:
+				await websocket.send(json.dumps({'id': 1, 'method': 'Browser.close'}))
+			return True
+		except Exception:
+			return False
 
 	def _cleanup_temp_dir(self, temp_dir: Path | str) -> None:
 		"""Clean up temporary directory.
@@ -538,71 +722,57 @@ class LocalBrowserWatchdog(BaseWatchdog):
 
 		return total_cleared_bytes
 
-	@staticmethod
-	async def _kill_stale_chrome_for_profile(user_data_dir: str) -> bool:
-		"""Find and kill Chrome processes using the given user data directory.
+	@classmethod
+	async def _kill_stale_chrome_for_profile(
+		cls,
+		user_data_dir: str,
+		*,
+		metadata: dict[str, Any] | None = None,
+		instance_id: str | None = None,
+	) -> bool:
+		"""Close only the recorded browser owned by a stale profile lease.
 
-		Scans running Chrome/Chromium processes for a matching --user-data-dir
-		argument, terminates them, and waits for the profile lock to be released.
-
-		Returns:
-			True if any stale processes were killed, False otherwise.
+		A path-only call intentionally does nothing. Matching an arbitrary Chrome
+		process by ``--user-data-dir`` is not sufficient proof of ownership.
 		"""
 		resolved_dir = str(Path(user_data_dir).expanduser().resolve())
-		killed_any = False
+		if not metadata or metadata.get('profile_dir') != resolved_dir:
+			return False
+
+		owner_is_alive = ProfileLease.process_is_alive(metadata.get('owner_pid'), metadata.get('owner_start_time'))
+		if owner_is_alive and metadata.get('instance_id') != instance_id:
+			return False
+
+		browser = metadata.get('browser')
+		if not isinstance(browser, dict):
+			return False
+		if browser.get('instance_id') != metadata.get('instance_id'):
+			return False
+		if browser.get('profile_dir') != resolved_dir:
+			return False
 
 		for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
 			try:
 				name = (proc.info.get('name') or '').lower()
 				if not any(browser_name in name for browser_name in ('chrome', 'chromium', 'brave')):
 					continue
+				if not ProfileLease.process_matches_browser(proc, browser):
+					continue
 
-				cmdline = proc.info.get('cmdline') or []
-				for arg in cmdline:
-					if arg.startswith('--user-data-dir='):
-						proc_dir = str(Path(arg.split('=', 1)[1]).expanduser().resolve())
-						if proc_dir == resolved_dir:
-							_logger.info(
-								f'[LocalBrowserWatchdog] Killing stale Chrome process pid={proc.pid} '
-								f'holding profile lock on {resolved_dir}'
-							)
-							proc.kill()
-							killed_any = True
-							break
+				cdp_url = None
+				if browser.get('cdp_port'):
+					cdp_url = f"http://127.0.0.1:{browser['cdp_port']}/"
+				_logger.info(
+					f'[LocalBrowserWatchdog] Closing owned stale Chrome process pid={proc.pid} '
+					f'for profile {resolved_dir}'
+				)
+				if not await cls._cleanup_process(proc, browser_record=browser, cdp_url=cdp_url):
+					raise RuntimeError(f'Unable to safely close owned browser process pid={proc.pid}')
+				return True
 			except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
 				continue
 
-		if not killed_any:
-			return False
-
-		# Wait for killed processes to fully exit and release profile locks.
-		# Chrome may hold SingletonLock and CDP ports briefly after receiving
-		# SIGKILL -- poll until no matching processes remain (up to 5s).
-		for _ in range(50):
-			still_alive = False
-			for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
-				try:
-					name = (proc.info.get('name') or '').lower()
-					if not any(browser_name in name for browser_name in ('chrome', 'chromium', 'brave')):
-						continue
-					cmdline = proc.info.get('cmdline') or []
-					for arg in cmdline:
-						if arg.startswith('--user-data-dir='):
-							proc_dir = str(Path(arg.split('=', 1)[1]).expanduser().resolve())
-							if proc_dir == resolved_dir:
-								still_alive = True
-								break
-				except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-					continue
-				if still_alive:
-					break
-			if not still_alive:
-				break
-			await asyncio.sleep(0.1)
-
-		# Extra settle time for OS to release file locks
-		await asyncio.sleep(0.5)
-		return True
+		return False
 
 	@property
 	def browser_pid(self) -> int | None:
