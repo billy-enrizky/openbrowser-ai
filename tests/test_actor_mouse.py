@@ -1,5 +1,6 @@
 """Tests for openbrowser.actor.mouse module."""
 
+import inspect
 import logging
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -136,6 +137,12 @@ class TestMouseMove:
         assert call_args['x'] == 300
         assert call_args['y'] == 400
 
+    async def test_click_and_move_accept_float_coordinates(self):
+        assert inspect.signature(Mouse.click).parameters['x'].annotation is float
+        assert inspect.signature(Mouse.click).parameters['y'].annotation is float
+        assert inspect.signature(Mouse.move).parameters['x'].annotation is float
+        assert inspect.signature(Mouse.move).parameters['y'].annotation is float
+
 
 @pytest.mark.asyncio
 class TestMouseScroll:
@@ -192,6 +199,17 @@ class TestMouseScroll:
 
         # Should fall back to synthesizeScrollGesture
         client.send.Input.synthesizeScrollGesture.assert_called_once()
+
+    async def test_scroll_synthesize_fallback_uses_numeric_anchor_and_cdp_direction(self):
+        session, client = _make_mock_browser_session()
+        mouse = Mouse(session, session_id='sid-123')
+
+        client.send.Page.getLayoutMetrics.side_effect = Exception('no metrics')
+
+        await mouse.scroll(delta_x=40, delta_y=100)
+
+        params = client.send.Input.synthesizeScrollGesture.call_args.args[0]
+        assert params == {'x': 0, 'y': 0, 'xDistance': -40, 'yDistance': -100}
 
     async def test_scroll_fallback_to_javascript(self):
         session, client = _make_mock_browser_session()

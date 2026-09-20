@@ -14,6 +14,9 @@ EXECUTE_CODE_DESCRIPTION_COMPACT = """Execute Python code with browser automatio
 - `await click(index)` -- Click element by index
 - `await input_text(index, text, clear=True)` -- Type into input field
 - `await scroll(down=True, pages=1.0)` -- Scroll page
+- `await click_xy(x, y, button="left", click_count=1)` -- Click a no-index canvas, PDF, embed, or native-rendered target
+- `await hover_xy(x, y)` -- Move over a no-index canvas, PDF, embed, or native-rendered target
+- `await scroll_xy(x, y, delta_x=0, delta_y=0)` -- Wheel-scroll a no-index surface
 - `await send_keys(keys)` -- Keyboard input (e.g. "Enter", "Escape")
 - `await evaluate(code)` -- Run JavaScript, returns Python objects
 - `await select_dropdown(index, text)` -- Select dropdown option
@@ -22,6 +25,7 @@ EXECUTE_CODE_DESCRIPTION_COMPACT = """Execute Python code with browser automatio
 ## State
 - `state = await browser.get_browser_state_summary()` -- Get page URL, title, interactive elements
 - Elements shown as `[i_N]` -- use N as the index for click/input_text
+- Prefer indexed actions whenever an index exists. For no-index targets, `x` and `y` are CSS viewport pixels. If converting screenshot pixels, divide by `window.devicePixelRatio` first.
 
 ## Libraries
 json, asyncio, Path, csv, re, datetime, requests (pre-imported)
@@ -41,6 +45,10 @@ EXECUTE_CODE_DESCRIPTION = """Execute Python code in a persistent namespace with
 - `await click(index: int)` -- Click an element by its index from browser state. Index must be >= 1. Works for buttons, links, checkboxes, radio buttons. Does NOT work for <select> elements (use select_dropdown instead).
 - `await input_text(index: int, text: str, clear: bool = True)` -- Type text into an input field. clear=True (default) clears the field first; clear=False appends.
 - `await scroll(down: bool = True, pages: float = 1.0, index: int | None = None)` -- Scroll the page. down=True scrolls down, down=False scrolls up. pages=0.5 for half page, 1 for full page, 10 for top/bottom. Pass index to scroll within a specific container element.
+- `await click_xy(x: float, y: float, button: str = "left", click_count: int = 1)` -- Click a no-index canvas, PDF, embed, or native-rendered target.
+- `await hover_xy(x: float, y: float)` -- Move over a no-index canvas, PDF, embed, or native-rendered target.
+- `await scroll_xy(x: float, y: float, delta_x: int = 0, delta_y: int = 0)` -- Wheel-scroll a no-index surface. Positive `delta_y` scrolls down and positive `delta_x` scrolls right.
+- Prefer indexed actions whenever an index exists. The `*_xy` coordinates are CSS viewport pixels, not screenshot pixels. If `devicePixelRatio` is not 1, divide screenshot coordinates by `window.devicePixelRatio` first.
 - `await send_keys(keys: str)` -- Send keyboard keys or shortcuts. Examples: "Escape", "Enter", "PageDown", "Control+o", "Control+a", "ArrowDown".
 - `await upload_file(index: int, path: str)` -- Upload a file to a file input element. index is the file input element index, path is the local file path.
 
