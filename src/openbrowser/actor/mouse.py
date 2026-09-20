@@ -18,7 +18,7 @@ class Mouse:
 		self._session_id = session_id
 		self._target_id = target_id
 
-	async def click(self, x: int, y: int, button: 'MouseButton' = 'left', click_count: int = 1) -> None:
+	async def click(self, x: float, y: float, button: 'MouseButton' = 'left', click_count: int = 1) -> None:
 		"""Click at the specified coordinates."""
 		# Mouse press
 		press_params: 'DispatchMouseEventParameters' = {
@@ -74,7 +74,7 @@ class Mouse:
 			session_id=self._session_id,
 		)
 
-	async def move(self, x: int, y: int, steps: int = 1) -> None:
+	async def move(self, x: float, y: float, steps: int = 1) -> None:
 		"""Move mouse to the specified coordinates."""
 		# TODO: Implement smooth movement with multiple steps if needed
 		_ = steps  # Acknowledge parameter for future use
@@ -126,7 +126,14 @@ class Mouse:
 
 		# Method 2: Fallback to synthesizeScrollGesture
 		try:
-			params: 'SynthesizeScrollGestureParameters' = {'x': x, 'y': y, 'xDistance': delta_x or 0, 'yDistance': delta_y or 0}
+			fallback_x = x if x is not None else 0
+			fallback_y = y if y is not None else 0
+			params: 'SynthesizeScrollGestureParameters' = {
+				'x': fallback_x,
+				'y': fallback_y,
+				'xDistance': -(delta_x or 0),
+				'yDistance': -(delta_y or 0),
+			}
 			await self._client.send.Input.synthesizeScrollGesture(
 				params,
 				session_id=self._session_id,
