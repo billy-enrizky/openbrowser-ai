@@ -8,6 +8,7 @@ import pytest
 from pydantic import ValidationError
 
 from openbrowser.actor.mouse import Mouse
+from openbrowser.code_use.descriptions import EXECUTE_CODE_DESCRIPTION, EXECUTE_CODE_DESCRIPTION_COMPACT
 from openbrowser.tools.service import CodeAgentTools, Tools
 from openbrowser.tools.views import ClickXYAction, HoverXYAction, ScrollXYAction
 
@@ -51,6 +52,14 @@ def test_coordinate_actions_use_css_viewport_pixel_defaults():
         'delta_x': 0,
         'delta_y': 120,
     }
+
+
+@pytest.mark.parametrize('model', [ClickXYAction, HoverXYAction, ScrollXYAction])
+def test_coordinate_actions_preserve_fractional_css_pixels(model):
+    action = model(x=12.5, y=34.25)
+
+    assert action.x == 12.5
+    assert action.y == 34.25
 
 
 @pytest.mark.parametrize(
@@ -119,6 +128,21 @@ def test_hover_and_scroll_xy_dispatch_mouse_events():
     assert scroll_result.extracted_content == 'Wheel at (31, 47) dx=12 dy=240'
 
 
+def test_scroll_xy_preserves_zero_coordinate_anchor():
+    session = _make_browser_session()
+
+    asyncio.run(
+        Tools().registry.execute_action(
+            'scroll_xy', {'x': 0, 'y': 0, 'delta_y': 240}, browser_session=session
+        )
+    )
+
+    event = _mouse_event_payload(session.cdp_client.send.Input.dispatchMouseEvent.await_args_list[0])
+    assert event['x'] == 0
+    assert event['y'] == 0
+    assert event['deltaY'] == 240
+
+
 @pytest.mark.parametrize(
     ('action_name', 'params', 'method_name'),
     [
@@ -165,3 +189,12 @@ def test_coordinate_actions_cover_a_canvas_style_surface_contract():
         {'type': 'mouseReleased', 'x': 50, 'y': 60, 'button': 'left', 'clickCount': 1},
         {'type': 'mouseWheel', 'x': 50, 'y': 60, 'deltaX': 0, 'deltaY': 180},
     ]
+
+
+def test_code_execution_descriptions_document_coordinate_actions():
+    for description in (EXECUTE_CODE_DESCRIPTION_COMPACT, EXECUTE_CODE_DESCRIPTION):
+        assert 'click_xy' in description
+        assert 'hover_xy' in description
+        assert 'scroll_xy' in description
+        assert 'CSS viewport pixels' in description
+        assert 'devicePixelRatio' in description
