@@ -73,10 +73,7 @@ class ProfileLease:
 			return self.previous_metadata
 
 		self.profile_dir.mkdir(parents=True, exist_ok=True)
-		try:
-			handle = self.lock_path.open('a+b')
-		except OSError:
-			raise
+		handle = self.lock_path.open('a+b')
 
 		try:
 			self._lock(handle)
@@ -176,7 +173,14 @@ class ProfileLease:
 				return False
 			profile_dir = str(Path(browser['profile_dir']).expanduser().resolve())
 			marker = str(browser['ownership_marker'])
-			cmdline = process.cmdline()
+			expected_marker = f"--openbrowser-instance-id={browser['instance_id']}"
+			if marker != expected_marker:
+				return False
+			try:
+				cmdline = process.cmdline()
+			except (AttributeError, OSError, psutil.Error):
+				process_info = getattr(process, 'info', None)
+				cmdline = process_info.get('cmdline') if isinstance(process_info, dict) else None
 			if not isinstance(cmdline, (list, tuple)):
 				return False
 			profile_matches = False
@@ -194,11 +198,13 @@ class ProfileLease:
 			return False
 
 	@staticmethod
-	def process_is_alive(pid: int | str, start_time: float | str) -> bool:
+	def process_is_alive(pid: Any, start_time: Any) -> bool:
 		"""Check a process identity without trusting a reused PID."""
 		try:
+			if pid is None or start_time is None:
+				return False
 			process = psutil.Process(int(pid))
-		except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, ValueError, OSError):
+		except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, TypeError, ValueError, OSError):
 			return False
 		return ProfileLease.process_matches_identity(process, pid, start_time)
 
@@ -210,10 +216,14 @@ class ProfileLease:
 			raise RuntimeError(f'Unable to determine owner process start time for pid={pid}') from exc
 
 	def _metadata_belongs_to_this_lease(self, metadata: dict[str, Any]) -> bool:
+		try:
+			owner_start_time = float(metadata.get('owner_start_time'))
+		except (TypeError, ValueError):
+			return False
 		return (
 			metadata.get('instance_id') == self.instance_id
 			and metadata.get('owner_pid') == self.owner_pid
-			and float(metadata.get('owner_start_time')) == self.owner_start_time
+			and owner_start_time == self.owner_start_time
 		)
 
 	def _atomic_write(self, metadata: dict[str, Any]) -> None:
