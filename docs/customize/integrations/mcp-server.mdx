@@ -78,14 +78,14 @@ Optional configuration:
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `OPENBROWSER_HEADLESS` | Run browser without GUI | `false` |
+| `OPENBROWSER_HEADLESS` | Run browser without GUI | `true` |
 | `OPENBROWSER_ALLOWED_DOMAINS` | Comma-separated domain whitelist | (none) |
 | `OPENBROWSER_COMPACT_DESCRIPTION` | Minimal tool description (~500 tokens vs ~1,430) | `false` |
 | `OPENBROWSER_MAX_OUTPUT` | Maximum output characters per execution | `10000` |
 
 ## The `execute_code` Tool
 
-The MCP server exposes a single tool that runs Python code in a persistent namespace with browser automation functions. All functions are async -- use `await`.
+The MCP server exposes a single tool that runs Python code in a persistent namespace with browser automation functions. Functions are async unless noted; use `await`.
 
 ### Available Functions
 
@@ -93,12 +93,16 @@ The MCP server exposes a single tool that runs Python code in a persistent names
 |----------|-----------|
 | **Navigation** | `navigate(url, new_tab)`, `go_back()`, `wait(seconds)` |
 | **Interaction** | `click(index)`, `input_text(index, text, clear)`, `scroll(down, pages, index)`, `send_keys(keys)`, `upload_file(index, path)` |
+| **Coordinate interaction** | `click_xy(x, y, button, click_count)`, `hover_xy(x, y)`, `scroll_xy(x, y, delta_x, delta_y)` for no-index canvas, PDF, embedded, and native-rendered targets |
 | **Dropdowns** | `select_dropdown(index, text)`, `dropdown_options(index)` |
 | **Tabs** | `switch(tab_id)`, `close(tab_id)` |
 | **JavaScript** | `evaluate(code)` -- run JS in page context, returns Python objects |
+| **Downloads** | `download_file(url, filename)`, `list_downloads()` (sync, no `await`) |
 | **State** | `browser.get_browser_state_summary()` -- page metadata and interactive elements |
 | **CSS** | `get_selector_from_index(index)` -- CSS selector for an element |
 | **Completion** | `done(text, success)` -- signal task completion |
+
+Prefer indexed actions whenever an element index exists. Coordinate actions use CSS viewport pixels, not screenshot pixels. If a screenshot uses a `devicePixelRatio` other than 1, divide its coordinates by `window.devicePixelRatio` before calling an `*_xy` function.
 
 **Pre-imported libraries**: `json`, `csv`, `re`, `datetime`, `asyncio`, `Path`, `requests`, `numpy`, `pandas`, `matplotlib`, `BeautifulSoup`
 
