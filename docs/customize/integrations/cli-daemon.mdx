@@ -62,6 +62,7 @@ All functions from the MCP `execute_code` tool are available in `-c` mode:
 |----------|-----------|
 | **Navigation** | `navigate(url, new_tab)`, `go_back()`, `wait(seconds)` |
 | **Interaction** | `click(index)`, `input_text(index, text, clear)`, `scroll(down, pages, index)`, `send_keys(keys)`, `upload_file(index, path)` |
+| **Coordinate interaction** | `click_xy(x, y, button, click_count)`, `hover_xy(x, y)`, `scroll_xy(x, y, delta_x, delta_y)` for no-index canvas, PDF, embedded, and native-rendered targets |
 | **Dropdowns** | `select_dropdown(index, text)`, `dropdown_options(index)` |
 | **Tabs** | `switch(tab_id)`, `close(tab_id)` |
 | **JavaScript** | `evaluate(code)` -- run JS in page context, returns Python objects |
@@ -69,6 +70,8 @@ All functions from the MCP `execute_code` tool are available in `-c` mode:
 | **State** | `browser.get_browser_state_summary()` -- page metadata and interactive elements |
 | **CSS** | `get_selector_from_index(index)` -- CSS selector for an element |
 | **Completion** | `done(text, success)` -- signal task completion |
+
+Prefer indexed actions whenever an element index exists. Coordinate actions use CSS viewport pixels, not screenshot pixels. If a screenshot uses a `devicePixelRatio` other than 1, divide its coordinates by `window.devicePixelRatio` before calling an `*_xy` function.
 
 **Pre-imported libraries**: `json`, `csv`, `re`, `datetime`, `asyncio`, `Path`, `requests`
 
@@ -116,7 +119,7 @@ graph LR
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `OPENBROWSER_HEADLESS` | Run browser without GUI | `false` |
+| `OPENBROWSER_HEADLESS` | Run browser without GUI | `true` |
 | `OPENBROWSER_MAX_OUTPUT` | Maximum output characters per execution | `10000` |
 | `OPENBROWSER_SOCKET` | Custom Unix socket path | `~/.openbrowser/daemon.sock` |
 
