@@ -2,13 +2,14 @@
 
 import asyncio
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from pydantic import ValidationError
 
 from openbrowser.actor.mouse import Mouse
 from openbrowser.code_use.descriptions import EXECUTE_CODE_DESCRIPTION, EXECUTE_CODE_DESCRIPTION_COMPACT
+from openbrowser.code_use.service import CodeAgent
 from openbrowser.tools.service import CodeAgentTools, Tools
 from openbrowser.tools.views import ClickXYAction, HoverXYAction, ScrollXYAction
 
@@ -60,6 +61,20 @@ def test_coordinate_actions_preserve_fractional_css_pixels(model):
 
     assert action.x == 12.5
     assert action.y == 34.25
+
+
+def test_coordinate_actions_dispatch_fractional_css_pixels():
+    session = _make_browser_session()
+
+    asyncio.run(Tools().registry.execute_action('click_xy', {'x': 12.5, 'y': 34.25}, browser_session=session))
+    asyncio.run(Tools().registry.execute_action('hover_xy', {'x': 12.5, 'y': 34.25}, browser_session=session))
+
+    events = [_mouse_event_payload(call) for call in session.cdp_client.send.Input.dispatchMouseEvent.await_args_list]
+    assert events == [
+        {'type': 'mousePressed', 'x': 12.5, 'y': 34.25, 'button': 'left', 'clickCount': 1},
+        {'type': 'mouseReleased', 'x': 12.5, 'y': 34.25, 'button': 'left', 'clickCount': 1},
+        {'type': 'mouseMoved', 'x': 12.5, 'y': 34.25},
+    ]
 
 
 @pytest.mark.parametrize(
@@ -198,3 +213,17 @@ def test_code_execution_descriptions_document_coordinate_actions():
         assert 'scroll_xy' in description
         assert 'CSS viewport pixels' in description
         assert 'devicePixelRatio' in description
+
+
+def test_code_agent_fallback_prompt_documents_coordinate_actions():
+    agent = object.__new__(CodeAgent)
+
+    with patch('builtins.open', side_effect=FileNotFoundError):
+        prompt = agent._get_code_agent_system_prompt()
+
+    assert 'click_xy' in prompt
+    assert 'hover_xy' in prompt
+    assert 'scroll_xy' in prompt
+    assert 'CSS viewport pixels' in prompt
+    assert 'devicePixelRatio' in prompt
+    assert 'Prefer indexed actions' in prompt
