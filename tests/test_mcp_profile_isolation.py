@@ -144,6 +144,22 @@ async def test_recovery_does_not_run_unscoped_profile_kill(isolated_mcp):
 
 
 @pytest.mark.asyncio
+async def test_cdp_health_probe_is_bounded(isolated_mcp):
+    mcp_mod, _, _ = isolated_mcp
+    server = mcp_mod.OpenBrowserServer()
+    session = MagicMock()
+    session._cdp_client_root = MagicMock()
+    session._cdp_client_root.send.Browser.getVersion = AsyncMock()
+    server.browser_session = session
+
+    with patch.object(mcp_mod.asyncio, 'wait_for', new_callable=AsyncMock, side_effect=asyncio.TimeoutError) as wait_for:
+        assert await server._is_cdp_alive() is False
+
+    wait_for.assert_awaited_once()
+    assert wait_for.await_args.kwargs['timeout'] > 0
+
+
+@pytest.mark.asyncio
 async def test_namespace_initialization_is_serialized(isolated_mcp):
     mcp_mod, _, _ = isolated_mcp
     server = mcp_mod.OpenBrowserServer()

@@ -432,6 +432,24 @@ class TestBrowserSessionLifecycle:
         with pytest.raises(RuntimeError, match='browser cleanup failed'):
             await session.kill()
 
+    async def test_kill_finishes_browser_cleanup_when_storage_save_fails(self):
+        from openbrowser.browser.session import BrowserSession
+
+        session = _make_browser_session()
+        stop_event = _make_awaitable_event()
+        session.event_bus.dispatch = MagicMock(side_effect=[RuntimeError('storage save failed'), stop_event])
+        event_bus = session.event_bus
+        event_bus.stop = AsyncMock()
+
+        with patch.object(BrowserSession, 'reset', new_callable=AsyncMock) as reset:
+            with pytest.raises(RuntimeError, match='storage save failed'):
+                await session.kill()
+
+        assert event_bus.dispatch.call_count == 2
+        event_bus.stop.assert_awaited_once_with(clear=True, timeout=5)
+        reset.assert_awaited_once()
+        assert session.event_bus is not event_bus
+
     async def test_stop(self):
         session = _make_browser_session()
         session._cdp_client_root = MagicMock()

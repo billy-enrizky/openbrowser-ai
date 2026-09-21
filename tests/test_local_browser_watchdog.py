@@ -240,7 +240,7 @@ class TestCleanupProcess:
 
         with patch('asyncio.sleep', new_callable=AsyncMock):
             # Should not raise
-            await LocalBrowserWatchdog._cleanup_process(mock_process)
+            await LocalBrowserWatchdog._cleanup_process(mock_process, require_identity=False)
 
 
 @pytest.mark.asyncio

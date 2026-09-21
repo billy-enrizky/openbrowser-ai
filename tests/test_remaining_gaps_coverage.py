@@ -485,7 +485,7 @@ class TestMcpServerCleanupExpired:
 
     @pytest.mark.asyncio
     async def test_cleanup_expired_session_dispatch_error(self, gaps_server_instance):
-        """When dispatch raises, session is still cleaned up."""
+        """When dispatch raises, cleanup fails and the session is retained for retry."""
         mock_session = MagicMock()
         mock_session.event_bus = MagicMock()
         mock_session.event_bus.dispatch = MagicMock(

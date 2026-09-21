@@ -391,7 +391,7 @@ For OpenClaw plugin documentation, see [docs.openclaw.ai/tools/plugin](https://d
 
 OpenBrowser includes an MCP (Model Context Protocol) server that exposes browser automation as tools for AI assistants like Claude. Listed on the [MCP Registry](https://registry.modelcontextprotocol.io/?q=openbrowser) as `me.openbrowser/openbrowser-ai`. No external LLM API keys required -- the MCP client provides the intelligence.
 
-By default, each MCP server instance uses an isolated profile under `~/.config/openbrowser/profiles/mcp-<instance-id>`. Its `storage_state.json` is seeded once from `~/.config/openbrowser/profiles/default/storage_state.json`, so existing logins are available without allowing concurrent MCP servers to kill or corrupt one another's browser. OpenBrowser also auto-cleans disposable Chromium caches in managed profiles, which keeps disk usage down without deleting cookies or login state. If you explicitly configure the same `OPENBROWSER_USER_DATA_DIR` for multiple servers, the profile lease rejects the second owner with a clear error.
+By default, each MCP server process uses an isolated profile under `~/.config/openbrowser/profiles/mcp-<instance-id>`. Its `storage_state.json` is seeded once from `~/.config/openbrowser/profiles/default/storage_state.json`, so existing logins are available without allowing concurrent MCP servers to kill or corrupt one another's browser. The per-process profile is retained on disk but is not automatically reused by a later MCP process; configure `OPENBROWSER_USER_DATA_DIR` for a persistent profile or `OPENBROWSER_STORAGE_STATE` with a stable source file when login state must survive restarts. OpenBrowser also auto-cleans disposable Chromium caches in managed profiles, which keeps disk usage down without deleting cookies or login state. If you explicitly configure the same `OPENBROWSER_USER_DATA_DIR` for multiple servers, the profile lease rejects the second owner with a clear error.
 
 ### Quick Setup
 
@@ -460,7 +460,7 @@ Prefer indexed actions whenever an element index exists. Coordinate actions use 
 | `OPENBROWSER_HEADLESS` | Run browser without GUI | `true` |
 | `OPENBROWSER_ALLOWED_DOMAINS` | Comma-separated domain whitelist | (none) |
 | `OPENBROWSER_USER_DATA_DIR` | Optional explicit Chrome profile directory. Omit it for an isolated profile per MCP server instance | (auto: `~/.config/openbrowser/profiles/mcp-<instance-id>`) |
-| `OPENBROWSER_STORAGE_STATE` | Optional JSON file used to seed and restore cookies plus localStorage | (auto: per-instance `storage_state.json`, seeded from `profiles/default`) |
+| `OPENBROWSER_STORAGE_STATE` | Optional JSON file used to seed and restore cookies plus localStorage | (auto: per-process copy, seeded from `profiles/default`) |
 | `OPENBROWSER_COMPACT_DESCRIPTION` | Minimal tool description (~500 tokens) | `false` |
 | `OPENBROWSER_MAX_OUTPUT` | Max output characters per execution | `10000` |
 
