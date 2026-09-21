@@ -167,11 +167,57 @@ class DaemonServer:
             except BaseException:
                 # Kill the browser if startup or namespace setup fails. Bound
                 # cleanup too, so a broken browser cannot block the client.
-                try:
-                    await asyncio.wait_for(session.kill(), timeout=DAEMON_CLEANUP_TIMEOUT)
-                except Exception:
-                    logger.warning('Failed to clean up browser after daemon initialization failure', exc_info=True)
+                await self._cleanup_failed_session(session)
                 raise
+
+    async def _cleanup_failed_session(self, session) -> None:
+        """Bound failed-start cleanup without cancelling BrowserSession.kill()."""
+        cleanup_task = asyncio.create_task(session.kill())
+        try:
+            done, pending = await asyncio.wait({cleanup_task}, timeout=DAEMON_CLEANUP_TIMEOUT)
+        except BaseException:
+            cleanup_task.add_done_callback(self._log_cleanup_task_failure)
+            cleanup_task.cancel()
+            self._request_force_stop(session)
+            raise
+
+        if pending:
+            cleanup_task.add_done_callback(self._log_cleanup_task_failure)
+            cleanup_task.cancel()
+            self._request_force_stop(session)
+            logger.warning(
+                'Browser cleanup exceeded %ss after daemon initialization failure; force-stop requested',
+                DAEMON_CLEANUP_TIMEOUT,
+            )
+            return
+
+        # Retrieve any cleanup error so the detached-task callback does not
+        # produce an unhandled-task warning or replace the startup exception.
+        done_task = done.pop()
+        try:
+            done_task.result()
+        except BaseException:
+            logger.warning('Failed to clean up browser after daemon initialization failure', exc_info=True)
+
+    @staticmethod
+    def _request_force_stop(session) -> None:
+        """Queue the normal forced browser-stop event without awaiting it."""
+        from openbrowser.browser.events import BrowserStopEvent
+
+        session.event_bus.dispatch(BrowserStopEvent(force=True))
+
+    @staticmethod
+    def _log_cleanup_task_failure(task: asyncio.Task) -> None:
+        """Consume a detached cleanup task's eventual exception."""
+        if task.cancelled():
+            return
+        try:
+            error = task.exception()
+        except BaseException:
+            logger.warning('Detached daemon browser cleanup task failed', exc_info=True)
+        else:
+            if error is not None:
+                logger.warning('Detached daemon browser cleanup task failed', exc_info=(type(error), error, error.__traceback__))
 
     _CDP_ERROR_KEYWORDS = ('connectionclosederror', 'no close frame', 'websocket', 'connection closed')
 
