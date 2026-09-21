@@ -22,6 +22,8 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_IDLE_TIMEOUT = 600  # 10 minutes
 DEFAULT_EXEC_TIMEOUT = 300  # 5 minutes max per code execution
+DAEMON_INIT_TIMEOUT = 30  # Bound browser startup so clients never wait indefinitely
+DAEMON_CLEANUP_TIMEOUT = 5  # Bound cleanup after failed startup
 
 
 def _read_pid() -> int | None:
@@ -105,6 +107,14 @@ class DaemonServer:
             },
             CONFIG.OPENBROWSER_PROFILES_DIR / 'daemon',
         )
+        # The daemon already persists cookies and storage in its Chrome
+        # user-data directory. Replaying a second snapshot on every startup
+        # can be enormous and blocks the first request while CDP applies it.
+        # Keep storage-state loading only when the user explicitly configured
+        # a snapshot path.
+        if not profile_config.get('storage_state'):
+            profile_data.pop('storage_state', None)
+
         # Stored config (profile_config) may have headless=False from a previous
         # non-headless session, overriding the daemon default above. Apply the env
         # var override last so OPENBROWSER_HEADLESS=false is the only way to opt
@@ -138,8 +148,12 @@ class DaemonServer:
 
             profile = self._build_browser_profile()
             session = BrowserSession(browser_profile=profile)
-            await session.start()
             try:
+                try:
+                    await asyncio.wait_for(session.start(), timeout=DAEMON_INIT_TIMEOUT)
+                except asyncio.TimeoutError as exc:
+                    raise TimeoutError(f'Browser initialization timed out after {DAEMON_INIT_TIMEOUT}s') from exc
+
                 tools = CodeAgentTools()
                 namespace = create_namespace(browser_session=session, tools=tools)
 
@@ -150,13 +164,60 @@ class DaemonServer:
                 self._executor = CodeExecutor(max_output_chars=max_output if max_output > 0 else DEFAULT_MAX_OUTPUT_CHARS)
                 self._executor.set_namespace(namespace)
                 self._session = session
-            except Exception:
-                # Kill the browser if namespace/executor setup fails to prevent leak
-                try:
-                    await session.kill()
-                except Exception:
-                    pass
+            except BaseException:
+                # Kill the browser if startup or namespace setup fails. Bound
+                # cleanup too, so a broken browser cannot block the client.
+                await self._cleanup_failed_session(session)
                 raise
+
+    async def _cleanup_failed_session(self, session) -> None:
+        """Bound failed-start cleanup without cancelling BrowserSession.kill()."""
+        cleanup_task = asyncio.create_task(session.kill())
+        try:
+            done, pending = await asyncio.wait({cleanup_task}, timeout=DAEMON_CLEANUP_TIMEOUT)
+        except BaseException:
+            cleanup_task.add_done_callback(self._log_cleanup_task_failure)
+            cleanup_task.cancel()
+            self._request_force_stop(session)
+            raise
+
+        if pending:
+            cleanup_task.add_done_callback(self._log_cleanup_task_failure)
+            cleanup_task.cancel()
+            self._request_force_stop(session)
+            logger.warning(
+                'Browser cleanup exceeded %ss after daemon initialization failure; force-stop requested',
+                DAEMON_CLEANUP_TIMEOUT,
+            )
+            return
+
+        # Retrieve any cleanup error so the detached-task callback does not
+        # produce an unhandled-task warning or replace the startup exception.
+        done_task = done.pop()
+        try:
+            done_task.result()
+        except BaseException:
+            logger.warning('Failed to clean up browser after daemon initialization failure', exc_info=True)
+
+    @staticmethod
+    def _request_force_stop(session) -> None:
+        """Queue the normal forced browser-stop event without awaiting it."""
+        from openbrowser.browser.events import BrowserStopEvent
+
+        session.event_bus.dispatch(BrowserStopEvent(force=True))
+
+    @staticmethod
+    def _log_cleanup_task_failure(task: asyncio.Task) -> None:
+        """Consume a detached cleanup task's eventual exception."""
+        if task.cancelled():
+            return
+        try:
+            error = task.exception()
+        except BaseException:
+            logger.warning('Detached daemon browser cleanup task failed', exc_info=True)
+        else:
+            if error is not None:
+                logger.warning('Detached daemon browser cleanup task failed', exc_info=(type(error), error, error.__traceback__))
 
     _CDP_ERROR_KEYWORDS = ('connectionclosederror', 'no close frame', 'websocket', 'connection closed')
 
