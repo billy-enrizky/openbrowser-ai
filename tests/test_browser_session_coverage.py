@@ -422,6 +422,65 @@ class TestBrowserSessionLifecycle:
             await session.kill()
             mock_stop.assert_called()
 
+    async def test_kill_surfaces_browser_stop_handler_failure(self):
+        session = _make_browser_session()
+        save_event = _make_awaitable_event()
+        stop_event = _make_awaitable_event()
+        stop_event.event_result = AsyncMock(side_effect=RuntimeError('browser cleanup failed'))
+        session.event_bus.dispatch = MagicMock(side_effect=[save_event, stop_event])
+
+        with pytest.raises(RuntimeError, match='browser cleanup failed'):
+            await session.kill()
+
+    async def test_kill_finishes_browser_cleanup_when_storage_save_fails(self):
+        from openbrowser.browser.session import BrowserSession
+
+        session = _make_browser_session()
+        stop_event = _make_awaitable_event()
+        session.event_bus.dispatch = MagicMock(side_effect=[RuntimeError('storage save failed'), stop_event])
+        event_bus = session.event_bus
+        event_bus.stop = AsyncMock()
+
+        with patch.object(BrowserSession, 'reset', new_callable=AsyncMock) as reset:
+            with pytest.raises(RuntimeError, match='storage save failed'):
+                await session.kill()
+
+        assert event_bus.dispatch.call_count == 2
+        event_bus.stop.assert_awaited_once_with(clear=True, timeout=5)
+        reset.assert_awaited_once()
+        assert session.event_bus is not event_bus
+
+    async def test_kill_retains_event_bus_when_finalization_fails(self):
+        session = _make_browser_session()
+        save_event = _make_awaitable_event()
+        stop_event = _make_awaitable_event()
+        event_bus = session.event_bus
+        session.event_bus.dispatch = MagicMock(side_effect=[save_event, stop_event])
+        event_bus.stop = AsyncMock(side_effect=RuntimeError('event bus finalization failed'))
+
+        with patch.object(type(session), 'reset', new_callable=AsyncMock) as reset:
+            with pytest.raises(RuntimeError, match='event bus finalization failed'):
+                await session.kill()
+
+        assert session.event_bus is event_bus
+        reset.assert_not_awaited()
+
+    async def test_kill_replaces_event_bus_when_reset_fails(self):
+        session = _make_browser_session()
+        save_event = _make_awaitable_event()
+        stop_event = _make_awaitable_event()
+        event_bus = session.event_bus
+        session.event_bus.dispatch = MagicMock(side_effect=[save_event, stop_event])
+        event_bus.stop = AsyncMock()
+
+        with patch.object(type(session), 'reset', new_callable=AsyncMock) as reset:
+            reset.side_effect = RuntimeError('session reset failed')
+            with pytest.raises(RuntimeError, match='session reset failed'):
+                await session.kill()
+
+        assert session.event_bus is not event_bus
+        reset.assert_awaited_once()
+
     async def test_stop(self):
         session = _make_browser_session()
         session._cdp_client_root = MagicMock()

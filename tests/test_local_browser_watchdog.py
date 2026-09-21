@@ -214,7 +214,7 @@ class TestCleanupProcess:
         mock_process.is_running.return_value = False
 
         with patch('asyncio.sleep', new_callable=AsyncMock):
-            await LocalBrowserWatchdog._cleanup_process(mock_process)
+            await LocalBrowserWatchdog._cleanup_process(mock_process, require_identity=False)
 
         mock_process.terminate.assert_called_once()
 
@@ -227,7 +227,7 @@ class TestCleanupProcess:
         mock_process.is_running.return_value = True  # Never stops
 
         with patch('asyncio.sleep', new_callable=AsyncMock):
-            await LocalBrowserWatchdog._cleanup_process(mock_process)
+            await LocalBrowserWatchdog._cleanup_process(mock_process, require_identity=False)
 
         mock_process.terminate.assert_called_once()
         mock_process.kill.assert_called_once()
@@ -240,7 +240,7 @@ class TestCleanupProcess:
 
         with patch('asyncio.sleep', new_callable=AsyncMock):
             # Should not raise
-            await LocalBrowserWatchdog._cleanup_process(mock_process)
+            await LocalBrowserWatchdog._cleanup_process(mock_process, require_identity=False)
 
 
 @pytest.mark.asyncio
@@ -353,6 +353,24 @@ class TestOnBrowserStopEvent:
 
         watchdog.event_bus.dispatch.assert_not_called()
 
+    async def test_propagates_kill_cleanup_failure(self):
+        watchdog, session = _make_watchdog()
+        session.is_local = True
+        watchdog._subprocess = MagicMock()
+
+        class FailedKillEvent:
+            def __await__(self):
+                return asyncio.sleep(0).__await__()
+
+            async def event_result(self, raise_if_any=True, raise_if_none=False):
+                raise RuntimeError('browser cleanup failed')
+
+        watchdog.event_bus = MagicMock()
+        watchdog.event_bus.dispatch.return_value = FailedKillEvent()
+
+        with pytest.raises(RuntimeError, match='browser cleanup failed'):
+            await watchdog.on_BrowserStopEvent(MagicMock())
+
 
 @pytest.mark.asyncio
 class TestWaitForCdpUrl:
@@ -435,7 +453,7 @@ class TestKillStaleChromeForProfile:
             result = await LocalBrowserWatchdog._kill_stale_chrome_for_profile('/tmp/test-profile')
             assert result is False
 
-    async def test_kills_matching_chrome(self):
+    async def test_ignores_matching_chrome_without_ownership_metadata(self):
         from openbrowser.browser.watchdogs.local_browser_watchdog import LocalBrowserWatchdog
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -449,12 +467,11 @@ class TestKillStaleChromeForProfile:
             }
             mock_proc.kill = MagicMock()
 
-            # First call returns the process, second call (after kill) returns empty
-            with patch('psutil.process_iter', side_effect=[[mock_proc], []]):
+            with patch('psutil.process_iter', return_value=[mock_proc]):
                 result = await LocalBrowserWatchdog._kill_stale_chrome_for_profile(tmpdir)
 
-            assert result is True
-            mock_proc.kill.assert_called_once()
+            assert result is False
+            mock_proc.kill.assert_not_called()
 
 
 @pytest.mark.asyncio
