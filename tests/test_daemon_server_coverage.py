@@ -200,6 +200,44 @@ class TestDaemonServerHandleRequest:
         assert daemon_server._session is None
 
     @pytest.mark.asyncio
+    async def test_ensure_executor_cleanup_timeout_force_stops_stuck_session(self, daemon_server):
+        """A cleanup that swallows cancellation must not hold startup indefinitely."""
+        session = MagicMock()
+        cleanup_released = asyncio.Event()
+
+        async def hanging_start():
+            await asyncio.sleep(60)
+
+        async def stubborn_kill():
+            try:
+                await asyncio.sleep(60)
+            except asyncio.CancelledError:
+                await cleanup_released.wait()
+
+        session.start = AsyncMock(side_effect=hanging_start)
+        session.kill = AsyncMock(side_effect=stubborn_kill)
+        session.event_bus.dispatch = MagicMock()
+
+        with patch("openbrowser.browser.BrowserSession", return_value=session):
+            with patch.object(daemon_server, "_build_browser_profile", return_value=MagicMock()):
+                with patch("openbrowser.daemon.server.DAEMON_INIT_TIMEOUT", 0.01):
+                    with patch("openbrowser.daemon.server.DAEMON_CLEANUP_TIMEOUT", 0.01):
+                        ensure_task = asyncio.create_task(daemon_server._ensure_executor())
+                        try:
+                            done, _ = await asyncio.wait({ensure_task}, timeout=0.2)
+                            assert ensure_task in done
+                            with pytest.raises(TimeoutError, match="Browser initialization timed out"):
+                                await ensure_task
+                        finally:
+                            cleanup_released.set()
+                            if not ensure_task.done():
+                                await ensure_task
+
+        await asyncio.sleep(0)
+        session.event_bus.dispatch.assert_called_once()
+        assert session.event_bus.dispatch.call_args.args[0].force is True
+
+    @pytest.mark.asyncio
     async def test_execute_success(self, daemon_server):
         """Test successful execution."""
         mock_result = MagicMock()
