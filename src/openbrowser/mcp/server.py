@@ -105,6 +105,7 @@ except Exception:
 logger = logging.getLogger(__name__)
 
 _MCP_WORKSPACE_DIR = Path.home() / 'Downloads' / 'openbrowser-mcp' / 'workspace'
+_CDP_HEALTH_CHECK_TIMEOUT_SECONDS = 2.0
 
 
 def _create_mcp_file_system() -> Any:
@@ -426,7 +427,7 @@ class OpenBrowserServer:
 		if root is None:
 			return False
 		try:
-			await root.send.Browser.getVersion()
+			await asyncio.wait_for(root.send.Browser.getVersion(), timeout=_CDP_HEALTH_CHECK_TIMEOUT_SECONDS)
 			return True
 		except Exception:
 			return False

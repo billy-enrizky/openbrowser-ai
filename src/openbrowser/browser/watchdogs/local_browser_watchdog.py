@@ -1060,10 +1060,11 @@ class LocalBrowserWatchdog(BaseWatchdog):
 			if browser.get('profile_dir') != resolved_dir:
 				return False
 			try:
-				proc = psutil.Process(int(browser['pid']))
+				browser_pid = int(browser.get('pid'))
+				proc = psutil.Process(browser_pid)
 			except psutil.NoSuchProcess:
 				descendants, scan_succeeded = cls._find_owned_descendants(
-					browser, excluded_pids={int(browser['pid'])}
+					browser, excluded_pids={browser_pid}
 				)
 				if not scan_succeeded:
 					return False

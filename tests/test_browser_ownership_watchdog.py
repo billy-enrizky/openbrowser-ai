@@ -74,6 +74,27 @@ async def test_recorded_browser_with_reused_pid_is_never_killed(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_malformed_browser_metadata_without_pid_fails_closed(tmp_path: Path):
+	metadata = {
+		'instance_id': 'instance-a',
+		'owner_pid': 999,
+		'owner_start_time': 1.0,
+		'profile_dir': str(tmp_path.resolve()),
+		'browser': {
+			'start_time': 20.0,
+			'profile_dir': str(tmp_path.resolve()),
+			'instance_id': 'instance-a',
+			'ownership_marker': '--openbrowser-instance-id=instance-a',
+		},
+	}
+
+	with patch.object(ProfileLease, 'process_identity_status', return_value='missing'):
+		assert await LocalBrowserWatchdog._kill_stale_chrome_for_profile(
+			str(tmp_path), metadata=metadata, instance_id='instance-b'
+		) is False
+
+
+@pytest.mark.asyncio
 async def test_metadata_cannot_redirect_cleanup_to_another_instance_or_profile(tmp_path: Path):
 	target_profile = tmp_path / 'target-profile'
 	other_profile = tmp_path / 'other-profile'
