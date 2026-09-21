@@ -112,8 +112,8 @@ class ProfileLease:
 	) -> dict[str, Any]:
 		"""Record the identity and launch details of the owned browser."""
 		browser = {
-			'pid': process.pid,
-			'start_time': process.create_time(),
+			'pid': int(process.pid),
+			'start_time': float(process.create_time()),
 			'profile_dir': str(self.profile_dir),
 			'instance_id': self.instance_id,
 			'ownership_marker': ownership_marker,
@@ -198,15 +198,35 @@ class ProfileLease:
 			return False
 
 	@staticmethod
+	def process_identity_status(pid: Any, start_time: Any) -> str:
+		"""Classify a process identity as match, mismatch, missing, or unknown."""
+		if pid is None or start_time is None:
+			return 'unknown'
+		try:
+			process = psutil.Process(int(pid))
+		except psutil.NoSuchProcess:
+			return 'missing'
+		except (psutil.AccessDenied, psutil.ZombieProcess, TypeError, ValueError, OSError):
+			return 'unknown'
+
+		try:
+			current_pid = int(process.pid)
+			current_start_time = float(process.create_time())
+			expected_pid = int(pid)
+			expected_start_time = float(start_time)
+		except psutil.NoSuchProcess:
+			return 'missing'
+		except (psutil.AccessDenied, psutil.ZombieProcess, TypeError, ValueError, OSError):
+			return 'unknown'
+
+		if current_pid == expected_pid and current_start_time == expected_start_time:
+			return 'match'
+		return 'mismatch'
+
+	@staticmethod
 	def process_is_alive(pid: Any, start_time: Any) -> bool:
 		"""Check a process identity without trusting a reused PID."""
-		try:
-			if pid is None or start_time is None:
-				return False
-			process = psutil.Process(int(pid))
-		except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, TypeError, ValueError, OSError):
-			return False
-		return ProfileLease.process_matches_identity(process, pid, start_time)
+		return ProfileLease.process_identity_status(pid, start_time) == 'match'
 
 	@staticmethod
 	def _get_process_start_time(pid: int) -> float:

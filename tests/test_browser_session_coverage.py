@@ -422,6 +422,16 @@ class TestBrowserSessionLifecycle:
             await session.kill()
             mock_stop.assert_called()
 
+    async def test_kill_surfaces_browser_stop_handler_failure(self):
+        session = _make_browser_session()
+        save_event = _make_awaitable_event()
+        stop_event = _make_awaitable_event()
+        stop_event.event_result = AsyncMock(side_effect=RuntimeError('browser cleanup failed'))
+        session.event_bus.dispatch = MagicMock(side_effect=[save_event, stop_event])
+
+        with pytest.raises(RuntimeError, match='browser cleanup failed'):
+            await session.kill()
+
     async def test_stop(self):
         session = _make_browser_session()
         session._cdp_client_root = MagicMock()

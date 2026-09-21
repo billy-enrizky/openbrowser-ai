@@ -237,8 +237,8 @@ class TestRecoverBrowserSessionEdgeCases:
     """Test _recover_browser_session edge cases."""
 
     @pytest.mark.asyncio
-    async def test_recover_kill_and_reset_both_fail(self, server_instance):
-        """Lines 386-387: both kill() and reset() fail during recovery."""
+    async def test_recover_aborts_when_kill_and_reset_fail(self, server_instance):
+        """Recovery keeps ownership when the old session cannot be killed."""
         mock_old_session = MagicMock()
         mock_old_session.kill = AsyncMock(side_effect=Exception("kill fail"))
         mock_old_session.reset = AsyncMock(side_effect=Exception("reset fail"))
@@ -264,9 +264,10 @@ class TestRecoverBrowserSessionEdgeCases:
                         create=True,
                     ) as mock_watchdog_cls:
                         mock_watchdog_cls._kill_stale_chrome_for_profile = AsyncMock()
-                        # Should not raise despite both kill and reset failing
-                        await server_instance._recover_browser_session()
-                        assert server_instance.browser_session is mock_new_session
+                        with pytest.raises(RuntimeError, match="Unable to safely close"):
+                            await server_instance._recover_browser_session()
+                        mock_old_session.reset.assert_not_awaited()
+                        assert server_instance.browser_session is mock_old_session
 
     @pytest.mark.asyncio
     async def test_recover_no_user_data_dir(self, server_instance):

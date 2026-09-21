@@ -8,7 +8,6 @@ mocked so no real Chrome is needed.
 
 import asyncio
 import json
-import os
 import pytest
 import uuid
 from pathlib import Path
@@ -24,8 +23,12 @@ def daemon_env():
     tmp_dir.mkdir(parents=True, exist_ok=True)
     sock = tmp_dir / 'd.sock'
 
-    with patch.dict(os.environ, {'OPENBROWSER_SOCKET': str(sock)}), \
-         patch('openbrowser.daemon.client.DAEMON_DIR', tmp_dir):
+    with (
+        patch('openbrowser.daemon.server.get_socket_path', return_value=sock),
+        patch('openbrowser.daemon.server.get_pid_path', return_value=tmp_dir / 'd.pid'),
+        patch('openbrowser.daemon.client.get_socket_path', return_value=sock),
+        patch('openbrowser.daemon.client.DAEMON_DIR', tmp_dir),
+    ):
         yield sock
 
     # Cleanup -- PID path is derived from socket path (d.sock -> d.pid)

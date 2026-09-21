@@ -496,8 +496,8 @@ class TestMcpServerCleanupExpired:
         gaps_server_instance.session_timeout_minutes = 1
 
         await gaps_server_instance._cleanup_expired_session()
-        # Session still cleaned up in finally block
-        assert gaps_server_instance.browser_session is None
+        # Keep the reference so ownership-safe shutdown can retry cleanup.
+        assert gaps_server_instance.browser_session is mock_session
 
     @pytest.mark.asyncio
     async def test_cleanup_not_expired(self, gaps_server_instance):

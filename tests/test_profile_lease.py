@@ -2,6 +2,7 @@
 
 import json
 import os
+from decimal import Decimal
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -65,6 +66,28 @@ def test_write_metadata_keeps_browser_identity(tmp_path: Path):
 		lease.release()
 
 
+def test_record_browser_normalizes_process_identity(tmp_path: Path):
+	lease = ProfileLease(tmp_path / 'profile', instance_id='instance-a')
+	lease.acquire()
+	process = MagicMock()
+	process.pid = '123'
+	process.create_time.return_value = Decimal('456.5')
+
+	try:
+		record = lease.record_browser(
+			process,
+			ownership_marker='--openbrowser-instance-id=instance-a',
+			executable='/custom/chrome',
+			cdp_port=9223,
+		)
+
+		assert record['pid'] == 123
+		assert record['start_time'] == 456.5
+		assert ProfileLease.read_metadata(tmp_path / 'profile')['browser'] == record
+	finally:
+		lease.release()
+
+
 def test_process_identity_rejects_pid_reuse():
 	process = MagicMock()
 	process.pid = 123
@@ -73,6 +96,19 @@ def test_process_identity_rejects_pid_reuse():
 	assert ProfileLease.process_matches_identity(process, 123, 20.0) is True
 	assert ProfileLease.process_matches_identity(process, 123, 19.0) is False
 	assert ProfileLease.process_matches_identity(process, 124, 20.0) is False
+
+
+def test_process_identity_status_distinguishes_inaccessible_process(monkeypatch):
+	process = MagicMock()
+	process.pid = 123
+	process.create_time.return_value = 20.0
+	monkeypatch.setattr('psutil.Process', lambda pid: process)
+
+	assert ProfileLease.process_identity_status(123, 20.0) == 'match'
+	assert ProfileLease.process_identity_status(123, 19.0) == 'mismatch'
+
+	monkeypatch.setattr('psutil.Process', MagicMock(side_effect=psutil.AccessDenied(pid=123)))
+	assert ProfileLease.process_identity_status(123, 20.0) == 'unknown'
 
 
 def test_browser_identity_requires_profile_and_instance_marker(tmp_path: Path):

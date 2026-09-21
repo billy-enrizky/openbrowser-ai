@@ -214,7 +214,7 @@ class TestCleanupProcess:
         mock_process.is_running.return_value = False
 
         with patch('asyncio.sleep', new_callable=AsyncMock):
-            await LocalBrowserWatchdog._cleanup_process(mock_process)
+            await LocalBrowserWatchdog._cleanup_process(mock_process, require_identity=False)
 
         mock_process.terminate.assert_called_once()
 
@@ -227,7 +227,7 @@ class TestCleanupProcess:
         mock_process.is_running.return_value = True  # Never stops
 
         with patch('asyncio.sleep', new_callable=AsyncMock):
-            await LocalBrowserWatchdog._cleanup_process(mock_process)
+            await LocalBrowserWatchdog._cleanup_process(mock_process, require_identity=False)
 
         mock_process.terminate.assert_called_once()
         mock_process.kill.assert_called_once()
@@ -352,6 +352,24 @@ class TestOnBrowserStopEvent:
         await watchdog.on_BrowserStopEvent(event)
 
         watchdog.event_bus.dispatch.assert_not_called()
+
+    async def test_propagates_kill_cleanup_failure(self):
+        watchdog, session = _make_watchdog()
+        session.is_local = True
+        watchdog._subprocess = MagicMock()
+
+        class FailedKillEvent:
+            def __await__(self):
+                return asyncio.sleep(0).__await__()
+
+            async def event_result(self, raise_if_any=True, raise_if_none=False):
+                raise RuntimeError('browser cleanup failed')
+
+        watchdog.event_bus = MagicMock()
+        watchdog.event_bus.dispatch.return_value = FailedKillEvent()
+
+        with pytest.raises(RuntimeError, match='browser cleanup failed'):
+            await watchdog.on_BrowserStopEvent(MagicMock())
 
 
 @pytest.mark.asyncio

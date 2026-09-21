@@ -1287,7 +1287,7 @@ class TestLocalBrowserWatchdog:
 
         watchdog = self._make_watchdog(session=session)
 
-        with patch.object(watchdog, "_kill_stale_chrome_for_profile", new_callable=AsyncMock, return_value=False):
+        with patch.object(watchdog, "_kill_stale_chrome_for_profile", new_callable=AsyncMock, return_value=True):
             with patch.object(watchdog, "_find_free_port", return_value=9222):
                 with patch.object(watchdog, "_find_installed_browser_path", return_value=None):
                     with patch.object(watchdog, "_install_browser_with_playwright", new_callable=AsyncMock, return_value="/usr/bin/chrome"):
@@ -1311,7 +1311,7 @@ class TestLocalBrowserWatchdog:
 
         watchdog = self._make_watchdog(session=session)
 
-        with patch.object(watchdog, "_kill_stale_chrome_for_profile", new_callable=AsyncMock, return_value=False):
+        with patch.object(watchdog, "_kill_stale_chrome_for_profile", new_callable=AsyncMock, return_value=True):
             with patch.object(watchdog, "_find_free_port", return_value=9222):
                 with patch.object(watchdog, "_find_installed_browser_path", return_value=None):
                     with patch.object(watchdog, "_install_browser_with_playwright", new_callable=AsyncMock, return_value=None):
@@ -1337,7 +1337,7 @@ class TestLocalBrowserWatchdog:
             mock.pid = 9999
             return mock
 
-        with patch.object(watchdog, "_kill_stale_chrome_for_profile", new_callable=AsyncMock, return_value=False):
+        with patch.object(watchdog, "_kill_stale_chrome_for_profile", new_callable=AsyncMock, return_value=True):
             with patch.object(watchdog, "_find_free_port", return_value=9222):
                 with patch("asyncio.create_subprocess_exec", side_effect=fake_subprocess):
                     with patch("psutil.Process") as MockProcess:
@@ -1357,7 +1357,7 @@ class TestLocalBrowserWatchdog:
 
         watchdog = self._make_watchdog(session=session)
 
-        with patch.object(watchdog, "_kill_stale_chrome_for_profile", new_callable=AsyncMock, return_value=False):
+        with patch.object(watchdog, "_kill_stale_chrome_for_profile", new_callable=AsyncMock, return_value=True):
             with patch.object(watchdog, "_find_free_port", return_value=9222):
                 with patch("asyncio.create_subprocess_exec", new_callable=AsyncMock, side_effect=RuntimeError("unexpected error")):
                     with pytest.raises(RuntimeError, match="unexpected error"):
@@ -1379,7 +1379,7 @@ class TestLocalBrowserWatchdog:
         mock_process.terminate = MagicMock()
 
         from openbrowser.browser.watchdogs.local_browser_watchdog import LocalBrowserWatchdog
-        await LocalBrowserWatchdog._cleanup_process(mock_process)
+        await LocalBrowserWatchdog._cleanup_process(mock_process, require_identity=False)
         mock_process.terminate.assert_called_once()
 
     @pytest.mark.asyncio
@@ -1392,7 +1392,7 @@ class TestLocalBrowserWatchdog:
 
         from openbrowser.browser.watchdogs.local_browser_watchdog import LocalBrowserWatchdog
         with patch("asyncio.sleep", new_callable=AsyncMock):
-            await LocalBrowserWatchdog._cleanup_process(mock_process)
+            await LocalBrowserWatchdog._cleanup_process(mock_process, require_identity=False)
         mock_process.kill.assert_called()
 
     @pytest.mark.asyncio

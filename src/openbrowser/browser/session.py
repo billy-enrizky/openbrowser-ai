@@ -1,6 +1,7 @@
 """Event-driven browser session with backwards compatibility."""
 
 import asyncio
+import inspect
 import logging
 from functools import cached_property
 from pathlib import Path
@@ -502,7 +503,13 @@ class BrowserSession(BaseModel):
 		await save_event
 
 		# Dispatch stop event to kill the browser
-		await self.event_bus.dispatch(BrowserStopEvent(force=True))
+		stop_event = self.event_bus.dispatch(BrowserStopEvent(force=True))
+		await stop_event
+		event_result = getattr(stop_event, 'event_result', None)
+		if callable(event_result):
+			result = event_result(raise_if_any=True, raise_if_none=False)
+			if inspect.isawaitable(result):
+				await result
 		# Stop the event bus
 		await self.event_bus.stop(clear=True, timeout=5)
 		# Reset all state

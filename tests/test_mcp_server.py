@@ -270,9 +270,7 @@ class TestSessionCleanup:
     def test_cleanup_closes_expired_session(self, mcp_server):
         """Closes session when idle beyond timeout."""
         mock_session = MagicMock()
-        mock_event_bus = MagicMock()
-        mock_event_bus.dispatch = MagicMock(return_value=AsyncMock()())
-        mock_session.event_bus = mock_event_bus
+        mock_session.kill = AsyncMock()
 
         mcp_server.browser_session = mock_session
         mcp_server._namespace = {"some": "data"}
@@ -296,9 +294,7 @@ class TestSessionCleanup:
     def test_cleanup_handles_stop_error_gracefully(self, mcp_server):
         """Cleanup handles errors during session stop."""
         mock_session = MagicMock()
-        mock_event_bus = MagicMock()
-        mock_event_bus.dispatch = MagicMock(side_effect=RuntimeError("stop failed"))
-        mock_session.event_bus = mock_event_bus
+        mock_session.kill = AsyncMock(side_effect=RuntimeError("stop failed"))
 
         mcp_server.browser_session = mock_session
         mcp_server._namespace = {"data": True}
@@ -307,9 +303,9 @@ class TestSessionCleanup:
         # Should not raise
         asyncio.run(mcp_server._cleanup_expired_session())
 
-        # Session should still be cleaned up
-        assert mcp_server.browser_session is None
-        assert mcp_server._namespace is None
+        # Keep the reference so shutdown can retry ownership-safe cleanup.
+        assert mcp_server.browser_session is mock_session
+        assert mcp_server._namespace == {"data": True}
 
 
 # ===========================================================================
