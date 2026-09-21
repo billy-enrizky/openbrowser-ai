@@ -450,6 +450,21 @@ class TestBrowserSessionLifecycle:
         reset.assert_awaited_once()
         assert session.event_bus is not event_bus
 
+    async def test_kill_retains_event_bus_when_finalization_fails(self):
+        session = _make_browser_session()
+        save_event = _make_awaitable_event()
+        stop_event = _make_awaitable_event()
+        event_bus = session.event_bus
+        session.event_bus.dispatch = MagicMock(side_effect=[save_event, stop_event])
+        event_bus.stop = AsyncMock(side_effect=RuntimeError('event bus finalization failed'))
+
+        with patch.object(type(session), 'reset', new_callable=AsyncMock) as reset:
+            with pytest.raises(RuntimeError, match='event bus finalization failed'):
+                await session.kill()
+
+        assert session.event_bus is event_bus
+        reset.assert_not_awaited()
+
     async def test_stop(self):
         session = _make_browser_session()
         session._cdp_client_root = MagicMock()

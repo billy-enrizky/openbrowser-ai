@@ -45,7 +45,7 @@
         },
         {
           "name": "OPENBROWSER_STORAGE_STATE",
-          "description": "Optional stable JSON source used to seed and restore cookies plus localStorage between MCP restarts",
+          "description": "Optional JSON file used as a one-time seed for cookies plus localStorage in managed MCP profiles; later updates are saved to the active profile copy",
           "isRequired": false,
           "isSecret": false
         },

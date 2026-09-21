@@ -89,7 +89,7 @@
     "storage_state": {
       "type": "string",
       "title": "Storage State Path",
-      "description": "Optional stable JSON source used to seed and restore cookies plus localStorage across MCP restarts",
+      "description": "Optional JSON file used as a one-time seed for cookies plus localStorage in managed MCP profiles; later updates are saved to the active profile copy",
       "required": false
     },
     "disable_security": {
