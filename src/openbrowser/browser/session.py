@@ -530,19 +530,22 @@ class BrowserSession(BaseModel):
 			raise stop_error
 
 		finalization_error: BaseException | None = None
+		event_bus_stopped = False
 		try:
 			# Stop the event bus only after the browser cleanup handlers complete.
 			await event_bus.stop(clear=True, timeout=5)
+			event_bus_stopped = True
 		except BaseException as error:
 			finalization_error = error
-		try:
-			# Reset all state
-			await self.reset()
-		except BaseException as error:
-			if finalization_error is None:
+		if event_bus_stopped:
+			try:
+				# Reset all state
+				await self.reset()
+			except BaseException as error:
 				finalization_error = error
-		finally:
-			# Create fresh event bus even if state reset reports an error.
+
+		if finalization_error is None:
+			# Create a fresh event bus only after finalization succeeds.
 			self.event_bus = EventBus()
 
 		if finalization_error is not None:
