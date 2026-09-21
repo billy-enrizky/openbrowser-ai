@@ -385,9 +385,7 @@ class TestOpenBrowserServerCleanup:
     async def test_cleanup_expired(self, mcp_server_instance):
         """Lines 477-486: session expired."""
         mock_session = MagicMock()
-        mock_event_bus = MagicMock()
-        mock_event_bus.dispatch = MagicMock(return_value=AsyncMock()())
-        mock_session.event_bus = mock_event_bus
+        mock_session.kill = AsyncMock()
         mcp_server_instance.browser_session = mock_session
         mcp_server_instance._last_activity = time.time() - 10000
         mcp_server_instance.session_timeout_minutes = 1
@@ -403,16 +401,13 @@ class TestOpenBrowserServerCleanup:
     async def test_cleanup_error(self, mcp_server_instance):
         """Lines 482-486: cleanup error."""
         mock_session = MagicMock()
-        mock_session.event_bus = MagicMock()
-        mock_session.event_bus.dispatch = MagicMock(
-            side_effect=Exception("cleanup error")
-        )
+        mock_session.kill = AsyncMock(side_effect=Exception("cleanup error"))
         mcp_server_instance.browser_session = mock_session
         mcp_server_instance._last_activity = time.time() - 10000
         mcp_server_instance.session_timeout_minutes = 1
 
         await mcp_server_instance._cleanup_expired_session()
-        assert mcp_server_instance.browser_session is None
+        assert mcp_server_instance.browser_session is mock_session
 
     @pytest.mark.asyncio
     async def test_start_cleanup_task(self, mcp_server_instance):
@@ -420,6 +415,8 @@ class TestOpenBrowserServerCleanup:
         await mcp_server_instance._start_cleanup_task()
         assert mcp_server_instance._cleanup_task is not None
         mcp_server_instance._cleanup_task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await mcp_server_instance._cleanup_task
 
 
 class TestMCPServerMain:
@@ -514,7 +511,7 @@ class TestRecoverBrowserSession:
 
     @pytest.mark.asyncio
     async def test_recover_browser_session_kill_fails(self, mcp_server_instance):
-        """Lines 379-387: kill fails, try reset."""
+        """Recovery aborts when the old session cannot be cleaned safely."""
         mock_old_session = MagicMock()
         mock_old_session.kill = AsyncMock(side_effect=Exception("kill failed"))
         mock_old_session.reset = AsyncMock()
@@ -529,7 +526,7 @@ class TestRecoverBrowserSession:
         with patch(
             "openbrowser.mcp.server.BrowserSession",
             return_value=mock_new_session,
-        ):
+        ) as browser_session:
             with patch("openbrowser.mcp.server.CodeAgentTools", return_value=MagicMock()):
                 with patch(
                     "openbrowser.mcp.server.create_namespace",
@@ -540,4 +537,9 @@ class TestRecoverBrowserSession:
                         create=True,
                     ) as mock_watchdog_cls:
                         mock_watchdog_cls._kill_stale_chrome_for_profile = AsyncMock()
-                        await mcp_server_instance._recover_browser_session()
+                        with pytest.raises(RuntimeError, match="Unable to safely close"):
+                            await mcp_server_instance._recover_browser_session()
+
+                        browser_session.assert_not_called()
+                        mock_old_session.reset.assert_not_awaited()
+                        assert mcp_server_instance.browser_session is mock_old_session
