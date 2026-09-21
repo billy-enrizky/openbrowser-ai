@@ -485,7 +485,7 @@ class TestMcpServerCleanupExpired:
 
     @pytest.mark.asyncio
     async def test_cleanup_expired_session_dispatch_error(self, gaps_server_instance):
-        """When dispatch raises, session is still cleaned up."""
+        """When dispatch raises, cleanup fails and the session is retained for retry."""
         mock_session = MagicMock()
         mock_session.event_bus = MagicMock()
         mock_session.event_bus.dispatch = MagicMock(
@@ -496,8 +496,8 @@ class TestMcpServerCleanupExpired:
         gaps_server_instance.session_timeout_minutes = 1
 
         await gaps_server_instance._cleanup_expired_session()
-        # Session still cleaned up in finally block
-        assert gaps_server_instance.browser_session is None
+        # Keep the reference so ownership-safe shutdown can retry cleanup.
+        assert gaps_server_instance.browser_session is mock_session
 
     @pytest.mark.asyncio
     async def test_cleanup_not_expired(self, gaps_server_instance):
@@ -1173,8 +1173,8 @@ class TestLbwKillStaleChromeLines503_512:
             assert result is False
 
     @pytest.mark.asyncio
-    async def test_kill_stale_chrome_with_matching_process(self):
-        """Matching Chrome process is killed and returns True."""
+    async def test_kill_stale_chrome_with_matching_process_is_ignored_without_record(self):
+        """A matching path without an ownership record is not enough to kill."""
         tmp_dir = tempfile.mkdtemp(prefix="openbrowser-test-")
         resolved = str(Path(tmp_dir).resolve())
 
@@ -1187,20 +1187,10 @@ class TestLbwKillStaleChromeLines503_512:
         mock_proc.pid = 99999
         mock_proc.kill = MagicMock()
 
-        # After killing, second iteration should find no matching procs
-        call_count = 0
-
-        def mock_process_iter(*args, **kwargs):
-            nonlocal call_count
-            call_count += 1
-            if call_count <= 1:
-                return [mock_proc]
-            return []
-
-        with patch("psutil.process_iter", side_effect=mock_process_iter):
+        with patch("psutil.process_iter", return_value=[mock_proc]):
             result = await LocalBrowserWatchdog._kill_stale_chrome_for_profile(tmp_dir)
-            assert result is True
-            mock_proc.kill.assert_called_once()
+            assert result is False
+            mock_proc.kill.assert_not_called()
 
 
 class TestLbwGetBrowserPidViaCdp:

@@ -1,6 +1,7 @@
 """Event-driven browser session with backwards compatibility."""
 
 import asyncio
+import inspect
 import logging
 from functools import cached_property
 from pathlib import Path
@@ -498,17 +499,58 @@ class BrowserSession(BaseModel):
 		# First save storage state while CDP is still connected
 		from openbrowser.browser.events import SaveStorageStateEvent
 
-		save_event = self.event_bus.dispatch(SaveStorageStateEvent())
-		await save_event
+		event_bus = self.event_bus
+		save_error: BaseException | None = None
+		try:
+			save_event = event_bus.dispatch(SaveStorageStateEvent())
+			await save_event
+		except BaseException as error:
+			# A storage-state failure must not prevent the browser from receiving
+			# its force-stop event. Preserve the error for the caller after cleanup.
+			save_error = error
 
-		# Dispatch stop event to kill the browser
-		await self.event_bus.dispatch(BrowserStopEvent(force=True))
-		# Stop the event bus
-		await self.event_bus.stop(clear=True, timeout=5)
-		# Reset all state
-		await self.reset()
-		# Create fresh event bus
-		self.event_bus = EventBus()
+		stop_error: BaseException | None = None
+		try:
+			# Dispatch stop event to kill the browser
+			stop_event = event_bus.dispatch(BrowserStopEvent(force=True))
+			await stop_event
+			event_result = getattr(stop_event, 'event_result', None)
+			if callable(event_result):
+				result = event_result(raise_if_any=True, raise_if_none=False)
+				if inspect.isawaitable(result):
+					await result
+		except BaseException as error:
+			# Keep the event bus and watchdog references intact when ownership
+			# cleanup fails, so the caller can retry without releasing the lease.
+			stop_error = error
+
+		if stop_error is not None:
+			if save_error is not None:
+				raise stop_error from save_error
+			raise stop_error
+
+		finalization_error: BaseException | None = None
+		event_bus_stopped = False
+		try:
+			# Stop the event bus only after the browser cleanup handlers complete.
+			await event_bus.stop(clear=True, timeout=5)
+			event_bus_stopped = True
+		except BaseException as error:
+			finalization_error = error
+		if event_bus_stopped:
+			try:
+				# Reset all state
+				await self.reset()
+			except BaseException as error:
+				finalization_error = error
+			finally:
+				# The old bus is stopped, so replace it even if state reset fails.
+				self.event_bus = EventBus()
+
+		if finalization_error is not None:
+			raise finalization_error
+		if save_error is not None:
+			raise save_error
 
 	async def stop(self) -> None:
 		"""Stop the browser session without killing the browser process.

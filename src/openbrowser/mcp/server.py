@@ -20,14 +20,17 @@ Or as an MCP server in Claude Desktop or other MCP clients:
 import os
 import sys
 
-
 # Set environment variables BEFORE any openbrowser imports to prevent early logging
 os.environ['OPENBROWSER_LOGGING_LEVEL'] = 'critical'
 os.environ['OPENBROWSER_SETUP_LOGGING'] = 'false'
 
 import asyncio
+from copy import deepcopy
+import inspect
 import logging
+import shutil
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -80,10 +83,15 @@ logging.disable(logging.CRITICAL)
 
 # Import openbrowser modules
 from openbrowser.browser import BrowserProfile, BrowserSession
-from openbrowser.code_use.namespace import create_namespace
-from openbrowser.config import CONFIG, apply_managed_browser_profile_defaults, get_default_profile, load_openbrowser_config
-from openbrowser.tools.service import CodeAgentTools
 from openbrowser.code_use.executor import DEFAULT_MAX_OUTPUT_CHARS, CodeExecutor
+from openbrowser.code_use.namespace import create_namespace
+from openbrowser.config import (
+	CONFIG,
+	apply_managed_browser_profile_defaults,
+	get_default_profile,
+	load_openbrowser_config,
+)
+from openbrowser.tools.service import CodeAgentTools
 
 try:
 	from openbrowser.filesystem.file_system import FileSystem
@@ -97,6 +105,7 @@ except Exception:
 logger = logging.getLogger(__name__)
 
 _MCP_WORKSPACE_DIR = Path.home() / 'Downloads' / 'openbrowser-mcp' / 'workspace'
+_CDP_HEALTH_CHECK_TIMEOUT_SECONDS = 2.0
 
 
 def _create_mcp_file_system() -> Any:
@@ -190,6 +199,8 @@ def get_parent_process_cmdline() -> str | None:
 
 from openbrowser.code_use.descriptions import (
 	EXECUTE_CODE_DESCRIPTION as _EXECUTE_CODE_DESCRIPTION,
+)
+from openbrowser.code_use.descriptions import (
 	EXECUTE_CODE_DESCRIPTION_COMPACT as _EXECUTE_CODE_DESCRIPTION_COMPACT,
 )
 
@@ -208,6 +219,9 @@ class OpenBrowserServer:
 		self.server = Server('openbrowser')
 		self.config = load_openbrowser_config()
 		self.browser_session: BrowserSession | None = None
+		self._instance_id = uuid.uuid4().hex
+		self._managed_profile_dir: Path | None = None
+		self._managed_storage_state: Path | None = None
 		self._telemetry = ProductTelemetry() if TELEMETRY_AVAILABLE else None
 		self._start_time = time.time()
 
@@ -224,6 +238,9 @@ class OpenBrowserServer:
 		self.session_timeout_minutes = session_timeout_minutes
 		self._last_activity = time.time()
 		self._cleanup_task: Any = None
+		self._lifecycle_lock = asyncio.Lock()
+		self._execution_lock = asyncio.Lock()
+		self._execution_task: asyncio.Task[Any] | None = None
 
 		self._setup_handlers()
 
@@ -305,55 +322,102 @@ class OpenBrowserServer:
 
 	def _build_browser_profile(self):
 		"""Build a BrowserProfile from config with MCP defaults."""
-		profile_config = get_default_profile(self.config)
-		profile_data = apply_managed_browser_profile_defaults(
-			{
-				'downloads_path': str(Path.home() / 'Downloads' / 'openbrowser-mcp'),
-				'wait_between_actions': 0.5,
-				'keep_alive': True,
-				'user_data_dir': '~/.config/openbrowser/profiles/default',
-				'device_scale_factor': 1.0,
-				'disable_security': False,
-				'headless': True,
-				**profile_config,
-			},
-			CONFIG.OPENBROWSER_PROFILES_DIR / 'default',
-		)
+		profile_config = dict(get_default_profile(self.config))
+		explicit_user_data_dir = profile_config.get('user_data_dir')
+		profile_data = {
+			'downloads_path': str(Path.home() / 'Downloads' / 'openbrowser-mcp'),
+			'wait_between_actions': 0.5,
+			'keep_alive': True,
+			'device_scale_factor': 1.0,
+			'disable_security': False,
+			'headless': True,
+			**profile_config,
+		}
+
+		if explicit_user_data_dir:
+			# Explicit paths are intentionally shared and protected by the
+			# profile lease. Never silently replace one with a temporary path.
+			managed_default_dir = None
+		else:
+			managed_default_dir = self._get_managed_profile_dir()
+			profile_data['user_data_dir'] = str(managed_default_dir)
+			configured_storage_state = profile_data.get('storage_state')
+			if configured_storage_state is None or isinstance(configured_storage_state, (str, Path)):
+				storage_state_path = managed_default_dir / 'storage_state.json'
+				self._seed_managed_storage_state(storage_state_path, source=configured_storage_state)
+				profile_data['storage_state'] = str(storage_state_path)
+			else:
+				# In-memory Playwright storage state is already isolated per profile
+				# object. Do not coerce it into a shared filesystem path.
+				profile_data['storage_state'] = deepcopy(configured_storage_state)
+
+		profile_data = apply_managed_browser_profile_defaults(profile_data, managed_default_dir)
+		args = list(profile_data.get('args') or [])
+		ownership_marker = f'--openbrowser-instance-id={self._instance_id}'
+		if not any(argument.startswith('--openbrowser-instance-id=') for argument in args):
+			args.append(ownership_marker)
+		profile_data['args'] = args
 		return BrowserProfile(**profile_data)
+
+	def _get_managed_profile_dir(self) -> Path:
+		"""Return the stable isolated profile directory for this MCP instance."""
+		if self._managed_profile_dir is None:
+			self._managed_profile_dir = CONFIG.OPENBROWSER_PROFILES_DIR / f'mcp-{self._instance_id}'
+		self._managed_profile_dir.mkdir(parents=True, exist_ok=True)
+		return self._managed_profile_dir
+
+	def _seed_managed_storage_state(self, destination: Path, source: str | Path | None = None) -> None:
+		"""Copy configured or default state once into this instance's profile."""
+		if destination.exists():
+			self._managed_storage_state = destination
+			return
+
+		source_path = Path(source).expanduser() if source else CONFIG.OPENBROWSER_PROFILES_DIR / 'default' / 'storage_state.json'
+		if source_path.is_file():
+			destination.parent.mkdir(parents=True, exist_ok=True)
+			shutil.copy2(source_path, destination)
+		self._managed_storage_state = destination
 
 	async def _ensure_namespace(self):
 		"""Lazily initialize browser session, tools, and namespace on first use."""
 		if self._namespace is not None:
 			return
 
-		_ensure_all_loggers_use_stderr()
+		async with self._lifecycle_lock:
+			if self._namespace is not None:
+				return
+			if self.browser_session is not None:
+				raise RuntimeError('A previous browser session still owns resources after cleanup failed')
 
-		# Initialize browser session
-		profile = self._build_browser_profile()
-		session = BrowserSession(browser_profile=profile)
+			_ensure_all_loggers_use_stderr()
 
-		try:
-			await session.start()
-		except Exception as e:
-			logger.error('Failed to start browser session: %s', e)
+			# Initialize browser session
+			profile = self._build_browser_profile()
+			session = BrowserSession(browser_profile=profile)
+			self.browser_session = session
 			try:
-				from openbrowser.browser.events import BrowserStopEvent
-				event = session.event_bus.dispatch(BrowserStopEvent())
-				await event
-			except Exception:
-				pass
-			raise
+				await session.start()
 
-		self.browser_session = session
-
-		# Create CodeAgent tools and namespace
-		self._tools = CodeAgentTools()
-		self._namespace = create_namespace(
-			browser_session=self.browser_session,
-			tools=self._tools,
-			file_system=_create_mcp_file_system(),
-		)
-		self._executor.set_namespace(self._namespace)
+				# Create CodeAgent tools and namespace
+				self._tools = CodeAgentTools()
+				self._namespace = create_namespace(
+					browser_session=self.browser_session,
+					tools=self._tools,
+					file_system=_create_mcp_file_system(),
+				)
+				self._executor.set_namespace(self._namespace)
+			except BaseException as error:
+				logger.error('Failed to initialize browser session: %s', error)
+				cleanup_succeeded, was_cancelled = await self._kill_session_safely(session)
+				if not cleanup_succeeded:
+					logger.error('Failed to clean up browser session after initialization failure')
+				if cleanup_succeeded and self.browser_session is session:
+					self.browser_session = None
+				if cleanup_succeeded:
+					self._namespace = None
+				if was_cancelled:
+					raise asyncio.CancelledError
+				raise
 
 	async def _is_cdp_alive(self) -> bool:
 		"""Check if the browser session's CDP WebSocket is still connected."""
@@ -363,12 +427,70 @@ class OpenBrowserServer:
 		if root is None:
 			return False
 		try:
-			await root.send.Browser.getVersion()
+			await asyncio.wait_for(root.send.Browser.getVersion(), timeout=_CDP_HEALTH_CHECK_TIMEOUT_SECONDS)
 			return True
 		except Exception:
 			return False
 
+	async def _kill_session_safely(self, session: BrowserSession) -> tuple[bool, bool]:
+		"""Kill a session without allowing cancellation to interrupt cleanup."""
+		try:
+			kill_result = session.kill()
+		except BaseException:
+			return False, False
+		if not inspect.isawaitable(kill_result):
+			# Keep compatibility with lightweight session doubles and older session
+			# implementations that expose only the stop event lifecycle.
+			try:
+				from openbrowser.browser.events import BrowserStopEvent
+				event = session.event_bus.dispatch(BrowserStopEvent(force=True))
+				if inspect.isawaitable(event):
+					await event
+				event_result = getattr(event, 'event_result', None)
+				if callable(event_result):
+					result = event_result(raise_if_any=True, raise_if_none=False)
+					if inspect.isawaitable(result):
+						await result
+				return True, False
+			except BaseException:
+				return False, False
+
+		kill_task = asyncio.create_task(kill_result)
+		was_cancelled = False
+		try:
+			await asyncio.shield(kill_task)
+		except asyncio.CancelledError:
+			was_cancelled = True
+		except BaseException:
+			return False, False
+
+		# A caller can be cancelled more than once while the owned browser is
+		# being stopped. Keep draining the shielded task until it reaches a
+		# terminal state so a second cancellation cannot orphan the browser.
+		while not kill_task.done():
+			try:
+				await asyncio.shield(kill_task)
+			except asyncio.CancelledError:
+				was_cancelled = True
+			except BaseException:
+				return False, was_cancelled
+
+		try:
+			kill_task.result()
+		except BaseException:
+			return False, was_cancelled
+		return True, was_cancelled
+
 	async def _recover_browser_session(self) -> None:
+		"""Serialize recovery with execution and lifecycle cleanup."""
+		if self._execution_task is asyncio.current_task():
+			await self._recover_browser_session_locked()
+			return
+
+		async with self._execution_lock:
+			await self._recover_browser_session_locked()
+
+	async def _recover_browser_session_locked(self) -> None:
 		"""Kill the dead browser session and create a fresh one.
 
 		Called when we detect the CDP WebSocket has disconnected (e.g. Chrome
@@ -376,50 +498,67 @@ class OpenBrowserServer:
 		BrowserSession and rebuilds the namespace so the next execute_code
 		call works transparently.
 		"""
-		logger.info('CDP connection lost -- recovering browser session')
+		async with self._lifecycle_lock:
+			if self.browser_session and await self._is_cdp_alive():
+				return
 
-		# 1. Tear down the old session
-		if self.browser_session:
+			logger.info('CDP connection lost, recovering browser session')
+
+			# 1. Tear down the old session
+			old_session = self.browser_session
+			old_ns = self._namespace or {}
+			if old_session:
+				cleanup_succeeded, was_cancelled = await self._kill_session_safely(old_session)
+				if cleanup_succeeded and self.browser_session is old_session:
+					self.browser_session = None
+				if cleanup_succeeded:
+					self._namespace = None
+				if was_cancelled:
+					raise asyncio.CancelledError
+				if not cleanup_succeeded:
+					raise RuntimeError('Unable to safely close the old browser session during recovery')
+			else:
+				self._namespace = None
+
+			# 2. Create a brand-new session. The local watchdog owns its profile
+			# lease and can reclaim only its recorded browser process.
 			try:
-				await self.browser_session.kill()
-			except Exception:
-				# Session may already be half-dead; best-effort cleanup
-				try:
-					await self.browser_session.reset()
-				except Exception:
-					pass
+				profile = self._build_browser_profile()
+				session = BrowserSession(browser_profile=profile)
+			except BaseException:
+				self.browser_session = None
+				self._namespace = None
+				raise
 
-		# 2. Kill any stale Chrome holding the profile lock
-		from openbrowser.browser.watchdogs.local_browser_watchdog import LocalBrowserWatchdog
+			self.browser_session = session
+			try:
+				await session.start()
 
-		user_data_dir = '~/.config/openbrowser/profiles/default'
-		if self.browser_session and self.browser_session.browser_profile.user_data_dir:
-			user_data_dir = self.browser_session.browser_profile.user_data_dir
-		await LocalBrowserWatchdog._kill_stale_chrome_for_profile(user_data_dir)
+				# 3. Rebuild namespace with the new session (preserving user variables)
+				self._tools = CodeAgentTools()
+				self._namespace = create_namespace(
+					browser_session=self.browser_session,
+					tools=self._tools,
+					file_system=_create_mcp_file_system(),
+				)
+				# Copy user-defined variables from old namespace
+				for key, val in old_ns.items():
+					if not key.startswith('__') and key not in self._namespace:
+						self._namespace[key] = val
 
-		# 3. Create a brand-new session
-		profile = self._build_browser_profile()
-		session = BrowserSession(browser_profile=profile)
-		await session.start()
-		self.browser_session = session
+				self._executor.set_namespace(self._namespace)
+			except BaseException:
+				cleanup_succeeded, was_cancelled = await self._kill_session_safely(session)
+				if not cleanup_succeeded:
+					logger.error('Failed to clean up replacement browser session')
+				if cleanup_succeeded and self.browser_session is session:
+					self.browser_session = None
+				self._namespace = None
+				if was_cancelled:
+					raise asyncio.CancelledError
+				raise
 
-		# 4. Rebuild namespace with the new session (preserving user variables)
-		old_ns = self._namespace or {}
-
-		self._tools = CodeAgentTools()
-		self._namespace = create_namespace(
-			browser_session=self.browser_session,
-			tools=self._tools,
-			file_system=_create_mcp_file_system(),
-		)
-		# Copy user-defined variables from old namespace
-		for key, val in old_ns.items():
-			if not key.startswith('__') and key not in self._namespace:
-				self._namespace[key] = val
-
-		self._executor.set_namespace(self._namespace)
-
-		logger.info('Browser session recovered successfully')
+			logger.info('Browser session recovered successfully')
 
 	def _is_connection_error(self, exc_or_text) -> bool:
 		"""Return True if the error indicates a dead CDP connection."""
@@ -431,6 +570,16 @@ class OpenBrowserServer:
 		return any(kw in text for kw in keywords)
 
 	async def _execute_code(self, code: str) -> str:
+		"""Serialize execution with browser lifecycle operations."""
+		async with self._execution_lock:
+			self._execution_task = asyncio.current_task()
+			try:
+				return await self._execute_code_locked(code)
+			finally:
+				self._last_activity = time.time()
+				self._execution_task = None
+
+	async def _execute_code_locked(self, code: str) -> str:
 		"""Execute Python code in the persistent namespace."""
 		await self._ensure_namespace()
 		assert self._namespace is not None
@@ -468,25 +617,70 @@ class OpenBrowserServer:
 
 		return result.output
 
+	async def _shutdown(self) -> None:
+		"""Stop background cleanup and release this server's browser ownership."""
+		shutdown_task = asyncio.create_task(self._shutdown_locked())
+		cancellation_requested = False
+		while not shutdown_task.done():
+			try:
+				await asyncio.shield(shutdown_task)
+			except asyncio.CancelledError:
+				cancellation_requested = True
+
+		shutdown_task.result()
+		if cancellation_requested:
+			raise asyncio.CancelledError
+
+	async def _shutdown_locked(self) -> None:
+		"""Perform shutdown while isolated from cancellation of the caller."""
+		cleanup_task = self._cleanup_task
+		self._cleanup_task = None
+		if cleanup_task:
+			cleanup_task.cancel()
+			try:
+				await cleanup_task
+			except asyncio.CancelledError:
+				pass
+			except Exception as e:
+				logger.error('Error stopping cleanup task: %s', e)
+
+		async with self._execution_lock:
+			async with self._lifecycle_lock:
+				session = self.browser_session
+				if not session:
+					self._namespace = None
+					return
+
+				cleanup_succeeded, was_cancelled = await self._kill_session_safely(session)
+				if cleanup_succeeded and self.browser_session is session:
+					self.browser_session = None
+					self._namespace = None
+				elif not cleanup_succeeded:
+					raise RuntimeError('Unable to safely close the browser session during shutdown')
+				if was_cancelled:
+					raise asyncio.CancelledError
+
 	async def _cleanup_expired_session(self) -> None:
 		"""Close browser session if idle beyond timeout."""
-		if not self.browser_session:
-			return
+		async with self._execution_lock:
+			async with self._lifecycle_lock:
+				session = self.browser_session
+				if not session:
+					return
 
-		current_time = time.time()
-		timeout_seconds = self.session_timeout_minutes * 60
+				current_time = time.time()
+				timeout_seconds = self.session_timeout_minutes * 60
 
-		if current_time - self._last_activity > timeout_seconds:
-			logger.info('Auto-closing idle browser session')
-			try:
-				from openbrowser.browser.events import BrowserStopEvent
-				event = self.browser_session.event_bus.dispatch(BrowserStopEvent())
-				await event
-			except Exception as e:
-				logger.error('Error closing idle session: %s', e)
-			finally:
-				self.browser_session = None
-				self._namespace = None
+				if current_time - self._last_activity > timeout_seconds:
+					logger.info('Auto-closing idle browser session')
+					cleanup_succeeded, was_cancelled = await self._kill_session_safely(session)
+					if cleanup_succeeded and self.browser_session is session:
+						self.browser_session = None
+						self._namespace = None
+					elif not cleanup_succeeded:
+						logger.error('Error closing idle session: cleanup failed')
+					if was_cancelled:
+						raise asyncio.CancelledError
 
 	async def _start_cleanup_task(self) -> None:
 		"""Start the background cleanup task."""
@@ -504,21 +698,24 @@ class OpenBrowserServer:
 
 	async def run(self):
 		"""Run the MCP server."""
-		await self._start_cleanup_task()
+		try:
+			await self._start_cleanup_task()
 
-		async with mcp.server.stdio.stdio_server() as (read_stream, write_stream):
-			await self.server.run(
-				read_stream,
-				write_stream,
-				InitializationOptions(
-					server_name='openbrowser',
-					server_version=get_openbrowser_version(),
-					capabilities=self.server.get_capabilities(
-						notification_options=NotificationOptions(),
-						experimental_capabilities={},
+			async with mcp.server.stdio.stdio_server() as (read_stream, write_stream):
+				await self.server.run(
+					read_stream,
+					write_stream,
+					InitializationOptions(
+						server_name='openbrowser',
+						server_version=get_openbrowser_version(),
+						capabilities=self.server.get_capabilities(
+							notification_options=NotificationOptions(),
+							experimental_capabilities={},
+						),
 					),
 				),
-			)
+		finally:
+			await self._shutdown()
 
 
 async def main(session_timeout_minutes: int = 10):

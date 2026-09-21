@@ -684,4 +684,4 @@ Anti-patterns:
 - Do NOT `daemon stop` when reusing an existing session; that kills the user's open tabs.
 - Do NOT rely on the 600s idle timeout; that wastes a Chrome process for 10 minutes.
 - Do NOT use `done()` as a substitute; it only ends the agent loop, browser stays open.
-- Do NOT mix `--mcp` mode with the daemon; separate profiles, browser contention.
+- Do NOT mix `--mcp` mode with the daemon in one workflow; they have separate persistent namespaces and browser profiles.

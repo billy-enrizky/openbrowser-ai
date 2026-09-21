@@ -9,7 +9,7 @@ import threading
 import time
 import uuid
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import patch
 
 import pytest
 
@@ -110,44 +110,44 @@ class TestCliCHelp:
 
         def run_daemon():
             asyncio.set_event_loop(loop)
-            os.environ['OPENBROWSER_SOCKET'] = sock_str
+            loop.run_until_complete(server.run())
+
+        with (
+            patch('openbrowser.daemon.server.get_socket_path', return_value=sock),
+            patch('openbrowser.daemon.server.get_pid_path', return_value=tmp_dir / 'd.pid'),
+        ):
+            t = threading.Thread(target=run_daemon, daemon=True)
+            t.start()
+
+            # Wait for socket to appear
+            for _ in range(50):
+                if sock.exists():
+                    break
+                time.sleep(0.05)
+            else:
+                server._running = False
+                server._stop_event.set()
+                t.join(timeout=5)
+                pytest.fail('Mock daemon socket never appeared')
+
             try:
-                loop.run_until_complete(server.run())
+                env = {**os.environ, 'OPENBROWSER_SOCKET': sock_str}
+                result = subprocess.run(
+                    [sys.executable, '-m', 'openbrowser.cli', '-c', 'print(1+1)'],
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                    env=env,
+                )
+                assert result.returncode == 0, f'stderr: {result.stderr}'
+                assert '2' in result.stdout
             finally:
-                os.environ.pop('OPENBROWSER_SOCKET', None)
-
-        t = threading.Thread(target=run_daemon, daemon=True)
-        t.start()
-
-        # Wait for socket to appear
-        for _ in range(50):
-            if sock.exists():
-                break
-            time.sleep(0.05)
-        else:
-            server._running = False
-            server._stop_event.set()
-            t.join(timeout=5)
-            pytest.fail('Mock daemon socket never appeared')
-
-        try:
-            env = {**os.environ, 'OPENBROWSER_SOCKET': sock_str}
-            result = subprocess.run(
-                [sys.executable, '-m', 'openbrowser.cli', '-c', 'print(1+1)'],
-                capture_output=True,
-                text=True,
-                timeout=30,
-                env=env,
-            )
-            assert result.returncode == 0, f'stderr: {result.stderr}'
-            assert '2' in result.stdout
-        finally:
-            server._running = False
-            server._stop_event.set()
-            t.join(timeout=5)
-            sock.unlink(missing_ok=True)
-            (tmp_dir / 'd.pid').unlink(missing_ok=True)
-            try:
-                tmp_dir.rmdir()
-            except OSError:
-                pass
+                server._running = False
+                server._stop_event.set()
+                t.join(timeout=5)
+                sock.unlink(missing_ok=True)
+                (tmp_dir / 'd.pid').unlink(missing_ok=True)
+                try:
+                    tmp_dir.rmdir()
+                except OSError:
+                    pass

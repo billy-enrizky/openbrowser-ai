@@ -2,7 +2,7 @@
 
 AI-powered browser automation for Claude Code. Control real web browsers directly from Claude -- navigate websites, fill forms, extract data, inspect accessibility trees, and automate multi-step workflows.
 
-Local OpenBrowser sessions persist cookies and login state by default. The CLI daemon saves them in `~/.config/openbrowser/profiles/daemon/storage_state.json`, and the MCP server saves them in `~/.config/openbrowser/profiles/default/storage_state.json` unless you override those paths. Managed profiles also auto-clean disposable Chromium caches so they do not grow like normal long-lived Chrome profiles.
+Local CLI daemon sessions persist cookies and login state by default in `~/.config/openbrowser/profiles/daemon/storage_state.json`. Each MCP server process uses an isolated `~/.config/openbrowser/profiles/mcp-<instance-id>` profile and seeds its state once from `profiles/default/storage_state.json`, preventing concurrent MCP servers from terminating or corrupting one another's browser. MCP instance profiles are retained on disk but are not automatically reused by later processes. Configure `OPENBROWSER_USER_DATA_DIR` for a profile that survives restarts; `OPENBROWSER_STORAGE_STATE` is a one-time seed for managed profiles, and later changes are saved to the active per-process copy rather than copied back automatically. Managed profiles also auto-clean disposable Chromium caches so they do not grow like normal long-lived Chrome profiles. Explicitly configured shared profiles are protected by a lease and reject concurrent owners.
 
 ## Prerequisites
 
@@ -152,8 +152,8 @@ Optional environment variables:
 |----------|-------------|
 | `OPENBROWSER_HEADLESS` | Set to `true` to run browser without GUI |
 | `OPENBROWSER_ALLOWED_DOMAINS` | Comma-separated domain whitelist |
-| `OPENBROWSER_USER_DATA_DIR` | Chrome profile directory for saved MCP sessions |
-| `OPENBROWSER_STORAGE_STATE` | JSON file for saving and restoring cookies plus localStorage |
+| `OPENBROWSER_USER_DATA_DIR` | Optional explicit Chrome profile directory. Omit it for one isolated profile per MCP server process |
+| `OPENBROWSER_STORAGE_STATE` | Optional JSON file used as a one-time seed for cookies plus localStorage in managed MCP profiles |
 | `OPENBROWSER_COMPACT_DESCRIPTION` | Set to `true` for minimal tool description (~500 tokens) |
 | `OPENBROWSER_MAX_OUTPUT` | Maximum output characters per execution (default: 10,000) |
 | `ANONYMIZED_TELEMETRY` | Set to `false` to disable anonymized usage telemetry (default: `true`) |
