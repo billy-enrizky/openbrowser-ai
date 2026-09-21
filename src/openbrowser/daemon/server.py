@@ -22,6 +22,8 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_IDLE_TIMEOUT = 600  # 10 minutes
 DEFAULT_EXEC_TIMEOUT = 300  # 5 minutes max per code execution
+DAEMON_INIT_TIMEOUT = 30  # Bound browser startup so clients never wait indefinitely
+DAEMON_CLEANUP_TIMEOUT = 5  # Bound cleanup after failed startup
 
 
 def _read_pid() -> int | None:
@@ -105,6 +107,14 @@ class DaemonServer:
             },
             CONFIG.OPENBROWSER_PROFILES_DIR / 'daemon',
         )
+        # The daemon already persists cookies and storage in its Chrome
+        # user-data directory. Replaying a second snapshot on every startup
+        # can be enormous and blocks the first request while CDP applies it.
+        # Keep storage-state loading only when the user explicitly configured
+        # a snapshot path.
+        if not profile_config.get('storage_state'):
+            profile_data.pop('storage_state', None)
+
         # Stored config (profile_config) may have headless=False from a previous
         # non-headless session, overriding the daemon default above. Apply the env
         # var override last so OPENBROWSER_HEADLESS=false is the only way to opt
@@ -138,8 +148,12 @@ class DaemonServer:
 
             profile = self._build_browser_profile()
             session = BrowserSession(browser_profile=profile)
-            await session.start()
             try:
+                try:
+                    await asyncio.wait_for(session.start(), timeout=DAEMON_INIT_TIMEOUT)
+                except asyncio.TimeoutError as exc:
+                    raise TimeoutError(f'Browser initialization timed out after {DAEMON_INIT_TIMEOUT}s') from exc
+
                 tools = CodeAgentTools()
                 namespace = create_namespace(browser_session=session, tools=tools)
 
@@ -150,12 +164,13 @@ class DaemonServer:
                 self._executor = CodeExecutor(max_output_chars=max_output if max_output > 0 else DEFAULT_MAX_OUTPUT_CHARS)
                 self._executor.set_namespace(namespace)
                 self._session = session
-            except Exception:
-                # Kill the browser if namespace/executor setup fails to prevent leak
+            except BaseException:
+                # Kill the browser if startup or namespace setup fails. Bound
+                # cleanup too, so a broken browser cannot block the client.
                 try:
-                    await session.kill()
+                    await asyncio.wait_for(session.kill(), timeout=DAEMON_CLEANUP_TIMEOUT)
                 except Exception:
-                    pass
+                    logger.warning('Failed to clean up browser after daemon initialization failure', exc_info=True)
                 raise
 
     _CDP_ERROR_KEYWORDS = ('connectionclosederror', 'no close frame', 'websocket', 'connection closed')

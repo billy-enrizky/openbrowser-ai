@@ -103,8 +103,8 @@ class TestPidFunctions:
 class TestDaemonServerBuildProfile:
     """Test _build_browser_profile."""
 
-    def test_build_browser_profile(self, daemon_server):
-        """Lines 71-86: build browser profile from config."""
+    def test_build_browser_profile_does_not_replay_managed_storage_state(self, daemon_server):
+        """A persistent Chrome profile should not also replay a duplicate snapshot."""
         mock_profile = MagicMock()
         mock_profile_class = MagicMock(return_value=mock_profile)
 
@@ -119,7 +119,26 @@ class TestDaemonServerBuildProfile:
                     assert result is mock_profile
                     mock_profile_class.assert_called_once()
                     _, kwargs = mock_profile_class.call_args
-                    assert kwargs["storage_state"].endswith("profiles/daemon/storage_state.json")
+                    assert kwargs.get("storage_state") is None
+
+    def test_build_browser_profile_preserves_explicit_storage_state(self, daemon_server):
+        """An explicitly configured storage state remains available to the daemon."""
+        mock_profile = MagicMock()
+        mock_profile_class = MagicMock(return_value=mock_profile)
+        configured_state = "/tmp/openbrowser-explicit-state.json"
+
+        with patch("openbrowser.browser.BrowserProfile", mock_profile_class):
+            with patch(
+                "openbrowser.config.load_openbrowser_config", return_value={}
+            ):
+                with patch(
+                    "openbrowser.config.get_default_profile",
+                    return_value={"storage_state": configured_state},
+                ):
+                    result = daemon_server._build_browser_profile()
+                    assert result is mock_profile
+                    _, kwargs = mock_profile_class.call_args
+                    assert kwargs["storage_state"] == configured_state
 
 
 class TestDaemonServerIsConnectionError:
@@ -158,6 +177,27 @@ class TestDaemonServerHandleRequest:
         )
         assert result["success"] is False
         assert "timed out" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_ensure_executor_timeout_cleans_up_session(self, daemon_server):
+        """Browser startup timeout must not leave a live session or pending request."""
+        session = MagicMock()
+
+        async def hanging_start():
+            await asyncio.sleep(60)
+
+        session.start = AsyncMock(side_effect=hanging_start)
+        session.kill = AsyncMock()
+
+        with patch("openbrowser.browser.BrowserSession", return_value=session):
+            with patch.object(daemon_server, "_build_browser_profile", return_value=MagicMock()):
+                with patch("openbrowser.daemon.server.DAEMON_INIT_TIMEOUT", 0.01):
+                    with pytest.raises(TimeoutError, match="Browser initialization timed out"):
+                        await daemon_server._ensure_executor()
+
+        session.kill.assert_awaited_once()
+        assert daemon_server._executor is None
+        assert daemon_server._session is None
 
     @pytest.mark.asyncio
     async def test_execute_success(self, daemon_server):
