@@ -543,10 +543,9 @@ class BrowserSession(BaseModel):
 				await self.reset()
 			except BaseException as error:
 				finalization_error = error
-
-		if finalization_error is None:
-			# Create a fresh event bus only after finalization succeeds.
-			self.event_bus = EventBus()
+			finally:
+				# The old bus is stopped, so replace it even if state reset fails.
+				self.event_bus = EventBus()
 
 		if finalization_error is not None:
 			raise finalization_error
