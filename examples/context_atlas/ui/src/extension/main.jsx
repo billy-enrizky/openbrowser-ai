@@ -15,6 +15,7 @@ const PAGE_HIGHLIGHT_STYLE_ID = "context-atlas-page-highlight-style";
 const SELECTOR = "p,li,pre,blockquote,figcaption";
 const HEADING_SELECTOR = "h1,h2,h3";
 const NOISE_ANCESTOR_SELECTOR = "nav,header,footer,aside,form,figure,table,[role='navigation'],[role='complementary'],[hidden],[aria-hidden='true'],[contenteditable='true'],.thumb,.infobox,.navbox,.metadata,.mw-editsection";
+const FIGCAPTION_NOISE_ANCESTOR_SELECTOR = NOISE_ANCESTOR_SELECTOR.replace("figure,", "");
 const SOURCE_REFRESH_DEBOUNCE_MS = 120;
 const SOURCE_URL_POLL_MS = 250;
 const NAVIGATION_EVENT = "context-atlas:navigation";
@@ -65,7 +66,10 @@ function publishPageSource(adapter, source) {
 }
 
 function isUsable(element) {
-  if (element.localName !== "figcaption" && element.closest(NOISE_ANCESTOR_SELECTOR)) return false;
+  const noiseSelector = element.localName === "figcaption"
+    ? FIGCAPTION_NOISE_ANCESTOR_SELECTOR
+    : NOISE_ANCESTOR_SELECTOR;
+  if (element.closest(noiseSelector)) return false;
   const computed = getComputedStyle(element);
   return computed.display !== "none" && computed.visibility !== "hidden" && element.getClientRects().length > 0;
 }
