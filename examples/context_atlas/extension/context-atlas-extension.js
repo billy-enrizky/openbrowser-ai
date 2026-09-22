@@ -8056,6 +8056,28 @@
         if (selectionVersion === providerSelectionVersionRef.current) setProviderBusy(false);
       }
     }
+    function handleProviderKeyDown(event) {
+      if (providerBusy || !["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+      const providers = ["laya", "jev"];
+      const currentIndex = providers.indexOf(event.currentTarget.dataset.provider);
+      if (currentIndex < 0) return;
+      const nextIndex = event.key === "Home" ? 0 : event.key === "End" ? providers.length - 1 : event.key === "ArrowRight" ? (currentIndex + 1) % providers.length : (currentIndex - 1 + providers.length) % providers.length;
+      const nextProvider = providers[nextIndex];
+      const tabList = event.currentTarget.parentElement;
+      const currentTab = event.currentTarget;
+      const nextTab = tabList?.querySelector(`[data-provider="${nextProvider}"]`);
+      const selectionVersion = providerSelectionVersionRef.current + 1;
+      event.preventDefault();
+      nextTab?.focus();
+      void (async () => {
+        await chooseProvider(nextProvider);
+        if (selectionVersion !== providerSelectionVersionRef.current) return;
+        window.setTimeout(() => {
+          if (selectionVersion !== providerSelectionVersionRef.current) return;
+          (tabList?.querySelector('[aria-selected="true"]') || currentTab)?.focus();
+        }, 0);
+      })();
+    }
     const activeProvider = providerEnabled ? provider : "jev";
     const focusedIndex = result?.ambiguous && ambiguousSelection === null ? -1 : current;
     const focused = focusedIndex >= 0 ? matches[focusedIndex] || null : null;
@@ -8127,22 +8149,31 @@
         setStatus({ kind: "error", message: "Enter a question first.", retryable: false });
         return;
       }
+      const requestId = requestRef.current + 1;
+      requestRef.current = requestId;
+      const isRequestCurrent = () => isCurrentRequest(requestId, requestRef.current);
       let accessPromise = Promise.resolve({ granted: true });
       if (activeProvider === "laya" && typeof adapter?.ensureProviderAccess === "function") {
         try {
           accessPromise = adapter.ensureProviderAccess(activeProvider);
         } catch (error) {
-          setStatus({ kind: "error", ...normalizeSearchError(error) });
+          if (isRequestCurrent()) {
+            setSearchProgress(0);
+            setStatus({ kind: "error", ...normalizeSearchError(error) });
+          }
           return;
         }
       }
+      if (!isRequestCurrent()) return;
       setSearchProgress(12);
       setStatus({ kind: "loading", message: "Finding results\u2026", retryable: false });
       let searchPassages = sourcePassages;
       try {
         await accessPromise;
+        if (!isRequestCurrent()) return;
         if (typeof prepareSearch === "function") {
           const prepared = await prepareSearch(cleanQuery);
+          if (!isRequestCurrent()) return;
           if (prepared && Array.isArray(prepared.passages)) {
             searchPassages = prepared.passages;
             setActivePassages(searchPassages);
@@ -8150,17 +8181,17 @@
           }
         }
       } catch (error) {
+        if (!isRequestCurrent()) return;
         setSearchProgress(0);
         setStatus({ kind: "error", ...normalizeSearchError(error) });
         return;
       }
+      if (!isRequestCurrent()) return;
       if (!searchPassages.length) {
         setSearchProgress(0);
         setStatus({ kind: "error", message: "No page text is ready yet. Refresh from the current page.", retryable: true });
         return;
       }
-      const requestId = requestRef.current + 1;
-      requestRef.current = requestId;
       const sourceAtRequest = sourceFingerprint(searchPassages);
       lastSearchRef.current = { query: cleanQuery, sourceAtRequest };
       setResult(null);
@@ -8230,8 +8261,8 @@
       ] }),
       providerEnabled ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("section", { className: "context-atlas-card context-atlas-provider-card", "aria-label": "Search provider", children: [
         /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "context-atlas-provider-tabs", role: "tablist", "aria-label": "Search provider", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { id: "context-atlas-provider-tab-laya", className: "context-atlas-provider-tab", type: "button", role: "tab", "aria-selected": provider === "laya", "aria-controls": "context-atlas-provider-panel-laya", tabIndex: provider === "laya" ? 0 : -1, onClick: () => void chooseProvider("laya"), disabled: providerBusy, children: "Local" }),
-          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { id: "context-atlas-provider-tab-jev", className: "context-atlas-provider-tab", type: "button", role: "tab", "aria-selected": provider === "jev", "aria-controls": "context-atlas-provider-panel-jev", tabIndex: provider === "jev" ? 0 : -1, onClick: () => void chooseProvider("jev"), disabled: providerBusy, children: "Cloud" })
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { id: "context-atlas-provider-tab-laya", "data-provider": "laya", className: "context-atlas-provider-tab", type: "button", role: "tab", "aria-selected": provider === "laya", "aria-controls": "context-atlas-provider-panel-laya", tabIndex: provider === "laya" ? 0 : -1, onClick: () => void chooseProvider("laya"), onKeyDown: handleProviderKeyDown, disabled: providerBusy, children: "Local" }),
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { id: "context-atlas-provider-tab-jev", "data-provider": "jev", className: "context-atlas-provider-tab", type: "button", role: "tab", "aria-selected": provider === "jev", "aria-controls": "context-atlas-provider-panel-jev", tabIndex: provider === "jev" ? 0 : -1, onClick: () => void chooseProvider("jev"), onKeyDown: handleProviderKeyDown, disabled: providerBusy, children: "Cloud" })
         ] }),
         /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { id: "context-atlas-provider-panel-laya", className: "context-atlas-provider-status", role: "tabpanel", "aria-labelledby": "context-atlas-provider-tab-laya", hidden: provider !== "laya", children: [
           /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "context-atlas-eyebrow", children: "LOCAL" }),
@@ -8502,6 +8533,7 @@
   var SELECTOR = "p,li,pre,blockquote,figcaption";
   var HEADING_SELECTOR = "h1,h2,h3";
   var NOISE_ANCESTOR_SELECTOR = "nav,header,footer,aside,form,figure,table,[role='navigation'],[role='complementary'],[hidden],[aria-hidden='true'],[contenteditable='true'],.thumb,.infobox,.navbox,.metadata,.mw-editsection";
+  var FIGCAPTION_NOISE_ANCESTOR_SELECTOR = NOISE_ANCESTOR_SELECTOR.replace("figure,", "");
   var SOURCE_REFRESH_DEBOUNCE_MS = 120;
   var SOURCE_URL_POLL_MS = 250;
   var NAVIGATION_EVENT = "context-atlas:navigation";
@@ -8549,7 +8581,8 @@
     });
   }
   function isUsable(element) {
-    if (element.localName !== "figcaption" && element.closest(NOISE_ANCESTOR_SELECTOR)) return false;
+    const noiseSelector = element.localName === "figcaption" ? FIGCAPTION_NOISE_ANCESTOR_SELECTOR : NOISE_ANCESTOR_SELECTOR;
+    if (element.closest(noiseSelector)) return false;
     const computed = getComputedStyle(element);
     return computed.display !== "none" && computed.visibility !== "hidden" && element.getClientRects().length > 0;
   }

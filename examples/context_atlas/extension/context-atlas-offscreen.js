@@ -102,6 +102,15 @@ function rejectPending(error) {
   }
   pendingRequests.clear();
 }
+function resetSandbox(error) {
+  clearTimeout(sandboxReadyPromise?.timeout);
+  sandboxReadyPromise?.reject(error);
+  sandboxReadyPromise = null;
+  rejectPending(error);
+  const frame = sandboxFrame;
+  sandboxFrame = null;
+  frame?.remove();
+}
 function withTimeout(promise, timeoutMs, message, onTimeout) {
   return new Promise((resolve, reject) => {
     let settled = false;
@@ -160,27 +169,20 @@ function ensureSandbox() {
   });
   const timeout = setTimeout(() => {
     const error = new Error("The local Laya sandbox did not become ready.");
-    sandboxReadyPromise?.reject(error);
-    rejectPending(error);
-    sandboxReadyPromise = null;
-    sandboxFrame?.remove();
-    sandboxFrame = null;
+    resetSandbox(error);
   }, SANDBOX_READY_TIMEOUT_MS);
   sandboxReadyPromise = { promise, resolve: resolveReady, reject: rejectReady, timeout };
-  sandboxFrame = document.createElement("iframe");
-  sandboxFrame.hidden = true;
-  sandboxFrame.title = "Context Atlas local model sandbox";
-  sandboxFrame.src = chrome.runtime.getURL("sandbox.html");
-  sandboxFrame.addEventListener("error", () => {
+  const frame = document.createElement("iframe");
+  sandboxFrame = frame;
+  frame.hidden = true;
+  frame.title = "Context Atlas local model sandbox";
+  frame.src = chrome.runtime.getURL("sandbox.html");
+  frame.addEventListener("error", () => {
+    if (sandboxFrame !== frame) return;
     const error = new Error("The local Laya sandbox could not be loaded.");
-    clearTimeout(sandboxReadyPromise?.timeout);
-    sandboxReadyPromise?.reject(error);
-    rejectPending(error);
-    sandboxReadyPromise = null;
-    sandboxFrame?.remove();
-    sandboxFrame = null;
+    resetSandbox(error);
   });
-  document.body.append(sandboxFrame);
+  document.body.append(frame);
   return promise;
 }
 async function requestSandbox(type, payload = {}, transfer = []) {
@@ -193,7 +195,9 @@ async function requestSandbox(type, payload = {}, transfer = []) {
       const pending2 = pendingRequests.get(requestId);
       if (!pending2) return;
       pendingRequests.delete(requestId);
-      pending2.reject(new Error("The local Laya sandbox request timed out."));
+      const error = new Error("The local Laya sandbox request timed out.");
+      pending2.reject(error);
+      if (type === "initialize") resetSandbox(error);
     }, SANDBOX_REQUEST_TIMEOUT_MS);
     try {
       frame.contentWindow.postMessage({ channel: CHANNEL, requestId, type, ...payload }, "*", transfer);
@@ -220,7 +224,7 @@ async function initializeRuntime() {
       "The local Laya runtime initialization timed out.",
       (error) => {
         controller?.abort();
-        rejectPending(error);
+        resetSandbox(error);
       }
     ).catch((error) => {
       runtimePromise = null;
