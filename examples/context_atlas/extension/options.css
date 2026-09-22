@@ -1,0 +1,25 @@
+:root {
+  color-scheme: light;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  color: #18222d;
+  background: #f4f7f8;
+}
+
+body { margin: 0; }
+.panel { width: min(560px, calc(100% - 40px)); margin: 48px auto; padding: 28px; border: 1px solid #dce2e7; border-radius: 16px; background: white; box-shadow: 0 18px 50px rgba(24,34,45,.07); }
+.eyebrow { color: #b9432a; font-size: 11px; font-weight: 800; letter-spacing: .16em; }
+h1 { margin: 18px 0 10px; letter-spacing: -.04em; }
+.muted, .field-help { color: #65717d; line-height: 1.55; }
+label { display: block; margin: 20px 0 6px; font-size: 13px; font-weight: 700; }
+.field-help { margin: 0 0 8px; font-size: 13px; }
+.status-card { margin: 24px 0; padding: 16px; border: 1px solid #dce2e7; border-radius: 12px; background: #f8fafb; }
+.status-card p { margin: 7px 0; }
+input { width: 100%; box-sizing: border-box; padding: 11px 12px; border: 1px solid #dce2e7; border-radius: 9px; font: inherit; font-size: 16px; }
+input:focus, button:focus-visible { border-color: #e35d3f; outline: 3px solid rgba(227,93,63,.24); outline-offset: 2px; }
+.actions { display: flex; flex-wrap: wrap; gap: 10px; }
+button { margin-top: 14px; border: 1px solid #e35d3f; border-radius: 9px; padding: 10px 15px; color: white; background: #e35d3f; font: inherit; font-weight: 700; cursor: pointer; }
+button.secondary { border-color: #dce2e7; color: #18222d; background: white; }
+button:disabled { cursor: not-allowed; opacity: .55; }
+#status { min-height: 20px; color: #65717d; font-size: 13px; }
+#status[data-kind="error"] { color: #b3261e; }
+#status[data-kind="success"] { color: #26734d; }
