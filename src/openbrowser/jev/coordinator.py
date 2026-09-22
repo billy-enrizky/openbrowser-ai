@@ -6,12 +6,12 @@ import asyncio
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from openbrowser.jev.semantic_search import (
 	DEFAULT_RELEVANCE_THRESHOLD,
-	MAX_PASSAGES,
 	MAX_PASSAGE_LENGTH,
+	MAX_PASSAGES,
 	MAX_QUERY_LENGTH,
 	MAX_TOTAL_TEXT_LENGTH,
 	SemanticSearchError,
@@ -67,7 +67,7 @@ class BoundedSemanticSearch:
 		searcher: object,
 		max_concurrency: int = MAX_BATCH_CONCURRENCY,
 	) -> None:
-		if isinstance(max_concurrency, bool) or max_concurrency < 1:
+		if not isinstance(max_concurrency, int) or isinstance(max_concurrency, bool) or max_concurrency < 1:
 			raise ValueError("max_concurrency must be a positive integer")
 		self._searcher = searcher
 		self._max_concurrency = max_concurrency
@@ -95,19 +95,27 @@ class BoundedSemanticSearch:
 		async def run_batch(batch: SearchBatch) -> SemanticSearchResult:
 			async with semaphore:
 				try:
-					search = getattr(self._searcher, "search")
+					search = getattr(self._searcher, "search")  # noqa: B009
 					return await search(query=query.strip(), passages=batch.passages)
 				except SemanticSearchError as exc:
 					raise _normalize_provider_error(exc) from exc
 				except Exception as exc:
 					raise _normalize_provider_error(exc) from exc
 
-		results = await asyncio.gather(*(run_batch(batch) for batch in batches))
+		tasks = [asyncio.create_task(run_batch(batch)) for batch in batches]
+		try:
+			results = await asyncio.gather(*tasks)
+		except BaseException:
+			for task in tasks:
+				if not task.done():
+					task.cancel()
+			await asyncio.gather(*tasks, return_exceptions=True)
+			raise
 		return _merge_results(
 			results=results,
 			batches=batches,
 			threshold=self.threshold,
-			elapsed_ms=sum(result.elapsed_ms for result in results),
+			elapsed_ms=_elapsed_ms(started),
 		)
 
 
@@ -239,10 +247,11 @@ def _aggregate_usage(values: Sequence[object]) -> object | None:
 		return None
 	if not all(isinstance(value, Mapping) for value in values):
 		return None
-	keys = {key for value in values for key in value}
+	mapping_values = tuple(cast(Mapping[Any, Any], value) for value in values)
+	keys = {key for value in mapping_values for key in value}
 	aggregated: dict[object, object] = {}
 	for key in keys:
-		raw_values = [value[key] for value in values if key in value]
+		raw_values = [value[key] for value in mapping_values if key in value]
 		if raw_values and all(isinstance(item, (int, float)) and not isinstance(item, bool) for item in raw_values):
 			aggregated[key] = sum(raw_values)
 		elif raw_values and all(item == raw_values[0] for item in raw_values):
@@ -255,9 +264,9 @@ def _elapsed_ms(started: float) -> int:
 
 
 __all__ = [
-	"BoundedSemanticSearch",
 	"MAX_BATCH_CONCURRENCY",
 	"MAX_BATCH_PASSAGES",
+	"BoundedSemanticSearch",
 	"SearchBatch",
 	"plan_search_batches",
 	]

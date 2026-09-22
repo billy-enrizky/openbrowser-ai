@@ -25,6 +25,9 @@ MAX_QUERY_LENGTH = 400
 MAX_PASSAGES = 160
 MAX_PASSAGE_LENGTH = 2_200
 MAX_TOTAL_TEXT_LENGTH = 60_000
+MAX_SENTENCES_PER_PASSAGE = 128
+MAX_SENTENCE_LENGTH = MAX_PASSAGE_LENGTH
+MAX_TOTAL_SENTENCE_TEXT_LENGTH = MAX_TOTAL_TEXT_LENGTH
 DEFAULT_RELEVANCE_THRESHOLD = 0.58
 
 
@@ -128,6 +131,7 @@ def _validate_and_normalize(
 
 	seen_ids: set[str] = set()
 	total_text_length = 0
+	total_sentence_text_length = 0
 	normalized: list[SearchPassage] = []
 	for passage in items:
 		if not isinstance(passage, SearchPassage):
@@ -148,13 +152,14 @@ def _validate_and_normalize(
 			raise SemanticSearchError(
 				f"passage text must total at most {MAX_TOTAL_TEXT_LENGTH:,} characters"
 			)
-		normalized.append(
-			SearchPassage(
-				id=passage.id,
-				text=passage.text,
-				sentences=_normalize_sentences(passage),
+		sentences = _normalize_sentences(passage)
+		total_sentence_text_length += sum(len(sentence.text) for sentence in sentences)
+		if total_sentence_text_length > MAX_TOTAL_SENTENCE_TEXT_LENGTH:
+			raise SemanticSearchError(
+				"sentence metadata must total at most "
+				f"{MAX_TOTAL_SENTENCE_TEXT_LENGTH:,} characters"
 			)
-		)
+		normalized.append(SearchPassage(id=passage.id, text=passage.text, sentences=sentences))
 	return clean_query, tuple(normalized)
 
 
@@ -162,23 +167,20 @@ def _normalize_sentences(passage: SearchPassage) -> tuple[SearchSentence, ...]:
 	if not passage.sentences:
 		return (SearchSentence(index=0, text=passage.text),)
 	try:
-		sentences = tuple(passage.sentences)
+		iterator = iter(passage.sentences)
 	except TypeError as exc:
 		raise SemanticSearchError(f"passage {passage.id!r} sentences must be iterable") from exc
-	if not sentences:
-		raise SemanticSearchError(
-			f"passage {passage.id!r} sentence indexes must be contiguous from zero"
-		)
-	for sentence in sentences:
+	sentences: list[SearchSentence] = []
+	for position, sentence in enumerate(iterator):
+		if position >= MAX_SENTENCES_PER_PASSAGE:
+			raise SemanticSearchError(
+				f"passage {passage.id!r} must contain at most "
+				f"{MAX_SENTENCES_PER_PASSAGE} sentences"
+			)
 		if not isinstance(sentence, SearchSentence):
 			raise SemanticSearchError(
 				f"passage {passage.id!r} sentences must contain SearchSentence values"
 			)
-	if tuple(sentence.index for sentence in sentences) != tuple(range(len(sentences))):
-		raise SemanticSearchError(
-			f"passage {passage.id!r} sentence indexes must be contiguous from zero"
-		)
-	for sentence in sentences:
 		if not isinstance(sentence.index, int) or isinstance(sentence.index, bool):
 			raise SemanticSearchError(
 				f"passage {passage.id!r} sentence indexes must be integers"
@@ -187,7 +189,21 @@ def _normalize_sentences(passage: SearchPassage) -> tuple[SearchSentence, ...]:
 			raise SemanticSearchError(
 				f"passage {passage.id!r} sentence text must not be empty"
 			)
-	return sentences
+		if len(sentence.text) > MAX_SENTENCE_LENGTH:
+			raise SemanticSearchError(
+				f"passage {passage.id!r} sentence must be at most "
+				f"{MAX_SENTENCE_LENGTH:,} characters"
+			)
+		sentences.append(sentence)
+	if not sentences:
+		raise SemanticSearchError(
+			f"passage {passage.id!r} sentence indexes must be contiguous from zero"
+		)
+	if tuple(sentence.index for sentence in sentences) != tuple(range(len(sentences))):
+		raise SemanticSearchError(
+			f"passage {passage.id!r} sentence indexes must be contiguous from zero"
+		)
+	return tuple(sentences)
 
 
 def _build_evaluation_input(
@@ -312,6 +328,9 @@ __all__ = [
 	"MAX_PASSAGES",
 	"MAX_PASSAGE_LENGTH",
 	"MAX_QUERY_LENGTH",
+	"MAX_SENTENCES_PER_PASSAGE",
+	"MAX_SENTENCE_LENGTH",
+	"MAX_TOTAL_SENTENCE_TEXT_LENGTH",
 	"MAX_TOTAL_TEXT_LENGTH",
 	"SemanticSearch",
 	"SemanticSearchError",

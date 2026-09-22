@@ -16,6 +16,8 @@ const SELECTOR = "p,li,pre,blockquote,figcaption";
 const HEADING_SELECTOR = "h1,h2,h3";
 const NOISE_ANCESTOR_SELECTOR = "nav,header,footer,aside,form,figure,table,[role='navigation'],[role='complementary'],[hidden],[aria-hidden='true'],[contenteditable='true'],.thumb,.infobox,.navbox,.metadata,.mw-editsection";
 const SOURCE_REFRESH_DEBOUNCE_MS = 120;
+const SOURCE_URL_POLL_MS = 250;
+const NAVIGATION_EVENT = "context-atlas:navigation";
 let internalMutationPending = false;
 
 function collectPageSource(query = "") {
@@ -63,7 +65,7 @@ function publishPageSource(adapter, source) {
 }
 
 function isUsable(element) {
-  if (element.closest(NOISE_ANCESTOR_SELECTOR)) return false;
+  if (element.localName !== "figcaption" && element.closest(NOISE_ANCESTOR_SELECTOR)) return false;
   const computed = getComputedStyle(element);
   return computed.display !== "none" && computed.visibility !== "hidden" && element.getClientRects().length > 0;
 }
@@ -116,12 +118,16 @@ function ExtensionApp({ adapter, initialSource, onSourceChange }) {
 function highlightMatch(elements, passage, sentence) {
   clearPageHighlights();
   const element = elements.get(passage.id);
+  if (!element) return;
   const offset = findSentenceOffset(passage.text, sentence.index, sentence.text);
-  if (!element || !offset) return;
+  if (!offset) return;
+  const rawText = element.textContent || "";
+  const passageOffset = rawText.indexOf(passage.text);
+  if (passageOffset < 0) return;
   const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
   const textNodes = [];
   while (walker.nextNode()) textNodes.push(walker.currentNode);
-  const segments = findTextNodeSegments(textNodes, offset.start, offset.end);
+  const segments = findTextNodeSegments(textNodes, passageOffset + offset.start, passageOffset + offset.end);
   if (!segments.length) return;
   const ranges = segments.map(({ node, start, end }) => {
     const range = document.createRange();
@@ -195,24 +201,77 @@ function mountExtension() {
   let refreshTimer = null;
   const root = createRoot(mount);
   root.render(<ExtensionApp adapter={adapter} initialSource={initialSource} onSourceChange={(replaceSource) => {
-    const observer = new MutationObserver((records) => {
-      if (internalMutationPending || records.some((record) => mutationTouchesPanel(record, host))) return;
+    let observedUrl = location.href;
+    const scheduleSourceRefresh = () => {
       if (refreshTimer !== null) window.clearTimeout(refreshTimer);
       refreshTimer = window.setTimeout(() => {
         refreshTimer = null;
         clearPageHighlights();
         const nextSource = collectPageSource();
+        observedUrl = nextSource.url;
         publishPageSource(adapter, nextSource);
         replaceSource(nextSource);
       }, SOURCE_REFRESH_DEBOUNCE_MS);
+    };
+    const checkUrl = () => {
+      const currentUrl = location.href;
+      if (currentUrl === observedUrl) return;
+      observedUrl = currentUrl;
+      scheduleSourceRefresh();
+    };
+    const onNavigation = (event = null) => {
+      const nextUrl = event?.destination?.url || location.href;
+      if (nextUrl === observedUrl && location.href === observedUrl) return;
+      observedUrl = nextUrl;
+      scheduleSourceRefresh();
+    };
+    const observer = new MutationObserver((records) => {
+      if (internalMutationPending || records.some((record) => mutationTouchesPanel(record, host))) return;
+      scheduleSourceRefresh();
     });
     observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+    window.addEventListener("popstate", onNavigation);
+    window.addEventListener("hashchange", onNavigation);
+    window.addEventListener(NAVIGATION_EVENT, onNavigation);
+    const navigationObject = window.navigation;
+    if (navigationObject && typeof navigationObject.addEventListener === "function") {
+      navigationObject.addEventListener("navigate", onNavigation);
+    }
+    const historyObject = window.history;
+    const originalPushState = historyObject?.pushState;
+    const originalReplaceState = historyObject?.replaceState;
+    const wrappedPushState = typeof originalPushState === "function"
+      ? function (...args) {
+        const result = originalPushState.apply(this, args);
+        window.dispatchEvent(new Event(NAVIGATION_EVENT));
+        return result;
+      }
+      : null;
+    const wrappedReplaceState = typeof originalReplaceState === "function"
+      ? function (...args) {
+        const result = originalReplaceState.apply(this, args);
+        window.dispatchEvent(new Event(NAVIGATION_EVENT));
+        return result;
+      }
+      : null;
+    if (wrappedPushState) historyObject.pushState = wrappedPushState;
+    if (wrappedReplaceState) historyObject.replaceState = wrappedReplaceState;
+    const urlPollTimer = window.setInterval(checkUrl, SOURCE_URL_POLL_MS);
     stopSourceObserver = () => {
       observer.disconnect();
+      window.removeEventListener("popstate", onNavigation);
+      window.removeEventListener("hashchange", onNavigation);
+      window.removeEventListener(NAVIGATION_EVENT, onNavigation);
+      if (navigationObject && typeof navigationObject.removeEventListener === "function") {
+        navigationObject.removeEventListener("navigate", onNavigation);
+      }
       if (refreshTimer !== null) {
         window.clearTimeout(refreshTimer);
         refreshTimer = null;
       }
+      window.clearInterval(urlPollTimer);
+      if (wrappedPushState && historyObject.pushState === wrappedPushState) historyObject.pushState = originalPushState;
+      if (wrappedReplaceState && historyObject.replaceState === wrappedReplaceState) historyObject.replaceState = originalReplaceState;
     };
     return stopSourceObserver;
   }} />);

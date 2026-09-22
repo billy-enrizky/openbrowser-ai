@@ -5,7 +5,6 @@
 })(typeof globalThis === "object" ? globalThis : this, function () {
   const API_URL = "https://api.typesafe.ai/v1/systemone";
   const MODEL = "jev-latest";
-  const MAX_CANDIDATE_PASSAGES = 24;
   const MAX_BATCH_CONCURRENCY = 4;
   const MAX_QUERY_LENGTH = 400;
   const MAX_PASSAGES = 160;
@@ -80,7 +79,7 @@
     }
 
     const started = Date.now();
-    const candidates = selectCandidatePassages(normalizedQuery, normalizedPassages);
+    const candidates = normalizedPassages;
     const results = new Array(candidates.length);
     let nextCandidate = 0;
 
@@ -172,30 +171,6 @@
     return noul;
   }
 
-  function selectCandidatePassages(query, passages) {
-    const terms = meaningfulTerms(query);
-    const ranked = passages.map((passage, index) => ({
-      passage,
-      index,
-      score: scorePassage(passage, terms),
-    }));
-    const matches = ranked.filter((item) => item.score > 0);
-    const pool = matches.length ? matches : ranked;
-    return pool
-      .sort((left, right) => right.score - left.score || left.index - right.index)
-      .slice(0, MAX_CANDIDATE_PASSAGES)
-      .map((item) => item.passage);
-  }
-
-  function scorePassage(passage, terms) {
-    if (!terms.length) return 0;
-    const source = `${passage.text} ${passage.section || ""}`;
-    const sourceTerms = new Set(tokenize(source).map(stemToken));
-    const overlap = terms.reduce((score, term) => score + (sourceTerms.has(term) ? 1 : 0), 0);
-    const phrase = normalizeForMatch(passage.text).includes(normalizeForMatch(terms.join(" ")));
-    return overlap * 10 + (phrase ? terms.length : 0);
-  }
-
   function selectFocusSentence(query, passage) {
     const terms = meaningfulTerms(query);
     const ranked = passage.sentences.map((sentence, index) => ({
@@ -207,8 +182,17 @@
     return ranked[0]?.sentence || passage.sentences[0];
   }
 
+  function scorePassage(passage, terms) {
+    if (!terms.length) return 0;
+    const source = `${passage.text} ${passage.section || ""}`;
+    const sourceTerms = new Set(tokenize(source).map(stemToken));
+    const overlap = terms.reduce((score, term) => score + (sourceTerms.has(term) ? 1 : 0), 0);
+    const phrase = normalizeForMatch(passage.text).includes(normalizeForMatch(terms.join(" ")));
+    return overlap * 10 + (phrase ? terms.length : 0);
+  }
+
   function meaningfulTerms(value) {
-    return [...new Set(tokenize(value).map(stemToken).filter((term) => term.length > 1 && !STOP_WORDS.has(term)))];
+    return [...new Set(tokenize(value).filter((token) => token.length > 1 && !STOP_WORDS.has(token)).map(stemToken))];
   }
 
   function tokenize(value) {
@@ -288,10 +272,12 @@
 
   return {
     API_URL,
-    MAX_CANDIDATE_PASSAGES,
     MAX_BATCH_CONCURRENCY,
     buildSystemOneRequest,
+    meaningfulTerms,
+    normalizeForMatch,
     search,
+    scorePassage,
     validateSystemOneResponse,
   };
 });
