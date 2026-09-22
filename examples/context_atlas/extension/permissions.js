@@ -1,10 +1,4 @@
-const PROVIDER_ORIGINS = Object.freeze({
-  jev: ["https://api.typesafe.ai/v1/systemone"],
-  laya: [
-    "https://huggingface.co/mizchi/laya-multilingual-onnx/resolve/d9d003d543e63d6d3375c21d44624136bd1e0bad/*",
-    "https://us.aws.cdn.hf.co/xet-bridge-us/*",
-  ],
-});
+const PROVIDER_ORIGINS = globalThis.ContextAtlasProviderOrigins;
 
 const params = new URLSearchParams(location.search);
 const provider = params.get("provider");
@@ -65,9 +59,16 @@ allowButton.addEventListener("click", async () => {
       granted,
       request_id: requestId,
     });
-    status.textContent = result.granted
-      ? "Access granted. Return to your page and choose this provider again."
-      : "Access was not granted. Return to your page and try again if you change your mind.";
+    if (result.granted) {
+      status.textContent = "Access granted. Return to your page and choose this provider again.";
+      try {
+        await closePermissionPage();
+      } catch (error) {
+        console.warn("The permission page could not close automatically.", error);
+      }
+      return;
+    }
+    status.textContent = "Access was not granted. Return to your page and try again if you change your mind.";
   } catch (error) {
     status.textContent = error instanceof Error ? error.message : "The access request could not be completed.";
   } finally {
@@ -76,4 +77,16 @@ allowButton.addEventListener("click", async () => {
   }
 });
 
-closeButton.addEventListener("click", () => window.close());
+async function closePermissionPage() {
+  await sendMessage({ type: "context_atlas.close_permission_page", request_id: requestId });
+}
+
+closeButton.addEventListener("click", async () => {
+  closeButton.disabled = true;
+  try {
+    await closePermissionPage();
+  } catch (error) {
+    status.textContent = error instanceof Error ? error.message : "The permission page could not be closed.";
+    closeButton.disabled = false;
+  }
+});

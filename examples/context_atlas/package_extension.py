@@ -38,11 +38,16 @@ PACKAGE_FILES = (
     "ort/ort-wasm-simd-threaded.asyncify.mjs",
     "ort/ort-wasm-simd-threaded.asyncify.wasm",
 )
+OPTIONAL_PACKAGE_FILES = ("provider-origins.js",)
 EXPECTED_PERMISSIONS = {"activeTab", "scripting", "storage", "offscreen", "unlimitedStorage"}
 EXPECTED_OPTIONAL_HOST_PERMISSIONS = {
     "https://api.typesafe.ai/v1/systemone",
     "https://huggingface.co/mizchi/laya-multilingual-onnx/resolve/d9d003d543e63d6d3375c21d44624136bd1e0bad/*",
     "https://us.aws.cdn.hf.co/xet-bridge-us/*",
+}
+EXPECTED_CONTENT_SCRIPT_MATCHES = {
+    "http://127.0.0.1:8765/",
+    "http://localhost:8765/",
 }
 SECRET_PATTERNS = (
     re.compile(rb"Bearer\s+sk-", re.IGNORECASE),
@@ -152,6 +157,8 @@ def _validate_manifest(manifest: dict[str, object]) -> set[str]:
     for content_script in content_scripts:
         if not isinstance(content_script, dict) or not isinstance(content_script.get("js", []), list):
             raise PackageError("manifest content script is invalid")
+        if not _matches_expected_strings(content_script.get("matches"), EXPECTED_CONTENT_SCRIPT_MATCHES):
+            raise PackageError("manifest content script matches do not match the release policy")
         references.update(_validate_file_references(content_script["js"]))
     web_accessible_resources = manifest.get("web_accessible_resources", [])
     if not isinstance(web_accessible_resources, list):
@@ -223,6 +230,14 @@ def build_package(output_path: Path | str, extension_root: Path | str, bundle_pa
         source_path = bundle if name == "context-atlas-extension.js" else root / name
         if not source_path.is_file():
             raise PackageError(f"required package file could not be read: {name}")
+        files[name] = _read_file(source_path)
+    for name in OPTIONAL_PACKAGE_FILES:
+        source_path = root / name
+        if not source_path.is_file():
+            marker = name.encode("utf-8")
+            if any(marker in content for content in files.values()):
+                raise PackageError(f"required package file could not be read: {name}")
+            continue
         files[name] = _read_file(source_path)
     if not references.issubset(files):
         raise PackageError("manifest references missing package files")

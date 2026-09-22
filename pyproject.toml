@@ -62,6 +62,7 @@ all = [
     "anthropic>=0.68.0",
     "groq>=0.30.0",
     "ollama>=0.5.1",
+    "typesafe-sdk>=0.7.0,<1.0.0",
     "boto3",
     "posthog>=3.7.0",
     "pypdf",

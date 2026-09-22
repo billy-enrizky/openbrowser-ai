@@ -32,7 +32,7 @@ function sendMessage(message) {
   });
 }
 
-async function refresh() {
+async function refresh({ preserveStatus = false } = {}) {
   try {
     const selected = await sendMessage({ type: "context_atlas.provider_status" });
     provider.textContent = selected.provider === "jev"
@@ -42,8 +42,12 @@ async function refresh() {
     keyConfigured = keyStatus.configured === true;
     updateMutationControls();
   } catch (error) {
-    status.textContent = error instanceof Error ? error.message : "Could not load settings.";
-    status.dataset.kind = "error";
+    if (preserveStatus) {
+      console.warn("Could not refresh settings after a change.", error);
+    } else {
+      status.textContent = error instanceof Error ? error.message : "Could not load settings.";
+      status.dataset.kind = "error";
+    }
   }
 }
 
@@ -68,7 +72,7 @@ document.getElementById("cloud-form").addEventListener("submit", async (event) =
     status.dataset.kind = "error";
   } finally {
     try {
-      await refresh();
+      await refresh({ preserveStatus: true });
     } finally {
       setMutationBusy(false);
     }
@@ -80,6 +84,7 @@ clearButton.addEventListener("click", async () => {
   setMutationBusy(true);
   try {
     await sendMessage({ type: "context_atlas.clear_key" });
+    keyConfigured = false;
     status.textContent = "Saved access key cleared.";
     status.dataset.kind = "success";
   } catch (error) {
@@ -88,7 +93,7 @@ clearButton.addEventListener("click", async () => {
   }
   finally {
     try {
-      await refresh();
+      await refresh({ preserveStatus: true });
     } finally {
       setMutationBusy(false);
     }

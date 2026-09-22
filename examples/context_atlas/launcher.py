@@ -37,8 +37,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 	parser.add_argument(
 		"--mode",
 		choices=("current-chrome", "managed"),
-		default="current-chrome",
-		help="Reuse the current Chrome application or explicitly launch managed Chromium",
+		default="managed",
+		help="Launch managed Chromium with the extension or reuse current Chrome after manual installation",
 	)
 	parser.add_argument("--url", default=None, help="Context Atlas URL to open")
 	parser.add_argument("--server-url", default=DEFAULT_SERVER_URL, help="Loopback server base URL")
@@ -92,7 +92,10 @@ def build_browser_command(url: str, *, platform_name: str | None = None) -> list
 	name = (platform_name or platform.system()).lower()
 	extension_arg = f"--load-extension={EXTENSION_ROOT}"
 	if name == "darwin":
-		return ["open", "-a", "Google Chrome", "--args", extension_arg, url]
+		# LaunchServices forwards startup arguments to an existing branded Chrome
+		# process, where --load-extension is ignored. Load the extension once in
+		# the current Chrome profile, then only open the requested URL here.
+		return ["open", "-a", "Google Chrome", url]
 	return [_find_chrome_executable(name), extension_arg, url]
 
 
@@ -172,7 +175,7 @@ def main(argv: list[str] | None = None) -> int:
 			app_url = args.url
 		if not args.skip_server:
 			start_or_reuse_server(args.server_url)
-		if args.install_extension_guide:
+		if args.install_extension_guide or args.mode == "current-chrome":
 			print_extension_guide()
 		if args.mode == "managed":
 			asyncio.run(run_managed(app_url))
@@ -184,7 +187,11 @@ def main(argv: list[str] | None = None) -> int:
 		else:
 			LOGGER.info("Verified current-Chrome CDP endpoint for %s", cdp_payload.get("Browser", "Chrome"))
 		subprocess.Popen(build_browser_command(app_url))
-		LOGGER.info("Opened Context Atlas in the existing Chrome application at %s", _safe_url(app_url))
+		LOGGER.info(
+			"Opened the Context Atlas URL in the existing Chrome application at %s; "
+			"the unpacked extension must already be loaded in this profile",
+			_safe_url(app_url),
+		)
 		return 0
 	except (OSError, RuntimeError, TimeoutError, ValueError) as exc:
 		LOGGER.error("Could not launch Context Atlas: %s", exc)
