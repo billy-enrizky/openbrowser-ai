@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from typing import Any
 
 from openbrowser.jev.evaluator import (
@@ -19,7 +19,6 @@ from openbrowser.jev.views import (
 	SemanticMatch,
 	SemanticSearchResult,
 )
-
 
 MAX_QUERY_LENGTH = 400
 MAX_PASSAGES = 160
@@ -112,7 +111,7 @@ def _elapsed_ms(started: float) -> int:
 
 def _validate_and_normalize(
 	query: str,
-	passages: tuple[SearchPassage, ...],
+	passages: Iterable[SearchPassage],
 ) -> tuple[str, tuple[SearchPassage, ...]]:
 	if not isinstance(query, str):
 		raise SemanticSearchError("query must be a string")
@@ -200,9 +199,7 @@ def _normalize_sentences(passage: SearchPassage) -> tuple[SearchSentence, ...]:
 			)
 		sentences.append(sentence)
 	if not sentences:
-		raise SemanticSearchError(
-			f"passage {passage.id!r} sentence indexes must be contiguous from zero"
-		)
+		return (SearchSentence(index=0, text=passage.text),)
 	if tuple(sentence.index for sentence in sentences) != tuple(range(len(sentences))):
 		raise SemanticSearchError(
 			f"passage {passage.id!r} sentence indexes must be contiguous from zero"
