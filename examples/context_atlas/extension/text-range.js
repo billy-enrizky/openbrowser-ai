@@ -71,8 +71,9 @@
     let start = 0;
     for (let position = 0; position < source.length; position += 1) {
       const character = source[position];
-      if (!".!?".includes(character) || !endsSentence(source, position)) continue;
-      const raw = source.slice(start, position + 1);
+      if (!".!?。！？｡．".includes(character) || !endsSentence(source, position)) continue;
+      const end = sentenceBoundaryEnd(source, position);
+      const raw = source.slice(start, end);
       const text = raw.trim();
       if (text) {
         const leftTrim = raw.length - raw.trimStart().length;
@@ -83,7 +84,8 @@
           end: start + raw.trimEnd().length,
         });
       }
-      start = position + 1;
+      start = end;
+      position = end - 1;
     }
     const raw = source.slice(start);
     const text = raw.trim();
@@ -100,10 +102,16 @@
   }
 
   function endsSentence(source, position) {
-    const closing = "\"'”’)]}";
+    if ("。！？｡．".includes(source[position])) return true;
+    const next = sentenceBoundaryEnd(source, position);
+    return next === source.length || /\s/.test(source[next]);
+  }
+
+  function sentenceBoundaryEnd(source, position) {
+    const closing = "\"'”’)]}»〉》」』】〕］）｝";
     let next = position + 1;
     while (next < source.length && closing.includes(source[next])) next += 1;
-    return next === source.length || /\s/.test(source[next]);
+    return next;
   }
 
   return { findSentenceOffset, isCurrentRequest, segmentText };

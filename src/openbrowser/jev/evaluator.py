@@ -21,6 +21,7 @@ class JevEvaluator(Protocol):
 		questions: dict[str, dict[str, Any]],
 	) -> "JevEvaluation":
 		"""Return validated answers for code-owned choice questions."""
+		...
 
 
 @dataclass(frozen=True, slots=True)
@@ -188,7 +189,7 @@ class RemoteJevEvaluator:
 		client = self._client_or_create()
 		typed_questions = self._typed_questions(questions)
 		try:
-			system_one = getattr(client, "system_one")
+			system_one = getattr(client, "system_one")  # noqa: B009
 			response = await system_one(state=state, questions=typed_questions, model=self.model_name)
 		except JevEvaluationError:
 			raise

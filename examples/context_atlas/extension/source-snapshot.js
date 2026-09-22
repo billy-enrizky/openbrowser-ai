@@ -15,7 +15,7 @@
   const MAX_SENTENCES_PER_PASSAGE = 128;
   const MAX_SENTENCE_ID_LENGTH = 160;
   const MAX_SENTENCE_LENGTH = 2200;
-  const MAX_SOURCE_SNAPSHOT_BYTES = 250000;
+  const MAX_SOURCE_SNAPSHOT_BYTES = 1000000;
 
   function serializeSourceSnapshot(source) {
     if (!source || typeof source !== "object" || Array.isArray(source)) {
@@ -38,11 +38,8 @@
     if (Object.hasOwn(source, "url")) snapshot.url = cleanUrl(source.url);
     if (Object.hasOwn(source, "revision")) snapshot.revision = cleanText(source.revision, MAX_REVISION_LENGTH, "Source revision");
     snapshot.passages = normalizePassages(source.passages);
-    const serialized = JSON.stringify(snapshot);
-    const byteLength = typeof TextEncoder === "function"
-      ? new TextEncoder().encode(serialized).length
-      : serialized.length;
-    if (byteLength > MAX_SOURCE_SNAPSHOT_BYTES) throw invalid("Source snapshot is too large.");
+    const sourceByteLength = snapshot.passages.reduce((total, passage) => total + utf8ByteLength(passage.text), 0);
+    if (sourceByteLength > MAX_SOURCE_SNAPSHOT_BYTES) throw invalid("Source snapshot is too large.");
     return snapshot;
   }
 
@@ -52,6 +49,7 @@
     }
     const seen = new Set();
     let totalLength = 0;
+    let totalSentenceLength = 0;
     return passages.map((passage) => {
       if (!passage || typeof passage !== "object" || Array.isArray(passage)) throw invalid("Source passage is invalid.");
       const id = cleanText(passage.id, MAX_PASSAGE_ID_LENGTH, "Source passage ID");
@@ -71,6 +69,8 @@
         if (section) normalized.section = section;
       }
       normalized.sentences = normalizeSentences(passage.sentences, text);
+      totalSentenceLength += normalized.sentences.reduce((sum, sentence) => sum + sentence.text.length, 0);
+      if (totalSentenceLength > MAX_TOTAL_TEXT_LENGTH) throw invalid("Source snapshot is too large.");
       return normalized;
     });
   }
@@ -105,6 +105,10 @@
     const url = cleanText(value, MAX_URL_LENGTH, "Source URL");
     if (url && !/^https?:\/\//i.test(url)) throw invalid("Source URL is invalid.");
     return url;
+  }
+
+  function utf8ByteLength(value) {
+    return typeof TextEncoder === "function" ? new TextEncoder().encode(value).length : value.length;
   }
 
   function invalid(message) {

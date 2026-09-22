@@ -6,8 +6,8 @@ from collections.abc import Iterable, Mapping
 from typing import Any
 
 from openbrowser.jev.semantic_search import (
-	MAX_PASSAGES,
 	MAX_PASSAGE_LENGTH,
+	MAX_PASSAGES,
 	MAX_QUERY_LENGTH,
 	MAX_TOTAL_TEXT_LENGTH,
 )
@@ -86,6 +86,11 @@ def prepare_passages(
 		sentences = _read_sentences(block, block_id, text)
 		if not sentences:
 			raise DocumentInputError(f"block {block_id!r} must contain source text")
+		total_length += sum(len(sentence.text) for sentence in sentences)
+		if total_length > MAX_TOTAL_TEXT_LENGTH:
+			raise DocumentInputError(
+				f"block text must total at most {MAX_TOTAL_TEXT_LENGTH:,} characters"
+			)
 		passages.append(SearchPassage(id=block_id, text=text, sentences=sentences))
 	return tuple(passages)
 
@@ -121,6 +126,10 @@ def _read_sentences(
 			)
 		if not isinstance(sentence_text, str) or not sentence_text.strip():
 			raise DocumentInputError(f"block {block_id!r} sentence text must not be empty")
+		if sentence_text not in text:
+			raise DocumentInputError(
+				f"block {block_id!r} sentence text must be present in source text"
+			)
 		sentences.append(SearchSentence(index=index, text=sentence_text))
 	return tuple(sentences)
 
