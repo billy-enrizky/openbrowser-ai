@@ -88,16 +88,26 @@ function requestProviderAccess(message, sendResponse, requestId) {
 
 function closePermissionPage(message, sender, sendResponse, requestId) {
   const permissionRequestId = typeof message.request_id === "string" ? message.request_id : "";
-  const tabId = permissionRequestId ? permissionTabs.get(permissionRequestId) : sender.tab?.id;
+  const tabId = Number.isInteger(sender.tab?.id)
+    ? sender.tab.id
+    : permissionRequestId
+      ? permissionTabs.get(permissionRequestId)
+      : undefined;
   const permissionPageUrl = chrome.runtime.getURL(PERMISSION_PAGE_URL);
   if (!Number.isInteger(tabId) || !sender.url?.startsWith(`${permissionPageUrl}?`)) {
     sendResponse({ ok: false, requestId, error: "The permission page could not be closed.", code: "permission_page_unavailable" });
     return false;
   }
-  if (permissionRequestId) permissionTabs.delete(permissionRequestId);
-  sendResponse({ ok: true, requestId, payload: { closed: true } });
-  void chrome.tabs.remove(tabId).catch(() => {});
-  return false;
+  (async () => {
+    try {
+      await chrome.tabs.remove(tabId);
+      if (permissionRequestId) permissionTabs.delete(permissionRequestId);
+      sendResponse({ ok: true, requestId, payload: { closed: true } });
+    } catch (_error) {
+      sendResponse({ ok: false, requestId, error: "The permission page could not be closed.", code: "permission_page_unavailable" });
+    }
+  })();
+  return true;
 }
 
 async function providerAccessResult(message) {

@@ -9,9 +9,9 @@ import logging
 import re
 import subprocess
 import zipfile
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
 
 LOGGER = logging.getLogger(__name__)
 
@@ -114,6 +114,17 @@ def _matches_expected_strings(value: object, expected: set[str]) -> bool:
     )
 
 
+def _optional_file_is_referenced(name: str, files: dict[str, bytes]) -> bool:
+    """Check executable entry-point references for an optional package file."""
+    escaped_name = re.escape(name.encode("utf-8"))
+    patterns = (
+        re.compile(rb"\bimportScripts\s*\([^)]*['\"]" + escaped_name + rb"['\"]"),
+        re.compile(rb"<script\b[^>]*\bsrc\s*=\s*['\"]" + escaped_name + rb"['\"]", re.IGNORECASE),
+    )
+    entry_points = ("background.js", "permissions.html", "options.html", "offscreen.html", "sandbox.html")
+    return any(pattern.search(files.get(entry_point, b"")) for pattern in patterns for entry_point in entry_points)
+
+
 def _validate_manifest(manifest: dict[str, object]) -> set[str]:
     if manifest.get("manifest_version") != 3:
         raise PackageError("manifest must use Manifest V3")
@@ -151,11 +162,11 @@ def _validate_manifest(manifest: dict[str, object]) -> set[str]:
     if not isinstance(sandbox, dict) or not isinstance(sandbox.get("pages"), list) or sandbox["pages"] != ["sandbox.html"]:
         raise PackageError("manifest sandbox pages do not match the release policy")
     references.update(sandbox["pages"])
-    content_scripts = manifest.get("content_scripts", [])
-    if not isinstance(content_scripts, list):
-        raise PackageError("manifest content scripts are invalid")
+    content_scripts = manifest.get("content_scripts")
+    if not isinstance(content_scripts, list) or not content_scripts:
+        raise PackageError("manifest content scripts are required")
     for content_script in content_scripts:
-        if not isinstance(content_script, dict) or not isinstance(content_script.get("js", []), list):
+        if not isinstance(content_script, dict) or not isinstance(content_script.get("js"), list) or not content_script["js"]:
             raise PackageError("manifest content script is invalid")
         if not _matches_expected_strings(content_script.get("matches"), EXPECTED_CONTENT_SCRIPT_MATCHES):
             raise PackageError("manifest content script matches do not match the release policy")
@@ -234,8 +245,7 @@ def build_package(output_path: Path | str, extension_root: Path | str, bundle_pa
     for name in OPTIONAL_PACKAGE_FILES:
         source_path = root / name
         if not source_path.is_file():
-            marker = name.encode("utf-8")
-            if any(marker in content for content in files.values()):
+            if _optional_file_is_referenced(name, files):
                 raise PackageError(f"required package file could not be read: {name}")
             continue
         files[name] = _read_file(source_path)
