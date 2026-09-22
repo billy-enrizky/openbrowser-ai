@@ -4,8 +4,7 @@
   "type": "module",
   "scripts": {
     "build": "node build.mjs",
-    "package:extension": "npm run build && cd ../../.. && uv run python -m examples.context_atlas.package_extension",
-    "test": "node --test tests/*.test.mjs"
+    "package:extension": "npm run build && cd ../../.. && uv run python -m examples.context_atlas.package_extension"
   },
   "dependencies": {
     "@huggingface/tokenizers": "0.2.0",

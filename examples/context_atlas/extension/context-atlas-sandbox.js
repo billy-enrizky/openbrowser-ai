@@ -7312,22 +7312,28 @@ function browserModelUrls(config = DEFAULT_LAYA_BROWSER_CONFIG) {
   const baseUrl = withTrailingSlash(config.modelBaseUrl);
   return Object.fromEntries(Object.entries(MODEL_FILES).map(([key, file]) => [key, new URL(file, baseUrl).toString()]));
 }
-async function fetchResponse(url, fetchImpl, cacheStorage) {
+async function fetchResponse(url, fetchImpl, cacheStorage, signal) {
   if (cacheStorage && typeof cacheStorage.open === "function") {
+    let cache = null;
     try {
-      const cache = await cacheStorage.open(MODEL_CACHE_NAME);
+      cache = await cacheStorage.open(MODEL_CACHE_NAME);
       const cached = await cache.match(url);
       if (cached) return cached;
-      const response2 = await fetchResponse(url, fetchImpl, null);
+    } catch (_error) {
+      cache = null;
+    }
+    if (cache) {
+      const response2 = await fetchResponse(url, fetchImpl, null, signal);
       try {
         await cache.put(url, response2.clone());
       } catch (_error) {
       }
       return response2;
-    } catch (_error) {
     }
   }
-  const response = await fetchImpl(url, { credentials: "omit" });
+  const requestOptions = { credentials: "omit" };
+  if (signal) requestOptions.signal = signal;
+  const response = await fetchImpl(url, requestOptions);
   if (!response?.ok) throw new Error(`Could not download the local Laya asset (${response?.status || "network error"}).`);
   return response;
 }
@@ -7339,15 +7345,15 @@ function resolveCacheStorage(globalLike = globalThis) {
     return null;
   }
 }
-async function loadLayaBrowserAssets({ config = DEFAULT_LAYA_BROWSER_CONFIG, fetchImpl = globalThis.fetch, cacheStorage } = {}) {
+async function loadLayaBrowserAssets({ config = DEFAULT_LAYA_BROWSER_CONFIG, fetchImpl = globalThis.fetch, cacheStorage, signal } = {}) {
   if (typeof fetchImpl !== "function") throw new Error("The browser fetch API is required for local Laya assets.");
   const availableCacheStorage = cacheStorage === void 0 ? resolveCacheStorage() : cacheStorage;
   const urls = browserModelUrls(config);
   const [modelResponse, tokenizerResponse, tokenizerConfigResponse, rlConfigResponse] = await Promise.all([
-    fetchResponse(urls.model, fetchImpl, availableCacheStorage),
-    fetchResponse(urls.tokenizer, fetchImpl, availableCacheStorage),
-    fetchResponse(urls.tokenizerConfig, fetchImpl, availableCacheStorage),
-    fetchResponse(urls.rlConfig, fetchImpl, availableCacheStorage)
+    fetchResponse(urls.model, fetchImpl, availableCacheStorage, signal),
+    fetchResponse(urls.tokenizer, fetchImpl, availableCacheStorage, signal),
+    fetchResponse(urls.tokenizerConfig, fetchImpl, availableCacheStorage, signal),
+    fetchResponse(urls.rlConfig, fetchImpl, availableCacheStorage, signal)
   ]);
   return {
     modelBytes: new Uint8Array(await modelResponse.arrayBuffer()),

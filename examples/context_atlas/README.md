@@ -23,7 +23,7 @@ open in its own tab.
 Start the static development server from the repository root:
 
 ```bash
-uv sync --extra dev
+uv sync --extra dev --extra jev
 uv run python -m examples.context_atlas.server
 ```
 
@@ -76,11 +76,12 @@ several results are similarly relevant, Context Atlas shows up to five close
 matches. Choosing one displays the exact source sentence, preserves provenance,
 and highlights that sentence on the webpage.
 
-## Tests and packaging
+## Build and packaging verification
+
+This PR intentionally ships the extension source and build inputs without local
+test fixtures. Verify the delivered build and deterministic Chrome package with:
 
 ```bash
-npm --prefix examples/context_atlas/ui test
-node --test examples/context_atlas/tests/*.test.mjs
-OPENBROWSER_HEADLESS=true uv run --extra dev pytest examples/context_atlas/tests -q
+npm --prefix examples/context_atlas/ui run build
 uv run python -m examples.context_atlas.package_extension --build
 ```

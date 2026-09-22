@@ -30,22 +30,28 @@ function browserModelUrls(config = DEFAULT_LAYA_BROWSER_CONFIG) {
   const baseUrl = withTrailingSlash(config.modelBaseUrl);
   return Object.fromEntries(Object.entries(MODEL_FILES).map(([key, file]) => [key, new URL(file, baseUrl).toString()]));
 }
-async function fetchResponse(url, fetchImpl, cacheStorage) {
+async function fetchResponse(url, fetchImpl, cacheStorage, signal) {
   if (cacheStorage && typeof cacheStorage.open === "function") {
+    let cache = null;
     try {
-      const cache = await cacheStorage.open(MODEL_CACHE_NAME);
+      cache = await cacheStorage.open(MODEL_CACHE_NAME);
       const cached = await cache.match(url);
       if (cached) return cached;
-      const response2 = await fetchResponse(url, fetchImpl, null);
+    } catch (_error) {
+      cache = null;
+    }
+    if (cache) {
+      const response2 = await fetchResponse(url, fetchImpl, null, signal);
       try {
         await cache.put(url, response2.clone());
       } catch (_error) {
       }
       return response2;
-    } catch (_error) {
     }
   }
-  const response = await fetchImpl(url, { credentials: "omit" });
+  const requestOptions = { credentials: "omit" };
+  if (signal) requestOptions.signal = signal;
+  const response = await fetchImpl(url, requestOptions);
   if (!response?.ok) throw new Error(`Could not download the local Laya asset (${response?.status || "network error"}).`);
   return response;
 }
@@ -57,15 +63,15 @@ function resolveCacheStorage(globalLike = globalThis) {
     return null;
   }
 }
-async function loadLayaBrowserAssets({ config = DEFAULT_LAYA_BROWSER_CONFIG, fetchImpl = globalThis.fetch, cacheStorage } = {}) {
+async function loadLayaBrowserAssets({ config = DEFAULT_LAYA_BROWSER_CONFIG, fetchImpl = globalThis.fetch, cacheStorage, signal } = {}) {
   if (typeof fetchImpl !== "function") throw new Error("The browser fetch API is required for local Laya assets.");
   const availableCacheStorage = cacheStorage === void 0 ? resolveCacheStorage() : cacheStorage;
   const urls = browserModelUrls(config);
   const [modelResponse, tokenizerResponse, tokenizerConfigResponse, rlConfigResponse] = await Promise.all([
-    fetchResponse(urls.model, fetchImpl, availableCacheStorage),
-    fetchResponse(urls.tokenizer, fetchImpl, availableCacheStorage),
-    fetchResponse(urls.tokenizerConfig, fetchImpl, availableCacheStorage),
-    fetchResponse(urls.rlConfig, fetchImpl, availableCacheStorage)
+    fetchResponse(urls.model, fetchImpl, availableCacheStorage, signal),
+    fetchResponse(urls.tokenizer, fetchImpl, availableCacheStorage, signal),
+    fetchResponse(urls.tokenizerConfig, fetchImpl, availableCacheStorage, signal),
+    fetchResponse(urls.rlConfig, fetchImpl, availableCacheStorage, signal)
   ]);
   return {
     modelBytes: new Uint8Array(await modelResponse.arrayBuffer()),
@@ -78,6 +84,8 @@ async function loadLayaBrowserAssets({ config = DEFAULT_LAYA_BROWSER_CONFIG, fet
 // src/extension/offscreen.js
 var CHANNEL = "context-atlas-laya-sandbox-v1";
 var SANDBOX_READY_TIMEOUT_MS = 3e4;
+var SANDBOX_REQUEST_TIMEOUT_MS = 12e4;
+var INITIALIZATION_TIMEOUT_MS = 12e4;
 var runtimePromise;
 var sandboxFrame;
 var sandboxReadyPromise;
@@ -88,8 +96,40 @@ function errorMessage(error) {
   return "The local Laya runtime could not start.";
 }
 function rejectPending(error) {
-  for (const { reject } of pendingRequests.values()) reject(error);
+  for (const { reject, timeout } of pendingRequests.values()) {
+    clearTimeout(timeout);
+    reject(error);
+  }
   pendingRequests.clear();
+}
+function withTimeout(promise, timeoutMs, message, onTimeout) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const timeout = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      const error = new Error(message);
+      try {
+        onTimeout?.(error);
+      } catch (_error) {
+      }
+      reject(error);
+    }, timeoutMs);
+    promise.then(
+      (value) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        resolve(value);
+      },
+      (error) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        reject(error);
+      }
+    );
+  });
 }
 function acceptSandboxMessage(event) {
   if (!sandboxFrame || event.source !== sandboxFrame.contentWindow) return;
@@ -104,9 +144,10 @@ function acceptSandboxMessage(event) {
   }
   const pending = pendingRequests.get(message.requestId);
   if (!pending) return;
+  clearTimeout(pending.timeout);
+  pendingRequests.delete(message.requestId);
   if (message.ok) pending.resolve(message.payload || {});
   else pending.reject(new Error(message.error || "The local Laya sandbox rejected the request."));
-  pendingRequests.delete(message.requestId);
 }
 window.addEventListener("message", acceptSandboxMessage);
 function ensureSandbox() {
@@ -146,19 +187,42 @@ async function requestSandbox(type, payload = {}, transfer = []) {
   const frame = await ensureSandbox();
   const requestId = `r${++requestSequence}`;
   return new Promise((resolve, reject) => {
-    pendingRequests.set(requestId, { resolve, reject });
-    frame.contentWindow.postMessage({ channel: CHANNEL, requestId, type, ...payload }, "*", transfer);
+    const pending = { resolve, reject, timeout: null };
+    pendingRequests.set(requestId, pending);
+    pending.timeout = setTimeout(() => {
+      const pending2 = pendingRequests.get(requestId);
+      if (!pending2) return;
+      pendingRequests.delete(requestId);
+      pending2.reject(new Error("The local Laya sandbox request timed out."));
+    }, SANDBOX_REQUEST_TIMEOUT_MS);
+    try {
+      frame.contentWindow.postMessage({ channel: CHANNEL, requestId, type, ...payload }, "*", transfer);
+    } catch (error) {
+      clearTimeout(pending.timeout);
+      pendingRequests.delete(requestId);
+      reject(error);
+    }
   });
 }
 async function initializeRuntime() {
   if (!runtimePromise) {
-    runtimePromise = (async () => {
-      const assets = await loadLayaBrowserAssets();
+    const controller = typeof AbortController === "function" ? new AbortController() : null;
+    const initialization = (async () => {
+      const assets = await loadLayaBrowserAssets(controller ? { signal: controller.signal } : {});
       const modelBuffer = assets.modelBytes.buffer;
       return requestSandbox("initialize", {
         assets: { modelBytes: modelBuffer, tokenizerJson: assets.tokenizerJson, tokenizerConfig: assets.tokenizerConfig, rlConfig: assets.rlConfig }
       }, [modelBuffer]);
-    })().catch((error) => {
+    })();
+    runtimePromise = withTimeout(
+      initialization,
+      INITIALIZATION_TIMEOUT_MS,
+      "The local Laya runtime initialization timed out.",
+      (error) => {
+        controller?.abort();
+        rejectPending(error);
+      }
+    ).catch((error) => {
       runtimePromise = null;
       throw error;
     });

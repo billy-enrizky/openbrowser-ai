@@ -38,7 +38,8 @@ export function ContextAtlasSurface({
   const providerEnabled = typeof adapter?.getProvider === "function" && typeof adapter?.setProvider === "function";
   const [provider, setProvider] = useState("laya");
   const [providerBusy, setProviderBusy] = useState(false);
-  const fingerprint = sourceFingerprint(sourcePassages);
+  const providerSelectionVersionRef = useRef(0);
+  const fingerprint = sourceFingerprint(sourcePassages, source?.url);
   const requestRef = useRef(0);
   const previousFingerprint = useRef(fingerprint);
   const lastSearchRef = useRef(null);
@@ -46,6 +47,7 @@ export function ContextAtlasSurface({
   const [keyConfigured, setKeyConfigured] = useState(null);
   const [keyBusy, setKeyBusy] = useState(false);
   const [keyAction, setKeyAction] = useState(null);
+  const keyMutationVersionRef = useRef(0);
   const [query, setQuery] = useState("");
   const [result, setResult] = useState(null);
   const [matches, setMatches] = useState([]);
@@ -58,12 +60,13 @@ export function ContextAtlasSurface({
   useEffect(() => {
     if (!providerEnabled) return undefined;
     let active = true;
+    const selectionVersion = providerSelectionVersionRef.current;
     (async () => {
       try {
         const savedProvider = normalizeProvider(await adapter.getProvider());
-        if (active) setProvider(savedProvider);
+        if (active && selectionVersion === providerSelectionVersionRef.current) setProvider(savedProvider);
       } catch (_error) {
-        if (active) setProvider("laya");
+        if (active && selectionVersion === providerSelectionVersionRef.current) setProvider("laya");
       }
     })();
     return () => { active = false; };
@@ -72,10 +75,11 @@ export function ContextAtlasSurface({
   useEffect(() => {
     if ((providerEnabled && provider !== "jev") || typeof adapter?.getKeyStatus !== "function") return undefined;
     let active = true;
+    const mutationVersion = keyMutationVersionRef.current;
     (async () => {
       try {
         const payload = await adapter.getKeyStatus();
-        if (active) {
+        if (active && mutationVersion === keyMutationVersionRef.current) {
           const configured = payload?.configured === true;
           setKeyConfigured(configured);
           setStatus({
@@ -85,7 +89,7 @@ export function ContextAtlasSurface({
           });
         }
       } catch (error) {
-        if (active) {
+        if (active && mutationVersion === keyMutationVersionRef.current) {
           setKeyConfigured(false);
           setStatus({ kind: "error", ...normalizeSearchError(error) });
         }
@@ -112,6 +116,8 @@ export function ContextAtlasSurface({
   async function chooseProvider(nextProvider) {
     const next = normalizeProvider(nextProvider);
     if (!providerEnabled || next === provider || providerBusy) return;
+    const selectionVersion = providerSelectionVersionRef.current + 1;
+    providerSelectionVersionRef.current = selectionVersion;
     let accessPromise = Promise.resolve({ granted: true });
     if (next === "jev" && typeof adapter?.ensureProviderAccess === "function") {
       try {
@@ -127,6 +133,7 @@ export function ContextAtlasSurface({
     try {
       await accessPromise;
       await adapter.setProvider(next);
+      if (selectionVersion !== providerSelectionVersionRef.current) return;
       invalidateProviderRequest(requestRef, () => {
         setResult(null);
         setMatches([]);
@@ -143,9 +150,11 @@ export function ContextAtlasSurface({
         retryable: false,
       });
     } catch (error) {
-      setStatus({ kind: "error", ...normalizeSearchError(error) });
+      if (selectionVersion === providerSelectionVersionRef.current) {
+        setStatus({ kind: "error", ...normalizeSearchError(error) });
+      }
     } finally {
-      setProviderBusy(false);
+      if (selectionVersion === providerSelectionVersionRef.current) setProviderBusy(false);
     }
   }
 
@@ -164,47 +173,61 @@ export function ContextAtlasSurface({
       setStatus({ kind: "error", message: "Enter a Cloud access key before saving.", retryable: false });
       return;
     }
+    const mutationVersion = keyMutationVersionRef.current + 1;
+    keyMutationVersionRef.current = mutationVersion;
     setKeyBusy(true);
     setKeyAction("save");
     setSearchProgress(0);
     setStatus({ kind: "loading", message: "Saving your access key…", retryable: false });
     try {
       const payload = await adapter.saveKey(cleanKey);
+      if (mutationVersion !== keyMutationVersionRef.current) return;
       setApiKey("");
       setKeyConfigured(payload?.configured === true);
       setStatus({ kind: "success", message: "Access key saved. Cloud search is ready.", retryable: false });
     } catch (error) {
-      setStatus({ kind: "error", ...normalizeSearchError(error) });
+      if (mutationVersion === keyMutationVersionRef.current) {
+        setStatus({ kind: "error", ...normalizeSearchError(error) });
+      }
     } finally {
-      setKeyBusy(false);
-      setKeyAction(null);
+      if (mutationVersion === keyMutationVersionRef.current) {
+        setKeyBusy(false);
+        setKeyAction(null);
+      }
     }
   }
 
   async function clearKey() {
+    const mutationVersion = keyMutationVersionRef.current + 1;
+    keyMutationVersionRef.current = mutationVersion;
     setKeyBusy(true);
     setKeyAction("clear");
     setSearchProgress(0);
     setStatus({ kind: "loading", message: "Removing your saved key…", retryable: false });
     try {
       const payload = await adapter.clearKey();
+      if (mutationVersion !== keyMutationVersionRef.current) return;
       setKeyConfigured(payload?.configured === true);
       setStatus({ kind: "success", message: "Saved access key cleared. Cloud search is paused.", retryable: false });
     } catch (error) {
-      setStatus({ kind: "error", ...normalizeSearchError(error) });
+      if (mutationVersion === keyMutationVersionRef.current) {
+        setStatus({ kind: "error", ...normalizeSearchError(error) });
+      }
     } finally {
-      setKeyBusy(false);
-      setKeyAction(null);
+      if (mutationVersion === keyMutationVersionRef.current) {
+        setKeyBusy(false);
+        setKeyAction(null);
+      }
     }
   }
 
-  async function searchSource(event) {
+  async function searchSource(event, queryOverride = null) {
     event?.preventDefault();
     if (activeProvider === "jev" && keyConfigured !== true) {
       setStatus({ kind: "error", message: "Save your Cloud access key before searching.", retryable: false });
       return;
     }
-    const cleanQuery = query.trim();
+    const cleanQuery = String(queryOverride ?? query).trim();
     if (!cleanQuery) {
       setStatus({ kind: "error", message: "Enter a question first.", retryable: false });
       return;
@@ -262,7 +285,7 @@ export function ContextAtlasSurface({
         return;
       }
       const normalizedMatches = validMatches.map((item) => item.match);
-      const ambiguous = payload?.ambiguous === true || isAmbiguous(normalizedMatches);
+      const ambiguous = isAmbiguous(normalizedMatches, payload?.threshold);
       const normalizedResult = { ...payload, ambiguous, matches: normalizedMatches };
       setResult(normalizedResult);
       setMatches(normalizedResult.matches);
@@ -296,8 +319,9 @@ export function ContextAtlasSurface({
   }
 
   function retry() {
-    if (lastSearchRef.current) setQuery(lastSearchRef.current.query);
-    void searchSource();
+    const previous = lastSearchRef.current?.query ?? query;
+    setQuery(previous);
+    void searchSource(null, previous);
   }
 
   const provenance = buildProvenanceThread(
@@ -375,11 +399,19 @@ export function ContextAtlasSurface({
   );
 }
 
-function isAmbiguous(matches) {
-  if (matches.length < 2) return false;
-  const first = Number(matches[0]?.probability);
-  const second = Number(matches[1]?.probability);
-  return Number.isFinite(first) && Number.isFinite(second) && first - second < 0.05;
+function isAmbiguous(matches, threshold = 0.58) {
+  const parsedThreshold = Number(threshold);
+  const relevanceThreshold = Number.isFinite(parsedThreshold) && parsedThreshold >= 0 && parsedThreshold <= 1
+    ? parsedThreshold
+    : 0.58;
+  const eligible = (Array.isArray(matches) ? matches : [])
+    .filter((match) => {
+      const probability = Number(match?.probability);
+      return Number.isFinite(probability) && probability >= relevanceThreshold;
+    })
+    .sort((left, right) => Number(right.probability) - Number(left.probability));
+  if (eligible.length < 2) return false;
+  return Number(eligible[0].probability) - Number(eligible[1].probability) < 0.05;
 }
 
 function confidence(value) {
