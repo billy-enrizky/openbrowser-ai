@@ -9,6 +9,7 @@ from openbrowser.jev.semantic_search import (
 	MAX_PASSAGE_LENGTH,
 	MAX_PASSAGES,
 	MAX_QUERY_LENGTH,
+	MAX_TOTAL_SENTENCE_TEXT_LENGTH,
 	MAX_TOTAL_TEXT_LENGTH,
 )
 from openbrowser.jev.views import SearchPassage, SearchSentence
@@ -59,7 +60,8 @@ def prepare_passages(
 		raise DocumentInputError(f"blocks must contain at most {MAX_PASSAGES} items")
 
 	seen_ids: set[str] = set()
-	total_length = 0
+	total_text_length = 0
+	total_sentence_text_length = 0
 	passages: list[SearchPassage] = []
 	for block in items:
 		if not isinstance(block, Mapping):
@@ -77,8 +79,8 @@ def prepare_passages(
 			raise DocumentInputError(
 				f"block {block_id!r} must be at most {MAX_PASSAGE_LENGTH:,} characters"
 			)
-		total_length += len(text)
-		if total_length > MAX_TOTAL_TEXT_LENGTH:
+		total_text_length += len(text)
+		if total_text_length > MAX_TOTAL_TEXT_LENGTH:
 			raise DocumentInputError(
 				f"block text must total at most {MAX_TOTAL_TEXT_LENGTH:,} characters"
 			)
@@ -86,10 +88,11 @@ def prepare_passages(
 		sentences = _read_sentences(block, block_id, text)
 		if not sentences:
 			raise DocumentInputError(f"block {block_id!r} must contain source text")
-		total_length += sum(len(sentence.text) for sentence in sentences)
-		if total_length > MAX_TOTAL_TEXT_LENGTH:
+		total_sentence_text_length += sum(len(sentence.text) for sentence in sentences)
+		if total_sentence_text_length > MAX_TOTAL_SENTENCE_TEXT_LENGTH:
 			raise DocumentInputError(
-				f"block text must total at most {MAX_TOTAL_TEXT_LENGTH:,} characters"
+				"sentence metadata must total at most "
+				f"{MAX_TOTAL_SENTENCE_TEXT_LENGTH:,} characters"
 			)
 		passages.append(SearchPassage(id=block_id, text=text, sentences=sentences))
 	return tuple(passages)
