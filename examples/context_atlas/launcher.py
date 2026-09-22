@@ -6,7 +6,9 @@ import argparse
 import asyncio
 import json
 import logging
+import os
 import platform
+import shutil
 import subprocess
 import sys
 import time
@@ -22,6 +24,10 @@ DEFAULT_CDP_URL = "http://127.0.0.1:9222"
 DEFAULT_APP_URL = f"{DEFAULT_SERVER_URL}/"
 SERVER_START_TIMEOUT = 8.0
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+SUPPORTED_COMPANION_ORIGINS = frozenset({
+	"http://127.0.0.1:8765",
+	"http://localhost:8765",
+})
 EXTENSION_ROOT = Path(__file__).with_name("extension")
 LOGGER = logging.getLogger(__name__)
 
@@ -34,7 +40,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 		default="current-chrome",
 		help="Reuse the current Chrome application or explicitly launch managed Chromium",
 	)
-	parser.add_argument("--url", default=DEFAULT_APP_URL, help="Context Atlas URL to open")
+	parser.add_argument("--url", default=None, help="Context Atlas URL to open")
 	parser.add_argument("--server-url", default=DEFAULT_SERVER_URL, help="Loopback server base URL")
 	parser.add_argument(
 		"--cdp-url",
@@ -70,7 +76,7 @@ def verify_cdp_endpoint(endpoint: str, *, timeout: float = 1.5) -> dict[str, obj
 
 
 def build_server_command(server_url: str, *, python_executable: str | None = None) -> list[str]:
-	parsed = _require_loopback_url(server_url)
+	parsed = _require_server_url(server_url)
 	return [
 		python_executable or sys.executable,
 		"-m",
@@ -83,12 +89,11 @@ def build_server_command(server_url: str, *, python_executable: str | None = Non
 
 
 def build_browser_command(url: str, *, platform_name: str | None = None) -> list[str]:
-	name = platform_name or platform.system().lower()
+	name = (platform_name or platform.system()).lower()
+	extension_arg = f"--load-extension={EXTENSION_ROOT}"
 	if name == "darwin":
-		return ["open", "-a", "Google Chrome", url]
-	if name == "windows":
-		return ["cmd", "/c", "start", "", url]
-	return ["xdg-open", url]
+		return ["open", "-a", "Google Chrome", "--args", extension_arg, url]
+	return [_find_chrome_executable(name), extension_arg, url]
 
 
 def server_is_healthy(server_url: str, *, timeout: float = 0.8) -> bool:
@@ -104,6 +109,7 @@ def server_is_healthy(server_url: str, *, timeout: float = 0.8) -> bool:
 
 def start_or_reuse_server(server_url: str) -> subprocess.Popen[bytes] | None:
 	"""Reuse a healthy server or start a detached loopback server process."""
+	_require_server_url(server_url)
 	if server_is_healthy(server_url):
 		LOGGER.info("Reusing Context Atlas server at %s", _safe_url(server_url))
 		return None
@@ -137,7 +143,11 @@ def print_extension_guide() -> None:
 async def run_managed(url: str) -> None:
 	from openbrowser.browser import BrowserProfile, BrowserSession
 
-	profile = BrowserProfile(headless=False)
+	profile = BrowserProfile(
+		headless=False,
+		enable_default_extensions=False,
+		args=[f"--load-extension={EXTENSION_ROOT}"],
+	)
 	session = BrowserSession(browser_profile=profile)
 	try:
 		await session.start()
@@ -154,12 +164,18 @@ def main(argv: list[str] | None = None) -> int:
 	logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 	args = parse_args(argv)
 	try:
+		_validate_supported_companion_url(args.server_url)
+		if args.url is None:
+			app_url = derive_app_url(args.server_url)
+		else:
+			_validate_supported_companion_url(args.url)
+			app_url = args.url
 		if not args.skip_server:
 			start_or_reuse_server(args.server_url)
 		if args.install_extension_guide:
 			print_extension_guide()
 		if args.mode == "managed":
-			asyncio.run(run_managed(args.url))
+			asyncio.run(run_managed(app_url))
 			return 0
 
 		cdp_payload = verify_cdp_endpoint(args.cdp_url)
@@ -167,8 +183,8 @@ def main(argv: list[str] | None = None) -> int:
 			LOGGER.info("No usable CDP endpoint at %s; opening the app normally without attachment", _safe_url(args.cdp_url))
 		else:
 			LOGGER.info("Verified current-Chrome CDP endpoint for %s", cdp_payload.get("Browser", "Chrome"))
-		subprocess.Popen(build_browser_command(args.url))
-		LOGGER.info("Opened Context Atlas in the existing Chrome application at %s", _safe_url(args.url))
+		subprocess.Popen(build_browser_command(app_url))
+		LOGGER.info("Opened Context Atlas in the existing Chrome application at %s", _safe_url(app_url))
 		return 0
 	except (OSError, RuntimeError, TimeoutError, ValueError) as exc:
 		LOGGER.error("Could not launch Context Atlas: %s", exc)
@@ -183,6 +199,31 @@ def _loopback_base(url: str) -> str | None:
 	return parsed._replace(path="", query="", fragment="").geturl().rstrip("/")
 
 
+def derive_app_url(server_url: str) -> str:
+	"""Return the static app URL served by the configured companion server."""
+	parsed = _require_server_url(server_url)
+	base = parsed._replace(path="", query="", fragment="").geturl().rstrip("/")
+	return f"{base}/"
+
+
+def _require_server_url(url: str):
+	parsed = _require_loopback_url(url)
+	if parsed.scheme != "http":
+		raise ValueError("Context Atlas companion server URL must use plain HTTP")
+	return parsed
+
+
+def _validate_supported_companion_url(url: str):
+	parsed = _require_server_url(url)
+	origin = parsed._replace(path="", query="", fragment="").geturl().rstrip("/")
+	if origin not in SUPPORTED_COMPANION_ORIGINS:
+		raise ValueError(
+			"Context Atlas only supports the configured localhost companion origins "
+			"http://127.0.0.1:8765 and http://localhost:8765"
+		)
+	return parsed
+
+
 def _require_loopback_url(url: str):
 	parsed = urlsplit(url)
 	if parsed.scheme not in {"http", "https"} or parsed.hostname not in LOOPBACK_HOSTS:
@@ -192,6 +233,53 @@ def _require_loopback_url(url: str):
 	except ValueError as exc:
 		raise ValueError("URL port is invalid") from exc
 	return parsed
+
+
+def _find_chrome_executable(platform_name: str) -> str:
+	configured = os.environ.get("CONTEXT_ATLAS_CHROME_PATH") or os.environ.get("CHROME_PATH")
+	if configured:
+		path = Path(configured).expanduser()
+		if path.is_file():
+			return str(path)
+		raise FileNotFoundError(f"Configured Chrome executable does not exist: {configured}")
+
+	if platform_name in {"windows", "win32"}:
+		candidate_paths = [
+			Path(root) / relative
+			for root in (
+				os.environ.get("PROGRAMFILES"),
+				os.environ.get("PROGRAMFILES(X86)"),
+				os.environ.get("LOCALAPPDATA"),
+			)
+			if root
+			for relative in (
+				"Google/Chrome/Application/chrome.exe",
+				"Chromium/Application/chrome.exe",
+				"BraveSoftware/Brave-Browser/Application/brave.exe",
+			)
+		]
+		command_names = ("chrome.exe", "chromium.exe", "brave.exe", "msedge.exe")
+	else:
+		candidate_paths = []
+		command_names = (
+			"google-chrome",
+			"google-chrome-stable",
+			"chromium",
+			"chromium-browser",
+			"brave-browser",
+			"microsoft-edge",
+		)
+
+	for path in candidate_paths:
+		if path.is_file():
+			return str(path)
+	for command_name in command_names:
+		resolved = shutil.which(command_name)
+		if resolved:
+			return resolved
+	raise FileNotFoundError(
+		"Could not find a Chrome-compatible browser. Set CONTEXT_ATLAS_CHROME_PATH to its executable."
+	)
 
 
 def _safe_url(url: str) -> str:
@@ -213,6 +301,7 @@ __all__ = [
 	"EXTENSION_ROOT",
 	"build_browser_command",
 	"build_server_command",
+	"derive_app_url",
 	"main",
 	"parse_args",
 	"print_extension_guide",

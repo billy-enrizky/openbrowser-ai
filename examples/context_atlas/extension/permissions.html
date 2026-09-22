@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Context Atlas access</title>
+    <link rel="stylesheet" href="options.css">
+  </head>
+  <body>
+    <main class="panel">
+      <p class="eyebrow">CONTEXT ATLAS</p>
+      <h1 id="heading">Allow provider access</h1>
+      <p class="muted" id="description">Context Atlas needs access to the selected provider to search this page.</p>
+      <p class="muted">This access is optional and applies only to the provider you selected.</p>
+      <div class="actions">
+        <button id="allow" type="button">Allow access</button>
+        <button id="close" class="secondary" type="button">Close</button>
+      </div>
+      <p id="status" role="status" aria-live="polite"></p>
+    </main>
+    <script src="permissions.js"></script>
+  </body>
+</html>
