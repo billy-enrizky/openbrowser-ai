@@ -78,8 +78,8 @@ and highlights that sentence on the webpage.
 
 ## Build and packaging verification
 
-This PR intentionally ships the extension source and build inputs without local
-test fixtures. Verify the delivered build and deterministic Chrome package with:
+The extension ships source and build inputs without local test fixtures. Verify
+the delivered build and deterministic Chrome package with:
 
 ```bash
 npm --prefix examples/context_atlas/ui run build

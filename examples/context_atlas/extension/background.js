@@ -1,10 +1,11 @@
-importScripts("jev-client.js", "source-snapshot.js");
+importScripts("provider-origins.js", "jev-client.js", "source-snapshot.js");
 
 const SUPPORTED_PROVIDERS = new Set(["jev", "laya"]);
 const SUPPORTED_TYPES = new Set([
   "context_atlas.provider_status",
   "context_atlas.request_provider_access",
   "context_atlas.provider_access_result",
+  "context_atlas.close_permission_page",
   "context_atlas.set_provider",
   "context_atlas.key_status",
   "context_atlas.save_key",
@@ -20,13 +21,7 @@ const SOURCE_STORAGE_KEY = "context_atlas.current_source";
 const OFFSCREEN_TARGET = "context_atlas.offscreen";
 const OFFSCREEN_URL = "offscreen.html";
 const PERMISSION_PAGE_URL = "permissions.html";
-const PROVIDER_ORIGINS = Object.freeze({
-  jev: ["https://api.typesafe.ai/v1/systemone"],
-  laya: [
-    "https://huggingface.co/mizchi/laya-multilingual-onnx/resolve/d9d003d543e63d6d3375c21d44624136bd1e0bad/*",
-    "https://us.aws.cdn.hf.co/xet-bridge-us/*",
-  ],
-});
+const permissionTabs = new Map();
 let requestSequence = 0;
 
 chrome.action.onClicked.addListener(async (tab) => {
@@ -41,12 +36,15 @@ chrome.action.onClicked.addListener(async (tab) => {
   }
 });
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message || !SUPPORTED_TYPES.has(message.type)) return false;
   const requestId = ++requestSequence;
 
   if (message.type === "context_atlas.request_provider_access") {
     return requestProviderAccess(message, sendResponse, requestId);
+  }
+  if (message.type === "context_atlas.close_permission_page") {
+    return closePermissionPage(message, sender, sendResponse, requestId);
   }
 
   (async () => {
@@ -75,7 +73,8 @@ function requestProviderAccess(message, sendResponse, requestId) {
       const permissionUrl = new URL(chrome.runtime.getURL(PERMISSION_PAGE_URL));
       permissionUrl.searchParams.set("provider", message.provider);
       permissionUrl.searchParams.set("request_id", String(requestId));
-      await chrome.tabs.create({ url: permissionUrl.toString(), active: true });
+      const permissionTab = await chrome.tabs.create({ url: permissionUrl.toString(), active: true });
+      if (Number.isInteger(permissionTab?.id)) permissionTabs.set(requestId, permissionTab.id);
       const error = new Error("Allow access in the Context Atlas window, then try again.");
       error.code = "permission_required";
       throw error;
@@ -86,6 +85,22 @@ function requestProviderAccess(message, sendResponse, requestId) {
   return true;
 }
 
+function closePermissionPage(message, sender, sendResponse, requestId) {
+  const permissionRequestId = Number.parseInt(String(message.request_id || ""), 10);
+  const tabId = Number.isInteger(permissionRequestId)
+    ? permissionTabs.get(permissionRequestId) ?? sender.tab?.id
+    : sender.tab?.id;
+  const permissionPageUrl = chrome.runtime.getURL(PERMISSION_PAGE_URL);
+  if (!Number.isInteger(tabId) || !sender.url?.startsWith(`${permissionPageUrl}?`)) {
+    sendResponse({ ok: false, requestId, error: "The permission page could not be closed.", code: "permission_page_unavailable" });
+    return false;
+  }
+  if (Number.isInteger(permissionRequestId)) permissionTabs.delete(permissionRequestId);
+  sendResponse({ ok: true, requestId, payload: { closed: true } });
+  void chrome.tabs.remove(tabId).catch(() => {});
+  return false;
+}
+
 async function providerAccessResult(message) {
   const origins = providerOrigins(message.provider);
   const granted = message.granted === true && await chrome.permissions.contains({ origins });
@@ -94,7 +109,7 @@ async function providerAccessResult(message) {
 
 function providerOrigins(provider) {
   if (!SUPPORTED_PROVIDERS.has(provider)) throw new Error("Unsupported Context Atlas provider.");
-  return PROVIDER_ORIGINS[provider];
+  return ContextAtlasProviderOrigins[provider];
 }
 
 async function handleMessage(message) {
