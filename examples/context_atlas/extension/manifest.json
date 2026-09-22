@@ -1,0 +1,46 @@
+{
+  "manifest_version": 3,
+  "name": "Context Atlas, find what matters",
+  "version": "0.1.0",
+  "description": "Find source-backed answers on the webpage you are reading, with private local or cloud search.",
+  "minimum_chrome_version": "116",
+  "permissions": ["activeTab", "scripting", "storage", "offscreen"],
+  "optional_host_permissions": [
+    "https://api.typesafe.ai/*",
+    "https://huggingface.co/*",
+    "https://*.cdn.hf.co/*"
+  ],
+  "icons": {
+    "16": "icons/context-atlas-16.png",
+    "48": "icons/context-atlas-48.png",
+    "128": "icons/context-atlas-128.png"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "http://127.0.0.1:8765/"
+      ],
+      "js": ["localhost-bridge.js"],
+      "run_at": "document_start"
+    }
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'none';",
+    "sandbox": "sandbox allow-scripts; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval'; object-src 'none'; child-src 'self';"
+  },
+  "sandbox": {
+    "pages": ["sandbox.html"]
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Search this page with Context Atlas",
+    "default_icon": {
+      "16": "icons/context-atlas-16.png",
+      "48": "icons/context-atlas-48.png",
+      "128": "icons/context-atlas-128.png"
+    }
+  },
+  "options_page": "options.html"
+}
