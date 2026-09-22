@@ -90,13 +90,12 @@ def build_server_command(server_url: str, *, python_executable: str | None = Non
 
 def build_browser_command(url: str, *, platform_name: str | None = None) -> list[str]:
 	name = (platform_name or platform.system()).lower()
-	extension_arg = f"--load-extension={EXTENSION_ROOT}"
 	if name == "darwin":
 		# LaunchServices forwards startup arguments to an existing branded Chrome
 		# process, where --load-extension is ignored. Load the extension once in
 		# the current Chrome profile, then only open the requested URL here.
 		return ["open", "-a", "Google Chrome", url]
-	return [_find_chrome_executable(name), extension_arg, url]
+	return [_find_chrome_executable(name), url]
 
 
 def server_is_healthy(server_url: str, *, timeout: float = 0.8) -> bool:

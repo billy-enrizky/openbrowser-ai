@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from typing import Any
+from typing import Any, cast
 
 from openbrowser.jev.semantic_search import (
 	MAX_PASSAGE_LENGTH,
 	MAX_PASSAGES,
 	MAX_QUERY_LENGTH,
+	MAX_SENTENCE_LENGTH,
+	MAX_SENTENCES_PER_PASSAGE,
 	MAX_TOTAL_SENTENCE_TEXT_LENGTH,
 	MAX_TOTAL_TEXT_LENGTH,
 )
@@ -113,22 +115,38 @@ def _read_sentences(
 	text: str,
 ) -> tuple[SearchSentence, ...]:
 	if "sentences" not in block or block["sentences"] is None:
-		return tuple(SearchSentence(index=item["index"], text=item["text"]) for item in segment_text(text))
+		generated = segment_text(text)
+		if len(generated) > MAX_SENTENCES_PER_PASSAGE:
+			raise DocumentInputError(
+				f"block {block_id!r} must contain at most {MAX_SENTENCES_PER_PASSAGE} sentences"
+			)
+		return tuple(
+			SearchSentence(index=cast(int, item["index"]), text=cast(str, item["text"]))
+			for item in generated
+		)
 	raw_sentences = block["sentences"]
 	if not isinstance(raw_sentences, (list, tuple)) or not raw_sentences:
 		raise DocumentInputError(f"block {block_id!r} sentences must be a non-empty list")
+	if len(raw_sentences) > MAX_SENTENCES_PER_PASSAGE:
+		raise DocumentInputError(
+			f"block {block_id!r} must contain at most {MAX_SENTENCES_PER_PASSAGE} sentences"
+		)
 	sentences: list[SearchSentence] = []
 	for expected_index, raw_sentence in enumerate(raw_sentences):
 		if not isinstance(raw_sentence, Mapping):
 			raise DocumentInputError(f"block {block_id!r} sentences must be objects")
 		index = raw_sentence.get("index")
 		sentence_text = raw_sentence.get("text")
-		if index != expected_index:
+		if not isinstance(index, int) or isinstance(index, bool) or index != expected_index:
 			raise DocumentInputError(
 				f"block {block_id!r} sentence indexes must be contiguous from zero"
 			)
 		if not isinstance(sentence_text, str) or not sentence_text.strip():
 			raise DocumentInputError(f"block {block_id!r} sentence text must not be empty")
+		if len(sentence_text) > MAX_SENTENCE_LENGTH:
+			raise DocumentInputError(
+				f"block {block_id!r} sentence must be at most {MAX_SENTENCE_LENGTH:,} characters"
+			)
 		if sentence_text not in text:
 			raise DocumentInputError(
 				f"block {block_id!r} sentence text must be present in source text"
