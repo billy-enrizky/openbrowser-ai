@@ -1,9 +1,9 @@
-const PROVIDER_ORIGINS = globalThis.ContextAtlasProviderOrigins;
+const PROVIDER_ORIGINS = globalThis.ContextAtlasProviderOrigins || {};
 
 const params = new URLSearchParams(location.search);
 const provider = params.get("provider");
 const requestId = params.get("request_id") || "";
-const origins = PROVIDER_ORIGINS[provider];
+const origins = Array.isArray(PROVIDER_ORIGINS[provider]) ? PROVIDER_ORIGINS[provider] : [];
 const heading = document.getElementById("heading");
 const description = document.getElementById("description");
 const allowButton = document.getElementById("allow");
@@ -19,6 +19,11 @@ if (provider === "jev") {
 } else {
   allowButton.disabled = true;
   status.textContent = "The selected provider is not supported.";
+}
+
+if ((provider === "jev" || provider === "laya") && origins.length === 0) {
+  allowButton.disabled = true;
+  status.textContent = "Access for this provider is not configured.";
 }
 
 function sendMessage(message) {
@@ -38,7 +43,7 @@ function sendMessage(message) {
 }
 
 allowButton.addEventListener("click", async () => {
-  if (!origins) return;
+  if (origins.length === 0) return;
   allowButton.disabled = true;
   closeButton.disabled = true;
   status.textContent = "Waiting for your permission…";

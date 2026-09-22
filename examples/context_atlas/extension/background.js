@@ -62,7 +62,7 @@ function requestProviderAccess(message, sendResponse, requestId) {
   (async () => {
     try {
       const origins = providerOrigins(message.provider);
-      if (await chrome.permissions.contains({ origins })) {
+      if (origins.length > 0 && await chrome.permissions.contains({ origins })) {
         sendResponse({ ok: true, requestId, payload: { granted: true, provider: message.provider } });
         return;
       }
@@ -88,11 +88,9 @@ function requestProviderAccess(message, sendResponse, requestId) {
 
 function closePermissionPage(message, sender, sendResponse, requestId) {
   const permissionRequestId = typeof message.request_id === "string" ? message.request_id : "";
-  const tabId = Number.isInteger(sender.tab?.id)
-    ? sender.tab.id
-    : permissionRequestId
-      ? permissionTabs.get(permissionRequestId)
-      : undefined;
+  const tabId = permissionRequestId
+    ? permissionTabs.get(permissionRequestId) ?? sender.tab?.id
+    : sender.tab?.id;
   const permissionPageUrl = chrome.runtime.getURL(PERMISSION_PAGE_URL);
   if (!Number.isInteger(tabId) || !sender.url?.startsWith(`${permissionPageUrl}?`)) {
     sendResponse({ ok: false, requestId, error: "The permission page could not be closed.", code: "permission_page_unavailable" });
@@ -112,13 +110,17 @@ function closePermissionPage(message, sender, sendResponse, requestId) {
 
 async function providerAccessResult(message) {
   const origins = providerOrigins(message.provider);
-  const granted = message.granted === true && await chrome.permissions.contains({ origins });
+  const granted = origins.length > 0 && message.granted === true && await chrome.permissions.contains({ origins });
   return { granted, provider: message.provider };
 }
 
 function providerOrigins(provider) {
   if (!SUPPORTED_PROVIDERS.has(provider)) throw new Error("Unsupported Context Atlas provider.");
-  return ContextAtlasProviderOrigins[provider];
+  const origins = ContextAtlasProviderOrigins[provider];
+  if (!Array.isArray(origins) || origins.length === 0) {
+    throw new Error("The selected provider has no configured access origin.");
+  }
+  return origins;
 }
 
 async function handleMessage(message) {
