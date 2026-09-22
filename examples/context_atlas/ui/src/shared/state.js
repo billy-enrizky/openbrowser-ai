@@ -27,15 +27,18 @@ export function invalidateProviderRequest(requestRef, clearResult = () => {}) {
 export function isCurrentRequest(requestId, currentRequestId) {
   return requestId === currentRequestId;
 }
-export function sourceFingerprint(passages) {
+export function sourceFingerprint(passages, sourceUrl = "") {
   return JSON.stringify(
-    (Array.isArray(passages) ? passages : []).map((passage) => ({
-      id: passage?.id,
-      text: passage?.text,
-      sentences: Array.isArray(passage?.sentences)
-        ? passage.sentences.map((sentence) => ({ index: sentence?.index, text: sentence?.text }))
-        : [],
-    })),
+    {
+      url: String(sourceUrl || ""),
+      passages: (Array.isArray(passages) ? passages : []).map((passage) => ({
+        id: passage?.id,
+        text: passage?.text,
+        sentences: Array.isArray(passage?.sentences)
+          ? passage.sentences.map((sentence) => ({ index: sentence?.index, text: sentence?.text }))
+          : [],
+      })),
+    },
   );
 }
 
@@ -76,6 +79,17 @@ export function buildProvenanceThread(result, passages, query) {
 export function normalizeSearchError(error) {
   const status = Number(error?.status);
   const rawMessage = error?.message || "The request could not be completed.";
+  const codeMessages = {
+    authentication: "The saved Cloud access key was rejected. Check it and try again.",
+    not_configured: "Cloud is not configured. Save an access key first.",
+    invalid_input: "The page source or question is invalid. Check it and try again.",
+    invalid_source: "The current page source could not be prepared. Refresh the page and try again.",
+    not_ready: "The current page is not ready. Open Context Atlas on a webpage first.",
+    permission_required: "Allow access in the new Context Atlas window, then choose this provider again.",
+  };
+  if (Object.hasOwn(codeMessages, error?.code)) {
+    return { message: codeMessages[error.code], retryable: false };
+  }
   if (error?.code === "permission_denied") {
     return { message: String(rawMessage), retryable: false };
   }
@@ -95,7 +109,7 @@ export function normalizeSearchError(error) {
   if (/jev is not configured/.test(message)) {
     return { message: "Cloud is not configured. Save an access key first.", retryable: false };
   }
-  if (status === 502 || /max[_ ]tokens|context length|provider input|input too large/.test(message)) {
+  if (/max[_ ]tokens|context length|provider input|provider limit|input too large/.test(message)) {
     return {
       message: "Cloud search rejected the source size. Retry with fewer visible passages.",
       retryable: true,

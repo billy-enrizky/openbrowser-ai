@@ -2,6 +2,8 @@ import { loadLayaBrowserAssets } from "./laya-assets.js";
 
 const CHANNEL = "context-atlas-laya-sandbox-v1";
 const SANDBOX_READY_TIMEOUT_MS = 30000;
+const SANDBOX_REQUEST_TIMEOUT_MS = 120000;
+const INITIALIZATION_TIMEOUT_MS = 120000;
 let runtimePromise;
 let sandboxFrame;
 let sandboxReadyPromise;
@@ -14,8 +16,42 @@ function errorMessage(error) {
 }
 
 function rejectPending(error) {
-  for (const { reject } of pendingRequests.values()) reject(error);
+  for (const { reject, timeout } of pendingRequests.values()) {
+    clearTimeout(timeout);
+    reject(error);
+  }
   pendingRequests.clear();
+}
+
+function withTimeout(promise, timeoutMs, message, onTimeout) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const timeout = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      const error = new Error(message);
+      try {
+        onTimeout?.(error);
+      } catch (_error) {
+      }
+      reject(error);
+    }, timeoutMs);
+
+    promise.then(
+      (value) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        resolve(value);
+      },
+      (error) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        reject(error);
+      },
+    );
+  });
 }
 
 function acceptSandboxMessage(event) {
@@ -31,9 +67,10 @@ function acceptSandboxMessage(event) {
   }
   const pending = pendingRequests.get(message.requestId);
   if (!pending) return;
+  clearTimeout(pending.timeout);
+  pendingRequests.delete(message.requestId);
   if (message.ok) pending.resolve(message.payload || {});
   else pending.reject(new Error(message.error || "The local Laya sandbox rejected the request."));
-  pendingRequests.delete(message.requestId);
 }
 
 window.addEventListener("message", acceptSandboxMessage);
@@ -76,20 +113,43 @@ async function requestSandbox(type, payload = {}, transfer = []) {
   const frame = await ensureSandbox();
   const requestId = `r${++requestSequence}`;
   return new Promise((resolve, reject) => {
-    pendingRequests.set(requestId, { resolve, reject });
-    frame.contentWindow.postMessage({ channel: CHANNEL, requestId, type, ...payload }, "*", transfer);
+    const pending = { resolve, reject, timeout: null };
+    pendingRequests.set(requestId, pending);
+    pending.timeout = setTimeout(() => {
+      const pending = pendingRequests.get(requestId);
+      if (!pending) return;
+      pendingRequests.delete(requestId);
+      pending.reject(new Error("The local Laya sandbox request timed out."));
+    }, SANDBOX_REQUEST_TIMEOUT_MS);
+    try {
+      frame.contentWindow.postMessage({ channel: CHANNEL, requestId, type, ...payload }, "*", transfer);
+    } catch (error) {
+      clearTimeout(pending.timeout);
+      pendingRequests.delete(requestId);
+      reject(error);
+    }
   });
 }
 
 async function initializeRuntime() {
   if (!runtimePromise) {
-    runtimePromise = (async () => {
-      const assets = await loadLayaBrowserAssets();
+    const controller = typeof AbortController === "function" ? new AbortController() : null;
+    const initialization = (async () => {
+      const assets = await loadLayaBrowserAssets(controller ? { signal: controller.signal } : {});
       const modelBuffer = assets.modelBytes.buffer;
       return requestSandbox("initialize", {
         assets: { modelBytes: modelBuffer, tokenizerJson: assets.tokenizerJson, tokenizerConfig: assets.tokenizerConfig, rlConfig: assets.rlConfig },
       }, [modelBuffer]);
-    })().catch((error) => {
+    })();
+    runtimePromise = withTimeout(
+      initialization,
+      INITIALIZATION_TIMEOUT_MS,
+      "The local Laya runtime initialization timed out.",
+      (error) => {
+        controller?.abort();
+        rejectPending(error);
+      },
+    ).catch((error) => {
       runtimePromise = null;
       throw error;
     });

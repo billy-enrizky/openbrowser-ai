@@ -2,6 +2,7 @@
   const CHANNEL = "context_atlas";
   const ALLOWED_ORIGINS = new Set([
     "http://127.0.0.1:8765",
+    "http://localhost:8765",
   ]);
   const ALLOWED_TYPES = new Set([
     "context_atlas.provider_status",

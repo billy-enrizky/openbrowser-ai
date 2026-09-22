@@ -1,6 +1,7 @@
 const CHANNEL = "context_atlas";
 const ALLOWED_ORIGINS = new Set([
   "http://127.0.0.1:8765",
+  "http://localhost:8765",
 ]);
 
 export function createWindowBridgeAdapter({ windowObject = globalThis.window, timeoutMs = 15000 } = {}) {
@@ -8,10 +9,11 @@ export function createWindowBridgeAdapter({ windowObject = globalThis.window, ti
     throw new Error("A browser window is required for the Context Atlas bridge.");
   }
   const origin = windowObject.location?.origin;
-  if (!ALLOWED_ORIGINS.has(origin)) throw new Error("Context Atlas must run on the supported localhost address.");
+  const unsupportedOrigin = !ALLOWED_ORIGINS.has(origin);
   let sequence = 0;
 
   function request(type, fields = {}) {
+    if (unsupportedOrigin) return Promise.reject(new Error("Context Atlas must run on the supported localhost address."));
     const requestId = `context-atlas-${Date.now().toString(36)}-${(++sequence).toString(36)}`;
     return new Promise((resolve, reject) => {
       let settled = false;
