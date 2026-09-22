@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Context Atlas settings</title>
+    <link rel="stylesheet" href="options.css" />
+  </head>
+  <body>
+    <main class="panel">
+      <p class="eyebrow">CONTEXT ATLAS / SETTINGS</p>
+      <h1>Choose how Context Atlas searches.</h1>
+      <p class="muted">Choose Local to keep search in Chrome, or Cloud to use your organization's search service. Page text is shared only when you search.</p>
+      <section class="status-card" aria-labelledby="runtime-heading">
+        <p class="eyebrow" id="runtime-heading">SELECTED SEARCH</p>
+        <p id="provider" role="status" aria-live="polite">Checking provider…</p>
+        <p class="muted">Local prepares its model on first use. Cloud uses the saved access key only after you choose Search.</p>
+      </section>
+      <form id="cloud-form">
+        <label for="api-key">Cloud access key</label>
+        <p class="field-help" id="api-key-help">Stored locally in Chrome extension storage and never shown after saving.</p>
+        <input id="api-key" type="password" autocomplete="off" spellcheck="false" placeholder="Paste your access key" aria-describedby="api-key-help" />
+        <div class="actions">
+          <button id="save" type="submit">Save access key</button>
+          <button id="clear" class="secondary" type="button">Clear saved key</button>
+        </div>
+      </form>
+      <p id="status" role="status" aria-live="polite"></p>
+      <p class="muted"><a href="privacy.html">Read the privacy policy</a></p>
+    </main>
+    <script src="options.js"></script>
+  </body>
+</html>

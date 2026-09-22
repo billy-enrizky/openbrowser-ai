@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Context Atlas privacy policy</title>
+    <style>
+      :root { color-scheme: light; font-family: system-ui, sans-serif; color: #18222d; background: #f4f7f8; }
+      body { margin: 0; }
+      main { width: min(720px, calc(100% - 40px)); margin: 48px auto; padding: 32px; border: 1px solid #dce2e7; border-radius: 16px; background: white; }
+      h1 { letter-spacing: -.04em; }
+      h2 { margin-top: 28px; font-size: 1.1rem; }
+      p, li { color: #53616e; line-height: 1.65; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Context Atlas privacy policy</h1>
+      <p>Last updated: 2026-09-21</p>
+      <p>Contact: <a href="mailto:billy.suharno@gmail.com">billy.suharno@gmail.com</a></p>
+      <p>Context Atlas does not use analytics, sell data, or load remote executable code.</p>
+      <h2>Page text and search modes</h2>
+      <p>The extension reads visible page passages after the user opens it. Local keeps page text in the browser. Cloud sends the question and bounded page passages only after a user-initiated search.</p>
+      <h2>Storage and credentials</h2>
+      <p>The optional Cloud access key and selected search mode are stored locally in Chrome extension storage. The key is not shown after saving, is not sent to page scripts or Local, and can be removed with Clear saved key or by uninstalling the extension.</p>
+      <h2>Current page companion</h2>
+      <p>The separate localhost page requests the latest bounded source through an exact-origin extension bridge. It does not replace the panel on the current webpage or require manual document fields.</p>
+      <h2>Model data</h2>
+      <p>Local downloads pinned model data from the manifest's declared hosts. Chrome asks for access to those hosts when Local search starts for the first time, not during installation. WebGPU is preferred and bundled WASM CPU is the fallback. Page text is not sent to the model host.</p>
+      <h2>Third-party services</h2>
+      <p>If you choose Cloud, Chrome asks for access to the Cloud service. The extension then sends the search question and bounded visible page passages to the configured Cloud search service only after you start the search. The locally stored Cloud access key is used for that request and is not sent to page scripts or Local. That service's own privacy policy applies to the request. Local search does not send page text to that service.</p>
+      <h2>Retention and deletion</h2>
+      <p>The extension does not keep an account or analytics history. The current page snapshot lasts only for the active browser session. The selected search mode and optional Cloud access key remain in local extension storage until changed, cleared in Settings, or removed by uninstalling the extension. Cloud retention is controlled by the configured Cloud service.</p>
+      <h2>Changes and contact</h2>
+      <p>This policy will be updated if Context Atlas changes what it stores or sends. The date above identifies the latest version. For privacy questions, contact <a href="mailto:billy.suharno@gmail.com">billy.suharno@gmail.com</a>.</p>
+    </main>
+  </body>
+</html>

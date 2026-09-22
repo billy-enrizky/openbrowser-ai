@@ -1,0 +1,19 @@
+{
+  "name": "context-atlas-ui",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "package:extension": "npm run build && cd ../../.. && uv run python -m examples.context_atlas.package_extension"
+  },
+  "dependencies": {
+    "@huggingface/tokenizers": "0.2.0",
+    "lucide-react": "0.468.0",
+    "onnxruntime-web": "1.30.0",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  }
+}
