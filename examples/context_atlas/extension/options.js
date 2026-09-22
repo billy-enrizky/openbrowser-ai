@@ -5,6 +5,7 @@ const saveButton = document.getElementById("save");
 const clearButton = document.getElementById("clear");
 let mutationInFlight = false;
 let keyConfigured = false;
+let settingsReadVersion = 0;
 
 function updateMutationControls() {
   saveButton.disabled = mutationInFlight;
@@ -12,6 +13,7 @@ function updateMutationControls() {
 }
 
 function setMutationBusy(busy) {
+  if (busy) settingsReadVersion += 1;
   mutationInFlight = busy;
   updateMutationControls();
 }
@@ -33,15 +35,19 @@ function sendMessage(message) {
 }
 
 async function refresh({ preserveStatus = false } = {}) {
+  const readVersion = ++settingsReadVersion;
   try {
     const selected = await sendMessage({ type: "context_atlas.provider_status" });
+    if (readVersion !== settingsReadVersion) return;
     provider.textContent = selected.provider === "jev"
       ? "Cloud is selected."
       : "Local is selected.";
     const keyStatus = await sendMessage({ type: "context_atlas.key_status" });
+    if (readVersion !== settingsReadVersion) return;
     keyConfigured = keyStatus.configured === true;
     updateMutationControls();
   } catch (error) {
+    if (readVersion !== settingsReadVersion) return;
     if (preserveStatus) {
       console.warn("Could not refresh settings after a change.", error);
     } else {

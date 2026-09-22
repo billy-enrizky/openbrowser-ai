@@ -8014,10 +8014,10 @@
       setSearchProgress(0);
       setStatus({ kind: "idle", message: "The page changed. Search again.", retryable: false });
     }, [fingerprint, sourcePassages]);
-    async function chooseProvider(nextProvider) {
+    async function chooseProvider(nextProvider, requestedSelectionVersion = null) {
       const next = normalizeProvider(nextProvider);
       if (!providerEnabled || next === provider || providerBusy) return;
-      const selectionVersion = providerSelectionVersionRef.current + 1;
+      const selectionVersion = requestedSelectionVersion ?? providerSelectionVersionRef.current + 1;
       providerSelectionVersionRef.current = selectionVersion;
       let accessPromise = Promise.resolve({ granted: true });
       if (next === "jev" && typeof adapter?.ensureProviderAccess === "function") {
@@ -8070,7 +8070,7 @@
       event.preventDefault();
       nextTab?.focus();
       void (async () => {
-        await chooseProvider(nextProvider);
+        await chooseProvider(nextProvider, selectionVersion);
         if (selectionVersion !== providerSelectionVersionRef.current) return;
         window.setTimeout(() => {
           if (selectionVersion !== providerSelectionVersionRef.current) return;
@@ -8270,7 +8270,7 @@
           /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "context-atlas-card-copy", children: "Runs in your browser." })
         ] })
       ] }) : null,
-      activeProvider === "jev" && typeof adapter?.getKeyStatus === "function" ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("section", { className: "context-atlas-card context-atlas-key-card", role: providerEnabled ? "tabpanel" : void 0, id: providerEnabled ? "context-atlas-provider-panel-jev" : void 0, "aria-labelledby": providerEnabled ? "context-atlas-provider-tab-jev" : "context-atlas-key-heading", hidden: providerEnabled && provider !== "jev", children: [
+      typeof adapter?.getKeyStatus === "function" ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("section", { className: "context-atlas-card context-atlas-key-card", role: providerEnabled ? "tabpanel" : void 0, id: providerEnabled ? "context-atlas-provider-panel-jev" : void 0, "aria-labelledby": providerEnabled ? "context-atlas-provider-tab-jev" : "context-atlas-key-heading", hidden: providerEnabled && provider !== "jev", children: [
         /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "context-atlas-section-heading", children: [
           /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [
             /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "context-atlas-eyebrow", children: "CLOUD ACCESS" }),

@@ -24,6 +24,7 @@ function rejectPending(error) {
 }
 
 function resetSandbox(error) {
+  runtimePromise = null;
   clearTimeout(sandboxReadyPromise?.timeout);
   sandboxReadyPromise?.reject(error);
   sandboxReadyPromise = null;
@@ -124,7 +125,7 @@ async function requestSandbox(type, payload = {}, transfer = []) {
       pendingRequests.delete(requestId);
       const error = new Error("The local Laya sandbox request timed out.");
       pending.reject(error);
-      if (type === "initialize") resetSandbox(error);
+      resetSandbox(error);
     }, SANDBOX_REQUEST_TIMEOUT_MS);
     try {
       frame.contentWindow.postMessage({ channel: CHANNEL, requestId, type, ...payload }, "*", transfer);

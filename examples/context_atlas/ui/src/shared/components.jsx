@@ -113,10 +113,10 @@ export function ContextAtlasSurface({
     setStatus({ kind: "idle", message: "The page changed. Search again.", retryable: false });
   }, [fingerprint, sourcePassages]);
 
-  async function chooseProvider(nextProvider) {
+  async function chooseProvider(nextProvider, requestedSelectionVersion = null) {
     const next = normalizeProvider(nextProvider);
     if (!providerEnabled || next === provider || providerBusy) return;
-    const selectionVersion = providerSelectionVersionRef.current + 1;
+    const selectionVersion = requestedSelectionVersion ?? providerSelectionVersionRef.current + 1;
     providerSelectionVersionRef.current = selectionVersion;
     let accessPromise = Promise.resolve({ granted: true });
     if (next === "jev" && typeof adapter?.ensureProviderAccess === "function") {
@@ -178,7 +178,7 @@ export function ContextAtlasSurface({
     event.preventDefault();
     nextTab?.focus();
     void (async () => {
-      await chooseProvider(nextProvider);
+      await chooseProvider(nextProvider, selectionVersion);
       if (selectionVersion !== providerSelectionVersionRef.current) return;
       window.setTimeout(() => {
         if (selectionVersion !== providerSelectionVersionRef.current) return;
@@ -392,7 +392,7 @@ export function ContextAtlasSurface({
         </div>
       </section> : null}
 
-      {activeProvider === "jev" && typeof adapter?.getKeyStatus === "function" ? <section className="context-atlas-card context-atlas-key-card" role={providerEnabled ? "tabpanel" : undefined} id={providerEnabled ? "context-atlas-provider-panel-jev" : undefined} aria-labelledby={providerEnabled ? "context-atlas-provider-tab-jev" : "context-atlas-key-heading"} hidden={providerEnabled && provider !== "jev"}>
+      {typeof adapter?.getKeyStatus === "function" ? <section className="context-atlas-card context-atlas-key-card" role={providerEnabled ? "tabpanel" : undefined} id={providerEnabled ? "context-atlas-provider-panel-jev" : undefined} aria-labelledby={providerEnabled ? "context-atlas-provider-tab-jev" : "context-atlas-key-heading"} hidden={providerEnabled && provider !== "jev"}>
         <div className="context-atlas-section-heading">
           <div><p className="context-atlas-eyebrow">CLOUD ACCESS</p><h2 id="context-atlas-key-heading">Cloud access key</h2></div>
           <span className={`context-atlas-badge ${keyConfigured ? "is-success" : keyConfigured === false ? "is-muted" : "is-warn"}`}>{keyConfigured ? "Saved locally" : keyConfigured === false ? "Not set up" : "Checking…"}</span>

@@ -38,8 +38,7 @@
     if (Object.hasOwn(source, "url")) snapshot.url = cleanUrl(source.url);
     if (Object.hasOwn(source, "revision")) snapshot.revision = cleanText(source.revision, MAX_REVISION_LENGTH, "Source revision");
     snapshot.passages = normalizePassages(source.passages);
-    const sourceByteLength = snapshot.passages.reduce((total, passage) => total + utf8ByteLength(passage.text), 0);
-    if (sourceByteLength > MAX_SOURCE_SNAPSHOT_BYTES) throw invalid("Source snapshot is too large.");
+    if (utf8ByteLength(JSON.stringify(snapshot)) > MAX_SOURCE_SNAPSHOT_BYTES) throw invalid("Source snapshot is too large.");
     return snapshot;
   }
 
@@ -108,7 +107,13 @@
   }
 
   function utf8ByteLength(value) {
-    return typeof TextEncoder === "function" ? new TextEncoder().encode(value).length : value.length;
+    if (typeof TextEncoder === "function") return new TextEncoder().encode(value).length;
+    let length = 0;
+    for (const character of String(value)) {
+      const codePoint = character.codePointAt(0);
+      length += codePoint <= 0x7f ? 1 : codePoint <= 0x7ff ? 2 : codePoint <= 0xffff ? 3 : 4;
+    }
+    return length;
   }
 
   function invalid(message) {

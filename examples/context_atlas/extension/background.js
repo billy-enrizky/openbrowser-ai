@@ -70,11 +70,12 @@ function requestProviderAccess(message, sendResponse, requestId) {
       if (typeof chrome.tabs?.create !== "function") {
         throw new Error("The provider access page is unavailable.");
       }
+      const permissionRequestId = crypto.randomUUID();
       const permissionUrl = new URL(chrome.runtime.getURL(PERMISSION_PAGE_URL));
       permissionUrl.searchParams.set("provider", message.provider);
-      permissionUrl.searchParams.set("request_id", String(requestId));
+      permissionUrl.searchParams.set("request_id", permissionRequestId);
       const permissionTab = await chrome.tabs.create({ url: permissionUrl.toString(), active: true });
-      if (Number.isInteger(permissionTab?.id)) permissionTabs.set(requestId, permissionTab.id);
+      if (Number.isInteger(permissionTab?.id)) permissionTabs.set(permissionRequestId, permissionTab.id);
       const error = new Error("Allow access in the Context Atlas window, then try again.");
       error.code = "permission_required";
       throw error;
@@ -86,16 +87,14 @@ function requestProviderAccess(message, sendResponse, requestId) {
 }
 
 function closePermissionPage(message, sender, sendResponse, requestId) {
-  const permissionRequestId = Number.parseInt(String(message.request_id || ""), 10);
-  const tabId = Number.isInteger(permissionRequestId)
-    ? permissionTabs.get(permissionRequestId) ?? sender.tab?.id
-    : sender.tab?.id;
+  const permissionRequestId = typeof message.request_id === "string" ? message.request_id : "";
+  const tabId = permissionRequestId ? permissionTabs.get(permissionRequestId) : sender.tab?.id;
   const permissionPageUrl = chrome.runtime.getURL(PERMISSION_PAGE_URL);
   if (!Number.isInteger(tabId) || !sender.url?.startsWith(`${permissionPageUrl}?`)) {
     sendResponse({ ok: false, requestId, error: "The permission page could not be closed.", code: "permission_page_unavailable" });
     return false;
   }
-  if (Number.isInteger(permissionRequestId)) permissionTabs.delete(permissionRequestId);
+  if (permissionRequestId) permissionTabs.delete(permissionRequestId);
   sendResponse({ ok: true, requestId, payload: { closed: true } });
   void chrome.tabs.remove(tabId).catch(() => {});
   return false;

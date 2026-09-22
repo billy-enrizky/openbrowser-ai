@@ -222,7 +222,7 @@ def create_server(
 class ContextAtlasRequestHandler(BaseHTTPRequestHandler):
 	"""HTTP adapter with JSON errors and no request-body logging."""
 
-	server: ThreadingHTTPServer
+	server: ThreadingHTTPServer  # type: ignore[reportIncompatibleVariableOverride]
 
 	def do_GET(self) -> None:
 		path = urlsplit(self.path).path
@@ -393,7 +393,7 @@ class ContextAtlasRequestHandler(BaseHTTPRequestHandler):
 		origin = self.headers.get("Origin")
 		allowed_origins = self.server.context_atlas_allowed_origins  # type: ignore[attr-defined]
 		self.send_header("Vary", "Origin")
-		if origin in allowed_origins:
+		if origin is not None and origin in allowed_origins:
 			self.send_header("Access-Control-Allow-Origin", origin)
 			self.send_header("Access-Control-Allow-Headers", ALLOWED_CORS_HEADERS)
 			self.send_header("Access-Control-Allow-Methods", ALLOWED_CORS_METHODS)

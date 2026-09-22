@@ -194,6 +194,10 @@ def _normalize_sentences(passage: SearchPassage) -> tuple[SearchSentence, ...]:
 				f"passage {passage.id!r} sentence must be at most "
 				f"{MAX_SENTENCE_LENGTH:,} characters"
 			)
+		if sentence.text not in passage.text:
+			raise SemanticSearchError(
+				f"passage {passage.id!r} sentence text must be present in source"
+			)
 		sentences.append(sentence)
 	if not sentences:
 		raise SemanticSearchError(
