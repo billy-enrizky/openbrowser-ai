@@ -10,22 +10,15 @@ from typing import Any, cast
 
 from openbrowser.jev.semantic_search import (
 	DEFAULT_RELEVANCE_THRESHOLD,
-	MAX_PASSAGE_LENGTH,
-	MAX_PASSAGES,
-	MAX_QUERY_LENGTH,
-	MAX_SENTENCE_LENGTH,
-	MAX_SENTENCES_PER_PASSAGE,
-	MAX_TOTAL_SENTENCE_TEXT_LENGTH,
-	MAX_TOTAL_TEXT_LENGTH,
 	SemanticSearchError,
+	_normalize_sentences,
+	_validate_and_normalize,
 )
 from openbrowser.jev.views import (
 	SearchPassage,
-	SearchSentence,
 	SemanticMatch,
 	SemanticSearchResult,
 )
-
 
 MAX_BATCH_PASSAGES = 12
 MAX_BATCH_CONCURRENCY = 4
@@ -45,19 +38,13 @@ def plan_search_batches(
 	passages: tuple[SearchPassage, ...] | Sequence[SearchPassage],
 ) -> tuple[SearchBatch, ...]:
 	"""Validate a source and split it into provider-safe windows."""
-	clean_query = _validate_query(query)
-	del clean_query
-	try:
-		items = tuple(passages)
-	except TypeError as exc:
-		raise SemanticSearchError("passages must be an iterable of SearchPassage values") from exc
-	if len(items) > MAX_PASSAGES:
-		raise SemanticSearchError(f"passages must contain at most {MAX_PASSAGES} items")
-
-	_validate_passages(items)
+	_, normalized_passages = _validate_and_normalize(query, passages)
 	return tuple(
-		SearchBatch(index=start // MAX_BATCH_PASSAGES, passages=items[start : start + MAX_BATCH_PASSAGES])
-		for start in range(0, len(items), MAX_BATCH_PASSAGES)
+		SearchBatch(
+			index=start // MAX_BATCH_PASSAGES,
+			passages=normalized_passages[start : start + MAX_BATCH_PASSAGES],
+		)
+		for start in range(0, len(normalized_passages), MAX_BATCH_PASSAGES)
 	)
 
 
@@ -122,84 +109,6 @@ class BoundedSemanticSearch:
 		)
 
 
-def _validate_query(query: str) -> str:
-	if not isinstance(query, str):
-		raise SemanticSearchError("query must be a string")
-	clean_query = query.strip()
-	if not clean_query:
-		raise SemanticSearchError("query must not be empty")
-	if len(clean_query) > MAX_QUERY_LENGTH:
-		raise SemanticSearchError(f"query must be at most {MAX_QUERY_LENGTH} characters")
-	return clean_query
-
-
-def _validate_passages(passages: tuple[SearchPassage, ...]) -> None:
-	seen_ids: set[str] = set()
-	total_text_length = 0
-	total_sentence_text_length = 0
-	for passage in passages:
-		if not isinstance(passage, SearchPassage):
-			raise SemanticSearchError("passages must contain SearchPassage values")
-		if not isinstance(passage.id, str) or not passage.id.strip():
-			raise SemanticSearchError("passage IDs must not be empty")
-		if passage.id in seen_ids:
-			raise SemanticSearchError("passage IDs must be unique")
-		seen_ids.add(passage.id)
-		if not isinstance(passage.text, str) or not passage.text.strip():
-			raise SemanticSearchError("passage text must not be empty")
-		if len(passage.text) > MAX_PASSAGE_LENGTH:
-			raise SemanticSearchError(
-				f"passage {passage.id!r} must be at most {MAX_PASSAGE_LENGTH:,} characters"
-			)
-		total_text_length += len(passage.text)
-		if total_text_length > MAX_TOTAL_TEXT_LENGTH:
-			raise SemanticSearchError(
-				f"passage text must total at most {MAX_TOTAL_TEXT_LENGTH:,} characters"
-			)
-		_validate_sentences(passage)
-		total_sentence_text_length += sum(len(sentence.text) for sentence in passage.sentences)
-		if total_sentence_text_length > MAX_TOTAL_SENTENCE_TEXT_LENGTH:
-			raise SemanticSearchError(
-				"sentence metadata must total at most "
-				f"{MAX_TOTAL_SENTENCE_TEXT_LENGTH:,} characters"
-			)
-
-
-def _validate_sentences(passage: SearchPassage) -> None:
-	if not passage.sentences:
-		return
-	if len(passage.sentences) > MAX_SENTENCES_PER_PASSAGE:
-		raise SemanticSearchError(
-			f"passage {passage.id!r} must contain at most {MAX_SENTENCES_PER_PASSAGE} sentences"
-		)
-	for sentence in passage.sentences:
-		if not isinstance(sentence, SearchSentence):
-			raise SemanticSearchError(
-				f"passage {passage.id!r} sentences must contain SearchSentence values"
-			)
-		if not isinstance(sentence.index, int) or isinstance(sentence.index, bool):
-			raise SemanticSearchError(
-				f"passage {passage.id!r} sentence indexes must be integers"
-			)
-		if not isinstance(sentence.text, str) or not sentence.text.strip():
-			raise SemanticSearchError(
-				f"passage {passage.id!r} sentence text must not be empty"
-			)
-		if len(sentence.text) > MAX_SENTENCE_LENGTH:
-			raise SemanticSearchError(
-				f"passage {passage.id!r} sentence must be at most "
-				f"{MAX_SENTENCE_LENGTH:,} characters"
-			)
-		if sentence.text not in passage.text:
-			raise SemanticSearchError(
-				f"passage {passage.id!r} sentence text must be present in source"
-			)
-	if tuple(sentence.index for sentence in passage.sentences) != tuple(range(len(passage.sentences))):
-		raise SemanticSearchError(
-			f"passage {passage.id!r} sentence indexes must be contiguous from zero"
-		)
-
-
 def _normalize_provider_error(error: Exception) -> SemanticSearchError:
 	message = str(error).lower()
 	if any(marker in message for marker in ("max_tokens", "max tokens", "context length", "input too large", "413")):
@@ -260,7 +169,7 @@ def _validate_match(
 		raise SemanticSearchError("Jev returned an invalid match probability")
 	if not any(
 		sentence.index == match.sentence_index and sentence.text == match.sentence_text
-		for sentence in passage.sentences or (SearchSentence(index=0, text=passage.text),)
+		for sentence in _normalize_sentences(passage)
 	):
 		raise SemanticSearchError("Jev returned a sentence that is not present in the source")
 
