@@ -4,26 +4,40 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hmac
+import ipaddress
 import json
 import mimetypes
-from collections.abc import Mapping
+import secrets
+from collections.abc import Iterable, Mapping
 from http import HTTPStatus
+from http.cookies import CookieError, SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlsplit
 
+from examples.context_atlas.credentials import CredentialStore, CredentialStoreError
+from examples.context_atlas.documents import DocumentInputError, prepare_passages
 from openbrowser.jev.coordinator import BoundedSemanticSearch
 from openbrowser.jev.semantic_search import SemanticSearch, SemanticSearchError
 from openbrowser.jev.views import SemanticMatch, SemanticSearchResult
-
-from examples.context_atlas.credentials import CredentialStore, CredentialStoreError
-from examples.context_atlas.documents import DocumentInputError, prepare_passages
 
 
 MAX_REQUEST_BYTES = 512_000
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
+TOKEN_HEADER = "X-Context-Atlas-Token"
+TOKEN_COOKIE_NAME = "context_atlas_token"
+TOKEN_COOKIE_ATTRIBUTES = "Path=/; HttpOnly; SameSite=Strict"
+API_METHODS = {
+	"/api/health": "GET",
+	"/api/key/status": "GET",
+	"/api/search": "POST",
+	"/api/key": "PUT, DELETE",
+}
+ALLOWED_CORS_HEADERS = "Content-Type, X-Context-Atlas-Token"
+ALLOWED_CORS_METHODS = "GET, POST, PUT, DELETE, OPTIONS"
 
 
 class ContextAtlasError(RuntimeError):
@@ -32,6 +46,10 @@ class ContextAtlasError(RuntimeError):
 
 class ContextAtlasInvalidRequest(ContextAtlasError):
 	"""Raised when a request body does not match the documented shape."""
+
+
+class ContextAtlasUnauthorized(ContextAtlasError):
+	"""Raised when a local API request is not from an authorized client."""
 
 
 class ContextAtlasNotConfigured(ContextAtlasError):
@@ -185,10 +203,19 @@ def create_server(
 	port: int = DEFAULT_PORT,
 	service: ContextAtlasService | None = None,
 	static_root: Path | None = None,
+	allowed_origins: Iterable[str] | None = None,
+	token: str | None = None,
 ) -> ThreadingHTTPServer:
+	if not _is_loopback_host(host):
+		raise ValueError("Context Atlas server must bind to a loopback host")
 	server = ThreadingHTTPServer((host, port), ContextAtlasRequestHandler)
 	server.context_atlas_service = service or ContextAtlasService()  # type: ignore[attr-defined]
 	server.context_atlas_static_root = static_root or Path(__file__).with_name("web")  # type: ignore[attr-defined]
+	server.context_atlas_token = _validate_token(token or secrets.token_urlsafe(32))  # type: ignore[attr-defined]
+	server.context_atlas_allowed_origins = _normalise_allowed_origins(  # type: ignore[attr-defined]
+		allowed_origins,
+		server.server_port,
+	)
 	return server
 
 
@@ -197,8 +224,14 @@ class ContextAtlasRequestHandler(BaseHTTPRequestHandler):
 
 	server: ThreadingHTTPServer
 
-	def do_GET(self) -> None:  # noqa: N802
+	def do_GET(self) -> None:
 		path = urlsplit(self.path).path
+		if path.startswith("/api/"):
+			try:
+				self._authorize_request(require_token=path != "/api/health")
+			except ContextAtlasUnauthorized as exc:
+				self._send_error_for(exc)
+				return
 		if path == "/api/health":
 			self._send_json(HTTPStatus.OK, self.server.context_atlas_service.health())  # type: ignore[attr-defined]
 			return
@@ -210,8 +243,15 @@ class ContextAtlasRequestHandler(BaseHTTPRequestHandler):
 			return
 		self._serve_static(path)
 
-	def do_POST(self) -> None:  # noqa: N802
-		if urlsplit(self.path).path != "/api/search":
+	def do_POST(self) -> None:
+		path = urlsplit(self.path).path
+		if path.startswith("/api/"):
+			try:
+				self._authorize_request()
+			except ContextAtlasUnauthorized as exc:
+				self._send_error_for(exc)
+				return
+		if path != "/api/search":
 			self._send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
 			return
 		try:
@@ -221,8 +261,15 @@ class ContextAtlasRequestHandler(BaseHTTPRequestHandler):
 		except ContextAtlasError as exc:
 			self._send_error_for(exc)
 
-	def do_PUT(self) -> None:  # noqa: N802
-		if urlsplit(self.path).path != "/api/key":
+	def do_PUT(self) -> None:
+		path = urlsplit(self.path).path
+		if path.startswith("/api/"):
+			try:
+				self._authorize_request()
+			except ContextAtlasUnauthorized as exc:
+				self._send_error_for(exc)
+				return
+		if path != "/api/key":
 			self._send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
 			return
 		try:
@@ -232,8 +279,15 @@ class ContextAtlasRequestHandler(BaseHTTPRequestHandler):
 		except ContextAtlasError as exc:
 			self._send_error_for(exc)
 
-	def do_DELETE(self) -> None:  # noqa: N802
-		if urlsplit(self.path).path != "/api/key":
+	def do_DELETE(self) -> None:
+		path = urlsplit(self.path).path
+		if path.startswith("/api/"):
+			try:
+				self._authorize_request()
+			except ContextAtlasUnauthorized as exc:
+				self._send_error_for(exc)
+				return
+		if path != "/api/key":
 			self._send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
 			return
 		try:
@@ -241,9 +295,26 @@ class ContextAtlasRequestHandler(BaseHTTPRequestHandler):
 		except ContextAtlasError as exc:
 			self._send_error_for(exc)
 
-	def do_OPTIONS(self) -> None:  # noqa: N802
-		if not urlsplit(self.path).path.startswith("/api/"):
+	def do_OPTIONS(self) -> None:
+		path = urlsplit(self.path).path
+		if path not in API_METHODS:
 			self._send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
+			return
+		try:
+			self._authorize_request(require_token=False, require_origin=True)
+			requested_method = self.headers.get("Access-Control-Request-Method", "").upper()
+			allowed_methods = {method.strip() for method in API_METHODS[path].split(",")}
+			if requested_method and requested_method not in allowed_methods:
+				raise ContextAtlasUnauthorized("requested method is not allowed")
+			requested_headers = {
+				header.strip().lower()
+				for header in self.headers.get("Access-Control-Request-Headers", "").split(",")
+				if header.strip()
+			}
+			if not requested_headers.issubset({"content-type", TOKEN_HEADER.lower()}):
+				raise ContextAtlasUnauthorized("requested header is not allowed")
+		except ContextAtlasUnauthorized as exc:
+			self._send_error_for(exc)
 			return
 		self.send_response(HTTPStatus.NO_CONTENT)
 		self._send_cors_headers()
@@ -251,6 +322,9 @@ class ContextAtlasRequestHandler(BaseHTTPRequestHandler):
 		self.end_headers()
 
 	def _read_payload(self) -> Mapping[str, Any]:
+		content_type = self.headers.get("Content-Type", "")
+		if content_type.split(";", 1)[0].strip().lower() != "application/json":
+			raise ContextAtlasInvalidRequest("Content-Type must be application/json")
 		length = validate_request_size(self.headers.get("Content-Length"))
 		body = self.rfile.read(length)
 		if len(body) != length:
@@ -274,12 +348,17 @@ class ContextAtlasRequestHandler(BaseHTTPRequestHandler):
 		self.send_header("Content-Type", mimetypes.guess_type(candidate.name)[0] or "application/octet-stream")
 		self.send_header("Content-Length", str(len(body)))
 		self.send_header("Cache-Control", "no-store")
+		self.send_header(
+			"Set-Cookie",
+			f"{TOKEN_COOKIE_NAME}={self.server.context_atlas_token}; {TOKEN_COOKIE_ATTRIBUTES}",  # type: ignore[attr-defined]
+		)
 		self.end_headers()
 		self.wfile.write(body)
 
 	def _send_error_for(self, error: ContextAtlasError) -> None:
 		status = {
 			ContextAtlasInvalidRequest: HTTPStatus.BAD_REQUEST,
+			ContextAtlasUnauthorized: HTTPStatus.UNAUTHORIZED,
 			ContextAtlasRequestTooLarge: HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
 			ContextAtlasNotConfigured: HTTPStatus.SERVICE_UNAVAILABLE,
 			ContextAtlasRateLimitError: HTTPStatus.TOO_MANY_REQUESTS,
@@ -293,6 +372,7 @@ class ContextAtlasRequestHandler(BaseHTTPRequestHandler):
 		else:
 			message = {
 				HTTPStatus.BAD_REQUEST: str(error),
+				HTTPStatus.UNAUTHORIZED: "unauthorized",
 				HTTPStatus.REQUEST_ENTITY_TOO_LARGE: "request body is too large",
 				HTTPStatus.SERVICE_UNAVAILABLE: "Jev is not configured",
 				HTTPStatus.TOO_MANY_REQUESTS: "Jev rate limit reached",
@@ -310,9 +390,41 @@ class ContextAtlasRequestHandler(BaseHTTPRequestHandler):
 		self.wfile.write(body)
 
 	def _send_cors_headers(self) -> None:
-		self.send_header("Access-Control-Allow-Origin", "*")
-		self.send_header("Access-Control-Allow-Headers", "Content-Type")
-		self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		origin = self.headers.get("Origin")
+		allowed_origins = self.server.context_atlas_allowed_origins  # type: ignore[attr-defined]
+		self.send_header("Vary", "Origin")
+		if origin in allowed_origins:
+			self.send_header("Access-Control-Allow-Origin", origin)
+			self.send_header("Access-Control-Allow-Headers", ALLOWED_CORS_HEADERS)
+			self.send_header("Access-Control-Allow-Methods", ALLOWED_CORS_METHODS)
+
+	def _authorize_request(self, *, require_token: bool = True, require_origin: bool = False) -> None:
+		if not _request_host_is_allowed(self.headers.get("Host"), self.server.server_port):
+			raise ContextAtlasUnauthorized("request host is not allowed")
+		origin = self.headers.get("Origin")
+		if require_origin and not origin:
+			raise ContextAtlasUnauthorized("Origin header is required")
+		if origin and origin not in self.server.context_atlas_allowed_origins:  # type: ignore[attr-defined]
+			raise ContextAtlasUnauthorized("request origin is not allowed")
+		if require_token:
+			provided_token = self._request_token()
+			if not provided_token or not hmac.compare_digest(provided_token, self.server.context_atlas_token):  # type: ignore[attr-defined]
+				raise ContextAtlasUnauthorized("request token is invalid")
+
+	def _request_token(self) -> str | None:
+		provided_token = self.headers.get(TOKEN_HEADER)
+		if provided_token is not None:
+			return provided_token
+		cookie_header = self.headers.get("Cookie")
+		if not cookie_header:
+			return None
+		cookies = SimpleCookie()
+		try:
+			cookies.load(cookie_header)
+		except CookieError:
+			return None
+		cookie = cookies.get(TOKEN_COOKIE_NAME)
+		return cookie.value if cookie is not None else None
 
 	def log_message(self, format: str, *args: object) -> None:
 		return
@@ -322,8 +434,9 @@ def main(argv: list[str] | None = None) -> int:
 	parser = argparse.ArgumentParser(description="Run the local Context Atlas Jev search server")
 	parser.add_argument("--host", default=DEFAULT_HOST)
 	parser.add_argument("--port", type=int, default=DEFAULT_PORT)
+	parser.add_argument("--token", default=None, help=argparse.SUPPRESS)
 	args = parser.parse_args(argv)
-	server = create_server(host=args.host, port=args.port)
+	server = create_server(host=args.host, port=args.port, token=args.token)
 	print(f"Context Atlas server listening at http://{args.host}:{args.port}")
 	try:
 		server.serve_forever()
@@ -353,6 +466,54 @@ def _json_safe(value: Any) -> Any:
 	return None
 
 
+def _validate_token(token: str) -> str:
+	if (
+		not isinstance(token, str)
+		or not token
+		or not token.isascii()
+		or not all(character.isalnum() or character in "-_" for character in token)
+	):
+		raise ValueError("Context Atlas token must be a non-empty string")
+	return token
+
+
+def _normalise_allowed_origins(origins: Iterable[str] | None, port: int) -> frozenset[str]:
+	if origins is None:
+		origins = (
+			f"http://127.0.0.1:{port}",
+			f"http://localhost:{port}",
+			f"http://[::1]:{port}",
+		)
+	validated: set[str] = set()
+	for origin in origins:
+		if not isinstance(origin, str) or not origin or origin == "*":
+			raise ValueError("CORS origins must be explicit, non-empty origins")
+		parsed = urlsplit(origin)
+		if not parsed.scheme or not parsed.netloc or parsed.path or parsed.query or parsed.fragment:
+			raise ValueError("CORS origins must be scheme and host only")
+		validated.add(origin)
+	return frozenset(validated)
+
+
+def _is_loopback_host(host: str) -> bool:
+	if host.lower() == "localhost":
+		return True
+	try:
+		return ipaddress.ip_address(host).is_loopback
+	except ValueError:
+		return False
+
+
+def _request_host_is_allowed(host_header: str | None, port: int) -> bool:
+	if not host_header:
+		return False
+	try:
+		parsed = urlsplit(f"//{host_header}")
+		return parsed.port == port and parsed.hostname is not None and _is_loopback_host(parsed.hostname)
+	except ValueError:
+		return False
+
+
 if __name__ == "__main__":
 	raise SystemExit(main())
 
@@ -368,6 +529,7 @@ __all__ = [
 	"ContextAtlasRateLimitError",
 	"ContextAtlasRequestTooLarge",
 	"ContextAtlasService",
+	"ContextAtlasUnauthorized",
 	"ContextAtlasUpstreamError",
 	"create_server",
 	"main",

@@ -29,6 +29,8 @@ PACKAGE_FILES = (
     "options.html",
     "options.js",
     "options.css",
+    "permissions.html",
+    "permissions.js",
     "privacy.html",
     "icons/context-atlas-16.png",
     "icons/context-atlas-48.png",
@@ -36,11 +38,11 @@ PACKAGE_FILES = (
     "ort/ort-wasm-simd-threaded.asyncify.mjs",
     "ort/ort-wasm-simd-threaded.asyncify.wasm",
 )
-EXPECTED_PERMISSIONS = {"activeTab", "scripting", "storage", "offscreen"}
+EXPECTED_PERMISSIONS = {"activeTab", "scripting", "storage", "offscreen", "unlimitedStorage"}
 EXPECTED_OPTIONAL_HOST_PERMISSIONS = {
-    "https://api.typesafe.ai/*",
-    "https://huggingface.co/*",
-    "https://*.cdn.hf.co/*",
+    "https://api.typesafe.ai/v1/systemone",
+    "https://huggingface.co/mizchi/laya-multilingual-onnx/resolve/d9d003d543e63d6d3375c21d44624136bd1e0bad/*",
+    "https://us.aws.cdn.hf.co/xet-bridge-us/*",
 }
 SECRET_PATTERNS = (
     re.compile(rb"Bearer\s+sk-", re.IGNORECASE),
@@ -88,27 +90,58 @@ def _validate_reference(reference: str) -> None:
         raise PackageError("manifest contains an unsafe file reference")
 
 
+def _validate_file_references(references: Iterable[object]) -> set[str]:
+    validated: set[str] = set()
+    for reference in references:
+        if not isinstance(reference, str):
+            raise PackageError("manifest file reference is invalid")
+        _validate_reference(reference)
+        validated.add(reference)
+    return validated
+
+
+def _matches_expected_strings(value: object, expected: set[str]) -> bool:
+    return (
+        isinstance(value, list)
+        and len(value) == len(expected)
+        and all(isinstance(item, str) for item in value)
+        and set(value) == expected
+    )
+
+
 def _validate_manifest(manifest: dict[str, object]) -> set[str]:
     if manifest.get("manifest_version") != 3:
         raise PackageError("manifest must use Manifest V3")
-    if not isinstance(manifest.get("version"), str) or not manifest["version"]:
-        raise PackageError("manifest must contain a version")
+    version = manifest.get("version")
+    parts = version.split(".") if isinstance(version, str) else []
+    if (
+        len(parts) not in range(1, 5)
+        or any(
+            not re.fullmatch(r"[0-9]+", part)
+            or (len(part) > 1 and part.startswith("0"))
+            or len(part) > 5
+            or (len(part) == 5 and int(part) > 65535)
+            for part in parts
+        )
+        or not any(part.lstrip("0") for part in parts)
+    ):
+        raise PackageError("manifest version is invalid")
     permissions = manifest.get("permissions")
-    if not isinstance(permissions, list) or set(permissions) != EXPECTED_PERMISSIONS:
+    if not _matches_expected_strings(permissions, EXPECTED_PERMISSIONS):
         raise PackageError("manifest permissions do not match the release policy")
     host_permissions = manifest.get("host_permissions")
     if host_permissions not in (None, []):
         raise PackageError("required host permissions must be empty; use optional host permissions")
     optional_host_permissions = manifest.get("optional_host_permissions")
-    if not isinstance(optional_host_permissions, list) or set(optional_host_permissions) != EXPECTED_OPTIONAL_HOST_PERMISSIONS:
+    if not _matches_expected_strings(optional_host_permissions, EXPECTED_OPTIONAL_HOST_PERMISSIONS):
         raise PackageError("manifest optional host permissions do not match the release policy")
     background = manifest.get("background")
     if not isinstance(background, dict) or not isinstance(background.get("service_worker"), str):
         raise PackageError("manifest service worker is missing")
-    references = {background["service_worker"]}
+    references = _validate_file_references((background["service_worker"],))
     options_page = manifest.get("options_page")
-    if isinstance(options_page, str):
-        references.add(options_page)
+    if options_page is not None:
+        references.update(_validate_file_references((options_page,)))
     sandbox = manifest.get("sandbox")
     if not isinstance(sandbox, dict) or not isinstance(sandbox.get("pages"), list) or sandbox["pages"] != ["sandbox.html"]:
         raise PackageError("manifest sandbox pages do not match the release policy")
@@ -119,7 +152,14 @@ def _validate_manifest(manifest: dict[str, object]) -> set[str]:
     for content_script in content_scripts:
         if not isinstance(content_script, dict) or not isinstance(content_script.get("js", []), list):
             raise PackageError("manifest content script is invalid")
-        references.update(content_script["js"])
+        references.update(_validate_file_references(content_script["js"]))
+    web_accessible_resources = manifest.get("web_accessible_resources", [])
+    if not isinstance(web_accessible_resources, list):
+        raise PackageError("manifest web-accessible resources are invalid")
+    for resource_entry in web_accessible_resources:
+        if not isinstance(resource_entry, dict) or not isinstance(resource_entry.get("resources"), list):
+            raise PackageError("manifest web-accessible resource entry is invalid")
+        references.update(_validate_file_references(resource_entry["resources"]))
     action = manifest.get("action")
     if not isinstance(action, dict):
         raise PackageError("manifest action is missing")
@@ -127,16 +167,12 @@ def _validate_manifest(manifest: dict[str, object]) -> set[str]:
     if action_icon is not None:
         if not isinstance(action_icon, dict):
             raise PackageError("manifest action icon path is invalid")
-        references.update(action_icon.values())
+        references.update(_validate_file_references(action_icon.values()))
     icons = manifest.get("icons")
     if icons is not None:
         if not isinstance(icons, dict):
             raise PackageError("manifest icon path is invalid")
-        references.update(icons.values())
-    for reference in references:
-        if not isinstance(reference, str):
-            raise PackageError("manifest file reference is invalid")
-        _validate_reference(reference)
+        references.update(_validate_file_references(icons.values()))
     return references
 
 
@@ -223,9 +259,6 @@ def main() -> int:
             version = manifest["version"]
         except (OSError, KeyError, TypeError, json.JSONDecodeError):
             LOGGER.error("package validation failed: manifest version is unavailable")
-            return 1
-        if not isinstance(version, str) or not re.fullmatch(r"[0-9]+(?:\.[0-9]+){1,3}", version):
-            LOGGER.error("package validation failed: manifest version is invalid")
             return 1
         args.output = root.parent / "dist" / f"context-atlas-extension-v{version}.zip"
     try:

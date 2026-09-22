@@ -4,11 +4,11 @@
   "version": "0.1.0",
   "description": "Find source-backed answers on the webpage you are reading, with private local or cloud search.",
   "minimum_chrome_version": "116",
-  "permissions": ["activeTab", "scripting", "storage", "offscreen"],
+  "permissions": ["activeTab", "scripting", "storage", "offscreen", "unlimitedStorage"],
   "optional_host_permissions": [
-    "https://api.typesafe.ai/*",
-    "https://huggingface.co/*",
-    "https://*.cdn.hf.co/*"
+    "https://api.typesafe.ai/v1/systemone",
+    "https://huggingface.co/mizchi/laya-multilingual-onnx/resolve/d9d003d543e63d6d3375c21d44624136bd1e0bad/*",
+    "https://us.aws.cdn.hf.co/xet-bridge-us/*"
   ],
   "icons": {
     "16": "icons/context-atlas-16.png",
@@ -18,7 +18,8 @@
   "content_scripts": [
     {
       "matches": [
-        "http://127.0.0.1:8765/"
+        "http://127.0.0.1:8765/",
+        "http://localhost:8765/"
       ],
       "js": ["localhost-bridge.js"],
       "run_at": "document_start"
@@ -31,6 +32,15 @@
   "sandbox": {
     "pages": ["sandbox.html"]
   },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "ort/ort-wasm-simd-threaded.asyncify.mjs",
+        "ort/ort-wasm-simd-threaded.asyncify.wasm"
+      ],
+      "matches": ["<all_urls>"]
+    }
+  ],
   "background": {
     "service_worker": "background.js"
   },

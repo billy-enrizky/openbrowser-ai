@@ -4,6 +4,7 @@ const SUPPORTED_PROVIDERS = new Set(["jev", "laya"]);
 const SUPPORTED_TYPES = new Set([
   "context_atlas.provider_status",
   "context_atlas.request_provider_access",
+  "context_atlas.provider_access_result",
   "context_atlas.set_provider",
   "context_atlas.key_status",
   "context_atlas.save_key",
@@ -18,11 +19,12 @@ const JEV_STORAGE_KEY = "context_atlas.jev_api_key";
 const SOURCE_STORAGE_KEY = "context_atlas.current_source";
 const OFFSCREEN_TARGET = "context_atlas.offscreen";
 const OFFSCREEN_URL = "offscreen.html";
+const PERMISSION_PAGE_URL = "permissions.html";
 const PROVIDER_ORIGINS = Object.freeze({
-  jev: ["https://api.typesafe.ai/*"],
+  jev: ["https://api.typesafe.ai/v1/systemone"],
   laya: [
-    "https://huggingface.co/*",
-    "https://*.cdn.hf.co/*",
+    "https://huggingface.co/mizchi/laya-multilingual-onnx/resolve/d9d003d543e63d6d3375c21d44624136bd1e0bad/*",
+    "https://us.aws.cdn.hf.co/xet-bridge-us/*",
   ],
 });
 let requestSequence = 0;
@@ -43,8 +45,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (!message || !SUPPORTED_TYPES.has(message.type)) return false;
   const requestId = ++requestSequence;
 
-  // Keep this call in the synchronous user-gesture turn. Awaiting anything
-  // before chrome.permissions.request() would make Chrome reject the request.
   if (message.type === "context_atlas.request_provider_access") {
     return requestProviderAccess(message, sendResponse, requestId);
   }
@@ -61,23 +61,24 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 });
 
 function requestProviderAccess(message, sendResponse, requestId) {
-  let permissionPromise;
-  try {
-    permissionPromise = chrome.permissions.request({ origins: providerOrigins(message.provider) });
-  } catch (error) {
-    sendResponse({ ok: false, requestId, error: safeError(error), code: error?.code || "request_failed" });
-    return true;
-  }
-
   (async () => {
     try {
-      const granted = await permissionPromise;
-      if (!granted) {
-        const error = new Error(permissionDeniedMessage(message.provider));
-        error.code = "permission_denied";
-        throw error;
+      const origins = providerOrigins(message.provider);
+      if (await chrome.permissions.contains({ origins })) {
+        sendResponse({ ok: true, requestId, payload: { granted: true, provider: message.provider } });
+        return;
       }
-      sendResponse({ ok: true, requestId, payload: { granted: true, provider: message.provider } });
+
+      if (typeof chrome.tabs?.create !== "function") {
+        throw new Error("The provider access page is unavailable.");
+      }
+      const permissionUrl = new URL(chrome.runtime.getURL(PERMISSION_PAGE_URL));
+      permissionUrl.searchParams.set("provider", message.provider);
+      permissionUrl.searchParams.set("request_id", String(requestId));
+      await chrome.tabs.create({ url: permissionUrl.toString(), active: true });
+      const error = new Error("Allow access in the Context Atlas window, then try again.");
+      error.code = "permission_required";
+      throw error;
     } catch (error) {
       sendResponse({ ok: false, requestId, error: safeError(error), code: error?.code || "request_failed" });
     }
@@ -85,21 +86,23 @@ function requestProviderAccess(message, sendResponse, requestId) {
   return true;
 }
 
+async function providerAccessResult(message) {
+  const origins = providerOrigins(message.provider);
+  const granted = message.granted === true && await chrome.permissions.contains({ origins });
+  return { granted, provider: message.provider };
+}
+
 function providerOrigins(provider) {
   if (!SUPPORTED_PROVIDERS.has(provider)) throw new Error("Unsupported Context Atlas provider.");
   return PROVIDER_ORIGINS[provider];
-}
-
-function permissionDeniedMessage(provider) {
-  return provider === "jev"
-    ? "Cloud access is needed for Cloud search. Allow access and try again."
-    : "Local model access is needed for Local search. Allow access and try again.";
 }
 
 async function handleMessage(message) {
   switch (message.type) {
     case "context_atlas.provider_status":
       return providerStatus();
+    case "context_atlas.provider_access_result":
+      return providerAccessResult(message);
     case "context_atlas.set_provider":
       return setProvider(message.provider);
     case "context_atlas.key_status":
@@ -247,6 +250,7 @@ function safeError(error) {
   if (error?.code === "not_ready" || error?.status === 404) return "The current page is not ready. Open Context Atlas on a webpage first.";
   if (error?.code === "network") return "Cloud search is unavailable. Retry the request.";
   if (error?.code === "permission_denied") return error.message;
+  if (error?.code === "permission_required") return error.message;
   if (error?.message === "Unsupported Context Atlas provider.") return error.message;
   if (error?.message === "The local Laya runtime is unavailable.") return error.message;
   if (error?.message === "The local Laya runtime failed.") return error.message;
