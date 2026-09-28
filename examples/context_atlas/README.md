@@ -14,6 +14,12 @@ sentence, so the page can be checked immediately.
 
 The last selection is remembered. New installations start with Local.
 
+Recent results are also remembered on this device. Context Atlas keeps up to
+100 successful searches, stores hashed page identity and result references, and
+does not store raw page text or URLs in the history records. A changed page or
+source invalidates an older result, and a storage failure does not block a new
+search.
+
 ## Run the separate localhost page
 
 The localhost page is a companion workspace, not the page being searched. The

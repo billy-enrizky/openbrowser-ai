@@ -12,6 +12,7 @@ import {
   sourceFingerprint,
   validSourceMatches,
 } from "./state.js";
+import { restoreCachedSearch } from "./history.js";
 
 function BusyProgress({ label = "Loading", value = 50, showValue = false }) {
   const progress = Math.min(100, Math.max(0, Number.isFinite(Number(value)) ? Number(value) : 50));
@@ -23,6 +24,8 @@ function BusyProgress({ label = "Loading", value = 50, showValue = false }) {
 
 export function ContextAtlasSurface({
   adapter,
+  history = null,
+  historySubject: baseHistorySubject = null,
   source,
   surface = "standalone",
   sourceEditor = null,
@@ -37,12 +40,27 @@ export function ContextAtlasSurface({
   const isExtension = surface === "extension";
   const providerEnabled = typeof adapter?.getProvider === "function" && typeof adapter?.setProvider === "function";
   const [provider, setProvider] = useState("laya");
+  const [providerReady, setProviderReady] = useState(() => !providerEnabled);
   const [providerBusy, setProviderBusy] = useState(false);
   const providerSelectionVersionRef = useRef(0);
   const fingerprint = sourceFingerprint(sourcePassages, source?.url);
+  const activeProvider = providerEnabled ? provider : "jev";
+  const sourceHistoryBase = baseHistorySubject || (
+    source?.title && source?.revision
+      ? { surface: "standalone", locator: source.title, revision: source.revision }
+      : null
+  );
+  const historySubject = history && sourceHistoryBase
+    ? { ...sourceHistoryBase, provider: activeProvider }
+    : null;
+  const sourceIdentity = historySubject
+    ? JSON.stringify([historySubject.surface, historySubject.locator, historySubject.revision, historySubject.provider])
+    : fingerprint;
   const requestRef = useRef(0);
   const previousFingerprint = useRef(fingerprint);
   const lastSearchRef = useRef(null);
+  const sourceIdentityRef = useRef(sourceIdentity);
+  sourceIdentityRef.current = sourceIdentity;
   const [apiKey, setApiKey] = useState("");
   const [keyConfigured, setKeyConfigured] = useState(null);
   const [keyBusy, setKeyBusy] = useState(false);
@@ -58,15 +76,25 @@ export function ContextAtlasSurface({
   const [status, setStatus] = useState({ kind: "idle", message: "Ready when you are.", retryable: false });
 
   useEffect(() => {
-    if (!providerEnabled) return undefined;
+    if (!providerEnabled) {
+      setProviderReady(true);
+      return undefined;
+    }
+    setProviderReady(false);
     let active = true;
     const selectionVersion = providerSelectionVersionRef.current;
     (async () => {
       try {
         const savedProvider = normalizeProvider(await adapter.getProvider());
-        if (active && selectionVersion === providerSelectionVersionRef.current) setProvider(savedProvider);
+        if (active && selectionVersion === providerSelectionVersionRef.current) {
+          setProvider(savedProvider);
+          setProviderReady(true);
+        }
       } catch (_error) {
-        if (active && selectionVersion === providerSelectionVersionRef.current) setProvider("laya");
+        if (active && selectionVersion === providerSelectionVersionRef.current) {
+          setProvider("laya");
+          setProviderReady(true);
+        }
       }
     })();
     return () => { active = false; };
@@ -82,11 +110,13 @@ export function ContextAtlasSurface({
         if (active && mutationVersion === keyMutationVersionRef.current) {
           const configured = payload?.configured === true;
           setKeyConfigured(configured);
-          setStatus({
-            kind: "idle",
-            message: configured ? "Ready to search with Cloud." : "Get your Cloud key at console.typesafe.ai.",
-            retryable: false,
-          });
+          setStatus((currentStatus) => ["Checking previous results…", "Previous result restored."].includes(currentStatus.message)
+            ? currentStatus
+            : {
+              kind: "idle",
+              message: configured ? "Ready to search with Cloud." : "Get your Cloud key at console.typesafe.ai.",
+              retryable: false,
+            });
         }
       } catch (error) {
         if (active && mutationVersion === keyMutationVersionRef.current) {
@@ -113,6 +143,60 @@ export function ContextAtlasSurface({
     setStatus({ kind: "idle", message: "The page changed. Search again.", retryable: false });
   }, [fingerprint, sourcePassages]);
 
+  function hydrateCachedSearch(record, message, candidatePassages = sourcePassages) {
+    const restored = restoreCachedSearch(record, candidatePassages);
+    if (!restored) return false;
+    lastSearchRef.current = { query: restored.query, sourceAtRequest: sourceIdentity };
+    setActivePassages(candidatePassages);
+    setQuery(restored.query);
+    setResult(restored.result);
+    setMatches(restored.matches);
+    setCurrent(restored.current);
+    setAmbiguousSelection(restored.ambiguousSelection);
+    setTraceOpen(false);
+    setSearchProgress(100);
+    setStatus({ kind: "success", message, retryable: false });
+    const selected = restored.selected || (!restored.result.ambiguous
+      ? findSourceMatch({ matches: restored.matches }, candidatePassages, restored.current)
+      : null);
+    if (selected) adapter.focusMatch?.(selected);
+    return true;
+  }
+
+  useEffect(() => {
+    if (!history || !historySubject || !providerReady || !sourcePassages.length) return undefined;
+    const requestId = requestRef.current + 1;
+    requestRef.current = requestId;
+    const sourceAtRequest = sourceIdentity;
+    let cancelled = false;
+    setSearchProgress(0);
+    setStatus({ kind: "loading", message: "Checking previous results…", retryable: false });
+    void (async () => {
+      const resolvePassages = async (candidateQuery) => {
+        if (typeof prepareSearch !== "function") return sourcePassages;
+        const prepared = await prepareSearch(candidateQuery);
+        return Array.isArray(prepared?.passages) ? prepared.passages : sourcePassages;
+      };
+      const record = await history.findLatest(historySubject, sourcePassages, resolvePassages);
+      if (
+        cancelled
+        || !isCurrentRequest(requestId, requestRef.current)
+        || sourceIdentityRef.current !== sourceAtRequest
+      ) return;
+      if (record) {
+        const prepared = await resolvePassages(record.normalizedQuery);
+        if (cancelled || !isCurrentRequest(requestId, requestRef.current) || sourceIdentityRef.current !== sourceAtRequest) return;
+        if (hydrateCachedSearch(record, "Previous result restored.", prepared)) return;
+      }
+      setStatus((currentStatus) => currentStatus.message === "Previous result restored."
+        ? currentStatus
+        : { kind: "idle", message: "Ready when you are.", retryable: false });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [history, prepareSearch, providerReady, sourceIdentity, sourcePassages]);
+
   async function chooseProvider(nextProvider, requestedSelectionVersion = null) {
     const next = normalizeProvider(nextProvider);
     if (!providerEnabled || next === provider || providerBusy) return;
@@ -135,6 +219,7 @@ export function ContextAtlasSurface({
       await adapter.setProvider(next);
       if (selectionVersion !== providerSelectionVersionRef.current) return;
       invalidateProviderRequest(requestRef, () => {
+        lastSearchRef.current = null;
         setResult(null);
         setMatches([]);
         setCurrent(0);
@@ -187,7 +272,6 @@ export function ContextAtlasSurface({
     })();
   }
 
-  const activeProvider = providerEnabled ? provider : "jev";
   const focusedIndex = result?.ambiguous && ambiguousSelection === null ? -1 : current;
   const focused = focusedIndex >= 0 ? matches[focusedIndex] || null : null;
   const focusedSource = useMemo(
@@ -252,10 +336,6 @@ export function ContextAtlasSurface({
 
   async function searchSource(event, queryOverride = null) {
     event?.preventDefault();
-    if (activeProvider === "jev" && keyConfigured !== true) {
-      setStatus({ kind: "error", message: "Save your Cloud access key before searching.", retryable: false });
-      return;
-    }
     const cleanQuery = String(queryOverride ?? query).trim();
     if (!cleanQuery) {
       setStatus({ kind: "error", message: "Enter a question first.", retryable: false });
@@ -264,6 +344,48 @@ export function ContextAtlasSurface({
     const requestId = requestRef.current + 1;
     requestRef.current = requestId;
     const isRequestCurrent = () => isCurrentRequest(requestId, requestRef.current);
+    const sourceAtRequest = sourceIdentity;
+    lastSearchRef.current = { query: cleanQuery, sourceAtRequest };
+    setResult(null);
+    setMatches([]);
+    setCurrent(0);
+    setAmbiguousSelection(null);
+    setTraceOpen(false);
+    setSearchProgress(0);
+    setStatus({
+      kind: "loading",
+      message: history && historySubject ? "Checking previous results…" : "Finding results…",
+      retryable: false,
+    });
+    try {
+      if (history && historySubject) {
+        const record = await history.find(historySubject, cleanQuery);
+        if (!isRequestCurrent() || sourceIdentityRef.current !== sourceAtRequest) return;
+        if (record) {
+          let cachedPassages = sourcePassages;
+          if (typeof prepareSearch === "function") {
+            const prepared = await prepareSearch(cleanQuery);
+            if (!isRequestCurrent() || sourceIdentityRef.current !== sourceAtRequest) return;
+            if (Array.isArray(prepared?.passages)) {
+              cachedPassages = prepared.passages;
+              setActivePassages(cachedPassages);
+            }
+          }
+          if (hydrateCachedSearch(record, "Previous result restored.", cachedPassages)) return;
+        }
+        setStatus({ kind: "loading", message: "Finding results…", retryable: false });
+      }
+      if (activeProvider === "jev" && keyConfigured !== true) {
+        setSearchProgress(0);
+        setStatus({ kind: "error", message: "Save your Cloud access key before searching.", retryable: false });
+        return;
+      }
+    } catch (error) {
+      if (!isRequestCurrent() || sourceIdentityRef.current !== sourceAtRequest) return;
+      setSearchProgress(0);
+      setStatus({ kind: "error", ...normalizeSearchError(error) });
+      return;
+    }
     let accessPromise = Promise.resolve({ granted: true });
     if (activeProvider === "laya" && typeof adapter?.ensureProviderAccess === "function") {
       try {
@@ -278,7 +400,6 @@ export function ContextAtlasSurface({
     }
     if (!isRequestCurrent()) return;
     setSearchProgress(12);
-    setStatus({ kind: "loading", message: "Finding results…", retryable: false });
     let searchPassages = sourcePassages;
     try {
       await accessPromise;
@@ -304,17 +425,15 @@ export function ContextAtlasSurface({
       setStatus({ kind: "error", message: "No page text is ready yet. Refresh from the current page.", retryable: true });
       return;
     }
-    const sourceAtRequest = sourceFingerprint(searchPassages);
-    lastSearchRef.current = { query: cleanQuery, sourceAtRequest };
-    setResult(null);
-    setMatches([]);
-    setCurrent(0);
-    setAmbiguousSelection(null);
-    setTraceOpen(false);
+    const searchSourceFingerprint = sourceFingerprint(searchPassages);
     setSearchProgress(55);
     try {
       const payload = await adapter.search(cleanQuery, searchPassages);
-      if (!isCurrentRequest(requestId, requestRef.current) || sourceFingerprint(searchPassages) !== sourceAtRequest) return;
+      if (
+        !isCurrentRequest(requestId, requestRef.current)
+        || sourceIdentityRef.current !== sourceAtRequest
+        || sourceFingerprint(searchPassages) !== searchSourceFingerprint
+      ) return;
       const validMatches = validSourceMatches(payload, searchPassages);
       const returnedMatches = Array.isArray(payload?.matches) ? payload.matches : [];
       if (returnedMatches.length && !validMatches.length) {
@@ -328,6 +447,9 @@ export function ContextAtlasSurface({
       setResult(normalizedResult);
       setMatches(normalizedResult.matches);
       if (!ambiguous) focusResult(normalizedMatches, searchPassages, 0);
+      if (history && historySubject && sourceIdentityRef.current === sourceAtRequest) {
+        void history.save({ subject: historySubject, query: cleanQuery, result: normalizedResult, passages: searchPassages });
+      }
       setSearchProgress(100);
       setStatus({
         kind: "success",
@@ -353,7 +475,14 @@ export function ContextAtlasSurface({
     setCurrent(nextIndex);
     setAmbiguousSelection(nextIndex);
     setTraceOpen(false);
-    focusResult(matches, passages, nextIndex);
+    const selected = findSourceMatch({ matches }, passages, nextIndex);
+    if (selected) {
+      adapter.focusMatch?.(selected);
+      const lastSearch = lastSearchRef.current;
+      if (history && historySubject && lastSearch?.sourceAtRequest === sourceIdentity) {
+        void history.select(historySubject, lastSearch.query, selected.match, passages);
+      }
+    }
   }
 
   function retry() {
