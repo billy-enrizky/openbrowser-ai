@@ -2,11 +2,14 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 
 import { ContextAtlasSurface } from "../shared/components.jsx";
+import { createLocalHistoryStorage, createSearchHistory } from "../shared/history.js";
+import { sourceRevision } from "../extension/search-context.js";
 import { createWindowBridgeAdapter } from "./window-bridge.js";
 import styles from "../shared/styles.css";
 
 function StandaloneApp() {
   const adapter = useMemo(() => createWindowBridgeAdapter(), []);
+  const history = useMemo(() => createSearchHistory(createLocalHistoryStorage()), []);
   const [source, setSource] = useState(null);
   const [sourceStatus, setSourceStatus] = useState({ kind: "loading", message: "Getting the current page…" });
 
@@ -26,7 +29,23 @@ function StandaloneApp() {
     void refreshSource();
   }, [refreshSource]);
 
-  return <ContextAtlasSurface adapter={adapter} source={source || { title: "Current page", passages: [] }} sourceStatus={sourceStatus} onRefreshSource={refreshSource} surface="standalone" />;
+  const currentSource = source || { title: "Current page", passages: [] };
+  const historySubject = source
+    ? {
+      surface: "standalone",
+      locator: source.title,
+      revision: source.revision || sourceRevision(source.passages),
+    }
+    : null;
+  return <ContextAtlasSurface
+    adapter={adapter}
+    history={history}
+    historySubject={historySubject}
+    source={currentSource}
+    sourceStatus={sourceStatus}
+    onRefreshSource={refreshSource}
+    surface="standalone"
+  />;
 }
 
 function mountStyles() {
