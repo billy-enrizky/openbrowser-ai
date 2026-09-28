@@ -7910,6 +7910,246 @@
     ["path", { d: "m6 6 12 12", key: "d8bk6v" }]
   ]);
 
+  // src/shared/history.js
+  var SEARCH_HISTORY_PREFIX = "context-atlas.history.v1.";
+  var MAX_SEARCH_HISTORY_ENTRIES = 100;
+  var HISTORY_VERSION = 1;
+  var PROVIDERS = /* @__PURE__ */ new Set(["jev", "laya"]);
+  var SURFACES = /* @__PURE__ */ new Set(["extension", "standalone"]);
+  function normalizeHistoryQuery(value) {
+    return String(value ?? "").normalize("NFKC").replace(/\s+/gu, " ").trim().toLowerCase();
+  }
+  async function createHistorySubjectHash(subject, cryptoLike = globalThis.crypto) {
+    const canonical = JSON.stringify([
+      HISTORY_VERSION,
+      String(subject?.surface ?? ""),
+      String(subject?.locator ?? ""),
+      String(subject?.revision ?? ""),
+      String(subject?.provider ?? "")
+    ]);
+    return sha256Hex(canonical, cryptoLike);
+  }
+  function createChromeHistoryStorage(storageArea) {
+    return {
+      async entries() {
+        const values = await storageArea.get(null);
+        return Object.entries(values || {});
+      },
+      async get(key) {
+        const values = await storageArea.get(key);
+        return Object.hasOwn(values || {}, key) ? values[key] : null;
+      },
+      async set(key, value) {
+        await storageArea.set({ [key]: value });
+      },
+      async remove(keys) {
+        if (keys.length) await storageArea.remove(keys);
+      }
+    };
+  }
+  function createSearchHistory(storage, {
+    maxEntries = MAX_SEARCH_HISTORY_ENTRIES,
+    now = Date.now,
+    cryptoLike = globalThis.crypto
+  } = {}) {
+    const retention = Number.isInteger(maxEntries) && maxEntries > 0 ? maxEntries : MAX_SEARCH_HISTORY_ENTRIES;
+    let writeQueue = Promise.resolve();
+    async function recordIdentity(subject, query) {
+      const surface = String(subject?.surface ?? "");
+      const provider = String(subject?.provider ?? "");
+      const normalizedQuery = normalizeHistoryQuery(query);
+      if (!SURFACES.has(surface) || !PROVIDERS.has(provider) || !normalizedQuery) return null;
+      const subjectHash = await createHistorySubjectHash(subject, cryptoLike);
+      const queryHash = await sha256Hex(normalizedQuery, cryptoLike);
+      return {
+        subjectHash,
+        surface,
+        provider,
+        normalizedQuery,
+        key: `${SEARCH_HISTORY_PREFIX}${subjectHash}.${queryHash}`
+      };
+    }
+    async function find(subject, query) {
+      try {
+        const identity = await recordIdentity(subject, query);
+        if (!identity) return null;
+        const record = normalizeRecord(await storage.get(identity.key));
+        if (!matchesIdentity(record, identity)) return null;
+        return record;
+      } catch (_error) {
+        return null;
+      }
+    }
+    async function findLatest(subject, sourcePassages = null) {
+      try {
+        const surface = String(subject?.surface ?? "");
+        const provider = String(subject?.provider ?? "");
+        if (!SURFACES.has(surface) || !PROVIDERS.has(provider)) return null;
+        const subjectHash = await createHistorySubjectHash(subject, cryptoLike);
+        const records = [];
+        for (const [key, value] of await storage.entries()) {
+          if (!key.startsWith(SEARCH_HISTORY_PREFIX)) continue;
+          const record = normalizeRecord(value);
+          if (!record || record.subjectHash !== subjectHash || record.surface !== surface || record.provider !== provider) continue;
+          const queryHash = await sha256Hex(record.normalizedQuery, cryptoLike);
+          if (key !== `${SEARCH_HISTORY_PREFIX}${record.subjectHash}.${queryHash}`) continue;
+          if (Array.isArray(sourcePassages) && !restoreCachedSearch(record, sourcePassages)) continue;
+          records.push(record);
+        }
+        records.sort((left, right) => right.updatedAt - left.updatedAt);
+        return records[0] || null;
+      } catch (_error) {
+        return null;
+      }
+    }
+    function enqueue(operation) {
+      const pending = writeQueue.catch(() => null).then(operation).catch(() => null);
+      writeQueue = pending;
+      return pending;
+    }
+    function save({ subject, query, result, selected = null }) {
+      return enqueue(async () => {
+        const identity = await recordIdentity(subject, query);
+        if (!identity) return null;
+        const existing = normalizeRecord(await storage.get(identity.key));
+        const timestamp = Number(now());
+        const record = {
+          version: HISTORY_VERSION,
+          surface: identity.surface,
+          provider: identity.provider,
+          subjectHash: identity.subjectHash,
+          normalizedQuery: identity.normalizedQuery,
+          result: sanitizeResult(result),
+          selected: sanitizeSelection(selected),
+          createdAt: existing?.createdAt ?? timestamp,
+          updatedAt: timestamp
+        };
+        await storage.set(identity.key, record);
+        await pruneHistory(storage, retention);
+        return record;
+      });
+    }
+    function select(subject, query, selected) {
+      return enqueue(async () => {
+        const identity = await recordIdentity(subject, query);
+        if (!identity) return null;
+        const existing = normalizeRecord(await storage.get(identity.key));
+        if (!existing || !matchesIdentity(existing, identity)) return null;
+        const record = {
+          ...existing,
+          selected: sanitizeSelection(selected),
+          updatedAt: Number(now())
+        };
+        await storage.set(identity.key, record);
+        await pruneHistory(storage, retention);
+        return record;
+      });
+    }
+    return { find, findLatest, save, select };
+  }
+  function restoreCachedSearch(record, passages) {
+    const normalized = normalizeRecord(record);
+    if (!normalized || !Array.isArray(passages)) return null;
+    const matches = normalized.result.matches.map((match) => restoreSourceMatch(match, passages));
+    if (matches.some((match) => match === null)) return null;
+    const result = { ...normalized.result, matches };
+    const selectedIndex = normalized.selected ? matches.findIndex((match) => match.passage_id === normalized.selected.passage_id && match.sentence_index === normalized.selected.sentence_index) : -1;
+    const current = selectedIndex >= 0 ? selectedIndex : 0;
+    return {
+      query: normalized.normalizedQuery,
+      result,
+      matches,
+      current,
+      ambiguousSelection: result.ambiguous && selectedIndex < 0 ? null : current,
+      selected: selectedIndex >= 0 ? findSourceMatch({ matches }, passages, selectedIndex) : null
+    };
+  }
+  function restoreSourceMatch(match, passages) {
+    const passage = passages.find((item) => item?.id === match.passage_id);
+    const sentence = passage?.sentences?.find((item) => item?.index === match.sentence_index);
+    if (!passage || !sentence || typeof sentence.text !== "string" || !sentence.text) return null;
+    return { ...match, sentence_text: sentence.text };
+  }
+  function matchesIdentity(record, identity) {
+    return Boolean(
+      record && record.subjectHash === identity.subjectHash && record.surface === identity.surface && record.provider === identity.provider && record.normalizedQuery === identity.normalizedQuery
+    );
+  }
+  async function sha256Hex(value, cryptoLike) {
+    if (!cryptoLike?.subtle?.digest) throw new Error("Web Crypto is unavailable");
+    const digest = await cryptoLike.subtle.digest("SHA-256", new TextEncoder().encode(String(value)));
+    return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  }
+  function sanitizeResult(result) {
+    const matches = (Array.isArray(result?.matches) ? result.matches : []).map((match) => ({
+      passage_id: typeof match?.passage_id === "string" ? match.passage_id : "",
+      probability: Number(match?.probability),
+      sentence_index: Number(match?.sentence_index)
+    })).filter((match) => match.passage_id && Number.isInteger(match.sentence_index) && match.sentence_index >= 0 && Number.isFinite(match.probability) && match.probability >= 0 && match.probability <= 1);
+    const ambiguityGap = Number(result?.ambiguity_gap);
+    return {
+      matches,
+      ambiguous: result?.ambiguous === true,
+      ambiguity_gap: Number.isFinite(ambiguityGap) ? ambiguityGap : null
+    };
+  }
+  function sanitizeSelection(selected) {
+    if (typeof selected?.passage_id !== "string" || !selected.passage_id) return null;
+    const sentenceIndex = Number(selected.sentence_index);
+    if (!Number.isInteger(sentenceIndex) || sentenceIndex < 0) return null;
+    return { passage_id: selected.passage_id, sentence_index: sentenceIndex };
+  }
+  function normalizeRecord(value) {
+    if (!value || value.version !== HISTORY_VERSION) return null;
+    if (!/^[a-f0-9]{64}$/u.test(value.subjectHash || "")) return null;
+    if (!SURFACES.has(value.surface) || !PROVIDERS.has(value.provider)) return null;
+    if (Object.hasOwn(value, "query")) return null;
+    if (typeof value.normalizedQuery !== "string" || !value.normalizedQuery) return null;
+    if (normalizeHistoryQuery(value.normalizedQuery) !== value.normalizedQuery) return null;
+    const createdAt = Number(value.createdAt);
+    const updatedAt = Number(value.updatedAt);
+    if (!Number.isFinite(createdAt) || !Number.isFinite(updatedAt)) return null;
+    const result = normalizeStoredResult(value.result);
+    if (!result) return null;
+    const selected = value.selected === null ? null : normalizeStoredSelection(value.selected);
+    if (value.selected !== null && !selected) return null;
+    return {
+      version: HISTORY_VERSION,
+      surface: value.surface,
+      provider: value.provider,
+      subjectHash: value.subjectHash,
+      normalizedQuery: value.normalizedQuery,
+      result,
+      selected,
+      createdAt,
+      updatedAt
+    };
+  }
+  function normalizeStoredResult(value) {
+    if (!value || typeof value !== "object" || !Array.isArray(value.matches) || typeof value.ambiguous !== "boolean") return null;
+    const ambiguityGap = value.ambiguity_gap === null ? null : Number(value.ambiguity_gap);
+    if (value.ambiguity_gap !== null && !Number.isFinite(ambiguityGap)) return null;
+    const matches = value.matches.map((match) => {
+      if (typeof match?.passage_id !== "string" || !match.passage_id || !Number.isInteger(match?.sentence_index) || match.sentence_index < 0 || !Number.isFinite(match?.probability) || match.probability < 0 || match.probability > 1) return null;
+      return {
+        passage_id: match.passage_id,
+        probability: match.probability,
+        sentence_index: match.sentence_index
+      };
+    });
+    if (matches.some((match) => match === null)) return null;
+    return { matches, ambiguous: value.ambiguous, ambiguity_gap: ambiguityGap };
+  }
+  function normalizeStoredSelection(value) {
+    if (!value || typeof value.passage_id !== "string" || !value.passage_id || !Number.isInteger(value.sentence_index) || value.sentence_index < 0) return null;
+    return { passage_id: value.passage_id, sentence_index: value.sentence_index };
+  }
+  async function pruneHistory(storage, maxEntries) {
+    const records = (await storage.entries()).filter(([key]) => key.startsWith(SEARCH_HISTORY_PREFIX)).map(([key, value]) => ({ key, record: normalizeRecord(value) })).filter((item) => item.record).sort((left, right) => right.record.updatedAt - left.record.updatedAt);
+    const staleKeys = records.slice(maxEntries).map((item) => item.key);
+    if (staleKeys.length) await storage.remove(staleKeys);
+  }
+
   // src/shared/components.jsx
   var import_jsx_runtime = __toESM(require_jsx_runtime(), 1);
   function BusyProgress({ label = "Loading", value = 50, showValue = false }) {
@@ -7924,6 +8164,8 @@
   }
   function ContextAtlasSurface({
     adapter,
+    history: history2 = null,
+    historySubject: baseHistorySubject = null,
     source,
     surface = "standalone",
     sourceEditor = null,
@@ -7938,12 +8180,19 @@
     const isExtension = surface === "extension";
     const providerEnabled = typeof adapter?.getProvider === "function" && typeof adapter?.setProvider === "function";
     const [provider, setProvider] = (0, import_react3.useState)("laya");
+    const [providerReady, setProviderReady] = (0, import_react3.useState)(() => !providerEnabled);
     const [providerBusy, setProviderBusy] = (0, import_react3.useState)(false);
     const providerSelectionVersionRef = (0, import_react3.useRef)(0);
     const fingerprint = sourceFingerprint(sourcePassages, source?.url);
+    const activeProvider = providerEnabled ? provider : "jev";
+    const sourceHistoryBase = baseHistorySubject || (source?.title && source?.revision ? { surface: "standalone", locator: source.title, revision: source.revision } : null);
+    const historySubject = history2 && sourceHistoryBase ? { ...sourceHistoryBase, provider: activeProvider } : null;
+    const sourceIdentity = historySubject ? JSON.stringify([historySubject.surface, historySubject.locator, historySubject.revision, historySubject.provider]) : fingerprint;
     const requestRef = (0, import_react3.useRef)(0);
     const previousFingerprint = (0, import_react3.useRef)(fingerprint);
     const lastSearchRef = (0, import_react3.useRef)(null);
+    const sourceIdentityRef = (0, import_react3.useRef)(sourceIdentity);
+    sourceIdentityRef.current = sourceIdentity;
     const [apiKey, setApiKey] = (0, import_react3.useState)("");
     const [keyConfigured, setKeyConfigured] = (0, import_react3.useState)(null);
     const [keyBusy, setKeyBusy] = (0, import_react3.useState)(false);
@@ -7958,15 +8207,25 @@
     const [searchProgress, setSearchProgress] = (0, import_react3.useState)(0);
     const [status, setStatus] = (0, import_react3.useState)({ kind: "idle", message: "Ready when you are.", retryable: false });
     (0, import_react3.useEffect)(() => {
-      if (!providerEnabled) return void 0;
+      if (!providerEnabled) {
+        setProviderReady(true);
+        return void 0;
+      }
+      setProviderReady(false);
       let active = true;
       const selectionVersion = providerSelectionVersionRef.current;
       (async () => {
         try {
           const savedProvider = normalizeProvider(await adapter.getProvider());
-          if (active && selectionVersion === providerSelectionVersionRef.current) setProvider(savedProvider);
+          if (active && selectionVersion === providerSelectionVersionRef.current) {
+            setProvider(savedProvider);
+            setProviderReady(true);
+          }
         } catch (_error) {
-          if (active && selectionVersion === providerSelectionVersionRef.current) setProvider("laya");
+          if (active && selectionVersion === providerSelectionVersionRef.current) {
+            setProvider("laya");
+            setProviderReady(true);
+          }
         }
       })();
       return () => {
@@ -7983,7 +8242,7 @@
           if (active && mutationVersion === keyMutationVersionRef.current) {
             const configured = payload?.configured === true;
             setKeyConfigured(configured);
-            setStatus({
+            setStatus((currentStatus) => ["Checking previous results\u2026", "Previous result restored."].includes(currentStatus.message) ? currentStatus : {
               kind: "idle",
               message: configured ? "Ready to search with Cloud." : "Get your Cloud key at console.typesafe.ai.",
               retryable: false
@@ -8014,6 +8273,41 @@
       setSearchProgress(0);
       setStatus({ kind: "idle", message: "The page changed. Search again.", retryable: false });
     }, [fingerprint, sourcePassages]);
+    function hydrateCachedSearch(record, message, candidatePassages = sourcePassages) {
+      const restored = restoreCachedSearch(record, candidatePassages);
+      if (!restored) return false;
+      lastSearchRef.current = { query: restored.query, sourceAtRequest: sourceIdentity };
+      setActivePassages(candidatePassages);
+      setQuery(restored.query);
+      setResult(restored.result);
+      setMatches(restored.matches);
+      setCurrent(restored.current);
+      setAmbiguousSelection(restored.ambiguousSelection);
+      setTraceOpen(false);
+      setSearchProgress(100);
+      setStatus({ kind: "success", message, retryable: false });
+      const selected = restored.selected || (!restored.result.ambiguous ? findSourceMatch({ matches: restored.matches }, candidatePassages, restored.current) : null);
+      if (selected) adapter.focusMatch?.(selected);
+      return true;
+    }
+    (0, import_react3.useEffect)(() => {
+      if (!history2 || !historySubject || !providerReady || !sourcePassages.length) return void 0;
+      const requestId = requestRef.current + 1;
+      requestRef.current = requestId;
+      const sourceAtRequest = sourceIdentity;
+      let cancelled = false;
+      setSearchProgress(0);
+      setStatus({ kind: "loading", message: "Checking previous results\u2026", retryable: false });
+      void (async () => {
+        const record = await history2.findLatest(historySubject, sourcePassages);
+        if (cancelled || !isCurrentRequest(requestId, requestRef.current) || sourceIdentityRef.current !== sourceAtRequest) return;
+        if (record && hydrateCachedSearch(record, "Previous result restored.")) return;
+        setStatus((currentStatus) => currentStatus.message === "Previous result restored." ? currentStatus : { kind: "idle", message: "Ready when you are.", retryable: false });
+      })();
+      return () => {
+        cancelled = true;
+      };
+    }, [history2, providerReady, sourceIdentity, sourcePassages]);
     async function chooseProvider(nextProvider, requestedSelectionVersion = null) {
       const next = normalizeProvider(nextProvider);
       if (!providerEnabled || next === provider || providerBusy) return;
@@ -8036,6 +8330,7 @@
         await adapter.setProvider(next);
         if (selectionVersion !== providerSelectionVersionRef.current) return;
         invalidateProviderRequest(requestRef, () => {
+          lastSearchRef.current = null;
           setResult(null);
           setMatches([]);
           setCurrent(0);
@@ -8078,7 +8373,6 @@
         }, 0);
       })();
     }
-    const activeProvider = providerEnabled ? provider : "jev";
     const focusedIndex = result?.ambiguous && ambiguousSelection === null ? -1 : current;
     const focused = focusedIndex >= 0 ? matches[focusedIndex] || null : null;
     const focusedSource = (0, import_react3.useMemo)(
@@ -8140,10 +8434,6 @@
     }
     async function searchSource(event, queryOverride = null) {
       event?.preventDefault();
-      if (activeProvider === "jev" && keyConfigured !== true) {
-        setStatus({ kind: "error", message: "Save your Cloud access key before searching.", retryable: false });
-        return;
-      }
       const cleanQuery = String(queryOverride ?? query).trim();
       if (!cleanQuery) {
         setStatus({ kind: "error", message: "Enter a question first.", retryable: false });
@@ -8152,6 +8442,37 @@
       const requestId = requestRef.current + 1;
       requestRef.current = requestId;
       const isRequestCurrent = () => isCurrentRequest(requestId, requestRef.current);
+      const sourceAtRequest = sourceIdentity;
+      lastSearchRef.current = { query: cleanQuery, sourceAtRequest };
+      setResult(null);
+      setMatches([]);
+      setCurrent(0);
+      setAmbiguousSelection(null);
+      setTraceOpen(false);
+      setSearchProgress(0);
+      setStatus({
+        kind: "loading",
+        message: history2 && historySubject ? "Checking previous results\u2026" : "Finding results\u2026",
+        retryable: false
+      });
+      try {
+        if (history2 && historySubject) {
+          const record = await history2.find(historySubject, cleanQuery);
+          if (!isRequestCurrent() || sourceIdentityRef.current !== sourceAtRequest) return;
+          if (record && hydrateCachedSearch(record, "Previous result restored.")) return;
+          setStatus({ kind: "loading", message: "Finding results\u2026", retryable: false });
+        }
+        if (activeProvider === "jev" && keyConfigured !== true) {
+          setSearchProgress(0);
+          setStatus({ kind: "error", message: "Save your Cloud access key before searching.", retryable: false });
+          return;
+        }
+      } catch (error) {
+        if (!isRequestCurrent() || sourceIdentityRef.current !== sourceAtRequest) return;
+        setSearchProgress(0);
+        setStatus({ kind: "error", ...normalizeSearchError(error) });
+        return;
+      }
       let accessPromise = Promise.resolve({ granted: true });
       if (activeProvider === "laya" && typeof adapter?.ensureProviderAccess === "function") {
         try {
@@ -8166,7 +8487,6 @@
       }
       if (!isRequestCurrent()) return;
       setSearchProgress(12);
-      setStatus({ kind: "loading", message: "Finding results\u2026", retryable: false });
       let searchPassages = sourcePassages;
       try {
         await accessPromise;
@@ -8192,17 +8512,11 @@
         setStatus({ kind: "error", message: "No page text is ready yet. Refresh from the current page.", retryable: true });
         return;
       }
-      const sourceAtRequest = sourceFingerprint(searchPassages);
-      lastSearchRef.current = { query: cleanQuery, sourceAtRequest };
-      setResult(null);
-      setMatches([]);
-      setCurrent(0);
-      setAmbiguousSelection(null);
-      setTraceOpen(false);
+      const searchSourceFingerprint = sourceFingerprint(searchPassages);
       setSearchProgress(55);
       try {
         const payload = await adapter.search(cleanQuery, searchPassages);
-        if (!isCurrentRequest(requestId, requestRef.current) || sourceFingerprint(searchPassages) !== sourceAtRequest) return;
+        if (!isCurrentRequest(requestId, requestRef.current) || sourceIdentityRef.current !== sourceAtRequest || sourceFingerprint(searchPassages) !== searchSourceFingerprint) return;
         const validMatches = validSourceMatches(payload, searchPassages);
         const returnedMatches = Array.isArray(payload?.matches) ? payload.matches : [];
         if (returnedMatches.length && !validMatches.length) {
@@ -8216,6 +8530,9 @@
         setResult(normalizedResult);
         setMatches(normalizedResult.matches);
         if (!ambiguous) focusResult(normalizedMatches, searchPassages, 0);
+        if (history2 && historySubject && sourceIdentityRef.current === sourceAtRequest) {
+          void history2.save({ subject: historySubject, query: cleanQuery, result: normalizedResult });
+        }
         setSearchProgress(100);
         setStatus({
           kind: "success",
@@ -8237,7 +8554,14 @@
       setCurrent(nextIndex);
       setAmbiguousSelection(nextIndex);
       setTraceOpen(false);
-      focusResult(matches, passages, nextIndex);
+      const selected = findSourceMatch({ matches }, passages, nextIndex);
+      if (selected) {
+        adapter.focusMatch?.(selected);
+        const lastSearch = lastSearchRef.current;
+        if (history2 && historySubject && lastSearch?.sourceAtRequest === sourceIdentity) {
+          void history2.select(historySubject, lastSearch.query, selected.match);
+        }
+      }
     }
     function retry() {
       const previous = lastSearchRef.current?.query ?? query;
@@ -8537,6 +8861,7 @@
   var SOURCE_REFRESH_DEBOUNCE_MS = 120;
   var SOURCE_URL_POLL_MS = 250;
   var NAVIGATION_EVENT = "context-atlas:navigation";
+  var history = createSearchHistory(createChromeHistoryStorage(chrome.storage.local));
   var internalMutationPending = false;
   function collectPageSource(query = "") {
     const rawPassages = [];
@@ -8609,7 +8934,7 @@
     }
     return `body/${parts.join("/")}`;
   }
-  function ExtensionApp({ adapter, initialSource, onSourceChange }) {
+  function ExtensionApp({ adapter, history: history2, initialSource, onSourceChange }) {
     const [source, setSource] = (0, import_react4.useState)(initialSource);
     const sourceRef = (0, import_react4.useRef)(initialSource);
     sourceRef.current = source;
@@ -8626,7 +8951,18 @@
       ...adapter,
       focusMatch: ({ passage, sentence }) => highlightMatch(sourceRef.current.elements, passage, sentence)
     }), [adapter]);
-    return /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(ContextAtlasSurface, { adapter: surfaceAdapter, source, surface: "extension", prepareSearch, onClose: () => window.__contextAtlasClose?.() });
+    return /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
+      ContextAtlasSurface,
+      {
+        adapter: surfaceAdapter,
+        history: history2,
+        historySubject: { surface: "extension", locator: source.url, revision: source.revision },
+        source,
+        surface: "extension",
+        prepareSearch,
+        onClose: () => window.__contextAtlasClose?.()
+      }
+    );
   }
   function highlightMatch(elements, passage, sentence) {
     clearPageHighlights();
@@ -8713,7 +9049,7 @@
     };
     let refreshTimer = null;
     const root = (0, import_client.createRoot)(mount);
-    root.render(/* @__PURE__ */ (0, import_jsx_runtime2.jsx)(ExtensionApp, { adapter, initialSource, onSourceChange: (replaceSource) => {
+    root.render(/* @__PURE__ */ (0, import_jsx_runtime2.jsx)(ExtensionApp, { adapter, history, initialSource, onSourceChange: (replaceSource) => {
       let observedUrl = location.href;
       const scheduleSourceRefresh = () => {
         if (refreshTimer !== null) window.clearTimeout(refreshTimer);

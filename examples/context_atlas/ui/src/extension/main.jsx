@@ -4,6 +4,7 @@ import { createRoot } from "react-dom/client";
 import { createRuntimeAdapter } from "../shared/adapters.js";
 import { segmentText, findSentenceOffset, MAX_BLOCKS, MAX_PASSAGE_LENGTH } from "../shared/contracts.js";
 import { ContextAtlasSurface } from "../shared/components.jsx";
+import { createChromeHistoryStorage, createSearchHistory } from "../shared/history.js";
 import { findTextNodeSegments } from "./range-utils.js";
 import { stableBlockId, sourceRevision } from "./search-context.js";
 import { MAX_SOURCE_SCAN_PASSAGES, planSourcePassages } from "../../../extension/source-harness.mjs";
@@ -19,6 +20,7 @@ const FIGCAPTION_NOISE_ANCESTOR_SELECTOR = NOISE_ANCESTOR_SELECTOR.replace("figu
 const SOURCE_REFRESH_DEBOUNCE_MS = 120;
 const SOURCE_URL_POLL_MS = 250;
 const NAVIGATION_EVENT = "context-atlas:navigation";
+const history = createSearchHistory(createChromeHistoryStorage(chrome.storage.local));
 let internalMutationPending = false;
 
 function collectPageSource(query = "") {
@@ -99,7 +101,7 @@ function elementPath(element) {
   return `body/${parts.join("/")}`;
 }
 
-function ExtensionApp({ adapter, initialSource, onSourceChange }) {
+function ExtensionApp({ adapter, history, initialSource, onSourceChange }) {
   const [source, setSource] = useState(initialSource);
   const sourceRef = useRef(initialSource);
   sourceRef.current = source;
@@ -116,7 +118,15 @@ function ExtensionApp({ adapter, initialSource, onSourceChange }) {
     ...adapter,
     focusMatch: ({ passage, sentence }) => highlightMatch(sourceRef.current.elements, passage, sentence),
   }), [adapter]);
-  return <ContextAtlasSurface adapter={surfaceAdapter} source={source} surface="extension" prepareSearch={prepareSearch} onClose={() => window.__contextAtlasClose?.()} />;
+  return <ContextAtlasSurface
+    adapter={surfaceAdapter}
+    history={history}
+    historySubject={{ surface: "extension", locator: source.url, revision: source.revision }}
+    source={source}
+    surface="extension"
+    prepareSearch={prepareSearch}
+    onClose={() => window.__contextAtlasClose?.()}
+  />;
 }
 
 function highlightMatch(elements, passage, sentence) {
@@ -204,7 +214,7 @@ function mountExtension() {
   let stopSourceObserver = () => {};
   let refreshTimer = null;
   const root = createRoot(mount);
-  root.render(<ExtensionApp adapter={adapter} initialSource={initialSource} onSourceChange={(replaceSource) => {
+  root.render(<ExtensionApp adapter={adapter} history={history} initialSource={initialSource} onSourceChange={(replaceSource) => {
     let observedUrl = location.href;
     const scheduleSourceRefresh = () => {
       if (refreshTimer !== null) window.clearTimeout(refreshTimer);
