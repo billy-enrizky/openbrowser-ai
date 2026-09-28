@@ -7980,7 +7980,7 @@
         return null;
       }
     }
-    async function findLatest(subject, sourcePassages = null) {
+    async function findLatest(subject, sourcePassages = null, resolvePassages = null) {
       try {
         const surface = String(subject?.surface ?? "");
         const provider = String(subject?.provider ?? "");
@@ -7993,11 +7993,20 @@
           if (!record || record.subjectHash !== subjectHash || record.surface !== surface || record.provider !== provider) continue;
           const queryHash = await sha256Hex(record.normalizedQuery, cryptoLike);
           if (key !== `${SEARCH_HISTORY_PREFIX}${record.subjectHash}.${queryHash}`) continue;
-          if (Array.isArray(sourcePassages) && !restoreCachedSearch(record, sourcePassages)) continue;
-          records.push(record);
+          records.push({ key, record });
         }
-        records.sort((left, right) => right.updatedAt - left.updatedAt);
-        return records[0] || null;
+        records.sort((left, right) => right.record.updatedAt - left.record.updatedAt || right.key.localeCompare(left.key));
+        for (const { record } of records) {
+          if (!Array.isArray(sourcePassages) || restoreCachedSearch(record, sourcePassages)) return record;
+          if (typeof resolvePassages === "function") {
+            try {
+              const resolvedPassages = await resolvePassages(record.normalizedQuery);
+              if (restoreCachedSearch(record, resolvedPassages)) return record;
+            } catch (_error) {
+            }
+          }
+        }
+        return null;
       } catch (_error) {
         return null;
       }
@@ -8007,20 +8016,22 @@
       writeQueue = pending;
       return pending;
     }
-    function save({ subject, query, result, selected = null }) {
+    function save({ subject, query, result, selected = null, passages = null }) {
       return enqueue(async () => {
         const identity = await recordIdentity(subject, query);
         if (!identity) return null;
+        const sanitizedResult = sanitizeResult(result, passages);
+        if (!sanitizedResult) return null;
         const existing = normalizeRecord(await storage.get(identity.key));
-        const timestamp = Number(now());
+        const timestamp = await nextUpdatedAt(storage, now);
         const record = {
           version: HISTORY_VERSION,
           surface: identity.surface,
           provider: identity.provider,
           subjectHash: identity.subjectHash,
           normalizedQuery: identity.normalizedQuery,
-          result: sanitizeResult(result),
-          selected: sanitizeSelection(selected),
+          result: sanitizedResult,
+          selected: sanitizeSelection(selected, passages),
           createdAt: existing?.createdAt ?? timestamp,
           updatedAt: timestamp
         };
@@ -8029,16 +8040,18 @@
         return record;
       });
     }
-    function select(subject, query, selected) {
+    function select(subject, query, selected, passages = null) {
       return enqueue(async () => {
         const identity = await recordIdentity(subject, query);
         if (!identity) return null;
         const existing = normalizeRecord(await storage.get(identity.key));
         if (!existing || !matchesIdentity(existing, identity)) return null;
+        const sanitizedSelection = sanitizeSelection(selected, passages);
+        if (!sanitizedSelection) return null;
         const record = {
           ...existing,
-          selected: sanitizeSelection(selected),
-          updatedAt: Number(now())
+          selected: sanitizedSelection,
+          updatedAt: await nextUpdatedAt(storage, now)
         };
         await storage.set(identity.key, record);
         await pruneHistory(storage, retention);
@@ -8053,7 +8066,7 @@
     const matches = normalized.result.matches.map((match) => restoreSourceMatch(match, passages));
     if (matches.some((match) => match === null)) return null;
     const result = { ...normalized.result, matches };
-    const selectedIndex = normalized.selected ? matches.findIndex((match) => match.passage_id === normalized.selected.passage_id && match.sentence_index === normalized.selected.sentence_index) : -1;
+    const selectedIndex = normalized.selected ? matches.findIndex((match) => match.passage_id === normalized.selected.passage_id && match.sentence_id === normalized.selected.sentence_id) : -1;
     const current = selectedIndex >= 0 ? selectedIndex : 0;
     return {
       query: normalized.normalizedQuery,
@@ -8066,9 +8079,9 @@
   }
   function restoreSourceMatch(match, passages) {
     const passage = passages.find((item) => item?.id === match.passage_id);
-    const sentence = passage?.sentences?.find((item) => item?.index === match.sentence_index);
+    const sentence = passage?.sentences?.map((item, index) => ({ item, index })).find(({ item, index }) => sentenceIdentity(passage, item, index) === match.sentence_id)?.item;
     if (!passage || !sentence || typeof sentence.text !== "string" || !sentence.text) return null;
-    return { ...match, sentence_text: sentence.text };
+    return { ...match, sentence_index: Number.isInteger(sentence.index) ? sentence.index : passage.sentences.indexOf(sentence), sentence_text: sentence.text };
   }
   function matchesIdentity(record, identity) {
     return Boolean(
@@ -8080,24 +8093,35 @@
     const digest = await cryptoLike.subtle.digest("SHA-256", new TextEncoder().encode(String(value)));
     return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
   }
-  function sanitizeResult(result) {
-    const matches = (Array.isArray(result?.matches) ? result.matches : []).map((match) => ({
-      passage_id: typeof match?.passage_id === "string" ? match.passage_id : "",
-      probability: Number(match?.probability),
-      sentence_index: Number(match?.sentence_index)
-    })).filter((match) => match.passage_id && Number.isInteger(match.sentence_index) && match.sentence_index >= 0 && Number.isFinite(match.probability) && match.probability >= 0 && match.probability <= 1);
+  function sanitizeResult(result, passages) {
+    if (!Array.isArray(passages) || !passages.length) return null;
+    const matches = (Array.isArray(result?.matches) ? result.matches : []).map((match) => {
+      const source = findSourceSentence(match, passages);
+      const probability = Number(match?.probability);
+      if (!source || !Number.isFinite(probability) || probability < 0 || probability > 1) return null;
+      return {
+        passage_id: source.passage.id,
+        sentence_id: sentenceIdentity(source.passage, source.sentence, source.index),
+        probability
+      };
+    }).filter(Boolean);
+    if (!matches.length) return null;
     const ambiguityGap = Number(result?.ambiguity_gap);
+    const ambiguous = result?.ambiguous === true;
+    if (ambiguous && matches.length < 2) return null;
     return {
       matches,
-      ambiguous: result?.ambiguous === true,
+      ambiguous,
       ambiguity_gap: Number.isFinite(ambiguityGap) ? ambiguityGap : null
     };
   }
-  function sanitizeSelection(selected) {
-    if (typeof selected?.passage_id !== "string" || !selected.passage_id) return null;
-    const sentenceIndex = Number(selected.sentence_index);
-    if (!Number.isInteger(sentenceIndex) || sentenceIndex < 0) return null;
-    return { passage_id: selected.passage_id, sentence_index: sentenceIndex };
+  function sanitizeSelection(selected, passages) {
+    const source = findSourceSentence(selected, passages);
+    if (!source) return null;
+    return {
+      passage_id: source.passage.id,
+      sentence_id: sentenceIdentity(source.passage, source.sentence, source.index)
+    };
   }
   function normalizeRecord(value) {
     if (!value || value.version !== HISTORY_VERSION) return null;
@@ -8127,27 +8151,66 @@
   }
   function normalizeStoredResult(value) {
     if (!value || typeof value !== "object" || !Array.isArray(value.matches) || typeof value.ambiguous !== "boolean") return null;
+    if (!value.matches.length || value.ambiguous && value.matches.length < 2) return null;
     const ambiguityGap = value.ambiguity_gap === null ? null : Number(value.ambiguity_gap);
     if (value.ambiguity_gap !== null && !Number.isFinite(ambiguityGap)) return null;
     const matches = value.matches.map((match) => {
-      if (typeof match?.passage_id !== "string" || !match.passage_id || !Number.isInteger(match?.sentence_index) || match.sentence_index < 0 || !Number.isFinite(match?.probability) || match.probability < 0 || match.probability > 1) return null;
+      if (typeof match?.passage_id !== "string" || !match.passage_id || typeof match?.sentence_id !== "string" || !match.sentence_id || Object.hasOwn(match, "sentence_index") || !Number.isFinite(match?.probability) || match.probability < 0 || match.probability > 1) return null;
       return {
         passage_id: match.passage_id,
-        probability: match.probability,
-        sentence_index: match.sentence_index
+        sentence_id: match.sentence_id,
+        probability: match.probability
       };
     });
     if (matches.some((match) => match === null)) return null;
     return { matches, ambiguous: value.ambiguous, ambiguity_gap: ambiguityGap };
   }
   function normalizeStoredSelection(value) {
-    if (!value || typeof value.passage_id !== "string" || !value.passage_id || !Number.isInteger(value.sentence_index) || value.sentence_index < 0) return null;
-    return { passage_id: value.passage_id, sentence_index: value.sentence_index };
+    if (!value || typeof value.passage_id !== "string" || !value.passage_id || typeof value.sentence_id !== "string" || !value.sentence_id || Object.hasOwn(value, "sentence_index")) return null;
+    return { passage_id: value.passage_id, sentence_id: value.sentence_id };
   }
   async function pruneHistory(storage, maxEntries) {
-    const records = (await storage.entries()).filter(([key]) => key.startsWith(SEARCH_HISTORY_PREFIX)).map(([key, value]) => ({ key, record: normalizeRecord(value) })).filter((item) => item.record).sort((left, right) => right.record.updatedAt - left.record.updatedAt);
+    const records = (await storage.entries()).filter(([key]) => key.startsWith(SEARCH_HISTORY_PREFIX)).map(([key, value]) => ({ key, record: normalizeRecord(value) })).filter((item) => item.record).sort((left, right) => right.record.updatedAt - left.record.updatedAt || right.key.localeCompare(left.key));
     const staleKeys = records.slice(maxEntries).map((item) => item.key);
     if (staleKeys.length) await storage.remove(staleKeys);
+  }
+  async function nextUpdatedAt(storage, now) {
+    const requested = Number(now());
+    const base = Number.isFinite(requested) ? requested : Date.now();
+    let latest = null;
+    for (const [key, value] of await storage.entries()) {
+      if (!key.startsWith(SEARCH_HISTORY_PREFIX)) continue;
+      const record = normalizeRecord(value);
+      if (record && (latest === null || record.updatedAt > latest)) latest = record.updatedAt;
+    }
+    return Math.max(base, latest === null ? base : latest + 1);
+  }
+  function findSourceSentence(match, passages) {
+    if (!Array.isArray(passages) || typeof match?.passage_id !== "string" || !match.passage_id) return null;
+    const passage = passages.find((item) => item?.id === match.passage_id);
+    if (!passage || !Array.isArray(passage.sentences)) return null;
+    const sentenceId = typeof match.sentence_id === "string" && match.sentence_id ? match.sentence_id : null;
+    const sentenceIndex = Number(match.sentence_index);
+    const sentenceText = typeof match.sentence_text === "string" ? match.sentence_text : null;
+    const source = passage.sentences.map((sentence, index) => ({ sentence, index })).find(({ sentence, index }) => sentenceId ? sentenceIdentity(passage, sentence, index) === sentenceId : Number(sentence?.index ?? index) === sentenceIndex && (!sentenceText || sentence?.text === sentenceText));
+    return source ? { passage, sentence: source.sentence, index: source.index } : null;
+  }
+  function sentenceIdentity(passage, sentence, index) {
+    if (typeof sentence?.id === "string" && sentence.id) return sentence.id;
+    const normalized = normalizeHistoryQuery(sentence?.text);
+    let occurrence = 0;
+    for (let prior = 0; prior < index; prior += 1) {
+      if (normalizeHistoryQuery(passage?.sentences?.[prior]?.text) === normalized) occurrence += 1;
+    }
+    return `s${hashString(`${passage?.id || ""}\0${normalized}\0${occurrence}`).toString(36)}`;
+  }
+  function hashString(value) {
+    let hash = 2166136261;
+    for (let index = 0; index < value.length; index += 1) {
+      hash ^= value.charCodeAt(index);
+      hash = Math.imul(hash, 16777619);
+    }
+    return hash >>> 0;
   }
 
   // src/shared/components.jsx
@@ -8299,15 +8362,24 @@
       setSearchProgress(0);
       setStatus({ kind: "loading", message: "Checking previous results\u2026", retryable: false });
       void (async () => {
-        const record = await history2.findLatest(historySubject, sourcePassages);
+        const resolvePassages = async (candidateQuery) => {
+          if (typeof prepareSearch !== "function") return sourcePassages;
+          const prepared = await prepareSearch(candidateQuery);
+          return Array.isArray(prepared?.passages) ? prepared.passages : sourcePassages;
+        };
+        const record = await history2.findLatest(historySubject, sourcePassages, resolvePassages);
         if (cancelled || !isCurrentRequest(requestId, requestRef.current) || sourceIdentityRef.current !== sourceAtRequest) return;
-        if (record && hydrateCachedSearch(record, "Previous result restored.")) return;
+        if (record) {
+          const prepared = await resolvePassages(record.normalizedQuery);
+          if (cancelled || !isCurrentRequest(requestId, requestRef.current) || sourceIdentityRef.current !== sourceAtRequest) return;
+          if (hydrateCachedSearch(record, "Previous result restored.", prepared)) return;
+        }
         setStatus((currentStatus) => currentStatus.message === "Previous result restored." ? currentStatus : { kind: "idle", message: "Ready when you are.", retryable: false });
       })();
       return () => {
         cancelled = true;
       };
-    }, [history2, providerReady, sourceIdentity, sourcePassages]);
+    }, [history2, prepareSearch, providerReady, sourceIdentity, sourcePassages]);
     async function chooseProvider(nextProvider, requestedSelectionVersion = null) {
       const next = normalizeProvider(nextProvider);
       if (!providerEnabled || next === provider || providerBusy) return;
@@ -8459,7 +8531,18 @@
         if (history2 && historySubject) {
           const record = await history2.find(historySubject, cleanQuery);
           if (!isRequestCurrent() || sourceIdentityRef.current !== sourceAtRequest) return;
-          if (record && hydrateCachedSearch(record, "Previous result restored.")) return;
+          if (record) {
+            let cachedPassages = sourcePassages;
+            if (typeof prepareSearch === "function") {
+              const prepared = await prepareSearch(cleanQuery);
+              if (!isRequestCurrent() || sourceIdentityRef.current !== sourceAtRequest) return;
+              if (Array.isArray(prepared?.passages)) {
+                cachedPassages = prepared.passages;
+                setActivePassages(cachedPassages);
+              }
+            }
+            if (hydrateCachedSearch(record, "Previous result restored.", cachedPassages)) return;
+          }
           setStatus({ kind: "loading", message: "Finding results\u2026", retryable: false });
         }
         if (activeProvider === "jev" && keyConfigured !== true) {
@@ -8531,7 +8614,7 @@
         setMatches(normalizedResult.matches);
         if (!ambiguous) focusResult(normalizedMatches, searchPassages, 0);
         if (history2 && historySubject && sourceIdentityRef.current === sourceAtRequest) {
-          void history2.save({ subject: historySubject, query: cleanQuery, result: normalizedResult });
+          void history2.save({ subject: historySubject, query: cleanQuery, result: normalizedResult, passages: searchPassages });
         }
         setSearchProgress(100);
         setStatus({
@@ -8559,7 +8642,7 @@
         adapter.focusMatch?.(selected);
         const lastSearch = lastSearchRef.current;
         if (history2 && historySubject && lastSearch?.sourceAtRequest === sourceIdentity) {
-          void history2.select(historySubject, lastSearch.query, selected.match);
+          void history2.select(historySubject, lastSearch.query, selected.match, passages);
         }
       }
     }
@@ -8791,7 +8874,7 @@
   }
   function stableBlockId({ path = "", text = "", occurrence = 0 } = {}) {
     const key = `${path || `occurrence:${occurrence}`}\0${normalizeSourceText(text)}`;
-    return `b${hashString(key).toString(36)}`;
+    return `b${hashString2(key).toString(36)}`;
   }
   function sourceRevision(blocks) {
     const serialized = JSON.stringify((Array.isArray(blocks) ? blocks : []).map((block) => ({
@@ -8800,9 +8883,9 @@
       text: block?.text,
       sentences: Array.isArray(block?.sentences) ? block.sentences.map((sentence) => ({ id: sentence?.id, index: sentence?.index, text: sentence?.text })) : []
     })));
-    return `r${hashString(serialized).toString(36)}`;
+    return `r${hashString2(serialized).toString(36)}`;
   }
-  function hashString(value) {
+  function hashString2(value) {
     let hash = 2166136261;
     for (let index = 0; index < value.length; index += 1) {
       hash ^= value.charCodeAt(index);
@@ -8882,6 +8965,7 @@
       rawPassages.push(passage);
       rawElements.set(id, element);
     });
+    const revision = sourceRevision(rawPassages);
     const passages = planSourcePassages(query, rawPassages).slice(0, MAX_BLOCKS);
     const elements = new Map(passages.map((passage) => [passage.id, rawElements.get(passage.id)]));
     return {
@@ -8889,7 +8973,7 @@
       url: location.href,
       passages,
       elements,
-      revision: sourceRevision(passages)
+      revision
     };
   }
   function serializableSource(source) {

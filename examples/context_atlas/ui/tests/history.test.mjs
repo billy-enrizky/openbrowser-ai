@@ -26,8 +26,8 @@ const passages = [
     id: "b1",
     text: "First answer. Second answer.",
     sentences: [
-      { index: 0, text: "First answer." },
-      { index: 1, text: "Second answer." },
+      { id: "s-first", index: 0, text: "First answer." },
+      { id: "s-second", index: 1, text: "Second answer." },
     ],
   },
 ];
@@ -62,20 +62,21 @@ test("saves, finds, selects, and restores source-owned references without raw te
   const storage = createMemoryHistoryStorage();
   const history = createSearchHistory(storage, { cryptoLike: webcrypto, now: () => 1234 });
 
-  const saved = await history.save({ subject: jevSubject, query: "Which answer matters?", result: ambiguousResult });
+  const saved = await history.save({ subject: jevSubject, query: "Which answer matters?", result: ambiguousResult, passages });
   assert.equal(saved.selected, null);
   assert.equal(saved.query, undefined);
   assert.equal(saved.normalizedQuery, "which answer matters?");
   assert.deepEqual(saved.result.matches[0], {
     passage_id: "b1",
     probability: 0.91,
-    sentence_index: 0,
+    sentence_id: "s-first",
   });
 
   const storedText = JSON.stringify(await storage.entries());
   assert.doesNotMatch(storedText, /https:\/\/example\.com/);
   assert.doesNotMatch(storedText, /visible source revision/);
   assert.doesNotMatch(storedText, /First answer/);
+  assert.doesNotMatch(storedText, /sentence_index/);
   assert.doesNotMatch(storedText, /Which answer matters\?/);
   assert.match(storedText, /which answer matters\?/);
   assert.doesNotMatch(storedText, /do not persist/);
@@ -85,7 +86,7 @@ test("saves, finds, selects, and restores source-owned references without raw te
   assert.equal((await history.findLatest(jevSubject)).normalizedQuery, "which answer matters?");
   assert.equal(await history.find(layaSubject, "Which answer matters?"), null);
 
-  await history.select(jevSubject, "which answer matters?", { passage_id: "b1", sentence_index: 1 });
+  await history.select(jevSubject, "which answer matters?", { passage_id: "b1", sentence_id: "s-second" }, passages);
   const selected = await history.find(jevSubject, "Which answer matters?");
   const restored = restoreCachedSearch(selected, passages);
 
@@ -94,6 +95,18 @@ test("saves, finds, selects, and restores source-owned references without raw te
   assert.equal(restored.query, "which answer matters?");
   assert.equal(restored.matches[1].sentence_text, "Second answer.");
   assert.equal(restored.selected.sentence.text, "Second answer.");
+  assert.equal(selected.selected.sentence_id, "s-second");
+
+  const reorderedPassages = [{
+    ...passages[0],
+    sentences: [
+      { id: "s-second", index: 0, text: "Second answer." },
+      { id: "s-first", index: 1, text: "First answer." },
+    ],
+  }];
+  const reordered = restoreCachedSearch(selected, reorderedPassages);
+  assert.equal(reordered.selected.sentence.text, "Second answer.");
+  assert.equal(reordered.selected.match.sentence_index, 0);
 });
 
 test("sanitizes out-of-range probabilities before writing history", async () => {
@@ -102,17 +115,18 @@ test("sanitizes out-of-range probabilities before writing history", async () => 
   const saved = await history.save({
     subject: jevSubject,
     query: "score",
-    result: { ambiguous: false, matches: [{ passage_id: "b1", probability: 2, sentence_index: 0 }] },
+    result: { ambiguous: false, matches: [{ passage_id: "b1", probability: 2, sentence_index: 0, sentence_text: "First answer." }] },
+    passages,
   });
 
-  assert.deepEqual(saved.result.matches, []);
-  assert.deepEqual((await history.find(jevSubject, "score")).result.matches, []);
+  assert.equal(saved, null);
+  assert.equal(await history.find(jevSubject, "score"), null);
 });
 
 test("rejects stale and malformed records", async () => {
   const storage = createMemoryHistoryStorage();
   const history = createSearchHistory(storage, { cryptoLike: webcrypto });
-  await history.save({ subject: jevSubject, query: "find", result: ambiguousResult });
+  await history.save({ subject: jevSubject, query: "find", result: ambiguousResult, passages });
   const [[key, record]] = await storage.entries();
 
   assert.equal(restoreCachedSearch(record, [{ ...passages[0], id: "changed" }]), null);
@@ -126,24 +140,75 @@ test("finds the newest source-valid record when a newer record is stale", async 
   let timestamp = 100;
   const storage = createMemoryHistoryStorage();
   const history = createSearchHistory(storage, { cryptoLike: webcrypto, now: () => timestamp++ });
-  await history.save({ subject: jevSubject, query: "first", result: ambiguousResult });
+  await history.save({ subject: jevSubject, query: "first", result: ambiguousResult, passages });
   await history.save({
     subject: jevSubject,
     query: "stale",
-    result: { ...ambiguousResult, matches: [{ passage_id: "missing", probability: 0.99, sentence_index: 0 }] },
+    result: { ambiguous: false, ambiguity_gap: null, matches: [{ passage_id: "missing", probability: 0.99, sentence_index: 0, sentence_text: "Stale answer." }] },
+    passages: [{ id: "missing", text: "Stale answer.", sentences: [{ id: "stale-sentence", index: 0, text: "Stale answer." }] }],
   });
 
   assert.equal((await history.findLatest(jevSubject)).normalizedQuery, "stale");
   assert.equal((await history.findLatest(jevSubject, passages)).normalizedQuery, "first");
 });
 
+test("resolves query-planned passages before validating the latest record", async () => {
+  const storage = createMemoryHistoryStorage();
+  const history = createSearchHistory(storage, { cryptoLike: webcrypto, now: () => 100 });
+  await history.save({ subject: jevSubject, query: "which answer", result: ambiguousResult, passages });
+
+  const initialWindow = [{ id: "boundary", text: "Boundary only.", sentences: [{ id: "boundary-sentence", index: 0, text: "Boundary only." }] }];
+  const latest = await history.findLatest(jevSubject, initialWindow, async (query) => query === "which answer" ? passages : []);
+
+  assert.equal(latest.normalizedQuery, "which answer");
+});
+
+test("orders same-millisecond writes by their serialized update time", async () => {
+  const storage = createMemoryHistoryStorage();
+  const history = createSearchHistory(storage, { cryptoLike: webcrypto, now: () => 100 });
+  await history.save({ subject: jevSubject, query: "first", result: ambiguousResult, passages });
+  await history.save({ subject: jevSubject, query: "second", result: ambiguousResult, passages });
+
+  assert.equal((await history.findLatest(jevSubject)).normalizedQuery, "second");
+});
+
+test("derives a stable sentence ID when a source does not provide one", async () => {
+  const sourceWithoutIds = [{
+    id: "b-no-id",
+    text: "Generated identity.",
+    sentences: [{ index: 0, text: "Generated identity." }],
+  }];
+  const storage = createMemoryHistoryStorage();
+  const history = createSearchHistory(storage, { cryptoLike: webcrypto });
+  await history.save({
+    subject: jevSubject,
+    query: "generated",
+    result: { ambiguous: false, matches: [{ passage_id: "b-no-id", probability: 0.9, sentence_index: 0, sentence_text: "Generated identity." }] },
+    passages: sourceWithoutIds,
+  });
+
+  const record = await history.find(jevSubject, "generated");
+  assert.match(record.result.matches[0].sentence_id, /^s[a-z0-9]+$/u);
+  assert.equal(restoreCachedSearch(record, sourceWithoutIds).matches[0].sentence_text, "Generated identity.");
+});
+
+test("ignores an empty ambiguous record instead of restoring it", async () => {
+  const storage = createMemoryHistoryStorage();
+  const history = createSearchHistory(storage, { cryptoLike: webcrypto });
+  await history.save({ subject: jevSubject, query: "empty", result: ambiguousResult, passages });
+  const [[key, record]] = await storage.entries();
+  await storage.set(key, { ...record, result: { ...record.result, matches: [], ambiguous: true } });
+
+  assert.equal(await history.find(jevSubject, "empty"), null);
+});
+
 test("evicts oldest records and fails open when storage is unavailable", async () => {
   let timestamp = 100;
   const storage = createMemoryHistoryStorage();
   const history = createSearchHistory(storage, { cryptoLike: webcrypto, maxEntries: 2, now: () => timestamp++ });
-  await history.save({ subject: jevSubject, query: "first", result: ambiguousResult });
-  await history.save({ subject: jevSubject, query: "second", result: ambiguousResult });
-  await history.save({ subject: jevSubject, query: "third", result: ambiguousResult });
+  await history.save({ subject: jevSubject, query: "first", result: ambiguousResult, passages });
+  await history.save({ subject: jevSubject, query: "second", result: ambiguousResult, passages });
+  await history.save({ subject: jevSubject, query: "third", result: ambiguousResult, passages });
 
   assert.equal((await storage.entries()).length, 2);
   assert.equal(await history.find(jevSubject, "first"), null);
@@ -153,8 +218,8 @@ test("evicts oldest records and fails open when storage is unavailable", async (
   const unavailable = createSearchHistory({ entries: failure, get: failure, set: failure, remove: failure }, { cryptoLike: webcrypto });
   assert.equal(await unavailable.find(jevSubject, "find"), null);
   assert.equal(await unavailable.findLatest(jevSubject), null);
-  assert.equal(await unavailable.save({ subject: jevSubject, query: "find", result: ambiguousResult }), null);
-  assert.equal(await unavailable.select(jevSubject, "find", { passage_id: "b1", sentence_index: 0 }), null);
+  assert.equal(await unavailable.save({ subject: jevSubject, query: "find", result: ambiguousResult, passages }), null);
+  assert.equal(await unavailable.select(jevSubject, "find", { passage_id: "b1", sentence_index: 0, sentence_text: "First answer." }, passages), null);
 });
 
 test("adapts Chrome storage local operations", async () => {

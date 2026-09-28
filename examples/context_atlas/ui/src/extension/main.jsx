@@ -42,6 +42,7 @@ function collectPageSource(query = "") {
     rawPassages.push(passage);
     rawElements.set(id, element);
   });
+  const revision = sourceRevision(rawPassages);
   const passages = planSourcePassages(query, rawPassages).slice(0, MAX_BLOCKS);
   const elements = new Map(passages.map((passage) => [passage.id, rawElements.get(passage.id)]));
   return {
@@ -49,7 +50,7 @@ function collectPageSource(query = "") {
     url: location.href,
     passages,
     elements,
-    revision: sourceRevision(passages),
+    revision,
   };
 }
 

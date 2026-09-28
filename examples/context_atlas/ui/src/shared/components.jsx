@@ -172,13 +172,22 @@ export function ContextAtlasSurface({
     setSearchProgress(0);
     setStatus({ kind: "loading", message: "Checking previous results…", retryable: false });
     void (async () => {
-      const record = await history.findLatest(historySubject, sourcePassages);
+      const resolvePassages = async (candidateQuery) => {
+        if (typeof prepareSearch !== "function") return sourcePassages;
+        const prepared = await prepareSearch(candidateQuery);
+        return Array.isArray(prepared?.passages) ? prepared.passages : sourcePassages;
+      };
+      const record = await history.findLatest(historySubject, sourcePassages, resolvePassages);
       if (
         cancelled
         || !isCurrentRequest(requestId, requestRef.current)
         || sourceIdentityRef.current !== sourceAtRequest
       ) return;
-      if (record && hydrateCachedSearch(record, "Previous result restored.")) return;
+      if (record) {
+        const prepared = await resolvePassages(record.normalizedQuery);
+        if (cancelled || !isCurrentRequest(requestId, requestRef.current) || sourceIdentityRef.current !== sourceAtRequest) return;
+        if (hydrateCachedSearch(record, "Previous result restored.", prepared)) return;
+      }
       setStatus((currentStatus) => currentStatus.message === "Previous result restored."
         ? currentStatus
         : { kind: "idle", message: "Ready when you are.", retryable: false });
@@ -186,7 +195,7 @@ export function ContextAtlasSurface({
     return () => {
       cancelled = true;
     };
-  }, [history, providerReady, sourceIdentity, sourcePassages]);
+  }, [history, prepareSearch, providerReady, sourceIdentity, sourcePassages]);
 
   async function chooseProvider(nextProvider, requestedSelectionVersion = null) {
     const next = normalizeProvider(nextProvider);
@@ -352,7 +361,18 @@ export function ContextAtlasSurface({
       if (history && historySubject) {
         const record = await history.find(historySubject, cleanQuery);
         if (!isRequestCurrent() || sourceIdentityRef.current !== sourceAtRequest) return;
-        if (record && hydrateCachedSearch(record, "Previous result restored.")) return;
+        if (record) {
+          let cachedPassages = sourcePassages;
+          if (typeof prepareSearch === "function") {
+            const prepared = await prepareSearch(cleanQuery);
+            if (!isRequestCurrent() || sourceIdentityRef.current !== sourceAtRequest) return;
+            if (Array.isArray(prepared?.passages)) {
+              cachedPassages = prepared.passages;
+              setActivePassages(cachedPassages);
+            }
+          }
+          if (hydrateCachedSearch(record, "Previous result restored.", cachedPassages)) return;
+        }
         setStatus({ kind: "loading", message: "Finding results…", retryable: false });
       }
       if (activeProvider === "jev" && keyConfigured !== true) {
@@ -428,7 +448,7 @@ export function ContextAtlasSurface({
       setMatches(normalizedResult.matches);
       if (!ambiguous) focusResult(normalizedMatches, searchPassages, 0);
       if (history && historySubject && sourceIdentityRef.current === sourceAtRequest) {
-        void history.save({ subject: historySubject, query: cleanQuery, result: normalizedResult });
+        void history.save({ subject: historySubject, query: cleanQuery, result: normalizedResult, passages: searchPassages });
       }
       setSearchProgress(100);
       setStatus({
@@ -460,7 +480,7 @@ export function ContextAtlasSurface({
       adapter.focusMatch?.(selected);
       const lastSearch = lastSearchRef.current;
       if (history && historySubject && lastSearch?.sourceAtRequest === sourceIdentity) {
-        void history.select(historySubject, lastSearch.query, selected.match);
+        void history.select(historySubject, lastSearch.query, selected.match, passages);
       }
     }
   }
