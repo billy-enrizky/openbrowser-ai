@@ -888,7 +888,8 @@ class TestMCPServerCleanup:
         with patch.object(srv, "_is_cdp_alive", new_callable=AsyncMock, return_value=True), \
              patch.object(srv, "_recover_browser_session", new_callable=AsyncMock):
             result = await srv._execute_code("x")
-            assert result == "ok"
+            assert "may have partially run" in result
+            assert srv._executor.execute.await_count == 1
 
 
 @pytest.mark.asyncio
