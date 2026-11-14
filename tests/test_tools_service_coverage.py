@@ -664,6 +664,30 @@ class TestSwitchTabAction:
         assert "Failed to switch" in (result.error or "")
 
 
+    @pytest.mark.asyncio
+    async def test_switch_ambiguous_id_returns_candidates_and_hint(self):
+        from openbrowser.browser.tabs import TabError
+
+        tools = Tools()
+        session = _make_mock_browser_session()
+        session.get_target_id_from_tab_id = AsyncMock(
+            side_effect=TabError(
+                'Tab ID ab12 is ambiguous.',
+                tab_id='ab12',
+                candidates=['AAAAab12', 'BBBBab12'],
+                hint='Pass the full CDP target_id.',
+            )
+        )
+
+        result = await tools.registry.execute_action('switch', {'tab_id': 'ab12'}, browser_session=session)
+
+        assert result.success is False
+        assert 'AAAAab12' in result.error
+        assert 'BBBBab12' in result.error
+        assert 'Pass the full CDP target_id' in result.error
+        session.event_bus.dispatch.assert_not_called()
+
+
 # ---------------------------------------------------------------------------
 # Close tab action
 # ---------------------------------------------------------------------------
@@ -772,6 +796,7 @@ class TestCloseTabAction:
                 'Tab ID cd34 is ambiguous.',
                 tab_id='cd34',
                 candidates=['AAAAcd34', 'BBBBcd34'],
+                hint='Pass the full CDP target_id.',
             )
         )
         session.agent_focus = MagicMock(target_id='AAAAcd34')
@@ -779,6 +804,9 @@ class TestCloseTabAction:
         result = await tools.registry.execute_action('close', {'tab_id': 'cd34'}, browser_session=session)
 
         assert result.success is False
+        assert 'AAAAcd34' in result.error
+        assert 'BBBBcd34' in result.error
+        assert 'Pass the full CDP target_id' in result.error
         session.event_bus.dispatch.assert_not_called()
 
 

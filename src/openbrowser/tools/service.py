@@ -62,6 +62,16 @@ from openbrowser.utils import time_execution_sync
 
 logger = logging.getLogger(__name__)
 
+
+def _tab_error_text(action: str, tab_id: str, error: TabError) -> str:
+	"""Render a tab resolution failure with every actionable detail."""
+	detail = f'Failed to {action} tab {tab_id}: {error}'
+	if error.candidates:
+		detail = f'{detail} Candidates: {", ".join(error.candidates)}.'
+	if error.hint:
+		detail = f'{detail} Hint: {error.hint}'
+	return detail
+
 # Import EnhancedDOMTreeNode and rebuild event models that have forward references to it
 # This must be done after all imports are complete
 ClickElementEvent.model_rebuild()
@@ -559,6 +569,10 @@ class Tools(Generic[Context]):
 
 				logger.info(f'🔄  {memory}')
 				return ActionResult(extracted_content=memory, long_term_memory=memory)
+			except TabError as error:
+				error_msg = _tab_error_text('switch', params.tab_id, error)
+				logger.warning(error_msg)
+				return ActionResult(error=error_msg, success=False)
 			except Exception as e:
 				error_msg = f'Failed to switch to tab {params.tab_id}: {e}'
 				logger.warning(error_msg)
@@ -574,7 +588,7 @@ class Tools(Generic[Context]):
 				target_id = await browser_session.get_target_id_from_tab_id(params.tab_id)
 			except TabError as error:
 				if error.candidates:
-					error_msg = f'Failed to close tab {params.tab_id}: {error}'
+					error_msg = _tab_error_text('close', params.tab_id, error)
 					logger.warning(error_msg)
 					return ActionResult(error=error_msg, success=False)
 				registry = getattr(browser_session, '_tab_registry', None)
@@ -589,7 +603,7 @@ class Tools(Generic[Context]):
 						logger.warning(f'Closed tab focus repair failed: {type(focus_error).__name__}: {focus_error}')
 					memory = f'Tab #{params.tab_id} was already closed'
 					return ActionResult(extracted_content=memory, long_term_memory=memory)
-				error_msg = f'Failed to close tab {params.tab_id}: {error}'
+				error_msg = _tab_error_text('close', params.tab_id, error)
 				logger.warning(error_msg)
 				return ActionResult(error=error_msg, success=False)
 			except Exception as error:

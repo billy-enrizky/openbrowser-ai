@@ -16,14 +16,27 @@ DAEMON_MODULE = 'openbrowser.daemon.server'
 
 
 def is_daemon_cmdline(cmdline: Any) -> bool:
-    """Return True only for an exact ``python -m openbrowser.daemon.server`` argv."""
-    if not isinstance(cmdline, (list, tuple)):
+    """Return True only when the interpreter itself runs the daemon module.
+
+    Reject script paths, ``-c`` programs, and later ``-m`` arguments that are
+    merely forwarded to another program.
+    """
+    if not isinstance(cmdline, (list, tuple)) or len(cmdline) < 3:
         return False
     arguments = [str(part) for part in cmdline]
-    return any(
-        arguments[index] == '-m' and arguments[index + 1] == DAEMON_MODULE
-        for index in range(len(arguments) - 1)
-    )
+    executable = Path(arguments[0]).name.lower()
+    if not (executable.startswith('python') or executable.startswith('pypy')):
+        return False
+    for index in range(1, len(arguments) - 1):
+        argument = arguments[index]
+        if argument == '-c':
+            return False
+        if argument == '-m':
+            return arguments[index + 1] == DAEMON_MODULE
+        if not argument.startswith('-'):
+            # A script path selects the program before any later -m option.
+            return False
+    return False
 
 
 def socket_candidates() -> list[Path]:

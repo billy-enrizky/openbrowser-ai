@@ -56,9 +56,13 @@ def test_daemon_processes_filters_commands_and_users(tmp_path):
 
 def test_is_daemon_cmdline_requires_an_exact_module_argument():
 	assert diagnostics.is_daemon_cmdline(['python', '-m', 'openbrowser.daemon.server'])
+	assert diagnostics.is_daemon_cmdline(['/usr/bin/python3.12', '-m', 'openbrowser.daemon.server'])
 	assert not diagnostics.is_daemon_cmdline(['python', '-m', 'openbrowser.daemon.server_extra'])
 	assert not diagnostics.is_daemon_cmdline(['python', 'openbrowser.daemon.server'])
 	assert not diagnostics.is_daemon_cmdline(['python', '-m'])
+	assert not diagnostics.is_daemon_cmdline(['python', 'worker.py', '-m', 'openbrowser.daemon.server'])
+	assert not diagnostics.is_daemon_cmdline(['python', '-c', 'print(1)', '-m', 'openbrowser.daemon.server'])
+	assert not diagnostics.is_daemon_cmdline(['node', '-m', 'openbrowser.daemon.server'])
 
 
 def test_daemon_processes_ignores_a_lookalike_module(tmp_path):
