@@ -323,7 +323,7 @@ class StorageStateWatchdog(BaseWatchdog):
 		current: list[list[str]] = []
 		current_size = 2  # JSON array brackets
 		for item in clean_items:
-			item_size = len(json.dumps(item, ensure_ascii=False).encode('utf-8'))
+			item_size = len(json.dumps(item, ensure_ascii=False, separators=(',', ':')).encode('utf-8'))
 			candidate_size = current_size + (1 if current else 0) + item_size
 			if current and overhead + candidate_size > limit:
 				chunks.append(current)
@@ -337,7 +337,7 @@ class StorageStateWatchdog(BaseWatchdog):
 
 		scripts = []
 		for chunk in chunks:
-			payload = json.dumps(chunk, ensure_ascii=False)
+			payload = json.dumps(chunk, ensure_ascii=False, separators=(',', ':'))
 			script = f'{prefix}{payload}{suffix}'
 			if len(chunk) == 1 and len(script.encode('utf-8')) > limit:
 				warning = (
