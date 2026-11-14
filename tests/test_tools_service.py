@@ -348,4 +348,17 @@ class TestToolsWaitAction:
             # actual_seconds = min(max(60 - 3, 0), 30) = 30
             mock_sleep.assert_called_once_with(30)
             assert isinstance(result, ActionResult)
-            assert "60 second" in result.extracted_content
+            assert "capped from 60" in result.extracted_content
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("seconds", "expected_sleep"),
+        [(float("inf"), 30.0), (float("-inf"), 0.0), (float("nan"), 0.0)],
+    )
+    async def test_wait_clamps_non_finite_values(self, seconds, expected_sleep):
+        tools = Tools()
+        with patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+            result = await tools.registry.execute_action("wait", {"seconds": seconds})
+
+        mock_sleep.assert_called_once_with(expected_sleep)
+        assert isinstance(result, ActionResult)

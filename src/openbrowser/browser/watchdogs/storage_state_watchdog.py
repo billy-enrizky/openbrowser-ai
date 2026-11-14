@@ -39,6 +39,7 @@ class StorageStateWatchdog(BaseWatchdog):
 	# Configuration
 	auto_save_interval: float = Field(default=30.0)  # Auto-save every 30 seconds
 	save_on_change: bool = Field(default=True)  # Save immediately when cookies change
+	max_script_bytes_per_origin: int = Field(default=256_000)  # Bound one injected storage script
 
 	# Private state
 	_monitoring_task: asyncio.Task | None = PrivateAttr(default=None)
@@ -253,17 +254,20 @@ class StorageStateWatchdog(BaseWatchdog):
 			# Apply origins (localStorage/sessionStorage) if present
 			if 'origins' in storage and storage['origins']:
 				for origin in storage['origins']:
-					if 'localStorage' in origin:
-						for item in origin['localStorage']:
-							script = f"""
-								window.localStorage.setItem({json.dumps(item['name'])}, {json.dumps(item['value'])});
-							"""
-							await self.browser_session._cdp_add_init_script(script)
-					if 'sessionStorage' in origin:
-						for item in origin['sessionStorage']:
-							script = f"""
-								window.sessionStorage.setItem({json.dumps(item['name'])}, {json.dumps(item['value'])});
-							"""
+					origin_name = str(origin.get('origin') or '')
+					for storage_type, key in (('localStorage', 'localStorage'), ('sessionStorage', 'sessionStorage')):
+						items = origin.get(key) or []
+						if not items:
+							continue
+						scripts = self._build_storage_scripts(storage_type, items, origin_name)
+						if len(scripts) > 1:
+							warning = (
+								f'{storage_type} for {origin_name or "<unknown origin>"} was split into '
+								f'{len(scripts)} scripts to respect the size bound'
+							)
+							self.logger.warning('[StorageStateWatchdog] %s', warning)
+							self._record_warning(warning)
+						for script in scripts:
 							await self.browser_session._cdp_add_init_script(script)
 				self.logger.debug(
 					f'[StorageStateWatchdog] Applied localStorage/sessionStorage from {len(storage["origins"])} origins'
@@ -280,7 +284,57 @@ class StorageStateWatchdog(BaseWatchdog):
 			self.logger.debug(f'[StorageStateWatchdog] Loaded storage state from: {load_path}')
 
 		except Exception as e:
+			self._record_warning(f'Failed to load storage state: {type(e).__name__}: {e}')
 			self.logger.error(f'[StorageStateWatchdog] Failed to load storage state: {e}')
+
+	def _record_warning(self, warning: str) -> None:
+		warnings = getattr(self.browser_session, '_storage_state_warnings', None)
+		if warnings is None:
+			return
+		if len(warnings) < 20:
+			warnings.append(warning)
+
+	def _build_storage_scripts(
+		self,
+		storage_type: str,
+		items: list[dict[str, Any]],
+		origin: str = '',
+	) -> list[str]:
+		"""Build one bounded initialization script per chunk of storage items."""
+		clean_items = [
+			[str(item.get('name', '')), str(item.get('value', ''))]
+			for item in items
+			if isinstance(item, dict) and item.get('name') is not None
+		]
+		if not clean_items:
+			return []
+
+		chunks: list[list[list[str]]] = []
+		current: list[list[str]] = []
+		for item in clean_items:
+			candidate = [*current, item]
+			payload = json.dumps(candidate, ensure_ascii=False)
+			if current and len(payload) > self.max_script_bytes_per_origin:
+				chunks.append(current)
+				current = [item]
+			else:
+				current = candidate
+		if current:
+			chunks.append(current)
+
+		scripts = []
+		accessor = 'window.localStorage' if storage_type == 'localStorage' else 'window.sessionStorage'
+		origin_guard = f'if (window.location.origin !== {json.dumps(origin)}) {{ return; }}' if origin else ''
+		for chunk in chunks:
+			payload = json.dumps(chunk, ensure_ascii=False)
+			scripts.append(
+				'(() => {'
+				f'{origin_guard}'
+				f'const items = {payload};'
+				f'for (const [key, value] of items) {{ try {{ {accessor}.setItem(key, value); }} catch (error) {{}} }}'
+				'})();'
+			)
+		return scripts
 
 	@staticmethod
 	def _merge_storage_states(existing: dict[str, Any], new: dict[str, Any]) -> dict[str, Any]:

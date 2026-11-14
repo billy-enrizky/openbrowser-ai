@@ -643,7 +643,8 @@ class TestSwitchTabAction:
             {"tab_id": "ab12"},
             browser_session=session,
         )
-        assert "Attempted to switch" in result.extracted_content
+        assert result.success is False
+        assert "Failed to switch" in (result.error or "")
 
 
 # ---------------------------------------------------------------------------
@@ -671,9 +672,13 @@ class TestCloseTabAction:
     async def test_close_tab_already_closed(self):
         tools = Tools()
         session = _make_mock_browser_session()
+        from openbrowser.browser.tabs import TabError
+
         session.get_target_id_from_tab_id = AsyncMock(
-            side_effect=Exception("already closed")
+            side_effect=TabError("Tab cd34 is already closed.", tab_id="cd34")
         )
+        event = _make_awaitable_event()
+        session.event_bus.dispatch = MagicMock(return_value=event)
 
         result = await tools.registry.execute_action(
             "close",
@@ -681,6 +686,29 @@ class TestCloseTabAction:
             browser_session=session,
         )
         assert "closed" in result.extracted_content.lower()
+        assert session.event_bus.dispatch.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_close_short_id_repairs_focus_for_a_closed_target(self):
+        tools = Tools()
+        session = _make_mock_browser_session()
+        from openbrowser.browser.tabs import TabError
+
+        session.get_target_id_from_tab_id = AsyncMock(
+            side_effect=TabError('No live tab matches tab_id cd34.', tab_id='cd34')
+        )
+        session.agent_focus = MagicMock(target_id='AAAABBBBCCCCDDDD11112222333cd34')
+        event = _make_awaitable_event()
+        session.event_bus.dispatch = MagicMock(return_value=event)
+
+        result = await tools.registry.execute_action(
+            'close',
+            {'tab_id': 'cd34'},
+            browser_session=session,
+        )
+
+        assert 'closed' in result.extracted_content.lower()
+        assert session.event_bus.dispatch.call_count == 1
 
 
 # ---------------------------------------------------------------------------

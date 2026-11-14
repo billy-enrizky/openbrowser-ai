@@ -90,7 +90,7 @@ EXECUTE_CODE_DESCRIPTION = """Execute Python code in a persistent namespace with
 - `browser` -- The BrowserSession object. Use `state = await browser.get_browser_state_summary()` to get current page state including:
   - `state.url` -- current URL
   - `state.title` -- page title
-  - `state.tabs` -- list of open tabs (each has .target_id, .url, .title). For switch()/close(), use the LAST 4 CHARS of target_id as tab_id.
+  - `state.tabs` -- list of open tabs (each has .target_id, .url, .title). For switch()/close(), use the last 4 chars of target_id or the full target_id.
   - `state.dom_state.selector_map` -- dict of {index: element} for all interactive elements
   - Each element has: `.tag_name`, `.attributes` (dict), `.get_all_children_text(max_depth=N)` (text content)
 
@@ -126,4 +126,8 @@ EXECUTE_CODE_DESCRIPTION = """Execute Python code in a persistent namespace with
 5. Extract data: `data = await evaluate('JS expression')` -- returns Python objects
 6. Process with Python: use json, pandas, re, etc.
 7. Print results: `print(output)` -- this is what gets returned to the client
+
+## Recovery
+
+If a call fails with a browser connection error, do not replay a page-changing action blindly. Check `browser.lifecycle_snapshot()` for the current state. Through MCP, call `get_status`, then `reset_browser` before retrying. Through the CLI, run `openbrowser-ai daemon status` or `openbrowser-ai daemon reset`.
 """

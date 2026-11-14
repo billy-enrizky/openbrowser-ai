@@ -41,7 +41,7 @@ class ClickElementAction(BaseModel):
 
 
 class InputTextAction(BaseModel):
-	index: int = Field(ge=0, description='from browser_state')
+	index: int = Field(ge=1, description='from browser_state')
 	text: str
 	clear: bool = Field(default=True, description='1=clear, 0=append')
 
@@ -61,11 +61,17 @@ class StructuredOutputAction(BaseModel, Generic[T]):
 
 
 class SwitchTabAction(BaseModel):
-	tab_id: str = Field(min_length=4, max_length=4, description='4-char id')
+	tab_id: str = Field(
+		min_length=4,
+		description='Tab ID from browser state (4-char suffix) or a full CDP target ID',
+	)
 
 
 class CloseTabAction(BaseModel):
-	tab_id: str = Field(min_length=4, max_length=4, description='4-char id')
+	tab_id: str = Field(
+		min_length=4,
+		description='Tab ID from browser state (4-char suffix) or a full CDP target ID',
+	)
 
 
 class ScrollAction(BaseModel):
