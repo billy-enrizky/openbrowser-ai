@@ -507,6 +507,11 @@ class BrowserSession(BaseModel):
 
 	async def reset(self, *, stop_event_bus: bool = True, wait_for_operations: bool = True) -> None:
 		"""Clear all cached CDP sessions with proper cleanup."""
+		if (
+			self._lifecycle.phase is LifecyclePhase.FAILED
+			and self._watchdog_has_live_resources(self._local_browser_watchdog)
+		):
+			raise RuntimeError('Browser resources are still live; run kill() before reset()')
 		if wait_for_operations:
 			await self._cancel_owned_start()
 			stop_task = self._stop_task

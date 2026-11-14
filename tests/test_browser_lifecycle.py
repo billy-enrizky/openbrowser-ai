@@ -578,6 +578,8 @@ async def test_failed_force_stop_keeps_ownership_until_kill_retry_succeeds():
 	assert session.lifecycle_snapshot()['phase'] == 'failed'
 	with pytest.raises(RuntimeError, match='resources are still live'):
 		await session.start()
+	with pytest.raises(RuntimeError, match='resources are still live'):
+		await session.reset()
 
 	async def release_on_retry(event):
 		watchdog._subprocess = None
