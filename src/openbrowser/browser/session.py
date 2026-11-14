@@ -870,6 +870,14 @@ class BrowserSession(BaseModel):
 
 		try:
 			if stop_error is not None:
+				# A failed stop must still retire the bus that owns the failed
+				# watchdog handlers. Otherwise a retry reattaches a second set
+				# of handlers and duplicate work becomes permanent.
+				try:
+					await event_bus.stop(clear=True, timeout=5)
+				except BaseException:
+					pass
+				self._force_reset_runtime_state(replace_event_bus=True)
 				if save_error is not None:
 					raise stop_error from save_error
 				raise stop_error

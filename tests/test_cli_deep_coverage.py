@@ -1809,19 +1809,26 @@ class TestModuleLevelEarlyExits:
             sys.argv = original_argv
 
     def test_early_daemon_force_stop_success(self):
-        """The force-stop subcommand uses the socket-scoped force_stop path."""
+        """The force-stop subcommand awaits the socket-scoped force_stop path."""
         mock_resp = MagicMock()
         mock_resp.success = True
         mock_resp.output = "Daemon force-stopped"
         mock_resp.error = None
         mock_client_instance = MagicMock()
-        mock_client_instance.force_stop = MagicMock()
+        mock_client_instance.force_stop = AsyncMock(return_value=mock_resp)
+
+        def run_coroutine(coro):
+            loop = asyncio.new_event_loop()
+            try:
+                return loop.run_until_complete(coro)
+            finally:
+                loop.close()
 
         original_argv = sys.argv[:]
         try:
             sys.argv = ["openbrowser-ai", "daemon", "force-stop"]
             with (
-                patch("asyncio.run", return_value=mock_resp),
+                patch("asyncio.run", side_effect=run_coroutine),
                 patch.dict("sys.modules", {
                     "dotenv": MagicMock(),
                     "openbrowser.daemon.client": MagicMock(
@@ -1836,6 +1843,7 @@ class TestModuleLevelEarlyExits:
                 exec(compile(code, str(cli_path), "exec"), ns)
 
             assert exc_info.value.code == 0
+            mock_client_instance.force_stop.assert_awaited_once_with()
         finally:
             sys.argv = original_argv
 

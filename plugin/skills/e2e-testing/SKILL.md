@@ -219,7 +219,7 @@ openbrowser-ai daemon stop
 openbrowser-ai daemon status
 ```
 
-`daemon stop` closes every tab, exits Chrome, flushes saved cookies/login state to the profile, and shuts down the daemon process. `daemon status` should report the daemon is not running. If it still reports running, run `openbrowser-ai daemon force-stop`. That command acts only on the current `OPENBROWSER_SOCKET` and verifies listener and owner absence before success. `daemon reap` is broader: it scans all discovered OpenBrowser sockets under the daemon directory and attempts to stop verified daemons. Inspect its JSON before accepting global cleanup.
+`daemon stop` closes every tab, exits Chrome, flushes saved cookies/login state to the profile, and shuts down the daemon process. `daemon status` should report the daemon is not running. If it still reports running, run `openbrowser-ai daemon force-stop`. It targets the current daemon endpoint: the configured `OPENBROWSER_SOCKET` on macOS/Linux, or the fixed loopback port on Windows. It verifies listener and owner absence before success. `daemon reap` is broader: it scans the default socket plus custom sockets that have a matching PID file and attempts to stop verified daemons. Inspect its JSON before accepting global cleanup.
 
 E2E runs fail often by design (that is what assertions are for). Guarantee cleanup with a shell trap so a failed assertion never leaks a browser:
 

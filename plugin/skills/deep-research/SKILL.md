@@ -26,7 +26,7 @@ Hard rules:
 
 - One sub-agent = one tab. Sub-agents must NOT call `navigate(url, new_tab=True)` to spawn additional tabs.
 - All sub-agents share the same daemon (and so the same Chrome process). Tabs are isolated; navigation in one tab does not affect another.
-- Each sub-agent writes its findings to its own JSON file under `local_docs/research/_partial/<slug>-NN.json`. The orchestrator reads and merges these.
+- Each sub-agent writes its findings to its own JSON file under `$DEEP_RESEARCH_PARTIAL_DIR/<slug>-NN.json`. The orchestrator reads and merges these.
 - The orchestrator never drives tabs itself. It only plans, dispatches, merges, renders, verifies, cleans up.
 
 If a first-wave sub-agent returns <2 findings, the orchestrator dispatches a Step 2b retry sub-agent with broader search strategy (alternative engines, query reformulation, lower thresholds). Still `-c`-only: the skill never calls `openbrowser-ai -p`.
@@ -75,41 +75,55 @@ mkdir -p local_docs/research
 
 Use a dedicated socket and profile for the research run so the user's existing daemon, tabs, and namespace are never restarted or touched. If this research run already started its own daemon, reuse it. Otherwise the next `-c` call auto-starts one.
 
-Persist this run's environment in a file. Each shell block starts a new process, so bare `export` values do not carry across blocks. Every later shell block must begin with:
+Each shell block starts a new process, so bare `export` values do not carry across blocks. Step 0 creates a per-invocation run directory, writes a shell-escaped environment file, and prints its absolute path as `RUN_ENV_FILE=...`.
+
+Every later shell block must begin by sourcing that exact path:
 
 ```bash
-. "<ABSOLUTE_PATH_TO_PROJECT_ROOT>/local_docs/research/.deep-research.env"
+. "<RUN_ENV_FILE>"
 ```
 
-Step 0 writes that file once. The run ID is stable for this project, so later blocks reconnect to the same dedicated socket:
+Copy the printed path from Step 0. Do not substitute the project path or reuse another run's file.
 
 ```bash
 RESEARCH_ROOT="$(pwd)"
-mkdir -p "$RESEARCH_ROOT/local_docs/research"
-ENV_FILE="$RESEARCH_ROOT/local_docs/research/.deep-research.env"
-RUN_ID_FILE="$RESEARCH_ROOT/local_docs/research/.deep-research.run-id"
-[ -f "$RUN_ID_FILE" ] || date +%s > "$RUN_ID_FILE"
-RUN_ID="$(cat "$RUN_ID_FILE")"
-cat > "$ENV_FILE" <<EOF
-export OPENBROWSER_HEADLESS=true
-export OPENBROWSER_SOCKET="${TMPDIR:-/tmp}/openbrowser-deep-research-${RUN_ID}.sock"
-export OPENBROWSER_DAEMON_PROFILE_DIR="${TMPDIR:-/tmp}/openbrowser-deep-research-profile-${RUN_ID}"
-export OPENBROWSER_DAEMON_PROFILE_ISOLATION=true
-export OPENBROWSER_USER_DATA_DIR=
-export DEEP_RESEARCH_PROJECT_ROOT="$RESEARCH_ROOT"
-export DEEP_RESEARCH_ENV_FILE="$ENV_FILE"
-EOF
-. "$ENV_FILE"
+RUN_STAMP="$(date +%Y%m%d-%H%M%S)-$$"
+RUN_DIR="$RESEARCH_ROOT/local_docs/research/.runs/$RUN_STAMP"
+ENV_FILE="$RUN_DIR/env.sh"
+mkdir -p "$RUN_DIR/partial" || { echo "Cannot create $RUN_DIR"; exit 1; }
+{
+    printf 'export OPENBROWSER_HEADLESS=true\n'
+    printf 'export OPENBROWSER_SOCKET=%q\n' "${TMPDIR:-/tmp}/openbrowser-deep-research-${RUN_STAMP}.sock"
+    printf 'export OPENBROWSER_DAEMON_PROFILE_DIR=%q\n' "${TMPDIR:-/tmp}/openbrowser-deep-research-profile-${RUN_STAMP}"
+    printf 'export OPENBROWSER_DAEMON_PROFILE_ISOLATION=true\n'
+    printf 'export OPENBROWSER_USER_DATA_DIR=\n'
+    printf 'export DEEP_RESEARCH_RUN_DIR=%q\n' "$RUN_DIR"
+    printf 'export DEEP_RESEARCH_PARTIAL_DIR=%q\n' "$RUN_DIR/partial"
+    printf 'export DEEP_RESEARCH_PROJECT_ROOT=%q\n' "$RESEARCH_ROOT"
+    printf 'export DEEP_RESEARCH_ENV_FILE=%q\n' "$ENV_FILE"
+} > "$ENV_FILE" || { echo "Cannot write $ENV_FILE"; exit 1; }
+[ -s "$ENV_FILE" ] || { echo "Empty run environment: $ENV_FILE"; exit 1; }
+. "$ENV_FILE" || { echo "Cannot source $ENV_FILE"; exit 1; }
+: "${OPENBROWSER_SOCKET:?dedicated socket was not loaded}"
+case "$OPENBROWSER_SOCKET" in
+    *openbrowser-deep-research-*) ;;
+    *) echo "Refusing to continue without a dedicated research socket"; exit 1 ;;
+esac
 
 ensure_output=$(openbrowser-ai daemon ensure 2>&1) || { echo "$ensure_output"; exit 1; }
 if printf '%s' "$ensure_output" | grep -q 'already matches'; then
     echo "Reusing this research run's daemon"
-    export DEEP_RESEARCH_REUSED=1
+    DEEP_RESEARCH_REUSED=1
+    DEEP_RESEARCH_OWNED=0
 else
     echo "Started this research run's isolated daemon"
-    export DEEP_RESEARCH_REUSED=0
+    DEEP_RESEARCH_REUSED=0
+    DEEP_RESEARCH_OWNED=1
 fi
-echo "export DEEP_RESEARCH_REUSED=$DEEP_RESEARCH_REUSED" >> "$ENV_FILE"
+printf 'export DEEP_RESEARCH_REUSED=%s\nexport DEEP_RESEARCH_OWNED=%s\n' \
+    "$DEEP_RESEARCH_REUSED" "$DEEP_RESEARCH_OWNED" >> "$ENV_FILE"
+export DEEP_RESEARCH_REUSED DEEP_RESEARCH_OWNED
+echo "RUN_ENV_FILE=$ENV_FILE"
 ```
 
 `OPENBROWSER_USER_DATA_DIR=` clears an inherited explicit profile so it cannot override the dedicated research profile. `daemon ensure` reuses a daemon only when its effective headless and profile settings match; otherwise it restarts this run's daemon.
@@ -190,13 +204,13 @@ Edit the `QUERY`, `PROJECT_ROOT`, and `sub_questions` list before running. `PROJ
 
 The orchestrator (the Claude session running this skill) MUST invoke `/dispatching-parallel-agents` and dispatch one sub-agent per sub-question. All sub-agents share the same `openbrowser-ai` daemon. Each sub-agent owns exactly one tab, the one it opens at the start of its run.
 
-Give every sub-agent the absolute path to `local_docs/research/.deep-research.env` and require it to source that file before any `openbrowser-ai` command. Without those values a sub-agent would talk to the user's default daemon.
+Give every sub-agent the exact absolute `RUN_ENV_FILE` path printed by Step 0 and require it to source that file before any `openbrowser-ai` command. Without those values a sub-agent would talk to the user's default daemon.
 
 **Hard rules for the orchestrator:**
 
 - Send ONE message containing N parallel `Agent` tool calls, where N = `len(_plan["sub_questions"])`.
 - Each sub-agent gets the prompt template below, parameterized with: `SUB_QUESTION`, `AGENT_INDEX` (zero-padded 2 digits, used in output filename), `PROJECT_ROOT` (absolute path).
-- After dispatch, wait for all sub-agents to return. Do not begin Step 4 until every partial JSON file under `local_docs/research/_partial/` is on disk.
+- After dispatch, wait for all sub-agents to return. Do not begin Step 4 until every partial JSON file under `$DEEP_RESEARCH_PARTIAL_DIR/` is on disk.
 - The orchestrator does NOT drive any tab in this step.
 
 **Sub-agent prompt template** (copy into each `Agent` tool call's `prompt` argument):
@@ -221,7 +235,7 @@ Hard constraints:
   needs_depth (bool, true if a deeper follow-up would meaningfully sharpen the claim).
 - Return at least 2 findings; 3 is ideal.
 - Write the findings JSON array to:
-  <PROJECT_ROOT>/local_docs/research/_partial/agent-<AGENT_INDEX>.json
+  <DEEP_RESEARCH_PARTIAL_DIR>/agent-<AGENT_INDEX>.json
 
 Workflow (run via openbrowser-ai -c - heredocs, all in this one bash session):
 
@@ -255,8 +269,7 @@ The orchestrator's pre-step (run once before dispatching agents):
 ```bash
 openbrowser-ai -c - <<'EOF'
 import os
-PROJECT_ROOT = "<ABSOLUTE_PATH_TO_PROJECT_ROOT>"
-partial_dir = os.path.join(PROJECT_ROOT, "local_docs", "research", "_partial")
+partial_dir = os.environ["DEEP_RESEARCH_PARTIAL_DIR"]
 os.makedirs(partial_dir, exist_ok=True)
 # Wipe stale partials from prior runs of the same query
 for f in os.listdir(partial_dir):
@@ -272,8 +285,7 @@ After all sub-agents return, the orchestrator collects findings:
 openbrowser-ai -c - <<'EOF'
 import os, json
 global _findings
-PROJECT_ROOT = "<ABSOLUTE_PATH_TO_PROJECT_ROOT>"
-partial_dir = os.path.join(PROJECT_ROOT, "local_docs", "research", "_partial")
+partial_dir = os.environ["DEEP_RESEARCH_PARTIAL_DIR"]
 
 _findings = []
 for fname in sorted(os.listdir(partial_dir)):
@@ -344,7 +356,7 @@ Hard constraints:
   4. For factual sub-questions ("when was X released"), check Wikipedia
      directly: https://en.wikipedia.org/wiki/Special:Search?search=...
 - Same JSON shape as Step 2a sub-agents.
-- Write to: <PROJECT_ROOT>/local_docs/research/_partial/agent-retry-<AGENT_INDEX>.json
+- Write to: <DEEP_RESEARCH_PARTIAL_DIR>/agent-retry-<AGENT_INDEX>.json
 - Return at least 2 findings. If still <2 after the broader strategy, write
   whatever you got (even 0-1) and surface the limitation in your reply.
 ```
@@ -355,8 +367,7 @@ After all retry sub-agents return, merge their partials into `_findings`:
 openbrowser-ai -c - <<'EOF'
 import os, json
 global _findings
-PROJECT_ROOT = "<ABSOLUTE_PATH_TO_PROJECT_ROOT>"
-partial_dir = os.path.join(PROJECT_ROOT, "local_docs", "research", "_partial")
+partial_dir = os.environ["DEEP_RESEARCH_PARTIAL_DIR"]
 extra = []
 for fname in sorted(os.listdir(partial_dir)):
     if not (fname.startswith("agent-retry-") and fname.endswith(".json")):
@@ -424,7 +435,7 @@ Hard constraints:
 - needs_depth must be false on every finding you return (depth cap reached).
 - Same JSON shape as Step 2a sub-agents: claim, url, quote, domain, confidence,
   needs_depth, plus add sub_question = "<PARENT_SUB_QUESTION>".
-- Write to: <PROJECT_ROOT>/local_docs/research/_partial/agent-drill-<AGENT_INDEX>.json
+- Write to: <DEEP_RESEARCH_PARTIAL_DIR>/agent-drill-<AGENT_INDEX>.json
 ```
 
 After all drilldown sub-agents return, merge their partials into `_findings`:
@@ -433,8 +444,7 @@ After all drilldown sub-agents return, merge their partials into `_findings`:
 openbrowser-ai -c - <<'EOF'
 import os, json
 global _findings
-PROJECT_ROOT = "<ABSOLUTE_PATH_TO_PROJECT_ROOT>"
-partial_dir = os.path.join(PROJECT_ROOT, "local_docs", "research", "_partial")
+partial_dir = os.environ["DEEP_RESEARCH_PARTIAL_DIR"]
 extra = []
 for fname in sorted(os.listdir(partial_dir)):
     if not (fname.startswith("agent-drill-") and fname.endswith(".json")):
@@ -657,23 +667,23 @@ fi
 
 **Case B: daemon was started fresh by this skill** (`DEEP_RESEARCH_REUSED=0`). Full daemon stop, freeing the Chrome process. See Cleanup section below.
 
-**Always:** remove the per-agent partial JSON files. They are intermediate state, not part of the report:
+**Always:** after the final report is written, remove this run's partial directory. It is intermediate state, not part of the report:
 
 ```bash
-rm -rf "<ABSOLUTE_PATH_TO_PROJECT_ROOT>/local_docs/research/_partial" 2>/dev/null || true
+rm -rf "$DEEP_RESEARCH_PARTIAL_DIR" 2>/dev/null || true
 ```
 
 ## Tips
 
-- **Source the run environment first:** every later Bash call must begin with `. "<ABSOLUTE_PATH_TO_PROJECT_ROOT>/local_docs/research/.deep-research.env"`. Bare exports do not survive separate shell blocks.
+- **Source the run environment first:** every later Bash call must begin with `. "<RUN_ENV_FILE>"`, using the exact absolute path printed by Step 0. Bare exports do not survive separate shell blocks.
 - **Headless by default:** `OPENBROWSER_HEADLESS=true` is set in Step 0 so the daemon always starts without a visible browser window. The daemon default in `daemon/server.py` is already `headless: True`, but a user config file can override it. The env var wins over config. If you need a visible window for debugging, unset or override: `export OPENBROWSER_HEADLESS=false`.
 - **One tab per sub-agent:** the orchestrator dispatches via `/dispatching-parallel-agents` and each sub-agent must own exactly one tab. Multiple-tab sub-agents serialize navigation at the CDP layer and lose the parallelism benefit. Enforce in the agent prompt: "NEVER pass new_tab=True to navigate() after the first call."
 - **Single message, multiple Agent calls:** to actually parallelize, the orchestrator must put all N `Agent` tool calls in ONE message. Sequential `Agent` invocations across messages run serially.
 - **Heredoc quoting:** always use `<<'EOF'` (single-quoted) so `$`, backticks, and `!` inside Python don't expand in the shell.
 - **Daemon namespace:** `_plan`, `_findings`, `_sources` persist across orchestrator `-c` calls. Sub-agents share the same daemon and so see the same namespace, but each operates in its own tab. Don't restart the daemon mid-run.
-- **Partial files as the contract:** sub-agents write to `local_docs/research/_partial/agent-NN.json`, the orchestrator reads them back. Sub-agents do NOT communicate findings via stdout. If a partial file is missing or empty, that sub-agent failed; rerun it or fall through to Step 2b.
+- **Partial files as the contract:** sub-agents write to `$DEEP_RESEARCH_PARTIAL_DIR/agent-NN.json`, the orchestrator reads them back. Sub-agents do NOT communicate findings via stdout. If a partial file is missing or empty, that sub-agent failed; rerun it or fall through to Step 2b.
 - **`exact_url` normalization:** sub-agents may write `exact_url` instead of `url`. All merge steps (Step 2a, 2b, 3) normalize this automatically. Step 4 has a final safety pass. Never rely on `url` being set before the merge step runs.
-- **Daemon restart recovery:** if the daemon restarts mid-session, `_plan`/`_findings`/`_sources` are lost from namespace. The partial JSON files on disk survive. Re-run the merge step (Step 2a collect block) with `PROJECT_ROOT` hardcoded to reload `_findings` from disk. Re-run Step 1 with the same `QUERY` and `PROJECT_ROOT` to restore `_plan`; the slug-collision bump will avoid overwriting the existing output file.
+- **Daemon restart recovery:** if the daemon restarts mid-session, `_plan`/`_findings`/`_sources` are lost from namespace. Partial JSON files under `$DEEP_RESEARCH_PARTIAL_DIR` survive. Source the same run environment and re-run the Step 2a merge block. Re-run Step 1 with the same `QUERY` and project root to restore `_plan`; the slug-collision bump avoids overwriting the existing output file.
 - **No `-p`, ever:** this skill never shells out to `openbrowser-ai -p`. The `-p` mode runs the full Browser Agent loop with LLM-driven navigation and requires an OpenAI / Anthropic / Google API key (`cli.py:434-490` `get_llm()`). The `-c` daemon path needs no API key. If you see `-p` anywhere in skill code, that is a bug.
 - **Source diversity:** if dedup leaves <60% of findings (heavy domain repetition), rerun the affected sub-agent with explicit "prefer different domains than: <list>" appended to its prompt.
 - **Drilldown cost:** drilldown dispatches up to `len(sub_questions) * 3` extra parallel sub-agents. Reserve for genuinely deep topics.
@@ -684,27 +694,26 @@ rm -rf "<ABSOLUTE_PATH_TO_PROJECT_ROOT>/local_docs/research/_partial" 2>/dev/nul
 
 **Mandatory.** Run after every workflow, success or failure.
 
-If this skill started the daemon (`DEEP_RESEARCH_REUSED=0`), use the socket-scoped force-stop. It verifies that the listener and verified owner are gone before it reports success. Delete the profile only after that success:
+If this skill started the daemon (`DEEP_RESEARCH_REUSED=0`), use `daemon force-stop`. It targets the current daemon endpoint (the configured Unix socket on macOS/Linux, the fixed loopback port on Windows) and verifies listener and owner absence before it reports success. Delete the profile and run directory only after that success:
 
 ```bash
 . "$DEEP_RESEARCH_ENV_FILE"
 if [ "$DEEP_RESEARCH_REUSED" = "0" ]; then
     if openbrowser-ai daemon force-stop; then
-        rm -rf "$OPENBROWSER_DAEMON_PROFILE_DIR" 2>/dev/null || true
-        rm -f "${OPENBROWSER_SOCKET%.sock}.log" "${OPENBROWSER_SOCKET%.sock}.pid" \
-              "$DEEP_RESEARCH_ENV_FILE" "$DEEP_RESEARCH_PROJECT_ROOT/local_docs/research/.deep-research.run-id" 2>/dev/null || true
+        rm -rf "$OPENBROWSER_DAEMON_PROFILE_DIR" "$DEEP_RESEARCH_RUN_DIR" 2>/dev/null || true
+        rm -f "${OPENBROWSER_SOCKET%.sock}.log" "${OPENBROWSER_SOCKET%.sock}.pid" 2>/dev/null || true
     else
-        echo "Daemon shutdown could not be verified. Keeping $OPENBROWSER_DAEMON_PROFILE_DIR for manual cleanup."
+        echo "Daemon shutdown could not be verified. Keeping $OPENBROWSER_DAEMON_PROFILE_DIR and $DEEP_RESEARCH_RUN_DIR for manual cleanup."
     fi
 fi
 ```
 
 If daemon was reused (`DEEP_RESEARCH_REUSED=1`), Step 7 already closed only the research tabs. Do NOT call `daemon stop` or `daemon force-stop`, that kills the user's pre-existing browser session.
 
-Trap for failure-safe cleanup at script top. It never deletes the profile; only the explicit cleanup above does, after verified shutdown:
+Install this trap only after Step 0 has sourced the dedicated environment and set `DEEP_RESEARCH_OWNED`. It never fires for an unset or default environment and never deletes the profile:
 
 ```bash
-trap 'if [ "${DEEP_RESEARCH_REUSED:-0}" = "0" ]; then openbrowser-ai daemon force-stop >/dev/null 2>&1 || true; fi' EXIT
+trap 'if [ "${DEEP_RESEARCH_OWNED:-0}" = "1" ] && [ -n "${OPENBROWSER_SOCKET:-}" ]; then openbrowser-ai daemon force-stop >/dev/null 2>&1 || true; fi' EXIT
 ```
 
 Anti-patterns:
