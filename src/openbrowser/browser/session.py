@@ -603,6 +603,11 @@ class BrowserSession(BaseModel):
 		"""Start the browser session, waiting for an in-flight start when present."""
 		if self._lifecycle.phase is LifecyclePhase.READY:
 			return
+		if (
+			self._lifecycle.phase is LifecyclePhase.FAILED
+			and self._watchdog_has_live_resources(self._local_browser_watchdog)
+		):
+			raise RuntimeError('Browser resources are still live; run kill() before start()')
 
 		stop_task = self._stop_task
 		if stop_task is not None and not stop_task.done():
@@ -776,6 +781,8 @@ class BrowserSession(BaseModel):
 		self.agent_focus = None
 		if self.is_local:
 			self.browser_profile.cdp_url = None
+		if not self._watchdog_has_live_resources(self._local_browser_watchdog):
+			self._local_browser_watchdog = None
 		if replace_event_bus:
 			self.event_bus = EventBus()
 			self._core_handlers_attached = False
@@ -870,11 +877,28 @@ class BrowserSession(BaseModel):
 
 		try:
 			if stop_error is not None:
-				# A failed stop must still retire the bus that owns the failed
-				# watchdog handlers. Otherwise a retry reattaches a second set
-				# of handlers and duplicate work becomes permanent.
+				# A force-stop may still be able to release the watchdog after the
+				# normal stop handler failed.
+				if force:
+					force_cleanup_error = await self._force_stop_retained_browser()
+					if force_cleanup_error is not None:
+						stop_error = force_cleanup_error
+
+				if self._watchdog_has_live_resources(self._local_browser_watchdog):
+					# Retain the bus and the owning watchdog so kill() can retry the
+					# same cleanup. Marking the watchdog set attached prevents a later
+					# start from registering duplicate handlers.
+					self._watchdogs_attached = True
+					if save_error is not None:
+						raise stop_error from save_error
+					raise stop_error
+
+				# No browser-owned resources remain. Retire the failed bus so a
+				# retry starts with a clean handler set.
 				try:
 					await event_bus.stop(clear=True, timeout=5)
+				except asyncio.CancelledError:
+					raise
 				except BaseException:
 					pass
 				self._force_reset_runtime_state(replace_event_bus=True)
