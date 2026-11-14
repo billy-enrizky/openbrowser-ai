@@ -1,5 +1,5 @@
 import json
-from typing import overload
+from typing import cast, overload
 
 from anthropic.types import (
 	Base64ImageSourceParam,
@@ -172,7 +172,7 @@ class AnthropicMessageSerializer:
 		"""
 		if isinstance(message, UserMessage):
 			content = AnthropicMessageSerializer._serialize_content(message.content, use_cache=message.cache)
-			return MessageParam(role='user', content=content)
+			return cast(MessageParam, {'role': 'user', 'content': content})
 
 		elif isinstance(message, SystemMessage):
 			# Anthropic doesn't have system messages in the messages array
@@ -231,10 +231,7 @@ class AnthropicMessageSerializer:
 				else:
 					content = blocks
 
-			return MessageParam(
-				role='assistant',
-				content=content,
-			)
+			return cast(MessageParam, {'role': 'assistant', 'content': content})
 
 		else:
 			raise ValueError(f'Unknown message type: {type(message)}')

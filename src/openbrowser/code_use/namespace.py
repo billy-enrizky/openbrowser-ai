@@ -57,11 +57,33 @@ try:
 except ImportError:
 	BS4_AVAILABLE = False
 
+_PDF_INSTALL_HINT = "pypdf is not installed. Install it with: pip install 'openbrowser-ai[pdf]'"
+
+
+class _MissingPdfReader:
+	"""Actionable placeholder when the optional PDF dependency is absent."""
+
+	def __init__(self, *args, **kwargs):
+		raise ImportError(_PDF_INSTALL_HINT)
+
+
+class _MissingPypdfModule:
+	"""Module-like fallback so ``pypdf.PdfReader`` stays discoverable."""
+
+	def __getattr__(self, name: str):
+		if name == 'PdfReader':
+			return _MissingPdfReader
+		raise AttributeError(name)
+
+
 try:
+	import pypdf  # type: ignore
 	from pypdf import PdfReader  # type: ignore
 
 	PYPDF_AVAILABLE = True
 except ImportError:
+	pypdf = _MissingPypdfModule()  # type: ignore[assignment]
+	PdfReader = _MissingPdfReader  # type: ignore[assignment,misc]
 	PYPDF_AVAILABLE = False
 
 try:
@@ -325,9 +347,9 @@ def create_namespace(
 	if BS4_AVAILABLE:
 		namespace['BeautifulSoup'] = BeautifulSoup
 		namespace['bs4'] = BeautifulSoup
-	if PYPDF_AVAILABLE:
-		namespace['PdfReader'] = PdfReader
-		namespace['pypdf'] = PdfReader
+	pdf_reader = PdfReader if PYPDF_AVAILABLE else _MissingPdfReader
+	namespace['PdfReader'] = pdf_reader
+	namespace['pypdf'] = pypdf if PYPDF_AVAILABLE else _MissingPypdfModule()
 	if TABULATE_AVAILABLE:
 		namespace['tabulate'] = tabulate
 
@@ -695,12 +717,6 @@ def create_namespace(
 							f'{act_name}() requires a valid element index, got index=None. '
 							f'Read the current browser state and use an [i_N] index from the DOM tree.'
 						)
-
-				# Auto-truncate tab_id to last 4 chars for switch/close only
-				# TabInfo.target_id returns the full 32-char CDP target ID in code
-				# execution mode, but SwitchTabAction/CloseTabAction expect 4-char IDs
-				if act_name in ('switch', 'close') and 'tab_id' in kwargs and isinstance(kwargs['tab_id'], str) and len(kwargs['tab_id']) > 4:
-					kwargs['tab_id'] = kwargs['tab_id'][-4:]
 
 				# Create params from kwargs
 				try:

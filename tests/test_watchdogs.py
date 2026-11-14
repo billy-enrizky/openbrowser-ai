@@ -338,19 +338,40 @@ class TestAboutBlankWatchdog:
 
         session = _make_mock_browser_session()
         session._cdp_get_all_pages.return_value = [{'targetId': 'target-1', 'url': 'about:blank'}]
+        session._cdp_create_new_page = AsyncMock(return_value='new-target')
 
         event_bus = EventBus()
-        # dispatch must return an awaitable (the source does `await navigate_event`)
-        event_bus.dispatch = AsyncMock()
+        dispatch_result = asyncio.get_running_loop().create_future()
+        dispatch_result.set_result(None)
+        event_bus.dispatch = MagicMock(return_value=dispatch_result)
 
         watchdog = AboutBlankWatchdog(event_bus=event_bus, browser_session=session)
 
         event = MagicMock()
         # Patch _show_dvd_screensaver to avoid complex CDP setup
         watchdog._show_dvd_screensaver_on_about_blank_tabs = AsyncMock()
-        await watchdog.on_TabClosedEvent(event)
+        await watchdog.on_TabClosingEvent(event)
 
         event_bus.dispatch.assert_called()
+        session._cdp_create_new_page.assert_awaited_once_with('about:blank')
+
+    @pytest.mark.asyncio
+    async def test_tab_closed_with_one_remaining_does_not_create_blank(self):
+        from openbrowser.browser.watchdogs.aboutblank_watchdog import AboutBlankWatchdog
+
+        session = _make_mock_browser_session()
+        session._cdp_get_all_pages.return_value = [
+            {'targetId': 'target-1', 'url': 'https://example.com'}
+        ]
+        event_bus = EventBus()
+        event_bus.dispatch = AsyncMock()
+        watchdog = AboutBlankWatchdog(event_bus=event_bus, browser_session=session)
+        watchdog._check_and_ensure_about_blank_tab = AsyncMock()
+
+        await watchdog.on_TabClosedEvent(MagicMock())
+
+        watchdog._check_and_ensure_about_blank_tab.assert_awaited_once()
+        event_bus.dispatch.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_tab_closed_multiple_tabs_checks_about_blank(self):

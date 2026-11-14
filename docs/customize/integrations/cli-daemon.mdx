@@ -44,13 +44,23 @@ This enables incremental exploration -- navigate in one call, extract in the nex
 ## Daemon Management
 
 ```bash
+uvx openbrowser-ai daemon ensure    # Start or restart a daemon that matches the requested headless and profile settings
 uvx openbrowser-ai daemon start     # Start daemon (auto-starts on first -c call)
 uvx openbrowser-ai daemon stop      # Stop daemon and close browser
-uvx openbrowser-ai daemon status    # Show PID, init state, idle timeout
+uvx openbrowser-ai daemon force-stop # Force-stop the current endpoint after verifying the owner
+uvx openbrowser-ai daemon status    # Show lifecycle, profile, browser, and tab state
+uvx openbrowser-ai daemon reset     # Close the browser but keep the daemon process
+uvx openbrowser-ai daemon doctor    # Diagnose socket, PID, profile, and log state
+uvx openbrowser-ai daemon list      # List sockets and this user's daemon processes
+uvx openbrowser-ai daemon reap      # Stop verified daemons and reap orphaned daemon processes
 uvx openbrowser-ai daemon restart   # Restart with fresh browser session
 ```
 
-The daemon runs in the background and communicates via a Unix socket at `~/.openbrowser/daemon.sock`. Logs are written to `~/.openbrowser/daemon.log`.
+The daemon runs in the background and communicates via a Unix socket at `~/.openbrowser/daemon.sock`. Logs are written next to the socket. The default socket uses `~/.openbrowser/daemon.log`; a custom socket uses `<socket-stem>.log`.
+
+`daemon status` returns `state`, `profile`, `browser`, `exec_timeout`, `init_timeout`, and `last_error`. Tab state is nested under `browser.tabs` and is omitted until the browser has started. The effective profile is resolved before the first browser start, so `daemon ensure` can compare `OPENBROWSER_USER_DATA_DIR`, `OPENBROWSER_DAEMON_PROFILE_DIR`, headless mode, and opted-in socket isolation without launching Chrome. When a browser connection fails, check status before retrying because the first call may have partially run. Use `daemon reset` to close the browser without stopping the daemon process, or `daemon doctor` / `daemon reap` when a socket or process is stuck.
+
+Automatic starts for one socket are serialized across processes. The first client starts the daemon; concurrent clients wait, then reuse it. A socket that accepts connections but does not answer status is treated as busy and left alone, because user code may be blocking the daemon event loop. A socket with no listener and no verified OpenBrowser owner is removed before spawning. Use `daemon restart` or `daemon reap` when an owned process must be terminated.
 
 > **Windows**: On Windows, the daemon uses a localhost TCP connection on port 19222 instead of a Unix socket. This means any process on the same machine can connect. The Unix socket on macOS/Linux is restricted to the file owner (mode `0600`).
 
@@ -122,6 +132,12 @@ graph LR
 | `OPENBROWSER_HEADLESS` | Run browser without GUI | `true` |
 | `OPENBROWSER_MAX_OUTPUT` | Maximum output characters per execution | `10000` |
 | `OPENBROWSER_SOCKET` | Custom Unix socket path | `~/.openbrowser/daemon.sock` |
+| `OPENBROWSER_DAEMON_PROFILE_DIR` | Explicit daemon profile directory | `~/.config/openbrowser/profiles/daemon` |
+| `OPENBROWSER_DAEMON_PROFILE_ISOLATION` | Give a custom socket its own profile | `false` |
+| `OPENBROWSER_DAEMON_INIT_TIMEOUT` | Browser startup bound in seconds | `30` |
+| `OPENBROWSER_EXEC_TIMEOUT` | Execution bound in seconds | `110` |
+| `OPENBROWSER_READ_TIMEOUT` | Client response bound, must exceed exec timeout | `140` |
+| `OPENBROWSER_SHUTDOWN_TIMEOUT` | Browser cleanup bound in seconds | `20` |
 
 ## Comparison with MCP Server
 
@@ -139,18 +155,20 @@ Both use the same `CodeExecutor` engine and browser automation functions.
 ## Troubleshooting
 
 **Daemon won't start**
-- Check `~/.openbrowser/daemon.log` for errors
+- Run `uvx openbrowser-ai daemon doctor` and check the reported log tail
 - Verify Chrome/Chromium is installed
-- Remove stale files: `rm ~/.openbrowser/daemon.sock ~/.openbrowser/daemon.pid`
+- Run `uvx openbrowser-ai daemon reap` to stop OpenBrowser-owned daemons and remove stale files
+- `daemon list` reports `socket_known` and `socket_live` for each process. A default daemon with no `OPENBROWSER_SOCKET` is checked against the default `daemon.sock`, not treated as socketless.
 
 **"Daemon not running" on status**
 - The daemon shuts down after 10 minutes of inactivity
 - Run any `-c` command to auto-start it
+- If status times out while a command is running, the daemon may be busy rather than dead. Wait for the active execution or use `daemon restart` when termination is intended.
 
 **Socket permission errors**
 - The socket is created with `0600` permissions (owner-only)
 - Check that `~/.openbrowser/` is owned by your user
 
 **Variables lost between calls**
-- The daemon may have restarted (idle timeout or crash)
+- A browser recovery inside the daemon preserves user variables. An idle shutdown or process restart clears the namespace. MCP preserves variables across reset and idle expiry because the server process stays alive.
 - Use `openbrowser-ai daemon status` to check if the daemon is running

@@ -74,6 +74,9 @@ if '-c' in sys.argv:
 		if status and status.success:
 			# Daemon already running (warm) -- compact description
 			print(EXECUTE_CODE_DESCRIPTION_COMPACT)
+		elif status and status.error_code == 'daemon_timeout':
+			# The daemon is alive but busy. Do not describe it as cold or try to start another.
+			print(EXECUTE_CODE_DESCRIPTION_COMPACT)
 		else:
 			# Daemon not running (cold) -- verbose description, then start it
 			print(EXECUTE_CODE_DESCRIPTION)
@@ -91,6 +94,10 @@ if '-c' in sys.argv:
 			print(result.output)
 	else:
 		print(result.output or result.error, file=sys.stderr)
+		if result.error_code:
+			print(f'Error code: {result.error_code}', file=sys.stderr)
+		if result.hint:
+			print(f'Hint: {result.hint}', file=sys.stderr)
 		sys.exit(1)
 	sys.exit(0)
 
@@ -105,54 +112,263 @@ if len(sys.argv) > 1 and sys.argv[1] == 'daemon':
 		pass
 
 	import asyncio
+	import json
+	from pathlib import Path
 
 	from openbrowser.daemon.client import DaemonClient
+	from openbrowser.daemon import DAEMON_DIR, IS_WINDOWS, WINDOWS_PORT, get_log_path, get_pid_path, get_socket_path
+	from openbrowser.daemon.diagnostics import daemon_processes, reap_orphan_processes, socket_candidates
 
 	sub = sys.argv[2] if len(sys.argv) > 2 else 'status'
 	client = DaemonClient()
 
+	def _print_daemon_error(resp) -> None:
+		print(resp.output or resp.error, file=sys.stderr)
+		if resp.error_code:
+			print(f'Error code: {resp.error_code}', file=sys.stderr)
+		if resp.hint:
+			print(f'Hint: {resp.hint}', file=sys.stderr)
+
+	def _requested_headless() -> bool | None:
+		raw = os.environ.get('OPENBROWSER_HEADLESS')
+		if raw is None:
+			return None
+		# Mirror the daemon: only explicit false values disable headless mode.
+		return raw.lower() not in ('false', '0', 'no')
+
+	def _status_matches_request(resp) -> bool:
+		if not resp.success:
+			return False
+		try:
+			payload = json.loads(resp.output)
+		except (TypeError, json.JSONDecodeError):
+			return True
+		if not isinstance(payload, dict):
+			return True
+		profile = payload.get('profile') or {}
+		requested_headless = _requested_headless()
+		if requested_headless is not None and profile.get('headless') != requested_headless:
+			return False
+		requested_profile = os.environ.get('OPENBROWSER_USER_DATA_DIR') or os.environ.get('OPENBROWSER_DAEMON_PROFILE_DIR')
+		if requested_profile:
+			current_profile = profile.get('user_data_dir')
+			if not current_profile:
+				return False
+			try:
+				if Path(current_profile).expanduser().resolve() != Path(requested_profile).expanduser().resolve():
+					return False
+			except OSError:
+				return False
+		custom_socket = os.environ.get('OPENBROWSER_SOCKET')
+		isolate = os.environ.get('OPENBROWSER_DAEMON_PROFILE_ISOLATION', '').lower() in ('true', '1', 'yes')
+		if not requested_profile and custom_socket and isolate:
+			current_profile = profile.get('user_data_dir')
+			if not current_profile:
+				return False
+			import hashlib
+
+			expected_name = f'daemon-{hashlib.sha256(str(get_socket_path()).encode("utf-8")).hexdigest()[:12]}'
+			if Path(current_profile).name != expected_name:
+				return False
+		return True
+
 	if sub == 'start':
 		async def _start():
 			status = await client.status()
-			if status.success:
+			if status.success and _status_matches_request(status):
 				print('Daemon is already running')
 				return
-			await client._start_daemon()
+			if status.success:
+				print('Daemon configuration differs; restarting')
+				stop = await client.force_stop()
+				if not stop.success:
+					_print_daemon_error(stop)
+					sys.exit(1)
+			try:
+				await client._start_daemon()
+			except (TimeoutError, OSError) as error:
+				print(f'Daemon failed to start: {error}', file=sys.stderr)
+				sys.exit(1)
 			print('Daemon started')
 		asyncio.run(_start())
+	elif sub == 'ensure':
+		async def _ensure():
+			status = await client.status()
+			if status.success and _status_matches_request(status):
+				print('Daemon already matches the requested configuration')
+				return
+			if status.success:
+				print('Daemon configuration differs; restarting')
+				stop = await client.force_stop()
+				if not stop.success:
+					_print_daemon_error(stop)
+					sys.exit(1)
+			try:
+				await client._start_daemon()
+			except (TimeoutError, OSError) as error:
+				print(f'Daemon failed to start: {error}', file=sys.stderr)
+				sys.exit(1)
+			print('Daemon started')
+		asyncio.run(_ensure())
 	elif sub == 'stop':
 		resp = asyncio.run(client.stop())
-		print(resp.output or resp.error)
 		if not resp.success:
+			_print_daemon_error(resp)
 			sys.exit(1)
+		print(resp.output or 'Daemon stopped')
+	elif sub == 'force-stop':
+		resp = asyncio.run(client.force_stop())
+		if not resp.success:
+			_print_daemon_error(resp)
+			sys.exit(1)
+		print(resp.output or 'Daemon force-stopped')
 	elif sub == 'status':
 		resp = asyncio.run(client.status())
-		print(resp.output or resp.error)
 		if not resp.success:
+			_print_daemon_error(resp)
 			sys.exit(1)
+		print(resp.output)
+	elif sub == 'reset':
+		resp = asyncio.run(client.reset())
+		if not resp.success:
+			_print_daemon_error(resp)
+			sys.exit(1)
+		print(resp.output or 'Session reset')
 	elif sub == 'restart':
-		import time as _time
-
 		async def _restart():
-			await client.stop()
-			# Wait for old daemon to fully shut down
-			stopped = False
-			deadline = _time.time() + 5.0
-			while _time.time() < deadline:
-				resp = await client.status()
-				if not resp.success:
-					stopped = True
-					break
-				await asyncio.sleep(0.3)
-			if not stopped:
-				print('Old daemon did not stop within timeout', file=sys.stderr)
+			stop = await client.force_stop()
+			if not stop.success:
+				_print_daemon_error(stop)
 				sys.exit(1)
-			await client._start_daemon()
+			try:
+				await client._start_daemon()
+			except (TimeoutError, OSError) as error:
+				print(f'Daemon failed to start: {error}', file=sys.stderr)
+				sys.exit(1)
 			print('Daemon restarted')
 		asyncio.run(_restart())
+	elif sub == 'list':
+		async def _list():
+			original_socket = os.environ.get('OPENBROWSER_SOCKET')
+			results = []
+			try:
+				for socket_path in socket_candidates():
+					os.environ['OPENBROWSER_SOCKET'] = str(socket_path)
+					status = await DaemonClient().status()
+					payload = None
+					if status.success:
+						try:
+							payload = json.loads(status.output)
+						except (TypeError, json.JSONDecodeError):
+							payload = {'raw': status.output}
+					results.append(
+						{
+							'socket': str(socket_path),
+							'running': status.success,
+							'status': payload,
+							'error': status.error,
+							'error_code': status.error_code,
+						}
+					)
+			finally:
+				if original_socket is None:
+					os.environ.pop('OPENBROWSER_SOCKET', None)
+				else:
+					os.environ['OPENBROWSER_SOCKET'] = original_socket
+			print(json.dumps({'sockets': results, 'processes': daemon_processes()}, indent=2))
+		asyncio.run(_list())
+	elif sub == 'reap':
+		async def _reap():
+			original_socket = os.environ.get('OPENBROWSER_SOCKET')
+			results = []
+			try:
+				for socket_path in socket_candidates():
+					os.environ['OPENBROWSER_SOCKET'] = str(socket_path)
+					response = await DaemonClient().force_stop()
+					results.append(
+						{
+							'socket': str(socket_path),
+							'success': response.success,
+							'output': response.output,
+							'error': response.error,
+							'error_code': response.error_code,
+						}
+					)
+			finally:
+				if original_socket is None:
+					os.environ.pop('OPENBROWSER_SOCKET', None)
+				else:
+					os.environ['OPENBROWSER_SOCKET'] = original_socket
+			orphans = reap_orphan_processes()
+			print(json.dumps({'sockets': results, 'orphans': orphans}, indent=2))
+			if any(not item['success'] for item in results) or any(
+				not item['reaped']
+				and item['reason'] not in ('socket is live or unknown', 'process is too young', 'process identity changed')
+				for item in orphans
+			):
+				sys.exit(1)
+		asyncio.run(_reap())
+	elif sub == 'doctor':
+		async def _doctor():
+			status = await client.status()
+			payload = None
+			if status.success:
+				try:
+					payload = json.loads(status.output)
+				except json.JSONDecodeError:
+					payload = {'raw': status.output}
+
+			socket_path = get_socket_path()
+			pid_path = get_pid_path()
+			log_path = get_log_path()
+			pid = None
+			if pid_path.exists():
+				try:
+					pid = int(pid_path.read_text().strip())
+				except (OSError, ValueError):
+					pid = None
+			log_tail = ''
+			if log_path.exists():
+				try:
+					log_tail = '\n'.join(log_path.read_text(encoding='utf-8', errors='replace').splitlines()[-15:])
+				except OSError:
+					log_tail = ''
+
+			healthy = bool(status.success and payload and payload.get('state') == 'ready')
+			if IS_WINDOWS:
+				listeners = [row for row in daemon_processes() if row.get('socket_live')]
+				socket_report = {
+					'transport': 'tcp',
+					'host': '127.0.0.1',
+					'port': WINDOWS_PORT,
+					'listening': bool(listeners),
+				}
+			else:
+				socket_report = {
+					'transport': 'unix',
+					'path': str(socket_path),
+					'exists': socket_path.exists(),
+				}
+			report = {
+				'healthy': healthy,
+				'status': payload,
+				'status_error': status.error,
+				'error_code': status.error_code,
+				'hint': status.hint,
+				'socket': socket_report,
+				'pid_file': {'path': str(pid_path), 'exists': pid_path.exists(), 'pid': pid},
+				'log': {'path': str(log_path), 'tail': log_tail},
+			}
+			print(json.dumps(report, indent=2))
+			if not healthy:
+				sys.exit(1)
+		asyncio.run(_doctor())
 	else:
 		print(f'Unknown daemon command: {sub}', file=sys.stderr)
-		print('Usage: openbrowser-ai daemon [start|stop|status|restart]', file=sys.stderr)
+		print(
+			'Usage: openbrowser-ai daemon [start|ensure|stop|force-stop|status|reset|restart|list|reap|doctor]',
+			file=sys.stderr,
+		)
 		sys.exit(1)
 	sys.exit(0)
 

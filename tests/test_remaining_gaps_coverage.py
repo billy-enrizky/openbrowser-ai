@@ -594,7 +594,7 @@ class TestMcpServerExecuteCodePreflightRecovery:
             new_callable=AsyncMock, side_effect=Exception("recovery fail"),
         ):
             result = await gaps_server_instance._execute_code("x = 1")
-            assert result == "ok"
+            assert "Browser connection lost and recovery failed" in result
 
 
 # ============================================================================

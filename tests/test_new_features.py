@@ -74,54 +74,34 @@ class TestMultiTabDisplay:
 		assert '...' not in tab_lines[0]
 
 
-class TestTabIdTruncation:
-	"""Tests for tab_id auto-truncation in action_wrapper."""
+class TestTabIdInput:
+	"""Switch and close accept short IDs and full CDP target IDs."""
 
-	def test_truncation_logic_direct(self):
-		"""Verify the truncation logic that action_wrapper applies."""
+	def test_switch_accepts_full_target_id(self):
+		from openbrowser.tools.views import SwitchTabAction
+
 		full_id = 'F8863CF9860B598226D1F7C08B1AE9CD'
-		assert len(full_id) == 32
-		truncated = full_id[-4:]
-		assert truncated == 'E9CD'
-		assert len(truncated) == 4
+		action = SwitchTabAction(tab_id=full_id)
+		assert action.tab_id == full_id
 
-	def test_short_id_not_truncated(self):
-		"""4-char IDs should pass through unchanged."""
-		short_id = 'E9CD'
-		assert len(short_id) == 4
-		# The truncation guard only fires when len > 4
-		if len(short_id) > 4:
-			short_id = short_id[-4:]
-		assert short_id == 'E9CD'
+	def test_close_accepts_full_target_id(self):
+		from openbrowser.tools.views import CloseTabAction
 
-	def test_truncation_guard_conditions(self):
-		"""Verify the three-part guard: key exists, is str, len > 4."""
-		kwargs = {'tab_id': 'F8863CF9860B598226D1F7C08B1AE9CD'}
-		act_name = 'switch'
-		if act_name in ('switch', 'close') and 'tab_id' in kwargs and isinstance(kwargs['tab_id'], str) and len(kwargs['tab_id']) > 4:
-			kwargs['tab_id'] = kwargs['tab_id'][-4:]
-		assert kwargs['tab_id'] == 'E9CD'
+		full_id = 'AABBCCDD11223344AABBCCDD11223344'
+		action = CloseTabAction(tab_id=full_id)
+		assert action.tab_id == full_id
 
-	def test_truncation_not_applied_to_other_actions(self):
-		"""Truncation should only apply to switch and close."""
-		kwargs = {'tab_id': 'F8863CF9860B598226D1F7C08B1AE9CD'}
-		act_name = 'navigate'
-		if act_name in ('switch', 'close') and 'tab_id' in kwargs and isinstance(kwargs['tab_id'], str) and len(kwargs['tab_id']) > 4:
-			kwargs['tab_id'] = kwargs['tab_id'][-4:]
-		assert kwargs['tab_id'] == 'F8863CF9860B598226D1F7C08B1AE9CD'
+	def test_switch_accepts_short_id(self):
+		from openbrowser.tools.views import SwitchTabAction
 
-	def test_truncation_applies_to_close(self):
-		"""Close action should also truncate."""
-		kwargs = {'tab_id': 'AABBCCDD11223344AABBCCDD11223344'}
-		act_name = 'close'
-		if act_name in ('switch', 'close') and 'tab_id' in kwargs and isinstance(kwargs['tab_id'], str) and len(kwargs['tab_id']) > 4:
-			kwargs['tab_id'] = kwargs['tab_id'][-4:]
-		assert kwargs['tab_id'] == '3344'
+		assert SwitchTabAction(tab_id='E9CD').tab_id == 'E9CD'
 
-	def test_non_string_tab_id_not_truncated(self):
-		"""Non-string tab_id values should not be touched."""
-		kwargs = {'tab_id': 12345}
-		act_name = 'switch'
-		if act_name in ('switch', 'close') and 'tab_id' in kwargs and isinstance(kwargs['tab_id'], str) and len(kwargs['tab_id']) > 4:
-			kwargs['tab_id'] = kwargs['tab_id'][-4:]
-		assert kwargs['tab_id'] == 12345
+	def test_rejects_ids_shorter_than_four_characters(self):
+		from pydantic import ValidationError
+
+		from openbrowser.tools.views import CloseTabAction, SwitchTabAction
+
+		with pytest.raises(ValidationError):
+			SwitchTabAction(tab_id='ABC')
+		with pytest.raises(ValidationError):
+			CloseTabAction(tab_id='ABC')

@@ -5,7 +5,7 @@
   "display_name": "OpenBrowser AI Browser Automation",
   "version": "0.1.29",
   "description": "CodeAgent MCP server -- execute Python code with browser automation functions, persistent namespace, and isolated browser profiles",
-  "long_description": "OpenBrowser CodeAgent exposes a single execute_code tool that runs Python code in a persistent namespace with browser automation functions. Write multi-step workflows in Python with full access to navigate, click, type, evaluate JS, and more.\n\n### Key Features:\n- **Code Execution**: Write Python code with async browser functions (await navigate, click, evaluate, etc.)\n- **Persistent Namespace**: Variables and state persist between execute_code calls\n- **Isolated Browser Profiles**: Each MCP server process gets an isolated profile so concurrent servers cannot terminate or corrupt one another's browser\n- **Saved Login Sessions**: Configure an explicit user-data directory or stable storage-state source when authenticated sessions must survive MCP restarts\n- **Browser Automation**: Full browser control via CodeAgent functions\n- **JavaScript Evaluation**: Run JS in page context via evaluate()\n- **Data Libraries**: numpy, pandas, matplotlib, BeautifulSoup available\n- **Standard Libraries**: json, csv, re, datetime, requests, asyncio, Path\n\n### Use Cases:\n- Web scraping with Python data processing\n- Automated testing with assertions\n- Research and information gathering\n- Form filling and multi-step workflows\n- DOM extraction via evaluate() + Python post-processing",
+  "long_description": "OpenBrowser CodeAgent exposes execute_code, get_status, and reset_browser tools. execute_code runs Python code in a persistent namespace with browser automation functions. Write multi-step workflows in Python with full access to navigate, click, type, evaluate JS, and more.\n\n### Key Features:\n- **Code Execution**: Write Python code with async browser functions (await navigate, click, evaluate, etc.)\n- **Persistent Namespace**: Variables and state persist between execute_code calls\n- **Recovery Tools**: get_status reports lifecycle and tab state without starting a browser; reset_browser closes a stuck browser while preserving user variables by default\n- **Isolated Browser Profiles**: Each MCP server process gets an isolated profile so concurrent servers cannot terminate or corrupt one another's browser\n- **Saved Login Sessions**: Configure an explicit user-data directory or stable storage-state source when authenticated sessions must survive MCP restarts\n- **Browser Automation**: Full browser control via CodeAgent functions\n- **JavaScript Evaluation**: Run JS in page context via evaluate()\n- **Data Libraries**: numpy, pandas, matplotlib, BeautifulSoup available\n- **Standard Libraries**: json, csv, re, datetime, requests, asyncio, Path\n\n### Use Cases:\n- Web scraping with Python data processing\n- Automated testing with assertions\n- Research and information gathering\n- Form filling and multi-step workflows\n- DOM extraction via evaluate() + Python post-processing",
   "icon": "icon.png",
   "homepage": "https://github.com/billy-enrizky/openbrowser-ai",
   "documentation": "https://github.com/billy-enrizky/openbrowser-ai",
@@ -24,7 +24,10 @@
     "entry_point": "python",
     "mcp_config": {
       "command": "uvx",
-      "args": ["openbrowser-ai", "--mcp"],
+      "args": [
+        "openbrowser-ai",
+        "--mcp"
+      ],
       "env": {
         "OPENBROWSER_HEADLESS": "${user_config.headless}",
         "OPENBROWSER_ALLOWED_DOMAINS": "${user_config.allowed_domains}",
@@ -37,6 +40,14 @@
     {
       "name": "execute_code",
       "description": "Execute Python code in a persistent namespace with browser automation functions (navigate, click, evaluate, etc.). All functions are async -- use await."
+    },
+    {
+      "name": "get_status",
+      "description": "Return OpenBrowser server, browser, profile, and tab state as JSON. Read-only and does not start a browser."
+    },
+    {
+      "name": "reset_browser",
+      "description": "Close the current browser session and release its profile. User-defined Python variables are preserved unless clear_variables is true."
     }
   ],
   "prompts": [
@@ -56,7 +67,19 @@
       "text": "Use execute_code to navigate to multiple sites, extract content using evaluate() or page text, and aggregate findings about {topic} using Python data structures."
     }
   ],
-  "keywords": ["browser", "automation", "web-scraping", "testing", "ai-agent", "playwright", "selenium-alternative", "rpa", "web-automation", "mcp", "openbrowser"],
+  "keywords": [
+    "browser",
+    "automation",
+    "web-scraping",
+    "testing",
+    "ai-agent",
+    "playwright",
+    "selenium-alternative",
+    "rpa",
+    "web-automation",
+    "mcp",
+    "openbrowser"
+  ],
   "license": "MIT",
   "user_config": {
     "workspace_directory": {
@@ -133,7 +156,11 @@
       "type": "string",
       "title": "Browser Type",
       "description": "Which browser engine to use",
-      "enum": ["chromium", "firefox", "webkit"],
+      "enum": [
+        "chromium",
+        "firefox",
+        "webkit"
+      ],
       "default": "chromium",
       "required": false
     },
@@ -167,6 +194,10 @@
   },
   "compatibility": {
     "claude_desktop": ">=0.10.0",
-    "platforms": ["darwin", "win32", "linux"]
+    "platforms": [
+      "darwin",
+      "win32",
+      "linux"
+    ]
   }
 }

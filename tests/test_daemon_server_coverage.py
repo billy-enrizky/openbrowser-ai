@@ -220,7 +220,7 @@ class TestDaemonServerHandleRequest:
 
         with patch("openbrowser.browser.BrowserSession", return_value=session):
             with patch.object(daemon_server, "_build_browser_profile", return_value=MagicMock()):
-                with patch("openbrowser.daemon.server.DAEMON_INIT_TIMEOUT", 0.01):
+                with patch.object(daemon_server, "_init_timeout", 0.01):
                     with patch("openbrowser.daemon.server.DAEMON_CLEANUP_TIMEOUT", 0.01):
                         ensure_task = asyncio.create_task(daemon_server._ensure_executor())
                         try:
@@ -262,13 +262,8 @@ class TestDaemonServerHandleRequest:
         mock_result_fail.output = "ConnectionClosedError"
         mock_result_fail.error = "ConnectionClosedError"
 
-        mock_result_ok = MagicMock()
-        mock_result_ok.success = True
-        mock_result_ok.output = "ok"
-        mock_result_ok.error = None
-
         mock_executor = MagicMock()
-        mock_executor.execute = AsyncMock(side_effect=[mock_result_fail, mock_result_ok])
+        mock_executor.execute = AsyncMock(return_value=mock_result_fail)
         daemon_server._executor = mock_executor
 
         with patch.object(
@@ -277,7 +272,9 @@ class TestDaemonServerHandleRequest:
             result = await daemon_server._handle_request(
                 {"action": "execute", "code": "x = 1", "id": 1}
             )
-            assert result["success"] is True
+            assert result["success"] is False
+            assert result["error_code"] == "cdp_connection_lost"
+            assert mock_executor.execute.await_count == 1
 
     @pytest.mark.asyncio
     async def test_status(self, daemon_server):
@@ -313,7 +310,8 @@ class TestDaemonServerHandleRequest:
         daemon_server._executor = MagicMock()
 
         result = await daemon_server._handle_request({"action": "reset", "id": 1})
-        assert result["success"] is True
+        assert result["success"] is False
+        assert result["error_code"] == "reset_failed"
 
     @pytest.mark.asyncio
     async def test_unknown_action(self, daemon_server):

@@ -424,6 +424,7 @@ class TestBrowserSessionLifecycle:
 
     async def test_kill_surfaces_browser_stop_handler_failure(self):
         session = _make_browser_session()
+        session._cdp_client_root = MagicMock()
         save_event = _make_awaitable_event()
         stop_event = _make_awaitable_event()
         stop_event.event_result = AsyncMock(side_effect=RuntimeError('browser cleanup failed'))
@@ -436,6 +437,7 @@ class TestBrowserSessionLifecycle:
         from openbrowser.browser.session import BrowserSession
 
         session = _make_browser_session()
+        session._cdp_client_root = MagicMock()
         stop_event = _make_awaitable_event()
         session.event_bus.dispatch = MagicMock(side_effect=[RuntimeError('storage save failed'), stop_event])
         event_bus = session.event_bus
@@ -452,6 +454,7 @@ class TestBrowserSessionLifecycle:
 
     async def test_kill_retains_event_bus_when_finalization_fails(self):
         session = _make_browser_session()
+        session._cdp_client_root = MagicMock()
         save_event = _make_awaitable_event()
         stop_event = _make_awaitable_event()
         event_bus = session.event_bus
@@ -467,6 +470,7 @@ class TestBrowserSessionLifecycle:
 
     async def test_kill_replaces_event_bus_when_reset_fails(self):
         session = _make_browser_session()
+        session._cdp_client_root = MagicMock()
         save_event = _make_awaitable_event()
         stop_event = _make_awaitable_event()
         event_bus = session.event_bus
@@ -1158,7 +1162,7 @@ class TestDOMHelperMethods:
         )
         session._cdp_session_pool = {}
 
-        with pytest.raises(ValueError, match="No TargetID found"):
+        with pytest.raises(ValueError, match="No live tab matches"):
             await session.get_target_id_from_tab_id("ZZZZ")
 
     async def test_get_target_id_from_tab_id_cached(self):

@@ -2,6 +2,7 @@ import asyncio
 import enum
 import json
 import logging
+import math
 import os
 from typing import Generic, TypeVar
 
@@ -24,10 +25,12 @@ from openbrowser.browser.events import (
 	ScrollToTextEvent,
 	SendKeysEvent,
 	SwitchTabEvent,
+	TabClosedEvent,
 	TypeTextEvent,
 	UploadFileEvent,
 )
 from openbrowser.browser.views import BrowserError
+from openbrowser.browser.tabs import TabError, TabRegistry
 from openbrowser.dom.service import EnhancedDOMTreeNode
 from openbrowser.filesystem.file_system import FileSystem
 from openbrowser.llm.base import BaseChatModel
@@ -58,6 +61,16 @@ from openbrowser.tools.views import (
 from openbrowser.utils import time_execution_sync
 
 logger = logging.getLogger(__name__)
+
+
+def _tab_error_text(action: str, tab_id: str, error: TabError) -> str:
+	"""Render a tab resolution failure with every actionable detail."""
+	detail = f'Failed to {action} tab {tab_id}: {error}'
+	if error.candidates:
+		detail = f'{detail} Candidates: {", ".join(error.candidates)}.'
+	if error.hint:
+		detail = f'{detail} Hint: {error.hint}'
+	return detail
 
 # Import EnhancedDOMTreeNode and rebuild event models that have forward references to it
 # This must be done after all imports are complete
@@ -225,15 +238,20 @@ class Tools(Generic[Context]):
 				return ActionResult(error=error_msg)
 
 		@self.registry.action('')
-		async def wait(seconds: int = 3):
-			# Cap wait time at maximum 30 seconds
-			# Reduce the wait time by 3 seconds to account for the llm call which takes at least 3 seconds
-			# So if the model decides to wait for 5 seconds, the llm call took at least 3 seconds, so we only need to wait for 2 seconds
-			# Note by Mert: the above doesnt make sense because we do the LLM call right after this or this could be followed by another action after which we would like to wait
-			# so I revert this.
-			actual_seconds = min(max(seconds - 3, 0), 30)
-			memory = f'Waited for {seconds} seconds'
-			logger.info(f'🕒 waited for {seconds} second{"" if seconds == 1 else "s"}')
+		async def wait(seconds: float = 3):
+			# Sleep the full requested duration. Subtracting model latency made
+			# short waits end early and broke the caller's stated contract.
+			# Fractional seconds are valid; cap only values above 30 seconds.
+			requested_seconds = float(seconds)
+			if math.isfinite(requested_seconds):
+				actual_seconds = min(max(requested_seconds, 0.0), 30.0)
+			else:
+				actual_seconds = 30.0 if requested_seconds > 0 else 0.0
+			if actual_seconds != requested_seconds:
+				memory = f'Waited for {actual_seconds:g} seconds (capped from {requested_seconds:g})'
+			else:
+				memory = f'Waited for {actual_seconds:g} seconds'
+			logger.info(f'🕒 waited for {actual_seconds:g} seconds')
 			await asyncio.sleep(actual_seconds)
 			return ActionResult(extracted_content=memory, long_term_memory=memory)
 
@@ -532,7 +550,7 @@ class Tools(Generic[Context]):
 		# Tab Management Actions
 
 		@self.registry.action(
-			'Switch to another open tab by tab_id. Tab IDs are shown in browser state tabs list (last 4 chars of target_id). Use when you need to work with content in a different tab.',
+			'Switch to another open tab by tab_id. Pass the full target_id or its 4-character suffix from the browser state tabs list. An ambiguous suffix returns the matching full IDs.',
 			param_model=SwitchTabAction,
 		)
 		async def switch(params: SwitchTabAction, browser_session: BrowserSession):
@@ -542,7 +560,7 @@ class Tools(Generic[Context]):
 
 				event = browser_session.event_bus.dispatch(SwitchTabEvent(target_id=target_id))
 				await event
-				new_target_id = await event.event_result(raise_if_any=False, raise_if_none=False)  # Don't raise on errors
+				new_target_id = await event.event_result(raise_if_any=True, raise_if_none=False)
 
 				if new_target_id:
 					memory = f'Switched to tab #{new_target_id[-4:]}'
@@ -551,39 +569,63 @@ class Tools(Generic[Context]):
 
 				logger.info(f'🔄  {memory}')
 				return ActionResult(extracted_content=memory, long_term_memory=memory)
+			except TabError as error:
+				error_msg = _tab_error_text('switch', params.tab_id, error)
+				logger.warning(error_msg)
+				return ActionResult(error=error_msg, success=False)
 			except Exception as e:
-				logger.warning(f'Tab switch may have failed: {e}')
-				memory = f'Attempted to switch to tab #{params.tab_id}'
-				return ActionResult(extracted_content=memory, long_term_memory=memory)
+				error_msg = f'Failed to switch to tab {params.tab_id}: {e}'
+				logger.warning(error_msg)
+				return ActionResult(error=error_msg, success=False)
 
 		@self.registry.action(
-			'Close a tab by tab_id. Tab IDs are shown in browser state tabs list (last 4 chars of target_id). Use to clean up tabs you no longer need.',
+			'Close a tab by tab_id. Pass the full target_id or its 4-character suffix from the browser state tabs list. An ambiguous suffix returns the matching full IDs. Closing an already closed tab is a no-op.',
 			param_model=CloseTabAction,
 		)
 		async def close(params: CloseTabAction, browser_session: BrowserSession):
 			# Simple close tab logic
 			try:
 				target_id = await browser_session.get_target_id_from_tab_id(params.tab_id)
+			except TabError as error:
+				if error.candidates:
+					error_msg = _tab_error_text('close', params.tab_id, error)
+					logger.warning(error_msg)
+					return ActionResult(error=error_msg, success=False)
+				registry = getattr(browser_session, '_tab_registry', None)
+				known_closed = registry.known_closed(params.tab_id) if isinstance(registry, TabRegistry) else None
+				focused_target = browser_session.agent_focus.target_id if browser_session.agent_focus else None
+				focus_matches_closed_id = bool(focused_target and focused_target.endswith(params.tab_id))
+				closed_target_id = known_closed or (params.tab_id if 'already closed' in str(error).lower() else None)
+				if closed_target_id is not None or focus_matches_closed_id:
+					try:
+						await browser_session.event_bus.dispatch(TabClosedEvent(target_id=closed_target_id or params.tab_id))
+					except Exception as focus_error:
+						logger.warning(f'Closed tab focus repair failed: {type(focus_error).__name__}: {focus_error}')
+					memory = f'Tab #{params.tab_id} was already closed'
+					return ActionResult(extracted_content=memory, long_term_memory=memory)
+				error_msg = _tab_error_text('close', params.tab_id, error)
+				logger.warning(error_msg)
+				return ActionResult(error=error_msg, success=False)
+			except Exception as error:
+				error_msg = f'Failed to close tab {params.tab_id}: {error}'
+				logger.warning(error_msg)
+				return ActionResult(error=error_msg, success=False)
 
-				# Dispatch close tab event - handle stale target IDs gracefully
+			try:
 				event = browser_session.event_bus.dispatch(CloseTabEvent(target_id=target_id))
 				await event
-				await event.event_result(raise_if_any=False, raise_if_none=False)  # Don't raise on errors
+				await event.event_result(raise_if_any=True, raise_if_none=False)
+			except Exception as error:
+				error_msg = f'Failed to close tab {params.tab_id}: {error}'
+				logger.warning(error_msg)
+				return ActionResult(error=error_msg, success=False)
 
-				memory = f'Closed tab #{params.tab_id}'
-				logger.info(f'🗑️  {memory}')
-				return ActionResult(
-					extracted_content=memory,
-					long_term_memory=memory,
-				)
-			except Exception as e:
-				# Handle stale target IDs gracefully
-				logger.warning(f'Tab {params.tab_id} may already be closed: {e}')
-				memory = f'Tab #{params.tab_id} closed (was already closed or invalid)'
-				return ActionResult(
-					extracted_content=memory,
-					long_term_memory=memory,
-				)
+			memory = f'Closed tab #{params.tab_id}'
+			logger.info(f'🗑️  {memory}')
+			return ActionResult(
+				extracted_content=memory,
+				long_term_memory=memory,
+			)
 
 		# Content Actions
 

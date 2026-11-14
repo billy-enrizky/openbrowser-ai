@@ -25,3 +25,12 @@ def get_pid_path() -> Path:
         sock = Path(custom_socket).expanduser()
         return sock.parent / (sock.stem + '.pid')
     return PID_PATH
+
+
+def get_log_path() -> Path:
+    """Return a log path owned by the daemon socket."""
+    custom_socket = os.environ.get('OPENBROWSER_SOCKET')
+    if custom_socket:
+        sock = Path(custom_socket).expanduser()
+        return sock.parent / (sock.stem + '.log')
+    return DAEMON_DIR / 'daemon.log'
