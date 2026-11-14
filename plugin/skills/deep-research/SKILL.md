@@ -75,16 +75,17 @@ mkdir -p local_docs/research
 
 Enforce headless mode and detect whether a daemon is already running. If yes, reuse it (operate in NEW tabs only). If no, the next `-c` call auto-starts one.
 
-`OPENBROWSER_HEADLESS=true` is set here so the daemon spawned by the first `-c` call inherits it, even if the user's config file sets `headless: false`. Already-running daemons are unaffected (their browser was opened at start time).
+`OPENBROWSER_HEADLESS=true` is set before `daemon ensure`. `ensure` reuses a daemon only when its effective headless and profile settings match the request; otherwise it restarts the daemon so a stale visible browser or old profile is not reused.
 
 ```bash
 export OPENBROWSER_HEADLESS=true
 
-if openbrowser-ai daemon status 2>&1 | grep -qi 'running\|listening\|pid'; then
-    echo "Reusing existing daemon -- will work in new tabs"
+ensure_output=$(openbrowser-ai daemon ensure 2>&1) || { echo "$ensure_output"; exit 1; }
+if printf '%s' "$ensure_output" | grep -q 'already matches'; then
+    echo "Reusing matching daemon -- will work in new tabs"
     export DEEP_RESEARCH_REUSED=1
 else
-    echo "No daemon running -- will start fresh headless session"
+    echo "Started or restarted daemon -- will work in new tabs"
     export DEEP_RESEARCH_REUSED=0
 fi
 ```

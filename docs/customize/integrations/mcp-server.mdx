@@ -7,7 +7,7 @@ mode: "wide"
 
 ## Overview
 
-The MCP (Model Context Protocol) Server exposes OpenBrowser's browser automation as a single `execute_code` tool for AI assistants like Claude Desktop, Claude Code, and other MCP-compatible clients. The LLM writes Python code to navigate, interact with, and extract data from web pages. No external LLM API keys required -- the MCP client provides the intelligence.
+The MCP (Model Context Protocol) Server exposes OpenBrowser's browser automation through three tools for AI assistants like Claude Desktop, Claude Code, and other MCP-compatible clients. `execute_code` runs Python to navigate, interact with, and extract data from web pages. `get_status` reports lifecycle and tab state without starting a browser, and `reset_browser` recovers a stuck browser while preserving user variables by default. No external LLM API keys required -- the MCP client provides the intelligence.
 
 ## Quick Start
 
@@ -83,9 +83,17 @@ Optional configuration:
 | `OPENBROWSER_COMPACT_DESCRIPTION` | Minimal tool description (~500 tokens vs ~1,430) | `false` |
 | `OPENBROWSER_MAX_OUTPUT` | Maximum output characters per execution | `10000` |
 
-## The `execute_code` Tool
+## Tools
 
-The MCP server exposes a single tool that runs Python code in a persistent namespace with browser automation functions. Functions are async unless noted; use `await`.
+The MCP server exposes three tools:
+
+| Tool | Use |
+|---|---|
+| `execute_code` | Run Python in a persistent namespace with browser automation functions. Functions are async unless noted; use `await`. |
+| `get_status` | Read the server, browser, profile, and tab state as JSON. It does not start or mutate a browser. |
+| `reset_browser` | Close a stuck browser and release its profile. User variables are preserved unless `clear_variables` is true. |
+
+If a browser connection fails, call `get_status` before retrying. A page-changing action may have partially run, so do not replay it blindly.
 
 ### Available Functions
 
@@ -95,7 +103,7 @@ The MCP server exposes a single tool that runs Python code in a persistent names
 | **Interaction** | `click(index)`, `input_text(index, text, clear)`, `scroll(down, pages, index)`, `send_keys(keys)`, `upload_file(index, path)` |
 | **Coordinate interaction** | `click_xy(x, y, button, click_count)`, `hover_xy(x, y)`, `scroll_xy(x, y, delta_x, delta_y)` for no-index canvas, PDF, embedded, and native-rendered targets |
 | **Dropdowns** | `select_dropdown(index, text)`, `dropdown_options(index)` |
-| **Tabs** | `switch(tab_id)`, `close(tab_id)` |
+| **Tabs** | `switch(tab_id)`, `close(tab_id)`: accepts the four-character suffix or the full CDP target ID |
 | **JavaScript** | `evaluate(code)` -- run JS in page context, returns Python objects |
 | **Downloads** | `download_file(url, filename)`, `list_downloads()` (sync, no `await`) |
 | **State** | `browser.get_browser_state_summary()` -- page metadata and interactive elements |

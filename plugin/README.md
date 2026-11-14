@@ -60,9 +60,9 @@ Add to your project's `.mcp.json`:
 }
 ```
 
-## Available Tool
+## Available Tools
 
-The MCP server exposes a single `execute_code` tool that runs Python code in a persistent namespace with browser automation functions. The LLM writes Python code to navigate, interact, and extract data.
+The MCP server exposes `execute_code`, `get_status`, and `reset_browser`. `execute_code` runs Python code in a persistent namespace with browser automation functions. `get_status` is a read-only lifecycle and tab snapshot. `reset_browser` closes a stuck browser while preserving user variables by default.
 
 Authenticated browser state is also persisted, so once a user logs in, later MCP calls can keep using the same cookies and localStorage.
 
@@ -142,7 +142,7 @@ openbrowser-ai daemon start|stop|status|restart
 
 Variables persist across `-c` calls while the daemon is running. The daemon starts automatically on first use and shuts down after 10 minutes of inactivity.
 
-The CLI daemon uses `~/.config/openbrowser/profiles/daemon` as its default browser profile and writes a matching `storage_state.json`, so saved logins survive daemon restarts.
+The CLI daemon uses `~/.config/openbrowser/profiles/daemon` as its default browser profile, so saved logins survive daemon restarts through Chrome's user-data directory. An explicit `storage_state` path is still honored. Custom sockets share the default profile unless `OPENBROWSER_DAEMON_PROFILE_ISOLATION=true` or `OPENBROWSER_DAEMON_PROFILE_DIR` is set.
 
 ## Configuration
 
