@@ -57,19 +57,21 @@ try:
 except ImportError:
 	BS4_AVAILABLE = False
 
+class _MissingPdfReader:
+	"""Actionable placeholder when the optional PDF dependency is absent."""
+
+	def __init__(self, *args, **kwargs):
+		raise ImportError(
+			"pypdf is not installed. Install it with: pip install 'openbrowser-ai[pdf]'"
+		)
+
+
 try:
 	from pypdf import PdfReader  # type: ignore
 
 	PYPDF_AVAILABLE = True
 except ImportError:
-	class PdfReader:  # type: ignore[no-redef]
-		"""Actionable placeholder when the optional PDF dependency is absent."""
-
-		def __init__(self, *args, **kwargs):
-			raise ImportError(
-				"pypdf is not installed. Install it with: pip install 'openbrowser-ai[pdf]'"
-			)
-
+	PdfReader = _MissingPdfReader  # type: ignore[assignment,misc]
 	PYPDF_AVAILABLE = False
 
 try:
@@ -333,8 +335,9 @@ def create_namespace(
 	if BS4_AVAILABLE:
 		namespace['BeautifulSoup'] = BeautifulSoup
 		namespace['bs4'] = BeautifulSoup
-	namespace['PdfReader'] = PdfReader
-	namespace['pypdf'] = PdfReader
+	pdf_reader = PdfReader if PYPDF_AVAILABLE else _MissingPdfReader
+	namespace['PdfReader'] = pdf_reader
+	namespace['pypdf'] = pdf_reader
 	if TABULATE_AVAILABLE:
 		namespace['tabulate'] = tabulate
 
