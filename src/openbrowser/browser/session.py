@@ -3,6 +3,7 @@
 import asyncio
 import inspect
 import logging
+import os
 from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Self, Union, cast, overload
@@ -25,6 +26,7 @@ from openbrowser.browser.events import (
 	BrowserErrorEvent,
 	BrowserLaunchEvent,
 	BrowserLaunchResult,
+	BrowserKillEvent,
 	BrowserStartEvent,
 	BrowserStateRequestEvent,
 	BrowserStopEvent,
@@ -36,9 +38,17 @@ from openbrowser.browser.events import (
 	NavigationStartedEvent,
 	SwitchTabEvent,
 	TabClosedEvent,
+	TabClosingEvent,
 	TabCreatedEvent,
 )
+from openbrowser.browser.lifecycle import (
+	LifecycleMachine,
+	LifecyclePhase,
+	LifecycleSnapshot,
+	LifecycleTransitionError,
+)
 from openbrowser.browser.profile import BrowserProfile, ProxySettings
+from openbrowser.browser.tabs import TabError, TabRegistry, TabState
 from openbrowser.browser.views import BrowserStateSummary, TabInfo
 from openbrowser.dom.views import DOMRect, EnhancedDOMTreeNode, TargetInfo
 from openbrowser.observability import observe_debug
@@ -48,6 +58,14 @@ if TYPE_CHECKING:
 	from openbrowser.actor.page import Page
 
 DEFAULT_BROWSER_PROFILE = BrowserProfile()
+
+
+def _shutdown_timeout() -> float:
+	raw = os.environ.get('OPENBROWSER_SHUTDOWN_TIMEOUT', '')
+	try:
+		return max(1.0, float(raw)) if raw else 20.0
+	except ValueError:
+		return 20.0
 
 _LOGGED_UNIQUE_SESSION_IDS = set()  # track unique session IDs that have been logged to make sure we always assign a unique enough id to new sessions and avoid ambiguity in logs
 red = '\033[91m'
@@ -373,10 +391,20 @@ class BrowserSession(BaseModel):
 	_cdp_client_root: CDPClient | None = PrivateAttr(default=None)
 	_cdp_session_pool: dict[str, CDPSession] = PrivateAttr(default_factory=dict)
 	_session_manager: Any = PrivateAttr(default=None)  # SessionManager instance
+	_lifecycle: LifecycleMachine = PrivateAttr(default_factory=lambda: LifecycleMachine('browser_session'))
+	_tab_registry: TabRegistry = PrivateAttr(default_factory=TabRegistry)
+	_lifecycle_lock: asyncio.Lock = PrivateAttr(default_factory=asyncio.Lock)
+	_start_event: asyncio.Event | None = PrivateAttr(default=None)
+	_start_error: BaseException | None = PrivateAttr(default=None)
+	_start_task: asyncio.Task | None = PrivateAttr(default=None)
+	_stop_task: asyncio.Task | None = PrivateAttr(default=None)
+	_watchdogs_attached: bool = PrivateAttr(default=False)
+	_core_handlers_attached: bool = PrivateAttr(default=False)
 	_cached_browser_state_summary: Any = PrivateAttr(default=None)
 	_cached_selector_map: dict[int, EnhancedDOMTreeNode] = PrivateAttr(default_factory=dict)
 	_downloaded_files: list[str] = PrivateAttr(default_factory=list)  # Track files downloaded during this session
 	_closed_popup_messages: list[str] = PrivateAttr(default_factory=list)  # Store messages from auto-closed JavaScript dialogs
+	_storage_state_warnings: list[str] = PrivateAttr(default_factory=list)
 
 	# Watchdogs
 	_crash_watchdog: Any | None = PrivateAttr(default=None)
@@ -424,8 +452,71 @@ class BrowserSession(BaseModel):
 	def __str__(self) -> str:
 		return f'BrowserSession🅑 {self._id_for_logs} 🅣 {self._tab_id_for_logs}'
 
-	async def reset(self) -> None:
+	@property
+	def lifecycle(self) -> LifecycleSnapshot:
+		"""Return the current lifecycle snapshot."""
+		return self._lifecycle.snapshot()
+
+	def lifecycle_snapshot(self) -> dict[str, Any]:
+		"""Return lifecycle, tab, and connection state in one JSON-safe shape."""
+		snapshot = self._lifecycle.snapshot().to_dict()
+		snapshot['cdp_connected'] = self._cdp_client_root is not None
+		snapshot['active_target_id'] = self.agent_focus.target_id if self.agent_focus else None
+		snapshot['tabs'] = self.tab_snapshot()
+		snapshot['warnings'] = list(self._storage_state_warnings)
+		return snapshot
+
+	def tab_snapshot(self) -> list[dict[str, Any]]:
+		"""Return the registry view of all known tabs."""
+		active_target_id = self.agent_focus.target_id if self.agent_focus else None
+		return self._tab_registry.snapshot(active_target_id=active_target_id)
+
+	def seed_generation(self, generation: int) -> None:
+		"""Keep the lifecycle generation monotonic across replacement sessions."""
+		self._lifecycle.seed_generation(generation)
+
+	async def mark_degraded(self, reason: str) -> None:
+		"""Record a non-fatal browser health problem in the lifecycle state."""
+		if self._lifecycle.phase in (LifecyclePhase.READY, LifecyclePhase.RECOVERING):
+			try:
+				self._lifecycle.transition(LifecyclePhase.DEGRADED, reason=reason)
+			except LifecycleTransitionError:
+				pass
+
+	def _has_live_resources(self) -> bool:
+		"""Return True when cleanup still has browser-owned resources to release."""
+		return bool(
+			self._cdp_client_root
+			or self._session_manager
+			or self._watchdogs_attached
+			or self.browser_profile.cdp_url
+			or self._watchdog_has_live_resources(self._local_browser_watchdog)
+		)
+
+	@staticmethod
+	def _watchdog_has_live_resources(watchdog: Any | None) -> bool:
+		"""Return True while a local watchdog still owns a process or profile lease."""
+		if watchdog is None:
+			return False
+		for attribute in ('_subprocess', '_spawned_subprocess', '_profile_lease'):
+			if getattr(watchdog, attribute, None) is not None:
+				return True
+		return False
+
+	async def reset(self, *, stop_event_bus: bool = True) -> None:
 		"""Clear all cached CDP sessions with proper cleanup."""
+
+		if stop_event_bus and self._watchdogs_attached:
+			try:
+				await self.event_bus.stop(clear=True, timeout=5)
+			except BaseException:
+				pass
+			self.event_bus = EventBus()
+			self._core_handlers_attached = False
+			self._attach_core_handlers()
+
+		if self._lifecycle.phase in (LifecyclePhase.READY, LifecyclePhase.DEGRADED, LifecyclePhase.FAILED):
+			self._lifecycle.transition(LifecyclePhase.STOPPED, reason='reset', increment_generation=True)
 
 		# TODO: clear the event bus queue here, implement this helper
 		# await self.event_bus.wait_for_idle(timeout=5.0)
@@ -438,11 +529,14 @@ class BrowserSession(BaseModel):
 
 		# Clear session pool (all sessions share the root WebSocket, so no disconnect needed)
 		self._cdp_session_pool.clear()
+		self._tab_registry.clear()
+		self._watchdogs_attached = False
 
 		self._cdp_client_root = None  # type: ignore
 		self._cached_browser_state_summary = None
 		self._cached_selector_map.clear()
 		self._downloaded_files.clear()
+		self._storage_state_warnings.clear()
 
 		self.agent_focus = None
 		if self.is_local:
@@ -453,7 +547,8 @@ class BrowserSession(BaseModel):
 		self._aboutblank_watchdog = None
 		self._security_watchdog = None
 		self._storage_state_watchdog = None
-		self._local_browser_watchdog = None
+		if not self._watchdog_has_live_resources(self._local_browser_watchdog):
+			self._local_browser_watchdog = None
 		self._default_action_watchdog = None
 		self._dom_watchdog = None
 		self._screenshot_watchdog = None
@@ -462,19 +557,13 @@ class BrowserSession(BaseModel):
 
 	def model_post_init(self, __context) -> None:
 		"""Register event handlers after model initialization."""
-		# Check if handlers are already registered to prevent duplicates
+		self._attach_core_handlers()
 
+	def _attach_core_handlers(self) -> None:
+		"""Attach the BrowserSession core handlers to its current event bus."""
+		if self._core_handlers_attached:
+			return
 		from openbrowser.browser.watchdog_base import BaseWatchdog
-
-		start_handlers = self.event_bus.handlers.get('BrowserStartEvent', [])
-		start_handler_names = [getattr(h, '__name__', str(h)) for h in start_handlers]
-
-		if any('on_BrowserStartEvent' in name for name in start_handler_names):
-			raise RuntimeError(
-				'[BrowserSession] Duplicate handler registration attempted! '
-				'on_BrowserStartEvent is already registered. '
-				'This likely means BrowserSession was initialized multiple times with the same EventBus.'
-			)
 
 		BaseWatchdog.attach_handler_to_session(self, BrowserStartEvent, self.on_BrowserStartEvent)
 		BaseWatchdog.attach_handler_to_session(self, BrowserStopEvent, self.on_BrowserStopEvent)
@@ -485,17 +574,187 @@ class BrowserSession(BaseModel):
 		BaseWatchdog.attach_handler_to_session(self, AgentFocusChangedEvent, self.on_AgentFocusChangedEvent)
 		BaseWatchdog.attach_handler_to_session(self, FileDownloadedEvent, self.on_FileDownloadedEvent)
 		BaseWatchdog.attach_handler_to_session(self, CloseTabEvent, self.on_CloseTabEvent)
+		self._core_handlers_attached = True
 
 	@observe_debug(ignore_input=True, ignore_output=True, name='browser_session_start')
 	async def start(self) -> None:
-		"""Start the browser session."""
-		start_event = self.event_bus.dispatch(BrowserStartEvent())
-		await start_event
-		# Ensure any exceptions from the event handler are propagated
-		await start_event.event_result(raise_if_any=True, raise_if_none=False)
+		"""Start the browser session, waiting for an in-flight start when present."""
+		if self._lifecycle.phase is LifecyclePhase.READY:
+			return
+
+		owner = False
+		async with self._lifecycle_lock:
+			if self._lifecycle.phase is LifecyclePhase.READY:
+				return
+			if self._lifecycle.phase is LifecyclePhase.STARTING and self._start_event is not None:
+				start_event = self._start_event
+			else:
+				self._lifecycle.transition(LifecyclePhase.STARTING, reason='start requested')
+				self._start_event = asyncio.Event()
+				self._start_error = None
+				start_event = self._start_event
+				owner = True
+
+		if not owner:
+			await start_event.wait()
+			if self._lifecycle.phase is not LifecyclePhase.READY:
+				error = self._start_error
+				if error is not None:
+					raise RuntimeError(f'Browser start failed: {error}') from error
+				raise RuntimeError('Browser start did not reach the ready state')
+			return
+
+		start_task = asyncio.current_task()
+		self._start_task = start_task
+		try:
+			await self._start_locked()
+		except BaseException as error:
+			self._start_error = error
+			raise
+		finally:
+			start_event.set()
+			if self._start_event is start_event:
+				self._start_event = None
+			if self._start_task is start_task:
+				self._start_task = None
+
+	async def _start_locked(self) -> None:
+		"""Run the browser start event and update lifecycle state."""
+		try:
+			start_event = self.event_bus.dispatch(BrowserStartEvent())
+			await start_event
+			# Ensure any exceptions from the event handler are propagated
+			await start_event.event_result(raise_if_any=True, raise_if_none=False)
+		except asyncio.CancelledError:
+			if self._lifecycle.phase is not LifecyclePhase.STOPPING:
+				self._lifecycle.fail('Browser start cancelled', reason='browser start cancelled')
+			raise
+		except BaseException as error:
+			self._lifecycle.fail(error, reason='browser start failed')
+			raise
+		else:
+			self._lifecycle.transition(LifecyclePhase.READY, reason='browser ready')
+
+	@staticmethod
+	async def _await_task(task: asyncio.Task) -> None:
+		"""Wait for a lifecycle task even when the caller is cancelled."""
+		cancelled = False
+		while not task.done():
+			try:
+				await asyncio.shield(task)
+			except asyncio.CancelledError:
+				cancelled = True
+			except BaseException:
+				break
+		if task.done():
+			task.result()
+		if cancelled:
+			raise asyncio.CancelledError
+
+	async def _await_task_bounded(self, task: asyncio.Task, timeout: float) -> None:
+		"""Wait for cleanup, then force-release resources if it exceeds the bound."""
+		try:
+			await asyncio.wait_for(asyncio.shield(task), timeout=timeout)
+		except asyncio.TimeoutError as error:
+			self._force_stop_resources()
+			task.cancel()
+			try:
+				await asyncio.wait_for(task, timeout=2.0)
+			except BaseException:
+				pass
+			timeout_error = TimeoutError(f'Browser shutdown timed out after {timeout:g}s')
+			self._force_reset_runtime_state()
+			try:
+				self._lifecycle.transition(
+					LifecyclePhase.STOPPED,
+					reason='browser force-stopped after timeout',
+					error=timeout_error,
+					increment_generation=True,
+				)
+			except LifecycleTransitionError:
+				pass
+			raise timeout_error from error
+		except asyncio.CancelledError:
+			try:
+				await asyncio.wait_for(asyncio.shield(task), timeout=timeout)
+			except BaseException:
+				pass
+			raise
+
+	def _force_stop_resources(self) -> None:
+		"""Request a forced browser stop and kill the owned process if present."""
+		from openbrowser.browser.events import BrowserStopEvent
+
+		try:
+			self.event_bus.dispatch(BrowserStopEvent(force=True))
+		except Exception:
+			pass
+		watchdog = self._local_browser_watchdog
+		if watchdog is None:
+			return
+		for attribute in ('_subprocess', '_spawned_subprocess'):
+			process = getattr(watchdog, attribute, None)
+			if process is None:
+				continue
+			try:
+				process.kill()
+			except Exception:
+				pass
+
+	def _force_reset_runtime_state(self) -> None:
+		"""Abandon stuck cleanup tasks and restore a usable lifecycle shell."""
+		self._session_manager = None
+		self._cdp_session_pool.clear()
+		self._cdp_client_root = None
+		self._tab_registry.clear()
+		self._watchdogs_attached = False
+		self._cached_browser_state_summary = None
+		self._cached_selector_map.clear()
+		self.agent_focus = None
+		self.event_bus = EventBus()
+		self._core_handlers_attached = False
+		self._attach_core_handlers()
 
 	async def kill(self) -> None:
 		"""Kill the browser session and reset all state."""
+		if self._lifecycle.phase is LifecyclePhase.STOPPED and not self._has_live_resources():
+			return
+
+		async with self._lifecycle_lock:
+			if self._lifecycle.phase is LifecyclePhase.STOPPED and not self._has_live_resources():
+				return
+			if self._lifecycle.phase is LifecyclePhase.STOPPED:
+				self._lifecycle.transition(LifecyclePhase.STOPPING, reason='kill requested')
+			if self._stop_task is None or self._stop_task.done():
+				if self._lifecycle.phase is not LifecyclePhase.STOPPING:
+					self._lifecycle.transition(LifecyclePhase.STOPPING, reason='kill requested')
+				self._stop_task = asyncio.create_task(self._shutdown_locked(force=True))
+			stop_task = self._stop_task
+
+		await self._await_task_bounded(stop_task, _shutdown_timeout())
+
+	async def stop(self) -> None:
+		"""Stop the browser session without forcing the browser process closed."""
+		if self._lifecycle.phase is LifecyclePhase.STOPPED and not self._has_live_resources():
+			return
+
+		async with self._lifecycle_lock:
+			if self._lifecycle.phase is LifecyclePhase.STOPPED and not self._has_live_resources():
+				return
+			if self._lifecycle.phase is LifecyclePhase.STOPPED:
+				self._lifecycle.transition(LifecyclePhase.STOPPING, reason='stop requested')
+			if self._stop_task is None or self._stop_task.done():
+				if self._lifecycle.phase is not LifecyclePhase.STOPPING:
+					self._lifecycle.transition(LifecyclePhase.STOPPING, reason='stop requested')
+				self._stop_task = asyncio.create_task(self._shutdown_locked(force=False))
+			stop_task = self._stop_task
+
+		await self._await_task_bounded(stop_task, _shutdown_timeout())
+
+	async def _shutdown_locked(self, *, force: bool) -> None:
+		"""Save state, dispatch the stop event, then release the event bus."""
+		await self._cancel_owned_start()
+
 		# First save storage state while CDP is still connected
 		from openbrowser.browser.events import SaveStorageStateEvent
 
@@ -511,8 +770,8 @@ class BrowserSession(BaseModel):
 
 		stop_error: BaseException | None = None
 		try:
-			# Dispatch stop event to kill the browser
-			stop_event = event_bus.dispatch(BrowserStopEvent(force=True))
+			# Dispatch stop event to release the browser.
+			stop_event = event_bus.dispatch(BrowserStopEvent(force=force))
 			await stop_event
 			event_result = getattr(stop_event, 'event_result', None)
 			if callable(event_result):
@@ -524,55 +783,78 @@ class BrowserSession(BaseModel):
 			# cleanup fails, so the caller can retry without releasing the lease.
 			stop_error = error
 
-		if stop_error is not None:
-			if save_error is not None:
-				raise stop_error from save_error
-			raise stop_error
+		if force:
+			force_error = await self._force_stop_retained_browser()
+			if stop_error is None and force_error is not None:
+				stop_error = force_error
 
-		finalization_error: BaseException | None = None
-		event_bus_stopped = False
 		try:
-			# Stop the event bus only after the browser cleanup handlers complete.
-			await event_bus.stop(clear=True, timeout=5)
-			event_bus_stopped = True
-		except BaseException as error:
-			finalization_error = error
-		if event_bus_stopped:
+			if stop_error is not None:
+				if save_error is not None:
+					raise stop_error from save_error
+				raise stop_error
+
+			finalization_error: BaseException | None = None
+			event_bus_stopped = False
 			try:
-				# Reset all state
-				await self.reset()
+				# Stop the event bus only after the browser cleanup handlers complete.
+				await event_bus.stop(clear=True, timeout=5)
+				event_bus_stopped = True
 			except BaseException as error:
 				finalization_error = error
-			finally:
-				# The old bus is stopped, so replace it even if state reset fails.
-				self.event_bus = EventBus()
+			if event_bus_stopped:
+				try:
+					# Reset all state
+					await self.reset(stop_event_bus=False)
+				except BaseException as error:
+					finalization_error = error
+				finally:
+					# The old bus is stopped, so replace it even if state reset fails.
+					self.event_bus = EventBus()
+					self._core_handlers_attached = False
+					self._attach_core_handlers()
 
-		if finalization_error is not None:
-			raise finalization_error
-		if save_error is not None:
-			raise save_error
+			if finalization_error is not None:
+				raise finalization_error
+			if save_error is not None:
+				self._lifecycle.transition(
+					LifecyclePhase.STOPPED,
+					reason='browser stopped with storage-state error',
+					error=save_error,
+					increment_generation=True,
+				)
+				raise save_error
+			self._lifecycle.transition(LifecyclePhase.STOPPED, reason='browser stopped', increment_generation=True)
+		except BaseException as error:
+			if self._lifecycle.phase is not LifecyclePhase.STOPPED:
+				self._lifecycle.fail(error, reason='browser stop failed')
+			raise
+		finally:
+			self._stop_task = None
 
-	async def stop(self) -> None:
-		"""Stop the browser session without killing the browser process.
+	async def _cancel_owned_start(self) -> None:
+		"""Cancel an in-flight start before cleanup takes ownership."""
+		start_task = self._start_task
+		if start_task is None or start_task.done() or start_task is asyncio.current_task():
+			return
+		start_task.cancel()
+		await asyncio.gather(start_task, return_exceptions=True)
 
-		This clears event buses and cached state but keeps the browser alive.
-		Useful when you want to clean up resources but plan to reconnect later.
-		"""
-		# First save storage state while CDP is still connected
-		from openbrowser.browser.events import SaveStorageStateEvent
-
-		save_event = self.event_bus.dispatch(SaveStorageStateEvent())
-		await save_event
-
-		# Now dispatch BrowserStopEvent to notify watchdogs
-		await self.event_bus.dispatch(BrowserStopEvent(force=False))
-
-		# Stop the event bus
-		await self.event_bus.stop(clear=True, timeout=5)
-		# Reset all state
-		await self.reset()
-		# Create fresh event bus
-		self.event_bus = EventBus()
+	async def _force_stop_retained_browser(self) -> BaseException | None:
+		"""Kill and release a local browser retained by keep_alive."""
+		watchdog = self._local_browser_watchdog
+		if not self._watchdog_has_live_resources(watchdog):
+			return None
+		handler = getattr(watchdog, 'on_BrowserKillEvent', None)
+		if not callable(handler):
+			return None
+		try:
+			result = handler(BrowserKillEvent())
+			if inspect.isawaitable(result):
+				await result
+		except BaseException as error:
+			return error
+		return None
 
 	@observe_debug(ignore_input=True, ignore_output=True, name='browser_start_event_handler')
 	async def on_BrowserStartEvent(self, event: BrowserStartEvent) -> dict[str, str]:
@@ -789,6 +1071,12 @@ class BrowserSession(BaseModel):
 
 		# switch to the target
 		self.agent_focus = await self.get_or_create_cdp_session(target_id=event.target_id, focus=True)
+		self._tab_registry.register(
+			self.agent_focus.target_id,
+			url=self.agent_focus.url,
+			title=self.agent_focus.title if hasattr(self.agent_focus, 'title') else '',
+			state=TabState.OPEN,
+		)
 
 		# Visually switch to the tab in the browser
 		# The Force Background Tab extension prevents Chrome from auto-switching when links create new tabs,
@@ -806,23 +1094,71 @@ class BrowserSession(BaseModel):
 
 	async def on_CloseTabEvent(self, event: CloseTabEvent) -> None:
 		"""Handle tab closure - update focus if needed."""
+		record = self._tab_registry.get(event.target_id)
+		if record is not None and record.state is TabState.CLOSED:
+			await self._repair_focus_after_closed_tab(event.target_id)
+			return
+		# CLOSING is retryable: a previous close may have been cancelled after
+		# setting the state but before the target detached.
+		self._tab_registry.mark_closing(event.target_id)
+		closed = False
 		try:
-			# Dispatch tab closed event
-			await self.event_bus.dispatch(TabClosedEvent(target_id=event.target_id))
-
-			# Try to close the target, but don't fail if it's already closed
+			try:
+				await self.event_bus.dispatch(TabClosingEvent(target_id=event.target_id))
+			except Exception as error:
+				self.logger.warning(f'Tab closing observer failed: {type(error).__name__}: {error}')
 			try:
 				cdp_session = await self.get_or_create_cdp_session(target_id=None, focus=False)
 				await cdp_session.cdp_client.send.Target.closeTarget(params={'targetId': event.target_id})
-			except Exception as e:
-				self.logger.debug(f'Target may already be closed: {e}')
-		except Exception as e:
-			self.logger.warning(f'Error during tab close cleanup: {e}')
+			except Exception as error:
+				error_text = str(error).lower()
+				already_closed = any(
+					marker in error_text
+					for marker in ('already closed', 'no target', 'target closed', 'not found', '-32001')
+				)
+				try:
+					still_open = False if already_closed else await self._is_target_valid(event.target_id)
+				except Exception:
+					still_open = False
+				if still_open:
+					self._tab_registry.update(event.target_id, state=TabState.OPEN)
+					raise
+				closed = True
+				self.logger.debug(f'Target was already closed: {error}')
+			else:
+				closed = True
+		except BaseException:
+			if not closed:
+				record = self._tab_registry.get(event.target_id)
+				if record is not None and record.state is TabState.CLOSING:
+					self._tab_registry.update(event.target_id, state=TabState.OPEN)
+			raise
+		finally:
+			record = self._tab_registry.get(event.target_id)
+			if closed and (record is None or record.state is not TabState.CLOSED):
+				try:
+					await self.event_bus.dispatch(TabClosedEvent(target_id=event.target_id))
+				except Exception as error:
+					self.logger.warning(f'Tab closed but focus update failed: {type(error).__name__}: {error}')
+				except BaseException:
+					self._tab_registry.mark_closed(event.target_id)
+					raise
+				finally:
+					record = self._tab_registry.get(event.target_id)
+					if record is not None and record.state is TabState.CLOSING:
+						self._tab_registry.mark_closed(event.target_id)
+				await self._repair_focus_after_closed_tab(event.target_id)
 
 	async def on_TabCreatedEvent(self, event: TabCreatedEvent) -> None:
 		"""Handle tab creation - apply viewport settings to new tab."""
 		# Note: Tab switching prevention is handled by the Force Background Tab extension
 		# The extension automatically keeps focus on the current tab when new tabs are created
+
+		self._tab_registry.register(
+			event.target_id,
+			url=event.url,
+			state=TabState.OPENING,
+		)
 
 		# Apply viewport settings if configured
 		if self.browser_profile.viewport and not self.browser_profile.no_viewport:
@@ -840,14 +1176,14 @@ class BrowserSession(BaseModel):
 
 	async def on_TabClosedEvent(self, event: TabClosedEvent) -> None:
 		"""Handle tab closure - update focus if needed."""
+		self._tab_registry.mark_closed(event.target_id)
+		await self._repair_focus_after_closed_tab(event.target_id)
+
+	async def _repair_focus_after_closed_tab(self, target_id: str) -> None:
+		"""Move agent focus away from a tab that is known to be closed."""
 		if not self.agent_focus:
 			return
-
-		# Get current tab index
-		current_target_id = self.agent_focus.target_id
-
-		# If the closed tab was the current one, find a new target
-		if current_target_id == event.target_id:
+		if self.agent_focus.target_id == target_id or self.agent_focus.target_id.endswith(target_id):
 			await self.event_bus.dispatch(SwitchTabEvent(target_id=None))
 
 	async def on_AgentFocusChangedEvent(self, event: AgentFocusChangedEvent) -> None:
@@ -870,6 +1206,12 @@ class BrowserSession(BaseModel):
 		# Update agent focus if a specific target_id is provided
 		if event.target_id:
 			self.agent_focus = await self.get_or_create_cdp_session(target_id=event.target_id, focus=True)
+			self._tab_registry.register(
+				self.agent_focus.target_id,
+				url=event.url or self.agent_focus.url,
+				title=self.agent_focus.title if hasattr(self.agent_focus, 'title') else '',
+				state=TabState.OPEN,
+			)
 			self.logger.debug(f'🔄 Updated agent focus to tab target_id=...{event.target_id[-4:]}')
 		else:
 			raise RuntimeError('AgentFocusChangedEvent received with no target_id for newly focused tab')
@@ -890,8 +1232,9 @@ class BrowserSession(BaseModel):
 				else:
 					raise Exception('❌ Failed to execute test JS expression with Page.evaluate')
 			except Exception as e:
+				fallback_target_id = all_targets[0].get('targetId') if all_targets else 'no remaining targets'
 				self.logger.error(
-					f'🔄 ❌ Target {self.agent_focus.target_id} seems closed/crashed, switching to fallback page {all_targets[0]}: {type(e).__name__}: {e}'
+					f'🔄 ❌ Target {self.agent_focus.target_id} seems closed/crashed, switching to fallback page {fallback_target_id}: {type(e).__name__}: {e}'
 				)
 				all_pages = await self._cdp_get_all_pages()
 				last_target_id = all_pages[-1]['targetId'] if all_pages else None
@@ -933,7 +1276,7 @@ class BrowserSession(BaseModel):
 				return
 
 			# Clear CDP session cache before stopping
-			await self.reset()
+			await self.reset(stop_event_bus=False)
 
 			# Reset state
 			if self.is_local:
@@ -1677,7 +2020,15 @@ class BrowserSession(BaseModel):
 		if not self._cdp_client_root:
 			return tabs
 
-		# Get all page targets using CDP
+		# Reconcile against every page target, then use the filtered page query
+		# for display. A chrome-error:// or chrome:// tab is still live even
+		# when it is not shown as an actionable tab.
+		authoritative_pages = await self._cdp_get_all_pages(
+			include_chrome=True,
+			include_chrome_extensions=True,
+			include_chrome_error=True,
+		)
+		self._tab_registry.sync_from_pages(authoritative_pages)
 		pages = await self._cdp_get_all_pages()
 
 		for i, page_target in enumerate(pages):
@@ -1729,6 +2080,7 @@ class BrowserSession(BaseModel):
 				title=title,
 				parent_target_id=None,
 			)
+			self._tab_registry.update(target_id, url=url, title=title, state=TabState.OPEN)
 			tabs.append(tab_info)
 
 		return tabs
@@ -1813,23 +2165,44 @@ class BrowserSession(BaseModel):
 
 	async def get_target_id_from_tab_id(self, tab_id: str) -> TargetID:
 		"""Get the full-length TargetID from the truncated 4-char tab_id."""
-		# First check cached sessions
-		for full_target_id in self._cdp_session_pool.keys():
-			if full_target_id.endswith(tab_id):
+		try:
+			return self._tab_registry.resolve(tab_id)
+		except TabError as first_error:
+			if first_error.candidates:
+				raise
+
+		cached_candidates = [
+			full_target_id
+			for full_target_id in self._cdp_session_pool
+			if full_target_id.endswith(tab_id)
+		]
+		live_cached: list[str] = []
+		for full_target_id in cached_candidates:
+			try:
 				if await self._is_target_valid(full_target_id):
-					return full_target_id
-				# Stale session - Chrome should have sent detach event
-				# If we're here, event listener will clean it up
-				self.logger.debug(f'Found stale session for target {full_target_id}, skipping')
+					live_cached.append(full_target_id)
+			except Exception:
+				continue
+		if len(live_cached) == 1:
+			return live_cached[0]
+		if len(live_cached) > 1:
+			raise TabError(
+				f'Tab ID {tab_id} is ambiguous; it matches {len(live_cached)} cached CDP sessions.',
+				tab_id=tab_id,
+				candidates=live_cached,
+				hint='Pass the full CDP target_id, not the four-character suffix.',
+			)
 
-		# Get all current targets and find the one matching tab_id
-		all_targets = await self.cdp_client.send.Target.getTargets()
-		# Filter for valid page/tab targets only
-		for target in all_targets.get('targetInfos', []):
-			if target['targetId'].endswith(tab_id) and target.get('type') == 'page':
-				return target['targetId']
+		if self._cdp_client_root is not None:
+			targets = await self.cdp_client.send.Target.getTargets()
+			pages = [
+				target
+				for target in targets.get('targetInfos', [])
+				if target.get('type') in ('page', 'tab')
+			]
+			self._tab_registry.sync_from_pages(pages)
 
-		raise ValueError(f'No TargetID found ending in tab_id=...{tab_id}')
+		return self._tab_registry.resolve(tab_id)
 
 	async def _is_target_valid(self, target_id: TargetID) -> bool:
 		"""Check if a target ID is still valid."""

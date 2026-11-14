@@ -1158,7 +1158,7 @@ class TestDOMHelperMethods:
         )
         session._cdp_session_pool = {}
 
-        with pytest.raises(ValueError, match="No TargetID found"):
+        with pytest.raises(ValueError, match="No live tab matches"):
             await session.get_target_id_from_tab_id("ZZZZ")
 
     async def test_get_target_id_from_tab_id_cached(self):
