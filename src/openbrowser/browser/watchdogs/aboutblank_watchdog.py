@@ -12,7 +12,9 @@ from openbrowser.browser.events import (
 	BrowserStoppedEvent,
 	CloseTabEvent,
 	NavigateToUrlEvent,
+	SwitchTabEvent,
 	TabClosedEvent,
+	TabClosingEvent,
 	TabCreatedEvent,
 )
 from openbrowser.browser.watchdog_base import BaseWatchdog
@@ -30,10 +32,13 @@ class AboutBlankWatchdog(BaseWatchdog):
 		BrowserStoppedEvent,
 		TabCreatedEvent,
 		TabClosedEvent,
+		TabClosingEvent,
 	]
 	EMITS: ClassVar[list[type[BaseEvent]]] = [
 		NavigateToUrlEvent,
 		CloseTabEvent,
+		TabCreatedEvent,
+		SwitchTabEvent,
 		AboutBlankDVDScreensaverShownEvent,
 	]
 
@@ -57,8 +62,8 @@ class AboutBlankWatchdog(BaseWatchdog):
 		if event.url == 'about:blank':
 			await self._show_dvd_screensaver_on_about_blank_tabs()
 
-	async def on_TabClosedEvent(self, event: TabClosedEvent) -> None:
-		"""Check tabs when a tab is closed and proactively create about:blank if needed."""
+	async def on_TabClosingEvent(self, event: TabClosingEvent) -> None:
+		"""Protect the last tab before the close request detaches it."""
 		# logger.debug('[AboutBlankWatchdog] Tab closing, checking if we need to create about:blank tab')
 
 		# Don't create new tabs if browser is shutting down
@@ -73,18 +78,32 @@ class AboutBlankWatchdog(BaseWatchdog):
 			self.logger.debug(
 				'[AboutBlankWatchdog] Last tab closing, creating new about:blank tab to avoid closing entire browser'
 			)
-			# Create the animation tab since no tabs should remain
-			navigate_event = self.event_bus.dispatch(NavigateToUrlEvent(url='about:blank', new_tab=True))
-			await navigate_event
+			await self._create_about_blank_tab()
 			# Show DVD screensaver on the new tab
 			await self._show_dvd_screensaver_on_about_blank_tabs()
 		else:
 			# Multiple tabs exist, check after close
 			await self._check_and_ensure_about_blank_tab()
 
+	async def on_TabClosedEvent(self, event: TabClosedEvent) -> None:
+		"""Ensure the browser keeps a tab after a close or detach completes."""
+		if self._stopping:
+			return
+		await self._check_and_ensure_about_blank_tab()
+
 	async def attach_to_target(self, target_id: TargetID) -> None:
 		"""AboutBlankWatchdog doesn't monitor individual targets."""
 		pass
+
+	async def _create_about_blank_tab(self) -> None:
+		"""Create a foreground about:blank tab without reusing the tab being closed."""
+		if self.browser_session._cdp_client_root is not None:
+			target_id = await self.browser_session._cdp_create_new_page('about:blank')
+			self.event_bus.dispatch(TabCreatedEvent(target_id=target_id, url='about:blank'))
+			await self.event_bus.dispatch(SwitchTabEvent(target_id=target_id))
+			return
+		navigate_event = self.event_bus.dispatch(NavigateToUrlEvent(url='about:blank', new_tab=True))
+		await navigate_event
 
 	async def _check_and_ensure_about_blank_tab(self) -> None:
 		"""Check current tabs and ensure exactly one about:blank tab with animation exists."""

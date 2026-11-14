@@ -212,11 +212,7 @@ openbrowser-ai daemon stop
 openbrowser-ai daemon status
 ```
 
-`daemon stop` closes every tab, exits Chrome, flushes saved cookies/login state to the profile, and shuts down the daemon process. `daemon status` should report the daemon is not running. If it still reports running, the daemon is wedged, force-kill it:
-
-```bash
-pkill -f 'openbrowser.*daemon' || true
-```
+`daemon stop` closes every tab, exits Chrome, flushes saved cookies/login state to the profile, and shuts down the daemon process. `daemon status` should report the daemon is not running. If it still reports running, run `openbrowser-ai daemon force-stop`. It targets the current daemon endpoint: the configured `OPENBROWSER_SOCKET` on macOS/Linux, or the fixed loopback port on Windows. It verifies listener and owner absence before success. `daemon reap` is broader: it scans the default socket plus custom sockets that have a matching PID file and attempts to stop verified daemons. Inspect its JSON before accepting global cleanup.
 
 If a download can fail mid-workflow (timeout, 4xx/5xx, CORS), guarantee cleanup with a shell trap so the browser is never left orphaned:
 

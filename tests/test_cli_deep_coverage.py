@@ -1315,8 +1315,9 @@ class TestInitCommand:
         assert Path(output_file).exists()
         assert "Created" in result.output
 
-    def test_init_interactive_mode(self, fake_templates, tmp_path):
+    def test_init_interactive_mode(self, fake_templates, tmp_path, monkeypatch):
         runner = CliRunner()
+        monkeypatch.chdir(tmp_path)
         with patch("openbrowser.cli.__file__", str(fake_templates / "cli.py")):
             result = runner.invoke(main, ["init", "-f"], input="default\n")
         # Interactive mode prompts for template then writes
@@ -1352,12 +1353,14 @@ class TestInitCommand:
             result = runner.invoke(main, ["init", "--template", "tools", "-o", output_file, "-f"])
         assert result.exit_code == 0
 
-    def test_init_no_output_uses_default(self, fake_templates):
+    def test_init_no_output_uses_default(self, fake_templates, tmp_path, monkeypatch):
         """When no --output specified, init uses cwd/openbrowser_<template>.py."""
         runner = CliRunner()
+        monkeypatch.chdir(tmp_path)
         with patch("openbrowser.cli.__file__", str(fake_templates / "cli.py")):
             result = runner.invoke(main, ["init", "--template", "default", "-f"])
         assert result.exit_code == 0
+        assert (tmp_path / "openbrowser_default.py").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -1805,6 +1808,46 @@ class TestModuleLevelEarlyExits:
         finally:
             sys.argv = original_argv
 
+    def test_early_daemon_force_stop_success(self):
+        """The force-stop subcommand awaits the socket-scoped force_stop path."""
+        mock_resp = MagicMock()
+        mock_resp.success = True
+        mock_resp.output = "Daemon force-stopped"
+        mock_resp.error = None
+        mock_client_instance = MagicMock()
+        mock_client_instance.force_stop = AsyncMock(return_value=mock_resp)
+
+        def run_coroutine(coro):
+            loop = asyncio.new_event_loop()
+            try:
+                return loop.run_until_complete(coro)
+            finally:
+                loop.close()
+
+        original_argv = sys.argv[:]
+        try:
+            sys.argv = ["openbrowser-ai", "daemon", "force-stop"]
+            with (
+                patch("asyncio.run", side_effect=run_coroutine),
+                patch.dict("sys.modules", {
+                    "dotenv": MagicMock(),
+                    "openbrowser.daemon.client": MagicMock(
+                        DaemonClient=MagicMock(return_value=mock_client_instance),
+                    ),
+                }),
+                pytest.raises(SystemExit) as exc_info,
+            ):
+                cli_path = Path(cli_mod.__file__)
+                code = cli_path.read_text()
+                ns = {"__name__": "__test__", "__file__": str(cli_path)}
+                exec(compile(code, str(cli_path), "exec"), ns)
+
+            assert exc_info.value.code == 0
+            mock_client_instance.force_stop.assert_awaited_once_with()
+        finally:
+            sys.argv = original_argv
+
+
     def test_early_daemon_stop_failure(self):
         """Test early daemon stop failure (lines 120-121)."""
         mock_resp = MagicMock()
@@ -2072,12 +2115,8 @@ class TestModuleLevelEarlyExits:
 
     def test_early_daemon_restart_success(self):
         """Test early daemon restart success (lines 128-146)."""
-        mock_stop_resp = MagicMock()
-        mock_stop_resp.success = False  # After stopping, status returns not running
-
         mock_client_instance = MagicMock()
-        mock_client_instance.stop = AsyncMock()
-        mock_client_instance.status = AsyncMock(return_value=mock_stop_resp)
+        mock_client_instance.force_stop = AsyncMock(return_value=MagicMock(success=True))
         mock_client_instance._start_daemon = AsyncMock()
         mock_client_cls = MagicMock(return_value=mock_client_instance)
 
@@ -2087,7 +2126,6 @@ class TestModuleLevelEarlyExits:
             with (
                 patch.dict("sys.modules", {
                     "dotenv": MagicMock(),
-                    "time": MagicMock(time=MagicMock(side_effect=[0, 0, 10])),
                     "openbrowser.daemon.client": MagicMock(
                         DaemonClient=mock_client_cls,
                     ),
@@ -2104,13 +2142,17 @@ class TestModuleLevelEarlyExits:
             sys.argv = original_argv
 
     def test_early_daemon_restart_timeout(self):
-        """Test early daemon restart timeout (lines 141-143)."""
-        mock_running_resp = MagicMock()
-        mock_running_resp.success = True  # Daemon still running after stop
-
+        """A failed force-stop exits with an error."""
         mock_client_instance = MagicMock()
-        mock_client_instance.stop = AsyncMock()
-        mock_client_instance.status = AsyncMock(return_value=mock_running_resp)
+        mock_client_instance.force_stop = AsyncMock(
+            return_value=MagicMock(
+                success=False,
+                output='',
+                error='still running',
+                error_code='daemon_stop_timeout',
+                hint='retry',
+            )
+        )
         mock_client_instance._start_daemon = AsyncMock()
         mock_client_cls = MagicMock(return_value=mock_client_instance)
 
@@ -2131,8 +2173,7 @@ class TestModuleLevelEarlyExits:
                 ns = {"__name__": "__test__", "__file__": str(cli_path)}
                 exec(compile(code, str(cli_path), "exec"), ns)
 
-            # Should exit 1 due to timeout or 0 due to normal restart
-            assert exc_info.value.code in (0, 1)
+            assert exc_info.value.code == 1
         finally:
             sys.argv = original_argv
 

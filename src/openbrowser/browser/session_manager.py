@@ -9,6 +9,8 @@ from typing import TYPE_CHECKING
 
 from cdp_use.cdp.target import AttachedToTargetEvent, DetachedFromTargetEvent, SessionID, TargetID
 
+from openbrowser.browser.tabs import TabState
+
 if TYPE_CHECKING:
 	from openbrowser.browser.session import BrowserSession, CDPSession
 
@@ -194,6 +196,24 @@ class SessionManager:
 				existing.session_id = session_id
 				existing.title = event['targetInfo'].get('title', existing.title)
 				existing.url = event['targetInfo'].get('url', existing.url)
+
+			if target_type == 'page':
+				tab_url = event['targetInfo'].get('url')
+				tab_title = event['targetInfo'].get('title')
+				if self.browser_session._tab_registry.get(target_id) is None:
+					self.browser_session._tab_registry.register(
+						target_id,
+						url=tab_url,
+						title=tab_title,
+						state=TabState.OPEN,
+					)
+				else:
+					self.browser_session._tab_registry.update(
+						target_id,
+						url=tab_url,
+						title=tab_title,
+						state=TabState.OPEN,
+					)
 
 		# Resume execution if waiting for debugger
 		if waiting_for_debugger:

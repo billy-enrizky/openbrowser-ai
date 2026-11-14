@@ -44,6 +44,7 @@ Targets specific missed lines across:
 
 import asyncio
 import base64
+from contextlib import asynccontextmanager
 import io
 import json
 import logging
@@ -474,6 +475,7 @@ class TestDaemonServer:
         from openbrowser.daemon.server import DaemonServer
 
         daemon = DaemonServer.__new__(DaemonServer)
+        daemon._init_lock = asyncio.Lock()
         daemon._session = AsyncMock()
         daemon._session.kill = AsyncMock()
         daemon._executor = MagicMock()
@@ -497,39 +499,59 @@ class TestDaemonServer:
 # ===========================================================================
 
 class TestDaemonClient:
-    """Cover lines 70-71: connection refused during daemon start."""
+    """Daemon start and probe behavior."""
+
+    @asynccontextmanager
+    async def _no_start_lock(self):
+        yield
 
     @pytest.mark.asyncio
-    async def test_start_daemon_connection_refused_retry(self):
-        """Lines 70-71: ConnectionRefusedError/FileNotFoundError/OSError caught in loop."""
+    async def test_start_daemon_connection_refused_retry(self, tmp_path):
+        """The startup probe tolerates initial connection failures."""
         from openbrowser.daemon.client import DaemonClient
 
         client = DaemonClient()
-        connect_attempts = [0]
+        probe_attempts = [0]
 
-        async def mock_connect():
-            connect_attempts[0] += 1
-            if connect_attempts[0] <= 2:
-                raise ConnectionRefusedError("refused")
-            # Return mock reader/writer on 3rd attempt
-            writer = AsyncMock()
-            writer.close = MagicMock()
-            writer.wait_closed = AsyncMock()
-            return AsyncMock(), writer
+        async def mock_probe(timeout=1.0):
+            probe_attempts[0] += 1
+            return probe_attempts[0] >= 3
 
-        with patch.object(client, "_connect", side_effect=mock_connect), \
-             patch("openbrowser.daemon.client.get_socket_path") as mock_sock, \
-             patch("openbrowser.daemon.client.DAEMON_DIR", Path(tempfile.mkdtemp())), \
-             patch("subprocess.Popen"), \
+        process = MagicMock()
+        process.poll.return_value = None
+        socket_path = tmp_path / "daemon.sock"
+        socket_path.touch()
+        with patch.object(client, "_probe", side_effect=mock_probe), \
+             patch.object(client, "_start_lock", self._no_start_lock), \
+             patch("openbrowser.daemon.client.get_socket_path", return_value=socket_path), \
+             patch("openbrowser.daemon.client.get_pid_path", return_value=tmp_path / "daemon.pid"), \
+             patch("openbrowser.daemon.client.get_log_path", return_value=tmp_path / "daemon.log"), \
+             patch("openbrowser.daemon.client.DAEMON_DIR", tmp_path), \
+             patch.object(client, "_daemon_owner_for_socket", return_value=None), \
+             patch.object(client, "_verified_daemon_pid", return_value=None), \
+             patch.object(client, "_remove_stale_socket"), \
+             patch("subprocess.Popen", return_value=process), \
              patch("asyncio.sleep", new_callable=AsyncMock), \
-             patch("time.time", side_effect=[0, 0.1, 0.2, 0.3, 100]):
-            mock_sock.return_value = MagicMock()
-            mock_sock.return_value.parent = MagicMock()
-            mock_sock.return_value.parent.mkdir = MagicMock()
-            mock_sock.return_value.exists.return_value = True
-
+             patch("time.time", side_effect=[0, 0.1, 0.2, 0.3]):
             await client._start_daemon()
-        assert connect_attempts[0] == 3
+        assert probe_attempts[0] >= 3
+
+    @pytest.mark.asyncio
+    async def test_probe_handles_connection_refusal_then_success(self):
+        from openbrowser.daemon.client import DaemonClient
+
+        client = DaemonClient()
+        reader = MagicMock()
+        reader.readline = AsyncMock(return_value=b'{"success": true}\n')
+        writer = MagicMock()
+        writer.drain = AsyncMock()
+        writer.wait_closed = AsyncMock()
+        client._connect = AsyncMock(
+            side_effect=[ConnectionRefusedError("not listening"), (reader, writer)]
+        )
+
+        assert await client._probe() is False
+        assert await client._probe() is True
 
 
 # ===========================================================================

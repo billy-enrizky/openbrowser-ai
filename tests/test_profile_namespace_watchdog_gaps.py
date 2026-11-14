@@ -683,8 +683,12 @@ class TestNamespaceImportFallbacks:
             mock_tools.registry.registry.actions = {}
 
             ns = ns_mod.create_namespace(session, tools=mock_tools)
-            assert "PdfReader" not in ns
-            assert "pypdf" not in ns
+            assert "PdfReader" in ns
+            with pytest.raises(ImportError, match="openbrowser-ai\\[pdf\\]"):
+                ns["PdfReader"]()
+            assert "pypdf" in ns
+            with pytest.raises(ImportError, match="openbrowser-ai\\[pdf\\]"):
+                ns["pypdf"].PdfReader("file.pdf")
         finally:
             ns_mod.PYPDF_AVAILABLE = original
 

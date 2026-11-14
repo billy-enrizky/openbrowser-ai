@@ -1,7 +1,8 @@
 """MCP Server for openbrowser -- CodeAgent code execution via Model Context Protocol.
 
-Exposes a single ``execute_code`` tool that runs Python code in a persistent
-namespace with browser automation functions (navigate, click, evaluate, etc.).
+Exposes ``execute_code`` plus lifecycle diagnostics and recovery tools.
+``execute_code`` runs Python code in a persistent namespace with browser
+automation functions (navigate, click, evaluate, etc.).
 
 Usage:
     uvx openbrowser-ai --mcp
@@ -27,6 +28,7 @@ os.environ['OPENBROWSER_SETUP_LOGGING'] = 'false'
 import asyncio
 from copy import deepcopy
 import inspect
+import json
 import logging
 import shutil
 import time
@@ -83,6 +85,7 @@ logging.disable(logging.CRITICAL)
 
 # Import openbrowser modules
 from openbrowser.browser import BrowserProfile, BrowserSession
+from openbrowser.browser.lifecycle import LifecycleMachine, LifecyclePhase, LifecycleTransitionError
 from openbrowser.code_use.executor import DEFAULT_MAX_OUTPUT_CHARS, CodeExecutor
 from openbrowser.code_use.namespace import create_namespace
 from openbrowser.config import (
@@ -106,6 +109,22 @@ logger = logging.getLogger(__name__)
 
 _MCP_WORKSPACE_DIR = Path.home() / 'Downloads' / 'openbrowser-mcp' / 'workspace'
 _CDP_HEALTH_CHECK_TIMEOUT_SECONDS = 2.0
+
+
+def _start_timeout_seconds() -> float:
+	raw = os.environ.get('OPENBROWSER_MCP_START_TIMEOUT', '')
+	try:
+		return max(1.0, float(raw)) if raw else 30.0
+	except ValueError:
+		return 30.0
+
+
+def _exec_timeout_seconds() -> float:
+	raw = os.environ.get('OPENBROWSER_MCP_EXEC_TIMEOUT', '')
+	try:
+		return max(1.0, float(raw)) if raw else 110.0
+	except ValueError:
+		return 110.0
 
 
 def _create_mcp_file_system() -> Any:
@@ -208,9 +227,10 @@ from openbrowser.code_use.descriptions import (
 class OpenBrowserServer:
 	"""MCP Server exposing CodeAgent code execution environment.
 
-	Provides a single ``execute_code`` tool that runs Python code in a
-	persistent namespace populated with browser automation functions from
-	``create_namespace()`` (navigate, click, evaluate, etc.).
+	Provides ``execute_code`` plus ``get_status`` and ``reset_browser``.
+	``execute_code`` runs Python code in a persistent namespace populated with
+	browser automation functions from ``create_namespace()`` (navigate, click,
+	evaluate, etc.).
 	"""
 
 	def __init__(self, session_timeout_minutes: int = 10):
@@ -219,6 +239,11 @@ class OpenBrowserServer:
 		self.server = Server('openbrowser')
 		self.config = load_openbrowser_config()
 		self.browser_session: BrowserSession | None = None
+		self._lifecycle = LifecycleMachine('mcp_server')
+		self._browser_lifecycle = LifecycleMachine('mcp_browser')
+		self._browser_generation = 0
+		self._pending_variables: dict[str, Any] = {}
+		self._profile_summary: dict[str, Any] | None = None
 		self._instance_id = uuid.uuid4().hex
 		self._managed_profile_dir: Path | None = None
 		self._managed_storage_state: Path | None = None
@@ -249,7 +274,7 @@ class OpenBrowserServer:
 
 		@self.server.list_tools()
 		async def handle_list_tools() -> list[types.Tool]:
-			"""List the single execute_code tool."""
+			"""List the code execution and recovery tools."""
 			description = _EXECUTE_CODE_DESCRIPTION
 			if os.environ.get('OPENBROWSER_COMPACT_DESCRIPTION', '').lower() in ('1', 'true', 'yes'):
 				description = _EXECUTE_CODE_DESCRIPTION_COMPACT
@@ -268,11 +293,54 @@ class OpenBrowserServer:
 						'required': ['code'],
 					},
 					annotations=types.ToolAnnotations(
-					readOnlyHint=False,
-					destructiveHint=True,
-					openWorldHint=True,
-					idempotentHint=False,
+						readOnlyHint=False,
+						destructiveHint=True,
+						openWorldHint=True,
+						idempotentHint=False,
+					),
 				),
+				types.Tool(
+					name='get_status',
+					description=(
+						'Return OpenBrowser server, browser, profile, and tab state as JSON. '
+						'Read-only and does not start a browser. Use this before retrying a failed task.'
+					),
+					inputSchema={
+						'type': 'object',
+						'properties': {},
+						'additionalProperties': False,
+					},
+					annotations=types.ToolAnnotations(
+						readOnlyHint=True,
+						destructiveHint=False,
+						openWorldHint=False,
+						idempotentHint=True,
+					),
+				),
+				types.Tool(
+					name='reset_browser',
+					description=(
+						'Close the current browser session and release its profile. '
+						'User-defined Python variables are preserved unless clear_variables is true. '
+						'The next execute_code call starts a fresh browser.'
+					),
+					inputSchema={
+						'type': 'object',
+						'properties': {
+							'clear_variables': {
+								'type': 'boolean',
+								'description': 'Also discard user-defined Python variables.',
+								'default': False,
+							},
+						},
+						'additionalProperties': False,
+					},
+					annotations=types.ToolAnnotations(
+						readOnlyHint=False,
+						destructiveHint=True,
+						openWorldHint=False,
+						idempotentHint=True,
+					),
 				),
 			]
 
@@ -294,14 +362,7 @@ class OpenBrowserServer:
 			start_time = time.time()
 			error_msg = None
 			try:
-				if name != 'execute_code':
-					return [types.TextContent(type='text', text=f'Unknown tool: {name}')]
-
-				code = (arguments or {}).get('code', '')
-				if not code.strip():
-					return [types.TextContent(type='text', text='Error: No code provided')]
-
-				result = await self._execute_code(code)
+				result = await self._handle_tool(name, arguments or {})
 				return [types.TextContent(type='text', text=result)]
 			except Exception as e:
 				error_msg = str(e)
@@ -320,6 +381,19 @@ class OpenBrowserServer:
 						)
 					)
 
+	async def _handle_tool(self, name: str, arguments: dict[str, Any]) -> str:
+		"""Dispatch one MCP tool call to its implementation."""
+		if name == 'execute_code':
+			code = arguments.get('code', '')
+			if not code.strip():
+				return 'Error: No code provided'
+			return await self._execute_code(code)
+		if name == 'get_status':
+			return json.dumps(self._status_payload(), indent=2)
+		if name == 'reset_browser':
+			return await self._reset_browser(clear_variables=bool(arguments.get('clear_variables', False)))
+		return f'Unknown tool: {name}'
+
 	def _build_browser_profile(self):
 		"""Build a BrowserProfile from config with MCP defaults."""
 		profile_config = dict(get_default_profile(self.config))
@@ -333,6 +407,11 @@ class OpenBrowserServer:
 			'headless': True,
 			**profile_config,
 		}
+		env_headless = os.environ.get('OPENBROWSER_HEADLESS', '').lower()
+		if env_headless in ('true', '1', 'yes'):
+			profile_data['headless'] = True
+		elif env_headless in ('false', '0', 'no'):
+			profile_data['headless'] = False
 
 		if explicit_user_data_dir:
 			# Explicit paths are intentionally shared and protected by the
@@ -357,7 +436,15 @@ class OpenBrowserServer:
 		if not any(argument.startswith('--openbrowser-instance-id=') for argument in args):
 			args.append(ownership_marker)
 		profile_data['args'] = args
-		return BrowserProfile(**profile_data)
+		profile = BrowserProfile(**profile_data)
+		storage_state = profile.storage_state
+		self._profile_summary = {
+			'user_data_dir': str(profile.user_data_dir) if profile.user_data_dir else None,
+			'headless': profile.headless,
+			'storage_state': str(storage_state) if isinstance(storage_state, (str, Path)) else None,
+			'instance_id': self._instance_id,
+		}
+		return profile
 
 	def _get_managed_profile_dir(self) -> Path:
 		"""Return the stable isolated profile directory for this MCP instance."""
@@ -390,13 +477,26 @@ class OpenBrowserServer:
 				raise RuntimeError('A previous browser session still owns resources after cleanup failed')
 
 			_ensure_all_loggers_use_stderr()
+			if self._browser_lifecycle.phase not in (LifecyclePhase.STOPPED, LifecyclePhase.FAILED):
+				try:
+					self._browser_lifecycle.transition(LifecyclePhase.STOPPING, reason='reinitializing browser')
+					self._browser_lifecycle.transition(
+						LifecyclePhase.STOPPED,
+						reason='browser reinitialized',
+						increment_generation=True,
+					)
+				except LifecycleTransitionError:
+					pass
+			self._browser_lifecycle.transition(LifecyclePhase.STARTING, reason='browser start requested')
 
 			# Initialize browser session
-			profile = self._build_browser_profile()
-			session = BrowserSession(browser_profile=profile)
-			self.browser_session = session
+			session = None
 			try:
-				await session.start()
+				profile = self._build_browser_profile()
+				session = BrowserSession(browser_profile=profile)
+				self.browser_session = session
+				await asyncio.wait_for(session.start(), timeout=_start_timeout_seconds())
+				session.seed_generation(self._browser_generation)
 
 				# Create CodeAgent tools and namespace
 				self._tools = CodeAgentTools()
@@ -405,18 +505,26 @@ class OpenBrowserServer:
 					tools=self._tools,
 					file_system=_create_mcp_file_system(),
 				)
+				for key, value in self._pending_variables.items():
+					if not key.startswith('__') and key not in self._namespace:
+						self._namespace[key] = value
+				self._pending_variables.clear()
 				self._executor.set_namespace(self._namespace)
+				self._browser_lifecycle.transition(LifecyclePhase.READY, reason='browser ready')
 			except BaseException as error:
+				message = f'{type(error).__name__}: {error}'
+				self._browser_lifecycle.fail(message, reason='browser start failed')
 				logger.error('Failed to initialize browser session: %s', error)
-				cleanup_succeeded, was_cancelled = await self._kill_session_safely(session)
-				if not cleanup_succeeded:
-					logger.error('Failed to clean up browser session after initialization failure')
-				if cleanup_succeeded and self.browser_session is session:
-					self.browser_session = None
-				if cleanup_succeeded:
-					self._namespace = None
-				if was_cancelled:
-					raise asyncio.CancelledError
+				if session is not None:
+					cleanup_succeeded, was_cancelled = await self._kill_session_safely(session)
+					if not cleanup_succeeded:
+						logger.error('Failed to clean up browser session after initialization failure')
+					if cleanup_succeeded and self.browser_session is session:
+						self.browser_session = None
+					if cleanup_succeeded:
+						self._namespace = None
+					if was_cancelled:
+						raise asyncio.CancelledError
 				raise
 
 	async def _is_cdp_alive(self) -> bool:
@@ -503,6 +611,10 @@ class OpenBrowserServer:
 				return
 
 			logger.info('CDP connection lost, recovering browser session')
+			try:
+				self._browser_lifecycle.transition(LifecyclePhase.RECOVERING, reason='cdp connection lost')
+			except LifecycleTransitionError:
+				self._browser_lifecycle.transition(LifecyclePhase.STARTING, reason='cdp connection lost')
 
 			# 1. Tear down the old session
 			old_session = self.browser_session
@@ -532,7 +644,9 @@ class OpenBrowserServer:
 
 			self.browser_session = session
 			try:
-				await session.start()
+				await asyncio.wait_for(session.start(), timeout=_start_timeout_seconds())
+				self._browser_generation += 1
+				session.seed_generation(self._browser_generation)
 
 				# 3. Rebuild namespace with the new session (preserving user variables)
 				self._tools = CodeAgentTools()
@@ -547,7 +661,13 @@ class OpenBrowserServer:
 						self._namespace[key] = val
 
 				self._executor.set_namespace(self._namespace)
-			except BaseException:
+				self._browser_lifecycle.transition(
+					LifecyclePhase.READY,
+					reason='browser recovered',
+					increment_generation=True,
+				)
+			except BaseException as error:
+				self._browser_lifecycle.fail(error, reason='browser recovery failed')
 				cleanup_succeeded, was_cancelled = await self._kill_session_safely(session)
 				if not cleanup_succeeded:
 					logger.error('Failed to clean up replacement browser session')
@@ -599,23 +719,132 @@ class OpenBrowserServer:
 				await self._recover_browser_session()
 			except Exception as recovery_err:
 				logger.error('Pre-flight CDP recovery failed: %s', recovery_err)
+				return (
+					f'Error: Browser connection lost and recovery failed: {type(recovery_err).__name__}: {recovery_err}\n\n'
+					'Run get_status, then reset_browser before retrying.'
+				)
 
-		# Execute via shared CodeExecutor
-		result = await self._executor.execute(code)
+		# Execute via shared CodeExecutor with a bound that leaves room for the
+		# calling agent to receive the timeout message before its own timeout.
+		try:
+			result = await asyncio.wait_for(
+				self._executor.execute(code),
+				timeout=_exec_timeout_seconds(),
+			)
+		except asyncio.TimeoutError:
+			return (
+				f'Error: Execution timed out after {_exec_timeout_seconds():g}s. '
+				'The code may still be running. Run get_status before retrying.'
+			)
 
-		# If error looks like CDP connection issue, recover and retry once.
-		# Check result.error (raw, not truncated) to avoid missing errors
-		# when large stdout causes the error message to be truncated away.
+		# If the error looks like a CDP connection issue, recover the browser
+		# but do not run the code again. The first attempt may have changed
+		# the page before the connection failed.
 		error_text = result.error or result.output
 		if not result.success and self._is_connection_error(error_text):
 			logger.info('CDP connection error during execution, recovering')
 			try:
 				await self._recover_browser_session()
-				result = await self._executor.execute(code)
 			except Exception as recovery_err:
 				logger.error('CDP recovery failed: %s', recovery_err)
+				return (
+					f'{result.output}\n\n[openbrowser] Browser recovery failed: '
+					f'{type(recovery_err).__name__}: {recovery_err}. Run get_status before retrying.'
+				)
+			return (
+				f'{result.output}\n\n[openbrowser] Browser was recovered. '
+				'The code may have partially run. Run get_status before retrying.'
+			)
 
 		return result.output
+
+	def _status_payload(self) -> dict[str, Any]:
+		"""Build a JSON-safe status snapshot without starting the browser."""
+		browser = self._browser_lifecycle.snapshot().to_dict()
+		if self.browser_session is not None and hasattr(self.browser_session, 'lifecycle_snapshot'):
+			try:
+				snapshot = self.browser_session.lifecycle_snapshot()
+				if isinstance(snapshot, dict):
+					browser = snapshot
+			except Exception:
+				pass
+
+		namespace_variables = 0
+		if self._namespace is not None:
+			namespace_variables = sum(1 for key in self._namespace if not key.startswith('__'))
+
+		try:
+			version = get_openbrowser_version()
+		except Exception:
+			version = None
+
+		return {
+			'server': self._lifecycle.snapshot().to_dict(),
+			'browser': browser,
+			'profile': self._profile_summary,
+			'instance_id': self._instance_id,
+			'namespace_variables': namespace_variables,
+			'pending_variables': len(self._pending_variables),
+			'session_timeout_minutes': self.session_timeout_minutes,
+			'exec_timeout': _exec_timeout_seconds(),
+			'uptime_seconds': max(0.0, time.time() - self._start_time),
+			'version': version,
+		}
+
+	async def _reset_browser(self, *, clear_variables: bool = False) -> str:
+		"""Close the current browser and preserve user variables by default."""
+		async with self._execution_lock:
+			async with self._lifecycle_lock:
+				session = self.browser_session
+				old_namespace = self._namespace or {}
+				was_cancelled = False
+
+				if session is not None:
+					cleanup_succeeded, was_cancelled = await self._kill_session_safely(session)
+					if not cleanup_succeeded:
+						self._browser_lifecycle.fail(
+							'Unable to close the browser session during reset',
+							reason='browser reset failed',
+						)
+						return json.dumps(
+							{
+								'ok': False,
+								'error': 'Unable to close the browser session during reset',
+								'browser': self._status_payload()['browser'],
+							},
+							indent=2,
+						)
+					if self.browser_session is session:
+						self.browser_session = None
+
+				self._namespace = None
+				self._executor.set_namespace({})
+				if clear_variables:
+					self._pending_variables.clear()
+				else:
+					merged = {**self._pending_variables, **old_namespace}
+					self._pending_variables = {key: value for key, value in merged.items() if not key.startswith('__')}
+				self._browser_generation += 1
+				try:
+					self._browser_lifecycle.transition(
+						LifecyclePhase.STOPPED,
+						reason='browser reset',
+						increment_generation=True,
+					)
+				except LifecycleTransitionError:
+					pass
+				if was_cancelled:
+					raise asyncio.CancelledError
+
+				return json.dumps(
+					{
+						'ok': True,
+						'message': 'Browser reset',
+						'preserved_variables': len(self._pending_variables),
+						'browser': self._status_payload()['browser'],
+					},
+					indent=2,
+				)
 
 	async def _shutdown(self) -> None:
 		"""Stop background cleanup and release this server's browser ownership."""
@@ -649,13 +878,33 @@ class OpenBrowserServer:
 				session = self.browser_session
 				if not session:
 					self._namespace = None
+					try:
+						self._browser_lifecycle.transition(
+							LifecyclePhase.STOPPED,
+							reason='server shutdown',
+							increment_generation=True,
+						)
+					except LifecycleTransitionError:
+						pass
 					return
 
 				cleanup_succeeded, was_cancelled = await self._kill_session_safely(session)
 				if cleanup_succeeded and self.browser_session is session:
 					self.browser_session = None
 					self._namespace = None
+					try:
+						self._browser_lifecycle.transition(
+							LifecyclePhase.STOPPED,
+							reason='server shutdown',
+							increment_generation=True,
+						)
+					except LifecycleTransitionError:
+						pass
 				elif not cleanup_succeeded:
+					self._browser_lifecycle.fail(
+						'Unable to safely close the browser session during shutdown',
+						reason='shutdown failed',
+					)
 					raise RuntimeError('Unable to safely close the browser session during shutdown')
 				if was_cancelled:
 					raise asyncio.CancelledError
@@ -673,10 +922,25 @@ class OpenBrowserServer:
 
 				if current_time - self._last_activity > timeout_seconds:
 					logger.info('Auto-closing idle browser session')
+					old_namespace = self._namespace or {}
 					cleanup_succeeded, was_cancelled = await self._kill_session_safely(session)
 					if cleanup_succeeded and self.browser_session is session:
 						self.browser_session = None
 						self._namespace = None
+						self._pending_variables = {
+							key: value
+							for key, value in old_namespace.items()
+							if not key.startswith('__')
+						}
+						self._browser_generation += 1
+						try:
+							self._browser_lifecycle.transition(
+								LifecyclePhase.STOPPED,
+								reason='idle timeout',
+								increment_generation=True,
+							)
+						except LifecycleTransitionError:
+							pass
 					elif not cleanup_succeeded:
 						logger.error('Error closing idle session: cleanup failed')
 					if was_cancelled:
@@ -698,8 +962,10 @@ class OpenBrowserServer:
 
 	async def run(self):
 		"""Run the MCP server."""
+		self._lifecycle.transition(LifecyclePhase.STARTING, reason='mcp server starting')
 		try:
 			await self._start_cleanup_task()
+			self._lifecycle.transition(LifecyclePhase.READY, reason='mcp server ready')
 
 			async with mcp.server.stdio.stdio_server() as (read_stream, write_stream):
 				await self.server.run(
@@ -715,7 +981,19 @@ class OpenBrowserServer:
 					),
 				),
 		finally:
+			try:
+				self._lifecycle.transition(LifecyclePhase.STOPPING, reason='mcp server stopping')
+			except LifecycleTransitionError:
+				pass
 			await self._shutdown()
+			try:
+				self._lifecycle.transition(
+					LifecyclePhase.STOPPED,
+					reason='mcp server stopped',
+					increment_generation=True,
+				)
+			except LifecycleTransitionError:
+				pass
 
 
 async def main(session_timeout_minutes: int = 10):

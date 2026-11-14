@@ -310,27 +310,21 @@ class TestOpenBrowserServerExecuteCode:
                 side_effect=Exception("recovery failed"),
             ):
                 result = await mcp_server_instance._execute_code("x = 1")
-                assert result == "ok"
+                assert "Browser connection lost and recovery failed" in result
+                assert "reset_browser" in result
 
     @pytest.mark.asyncio
-    async def test_execute_code_retry_on_connection_error(self, mcp_server_instance):
-        """Lines 459-464: retry on connection error."""
+    async def test_execute_code_does_not_retry_after_connection_error(self, mcp_server_instance):
+        """A connection error recovers the browser but does not re-run user code."""
         mock_result_fail = MagicMock()
         mock_result_fail.success = False
         mock_result_fail.output = "ConnectionClosedError"
         mock_result_fail.error = "ConnectionClosedError"
 
-        mock_result_ok = MagicMock()
-        mock_result_ok.success = True
-        mock_result_ok.output = "ok"
-        mock_result_ok.error = None
-
         mcp_server_instance._namespace = {"x": 1}
         mcp_server_instance._executor = MagicMock()
         mcp_server_instance._executor.initialized = True
-        mcp_server_instance._executor.execute = AsyncMock(
-            side_effect=[mock_result_fail, mock_result_ok]
-        )
+        mcp_server_instance._executor.execute = AsyncMock(return_value=mock_result_fail)
         mcp_server_instance.browser_session = None
 
         with patch.object(
@@ -339,7 +333,8 @@ class TestOpenBrowserServerExecuteCode:
             new_callable=AsyncMock,
         ):
             result = await mcp_server_instance._execute_code("x = 1")
-            assert result == "ok"
+            assert "may have partially run" in result
+            assert mcp_server_instance._executor.execute.await_count == 1
 
     @pytest.mark.asyncio
     async def test_execute_code_uninitialized_executor(self, mcp_server_instance):

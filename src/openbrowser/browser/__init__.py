@@ -2,8 +2,10 @@ from typing import TYPE_CHECKING
 
 # Type stubs for lazy imports
 if TYPE_CHECKING:
+	from .lifecycle import LifecycleMachine, LifecyclePhase, LifecycleSnapshot, LifecycleTransitionError
 	from .profile import BrowserProfile, ProxySettings
 	from .session import BrowserSession
+	from .tabs import TabError, TabRecord, TabRegistry, TabState
 
 
 # Lazy imports mapping for heavy browser components
@@ -11,6 +13,14 @@ _LAZY_IMPORTS = {
 	'ProxySettings': ('.profile', 'ProxySettings'),
 	'BrowserProfile': ('.profile', 'BrowserProfile'),
 	'BrowserSession': ('.session', 'BrowserSession'),
+	'LifecycleMachine': ('.lifecycle', 'LifecycleMachine'),
+	'LifecyclePhase': ('.lifecycle', 'LifecyclePhase'),
+	'LifecycleSnapshot': ('.lifecycle', 'LifecycleSnapshot'),
+	'LifecycleTransitionError': ('.lifecycle', 'LifecycleTransitionError'),
+	'TabError': ('.tabs', 'TabError'),
+	'TabRecord': ('.tabs', 'TabRecord'),
+	'TabRegistry': ('.tabs', 'TabRegistry'),
+	'TabState': ('.tabs', 'TabState'),
 }
 
 
@@ -38,4 +48,12 @@ __all__ = [
 	'BrowserSession',
 	'BrowserProfile',
 	'ProxySettings',
+	'LifecycleMachine',
+	'LifecyclePhase',
+	'LifecycleSnapshot',
+	'LifecycleTransitionError',
+	'TabError',
+	'TabRecord',
+	'TabRegistry',
+	'TabState',
 ]

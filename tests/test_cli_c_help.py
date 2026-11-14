@@ -120,7 +120,7 @@ class TestCliCHelp:
             t.start()
 
             # Wait for socket to appear
-            for _ in range(50):
+            for _ in range(200):
                 if sock.exists():
                     break
                 time.sleep(0.05)

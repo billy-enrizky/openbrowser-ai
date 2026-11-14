@@ -150,14 +150,16 @@ class TestDaemonServerHandleRequest:
 
     @pytest.mark.asyncio
     async def test_handle_reset_session_kill_error(self, daemon_server):
-        """Reset still clears state even if session.kill() raises."""
+        """Reset reports a failure and keeps ownership if session.kill() raises."""
         mock_session = AsyncMock()
         mock_session.kill.side_effect = RuntimeError("boom")
         daemon_server._session = mock_session
         daemon_server._executor = MagicMock()
         result = await daemon_server._handle_request({"action": "reset", "id": 6})
-        assert result["success"] is True
-        assert daemon_server._executor is None
+        assert result["success"] is False
+        assert result["error_code"] == "reset_failed"
+        assert daemon_server._executor is not None
+        assert daemon_server._session is mock_session
 
     @pytest.mark.asyncio
     async def test_handle_unknown_action(self, daemon_server):

@@ -2,6 +2,14 @@
 
 import json
 import logging
+import os
+import shutil
+import socket
+import subprocess
+import tempfile
+import sys
+from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -94,7 +102,7 @@ class TestDaemonClientMethods:
 
     @pytest.mark.asyncio
     async def test_send_connection_reset(self):
-        """_send raises ConnectionResetError when daemon closes without responding."""
+        """_send returns a structured error when the daemon closes without responding."""
         mock_reader = AsyncMock()
         mock_reader.readline = AsyncMock(return_value=b"")
         mock_writer = MagicMock()
@@ -105,8 +113,9 @@ class TestDaemonClientMethods:
 
         with patch("asyncio.open_unix_connection", return_value=(mock_reader, mock_writer)):
             client = DaemonClient()
-            with pytest.raises(ConnectionResetError):
-                await client._send({"action": "status"})
+            result = await client._send({"action": "status"})
+            assert result.success is False
+            assert result.error_code == "daemon_connection_lost"
 
     @pytest.mark.asyncio
     async def test_execute_code_via_daemon(self):
@@ -135,3 +144,219 @@ class TestDaemonResponse:
         resp = DaemonResponse(success=False, output="", error="boom")
         assert resp.success is False
         assert resp.error == "boom"
+
+
+class TestDaemonClientRecoveryDiscovery:
+    """Tests for finding browser leases without a responsive daemon socket."""
+
+    def _write_metadata(self, profile_dir: Path, *, owner_pid: int, owner_start_time: float) -> None:
+        profile_dir.mkdir(parents=True)
+        (profile_dir / '.openbrowser-profile.json').write_text(
+            json.dumps(
+                {
+                    'schema_version': 1,
+                    'profile_dir': str(profile_dir),
+                    'instance_id': 'lease-id',
+                    'owner_pid': owner_pid,
+                    'owner_start_time': owner_start_time,
+                    'browser': None,
+                }
+            )
+        )
+
+    def test_profile_dirs_for_daemon_matches_pid_and_start_time(self, tmp_path):
+        profiles_root = tmp_path / 'profiles'
+        profile_dir = profiles_root / 'daemon'
+        self._write_metadata(profile_dir, owner_pid=123, owner_start_time=456.0)
+        process = MagicMock(pid=123)
+        process.create_time.return_value = 456.0
+
+        with patch('openbrowser.config.CONFIG', new=SimpleNamespace(OPENBROWSER_PROFILES_DIR=profiles_root)):
+            matches = DaemonClient()._profile_dirs_for_daemon(process, 123)
+
+        assert matches == [str(profile_dir.resolve())]
+
+    def test_profile_dirs_for_daemon_rejects_a_reused_pid(self, tmp_path):
+        profiles_root = tmp_path / 'profiles'
+        profile_dir = profiles_root / 'daemon'
+        self._write_metadata(profile_dir, owner_pid=123, owner_start_time=456.0)
+        process = MagicMock(pid=123)
+        process.create_time.return_value = 999.0
+
+        with patch('openbrowser.config.CONFIG', new=SimpleNamespace(OPENBROWSER_PROFILES_DIR=profiles_root)):
+            matches = DaemonClient()._profile_dirs_for_daemon(process, 123)
+
+        assert matches == []
+
+    @pytest.mark.asyncio
+    async def test_force_stop_discovers_browser_lease_without_status(self, tmp_path):
+        client = DaemonClient()
+        client.status = AsyncMock(return_value=DaemonResponse(success=False, output='', error='unresponsive'))
+        client.stop = AsyncMock(return_value=DaemonResponse(success=False, output='', error='unresponsive'))
+        client._read_pid = MagicMock(return_value=123)
+
+        process = MagicMock()
+        process.cmdline.return_value = ['python', '-m', 'openbrowser.daemon.server']
+        pid_path = tmp_path / 'daemon.pid'
+        socket_path = tmp_path / 'daemon.sock'
+        pid_path.write_text('123')
+        socket_path.write_text('')
+
+        with (
+            patch('openbrowser.daemon.client.get_pid_path', return_value=pid_path),
+            patch('openbrowser.daemon.client.get_socket_path', return_value=socket_path),
+            patch('psutil.Process', return_value=process),
+            patch.object(client, '_profile_dirs_for_daemon', return_value=['/tmp/profile']) as discover,
+            patch.object(
+                client,
+                '_kill_recorded_browsers',
+                new_callable=AsyncMock,
+                return_value=(True, None),
+            ) as cleanup,
+        ):
+            result = await client.force_stop(timeout=0.01)
+
+        assert result.success is True
+        discover.assert_called_once_with(process, 123)
+        cleanup.assert_awaited_once_with(['/tmp/profile'], 0.01)
+
+    @pytest.mark.skipif(os.name == 'nt', reason='Unix sockets are not used on Windows')
+    def test_remove_stale_socket_deletes_a_socket_file(self):
+        short_dir = Path(tempfile.mkdtemp(prefix='ob_sock_', dir='/tmp'))
+        path = short_dir / 'd.sock'
+        try:
+            listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            listener.bind(str(path))
+            listener.close()
+            assert path.exists()
+
+            DaemonClient._remove_stale_socket(path)
+
+            assert not path.exists()
+        finally:
+            shutil.rmtree(short_dir, ignore_errors=True)
+
+
+    def test_remove_stale_socket_refuses_a_regular_file(self, tmp_path):
+        path = tmp_path / 'not-a-socket'
+        path.write_text('important data')
+
+        with pytest.raises(OSError, match='Refusing to remove non-socket'):
+            DaemonClient._remove_stale_socket(path)
+
+        assert path.read_text() == 'important data'
+
+
+    def test_windows_owner_is_the_daemon_listening_on_the_loopback_port(self):
+        with (
+            patch('openbrowser.daemon.client.IS_WINDOWS', True),
+            patch(
+                'openbrowser.daemon.diagnostics.daemon_processes',
+                return_value=[
+                    {'pid': 1, 'socket': None, 'socket_live': False},
+                    {'pid': 2, 'socket': None, 'socket_live': True},
+                ],
+            ),
+        ):
+            owner = DaemonClient()._daemon_owner_for_socket()
+
+        assert owner == {'pid': 2, 'socket': None, 'socket_live': True}
+
+
+    @pytest.mark.asyncio
+    async def test_kill_recorded_browser_terminates_only_the_verified_process(self, tmp_path):
+        import psutil
+
+        profile_dir = tmp_path / 'profile'
+        profile_dir.mkdir()
+        instance_id = 'test-instance'
+        marker = f'--openbrowser-instance-id={instance_id}'
+        process = subprocess.Popen(
+            [
+                sys.executable,
+                '-c',
+                'import time; time.sleep(60)',
+                f'--user-data-dir={profile_dir}',
+                marker,
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        try:
+            observed = psutil.Process(process.pid)
+            (profile_dir / '.openbrowser-profile.json').write_text(
+                json.dumps(
+                    {
+                        'schema_version': 1,
+                        'profile_dir': str(profile_dir.resolve()),
+                        'instance_id': instance_id,
+                        'owner_pid': 999999,
+                        'owner_start_time': 1.0,
+                        'browser': {
+                            'pid': process.pid,
+                            'start_time': observed.create_time(),
+                            'profile_dir': str(profile_dir.resolve()),
+                            'instance_id': instance_id,
+                            'ownership_marker': marker,
+                            'executable': sys.executable,
+                            'cdp_port': 1,
+                        },
+                    }
+                )
+            )
+
+            ok, error = await DaemonClient()._kill_recorded_browser(str(profile_dir), timeout=5)
+
+            assert ok is True
+            assert error is None
+            process.wait(timeout=3)
+            assert process.returncode is not None
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait(timeout=3)
+
+
+    @pytest.mark.asyncio
+    async def test_force_stop_without_pid_does_not_hide_a_live_listener(self, tmp_path):
+        client = DaemonClient()
+        client.status = AsyncMock(return_value=DaemonResponse(success=False, output='', error='unresponsive'))
+        client.stop = AsyncMock(return_value=DaemonResponse(success=False, output='', error='unresponsive'))
+        client._read_pid = MagicMock(return_value=None)
+        socket_path = tmp_path / 'daemon.sock'
+        socket_path.write_text('')
+
+        with (
+            patch('openbrowser.daemon.client.get_socket_path', return_value=socket_path),
+            patch('openbrowser.daemon.client.get_pid_path', return_value=tmp_path / 'daemon.pid'),
+            patch.object(client, '_socket_accepts_connection', new_callable=AsyncMock, return_value=True),
+        ):
+            result = await client.force_stop(timeout=0.01)
+
+        assert result.success is False
+        assert result.error_code == 'daemon_stop_timeout'
+        assert socket_path.exists()
+
+    @pytest.mark.asyncio
+    async def test_force_stop_with_stale_pid_does_not_hide_a_live_listener(self, tmp_path):
+        client = DaemonClient()
+        client.status = AsyncMock(return_value=DaemonResponse(success=False, output='', error='unresponsive'))
+        client.stop = AsyncMock(return_value=DaemonResponse(success=False, output='', error='unresponsive'))
+        client._read_pid = MagicMock(return_value=999)
+        socket_path = tmp_path / 'daemon.sock'
+        pid_path = tmp_path / 'daemon.pid'
+        socket_path.write_text('')
+        pid_path.write_text('999')
+
+        with (
+            patch('openbrowser.daemon.client.get_socket_path', return_value=socket_path),
+            patch('openbrowser.daemon.client.get_pid_path', return_value=pid_path),
+            patch('psutil.Process', side_effect=__import__('psutil').NoSuchProcess(999)),
+            patch.object(client, '_socket_accepts_connection', new_callable=AsyncMock, return_value=True),
+        ):
+            result = await client.force_stop(timeout=0.01)
+
+        assert result.success is False
+        assert result.error_code == 'daemon_stop_timeout'
+        assert socket_path.exists()
+        assert pid_path.exists()

@@ -43,6 +43,11 @@ class CodeExecutor:
     def initialized(self) -> bool:
         return self._namespace is not None
 
+    @property
+    def namespace(self) -> dict[str, Any] | None:
+        """Return the live namespace for inspection or transfer by an owner."""
+        return self._namespace
+
     def set_namespace(self, namespace: dict[str, Any]) -> None:
         """Set the execution namespace (for external initialization)."""
         self._namespace = namespace

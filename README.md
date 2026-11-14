@@ -430,9 +430,15 @@ By default, each MCP server process uses an isolated profile under `~/.config/op
 uvx openbrowser-ai --mcp
 ```
 
-### Tool
+### Tools
 
-The MCP server exposes a single `execute_code` tool that runs Python code in a persistent namespace with browser automation functions. The LLM writes Python code to navigate, interact, and extract data, returning only what was explicitly requested.
+The MCP server exposes three tools:
+
+- `execute_code` runs Python code in a persistent namespace with browser automation functions.
+- `get_status` returns server, browser, profile, and tab state as JSON. It is read-only and does not start a browser.
+- `reset_browser` closes a stuck browser and preserves user-defined Python variables unless `clear_variables` is true.
+
+If a browser connection fails, call `get_status` before retrying. Do not replay a page-changing action blindly because the first attempt may have partially run.
 
 **Available functions** (use `await` unless noted):
 
@@ -442,7 +448,7 @@ The MCP server exposes a single `execute_code` tool that runs Python code in a p
 | **Interaction** | `click(index)`, `input_text(index, text, clear)`, `scroll(down, pages, index)`, `send_keys(keys)`, `upload_file(index, path)` |
 | **Coordinate interaction** | `click_xy(x, y, button, click_count)`, `hover_xy(x, y)`, `scroll_xy(x, y, delta_x, delta_y)` for no-index canvas, PDF, embedded, and native-rendered targets |
 | **Dropdowns** | `select_dropdown(index, text)`, `dropdown_options(index)` |
-| **Tabs** | `switch(tab_id)`, `close(tab_id)` |
+| **Tabs** | `switch(tab_id)`, `close(tab_id)`: accepts the four-character suffix or the full CDP target ID |
 | **JavaScript** | `evaluate(code)`: run JS in page context, returns Python objects |
 | **Downloads** | `download_file(url, filename)`: download a file using browser cookies, `list_downloads()`: list downloaded files (sync, no `await`) |
 | **State** | `browser.get_browser_state_summary()`: get page metadata and interactive elements |
@@ -463,6 +469,8 @@ Prefer indexed actions whenever an element index exists. Coordinate actions use 
 | `OPENBROWSER_STORAGE_STATE` | Optional JSON file used as a one-time seed for cookies plus localStorage in managed MCP profiles | (auto: per-process copy, seeded from `profiles/default`) |
 | `OPENBROWSER_COMPACT_DESCRIPTION` | Minimal tool description (~500 tokens) | `false` |
 | `OPENBROWSER_MAX_OUTPUT` | Max output characters per execution | `10000` |
+| `OPENBROWSER_MCP_START_TIMEOUT` | Browser startup bound in seconds | `30` |
+| `OPENBROWSER_MCP_EXEC_TIMEOUT` | Seconds before a tool call returns a timeout result | `110` |
 
 ## Benchmark: Token Efficiency
 
@@ -540,9 +548,15 @@ uvx openbrowser-ai -c "await navigate('https://example.com')"
 uvx openbrowser-ai -c "print(await evaluate('document.title'))"
 
 # Daemon management
+uvx openbrowser-ai daemon ensure    # Start or restart a daemon that matches the requested headless and profile settings
 uvx openbrowser-ai daemon start     # Start daemon (auto-starts on first -c call)
 uvx openbrowser-ai daemon stop      # Stop daemon and browser
-uvx openbrowser-ai daemon status    # Show daemon info
+uvx openbrowser-ai daemon force-stop # Force-stop the current endpoint after verifying the owner
+uvx openbrowser-ai daemon status    # Show lifecycle, profile, browser, and tab state
+uvx openbrowser-ai daemon reset     # Close the browser but keep the daemon process
+uvx openbrowser-ai daemon doctor    # Diagnose socket, PID, profile, and log state
+uvx openbrowser-ai daemon list      # List sockets and this user's daemon processes
+uvx openbrowser-ai daemon reap      # Stop verified daemons and reap orphaned daemon processes
 uvx openbrowser-ai daemon restart   # Restart daemon
 
 # Install browser
@@ -554,7 +568,9 @@ uvx openbrowser-ai --mcp
 
 The `-c` flag connects to a persistent browser daemon over a Unix socket (localhost TCP on Windows). Variables persist across calls while the daemon is running. The daemon starts automatically on first use and shuts down after 10 minutes of inactivity.
 
-The CLI daemon stores its browser profile in `~/.config/openbrowser/profiles/daemon` and also writes `storage_state.json` there, so cookies and login sessions survive daemon restarts. One-shot `-p` runs use `~/.config/openbrowser/profiles/cli` with the same storage-state behavior. Managed profiles automatically clear disposable browser caches on startup and shutdown while keeping auth state.
+The CLI daemon stores its browser profile in `~/.config/openbrowser/profiles/daemon`, so cookies and login sessions survive daemon restarts through Chrome's user-data directory. An explicit `storage_state` path is still loaded when configured. Custom sockets share the default profile by default to preserve existing logins. Set `OPENBROWSER_DAEMON_PROFILE_ISOLATION=true` or `OPENBROWSER_DAEMON_PROFILE_DIR` when several daemons must run with separate profiles. `OPENBROWSER_USER_DATA_DIR` takes precedence over both and always selects that explicit profile. One-shot `-p` runs use `~/.config/openbrowser/profiles/cli`. Managed profiles automatically clear disposable browser caches on startup and shutdown while keeping auth state.
+
+Execution defaults to 110 seconds so an agent with a 120 second tool timeout receives a structured timeout response. Override it with `OPENBROWSER_EXEC_TIMEOUT` and set `OPENBROWSER_READ_TIMEOUT` above that value if you need longer calls. `OPENBROWSER_DAEMON_INIT_TIMEOUT` and `OPENBROWSER_SHUTDOWN_TIMEOUT` bound browser startup and cleanup.
 
 ## Project Structure
 

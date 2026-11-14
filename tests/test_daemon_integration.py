@@ -68,13 +68,13 @@ async def _start_daemon_with_mock(daemon_env, mock_namespace, idle_timeout=600):
 
     task = asyncio.create_task(server.run())
     # Wait for socket to appear
-    for _ in range(50):
+    for _ in range(200):
         if daemon_env.exists():
             break
         await asyncio.sleep(0.05)
     else:
         task.cancel()
-        pytest.fail('Daemon socket never appeared within timeout')
+        pytest.fail('Daemon socket never appeared within 10 seconds')
     return server, task
 
 

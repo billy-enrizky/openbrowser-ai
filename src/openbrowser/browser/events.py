@@ -399,6 +399,14 @@ class TabClosedEvent(BaseEvent):
 	event_timeout: float | None = _get_timeout('TIMEOUT_TabClosedEvent', 10.0)  # seconds
 
 
+class TabClosingEvent(BaseEvent):
+	"""A tab close was requested and the target is still expected to exist."""
+
+	target_id: TargetID
+
+	event_timeout: float | None = _get_timeout('TIMEOUT_TabClosingEvent', 10.0)  # seconds
+
+
 # TODO: emit this when DOM changes significantly, inner frame navigates, form submits, history.pushState(), etc.
 # class TabUpdatedEvent(BaseEvent):
 # 	"""Tab information updated (URL changed, etc.)."""
