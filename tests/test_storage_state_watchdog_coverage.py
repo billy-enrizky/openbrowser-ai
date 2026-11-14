@@ -560,6 +560,46 @@ class TestLoadStorageState:
             session._cdp_set_cookies.assert_not_awaited()
 
     @pytest.mark.asyncio
+    async def test_batches_local_storage_into_one_script(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_path = os.path.join(tmpdir, "state.json")
+            items = [{"name": f"key{i}", "value": f"value{i}"} for i in range(200)]
+            state = {"cookies": [], "origins": [{"origin": "https://x.com", "localStorage": items}]}
+            with open(state_path, "w") as f:
+                json.dump(state, f)
+
+            session = _make_mock_browser_session()
+            event_bus = MagicMock()
+            watchdog = _make_storage_watchdog(session=session, event_bus=event_bus)
+
+            await watchdog._load_storage_state(path=state_path)
+
+            assert session._cdp_add_init_script.await_count == 1
+            script = session._cdp_add_init_script.await_args.args[0]
+            assert "key0" in script
+            assert "key199" in script
+            assert "window.localStorage.setItem" in script
+            assert "window.location.origin" in script
+
+    @pytest.mark.asyncio
+    async def test_splits_storage_scripts_when_bound_is_exceeded(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_path = os.path.join(tmpdir, "state.json")
+            items = [{"name": f"key{i}", "value": "x" * 100} for i in range(20)]
+            state = {"cookies": [], "origins": [{"origin": "https://x.com", "localStorage": items}]}
+            with open(state_path, "w") as f:
+                json.dump(state, f)
+
+            session = _make_mock_browser_session()
+            event_bus = MagicMock()
+            watchdog = _make_storage_watchdog(session=session, event_bus=event_bus)
+            watchdog.max_script_bytes_per_origin = 300
+
+            await watchdog._load_storage_state(path=state_path)
+
+            assert session._cdp_add_init_script.await_count > 1
+
+    @pytest.mark.asyncio
     async def test_load_exception(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             state_path = os.path.join(tmpdir, "bad_state.json")
