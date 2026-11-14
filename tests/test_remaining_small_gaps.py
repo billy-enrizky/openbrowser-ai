@@ -474,6 +474,7 @@ class TestDaemonServer:
         from openbrowser.daemon.server import DaemonServer
 
         daemon = DaemonServer.__new__(DaemonServer)
+        daemon._init_lock = asyncio.Lock()
         daemon._session = AsyncMock()
         daemon._session.kill = AsyncMock()
         daemon._executor = MagicMock()
@@ -501,26 +502,22 @@ class TestDaemonClient:
 
     @pytest.mark.asyncio
     async def test_start_daemon_connection_refused_retry(self):
-        """Lines 70-71: ConnectionRefusedError/FileNotFoundError/OSError caught in loop."""
+        """The startup probe tolerates initial connection failures."""
         from openbrowser.daemon.client import DaemonClient
 
         client = DaemonClient()
-        connect_attempts = [0]
+        probe_attempts = [0]
 
-        async def mock_connect():
-            connect_attempts[0] += 1
-            if connect_attempts[0] <= 2:
-                raise ConnectionRefusedError("refused")
-            # Return mock reader/writer on 3rd attempt
-            writer = AsyncMock()
-            writer.close = MagicMock()
-            writer.wait_closed = AsyncMock()
-            return AsyncMock(), writer
+        async def mock_probe(timeout=1.0):
+            probe_attempts[0] += 1
+            return probe_attempts[0] >= 3
 
-        with patch.object(client, "_connect", side_effect=mock_connect), \
+        process = MagicMock()
+        process.poll.return_value = None
+        with patch.object(client, "_probe", side_effect=mock_probe), \
              patch("openbrowser.daemon.client.get_socket_path") as mock_sock, \
              patch("openbrowser.daemon.client.DAEMON_DIR", Path(tempfile.mkdtemp())), \
-             patch("subprocess.Popen"), \
+             patch("subprocess.Popen", return_value=process), \
              patch("asyncio.sleep", new_callable=AsyncMock), \
              patch("time.time", side_effect=[0, 0.1, 0.2, 0.3, 100]):
             mock_sock.return_value = MagicMock()
@@ -529,7 +526,7 @@ class TestDaemonClient:
             mock_sock.return_value.exists.return_value = True
 
             await client._start_daemon()
-        assert connect_attempts[0] == 3
+        assert probe_attempts[0] >= 3
 
 
 # ===========================================================================
