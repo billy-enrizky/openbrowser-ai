@@ -860,8 +860,9 @@ class TestDaemonServerRecoverBrowserSession:
         from openbrowser.daemon.server import DaemonServer
 
         daemon = DaemonServer()
-        daemon._session = MagicMock()
-        daemon._session.kill = AsyncMock(side_effect=Exception("kill failed"))
+        old_session = MagicMock()
+        old_session.kill = AsyncMock(side_effect=Exception("kill failed"))
+        daemon._session = old_session
         daemon._executor = MagicMock()
 
         mock_new_session = MagicMock()
@@ -873,8 +874,10 @@ class TestDaemonServerRecoverBrowserSession:
              patch("openbrowser.code_use.namespace.create_namespace", return_value={}), \
              patch("openbrowser.tools.service.CodeAgentTools", return_value=MagicMock()):
 
-            await daemon._recover_browser_session()
-            assert daemon._session is mock_new_session
+            with pytest.raises(RuntimeError, match="Unable to close the old browser session"):
+                await daemon._recover_browser_session()
+            assert daemon._session is old_session
+            mock_new_session.start.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_recover_namespace_fails_kills_browser(self):
