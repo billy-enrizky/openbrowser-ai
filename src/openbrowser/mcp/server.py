@@ -412,8 +412,6 @@ class OpenBrowserServer:
 			profile_data['headless'] = True
 		elif env_headless in ('false', '0', 'no'):
 			profile_data['headless'] = False
-		else:
-			profile_data['headless'] = True
 
 		if explicit_user_data_dir:
 			# Explicit paths are intentionally shared and protected by the
@@ -492,10 +490,11 @@ class OpenBrowserServer:
 			self._browser_lifecycle.transition(LifecyclePhase.STARTING, reason='browser start requested')
 
 			# Initialize browser session
-			profile = self._build_browser_profile()
-			session = BrowserSession(browser_profile=profile)
-			self.browser_session = session
+			session = None
 			try:
+				profile = self._build_browser_profile()
+				session = BrowserSession(browser_profile=profile)
+				self.browser_session = session
 				await asyncio.wait_for(session.start(), timeout=_start_timeout_seconds())
 				session.seed_generation(self._browser_generation)
 
@@ -516,15 +515,16 @@ class OpenBrowserServer:
 				message = f'{type(error).__name__}: {error}'
 				self._browser_lifecycle.fail(message, reason='browser start failed')
 				logger.error('Failed to initialize browser session: %s', error)
-				cleanup_succeeded, was_cancelled = await self._kill_session_safely(session)
-				if not cleanup_succeeded:
-					logger.error('Failed to clean up browser session after initialization failure')
-				if cleanup_succeeded and self.browser_session is session:
-					self.browser_session = None
-				if cleanup_succeeded:
-					self._namespace = None
-				if was_cancelled:
-					raise asyncio.CancelledError
+				if session is not None:
+					cleanup_succeeded, was_cancelled = await self._kill_session_safely(session)
+					if not cleanup_succeeded:
+						logger.error('Failed to clean up browser session after initialization failure')
+					if cleanup_succeeded and self.browser_session is session:
+						self.browser_session = None
+					if cleanup_succeeded:
+						self._namespace = None
+					if was_cancelled:
+						raise asyncio.CancelledError
 				raise
 
 	async def _is_cdp_alive(self) -> bool:
@@ -797,6 +797,7 @@ class OpenBrowserServer:
 			async with self._lifecycle_lock:
 				session = self.browser_session
 				old_namespace = self._namespace or {}
+				was_cancelled = False
 
 				if session is not None:
 					cleanup_succeeded, was_cancelled = await self._kill_session_safely(session)
@@ -815,19 +816,14 @@ class OpenBrowserServer:
 						)
 					if self.browser_session is session:
 						self.browser_session = None
-					if was_cancelled:
-						raise asyncio.CancelledError
 
 				self._namespace = None
 				self._executor.set_namespace({})
 				if clear_variables:
 					self._pending_variables.clear()
 				else:
-					self._pending_variables = {
-						key: value
-						for key, value in old_namespace.items()
-						if not key.startswith('__')
-					}
+					merged = {**self._pending_variables, **old_namespace}
+					self._pending_variables = {key: value for key, value in merged.items() if not key.startswith('__')}
 				self._browser_generation += 1
 				try:
 					self._browser_lifecycle.transition(
@@ -837,6 +833,8 @@ class OpenBrowserServer:
 					)
 				except LifecycleTransitionError:
 					pass
+				if was_cancelled:
+					raise asyncio.CancelledError
 
 				return json.dumps(
 					{

@@ -342,13 +342,20 @@ class TestToolsWaitAction:
     @pytest.mark.asyncio
     async def test_wait_caps_at_30_seconds_for_large_values(self):
         tools = Tools()
-        # The wait action caps at 30 seconds via min() — no validation error
         with patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
             result = await tools.registry.execute_action("wait", {"seconds": 60})
-            # actual_seconds = min(max(60 - 3, 0), 30) = 30
             mock_sleep.assert_called_once_with(30)
             assert isinstance(result, ActionResult)
             assert "capped from 60" in result.extracted_content
+
+    @pytest.mark.asyncio
+    async def test_wait_sleeps_the_full_requested_duration(self):
+        tools = Tools()
+        with patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+            result = await tools.registry.execute_action("wait", {"seconds": 0.1})
+
+        mock_sleep.assert_awaited_once_with(0.1)
+        assert "Waited for 0.1 seconds" in result.extracted_content
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(

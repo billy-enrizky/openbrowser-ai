@@ -267,7 +267,7 @@ class BrowserSession(BaseModel):
 		# Core configuration
 		id: str | None = None,
 		cdp_url: str | None = None,
-		is_local: bool = False,
+		is_local: bool | None = None,
 		browser_profile: BrowserProfile | None = None,
 		# BrowserProfile fields that can be passed directly
 		# From BrowserConnectArgs
@@ -340,11 +340,12 @@ class BrowserSession(BaseModel):
 			and v is not None
 		}
 
-		# if is_local is False but executable_path is provided, set is_local to True
-		if is_local is False and executable_path is not None:
+		# An explicit executable_path means this process launches the browser.
+		if executable_path is not None:
 			profile_kwargs['is_local'] = True
-		# Set is_local=True when cdp_url is missing
-		if not cdp_url:
+		# Set is_local=True only when neither the direct argument nor the
+		# supplied profile has a CDP URL to connect to.
+		if not cdp_url and (browser_profile is None or not browser_profile.cdp_url):
 			profile_kwargs['is_local'] = True
 
 		# Create browser profile from direct parameters or use provided one
@@ -397,6 +398,7 @@ class BrowserSession(BaseModel):
 	_start_event: asyncio.Event | None = PrivateAttr(default=None)
 	_start_error: BaseException | None = PrivateAttr(default=None)
 	_start_task: asyncio.Task | None = PrivateAttr(default=None)
+	_start_cancelled_by_lifecycle: bool = PrivateAttr(default=False)
 	_stop_task: asyncio.Task | None = PrivateAttr(default=None)
 	_watchdogs_attached: bool = PrivateAttr(default=False)
 	_core_handlers_attached: bool = PrivateAttr(default=False)
@@ -489,7 +491,7 @@ class BrowserSession(BaseModel):
 			self._cdp_client_root
 			or self._session_manager
 			or self._watchdogs_attached
-			or self.browser_profile.cdp_url
+			or (self.is_local and self.browser_profile.cdp_url)
 			or self._watchdog_has_live_resources(self._local_browser_watchdog)
 		)
 
@@ -503,8 +505,22 @@ class BrowserSession(BaseModel):
 				return True
 		return False
 
-	async def reset(self, *, stop_event_bus: bool = True) -> None:
+	async def reset(self, *, stop_event_bus: bool = True, wait_for_operations: bool = True) -> None:
 		"""Clear all cached CDP sessions with proper cleanup."""
+		if wait_for_operations:
+			await self._cancel_owned_start()
+			stop_task = self._stop_task
+			if stop_task is not None and not stop_task.done() and stop_task is not asyncio.current_task():
+				try:
+					await self._await_task(stop_task)
+				except Exception:
+					# Reset is still the right recovery action after a failed stop.
+					pass
+		async with self._lifecycle_lock:
+			await self._reset_locked(stop_event_bus=stop_event_bus)
+
+	async def _reset_locked(self, *, stop_event_bus: bool) -> None:
+		"""Reset runtime state for the active lifecycle operation."""
 
 		if stop_event_bus and self._watchdogs_attached:
 			try:
@@ -515,7 +531,13 @@ class BrowserSession(BaseModel):
 			self._core_handlers_attached = False
 			self._attach_core_handlers()
 
-		if self._lifecycle.phase in (LifecyclePhase.READY, LifecyclePhase.DEGRADED, LifecyclePhase.FAILED):
+		if self._lifecycle.phase in (
+			LifecyclePhase.STARTING,
+			LifecyclePhase.READY,
+			LifecyclePhase.DEGRADED,
+			LifecyclePhase.RECOVERING,
+			LifecyclePhase.FAILED,
+		):
 			self._lifecycle.transition(LifecyclePhase.STOPPED, reason='reset', increment_generation=True)
 
 		# TODO: clear the event bus queue here, implement this helper
@@ -582,6 +604,10 @@ class BrowserSession(BaseModel):
 		if self._lifecycle.phase is LifecyclePhase.READY:
 			return
 
+		stop_task = self._stop_task
+		if stop_task is not None and not stop_task.done():
+			await self._await_task(stop_task)
+
 		owner = False
 		async with self._lifecycle_lock:
 			if self._lifecycle.phase is LifecyclePhase.READY:
@@ -604,10 +630,15 @@ class BrowserSession(BaseModel):
 				raise RuntimeError('Browser start did not reach the ready state')
 			return
 
-		start_task = asyncio.current_task()
+		self._start_cancelled_by_lifecycle = False
+		start_task = asyncio.create_task(self._start_locked())
 		self._start_task = start_task
 		try:
-			await self._start_locked()
+			await start_task
+		except asyncio.CancelledError:
+			if self._start_cancelled_by_lifecycle:
+				raise RuntimeError('Browser start cancelled by shutdown') from None
+			raise
 		except BaseException as error:
 			self._start_error = error
 			raise
@@ -628,12 +659,39 @@ class BrowserSession(BaseModel):
 		except asyncio.CancelledError:
 			if self._lifecycle.phase is not LifecyclePhase.STOPPING:
 				self._lifecycle.fail('Browser start cancelled', reason='browser start cancelled')
+			await self._cleanup_cancelled_start()
 			raise
 		except BaseException as error:
 			self._lifecycle.fail(error, reason='browser start failed')
 			raise
 		else:
 			self._lifecycle.transition(LifecyclePhase.READY, reason='browser ready')
+
+	async def _cleanup_cancelled_start(self) -> None:
+		"""Release resources that a cancelled start acquired before failing."""
+		if self._watchdog_has_live_resources(self._local_browser_watchdog):
+			try:
+				force_error = await asyncio.wait_for(
+					self._force_stop_retained_browser(), timeout=_shutdown_timeout()
+				)
+				if force_error is not None:
+					self._force_stop_resources()
+			except BaseException:
+				# Killing the owned process is the last-resort release path. Never
+				# let a second cancellation skip the runtime reset below.
+				self._force_stop_resources()
+		root = self._cdp_client_root
+		stop_root = getattr(root, 'stop', None)
+		if callable(stop_root):
+			try:
+				result = stop_root()
+				if inspect.isawaitable(result):
+					await asyncio.wait_for(result, timeout=_shutdown_timeout())
+			except BaseException:
+				pass
+		self._force_reset_runtime_state()
+		if not self._watchdog_has_live_resources(self._local_browser_watchdog):
+			self._local_browser_watchdog = None
 
 	@staticmethod
 	async def _await_task(task: asyncio.Task) -> None:
@@ -710,7 +768,10 @@ class BrowserSession(BaseModel):
 		self._watchdogs_attached = False
 		self._cached_browser_state_summary = None
 		self._cached_selector_map.clear()
+		self._storage_state_warnings.clear()
 		self.agent_focus = None
+		if self.is_local:
+			self.browser_profile.cdp_url = None
 		self.event_bus = EventBus()
 		self._core_handlers_attached = False
 		self._attach_core_handlers()
@@ -732,6 +793,12 @@ class BrowserSession(BaseModel):
 			stop_task = self._stop_task
 
 		await self._await_task_bounded(stop_task, _shutdown_timeout())
+		if self._watchdog_has_live_resources(self._local_browser_watchdog):
+			force_error = await self._force_stop_retained_browser()
+			if force_error is not None:
+				raise force_error
+			if not self._watchdog_has_live_resources(self._local_browser_watchdog):
+				self._local_browser_watchdog = None
 
 	async def stop(self) -> None:
 		"""Stop the browser session without forcing the browser process closed."""
@@ -753,16 +820,19 @@ class BrowserSession(BaseModel):
 
 	async def _shutdown_locked(self, *, force: bool) -> None:
 		"""Save state, dispatch the stop event, then release the event bus."""
+		shutdown_generation = self._lifecycle.generation
+		event_bus = self.event_bus
 		await self._cancel_owned_start()
 
 		# First save storage state while CDP is still connected
 		from openbrowser.browser.events import SaveStorageStateEvent
 
-		event_bus = self.event_bus
 		save_error: BaseException | None = None
 		try:
 			save_event = event_bus.dispatch(SaveStorageStateEvent())
 			await save_event
+		except asyncio.CancelledError:
+			raise
 		except BaseException as error:
 			# A storage-state failure must not prevent the browser from receiving
 			# its force-stop event. Preserve the error for the caller after cleanup.
@@ -778,6 +848,8 @@ class BrowserSession(BaseModel):
 				result = event_result(raise_if_any=True, raise_if_none=False)
 				if inspect.isawaitable(result):
 					await result
+		except asyncio.CancelledError:
+			raise
 		except BaseException as error:
 			# Keep the event bus and watchdog references intact when ownership
 			# cleanup fails, so the caller can retry without releasing the lease.
@@ -787,6 +859,9 @@ class BrowserSession(BaseModel):
 			force_error = await self._force_stop_retained_browser()
 			if stop_error is None and force_error is not None:
 				stop_error = force_error
+
+		if self.event_bus is not event_bus or self._lifecycle.generation != shutdown_generation:
+			return
 
 		try:
 			if stop_error is not None:
@@ -800,12 +875,17 @@ class BrowserSession(BaseModel):
 				# Stop the event bus only after the browser cleanup handlers complete.
 				await event_bus.stop(clear=True, timeout=5)
 				event_bus_stopped = True
+			except asyncio.CancelledError:
+				raise
 			except BaseException as error:
 				finalization_error = error
 			if event_bus_stopped:
 				try:
-					# Reset all state
-					await self.reset(stop_event_bus=False)
+					# Reset all state. This task owns the lifecycle operation,
+					# so it must not wait on itself through the public reset().
+					await self.reset(stop_event_bus=False, wait_for_operations=False)
+				except asyncio.CancelledError:
+					raise
 				except BaseException as error:
 					finalization_error = error
 				finally:
@@ -837,6 +917,7 @@ class BrowserSession(BaseModel):
 		start_task = self._start_task
 		if start_task is None or start_task.done() or start_task is asyncio.current_task():
 			return
+		self._start_cancelled_by_lifecycle = True
 		start_task.cancel()
 		await asyncio.gather(start_task, return_exceptions=True)
 
@@ -852,6 +933,8 @@ class BrowserSession(BaseModel):
 			result = handler(BrowserKillEvent())
 			if inspect.isawaitable(result):
 				await result
+		except asyncio.CancelledError:
+			raise
 		except BaseException as error:
 			return error
 		return None
@@ -1108,8 +1191,7 @@ class BrowserSession(BaseModel):
 			except Exception as error:
 				self.logger.warning(f'Tab closing observer failed: {type(error).__name__}: {error}')
 			try:
-				cdp_session = await self.get_or_create_cdp_session(target_id=None, focus=False)
-				await cdp_session.cdp_client.send.Target.closeTarget(params={'targetId': event.target_id})
+				await self.cdp_client.send.Target.closeTarget(params={'targetId': event.target_id})
 			except Exception as error:
 				error_text = str(error).lower()
 				already_closed = any(
@@ -1275,8 +1357,9 @@ class BrowserSession(BaseModel):
 				self.event_bus.dispatch(BrowserStoppedEvent(reason='Kept alive due to keep_alive=True'))
 				return
 
-			# Clear CDP session cache before stopping
-			await self.reset(stop_event_bus=False)
+			# Clear CDP session cache before stopping. The active shutdown task
+			# owns the lifecycle operation, so it must not wait on itself.
+			await self.reset(stop_event_bus=False, wait_for_operations=False)
 
 			# Reset state
 			if self.is_local:

@@ -309,31 +309,44 @@ class StorageStateWatchdog(BaseWatchdog):
 		if not clean_items:
 			return []
 
+		accessor = 'window.localStorage' if storage_type == 'localStorage' else 'window.sessionStorage'
+		origin_guard = f'if (window.location.origin !== {json.dumps(origin)}) {{ return; }}' if origin else ''
+		prefix = f'(() => {{{origin_guard}const items = '
+		suffix = (
+			f';for (const [key, value] of items) {{ try {{ {accessor}.setItem(key, value); }} '
+			'catch (error) {} }})();'
+		)
+		overhead = len(prefix.encode('utf-8')) + len(suffix.encode('utf-8'))
+		limit = max(1, int(self.max_script_bytes_per_origin))
+
 		chunks: list[list[list[str]]] = []
 		current: list[list[str]] = []
+		current_size = 2  # JSON array brackets
 		for item in clean_items:
-			candidate = [*current, item]
-			payload = json.dumps(candidate, ensure_ascii=False)
-			if current and len(payload) > self.max_script_bytes_per_origin:
+			item_size = len(json.dumps(item, ensure_ascii=False).encode('utf-8'))
+			candidate_size = current_size + (1 if current else 0) + item_size
+			if current and overhead + candidate_size > limit:
 				chunks.append(current)
 				current = [item]
+				current_size = 2 + item_size
 			else:
-				current = candidate
+				current.append(item)
+				current_size = candidate_size
 		if current:
 			chunks.append(current)
 
 		scripts = []
-		accessor = 'window.localStorage' if storage_type == 'localStorage' else 'window.sessionStorage'
-		origin_guard = f'if (window.location.origin !== {json.dumps(origin)}) {{ return; }}' if origin else ''
 		for chunk in chunks:
 			payload = json.dumps(chunk, ensure_ascii=False)
-			scripts.append(
-				'(() => {'
-				f'{origin_guard}'
-				f'const items = {payload};'
-				f'for (const [key, value] of items) {{ try {{ {accessor}.setItem(key, value); }} catch (error) {{}} }}'
-				'})();'
-			)
+			script = f'{prefix}{payload}{suffix}'
+			if len(chunk) == 1 and len(script.encode('utf-8')) > limit:
+				warning = (
+					f'{storage_type} entry {chunk[0][0]!r} for {origin or "<unknown origin>"} '
+					f'exceeds max_script_bytes_per_origin={limit}; keeping it in one script to avoid data loss'
+				)
+				self.logger.warning('[StorageStateWatchdog] %s', warning)
+				self._record_warning(warning)
+			scripts.append(script)
 		return scripts
 
 	@staticmethod

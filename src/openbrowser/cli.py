@@ -74,6 +74,9 @@ if '-c' in sys.argv:
 		if status and status.success:
 			# Daemon already running (warm) -- compact description
 			print(EXECUTE_CODE_DESCRIPTION_COMPACT)
+		elif status and status.error_code == 'daemon_timeout':
+			# The daemon is alive but busy. Do not describe it as cold or try to start another.
+			print(EXECUTE_CODE_DESCRIPTION_COMPACT)
 		else:
 			# Daemon not running (cold) -- verbose description, then start it
 			print(EXECUTE_CODE_DESCRIPTION)
@@ -113,7 +116,7 @@ if len(sys.argv) > 1 and sys.argv[1] == 'daemon':
 	from pathlib import Path
 
 	from openbrowser.daemon.client import DaemonClient
-	from openbrowser.daemon import DAEMON_DIR, get_log_path, get_pid_path, get_socket_path
+	from openbrowser.daemon import DAEMON_DIR, IS_WINDOWS, WINDOWS_PORT, get_log_path, get_pid_path, get_socket_path
 	from openbrowser.daemon.diagnostics import daemon_processes, reap_orphan_processes, socket_candidates
 
 	sub = sys.argv[2] if len(sys.argv) > 2 else 'status'
@@ -130,7 +133,8 @@ if len(sys.argv) > 1 and sys.argv[1] == 'daemon':
 		raw = os.environ.get('OPENBROWSER_HEADLESS')
 		if raw is None:
 			return None
-		return raw.lower() in ('true', '1', 'yes')
+		# Mirror the daemon: only explicit false values disable headless mode.
+		return raw.lower() not in ('false', '0', 'no')
 
 	def _status_matches_request(resp) -> bool:
 		if not resp.success:
@@ -325,13 +329,27 @@ if len(sys.argv) > 1 and sys.argv[1] == 'daemon':
 					log_tail = ''
 
 			healthy = bool(status.success and payload and payload.get('state') == 'ready')
+			if IS_WINDOWS:
+				listeners = [row for row in daemon_processes() if row.get('socket_live')]
+				socket_report = {
+					'transport': 'tcp',
+					'host': '127.0.0.1',
+					'port': WINDOWS_PORT,
+					'listening': bool(listeners),
+				}
+			else:
+				socket_report = {
+					'transport': 'unix',
+					'path': str(socket_path),
+					'exists': socket_path.exists(),
+				}
 			report = {
 				'healthy': healthy,
 				'status': payload,
 				'status_error': status.error,
 				'error_code': status.error_code,
 				'hint': status.hint,
-				'socket': {'path': str(socket_path), 'exists': socket_path.exists()},
+				'socket': socket_report,
 				'pid_file': {'path': str(pid_path), 'exists': pid_path.exists(), 'pid': pid},
 				'log': {'path': str(log_path), 'tail': log_tail},
 			}

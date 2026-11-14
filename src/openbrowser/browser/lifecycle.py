@@ -193,7 +193,7 @@ class LifecycleMachine:
 		self._previous_phase = self._phase
 		self._phase = phase
 		self._reason = reason
-		if phase is LifecyclePhase.STARTING and self._started_at is None:
+		if phase is LifecyclePhase.STARTING:
 			self._started_at = now
 		if error is not None:
 			self._last_error = _error_text(error)

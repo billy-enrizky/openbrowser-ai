@@ -159,6 +159,7 @@ class TestDaemonServerHandleRequest:
         assert result["success"] is False
         assert result["error_code"] == "reset_failed"
         assert daemon_server._executor is not None
+        assert daemon_server._session is mock_session
 
     @pytest.mark.asyncio
     async def test_handle_unknown_action(self, daemon_server):

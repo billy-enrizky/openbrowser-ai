@@ -619,6 +619,23 @@ class TestSwitchTabAction:
         assert "Switched to tab" in result.extracted_content
 
     @pytest.mark.asyncio
+    async def test_switch_dispatches_the_resolved_full_target_id(self):
+        from openbrowser.browser.events import SwitchTabEvent
+
+        tools = Tools()
+        session = _make_mock_browser_session()
+        full_target = 'AAAABBBBCCCCDDDD111122223333AB12'
+        session.get_target_id_from_tab_id = AsyncMock(return_value=full_target)
+        event = _make_awaitable_event(result=full_target)
+        session.event_bus.dispatch = MagicMock(return_value=event)
+
+        await tools.registry.execute_action('switch', {'tab_id': 'AB12'}, browser_session=session)
+
+        dispatched = session.event_bus.dispatch.call_args.args[0]
+        assert isinstance(dispatched, SwitchTabEvent)
+        assert dispatched.target_id == full_target
+
+    @pytest.mark.asyncio
     async def test_switch_tab_success_without_new_target(self):
         tools = Tools()
         session = _make_mock_browser_session()
@@ -670,10 +687,11 @@ class TestCloseTabAction:
 
     @pytest.mark.asyncio
     async def test_close_tab_already_closed(self):
-        tools = Tools()
-        session = _make_mock_browser_session()
+        from openbrowser.browser.events import TabClosedEvent
         from openbrowser.browser.tabs import TabError
 
+        tools = Tools()
+        session = _make_mock_browser_session()
         session.get_target_id_from_tab_id = AsyncMock(
             side_effect=TabError("Tab cd34 is already closed.", tab_id="cd34")
         )
@@ -687,13 +705,43 @@ class TestCloseTabAction:
         )
         assert "closed" in result.extracted_content.lower()
         assert session.event_bus.dispatch.call_count == 1
+        dispatched = session.event_bus.dispatch.call_args.args[0]
+        assert isinstance(dispatched, TabClosedEvent)
+        assert dispatched.target_id == 'cd34'
+
+    @pytest.mark.asyncio
+    async def test_close_known_closed_suffix_is_idempotent_without_focus(self):
+        from openbrowser.browser.events import TabClosedEvent
+        from openbrowser.browser.tabs import TabError, TabRegistry, TabState
+
+        tools = Tools()
+        session = _make_mock_browser_session()
+        registry = TabRegistry()
+        full_target = 'AAAABBBBCCCCDDDD111122223333FF34'
+        registry.register(full_target, state=TabState.CLOSED)
+        session._tab_registry = registry
+        session.agent_focus = None
+        session.get_target_id_from_tab_id = AsyncMock(
+            side_effect=TabError('No live tab matches tab_id FF34.', tab_id='FF34')
+        )
+        event = _make_awaitable_event()
+        session.event_bus.dispatch = MagicMock(return_value=event)
+
+        result = await tools.registry.execute_action('close', {'tab_id': 'FF34'}, browser_session=session)
+
+        assert result.success is not False
+        assert 'already closed' in result.extracted_content.lower()
+        dispatched = session.event_bus.dispatch.call_args.args[0]
+        assert isinstance(dispatched, TabClosedEvent)
+        assert dispatched.target_id == full_target
 
     @pytest.mark.asyncio
     async def test_close_short_id_repairs_focus_for_a_closed_target(self):
-        tools = Tools()
-        session = _make_mock_browser_session()
+        from openbrowser.browser.events import TabClosedEvent
         from openbrowser.browser.tabs import TabError
 
+        tools = Tools()
+        session = _make_mock_browser_session()
         session.get_target_id_from_tab_id = AsyncMock(
             side_effect=TabError('No live tab matches tab_id cd34.', tab_id='cd34')
         )
@@ -709,6 +757,29 @@ class TestCloseTabAction:
 
         assert 'closed' in result.extracted_content.lower()
         assert session.event_bus.dispatch.call_count == 1
+        dispatched = session.event_bus.dispatch.call_args.args[0]
+        assert isinstance(dispatched, TabClosedEvent)
+        assert dispatched.target_id == 'cd34'
+
+    @pytest.mark.asyncio
+    async def test_close_ambiguous_id_does_not_emit_a_closed_event(self):
+        tools = Tools()
+        session = _make_mock_browser_session()
+        from openbrowser.browser.tabs import TabError
+
+        session.get_target_id_from_tab_id = AsyncMock(
+            side_effect=TabError(
+                'Tab ID cd34 is ambiguous.',
+                tab_id='cd34',
+                candidates=['AAAAcd34', 'BBBBcd34'],
+            )
+        )
+        session.agent_focus = MagicMock(target_id='AAAAcd34')
+
+        result = await tools.registry.execute_action('close', {'tab_id': 'cd34'}, browser_session=session)
+
+        assert result.success is False
+        session.event_bus.dispatch.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

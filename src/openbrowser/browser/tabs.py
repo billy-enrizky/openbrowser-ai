@@ -75,8 +75,8 @@ class TabRegistry:
 		self,
 		target_id: str,
 		*,
-		url: str = '',
-		title: str = '',
+		url: str | None = None,
+		title: str | None = None,
 		parent_target_id: str | None = None,
 		state: TabState = TabState.OPENING,
 	) -> TabRecord:
@@ -86,8 +86,8 @@ class TabRegistry:
 			record = TabRecord(
 				target_id=target_id,
 				short_id=self.short_id_for(target_id),
-				url=url,
-				title=title,
+				url=url or '',
+				title=title or '',
 				state=state,
 				created_at=now,
 				updated_at=now,
@@ -96,9 +96,9 @@ class TabRegistry:
 			self._tabs[target_id] = record
 			return record
 
-		if url:
+		if url is not None:
 			record.url = url
-		if title:
+		if title is not None:
 			record.title = title
 		if parent_target_id is not None:
 			record.parent_target_id = parent_target_id
@@ -164,14 +164,36 @@ class TabRegistry:
 				record.state = TabState.CLOSED
 				record.touch(now=now)
 
+	def known_closed(self, identifier: str) -> str | None:
+		"""Return the full target ID of one uniquely known closed tab."""
+		identifier = identifier.strip()
+		if not identifier:
+			return None
+		if len(identifier) != 4:
+			record = self._tabs.get(identifier)
+			if record is not None and record.state is TabState.CLOSED:
+				return identifier
+			return None
+		matches = [
+			target_id
+			for target_id, record in self._tabs.items()
+			if record.state is TabState.CLOSED and record.short_id == identifier
+		]
+		return matches[0] if len(matches) == 1 else None
+
 	def candidates(self, identifier: str) -> list[str]:
 		identifier = identifier.strip()
 		if not identifier:
 			return []
+		if len(identifier) != 4:
+			record = self._tabs.get(identifier)
+			if record is not None and record.state is not TabState.CLOSED:
+				return [identifier]
+			return []
 		return [
 			target_id
 			for target_id, record in self._tabs.items()
-			if record.state is not TabState.CLOSED and target_id.endswith(identifier)
+			if record.state is not TabState.CLOSED and record.short_id == identifier
 		]
 
 	def resolve(self, identifier: str) -> str:

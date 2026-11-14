@@ -270,6 +270,68 @@ async def test_execution_returns_a_structured_timeout(daemon_server):
 	assert 'may still be running' in response['hint']
 
 
+@pytest.mark.asyncio
+async def test_execution_recovers_when_executor_survives_a_missing_session(daemon_server):
+	daemon_server._session = None
+	result = MagicMock()
+	result.success = True
+	result.output = 'ok'
+	result.error = None
+	daemon_server._needs_browser_recovery = True
+	daemon_server._executor = MagicMock()
+	daemon_server._executor.namespace = {'browser': object()}
+	daemon_server._executor.execute = AsyncMock(return_value=result)
+	replacement = MagicMock()
+
+	async def recover():
+		daemon_server._session = replacement
+
+	with patch.object(daemon_server, '_recover_browser_session', side_effect=recover) as recovery:
+		response = await daemon_server._handle_request({'action': 'execute', 'code': 'print(1)', 'id': 1})
+
+	recovery.assert_awaited_once()
+	assert response['success'] is True
+	assert daemon_server._session is replacement
+
+
+@pytest.mark.asyncio
+async def test_execution_refuses_to_run_when_a_previous_recovery_failed(daemon_server):
+	daemon_server._session = MagicMock()
+	daemon_server._needs_browser_recovery = True
+	daemon_server._executor = MagicMock()
+	daemon_server._executor.execute = AsyncMock()
+
+	with patch.object(
+		daemon_server,
+		'_recover_browser_session',
+		new=AsyncMock(side_effect=RuntimeError('close failed')),
+	) as recovery:
+		response = await daemon_server._handle_request({'action': 'execute', 'code': 'print(1)', 'id': 1})
+
+	recovery.assert_awaited_once()
+	daemon_server._executor.execute.assert_not_awaited()
+	assert response['success'] is False
+	assert response['error_code'] == 'cdp_recovery_failed'
+
+
+@pytest.mark.asyncio
+async def test_execution_does_not_recover_an_injected_code_only_executor(daemon_server):
+	daemon_server._session = None
+	result = MagicMock()
+	result.success = True
+	result.output = 'ok'
+	result.error = None
+	daemon_server._executor = MagicMock()
+	daemon_server._executor.namespace = {'browser': object()}
+	daemon_server._executor.execute = AsyncMock(return_value=result)
+
+	with patch.object(daemon_server, '_recover_browser_session', new=AsyncMock()) as recovery:
+		response = await daemon_server._handle_request({'action': 'execute', 'code': 'print(1)', 'id': 1})
+
+	recovery.assert_not_awaited()
+	assert response['success'] is True
+
+
 def test_error_response_is_structured(daemon_server):
 	response = daemon_server._error_response(
 		7,

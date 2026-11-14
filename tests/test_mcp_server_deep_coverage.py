@@ -613,8 +613,11 @@ class TestGetParentProcessCmdlineEdgeCases:
 class TestBuildBrowserProfile:
     """Test _build_browser_profile method."""
 
-    def test_build_profile_has_mcp_defaults(self, server_instance):
+    def test_build_profile_has_mcp_defaults(self, server_instance, monkeypatch):
         """Lines 306-319: profile built with MCP-specific defaults."""
+        # The developer's saved config must not decide an MCP default assertion.
+        server_instance.config = {'browser_profile': {}}
+        monkeypatch.delenv('OPENBROWSER_HEADLESS', raising=False)
         profile = server_instance._build_browser_profile()
         assert profile is not None
         assert profile.keep_alive is True

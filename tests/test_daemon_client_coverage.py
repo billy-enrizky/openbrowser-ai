@@ -147,7 +147,9 @@ class TestDaemonClientStartDaemon:
                                 "_socket_accepts_connection",
                                 new_callable=AsyncMock,
                                 return_value=False,
-                            ), patch.object(client, "_daemon_owner_for_socket", return_value=None):
+                            ), patch.object(client, "_daemon_owner_for_socket", return_value=None), patch.object(
+                                client, "_remove_stale_socket"
+                            ) as remove_stale:
                                 with patch.object(
                                     client,
                                     "_probe",
@@ -157,7 +159,7 @@ class TestDaemonClientStartDaemon:
                                     with patch("openbrowser.daemon.client.IS_WINDOWS", False):
                                         await client._start_daemon()
 
-        mock_sock_path.unlink.assert_called_once_with(missing_ok=True)
+        remove_stale.assert_called_once_with(mock_sock_path)
 
     @pytest.mark.asyncio
     async def test_start_daemon_refuses_a_busy_listener(self, tmp_path):
@@ -171,6 +173,8 @@ class TestDaemonClientStartDaemon:
         with (
             patch("openbrowser.daemon.client.get_socket_path", return_value=mock_sock_path),
             patch("openbrowser.daemon.client.get_pid_path", return_value=tmp_path / "daemon.pid"),
+            patch("openbrowser.daemon.client.get_log_path", return_value=tmp_path / "daemon.log"),
+            patch("openbrowser.daemon.client.DAEMON_DIR", tmp_path),
             patch.object(client, "_start_lock", _noop_start_lock),
             patch.object(client, "_probe", new_callable=AsyncMock, return_value=False),
             patch.object(client, "_socket_accepts_connection", new_callable=AsyncMock, return_value=True),
@@ -193,6 +197,8 @@ class TestDaemonClientStartDaemon:
         with (
             patch("openbrowser.daemon.client.get_socket_path", return_value=mock_sock_path),
             patch("openbrowser.daemon.client.get_pid_path", return_value=tmp_path / "daemon.pid"),
+            patch("openbrowser.daemon.client.get_log_path", return_value=tmp_path / "daemon.log"),
+            patch("openbrowser.daemon.client.DAEMON_DIR", tmp_path),
             patch.object(client, "_start_lock", _noop_start_lock),
             patch.object(client, "_daemon_owner_for_socket", return_value={"pid": 123}),
             patch("subprocess.Popen") as popen,

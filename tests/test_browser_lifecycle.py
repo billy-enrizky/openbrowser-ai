@@ -4,9 +4,10 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from bubus import EventBus
 
 from openbrowser.browser import BrowserProfile, BrowserSession
-from openbrowser.browser.events import CloseTabEvent, SwitchTabEvent
+from openbrowser.browser.events import BrowserStopEvent, CloseTabEvent, SwitchTabEvent, TabClosedEvent
 from openbrowser.browser.lifecycle import LifecyclePhase
 from openbrowser.browser.tabs import TabError, TabState
 
@@ -60,21 +61,19 @@ async def test_concurrent_start_waits_for_same_start():
 
 
 @pytest.mark.asyncio
-async def test_start_timeout_cancels_the_start_task():
+async def test_start_timeout_moves_the_real_lifecycle_to_failed():
 	session = _make_session()
 
-	async def hanging_start():
-		try:
-			await asyncio.sleep(60)
-		except BaseException as error:
-			session._lifecycle.fail(error, reason='cancelled by timeout')
-			raise
+	async def hanging_start_event():
+		await asyncio.sleep(60)
 
-	with patch.object(session, '_start_locked', side_effect=hanging_start):
-		with pytest.raises(asyncio.TimeoutError):
-			await asyncio.wait_for(session.start(), timeout=0.05)
+	session.event_bus.dispatch = MagicMock(return_value=hanging_start_event())
+
+	with pytest.raises(asyncio.TimeoutError):
+		await asyncio.wait_for(session.start(), timeout=0.05)
 
 	assert session.lifecycle_snapshot()['phase'] == 'failed'
+	assert session._start_task is None
 
 
 @pytest.mark.asyncio
@@ -97,7 +96,7 @@ async def test_stop_or_kill_during_start_cancels_the_owned_start(operation):
 		await asyncio.wait_for(started.wait(), timeout=1)
 
 		await getattr(session, operation)()
-		with pytest.raises(asyncio.CancelledError):
+		with pytest.raises(RuntimeError, match='cancelled by shutdown'):
 			await start_task
 
 	assert cancelled.is_set()
@@ -200,19 +199,19 @@ async def test_close_tab_reaches_a_terminal_state_when_the_target_disappears():
 	session = _make_session()
 	target = 'AAAABBBBCCCCDDDD1111222233334444'
 	session._tab_registry.register(target, state=TabState.OPEN)
-	cdp_session = MagicMock()
-	cdp_session.cdp_client.send.Target.closeTarget = AsyncMock(side_effect=Exception('already closed'))
+	session._cdp_client_root = MagicMock()
+	session._cdp_client_root.send.Target.closeTarget = AsyncMock(side_effect=Exception('already closed'))
 	dispatch = MagicMock(side_effect=lambda event: _ready_awaitable())
 	session.event_bus.dispatch = dispatch
 
-	with patch.object(BrowserSession, 'get_or_create_cdp_session', new_callable=AsyncMock, return_value=cdp_session):
-		await session.on_CloseTabEvent(CloseTabEvent(target_id=target))
+	await session.on_CloseTabEvent(CloseTabEvent(target_id=target))
 
-	closed_event = dispatch.call_args.args[0]
-	await session.on_TabClosedEvent(closed_event)
 	record = session._tab_registry.get(target)
 	assert record is not None
 	assert record.state is TabState.CLOSED
+	closed_event = dispatch.call_args.args[0]
+	assert isinstance(closed_event, TabClosedEvent)
+	assert closed_event.target_id == target
 
 
 @pytest.mark.asyncio
@@ -267,13 +266,11 @@ async def test_cancelled_close_restores_an_retryable_tab_state():
 	target = 'AAAABBBBCCCCDDDD1111222233334444'
 	session._tab_registry.register(target, state=TabState.OPEN)
 	session.event_bus.dispatch = MagicMock(side_effect=lambda event: _ready_awaitable())
+	session._cdp_client_root = MagicMock()
+	session._cdp_client_root.send.Target.closeTarget = AsyncMock(side_effect=asyncio.CancelledError)
 
-	async def cancelled_close(*args, **kwargs):
-		raise asyncio.CancelledError
-
-	with patch.object(BrowserSession, 'get_or_create_cdp_session', side_effect=cancelled_close):
-		with pytest.raises(asyncio.CancelledError):
-			await session.on_CloseTabEvent(CloseTabEvent(target_id=target))
+	with pytest.raises(asyncio.CancelledError):
+		await session.on_CloseTabEvent(CloseTabEvent(target_id=target))
 
 	assert session._tab_registry.get(target).state is TabState.OPEN
 
@@ -284,11 +281,10 @@ async def test_terminal_event_failure_still_leaves_the_tab_closed():
 	target = 'AAAABBBBCCCCDDDD1111222233334444'
 	session._tab_registry.register(target, state=TabState.OPEN)
 	session.event_bus.dispatch = MagicMock(side_effect=RuntimeError('event bus unavailable'))
-	cdp_session = MagicMock()
-	cdp_session.cdp_client.send.Target.closeTarget = AsyncMock()
+	session._cdp_client_root = MagicMock()
+	session._cdp_client_root.send.Target.closeTarget = AsyncMock()
 
-	with patch.object(BrowserSession, 'get_or_create_cdp_session', new_callable=AsyncMock, return_value=cdp_session):
-		await session.on_CloseTabEvent(CloseTabEvent(target_id=target))
+	await session.on_CloseTabEvent(CloseTabEvent(target_id=target))
 
 	assert session._tab_registry.get(target).state is TabState.CLOSED
 
@@ -314,6 +310,35 @@ async def test_kill_after_keep_alive_stop_forces_retained_browser_cleanup():
 		await session.kill()
 
 	shutdown.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_kill_escalates_after_joining_a_graceful_shutdown():
+	session = _make_session()
+	session._lifecycle.transition(LifecyclePhase.STARTING)
+	session._lifecycle.transition(LifecyclePhase.READY)
+	watchdog = MagicMock()
+	watchdog._subprocess = MagicMock()
+	watchdog._spawned_subprocess = None
+	watchdog._profile_lease = MagicMock()
+	session._local_browser_watchdog = watchdog
+	release = asyncio.Event()
+
+	async def graceful_shutdown():
+		await release.wait()
+		session._lifecycle.transition(LifecyclePhase.STOPPING)
+		session._lifecycle.transition(LifecyclePhase.STOPPED)
+
+	session._stop_task = asyncio.create_task(graceful_shutdown())
+	kill_task = asyncio.create_task(session.kill())
+	await asyncio.sleep(0.05)
+	with patch.object(
+		session, '_force_stop_retained_browser', new_callable=AsyncMock, return_value=None
+	) as force_stop:
+		release.set()
+		await kill_task
+
+	force_stop.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -344,6 +369,129 @@ async def test_reset_keeps_a_watchdog_that_still_owns_a_process():
 	await session.reset()
 
 	assert session._local_browser_watchdog is watchdog
+
+
+@pytest.mark.asyncio
+async def test_remote_cdp_url_is_not_a_live_resource_after_stop():
+	session = BrowserSession(browser_profile=BrowserProfile(cdp_url='ws://127.0.0.1:9222', is_local=False))
+	session._lifecycle.transition(LifecyclePhase.STARTING)
+	session._lifecycle.transition(LifecyclePhase.STOPPED)
+
+	await session.stop()
+	await session.kill()
+
+	assert session.lifecycle_snapshot()['phase'] == 'stopped'
+
+
+@pytest.mark.asyncio
+async def test_start_waits_for_an_in_flight_shutdown():
+	session = _make_session()
+	session._lifecycle.transition(LifecyclePhase.STARTING)
+	session._lifecycle.transition(LifecyclePhase.STOPPING)
+	release = asyncio.Event()
+
+	async def shutdown():
+		await release.wait()
+		session._lifecycle.transition(LifecyclePhase.STOPPED)
+
+	session._stop_task = asyncio.create_task(shutdown())
+
+	async def fake_start():
+		session._lifecycle.transition(LifecyclePhase.READY)
+
+	with patch.object(session, '_start_locked', side_effect=fake_start):
+		start_task = asyncio.create_task(session.start())
+		await asyncio.sleep(0.05)
+		assert session.lifecycle_snapshot()['phase'] == 'stopping'
+		release.set()
+		await start_task
+
+	assert session.lifecycle_snapshot()['phase'] == 'ready'
+
+
+def test_force_reset_clears_a_local_cdp_url_but_keeps_a_remote_one():
+	local = BrowserSession(
+		browser_profile=BrowserProfile(is_local=True, cdp_url='http://127.0.0.1:9222')
+	)
+	local._force_reset_runtime_state()
+	assert local.cdp_url is None
+
+	remote = BrowserSession(
+		browser_profile=BrowserProfile(is_local=False, cdp_url='http://remote.example:9222')
+	)
+	remote._force_reset_runtime_state()
+	assert remote.cdp_url == 'http://remote.example:9222'
+
+
+@pytest.mark.asyncio
+async def test_cancelled_start_releases_a_launched_browser_and_resets_state():
+	session = _make_session()
+	watchdog = MagicMock()
+	watchdog._subprocess = MagicMock()
+	watchdog._profile_lease = MagicMock()
+	watchdog.on_BrowserKillEvent = AsyncMock()
+	session._local_browser_watchdog = watchdog
+	session._cdp_client_root = MagicMock()
+
+	async def hanging_start_event():
+		await asyncio.sleep(60)
+
+	session.event_bus.dispatch = MagicMock(return_value=hanging_start_event())
+	start_task = asyncio.create_task(session.start())
+	await asyncio.sleep(0.05)
+	start_task.cancel()
+
+	with pytest.raises(asyncio.CancelledError):
+		await start_task
+
+	watchdog.on_BrowserKillEvent.assert_awaited_once()
+	assert session._cdp_client_root is None
+	assert session.lifecycle_snapshot()['phase'] == 'failed'
+
+
+@pytest.mark.asyncio
+async def test_stale_shutdown_does_not_reset_a_replacement_bus():
+	session = _make_session()
+	session._lifecycle.transition(LifecyclePhase.STARTING)
+	session._lifecycle.transition(LifecyclePhase.READY)
+	old_bus = session.event_bus
+	replacement_bus = EventBus()
+
+	def dispatch(event):
+		if isinstance(event, BrowserStopEvent):
+			session.event_bus = replacement_bus
+			session._lifecycle.seed_generation(session._lifecycle.generation + 1)
+		return _ready_awaitable()
+
+	old_bus.dispatch = MagicMock(side_effect=dispatch)
+	old_bus.stop = AsyncMock()
+
+	with patch.object(session, '_cancel_owned_start', new_callable=AsyncMock):
+		await session._shutdown_locked(force=False)
+
+	old_bus.stop.assert_not_awaited()
+	assert session.event_bus is replacement_bus
+
+
+@pytest.mark.asyncio
+async def test_reset_cancels_and_waits_for_an_in_flight_start():
+	session = _make_session()
+	started = asyncio.Event()
+
+	async def hanging_start():
+		started.set()
+		await asyncio.sleep(60)
+
+	with patch.object(session, '_start_locked', side_effect=hanging_start):
+		start_task = asyncio.create_task(session.start())
+		await asyncio.wait_for(started.wait(), timeout=1)
+
+		await session.reset()
+
+		with pytest.raises(RuntimeError, match='cancelled by shutdown'):
+			await start_task
+
+	assert session.lifecycle_snapshot()['phase'] == 'stopped'
 
 
 @pytest.mark.asyncio

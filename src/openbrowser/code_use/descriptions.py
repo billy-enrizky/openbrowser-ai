@@ -38,7 +38,7 @@ EXECUTE_CODE_DESCRIPTION = """Execute Python code in a persistent namespace with
 
 - `await navigate(url: str, new_tab: bool = False)` -- Navigate to a URL. Set new_tab=True to open in a new tab.
 - `await go_back()` -- Go back to the previous page in browser history.
-- `await wait(seconds: int = 3)` -- Wait for specified seconds (max 30). Use after actions that trigger page loads.
+- `await wait(seconds: float = 3)` -- Wait for the requested duration, capped at 30 seconds. Fractional seconds are accepted. Use after actions that trigger page loads.
 
 ## Element Interaction
 
@@ -59,8 +59,8 @@ EXECUTE_CODE_DESCRIPTION = """Execute Python code in a persistent namespace with
 
 ## Tab Management
 
-- `await switch(tab_id: str)` -- Switch to a different browser tab. tab_id is a 4-character ID (get IDs from browser state tabs list).
-- `await close(tab_id: str)` -- Close a browser tab by its 4-character tab_id.
+- `await switch(tab_id: str)` -- Switch to a different browser tab. Pass the full target_id or its 4-character suffix from the browser state tabs list. If a suffix is ambiguous, retry with one of the returned full IDs.
+- `await close(tab_id: str)` -- Close a browser tab. Pass the full target_id or its 4-character suffix. Closing an already closed tab is a no-op.
 
 ## JavaScript Execution
 
