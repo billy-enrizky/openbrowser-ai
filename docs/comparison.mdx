@@ -24,7 +24,7 @@ Three approaches to browser automation via MCP, measured on identical tasks.
 | **Maintainer** | Microsoft | Chrome DevTools team (Google) | OpenBrowser |
 | **GitHub Stars** | 27,400+ | 26,200+ | -- |
 | **Engine** | Playwright (Chromium/Firefox/WebKit) | Puppeteer (CDP) | Raw CDP (direct) |
-| **Tools** | 22 core (34 total) | 26 | 1 (`execute_code`) |
+| **Tools** | 22 core (34 total) | 26 | 3 (`execute_code`, `get_status`, `reset_browser`) |
 | **Approach** | A11y snapshot with every action | A11y snapshot on demand | CodeAgent -- Python code execution with browser namespace |
 | **Element IDs** | `ref` from snapshot (`[ref=e25]`) | `uid` from snapshot (`uid=1_2`) | Numeric index from state |
 | **Transport** | stdio | stdio | stdio |
@@ -323,17 +323,21 @@ Navigation, interaction, form filling, file upload, drag and drop, hover, key pr
 
 Input automation (click, drag, fill, fill_form, hover, press_key, handle_dialog, upload_file), navigation (navigate_page, new_page, close_page, list_pages, select_page, wait_for), emulation (emulate, resize_page), performance tracing (start/stop/analyze), network debugging (list/get requests), JS execution, console messages, screenshots, DOM snapshots.
 
-#### OpenBrowser MCP (1 tool -- CodeAgent)
+#### OpenBrowser MCP (CodeAgent, 3 tools)
+
+The benchmark run used v0.1.26 with `execute_code`. `get_status` and `reset_browser` are additive lifecycle tools in the current server.
 
 | Tool | Capabilities |
 |------|-------------|
 | `execute_code` | Python code execution in a persistent namespace with browser automation functions: `navigate()`, `click()`, `input_text()`, `scroll()`, `go_back()`, `select_dropdown()`, `send_keys()`, `upload_file()`, `evaluate()` (JS), `switch()`/`close()` (tabs), `done()` (task completion). Also provides `file_system` for local file operations and pre-imported libraries (json, pandas, re, csv, etc.) |
+| `get_status` | Read-only server, browser, profile, and tab state. Does not start a browser. |
+| `reset_browser` | Close a stuck browser and release its profile while preserving user variables by default. |
 
 ### Unique to OpenBrowser
 
 Features no competitor offers:
 
-- **CodeAgent architecture** -- single `execute_code` tool runs Python in a persistent namespace. The LLM writes code to navigate, extract, and process data rather than calling individual tools. Variables and state persist between calls.
+- **CodeAgent architecture** -- the core `execute_code` tool runs Python in a persistent namespace. The LLM writes code to navigate, extract, and process data rather than calling individual tools. Variables and state persist between calls. `get_status` and `reset_browser` provide lifecycle diagnostics without changing that execution model.
 - **144x smaller MCP responses** -- returns only the data the code explicitly extracts, not full page dumps
 - **JS evaluation with Python processing** -- `await evaluate("JS expression")` returns Python objects directly (dicts, lists, strings), enabling pandas/regex/json processing in the same code block
 - **Built-in libraries** -- json, pandas, numpy, matplotlib, csv, re, datetime, requests, BeautifulSoup available in the execution namespace

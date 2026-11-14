@@ -211,11 +211,7 @@ openbrowser-ai daemon stop
 openbrowser-ai daemon status
 ```
 
-`daemon stop` closes every tab, exits Chrome, flushes saved cookies/login state to the profile (so the next run reuses the login), and shuts down the daemon process. `daemon status` should report the daemon is not running. If it still reports running, the daemon is wedged, force-kill it:
-
-```bash
-pkill -f 'openbrowser.*daemon' || true
-```
+`daemon stop` closes every tab, exits Chrome, flushes saved cookies/login state to the profile (so the next run reuses the login), and shuts down the daemon process. `daemon status` should report the daemon is not running. If it still reports running, run `openbrowser-ai daemon doctor` and then `openbrowser-ai daemon reap`. `reap` stops only verified OpenBrowser daemons and removes stale sockets and PID files.
 
 Form runs can fail mid-workflow (validation error, CAPTCHA, network drop). Guarantee cleanup with a shell trap so a half-filled form never leaks a browser:
 

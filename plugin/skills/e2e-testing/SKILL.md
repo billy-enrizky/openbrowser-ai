@@ -219,11 +219,7 @@ openbrowser-ai daemon stop
 openbrowser-ai daemon status
 ```
 
-`daemon stop` closes every tab, exits Chrome, flushes saved cookies/login state to the profile, and shuts down the daemon process. `daemon status` should report the daemon is not running. If it still reports running, the daemon is wedged, force-kill it:
-
-```bash
-pkill -f 'openbrowser.*daemon' || true
-```
+`daemon stop` closes every tab, exits Chrome, flushes saved cookies/login state to the profile, and shuts down the daemon process. `daemon status` should report the daemon is not running. If it still reports running, run `openbrowser-ai daemon doctor` and then `openbrowser-ai daemon reap`. `reap` stops only verified OpenBrowser daemons and removes stale sockets and PID files.
 
 E2E runs fail often by design (that is what assertions are for). Guarantee cleanup with a shell trap so a failed assertion never leaks a browser:
 
