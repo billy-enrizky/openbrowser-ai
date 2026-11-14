@@ -389,14 +389,7 @@ class TestExecuteCodeRecovery:
         server_instance._executor = MagicMock()
         server_instance._executor.initialized = True
 
-        mock_result_ok = MagicMock()
-        mock_result_ok.success = True
-        mock_result_ok.output = "ok"
-        mock_result_ok.error = None
-
-        server_instance._executor.execute = AsyncMock(
-            side_effect=[mock_result, mock_result_ok]
-        )
+        server_instance._executor.execute = AsyncMock(return_value=mock_result)
         server_instance.browser_session = None
 
         with patch.object(
@@ -405,7 +398,9 @@ class TestExecuteCodeRecovery:
             new_callable=AsyncMock,
         ):
             result = await server_instance._execute_code("x = 1")
-            assert result == "ok"
+            assert "some long stdout output..." in result
+            assert "may have partially run" in result
+            assert server_instance._executor.execute.await_count == 1
 
 
 # ---------------------------------------------------------------------------
