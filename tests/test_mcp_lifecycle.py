@@ -61,6 +61,35 @@ async def test_reset_browser_clears_variables_when_requested(mcp_server):
 
 
 @pytest.mark.asyncio
+async def test_repeated_reset_browser_keeps_pending_variables(mcp_server):
+	session = MagicMock()
+	session.kill = AsyncMock()
+	mcp_server.browser_session = session
+	mcp_server._namespace = {'user_value': 42}
+
+	await mcp_server._handle_tool('reset_browser', {})
+	await mcp_server._handle_tool('reset_browser', {})
+
+	assert mcp_server._pending_variables['user_value'] == 42
+
+
+@pytest.mark.asyncio
+async def test_reset_browser_finishes_state_changes_before_cancellation(mcp_server):
+	session = MagicMock()
+	mcp_server.browser_session = session
+	mcp_server._namespace = {'user_value': 42}
+
+	with patch.object(mcp_server, '_kill_session_safely', new_callable=AsyncMock, return_value=(True, True)):
+		with pytest.raises(asyncio.CancelledError):
+			await mcp_server._handle_tool('reset_browser', {})
+
+	assert mcp_server.browser_session is None
+	assert mcp_server._namespace is None
+	assert mcp_server._pending_variables['user_value'] == 42
+	assert mcp_server._executor.namespace == {}
+
+
+@pytest.mark.asyncio
 async def test_reset_browser_keeps_ownership_when_cleanup_fails(mcp_server):
 	session = MagicMock()
 	session.kill = AsyncMock(side_effect=RuntimeError('cleanup failed'))
@@ -97,6 +126,17 @@ async def test_namespace_start_timeout_cleans_up(mcp_server):
 	assert mcp_server.browser_session is None
 	assert mcp_server._namespace is None
 	assert mcp_server._browser_lifecycle.phase is LifecyclePhase.FAILED
+
+
+@pytest.mark.asyncio
+async def test_profile_failure_marks_browser_lifecycle_failed(mcp_server):
+	mcp_server._build_browser_profile = MagicMock(side_effect=RuntimeError('profile failed'))
+
+	with pytest.raises(RuntimeError, match='profile failed'):
+		await mcp_server._ensure_namespace()
+
+	assert mcp_server._browser_lifecycle.phase is LifecyclePhase.FAILED
+	assert 'profile failed' in (mcp_server._status_payload()['browser']['last_error'] or '')
 
 
 @pytest.mark.asyncio

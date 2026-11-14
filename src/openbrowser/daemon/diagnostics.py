@@ -12,6 +12,19 @@ import psutil
 
 from openbrowser.daemon import DAEMON_DIR, IS_WINDOWS, SOCKET_PATH, WINDOWS_PORT, get_socket_path
 
+DAEMON_MODULE = 'openbrowser.daemon.server'
+
+
+def is_daemon_cmdline(cmdline: Any) -> bool:
+    """Return True only for an exact ``python -m openbrowser.daemon.server`` argv."""
+    if not isinstance(cmdline, (list, tuple)):
+        return False
+    arguments = [str(part) for part in cmdline]
+    return any(
+        arguments[index] == '-m' and arguments[index + 1] == DAEMON_MODULE
+        for index in range(len(arguments) - 1)
+    )
+
 
 def socket_candidates() -> list[Path]:
     """Return daemon sockets under the OpenBrowser directory plus the current socket."""
@@ -63,7 +76,7 @@ def daemon_processes() -> list[dict[str, Any]]:
     for process in psutil.process_iter(['pid', 'create_time', 'cmdline']):
         try:
             cmdline = process.info.get('cmdline') or []
-            if not any('openbrowser.daemon.server' in str(part) for part in cmdline):
+            if not is_daemon_cmdline(cmdline):
                 continue
             if process.username() != current_user:
                 continue
@@ -79,9 +92,17 @@ def daemon_processes() -> list[dict[str, Any]]:
                 socket_exists = socket_known and _windows_daemon_is_listening(process.pid)
                 socket_live = socket_exists
             elif socket_known:
-                socket_path = environment.get('OPENBROWSER_SOCKET') or str(SOCKET_PATH)
-                socket_exists = Path(socket_path).exists()
-                socket_live = socket_exists and _unix_socket_is_live(Path(socket_path))
+                raw_socket = environment.get('OPENBROWSER_SOCKET')
+                resolved_socket = Path(raw_socket).expanduser() if raw_socket else SOCKET_PATH
+                if resolved_socket.is_absolute():
+                    socket_path = str(resolved_socket)
+                    socket_exists = resolved_socket.exists()
+                    socket_live = socket_exists and _unix_socket_is_live(resolved_socket)
+                else:
+                    socket_known = False
+                    socket_path = None
+                    socket_exists = False
+                    socket_live = True
             else:
                 socket_path = None
                 socket_exists = False
@@ -120,9 +141,12 @@ def reap_orphan_processes(*, min_age_seconds: float = 30.0, timeout: float = 5.0
             if abs(float(process.create_time()) - float(row['create_time'])) > 1e-6:
                 results.append({**row, 'reaped': False, 'reason': 'process identity changed'})
                 continue
-            cmdline = ' '.join(str(part) for part in process.cmdline())
-            if 'openbrowser.daemon.server' not in cmdline:
+            cmdline_parts = process.cmdline()
+            if not is_daemon_cmdline(cmdline_parts):
                 results.append({**row, 'reaped': False, 'reason': 'process identity changed'})
+                continue
+            if row['socket'] and _unix_socket_is_live(Path(row['socket'])):
+                results.append({**row, 'reaped': False, 'reason': 'socket is live or unknown'})
                 continue
             process.terminate()
             try:

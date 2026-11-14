@@ -580,6 +580,9 @@ class TestLoadStorageState:
             assert "key199" in script
             assert "window.localStorage.setItem" in script
             assert "window.location.origin" in script
+            for index in range(200):
+                assert f"key{index}" in script
+                assert f"value{index}" in script
 
     @pytest.mark.asyncio
     async def test_splits_storage_scripts_when_bound_is_exceeded(self):
@@ -593,11 +596,41 @@ class TestLoadStorageState:
             session = _make_mock_browser_session()
             event_bus = MagicMock()
             watchdog = _make_storage_watchdog(session=session, event_bus=event_bus)
-            watchdog.max_script_bytes_per_origin = 300
+            watchdog.max_script_bytes_per_origin = 1000
 
             await watchdog._load_storage_state(path=state_path)
 
             assert session._cdp_add_init_script.await_count > 1
+            scripts = [call.args[0] for call in session._cdp_add_init_script.await_args_list]
+            for script in scripts:
+                assert len(script.encode('utf-8')) <= 1000
+            combined = '\n'.join(scripts)
+            for index in range(20):
+                assert f"key{index}" in combined
+                assert "x" * 100 in combined
+
+    @pytest.mark.asyncio
+    async def test_an_oversized_single_entry_is_kept_and_warned(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_path = os.path.join(tmpdir, "state.json")
+            items = [{"name": "huge", "value": "x" * 500}]
+            state = {"cookies": [], "origins": [{"origin": "https://x.com", "localStorage": items}]}
+            with open(state_path, "w") as f:
+                json.dump(state, f)
+
+            session = _make_mock_browser_session()
+            session._storage_state_warnings = []
+            event_bus = MagicMock()
+            watchdog = _make_storage_watchdog(session=session, event_bus=event_bus)
+            watchdog.max_script_bytes_per_origin = 300
+
+            await watchdog._load_storage_state(path=state_path)
+
+            session._cdp_add_init_script.assert_awaited_once()
+            script = session._cdp_add_init_script.await_args.args[0]
+            assert 'huge' in script
+            assert 'x' * 500 in script
+            assert any('exceeds max_script_bytes_per_origin' in warning for warning in session._storage_state_warnings)
 
     @pytest.mark.asyncio
     async def test_load_exception(self):

@@ -102,6 +102,7 @@ class DaemonServer:
         self._init_lock = asyncio.Lock()  # guard lazy initialization
         self._lifecycle = LifecycleMachine('daemon')
         self._browser_error: str | None = None
+        self._needs_browser_recovery = False
         self._profile_summary: dict[str, object] | None = None
         self._browser_generation = 0
 
@@ -213,6 +214,7 @@ class DaemonServer:
                 self._executor.set_namespace(namespace)
                 self._session = session
                 self._browser_error = None
+                self._needs_browser_recovery = False
             except BaseException as error:
                 # Kill the browser if startup or namespace setup fails. Bound
                 # cleanup too, so a broken browser cannot block the client.
@@ -281,15 +283,20 @@ class DaemonServer:
         async with self._init_lock:
             if expected_session is not None and self._session is not expected_session:
                 logger.info('Skipping browser recovery because another request already replaced the session')
+                self._needs_browser_recovery = False
                 return
 
             logger.info('CDP connection lost -- recovering browser session')
-            old_namespace = self._executor.namespace if self._executor else {}
+            self._needs_browser_recovery = True
+            old_namespace = getattr(self._executor, 'namespace', None) if self._executor else {}
+            if not isinstance(old_namespace, dict):
+                old_namespace = {}
             if self._session:
                 closed = await self._close_session_bounded(self._session)
                 if not closed:
                     raise RuntimeError('Unable to close the old browser session before recovery')
                 self._session = None
+                self._needs_browser_recovery = True
 
             from openbrowser.browser import BrowserSession
             from openbrowser.code_use.namespace import create_namespace
@@ -311,12 +318,13 @@ class DaemonServer:
                 self._executor.set_namespace(namespace)
                 self._session = session
                 self._browser_error = None
-            except Exception as error:
+                self._needs_browser_recovery = False
+            except BaseException as error:
                 self._browser_error = f'{type(error).__name__}: {error}'
                 try:
                     await self._cleanup_failed_session(session)
-                except Exception:
-                    pass
+                except BaseException:
+                    logger.warning('Failed to clean up replacement browser session', exc_info=True)
                 raise
             logger.info('Browser session recovered successfully')
 
@@ -351,6 +359,7 @@ class DaemonServer:
             'pid': os.getpid(),
             'state': snapshot.phase.value,
             'initialized': self._executor is not None,
+            'needs_browser_recovery': self._needs_browser_recovery,
             'socket': str(get_socket_path()),
             'profile': self._profile_summary,
             'idle_timeout': self._idle_timeout,
@@ -420,6 +429,16 @@ class DaemonServer:
                             code='daemon_start_failed',
                             hint='Run `openbrowser-ai daemon doctor` and check the profile path and daemon log.',
                         )
+                    if self._needs_browser_recovery:
+                        try:
+                            await self._recover_browser_session()
+                        except Exception as recovery_error:
+                            return self._error_response(
+                                req_id,
+                                f'Browser recovery failed: {type(recovery_error).__name__}: {recovery_error}',
+                                code='cdp_recovery_failed',
+                                hint='Run `openbrowser-ai daemon doctor` or `openbrowser-ai daemon reset` before retrying.',
+                            )
                     failed_session = self._session
                     result = await asyncio.wait_for(
                         self._executor.execute(code), timeout=self._exec_timeout
@@ -502,6 +521,7 @@ class DaemonServer:
                     self._executor = None
                     self._session = None
                     self._browser_error = None
+                    self._needs_browser_recovery = False
                     self._browser_generation += 1
             return {
                 'id': req_id,

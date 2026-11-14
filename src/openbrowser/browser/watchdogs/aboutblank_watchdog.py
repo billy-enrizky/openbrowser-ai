@@ -37,6 +37,8 @@ class AboutBlankWatchdog(BaseWatchdog):
 	EMITS: ClassVar[list[type[BaseEvent]]] = [
 		NavigateToUrlEvent,
 		CloseTabEvent,
+		TabCreatedEvent,
+		SwitchTabEvent,
 		AboutBlankDVDScreensaverShownEvent,
 	]
 

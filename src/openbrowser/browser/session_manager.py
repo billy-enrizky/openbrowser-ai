@@ -197,12 +197,23 @@ class SessionManager:
 				existing.title = event['targetInfo'].get('title', existing.title)
 				existing.url = event['targetInfo'].get('url', existing.url)
 
-			self.browser_session._tab_registry.update(
-				target_id,
-				url=event['targetInfo'].get('url'),
-				title=event['targetInfo'].get('title'),
-				state=TabState.OPEN,
-			)
+			if target_type == 'page':
+				tab_url = event['targetInfo'].get('url')
+				tab_title = event['targetInfo'].get('title')
+				if self.browser_session._tab_registry.get(target_id) is None:
+					self.browser_session._tab_registry.register(
+						target_id,
+						url=tab_url,
+						title=tab_title,
+						state=TabState.OPEN,
+					)
+				else:
+					self.browser_session._tab_registry.update(
+						target_id,
+						url=tab_url,
+						title=tab_title,
+						state=TabState.OPEN,
+					)
 
 		# Resume execution if waiting for debugger
 		if waiting_for_debugger:

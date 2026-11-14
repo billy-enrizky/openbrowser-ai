@@ -30,7 +30,7 @@ from openbrowser.browser.events import (
 	UploadFileEvent,
 )
 from openbrowser.browser.views import BrowserError
-from openbrowser.browser.tabs import TabError
+from openbrowser.browser.tabs import TabError, TabRegistry
 from openbrowser.dom.service import EnhancedDOMTreeNode
 from openbrowser.filesystem.file_system import FileSystem
 from openbrowser.llm.base import BaseChatModel
@@ -229,8 +229,9 @@ class Tools(Generic[Context]):
 
 		@self.registry.action('')
 		async def wait(seconds: float = 3):
-			# Cap wait time at maximum 30 seconds without changing the requested
-			# duration for shorter waits. Fractional seconds are valid.
+			# Sleep the full requested duration. Subtracting model latency made
+			# short waits end early and broke the caller's stated contract.
+			# Fractional seconds are valid; cap only values above 30 seconds.
 			requested_seconds = float(seconds)
 			if math.isfinite(requested_seconds):
 				actual_seconds = min(max(requested_seconds, 0.0), 30.0)
@@ -539,7 +540,7 @@ class Tools(Generic[Context]):
 		# Tab Management Actions
 
 		@self.registry.action(
-			'Switch to another open tab by tab_id. Tab IDs are shown in browser state tabs list (last 4 chars of target_id). Use when you need to work with content in a different tab.',
+			'Switch to another open tab by tab_id. Pass the full target_id or its 4-character suffix from the browser state tabs list. An ambiguous suffix returns the matching full IDs.',
 			param_model=SwitchTabAction,
 		)
 		async def switch(params: SwitchTabAction, browser_session: BrowserSession):
@@ -564,7 +565,7 @@ class Tools(Generic[Context]):
 				return ActionResult(error=error_msg, success=False)
 
 		@self.registry.action(
-			'Close a tab by tab_id. Tab IDs are shown in browser state tabs list (last 4 chars of target_id). Use to clean up tabs you no longer need.',
+			'Close a tab by tab_id. Pass the full target_id or its 4-character suffix from the browser state tabs list. An ambiguous suffix returns the matching full IDs. Closing an already closed tab is a no-op.',
 			param_model=CloseTabAction,
 		)
 		async def close(params: CloseTabAction, browser_session: BrowserSession):
@@ -572,11 +573,18 @@ class Tools(Generic[Context]):
 			try:
 				target_id = await browser_session.get_target_id_from_tab_id(params.tab_id)
 			except TabError as error:
+				if error.candidates:
+					error_msg = f'Failed to close tab {params.tab_id}: {error}'
+					logger.warning(error_msg)
+					return ActionResult(error=error_msg, success=False)
+				registry = getattr(browser_session, '_tab_registry', None)
+				known_closed = registry.known_closed(params.tab_id) if isinstance(registry, TabRegistry) else None
 				focused_target = browser_session.agent_focus.target_id if browser_session.agent_focus else None
 				focus_matches_closed_id = bool(focused_target and focused_target.endswith(params.tab_id))
-				if 'already closed' in str(error).lower() or focus_matches_closed_id:
+				closed_target_id = known_closed or (params.tab_id if 'already closed' in str(error).lower() else None)
+				if closed_target_id is not None or focus_matches_closed_id:
 					try:
-						await browser_session.event_bus.dispatch(TabClosedEvent(target_id=params.tab_id))
+						await browser_session.event_bus.dispatch(TabClosedEvent(target_id=closed_target_id or params.tab_id))
 					except Exception as focus_error:
 						logger.warning(f'Closed tab focus repair failed: {type(focus_error).__name__}: {focus_error}')
 					memory = f'Tab #{params.tab_id} was already closed'

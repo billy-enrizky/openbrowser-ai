@@ -81,6 +81,38 @@ def test_sync_from_pages_closes_missing_tabs():
 	assert snapshot[second]['state'] == 'closed'
 
 
+def test_known_closed_resolves_a_unique_suffix_and_an_exact_full_id():
+	registry = TabRegistry()
+	first = 'AAAABBBBCCCCDDDD111122223333FF34'
+	second = 'AAAABBBBCCCCDDDD111122223333EE34'
+	registry.register(first, state=TabState.CLOSED)
+	registry.register(second, state=TabState.CLOSED)
+
+	assert registry.known_closed('FF34') == first
+	assert registry.known_closed(first) == first
+	assert registry.known_closed('zzzz') is None
+
+
+def test_known_closed_refuses_an_ambiguous_suffix():
+	registry = TabRegistry()
+	registry.register('AAAABBBBCCCCDDDD111122223333FF34', state=TabState.CLOSED)
+	registry.register('BBBBCCCCDDDDEEEE111122223333FF34', state=TabState.CLOSED)
+
+	assert registry.known_closed('FF34') is None
+
+
+def test_register_applies_an_explicit_empty_url_and_title():
+	registry = TabRegistry()
+	target = 'AAAABBBBCCCCDDDD1111222233331234'
+	registry.register(target, url='https://old.example', title='Old')
+
+	registry.register(target, url='', title='')
+
+	record = registry.snapshot()[0]
+	assert record['url'] == ''
+	assert record['title'] == ''
+
+
 def test_sync_from_pages_reopens_existing_tab():
 	registry = TabRegistry()
 	target = 'AAAABBBBCCCCDDDD1111222233331234'
@@ -93,6 +125,25 @@ def test_sync_from_pages_reopens_existing_tab():
 	assert record['state'] == 'open'
 	assert record['url'] == 'https://new.example'
 	assert record['title'] == 'New'
+
+
+def test_sync_from_pages_applies_an_empty_title():
+	registry = TabRegistry()
+	target = 'AAAABBBBCCCCDDDD1111222233331234'
+	registry.register(target, title='Old title')
+
+	registry.sync_from_pages([{'targetId': target, 'url': 'https://new.example', 'title': ''}])
+
+	assert registry.snapshot()[0]['title'] == ''
+
+
+def test_long_suffix_is_not_treated_as_a_short_id():
+	registry = TabRegistry()
+	target = 'AAAABBBBCCCCDDDD1111222233334444'
+	registry.register(target)
+
+	with pytest.raises(TabError):
+		registry.resolve('334444')
 
 
 def test_mark_crashed_keeps_tab_resolvable():

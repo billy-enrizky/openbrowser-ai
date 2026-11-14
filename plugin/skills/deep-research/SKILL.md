@@ -33,7 +33,7 @@ If a first-wave sub-agent returns <2 findings, the orchestrator dispatches a Ste
 
 Variables persist across `-c` calls in the daemon namespace.
 
-**Session reuse:** Step 0 checks `openbrowser-ai daemon status`. If a daemon is already running (warm browser), the skill reuses it and operates in NEW tabs (never disturbs the user's existing tabs). If no daemon, the skill auto-starts one on first `-c` call.
+**Session reuse:** Step 0 creates a dedicated socket and profile for this research run. If that exact daemon is already running from an earlier step, the skill reuses it and operates in NEW tabs. It never attaches to or restarts the user's default daemon. If no daemon exists for this socket, the skill auto-starts one on the first `-c` call.
 
 Every factual claim in the report carries a footnote citation `[N]`. Verifier fails the run if uncited prose is found.
 
@@ -73,19 +73,22 @@ mkdir -p local_docs/research
 
 ### Step 0 -- Session check
 
-Enforce headless mode and detect whether a daemon is already running. If yes, reuse it (operate in NEW tabs only). If no, the next `-c` call auto-starts one.
+Use a dedicated socket and profile for the research run so the user's existing daemon, tabs, and namespace are never restarted or touched. If this research run already started its own daemon, reuse it. Otherwise the next `-c` call auto-starts one.
 
 `OPENBROWSER_HEADLESS=true` is set before `daemon ensure`. `ensure` reuses a daemon only when its effective headless and profile settings match the request; otherwise it restarts the daemon so a stale visible browser or old profile is not reused.
 
 ```bash
 export OPENBROWSER_HEADLESS=true
+export OPENBROWSER_SOCKET="${TMPDIR:-/tmp}/openbrowser-deep-research-$$.sock"
+export OPENBROWSER_DAEMON_PROFILE_DIR="${TMPDIR:-/tmp}/openbrowser-deep-research-profile-$$"
+export OPENBROWSER_DAEMON_PROFILE_ISOLATION=true
 
 ensure_output=$(openbrowser-ai daemon ensure 2>&1) || { echo "$ensure_output"; exit 1; }
 if printf '%s' "$ensure_output" | grep -q 'already matches'; then
-    echo "Reusing matching daemon -- will work in new tabs"
+    echo "Reusing this research run's daemon"
     export DEEP_RESEARCH_REUSED=1
 else
-    echo "Started or restarted daemon -- will work in new tabs"
+    echo "Started this research run's isolated daemon"
     export DEEP_RESEARCH_REUSED=0
 fi
 ```
@@ -165,6 +168,8 @@ Edit the `QUERY`, `PROJECT_ROOT`, and `sub_questions` list before running. `PROJ
 ### Step 2a -- Dispatch parallel sub-agents (one tab per agent)
 
 The orchestrator (the Claude session running this skill) MUST invoke `/dispatching-parallel-agents` and dispatch one sub-agent per sub-question. All sub-agents share the same `openbrowser-ai` daemon. Each sub-agent owns exactly one tab, the one it opens at the start of its run.
+
+Pass `OPENBROWSER_SOCKET` and `OPENBROWSER_DAEMON_PROFILE_DIR` from Step 0 into every sub-agent. Without those values a sub-agent would talk to the user's default daemon.
 
 **Hard rules for the orchestrator:**
 
@@ -622,7 +627,7 @@ to_close = [t.target_id for t in state.tabs if t.target_id not in _preexisting_t
 print(f"Closing {len(to_close)} research tabs, preserving {len(_preexisting_tab_ids)} pre-existing")
 for tid in to_close:
     try:
-        await close(tab_id=tid[-4:])
+        await close(tab_id=tid)
     except Exception as e:
         print(f"  skip {tid[-4:]}: {e}")
 EOF
@@ -663,6 +668,8 @@ If this skill started the daemon (`DEEP_RESEARCH_REUSED=0`), stop it fully:
 if [ "$DEEP_RESEARCH_REUSED" = "0" ]; then
     openbrowser-ai daemon stop
     openbrowser-ai daemon status
+    rm -r "$OPENBROWSER_DAEMON_PROFILE_DIR" 2>/dev/null || true
+    rm "${OPENBROWSER_SOCKET%.sock}.log" 2>/dev/null || true
 fi
 ```
 
@@ -671,7 +678,10 @@ If daemon was reused (`DEEP_RESEARCH_REUSED=1`), Step 7 already closed only the 
 Force-kill fallback (only if daemon was started by skill and stop failed):
 
 ```bash
-[ "$DEEP_RESEARCH_REUSED" = "0" ] && pkill -f 'openbrowser.*daemon' || true
+# Kill only the daemon this run started. The PID file lives next to the socket.
+if [ "$DEEP_RESEARCH_REUSED" = "0" ] && [ -f "${OPENBROWSER_SOCKET%.sock}.pid" ]; then
+    kill "$(cat "${OPENBROWSER_SOCKET%.sock}.pid")" 2>/dev/null || true
+fi
 ```
 
 Trap for failure-safe cleanup at script top:

@@ -44,7 +44,7 @@ This enables incremental exploration -- navigate in one call, extract in the nex
 ## Daemon Management
 
 ```bash
-uvx openbrowser-ai daemon ensure    # Start or restart a daemon that matches the requested env config
+uvx openbrowser-ai daemon ensure    # Start or restart a daemon that matches the requested headless and profile settings
 uvx openbrowser-ai daemon start     # Start daemon (auto-starts on first -c call)
 uvx openbrowser-ai daemon stop      # Stop daemon and close browser
 uvx openbrowser-ai daemon status    # Show lifecycle, profile, browser, and tab state
@@ -57,7 +57,7 @@ uvx openbrowser-ai daemon restart   # Restart with fresh browser session
 
 The daemon runs in the background and communicates via a Unix socket at `~/.openbrowser/daemon.sock`. Logs are written next to the socket. The default socket uses `~/.openbrowser/daemon.log`; a custom socket uses `<socket-stem>.log`.
 
-`daemon status` returns `state`, `profile`, `browser`, `tabs`, `exec_timeout`, `init_timeout`, and `last_error`. The effective profile is resolved before the first browser start, so `daemon ensure` can compare `OPENBROWSER_USER_DATA_DIR`, `OPENBROWSER_DAEMON_PROFILE_DIR`, headless mode, and opted-in socket isolation without launching Chrome. When a browser connection fails, check status before retrying because the first call may have partially run. Use `daemon reset` to close the browser without stopping the daemon process, or `daemon doctor` / `daemon reap` when a socket or process is stuck.
+`daemon status` returns `state`, `profile`, `browser`, `exec_timeout`, `init_timeout`, and `last_error`. Tab state is nested under `browser.tabs` and is omitted until the browser has started. The effective profile is resolved before the first browser start, so `daemon ensure` can compare `OPENBROWSER_USER_DATA_DIR`, `OPENBROWSER_DAEMON_PROFILE_DIR`, headless mode, and opted-in socket isolation without launching Chrome. When a browser connection fails, check status before retrying because the first call may have partially run. Use `daemon reset` to close the browser without stopping the daemon process, or `daemon doctor` / `daemon reap` when a socket or process is stuck.
 
 Automatic starts for one socket are serialized across processes. The first client starts the daemon; concurrent clients wait, then reuse it. A socket that accepts connections but does not answer status is treated as busy and left alone, because user code may be blocking the daemon event loop. A socket with no listener and no verified OpenBrowser owner is removed before spawning. Use `daemon restart` or `daemon reap` when an owned process must be terminated.
 

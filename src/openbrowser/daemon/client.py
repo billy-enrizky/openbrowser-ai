@@ -10,11 +10,13 @@ modules so the -c CLI path stays fast (<50ms import time).
 
 import asyncio
 from contextlib import asynccontextmanager
+import errno
 import json
 import os
 import subprocess
 import sys
 import time
+import stat
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -209,8 +211,14 @@ class DaemonClient:
         try:
             from openbrowser.daemon.diagnostics import daemon_processes
 
+            rows = daemon_processes()
+            if IS_WINDOWS:
+                for row in rows:
+                    if row.get('socket_live'):
+                        return row
+                return None
             socket_path = str(get_socket_path())
-            for row in daemon_processes():
+            for row in rows:
                 if row.get('socket') == socket_path:
                     return row
         except Exception:
@@ -225,8 +233,10 @@ class DaemonClient:
         try:
             import psutil
 
+            from openbrowser.daemon.diagnostics import is_daemon_cmdline
+
             process = psutil.Process(pid)
-            if 'openbrowser.daemon.server' in ' '.join(process.cmdline()):
+            if is_daemon_cmdline(process.cmdline()):
                 return pid
         except Exception:
             return None
@@ -268,12 +278,15 @@ class DaemonClient:
         if IS_WINDOWS and handle.tell() == 0:
             handle.write(b'\0')
             handle.flush()
+        locked = False
         try:
             await asyncio.to_thread(self._lock_start_file, handle)
+            locked = True
             yield
         finally:
             try:
-                await asyncio.to_thread(self._unlock_start_file, handle)
+                if locked:
+                    await asyncio.to_thread(self._unlock_start_file, handle)
             finally:
                 handle.close()
 
@@ -282,8 +295,15 @@ class DaemonClient:
         if IS_WINDOWS:
             import msvcrt
 
-            handle.seek(0)
-            msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+            while True:
+                handle.seek(0)
+                try:
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+                    return
+                except OSError as error:
+                    if error.errno not in (errno.EACCES, errno.EDEADLK):
+                        raise
+                    continue
         else:
             import fcntl
 
@@ -307,6 +327,9 @@ class DaemonClient:
         DAEMON_DIR.mkdir(parents=True, exist_ok=True)
         log_file = self._log_path()
 
+        if IS_WINDOWS and await self._probe(timeout=STATUS_TIMEOUT):
+            return
+
         if not IS_WINDOWS and get_socket_path().exists():
             if await self._probe(timeout=STATUS_TIMEOUT):
                 return
@@ -328,7 +351,9 @@ class DaemonClient:
                 f'Daemon PID {verified_pid} owns a PID file for this socket but is not accepting connections. '
                 'Run `openbrowser-ai daemon reap` or `openbrowser-ai daemon restart`.'
             )
-        get_socket_path().unlink(missing_ok=True)
+        socket_path = get_socket_path()
+        if socket_path.exists():
+            self._remove_stale_socket(socket_path)
         get_pid_path().unlink(missing_ok=True)
 
         with open(os.open(str(log_file), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), 'w') as log_handle:
@@ -409,7 +434,7 @@ class DaemonClient:
 
     async def reset(self) -> DaemonResponse:
         try:
-            return await self._send({'id': 1, 'action': 'reset'}, timeout=READ_TIMEOUT)
+            return await self._send({'id': 1, 'action': 'reset'}, timeout=_read_timeout())
         except (ConnectionRefusedError, FileNotFoundError, OSError):
             return DaemonResponse(
                 success=False,
@@ -508,9 +533,10 @@ class DaemonClient:
         try:
             import psutil
 
+            from openbrowser.daemon.diagnostics import is_daemon_cmdline
+
             process = psutil.Process(pid)
-            cmdline = ' '.join(process.cmdline())
-            if 'openbrowser.daemon.server' not in cmdline:
+            if not is_daemon_cmdline(process.cmdline()):
                 return DaemonResponse(
                     success=False,
                     output='',
@@ -587,9 +613,14 @@ class DaemonClient:
         except OSError:
             pass
 
+        try:
+            daemon_environment = process.environ() or {}
+        except Exception:
+            daemon_environment = {}
+
         explicit: set[Path] = set()
         for env_name in ('OPENBROWSER_DAEMON_PROFILE_DIR', 'OPENBROWSER_USER_DATA_DIR'):
-            value = os.environ.get(env_name)
+            value = daemon_environment.get(env_name) or os.environ.get(env_name)
             if value:
                 explicit.add(Path(value).expanduser())
         expanded.update(explicit)
@@ -603,6 +634,17 @@ class DaemonClient:
                 continue
             matched.append(str(profile_dir.expanduser().resolve()))
         return matched
+
+    @staticmethod
+    def _remove_stale_socket(path: Path) -> None:
+        """Remove a stale Unix socket without deleting a regular file."""
+        try:
+            mode = path.lstat().st_mode
+        except FileNotFoundError:
+            return
+        if not stat.S_ISSOCK(mode):
+            raise OSError(f'Refusing to remove non-socket daemon path: {path}')
+        path.unlink(missing_ok=True)
 
     async def _kill_recorded_browsers(self, profile_dirs: list[str], timeout: float) -> tuple[bool, str | None]:
         """Kill the verified browser recorded by each matching profile lease."""
@@ -637,8 +679,30 @@ class DaemonClient:
             if not ProfileLease.process_matches_browser(process, browser):
                 return True, None
 
-            children = process.children(recursive=True)
-            for child in children:
+            # Capture only descendants that carry this browser's ownership
+            # marker. Never signal an arbitrary child of a reused PID.
+            owned_children = []
+            try:
+                descendants = process.children(recursive=True)
+            except psutil.NoSuchProcess:
+                return True, None
+            except (psutil.AccessDenied, psutil.ZombieProcess):
+                return False, 'Unable to inspect browser descendants'
+            for child in descendants:
+                try:
+                    child_record = {
+                        **browser,
+                        'pid': int(child.pid),
+                        'start_time': float(child.create_time()),
+                    }
+                    if ProfileLease.process_matches_browser(child, child_record):
+                        owned_children.append(child)
+                except psutil.NoSuchProcess:
+                    continue
+                except (psutil.AccessDenied, psutil.ZombieProcess, TypeError, ValueError, OSError):
+                    return False, 'Unable to verify browser descendant identity'
+
+            for child in owned_children:
                 try:
                     child.terminate()
                 except psutil.NoSuchProcess:
@@ -647,13 +711,15 @@ class DaemonClient:
             try:
                 process.wait(timeout=timeout)
             except psutil.TimeoutExpired:
-                for child in children:
+                for child in owned_children:
                     try:
                         child.kill()
                     except psutil.NoSuchProcess:
                         pass
                 process.kill()
                 process.wait(timeout=timeout)
+            return True, None
+        except psutil.NoSuchProcess:
             return True, None
         except Exception as error:
             return False, f'{type(error).__name__}: {error}'

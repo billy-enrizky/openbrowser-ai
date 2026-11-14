@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from openbrowser.browser.session_manager import SessionManager
+from openbrowser.browser.tabs import TabRegistry, TabState
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +27,7 @@ def _make_mock_browser_session():
 
     session._cdp_client_root = cdp_client_root
     session._cdp_session_pool = {}
+    session._tab_registry = TabRegistry()
     session.agent_focus = None
     session.event_bus = MagicMock()
     session.event_bus.dispatch = MagicMock()
@@ -190,6 +192,10 @@ class TestSessionManagerHandleTargetAttached:
         assert 'session-1' in sm._target_sessions['target-1']
         assert sm._session_to_target['session-1'] == 'target-1'
         assert sm._target_types['target-1'] == 'page'
+        record = session._tab_registry.get('target-1')
+        assert record is not None
+        assert record.state is TabState.OPEN
+        assert record.url == 'https://example.com'
 
     async def test_updates_existing_session(self):
         session = _make_mock_browser_session()

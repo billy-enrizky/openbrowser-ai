@@ -687,6 +687,8 @@ class TestNamespaceImportFallbacks:
             with pytest.raises(ImportError, match="openbrowser-ai\\[pdf\\]"):
                 ns["PdfReader"]()
             assert "pypdf" in ns
+            with pytest.raises(ImportError, match="openbrowser-ai\\[pdf\\]"):
+                ns["pypdf"].PdfReader("file.pdf")
         finally:
             ns_mod.PYPDF_AVAILABLE = original
 
