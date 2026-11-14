@@ -428,10 +428,9 @@ async def test_cancelled_start_releases_a_launched_browser_and_resets_state():
 	session = _make_session()
 	watchdog = MagicMock()
 	watchdog._subprocess = MagicMock()
+	watchdog._spawned_subprocess = None
 	watchdog._profile_lease = MagicMock()
 	watchdog.on_BrowserKillEvent = AsyncMock()
-	session._local_browser_watchdog = watchdog
-	session._cdp_client_root = MagicMock()
 
 	async def hanging_start_event():
 		await asyncio.sleep(60)
@@ -439,6 +438,9 @@ async def test_cancelled_start_releases_a_launched_browser_and_resets_state():
 	session.event_bus.dispatch = MagicMock(return_value=hanging_start_event())
 	start_task = asyncio.create_task(session.start())
 	await asyncio.sleep(0.05)
+	# Simulate resources acquired after the start operation began.
+	session._local_browser_watchdog = watchdog
+	session._cdp_client_root = MagicMock()
 	start_task.cancel()
 
 	with pytest.raises(asyncio.CancelledError):
@@ -538,6 +540,56 @@ async def test_failed_stop_retires_its_bus_and_allows_a_clean_restart():
 		await session.start()
 
 	assert session.lifecycle_snapshot()['phase'] == 'ready'
+
+
+@pytest.mark.asyncio
+async def test_failed_force_stop_keeps_ownership_until_kill_retry_succeeds():
+	session = _make_session()
+	session._cdp_client_root = MagicMock()
+	watchdog = MagicMock()
+	watchdog._subprocess = MagicMock()
+	watchdog._spawned_subprocess = None
+	watchdog._profile_lease = MagicMock()
+	watchdog.on_BrowserKillEvent = AsyncMock(side_effect=RuntimeError('kill failed'))
+	session._local_browser_watchdog = watchdog
+
+	class StopEvent:
+		async def _resolve(self):
+			return None
+
+		def __await__(self):
+			return self._resolve().__await__()
+
+		def event_result(self, **kwargs):
+			async def no_error():
+				return None
+
+			return no_error()
+
+	old_bus = session.event_bus
+	session.event_bus.dispatch = MagicMock(side_effect=[_ready_awaitable(), StopEvent()])
+	old_bus.stop = AsyncMock()
+
+	with pytest.raises(RuntimeError, match='kill failed'):
+		await session.kill()
+
+	assert session.event_bus is old_bus
+	assert session._local_browser_watchdog is watchdog
+	assert session.lifecycle_snapshot()['phase'] == 'failed'
+	with pytest.raises(RuntimeError, match='resources are still live'):
+		await session.start()
+
+	async def release_on_retry(event):
+		watchdog._subprocess = None
+		watchdog._profile_lease = None
+
+	watchdog.on_BrowserKillEvent = AsyncMock(side_effect=release_on_retry)
+	session.event_bus.dispatch = MagicMock(side_effect=[_ready_awaitable(), StopEvent()])
+	await session.kill()
+
+	assert session.event_bus is not old_bus
+	assert session._local_browser_watchdog is None
+	assert session.lifecycle_snapshot()['phase'] == 'stopped'
 
 
 @pytest.mark.asyncio

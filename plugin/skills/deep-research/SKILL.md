@@ -667,11 +667,7 @@ fi
 
 **Case B: daemon was started fresh by this skill** (`DEEP_RESEARCH_REUSED=0`). Full daemon stop, freeing the Chrome process. See Cleanup section below.
 
-**Always:** after the final report is written, remove this run's partial directory. It is intermediate state, not part of the report:
-
-```bash
-rm -rf "$DEEP_RESEARCH_PARTIAL_DIR" 2>/dev/null || true
-```
+**Always:** the final cleanup below removes this run's partial directory and run directory after the report is written. If an owned daemon cannot be shut down, it keeps the run directory intact so the partials and environment remain available for recovery.
 
 ## Tips
 
@@ -698,13 +694,20 @@ If this skill started the daemon (`DEEP_RESEARCH_REUSED=0`), use `daemon force-s
 
 ```bash
 . "$DEEP_RESEARCH_ENV_FILE"
+DEEP_RESEARCH_CLEANUP_OK=0
 if [ "$DEEP_RESEARCH_REUSED" = "0" ]; then
     if openbrowser-ai daemon force-stop; then
-        rm -rf "$OPENBROWSER_DAEMON_PROFILE_DIR" "$DEEP_RESEARCH_RUN_DIR" 2>/dev/null || true
+        rm -rf "$OPENBROWSER_DAEMON_PROFILE_DIR" 2>/dev/null || true
         rm -f "${OPENBROWSER_SOCKET%.sock}.log" "${OPENBROWSER_SOCKET%.sock}.pid" 2>/dev/null || true
+        DEEP_RESEARCH_CLEANUP_OK=1
     else
         echo "Daemon shutdown could not be verified. Keeping $OPENBROWSER_DAEMON_PROFILE_DIR and $DEEP_RESEARCH_RUN_DIR for manual cleanup."
     fi
+else
+    DEEP_RESEARCH_CLEANUP_OK=1
+fi
+if [ "$DEEP_RESEARCH_CLEANUP_OK" = "1" ]; then
+    rm -rf "$DEEP_RESEARCH_RUN_DIR" 2>/dev/null || true
 fi
 ```
 
