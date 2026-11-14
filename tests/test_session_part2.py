@@ -1000,7 +1000,7 @@ class TestGetTargetIdFromTabId:
         session._cdp_session_pool = {}
         mocks["cdp_root"].send.Target.getTargets = AsyncMock(return_value={"targetInfos": []})
 
-        with pytest.raises(ValueError, match="No TargetID found"):
+        with pytest.raises(ValueError, match="No live tab matches"):
             await session.get_target_id_from_tab_id("zzzz")
 
 

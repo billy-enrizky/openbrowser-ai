@@ -43,6 +43,7 @@ from openbrowser.browser.events import (
     StorageStateSavedEvent,
     SwitchTabEvent,
     TabClosedEvent,
+    TabClosingEvent,
     TabCreatedEvent,
     TargetCrashedEvent,
     TypeTextEvent,
@@ -248,6 +249,12 @@ class TestTabCreatedEvent:
 class TestTabClosedEvent:
     def test_creation(self):
         event = TabClosedEvent(target_id="t1")
+        assert event.target_id == "t1"
+
+
+class TestTabClosingEvent:
+    def test_creation(self):
+        event = TabClosingEvent(target_id="t1")
         assert event.target_id == "t1"
 
 
