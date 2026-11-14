@@ -352,7 +352,7 @@ class DaemonClient:
                 'Run `openbrowser-ai daemon reap` or `openbrowser-ai daemon restart`.'
             )
         socket_path = get_socket_path()
-        if socket_path.exists():
+        if not IS_WINDOWS and socket_path.exists():
             self._remove_stale_socket(socket_path)
         get_pid_path().unlink(missing_ok=True)
 

@@ -75,13 +75,31 @@ mkdir -p local_docs/research
 
 Use a dedicated socket and profile for the research run so the user's existing daemon, tabs, and namespace are never restarted or touched. If this research run already started its own daemon, reuse it. Otherwise the next `-c` call auto-starts one.
 
-`OPENBROWSER_HEADLESS=true` is set before `daemon ensure`. `ensure` reuses a daemon only when its effective headless and profile settings match the request; otherwise it restarts the daemon so a stale visible browser or old profile is not reused.
+Persist this run's environment in a file. Each shell block starts a new process, so bare `export` values do not carry across blocks. Every later shell block must begin with:
 
 ```bash
+. "<ABSOLUTE_PATH_TO_PROJECT_ROOT>/local_docs/research/.deep-research.env"
+```
+
+Step 0 writes that file once. The run ID is stable for this project, so later blocks reconnect to the same dedicated socket:
+
+```bash
+RESEARCH_ROOT="$(pwd)"
+mkdir -p "$RESEARCH_ROOT/local_docs/research"
+ENV_FILE="$RESEARCH_ROOT/local_docs/research/.deep-research.env"
+RUN_ID_FILE="$RESEARCH_ROOT/local_docs/research/.deep-research.run-id"
+[ -f "$RUN_ID_FILE" ] || date +%s > "$RUN_ID_FILE"
+RUN_ID="$(cat "$RUN_ID_FILE")"
+cat > "$ENV_FILE" <<EOF
 export OPENBROWSER_HEADLESS=true
-export OPENBROWSER_SOCKET="${TMPDIR:-/tmp}/openbrowser-deep-research-$$.sock"
-export OPENBROWSER_DAEMON_PROFILE_DIR="${TMPDIR:-/tmp}/openbrowser-deep-research-profile-$$"
+export OPENBROWSER_SOCKET="${TMPDIR:-/tmp}/openbrowser-deep-research-${RUN_ID}.sock"
+export OPENBROWSER_DAEMON_PROFILE_DIR="${TMPDIR:-/tmp}/openbrowser-deep-research-profile-${RUN_ID}"
 export OPENBROWSER_DAEMON_PROFILE_ISOLATION=true
+export OPENBROWSER_USER_DATA_DIR=
+export DEEP_RESEARCH_PROJECT_ROOT="$RESEARCH_ROOT"
+export DEEP_RESEARCH_ENV_FILE="$ENV_FILE"
+EOF
+. "$ENV_FILE"
 
 ensure_output=$(openbrowser-ai daemon ensure 2>&1) || { echo "$ensure_output"; exit 1; }
 if printf '%s' "$ensure_output" | grep -q 'already matches'; then
@@ -91,7 +109,10 @@ else
     echo "Started this research run's isolated daemon"
     export DEEP_RESEARCH_REUSED=0
 fi
+echo "export DEEP_RESEARCH_REUSED=$DEEP_RESEARCH_REUSED" >> "$ENV_FILE"
 ```
+
+`OPENBROWSER_USER_DATA_DIR=` clears an inherited explicit profile so it cannot override the dedicated research profile. `daemon ensure` reuses a daemon only when its effective headless and profile settings match; otherwise it restarts this run's daemon.
 
 Snapshot existing tabs so cleanup leaves them untouched:
 
@@ -169,7 +190,7 @@ Edit the `QUERY`, `PROJECT_ROOT`, and `sub_questions` list before running. `PROJ
 
 The orchestrator (the Claude session running this skill) MUST invoke `/dispatching-parallel-agents` and dispatch one sub-agent per sub-question. All sub-agents share the same `openbrowser-ai` daemon. Each sub-agent owns exactly one tab, the one it opens at the start of its run.
 
-Pass `OPENBROWSER_SOCKET` and `OPENBROWSER_DAEMON_PROFILE_DIR` from Step 0 into every sub-agent. Without those values a sub-agent would talk to the user's default daemon.
+Give every sub-agent the absolute path to `local_docs/research/.deep-research.env` and require it to source that file before any `openbrowser-ai` command. Without those values a sub-agent would talk to the user's default daemon.
 
 **Hard rules for the orchestrator:**
 
@@ -644,6 +665,7 @@ rm -rf "<ABSOLUTE_PATH_TO_PROJECT_ROOT>/local_docs/research/_partial" 2>/dev/nul
 
 ## Tips
 
+- **Source the run environment first:** every later Bash call must begin with `. "<ABSOLUTE_PATH_TO_PROJECT_ROOT>/local_docs/research/.deep-research.env"`. Bare exports do not survive separate shell blocks.
 - **Headless by default:** `OPENBROWSER_HEADLESS=true` is set in Step 0 so the daemon always starts without a visible browser window. The daemon default in `daemon/server.py` is already `headless: True`, but a user config file can override it. The env var wins over config. If you need a visible window for debugging, unset or override: `export OPENBROWSER_HEADLESS=false`.
 - **One tab per sub-agent:** the orchestrator dispatches via `/dispatching-parallel-agents` and each sub-agent must own exactly one tab. Multiple-tab sub-agents serialize navigation at the CDP layer and lose the parallelism benefit. Enforce in the agent prompt: "NEVER pass new_tab=True to navigate() after the first call."
 - **Single message, multiple Agent calls:** to actually parallelize, the orchestrator must put all N `Agent` tool calls in ONE message. Sequential `Agent` invocations across messages run serially.
@@ -662,32 +684,27 @@ rm -rf "<ABSOLUTE_PATH_TO_PROJECT_ROOT>/local_docs/research/_partial" 2>/dev/nul
 
 **Mandatory.** Run after every workflow, success or failure.
 
-If this skill started the daemon (`DEEP_RESEARCH_REUSED=0`), stop it fully:
+If this skill started the daemon (`DEEP_RESEARCH_REUSED=0`), use the socket-scoped force-stop. It verifies that the listener and verified owner are gone before it reports success. Delete the profile only after that success:
 
 ```bash
+. "$DEEP_RESEARCH_ENV_FILE"
 if [ "$DEEP_RESEARCH_REUSED" = "0" ]; then
-    openbrowser-ai daemon stop
-    openbrowser-ai daemon status
-    rm -r "$OPENBROWSER_DAEMON_PROFILE_DIR" 2>/dev/null || true
-    rm "${OPENBROWSER_SOCKET%.sock}.log" 2>/dev/null || true
+    if openbrowser-ai daemon force-stop; then
+        rm -rf "$OPENBROWSER_DAEMON_PROFILE_DIR" 2>/dev/null || true
+        rm -f "${OPENBROWSER_SOCKET%.sock}.log" "${OPENBROWSER_SOCKET%.sock}.pid" \
+              "$DEEP_RESEARCH_ENV_FILE" "$DEEP_RESEARCH_PROJECT_ROOT/local_docs/research/.deep-research.run-id" 2>/dev/null || true
+    else
+        echo "Daemon shutdown could not be verified. Keeping $OPENBROWSER_DAEMON_PROFILE_DIR for manual cleanup."
+    fi
 fi
 ```
 
-If daemon was reused (`DEEP_RESEARCH_REUSED=1`), Step 7 already closed only the research tabs. Do NOT call `daemon stop`, that kills the user's pre-existing browser session.
+If daemon was reused (`DEEP_RESEARCH_REUSED=1`), Step 7 already closed only the research tabs. Do NOT call `daemon stop` or `daemon force-stop`, that kills the user's pre-existing browser session.
 
-Force-kill fallback (only if daemon was started by skill and stop failed):
-
-```bash
-# Kill only the daemon this run started. The PID file lives next to the socket.
-if [ "$DEEP_RESEARCH_REUSED" = "0" ] && [ -f "${OPENBROWSER_SOCKET%.sock}.pid" ]; then
-    kill "$(cat "${OPENBROWSER_SOCKET%.sock}.pid")" 2>/dev/null || true
-fi
-```
-
-Trap for failure-safe cleanup at script top:
+Trap for failure-safe cleanup at script top. It never deletes the profile; only the explicit cleanup above does, after verified shutdown:
 
 ```bash
-trap '[ "$DEEP_RESEARCH_REUSED" = "0" ] && openbrowser-ai daemon stop >/dev/null 2>&1 || true' EXIT
+trap 'if [ "${DEEP_RESEARCH_REUSED:-0}" = "0" ]; then openbrowser-ai daemon force-stop >/dev/null 2>&1 || true; fi' EXIT
 ```
 
 Anti-patterns:

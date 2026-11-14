@@ -7,7 +7,7 @@ import pytest
 from bubus import EventBus
 
 from openbrowser.browser import BrowserProfile, BrowserSession
-from openbrowser.browser.events import BrowserStopEvent, CloseTabEvent, SwitchTabEvent, TabClosedEvent
+from openbrowser.browser.events import BrowserStartEvent, BrowserStopEvent, CloseTabEvent, SwitchTabEvent, TabClosedEvent
 from openbrowser.browser.lifecycle import LifecyclePhase
 from openbrowser.browser.tabs import TabError, TabState
 
@@ -471,6 +471,39 @@ async def test_stale_shutdown_does_not_reset_a_replacement_bus():
 
 	old_bus.stop.assert_not_awaited()
 	assert session.event_bus is replacement_bus
+
+
+@pytest.mark.asyncio
+async def test_stop_during_a_real_start_finishes_stopped_and_can_restart():
+	session = _make_session()
+
+	async def hanging_start_event():
+		await asyncio.sleep(60)
+
+	def dispatch(event):
+		if isinstance(event, BrowserStartEvent):
+			return hanging_start_event()
+		return _ready_awaitable()
+
+	session.event_bus.dispatch = MagicMock(side_effect=dispatch)
+	start_task = asyncio.create_task(session.start())
+	await asyncio.sleep(0.05)
+
+	await session.stop()
+
+	with pytest.raises(RuntimeError, match='cancelled by shutdown'):
+		await start_task
+
+	assert session.lifecycle_snapshot()['phase'] == 'stopped'
+	assert session._stop_task is None
+
+	async def fake_start():
+		session._lifecycle.transition(LifecyclePhase.READY, reason='restart')
+
+	with patch.object(session, '_start_locked', side_effect=fake_start):
+		await session.start()
+
+	assert session.lifecycle_snapshot()['phase'] == 'ready'
 
 
 @pytest.mark.asyncio

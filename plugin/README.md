@@ -137,7 +137,7 @@ openbrowser-ai -c "await navigate('https://example.com')"
 openbrowser-ai -c "print(await evaluate('document.title'))"
 
 # Daemon management
-openbrowser-ai daemon start|stop|status|restart
+openbrowser-ai daemon start|stop|force-stop|status|restart
 ```
 
 Variables persist across `-c` calls while the daemon is running. The daemon starts automatically on first use and shuts down after 10 minutes of inactivity.

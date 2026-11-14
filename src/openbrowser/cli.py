@@ -216,6 +216,12 @@ if len(sys.argv) > 1 and sys.argv[1] == 'daemon':
 			_print_daemon_error(resp)
 			sys.exit(1)
 		print(resp.output or 'Daemon stopped')
+	elif sub == 'force-stop':
+		resp = asyncio.run(client.force_stop())
+		if not resp.success:
+			_print_daemon_error(resp)
+			sys.exit(1)
+		print(resp.output or 'Daemon force-stopped')
 	elif sub == 'status':
 		resp = asyncio.run(client.status())
 		if not resp.success:
@@ -360,7 +366,7 @@ if len(sys.argv) > 1 and sys.argv[1] == 'daemon':
 	else:
 		print(f'Unknown daemon command: {sub}', file=sys.stderr)
 		print(
-			'Usage: openbrowser-ai daemon [start|ensure|stop|status|reset|restart|list|reap|doctor]',
+			'Usage: openbrowser-ai daemon [start|ensure|stop|force-stop|status|reset|restart|list|reap|doctor]',
 			file=sys.stderr,
 		)
 		sys.exit(1)

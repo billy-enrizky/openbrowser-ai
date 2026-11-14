@@ -2,7 +2,11 @@
 
 import json
 import logging
+import os
+import shutil
+import socket
 import subprocess
+import tempfile
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -215,6 +219,23 @@ class TestDaemonClientRecoveryDiscovery:
         assert result.success is True
         discover.assert_called_once_with(process, 123)
         cleanup.assert_awaited_once_with(['/tmp/profile'], 0.01)
+
+    @pytest.mark.skipif(os.name == 'nt', reason='Unix sockets are not used on Windows')
+    def test_remove_stale_socket_deletes_a_socket_file(self):
+        short_dir = Path(tempfile.mkdtemp(prefix='ob_sock_', dir='/tmp'))
+        path = short_dir / 'd.sock'
+        try:
+            listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            listener.bind(str(path))
+            listener.close()
+            assert path.exists()
+
+            DaemonClient._remove_stale_socket(path)
+
+            assert not path.exists()
+        finally:
+            shutil.rmtree(short_dir, ignore_errors=True)
+
 
     def test_remove_stale_socket_refuses_a_regular_file(self, tmp_path):
         path = tmp_path / 'not-a-socket'

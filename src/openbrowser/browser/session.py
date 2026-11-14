@@ -689,7 +689,11 @@ class BrowserSession(BaseModel):
 					await asyncio.wait_for(result, timeout=_shutdown_timeout())
 			except BaseException:
 				pass
-		self._force_reset_runtime_state()
+		# A shutdown task already owns the current event bus and must be allowed
+		# to stop and replace it after this cancellation cleanup returns.
+		self._force_reset_runtime_state(
+			replace_event_bus=self._lifecycle.phase is not LifecyclePhase.STOPPING
+		)
 		if not self._watchdog_has_live_resources(self._local_browser_watchdog):
 			self._local_browser_watchdog = None
 
@@ -759,7 +763,7 @@ class BrowserSession(BaseModel):
 			except Exception:
 				pass
 
-	def _force_reset_runtime_state(self) -> None:
+	def _force_reset_runtime_state(self, *, replace_event_bus: bool = True) -> None:
 		"""Abandon stuck cleanup tasks and restore a usable lifecycle shell."""
 		self._session_manager = None
 		self._cdp_session_pool.clear()
@@ -772,9 +776,10 @@ class BrowserSession(BaseModel):
 		self.agent_focus = None
 		if self.is_local:
 			self.browser_profile.cdp_url = None
-		self.event_bus = EventBus()
-		self._core_handlers_attached = False
-		self._attach_core_handlers()
+		if replace_event_bus:
+			self.event_bus = EventBus()
+			self._core_handlers_attached = False
+			self._attach_core_handlers()
 
 	async def kill(self) -> None:
 		"""Kill the browser session and reset all state."""
