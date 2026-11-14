@@ -40,9 +40,16 @@ def is_daemon_cmdline(cmdline: Any) -> bool:
 
 
 def socket_candidates() -> list[Path]:
-    """Return daemon sockets under the OpenBrowser directory plus the current socket."""
-    sockets = {path for path in DAEMON_DIR.glob('*.sock')}
-    sockets.add(get_socket_path())
+    """Return the current socket plus OpenBrowser sockets with a sibling PID file.
+
+    A bare ``*.sock`` under the daemon directory is not proof that OpenBrowser
+    owns it. Reaping requires either the fixed default socket or a matching
+    ``<stem>.pid`` file created by a daemon for that socket.
+    """
+    sockets = {get_socket_path()}
+    for path in DAEMON_DIR.glob('*.sock'):
+        if path == SOCKET_PATH or (path.parent / f'{path.stem}.pid').exists():
+            sockets.add(path)
     return sorted(sockets)
 
 

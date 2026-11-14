@@ -551,7 +551,7 @@ uvx openbrowser-ai -c "print(await evaluate('document.title'))"
 uvx openbrowser-ai daemon ensure    # Start or restart a daemon that matches the requested headless and profile settings
 uvx openbrowser-ai daemon start     # Start daemon (auto-starts on first -c call)
 uvx openbrowser-ai daemon stop      # Stop daemon and browser
-uvx openbrowser-ai daemon force-stop # Force-stop only the current socket after verifying the owner
+uvx openbrowser-ai daemon force-stop # Force-stop the current endpoint after verifying the owner
 uvx openbrowser-ai daemon status    # Show lifecycle, profile, browser, and tab state
 uvx openbrowser-ai daemon reset     # Close the browser but keep the daemon process
 uvx openbrowser-ai daemon doctor    # Diagnose socket, PID, profile, and log state

@@ -507,6 +507,40 @@ async def test_stop_during_a_real_start_finishes_stopped_and_can_restart():
 
 
 @pytest.mark.asyncio
+async def test_failed_stop_retires_its_bus_and_allows_a_clean_restart():
+	session = _make_session()
+	session._cdp_client_root = MagicMock()
+	save_event = _ready_awaitable()
+
+	class StopEvent:
+		async def _resolve(self):
+			return None
+
+		def __await__(self):
+			return self._resolve().__await__()
+
+	stop_event = StopEvent()
+	stop_event.event_result = AsyncMock(side_effect=RuntimeError('watchdog cleanup failed'))
+	old_bus = session.event_bus
+	session.event_bus.dispatch = MagicMock(side_effect=[save_event, stop_event])
+	old_bus.stop = AsyncMock()
+
+	with pytest.raises(RuntimeError, match='watchdog cleanup failed'):
+		await session.kill()
+
+	assert session.event_bus is not old_bus
+	assert session.lifecycle_snapshot()['phase'] == 'failed'
+
+	async def fake_start():
+		session._lifecycle.transition(LifecyclePhase.READY, reason='restart after failed stop')
+
+	with patch.object(session, '_start_locked', side_effect=fake_start):
+		await session.start()
+
+	assert session.lifecycle_snapshot()['phase'] == 'ready'
+
+
+@pytest.mark.asyncio
 async def test_reset_cancels_and_waits_for_an_in_flight_start():
 	session = _make_session()
 	started = asyncio.Event()

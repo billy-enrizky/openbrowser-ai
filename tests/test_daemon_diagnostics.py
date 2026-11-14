@@ -11,10 +11,12 @@ import psutil
 from openbrowser.daemon import diagnostics
 
 
-def test_socket_candidates_includes_current_socket(tmp_path):
+def test_socket_candidates_requires_a_pid_file_for_unlisted_sockets(tmp_path):
 	daemon_dir = tmp_path / 'openbrowser'
 	daemon_dir.mkdir()
 	(daemon_dir / 'one.sock').write_text('')
+	(daemon_dir / 'one.pid').write_text('123')
+	(daemon_dir / 'unrelated.sock').write_text('')
 	current = daemon_dir / 'current.sock'
 	with (
 		patch.object(diagnostics, 'DAEMON_DIR', daemon_dir),
@@ -23,6 +25,7 @@ def test_socket_candidates_includes_current_socket(tmp_path):
 		candidates = diagnostics.socket_candidates()
 
 	assert (daemon_dir / 'one.sock') in candidates
+	assert (daemon_dir / 'unrelated.sock') not in candidates
 	assert current in candidates
 
 
