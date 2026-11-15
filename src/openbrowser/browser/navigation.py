@@ -46,6 +46,44 @@ _NEXT = {
 }
 
 
+@dataclass(frozen=True)
+class NavigationCommit:
+	frame_id: str
+	loader_id: str
+	url: str
+
+
+class ContainmentPhase(str, Enum):
+	PREPARING = 'preparing'
+	ACTION_IN_FLIGHT = 'action_in_flight'
+	VERIFYING = 'verifying'
+	CONTAINED = 'contained'
+	SKIPPED = 'skipped'
+	FAILED = 'failed'
+	UNCONFIRMED = 'unconfirmed'
+	REVOKED = 'revoked'
+
+
+@dataclass
+class ContainmentAttempt:
+	commit: NavigationCommit
+	phase: ContainmentPhase = ContainmentPhase.PREPARING
+	error: str | None = None
+	world_name: str = ''
+	context: tuple[int, str] | None = None
+	object_id: str | None = None
+	deadline: float | None = None
+	owned_browser: tuple[int, float, str, str] | None = None
+
+	@property
+	def requires_retirement(self) -> bool:
+		return self.phase in {ContainmentPhase.ACTION_IN_FLIGHT, ContainmentPhase.VERIFYING, ContainmentPhase.UNCONFIRMED}
+
+	def snapshot(self) -> dict[str, Any]:
+		return {'phase': self.phase.value, 'url': self.commit.url, 'frame_id': self.commit.frame_id,
+			'loader_id': self.commit.loader_id, 'error': self.error}
+
+
 @dataclass
 class NavigationOperation:
 	"""One event-owned request and the evidence that can complete it."""
@@ -69,6 +107,11 @@ class NavigationOperation:
 	_current_frame: str | None = None
 	_current_loader: str | None = None
 	_response_kind: Literal['document', 'same_document', 'download'] | None = None
+	policy_commit: NavigationCommit | None = None
+	containment: ContainmentAttempt | None = None
+	policy_task: asyncio.Task[None] | None = field(default=None, repr=False)
+	policy_changed: asyncio.Event = field(default_factory=asyncio.Event, repr=False)
+	_policy_open: bool = False
 	EVIDENCE_LIMIT: ClassVar[int] = 256
 
 	@property
@@ -111,7 +154,49 @@ class NavigationOperation:
 		self._current_loader = frame.get('loaderId')
 		self.observed_url = frame.get('url', '') + frame.get('urlFragment', '')
 
+	def arm_policy(self) -> None:
+		self._policy_open = True
+
+	def close_policy_capture(self) -> None:
+		self._policy_open = False
+		self.policy_changed.set()
+
+	@property
+	def policy_open(self) -> bool:
+		return self._policy_open
+
+	@property
+	def policy_pending(self) -> bool:
+		return (self.policy_task is not None and not self.policy_task.done()
+			and (self.containment is None or self.containment.phase is not ContainmentPhase.REVOKED)) or (
+			self.containment is not None and self.containment.requires_retirement)
+
+	def record_commit(self, frame: dict[str, Any]) -> None:
+		if not self._policy_open or frame.get('parentId') or frame.get('id') != self._current_frame:
+			return
+		loader, url = frame.get('loaderId'), frame.get('url')
+		if not isinstance(loader, str) or not loader or not isinstance(url, str):
+			return
+		self.policy_commit = NavigationCommit(frame['id'], loader, url + frame.get('urlFragment', ''))
+		if not self.terminal and self.containment is None:
+			self.observed_url = self.policy_commit.url
+		self.policy_changed.set()
+
+	def record_policy_context(self, event: dict[str, Any]) -> None:
+		attempt = self.containment
+		context = event.get('context', {})
+		if (attempt is not None and context.get('name') == attempt.world_name
+			and context.get('auxData', {}).get('frameId') == attempt.commit.frame_id
+			and isinstance(context.get('id'), int) and isinstance(context.get('uniqueId'), str)):
+			attempt.context = (context['id'], context['uniqueId'])
+			self.policy_changed.set()
+
 	def observe(self, kind: str, event: dict[str, Any]) -> None:
+		if kind == 'frame':
+			self.record_commit(event.get('frame', {}))
+		elif kind == 'within' and event.get('frameId') == self._current_frame:
+			loader = self.policy_commit.loader_id if self.policy_commit else self._current_loader
+			self.record_commit({'id': event['frameId'], 'loaderId': loader, 'url': event.get('url')})
 		if self.terminal:
 			return
 		if kind == 'frame':
@@ -192,7 +277,7 @@ class NavigationOperation:
 		return {name: getattr(self, name) for name in (
 			'navigation_id', 'generation', 'requested_url', 'wait_until', 'target_id', 'session_id',
 			'frame_id', 'loader_id', 'observed_url', 'last_error',
-		)} | {'phase': self.phase.value}
+		)} | {'phase': self.phase.value, 'containment': self.containment.snapshot() if self.containment else None}
 
 
 class NavigationMonitor:
@@ -229,3 +314,8 @@ class NavigationMonitor:
 				if self._root is root and operation is not None and operation.session_id == session_id:
 					operation.observe(_kind, event)
 			getattr(root.register.Page, method)(callback)
+		def context_callback(event: dict[str, Any], session_id: str | None = None) -> None:
+			operation = self.active
+			if self._root is root and operation is not None and operation.session_id == session_id:
+				operation.record_policy_context(event)
+		root.register.Runtime.executionContextCreated(context_callback)

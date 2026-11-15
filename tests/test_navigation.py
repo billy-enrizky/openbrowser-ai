@@ -109,7 +109,7 @@ def test_irrelevant_loader_evidence_is_ignored_after_response_identity_is_known(
 
 def test_monitor_ignores_wrong_session_old_root_and_terminal_callbacks():
     monitor = NavigationMonitor()
-    root = SimpleNamespace(register=SimpleNamespace(Page=MagicMock()))
+    root = SimpleNamespace(register=SimpleNamespace(Page=MagicMock(), Runtime=MagicMock()))
     monitor.bind(root)
     callback = root.register.Page.lifecycleEvent.call_args.args[0]
     monitor.bind(root)
@@ -146,7 +146,7 @@ def handler_fixture():
     from openbrowser.browser.session import BrowserSession
     session = _make_browser_session()
     client, focus, _ = _setup_session_with_cdp(session)
-    client.register = SimpleNamespace(Page=MagicMock())
+    client.register = SimpleNamespace(Page=MagicMock(), Runtime=MagicMock())
     frame = {'id': 'frame', 'loaderId': 'old', 'url': 'about:blank'}
     client.send.Page.getFrameTree = AsyncMock(side_effect=lambda **kw: {'frameTree': {'frame': dict(frame)}})
     client.send.Page.setLifecycleEventsEnabled = AsyncMock()
@@ -1287,6 +1287,705 @@ async def test_connect_rechecks_shared_retirement_guard_after_http_discovery(fai
     finally:
         release.set()
         await asyncio.gather(*pumps, return_exceptions=True)
+
+
+def test_policy_commit_is_separate_from_ack_and_survives_primary_terminalization():
+    from openbrowser.browser.navigation import NavigationCommit
+    op = operation()
+    op.arm_policy()
+    op.observe('frame', {'frame': {'id': 'frame', 'loaderId': 'pre-ack', 'url': 'https://blocked.test/'}})
+    assert op.policy_commit == NavigationCommit('frame', 'pre-ack', 'https://blocked.test/')
+    assert op.frame_id is None
+    assert op.loader_id is None
+    op.finish(NavigationPhase.CANCELLED)
+    assert op.policy_commit.url == 'https://blocked.test/'
+    assert not op.ready
+
+
+def test_done_but_unconfirmed_containment_still_requires_retirement():
+    from openbrowser.browser.navigation import ContainmentAttempt, ContainmentPhase, NavigationCommit
+    attempt = ContainmentAttempt(NavigationCommit('frame', 'loader', 'https://blocked.test/'))
+    attempt.phase = ContainmentPhase.UNCONFIRMED
+    assert attempt.requires_retirement
+    attempt.phase = ContainmentPhase.REVOKED
+    assert not attempt.requires_retirement
+
+
+def policy_handler_fixture(pre_ack=False):
+    from bubus import EventBus
+    session, client, focus, frame, patches = handler_fixture()
+    session.event_bus = EventBus()
+    session._core_handlers_attached = False
+    session._attach_core_handlers()
+    session.browser_profile.allowed_domains = ['allowed.test']
+    client.register.Runtime = MagicMock()
+    controls = SimpleNamespace(committed=asyncio.Event(), ack=asyncio.Event(), action=asyncio.Event(),
+        release_action=asyncio.Event(), hold_action=False, action_error=None, on_action=None, acquired_loader=None,
+        hold_world=False, world_entered=asyncio.Event(), release_world=asyncio.Event(), no_context=False)
+    async def navigate(**kwargs):
+        url = kwargs['params']['url']
+        frame.update(loaderId='next', url='https://blocked.test/forbidden' if url.endswith('/start') else url)
+        client.register.Page.frameNavigated.call_args.args[0]({'frame': dict(frame)}, focus.session_id)
+        controls.committed.set()
+        if not url.endswith('/start'):
+            client.register.Page.lifecycleEvent.call_args.args[0]({'frameId': 'frame', 'loaderId': 'next', 'name': 'load'}, focus.session_id)
+        if pre_ack:
+            await controls.ack.wait()
+        return {'frameId': 'frame', 'loaderId': 'next'}
+    async def world(**kwargs):
+        params = kwargs['params']
+        assert params['grantUniveralAccess'] is False
+        if not controls.no_context:
+            client.register.Runtime.executionContextCreated.call_args.args[0]({'context': {
+                'id': 7, 'uniqueId': 'unique-policy-context', 'name': params['worldName'], 'auxData': {'frameId': 'frame'},
+            }}, focus.session_id)
+        controls.world_entered.set()
+        if controls.hold_world:
+            await controls.release_world.wait()
+        return {'executionContextId': 7}
+    async def evaluate(**kwargs):
+        params = kwargs['params']
+        if params.get('expression') == 'document':
+            assert params.get('uniqueContextId') == 'unique-policy-context'
+            assert 'contextId' not in params
+            controls.acquired_loader = frame['loaderId']
+            return {'result': {'type': 'object', 'subtype': 'node', 'className': 'HTMLDocument', 'objectId': 'policy-document'}}
+        return {'result': {'value': 2}}
+    async def action(**kwargs):
+        params = kwargs['params']
+        assert params['objectId'] == 'policy-document'
+        assert 'executionContextId' not in params and 'uniqueContextId' not in params
+        controls.action.set()
+        if controls.hold_action:
+            await controls.release_action.wait()
+        if controls.on_action:
+            controls.on_action()
+        if controls.action_error:
+            raise controls.action_error
+        expected_url = params['arguments'][0]['value']
+        if frame['loaderId'] != controls.acquired_loader or frame['url'] != expected_url:
+            return {'result': {'value': {'initiated': False}}}
+        frame.update(loaderId='contained', url='about:blank')
+        return {'result': {'value': {'initiated': True}}}
+    client.send.Page.navigate = AsyncMock(side_effect=navigate)
+    client.send.Page.createIsolatedWorld = AsyncMock(side_effect=world)
+    client.send.Runtime.evaluate = AsyncMock(side_effect=evaluate)
+    client.send.Runtime.callFunctionOn = AsyncMock(side_effect=action)
+    client.send.Runtime.releaseObject = AsyncMock()
+    return session, client, focus, frame, patches, controls
+
+
+@pytest.mark.parametrize('pre_ack', [False, True])
+async def test_real_bus_policy_contains_stalled_commit_independently_of_ack_and_load(pre_ack):
+    from openbrowser.browser.navigation import NavigationBlockedError
+    session, client, _, frame, patches, controls = policy_handler_fixture(pre_ack)
+    try:
+        with patches[0], patches[1], pytest.raises(NavigationBlockedError):
+            await asyncio.wait_for(session.navigate_to('https://allowed.test/start', timeout_ms=1000), 3)
+        assert frame['url'] == 'about:blank'
+        assert [call.kwargs['params']['url'] for call in client.send.Page.navigate.await_args_list] == ['https://allowed.test/start']
+        state = session.lifecycle_snapshot()['navigation']
+        assert state['containment']['phase'] == 'contained'
+        if pre_ack:
+            assert state['frame_id'] is None and state['loader_id'] is None
+    finally:
+        controls.ack.set()
+        controls.release_action.set()
+        await session.event_bus.stop(clear=True, timeout=.1)
+        await session._drain_navigation_event_pumps(session.event_bus)
+
+
+@pytest.mark.parametrize('unrelated_focus,closed_record', [(False, False), (True, True)])
+async def test_verified_containment_invalidates_only_its_current_focus_cache(unrelated_focus, closed_record):
+    from openbrowser.browser.navigation import NavigationBlockedError
+    from openbrowser.browser.tabs import TabState
+    from test_session_part1 import _make_cdp_session
+    session, client, focus, _, patches, controls = policy_handler_fixture()
+    cached_node = object()
+    session._cached_selector_map[5] = cached_node
+    session._cached_browser_state_summary = 'old-summary'
+    dom = MagicMock()
+    session._dom_watchdog = dom
+    state = TabState.CLOSED if closed_record else TabState.OPEN
+    session._tab_registry.register(focus.target_id, url='https://old.example/', state=state)
+    other = _make_cdp_session(client, target_id='other', session_id='other-session')
+    if unrelated_focus:
+        controls.on_action = lambda: setattr(session, 'agent_focus', other)
+    try:
+        with patches[0], patches[1], pytest.raises(NavigationBlockedError):
+            await session.navigate_to('https://allowed.test/start')
+        record = session._tab_registry.get(focus.target_id)
+        assert record.state == state
+        if unrelated_focus:
+            assert session.agent_focus is other
+            assert session._cached_selector_map[5] is cached_node
+            assert session._cached_browser_state_summary == 'old-summary'
+            dom.clear_cache.assert_not_called()
+            assert record.url == 'https://old.example/'
+        else:
+            assert session.agent_focus is focus
+            assert not session._cached_selector_map
+            assert session._cached_browser_state_summary is None
+            dom.clear_cache.assert_called_once()
+            assert focus.url == 'about:blank' and record.url == 'about:blank'
+    finally:
+        await session.event_bus.stop(clear=True, timeout=.1)
+        await session._drain_navigation_event_pumps(session.event_bus)
+
+
+async def wait_primary_terminal(operation):
+    while not operation.terminal:
+        operation._changed.clear()
+        await asyncio.wait_for(operation._changed.wait(), 2)
+
+
+@pytest.mark.parametrize('ending', ['timeout', 'cancel', 'double_cancel'])
+@pytest.mark.parametrize('pre_ack', [False, True])
+async def test_policy_sent_job_survives_primary_timeout_and_repeated_caller_cancellation(ending, pre_ack):
+    from openbrowser.browser.navigation import NavigationTimeoutError
+    session, _, _, frame, patches, controls = policy_handler_fixture(pre_ack)
+    controls.hold_action = True
+    task = None
+    try:
+        with patches[0], patches[1]:
+            task = asyncio.create_task(session.navigate_to('https://allowed.test/start', timeout_ms=150 if ending == 'timeout' else 5000))
+            await asyncio.wait_for(controls.action.wait(), 1)
+            op = session._navigation_monitor.active
+            if ending != 'timeout':
+                task.cancel()
+            await wait_primary_terminal(op)
+            if ending == 'double_cancel':
+                task.cancel()
+                result, = await asyncio.gather(task, return_exceptions=True)
+                assert isinstance(result, asyncio.CancelledError)
+                assert not op.policy_task.done() and not op.policy_task.cancelled()
+                with pytest.raises(NavigationError):
+                    await session.navigate_to('https://allowed.test/too-early')
+            controls.release_action.set()
+            result, = await asyncio.gather(task, return_exceptions=True)
+            assert isinstance(result, NavigationTimeoutError if ending == 'timeout' else asyncio.CancelledError)
+            await asyncio.wait_for(asyncio.shield(op.policy_task), 2)
+            if session._navigation_task is not None:
+                await asyncio.wait({session._navigation_task}, timeout=1)
+            assert op.phase.value == ('timed_out' if ending == 'timeout' else 'cancelled')
+            assert op.containment.phase.value == 'contained'
+            assert frame['url'] == 'about:blank'
+            if pre_ack:
+                assert op.frame_id is None and op.loader_id is None
+            controls.ack.set()
+            await asyncio.wait_for(session.navigate_to('https://allowed.test/next'), 1)
+    finally:
+        controls.release_action.set()
+        controls.ack.set()
+        if task is not None:
+            await asyncio.gather(task, return_exceptions=True)
+        await session.event_bus.stop(clear=True, timeout=.1)
+        await session._drain_navigation_event_pumps(session.event_bus)
+
+
+@pytest.mark.parametrize('replacement', ['root', 'generation', 'session'])
+async def test_policy_preparation_cannot_act_on_replacement_binding(replacement):
+    from openbrowser.browser.navigation import NavigationBlockedError
+    from test_session_part1 import _make_mock_cdp_client
+    session, client, focus, frame, patches, controls = policy_handler_fixture()
+    controls.hold_world = True
+    task = None
+    try:
+        with patches[0], patches[1]:
+            task = asyncio.create_task(session.navigate_to('https://allowed.test/start'))
+            await asyncio.wait_for(controls.world_entered.wait(), 1)
+            if replacement == 'root':
+                session._cdp_client_root = _make_mock_cdp_client()
+            elif replacement == 'generation':
+                session.seed_generation(session.lifecycle.generation + 1)
+            else:
+                focus.session_id = 'replacement-session'
+            controls.release_world.set()
+            with pytest.raises(NavigationError):
+                await task
+            client.send.Runtime.callFunctionOn.assert_not_awaited()
+            assert frame['url'] == 'https://blocked.test/forbidden'
+    finally:
+        controls.release_world.set()
+        if task is not None:
+            await asyncio.gather(task, return_exceptions=True)
+        await session.event_bus.stop(clear=True, timeout=.1)
+        await session._drain_navigation_event_pumps(session.event_bus)
+
+
+@pytest.mark.parametrize('successor', ['same_url_new_loader', 'changed_hash'])
+async def test_browser_conditional_policy_action_skips_changed_document(successor):
+    from openbrowser.browser.navigation import NavigationBlockedError
+    session, client, _, frame, patches, controls = policy_handler_fixture()
+    controls.on_action = (lambda: frame.update(loaderId='successor')) if successor == 'same_url_new_loader' else (
+        lambda: frame.update(url=frame['url'] + '#operator'))
+    try:
+        with patches[0], patches[1], pytest.raises(NavigationBlockedError):
+            await session.navigate_to('https://allowed.test/start')
+        assert frame['url'] != 'about:blank'
+        assert session.lifecycle_snapshot()['navigation']['containment']['phase'] == 'skipped'
+        assert client.send.Runtime.callFunctionOn.await_count == 1
+        assert client.send.Page.navigate.await_count == 1
+    finally:
+        await session.event_bus.stop(clear=True, timeout=.1)
+        await session._drain_navigation_event_pumps(session.event_bus)
+
+
+async def test_completed_unconfirmed_policy_authority_keeps_remote_runtime_unusable():
+    session, client, focus, _, patches, controls = policy_handler_fixture()
+    controls.action_error = ConnectionError('sent action response lost')
+    old_bus = session.event_bus
+    old_url = session.browser_profile.cdp_url
+    op = None
+    try:
+        with patches[0], patches[1], pytest.raises(NavigationError):
+            await session.navigate_to('https://allowed.test/start')
+        op = session._navigation_monitor.active
+        assert op.policy_task.done()
+        assert op.containment.phase.value == 'unconfirmed'
+        assert op.containment.requires_retirement
+        assert session.lifecycle_snapshot()['phase'] == 'failed'
+        with pytest.raises(NavigationError, match='Policy|policy') as refused:
+            await session.connect(cdp_url='ws://successor.invalid')
+        assert 'new BrowserSession' in str(refused.value)
+        with pytest.raises(NavigationError):
+            await session.start()
+        with pytest.raises(NavigationError):
+            await session.navigate_to('https://allowed.test/next')
+        with pytest.raises(NavigationError):
+            await session.reset(stop_event_bus=False)
+        with pytest.raises(NavigationError):
+            session._force_reset_runtime_state()
+        assert session._cdp_client_root is client and session.agent_focus is focus
+        assert session.event_bus is old_bus and session.browser_profile.cdp_url == old_url
+    finally:
+        session._navigation_policies.clear()
+        if op is not None:
+            session._navigation_monitor.complete(op)
+        await old_bus.stop(clear=True, timeout=.1)
+        await session._drain_navigation_event_pumps(old_bus)
+
+
+async def test_reset_does_not_cancel_sent_policy_action_or_replace_before_retirement():
+    session, client, focus, _, patches, controls = policy_handler_fixture()
+    controls.hold_action = True
+    task = None
+    try:
+        with patches[0], patches[1]:
+            task = asyncio.create_task(session.navigate_to('https://allowed.test/start'))
+            await asyncio.wait_for(controls.action.wait(), 1)
+            op = session._navigation_monitor.active
+            with pytest.raises(NavigationError, match='retir'):
+                await session.reset(stop_event_bus=False)
+            assert not op.policy_task.done() and not op.policy_task.cancelled()
+            assert session._cdp_client_root is client and session.agent_focus is focus
+            assert session.lifecycle_snapshot()['phase'] == 'failed'
+            controls.release_action.set()
+            await asyncio.wait_for(asyncio.shield(op.policy_task), 2)
+            await asyncio.gather(task, return_exceptions=True)
+            assert op.containment.phase.value == 'contained'
+            await session.reset(stop_event_bus=False)
+            assert session._cdp_client_root is None
+    finally:
+        controls.release_action.set()
+        if task is not None:
+            await asyncio.gather(task, return_exceptions=True)
+        await session.event_bus.stop(clear=True, timeout=.1)
+        await session._drain_navigation_event_pumps(session.event_bus)
+
+
+@pytest.mark.parametrize('endpoint', ['owned', 'remote_same_pid', 'other_local_port', 'unowned_same_port',
+    'other_ipv4_address', 'missing_peer', 'unknown_family'])
+async def test_owned_browser_exit_revokes_unconfirmed_policy_authority_and_allows_retry(tmp_path, endpoint):
+    import sys
+    import socket
+    import psutil
+    from openbrowser.browser.lifecycle import LifecyclePhase
+    from openbrowser.browser.session import BrowserSession
+    from openbrowser.browser.watchdogs.profile_lease import ProfileLease
+    session, client, _, _, patches, controls = policy_handler_fixture()
+    controls.action_error = ConnectionError('sent response lost')
+    profile = tmp_path / 'owned-profile'
+    profile.mkdir()
+    instance = 'policy-owned-fixture'
+    marker = f'--openbrowser-instance-id={instance}'
+    ready, close, closed = (tmp_path / name for name in ('port', 'close-listener', 'listener-closed'))
+    code = ('import socket,sys,time\nfrom pathlib import Path\n'
+        's=socket.socket(); s.bind(("127.0.0.1",0)); s.listen(); s.settimeout(.01)\n'
+        'Path(sys.argv[1]).write_text(str(s.getsockname()[1]))\n'
+        'connections=[]; end=time.monotonic()+30\n'
+        'while time.monotonic()<end:\n'
+        ' if s is not None and Path(sys.argv[2]).exists():\n'
+        '  s.close(); s=None; Path(sys.argv[3]).touch()\n'
+        ' if s is not None:\n'
+        '  try: connections.append(s.accept()[0])\n'
+        '  except TimeoutError: pass\n'
+        ' time.sleep(.01)\n')
+    process = await asyncio.create_subprocess_exec(sys.executable, '-c', code, str(ready), str(close), str(closed),
+        f'--user-data-dir={profile}', marker)
+    for _ in range(200):
+        if ready.exists():
+            break
+        await asyncio.sleep(.01)
+    port = int(ready.read_text())
+    owned = psutil.Process(process.pid)
+    _reader, writer = await asyncio.open_connection('127.0.0.1', port)
+    actual_socket = writer.transport.get_extra_info('socket')
+    for _ in range(200):
+        if any(connection.status == psutil.CONN_ESTABLISHED for connection in owned.net_connections(kind='tcp')):
+            break
+        await asyncio.sleep(.01)
+    client.ws = SimpleNamespace(transport=writer.transport)
+    record = {'pid': process.pid, 'start_time': owned.create_time(), 'profile_dir': str(profile),
+        'instance_id': instance, 'ownership_marker': marker, 'cdp_port': port}
+    watchdog = SimpleNamespace(_subprocess=owned, _spawned_subprocess=None, _browser_record=record,
+        _profile_lease=SimpleNamespace(profile_dir=profile, instance_id=instance), _instance_id=instance,
+        _owns_browser_resources=True)
+    async def kill_owned(event):
+        assert ProfileLease.process_matches_browser(owned, record)
+        owned.kill()
+        await asyncio.wait_for(process.wait(), 2)
+        watchdog._subprocess = watchdog._profile_lease = watchdog._browser_record = None
+    watchdog.on_BrowserKillEvent = kill_owned
+    session._local_browser_watchdog = watchdog
+    session.browser_profile.is_local = True
+    session.browser_profile.user_data_dir = profile
+    client.url = {'owned': f'ws://127.0.0.1:{port}/devtools/browser/owned-fixture',
+        'remote_same_pid': f'ws://remote.invalid:{port}/devtools/browser/remote-fixture',
+        'other_local_port': f'ws://127.0.0.1:{port - 1}/devtools/browser/remote-fixture',
+        'unowned_same_port': f'ws://127.0.0.1:{port}/devtools/browser/remote-fixture',
+        'other_ipv4_address': f'ws://127.0.0.2:{port}/devtools/browser/remote-fixture',
+        'missing_peer': f'ws://127.0.0.1:{port}/devtools/browser/owned-fixture',
+        'unknown_family': f'ws://127.0.0.1:{port}/devtools/browser/owned-fixture'}[endpoint]
+    if endpoint in {'remote_same_pid', 'other_local_port', 'other_ipv4_address', 'unknown_family'}:
+        peer = {'remote_same_pid': ('203.0.113.5', port), 'other_local_port': ('127.0.0.1', port - 1),
+            'other_ipv4_address': ('127.0.0.2', port), 'unknown_family': ('127.0.0.1', port)}[endpoint]
+        peer_socket = SimpleNamespace(family=socket.AF_UNIX if endpoint == 'unknown_family' else socket.AF_INET,
+            getpeername=lambda: peer, getsockname=actual_socket.getsockname)
+        client.ws = SimpleNamespace(transport=SimpleNamespace(get_extra_info=lambda name: peer_socket if name == 'socket' else None))
+    elif endpoint == 'missing_peer':
+        client.ws = None
+    if endpoint == 'unowned_same_port':
+        close.touch()
+        for _ in range(200):
+            if closed.exists():
+                break
+            await asyncio.sleep(.01)
+        assert closed.exists()
+    client.send.SystemInfo.getProcessInfo = AsyncMock(return_value={'processInfo': [{'type': 'browser', 'id': process.pid}]})
+    op = None
+    try:
+        with patches[0], patches[1], pytest.raises(NavigationError):
+            await session.navigate_to('https://allowed.test/start')
+        op = session._navigation_monitor.active
+        assert op.containment.phase.value == 'unconfirmed'
+        if endpoint != 'owned':
+            assert op.containment.owned_browser is None
+            with pytest.raises(NavigationError, match='retir'):
+                await asyncio.wait_for(session.kill(), 5)
+            assert op.containment.phase.value == 'unconfirmed'
+            assert session._cdp_client_root is client
+            assert session.lifecycle_snapshot()['phase'] == 'failed'
+            return
+        await asyncio.wait_for(session.kill(), 5)
+        assert process.returncode is not None
+        assert op.containment.phase.value == 'revoked'
+        assert session.lifecycle_snapshot()['phase'] == 'stopped'
+        async def ready():
+            session._lifecycle.transition(LifecyclePhase.READY)
+        with patch.object(BrowserSession, '_start_locked', AsyncMock(side_effect=ready)):
+            await session.start()
+        assert session.lifecycle_snapshot()['phase'] == 'ready'
+    finally:
+        if process.returncode is None:
+            process.kill()
+            await process.wait()
+        writer.close()
+        try:
+            await writer.wait_closed()
+        except (ConnectionError, OSError):
+            pass
+        session._navigation_policies.clear()
+        if op is not None:
+            session._navigation_monitor.complete(op)
+        await session.event_bus.stop(clear=True, timeout=.1)
+        await session._drain_navigation_event_pumps(session.event_bus)
+
+
+async def test_ready_runtime_cannot_connect_over_live_sent_policy_authority():
+    from openbrowser.browser.lifecycle import LifecyclePhase
+    session, client, focus, _, patches, controls = policy_handler_fixture()
+    session._lifecycle.transition(LifecyclePhase.STARTING)
+    session._lifecycle.transition(LifecyclePhase.READY)
+    controls.hold_action = True
+    task = None
+    try:
+        with patches[0], patches[1]:
+            task = asyncio.create_task(session.navigate_to('https://allowed.test/start'))
+            await asyncio.wait_for(controls.action.wait(), 1)
+            assert session.lifecycle_snapshot()['phase'] == 'ready'
+            old_url = session.browser_profile.cdp_url
+            with patch('openbrowser.browser.session.CDPClient') as factory:
+                with pytest.raises(NavigationError, match='retir'):
+                    await session.connect(cdp_url='ws://successor.invalid')
+                factory.assert_not_called()
+            assert session._cdp_client_root is client and session.agent_focus is focus
+            assert session.browser_profile.cdp_url == old_url
+            assert session.lifecycle_snapshot()['phase'] == 'ready'
+            controls.release_action.set()
+            await asyncio.gather(task, return_exceptions=True)
+    finally:
+        controls.release_action.set()
+        if task is not None:
+            await asyncio.gather(task, return_exceptions=True)
+        await session.event_bus.stop(clear=True, timeout=.1)
+        await session._drain_navigation_event_pumps(session.event_bus)
+
+
+async def test_destroyed_old_document_command_is_skipped_without_successor_fallback():
+    session, client, _, frame, patches, controls = policy_handler_fixture()
+    controls.on_action = lambda: frame.update(loaderId='same-url-successor')
+    controls.action_error = RuntimeError({'code': -32000, 'message': 'Cannot find context with specified id'})
+    op = None
+    try:
+        with patches[0], patches[1], pytest.raises(NavigationError):
+            await session.navigate_to('https://allowed.test/start')
+        state = session.lifecycle_snapshot()['navigation']
+        assert state['containment']['phase'] == 'skipped'
+        assert frame['loaderId'] == 'same-url-successor'
+        assert frame['url'] == 'https://blocked.test/forbidden'
+        assert client.send.Runtime.callFunctionOn.await_count == 1
+        assert client.send.Page.navigate.await_count == 1
+    finally:
+        op = session._navigation_monitor.active
+        session._navigation_policies.clear()
+        if op is not None:
+            session._navigation_monitor.complete(op)
+        await session.event_bus.stop(clear=True, timeout=.1)
+        await session._drain_navigation_event_pumps(session.event_bus)
+
+
+async def test_missing_unique_context_fails_before_action_without_false_containment():
+    session, client, _, frame, patches, controls = policy_handler_fixture()
+    controls.no_context = True
+    try:
+        with patches[0], patches[1], pytest.raises(NavigationError):
+            await session.navigate_to('https://allowed.test/start', timeout_ms=5000)
+        assert session.lifecycle_snapshot()['navigation']['containment']['phase'] == 'failed'
+        client.send.Runtime.callFunctionOn.assert_not_awaited()
+        assert frame['url'] == 'https://blocked.test/forbidden'
+    finally:
+        await session.event_bus.stop(clear=True, timeout=.1)
+        await session._drain_navigation_event_pumps(session.event_bus)
+
+
+async def test_policy_consumer_error_is_failure_not_disguised_readiness_timeout():
+    session, _, _, _, patches, _ = policy_handler_fixture()
+    def allowed(url):
+        if url == 'https://allowed.test/start':
+            return True
+        raise RuntimeError('policy evaluator failed')
+    session._security_watchdog = SimpleNamespace(_is_url_allowed=allowed)
+    try:
+        with patches[0], patches[1], pytest.raises(NavigationError, match='policy evaluator failed'):
+            await session.navigate_to('https://allowed.test/start', timeout_ms=300)
+        assert session.lifecycle_snapshot()['navigation']['phase'] == 'failed'
+    finally:
+        await session.event_bus.stop(clear=True, timeout=.1)
+        await session._drain_navigation_event_pumps(session.event_bus)
+
+
+async def test_expired_containment_grace_is_not_restarted_by_request_finalization():
+    from openbrowser.browser.navigation import ContainmentAttempt, ContainmentPhase, NavigationCommit
+    session, _, _, _, _ = handler_fixture()
+    op = operation()
+    op.containment = ContainmentAttempt(NavigationCommit('frame', 'next', 'https://blocked.test/'),
+        phase=ContainmentPhase.ACTION_IN_FLIGHT, deadline=asyncio.get_running_loop().time() - 1)
+    release = asyncio.Event()
+    op.policy_task = asyncio.create_task(release.wait())
+    try:
+        with pytest.raises(NavigationError, match='retir'):
+            await asyncio.wait_for(session._join_navigation_policy(op), timeout=.2)
+        assert not op.policy_task.done() and not op.policy_task.cancelled()
+        assert op.containment.phase is ContainmentPhase.UNCONFIRMED
+    finally:
+        release.set()
+        await asyncio.gather(op.policy_task, return_exceptions=True)
+
+
+async def test_real_wire_ipv4_policy_authority_cannot_be_revoked_by_same_port_ipv6_process_exit(tmp_path):
+    import json
+    import socket
+    import sys
+    import psutil
+    import websockets
+    from cdp_use import CDPClient
+    from openbrowser.browser import BrowserSession
+    from openbrowser.browser.session import CDPSession
+    if not socket.has_ipv6:
+        pytest.skip('IPv6 loopback is required for the distinct endpoint fixture')
+    profile = tmp_path / 'profile'
+    profile.mkdir()
+    ready = tmp_path / 'ipv6-port'
+    instance = 'policy-distinct-endpoints'
+    marker = f'--openbrowser-instance-id={instance}'
+    code = ('import socket,time,sys\nfrom pathlib import Path\n'
+        's=socket.socket(socket.AF_INET6); s.setsockopt(socket.IPPROTO_IPV6,socket.IPV6_V6ONLY,1)\n'
+        's.bind(("::1",0)); s.listen(); Path(sys.argv[1]).write_text(str(s.getsockname()[1]))\n'
+        'time.sleep(30)\n')
+    process = await asyncio.create_subprocess_exec(sys.executable, '-c', code, str(ready), f'--user-data-dir={profile}', marker)
+    session = root = operation = None
+    actions = set()
+    release, seen, executed = asyncio.Event(), asyncio.Event(), asyncio.Event()
+    frame = {'id': 'frame', 'loaderId': 'old', 'url': 'about:blank'}
+    try:
+        for _ in range(200):
+            if ready.exists():
+                break
+            await asyncio.sleep(.01)
+        port = int(ready.read_text())
+        owned = psutil.Process(process.pid)
+        record = {'pid': process.pid, 'start_time': owned.create_time(), 'profile_dir': str(profile),
+            'instance_id': instance, 'ownership_marker': marker, 'cdp_port': port}
+        async def delayed_action(ws, request):
+            seen.set()
+            await release.wait()
+            frame.update(url='about:blank', loaderId='late-blank')
+            executed.set()
+            try:
+                await ws.send(json.dumps({'id': request['id'], 'result': {'result': {'value': {'initiated': True}}}}))
+            except websockets.exceptions.ConnectionClosed:
+                pass
+        async def endpoint(ws):
+            async for message in ws:
+                request = json.loads(message)
+                method, sid = request['method'], request.get('sessionId')
+                async def event(name, params):
+                    await ws.send(json.dumps({'method': name, 'params': params, 'sessionId': sid}))
+                result = {}
+                if method == 'SystemInfo.getProcessInfo':
+                    result = {'processInfo': [{'type': 'browser', 'id': process.pid}]}
+                elif method == 'Page.getFrameTree':
+                    result = {'frameTree': {'frame': dict(frame)}}
+                elif method == 'Page.navigate':
+                    frame.update(url='https://blocked.test/forbidden', loaderId='blocked')
+                    await event('Page.frameNavigated', {'frame': dict(frame)})
+                    result = {'frameId': 'frame', 'loaderId': 'blocked'}
+                elif method == 'Page.createIsolatedWorld':
+                    await event('Runtime.executionContextCreated', {'context': {'id': 7, 'uniqueId': 'wire-context',
+                        'name': request['params']['worldName'], 'auxData': {'frameId': 'frame'}}})
+                    result = {'executionContextId': 7}
+                elif method == 'Runtime.evaluate':
+                    result = {'result': {'type': 'object', 'subtype': 'node', 'className': 'HTMLDocument', 'objectId': 'wire-doc'}}
+                elif method == 'Runtime.callFunctionOn':
+                    action = asyncio.create_task(delayed_action(ws, request))
+                    actions.add(action)
+                    action.add_done_callback(actions.discard)
+                    continue
+                await ws.send(json.dumps({'id': request['id'], 'result': result}))
+        async with websockets.serve(endpoint, '127.0.0.1', port):
+            root = CDPClient(f'ws://127.0.0.1:{port}/devtools/browser/not-the-ipv6-owner')
+            await root.start()
+            try:
+                session = BrowserSession(is_local=True, user_data_dir=str(profile), allowed_domains=['allowed.test'],
+                    enable_default_extensions=False, keep_alive=False)
+                session._cdp_client_root = root
+                session.agent_focus = CDPSession.model_construct(cdp_client=root, target_id='target', session_id='s', url='about:blank', title='')
+                watchdog = SimpleNamespace(_subprocess=owned, _spawned_subprocess=None, _browser_record=record,
+                    _profile_lease=SimpleNamespace(profile_dir=profile, instance_id=instance), _instance_id=instance,
+                    _owns_browser_resources=True)
+                async def kill_owned(event):
+                    process.kill()
+                    await process.wait()
+                    watchdog._subprocess = watchdog._profile_lease = watchdog._browser_record = None
+                watchdog.on_BrowserKillEvent = kill_owned
+                session._local_browser_watchdog = watchdog
+                with (patch.object(BrowserSession, '_cdp_get_all_pages', AsyncMock(return_value=[])),
+                      patch.object(BrowserSession, '_close_extension_options_pages', AsyncMock())):
+                    with pytest.raises(NavigationError):
+                        await session.navigate_to('https://allowed.test/start', timeout_ms=150)
+                await asyncio.wait_for(seen.wait(), 2)
+                operation = session._navigation_monitor.active
+                outcome, = await asyncio.gather(session.kill(), return_exceptions=True)
+                assert isinstance(outcome, NavigationError), 'Different address-family process death falsely retired the live endpoint'
+                assert process.returncode is not None
+                assert operation.containment.owned_browser is None
+                assert operation.containment.phase.value == 'unconfirmed'
+                assert session._cdp_client_root is root
+                assert session.lifecycle_snapshot()['phase'] == 'failed'
+                release.set()
+                await asyncio.wait_for(executed.wait(), 2)
+                await asyncio.wait_for(asyncio.shield(operation.policy_task), 2)
+                assert operation.containment.phase.value == 'contained'
+                assert session._cdp_client_root is root
+            finally:
+                release.set()
+                if actions:
+                    await asyncio.gather(*actions, return_exceptions=True)
+                await root.stop()
+    finally:
+        release.set()
+        if session is not None:
+            if operation is not None and operation.policy_task is not None:
+                await asyncio.wait({operation.policy_task}, timeout=1)
+            session._navigation_policies.clear()
+            await session.event_bus.stop(clear=True, timeout=.1)
+            await session._drain_navigation_event_pumps(session.event_bus)
+        if process.returncode is None:
+            process.kill()
+            await process.wait()
+
+
+@pytest.mark.parametrize('peer_family,peer_ip,listen_family,listen_ip,accepted,expected', [
+    ('v4', '127.0.0.1', 'v4', '127.0.0.1', 'exact', True),
+    ('v6', '::1', 'v6', '::1', 'exact', True),
+    ('v4', '127.0.0.1', 'v6', '::1', 'exact', False),
+    ('v4', '127.0.0.1', 'v4', '127.0.0.2', 'exact', False),
+    ('v4', '127.0.0.1', 'v4', '0.0.0.0', 'exact', True),
+    ('v4', '127.0.0.1', 'v4', '0.0.0.0', 'missing', False),
+    ('v6', '::1', 'v6', '::', 'exact', True),
+    ('v4', '127.0.0.1', 'v6', '::', 'exact', False),
+    ('v4', '127.0.0.1', 'v4', '127.0.0.1', 'other_client', False),
+    ('v4', '127.0.0.1', 'v4', '127.0.0.1', 'peer_changed', False),
+    ('v4', '127.0.0.1', 'v4', '127.0.0.1', 'permission_denied', False),
+])
+async def test_policy_peer_binding_requires_matching_family_address_and_connection(tmp_path, peer_family, peer_ip, listen_family, listen_ip, accepted, expected):
+    import socket
+    import psutil
+    from openbrowser.browser.navigation import ContainmentAttempt, NavigationCommit
+    from openbrowser.browser.watchdogs.profile_lease import ProfileLease
+    session, client, _, _, _ = handler_fixture()
+    family = socket.AF_INET if peer_family == 'v4' else socket.AF_INET6
+    listener_family = socket.AF_INET if listen_family == 'v4' else socket.AF_INET6
+    peer = [(peer_ip, 7777)]
+    local = ('127.0.0.1' if peer_family == 'v4' else '::1', 5555)
+    connection_socket = SimpleNamespace(family=family, getpeername=lambda: peer[0], getsockname=lambda: local)
+    client.ws = SimpleNamespace(transport=SimpleNamespace(get_extra_info=lambda name: connection_socket if name == 'socket' else None))
+    record = {'pid': 1234, 'start_time': 10.0, 'profile_dir': str(tmp_path.resolve()),
+        'instance_id': 'fixture', 'ownership_marker': '--openbrowser-instance-id=fixture', 'cdp_port': 7777}
+    sockets = [SimpleNamespace(family=listener_family, status=psutil.CONN_LISTEN, laddr=(listen_ip, 7777), raddr=())]
+    if accepted != 'missing':
+        sockets.append(SimpleNamespace(family=family, status=psutil.CONN_ESTABLISHED,
+            laddr=peer[0], raddr=(local[0], 5556) if accepted == 'other_client' else local))
+    process = SimpleNamespace(net_connections=MagicMock(return_value=sockets))
+    if accepted == 'permission_denied':
+        process.net_connections.side_effect = psutil.AccessDenied(1234)
+    session._local_browser_watchdog = SimpleNamespace(_owns_browser_resources=True, _browser_record=record,
+        _profile_lease=SimpleNamespace(profile_dir=tmp_path.resolve(), instance_id='fixture'), _instance_id='fixture',
+        _subprocess=process)
+    session.browser_profile.is_local = True
+    session.browser_profile.user_data_dir = tmp_path
+    async def info():
+        if accepted == 'peer_changed':
+            peer[0] = ('127.0.0.2', 7777)
+        return {'processInfo': [{'type': 'browser', 'id': 1234}]}
+    client.send.SystemInfo.getProcessInfo = AsyncMock(side_effect=info)
+    op = operation()
+    op.containment = ContainmentAttempt(NavigationCommit('frame', 'loader', 'https://blocked.test/'),
+        deadline=asyncio.get_running_loop().time() + 1)
+    with patch.object(ProfileLease, 'process_matches_browser', return_value=True):
+        identity = await session._owned_policy_browser(op, client)
+    assert (identity is not None) == expected
 
 
 async def test_stale_tab_viewport_acquisition_does_not_command_or_register():

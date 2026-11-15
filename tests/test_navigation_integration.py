@@ -5,6 +5,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlencode, urlsplit
 from uuid import uuid4
+from unittest.mock import patch
 
 import psutil
 import pytest
@@ -46,6 +47,11 @@ class _NavigationHandler(BaseHTTPRequestHandler):
 		if path.path == '/forbidden-redirect':
 			self.send_response(302)
 			self.send_header('Location', f'http://localhost:{server.server_port}/page?nonce=blocked')
+			self.end_headers()
+			return
+		if path.path == '/forbidden-delayed-redirect':
+			self.send_response(302)
+			self.send_header('Location', f'http://localhost:{server.server_port}/delayed?nonce=blocked-before-load')
 			self.end_headers()
 			return
 		if path.path == '/slow.png':
@@ -268,6 +274,161 @@ async def test_forbidden_redirect_fails_and_leaves_about_blank(navigation_browse
 		await _navigate(browser, f'{base}/forbidden-redirect')
 	assert (await _document(browser))['url'] == 'about:blank'
 	assert browser.lifecycle_snapshot()['navigation']['phase'] == 'failed'
+
+
+async def test_forbidden_committed_document_is_contained_while_image_stays_blocked(navigation_browser, navigation_site):
+	browser = navigation_browser
+	server, base = navigation_site
+	browser.browser_profile.allowed_domains = ['127.0.0.1']
+	try:
+		with pytest.raises(NavigationBlockedError, match='blocked|policy|disallowed'):
+			await _navigate(browser, f'{base}/forbidden-delayed-redirect', timeout_ms=2000)
+		assert server.resource_requested.is_set()
+		assert not server.release_resource.is_set()
+		assert (await _document(browser))['url'] == 'about:blank'
+		state = browser.lifecycle_snapshot()['navigation']
+		assert state['containment']['phase'] == 'contained'
+	finally:
+		server.release_resource.set()
+
+
+@pytest.mark.parametrize('ending', ['timeout', 'cancel'])
+async def test_forbidden_commit_keeps_document_cleanup_after_primary_end(navigation_browser, navigation_site, ending):
+	from openbrowser.browser.navigation import NavigationTimeoutError
+	browser = navigation_browser
+	server, base = navigation_site
+	browser.browser_profile.allowed_domains = ['127.0.0.1']
+	root = browser._cdp_client_root
+	original = root.send.Runtime.callFunctionOn
+	entered, release = asyncio.Event(), asyncio.Event()
+	async def held_action(*args, **kwargs):
+		if 'this.location.replace' in kwargs.get('params', {}).get('functionDeclaration', ''):
+			entered.set()
+			await release.wait()
+		return await original(*args, **kwargs)
+	task = None
+	try:
+		with patch.object(root.send.Runtime, 'callFunctionOn', held_action):
+			task = asyncio.create_task(browser.navigate_to(f'{base}/forbidden-delayed-redirect', timeout_ms=1000 if ending == 'timeout' else 10000))
+			await asyncio.wait_for(entered.wait(), 5)
+			op = browser._navigation_monitor.active
+			if ending == 'cancel':
+				task.cancel()
+			while not op.terminal:
+				op._changed.clear()
+				await asyncio.wait_for(op._changed.wait(), 3)
+			release.set()
+			result, = await asyncio.wait_for(asyncio.gather(task, return_exceptions=True), 5)
+			assert isinstance(result, NavigationTimeoutError if ending == 'timeout' else asyncio.CancelledError)
+			await asyncio.wait_for(asyncio.shield(op.policy_task), 3)
+			assert op.containment.phase.value == 'contained'
+			assert (await _document(browser))['url'] == 'about:blank'
+			assert op.phase.value == ('timed_out' if ending == 'timeout' else 'cancelled')
+	finally:
+		release.set()
+		server.release_resource.set()
+		if task is not None:
+			await asyncio.gather(task, return_exceptions=True)
+
+
+async def test_kill_retires_sent_policy_by_owned_exit_before_restart(navigation_browser, navigation_site):
+	browser = navigation_browser
+	server, base = navigation_site
+	browser.browser_profile.allowed_domains = ['127.0.0.1']
+	root = browser._cdp_client_root
+	original = root.send.Runtime.callFunctionOn
+	entered, release = asyncio.Event(), asyncio.Event()
+	async def delayed_reply(*args, **kwargs):
+		result = await original(*args, **kwargs)
+		if 'this.location.replace' in kwargs.get('params', {}).get('functionDeclaration', ''):
+			entered.set()
+			await release.wait()
+		return result
+	task = None
+	try:
+		with patch.object(root.send.Runtime, 'callFunctionOn', delayed_reply):
+			task = asyncio.create_task(browser.navigate_to(f'{base}/forbidden-delayed-redirect', timeout_ms=10000))
+			await asyncio.wait_for(entered.wait(), 5)
+			op = browser._navigation_monitor.active
+			assert op.containment.owned_browser is not None
+			pid, created, _profile, _instance = op.containment.owned_browser
+			await asyncio.wait_for(browser.kill(), 20)
+			assert op.containment.phase.value == 'revoked'
+			try:
+				assert psutil.Process(pid).create_time() != created
+			except psutil.NoSuchProcess:
+				pass
+			release.set()
+			await asyncio.gather(task, return_exceptions=True)
+		server.release_resource.set()
+		await asyncio.wait_for(browser.start(), 30)
+		await _navigate(browser, f'{base}/page?nonce=after-policy-kill', timeout_ms=5000)
+		assert (await _document(browser))['marker'] == 'after-policy-kill'
+	finally:
+		release.set()
+		server.release_resource.set()
+		if task is not None:
+			await asyncio.gather(task, return_exceptions=True)
+
+
+@pytest.mark.parametrize('successor', ['same_url_new_loader', 'changed_hash'])
+async def test_policy_document_action_cannot_blank_successor_after_host_postcheck(navigation_browser, navigation_site, successor):
+	browser = navigation_browser
+	_, base = navigation_site
+	browser.browser_profile.allowed_domains = ['127.0.0.1']
+	root = browser._cdp_client_root
+	original = root.send.Runtime.callFunctionOn
+	observed = {}
+	async def install_successor(*args, **kwargs):
+		params = kwargs.get('params', {})
+		if 'this.location.replace' in params.get('functionDeclaration', ''):
+			assert not observed
+			sid = kwargs['session_id']
+			before = (await root.send.Page.getFrameTree(session_id=sid))['frameTree']['frame']
+			url = params['arguments'][0]['value']
+			if successor == 'same_url_new_loader':
+				response = await root.send.Page.navigate(params={'url': url}, session_id=sid)
+				after = (await root.send.Page.getFrameTree(session_id=sid))['frameTree']['frame']
+				assert after['loaderId'] == response['loaderId'] != before['loaderId']
+			else:
+				await root.send.Runtime.evaluate(params={'expression': 'history.replaceState(null,"",location.href+"#operator")'}, session_id=sid)
+				after = (await root.send.Page.getFrameTree(session_id=sid))['frameTree']['frame']
+				assert after['loaderId'] == before['loaderId']
+			observed.update(loader_id=after['loaderId'], url=after.get('url', '') + after.get('urlFragment', ''))
+		return await original(*args, **kwargs)
+	with patch.object(root.send.Runtime, 'callFunctionOn', install_successor):
+		with pytest.raises(NavigationBlockedError):
+			await _navigate(browser, f'{base}/forbidden-redirect', timeout_ms=5000)
+	assert observed
+	frame = (await root.send.Page.getFrameTree(session_id=browser.agent_focus.session_id))['frameTree']['frame']
+	assert frame['loaderId'] == observed['loader_id']
+	assert (await _document(browser))['url'] == observed['url'] != 'about:blank'
+	assert browser.lifecycle_snapshot()['navigation']['containment']['phase'] == 'skipped'
+
+
+async def test_policy_owner_contains_commit_while_initial_navigation_reply_is_held(navigation_browser, navigation_site):
+	browser = navigation_browser
+	server, base = navigation_site
+	browser.browser_profile.allowed_domains = ['127.0.0.1']
+	root = browser._cdp_client_root
+	original = root.send.Page.navigate
+	release = asyncio.Event()
+	async def held_reply(*args, **kwargs):
+		response = await original(*args, **kwargs)
+		if kwargs.get('params', {}).get('url') == f'{base}/forbidden-delayed-redirect':
+			await release.wait()
+		return response
+	try:
+		with patch.object(root.send.Page, 'navigate', held_reply):
+			with pytest.raises(NavigationBlockedError):
+				await _navigate(browser, f'{base}/forbidden-delayed-redirect', timeout_ms=5000)
+		state = browser.lifecycle_snapshot()['navigation']
+		assert state['frame_id'] is None and state['loader_id'] is None
+		assert state['containment']['phase'] == 'contained'
+		assert (await _document(browser))['url'] == 'about:blank'
+	finally:
+		release.set()
+		server.release_resource.set()
 
 
 async def test_domcontentloaded_does_not_wait_for_a_blocked_image(navigation_browser, navigation_site):
