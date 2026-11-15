@@ -57,6 +57,15 @@ async def test_same_document_uses_current_loader_and_acknowledgment():
     assert op.observed_url == 'https://example.com/#new'
 
 
+def test_same_document_load_waits_for_the_existing_document_load():
+    op = operation()
+    op.observe('lifecycle', {'frameId': 'frame', 'loaderId': 'old', 'name': 'DOMContentLoaded'})
+    op.accept_response({'frameId': 'frame'})
+    assert not op.ready
+    op.observe('lifecycle', {'frameId': 'frame', 'loaderId': 'old', 'name': 'load'})
+    assert op.ready
+
+
 def test_explicit_document_loader_is_not_a_same_document_acknowledgment():
     op = operation('commit')
     op.accept_response({'frameId': 'frame', 'loaderId': 'old'})

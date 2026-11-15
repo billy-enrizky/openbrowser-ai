@@ -10,6 +10,7 @@ import psutil
 import pytest
 
 from openbrowser.browser import BrowserSession
+from openbrowser.browser.navigation import NavigationBlockedError, NavigationBusyError
 
 pytestmark = pytest.mark.integration
 
@@ -223,8 +224,6 @@ async def test_public_cancellation_aborts_only_its_navigation(navigation_browser
 
 
 async def test_public_overlap_is_refused_without_replay(navigation_browser, navigation_site):
-	from openbrowser.browser.navigation import NavigationBusyError
-
 	browser = navigation_browser
 	server, base = navigation_site
 	task = asyncio.create_task(_navigate(browser, f'{base}/delayed?nonce=first'))
@@ -256,7 +255,7 @@ async def test_forbidden_input_never_reaches_the_server(navigation_browser, navi
 	browser = navigation_browser
 	server, _ = navigation_site
 	browser.browser_profile.allowed_domains = ['127.0.0.1']
-	with pytest.raises(Exception, match='blocked|policy|disallowed'):
+	with pytest.raises(NavigationBlockedError, match='blocked|policy|disallowed'):
 		await _navigate(browser, f'http://localhost:{server.server_port}/page?nonce=forbidden')
 	assert not any('nonce=forbidden' in path for path in server.requests)
 
@@ -265,7 +264,7 @@ async def test_forbidden_redirect_fails_and_leaves_about_blank(navigation_browse
 	browser = navigation_browser
 	_, base = navigation_site
 	browser.browser_profile.allowed_domains = ['127.0.0.1']
-	with pytest.raises(Exception, match='blocked|policy|disallowed'):
+	with pytest.raises(NavigationBlockedError, match='blocked|policy|disallowed'):
 		await _navigate(browser, f'{base}/forbidden-redirect')
 	assert (await _document(browser))['url'] == 'about:blank'
 	assert browser.lifecycle_snapshot()['navigation']['phase'] == 'failed'
