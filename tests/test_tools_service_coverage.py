@@ -61,6 +61,7 @@ def _make_mock_browser_session():
     session.highlight_interaction_element = AsyncMock()
     session.is_file_input = MagicMock(return_value=False)
     session.get_current_page_url = AsyncMock(return_value="https://example.com")
+    session.navigate_to = AsyncMock()
 
     # CDP session mock
     cdp_session = AsyncMock()
@@ -216,6 +217,7 @@ class TestSearchAction:
         session = _make_mock_browser_session()
         event = _make_awaitable_event(side_effect=RuntimeError("nav failed"))
         session.event_bus.dispatch = MagicMock(return_value=event)
+        session.navigate_to.side_effect = RuntimeError("nav failed")
 
         result = await tools.registry.execute_action(
             "search",
@@ -269,6 +271,7 @@ class TestNavigateAction:
             side_effect=RuntimeError("CDP client not initialized")
         )
         session.event_bus.dispatch = MagicMock(return_value=event)
+        session.navigate_to.side_effect = RuntimeError("CDP client not initialized")
 
         result = await tools.registry.execute_action(
             "navigate",
@@ -286,6 +289,7 @@ class TestNavigateAction:
             side_effect=RuntimeError("net::ERR_NAME_NOT_RESOLVED")
         )
         session.event_bus.dispatch = MagicMock(return_value=event)
+        session.navigate_to.side_effect = RuntimeError("net::ERR_NAME_NOT_RESOLVED")
 
         result = await tools.registry.execute_action(
             "navigate",
@@ -301,6 +305,7 @@ class TestNavigateAction:
         session = _make_mock_browser_session()
         event = _make_awaitable_event(side_effect=Exception("some other error"))
         session.event_bus.dispatch = MagicMock(return_value=event)
+        session.navigate_to.side_effect = RuntimeError("some other error")
 
         result = await tools.registry.execute_action(
             "navigate",
