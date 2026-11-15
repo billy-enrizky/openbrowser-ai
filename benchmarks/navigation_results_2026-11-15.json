@@ -665,5 +665,13 @@
     "Assertions prove this fixture contract only. DOM value assignment is not keyboard input. The paired comparison uses five independently started sessions per source, one excluded fast warmup per session.",
     "PID creation-time audit proves recorded identities are now absent or reused, not an exhaustive census of never-recorded descendants.",
     "A delayed image diagnostic catches premature default-load completion before the change. Its one expected failure is separate from the formal 70-attempt denominator."
-  ]
+  ],
+  "observed_formal_version_addendum": {
+    "recorded_at_utc": "2026-11-15T09:09:04.330557+00:00",
+    "chrome_executable_version": "Google Chrome for Testing 157.0.8103.78",
+    "observed_in_formal_result_directories": 11,
+    "raw_evidence_field": "metadata.executables.chrome.version",
+    "original_public_summary_sha256": "e2e5bf3f4f63eacffe8a02bfa7e0d389766695294440a11463df704d411cb780",
+    "scope": "Expose version strings already retained in every formal raw result; timing samples, denominators, frozen harness identity and original audit are unchanged."
+  }
 }

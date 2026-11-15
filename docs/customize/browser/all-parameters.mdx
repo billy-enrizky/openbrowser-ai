@@ -19,6 +19,8 @@ The `Browser` instance also provides all [Actor](/customize/actor/all-parameters
 
 `timeout_ms` must be positive and covers public-request queue time, target selection, the CDP command, readiness, and required observation work. A request with an explicit timeout receives an enclosing event timeout allowance before dispatch. If you dispatch `NavigateToUrlEvent` directly, an explicitly supplied `event_timeout`, including `None`, is preserved.
 
+Without `timeout_ms`, the deadline uses the event timeout: 15 seconds by default, configurable with `TIMEOUT_NavigateToUrlEvent`. If that event timeout is disabled with `None`, navigation still has an internal 30-second default deadline.
+
 The public method refuses overlapping requests with `NavigationBusyError` and propagates caller cancellation to the request owner. It never retries a navigation automatically. Raw event dispatch keeps the event bus's queue semantics; cancelling a raw event waiter alone does not cancel its handler.
 
 Read `session.lifecycle_snapshot()["navigation"]` for the active or last operation. A terminal phase is `succeeded`, `download`, `failed`, `timed_out`, or `cancelled`. A download phase acknowledges a handoff, not a completed file or loaded document. `NavigationFinishedEvent` reports the correlated outcome; legacy `NavigationCompleteEvent` remains an observation also used for focus and PDF discovery. Terminal status delivery is not durable across event-bus shutdown.
