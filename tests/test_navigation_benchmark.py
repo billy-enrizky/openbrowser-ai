@@ -1,5 +1,7 @@
 import importlib.util
 import asyncio
+import contextlib
+import io
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -242,7 +244,75 @@ def test_worker_refuses_unowned_root_even_with_supplied_environment_token(tmp_pa
         benchmark.validate_worker_root(root, 'openbrowser', 'run')
 
 
-def test_external_paths_and_missing_optional_arms_are_explicit(tmp_path):
+@pytest.mark.asyncio
+@pytest.mark.parametrize('states', [
+    [FileNotFoundError(), '', '12345\n/devtools/browser/owned'],
+    ['', 'not-yet-a-port', '12345\n/devtools/browser/owned'],
+])
+async def test_startup_retries_absent_empty_and_partial_port_file(tmp_path, monkeypatch, states):
+    arm, waits = mock_raw_startup(tmp_path, monkeypatch, states)
+    try:
+        await arm.start()
+        assert waits == [.05, .05]
+        assert arm.session == 'owned-session'
+    finally:
+        arm.log.close()
+
+
+@pytest.mark.asyncio
+async def test_empty_port_file_still_obeys_startup_deadline(tmp_path, monkeypatch):
+    arm, waits = mock_raw_startup(tmp_path, monkeypatch, [''])
+    clock = iter([0, 31])
+    monkeypatch.setattr(benchmark, 'time', SimpleNamespace(monotonic=lambda: next(clock)))
+    try:
+        with pytest.raises(TimeoutError, match=r'^CDP startup$'):
+            await arm.start()
+        assert waits == []
+    finally:
+        arm.log.close()
+
+
+def mock_raw_startup(tmp_path, monkeypatch, states):
+    arm = benchmark.Arm.__new__(benchmark.Arm)
+    arm.name, arm.root, arm.chrome, arm.token = 'raw-cdp', tmp_path, 'chrome', 'run'
+    arm.owned, arm.ownership = {}, lambda: []
+    arm.proc = None
+    monkeypatch.setattr(benchmark.subprocess, 'Popen', lambda *args, **kwargs: SimpleNamespace(poll=lambda: None))
+    port_file = tmp_path / 'profile/DevToolsActivePort'
+    read_text = Path.read_text
+    states = iter(states)
+
+    def read(path, *args, **kwargs):
+        if path != port_file:
+            return read_text(path, *args, **kwargs)
+        value = next(states)
+        if isinstance(value, Exception):
+            raise value
+        return value
+    monkeypatch.setattr(Path, 'read_text', read)
+    version = json.dumps({'webSocketDebuggerUrl': 'ws://127.0.0.1:12345/devtools/browser/owned'})
+    monkeypatch.setattr(benchmark, 'local_open', lambda *args, **kwargs: contextlib.closing(io.StringIO(version)))
+    waits = []
+
+    async def sleep(delay):
+        waits.append(delay)
+    monkeypatch.setattr(benchmark.asyncio, 'sleep', sleep)
+
+    class Cdp:
+        async def connect(self, url):
+            assert url == 'ws://127.0.0.1:12345/devtools/browser/owned'
+
+        async def send(self, method, params=None, session=None):
+            return {'Target.createTarget': {'targetId': 'owned-target'},
+                    'Target.attachToTarget': {'sessionId': 'owned-session'}}.get(method, {})
+    monkeypatch.setattr(benchmark, 'Cdp', Cdp)
+    return arm, waits
+
+
+def test_external_paths_and_missing_optional_arms_are_explicit(tmp_path, monkeypatch):
+    for key in ('NAV_BENCH_SOURCE', 'NAV_BENCH_CHROME', 'NAV_BENCH_LIGHTPANDA',
+                'NAV_BENCH_AGENT_BROWSER', 'NAV_BENCH_BROWSER_USE_PYTHON', 'NAV_BENCH_OPENBROWSER_PYTHON'):
+        monkeypatch.delenv(key, raising=False)
     source = tmp_path / 'source'
     (source / 'src/openbrowser').mkdir(parents=True)
     (source / 'src/openbrowser/__init__.py').touch()
@@ -457,7 +527,7 @@ def verified_result():
     result = {
         'metadata': {'samples_per_workload_arm': 1, 'source_unchanged': True,
                      'source_manifest': {'source.py': 'hash'}, 'source_manifest_end': {'source.py': 'hash'}},
-        'availability': {'raw-cdp': {'state': 'ready'}}, 'samples': samples, 'warmup': [],
+        'availability': {'raw-cdp': {'state': 'ready'}}, 'samples': samples, 'warmup': [completed_sample('fast')],
         'startup': {'raw-cdp': {'ok': True}},
         'cleanup': {'root_removed': True, 'raw-cdp': {'ok': True,
                     'worker_identity': {'state': 'absent'}, 'post_worker_exit_identities': [{'state': 'absent'}]}},
@@ -468,6 +538,50 @@ def verified_result():
 
 def test_verifier_accepts_all_workloads_and_proven_cleanup():
     assert benchmark.result_errors(verified_result()) == []
+
+
+@pytest.mark.parametrize('failure', [
+    'missing', 'duplicate', 'failed', 'kind', 'index', 'unknown_arm',
+    'title', 'side_effect', 'post_count', 'request_timer', 'checked_timer', 'elapsed',
+])
+def test_verifier_rejects_invalid_warmup(failure):
+    result = verified_result()
+    warmup = completed_sample('fast')
+    result['warmup'] = [warmup]
+    if failure == 'missing':
+        result['warmup'] = []
+    elif failure == 'duplicate':
+        result['warmup'].append(completed_sample('fast'))
+    elif failure == 'failed':
+        warmup['outcome'] = 'failure'
+    elif failure == 'kind':
+        warmup['kind'] = 'delayed'
+    elif failure == 'index':
+        warmup['index'] = 1
+    elif failure == 'unknown_arm':
+        warmup['arm'] = 'unrequested-arm'
+    elif failure == 'title':
+        warmup['navigation_observation']['title'] = 'wrong-document'
+    elif failure == 'side_effect':
+        warmup['server']['effects'] = 2
+    elif failure == 'post_count':
+        warmup['server']['requests'].append(dict(warmup['server']['requests'][-1]))
+    elif failure == 'request_timer':
+        warmup['server']['requests'][0]['completed_ns'] = 201
+    elif failure == 'checked_timer':
+        warmup['checked_ns'] = 201
+    else:
+        warmup['elapsed_ns'] = 1
+    assert any('warmup' in error for error in benchmark.result_errors(result))
+
+
+def test_warmup_never_enters_measured_latency_summary():
+    result = verified_result()
+    warmup = completed_sample('fast')
+    warmup.update(end_ns=10000, elapsed_ns=9900)
+    result['warmup'] = [warmup]
+    assert benchmark.result_errors(result) == []
+    assert result['summary']['raw-cdp/fast']['median_ns'] == 100
 
 
 def test_verifier_does_not_trust_cleanup_boolean_over_live_identity():

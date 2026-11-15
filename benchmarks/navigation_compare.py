@@ -322,7 +322,10 @@ class Arm:
                     if self.proc.poll() is not None:
                         raise RuntimeError(f'engine exited {self.proc.returncode}')
                     if self.name == 'raw-cdp':
-                        port = int((self.root / 'profile' / 'DevToolsActivePort').read_text().splitlines()[0])
+                        lines = (self.root / 'profile' / 'DevToolsActivePort').read_text().splitlines()
+                        if not lines:
+                            raise ValueError('CDP port is not ready')
+                        port = int(lines[0])
                     with local_open(f'http://127.0.0.1:{port}/json/version', timeout=1) as r:
                         self.version = json.load(r)
                     break
@@ -601,6 +604,17 @@ def summarize(samples, states, count):
     return result
 
 
+def trial_proof_errors(sample, label):
+    errors = []
+    if sample.get('elapsed_ns') != sample.get('end_ns', 0) - sample.get('start_ns', 0):
+        errors.append(f'{label}: invalid elapsed_ns')
+    if sample['outcome'] == 'success':
+        errors.extend(f'{label}: {e}' for e in workload_errors(sample, sample.get('server', {}), sample['end_ns']))
+        if not sample['start_ns'] <= sample.get('checked_ns', 0) <= sample['end_ns']:
+            errors.append(f'{label}: assertions were not checked inside timer')
+    return errors
+
+
 def result_errors(result):
     errors = []
     count = result['metadata']['samples_per_workload_arm']
@@ -621,18 +635,26 @@ def result_errors(result):
         identities = [cleanup.get('worker_identity', {}), *cleanup.get('post_worker_exit_identities', [])]
         if not cleanup.get('ok') or any(r.get('state') not in ('absent', 'reused') for r in identities):
             errors.append(f'{name}: cleanup identity proof is incomplete')
+        warmups = [s for s in result.get('warmup', []) if s['arm'] == name]
+        if len(warmups) != 1:
+            errors.append(f'{name}: expected exactly one warmup, got {len(warmups)}')
+    for warmup in result.get('warmup', []):
+        name = warmup['arm']
+        label = f'warmup {name}'
+        if result['availability'].get(name, {}).get('state') != 'ready':
+            errors.append(f'{label}: arm is not ready')
+        if warmup['kind'] != 'fast' or warmup['index'] != 0:
+            errors.append(f'{label}: expected fast workload at index zero')
+        if warmup['outcome'] != 'success':
+            errors.append(f'{label}: outcome={warmup["outcome"]}')
+        errors.extend(trial_proof_errors(warmup, label))
     seen = set()
     for sample in result['samples']:
         key = (sample['arm'], sample['kind'], sample['index'])
         if key in seen or not 0 <= sample['index'] < count or sample['arm'] not in result['availability'] or sample['kind'] not in ('fast', 'delayed'):
             errors.append(f'invalid or duplicate sample key: {key}')
         seen.add(key)
-        if sample.get('elapsed_ns') != sample.get('end_ns', 0) - sample.get('start_ns', 0):
-            errors.append(f'{key}: invalid elapsed_ns')
-        if sample['outcome'] == 'success':
-            errors.extend(f'{key}: {e}' for e in workload_errors(sample, sample.get('server', {}), sample['end_ns']))
-            if not sample['start_ns'] <= sample.get('checked_ns', 0) <= sample['end_ns']:
-                errors.append(f'{key}: assertions were not checked inside timer')
+        errors.extend(trial_proof_errors(sample, key))
     if not result['metadata'].get('source_unchanged'):
         errors.append('source changed during run')
     metadata = result['metadata']

@@ -65,6 +65,8 @@ uv run --no-sync --offline pytest tests/test_navigation_benchmark.py -q
 
 Each arm starts once and receives one fast-page warmup. Measured rounds rotate the arm order. Each round includes a fast page and a page with a deferred external script. The deferred script response waits `--delay` seconds, which defaults to `0.15`. Every page has a fresh nonce and `Cache-Control: no-store`.
 
+Verification requires exactly one successful fast-page warmup per ready arm, including the same document, side-effect, and timed server-evidence checks as measured trials. Missing, duplicate, failed, or invalid warmups fail verification. Warmups remain excluded from measured latency summaries.
+
 The timed interval includes all of this work:
 
 1. Navigate through the adapter's load wait.
