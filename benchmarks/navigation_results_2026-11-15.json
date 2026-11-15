@@ -166,7 +166,6 @@
   "paired_comparison": {
     "fast": {
       "verdict": "FASTER, fixed local task only",
-      "median_saving_ns": 991946416,
       "nonoverlapping_ranges": true,
       "paired_savings_ns": [
         991946416,
@@ -174,11 +173,12 @@
         985384833,
         987858291,
         990218500
-      ]
+      ],
+      "difference_of_medians_ns": 991946416,
+      "median_paired_saving_ns": 990218500
     },
     "delayed": {
       "verdict": "FASTER, fixed local task only",
-      "median_saving_ns": 840399791,
       "nonoverlapping_ranges": true,
       "paired_savings_ns": [
         854199708,
@@ -186,7 +186,9 @@
         850733291,
         840399791,
         836958791
-      ]
+      ],
+      "difference_of_medians_ns": 840399791,
+      "median_paired_saving_ns": 840399791
     }
   },
   "latest_tools": {
@@ -656,7 +658,7 @@
     "Local native warm-operation fixed-task comparison, not a full browser-agent or production measurement.",
     "No LLM, cloud, Docker, cold start, public-site compatibility, rendering quality, or broad regression claim.",
     "Cross-tool universal winner is INCONCLUSIVE: engines, IPC, launch defaults and default waits differ; competitors were not jointly tuned.",
-    "Host contention remained: 10 logical CPUs, saved load averages in provenance; source revisions alternate, latest-tool rounds rotate.",
+    "Host contention remained: 10 logical CPUs, saved load averages in provenance; source order was baseline, candidate repeated five times, not counterbalanced; latest-tool rounds rotate.",
     "Separate profiles identify the baseline fixed one-second navigation sleep. They use another harness and installed Chrome 157.0.8103.51, so raw latencies are not pooled.",
     "Candidate residual time includes browser load events, CDP transport, observations, POST and server audit. No unique candidate engine CPU bottleneck is established.",
     "The delayed workload explicitly waits at least 150000000 ns at its deferred-script response, which bounds achievable latency.",
@@ -673,5 +675,27 @@
     "raw_evidence_field": "metadata.executables.chrome.version",
     "original_public_summary_sha256": "e2e5bf3f4f63eacffe8a02bfa7e0d389766695294440a11463df704d411cb780",
     "scope": "Expose version strings already retained in every formal raw result; timing samples, denominators, frozen harness identity and original audit are unchanged."
+  },
+  "paired_execution_order": {
+    "sequence": [
+      "baseline",
+      "candidate",
+      "baseline",
+      "candidate",
+      "baseline",
+      "candidate",
+      "baseline",
+      "candidate",
+      "baseline",
+      "candidate"
+    ],
+    "pairs": 5,
+    "within_pair_order": "baseline first in every pair",
+    "counterbalanced": false,
+    "interpretation": "Revisions alternate globally, but within-pair order is fixed. Cache, thermal and clock order effects were not independently isolated."
+  },
+  "statistic_definition_addendum": {
+    "recorded_at_utc": "2026-11-15T21:57:52.800395+00:00",
+    "reason": "Replace ambiguous median_saving_ns with separate difference-of-medians and median-of-paired-differences fields; retain all original elapsed arrays and paired differences unchanged."
   }
 }
