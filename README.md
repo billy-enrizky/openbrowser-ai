@@ -256,8 +256,7 @@ from openbrowser import BrowserProfile
 
 profile = BrowserProfile(
     headless=True,
-    viewport_width=1280,
-    viewport_height=720,
+    viewport={"width": 1280, "height": 720},
     disable_security=False,
     extra_chromium_args=["--disable-gpu"],
     record_video_dir="./recordings",
