@@ -1,8 +1,10 @@
 """Event-driven browser session with backwards compatibility."""
 
 import asyncio
+import contextvars
 import inspect
 import logging
+import math
 import os
 from functools import cached_property
 from pathlib import Path
@@ -35,6 +37,7 @@ from openbrowser.browser.events import (
 	FileDownloadedEvent,
 	NavigateToUrlEvent,
 	NavigationCompleteEvent,
+	NavigationFinishedEvent,
 	NavigationStartedEvent,
 	SwitchTabEvent,
 	TabClosedEvent,
@@ -48,6 +51,10 @@ from openbrowser.browser.lifecycle import (
 	LifecycleTransitionError,
 )
 from openbrowser.browser.profile import BrowserProfile, ProxySettings
+from openbrowser.browser.navigation import (
+	NavigationBlockedError, NavigationBusyError, NavigationError, NavigationMonitor,
+	NavigationOperation, NavigationPhase, NavigationTimeoutError, WaitUntil,
+)
 from openbrowser.browser.tabs import TabError, TabRegistry, TabState
 from openbrowser.browser.views import BrowserStateSummary, TabInfo
 from openbrowser.dom.views import DOMRect, EnhancedDOMTreeNode, TargetInfo
@@ -395,6 +402,11 @@ class BrowserSession(BaseModel):
 	_lifecycle: LifecycleMachine = PrivateAttr(default_factory=lambda: LifecycleMachine('browser_session'))
 	_tab_registry: TabRegistry = PrivateAttr(default_factory=TabRegistry)
 	_lifecycle_lock: asyncio.Lock = PrivateAttr(default_factory=asyncio.Lock)
+	_navigation_monitor: NavigationMonitor = PrivateAttr(default_factory=NavigationMonitor)
+	_navigation_lock: asyncio.Lock = PrivateAttr(default_factory=asyncio.Lock)
+	_navigation_task: asyncio.Task | None = PrivateAttr(default=None)
+	_navigation_task_operation: NavigationOperation | None = PrivateAttr(default=None)
+	_navigation_event_pumps: dict[asyncio.Task, EventBus] = PrivateAttr(default_factory=dict)
 	_start_event: asyncio.Event | None = PrivateAttr(default=None)
 	_start_error: BaseException | None = PrivateAttr(default=None)
 	_start_task: asyncio.Task | None = PrivateAttr(default=None)
@@ -465,6 +477,7 @@ class BrowserSession(BaseModel):
 		snapshot['cdp_connected'] = self._cdp_client_root is not None
 		snapshot['active_target_id'] = self.agent_focus.target_id if self.agent_focus else None
 		snapshot['tabs'] = self.tab_snapshot()
+		snapshot['navigation'] = self._navigation_monitor.snapshot()
 		snapshot['warnings'] = list(self._storage_state_warnings)
 		return snapshot
 
@@ -526,12 +539,10 @@ class BrowserSession(BaseModel):
 
 	async def _reset_locked(self, *, stop_event_bus: bool) -> None:
 		"""Reset runtime state for the active lifecycle operation."""
-
-		if stop_event_bus and self._watchdogs_attached:
-			try:
-				await self.event_bus.stop(clear=True, timeout=5)
-			except BaseException:
-				pass
+		await self._cancel_navigation()
+		replace_event_bus = stop_event_bus and self._watchdogs_attached
+		await self._retire_event_bus(self.event_bus, stop_bus=replace_event_bus)
+		if replace_event_bus:
 			self.event_bus = EventBus()
 			self._core_handlers_attached = False
 			self._attach_core_handlers()
@@ -622,6 +633,7 @@ class BrowserSession(BaseModel):
 		async with self._lifecycle_lock:
 			if self._lifecycle.phase is LifecyclePhase.READY:
 				return
+			self._check_failed_runtime_retirement()
 			if self._lifecycle.phase is LifecyclePhase.STARTING and self._start_event is not None:
 				start_event = self._start_event
 			else:
@@ -701,9 +713,9 @@ class BrowserSession(BaseModel):
 				pass
 		# A shutdown task already owns the current event bus and must be allowed
 		# to stop and replace it after this cancellation cleanup returns.
-		self._force_reset_runtime_state(
-			replace_event_bus=self._lifecycle.phase is not LifecyclePhase.STOPPING
-		)
+		replace_event_bus = self._lifecycle.phase is not LifecyclePhase.STOPPING
+		await self._retire_event_bus(self.event_bus, stop_bus=replace_event_bus, timeout=0)
+		self._force_reset_runtime_state(replace_event_bus=replace_event_bus)
 		if not self._watchdog_has_live_resources(self._local_browser_watchdog):
 			self._local_browser_watchdog = None
 
@@ -728,6 +740,9 @@ class BrowserSession(BaseModel):
 		try:
 			await asyncio.wait_for(asyncio.shield(task), timeout=timeout)
 		except asyncio.TimeoutError as error:
+			if task.done():
+				task.result()
+				raise
 			self._force_stop_resources()
 			task.cancel()
 			try:
@@ -735,6 +750,7 @@ class BrowserSession(BaseModel):
 			except BaseException:
 				pass
 			timeout_error = TimeoutError(f'Browser shutdown timed out after {timeout:g}s')
+			await self._retire_event_bus(self.event_bus, timeout=0)
 			self._force_reset_runtime_state()
 			try:
 				self._lifecycle.transition(
@@ -775,6 +791,12 @@ class BrowserSession(BaseModel):
 
 	def _force_reset_runtime_state(self, *, replace_event_bus: bool = True) -> None:
 		"""Abandon stuck cleanup tasks and restore a usable lifecycle shell."""
+		self._abort_navigation()
+		self._cancel_navigation_event_pumps(self.event_bus)
+		if self._live_navigation_event_pumps(self.event_bus):
+			error = NavigationError('Event bus pumps have not retired; runtime is retained')
+			self._lifecycle.fail(error, reason='event bus retirement incomplete')
+			raise error
 		self._session_manager = None
 		self._cdp_session_pool.clear()
 		self._cdp_client_root = None
@@ -837,6 +859,7 @@ class BrowserSession(BaseModel):
 
 	async def _shutdown_locked(self, *, force: bool) -> None:
 		"""Save state, dispatch the stop event, then release the event bus."""
+		await self._cancel_navigation()
 		shutdown_generation = self._lifecycle.generation
 		event_bus = self.event_bus
 		await self._cancel_owned_start()
@@ -900,12 +923,7 @@ class BrowserSession(BaseModel):
 
 				# No browser-owned resources remain. Retire the failed bus so a
 				# retry starts with a clean handler set.
-				try:
-					await event_bus.stop(clear=True, timeout=5)
-				except asyncio.CancelledError:
-					raise
-				except BaseException:
-					pass
+				await self._retire_event_bus(event_bus)
 				self._force_reset_runtime_state(replace_event_bus=True)
 				if save_error is not None:
 					raise stop_error from save_error
@@ -915,7 +933,7 @@ class BrowserSession(BaseModel):
 			event_bus_stopped = False
 			try:
 				# Stop the event bus only after the browser cleanup handlers complete.
-				await event_bus.stop(clear=True, timeout=5)
+				await self._retire_event_bus(event_bus)
 				event_bus_stopped = True
 			except asyncio.CancelledError:
 				raise
@@ -931,10 +949,7 @@ class BrowserSession(BaseModel):
 				except BaseException as error:
 					finalization_error = error
 				finally:
-					# The old bus is stopped, so replace it even if state reset fails.
-					self.event_bus = EventBus()
-					self._core_handlers_attached = False
-					self._attach_core_handlers()
+					self._force_reset_runtime_state(replace_event_bus=True)
 
 			if finalization_error is not None:
 				raise finalization_error
@@ -1036,145 +1051,296 @@ class BrowserSession(BaseModel):
 			)
 			raise
 
-	async def on_NavigateToUrlEvent(self, event: NavigateToUrlEvent) -> None:
-		"""Handle navigation requests - core browser functionality."""
-		self.logger.debug(f'[on_NavigateToUrlEvent] Received NavigateToUrlEvent: url={event.url}, new_tab={event.new_tab}')
-		if not self.agent_focus:
-			self.logger.warning('Cannot navigate - browser not connected')
+	def _reserve_navigation(self, operation: NavigationOperation) -> None:
+		self._check_failed_runtime_retirement()
+		if self._navigation_task is not None and not self._navigation_task.done():
+			raise NavigationBusyError('Another navigation is in progress')
+		self._navigation_monitor.reserve(operation)
+
+	def _check_failed_runtime_retirement(self) -> None:
+		if self._lifecycle.phase is LifecyclePhase.FAILED and self._live_navigation_event_pumps(self.event_bus):
+			raise NavigationError('Event bus retirement is incomplete; finish cleanup before reusing this runtime')
+
+	def _publish_navigation_finished(self, operation: NavigationOperation, event_bus: EventBus) -> None:
+		if operation.publication_attempted:
 			return
-
-		target_id = None
-
-		# If new_tab=True but we're already in a new tab, set new_tab=False
-		if event.new_tab:
-			try:
-				current_url = await self.get_current_page_url()
-				from openbrowser.utils import is_new_tab_page
-
-				if is_new_tab_page(current_url):
-					self.logger.debug(f'[on_NavigateToUrlEvent] Already in new tab ({current_url}), setting new_tab=False')
-					event.new_tab = False
-			except Exception as e:
-				self.logger.debug(f'[on_NavigateToUrlEvent] Could not check current URL: {e}')
-
-		# check if the url is already open in a tab somewhere that we're not currently on, if so, short-circuit and just switch to it
-		targets = await self._cdp_get_all_pages()
-		for target in targets:
-			if target.get('url') == event.url and target['targetId'] != self.agent_focus.target_id and not event.new_tab:
-				target_id = target['targetId']
-				event.new_tab = False
-				# await self.event_bus.dispatch(SwitchTabEvent(target_id=target_id))
-
+		operation.publication_attempted = True
 		try:
-			# Find or create target for navigation
+			contextvars.Context().run(event_bus.dispatch, NavigationFinishedEvent(
+				navigation_id=operation.navigation_id, generation=operation.generation,
+				target_id=operation.target_id, requested_url=operation.requested_url,
+				observed_url=operation.observed_url, outcome=operation.phase.value,
+				error_text=operation.last_error,
+			))
+		except Exception as error:
+			self.logger.debug('Could not enqueue navigation terminal status: %s', error)
 
-			self.logger.debug(f'[on_NavigateToUrlEvent] Processing new_tab={event.new_tab}')
-			if event.new_tab:
-				# Look for existing about:blank tab that's not the current one
-				targets = await self._cdp_get_all_pages()
-				self.logger.debug(f'[on_NavigateToUrlEvent] Found {len(targets)} existing tabs')
-				current_target_id = self.agent_focus.target_id if self.agent_focus else None
-				self.logger.debug(f'[on_NavigateToUrlEvent] Current target_id: {current_target_id}')
+	def _retire_navigation(self, operation: NavigationOperation) -> None:
+		if (operation.terminal and not operation.child_tasks
+			and self._navigation_task_operation is not operation):
+			self._navigation_monitor.complete(operation)
 
-				for idx, target in enumerate(targets):
-					self.logger.debug(
-						f'[on_NavigateToUrlEvent] Tab {idx}: url={target.get("url")}, targetId={target["targetId"]}'
-					)
-					if target.get('url') == 'about:blank' and target['targetId'] != current_target_id:
-						target_id = target['targetId']
-						self.logger.debug(f'Reusing existing about:blank tab #{target_id[-4:]}')
-						break
+	def _cancel_navigation_tasks(self, operation: NavigationOperation) -> set[asyncio.Task]:
+		tasks = set(operation.child_tasks)
+		if self._navigation_task_operation is operation and self._navigation_task is not None:
+			tasks.add(self._navigation_task)
+		if not tasks:
+			return tasks
+		current = asyncio.current_task()
+		tasks = {task for task in tasks if task is not current and not task.done()}
+		for task in tasks:
+			task.cancel()
+		return tasks
 
-				# Create new tab if no reusable one found
-				if not target_id:
-					self.logger.debug('[on_NavigateToUrlEvent] No reusable about:blank tab found, creating new tab...')
-					try:
-						target_id = await self._cdp_create_new_page('about:blank')
-						self.logger.debug(f'[on_NavigateToUrlEvent] Created new page with target_id: {target_id}')
-						targets = await self._cdp_get_all_pages()
+	def _abort_navigation(self) -> set[asyncio.Task]:
+		operation = self._navigation_monitor.active
+		tasks = set()
+		if operation is not None:
+			operation.finish(NavigationPhase.CANCELLED, 'Browser session reset')
+			tasks = self._cancel_navigation_tasks(operation)
+			self._publish_navigation_finished(operation, self.event_bus)
+			self._retire_navigation(operation)
+		self._navigation_monitor.invalidate()
+		return tasks
 
-						self.logger.debug(f'Created new tab #{target_id[-4:]}')
-						# Dispatch TabCreatedEvent for new tab
-						await self.event_bus.dispatch(TabCreatedEvent(target_id=target_id, url='about:blank'))
-					except Exception as e:
-						self.logger.error(f'[on_NavigateToUrlEvent] Failed to create new tab: {type(e).__name__}: {e}')
-						# Fall back to using current tab
-						target_id = self.agent_focus.target_id
-						self.logger.warning(f'[on_NavigateToUrlEvent] Falling back to current tab #{target_id[-4:]}')
-			else:
-				# Use current tab
-				target_id = target_id or self.agent_focus.target_id
+	async def _cancel_navigation(self) -> None:
+		tasks = self._abort_navigation()
+		if tasks:
+			await asyncio.wait(tasks, timeout=1.0)
 
-			# Only switch tab if we're not already on the target tab
-			if self.agent_focus is None or self.agent_focus.target_id != target_id:
-				self.logger.debug(
-					f'[on_NavigateToUrlEvent] Switching to target tab {target_id[-4:]} (current: {self.agent_focus.target_id[-4:] if self.agent_focus else "none"})'
-				)
-				# Activate target (bring to foreground)
-				await self.event_bus.dispatch(SwitchTabEvent(target_id=target_id))
-				# which does this for us:
-				# self.agent_focus = await self.get_or_create_cdp_session(target_id)
-			else:
-				self.logger.debug(f'[on_NavigateToUrlEvent] Already on target tab {target_id[-4:]}, skipping SwitchTabEvent')
+	def _check_navigation_owner(self, operation: NavigationOperation, root: CDPClient, session: CDPSession | None = None) -> None:
+		if operation.deadline is not None and asyncio.get_running_loop().time() >= operation.deadline:
+			raise NavigationTimeoutError('Navigation deadline expired')
+		if (self._navigation_monitor.active is not operation or operation.terminal
+			or self._lifecycle.generation != operation.generation or self._cdp_client_root is not root):
+			raise NavigationError('Navigation ownership or browser binding changed')
+		if session is not None and (session.cdp_client is not root or session.session_id != operation.session_id
+			or session.target_id != operation.target_id):
+			raise NavigationError('Navigation CDP session binding changed')
 
-			assert self.agent_focus is not None and self.agent_focus.target_id == target_id, (
-				'Agent focus not updated to new target_id after SwitchTabEvent should have switched to it'
-			)
+	def _marked_navigation(self, event: Any, root: CDPClient) -> NavigationOperation:
+		operation = self._navigation_monitor.active
+		if (operation is None or event.navigation_id != operation.navigation_id
+			or event.navigation_generation != operation.generation):
+			raise NavigationError('Stale navigation child event')
+		self._check_navigation_owner(operation, root)
+		return operation
 
-			# Dispatch navigation started
-			await self.event_bus.dispatch(NavigationStartedEvent(target_id=target_id, url=event.url))
+	async def _await_navigation_event(self, event_bus: EventBus, event: Any) -> None:
+		dispatched = event_bus.dispatch(event)
+		async def pump() -> None:
+			await dispatched
+			await dispatched.event_result(raise_if_any=True, raise_if_none=False)
+		task = asyncio.create_task(pump())
+		self._navigation_event_pumps[task] = event_bus
+		task.add_done_callback(self._navigation_event_pump_done)
+		# Bubus event-await can execute unrelated queued handlers. Its pump is
+		# bus-owned, while cancellation of marked handlers is request-owned.
+		await asyncio.shield(task)
 
-			# Navigate to URL
-			await self.agent_focus.cdp_client.send.Page.navigate(
-				params={
-					'url': event.url,
-					'transitionType': 'address_bar',
-					# 'referrer': 'https://www.google.com',
-				},
-				session_id=self.agent_focus.session_id,
-			)
+	def _navigation_event_pump_done(self, task: asyncio.Task) -> None:
+		self._navigation_event_pumps.pop(task, None)
+		if not task.cancelled():
+			task.exception()
 
-			# # Wait a bit to ensure page starts loading
-			await asyncio.sleep(1)
+	def _live_navigation_event_pumps(self, event_bus: EventBus) -> set[asyncio.Task]:
+		return {task for task, bus in self._navigation_event_pumps.items() if bus is event_bus and not task.done()}
 
-			# Close any extension options pages that might have opened
-			await self._close_extension_options_pages()
+	def _cancel_navigation_event_pumps(self, event_bus: EventBus) -> set[asyncio.Task]:
+		tasks = self._live_navigation_event_pumps(event_bus)
+		if tasks:
+			tasks.discard(asyncio.current_task())
+		for task in tasks:
+			task.cancel()
+		return tasks
 
-			# Dispatch navigation complete
-			self.logger.debug(f'Dispatching NavigationCompleteEvent for {event.url} (tab #{target_id[-4:]})')
-			await self.event_bus.dispatch(
-				NavigationCompleteEvent(
-					target_id=target_id,
-					url=event.url,
-					status=None,  # CDP doesn't provide status directly
-				)
-			)
-			await self.event_bus.dispatch(
-				AgentFocusChangedEvent(target_id=target_id, url=event.url)
-			)  # do not await! AgentFocusChangedEvent calls SwitchTabEvent and it will deadlock, dispatch to enqueue and return
+	async def _drain_navigation_event_pumps(self, event_bus: EventBus) -> None:
+		tasks = self._cancel_navigation_event_pumps(event_bus)
+		if tasks:
+			await asyncio.wait(tasks, timeout=1.0)
+		if self._live_navigation_event_pumps(event_bus):
+			raise TimeoutError('Navigation event pump retirement timed out')
 
-			# Note: These should be handled by dedicated watchdogs:
-			# - Security checks (security_watchdog)
-			# - Page health checks (crash_watchdog)
-			# - Dialog handling (dialog_watchdog)
-			# - Download handling (downloads_watchdog)
-			# - DOM rebuilding (dom_watchdog)
-
-		except Exception as e:
-			self.logger.error(f'Navigation failed: {type(e).__name__}: {e}')
-			if target_id:
-				await self.event_bus.dispatch(
-					NavigationCompleteEvent(
-						target_id=target_id,
-						url=event.url,
-						error_message=f'{type(e).__name__}: {e}',
-					)
-				)
-				await self.event_bus.dispatch(AgentFocusChangedEvent(target_id=target_id, url=event.url))
+	async def _retire_event_bus(self, event_bus: EventBus, *, stop_bus: bool = True, timeout: float = 5.0) -> None:
+		stop_error: BaseException | None = None
+		if stop_bus:
+			try:
+				await event_bus.stop(clear=True, timeout=timeout)
+			except BaseException as error:
+				stop_error = error
+		try:
+			await self._drain_navigation_event_pumps(event_bus)
+		except BaseException as error:
+			self._lifecycle.fail(error, reason='event bus pump retirement failed')
+			if stop_error is not None:
+				raise error from stop_error
 			raise
+		if stop_error is not None:
+			self._lifecycle.fail(stop_error, reason='event bus stop failed')
+			raise stop_error
+
+	def _navigation_deadline(self, event: NavigateToUrlEvent, operation: NavigationOperation) -> float:
+		if operation.deadline is None:
+			duration = event.timeout_ms / 1000 if event.timeout_ms is not None else event.event_timeout
+			duration = duration if duration is not None else 30.0
+			if event.event_timeout is not None:
+				duration = min(duration, event.event_timeout)
+			if not math.isfinite(duration) or duration <= 0:
+				raise NavigationError('Navigation timeout must be positive and finite')
+			operation.deadline = asyncio.get_running_loop().time() + duration
+		return operation.deadline
+
+	async def on_NavigateToUrlEvent(self, event: NavigateToUrlEvent) -> None:
+		"""Run one correlated request under one deadline, without implicit replay."""
+		operation = event.get_navigation_operation(self._lifecycle.generation)
+		event_bus = self.event_bus
+		loop = asyncio.get_running_loop()
+		deadline = float('inf')
+		acquired = False
+		task = asyncio.current_task()
+		try:
+			if operation.terminal:
+				raise NavigationError(f'Navigation is already {operation.phase.value}')
+			deadline = self._navigation_deadline(event, operation)
+			self._reserve_navigation(operation)
+			if self._navigation_lock.locked():
+				raise NavigationBusyError('Another navigation is in progress')
+			await self._navigation_lock.acquire()
+			acquired = True
+			self._navigation_task, self._navigation_task_operation = task, operation
+			async with asyncio.timeout_at(deadline):
+				root = self._cdp_client_root
+				if root is None or self.agent_focus is None:
+					raise NavigationError('Cannot navigate: browser not connected')
+				self._check_navigation_owner(operation, root)
+				from openbrowser.browser.watchdogs.security_watchdog import SecurityWatchdog
+				policy = self._security_watchdog or SecurityWatchdog(event_bus=event_bus, browser_session=self)
+				if not policy._is_url_allowed(event.url):
+					raise NavigationBlockedError(f'Navigation to {event.url} blocked by security policy')
+
+				target_id = None
+				if event.new_tab:
+					try:
+						current_url = await self.get_current_page_url()
+						self._check_navigation_owner(operation, root)
+						if is_new_tab_page(current_url):
+							event.new_tab = False
+					except NavigationError:
+						raise
+					except Exception as error:
+						self.logger.debug('Could not check current URL: %s', error)
+				self._check_navigation_owner(operation, root)
+				targets = await self._cdp_get_all_pages()
+				self._check_navigation_owner(operation, root)
+				for target in targets:
+					if target.get('url') == event.url and target['targetId'] != self.agent_focus.target_id and not event.new_tab:
+						target_id = target['targetId']
+						event.new_tab = False
+				if event.new_tab:
+					targets = await self._cdp_get_all_pages()
+					self._check_navigation_owner(operation, root)
+					for target in targets:
+						if target.get('url') == 'about:blank' and target['targetId'] != self.agent_focus.target_id:
+							target_id = target['targetId']
+							break
+					if not target_id:
+						try:
+							target_id = await self._cdp_create_new_page('about:blank')
+						except NavigationError:
+							raise
+						except Exception as error:
+							self._check_navigation_owner(operation, root)
+							self.logger.debug('Tab creation failed, using current tab: %s', error)
+							target_id = self.agent_focus.target_id
+						else:
+							self._check_navigation_owner(operation, root)
+							await self._await_navigation_event(event_bus, TabCreatedEvent(target_id=target_id, url='about:blank',
+								navigation_id=operation.navigation_id, navigation_generation=operation.generation))
+							self._check_navigation_owner(operation, root)
+				else:
+					target_id = target_id or self.agent_focus.target_id
+				if self.agent_focus.target_id != target_id:
+					await self._await_navigation_event(event_bus, SwitchTabEvent(
+						target_id=target_id, navigation_id=operation.navigation_id, navigation_generation=operation.generation))
+					self._check_navigation_owner(operation, root)
+				if self.agent_focus is None or self.agent_focus.target_id != target_id:
+					raise NavigationError('Navigation target did not acquire focus')
+				session = self.agent_focus
+				operation.select_target(target_id, str(session.session_id))
+				self._check_navigation_owner(operation, root, session)
+				await self._await_navigation_event(event_bus, NavigationStartedEvent(
+					target_id=target_id, url=event.url, navigation_id=operation.navigation_id, navigation_generation=operation.generation))
+				self._check_navigation_owner(operation, root, session)
+				self._navigation_monitor.bind(root)
+				tree = await root.send.Page.getFrameTree(session_id=operation.session_id)
+				self._check_navigation_owner(operation, root, session)
+				operation.capture_document(tree['frameTree']['frame'])
+				await root.send.Page.setLifecycleEventsEnabled(params={'enabled': True}, session_id=operation.session_id)
+				self._check_navigation_owner(operation, root, session)
+				operation.transition(NavigationPhase.NAVIGATING)
+				response = await root.send.Page.navigate(params={'url': event.url, 'transitionType': 'address_bar'}, session_id=operation.session_id)
+				self._check_navigation_owner(operation, root, session)
+				operation.accept_response(response)
+				if not operation.is_download:
+					await operation.wait_ready()
+					self._check_navigation_owner(operation, root, session)
+					operation.transition(NavigationPhase.NOTIFYING)
+				tree = await root.send.Page.getFrameTree(session_id=operation.session_id)
+				self._check_navigation_owner(operation, root, session)
+				frame = tree['frameTree']['frame']
+				if not operation.is_download and (frame.get('id') != operation.frame_id or frame.get('loaderId') != operation.loader_id):
+					raise NavigationError('Navigation live document binding changed')
+				operation.observed_url = frame.get('url', '') + frame.get('urlFragment', '')
+				if not policy._is_url_allowed(operation.observed_url):
+					event_bus.dispatch(BrowserErrorEvent(error_type='NavigationBlocked', message=f'Navigation blocked to {operation.observed_url}', details={'url': operation.observed_url, 'target_id': target_id}))
+					try:
+						self._check_navigation_owner(operation, root, session)
+						await asyncio.wait_for(root.send.Page.navigate(params={'url': 'about:blank'}, session_id=operation.session_id), timeout=min(1.0, max(.001, deadline-loop.time())))
+					except Exception as error:
+						self.logger.debug('Policy containment failed: %s', error)
+					raise NavigationBlockedError(f'Navigation to {operation.observed_url} blocked by security policy')
+				await self._close_extension_options_pages()
+				self._check_navigation_owner(operation, root, session)
+				await self._await_navigation_event(event_bus, NavigationCompleteEvent(target_id=target_id, url=operation.observed_url,
+					navigation_id=operation.navigation_id, navigation_generation=operation.generation))
+				self._check_navigation_owner(operation, root, session)
+				await self._await_navigation_event(event_bus, AgentFocusChangedEvent(
+					target_id=target_id, url=operation.observed_url, navigation_id=operation.navigation_id,
+					navigation_generation=operation.generation, navigation_session_id=operation.session_id))
+				self._check_navigation_owner(operation, root, session)
+				operation.finish(NavigationPhase.DOWNLOAD if operation.is_download else NavigationPhase.SUCCEEDED)
+		except asyncio.CancelledError:
+			operation.finish(NavigationPhase.TIMED_OUT if loop.time() >= deadline else NavigationPhase.CANCELLED, 'Navigation cancelled')
+			raise
+		except TimeoutError as error:
+			if loop.time() >= deadline:
+				operation.finish(NavigationPhase.TIMED_OUT, 'Navigation deadline expired')
+				raise NavigationTimeoutError('Navigation deadline expired') from error
+			operation.finish(NavigationPhase.FAILED, error)
+			raise NavigationError(str(error)) from error
+		except Exception as error:
+			operation.finish(NavigationPhase.FAILED, error)
+			if isinstance(error, NavigationError):
+				raise
+			raise NavigationError(str(error)) from error
+		finally:
+			try:
+				if operation.phase not in (NavigationPhase.SUCCEEDED, NavigationPhase.DOWNLOAD):
+					tasks = self._cancel_navigation_tasks(operation)
+					if tasks:
+						await asyncio.wait(tasks, timeout=1.0)
+			finally:
+				self._publish_navigation_finished(operation, event_bus)
+				if self._navigation_task is task and self._navigation_task_operation is operation:
+					self._navigation_task = self._navigation_task_operation = None
+				self._retire_navigation(operation)
+				if acquired:
+					self._navigation_lock.release()
 
 	async def on_SwitchTabEvent(self, event: SwitchTabEvent) -> TargetID:
 		"""Handle tab switching - core browser functionality."""
+		if event.navigation_id is not None:
+			return await self._switch_navigation_target(event)
 		if not self.agent_focus:
 			raise RuntimeError('Cannot switch tabs - browser not connected')
 
@@ -1216,6 +1382,28 @@ class BrowserSession(BaseModel):
 			)
 		)
 		return self.agent_focus.target_id
+
+	async def _switch_navigation_target(self, event: SwitchTabEvent) -> TargetID:
+		root = self._cdp_client_root
+		operation = self._marked_navigation(event, root)
+		if not event.target_id:
+			raise NavigationError('Navigation switch requires an explicit target')
+		session = await self.get_or_create_cdp_session(target_id=event.target_id, focus=False)
+		self._check_navigation_owner(operation, root)
+		if session.cdp_client is not root:
+			raise NavigationError('Navigation target root binding changed')
+		session_id = str(session.session_id)
+		await root.send.Target.activateTarget(params={'targetId': event.target_id})
+		self._check_navigation_owner(operation, root)
+		if session.session_id != session_id:
+			raise NavigationError('Navigation target session binding changed')
+		self.agent_focus = session
+		self._tab_registry.register(session.target_id, url=session.url, title=session.title, state=TabState.OPEN)
+		await self._await_navigation_event(self.event_bus, AgentFocusChangedEvent(
+			target_id=session.target_id, url=session.url, navigation_id=operation.navigation_id,
+			navigation_generation=operation.generation, navigation_session_id=session_id))
+		self._check_navigation_owner(operation, root)
+		return session.target_id
 
 	async def on_CloseTabEvent(self, event: CloseTabEvent) -> None:
 		"""Handle tab closure - update focus if needed."""
@@ -1275,6 +1463,9 @@ class BrowserSession(BaseModel):
 
 	async def on_TabCreatedEvent(self, event: TabCreatedEvent) -> None:
 		"""Handle tab creation - apply viewport settings to new tab."""
+		if event.navigation_id is not None:
+			await self._prepare_navigation_tab(event)
+			return
 		# Note: Tab switching prevention is handled by the Force Background Tab extension
 		# The extension automatically keeps focus on the current tab when new tabs are created
 
@@ -1298,6 +1489,24 @@ class BrowserSession(BaseModel):
 			except Exception as e:
 				self.logger.warning(f'Failed to set viewport for new tab {event.target_id[-8:]}: {e}')
 
+	async def _prepare_navigation_tab(self, event: TabCreatedEvent) -> None:
+		root = self._cdp_client_root
+		operation = self._marked_navigation(event, root)
+		if self.browser_profile.viewport and not self.browser_profile.no_viewport:
+			session = await self.get_or_create_cdp_session(target_id=event.target_id, focus=False)
+			self._check_navigation_owner(operation, root)
+			if session.cdp_client is not root:
+				raise NavigationError('Navigation new-tab root binding changed')
+			session_id = str(session.session_id)
+			await root.send.Emulation.setDeviceMetricsOverride(params={
+				'width': self.browser_profile.viewport.width, 'height': self.browser_profile.viewport.height,
+				'deviceScaleFactor': self.browser_profile.device_scale_factor or 1.0, 'mobile': False,
+			}, session_id=session_id)
+			self._check_navigation_owner(operation, root)
+			if session.session_id != session_id:
+				raise NavigationError('Navigation new-tab session binding changed')
+		self._tab_registry.register(event.target_id, url=event.url, state=TabState.OPENING)
+
 	async def on_TabClosedEvent(self, event: TabClosedEvent) -> None:
 		"""Handle tab closure - update focus if needed."""
 		self._tab_registry.mark_closed(event.target_id)
@@ -1312,6 +1521,9 @@ class BrowserSession(BaseModel):
 
 	async def on_AgentFocusChangedEvent(self, event: AgentFocusChangedEvent) -> None:
 		"""Handle agent focus change - update focus and clear cache."""
+		if event.navigation_id is not None:
+			await self._refresh_navigation_focus(event)
+			return
 		self.logger.debug(f'🔄 AgentFocusChangedEvent received: target_id=...{event.target_id[-4:]} url={event.url}')
 
 		# Clear cached DOM state since focus changed
@@ -1377,6 +1589,36 @@ class BrowserSession(BaseModel):
 			)
 
 		# self.logger.debug('🔄 AgentFocusChangedEvent handler completed successfully')
+
+	async def _refresh_navigation_focus(self, event: AgentFocusChangedEvent) -> None:
+		root = self._cdp_client_root
+		operation = self._marked_navigation(event, root)
+		def check() -> bool:
+			self._check_navigation_owner(operation, root)
+			return (self.agent_focus is not None and self.agent_focus.target_id == event.target_id
+				and self.agent_focus.session_id == event.navigation_session_id)
+		if not check():
+			return
+		session = await self.get_or_create_cdp_session(target_id=event.target_id, focus=False)
+		if not check():
+			return
+		if session.cdp_client is not root or session.session_id != event.navigation_session_id:
+			raise NavigationError('Navigation focus session binding changed')
+		result = await asyncio.wait_for(root.send.Runtime.evaluate(
+			params={'expression': '1 + 1', 'returnByValue': True}, session_id=event.navigation_session_id), timeout=2.0)
+		if not check():
+			return
+		if result.get('result', {}).get('value') != 2:
+			raise NavigationError('Navigation focus did not respond to JavaScript')
+		if self._dom_watchdog:
+			self._dom_watchdog.clear_cache()
+		self._cached_browser_state_summary = None
+		self._cached_selector_map.clear()
+		self._tab_registry.register(session.target_id, url=event.url or session.url, title=session.title, state=TabState.OPEN)
+		if event.url:
+			await self._await_navigation_event(self.event_bus, NavigationCompleteEvent(target_id=event.target_id, url=event.url,
+				navigation_id=operation.navigation_id, navigation_generation=operation.generation))
+			check()
 
 	async def on_FileDownloadedEvent(self, event: FileDownloadedEvent) -> None:
 		"""Track downloaded files during this session."""
@@ -1826,7 +2068,7 @@ class BrowserSession(BaseModel):
 
 		This MUST succeed or the browser is unusable. Fails hard on any error.
 		"""
-
+		self._check_failed_runtime_retirement()
 		self.browser_profile.cdp_url = cdp_url or self.cdp_url
 		if not self.cdp_url:
 			raise RuntimeError('Cannot setup CDP connection without CDP URL')
@@ -1846,6 +2088,7 @@ class BrowserSession(BaseModel):
 				while True:
 					try:
 						version_info = await client.get(url, headers=headers)
+						self._check_failed_runtime_retirement()
 						self.browser_profile.cdp_url = version_info.json()['webSocketDebuggerUrl']
 						break
 					except (httpx.ReadTimeout, httpx.ConnectError, httpx.RemoteProtocolError):
@@ -1860,7 +2103,7 @@ class BrowserSession(BaseModel):
 
 		browser_location = 'local browser' if self.is_local else 'remote browser'
 		self.logger.debug(f'🌎 Connecting to existing chromium-based browser via CDP: {self.cdp_url} -> ({browser_location})')
-
+		self._check_failed_runtime_retirement()
 		try:
 			# Create and store the CDP client for direct CDP communication
 			self._cdp_client_root = CDPClient(self.cdp_url)
@@ -2239,18 +2482,38 @@ class BrowserSession(BaseModel):
 			return target_info.get('title', 'Unknown page title')
 		return 'Unknown page title'
 
-	async def navigate_to(self, url: str, new_tab: bool = False) -> None:
+	async def navigate_to(self, url: str, new_tab: bool = False, *, wait_until: WaitUntil = 'load', timeout_ms: int | None = None) -> None:
 		"""Navigate to a URL using the standard event system.
 
 		Args:
 			url: URL to navigate to
 			new_tab: Whether to open in a new tab
 		"""
-		from openbrowser.browser.events import NavigateToUrlEvent
-
-		event = self.event_bus.dispatch(NavigateToUrlEvent(url=url, new_tab=new_tab))
-		await event
-		await event.event_result(raise_if_any=True, raise_if_none=False)
+		event = NavigateToUrlEvent(url=url, new_tab=new_tab, wait_until=wait_until, timeout_ms=timeout_ms)
+		operation = event.get_navigation_operation(self._lifecycle.generation)
+		event_bus = self.event_bus
+		deadline = self._navigation_deadline(event, operation)
+		self._reserve_navigation(operation)
+		try:
+			async with asyncio.timeout_at(deadline):
+				await self._await_navigation_event(event_bus, event)
+		except (asyncio.CancelledError, TimeoutError) as error:
+			expired = asyncio.get_running_loop().time() >= deadline
+			phase = NavigationPhase.TIMED_OUT if expired else NavigationPhase.CANCELLED if isinstance(error, asyncio.CancelledError) else NavigationPhase.FAILED
+			operation.finish(phase, 'Navigation deadline expired' if expired else error)
+			tasks = self._cancel_navigation_tasks(operation)
+			if tasks:
+				await asyncio.wait(tasks, timeout=1.0)
+			self._publish_navigation_finished(operation, event_bus)
+			self._retire_navigation(operation)
+			if expired and not isinstance(error, asyncio.CancelledError):
+				raise NavigationTimeoutError('Navigation deadline expired') from error
+			raise
+		except BaseException as error:
+			operation.finish(NavigationPhase.FAILED, error)
+			self._publish_navigation_finished(operation, event_bus)
+			self._navigation_monitor.complete(operation)
+			raise
 
 	# endregion - ========== ID Lookup Methods ==========
 

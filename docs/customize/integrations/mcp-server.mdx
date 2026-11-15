@@ -95,6 +95,8 @@ The MCP server exposes three tools:
 
 If a browser connection fails, call `get_status` before retrying. A page-changing action may have partially run, so do not replay it blindly.
 
+When a browser session exists, `get_status` also includes `browser.navigation`, the active or last navigation transaction. It distinguishes the requested URL from the observed document URL and reports its generation, phase, and error. Navigation waits for the declared document milestone rather than a fixed delay. A `download` outcome is a handoff, not confirmation that a file finished downloading. A document milestone does not establish application hydration.
+
 ### Available Functions
 
 | Category | Functions |

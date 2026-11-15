@@ -13,6 +13,18 @@ The `Browser` instance also provides all [Actor](/customize/actor/all-parameters
 
 - `cdp_url`: CDP URL for connecting to existing browser instance (e.g., `"http://localhost:9222"`)
 
+## Navigation requests
+
+`await session.navigate_to(url, new_tab=False, *, wait_until="load", timeout_ms=None)` uses the shared navigation request implementation. `wait_until` accepts `commit`, `domcontentloaded`, `load`, or `networkidle`. The last option waits for Chromium's matching `networkIdle` lifecycle event. Document milestones do not establish application readiness.
+
+`timeout_ms` must be positive and covers public-request queue time, target selection, the CDP command, readiness, and required observation work. A request with an explicit timeout receives an enclosing event timeout allowance before dispatch. If you dispatch `NavigateToUrlEvent` directly, an explicitly supplied `event_timeout`, including `None`, is preserved.
+
+The public method refuses overlapping requests with `NavigationBusyError` and propagates caller cancellation to the request owner. It never retries a navigation automatically. Raw event dispatch keeps the event bus's queue semantics; cancelling a raw event waiter alone does not cancel its handler.
+
+Read `session.lifecycle_snapshot()["navigation"]` for the active or last operation. A terminal phase is `succeeded`, `download`, `failed`, `timed_out`, or `cancelled`. A download phase acknowledges a handoff, not a completed file or loaded document. `NavigationFinishedEvent` reports the correlated outcome; legacy `NavigationCompleteEvent` remains an observation also used for focus and PDF discovery. Terminal status delivery is not durable across event-bus shutdown.
+
+Requested URLs are checked before navigation. Observed final URLs are checked after commit; a disallowed final URL fails the request and triggers bounded containment to `about:blank`. This does not prevent every intermediate redirect request from reaching the network.
+
 ## Display & Appearance
 
 - `headless` (default: `None`): Run browser without UI. Auto-detects based on display availability (`True`/`False`/`None`)

@@ -20,7 +20,6 @@ from openbrowser.browser.events import (
 	CloseTabEvent,
 	GetDropdownOptionsEvent,
 	GoBackEvent,
-	NavigateToUrlEvent,
 	ScrollEvent,
 	ScrollToTextEvent,
 	SendKeysEvent,
@@ -160,14 +159,7 @@ class Tools(Generic[Context]):
 
 			# Dispatch navigation event
 			try:
-				event = browser_session.event_bus.dispatch(
-					NavigateToUrlEvent(
-						url=search_url,
-						new_tab=use_new_tab,
-					)
-				)
-				await event
-				await event.event_result(raise_if_any=True, raise_if_none=False)
+				await browser_session.navigate_to(search_url, new_tab=use_new_tab)
 				memory = f"Searched {params.engine.title()} for '{params.query}'"
 				msg = f'🔍  {memory}'
 				logger.info(msg)
@@ -183,9 +175,7 @@ class Tools(Generic[Context]):
 		async def navigate(params: NavigateAction, browser_session: BrowserSession):
 			try:
 				# Dispatch navigation event
-				event = browser_session.event_bus.dispatch(NavigateToUrlEvent(url=params.url, new_tab=params.new_tab))
-				await event
-				await event.event_result(raise_if_any=True, raise_if_none=False)
+				await browser_session.navigate_to(params.url, new_tab=params.new_tab)
 
 				if params.new_tab:
 					memory = f'Opened new tab with URL {params.url}'
