@@ -102,32 +102,18 @@ def test_identity_guard_rejects_missing_process_identity_fields():
 
 
 @pytest.mark.asyncio
-async def test_owned_cleanup_escalates_only_after_rechecking_identity(monkeypatch):
-    calls = []
-    saved = {'pid': 12, 'created': 2.0, 'cmdline': ['owned-browser'], 'owner_token': 'run'}
-
-    class Process:
-        pid = 12
-
-        def create_time(self):
-            return 2.0
-
-        def cmdline(self):
-            return ['owned-browser']
-
-        def terminate(self):
-            calls.append('terminate')
-
-        def kill(self):
-            calls.append('kill')
-
-    monkeypatch.setattr(benchmark.psutil, 'Process', lambda pid: Process())
+async def test_owned_cleanup_escalates_only_after_rechecking_identity(tmp_path, monkeypatch):
+    _, env = runtime_environment(tmp_path)
+    process = ProcessIdentity(12, env, ['owned-browser'])
+    calls = process.signals
+    saved = benchmark.record(process, 'run')
+    monkeypatch.setattr(benchmark.psutil, 'Process', lambda pid: process)
     monkeypatch.setattr(benchmark, 'state', lambda identity: 'absent' if 'kill' in calls else 'alive')
     await benchmark.terminate_owned([saved], 'run', grace=0)
     assert calls == ['terminate', 'kill']
 
     calls.clear()
-    monkeypatch.setattr(Process, 'create_time', lambda self: 2.0 if not calls else 3.0)
+    monkeypatch.setattr(process, 'create_time', lambda: 2.0 if not calls else 3.0)
     await benchmark.terminate_owned([saved], 'run', grace=0)
     assert calls == ['terminate']
 
@@ -282,11 +268,178 @@ def test_config_rejects_invalid_measurement_and_duplicate_arms(tmp_path, extra):
 
 
 def test_config_refuses_existing_output_and_user_profile_options(tmp_path):
-    args = benchmark.parser().parse_args(['--source', str(tmp_path), '--output', str(tmp_path)])
-    with pytest.raises(ValueError):
+    source = tmp_path / 'source'
+    (source / 'src/openbrowser').mkdir(parents=True)
+    (source / 'src/openbrowser/__init__.py').touch()
+    chrome = tmp_path / 'chrome'
+    chrome.write_text('#!/bin/sh\nexit 0\n')
+    chrome.chmod(0o700)
+    output = tmp_path / 'existing-results'
+    output.mkdir()
+    args = benchmark.parser().parse_args(['--source', str(source), '--chrome', str(chrome), '--output', str(output)])
+    with pytest.raises(ValueError, match=r'^--output must be a new directory$'):
         benchmark.validate_config(args)
     with pytest.raises(SystemExit):
         benchmark.parser().parse_args(['--profile', str(tmp_path)])
+
+
+def runtime_environment(tmp_path):
+    (tmp_path / '.benchmark-owner').write_text('run')
+    root = tmp_path / 'raw-cdp'
+    root.mkdir()
+    return root, {
+        'NAVIGATION_BENCHMARK_OWNER': 'run',
+        'BH_RUNTIME_DIR': str(root / 'runtime'),
+        'HOME': str(root / 'home'),
+    }
+
+
+class ProcessIdentity:
+    def __init__(self, pid, environment, command=None):
+        self.pid, self.environment = pid, environment
+        self.command = command or ['private-runtime-process']
+        self.descendants, self.signals = [], []
+        self.created = 2.0
+
+    def create_time(self):
+        return self.created
+
+    def cmdline(self):
+        return self.command
+
+    def environ(self):
+        if self.environment is None:
+            raise benchmark.psutil.AccessDenied(self.pid)
+        return self.environment
+
+    def children(self, recursive=False):
+        return self.descendants
+
+    def status(self):
+        return benchmark.psutil.STATUS_RUNNING
+
+    def terminate(self):
+        self.signals.append('terminate')
+
+    def kill(self):
+        self.signals.append('kill')
+
+
+def test_record_verifies_private_runtime_and_owner_marker(tmp_path):
+    root, env = runtime_environment(tmp_path)
+    identity = benchmark.record(ProcessIdentity(12, env), 'run')
+    assert identity['owner_token'] == 'run'
+    assert identity['owner_root'] == str(root)
+
+
+@pytest.mark.parametrize('failure', ['token', 'runtime', 'marker', 'profile', 'environment_access'])
+def test_record_does_not_stamp_unverified_process_as_owned(tmp_path, failure):
+    root, env = runtime_environment(tmp_path)
+    command = ['chrome', f'--user-data-dir={root / "profile"}']
+    if failure == 'token':
+        env['NAVIGATION_BENCHMARK_OWNER'] = 'different-owner'
+    elif failure == 'runtime':
+        env['BH_RUNTIME_DIR'] = str(tmp_path / 'somewhere-else')
+    elif failure == 'marker':
+        (tmp_path / '.benchmark-owner').unlink()
+    elif failure == 'profile':
+        command = ['chrome', f'--user-data-dir={tmp_path / "user-profile"}']
+    else:
+        env = None
+    identity = benchmark.record(ProcessIdentity(12, env, command), 'run')
+    assert identity['owner_token'] is None
+    assert identity['ownership_error']
+
+
+def test_descendant_cannot_borrow_verified_parent_ownership(tmp_path, monkeypatch):
+    _, env = runtime_environment(tmp_path)
+    parent = ProcessIdentity(12, env)
+    child = ProcessIdentity(13, {})
+    parent.descendants = [child]
+    processes = {12: parent, 13: child}
+    monkeypatch.setattr(benchmark.psutil, 'Process', processes.__getitem__)
+    descendants = benchmark.descendant_identities(benchmark.record(parent, 'run'), 'run')
+    assert len(descendants) == 1
+    assert descendants[0]['owner_token'] is None
+    assert benchmark.state(descendants[0]) == 'unknown'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('changed', ['token', 'runtime', 'marker'])
+async def test_signal_boundary_rechecks_each_process_ownership(tmp_path, monkeypatch, changed):
+    _, env = runtime_environment(tmp_path)
+    process = ProcessIdentity(12, env)
+    saved = benchmark.record(process, 'run')
+    if changed == 'token':
+        env['NAVIGATION_BENCHMARK_OWNER'] = 'different-owner'
+    elif changed == 'runtime':
+        env['BH_RUNTIME_DIR'] = str(tmp_path / 'foreign-runtime')
+    else:
+        (tmp_path / '.benchmark-owner').unlink()
+    monkeypatch.setattr(benchmark.psutil, 'Process', lambda pid: process)
+    await benchmark.terminate_owned([saved], 'run', grace=0)
+    assert process.signals == []
+
+
+@pytest.mark.asyncio
+async def test_kill_rechecks_ownership_after_terminate(tmp_path, monkeypatch):
+    _, env = runtime_environment(tmp_path)
+    process = ProcessIdentity(12, env)
+    saved = benchmark.record(process, 'run')
+
+    def terminate():
+        process.signals.append('terminate')
+        (tmp_path / '.benchmark-owner').unlink()
+    monkeypatch.setattr(process, 'terminate', terminate)
+    monkeypatch.setattr(benchmark.psutil, 'Process', lambda pid: process)
+    identities = await benchmark.terminate_owned([saved], 'run', grace=0)
+    assert process.signals == ['terminate']
+    assert identities[0]['state'] not in ('absent', 'reused')
+
+
+def test_worker_collection_checks_each_child_not_only_its_parent(tmp_path, monkeypatch):
+    root, env = runtime_environment(tmp_path)
+    parent = ProcessIdentity(benchmark.os.getpid(), env)
+    owned = ProcessIdentity(12, env)
+    foreign = ProcessIdentity(13, {})
+    parent.descendants = [owned, foreign]
+    processes = {parent.pid: parent, 12: owned, 13: foreign}
+    monkeypatch.setattr(benchmark.psutil, 'Process', processes.__getitem__)
+    arm = benchmark.Arm.__new__(benchmark.Arm)
+    arm.root, arm.token, arm.agent_browser, arm.owned = root, 'run', None, {}
+    captured = {identity['pid']: identity for identity in arm.ownership()}
+    assert captured[12]['owner_token'] == 'run'
+    assert captured[13]['owner_token'] is None
+    assert benchmark.state(captured[13]) == 'unknown'
+
+
+@pytest.mark.asyncio
+async def test_unverified_live_process_is_not_signaled_or_reported_clean(tmp_path, monkeypatch):
+    runtime_environment(tmp_path)
+    process = ProcessIdentity(13, {})
+    identity = benchmark.record(process, 'run')
+    monkeypatch.setattr(benchmark.psutil, 'Process', lambda pid: process)
+    identities = await benchmark.terminate_owned([identity], 'run', grace=0)
+    assert process.signals == []
+    assert identities[0]['state'] == 'unknown'
+    result = verified_result()
+    result['cleanup']['raw-cdp']['post_worker_exit_identities'] = identities
+    assert any('cleanup identity proof is incomplete' in error for error in benchmark.result_errors(result))
+
+
+def test_load_average_is_none_when_platform_has_no_capability(monkeypatch):
+    monkeypatch.delattr(benchmark.os, 'getloadavg', raising=False)
+    assert benchmark.load_average() is None
+
+
+def test_load_average_preserves_available_values_and_handles_os_error(monkeypatch):
+    monkeypatch.setattr(benchmark.os, 'getloadavg', lambda: (1.0, 2.0, 3.0), raising=False)
+    assert benchmark.load_average() == (1.0, 2.0, 3.0)
+
+    def unavailable():
+        raise OSError('load average is unavailable')
+    monkeypatch.setattr(benchmark.os, 'getloadavg', unavailable)
+    assert benchmark.load_average() is None
 
 
 def test_verify_rejects_false_summary_and_missing_attempts():
