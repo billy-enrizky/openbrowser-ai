@@ -1,0 +1,669 @@
+{
+  "schema_version": 1,
+  "audited_at_utc": "2026-11-15T08:50:17.280055+00:00",
+  "claim": "The candidate source is faster for both frozen local tasks without weakening their checked completion contract.",
+  "source_comparison_verdict": "FASTER, fixed local task only",
+  "cross_tool_universal_winner": "INCONCLUSIVE",
+  "harness_sha256": "7d40ce3c860c9665e7ccbb6b758d508bfb315ead18d1cde4d0bb91d5a58a412a",
+  "harness_readme": "benchmarks/navigation_compare_README.md",
+  "pure_verification": {
+    "directories": 11,
+    "passed": 11,
+    "failed": 0,
+    "log_sha256": "9ba270d1bbd84016d6c9c4643b482e50d4b2dcb0dd95025efa40ba237408832b"
+  },
+  "sources": {
+    "candidate": {
+      "commit": "7c08e72f546614c4d834b9cc609022467e887fd2",
+      "python_file_count": 151,
+      "manifest_canonical_sha256": "662eb6c0a2f3125a3078dec9acdeaa081a1bea88649a91e7276e70b849528945",
+      "matches_commit_objects": true,
+      "clean_and_unchanged_during_every_run": true
+    },
+    "baseline": {
+      "commit": "fb2cd683dea55b31fbb69617f4eaeddcbd4e008a",
+      "python_file_count": 150,
+      "manifest_canonical_sha256": "d4205963f5e5ab5f71bd15617919383fe197ec45e87733b5d890d161eb79b8f9",
+      "matches_commit_objects": true,
+      "clean_and_unchanged_during_every_run": true
+    }
+  },
+  "runtime_pins": {
+    "lightpanda": "1.0.4",
+    "agent-browser": "0.43.0",
+    "browser-use": "1.0.5",
+    "browser-harness": "0.1.13",
+    "chrome_for_testing": "157.0.8103.78",
+    "python": "3.12.12",
+    "websockets": "15.0.1",
+    "psutil_coordinator_openbrowser": "7.2.0",
+    "psutil_browser_use": "7.2.2"
+  },
+  "executable_sha256": {
+    "chrome": "0dc5fa1ed2364c0e4b80da73cb61a1230c57f052e18199807f0110fefce6de2d",
+    "lightpanda": "83b0ba5ae31086b675fb3ba50644bda075a13bebabe46dc5f7543952bc41ae46",
+    "agent_browser": "05338a8eeddf0b3f9ebf0c87a6c21aedc10685608c68618e1a8483c43eae9c3f",
+    "browser_use_python": "e7268b0250f9b13cf80dd3a544516dc5f7bac9274bf6963d33d563bfdd134ae7",
+    "openbrowser_python": "e7268b0250f9b13cf80dd3a544516dc5f7bac9274bf6963d33d563bfdd134ae7"
+  },
+  "release_provenance": {
+    "lightpanda-release.json": {
+      "sha256": "4966c0e908fa30846098ef54a60ed71fcf6c9ee1c09dd7e79d3ea400a45886d6",
+      "version": "1.0.4"
+    },
+    "agent-browser-release.json": {
+      "sha256": "c76b0feb4cfddef435b91bf11842d984f020f48716c7fff141f3999cf05ac36b",
+      "version": "v0.43.0"
+    },
+    "agent-browser-npm.json": {
+      "sha256": "9918b0465d0b14bf8105e177cb06914b5fa028b6e626c8a99a780cbf18b54bc9",
+      "version": "0.43.0"
+    },
+    "browser-use-release.json": {
+      "sha256": "96812c4e8b79a3e3ff233a1d0ffd79332bb06433fb7a2832d5ff63ea20bd7651",
+      "version": "1.0.5"
+    },
+    "browser-use-pypi.json": {
+      "sha256": "61fd24c99b4478057905df63cbf79851b806cd52a9b5505be6cb114822cb5fba",
+      "version": "1.0.5"
+    },
+    "browser-harness-pypi.json": {
+      "sha256": "54b86ac3a99f75eaed96981e992fc045b2972818b04c5ee090fcab15fa812f9e",
+      "version": "0.1.13"
+    },
+    "chrome-for-testing-stable.json": {
+      "sha256": "5eb512506a75939693c26f7b6e7b562bc441a10c553f65aa4500b082f5926630",
+      "version": "157.0.8103.78",
+      "timestamp": "2026-11-14T21:10:08.760Z"
+    },
+    "manifest.json": {
+      "sha256": "ce7025c4b28e5298aa50d02aede0eed822007ca6aed30d492992f705f58cf581",
+      "fetched_at": "2026-11-15T07:30:18.904729+00:00"
+    }
+  },
+  "paired": {
+    "baseline": {
+      "fast": {
+        "elapsed_ns": [
+          1028365166,
+          1029044459,
+          1029077958,
+          1026352541,
+          1026036625
+        ],
+        "median_ns": 1028365166,
+        "min_ns": 1026036625,
+        "max_ns": 1029077958,
+        "expected": 5,
+        "attempted": 5,
+        "successful": 5,
+        "failures": 0,
+        "timeouts": 0,
+        "unavailable": 0,
+        "not_run": 0
+      },
+      "delayed": {
+        "elapsed_ns": [
+          1052331708,
+          1025005250,
+          1045530000,
+          1035820250,
+          1028196083
+        ],
+        "median_ns": 1035820250,
+        "min_ns": 1025005250,
+        "max_ns": 1052331708,
+        "expected": 5,
+        "attempted": 5,
+        "successful": 5,
+        "failures": 0,
+        "timeouts": 0,
+        "unavailable": 0,
+        "not_run": 0
+      }
+    },
+    "candidate": {
+      "fast": {
+        "elapsed_ns": [
+          36418750,
+          34886458,
+          43693125,
+          38494250,
+          35818125
+        ],
+        "median_ns": 36418750,
+        "min_ns": 34886458,
+        "max_ns": 43693125,
+        "expected": 5,
+        "attempted": 5,
+        "successful": 5,
+        "failures": 0,
+        "timeouts": 0,
+        "unavailable": 0,
+        "not_run": 0
+      },
+      "delayed": {
+        "elapsed_ns": [
+          198132000,
+          196877375,
+          194796709,
+          195420459,
+          191237292
+        ],
+        "median_ns": 195420459,
+        "min_ns": 191237292,
+        "max_ns": 198132000,
+        "expected": 5,
+        "attempted": 5,
+        "successful": 5,
+        "failures": 0,
+        "timeouts": 0,
+        "unavailable": 0,
+        "not_run": 0
+      }
+    }
+  },
+  "paired_comparison": {
+    "fast": {
+      "verdict": "FASTER, fixed local task only",
+      "median_saving_ns": 991946416,
+      "nonoverlapping_ranges": true,
+      "paired_savings_ns": [
+        991946416,
+        994158001,
+        985384833,
+        987858291,
+        990218500
+      ]
+    },
+    "delayed": {
+      "verdict": "FASTER, fixed local task only",
+      "median_saving_ns": 840399791,
+      "nonoverlapping_ranges": true,
+      "paired_savings_ns": [
+        854199708,
+        828127875,
+        850733291,
+        840399791,
+        836958791
+      ]
+    }
+  },
+  "latest_tools": {
+    "raw-cdp/fast": {
+      "elapsed_ns": [
+        26183083,
+        24452041,
+        26125292,
+        25650333,
+        26806500
+      ],
+      "median_ns": 26125292,
+      "min_ns": 24452041,
+      "max_ns": 26806500,
+      "expected": 5,
+      "attempted": 5,
+      "successful": 5,
+      "failures": 0,
+      "timeouts": 0,
+      "unavailable": 0,
+      "not_run": 0
+    },
+    "raw-cdp/delayed": {
+      "elapsed_ns": [
+        181894583,
+        180253334,
+        189380750,
+        178766250,
+        177353708
+      ],
+      "median_ns": 180253334,
+      "min_ns": 177353708,
+      "max_ns": 189380750,
+      "expected": 5,
+      "attempted": 5,
+      "successful": 5,
+      "failures": 0,
+      "timeouts": 0,
+      "unavailable": 0,
+      "not_run": 0
+    },
+    "lightpanda/fast": {
+      "elapsed_ns": [
+        15820333,
+        11167792,
+        11662209,
+        11610875,
+        10770209
+      ],
+      "median_ns": 11610875,
+      "min_ns": 10770209,
+      "max_ns": 15820333,
+      "expected": 5,
+      "attempted": 5,
+      "successful": 5,
+      "failures": 0,
+      "timeouts": 0,
+      "unavailable": 0,
+      "not_run": 0
+    },
+    "lightpanda/delayed": {
+      "elapsed_ns": [
+        171104292,
+        170160875,
+        172849959,
+        166489417,
+        171427334
+      ],
+      "median_ns": 171104292,
+      "min_ns": 166489417,
+      "max_ns": 172849959,
+      "expected": 5,
+      "attempted": 5,
+      "successful": 5,
+      "failures": 0,
+      "timeouts": 0,
+      "unavailable": 0,
+      "not_run": 0
+    },
+    "agent-browser/fast": {
+      "elapsed_ns": [
+        164217584,
+        171307834,
+        154473083,
+        162470500,
+        174633000
+      ],
+      "median_ns": 164217584,
+      "min_ns": 154473083,
+      "max_ns": 174633000,
+      "expected": 5,
+      "attempted": 5,
+      "successful": 5,
+      "failures": 0,
+      "timeouts": 0,
+      "unavailable": 0,
+      "not_run": 0
+    },
+    "agent-browser/delayed": {
+      "elapsed_ns": [
+        321628167,
+        328136458,
+        328853375,
+        310558000,
+        323779166
+      ],
+      "median_ns": 323779166,
+      "min_ns": 310558000,
+      "max_ns": 328853375,
+      "expected": 5,
+      "attempted": 5,
+      "successful": 5,
+      "failures": 0,
+      "timeouts": 0,
+      "unavailable": 0,
+      "not_run": 0
+    },
+    "browser-use/fast": {
+      "elapsed_ns": [
+        31730708,
+        30735000,
+        32268125,
+        31996958,
+        30394125
+      ],
+      "median_ns": 31730708,
+      "min_ns": 30394125,
+      "max_ns": 32268125,
+      "expected": 5,
+      "attempted": 5,
+      "successful": 5,
+      "failures": 0,
+      "timeouts": 0,
+      "unavailable": 0,
+      "not_run": 0
+    },
+    "browser-use/delayed": {
+      "elapsed_ns": [
+        333251334,
+        333289666,
+        337265916,
+        338761709,
+        335236833
+      ],
+      "median_ns": 335236833,
+      "min_ns": 333251334,
+      "max_ns": 338761709,
+      "expected": 5,
+      "attempted": 5,
+      "successful": 5,
+      "failures": 0,
+      "timeouts": 0,
+      "unavailable": 0,
+      "not_run": 0
+    },
+    "openbrowser/fast": {
+      "elapsed_ns": [
+        44913917,
+        44616375,
+        43686125,
+        45657250,
+        47865167
+      ],
+      "median_ns": 44913917,
+      "min_ns": 43686125,
+      "max_ns": 47865167,
+      "expected": 5,
+      "attempted": 5,
+      "successful": 5,
+      "failures": 0,
+      "timeouts": 0,
+      "unavailable": 0,
+      "not_run": 0
+    },
+    "openbrowser/delayed": {
+      "elapsed_ns": [
+        197636209,
+        198418375,
+        203133333,
+        200833375,
+        200874167
+      ],
+      "median_ns": 200833375,
+      "min_ns": 197636209,
+      "max_ns": 203133333,
+      "expected": 5,
+      "attempted": 5,
+      "successful": 5,
+      "failures": 0,
+      "timeouts": 0,
+      "unavailable": 0,
+      "not_run": 0
+    }
+  },
+  "accounting": {
+    "measured_attempts": 70,
+    "measured_successful": 70,
+    "measured_failures": 0,
+    "measured_timeouts": 0,
+    "unavailable": 0,
+    "not_run": 0,
+    "warmup_attempts_excluded_from_latency": 15,
+    "warmup_failures": 0,
+    "all_formal_attempts_including_warmup": 85,
+    "exactly_once_successful_posts": 85,
+    "measured_workload_predicates_passed": 1225,
+    "warmup_workload_predicates_passed": 255,
+    "timer_containment_predicates_passed": 85,
+    "predicate_count_definition": "Six fields at navigation, six final fields, final input, exact effect object, server effect count, and one combined predicate per required response: 17 fast, 18 delayed; one timer-containment predicate separately."
+  },
+  "fresh_cleanup_audit": {
+    "method": "Read only PID and creation time; no signals, command lines, or environment access.",
+    "formal_identity_record_count": 422,
+    "formal_unique_identity_count": 152,
+    "formal_states": {
+      "absent": 152,
+      "pid_reused": 0,
+      "same_identity_present": 0,
+      "access_denied": 0
+    },
+    "diagnostic_unique_identity_count": 14,
+    "diagnostic_states": {
+      "absent": 14,
+      "pid_reused": 0,
+      "same_identity_present": 0,
+      "access_denied": 0
+    },
+    "all_formal_runtime_roots_recorded_removed": true
+  },
+  "separate_diagnostics": {
+    "baseline": {
+      "result_sha256": "402cc4f18fed1aeb9e771fce56dc3ac2ecf3dce122c8e115760530eb7042f181",
+      "profile_text_sha256": "48742b1fa905701d9d2377fb08b53ae3d8ec89fb29cde1c7589e72a0c02c91ef",
+      "harness_sha256": "edf070a6cca6b300c49bbd9d1c2426688fb72dc56329e0cb0d47508fb35c6475",
+      "source_commit": "fb2cd683dea55b31fbb69617f4eaeddcbd4e008a",
+      "chrome": "Chrome/157.0.8103.51",
+      "exit_code": 1,
+      "delayed_attempts": 1,
+      "delayed_failures": 1,
+      "delayed_assertion_failures": 5,
+      "profile_excluded_from_timing": true,
+      "navigation_sleep_observations": [
+        {
+          "actual_ns": 1002246916,
+          "function": "on_NavigateToUrlEvent",
+          "line": 1138,
+          "requested_seconds": 1,
+          "source": "src/openbrowser/browser/session.py"
+        }
+      ]
+    },
+    "candidate": {
+      "result_sha256": "8e685baa6b62c825914655b0337f5ef3bda09618a1246b7afe02d114fb0e45f7",
+      "profile_text_sha256": "96667087513dc15f27c0d9bff7632457d31b288fd3321d62e8792b81ec3f812b",
+      "harness_sha256": "edf070a6cca6b300c49bbd9d1c2426688fb72dc56329e0cb0d47508fb35c6475",
+      "source_commit": "7c08e72f546614c4d834b9cc609022467e887fd2",
+      "chrome": "Chrome/157.0.8103.51",
+      "exit_code": 0,
+      "delayed_attempts": 1,
+      "delayed_failures": 0,
+      "delayed_assertion_failures": 0,
+      "profile_excluded_from_timing": true,
+      "navigation_sleep_observations": []
+    }
+  },
+  "provenance": {
+    "latest-candidate-01": {
+      "results_sha256": "e618d1adc8f4168663033472e0ced248d99bdeab83c05d1c5f9cdd8228319176",
+      "hash_manifest_sha256": "20704a6773dff92adf3468c93e19d4dbc3edca593930a2904d62ed0aad167327",
+      "created_utc": "2026-11-15T08:40:30Z",
+      "source_commit": "7c08e72f546614c4d834b9cc609022467e887fd2",
+      "load_start": [
+        8.1640625,
+        11.193359375,
+        16.70654296875
+      ],
+      "load_end": [
+        13.0380859375,
+        12.05810546875,
+        16.79833984375
+      ],
+      "measured_attempts": 50,
+      "warmup_attempts": 5
+    },
+    "paired-1-baseline": {
+      "results_sha256": "42e87919fd66e8a99adb7861c77b104483c144b4a5838abcff2afb3d0e7aa5d2",
+      "hash_manifest_sha256": "f5c604718bad86e6b2a624789f957e600fd23260fde9c053ab6580570b86bc90",
+      "created_utc": "2026-11-15T08:41:07Z",
+      "source_commit": "fb2cd683dea55b31fbb69617f4eaeddcbd4e008a",
+      "load_start": [
+        13.0380859375,
+        12.05810546875,
+        16.79833984375
+      ],
+      "load_end": [
+        13.57275390625,
+        12.2041015625,
+        16.79443359375
+      ],
+      "measured_attempts": 2,
+      "warmup_attempts": 1
+    },
+    "paired-1-candidate": {
+      "results_sha256": "cdfab130a3346a2586b634719faf9bf41381566a390578ea79c8d01254e775af",
+      "hash_manifest_sha256": "180cd51089f1ad5bd348a7f481b38a1260af99bdb93eb475bef79c1cf6f6265b",
+      "created_utc": "2026-11-15T08:41:19Z",
+      "source_commit": "7c08e72f546614c4d834b9cc609022467e887fd2",
+      "load_start": [
+        15.04833984375,
+        12.53271484375,
+        16.88330078125
+      ],
+      "load_end": [
+        14.88427734375,
+        12.5400390625,
+        16.8603515625
+      ],
+      "measured_attempts": 2,
+      "warmup_attempts": 1
+    },
+    "paired-2-baseline": {
+      "results_sha256": "18deac500f5297cae197f253ab8d36c21592938bf641a8d57a9a0413a828ca6b",
+      "hash_manifest_sha256": "19a94ab1482845ed23885738e59e0d16f6c1826d308e082f6c0eba5ffb1ca479",
+      "created_utc": "2026-11-15T08:41:28Z",
+      "source_commit": "fb2cd683dea55b31fbb69617f4eaeddcbd4e008a",
+      "load_start": [
+        14.88427734375,
+        12.5400390625,
+        16.8603515625
+      ],
+      "load_end": [
+        14.76025390625,
+        12.587890625,
+        16.82666015625
+      ],
+      "measured_attempts": 2,
+      "warmup_attempts": 1
+    },
+    "paired-2-candidate": {
+      "results_sha256": "c31ba8c7a83bbed5b67332ec35123eb960bed342017d05f144ffb41973717ad1",
+      "hash_manifest_sha256": "b4832b76cb7452d5ec29fe98bec44049ba8c3fe296df9525da0936f56bc82b7d",
+      "created_utc": "2026-11-15T08:41:39Z",
+      "source_commit": "7c08e72f546614c4d834b9cc609022467e887fd2",
+      "load_start": [
+        14.76025390625,
+        12.587890625,
+        16.82666015625
+      ],
+      "load_end": [
+        14.59814453125,
+        12.63232421875,
+        16.79296875
+      ],
+      "measured_attempts": 2,
+      "warmup_attempts": 1
+    },
+    "paired-3-baseline": {
+      "results_sha256": "184f1addd2f63c0a04789312384e47610530c8ed4ee1faf68bf3c1d91d1503b7",
+      "hash_manifest_sha256": "752db9c433bec633c8ffd71d2f0dbea3b24201bbdde25459adfd1c89e4e30fc6",
+      "created_utc": "2026-11-15T08:41:47Z",
+      "source_commit": "fb2cd683dea55b31fbb69617f4eaeddcbd4e008a",
+      "load_start": [
+        14.59814453125,
+        12.63232421875,
+        16.79296875
+      ],
+      "load_end": [
+        14.03125,
+        12.57763671875,
+        16.724609375
+      ],
+      "measured_attempts": 2,
+      "warmup_attempts": 1
+    },
+    "paired-3-candidate": {
+      "results_sha256": "39075827d0ff09c0cc5398b104e13d0396e22f661684bfc1bd48e273f943042f",
+      "hash_manifest_sha256": "37b76230f17ee656be4cdece0e1e0d6c584e71ab9d6c149f0a1c11f7f0cf87f4",
+      "created_utc": "2026-11-15T08:41:58Z",
+      "source_commit": "7c08e72f546614c4d834b9cc609022467e887fd2",
+      "load_start": [
+        14.03125,
+        12.57763671875,
+        16.724609375
+      ],
+      "load_end": [
+        12.5810546875,
+        12.31201171875,
+        16.58154296875
+      ],
+      "measured_attempts": 2,
+      "warmup_attempts": 1
+    },
+    "paired-4-baseline": {
+      "results_sha256": "4912aa57156dcc2c88d674e7c8e7f9438ada9679543a775357105a923e6b9354",
+      "hash_manifest_sha256": "0171e7da3fedde5b4ef5609bb2bb3bc15c5f1f17950af6bd7e9b97a4304eccf4",
+      "created_utc": "2026-11-15T08:42:06Z",
+      "source_commit": "fb2cd683dea55b31fbb69617f4eaeddcbd4e008a",
+      "load_start": [
+        12.5810546875,
+        12.31201171875,
+        16.58154296875
+      ],
+      "load_end": [
+        11.40869140625,
+        12.0703125,
+        16.44580078125
+      ],
+      "measured_attempts": 2,
+      "warmup_attempts": 1
+    },
+    "paired-4-candidate": {
+      "results_sha256": "e75ed9d2a1aefcecb8d11b4f674a9c2447deb7060b30b22f22fd237f9aafc88a",
+      "hash_manifest_sha256": "f09f7d32c138441393fd7e406106e4e552a3819668dc35f4cf36df78b6a0d5b8",
+      "created_utc": "2026-11-15T08:42:16Z",
+      "source_commit": "7c08e72f546614c4d834b9cc609022467e887fd2",
+      "load_start": [
+        11.40869140625,
+        12.0703125,
+        16.44580078125
+      ],
+      "load_end": [
+        10.8037109375,
+        11.9189453125,
+        16.3408203125
+      ],
+      "measured_attempts": 2,
+      "warmup_attempts": 1
+    },
+    "paired-5-baseline": {
+      "results_sha256": "cd9467c0284d09bd5e97c87a4fc5430100099d1b831626e008fc75dfa41e491a",
+      "hash_manifest_sha256": "e7c87f2aa58613788c1e5e199d97a7d51974c41e82d60e8a7b4aea9a05006558",
+      "created_utc": "2026-11-15T08:42:24Z",
+      "source_commit": "fb2cd683dea55b31fbb69617f4eaeddcbd4e008a",
+      "load_start": [
+        10.8037109375,
+        11.9189453125,
+        16.3408203125
+      ],
+      "load_end": [
+        10.05859375,
+        11.72314453125,
+        16.21923828125
+      ],
+      "measured_attempts": 2,
+      "warmup_attempts": 1
+    },
+    "paired-5-candidate": {
+      "results_sha256": "488a3ac182c5db26a1769e5e361b7d6e1c8f1d61bb179aa1156f7e75c40628ab",
+      "hash_manifest_sha256": "4c1611016def80df4cf63fb56acb488aff848c394af0597f209429cfb587b126",
+      "created_utc": "2026-11-15T08:42:35Z",
+      "source_commit": "7c08e72f546614c4d834b9cc609022467e887fd2",
+      "load_start": [
+        10.05859375,
+        11.72314453125,
+        16.21923828125
+      ],
+      "load_end": [
+        10.0537109375,
+        11.6943359375,
+        16.1826171875
+      ],
+      "measured_attempts": 2,
+      "warmup_attempts": 1
+    }
+  },
+  "limitations": [
+    "Local native warm-operation fixed-task comparison, not a full browser-agent or production measurement.",
+    "No LLM, cloud, Docker, cold start, public-site compatibility, rendering quality, or broad regression claim.",
+    "Cross-tool universal winner is INCONCLUSIVE: engines, IPC, launch defaults and default waits differ; competitors were not jointly tuned.",
+    "Host contention remained: 10 logical CPUs, saved load averages in provenance; source revisions alternate, latest-tool rounds rotate.",
+    "Separate profiles identify the baseline fixed one-second navigation sleep. They use another harness and installed Chrome 157.0.8103.51, so raw latencies are not pooled.",
+    "Candidate residual time includes browser load events, CDP transport, observations, POST and server audit. No unique candidate engine CPU bottleneck is established.",
+    "The delayed workload explicitly waits at least 150000000 ns at its deferred-script response, which bounds achievable latency.",
+    "Observed source commits and committed Python bytes define source identity, not the installed openbrowser-ai distribution metadata of 0.1.55.",
+    "Release pins were current in retained official responses on 2026-11-15, not a guarantee of later currency. Lightpanda --version fails, but runtime Lightpanda-Version and official binary digest establish 1.0.4.",
+    "Assertions prove this fixture contract only. DOM value assignment is not keyboard input. The paired comparison uses five independently started sessions per source, one excluded fast warmup per session.",
+    "PID creation-time audit proves recorded identities are now absent or reused, not an exhaustive census of never-recorded descendants.",
+    "A delayed image diagnostic catches premature default-load completion before the change. Its one expected failure is separate from the formal 70-attempt denominator."
+  ]
+}
