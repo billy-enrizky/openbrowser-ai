@@ -52,6 +52,7 @@ from openbrowser.browser.lifecycle import (
 )
 from openbrowser.browser.profile import BrowserProfile, ProxySettings
 from openbrowser.browser.navigation import (
+	ContainmentAttempt, ContainmentPhase, NavigationCommit,
 	NavigationBlockedError, NavigationBusyError, NavigationError, NavigationMonitor,
 	NavigationOperation, NavigationPhase, NavigationTimeoutError, WaitUntil,
 )
@@ -65,6 +66,15 @@ if TYPE_CHECKING:
 	from openbrowser.actor.page import Page
 
 DEFAULT_BROWSER_PROFILE = BrowserProfile()
+NAVIGATION_CONTAINMENT_GRACE = 1.0
+_POLICY_RETIREMENT_HINT = 'Runtime retained. Close the actual browser, then create a new BrowserSession; kill() can verify a managed local browser exit.'
+_CONTAIN_DOCUMENT = '''function(expectedUrl) {
+	const active = this.defaultView && this.defaultView.document;
+	if (this.nodeType !== 9 || this !== document || this !== active ||
+		this.URL !== expectedUrl || active.URL !== expectedUrl) return {initiated:false};
+	this.location.replace('about:blank');
+	return {initiated:true};
+}'''
 
 
 def _shutdown_timeout() -> float:
@@ -407,6 +417,7 @@ class BrowserSession(BaseModel):
 	_navigation_task: asyncio.Task | None = PrivateAttr(default=None)
 	_navigation_task_operation: NavigationOperation | None = PrivateAttr(default=None)
 	_navigation_event_pumps: dict[asyncio.Task, EventBus] = PrivateAttr(default_factory=dict)
+	_navigation_policies: dict[str, NavigationOperation] = PrivateAttr(default_factory=dict)
 	_start_event: asyncio.Event | None = PrivateAttr(default=None)
 	_start_error: BaseException | None = PrivateAttr(default=None)
 	_start_task: asyncio.Task | None = PrivateAttr(default=None)
@@ -702,6 +713,7 @@ class BrowserSession(BaseModel):
 				# Killing the owned process is the last-resort release path. Never
 				# let a second cancellation skip the runtime reset below.
 				self._force_stop_resources()
+		await self._drain_navigation_policies()
 		root = self._cdp_client_root
 		stop_root = getattr(root, 'stop', None)
 		if callable(stop_root):
@@ -790,8 +802,13 @@ class BrowserSession(BaseModel):
 				pass
 
 	def _force_reset_runtime_state(self, *, replace_event_bus: bool = True) -> None:
-		"""Abandon stuck cleanup tasks and restore a usable lifecycle shell."""
+		"""Clear a quiescent runtime without discarding unretired authority."""
 		self._abort_navigation()
+		self._revoke_exited_policy_authorities()
+		if any(op.policy_pending for op in self._navigation_policies.values()):
+			error = NavigationError(f'Policy authority has not retired. {_POLICY_RETIREMENT_HINT}')
+			self._lifecycle.fail(error, reason='policy retirement incomplete')
+			raise error
 		self._cancel_navigation_event_pumps(self.event_bus)
 		if self._live_navigation_event_pumps(self.event_bus):
 			error = NavigationError('Event bus pumps have not retired; runtime is retained')
@@ -859,7 +876,18 @@ class BrowserSession(BaseModel):
 
 	async def _shutdown_locked(self, *, force: bool) -> None:
 		"""Save state, dispatch the stop event, then release the event bus."""
-		await self._cancel_navigation()
+		try:
+			await self._cancel_navigation()
+		except NavigationError:
+			if not force or not any(op.containment and op.containment.requires_retirement for op in self._navigation_policies.values()):
+				raise
+			force_error = await self._force_stop_retained_browser()
+			if force_error is not None:
+				raise force_error
+			self._revoke_exited_policy_authorities()
+			await self._cancel_navigation()
+			if self._lifecycle.phase is LifecyclePhase.FAILED:
+				self._lifecycle.transition(LifecyclePhase.STOPPING, reason='owned browser exit retired policy authority')
 		shutdown_generation = self._lifecycle.generation
 		event_bus = self.event_bus
 		await self._cancel_owned_start()
@@ -1053,11 +1081,16 @@ class BrowserSession(BaseModel):
 
 	def _reserve_navigation(self, operation: NavigationOperation) -> None:
 		self._check_failed_runtime_retirement()
+		if self._lifecycle.phase is LifecyclePhase.STOPPING or self._lifecycle_lock.locked():
+			raise NavigationBusyError('Browser lifecycle cleanup is in progress')
 		if self._navigation_task is not None and not self._navigation_task.done():
 			raise NavigationBusyError('Another navigation is in progress')
 		self._navigation_monitor.reserve(operation)
 
 	def _check_failed_runtime_retirement(self) -> None:
+		self._revoke_exited_policy_authorities()
+		if any(op.containment and op.containment.requires_retirement for op in self._navigation_policies.values()):
+			raise NavigationError(f'Policy action retirement is unconfirmed. {_POLICY_RETIREMENT_HINT}')
 		if self._lifecycle.phase is LifecyclePhase.FAILED and self._live_navigation_event_pumps(self.event_bus):
 			raise NavigationError('Event bus retirement is incomplete; finish cleanup before reusing this runtime')
 
@@ -1076,7 +1109,7 @@ class BrowserSession(BaseModel):
 			self.logger.debug('Could not enqueue navigation terminal status: %s', error)
 
 	def _retire_navigation(self, operation: NavigationOperation) -> None:
-		if (operation.terminal and not operation.child_tasks
+		if (operation.terminal and not operation.child_tasks and not operation.policy_pending
 			and self._navigation_task_operation is not operation):
 			self._navigation_monitor.complete(operation)
 
@@ -1096,6 +1129,10 @@ class BrowserSession(BaseModel):
 		operation = self._navigation_monitor.active
 		tasks = set()
 		if operation is not None:
+			operation.close_policy_capture()
+			if (operation.policy_task is not None and not operation.policy_task.done()
+				and not (operation.containment and operation.containment.requires_retirement)):
+				operation.policy_task.cancel()
 			operation.finish(NavigationPhase.CANCELLED, 'Browser session reset')
 			tasks = self._cancel_navigation_tasks(operation)
 			self._publish_navigation_finished(operation, self.event_bus)
@@ -1107,6 +1144,7 @@ class BrowserSession(BaseModel):
 		tasks = self._abort_navigation()
 		if tasks:
 			await asyncio.wait(tasks, timeout=1.0)
+		await self._drain_navigation_policies()
 
 	def _check_navigation_owner(self, operation: NavigationOperation, root: CDPClient, session: CDPSession | None = None) -> None:
 		if operation.deadline is not None and asyncio.get_running_loop().time() >= operation.deadline:
@@ -1162,6 +1200,7 @@ class BrowserSession(BaseModel):
 			raise TimeoutError('Navigation event pump retirement timed out')
 
 	async def _retire_event_bus(self, event_bus: EventBus, *, stop_bus: bool = True, timeout: float = 5.0) -> None:
+		await self._drain_navigation_policies()
 		stop_error: BaseException | None = None
 		if stop_bus:
 			try:
@@ -1189,6 +1228,310 @@ class BrowserSession(BaseModel):
 				raise NavigationError('Navigation timeout must be positive and finite')
 			operation.deadline = asyncio.get_running_loop().time() + duration
 		return operation.deadline
+
+	def _policy_owned(self, operation: NavigationOperation, root: CDPClient, session: CDPSession) -> bool:
+		return (self._navigation_monitor.active is operation and self._cdp_client_root is root
+			and self._lifecycle.generation == operation.generation and session.cdp_client is root
+			and session.target_id == operation.target_id and session.session_id == operation.session_id
+			and (operation.containment is None or operation.containment.phase is not ContainmentPhase.REVOKED))
+
+	def _require_policy_owner(self, operation: NavigationOperation, root: CDPClient, session: CDPSession) -> None:
+		if not self._policy_owned(operation, root, session):
+			raise NavigationError('Policy document authority changed')
+
+	def _start_navigation_policy(self, operation: NavigationOperation, root: CDPClient, session: CDPSession, policy: Any, event_bus: EventBus) -> None:
+		operation.arm_policy()
+		self._navigation_policies[operation.navigation_id] = operation
+		operation.policy_task = asyncio.create_task(self._run_navigation_policy(operation, root, session, policy, event_bus))
+		operation.policy_task.add_done_callback(lambda task: self._navigation_policy_done(operation, task))
+
+	def _navigation_policy_done(self, operation: NavigationOperation, task: asyncio.Task) -> None:
+		if not task.cancelled():
+			task.exception()
+		if not operation.policy_pending:
+			self._navigation_policies.pop(operation.navigation_id, None)
+		self._retire_navigation(operation)
+
+	async def _owned_policy_browser(self, operation: NavigationOperation, root: CDPClient) -> tuple[int, float, str, str] | None:
+		import ipaddress
+		import psutil
+		import socket
+		from openbrowser.browser.watchdogs.profile_lease import ProfileLease
+		watchdog = self._local_browser_watchdog
+		if not self.is_local or watchdog is None or getattr(watchdog, '_owns_browser_resources', False) is not True:
+			return None
+		record = getattr(watchdog, '_browser_record', None)
+		lease = getattr(watchdog, '_profile_lease', None)
+		process = getattr(watchdog, '_subprocess', None)
+		if not isinstance(record, dict) or lease is None or process is None:
+			return None
+		try:
+			ws = root.ws
+			transport = ws.transport
+			connection_socket = transport.get_extra_info('socket')
+			family = connection_socket.family
+			if family not in {socket.AF_INET, socket.AF_INET6}:
+				return None
+			def endpoint(value: Any) -> tuple[Any, int] | None:
+				if not isinstance(value, tuple) or len(value) < 2 or not isinstance(value[1], int) or any(value[2:]):
+					return None
+				address = ipaddress.ip_address(value[0])
+				if address.version != (4 if family == socket.AF_INET else 6) or getattr(address, 'scope_id', None) is not None:
+					return None
+				return address, value[1]
+			peer = endpoint(connection_socket.getpeername())
+			local = endpoint(connection_socket.getsockname())
+			profile = str(Path(self.browser_profile.user_data_dir).expanduser().resolve())
+			if (peer is None or local is None or not peer[0].is_loopback or not local[0].is_loopback or peer[1] != record['cdp_port']
+				or profile != record['profile_dir'] or str(lease.profile_dir) != profile
+				or lease.instance_id != record['instance_id'] or watchdog._instance_id != record['instance_id']
+				or not ProfileLease.process_matches_browser(process, record)):
+				return None
+			def endpoint_owned() -> bool:
+				if (root.ws is not ws or ws.transport is not transport or connection_socket.family != family
+					or endpoint(connection_socket.getpeername()) != peer or endpoint(connection_socket.getsockname()) != local):
+					return False
+				connections = [connection for connection in process.net_connections(kind='tcp') if connection.family == family]
+				listeners = [endpoint(connection.laddr) for connection in connections if connection.status == psutil.CONN_LISTEN]
+				covers_peer = any(listener is not None and listener[1] == peer[1]
+					and (listener[0] == peer[0] or listener[0].is_unspecified) for listener in listeners)
+				accepted_peer = any(connection.status == psutil.CONN_ESTABLISHED and endpoint(connection.laddr) == peer
+					and endpoint(connection.raddr) == local for connection in connections)
+				return covers_peer and accepted_peer
+			if not endpoint_owned():
+				return None
+			info = await self._policy_read(operation, root.send.SystemInfo.getProcessInfo())
+			if (not any(entry.get('type') == 'browser' and entry.get('id') == record['pid'] for entry in info.get('processInfo', []))
+				or not ProfileLease.process_matches_browser(process, record) or not endpoint_owned()):
+				return None
+			return (int(record['pid']), float(record['start_time']), profile, str(record['instance_id']))
+		except Exception:
+			return None
+
+	def _revoke_exited_policy_authorities(self) -> None:
+		if not self._navigation_policies:
+			return
+		from openbrowser.browser.watchdogs.profile_lease import ProfileLease
+		for operation in list(self._navigation_policies.values()):
+			attempt = operation.containment
+			if attempt is None or attempt.owned_browser is None or not attempt.requires_retirement:
+				continue
+			pid, start_time, _profile, _instance = attempt.owned_browser
+			if ProfileLease.process_identity_status(pid, start_time) not in {'missing', 'mismatch'}:
+				continue
+			attempt.phase = ContainmentPhase.REVOKED
+			attempt.error = 'Authority revoked by verified exit of its owned browser process'
+			if operation.policy_task is not None:
+				if not operation.policy_task.done():
+					operation.policy_task.cancel()
+				else:
+					self._navigation_policy_done(operation, operation.policy_task)
+			self._retire_navigation(operation)
+
+	async def _run_navigation_policy(self, operation: NavigationOperation, root: CDPClient, session: CDPSession, policy: Any, event_bus: EventBus) -> None:
+		seen = None
+		while True:
+			commit = operation.policy_commit
+			if commit is not None and commit != seen:
+				seen = commit
+				if not policy._is_url_allowed(commit.url):
+					attempt = ContainmentAttempt(commit, world_name=f'openbrowser-policy-{uuid7str()}',
+						deadline=asyncio.get_running_loop().time() + NAVIGATION_CONTAINMENT_GRACE)
+					operation.containment = attempt
+					contextvars.Context().run(event_bus.dispatch, BrowserErrorEvent(error_type='NavigationBlocked',
+						message=f'Navigation blocked to {commit.url}', details={'url': commit.url,
+						'target_id': operation.target_id, 'navigation_id': operation.navigation_id}))
+					await self._contain_navigation_document(operation, root, session)
+					return
+			if not operation.policy_open:
+				return
+			operation.policy_changed.clear()
+			await operation.policy_changed.wait()
+
+	async def _policy_read(self, operation: NavigationOperation, awaitable: Any, *, verification: bool = False) -> Any:
+		attempt = operation.containment
+		assert attempt is not None and attempt.deadline is not None
+		remaining = attempt.deadline - asyncio.get_running_loop().time()
+		return await asyncio.wait_for(awaitable, timeout=max(.001, remaining) if not verification else NAVIGATION_CONTAINMENT_GRACE)
+
+	@staticmethod
+	def _frame_commit(frame: dict[str, Any]) -> NavigationCommit:
+		return NavigationCommit(frame['id'], frame.get('loaderId', ''), frame.get('url', '') + frame.get('urlFragment', ''))
+
+	def _observe_contained_document(self, operation: NavigationOperation, root: CDPClient, session: CDPSession) -> None:
+		self._require_policy_owner(operation, root, session)
+		session.url, session.title = 'about:blank', ''
+		record = self._tab_registry.get(operation.target_id)
+		if record is not None and record.state is not TabState.CLOSED:
+			self._tab_registry.update(operation.target_id, url='about:blank', title='')
+		focus = self.agent_focus
+		if (focus is not None and focus.cdp_client is root and focus.target_id == operation.target_id
+			and focus.session_id == operation.session_id):
+			focus.url, focus.title = 'about:blank', ''
+			self._cached_browser_state_summary = None
+			self._cached_selector_map.clear()
+			if self._dom_watchdog:
+				self._dom_watchdog.clear_cache()
+
+	async def _resolve_policy_protocol_error(self, error: BaseException, operation: NavigationOperation, root: CDPClient, session: CDPSession) -> bool:
+		details = error.args[0] if isinstance(error, RuntimeError) and error.args else None
+		if not isinstance(details, dict) or not isinstance(details.get('code'), int):
+			return False
+		attempt = operation.containment
+		assert attempt is not None
+		try:
+			self._require_policy_owner(operation, root, session)
+			frame = (await self._policy_read(operation, root.send.Page.getFrameTree(session_id=operation.session_id), verification=True))['frameTree']['frame']
+			self._require_policy_owner(operation, root, session)
+			current = self._frame_commit(frame)
+			if current.url == 'about:blank':
+				self._observe_contained_document(operation, root, session)
+				attempt.phase = ContainmentPhase.CONTAINED
+				return True
+			if current != attempt.commit:
+				attempt.phase = ContainmentPhase.SKIPPED
+				return True
+			if details.get('code') == -32000 and details.get('message') in {
+				'Cannot find context with specified id', 'Could not find object with given id',
+			}:
+				attempt.phase = ContainmentPhase.FAILED
+				return True
+		except Exception:
+			pass
+		return False
+
+	async def _contain_navigation_document(self, operation: NavigationOperation, root: CDPClient, session: CDPSession) -> None:
+		attempt = operation.containment
+		assert attempt is not None
+		try:
+			self._require_policy_owner(operation, root, session)
+			attempt.owned_browser = await self._owned_policy_browser(operation, root)
+			self._require_policy_owner(operation, root, session)
+			frame = (await self._policy_read(operation, root.send.Page.getFrameTree(session_id=operation.session_id)))['frameTree']['frame']
+			self._require_policy_owner(operation, root, session)
+			if self._frame_commit(frame) != attempt.commit:
+				attempt.phase = ContainmentPhase.SKIPPED
+				return
+			await self._policy_read(operation, root.send.Runtime.enable(session_id=operation.session_id))
+			self._require_policy_owner(operation, root, session)
+			world = await self._policy_read(operation, root.send.Page.createIsolatedWorld(params={
+				'frameId': attempt.commit.frame_id, 'worldName': attempt.world_name, 'grantUniveralAccess': False,
+			}, session_id=operation.session_id))
+			self._require_policy_owner(operation, root, session)
+			while attempt.context is None or attempt.context[0] != world['executionContextId']:
+				operation.policy_changed.clear()
+				await self._policy_read(operation, operation.policy_changed.wait())
+				self._require_policy_owner(operation, root, session)
+			result = await self._policy_read(operation, root.send.Runtime.evaluate(params={
+				'expression': 'document', 'uniqueContextId': attempt.context[1], 'returnByValue': False,
+				'objectGroup': attempt.world_name,
+			}, session_id=operation.session_id))
+			self._require_policy_owner(operation, root, session)
+			document = result.get('result', {})
+			if result.get('exceptionDetails') or document.get('subtype') != 'node' or not isinstance(document.get('objectId'), str):
+				raise NavigationError('Could not acquire the policy Document object')
+			attempt.object_id = document['objectId']
+			frame = (await self._policy_read(operation, root.send.Page.getFrameTree(session_id=operation.session_id)))['frameTree']['frame']
+			self._require_policy_owner(operation, root, session)
+			if self._frame_commit(frame) != attempt.commit:
+				attempt.phase = ContainmentPhase.SKIPPED
+				return
+			if asyncio.get_running_loop().time() >= attempt.deadline:
+				raise TimeoutError('Policy preparation exceeded its containment grace')
+			attempt.phase = ContainmentPhase.ACTION_IN_FLIGHT
+			result = await root.send.Runtime.callFunctionOn(params={'objectId': attempt.object_id,
+				'functionDeclaration': _CONTAIN_DOCUMENT, 'arguments': [{'value': attempt.commit.url}],
+				'returnByValue': True, 'awaitPromise': False}, session_id=operation.session_id)
+			self._require_policy_owner(operation, root, session)
+			value = result.get('result', {}).get('value', {})
+			if result.get('exceptionDetails') or not isinstance(value, dict) or not isinstance(value.get('initiated'), bool):
+				raise NavigationError('Policy action returned no conclusive result')
+			if not value['initiated']:
+				attempt.phase = ContainmentPhase.SKIPPED
+				return
+			attempt.phase = ContainmentPhase.VERIFYING
+			verify_deadline = asyncio.get_running_loop().time() + NAVIGATION_CONTAINMENT_GRACE
+			while True:
+				frame = (await self._policy_read(operation, root.send.Page.getFrameTree(session_id=operation.session_id), verification=True))['frameTree']['frame']
+				self._require_policy_owner(operation, root, session)
+				current = self._frame_commit(frame)
+				if current.url == 'about:blank':
+					self._observe_contained_document(operation, root, session)
+					attempt.phase = ContainmentPhase.CONTAINED
+					return
+				if current != attempt.commit:
+					attempt.phase = ContainmentPhase.SKIPPED
+					return
+				remaining = verify_deadline - asyncio.get_running_loop().time()
+				if remaining <= 0:
+					raise TimeoutError('Policy replacement was not observed')
+				operation.policy_changed.clear()
+				try:
+					await asyncio.wait_for(operation.policy_changed.wait(), timeout=min(.05, remaining))
+				except TimeoutError:
+					pass
+		except BaseException as error:
+			if attempt.phase is ContainmentPhase.REVOKED:
+				return
+			attempt.error = f'{type(error).__name__}: {error}'
+			if attempt.requires_retirement:
+				if await self._resolve_policy_protocol_error(error, operation, root, session):
+					return
+				attempt.phase = ContainmentPhase.UNCONFIRMED
+				self._lifecycle.fail(attempt.error, reason='policy action is unconfirmed; close the owned browser or retain this remote runtime')
+			else:
+				attempt.phase = ContainmentPhase.FAILED if self._policy_owned(operation, root, session) else ContainmentPhase.SKIPPED
+		finally:
+			if attempt.object_id is not None:
+				try:
+					await asyncio.wait_for(root.send.Runtime.releaseObject(params={'objectId': attempt.object_id}, session_id=operation.session_id), timeout=.2)
+				except BaseException:
+					pass
+
+	async def _join_navigation_policy(self, operation: NavigationOperation, *, close: bool = True, retirement: bool = False) -> None:
+		if close:
+			operation.close_policy_capture()
+		task = operation.policy_task
+		if task is not None and task is not asyncio.current_task() and not task.done():
+			attempt = operation.containment
+			budget = NAVIGATION_CONTAINMENT_GRACE if retirement or attempt is None or attempt.deadline is None else max(
+				0.0, attempt.deadline - asyncio.get_running_loop().time())
+			await asyncio.wait({task}, timeout=budget)
+		if task is not None and task.done() and not task.cancelled():
+			task.result()
+		if operation.policy_pending:
+			if operation.containment and operation.containment.requires_retirement:
+				operation.containment.phase = ContainmentPhase.UNCONFIRMED
+			self._lifecycle.fail('Policy cleanup has not retired', reason='policy retirement incomplete')
+			raise NavigationError(f'Policy cleanup has not retired. {_POLICY_RETIREMENT_HINT}')
+
+	async def _drain_navigation_policies(self) -> None:
+		self._revoke_exited_policy_authorities()
+		operations = list(self._navigation_policies.values())
+		for operation in operations:
+			operation.close_policy_capture()
+			if operation.policy_task and not operation.policy_task.done() and not (operation.containment and operation.containment.requires_retirement):
+				operation.policy_task.cancel()
+		for operation in operations:
+			await self._join_navigation_policy(operation, retirement=True)
+
+	async def _navigation_step(self, operation: NavigationOperation, awaitable: Any) -> Any:
+		task = asyncio.ensure_future(awaitable)
+		operation.child_tasks.add(task)
+		try:
+			policy_task = operation.policy_task
+			if policy_task is not None:
+				await asyncio.wait({task, policy_task}, return_when=asyncio.FIRST_COMPLETED)
+				if policy_task.done() and operation.containment is None:
+					policy_task.result()
+				if operation.containment is not None:
+					await self._join_navigation_policy(operation, close=False)
+					raise NavigationBlockedError(f'Navigation to {operation.containment.commit.url} blocked by security policy')
+			return await task
+		finally:
+			if not task.done():
+				task.cancel()
+			operation.child_tasks.discard(task)
 
 	async def on_NavigateToUrlEvent(self, event: NavigateToUrlEvent) -> None:
 		"""Run one correlated request under one deadline, without implicit replay."""
@@ -1278,11 +1621,12 @@ class BrowserSession(BaseModel):
 				await root.send.Page.setLifecycleEventsEnabled(params={'enabled': True}, session_id=operation.session_id)
 				self._check_navigation_owner(operation, root, session)
 				operation.transition(NavigationPhase.NAVIGATING)
-				response = await root.send.Page.navigate(params={'url': event.url, 'transitionType': 'address_bar'}, session_id=operation.session_id)
+				self._start_navigation_policy(operation, root, session, policy, event_bus)
+				response = await self._navigation_step(operation, root.send.Page.navigate(params={'url': event.url, 'transitionType': 'address_bar'}, session_id=operation.session_id))
 				self._check_navigation_owner(operation, root, session)
 				operation.accept_response(response)
 				if not operation.is_download:
-					await operation.wait_ready()
+					await self._navigation_step(operation, operation.wait_ready())
 					self._check_navigation_owner(operation, root, session)
 					operation.transition(NavigationPhase.NOTIFYING)
 				tree = await root.send.Page.getFrameTree(session_id=operation.session_id)
@@ -1292,12 +1636,8 @@ class BrowserSession(BaseModel):
 					raise NavigationError('Navigation live document binding changed')
 				operation.observed_url = frame.get('url', '') + frame.get('urlFragment', '')
 				if not policy._is_url_allowed(operation.observed_url):
-					event_bus.dispatch(BrowserErrorEvent(error_type='NavigationBlocked', message=f'Navigation blocked to {operation.observed_url}', details={'url': operation.observed_url, 'target_id': target_id}))
-					try:
-						self._check_navigation_owner(operation, root, session)
-						await asyncio.wait_for(root.send.Page.navigate(params={'url': 'about:blank'}, session_id=operation.session_id), timeout=min(1.0, max(.001, deadline-loop.time())))
-					except Exception as error:
-						self.logger.debug('Policy containment failed: %s', error)
+					operation.record_commit(frame)
+					await self._join_navigation_policy(operation)
 					raise NavigationBlockedError(f'Navigation to {operation.observed_url} blocked by security policy')
 				await self._close_extension_options_pages()
 				self._check_navigation_owner(operation, root, session)
@@ -1308,6 +1648,10 @@ class BrowserSession(BaseModel):
 					target_id=target_id, url=operation.observed_url, navigation_id=operation.navigation_id,
 					navigation_generation=operation.generation, navigation_session_id=operation.session_id))
 				self._check_navigation_owner(operation, root, session)
+				await self._join_navigation_policy(operation)
+				self._check_navigation_owner(operation, root, session)
+				if operation.containment is not None:
+					raise NavigationBlockedError(f'Navigation to {operation.containment.commit.url} blocked by security policy')
 				operation.finish(NavigationPhase.DOWNLOAD if operation.is_download else NavigationPhase.SUCCEEDED)
 		except asyncio.CancelledError:
 			operation.finish(NavigationPhase.TIMED_OUT if loop.time() >= deadline else NavigationPhase.CANCELLED, 'Navigation cancelled')
@@ -1329,6 +1673,10 @@ class BrowserSession(BaseModel):
 					tasks = self._cancel_navigation_tasks(operation)
 					if tasks:
 						await asyncio.wait(tasks, timeout=1.0)
+				try:
+					await self._join_navigation_policy(operation)
+				except BaseException as error:
+					self.logger.debug('Policy cleanup remains reserved: %s', error)
 			finally:
 				self._publish_navigation_finished(operation, event_bus)
 				if self._navigation_task is task and self._navigation_task_operation is operation:
@@ -2512,7 +2860,7 @@ class BrowserSession(BaseModel):
 		except BaseException as error:
 			operation.finish(NavigationPhase.FAILED, error)
 			self._publish_navigation_finished(operation, event_bus)
-			self._navigation_monitor.complete(operation)
+			self._retire_navigation(operation)
 			raise
 
 	# endregion - ========== ID Lookup Methods ==========
