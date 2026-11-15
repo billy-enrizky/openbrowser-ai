@@ -3,6 +3,7 @@ import asyncio
 import contextlib
 import io
 import json
+import statistics
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -619,3 +620,31 @@ def test_worker_environment_does_not_inherit_user_browser_configuration(tmp_path
     assert Path(env['BH_HOME']).is_relative_to(tmp_path)
     assert Path(env['HOME']).is_relative_to(tmp_path)
     assert env['NAVIGATION_BENCHMARK_OWNER'] == 'private-token'
+
+
+def _assert_published_paired_statistics(data):
+    for kind, comparison in data['paired_comparison'].items():
+        baseline = data['paired']['baseline'][kind]['elapsed_ns']
+        candidate = data['paired']['candidate'][kind]['elapsed_ns']
+        assert len(baseline) == len(candidate) >= 5
+        differences = [old - new for old, new in zip(baseline, candidate)]
+        assert comparison['paired_savings_ns'] == differences
+        assert comparison['difference_of_medians_ns'] == statistics.median(baseline) - statistics.median(candidate)
+        assert comparison['median_paired_saving_ns'] == statistics.median(differences)
+        assert 'median_saving_ns' not in comparison
+
+
+def test_published_paired_statistics_match_unrounded_samples():
+    files = sorted(SCRIPT.parent.glob('navigation_results_*.json'))
+    assert files
+    for path in files:
+        _assert_published_paired_statistics(json.loads(path.read_text()))
+
+
+def test_paired_statistics_reject_difference_of_medians_as_median_paired_saving():
+    path = SCRIPT.parent / 'navigation_results_2026-11-15.json'
+    data = json.loads(path.read_text())
+    comparison = data['paired_comparison']['fast']
+    comparison['median_paired_saving_ns'] = comparison['difference_of_medians_ns']
+    with pytest.raises(AssertionError):
+        _assert_published_paired_statistics(data)
