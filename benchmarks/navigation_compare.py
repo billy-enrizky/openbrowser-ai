@@ -44,13 +44,39 @@ field:document.getElementById('value')?.value})"""
 
 
 def record(p, token):
-    return {'pid': p.pid, 'created': p.create_time(), 'cmdline': p.cmdline(), 'owner_token': token}
+    identity = {'pid': p.pid, 'created': p.create_time(), 'cmdline': p.cmdline(),
+                'owner_token': None, 'owner_root': None}
+    try:
+        env = p.environ()
+        runtime = Path(env.get('BH_RUNTIME_DIR', ''))
+        root = runtime.parent
+        if not token or env.get('NAVIGATION_BENCHMARK_OWNER') != token:
+            raise ValueError('process ownership marker does not match')
+        if not runtime.is_absolute() or runtime.name != 'runtime' or root.name not in ARMS:
+            raise ValueError('process runtime is not a private benchmark runtime')
+        validate_worker_root(root, root.name, token)
+        if env.get('HOME') != str(root / 'home'):
+            raise ValueError('process home does not match private runtime')
+        for index, arg in enumerate(identity['cmdline']):
+            if arg == '--user-data-dir':
+                profile = identity['cmdline'][index + 1] if index + 1 < len(identity['cmdline']) else ''
+            elif arg.startswith('--user-data-dir='):
+                profile = arg.partition('=')[2]
+            else:
+                continue
+            if not profile or Path(profile).resolve() != (root / 'profile').resolve():
+                raise ValueError('process profile does not match private runtime')
+        identity.update(owner_token=token, owner_root=str(root))
+    except (psutil.Error, OSError, ValueError) as error:
+        identity['ownership_error'] = str(error)
+    return identity
 
 
 def same_owned_identity(saved, current, token):
     keys = ('pid', 'created', 'cmdline')
     return (bool(token) and all(saved.get(key) for key in keys)
             and all(saved.get(key) == current.get(key) for key in keys)
+            and saved.get('owner_root') == current.get('owner_root')
             and saved.get('owner_token') == current.get('owner_token') == token)
 
 
@@ -76,7 +102,9 @@ def state(r):
         p = psutil.Process(r['pid'])
         if p.create_time() != r['created']:
             return 'reused'
-        return 'zombie' if p.status() == psutil.STATUS_ZOMBIE else 'alive'
+        if p.status() == psutil.STATUS_ZOMBIE:
+            return 'zombie'
+        return 'alive' if r.get('owner_token') and not r.get('ownership_error') else 'unknown'
     except psutil.NoSuchProcess:
         return 'absent'
     except psutil.AccessDenied:
@@ -717,6 +745,13 @@ def git_value(source, *args):
         return None
 
 
+def load_average():
+    try:
+        return os.getloadavg()
+    except (AttributeError, OSError):
+        return None
+
+
 async def main(args):
     validate_config(args)
     destination = Path(args.output).resolve()
@@ -731,7 +766,7 @@ async def main(args):
         'metadata': {
             'created_utc': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
             'platform': platform.platform(), 'python': sys.version, 'cores': os.cpu_count(),
-            'load_start': os.getloadavg(), 'script_sha256': sha256(SCRIPT),
+            'load_start': load_average(), 'script_sha256': sha256(SCRIPT),
             'samples_per_workload_arm': args.samples, 'source_commit': git_value(source, 'rev-parse', 'HEAD'),
             'source_dirty': git_value(source, 'status', '--porcelain'), 'source_manifest': before,
             'executables': {key: executable_metadata(getattr(args, key)) for key in
@@ -835,7 +870,7 @@ async def main(args):
             sample['errors'] = workload_errors(sample, sample['server'], sample['end_ns'])
             if sample['errors']:
                 sample['outcome'] = 'failure'
-        result['metadata']['load_end'] = os.getloadavg()
+        result['metadata']['load_end'] = load_average()
         result['metadata']['source_manifest_end'] = source_manifest(source)
         result['metadata']['source_unchanged'] = before == result['metadata']['source_manifest_end']
         result['summary'] = summarize(result['samples'], result['availability'], args.samples)
