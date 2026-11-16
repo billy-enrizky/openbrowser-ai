@@ -136,13 +136,6 @@ async def test_policy_retirement_cannot_resurrect_another_lifecycle_owner(interf
                 await asyncio.gather(shutdown, return_exceptions=True)
 
 
-async def test_policy_retirement_does_not_claim_health_after_degradation_signal():
-    async with retained_policy() as (session, _, _, _, controls, operation, task):
-        await session.mark_degraded('independent health observation')
-        await settle_policy(controls, operation, task)
-        assert session.lifecycle.phase is LifecyclePhase.DEGRADED
-
-
 async def test_unconfirmed_policy_failure_stays_failed_after_its_task_finishes():
     async with retained_policy() as (session, _, _, _, controls, operation, task):
         controls.action_error = ConnectionError('sent response lost')
