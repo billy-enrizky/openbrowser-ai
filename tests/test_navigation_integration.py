@@ -488,3 +488,50 @@ async def test_pdf_navigation_has_a_bounded_document_or_download_outcome(navigat
 		assert state['observed_url'] == f'{base}/document.pdf'
 	else:
 		assert state['observed_url'] == f'{base}/page?nonce=before-pdf'
+
+
+async def test_same_document_change_after_containment_initiation_keeps_authority(navigation_browser, navigation_site):
+	from openbrowser.browser.navigation import NavigationError
+	browser = navigation_browser
+	_, base = navigation_site
+	browser.browser_profile.allowed_domains = ['127.0.0.1']
+	root = browser._cdp_client_root
+	runtime = root.send.Runtime
+	original = runtime.callFunctionOn
+	observed = {}
+
+	async def install_page_listener(*args, **kwargs):
+		if 'this.location.replace' in kwargs.get('params', {}).get('functionDeclaration', ''):
+			assert not observed
+			sid = kwargs['session_id']
+			observed['before'] = (await root.send.Page.getFrameTree(session_id=sid))['frameTree']['frame']
+			installed = await runtime.evaluate(params={'expression': '''
+				window.navigation.addEventListener('navigate', event => {
+					if (event.destination.url === 'about:blank') {
+						history.replaceState(null, '', '/still-forbidden?during=1');
+						window.__authorityListenerRan = true;
+					}
+				}); true
+			''', 'returnByValue': True}, session_id=sid)
+			assert 'exceptionDetails' not in installed
+			result = await original(*args, **kwargs)
+			observed['response'] = result
+			return result
+		return await original(*args, **kwargs)
+
+	with patch.object(runtime, 'callFunctionOn', install_page_listener):
+		with pytest.raises(NavigationError):
+			await _navigate(browser, f'{base}/forbidden-redirect', timeout_ms=5000)
+	operation = browser._navigation_monitor.active
+	assert observed['response']['result']['value']['initiated'] is True
+	assert operation is not None
+	await asyncio.wait_for(asyncio.shield(operation.policy_task), 2)
+	frame = (await root.send.Page.getFrameTree(session_id=browser.agent_focus.session_id))['frameTree']['frame']
+	assert frame['loaderId'] == observed['before']['loaderId']
+	assert frame['url'] == observed['before']['url'].rsplit('/', 1)[0] + '/still-forbidden?during=1'
+	assert operation.containment.phase.value == 'unconfirmed'
+	assert operation.policy_pending
+	assert browser.lifecycle_snapshot()['phase'] == 'failed'
+	with pytest.raises(NavigationError, match='retir'):
+		await browser.connect(cdp_url='ws://successor.invalid')
+	assert browser._cdp_client_root is root
