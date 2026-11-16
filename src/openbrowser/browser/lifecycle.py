@@ -148,6 +148,7 @@ class LifecycleMachine:
 		self._phase = phase
 		self._previous_phase: LifecyclePhase | None = None
 		self._generation = 0
+		self._revision = 0
 		self._reason: str | None = None
 		self._last_error: str | None = None
 		self._started_at: float | None = None
@@ -161,13 +162,19 @@ class LifecycleMachine:
 	def generation(self) -> int:
 		return self._generation
 
+	@property
+	def revision(self) -> int:
+		return self._revision
+
 	def seed_generation(self, generation: int) -> None:
 		"""Raise the generation floor when a replacement resource is adopted."""
 		try:
 			candidate = int(generation)
 		except (TypeError, ValueError):
 			return
-		self._generation = max(self._generation, candidate)
+		if candidate > self._generation:
+			self._generation = candidate
+			self._revision += 1
 
 	def transition(
 		self,
@@ -185,6 +192,7 @@ class LifecycleMachine:
 			if error is not None:
 				self._last_error = _error_text(error)
 			self._updated_at = now
+			self._revision += 1
 			return self.snapshot()
 
 		if phase not in _ALLOWED_TRANSITIONS[self._phase]:
@@ -202,6 +210,7 @@ class LifecycleMachine:
 		if increment_generation:
 			self._generation += 1
 		self._updated_at = now
+		self._revision += 1
 		return self.snapshot()
 
 	def fail(self, error: BaseException | str, *, reason: str | None = None) -> LifecycleSnapshot:

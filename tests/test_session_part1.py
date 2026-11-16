@@ -24,6 +24,7 @@ from openbrowser.browser.events import (
     FileDownloadedEvent,
     NavigateToUrlEvent,
     NavigationCompleteEvent,
+    NavigationFinishedEvent,
     NavigationStartedEvent,
     SwitchTabEvent,
     TabClosedEvent,
@@ -86,8 +87,16 @@ def _make_mock_cdp_client():
     # Debugger extras
     client.send.Debugger.setSkipAllPauses = AsyncMock()
 
-    # Page navigate
-    client.send.Page.navigate = AsyncMock()
+    client.register = MagicMock()
+    frame = {"id": "main-frame", "loaderId": "old-loader", "url": "about:blank"}
+    client.send.Page.getFrameTree = AsyncMock(side_effect=lambda **kw: {"frameTree": {"frame": dict(frame)}})
+    client.send.Page.setLifecycleEventsEnabled = AsyncMock()
+    async def navigate(*args, **kwargs):
+        frame.update(loaderId="next-loader", url=kwargs["params"]["url"])
+        callback = client.register.Page.lifecycleEvent.call_args.args[0]
+        callback({"frameId": "main-frame", "loaderId": "next-loader", "name": "load"}, kwargs["session_id"])
+        return {"frameId": "main-frame", "loaderId": "next-loader"}
+    client.send.Page.navigate = AsyncMock(side_effect=navigate)
 
     # Runtime evaluate
     client.send.Runtime.evaluate = AsyncMock(return_value={"result": {"value": 2}})
@@ -588,12 +597,12 @@ class TestOnBrowserStartEvent:
 class TestOnNavigateToUrlEvent:
     """Tests for on_NavigateToUrlEvent (lines 590-725)."""
 
-    async def test_navigate_no_focus_returns_early(self):
-        """If no agent_focus, return without navigating (lines 594-595)."""
+    async def test_navigate_no_focus_raises_explicit_failure(self):
         session = _make_browser_session()
         session.agent_focus = None
         event = NavigateToUrlEvent(url="https://example.com")
-        await session.on_NavigateToUrlEvent(event)
+        with pytest.raises(RuntimeError, match="not connected"):
+            await session.on_NavigateToUrlEvent(event)
 
     async def test_navigate_new_tab_true_already_on_new_tab(self):
         """new_tab=True but current page is new tab page => set new_tab=False (lines 601-609)."""
@@ -736,8 +745,7 @@ class TestOnNavigateToUrlEvent:
                     with patch("asyncio.sleep", new_callable=AsyncMock):
                         await session.on_NavigateToUrlEvent(event)
 
-    async def test_navigate_exception_dispatches_error(self):
-        """Exception during navigation dispatches NavigationCompleteEvent with error (lines 714-725)."""
+    async def test_navigate_exception_records_failed_navigation(self):
         session = _make_browser_session()
         client, focus, sm = _setup_session_with_cdp(session)
         event = NavigateToUrlEvent(url="https://example.com")
@@ -749,8 +757,11 @@ class TestOnNavigateToUrlEvent:
                 await session.on_NavigateToUrlEvent(event)
 
         dispatch_calls = session.event_bus.dispatch.call_args_list
-        nav_complete_calls = [c for c in dispatch_calls if isinstance(c[0][0], NavigationCompleteEvent)]
-        assert any(e[0][0].error_message for e in nav_complete_calls if e[0][0].error_message)
+        finished = [c[0][0] for c in dispatch_calls if isinstance(c[0][0], NavigationFinishedEvent)]
+        assert len(finished) == 1
+        assert finished[0].outcome == 'failed'
+        assert 'nav failed' in finished[0].error_text
+        assert not any(isinstance(c[0][0], AgentFocusChangedEvent) for c in dispatch_calls)
 
 
 @pytest.mark.asyncio

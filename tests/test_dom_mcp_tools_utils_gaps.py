@@ -555,7 +555,7 @@ class TestRegistryServiceGaps:
             text: str = ""
 
         params = MP(text="<secret>bu_2fa_code_main</secret>")
-        sd = {"bu_2fa_code_main": "JBSWY3DPEHPK3PXP"}
+        sd = {"bu_2fa_code_main": "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"}
         try:
             import pyotp
             result = registry._replace_sensitive_data(params, sd)

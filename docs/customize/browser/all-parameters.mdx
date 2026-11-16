@@ -13,6 +13,24 @@ The `Browser` instance also provides all [Actor](/customize/actor/all-parameters
 
 - `cdp_url`: CDP URL for connecting to existing browser instance (e.g., `"http://localhost:9222"`)
 
+## Navigation requests
+
+`await session.navigate_to(url, new_tab=False, *, wait_until="load", timeout_ms=None)` uses the shared navigation request implementation. `wait_until` accepts `commit`, `domcontentloaded`, `load`, or `networkidle`. The last option waits for Chromium's matching `networkIdle` lifecycle event. Document milestones do not establish application readiness.
+
+`timeout_ms` must be positive and covers public-request queue time, target selection, the CDP command, readiness, and required observation work. A request with an explicit timeout receives an enclosing event timeout allowance before dispatch. If you dispatch `NavigateToUrlEvent` directly, an explicitly supplied `event_timeout`, including `None`, is preserved.
+
+Without `timeout_ms`, the deadline uses the event timeout: 15 seconds by default, configurable with `TIMEOUT_NavigateToUrlEvent`. If that event timeout is disabled with `None`, navigation still has an internal 30-second default deadline.
+
+The public method refuses overlapping requests with `NavigationBusyError` and propagates caller cancellation to the request owner. It never retries a navigation automatically. Raw event dispatch keeps the event bus's queue semantics; cancelling a raw event waiter alone does not cancel its handler.
+
+Read `session.lifecycle_snapshot()["navigation"]` for the active or last operation. A terminal phase is `succeeded`, `download`, `failed`, `timed_out`, or `cancelled`. A download phase acknowledges a handoff, not a completed file or loaded document. `NavigationFinishedEvent` reports the correlated outcome; legacy `NavigationCompleteEvent` remains an observation also used for focus and PDF discovery. Terminal status delivery is not durable across event-bus shutdown.
+
+Requested URLs are checked before navigation. While a request owns its captured target, policy also checks observed top-level commits independently of acknowledgment and document readiness. A forbidden committed document triggers conditional, document-bound containment to `about:blank`, even when a resource stalls. This is not a network filter or a continuous watcher after request retirement.
+
+`navigation.containment` reports cleanup separately from the primary navigation outcome. Timeout or cancellation does not discard a security action that might already have been sent. Preparation has a one-second deadline. After the action acknowledges initiation, verification uses a separate one-second polling deadline and one-second bounds on each CDP frame read. These are not a total cleanup timeout. An already-sent action can outlive those waits and remains tracked. `contained` means verification observed `about:blank`.
+
+If sent authority remains unconfirmed, the runtime stays failed and refuses replacement. Inspect status before retrying. To recover, close the actual browser and create a new `BrowserSession`. `kill()` can verify the exit of a managed local browser. A lost remote connection does not prove that the remote browser exited. If delayed cleanup is later verified, only its own unchanged lifecycle failure can move to `degraded`, not `ready`; explicit recovery is then available.
+
 ## Display & Appearance
 
 - `headless` (default: `None`): Run browser without UI. Auto-detects based on display availability (`True`/`False`/`None`)

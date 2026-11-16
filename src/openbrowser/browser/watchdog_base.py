@@ -1,5 +1,6 @@
 """Base watchdog class for browser monitoring components."""
 
+import asyncio
 import inspect
 import time
 from collections.abc import Iterable
@@ -9,6 +10,7 @@ from bubus import BaseEvent, EventBus
 from pydantic import BaseModel, ConfigDict, Field
 
 from openbrowser.browser.session import BrowserSession
+from openbrowser.browser.navigation import NavigationError
 
 
 class BaseWatchdog(BaseModel):
@@ -103,9 +105,18 @@ class BaseWatchdog(BaseModel):
 				watchdog_and_handler_str = f'[{watchdog_class_name}.{actual_handler.__name__}({event_str})]'.ljust(54)
 				browser_session.logger.debug(f'🚌 {watchdog_and_handler_str} ⏳ Starting...       {parent} {grandparent}')
 
+				from openbrowser.browser.events import NavigateToUrlEvent, NavigationFinishedEvent
+				operation = None
+				root = browser_session._cdp_client_root
+				task = asyncio.current_task()
 				try:
+					if getattr(event, 'navigation_id', None) is not None and not isinstance(event, NavigationFinishedEvent):
+						operation = browser_session._marked_navigation(event, root)
+						operation.child_tasks.add(task)
 					# **EXECUTE THE EVENT HANDLER FUNCTION**
 					result = await actual_handler(event)
+					if operation is not None:
+						browser_session._check_navigation_owner(operation, root)
 
 					if isinstance(result, Exception):
 						raise result
@@ -121,7 +132,14 @@ class BaseWatchdog(BaseModel):
 						f'🚌 {watchdog_and_handler_str} Succeeded ({time_elapsed:.2f}s){result_summary}{parents_summary}'
 					)
 					return result
+				except asyncio.CancelledError as error:
+					# Bubus treats an escaping CancelledError as processor shutdown.
+					if operation is not None or isinstance(event, NavigateToUrlEvent):
+						raise NavigationError('Navigation handler cancelled') from error
+					raise
 				except Exception as e:
+					if isinstance(e, NavigationError) or getattr(event, 'navigation_id', None) is not None:
+						raise
 					time_end = time.time()
 					time_elapsed = time_end - time_start
 					original_error = e
@@ -160,6 +178,10 @@ class BaseWatchdog(BaseModel):
 
 					# Always re-raise the original error with its traceback preserved
 					raise
+				finally:
+					if operation is not None:
+						operation.child_tasks.discard(task)
+						browser_session._retire_navigation(operation)
 
 			return unique_handler
 

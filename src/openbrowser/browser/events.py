@@ -7,7 +7,9 @@ from typing import Any, Literal
 from bubus import BaseEvent
 from bubus.models import T_EventResultType
 from cdp_use.cdp.target import TargetID
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, PrivateAttr, field_validator, model_validator
+
+from openbrowser.browser.navigation import NavigationOperation
 
 from openbrowser.browser.views import BrowserStateSummary
 from openbrowser.dom.views import EnhancedDOMTreeNode
@@ -112,7 +114,7 @@ class NavigateToUrlEvent(BaseEvent[None]):
 
 	url: str
 	wait_until: Literal['load', 'domcontentloaded', 'networkidle', 'commit'] = 'load'
-	timeout_ms: int | None = None
+	timeout_ms: int | None = Field(default=None, gt=0)
 	new_tab: bool = Field(
 		default=False, description='Set True to leave the current tab alone and open a new tab in the foreground for the new URL'
 	)
@@ -120,6 +122,18 @@ class NavigateToUrlEvent(BaseEvent[None]):
 
 	# time limits enforced by bubus, not exposed to LLM:
 	event_timeout: float | None = _get_timeout('TIMEOUT_NavigateToUrlEvent', 15.0)  # seconds
+	_navigation_operation: NavigationOperation | None = PrivateAttr(default=None)
+
+	@model_validator(mode='after')
+	def normalize_navigation_timeout(self) -> 'NavigateToUrlEvent':
+		if self.timeout_ms is not None and 'event_timeout' not in self.model_fields_set:
+			object.__setattr__(self, 'event_timeout', max(self.event_timeout or 0, self.timeout_ms / 1000 + 5))
+		return self
+
+	def get_navigation_operation(self, generation: int) -> NavigationOperation:
+		if self._navigation_operation is None:
+			self._navigation_operation = NavigationOperation(self.event_id, generation, self.url, self.wait_until)
+		return self._navigation_operation
 
 
 class ClickElementEvent(ElementSelectedEvent[dict[str, Any] | None]):
@@ -159,6 +173,8 @@ class SwitchTabEvent(BaseEvent[TargetID]):
 	"""Switch to a different tab."""
 
 	target_id: TargetID | None = Field(default=None, description='None means switch to the most recently opened tab')
+	navigation_id: str | None = None
+	navigation_generation: int | None = None
 
 	event_timeout: float | None = _get_timeout('TIMEOUT_SwitchTabEvent', 10.0)  # seconds
 
@@ -383,6 +399,8 @@ class TabCreatedEvent(BaseEvent):
 
 	target_id: TargetID
 	url: str
+	navigation_id: str | None = None
+	navigation_generation: int | None = None
 
 	event_timeout: float | None = _get_timeout('TIMEOUT_TabCreatedEvent', 30.0)  # seconds
 
@@ -420,6 +438,9 @@ class AgentFocusChangedEvent(BaseEvent):
 
 	target_id: TargetID
 	url: str
+	navigation_id: str | None = None
+	navigation_generation: int | None = None
+	navigation_session_id: str | None = None
 
 	event_timeout: float | None = _get_timeout('TIMEOUT_AgentFocusChangedEvent', 10.0)  # seconds
 
@@ -438,20 +459,37 @@ class NavigationStartedEvent(BaseEvent):
 
 	target_id: TargetID
 	url: str
+	navigation_id: str | None = None
+	navigation_generation: int | None = None
 
 	event_timeout: float | None = _get_timeout('TIMEOUT_NavigationStartedEvent', 30.0)  # seconds
 
 
 class NavigationCompleteEvent(BaseEvent):
-	"""Navigation completed."""
+	"""Document/focus observation, not an exactly-once request outcome."""
 
 	target_id: TargetID
 	url: str
 	status: int | None = None
 	error_message: str | None = None  # Error/timeout message if navigation had issues
 	loading_status: str | None = None  # Detailed loading status (e.g., network timeout info)
+	navigation_id: str | None = None
+	navigation_generation: int | None = None
 
 	event_timeout: float | None = _get_timeout('TIMEOUT_NavigationCompleteEvent', 30.0)  # seconds
+
+
+class NavigationFinishedEvent(BaseEvent):
+	"""Correlated terminal request status, independent of legacy observations."""
+
+	navigation_id: str
+	generation: int
+	target_id: TargetID | None = None
+	requested_url: str
+	observed_url: str | None = None
+	outcome: Literal['succeeded', 'download', 'failed', 'timed_out', 'cancelled']
+	error_text: str | None = None
+	event_timeout: float = Field(default=5.0, gt=0, allow_inf_nan=False)
 
 
 # ============================================================================
