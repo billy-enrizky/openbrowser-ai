@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "audited_at_utc": "2026-11-15T08:50:17.280055+00:00",
   "claim": "The candidate source is faster for both frozen local tasks without weakening their checked completion contract.",
   "source_comparison_verdict": "FASTER, fixed local task only",
