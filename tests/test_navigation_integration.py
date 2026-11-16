@@ -280,8 +280,14 @@ async def test_forbidden_committed_document_is_contained_while_image_stays_block
 	browser = navigation_browser
 	server, base = navigation_site
 	browser.browser_profile.allowed_domains = ['127.0.0.1']
+	runtime = browser._cdp_client_root.send.Runtime
+	original = runtime.callFunctionOn
+	async def contain_after_resource_request(*args, **kwargs):
+		if 'this.location.replace' in kwargs.get('params', {}).get('functionDeclaration', ''):
+			assert await asyncio.to_thread(server.resource_requested.wait, 5)
+		return await original(*args, **kwargs)
 	try:
-		with pytest.raises(NavigationBlockedError, match='blocked|policy|disallowed'):
+		with patch.object(runtime, 'callFunctionOn', contain_after_resource_request), pytest.raises(NavigationBlockedError, match='blocked|policy|disallowed'):
 			await _navigate(browser, f'{base}/forbidden-delayed-redirect', timeout_ms=2000)
 		assert server.resource_requested.is_set()
 		assert not server.release_resource.is_set()
