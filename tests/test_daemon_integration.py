@@ -79,9 +79,10 @@ async def _start_daemon_with_mock(daemon_env, mock_namespace, idle_timeout=600):
         remaining = deadline - asyncio.get_running_loop().time()
         if remaining <= 0:
             state = server._lifecycle.snapshot().to_dict()
+            pid_file_exists = pid_path.exists()
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
-            pytest.fail(f'Daemon socket did not appear within 10 seconds: {state}, pid_file={pid_path.exists()}')
+            pytest.fail(f'Daemon socket did not appear within 10 seconds: {state}, pid_file_exists={pid_file_exists}')
         await asyncio.sleep(min(0.05, remaining))
     if task.done():
         await task
