@@ -6,6 +6,7 @@ import inspect
 import logging
 import math
 import os
+from dataclasses import dataclass
 from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Self, Union, cast, overload
@@ -187,6 +188,14 @@ class CDPSession(BaseModel):
 	async def get_target_info(self) -> TargetInfo:
 		result = await self.cdp_client.send.Target.getTargetInfo(params={'targetId': self.target_id})
 		return result['targetInfo']
+
+
+@dataclass(frozen=True)
+class _PolicyRetentionFailure:
+	operation: NavigationOperation
+	root: CDPClient
+	failure: LifecycleSnapshot
+	revision: int
 
 
 class BrowserSession(BaseModel):
@@ -418,6 +427,7 @@ class BrowserSession(BaseModel):
 	_navigation_task_operation: NavigationOperation | None = PrivateAttr(default=None)
 	_navigation_event_pumps: dict[asyncio.Task, EventBus] = PrivateAttr(default_factory=dict)
 	_navigation_policies: dict[str, NavigationOperation] = PrivateAttr(default_factory=dict)
+	_policy_retention_failure: _PolicyRetentionFailure | None = PrivateAttr(default=None)
 	_start_event: asyncio.Event | None = PrivateAttr(default=None)
 	_start_error: BaseException | None = PrivateAttr(default=None)
 	_start_task: asyncio.Task | None = PrivateAttr(default=None)
@@ -805,9 +815,10 @@ class BrowserSession(BaseModel):
 		"""Clear a quiescent runtime without discarding unretired authority."""
 		self._abort_navigation()
 		self._revoke_exited_policy_authorities()
-		if any(op.policy_pending for op in self._navigation_policies.values()):
+		pending = next((op for op in self._navigation_policies.values() if op.policy_pending), None)
+		if pending is not None:
 			error = NavigationError(f'Policy authority has not retired. {_POLICY_RETIREMENT_HINT}')
-			self._lifecycle.fail(error, reason='policy retirement incomplete')
+			self._fail_policy_retirement(pending, error, reason='policy retirement incomplete')
 			raise error
 		self._cancel_navigation_event_pumps(self.event_bus)
 		if self._live_navigation_event_pumps(self.event_bus):
@@ -1180,6 +1191,7 @@ class BrowserSession(BaseModel):
 		self._navigation_event_pumps.pop(task, None)
 		if not task.cancelled():
 			task.exception()
+		self._reconcile_policy_retention()
 
 	def _live_navigation_event_pumps(self, event_bus: EventBus) -> set[asyncio.Task]:
 		return {task for task, bus in self._navigation_event_pumps.items() if bus is event_bus and not task.done()}
@@ -1250,7 +1262,48 @@ class BrowserSession(BaseModel):
 			task.exception()
 		if not operation.policy_pending:
 			self._navigation_policies.pop(operation.navigation_id, None)
+		self._reconcile_policy_retention()
 		self._retire_navigation(operation)
+
+	def _fail_policy_retirement(self, operation: NavigationOperation, error: BaseException | str, *, reason: str) -> None:
+		snapshot = self._lifecycle.snapshot()
+		retained = self._policy_retention_failure
+		root = self._cdp_client_root
+		owns_failure = (retained is not None and retained.operation is operation and retained.root is root
+			and retained.failure == snapshot and retained.revision == self._lifecycle.revision
+			and operation.generation == snapshot.generation)
+		if snapshot.phase is LifecyclePhase.FAILED and not owns_failure:
+			self._policy_retention_failure = None
+			return
+		can_recover = owns_failure or snapshot.phase in {LifecyclePhase.READY, LifecyclePhase.DEGRADED}
+		failure = self._lifecycle.fail(error, reason=reason)
+		self._policy_retention_failure = _PolicyRetentionFailure(operation, root, failure, self._lifecycle.revision) if (
+			can_recover and root is not None and operation.generation == failure.generation) else None
+
+	def _reconcile_policy_retention(self) -> None:
+		retained = self._policy_retention_failure
+		if retained is None:
+			return
+		operation = retained.operation
+		if (retained.failure != self._lifecycle.snapshot() or retained.root is not self._cdp_client_root
+			or retained.revision != self._lifecycle.revision
+			or operation.generation != self._lifecycle.generation
+			or (self._stop_task is not None and not self._stop_task.done())):
+			self._policy_retention_failure = None
+			return
+		task = operation.policy_task
+		if task is None or not task.done():
+			return
+		if (task.cancelled() or task.exception() is not None or operation.containment is None
+			or operation.containment.phase not in {ContainmentPhase.CONTAINED, ContainmentPhase.SKIPPED}):
+			self._policy_retention_failure = None
+			return
+		if (any(op.policy_pending for op in self._navigation_policies.values())
+			or self._live_navigation_event_pumps(self.event_bus)):
+			return
+		self._policy_retention_failure = None
+		self._lifecycle.transition(LifecyclePhase.RECOVERING, reason='policy authority retired')
+		self._lifecycle.transition(LifecyclePhase.DEGRADED, reason='policy authority retired; explicit recovery is available')
 
 	async def _owned_policy_browser(self, operation: NavigationOperation, root: CDPClient) -> tuple[int, float, str, str] | None:
 		import ipaddress
@@ -1478,7 +1531,7 @@ class BrowserSession(BaseModel):
 				if await self._resolve_policy_protocol_error(error, operation, root, session):
 					return
 				attempt.phase = ContainmentPhase.UNCONFIRMED
-				self._lifecycle.fail(attempt.error, reason='policy action is unconfirmed; close the owned browser or retain this remote runtime')
+				self._fail_policy_retirement(operation, attempt.error, reason='policy action is unconfirmed; close the owned browser or retain this remote runtime')
 			else:
 				attempt.phase = ContainmentPhase.FAILED if self._policy_owned(operation, root, session) else ContainmentPhase.SKIPPED
 		finally:
@@ -1502,7 +1555,7 @@ class BrowserSession(BaseModel):
 		if operation.policy_pending:
 			if operation.containment and operation.containment.requires_retirement:
 				operation.containment.phase = ContainmentPhase.UNCONFIRMED
-			self._lifecycle.fail('Policy cleanup has not retired', reason='policy retirement incomplete')
+			self._fail_policy_retirement(operation, 'Policy cleanup has not retired', reason='policy retirement incomplete')
 			raise NavigationError(f'Policy cleanup has not retired. {_POLICY_RETIREMENT_HINT}')
 
 	async def _drain_navigation_policies(self) -> None:
