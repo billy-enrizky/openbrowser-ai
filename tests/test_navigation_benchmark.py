@@ -623,6 +623,7 @@ def test_worker_environment_does_not_inherit_user_browser_configuration(tmp_path
 
 
 def _assert_published_paired_statistics(data):
+    assert data['schema_version'] == 2
     for kind, comparison in data['paired_comparison'].items():
         baseline = data['paired']['baseline'][kind]['elapsed_ns']
         candidate = data['paired']['candidate'][kind]['elapsed_ns']
@@ -646,5 +647,13 @@ def test_paired_statistics_reject_difference_of_medians_as_median_paired_saving(
     data = json.loads(path.read_text())
     comparison = data['paired_comparison']['fast']
     comparison['median_paired_saving_ns'] = comparison['difference_of_medians_ns']
+    with pytest.raises(AssertionError):
+        _assert_published_paired_statistics(data)
+
+
+def test_paired_statistics_reject_legacy_schema_version():
+    path = SCRIPT.parent / 'navigation_results_2026-11-15.json'
+    data = json.loads(path.read_text())
+    data['schema_version'] = 1
     with pytest.raises(AssertionError):
         _assert_published_paired_statistics(data)
