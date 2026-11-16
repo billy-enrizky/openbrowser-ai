@@ -97,6 +97,8 @@ If a browser connection fails, call `get_status` before retrying. A page-changin
 
 When a browser session exists, `get_status` also includes `browser.navigation`, the active or last navigation transaction. It distinguishes the requested URL from the observed document URL and reports its generation, phase, and error. Navigation waits for the declared document milestone rather than a fixed delay. A `download` outcome is a handoff, not confirmation that a file finished downloading. A document milestone does not establish application hydration.
 
+For a forbidden committed redirect, `browser.navigation.containment` records the bounded security cleanup separately. A cancelled or timed-out request may still own a sent cleanup action. An unconfirmed action keeps the old runtime failed rather than allowing an unsafe replacement. Read status and its recovery hint; do not assume cancelling a waiter revoked browser execution.
+
 ### Available Functions
 
 | Category | Functions |
