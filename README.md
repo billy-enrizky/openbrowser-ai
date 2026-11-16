@@ -204,8 +204,7 @@ from openbrowser import BrowserSession, BrowserProfile
 async def main():
     profile = BrowserProfile(
         headless=True,
-        viewport_width=1920,
-        viewport_height=1080,
+        viewport={"width": 1920, "height": 1080},
     )
     
     session = BrowserSession(browser_profile=profile)
@@ -218,6 +217,10 @@ async def main():
 
 asyncio.run(main())
 ```
+
+`await session.navigate_to(url)` waits for the document's `load` milestone, not a fixed delay. Use keyword options such as `wait_until="domcontentloaded"` and `timeout_ms=10000` to choose another milestone and deadline. Supported milestones are `commit`, `domcontentloaded`, `load`, and Chromium's `networkIdle` lifecycle event through `wait_until="networkidle"`. They do not establish application hydration or business-task completion.
+
+Cancelling `navigate_to()` cancels that request without replaying navigation. An overlapping request raises `NavigationBusyError`; wait for the active request to finish before trying again. A download handoff still returns `None`, but is recorded as `download`, not document readiness. `session.lifecycle_snapshot()["navigation"]` reports the active or last operation, including its requested URL, observed URL, generation, phase, and error.
 
 ## Configuration
 
@@ -253,8 +256,7 @@ from openbrowser import BrowserProfile
 
 profile = BrowserProfile(
     headless=True,
-    viewport_width=1280,
-    viewport_height=720,
+    viewport={"width": 1280, "height": 720},
     disable_security=False,
     extra_chromium_args=["--disable-gpu"],
     record_video_dir="./recordings",
@@ -473,6 +475,8 @@ Prefer indexed actions whenever an element index exists. Coordinate actions use 
 | `OPENBROWSER_MCP_EXEC_TIMEOUT` | Seconds before a tool call returns a timeout result | `110` |
 
 ## Benchmark: Token Efficiency
+
+The figures below are historical model-driven benchmark results, not a comparison of current tool releases or navigation latency. For a local, no-LLM comparison with pinned runtimes and verified page work, use the [navigation comparison verifier](benchmarks/navigation_compare_README.md), its [counterbalanced policy-fix results](benchmarks/navigation_results_2026-11-15_policy_v2.json), and the retained [earlier results](benchmarks/navigation_results_2026-11-15.json). These report engine, IPC, wait-policy, failure, and cleanup differences rather than declaring a universal winner. They are not MCP or CLI agent-comparison numbers.
 
 ### CLI Benchmark: 4-Way Comparison (6 Tasks, N=3 runs)
 

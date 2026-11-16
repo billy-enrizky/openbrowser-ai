@@ -7,7 +7,7 @@ import pytest
 from bubus import EventBus
 
 from openbrowser.browser import BrowserProfile, BrowserSession
-from openbrowser.browser.events import BrowserStartEvent, BrowserStopEvent, CloseTabEvent, SwitchTabEvent, TabClosedEvent
+from openbrowser.browser.events import BrowserStartEvent, BrowserStopEvent, CloseTabEvent, SwitchTabEvent, TabClosedEvent, TabCreatedEvent
 from openbrowser.browser.lifecycle import LifecyclePhase
 from openbrowser.browser.tabs import TabError, TabState
 
@@ -126,7 +126,7 @@ async def test_tab_registry_tracks_created_and_closed_events():
 	session = _make_session()
 	target = 'AAAABBBBCCCCDDDD1111222233334444'
 
-	await session.on_TabCreatedEvent(type('Event', (), {'target_id': target, 'url': 'https://example.com'})())
+	await session.on_TabCreatedEvent(TabCreatedEvent(target_id=target, url='https://example.com'))
 	record = session._tab_registry.get(target)
 	assert record is not None
 	assert record.state is TabState.OPENING
