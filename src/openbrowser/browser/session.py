@@ -1441,13 +1441,10 @@ class BrowserSession(BaseModel):
 				self._observe_contained_document(operation, root, session)
 				attempt.phase = ContainmentPhase.CONTAINED
 				return True
-			if current != attempt.commit:
-				attempt.phase = ContainmentPhase.SKIPPED
-				return True
 			if details.get('code') == -32000 and details.get('message') in {
 				'Cannot find context with specified id', 'Could not find object with given id',
 			}:
-				attempt.phase = ContainmentPhase.FAILED
+				attempt.phase = ContainmentPhase.SKIPPED if current != attempt.commit else ContainmentPhase.FAILED
 				return True
 		except Exception:
 			pass
@@ -1511,9 +1508,6 @@ class BrowserSession(BaseModel):
 				if current.url == 'about:blank':
 					self._observe_contained_document(operation, root, session)
 					attempt.phase = ContainmentPhase.CONTAINED
-					return
-				if current != attempt.commit:
-					attempt.phase = ContainmentPhase.SKIPPED
 					return
 				remaining = verify_deadline - asyncio.get_running_loop().time()
 				if remaining <= 0:
