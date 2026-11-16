@@ -1395,7 +1395,8 @@ async def test_real_bus_policy_contains_stalled_commit_independently_of_ack_and_
         await session._drain_navigation_event_pumps(session.event_bus)
 
 
-@pytest.mark.parametrize('unrelated_focus,closed_record', [(False, False), (True, True)])
+@pytest.mark.parametrize('closed_record', [False, True])
+@pytest.mark.parametrize('unrelated_focus', [False, True])
 async def test_verified_containment_invalidates_only_its_current_focus_cache(unrelated_focus, closed_record):
     from openbrowser.browser.navigation import NavigationBlockedError
     from openbrowser.browser.tabs import TabState
@@ -1416,18 +1417,18 @@ async def test_verified_containment_invalidates_only_its_current_focus_cache(unr
             await session.navigate_to('https://allowed.test/start')
         record = session._tab_registry.get(focus.target_id)
         assert record.state == state
+        assert record.url == ('https://old.example/' if closed_record else 'about:blank')
+        assert focus.url == 'about:blank'
         if unrelated_focus:
             assert session.agent_focus is other
             assert session._cached_selector_map[5] is cached_node
             assert session._cached_browser_state_summary == 'old-summary'
             dom.clear_cache.assert_not_called()
-            assert record.url == 'https://old.example/'
         else:
             assert session.agent_focus is focus
             assert not session._cached_selector_map
             assert session._cached_browser_state_summary is None
             dom.clear_cache.assert_called_once()
-            assert focus.url == 'about:blank' and record.url == 'about:blank'
     finally:
         await session.event_bus.stop(clear=True, timeout=.1)
         await session._drain_navigation_event_pumps(session.event_bus)
@@ -1824,6 +1825,12 @@ async def test_real_wire_ipv4_policy_authority_cannot_be_revoked_by_same_port_ip
     from openbrowser.browser.session import CDPSession
     if not socket.has_ipv6:
         pytest.skip('IPv6 loopback is required for the distinct endpoint fixture')
+    try:
+        with socket.socket(socket.AF_INET6) as probe:
+            probe.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+            probe.bind(('::1', 0))
+    except OSError:
+        pytest.skip('IPv6 loopback is unavailable for the distinct endpoint fixture')
     profile = tmp_path / 'profile'
     profile.mkdir()
     ready = tmp_path / 'ipv6-port'
