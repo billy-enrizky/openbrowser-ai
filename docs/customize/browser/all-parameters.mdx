@@ -27,7 +27,9 @@ Read `session.lifecycle_snapshot()["navigation"]` for the active or last operati
 
 Requested URLs are checked before navigation. While a request owns its captured target, policy also checks observed top-level commits independently of acknowledgment and document readiness. A forbidden committed document triggers conditional, document-bound containment to `about:blank`, even when a resource stalls. This is not a network filter or a continuous watcher after request retirement.
 
-`navigation.containment` reports cleanup separately from the primary navigation outcome. Timeout or cancellation does not discard a security action that might already have been sent. The request grants a one-second cleanup grace period and reports `contained` only after verification. If sent authority remains unconfirmed, the runtime stays failed and refuses replacement until retirement or a verified resource fence. Inspect status before retrying. A lost remote connection does not prove that the remote browser exited.
+`navigation.containment` reports cleanup separately from the primary navigation outcome. Timeout or cancellation does not discard a security action that might already have been sent. Preparation has a one-second deadline. After the action acknowledges initiation, verification uses a separate one-second polling deadline and one-second bounds on each CDP frame read. These are not a total cleanup timeout. An already-sent action can outlive those waits and remains tracked. `contained` means verification observed `about:blank`.
+
+If sent authority remains unconfirmed, the runtime stays failed and refuses replacement. Inspect status before retrying. To recover, close the actual browser and create a new `BrowserSession`. `kill()` can verify the exit of a managed local browser. A lost remote connection does not prove that the remote browser exited. If delayed cleanup is later verified, only its own unchanged lifecycle failure can move to `degraded`, not `ready`; explicit recovery is then available.
 
 ## Display & Appearance
 
