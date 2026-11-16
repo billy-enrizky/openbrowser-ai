@@ -19,10 +19,13 @@ from unittest.mock import patch, MagicMock, AsyncMock
 def daemon_env():
     """Provide a short temp socket path to stay under macOS 104-byte limit."""
     # Use /tmp directly to keep path short (macOS tmp_path is too long for Unix sockets)
-    test_id = uuid.uuid4().hex[:8]
+    test_id = uuid.uuid4().hex
     tmp_dir = Path(f'/tmp/ob_test_{test_id}')
-    tmp_dir.mkdir(parents=True, exist_ok=True)
+    tmp_dir.mkdir(parents=True, exist_ok=False)
     sock = tmp_dir / 'd.sock'
+    pid_path = tmp_dir / 'd.pid'
+    assert not sock.exists()
+    assert not pid_path.exists()
 
     with (
         patch.dict(os.environ, {'OPENBROWSER_SOCKET': str(sock)}),
@@ -66,16 +69,36 @@ async def _start_daemon_with_mock(daemon_env, mock_namespace, idle_timeout=600):
     executor.set_namespace(mock_namespace)
     server._executor = executor
 
+    pid_path = daemon_env.parent / f'{daemon_env.stem}.pid'
     task = asyncio.create_task(server.run())
-    # Wait for socket to appear
-    for _ in range(200):
-        if daemon_env.exists():
-            break
-        await asyncio.sleep(0.05)
-    else:
-        task.cancel()
-        pytest.fail('Daemon socket never appeared within 10 seconds')
+    deadline = asyncio.get_running_loop().time() + 10
+    while not daemon_env.exists():
+        if task.done():
+            await task
+            pytest.fail(f'Daemon task exited before creating its socket: {server._lifecycle.snapshot().to_dict()}')
+        remaining = deadline - asyncio.get_running_loop().time()
+        if remaining <= 0:
+            state = server._lifecycle.snapshot().to_dict()
+            pid_file_exists = pid_path.exists()
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            pytest.fail(f'Daemon socket did not appear within 10 seconds: {state}, pid_file_exists={pid_file_exists}')
+        await asyncio.sleep(min(0.05, remaining))
+    if task.done():
+        await task
+        pytest.fail('Daemon task exited immediately after creating its socket')
     return server, task
+
+
+async def test_start_daemon_helper_surfaces_server_startup_failure(daemon_env, mock_namespace, monkeypatch):
+    from openbrowser.daemon.server import DaemonServer
+
+    async def fail_to_start(self):
+        raise OSError('synthetic socket bind failure')
+
+    monkeypatch.setattr(DaemonServer, 'run', fail_to_start)
+    with pytest.raises(OSError, match='synthetic socket bind failure'):
+        await _start_daemon_with_mock(daemon_env, mock_namespace)
 
 
 async def _cleanup(server, task):

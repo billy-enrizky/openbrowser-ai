@@ -341,18 +341,29 @@ async def test_slow_terminal_observer_does_not_delay_public_navigation():
     session.event_bus = EventBus()
     session._core_handlers_attached = False
     session._attach_core_handlers()
-    entered, release = asyncio.Event(), asyncio.Event()
+    entered, release, finished = asyncio.Event(), asyncio.Event(), asyncio.Event()
     async def terminal_observer(event: NavigationFinishedEvent):
         entered.set()
-        await release.wait()
+        try:
+            await release.wait()
+        finally:
+            finished.set()
     session.event_bus.on(NavigationFinishedEvent, terminal_observer)
     try:
         with patches[0], patches[1]:
-            await asyncio.wait_for(session.navigate_to('https://example.com/'), .5)
-            await asyncio.wait_for(entered.wait(), .5)
-            assert session.lifecycle_snapshot()['navigation']['phase'] == 'succeeded'
+            navigation = asyncio.create_task(session.navigate_to('https://example.com/'))
+            try:
+                await asyncio.wait_for(entered.wait(), 5)
+                assert not finished.is_set()
+                await asyncio.wait_for(navigation, 5)
+                assert not finished.is_set()
+                assert session.lifecycle_snapshot()['navigation']['phase'] == 'succeeded'
+            finally:
+                release.set()
+                if not navigation.done():
+                    navigation.cancel()
+                await asyncio.gather(navigation, return_exceptions=True)
     finally:
-        release.set()
         await session.event_bus.stop(clear=True, timeout=.2)
 
 
