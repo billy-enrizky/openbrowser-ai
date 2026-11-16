@@ -745,21 +745,30 @@ async def test_raw_navigation_deadline_cancels_owned_observer_without_cancelling
     session.event_bus = EventBus()
     session._core_handlers_attached = False
     session._attach_core_handlers()
-    cleaned = asyncio.Event()
+    entered, release, cleaned = asyncio.Event(), asyncio.Event(), asyncio.Event()
     async def on_NavigationStartedEvent(event: NavigationStartedEvent):
+        entered.set()
         try:
-            await asyncio.Event().wait()
+            await release.wait()
         finally:
             cleaned.set()
     BaseWatchdog.attach_handler_to_session(session, NavigationStartedEvent, on_NavigationStartedEvent)
+    waiter = None
     try:
         with patches[0], patches[1]:
-            event = session.event_bus.dispatch(NavigateToUrlEvent(url='https://example.com/', timeout_ms=10))
-            done, _ = await asyncio.wait({asyncio.ensure_future(event)}, timeout=.5)
+            event = session.event_bus.dispatch(NavigateToUrlEvent(url='https://example.com/', timeout_ms=1000))
+            waiter = asyncio.ensure_future(event)
+            await asyncio.wait_for(entered.wait(), 2)
+            done, _ = await asyncio.wait({waiter}, timeout=2)
             assert done, 'Handler deadline did not cancel its owned observer work'
-            assert cleaned.is_set()
+            await asyncio.wait_for(cleaned.wait(), 1)
             assert session._navigation_monitor.active is None
     finally:
+        release.set()
+        if waiter is not None and not waiter.done():
+            waiter.cancel()
+        if waiter is not None:
+            await asyncio.gather(waiter, return_exceptions=True)
         await session.event_bus.stop(clear=True, timeout=.2)
 
 
