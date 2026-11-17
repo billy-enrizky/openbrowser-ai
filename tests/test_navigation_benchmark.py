@@ -3,8 +3,11 @@ import asyncio
 import contextlib
 import io
 import json
+import os
 import statistics
 from pathlib import Path
+import subprocess
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -13,7 +16,38 @@ import pytest
 SCRIPT = Path(__file__).resolve().parents[1] / 'benchmarks/navigation_compare.py'
 spec = importlib.util.spec_from_file_location('navigation_compare', SCRIPT)
 benchmark = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = benchmark
 spec.loader.exec_module(benchmark)
+
+
+def test_normal_benchmark_import_does_not_load_profile_modules(tmp_path):
+    home = tmp_path / 'home'
+    home.mkdir()
+    env = {
+        **{key: value for key, value in os.environ.items() if not key.startswith('AWS_')},
+        'HOME': str(home),
+        'XDG_CONFIG_HOME': str(home / 'config'),
+        'XDG_CACHE_HOME': str(home / 'cache'),
+        'AWS_EC2_METADATA_DISABLED': 'true',
+    }
+    code = (
+        'import importlib.util, sys; '
+        'spec = importlib.util.spec_from_file_location("navigation_compare_import_probe", sys.argv[1]); '
+        'module = importlib.util.module_from_spec(spec); '
+        'sys.modules[spec.name] = module; '
+        'spec.loader.exec_module(module); '
+        'assert "cProfile" not in sys.modules; '
+        'assert "pstats" not in sys.modules'
+    )
+    result = subprocess.run(
+        [sys.executable, '-c', code, str(SCRIPT)],
+        capture_output=True,
+        check=False,
+        cwd=SCRIPT.parents[1],
+        env=env,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def completed_sample(kind='delayed'):
@@ -102,6 +136,53 @@ def test_identity_guard_rejects_pid_reuse_changed_command_and_unowned_process():
 
 def test_identity_guard_rejects_missing_process_identity_fields():
     assert not benchmark.same_owned_identity({'owner_token': 'run'}, {'owner_token': 'run'}, 'run')
+
+
+def test_state_preserves_valid_live_and_reused_identity_behavior(monkeypatch):
+    class Process:
+        def create_time(self):
+            return 2.0
+
+        def status(self):
+            return benchmark.psutil.STATUS_RUNNING
+
+    process = Process()
+    monkeypatch.setattr(benchmark.psutil, 'Process', lambda _pid: process)
+    identity = {'pid': 12, 'created': 2.0, 'owner_token': 'run'}
+    assert benchmark.state(identity) == 'alive'
+    assert benchmark.state({**identity, 'created': 1.0}) == 'reused'
+
+
+@pytest.mark.parametrize(('has_created', 'created'), [
+    (False, None),
+    (True, None),
+    (True, 'not-a-number'),
+    (True, float('nan')),
+    (True, float('inf')),
+    (True, float('-inf')),
+])
+def test_live_identity_with_missing_or_invalid_creation_time_is_unknown(monkeypatch, has_created, created):
+    class Process:
+        def create_time(self):
+            return 2.0
+
+        def status(self):
+            return benchmark.psutil.STATUS_RUNNING
+
+    process = Process()
+    monkeypatch.setattr(benchmark.psutil, 'Process', lambda _pid: process)
+    identity = {'pid': 12, 'owner_token': 'run'}
+    if has_created:
+        identity['created'] = created
+    assert benchmark.state(identity) == 'unknown'
+
+
+def test_state_still_reports_definitely_absent_pid_with_missing_creation_time(monkeypatch):
+    def absent_process(pid):
+        raise benchmark.psutil.NoSuchProcess(pid)
+
+    monkeypatch.setattr(benchmark.psutil, 'Process', absent_process)
+    assert benchmark.state({'pid': 12}) == 'absent'
 
 
 @pytest.mark.asyncio
@@ -657,3 +738,101 @@ def test_paired_statistics_reject_legacy_schema_version():
     data['schema_version'] = 1
     with pytest.raises(AssertionError):
         _assert_published_paired_statistics(data)
+
+
+def test_normal_dispatch_preserves_default_schedule_and_artifacts(tmp_path, monkeypatch):
+    dispatch = getattr(benchmark, 'dispatch', None)
+    assert callable(dispatch), 'normal command dispatcher is missing'
+
+    def executable(name):
+        path = tmp_path / name
+        path.write_text('#!/bin/sh\necho test-version\n')
+        path.chmod(0o700)
+        return str(path)
+
+    source = SCRIPT.parents[1]
+    chrome = executable('chrome')
+    lightpanda = executable('lightpanda')
+    agent_browser = executable('agent-browser')
+    output = tmp_path / 'normal-results'
+    processes = []
+    schedule = []
+
+    class FakeProcess:
+        def __init__(self, pid):
+            self.pid = pid
+            self.stdin = SimpleNamespace(close=lambda: None)
+            self.returncode = 0
+
+    async def create_process(*command, **_kwargs):
+        process = FakeProcess(1000 + len(processes))
+        processes.append(process)
+        return process
+
+    async def send(_process, request, _log, timeout=90):
+        if request['op'] == 'start':
+            return {'ok': True, 'result': {'owned': []}}
+        schedule.append((request['arm'], request['kind'], request['index']))
+        sample = {key: value for key, value in request.items() if key != 'op'}
+        sample.update(start_ns=100, end_ns=200, checked_ns=195, elapsed_ns=100, outcome='success')
+        return {'ok': True, 'result': sample}
+
+    def record(process, token):
+        return {'pid': process.pid, 'created': float(process.pid), 'cmdline': ['fake-worker'],
+                'owner_token': token, 'owner_root': 'fake-runtime'}
+
+    async def cleanup(process, _stdout, identity, _initial, _token):
+        return {'ok': True, 'worker_identity': {**identity, 'state': 'absent'},
+                'post_worker_exit_identities': [], 'fallback_used': False}
+
+    monkeypatch.setattr(benchmark.psutil, 'Process', lambda pid: SimpleNamespace(pid=pid))
+    monkeypatch.setattr(benchmark, 'record', record)
+    monkeypatch.setattr(benchmark, 'source_manifest', lambda _source: {'src/openbrowser/test.py': 'a' * 64})
+    monkeypatch.setattr(benchmark, 'git_value', lambda _source, *args: '' if args[0] == 'status' else '0' * 40)
+    monkeypatch.setattr(benchmark, 'executable_metadata', lambda path: {'path': path, 'sha256': 'a' * 64, 'version': 'test'})
+    monkeypatch.setattr(benchmark, 'workload_errors', lambda *_args: [])
+    monkeypatch.setattr(benchmark, 'result_errors', lambda _result: [])
+    monkeypatch.setattr(benchmark, 'cleanup_worker', cleanup)
+    monkeypatch.setattr(benchmark.asyncio, 'create_subprocess_exec', create_process)
+
+    async def fake_send_recording(process, request, log, timeout=90):
+        return await send(process, request, log, timeout)
+
+    monkeypatch.setattr(benchmark, 'send', fake_send_recording)
+    code = dispatch([
+        '--source', str(source), '--output', str(output), '--chrome', chrome,
+        '--lightpanda', lightpanda, '--agent-browser', agent_browser,
+        '--browser-use-python', sys.executable, '--openbrowser-python', sys.executable,
+    ])
+
+    expected = [(name, 'fast', 0) for name in benchmark.ARMS]
+    for index in range(5):
+        ordered = list(benchmark.ARMS[index:]) + list(benchmark.ARMS[:index])
+        for kind in ('fast', 'delayed'):
+            expected.extend((name, kind, index) for name in ordered)
+    assert code == 0
+    assert len(processes) == len(benchmark.ARMS)
+    assert schedule == expected
+    result = json.loads((output / 'results.json').read_text())
+    assert result['metadata']['samples_per_workload_arm'] == 5
+    assert result['metadata']['delay_seconds'] == .15
+    assert set(result) == {
+        'metadata', 'availability', 'startup', 'warmup', 'samples', 'cleanup', 'summary', 'verification_errors',
+    }
+    assert len(result['warmup']) == len(benchmark.ARMS)
+    assert len(result['samples']) == 2 * 5 * len(benchmark.ARMS)
+    assert set(result['availability']) == set(benchmark.ARMS)
+    expected_files = {
+        'results.json', 'samples.jsonl', 'sha256.json',
+        *(f'{name}.{stream}.log' for name in benchmark.ARMS for stream in ('stdout', 'stderr')),
+    }
+    assert {path.name for path in output.iterdir()} == expected_files
+
+    def has_profile_field(value):
+        if isinstance(value, dict):
+            return 'profile' in value or any(has_profile_field(item) for item in value.values())
+        if isinstance(value, list):
+            return any(has_profile_field(item) for item in value)
+        return False
+
+    assert not has_profile_field(result)

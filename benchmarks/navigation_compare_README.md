@@ -18,7 +18,7 @@ uv pip install --python "$TOOLS/browser-use-env/bin/python" \
 uv pip freeze --python "$TOOLS/browser-use-env/bin/python" > "$TOOLS/browser-use-freeze.txt"
 ```
 
-Set `TOOLS` to a dedicated tools directory first. Obtain native Lightpanda and agent-browser binaries from their official release assets. Obtain Chrome for Testing from the Stable channel download manifest. Select assets for your operating system and architecture. Verify the release digests before execution. Do not point any profile or runtime directory at an existing user profile. The script exposes no profile option.
+Set `TOOLS` to a dedicated tools directory first. Obtain native Lightpanda and agent-browser binaries from their official release assets. Obtain Chrome for Testing from the Stable channel download manifest. Select assets for your operating system and architecture. Verify the release digests before execution. Do not point any browser profile or runtime directory at an existing user profile. Neither benchmark mode accepts a browser-profile path.
 
 Use these official metadata endpoints to resolve and retain release pins before a run:
 
@@ -97,6 +97,45 @@ The adapters do not have the same engine, IPC cost, or wait policy:
 
 The Chrome executable and mock-keychain isolation flag are shared across the Chrome arms. Other library launch defaults are not forced into one common configuration. Effective command lines remain in the ownership records. The deferred-script workload avoids making rendering-engine image support a prerequisite.
 
-The script labels cross-tool performance inconclusive. No universal winner follows from these numbers. It does not measure cold-start latency, a complete browser-agent task, public-site compatibility, or production behavior. Record unrelated host load, profile the limiter in a separate untimed diagnostic, and alternate source revisions for a before-and-after claim. Do not compare these timings directly with an older diagnostic that excluded final assertions or the server audit from its timer.
+The script labels cross-tool performance inconclusive. No universal winner follows from these numbers. It does not measure cold-start latency, a complete browser-agent task, public-site compatibility, or production behavior. Use the opt-in profile command below for a separate untimed diagnostic, and alternate source revisions for a before-and-after claim. Do not compare these timings directly with an older diagnostic that excluded final assertions or the server audit from its timer.
+
+## Collect one workload-specific profile
+
+Use profile mode only to inspect one OpenBrowser call path after a verified baseline identifies a loss. The command runs one unprofiled `fast` warmup, then one profiled `fast` or `delayed` trial in the same OpenBrowser worker. It does not start a competitor, add a benchmark sample, or report a latency rank. It does not change the normal benchmark timer, schedule, result shape, or files.
+
+Set `NAV_BENCH_CANDIDATE_SOURCE`, `NAV_BENCH_CANDIDATE_PYTHON`, `NAV_BENCH_CHROME`, and `NAV_BENCH_VERSION_MANIFEST` to the identities checked by the performance preflight. The manifest must contain the current candidate commit and harness digest, plus the Python and Chrome versions and hashes. Create a new profile directory below a private temporary parent:
+
+```sh
+PROFILE_PARENT="$(mktemp -d /tmp/openbrowser-profile.XXXXXX)"
+chmod 700 "$PROFILE_PARENT"
+PROFILE_DIR="$PROFILE_PARENT/fast"
+test ! -e "$PROFILE_DIR"
+
+uv run --no-project --offline --python "$NAV_BENCH_CANDIDATE_PYTHON" \
+  "$NAV_BENCH_CANDIDATE_SOURCE/benchmarks/navigation_compare.py" profile \
+  --source "$NAV_BENCH_CANDIDATE_SOURCE" \
+  --openbrowser-python "$NAV_BENCH_CANDIDATE_PYTHON" \
+  --chrome "$NAV_BENCH_CHROME" \
+  --version-manifest "$NAV_BENCH_VERSION_MANIFEST" \
+  --workload fast \
+  --output "$PROFILE_DIR"
+```
+
+The run form requires all six options shown above. Use `--workload delayed` to profile that fixed 0.15-second task instead. Profile mode does not accept `--arms`, `--samples`, or `--delay`. The output parent must have mode `0700`. The output directory must be new and below physical `/tmp`; reject `..` segments and every symlink component below `/tmp`. The run creates a separate marked OpenBrowser runtime root and gives the worker a private home, configuration, cache, and profile. The worker removes inherited `AWS_` variables and sets only `AWS_EC2_METADATA_DISABLED=true` among AWS variables.
+
+A complete profile directory contains `profile.json`, the copied `version-manifest.json`, `worker.stdout.log`, `worker.stderr.log`, `trial.pstats`, and `sha256.json`. The report schema is `openbrowser-navigation-profile/1`. It records the source commit and Python source hashes, harness hash, copied manifest hash, Python and Chrome identities, raw `Browser.getVersion()` data, package versions, one warmup record, one target record, stats metadata, cleanup identities, and error arrays. Files use mode `0600`; `sha256.json` hashes every file except itself. A complete report has `status: "complete"`, no failed phase, one successful fast warmup, one successful selected target, `sample.outcome: "success"` in both records, stable source, valid task and server evidence, verified worker and fixture cleanup, and copied stats. A failure report has `profile: null`, non-empty error arrays, and the first failing phase.
+
+Verify a saved profile offline. Verification reads only the report, copied manifest, hash list, and listed artifacts. It does not read the source tree or start a worker or browser. It checks every hash, report invariant, task proof, copied manifest identity, stats file, and cleanup record. It does not change the profile directory.
+
+```sh
+env -u NAV_BENCH_CANDIDATE_SOURCE -u NAV_BENCH_CHROME -u NAV_BENCH_VERSION_MANIFEST \
+  uv run --no-project --offline --python "$NAV_BENCH_CANDIDATE_PYTHON" \
+  "$NAV_BENCH_CANDIDATE_SOURCE/benchmarks/navigation_compare.py" \
+  profile --verify "$PROFILE_DIR"
+```
+
+Both forms return `0` only for a complete, verified profile. A run or verify failure returns `1`. Invalid options or invalid run inputs before output creation return `2`. If copying the manifest fails before worker startup, the new output directory is removed when safe and no report is written. Failures after output creation write a failed report when the filesystem permits. If cleanup is uncertain, the worker runtime root is retained. A report or hash write failure returns `1`; the output directory is incomplete and does not verify.
+
+The `trial.pstats` report is diagnostic call-path data. Its `elapsed_ns` values are not benchmark measurements. cProfile includes `Arm.trial`'s final `self.ownership()` scan, which runs after `elapsed_ns` is recorded. Exclude that scan when choosing runtime hypotheses. Do not use profile data for p50, ranking, speedup, or competitor-win claims. Use the normal unprofiled benchmark for latency and a separate reviewed plan before any runtime source change.
 
 For frozen published measurements, use the harness revision recorded with those results. Later ownership and metadata hardening changes the file hash even when the timed workload is unchanged. Smoke-validation samples from a later revision do not replace or join the published timing samples.
