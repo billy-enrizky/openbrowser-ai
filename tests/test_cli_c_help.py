@@ -5,6 +5,7 @@ import asyncio
 import os
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import uuid
@@ -68,22 +69,54 @@ class TestCliCHelp:
 
     def test_c_no_arg_compact_when_daemon_running(self):
         """When daemon is already running, output should be the compact description."""
-        # Ensure daemon is started
-        subprocess.run(
-            [sys.executable, '-m', 'openbrowser.cli', 'daemon', 'start'],
-            capture_output=True,
-            timeout=20,
-        )
-        result = _run_cli('-c')
-        assert result.returncode == 0
-        # Compact description has '## Core Functions' but NOT '## Navigation'
-        assert '## Core Functions' in result.stdout
-        # Clean up: stop the daemon
-        subprocess.run(
-            [sys.executable, '-m', 'openbrowser.cli', 'daemon', 'stop'],
-            capture_output=True,
-            timeout=10,
-        )
+        with tempfile.TemporaryDirectory(prefix='obc-') as temp_dir:
+            env = os.environ.copy()
+            env['OPENBROWSER_SOCKET'] = str(Path(temp_dir) / 'd.sock')
+            started = False
+            try:
+                start_result = subprocess.run(
+                    [sys.executable, '-m', 'openbrowser.cli', 'daemon', 'start'],
+                    capture_output=True,
+                    text=True,
+                    timeout=20,
+                    env=env,
+                )
+                assert start_result.returncode == 0, f'stderr: {start_result.stderr}'
+                started = True
+
+                status_result = subprocess.run(
+                    [sys.executable, '-m', 'openbrowser.cli', 'daemon', 'status'],
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                    env=env,
+                )
+                assert status_result.returncode == 0, f'stderr: {status_result.stderr}'
+
+                result = _run_cli('-c', env=env)
+                assert result.returncode == 0
+                assert '## Core Functions' in result.stdout
+                assert '## Navigation' not in result.stdout
+            finally:
+                if started:
+                    stop_result = subprocess.run(
+                        [sys.executable, '-m', 'openbrowser.cli', 'daemon', 'stop'],
+                        capture_output=True,
+                        text=True,
+                        timeout=10,
+                        env=env,
+                    )
+                    assert stop_result.returncode == 0, f'stderr: {stop_result.stderr}'
+
+                    stopped_status = subprocess.run(
+                        [sys.executable, '-m', 'openbrowser.cli', 'daemon', 'status'],
+                        capture_output=True,
+                        text=True,
+                        timeout=10,
+                        env=env,
+                    )
+                    assert stopped_status.returncode != 0
+                    assert 'Daemon not running' in stopped_status.stderr
 
     def test_c_with_code_still_works(self):
         """openbrowser-ai -c 'print(1+1)' should execute code via a mock daemon."""
