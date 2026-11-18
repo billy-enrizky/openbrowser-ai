@@ -932,6 +932,38 @@ def test_screenshot_smoke_accepts_sealed_executable_inputs(sealed_screenshot_inp
     assert result['candidate_commit'] == scenario['identity']['candidate_commit']
 
 
+def test_lightpanda_script_passes_an_explicit_request_to_the_page_sdk():
+    import subprocess
+
+    node = shutil.which('node')
+    if node is None:
+        pytest.skip('Node is required to exercise the JavaScript SDK fixture')
+    request = capability.screenshot_request('a' * 32, 'lightpanda', 0, 12345)
+    program = capability.render_lightpanda_script(request).decode()
+    sdk = '''const calls=[]; let nonce;
+globalThis.Page=class {
+  async goto(url, options) { calls.push(['goto',url,options]); nonce=new URL(url).searchParams.get('nonce'); }
+  async evaluate(script) {
+    if (typeof script !== 'string') throw new Error('Page.evaluate requires a script string');
+    return JSON.stringify({readyState:'complete',readyMarker:nonce,imageReady:true});
+  }
+  async screenshot(options) { calls.push(['screenshot',options]); }
+};\n'''
+
+    result = subprocess.run(
+        [node, '--input-type=module', '-'],
+        input=sdk + program + '\nconsole.log(JSON.stringify(calls));',
+        capture_output=True, text=True, check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    calls = json.loads(result.stdout)
+    assert calls[0] == ['goto', request['url'], {'waitUntil': 'load', 'timeout': 15000}]
+    assert calls[1] == ['screenshot', {
+        'selector': '#proof', 'path': 'result.png', 'fullPage': False, 'timeout': 15000,
+    }]
+
+
 def test_screenshot_cli_executes_the_async_smoke(private_result_root, monkeypatch):
     called = []
 

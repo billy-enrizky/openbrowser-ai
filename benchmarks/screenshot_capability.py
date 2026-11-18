@@ -637,6 +637,13 @@ def parse_lightpanda_screenshot_request(value):
     return LightpandaScreenshotRequest(attempt_id, url, nonce)
 
 
+def render_lightpanda_script(value):
+    request = parse_lightpanda_screenshot_request(value)
+    template = Path(__file__).with_name('screenshot_lightpanda.js').read_text()
+    arguments = json.dumps({'url': request.url, 'nonce': request.nonce}, sort_keys=True)
+    return (template.rstrip() + f'\nawait captureProof({arguments});\n').encode('utf-8')
+
+
 def image_request_proof(fixture, nonce):
     events = fixture.snapshot(nonce)['image_requests']
     successful = [event for event in events if event['method'] == 'GET' and event['status'] == 200]
@@ -974,11 +981,11 @@ async def execute_lightpanda_attempt(args, fixture, attempt_dir, attempt):
         )
         environment = navigation.worker_environment(launch)
         navigation.prepare_worker_directories(environment)
-        environment['NAV_BENCH_SCREENSHOT_URL'] = request.url
-        environment['NAV_BENCH_SCREENSHOT_NONCE'] = request.nonce
         stdout_log = open_private_log(log_directory / 'lightpanda.stdout.log')
         stderr_log = open_private_log(log_directory / 'lightpanda.stderr.log')
-        script = Path(__file__).with_name('screenshot_lightpanda.js').resolve()
+        script = log_directory / 'lightpanda.input.js'
+        with open_private_log(script) as stream:
+            stream.write(render_lightpanda_script(request_value).decode('utf-8'))
         process = await asyncio.create_subprocess_exec(
             str(launch.lightpanda), 'run', '--load-resources', 'image', str(script),
             cwd=attempt_dir,
@@ -1547,16 +1554,34 @@ def verify_attempt_artifacts(run_root, attempt):
         errors.append('screenshot attempt contains a latency field')
 
     logs = attempt_dir / 'logs'
+    input_script = logs / 'lightpanda.input.js'
+    if arm == 'lightpanda':
+        if input_script.exists() or input_script.is_symlink():
+            try:
+                navigation.validate_private_directory(logs)
+                info = input_script.lstat()
+                if not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode) != 0o600 \
+                        or info.st_uid != os.geteuid():
+                    raise ValueError('Lightpanda input script is not a private regular file')
+                if input_script.read_bytes() != render_lightpanda_script(attempt['request']):
+                    raise ValueError('Lightpanda input script differs from its request and frozen template')
+            except (OSError, ValueError, KeyError) as error:
+                errors.append(str(error))
+        elif attempt.get('state') in ('passed', 'pixel_mismatch'):
+            errors.append('completed Lightpanda attempt has no saved input script')
     if logs.exists() or logs.is_symlink():
         try:
             navigation.validate_private_directory(logs)
+            allowed_logs = {
+                'worker.stdout.log', 'worker.stderr.log',
+                'lightpanda.stdout.log', 'lightpanda.stderr.log',
+            }
+            if arm == 'lightpanda':
+                allowed_logs.add('lightpanda.input.js')
             for path in logs.iterdir():
                 info = path.lstat()
                 if not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode) != 0o600 \
-                        or path.name not in {
-                            'worker.stdout.log', 'worker.stderr.log',
-                            'lightpanda.stdout.log', 'lightpanda.stderr.log',
-                        }:
+                        or path.name not in allowed_logs:
                     errors.append(f'unexpected or non-private screenshot log: {path.name}')
         except (OSError, ValueError) as error:
             errors.append(f'screenshot log directory is invalid: {error}')

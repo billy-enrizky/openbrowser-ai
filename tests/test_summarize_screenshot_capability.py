@@ -66,6 +66,11 @@ def _make_attempt(run_root: Path, run_id: str, arm: str, index: int) -> dict:
     }
     if arm == "lightpanda":
         worker_cleanup.update({"process_state": "verified", "process_group_id": worker_identity["pid"]})
+        logs = attempt_dir / 'logs'
+        logs.mkdir(mode=0o700)
+        script = logs / 'lightpanda.input.js'
+        script.write_bytes(capability.render_lightpanda_script(request))
+        script.chmod(0o600)
 
     attempt = {
         "attempt_id": f"{run_id}:{arm}:{index}",
@@ -445,6 +450,24 @@ def test_verified_screenshot_run_exports_a_sanitized_capability_report(tmp_path)
         assert "elapsed_ns" not in report
         assert "navigation_ns" not in report
         assert "duration_ns" not in report
+
+
+def test_screenshot_report_rejects_changed_native_script_input(tmp_path):
+    with tempfile.TemporaryDirectory(dir=Path('/tmp').resolve()) as temp:
+        project_root = tmp_path / 'project'
+        project_root.mkdir()
+        artifacts = _write_valid_run(project_root, Path(temp))
+        script = artifacts['run_root'] / 'arms/lightpanda/attempt-1/logs/lightpanda.input.js'
+        script.write_text('throw new Error("different program");\n')
+        report = artifacts['report_directory'] / 'candidate-baseline-screenshot-capability.md'
+
+        result = subprocess.run(
+            _verify_command(project_root, artifacts, report),
+            capture_output=True, text=True, check=False,
+        )
+
+        assert result.returncode == 1
+        assert not report.exists()
 
 
 def test_screenshot_report_requires_a_complete_verified_run(tmp_path):
