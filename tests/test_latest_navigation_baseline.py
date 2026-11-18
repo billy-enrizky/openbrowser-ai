@@ -2215,3 +2215,32 @@ async def test_cancelled_trial_with_terminal_io_failure_keeps_committed_referenc
         )
         assert validated["attempted_work_count"] == 0
     assert len(harness.requests) == 3
+
+
+@pytest.mark.parametrize("mask", [0o200, 0o400, 0o777])
+def test_attempt_directory_normalizes_restrictive_umask(tmp_path, mask):
+    import subprocess
+
+    run_root = tmp_path / "run"
+    run_root.mkdir(mode=0o700)
+    program = (
+        "import os,sys; from pathlib import Path; "
+        f"sys.path.insert(0, {str(SCRIPT.parent)!r}); "
+        "import latest_navigation_baseline as baseline; "
+        "os.umask(int(sys.argv[2])); "
+        "path=baseline.create_pair_directories(Path(sys.argv[1]),1,'raw-cdp',1); "
+        "assert path.stat().st_mode & 0o777 == 0o700"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", program, str(run_root), str(mask)],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+    attempt = run_root / "round-1/pair-raw-cdp/attempt-1"
+    if attempt.exists():
+        attempt.chmod(0o700)
+
+    assert result.returncode == 0, result.stderr

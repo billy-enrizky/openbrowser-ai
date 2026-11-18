@@ -1473,6 +1473,7 @@ def create_pair_directories(run_root: Path, round_number: int, competitor: str, 
     pair_root = create_private_directory(round_root / f'pair-{competitor}')
     attempt_root = pair_root / f'attempt-{attempt_number}'
     attempt_root.mkdir(mode=0o700, exist_ok=False)
+    attempt_root.chmod(0o700)
     return navigation.validate_private_directory(attempt_root)
 
 
