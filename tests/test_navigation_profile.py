@@ -46,6 +46,10 @@ def make_executable(path, content):
     return path
 
 
+def profile_output_path(result_root, workload='fast', run_id='a' * 32):
+    return Path(result_root) / 'profile' / workload / run_id
+
+
 @pytest.fixture
 def profile_parent():
     with tempfile.TemporaryDirectory(
@@ -54,6 +58,13 @@ def profile_parent():
     ) as directory:
         parent = Path(directory)
         parent.chmod(0o700)
+        profile_directory = parent / 'profile'
+        profile_directory.mkdir(mode=0o700)
+        profile_directory.chmod(0o700)
+        for workload in ('fast', 'delayed'):
+            output_parent = profile_directory / workload
+            output_parent.mkdir(mode=0o700, parents=True)
+            output_parent.chmod(0o700)
         yield parent
 
 
@@ -109,13 +120,14 @@ def current_manifest(source, python, chrome):
     }
 
 
-def run_arguments(source, python, chrome, manifest, output, workload='fast'):
+def run_arguments(source, python, chrome, manifest, output, *, result_root, workload='fast'):
     return [
         '--source', str(source),
         '--openbrowser-python', str(python),
         '--chrome', str(chrome),
         '--version-manifest', str(manifest),
         '--workload', workload,
+        '--result-root', str(result_root),
         '--output', str(output),
     ]
 
@@ -240,7 +252,9 @@ def worker_messages(tmp_path, monkeypatch, arm, messages):
     monkeypatch.setattr(benchmark.sys, 'stdin', stdin)
     monkeypatch.setattr(benchmark.sys, 'stdout', stdout)
     monkeypatch.setattr(benchmark, 'Arm', lambda _args: arm)
-    args = SimpleNamespace(worker='openbrowser', run_root=str(run_root))
+    args = SimpleNamespace(
+        worker='openbrowser', worker_mode=benchmark.WorkerMode.PROFILE, run_root=str(run_root),
+    )
     asyncio.run(benchmark.worker(args))
     replies = [
         json.loads(line[len(benchmark.PREFIX):])
@@ -273,13 +287,15 @@ def test_profile_cli_rejects_dirty_runtime_source_before_output_or_worker(
     )
     manifest_path = tmp_path / 'manifest.json'
     manifest_path.write_text(json.dumps(current_manifest(source, python, chrome)))
-    output = profile_parent / 'profile'
+    output = profile_output_path(profile_parent)
     environment = private_cli_environment(tmp_path)
     environment['PROFILE_WORKER_START_MARKER'] = str(worker_started)
     environment['PROFILE_REAL_PYTHON'] = sys.executable
 
     result = run_cli(
-        ['profile', *run_arguments(source, python, chrome, manifest_path, output)],
+        ['profile', *run_arguments(
+            source, python, chrome, manifest_path, output, result_root=profile_parent,
+        )],
         env=environment,
     )
 
@@ -290,7 +306,7 @@ def test_profile_cli_rejects_dirty_runtime_source_before_output_or_worker(
 
 
 @pytest.mark.parametrize('workload', ['fast', 'delayed'])
-def test_profile_parser_accepts_all_six_run_options(workload, tmp_path):
+def test_profile_parser_accepts_all_seven_run_options(workload, tmp_path):
     parser = profile_function('profile_parser')()
     arguments = [
         '--source', str(SCRIPT.parents[1]),
@@ -298,6 +314,7 @@ def test_profile_parser_accepts_all_six_run_options(workload, tmp_path):
         '--chrome', str(tmp_path / 'chrome'),
         '--version-manifest', str(tmp_path / 'manifest.json'),
         '--workload', workload,
+        '--result-root', str(tmp_path / 'result-root'),
         '--output', str(tmp_path / 'profile'),
     ]
     parsed = parser.parse_args(arguments)
@@ -306,6 +323,7 @@ def test_profile_parser_accepts_all_six_run_options(workload, tmp_path):
     assert parsed.openbrowser_python == sys.executable
     assert parsed.chrome == str(tmp_path / 'chrome')
     assert parsed.version_manifest == str(tmp_path / 'manifest.json')
+    assert parsed.result_root == str(tmp_path / 'result-root')
     assert parsed.output == str(tmp_path / 'profile')
     assert not hasattr(parsed, 'samples')
     assert not hasattr(parsed, 'delay')
@@ -314,8 +332,11 @@ def test_profile_parser_accepts_all_six_run_options(workload, tmp_path):
 
 def test_profile_verify_parser_accepts_only_verify_directory(tmp_path):
     parser = profile_function('profile_parser')()
-    parsed = parser.parse_args(['--verify', str(tmp_path / 'profile')])
+    parsed = parser.parse_args([
+        '--verify', str(tmp_path / 'profile'), '--result-root', str(tmp_path / 'result-root'),
+    ])
     assert parsed.verify == str(tmp_path / 'profile')
+    assert parsed.result_root == str(tmp_path / 'result-root')
     assert parsed.source is None
     assert parsed.openbrowser_python is None
     assert parsed.chrome is None
@@ -331,12 +352,57 @@ def test_profile_verify_parser_accepts_only_verify_directory(tmp_path):
     (['profile', '--delay', '0.2'], '--delay'),
     (['profile', '--arms', 'openbrowser'], '--arms'),
     (['profile', '--verify', '/tmp/profile', '--workload', 'fast'], '--verify'),
+    (['profile', '--verify', '/tmp/profile'], '--result-root'),
     (['profile', '--workload', 'unsupported'], 'workload'),
 ])
 def test_profile_cli_rejects_invalid_invocations(arguments, expected_text):
     result = run_cli(arguments)
     assert result.returncode == 2
     assert expected_text in result.stderr
+
+
+def test_profile_output_rejects_path_outside_result_root_before_source_validation(
+    tmp_path, profile_parent,
+):
+    outside = tmp_path / 'outside-profile'
+    chrome = tmp_path / 'chrome'
+    manifest = tmp_path / 'manifest.json'
+
+    result = run_cli([
+        'profile', '--source', '', '--openbrowser-python', sys.executable,
+        '--chrome', str(chrome), '--version-manifest', str(manifest), '--workload', 'fast',
+        '--result-root', str(profile_parent), '--output', str(outside),
+    ], env=private_cli_environment(tmp_path))
+
+    assert result.returncode == 2
+    assert 'outside RESULT_ROOT' in result.stderr
+    assert not outside.exists()
+
+
+def test_profile_verify_rejects_path_outside_result_root(tmp_path, profile_parent):
+    outside = tmp_path / 'outside-profile'
+    outside.mkdir(mode=0o700)
+
+    result = run_cli([
+        'profile', '--verify', str(outside), '--result-root', str(profile_parent),
+    ], env=private_cli_environment(tmp_path))
+
+    assert result.returncode == 2
+    assert 'outside RESULT_ROOT' in result.stderr
+
+
+def test_profile_output_rejects_a_non_run_directory_inside_result_root(tmp_path, profile_parent):
+    non_run_directory = profile_parent / 'profile' / 'fast'
+    result = run_cli([
+        'profile', '--source', '', '--openbrowser-python', sys.executable,
+        '--chrome', str(tmp_path / 'chrome'), '--version-manifest', str(tmp_path / 'manifest.json'),
+        '--workload', 'fast', '--result-root', str(profile_parent),
+        '--output', str(non_run_directory),
+    ], env=private_cli_environment(tmp_path))
+
+    assert result.returncode == 2
+    assert 'RESULT_ROOT/profile/<workload>/<run-id>' in result.stderr
+    assert list(non_run_directory.iterdir()) == []
 
 
 def test_profile_request_accepts_required_manifest_and_preserves_python_symlink(
@@ -350,9 +416,11 @@ def test_profile_request_accepts_required_manifest_and_preserves_python_symlink(
     python_alias.symlink_to(Path(sys.executable))
     manifest_path = tmp_path / 'manifest.json'
     manifest_path.write_text(json.dumps(current_manifest(source, python_alias, chrome)))
-    output = parent / 'profile'
+    output = profile_output_path(parent)
     parser = profile_function('profile_parser')()
-    parsed = parser.parse_args(run_arguments(source, python_alias, chrome, manifest_path, output))
+    parsed = parser.parse_args(run_arguments(
+        source, python_alias, chrome, manifest_path, output, result_root=parent,
+    ))
     request = validate(parsed)
     assert request.source == source.resolve()
     assert request.openbrowser_python == python_alias.absolute()
@@ -373,7 +441,9 @@ def test_profile_request_rejects_manifest_missing_current_run_identity(tmp_path,
     manifest_path = tmp_path / 'manifest.json'
     manifest_path.write_text(json.dumps(manifest))
     parsed = profile_function('profile_parser')().parse_args(
-        run_arguments(source, sys.executable, chrome, manifest_path, parent / 'profile')
+        run_arguments(
+            source, sys.executable, chrome, manifest_path, profile_output_path(parent), result_root=parent,
+        )
     )
     with pytest.raises(ValueError, match='manifest'):
         validate(parsed)
@@ -386,16 +456,20 @@ def test_profile_request_rejects_existing_output_and_traversal(tmp_path, profile
     chrome = make_executable(tmp_path / 'chrome', '#!/bin/sh\necho "Chrome for Testing 1.2.3"\n')
     manifest_path = tmp_path / 'manifest.json'
     manifest_path.write_text(json.dumps(current_manifest(source, sys.executable, chrome)))
-    existing = parent / 'existing'
+    existing = profile_output_path(parent)
     existing.mkdir(mode=0o700)
     parser = profile_function('profile_parser')()
-    existing_args = parser.parse_args(run_arguments(source, sys.executable, chrome, manifest_path, existing))
+    existing_args = parser.parse_args(run_arguments(
+        source, sys.executable, chrome, manifest_path, existing, result_root=parent,
+    ))
     with pytest.raises(ValueError, match='output'):
         validate(existing_args)
     traversal_args = parser.parse_args(
-        run_arguments(source, sys.executable, chrome, manifest_path, parent / '..' / 'escaped')
+        run_arguments(
+            source, sys.executable, chrome, manifest_path, parent / '..' / 'escaped', result_root=parent,
+        )
     )
-    with pytest.raises(ValueError, match='output|path|temporary'):
+    with pytest.raises(ValueError, match='output|path|temporary|RESULT_ROOT'):
         validate(traversal_args)
 
 
@@ -413,13 +487,16 @@ def test_profile_request_rejects_symlink_component_below_physical_temp_root(
     link = parent / 'link'
     link.symlink_to(target, target_is_directory=True)
     parsed = profile_function('profile_parser')().parse_args(
-        run_arguments(source, sys.executable, chrome, manifest_path, link / 'profile')
+        run_arguments(
+            source, sys.executable, chrome, manifest_path,
+            link / 'profile' / 'fast' / ('a' * 32), result_root=parent,
+        )
     )
     with pytest.raises(ValueError, match='symlink'):
         validate(parsed)
 
 
-def test_profile_request_rejects_output_outside_physical_temp_root(tmp_path):
+def test_profile_request_rejects_output_outside_result_root(tmp_path, profile_parent):
     validate = profile_function('validate_profile_request')
     source = SCRIPT.parents[1]
     chrome = make_executable(tmp_path / 'chrome', '#!/bin/sh\necho "Chrome for Testing 1.2.3"\n')
@@ -427,9 +504,11 @@ def test_profile_request_rejects_output_outside_physical_temp_root(tmp_path):
     manifest_path.write_text(json.dumps(current_manifest(source, sys.executable, chrome)))
     outside = SCRIPT.parents[1] / 'outside-profile'
     parsed = profile_function('profile_parser')().parse_args(
-        run_arguments(source, sys.executable, chrome, manifest_path, outside)
+        run_arguments(
+            source, sys.executable, chrome, manifest_path, outside, result_root=profile_parent,
+        )
     )
-    with pytest.raises(ValueError, match='physical /tmp'):
+    with pytest.raises(ValueError, match='outside RESULT_ROOT'):
         validate(parsed)
     assert not outside.exists()
 
@@ -442,7 +521,10 @@ def test_profile_request_rejects_empty_source_even_when_current_directory_is_a_r
     manifest_path = tmp_path / 'manifest.json'
     manifest_path.write_text(json.dumps(current_manifest(SCRIPT.parents[1], sys.executable, chrome)))
     parsed = profile_function('profile_parser')().parse_args(
-        run_arguments('', sys.executable, chrome, manifest_path, profile_parent / 'profile')
+        run_arguments(
+            '', sys.executable, chrome, manifest_path,
+            profile_output_path(profile_parent), result_root=profile_parent,
+        )
     )
     with pytest.raises(ValueError, match='source'):
         validate(parsed)
@@ -845,7 +927,9 @@ async def test_worker_disables_profiler_when_target_is_cancelled(tmp_path, monke
     monkeypatch.setattr(benchmark.sys, 'stdin', stdin)
     monkeypatch.setattr(benchmark.sys, 'stdout', stdout)
     monkeypatch.setattr(benchmark, 'Arm', lambda _args: arm)
-    task = asyncio.create_task(benchmark.worker(SimpleNamespace(worker='openbrowser', run_root=str(run_root))))
+    task = asyncio.create_task(benchmark.worker(SimpleNamespace(
+        worker='openbrowser', worker_mode=benchmark.WorkerMode.PROFILE, run_root=str(run_root),
+    )))
     try:
         await asyncio.wait_for(arm.target_started.wait(), timeout=2)
     except TimeoutError:
@@ -875,7 +959,8 @@ def profile_input(tmp_path, profile_parent):
         chrome=chrome.absolute(),
         version_manifest=manifest_path.absolute(),
         workload='delayed',
-        output=parent / 'profile',
+        result_root=parent,
+        output=profile_output_path(parent, workload='delayed'),
     )
     return request, parent, manifest_path, chrome
 
@@ -886,6 +971,9 @@ class FakeWorkerProcess:
         self.run_root = run_root
         self.stdin = SimpleNamespace(close=lambda: None)
         self.returncode = 0
+
+    async def wait(self):
+        return self.returncode
 
 
 def write_fake_stats(path):
@@ -941,6 +1029,13 @@ def install_profile_run_fakes(monkeypatch, request, scenario='success'):
             elif scenario == 'startup_inventory_invalid_owned':
                 started['owned'] = None
             return {'ok': True, 'result': started}
+        if message['op'] == 'stop':
+            stop_errors = ['worker stop reported nested errors'] if scenario == 'worker_stop_nested_errors' else []
+            return {
+                'ok': scenario != 'worker_stop',
+                'error': 'worker stop failed' if scenario == 'worker_stop' else None,
+                'result': {'identities': [], 'errors': stop_errors},
+            }
         if message['op'] != 'profile_pair':
             raise AssertionError(f'unexpected worker request: {message!r}')
         captured['pair_requests'].append(message)
@@ -1040,7 +1135,7 @@ def install_profile_run_fakes(monkeypatch, request, scenario='success'):
         worker_identity.update(identity)
         return identity
 
-    async def cleanup(proc, _stdout, identity, _initial, _token):
+    async def cleanup(handle):
         captured['cleanup_called'] = True
         state = 'unknown' if scenario == 'cleanup' else 'absent'
         post = [{'pid': 43128, 'state': 'unknown'}] if scenario == 'cleanup' else []
@@ -1051,7 +1146,7 @@ def install_profile_run_fakes(monkeypatch, request, scenario='success'):
                 **({'errors': ['worker stop reported nested errors']}
                    if scenario == 'worker_stop_nested_errors' else {}),
             },
-            'worker_identity': {**identity, 'state': state},
+            'worker_identity': {**handle.worker_identity, 'state': state},
             'post_worker_exit_identities': post,
             'fallback_used': False,
             **({'error': 'worker stop failed'} if scenario == 'worker_stop' else {}),
@@ -1062,6 +1157,8 @@ def install_profile_run_fakes(monkeypatch, request, scenario='success'):
     monkeypatch.setattr(benchmark, 'record', record)
     monkeypatch.setattr(benchmark.psutil, 'Process', lambda pid: SimpleNamespace(pid=pid))
     monkeypatch.setattr(benchmark, 'cleanup_worker', cleanup)
+    monkeypatch.setattr(benchmark, 'state', lambda _identity: 'absent')
+    monkeypatch.setattr(benchmark, 'descendant_identities', lambda *_args: [])
     monkeypatch.setattr(
         benchmark.Fixture, 'snapshot',
         lambda _fixture, nonce: captured['snapshots'].get(nonce, {'effects': 0, 'requests': []}),
@@ -1095,6 +1192,8 @@ def test_profile_coordinator_runs_one_worker_and_removes_aws_environment(profile
     assert captured['owner_marker'] == captured['env']['NAVIGATION_BENCHMARK_OWNER']
     assert {key: value for key, value in captured['env'].items() if key.startswith('AWS_')} == {
         'AWS_EC2_METADATA_DISABLED': 'true',
+        'AWS_CONFIG_FILE': '/dev/null',
+        'AWS_SHARED_CREDENTIALS_FILE': '/dev/null',
     }
     assert len(captured['pair_requests']) == 1
     pair = captured['pair_requests'][0]
@@ -1137,12 +1236,12 @@ def test_profile_coordinator_retains_root_when_captured_worker_identity_is_incom
             'owner_root': str(captured['run_root']),
         }
 
-    async def cleanup_with_reused_fallback(_proc, _stdout, identity, _initial, _token):
+    async def cleanup_with_reused_fallback(handle):
         captured['cleanup_called'] = True
         return {
             'ok': True,
             'result': {'identities': []},
-            'worker_identity': {**identity, 'state': 'reused'},
+            'worker_identity': {**handle.worker_identity, 'state': 'reused'},
             'post_worker_exit_identities': [],
         }
 
@@ -1194,8 +1293,8 @@ def test_profile_coordinator_retains_root_when_post_exit_identities_are_invalid(
     captured = install_profile_run_fakes(monkeypatch, request)
     cleanup_worker = benchmark.cleanup_worker
 
-    async def cleanup_with_invalid_post_exit_identities(proc, stdout, identity, initial, token):
-        response = await cleanup_worker(proc, stdout, identity, initial, token)
+    async def cleanup_with_invalid_post_exit_identities(handle):
+        response = await cleanup_worker(handle)
         if mutation == 'missing':
             del response['post_worker_exit_identities']
         else:
@@ -1232,13 +1331,13 @@ def test_profile_coordinator_retains_root_for_incomplete_post_exit_identity(
     captured = install_profile_run_fakes(monkeypatch, request)
     cleanup_worker = benchmark.cleanup_worker
 
-    async def cleanup_with_incomplete_post_exit_identity(proc, stdout, identity, initial, token):
-        response = await cleanup_worker(proc, stdout, identity, initial, token)
+    async def cleanup_with_incomplete_post_exit_identity(handle):
+        response = await cleanup_worker(handle)
         post_identity = {
             'pid': 43128,
             'created': 1234.5,
             'cmdline': ['chrome', '--user-data-dir=private'],
-            'owner_token': token,
+            'owner_token': handle.owner_token,
             'owner_root': str(captured['run_root']),
             'state': 'absent',
         }
@@ -1313,11 +1412,11 @@ def test_profile_run_reverifies_saved_artifacts_and_removes_stats_on_failure(pro
     verify_profile = benchmark.verify_profile
     verification_calls = []
 
-    def corrupt_stats_then_verify(directory):
+    def corrupt_stats_then_verify(directory, result_root):
         verification_calls.append(Path(directory))
         stats_path = Path(directory) / 'trial.pstats'
         stats_path.write_bytes(stats_path.read_bytes() + b'corrupted after the initial hash')
-        return verify_profile(directory)
+        return verify_profile(directory, result_root)
 
     monkeypatch.setattr(benchmark, 'verify_profile', corrupt_stats_then_verify)
     run_profile = profile_function('run_profile')
@@ -1604,7 +1703,7 @@ def test_offline_verifier_rejects_invalid_profile_reports(profile_input, mutatio
 
     mutate_profile_report(output, change)
     verify = profile_function('verify_profile')
-    assert verify(output) == 1
+    assert verify(output, profile_input[0].result_root) == 1
 
 
 def test_offline_verifier_rejects_rehashed_unrecognized_report_keys(profile_input):
@@ -1612,7 +1711,7 @@ def test_offline_verifier_rejects_rehashed_unrecognized_report_keys(profile_inpu
     mutate_profile_report(output, lambda report: report.update(competitor_win=True))
 
     verify = profile_function('verify_profile')
-    assert verify(output) == 1
+    assert verify(output, profile_input[0].result_root) == 1
 
 
 def test_offline_verifier_rejects_rehashed_complete_cleanup_identity_with_extra_key(profile_input):
@@ -1628,7 +1727,7 @@ def test_offline_verifier_rejects_rehashed_complete_cleanup_identity_with_extra_
     assert any('cleanup' in error and 'identity' in error for error in benchmark.profile_report_errors(report))
 
     verify = profile_function('verify_profile')
-    assert verify(output) == 1
+    assert verify(output, profile_input[0].result_root) == 1
 
 
 @pytest.mark.parametrize(('record_name', 'field', 'value'), [
@@ -1653,7 +1752,7 @@ def test_offline_verifier_rejects_rehashed_non_integer_sample_accounting(profile
     hashes = json.loads((output / 'sha256.json').read_text())
     assert hashes['profile.json'] == hashlib.sha256((output / 'profile.json').read_bytes()).hexdigest()
     assert any(record_name.split('.')[0] in error for error in benchmark.profile_report_errors(report))
-    assert profile_function('verify_profile')(output) == 1
+    assert profile_function('verify_profile')(output, profile_input[0].result_root) == 1
 
 
 @pytest.mark.parametrize('invalid_name', [
@@ -1679,7 +1778,7 @@ def test_offline_verifier_rejects_rehashed_non_normalized_source_manifest_paths(
     assert hashes['profile.json'] == hashlib.sha256((output / 'profile.json').read_bytes()).hexdigest()
     errors = benchmark.profile_report_errors(report)
     assert any('source' in error for error in errors)
-    assert profile_function('verify_profile')(output) == 1
+    assert profile_function('verify_profile')(output, profile_input[0].result_root) == 1
 
 
 @pytest.mark.parametrize('mutation', ['null', 'non_list', 'missing'])
@@ -1702,7 +1801,7 @@ def test_offline_verifier_rejects_rehashed_missing_post_exit_identity_lists(prof
     assert any('cleanup' in error for error in benchmark.profile_report_errors(report))
 
     verify = profile_function('verify_profile')
-    assert verify(output) == 1
+    assert verify(output, profile_input[0].result_root) == 1
 
 
 @pytest.mark.parametrize('location', ['worker_identity', 'post_worker_exit_identities'])
@@ -1725,7 +1824,7 @@ def test_complete_profile_rejects_rehashed_cleanup_identity_with_missing_require
     hashes = json.loads((output / 'sha256.json').read_text())
     assert hashes['profile.json'] == hashlib.sha256((output / 'profile.json').read_bytes()).hexdigest()
     assert any('cleanup' in error and 'identity' in error for error in benchmark.profile_report_errors(report))
-    assert profile_function('verify_profile')(output) == 1
+    assert profile_function('verify_profile')(output, profile_input[0].result_root) == 1
 
 
 @pytest.mark.parametrize(('location', 'field', 'value'), [
@@ -1754,7 +1853,7 @@ def test_complete_profile_rejects_rehashed_invalid_cleanup_identity_field_values
     hashes = json.loads((output / 'sha256.json').read_text())
     assert hashes['profile.json'] == hashlib.sha256((output / 'profile.json').read_bytes()).hexdigest()
     assert any('cleanup' in error and 'identity' in error for error in benchmark.profile_report_errors(report))
-    assert profile_function('verify_profile')(output) == 1
+    assert profile_function('verify_profile')(output, profile_input[0].result_root) == 1
 
 
 @pytest.mark.parametrize('location', ['worker_identity', 'post_worker_exit_identities'])
@@ -1775,7 +1874,7 @@ def test_complete_profile_rejects_rehashed_cleanup_identity_ownership_error(
     mutate_profile_report(output, change)
     report = json.loads((output / 'profile.json').read_text())
     assert any('cleanup' in error and 'ownership' in error for error in benchmark.profile_report_errors(report))
-    assert profile_function('verify_profile')(output) == 1
+    assert profile_function('verify_profile')(output, profile_input[0].result_root) == 1
 
 
 @pytest.mark.parametrize(('location', 'identity'), [
@@ -1793,7 +1892,7 @@ def test_complete_profile_rejects_rehashed_invalid_cleanup_identities(profile_in
     assert any('cleanup' in error for error in benchmark.profile_report_errors(report))
 
     verify = profile_function('verify_profile')
-    assert verify(output) == 1
+    assert verify(output, profile_input[0].result_root) == 1
 
 
 def test_complete_profile_accepts_reused_post_exit_identity(profile_input):
@@ -1808,7 +1907,7 @@ def test_complete_profile_accepts_reused_post_exit_identity(profile_input):
     assert benchmark.profile_report_errors(report) == []
 
     verify = profile_function('verify_profile')
-    assert verify(output) == 0
+    assert verify(output, profile_input[0].result_root) == 0
 
 
 @pytest.mark.parametrize(('location', 'identity'), [
@@ -1884,7 +1983,7 @@ def test_offline_verifier_rejects_failed_report_even_when_artifacts_are_rehashed
     mutate_profile_report(output, mark_failed)
 
     verify = profile_function('verify_profile')
-    assert verify(output) == 1
+    assert verify(output, profile_input[0].result_root) == 1
 
 
 def test_offline_verifier_rejects_rehashed_non_string_failed_phase_without_traceback(
@@ -1901,7 +2000,9 @@ def test_offline_verifier_rejects_rehashed_non_string_failed_phase_without_trace
 
     mutate_profile_report(output, mark_failed_with_invalid_phase)
     environment = private_cli_environment(tmp_path)
-    result = run_cli(['profile', '--verify', str(output)], env=environment)
+    result = run_cli([
+        'profile', '--verify', str(output), '--result-root', str(profile_input[0].result_root),
+    ], env=environment)
 
     assert result.returncode == 1
     assert 'Traceback' not in result.stderr
@@ -1919,7 +2020,7 @@ def test_offline_verifier_rejects_rehashed_failed_sample_in_complete_report(
     )
 
     result = run_cli(
-        ['profile', '--verify', str(output)],
+        ['profile', '--verify', str(output), '--result-root', str(profile_input[0].result_root)],
         env=private_cli_environment(tmp_path),
     )
 
@@ -1941,7 +2042,7 @@ def test_offline_verifier_rejects_missing_or_tampered_artifacts(profile_input, f
         with (output / 'version-manifest.json').open('ab') as stream:
             stream.write(b'changed')
     verify = profile_function('verify_profile')
-    assert verify(output) == 1
+    assert verify(output, profile_input[0].result_root) == 1
 
 
 def test_profile_verify_cli_rejects_rehashed_malformed_url_without_traceback(profile_input, tmp_path):
@@ -1952,7 +2053,7 @@ def test_profile_verify_cli_rejects_rehashed_malformed_url_without_traceback(pro
     )
 
     result = run_cli(
-        ['profile', '--verify', str(output)],
+        ['profile', '--verify', str(output), '--result-root', str(profile_input[0].result_root)],
         env=private_cli_environment(tmp_path),
     )
 
@@ -1968,7 +2069,7 @@ def test_profile_verify_cli_rejects_nul_hash_name_without_traceback(profile_inpu
     benchmark.atomic_profile_json(output / 'sha256.json', hashes)
 
     result = run_cli(
-        ['profile', '--verify', str(output)],
+        ['profile', '--verify', str(output), '--result-root', str(profile_input[0].result_root)],
         env=private_cli_environment(tmp_path),
     )
 
@@ -1984,7 +2085,7 @@ def test_offline_verifier_rejects_non_basename_hash_entries(profile_input, hash_
     hashes[hash_name] = '0' * 64
     benchmark.atomic_profile_json(output / 'sha256.json', hashes)
     verify = profile_function('verify_profile')
-    assert verify(output) == 1
+    assert verify(output, profile_input[0].result_root) == 1
 
 
 def test_offline_verifier_rejects_symlink_and_non_regular_artifacts(profile_input, tmp_path):
@@ -1995,14 +2096,14 @@ def test_offline_verifier_rejects_symlink_and_non_regular_artifacts(profile_inpu
     outside.write_text('not the worker log')
     log.symlink_to(outside)
     verify = profile_function('verify_profile')
-    assert verify(output) == 1
+    assert verify(output, profile_input[0].result_root) == 1
 
     shutil.rmtree(output)
     output, _report = complete_profile_artifacts(profile_input)
     log = output / 'worker.stderr.log'
     log.unlink()
     log.mkdir()
-    assert verify(output) == 1
+    assert verify(output, profile_input[0].result_root) == 1
 
 
 def test_offline_verifier_uses_shared_physical_temp_path_rules(profile_input, tmp_path):
@@ -2011,12 +2112,12 @@ def test_offline_verifier_uses_shared_physical_temp_path_rules(profile_input, tm
     outside = tmp_path / 'outside'
     outside.mkdir(mode=0o700)
     outside.chmod(0o700)
-    assert verify(outside) == 1
-    assert verify(str(output.parent / '..' / output.name)) == 1
+    assert verify(outside, profile_input[0].result_root) == 1
+    assert verify(str(output.parent / '..' / output.name), profile_input[0].result_root) == 1
 
     alias = output.parent / 'alias'
     alias.symlink_to(output.parent, target_is_directory=True)
-    assert verify(alias / output.name) == 1
+    assert verify(alias / output.name, profile_input[0].result_root) == 1
 
 
 def test_profile_verify_cli_is_offline_and_does_not_modify_artifacts(profile_input, monkeypatch):
@@ -2035,7 +2136,9 @@ def test_profile_verify_cli_is_offline_and_does_not_modify_artifacts(profile_inp
     monkeypatch.setattr(benchmark.subprocess, 'Popen', lambda *_args, **_kwargs: pytest.fail('verify launched a process'))
     monkeypatch.setattr(benchmark.asyncio, 'create_subprocess_exec', lambda *_args, **_kwargs: pytest.fail('verify launched a worker'))
     monkeypatch.setattr(benchmark, 'Arm', lambda *_args, **_kwargs: pytest.fail('verify constructed a browser arm'))
-    assert benchmark.dispatch(['profile', '--verify', str(output)]) == 0
+    assert benchmark.dispatch([
+        'profile', '--verify', str(output), '--result-root', str(profile_input[0].result_root),
+    ]) == 0
     after = {
         path.name: (path.read_bytes(), path.stat().st_mtime_ns, stat.S_IMODE(path.stat().st_mode))
         for path in output.iterdir()
@@ -2045,11 +2148,13 @@ def test_profile_verify_cli_is_offline_and_does_not_modify_artifacts(profile_inp
 
 def test_offline_verifier_accepts_one_complete_fast_profile(profile_input):
     request, parent, manifest_path, chrome = profile_input
-    fast_request = replace(request, workload='fast')
+    fast_request = replace(
+        request, workload='fast', output=profile_output_path(request.result_root, workload='fast'),
+    )
     output, report = complete_profile_artifacts((fast_request, parent, manifest_path, chrome))
     verify = profile_function('verify_profile')
     assert report['workload'] == 'fast'
-    assert verify(output) == 0
+    assert verify(output, profile_input[0].result_root) == 0
 
 
 def test_profile_verify_command_needs_no_source_chrome_manifest_or_aws_variables(profile_input, tmp_path):
@@ -2059,7 +2164,9 @@ def test_profile_verify_command_needs_no_source_chrome_manifest_or_aws_variables
         for path in output.iterdir()
     }
     env = private_cli_environment(tmp_path)
-    result = run_cli(['profile', '--verify', str(output)], env=env)
+    result = run_cli([
+        'profile', '--verify', str(output), '--result-root', str(profile_input[0].result_root),
+    ], env=env)
     assert result.returncode == 0, result.stderr
     after = {
         path.name: (path.read_bytes(), path.stat().st_mtime_ns)
@@ -2072,6 +2179,12 @@ def test_profile_verify_rejects_mixed_modes_and_returns_one_for_bad_directory(pr
     output, _report = complete_profile_artifacts(profile_input)
     profile_function('verify_profile')
     with pytest.raises(SystemExit) as malformed:
-        benchmark.dispatch(['profile', '--verify', str(output), '--workload', 'fast'])
+        benchmark.dispatch([
+            'profile', '--verify', str(output), '--result-root', str(profile_input[0].result_root),
+            '--workload', 'fast',
+        ])
     assert malformed.value.code == 2
-    assert benchmark.dispatch(['profile', '--verify', str(output.parent / 'missing')]) == 1
+    assert benchmark.dispatch([
+        'profile', '--verify', str(output.parent / 'missing'),
+        '--result-root', str(profile_input[0].result_root),
+    ]) == 1

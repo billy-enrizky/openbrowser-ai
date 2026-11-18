@@ -4,10 +4,12 @@ import contextlib
 import io
 import json
 import os
+import shutil
 import statistics
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
 from types import SimpleNamespace
 
 import pytest
@@ -18,6 +20,35 @@ spec = importlib.util.spec_from_file_location('navigation_compare', SCRIPT)
 benchmark = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = benchmark
 spec.loader.exec_module(benchmark)
+
+
+@pytest.fixture
+def private_result_root():
+    root = Path('/tmp').resolve(strict=True) / f'openbrowser-navigation-test-{benchmark.uuid.uuid4().hex}'
+    yield root
+    shutil.rmtree(root, ignore_errors=True)
+
+
+def make_worker_launch(tmp_path, *, arm='openbrowser', mode=None, candidate_python=None,
+                       browser_use_python=None, log_directory=None, log_prefix='worker'):
+    runtime_root = Path(tmp_path) / 'runtime'
+    runtime_root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    worker_root = runtime_root / arm
+    log_directory = Path(log_directory or tmp_path)
+    log_directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    return benchmark.make_worker_launch(
+        arm=arm,
+        mode=mode or benchmark.WorkerMode.NAVIGATION,
+        source_root=SCRIPT.parents[1],
+        candidate_python=Path(candidate_python or sys.executable),
+        browser_use_python=Path(browser_use_python or sys.executable),
+        runtime_root=runtime_root,
+        worker_root=worker_root,
+        working_directory=worker_root,
+        log_directory=log_directory,
+        log_prefix=log_prefix,
+        owner_token='private-token',
+    )
 
 
 def test_normal_benchmark_import_does_not_load_profile_modules(tmp_path):
@@ -77,6 +108,100 @@ def completed_sample(kind='delayed'):
 def test_workload_accepts_exact_observation_and_server_work_inside_timer():
     sample = completed_sample()
     assert benchmark.workload_errors(sample, sample['server'], 200) == []
+
+
+@pytest.mark.asyncio
+async def test_openbrowser_navigate_explicitly_waits_for_load():
+    arm = benchmark.Arm.__new__(benchmark.Arm)
+    arm.name = 'openbrowser'
+    calls = []
+
+    class Browser:
+        async def navigate_to(self, url, *, wait_until=None):
+            calls.append((url, wait_until))
+            return {'url': url}
+
+    arm.browser = Browser()
+    url = 'http://127.0.0.1:12345/fixture?nonce=load-check'
+
+    await arm.navigate(url)
+
+    assert calls == [(url, 'load')]
+
+
+@pytest.mark.asyncio
+async def test_arm_trial_reports_elapsed_navigation_and_post_navigation_phases(monkeypatch):
+    nonce = 'phase-proof'
+    url = f'http://127.0.0.1:12345/fixture?nonce={nonce}'
+    observation = {
+        'url': url, 'title': f'fixture-{nonce}', 'readyState': 'complete',
+        'marker': nonce, 'loaded': nonce, 'scriptDone': nonce,
+    }
+    server = {'effects': 1, 'requests': [
+        {'path': '/fixture', 'method': 'GET', 'nonce': nonce, 'status': 200,
+         'received_ns': 110, 'completed_ns': 120},
+        {'path': '/effect', 'method': 'POST', 'nonce': nonce, 'status': 200,
+         'received_ns': 160, 'completed_ns': 170},
+    ]}
+
+    class AuditResponse(io.StringIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            self.close()
+
+    arm = benchmark.Arm.__new__(benchmark.Arm)
+    observations = [observation, {**observation, 'field': nonce}]
+
+    async def navigate(_url):
+        return None
+
+    async def evaluate(expression):
+        if expression == benchmark.OBSERVE:
+            return json.dumps(observations.pop(0))
+        return json.dumps({
+            'field': nonce,
+            'response': {'count': 1, 'nonce': nonce, 'payload': nonce},
+        })
+
+    arm.navigate = navigate
+    arm.evaluate = evaluate
+    arm.ownership = lambda: []
+    ticks = iter((100, 150, 180, 200))
+    monkeypatch.setattr(benchmark.time, 'perf_counter_ns', lambda: next(ticks))
+    monkeypatch.setattr(
+        benchmark, 'local_open',
+        lambda *_args, **_kwargs: AuditResponse(json.dumps(server)),
+    )
+
+    result = await arm.trial({
+        'arm': 'openbrowser', 'kind': 'fast', 'index': 0,
+        'nonce': nonce, 'url': url,
+    })
+
+    assert result['outcome'] == 'success'
+    assert result['elapsed_ns'] == 100
+    assert result['navigation_ns'] == 50
+    assert result['post_navigation_ns'] == 50
+
+
+@pytest.mark.asyncio
+async def test_agent_browser_navigate_waits_for_load_after_open():
+    arm = benchmark.Arm.__new__(benchmark.Arm)
+    arm.name = 'agent-browser'
+    calls = []
+
+    async def cli(*command):
+        calls.append(command)
+        return {'success': True}
+
+    arm.cli = cli
+    url = 'http://127.0.0.1:12345/fixture?nonce=load-check'
+
+    await arm.navigate(url)
+
+    assert calls == [('open', url), ('wait', '--load', 'load')]
 
 
 @pytest.mark.parametrize('field,value', [('url', 'about:blank'), ('readyState', 'interactive'),
@@ -228,7 +353,10 @@ async def test_graceful_shutdown_timeout_still_reaches_owned_cleanup(monkeypatch
 
 @pytest.mark.asyncio
 async def test_coordinator_stop_failure_still_reaps_only_verified_owned_identities(monkeypatch):
-    worker = {'pid': 12, 'created': 2.0, 'cmdline': ['worker'], 'owner_token': 'run'}
+    worker = {
+        'pid': 12, 'created': 2.0, 'cmdline': ['worker'],
+        'owner_token': 'run', 'owner_root': '/private/tmp/run/openbrowser',
+    }
     browser = {**worker, 'pid': 13, 'cmdline': ['owned-browser']}
     calls = []
     alive = True
@@ -256,7 +384,12 @@ async def test_coordinator_stop_failure_still_reaps_only_verified_owned_identiti
     monkeypatch.setattr(benchmark, 'descendant_identities', lambda identity, token: [browser])
     monkeypatch.setattr(benchmark, 'terminate_owned', terminate)
     monkeypatch.setattr(benchmark, 'state', lambda identity: 'alive' if alive else 'absent')
-    result = await benchmark.cleanup_worker(Process(), None, worker, [browser], 'run')
+    handle = benchmark.WorkerHandle(
+        process=Process(), stdout_log=io.StringIO(), stderr_log=io.StringIO(),
+        worker_identity=worker, initial_owned=(browser,), owner_token='run',
+        mode=benchmark.WorkerMode.NAVIGATION, state=benchmark.WorkerState.READY,
+    )
+    result = await benchmark.cleanup_worker(handle)
     assert ('terminate', {12, 13}, 'run') in calls
     assert result['worker_identity']['state'] == 'absent'
     assert result['post_worker_exit_identities'][0]['state'] == 'absent'
@@ -271,7 +404,8 @@ async def test_private_home_chrome_never_uses_host_keychain(tmp_path, monkeypatc
     root.mkdir()
     (tmp_path / '.benchmark-owner').write_text('run')
     monkeypatch.setenv('NAVIGATION_BENCHMARK_OWNER', 'run')
-    args = SimpleNamespace(worker=name, run_root=str(root), source=str(SCRIPT.parents[1]),
+    args = SimpleNamespace(worker=name, worker_mode=benchmark.WorkerMode.NAVIGATION.value,
+                           run_root=str(root), source=str(SCRIPT.parents[1]),
                            chrome='chrome', lightpanda=None, agent_browser=None)
     arm = benchmark.Arm(args)
     captured = {}
@@ -299,6 +433,52 @@ async def test_private_home_chrome_never_uses_host_keychain(tmp_path, monkeypatc
     finally:
         if hasattr(arm, 'log'):
             arm.log.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('name', ['raw-cdp', 'openbrowser'])
+@pytest.mark.parametrize(
+    ('mode', 'expected_srgb'),
+    [(benchmark.WorkerMode.NAVIGATION, False), (benchmark.WorkerMode.SCREENSHOT, True)],
+)
+async def test_chrome_start_uses_srgb_only_for_screenshot_mode(tmp_path, monkeypatch, name, mode, expected_srgb):
+    root = tmp_path / name
+    root.mkdir()
+    (tmp_path / '.benchmark-owner').write_text('run')
+    monkeypatch.setenv('NAVIGATION_BENCHMARK_OWNER', 'run')
+    args = SimpleNamespace(
+        worker=name, worker_mode=mode.value, run_root=str(root), source=str(SCRIPT.parents[1]),
+        chrome='chrome', lightpanda=None, agent_browser=None,
+    )
+    captured = {}
+    messages = [{'op': 'start'}, {'op': 'stop'}]
+    stdout = io.StringIO()
+    monkeypatch.setattr(benchmark.sys, 'stdin', io.StringIO(''.join(json.dumps(item) + '\n' for item in messages)))
+    monkeypatch.setattr(benchmark.sys, 'stdout', stdout)
+
+    if name == 'raw-cdp':
+        def no_launch(command, **kwargs):
+            captured['args'] = command
+            raise RuntimeError('browser launch prevented by test')
+        monkeypatch.setattr(benchmark.subprocess, 'Popen', no_launch)
+    else:
+        import openbrowser.browser
+
+        def profile(**kwargs):
+            captured.update(kwargs)
+            return kwargs
+
+        def no_session(**kwargs):
+            raise RuntimeError('browser launch prevented by test')
+        monkeypatch.setattr(openbrowser.browser, 'BrowserProfile', profile)
+        monkeypatch.setattr(openbrowser.browser, 'BrowserSession', no_session)
+
+    await benchmark.worker(args)
+
+    chrome_args = captured['args']
+    assert ('--force-color-profile=srgb' in chrome_args) is expected_srgb
+    replies = [json.loads(line[len(benchmark.PREFIX):]) for line in stdout.getvalue().splitlines()]
+    assert [reply['ok'] for reply in replies] == [False, True]
 
 
 def test_cleanup_refuses_live_process_wrong_owner_and_symlink(tmp_path):
@@ -357,6 +537,7 @@ async def test_empty_port_file_still_obeys_startup_deadline(tmp_path, monkeypatc
 def mock_raw_startup(tmp_path, monkeypatch, states):
     arm = benchmark.Arm.__new__(benchmark.Arm)
     arm.name, arm.root, arm.chrome, arm.token = 'raw-cdp', tmp_path, 'chrome', 'run'
+    arm.mode = benchmark.WorkerMode.NAVIGATION
     arm.owned, arm.ownership = {}, lambda: []
     arm.proc = None
     monkeypatch.setattr(benchmark.subprocess, 'Popen', lambda *args, **kwargs: SimpleNamespace(poll=lambda: None))
@@ -391,7 +572,7 @@ def mock_raw_startup(tmp_path, monkeypatch, states):
     return arm, waits
 
 
-def test_external_paths_and_missing_optional_arms_are_explicit(tmp_path, monkeypatch):
+def test_external_paths_and_missing_optional_arms_are_explicit(tmp_path, monkeypatch, private_result_root):
     for key in ('NAV_BENCH_SOURCE', 'NAV_BENCH_CHROME', 'NAV_BENCH_LIGHTPANDA',
                 'NAV_BENCH_AGENT_BROWSER', 'NAV_BENCH_BROWSER_USE_PYTHON', 'NAV_BENCH_OPENBROWSER_PYTHON'):
         monkeypatch.delenv(key, raising=False)
@@ -402,7 +583,7 @@ def test_external_paths_and_missing_optional_arms_are_explicit(tmp_path, monkeyp
     chrome.write_text('#!/bin/sh\nexit 0\n')
     chrome.chmod(0o700)
     args = benchmark.parser().parse_args(['--source', str(source), '--chrome', str(chrome),
-                                         '--output', str(tmp_path / 'new-results')])
+                                         '--output', str(private_result_root)])
     benchmark.validate_config(args)
     states = benchmark.availability(args)
     assert states['raw-cdp']['state'] == 'configured'
@@ -419,15 +600,15 @@ def test_config_rejects_invalid_measurement_and_duplicate_arms(tmp_path, extra):
         benchmark.validate_config(args)
 
 
-def test_config_refuses_existing_output_and_user_profile_options(tmp_path):
+def test_config_refuses_existing_output_and_user_profile_options(tmp_path, private_result_root):
     source = tmp_path / 'source'
     (source / 'src/openbrowser').mkdir(parents=True)
     (source / 'src/openbrowser/__init__.py').touch()
     chrome = tmp_path / 'chrome'
     chrome.write_text('#!/bin/sh\nexit 0\n')
     chrome.chmod(0o700)
-    output = tmp_path / 'existing-results'
-    output.mkdir()
+    output = private_result_root
+    output.mkdir(mode=0o700)
     args = benchmark.parser().parse_args(['--source', str(source), '--chrome', str(chrome), '--output', str(output)])
     with pytest.raises(ValueError, match=r'^--output must be a new directory$'):
         benchmark.validate_config(args)
@@ -694,13 +875,251 @@ def test_worker_environment_does_not_inherit_user_browser_configuration(tmp_path
     monkeypatch.setenv('OPENBROWSER_USER_DATA_DIR', '/user/profile')
     monkeypatch.setenv('BU_NAME', 'user-browser')
     monkeypatch.setenv('BH_HOME', '/user/browser-use')
-    env = benchmark.worker_environment(tmp_path, 'private-token', tmp_path / 'source')
+    launch = make_worker_launch(tmp_path, log_directory=tmp_path / 'logs')
+    env = benchmark.worker_environment(launch)
     assert 'AGENT_BROWSER_CDP' not in env
     assert 'OPENBROWSER_USER_DATA_DIR' not in env
     assert 'BU_NAME' not in env
     assert Path(env['BH_HOME']).is_relative_to(tmp_path)
     assert Path(env['HOME']).is_relative_to(tmp_path)
     assert env['NAVIGATION_BENCHMARK_OWNER'] == 'private-token'
+
+
+def test_cli_rejects_result_root_outside_physical_temp_before_creating_output(tmp_path, monkeypatch):
+    source = SCRIPT.parents[1]
+    chrome = tmp_path / 'chrome'
+    chrome.write_text('#!/bin/sh\necho test-version\n')
+    chrome.chmod(0o700)
+    output = tmp_path / 'navigation-results'
+    monkeypatch.setattr(
+        benchmark.asyncio, 'create_subprocess_exec',
+        lambda *_args, **_kwargs: pytest.fail('worker launch ran for an invalid result root'),
+    )
+
+    code = benchmark.dispatch([
+        '--source', str(source), '--output', str(output), '--chrome', str(chrome),
+        '--arms', 'openbrowser', '--openbrowser-python', sys.executable,
+    ])
+
+    assert code == 2
+    assert not output.exists()
+
+
+@pytest.mark.parametrize('arm', ['openbrowser', 'raw-cdp', 'lightpanda', 'agent-browser', 'browser-use'])
+def test_worker_launch_factory_selects_the_pinned_interpreter_for_each_arm(tmp_path, arm):
+    candidate_python = Path('/candidate/bin/python')
+    browser_use_python = Path('/browser-use/bin/python')
+    launch = make_worker_launch(
+        tmp_path,
+        arm=arm,
+        candidate_python=candidate_python,
+        browser_use_python=browser_use_python,
+        log_directory=tmp_path / 'logs',
+    )
+
+    expected = browser_use_python if arm == 'browser-use' else candidate_python
+    assert launch.interpreter == expected
+
+
+def test_worker_launch_factory_rejects_lightpanda_screenshot_mode(tmp_path):
+    with pytest.raises(ValueError, match='screenshot'):
+        make_worker_launch(
+            tmp_path, arm='lightpanda', mode=benchmark.WorkerMode.SCREENSHOT,
+            log_directory=tmp_path / 'logs',
+        )
+
+
+@pytest.mark.asyncio
+async def test_launch_worker_creates_private_logs_and_records_starting_handle(tmp_path, monkeypatch):
+    physical_tmp = Path('/tmp').resolve(strict=True)
+    with tempfile.TemporaryDirectory(dir=physical_tmp) as runtime_name, \
+            tempfile.TemporaryDirectory(dir=physical_tmp) as result_name:
+        runtime_root = Path(runtime_name)
+        result_root = Path(result_name)
+        runtime_root.chmod(0o700)
+        result_root.chmod(0o700)
+        marker = runtime_root / '.benchmark-owner'
+        marker.write_text('private-token')
+        marker.chmod(0o600)
+        log_directory = result_root / 'logs'
+        log_directory.mkdir(mode=0o700)
+        launch = benchmark.make_worker_launch(
+            arm='openbrowser', mode=benchmark.WorkerMode.NAVIGATION,
+            source_root=SCRIPT.parents[1], candidate_python=Path(sys.executable),
+            browser_use_python=Path(sys.executable), runtime_root=runtime_root,
+            worker_root=runtime_root / 'openbrowser', working_directory=runtime_root / 'openbrowser',
+            log_directory=log_directory, log_prefix='openbrowser-fast', owner_token='private-token',
+        )
+        captured = {}
+
+        class Process:
+            pid = 81234
+
+        async def create_process(*command, **kwargs):
+            captured.update(command=command, kwargs=kwargs)
+            return Process()
+
+        identity = {
+            'pid': 81234, 'created': 1234.5, 'cmdline': ['worker'],
+            'owner_token': launch.owner_token, 'owner_root': str(launch.worker_root),
+        }
+        monkeypatch.setattr(benchmark.asyncio, 'create_subprocess_exec', create_process)
+        monkeypatch.setattr(benchmark.psutil, 'Process', lambda pid: SimpleNamespace(pid=pid))
+        monkeypatch.setattr(benchmark, 'record', lambda _process, _token: identity)
+
+        handle = await benchmark.launch_worker(launch)
+
+        assert handle.process.pid == 81234
+        assert handle.worker_identity == identity
+        assert handle.initial_owned is None
+        assert handle.state is benchmark.WorkerState.STARTING
+        assert captured['command'][0] == str(launch.interpreter)
+        assert str(SCRIPT) in captured['command']
+        assert captured['kwargs']['cwd'] == launch.working_directory
+        assert captured['kwargs']['env']['NAVIGATION_BENCHMARK_OWNER'] == launch.owner_token
+        stdout_path = log_directory / 'openbrowser-fast.stdout.log'
+        stderr_path = log_directory / 'openbrowser-fast.stderr.log'
+        assert stdout_path.is_file()
+        assert stderr_path.is_file()
+        assert stdout_path.stat().st_mode & 0o777 == 0o600
+        assert stderr_path.stat().st_mode & 0o777 == 0o600
+        handle.stdout_log.close()
+        handle.stderr_log.close()
+
+
+def make_worker_handle(tmp_path, initial_owned):
+    class Input:
+        def close(self):
+            return None
+
+    class Process:
+        def __init__(self):
+            self.pid = 81235
+            self.stdin = Input()
+            self.returncode = None
+
+        async def wait(self):
+            self.returncode = 0
+
+    identity = {
+        'pid': 81235, 'created': 1234.5, 'cmdline': ['worker'],
+        'owner_token': 'private-token', 'owner_root': str(Path(tmp_path) / 'openbrowser'),
+    }
+    return benchmark.WorkerHandle(
+        process=Process(), stdout_log=io.StringIO(), stderr_log=io.StringIO(),
+        worker_identity=identity, initial_owned=initial_owned,
+        owner_token='private-token', mode=benchmark.WorkerMode.NAVIGATION,
+        state=benchmark.WorkerState.STARTING,
+    )
+
+
+@pytest.mark.asyncio
+async def test_cleanup_worker_marks_unknown_start_inventory_incomplete(tmp_path, monkeypatch):
+    handle = make_worker_handle(tmp_path, None)
+    calls = []
+
+    async def send(_process, request, _log, timeout=90):
+        calls.append((request['op'], timeout))
+        return {'ok': True, 'result': {'identities': [], 'errors': []}}
+
+    monkeypatch.setattr(benchmark, 'send', send)
+    monkeypatch.setattr(benchmark, 'state', lambda _identity: 'absent')
+
+    result = await benchmark.cleanup_worker(handle)
+
+    assert calls == [('stop', 60)]
+    assert result['ok'] is False
+    assert handle.state is benchmark.WorkerState.INCOMPLETE
+    assert result['worker_identity']['state'] == 'absent'
+    assert 'inventory' in result['error']
+
+
+@pytest.mark.asyncio
+async def test_cleanup_worker_is_idempotent_after_verified_stop(tmp_path, monkeypatch):
+    handle = make_worker_handle(tmp_path, ())
+    calls = []
+
+    async def send(_process, request, _log, timeout=90):
+        calls.append(request['op'])
+        return {'ok': True, 'result': {'identities': [], 'errors': []}}
+
+    monkeypatch.setattr(benchmark, 'send', send)
+    monkeypatch.setattr(benchmark, 'state', lambda _identity: 'absent')
+
+    first = await benchmark.cleanup_worker(handle)
+    second = await benchmark.cleanup_worker(handle)
+
+    assert first['ok'] is True
+    assert second == first
+    assert calls == ['stop']
+    assert handle.state is benchmark.WorkerState.STOPPED
+
+
+@pytest.mark.asyncio
+async def test_cleanup_worker_accepts_stateful_stop_identity_records(tmp_path, monkeypatch):
+    handle = make_worker_handle(tmp_path, ())
+    child = {**handle.worker_identity, 'pid': 81236}
+
+    async def send(_process, request, _log, timeout=90):
+        return {'ok': True, 'result': {'identities': [{**child, 'state': 'absent'}], 'errors': []}}
+
+    monkeypatch.setattr(benchmark, 'send', send)
+    monkeypatch.setattr(benchmark, 'state', lambda _identity: 'absent')
+    cleanup = await benchmark.cleanup_worker(handle)
+
+    assert cleanup['ok'] is True, cleanup
+    assert cleanup['post_worker_exit_identities'] == [{**child, 'state': 'absent'}]
+
+
+def test_worker_state_transition_returns_ready_after_failed_navigation_sample():
+    transition = getattr(benchmark, 'transition_worker_state', None)
+    assert callable(transition), 'worker state transition table is not defined'
+
+    state = 'created'
+    for event in ('start', 'start_succeeded', 'valid_operation', 'navigation_result'):
+        state = transition(state, event)
+
+    assert state == 'ready'
+
+
+def test_worker_protocol_error_blocks_later_operations_but_keeps_stop(monkeypatch):
+    instances = []
+
+    class FakeArm:
+        def __init__(self, _args):
+            self.calls = []
+            instances.append(self)
+
+        async def start(self, _mode=None):
+            self.calls.append('start')
+            return {'owned': []}
+
+        async def trial(self, _request):
+            self.calls.append('trial')
+            return {'outcome': 'failure', 'exception': 'fixture assertion failed'}
+
+        async def stop(self):
+            self.calls.append('stop')
+            return {'errors': [], 'identities': []}
+
+    requests = [
+        {'op': 'start'},
+        {'op': 'unknown_operation'},
+        {'op': 'trial', 'url': 'http://127.0.0.1/fixture', 'nonce': 'sample'},
+        {'op': 'stop'},
+    ]
+    stdout = io.StringIO()
+    monkeypatch.setattr(benchmark, 'Arm', FakeArm)
+    monkeypatch.setattr(benchmark.sys, 'stdin', io.StringIO(''.join(json.dumps(item) + '\n' for item in requests)))
+    monkeypatch.setattr(benchmark.sys, 'stdout', stdout)
+
+    asyncio.run(benchmark.worker(SimpleNamespace(
+        worker='openbrowser', worker_mode=benchmark.WorkerMode.NAVIGATION,
+    )))
+
+    replies = [json.loads(line[len(benchmark.PREFIX):]) for line in stdout.getvalue().splitlines()]
+    assert [reply['ok'] for reply in replies] == [True, False, False, True]
+    assert instances[0].calls == ['start', 'stop']
 
 
 def _assert_published_paired_statistics(data):
@@ -740,7 +1159,7 @@ def test_paired_statistics_reject_legacy_schema_version():
         _assert_published_paired_statistics(data)
 
 
-def test_normal_dispatch_preserves_default_schedule_and_artifacts(tmp_path, monkeypatch):
+def test_normal_dispatch_preserves_default_schedule_and_artifacts(tmp_path, monkeypatch, private_result_root):
     dispatch = getattr(benchmark, 'dispatch', None)
     assert callable(dispatch), 'normal command dispatcher is missing'
 
@@ -754,7 +1173,7 @@ def test_normal_dispatch_preserves_default_schedule_and_artifacts(tmp_path, monk
     chrome = executable('chrome')
     lightpanda = executable('lightpanda')
     agent_browser = executable('agent-browser')
-    output = tmp_path / 'normal-results'
+    output = private_result_root
     processes = []
     schedule = []
 
@@ -779,10 +1198,10 @@ def test_normal_dispatch_preserves_default_schedule_and_artifacts(tmp_path, monk
 
     def record(process, token):
         return {'pid': process.pid, 'created': float(process.pid), 'cmdline': ['fake-worker'],
-                'owner_token': token, 'owner_root': 'fake-runtime'}
+                'owner_token': token, 'owner_root': '/private/tmp/fake-runtime'}
 
-    async def cleanup(process, _stdout, identity, _initial, _token):
-        return {'ok': True, 'worker_identity': {**identity, 'state': 'absent'},
+    async def cleanup(handle):
+        return {'ok': True, 'worker_identity': {**handle.worker_identity, 'state': 'absent'},
                 'post_worker_exit_identities': [], 'fallback_used': False}
 
     monkeypatch.setattr(benchmark.psutil, 'Process', lambda pid: SimpleNamespace(pid=pid))

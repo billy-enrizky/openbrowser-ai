@@ -1,18 +1,22 @@
-"""Local current-release operation diagnostic. No LLM, cloud, Docker, or user profiles.
-
-Each owned worker has one arm, a private profile, and an explicit command protocol.
-The measured workload is navigation through load, observation, then one DOM mutation
-and one POST. CLI transport is included only for the CLI-only agent-browser arm.
-"""
 from __future__ import annotations
+
+CLI_DESCRIPTION = (
+    'Local current-release operation diagnostic. No LLM, cloud, Docker, or user profiles.\n\n'
+    'Each owned worker has one arm, a private profile, and an explicit command protocol.\n'
+    'The measured workload is navigation through load, observation, then one DOM mutation\n'
+    'and one POST. CLI transport is included only for the CLI-only agent-browser arm.'
+)
 
 import argparse
 import asyncio
-from dataclasses import dataclass
+import base64
+from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
+from enum import StrEnum
 import hashlib
 import html
 import importlib.metadata
+import ipaddress
 import json
 import logging
 import math
@@ -32,7 +36,7 @@ import traceback
 import urllib.request
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Literal
+from typing import Literal, TextIO
 from urllib.parse import parse_qs, urlencode, urlsplit
 
 import psutil
@@ -45,6 +49,323 @@ OBSERVE = """JSON.stringify({url:location.href,title:document.title,
 readyState:document.readyState,marker:document.getElementById('marker')?.textContent,
 loaded:document.documentElement.dataset.loaded,scriptDone:document.documentElement.dataset.scriptDone,
 field:document.getElementById('value')?.value})"""
+SCREENSHOT_OBSERVE = """JSON.stringify({readyState:document.readyState,
+readyMarker:document.documentElement.dataset.screenshotReady||null,
+imageReady:(()=>{const proof=document.querySelector('#proof');
+const image=proof?.querySelector('img');const box=proof?.getBoundingClientRect();
+return !!proof&&box?.x===0&&box?.y===0&&box?.width===128&&box?.height===128
+&&!!image&&image.complete&&image.naturalWidth===64&&image.naturalHeight===64})()})"""
+
+
+class WorkerMode(StrEnum):
+    NAVIGATION = 'navigation'
+    SCREENSHOT = 'screenshot'
+    PROFILE = 'profile'
+
+
+_MODE_OPERATION = {
+    WorkerMode.NAVIGATION: 'trial',
+    WorkerMode.SCREENSHOT: 'capture_screenshot',
+    WorkerMode.PROFILE: 'profile_pair',
+}
+
+
+class WorkerState(StrEnum):
+    CREATED = 'created'
+    STARTING = 'starting'
+    READY = 'ready'
+    OPERATION_RUNNING = 'operation_running'
+    OPERATION_COMPLETE = 'operation_complete'
+    FAILED = 'failed'
+    STOPPING = 'stopping'
+    STOPPED = 'stopped'
+    INCOMPLETE = 'incomplete'
+
+
+class WorkerEvent(StrEnum):
+    START = 'start'
+    START_SUCCEEDED = 'start_succeeded'
+    START_FAILED = 'start_failed'
+    VALID_OPERATION = 'valid_operation'
+    INVALID_OPERATION = 'invalid_operation'
+    NAVIGATION_RESULT = 'navigation_result'
+    ONE_SHOT_RESULT = 'one_shot_result'
+    OPERATION_FAILED = 'operation_failed'
+    CLEANUP = 'cleanup'
+    CLEANUP_WITHOUT_CHILD = 'cleanup_without_child'
+    CLEANUP_VERIFIED = 'cleanup_verified'
+    CLEANUP_UNCERTAIN = 'cleanup_uncertain'
+    LATE_OPERATION = 'late_operation'
+
+
+_WORKER_TRANSITIONS = {
+    (WorkerState.CREATED, WorkerEvent.START): WorkerState.STARTING,
+    (WorkerState.CREATED, WorkerEvent.CLEANUP_WITHOUT_CHILD): WorkerState.STOPPED,
+    (WorkerState.STARTING, WorkerEvent.START_SUCCEEDED): WorkerState.READY,
+    (WorkerState.STARTING, WorkerEvent.START_FAILED): WorkerState.FAILED,
+    (WorkerState.STARTING, WorkerEvent.INVALID_OPERATION): WorkerState.FAILED,
+    (WorkerState.READY, WorkerEvent.VALID_OPERATION): WorkerState.OPERATION_RUNNING,
+    (WorkerState.READY, WorkerEvent.INVALID_OPERATION): WorkerState.FAILED,
+    (WorkerState.OPERATION_RUNNING, WorkerEvent.NAVIGATION_RESULT): WorkerState.READY,
+    (WorkerState.OPERATION_RUNNING, WorkerEvent.ONE_SHOT_RESULT): WorkerState.OPERATION_COMPLETE,
+    (WorkerState.OPERATION_RUNNING, WorkerEvent.OPERATION_FAILED): WorkerState.FAILED,
+    (WorkerState.OPERATION_COMPLETE, WorkerEvent.INVALID_OPERATION): WorkerState.OPERATION_COMPLETE,
+    (WorkerState.FAILED, WorkerEvent.INVALID_OPERATION): WorkerState.FAILED,
+    (WorkerState.STOPPING, WorkerEvent.CLEANUP): WorkerState.STOPPING,
+    (WorkerState.STOPPING, WorkerEvent.CLEANUP_VERIFIED): WorkerState.STOPPED,
+    (WorkerState.STOPPING, WorkerEvent.CLEANUP_UNCERTAIN): WorkerState.INCOMPLETE,
+    (WorkerState.STOPPED, WorkerEvent.CLEANUP): WorkerState.STOPPED,
+    (WorkerState.STOPPED, WorkerEvent.LATE_OPERATION): WorkerState.STOPPED,
+}
+for _live_state in (
+    WorkerState.STARTING,
+    WorkerState.READY,
+    WorkerState.OPERATION_RUNNING,
+    WorkerState.OPERATION_COMPLETE,
+    WorkerState.FAILED,
+):
+    _WORKER_TRANSITIONS[(_live_state, WorkerEvent.CLEANUP)] = WorkerState.STOPPING
+
+
+def transition_worker_state(state: WorkerState | str, event: WorkerEvent | str) -> WorkerState:
+    try:
+        current = WorkerState(state)
+        action = WorkerEvent(event)
+    except ValueError as error:
+        raise ValueError(f'unknown worker state or event: {state!r}, {event!r}') from error
+    try:
+        return _WORKER_TRANSITIONS[(current, action)]
+    except KeyError as error:
+        raise ValueError(f'illegal worker transition: {current.value} + {action.value}') from error
+
+
+@dataclass(frozen=True)
+class WorkerLaunch:
+    arm: Literal['raw-cdp', 'lightpanda', 'agent-browser', 'browser-use', 'openbrowser']
+    mode: WorkerMode
+    source_root: Path
+    interpreter: Path
+    runtime_root: Path
+    worker_root: Path
+    working_directory: Path
+    log_directory: Path
+    log_prefix: str
+    owner_token: str
+    chrome: Path | None = None
+    lightpanda: Path | None = None
+    agent_browser: Path | None = None
+    node: Path | None = None
+
+
+@dataclass
+class WorkerHandle:
+    process: asyncio.subprocess.Process
+    stdout_log: TextIO
+    stderr_log: TextIO
+    worker_identity: dict
+    initial_owned: tuple[dict, ...] | None
+    owner_token: str
+    mode: WorkerMode
+    state: WorkerState
+    cleanup_result: dict | None = None
+
+
+@dataclass(frozen=True)
+class ScreenshotRequest:
+    attempt_id: str
+    arm: Literal['openbrowser', 'raw-cdp']
+    url: str
+    nonce: str
+    selector: Literal['#proof']
+    output: Literal['result.png']
+
+
+@dataclass(frozen=True)
+class ScreenshotReply:
+    schema: Literal['openbrowser-screenshot-reply/1']
+    attempt_id: str
+    arm: Literal['openbrowser', 'raw-cdp']
+    nonce: str
+    ready_marker: str
+    output: Literal['result.png']
+    byte_count: int
+    sha256: str
+
+
+def parse_screenshot_request(arm, value) -> ScreenshotRequest:
+    if arm not in ('openbrowser', 'raw-cdp'):
+        raise ValueError('screenshot mode supports only OpenBrowser and raw CDP')
+    if not isinstance(value, dict):
+        raise ValueError('screenshot request must be an object')
+    expected = {'op', 'schema', 'attempt_id', 'url', 'nonce', 'selector', 'output'}
+    extra = value.keys() - expected
+    missing = expected - value.keys()
+    if extra:
+        raise ValueError(f'screenshot request has unsupported fields: {sorted(extra)!r}')
+    if missing:
+        raise ValueError(f'screenshot request is missing fields: {sorted(missing)!r}')
+    if value['op'] != 'capture_screenshot' or value['schema'] != 'openbrowser-screenshot-request/1':
+        raise ValueError('screenshot request operation or schema is invalid')
+    attempt_id, nonce, url = value['attempt_id'], value['nonce'], value['url']
+    if not all(isinstance(item, str) for item in (attempt_id, nonce, url)):
+        raise ValueError('screenshot attempt, nonce, and URL must be strings')
+    parts = attempt_id.split(':')
+    if len(parts) != 3 or len(parts[0]) != 32 \
+            or any(character not in '0123456789abcdef' for character in parts[0]) \
+            or parts[1] != arm or not parts[2] \
+            or any(character not in '0123456789' for character in parts[2]):
+        raise ValueError('screenshot attempt_id is invalid')
+    index = int(parts[2])
+    if str(index) != parts[2]:
+        raise ValueError('screenshot attempt_id index is not canonical')
+    if nonce != f'{parts[0]}-{arm}-{index}':
+        raise ValueError('screenshot nonce does not match attempt_id')
+    try:
+        parsed_url = urlsplit(url)
+        hostname = parsed_url.hostname
+        port = parsed_url.port
+        loopback = hostname is not None and ipaddress.ip_address(hostname).is_loopback
+    except ValueError as error:
+        raise ValueError('screenshot URL is invalid') from error
+    if parsed_url.scheme != 'http' or not loopback or port is None \
+            or parsed_url.path != '/screenshot' or parsed_url.username is not None \
+            or parsed_url.password is not None or parsed_url.fragment:
+        raise ValueError('screenshot URL must use a loopback /screenshot endpoint')
+    if parse_qs(parsed_url.query, keep_blank_values=True) != {'nonce': [nonce]}:
+        raise ValueError('screenshot URL nonce does not match the request')
+    if value['selector'] != '#proof':
+        raise ValueError('screenshot selector must be #proof')
+    if value['output'] != 'result.png':
+        raise ValueError('screenshot output must be result.png')
+    return ScreenshotRequest(attempt_id, arm, url, nonce, '#proof', 'result.png')
+
+
+def parse_screenshot_reply(request: ScreenshotRequest, envelope) -> ScreenshotReply:
+    if not isinstance(envelope, dict):
+        raise ValueError('screenshot reply envelope must be an object')
+    if envelope.keys() != {'ok', 'result'}:
+        raise ValueError('screenshot reply envelope has missing or extra fields')
+    if envelope['ok'] is not True:
+        raise ValueError('screenshot worker returned an error envelope')
+    result = envelope['result']
+    expected = {'schema', 'attempt_id', 'arm', 'nonce', 'ready_marker', 'output', 'byte_count', 'sha256'}
+    if not isinstance(result, dict) or result.keys() != expected:
+        raise ValueError('screenshot reply result has missing or extra fields')
+    if result['schema'] != 'openbrowser-screenshot-reply/1':
+        raise ValueError('screenshot reply schema is invalid')
+    for field, expected_value in (
+        ('attempt_id', request.attempt_id), ('arm', request.arm), ('nonce', request.nonce),
+        ('ready_marker', request.nonce), ('output', request.output),
+    ):
+        if result[field] != expected_value:
+            raise ValueError(f'screenshot reply {field} does not match the request')
+    if type(result['byte_count']) is not int or result['byte_count'] <= 0:
+        raise ValueError('screenshot reply byte_count must be a positive integer')
+    digest = result['sha256']
+    if not isinstance(digest, str) or len(digest) != 64 \
+            or any(character not in '0123456789abcdef' for character in digest):
+        raise ValueError('screenshot reply sha256 must be 64 lowercase hexadecimal characters')
+    return ScreenshotReply(**result)
+
+
+def make_worker_launch(
+    *, arm, mode, source_root, candidate_python, browser_use_python,
+    runtime_root, worker_root, working_directory, log_directory, log_prefix,
+    owner_token, chrome=None, lightpanda=None, agent_browser=None, node=None,
+):
+    if arm not in ARMS:
+        raise ValueError(f'unsupported worker arm: {arm!r}')
+    try:
+        mode = WorkerMode(mode)
+    except ValueError as error:
+        raise ValueError(f'unsupported worker mode: {mode!r}') from error
+    if mode is WorkerMode.PROFILE and arm != 'openbrowser':
+        raise ValueError('profile mode supports only OpenBrowser')
+    if mode is WorkerMode.SCREENSHOT and arm not in ('openbrowser', 'raw-cdp'):
+        raise ValueError('screenshot mode supports only OpenBrowser and raw CDP')
+    if arm == 'browser-use' and browser_use_python is None:
+        raise ValueError('browser-use requires BROWSER_USE_PYTHON')
+    if node is not None and arm != 'agent-browser':
+        raise ValueError('a Node executable is allowed only for the agent-browser worker')
+
+    interpreter = browser_use_python if arm == 'browser-use' else candidate_python
+    paths = {
+        'source_root': source_root,
+        'interpreter': interpreter,
+        'runtime_root': runtime_root,
+        'worker_root': worker_root,
+        'working_directory': working_directory,
+        'log_directory': log_directory,
+    }
+    normalized = {}
+    for name, value in paths.items():
+        path = Path(value)
+        if not path.is_absolute():
+            raise ValueError(f'worker launch {name} must be absolute')
+        normalized[name] = path
+    for name, value in (('chrome', chrome), ('lightpanda', lightpanda),
+                        ('agent_browser', agent_browser), ('node', node)):
+        if value is not None and not Path(value).is_absolute():
+            raise ValueError(f'worker launch {name} must be absolute')
+    if normalized['worker_root'].parent != normalized['runtime_root'] \
+            or normalized['worker_root'].name != arm:
+        raise ValueError('worker root must be exactly RUNTIME_ROOT/<arm>')
+    if normalized['log_directory'].is_relative_to(normalized['runtime_root']):
+        raise ValueError('worker logs must be outside RUNTIME_ROOT')
+    if not owner_token:
+        raise ValueError('worker owner token must not be empty')
+    if not isinstance(log_prefix, str) or not log_prefix or log_prefix in ('.', '..') \
+            or Path(log_prefix).name != log_prefix \
+            or any(character not in 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-' for character in log_prefix):
+        raise ValueError('worker log prefix must be a safe basename')
+
+    launch = WorkerLaunch(
+        arm=arm, mode=mode,
+        source_root=normalized['source_root'],
+        interpreter=normalized['interpreter'],
+        runtime_root=normalized['runtime_root'],
+        worker_root=normalized['worker_root'],
+        working_directory=normalized['working_directory'],
+        log_directory=normalized['log_directory'],
+        log_prefix=log_prefix,
+        owner_token=owner_token,
+        chrome=Path(chrome) if chrome is not None else None,
+        lightpanda=Path(lightpanda) if lightpanda is not None else None,
+        agent_browser=Path(agent_browser) if agent_browser is not None else None,
+        node=Path(node) if node is not None else None,
+    )
+    validate_worker_launch(launch)
+    return launch
+
+
+def validate_worker_launch(launch: WorkerLaunch) -> None:
+    if launch.arm not in ARMS:
+        raise ValueError(f'unsupported worker arm: {launch.arm!r}')
+    if launch.mode is WorkerMode.PROFILE and launch.arm != 'openbrowser':
+        raise ValueError('profile mode supports only OpenBrowser')
+    if launch.mode is WorkerMode.SCREENSHOT and launch.arm not in ('openbrowser', 'raw-cdp'):
+        raise ValueError('screenshot mode supports only OpenBrowser and raw CDP')
+    if launch.node is not None and launch.arm != 'agent-browser':
+        raise ValueError('a Node executable is allowed only for the agent-browser worker')
+    for name in ('source_root', 'interpreter', 'runtime_root', 'worker_root',
+                 'working_directory', 'log_directory'):
+        path = Path(getattr(launch, name))
+        if not path.is_absolute():
+            raise ValueError(f'worker launch {name} must be absolute')
+    for name in ('chrome', 'lightpanda', 'agent_browser', 'node'):
+        path = getattr(launch, name)
+        if path is not None and not Path(path).is_absolute():
+            raise ValueError(f'worker launch {name} must be absolute')
+    if launch.worker_root.parent != launch.runtime_root or launch.worker_root.name != launch.arm:
+        raise ValueError('worker root must be exactly RUNTIME_ROOT/<arm>')
+    if launch.log_directory.is_relative_to(launch.runtime_root):
+        raise ValueError('worker logs must be outside RUNTIME_ROOT')
+    if not launch.owner_token:
+        raise ValueError('worker owner token must not be empty')
+    if not isinstance(launch.log_prefix, str) or not launch.log_prefix \
+            or launch.log_prefix in ('.', '..') or Path(launch.log_prefix).name != launch.log_prefix \
+            or any(character not in 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-' for character in launch.log_prefix):
+        raise ValueError('worker log prefix must be a safe basename')
 
 
 def record(p, token):
@@ -299,6 +620,7 @@ class Cdp:
 class Arm:
     def __init__(self, args):
         self.name, self.root = args.worker, Path(args.run_root)
+        self.mode = WorkerMode(args.worker_mode)
         self.source, self.chrome = Path(args.source), Path(args.chrome) if args.chrome else None
         self.lightpanda, self.agent_browser = args.lightpanda, args.agent_browser
         self.token = os.environ['NAVIGATION_BENCHMARK_OWNER']
@@ -357,7 +679,10 @@ class Arm:
                 command = [str(self.chrome), '--headless=new', '--remote-debugging-port=0',
                            f'--user-data-dir={self.root / "profile"}', '--no-first-run', '--no-default-browser-check',
                            '--disable-background-networking', '--disable-component-update', '--disable-extensions',
-                           '--use-mock-keychain', 'about:blank']
+                           '--use-mock-keychain']
+                if self.mode is WorkerMode.SCREENSHOT:
+                    command.append('--force-color-profile=srgb')
+                command.append('about:blank')
             else:
                 with socket.socket() as s:
                     s.bind(('127.0.0.1', 0))
@@ -410,7 +735,10 @@ class Arm:
             module = Path(openbrowser.__file__).resolve()
             if not module.is_relative_to(self.source / 'src'):
                 raise RuntimeError('OpenBrowser imported from wrong source')
-            self.browser = BrowserSession(browser_profile=BrowserProfile(headless=True, executable_path=str(self.chrome), args=['--use-mock-keychain'],
+            browser_args = ['--use-mock-keychain']
+            if self.mode is WorkerMode.SCREENSHOT:
+                browser_args.append('--force-color-profile=srgb')
+            self.browser = BrowserSession(browser_profile=BrowserProfile(headless=True, executable_path=str(self.chrome), args=browser_args,
                                             user_data_dir=self.root / 'profile', downloads_path=self.root / 'downloads'))
             await self.browser.start()
             self.version = await self.browser.cdp_client.send.Browser.getVersion()
@@ -432,7 +760,8 @@ class Arm:
                 if event.get('method') == 'Page.loadEventFired' and event.get('sessionId') == self.session:
                     return response
         elif self.name == 'agent-browser':
-            return await self.cli('open', url)
+            await self.cli('open', url)
+            return await self.cli('wait', '--load', 'load')
         elif self.name == 'browser-use':
             def operation():
                 result = self.helpers.goto_url(url)
@@ -441,7 +770,7 @@ class Arm:
                 return result
             return await asyncio.to_thread(operation)
         else:
-            return await self.browser.navigate_to(url)
+            return await self.browser.navigate_to(url, wait_until='load')
 
     async def evaluate(self, expression):
         if self.name in ('raw-cdp', 'lightpanda'):
@@ -457,6 +786,44 @@ class Arm:
         if result.get('exceptionDetails'):
             raise RuntimeError(result['exceptionDetails'])
         return result['result']['value']
+
+    async def wait_for_screenshot_ready(self, nonce):
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline:
+            observation = json.loads(await self.evaluate(SCREENSHOT_OBSERVE))
+            if observation.get('readyState') == 'complete' \
+                    and observation.get('readyMarker') == nonce \
+                    and observation.get('imageReady') is True:
+                return
+            await asyncio.sleep(.05)
+        raise TimeoutError('screenshot fixture did not reach its ready marker')
+
+    async def capture_screenshot(self, request: ScreenshotRequest):
+        if self.mode is not WorkerMode.SCREENSHOT:
+            raise ValueError('capture_screenshot requires screenshot mode')
+        if self.name == 'openbrowser':
+            await self.browser.navigate_to(request.url, wait_until='load')
+            await self.wait_for_screenshot_ready(request.nonce)
+            return await self.browser.screenshot_element(
+                request.selector, path=request.output, format='png',
+            )
+        if self.name == 'raw-cdp':
+            await self.cdp.send('Emulation.setDeviceMetricsOverride', {
+                'width': 128, 'height': 128, 'deviceScaleFactor': 1, 'mobile': False,
+            }, self.session)
+            await self.navigate(request.url)
+            await self.wait_for_screenshot_ready(request.nonce)
+            result = await self.cdp.send('Page.captureScreenshot', {
+                'format': 'png', 'fromSurface': True, 'captureBeyondViewport': False,
+                'clip': {'x': 0, 'y': 0, 'width': 128, 'height': 128, 'scale': 1},
+            }, self.session)
+            try:
+                content = base64.b64decode(result['data'], validate=True)
+            except (KeyError, TypeError, ValueError) as error:
+                raise ValueError('CDP screenshot reply has invalid PNG data') from error
+            Path(request.output).write_bytes(content)
+            return content
+        raise ValueError('capture_screenshot supports only OpenBrowser and raw CDP')
 
     async def trial(self, request):
         start = time.perf_counter_ns()
@@ -497,6 +864,7 @@ return JSON.stringify({{field:f.value,response:await r.json()}})}})()'''
         result['elapsed_ns'] = result['end_ns'] - start
         if 'navigation_return_ns' in result:
             result['navigation_ns'] = result['navigation_return_ns'] - start
+            result['post_navigation_ns'] = result['end_ns'] - result['navigation_return_ns']
         self.ownership()
         return result
 
@@ -762,37 +1130,168 @@ async def profile_pair_operation(arm, args, request, started):
     return result()
 
 
+async def capture_screenshot_operation(arm, value):
+    request = parse_screenshot_request(arm.name, value)
+    working_directory = Path.cwd()
+    directory_info = working_directory.lstat()
+    if not stat.S_ISDIR(directory_info.st_mode) or stat.S_IMODE(directory_info.st_mode) != 0o700 \
+            or directory_info.st_uid != os.geteuid():
+        raise ValueError('screenshot worker directory must be private')
+    output = working_directory / request.output
+    if output.exists() or output.is_symlink():
+        raise ValueError('screenshot output already exists')
+    try:
+        await arm.capture_screenshot(request)
+        info = output.lstat()
+        if not stat.S_ISREG(info.st_mode):
+            raise ValueError('screenshot output is not a regular file')
+        os.chmod(output, 0o600, follow_symlinks=False)
+        info = output.lstat()
+        if not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode) != 0o600 \
+                or info.st_uid != os.geteuid():
+            raise ValueError('screenshot output is not a private regular file')
+        content = output.read_bytes()
+        if not content.startswith(b'\x89PNG\r\n\x1a\n'):
+            raise ValueError('screenshot output is not a PNG')
+        return asdict(ScreenshotReply(
+            schema='openbrowser-screenshot-reply/1',
+            attempt_id=request.attempt_id,
+            arm=request.arm,
+            nonce=request.nonce,
+            ready_marker=request.nonce,
+            output=request.output,
+            byte_count=len(content),
+            sha256=hashlib.sha256(content).hexdigest(),
+        ))
+    except BaseException:
+        try:
+            if output.is_symlink() or output.is_file():
+                output.unlink()
+        except OSError:
+            pass
+        raise
+
+
 async def worker(args):
+    mode = WorkerMode(args.worker_mode)
     arm = Arm(args)
+    state = WorkerState.STARTING
     stopped = False
-    profile_pair_used = False
     started = None
+
+    def error_reply(error):
+        trace = ''.join(traceback.format_exception(error)) if error.__traceback__ else ''
+        return {'ok': False, 'error': f'{type(error).__name__}: {error}', 'traceback': trace}
+
+    def reject_operation(error):
+        nonlocal state
+        if state in (WorkerState.STARTING, WorkerState.READY):
+            state = transition_worker_state(state, WorkerEvent.INVALID_OPERATION)
+        elif state is WorkerState.OPERATION_RUNNING:
+            state = transition_worker_state(state, WorkerEvent.OPERATION_FAILED)
+        elif state in (WorkerState.OPERATION_COMPLETE, WorkerState.FAILED):
+            state = transition_worker_state(state, WorkerEvent.INVALID_OPERATION)
+        elif state is WorkerState.STOPPED:
+            state = transition_worker_state(state, WorkerEvent.LATE_OPERATION)
+        return error_reply(error)
+
+    def write_reply(reply):
+        sys.stdout.write(PREFIX + json.dumps(reply) + '\n')
+        sys.stdout.flush()
+
     try:
         while raw := await asyncio.to_thread(sys.stdin.readline):
-            request = json.loads(raw)
+            try:
+                request = json.loads(raw)
+                if not isinstance(request, dict) or not isinstance(request.get('op'), str):
+                    raise ValueError('worker request must be an object with a string op')
+            except Exception as error:
+                write_reply(reject_operation(error))
+                continue
+
+            if request['op'] == 'stop':
+                try:
+                    state = transition_worker_state(state, WorkerEvent.CLEANUP)
+                    result = await arm.stop()
+                    identities = result.get('identities') if isinstance(result, dict) else None
+                    cleanup_verified = (
+                        isinstance(identities, list)
+                        and all(
+                            isinstance(identity, dict)
+                            and identity.get('state') in ('absent', 'reused')
+                            for identity in identities
+                        )
+                    )
+                    if cleanup_verified:
+                        state = transition_worker_state(state, WorkerEvent.CLEANUP_VERIFIED)
+                        reply = {'ok': True, 'result': result}
+                    else:
+                        state = transition_worker_state(state, WorkerEvent.CLEANUP_UNCERTAIN)
+                        reply = {'ok': False, 'error': 'worker process cleanup is incomplete', 'result': result}
+                except Exception as error:
+                    if state is WorkerState.STOPPING:
+                        state = transition_worker_state(state, WorkerEvent.CLEANUP_UNCERTAIN)
+                    reply = error_reply(error)
+                stopped = True
+                write_reply(reply)
+                break
+
             try:
                 if request['op'] == 'start':
+                    if state is not WorkerState.STARTING:
+                        raise ValueError('worker start is allowed only once')
+                    if mode is WorkerMode.PROFILE and arm.name != 'openbrowser':
+                        raise ValueError('profile mode supports only OpenBrowser')
+                    if mode is WorkerMode.SCREENSHOT and arm.name not in ('openbrowser', 'raw-cdp'):
+                        raise ValueError('screenshot mode supports only OpenBrowser and raw CDP')
                     result = await arm.start()
+                    if not isinstance(result, dict) or not isinstance(result.get('owned'), list):
+                        raise ValueError('worker start reply has no owned-process inventory')
                     started = result
-                elif request['op'] == 'trial':
+                    state = transition_worker_state(state, WorkerEvent.START_SUCCEEDED)
+                    reply = {'ok': True, 'result': result}
+                elif state is not WorkerState.READY:
+                    raise ValueError(f'worker operation {request["op"]!r} is not allowed in state {state.value}')
+                elif mode is WorkerMode.NAVIGATION and request['op'] == 'trial':
+                    state = transition_worker_state(state, WorkerEvent.VALID_OPERATION)
                     result = await arm.trial(request)
-                elif request['op'] == 'profile_pair':
-                    if profile_pair_used:
-                        raise ValueError('profile_pair can be used only once per worker')
-                    profile_pair_used = True
+                    required = ('arm', 'kind', 'index', 'nonce', 'url', 'outcome',
+                                'start_ns', 'end_ns', 'elapsed_ns')
+                    if (not isinstance(result, dict)
+                            or any(key not in result for key in required)
+                            or result.get('arm') != arm.name
+                            or result.get('outcome') not in ('success', 'failure')
+                            or type(result.get('index')) is not int
+                            or any(type(result.get(key)) is not int or result[key] < 0
+                                   for key in ('start_ns', 'end_ns', 'elapsed_ns'))):
+                        raise ValueError('navigation trial did not return a complete sample')
+                    state = transition_worker_state(state, WorkerEvent.NAVIGATION_RESULT)
+                    reply = {'ok': True, 'result': result}
+                elif mode is WorkerMode.PROFILE and request['op'] == 'profile_pair':
+                    state = transition_worker_state(state, WorkerEvent.VALID_OPERATION)
                     result = await profile_pair_operation(arm, args, request, started)
-                elif request['op'] == 'stop':
-                    result = await arm.stop()
-                    stopped = True
+                    if not isinstance(result, dict):
+                        raise ValueError('profile operation did not return a complete result')
+                    state = transition_worker_state(state, WorkerEvent.ONE_SHOT_RESULT)
+                    reply = {'ok': True, 'result': result}
+                elif mode is WorkerMode.SCREENSHOT and request['op'] == 'capture_screenshot':
+                    state = transition_worker_state(state, WorkerEvent.VALID_OPERATION)
+                    result = await capture_screenshot_operation(arm, request)
+                    if not isinstance(result, dict):
+                        raise ValueError('screenshot operation did not return a complete result')
+                    state = transition_worker_state(state, WorkerEvent.ONE_SHOT_RESULT)
+                    reply = {'ok': True, 'result': result}
                 else:
-                    raise ValueError('unknown worker operation')
-                reply = {'ok': True, 'result': result}
+                    raise ValueError(f'worker operation {request["op"]!r} is not allowed for mode {mode!r}')
             except Exception as error:
-                reply = {'ok': False, 'error': f'{type(error).__name__}: {error}', 'traceback': traceback.format_exc()}
-            sys.stdout.write(PREFIX + json.dumps(reply) + '\n')
-            sys.stdout.flush()
-            if request['op'] == 'stop':
-                break
+                if state is WorkerState.OPERATION_RUNNING:
+                    state = transition_worker_state(state, WorkerEvent.OPERATION_FAILED)
+                elif state in (WorkerState.STARTING, WorkerState.READY):
+                    event = (WorkerEvent.START_FAILED if state is WorkerState.STARTING
+                             and request['op'] == 'start' else WorkerEvent.INVALID_OPERATION)
+                    state = transition_worker_state(state, event)
+                reply = error_reply(error)
+            write_reply(reply)
     finally:
         if not stopped:
             await arm.stop()
@@ -820,28 +1319,120 @@ def descendant_identities(identity, token):
     return []
 
 
-async def cleanup_worker(proc, stdout, identity, initial, token):
-    captured = {(r['pid'], r['created']): r for r in initial}
+def identity_state(identity):
+    if profile_identity_errors(identity, state_required=False):
+        return 'unknown'
+    return state(identity)
+
+
+async def cleanup_worker(handle: WorkerHandle) -> dict:
+    if handle.cleanup_result is not None:
+        return handle.cleanup_result
+
+    cleanup_errors = []
+    captured = {}
+    invalid_identities = []
+    if handle.initial_owned is None:
+        cleanup_errors.append('initial owned-process inventory is unknown')
+    else:
+        for identity in handle.initial_owned:
+            errors = profile_identity_errors(identity, state_required=False)
+            if errors:
+                invalid_identities.append(identity)
+                cleanup_errors.append(f'initial owned-process identity is invalid: {errors!r}')
+            else:
+                captured[(identity['pid'], identity['created'])] = identity
+
+    handle.state = transition_worker_state(handle.state, WorkerEvent.CLEANUP)
     cleanup = {}
     try:
-        cleanup = await send(proc, {'op': 'stop'}, stdout, 60)
-        captured.update({(r['pid'], r['created']): r
-                         for r in cleanup.get('result', {}).get('identities', [])})
-        proc.stdin.close()
-        await asyncio.wait_for(proc.wait(), 15)
+        response = await send(handle.process, {'op': 'stop'}, handle.stdout_log, 60)
+        if not isinstance(response, dict):
+            cleanup_errors.append('worker stop reply is not an object')
+        else:
+            cleanup.update(response)
+            if response.get('ok') is not True:
+                cleanup_errors.append(response.get('error', 'worker stop failed'))
+            result = response.get('result')
+            if not isinstance(result, dict):
+                cleanup_errors.append('worker stop reply has no result object')
+            else:
+                identities = result.get('identities')
+                if not isinstance(identities, list):
+                    cleanup_errors.append('worker stop reply has no identity list')
+                else:
+                    for identity in identities:
+                        errors = profile_identity_errors(identity, state_required=True)
+                        if errors:
+                            invalid_identities.append(identity)
+                            cleanup_errors.append(f'worker stop identity is invalid: {errors!r}')
+                        else:
+                            captured[(identity['pid'], identity['created'])] = {
+                                key: value for key, value in identity.items() if key != 'state'
+                            }
+                worker_errors = result.get('errors')
+                if not isinstance(worker_errors, list):
+                    cleanup_errors.append('worker stop result has no error list')
+                elif worker_errors:
+                    cleanup_errors.extend(f'worker stop: {error}' for error in worker_errors)
     except Exception as error:
-        cleanup['error'] = repr(error)
-        proc.stdin.close()
-    cleanup['fallback_used'] = state(identity) == 'alive' or any(state(r) == 'alive' for r in captured.values())
-    if cleanup['fallback_used']:
-        captured.update({(r['pid'], r['created']): r for r in descendant_identities(identity, token)})
-        await terminate_owned([identity, *captured.values()], token)
+        cleanup_errors.append(f'{type(error).__name__}: {error}')
+    finally:
         try:
-            await asyncio.wait_for(proc.wait(), 5)
-        except TimeoutError:
-            cleanup['error'] = 'owned worker did not exit after verified termination'
-    cleanup['post_worker_exit_identities'] = [{**r, 'state': state(r)} for r in captured.values()]
-    cleanup['worker_identity'] = {**identity, 'state': state(identity)}
+            handle.process.stdin.close()
+        except Exception as error:
+            cleanup_errors.append(f'cannot close worker input: {type(error).__name__}: {error}')
+
+    try:
+        await asyncio.wait_for(handle.process.wait(), 15)
+    except Exception as error:
+        cleanup_errors.append(f'worker did not exit: {type(error).__name__}: {error}')
+
+    worker_identity_errors = profile_identity_errors(handle.worker_identity, state_required=False)
+    worker_state = identity_state(handle.worker_identity)
+    child_states = {key: identity_state(identity) for key, identity in captured.items()}
+    fallback_used = worker_state == 'alive' or 'alive' in child_states.values()
+    if fallback_used:
+        if worker_identity_errors:
+            cleanup_errors.append('worker identity is unverified; refusing to signal processes')
+        else:
+            for identity in descendant_identities(handle.worker_identity, handle.owner_token):
+                errors = profile_identity_errors(identity, state_required=False)
+                if errors:
+                    invalid_identities.append(identity)
+                    cleanup_errors.append(f'descendant identity is invalid: {errors!r}')
+                else:
+                    captured[(identity['pid'], identity['created'])] = identity
+            await terminate_owned([handle.worker_identity, *captured.values()], handle.owner_token)
+            try:
+                await asyncio.wait_for(handle.process.wait(), 5)
+            except Exception as error:
+                cleanup_errors.append(f'worker did not exit after verified termination: {type(error).__name__}: {error}')
+
+    worker_state = identity_state(handle.worker_identity)
+    post_worker_exit_identities = [
+        {**identity, 'state': identity_state(identity)}
+        for identity in captured.values()
+    ]
+    post_worker_exit_identities.extend(
+        {**identity, 'state': 'unknown'} if isinstance(identity, dict) else {'state': 'unknown'}
+        for identity in invalid_identities
+    )
+    worker_identity = {**handle.worker_identity, 'state': worker_state}
+    cleanup['fallback_used'] = fallback_used
+    cleanup['post_worker_exit_identities'] = post_worker_exit_identities
+    cleanup['worker_identity'] = worker_identity
+
+    retired = worker_state in ('absent', 'reused') and all(
+        identity['state'] in ('absent', 'reused') for identity in post_worker_exit_identities
+    )
+    cleanup['ok'] = not cleanup_errors and retired and handle.process.returncode is not None
+    if cleanup['ok']:
+        handle.state = transition_worker_state(handle.state, WorkerEvent.CLEANUP_VERIFIED)
+    else:
+        cleanup['error'] = '; '.join(str(error) for error in cleanup_errors) or 'worker cleanup could not be verified'
+        handle.state = transition_worker_state(handle.state, WorkerEvent.CLEANUP_UNCERTAIN)
+    handle.cleanup_result = cleanup
     return cleanup
 
 
@@ -962,24 +1553,243 @@ def local_open(url, timeout):
     return urllib.request.build_opener(urllib.request.ProxyHandler({})).open(url, timeout=timeout)
 
 
-def worker_environment(root, token, source):
-    env = {k: v for k, v in os.environ.items()
-           if not k.startswith(('BU_', 'BH_', 'BROWSER_USE_', 'OPENBROWSER_', 'AGENT_BROWSER_', 'LIGHTPANDA_'))}
-    env.update(
-        HOME=str(root / 'home'), XDG_CONFIG_HOME=str(root / 'config'), XDG_CACHE_HOME=str(root / 'cache'),
-        PYTHONPATH=str(source / 'src'), NAVIGATION_BENCHMARK_OWNER=token,
-        ANONYMIZED_TELEMETRY='false', LIGHTPANDA_DISABLE_TELEMETRY='true', BH_TELEMETRY='false',
-        BROWSER_HARNESS_TELEMETRY='false', BROWSER_USE_SETUP_LOGGING='false', BROWSER_USE_NO_UPDATE_CHECK='1',
-        BH_HOME=str(root / 'bh'), BH_RUNTIME_DIR=str(root / 'runtime'), BH_TMP_DIR=str(root / 'tmp'),
-        BH_TAB_MARKER='0', BH_RECORD='0', AGENT_BROWSER_SOCKET_DIR=str(root / 'agent'),
-        AGENT_BROWSER_NO_VERSION_CHECK='1', AGENT_BROWSER_NO_WEBMCP='1', DO_NOT_TRACK='1',
-        OPENBROWSER_HEADLESS='true', OPENBROWSER_DISABLE_EXTENSIONS='true',
-    )
+def worker_environment(launch: WorkerLaunch) -> dict[str, str]:
+    validate_worker_launch(launch)
+
+    worker_root = Path(launch.worker_root)
+    interpreter = Path(launch.interpreter)
+    path_parts = [str(interpreter.parent)]
+    if launch.node is not None:
+        node = Path(launch.node)
+        if not node.is_absolute():
+            raise ValueError('worker Node executable must be absolute')
+        path_parts.append(str(node.parent))
+    path_parts.extend(('/usr/bin', '/bin', '/usr/sbin', '/sbin'))
+
+    env = {
+        'PATH': os.pathsep.join(path_parts),
+        'VIRTUAL_ENV': str(interpreter.parent.parent),
+        'HOME': str(worker_root / 'home'),
+        'XDG_CONFIG_HOME': str(worker_root / 'config'),
+        'XDG_CACHE_HOME': str(worker_root / 'cache'),
+        'TMPDIR': str(worker_root / 'tmp'),
+        'LANG': 'C',
+        'PYTHON_DOTENV_DISABLED': '1',
+        'NAVIGATION_BENCHMARK_OWNER': launch.owner_token,
+        'BH_HOME': str(worker_root / 'bh'),
+        'BH_RUNTIME_DIR': str(worker_root / 'runtime'),
+        'BH_TMP_DIR': str(worker_root / 'tmp'),
+        'BH_TAB_MARKER': '0',
+        'BH_RECORD': '0',
+        'ANONYMIZED_TELEMETRY': 'false',
+        'LIGHTPANDA_DISABLE_TELEMETRY': 'true',
+        'BH_TELEMETRY': 'false',
+        'BROWSER_HARNESS_TELEMETRY': 'false',
+        'BROWSER_USE_SETUP_LOGGING': 'false',
+        'BROWSER_USE_NO_UPDATE_CHECK': '1',
+        'AGENT_BROWSER_SOCKET_DIR': str(worker_root / 'agent'),
+        'AGENT_BROWSER_NO_VERSION_CHECK': '1',
+        'AGENT_BROWSER_NO_WEBMCP': '1',
+        'DO_NOT_TRACK': '1',
+        'OPENBROWSER_HEADLESS': 'true',
+        'OPENBROWSER_DISABLE_EXTENSIONS': 'true',
+        'AWS_EC2_METADATA_DISABLED': 'true',
+        'AWS_CONFIG_FILE': '/dev/null',
+        'AWS_SHARED_CREDENTIALS_FILE': '/dev/null',
+    }
+    if launch.arm == 'openbrowser':
+        env['PYTHONPATH'] = str(Path(launch.source_root) / 'src')
     return env
 
 
+def prepare_worker_directories(env: dict[str, str]) -> None:
+    for name in ('HOME', 'XDG_CONFIG_HOME', 'XDG_CACHE_HOME', 'TMPDIR', 'BH_HOME',
+                 'BH_RUNTIME_DIR', 'BH_TMP_DIR', 'AGENT_BROWSER_SOCKET_DIR'):
+        path = Path(env[name])
+        path.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if path.is_symlink() or not path.is_dir():
+            raise ValueError(f'worker environment path is not a private directory: {name}')
+        path.chmod(0o700)
+
+
+def validate_private_directory(path):
+    physical_root, directory = physical_profile_path(path)
+    for part in directory.relative_to(physical_root).parts:
+        physical_root /= part
+        info = physical_root.lstat()
+        if not stat.S_ISDIR(info.st_mode) or stat.S_IMODE(info.st_mode) != 0o700 \
+                or info.st_uid != os.geteuid():
+            raise ValueError(f'benchmark path is not a private directory: {physical_root}')
+    return directory
+
+
+def worker_command(launch: WorkerLaunch) -> list[str]:
+    command = [
+        str(launch.interpreter), '-u', str(SCRIPT), '--worker', launch.arm,
+        '--worker-mode', launch.mode.value, '--run-root', str(launch.worker_root),
+        '--source', str(launch.source_root),
+    ]
+    for option in ('chrome', 'lightpanda', 'agent_browser'):
+        value = getattr(launch, option)
+        if value is not None:
+            command.extend(['--' + option.replace('_', '-'), str(value)])
+    return command
+
+
+async def launch_worker(launch: WorkerLaunch) -> WorkerHandle:
+    validate_worker_launch(launch)
+    if not launch.interpreter.is_file() or not os.access(launch.interpreter, os.X_OK):
+        raise ValueError('worker interpreter is unavailable or not executable')
+    for name in ('chrome', 'lightpanda', 'agent_browser', 'node'):
+        path = getattr(launch, name)
+        if path is not None and (not path.is_file() or not os.access(path, os.X_OK)):
+            raise ValueError(f'worker executable {name} is unavailable or not executable')
+
+    physical_root = Path('/tmp').resolve(strict=True)
+    runtime_root = validate_private_directory(launch.runtime_root)
+    if runtime_root.parent != physical_root:
+        raise ValueError('RUNTIME_ROOT must be a direct child of physical /tmp')
+    marker = runtime_root / '.benchmark-owner'
+    try:
+        marker_info = marker.lstat()
+    except OSError as error:
+        raise ValueError('RUNTIME_ROOT has no private owner marker') from error
+    if not stat.S_ISREG(marker_info.st_mode) or stat.S_IMODE(marker_info.st_mode) != 0o600 \
+            or marker_info.st_uid != os.geteuid() or marker.read_text() != launch.owner_token:
+        raise ValueError('RUNTIME_ROOT owner marker does not match this worker')
+
+    log_directory = validate_private_directory(launch.log_directory)
+    worker_root = Path(launch.worker_root)
+    if worker_root.exists() or worker_root.is_symlink():
+        raise ValueError('worker root already exists')
+    worker_root.mkdir(mode=0o700)
+    worker_root.chmod(0o700)
+    working_directory = Path(launch.working_directory)
+    if working_directory == worker_root:
+        validate_private_directory(working_directory)
+    else:
+        validate_private_directory(working_directory)
+    if working_directory == launch.source_root or working_directory.is_relative_to(launch.source_root):
+        raise ValueError('worker working directory must not be inside the source checkout')
+
+    env = worker_environment(launch)
+    prepare_worker_directories(env)
+    log_paths = (
+        log_directory / f'{launch.log_prefix}.stdout.log',
+        log_directory / f'{launch.log_prefix}.stderr.log',
+    )
+    descriptors = []
+    streams = []
+    try:
+        for path in log_paths:
+            descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            descriptors.append(descriptor)
+            os.chmod(path, 0o600)
+            streams.append(os.fdopen(descriptor, 'w'))
+            descriptors.pop()
+        process = await asyncio.create_subprocess_exec(
+            *worker_command(launch),
+            cwd=working_directory,
+            env=env,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=streams[1],
+        )
+    except BaseException:
+        for descriptor in descriptors:
+            os.close(descriptor)
+        for stream in streams:
+            stream.close()
+        raise
+
+    try:
+        identity = record(psutil.Process(process.pid), launch.owner_token)
+    except Exception as error:
+        identity = {
+            'pid': process.pid, 'created': None, 'cmdline': [],
+            'owner_token': launch.owner_token, 'owner_root': str(worker_root),
+            'ownership_error': f'{type(error).__name__}: {error}',
+        }
+    return WorkerHandle(
+        process=process, stdout_log=streams[0], stderr_log=streams[1],
+        worker_identity=identity, initial_owned=None,
+        owner_token=launch.owner_token, mode=launch.mode,
+        state=transition_worker_state(WorkerState.CREATED, WorkerEvent.START),
+    )
+
+
+async def start_worker(handle: WorkerHandle, timeout=90):
+    if handle.state is not WorkerState.STARTING:
+        raise ValueError(f'worker cannot start from state {handle.state.value}')
+    identity_errors = profile_identity_errors(handle.worker_identity, state_required=False)
+    if identity_errors:
+        handle.state = transition_worker_state(handle.state, WorkerEvent.START_FAILED)
+        return {'ok': False, 'error': f'worker identity is incomplete: {identity_errors!r}'}, identity_errors
+    try:
+        response = await send(handle.process, {'op': 'start'}, handle.stdout_log, timeout)
+    except Exception:
+        handle.state = transition_worker_state(handle.state, WorkerEvent.START_FAILED)
+        raise
+    errors = []
+    if not isinstance(response, dict) or response.get('ok') is not True:
+        errors.append('worker start did not return an ok reply')
+    result = response.get('result') if isinstance(response, dict) else None
+    owned = result.get('owned') if isinstance(result, dict) else None
+    if not isinstance(owned, list):
+        errors.append('worker start reply has no owned-process inventory')
+        owned = None
+    if owned is not None:
+        for index, identity in enumerate(owned):
+            identity_errors = profile_identity_errors(identity, state_required=False)
+            if identity_errors:
+                errors.append(f'worker start identity {index} is invalid: {identity_errors!r}')
+    if errors:
+        handle.initial_owned = None
+        handle.state = transition_worker_state(handle.state, WorkerEvent.START_FAILED)
+    else:
+        handle.initial_owned = tuple(owned)
+        handle.state = transition_worker_state(handle.state, WorkerEvent.START_SUCCEEDED)
+    return response, errors
+
+
+async def send_operation(handle: WorkerHandle, request, timeout=90):
+    if handle.state is not WorkerState.READY:
+        raise ValueError(f'worker operation is not allowed in state {handle.state.value}')
+    if not isinstance(request, dict) or request.get('op') != _MODE_OPERATION[handle.mode]:
+        handle.state = transition_worker_state(handle.state, WorkerEvent.INVALID_OPERATION)
+        raise ValueError(f'worker operation is not allowed in mode {handle.mode.value}')
+
+    handle.state = transition_worker_state(handle.state, WorkerEvent.VALID_OPERATION)
+    try:
+        response = await send(handle.process, request, handle.stdout_log, timeout)
+    except Exception:
+        handle.state = transition_worker_state(handle.state, WorkerEvent.OPERATION_FAILED)
+        raise
+    if not isinstance(response, dict) or response.get('ok') is not True:
+        handle.state = transition_worker_state(handle.state, WorkerEvent.OPERATION_FAILED)
+        return response
+    result = response.get('result')
+    if not isinstance(result, dict):
+        handle.state = transition_worker_state(handle.state, WorkerEvent.OPERATION_FAILED)
+        raise ValueError('worker operation reply has no result object')
+    if handle.mode is WorkerMode.NAVIGATION:
+        required = ('arm', 'kind', 'index', 'nonce', 'url', 'outcome',
+                    'start_ns', 'end_ns', 'elapsed_ns')
+        if any(key not in result for key in required) \
+                or result.get('outcome') not in ('success', 'failure') \
+                or type(result.get('index')) is not int \
+                or any(type(result.get(key)) is not int or result[key] < 0
+                       for key in ('start_ns', 'end_ns', 'elapsed_ns')):
+            handle.state = transition_worker_state(handle.state, WorkerEvent.OPERATION_FAILED)
+            raise ValueError('navigation operation reply is not a complete sample')
+        handle.state = transition_worker_state(handle.state, WorkerEvent.NAVIGATION_RESULT)
+    else:
+        handle.state = transition_worker_state(handle.state, WorkerEvent.ONE_SHOT_RESULT)
+    return response
+
+
 def parser():
-    p = argparse.ArgumentParser(description=__doc__)
+    p = argparse.ArgumentParser(description=CLI_DESCRIPTION)
     p.add_argument('--source', default=os.getenv('NAV_BENCH_SOURCE'))
     p.add_argument('--output')
     p.add_argument('--chrome', default=os.getenv('NAV_BENCH_CHROME'))
@@ -993,6 +1803,7 @@ def parser():
     p.add_argument('--arms', nargs='+', choices=ARMS, default=list(ARMS))
     p.add_argument('--verify', metavar='RESULT_DIRECTORY', help='Verify saved hashes and result contracts without browsers')
     p.add_argument('--worker', choices=ARMS, help=argparse.SUPPRESS)
+    p.add_argument('--worker-mode', choices=tuple(mode.value for mode in WorkerMode), help=argparse.SUPPRESS)
     p.add_argument('--run-root', help=argparse.SUPPRESS)
     return p
 
@@ -1004,9 +1815,15 @@ def validate_config(args):
         raise ValueError('duplicate arms are not allowed')
     if not args.source or not (Path(args.source) / 'src/openbrowser/__init__.py').is_file():
         raise ValueError('--source must identify the source repository')
-    if not args.output or Path(args.output).exists() or Path(args.output).is_symlink():
+    if not args.output:
+        raise ValueError('--output must identify a new result root')
+    physical_root, output = physical_profile_path(args.output)
+    if output.parent != physical_root:
+        raise ValueError('--output must be a direct child of physical /tmp')
+    if output.exists() or output.is_symlink():
         raise ValueError('--output must be a new directory')
     args.source = str(Path(args.source).resolve())
+    args.output = str(output)
     for key in ('chrome', 'lightpanda', 'agent_browser', 'browser_use_python', 'openbrowser_python'):
         value = getattr(args, key)
         if value:
@@ -1079,6 +1896,7 @@ class ProfileRequest:
     openbrowser_python: Path
     chrome: Path
     version_manifest: Path
+    result_root: Path
     workload: Literal['fast', 'delayed']
     output: Path
 
@@ -1093,6 +1911,7 @@ def profile_parser():
     p.add_argument('--chrome')
     p.add_argument('--version-manifest')
     p.add_argument('--workload', choices=('fast', 'delayed'))
+    p.add_argument('--result-root')
     p.add_argument('--output')
     p.add_argument('--verify', metavar='PROFILE_DIRECTORY')
     return p
@@ -1123,28 +1942,58 @@ def physical_profile_path(value):
     return physical_root, physical
 
 
-def validate_profile_directory(value, verify=False):
-    physical_root, directory = physical_profile_path(value)
-    parent = directory.parent
+def validate_profile_result_root(value):
+    physical_root, result_root = physical_profile_path(value)
+    if result_root.parent != physical_root:
+        raise ValueError('--result-root must be a direct child of physical /tmp')
     try:
-        parent_info = parent.stat()
+        info = result_root.lstat()
     except OSError as error:
-        raise ValueError(f'profile output parent must be an existing directory under /tmp: {parent}') from error
-    if not stat.S_ISDIR(parent_info.st_mode) or parent.is_symlink():
-        raise ValueError('profile output parent must be a regular directory')
-    if stat.S_IMODE(parent_info.st_mode) != 0o700:
-        raise ValueError('profile output parent must have mode 0700')
+        raise ValueError(f'--result-root must be an existing directory: {result_root}') from error
+    if not stat.S_ISDIR(info.st_mode) or stat.S_IMODE(info.st_mode) != 0o700:
+        raise ValueError('--result-root must be a directory with mode 0700')
+    if info.st_uid != os.geteuid():
+        raise ValueError('--result-root must be owned by the current user')
+    return result_root
+
+
+def profile_result_path(value, result_root, workload=None):
+    root = validate_profile_result_root(result_root)
+    try:
+        physical_root, directory = physical_profile_path(value)
+    except ValueError as error:
+        if 'must be under physical /tmp' in str(error):
+            raise ValueError('profile path is outside RESULT_ROOT') from error
+        raise
+    if physical_root != root.parent or not directory.is_relative_to(root):
+        raise ValueError('profile path is outside RESULT_ROOT')
+    parts = directory.relative_to(root).parts
+    if len(parts) != 3 or parts[0] != 'profile' or parts[1] not in ('fast', 'delayed') \
+            or (workload is not None and parts[1] != workload):
+        raise ValueError('profile path must be RESULT_ROOT/profile/<workload>/<run-id>')
+    for parent in (root / 'profile', root / 'profile' / parts[1]):
+        try:
+            info = parent.lstat()
+        except OSError as error:
+            raise ValueError(f'profile output parent must exist: {parent}') from error
+        if not stat.S_ISDIR(info.st_mode) or stat.S_IMODE(info.st_mode) != 0o700 \
+                or info.st_uid != os.geteuid():
+            raise ValueError(f'profile output parent must be a private directory: {parent}')
+    return root, directory
+
+
+def validate_profile_directory(value, result_root, workload=None, verify=False):
+    _root, directory = profile_result_path(value, result_root, workload)
     if verify:
         try:
             info = directory.lstat()
         except OSError as error:
             raise ValueError(f'profile directory does not exist: {directory}') from error
-        if not stat.S_ISDIR(info.st_mode) or stat.S_IMODE(info.st_mode) != 0o700:
-            raise ValueError('profile directory must be a regular directory with mode 0700')
+        if not stat.S_ISDIR(info.st_mode) or stat.S_IMODE(info.st_mode) != 0o700 \
+                or info.st_uid != os.geteuid():
+            raise ValueError('profile directory must be a private directory with mode 0700')
     elif directory.exists() or directory.is_symlink():
         raise ValueError('profile output must be a new directory')
-    if not parent.is_relative_to(physical_root):
-        raise ValueError('profile output parent must be under physical /tmp')
     return directory
 
 
@@ -1195,6 +2044,11 @@ def profile_manifest_errors(manifest):
 
 
 def validate_profile_request(args):
+    if args.workload not in ('fast', 'delayed'):
+        raise ValueError('--workload must be fast or delayed')
+    result_root = validate_profile_result_root(args.result_root)
+    output = validate_profile_directory(args.output, result_root, workload=args.workload)
+
     if not isinstance(args.source, str) or not args.source.strip():
         raise ValueError('--source must identify the candidate source repository')
     source_value = Path(args.source).expanduser()
@@ -1232,14 +2086,12 @@ def validate_profile_request(args):
     if sha256(SCRIPT) != harness_hash:
         raise ValueError('--version-manifest harness.sha256 does not match navigation_compare.py')
 
-    output = validate_profile_directory(args.output)
-    if args.workload not in ('fast', 'delayed'):
-        raise ValueError('--workload must be fast or delayed')
     return ProfileRequest(
         source=source,
         openbrowser_python=executable_paths['openbrowser_python'],
         chrome=executable_paths['chrome'],
         version_manifest=manifest_path,
+        result_root=result_root,
         workload=args.workload,
         output=output,
     )
@@ -1252,8 +2104,17 @@ def profile_cli(argv):
     if args.verify is not None:
         if any(getattr(args, name) is not None for name in run_fields):
             p.error('--verify cannot be combined with run options')
-        return verify_profile(args.verify)
+        if args.result_root is None:
+            p.error('--verify requires --result-root')
+        try:
+            profile_result_path(args.verify, args.result_root)
+        except (ValueError, OSError) as error:
+            LOG.error('invalid profile directory: %s', error)
+            return 2
+        return verify_profile(args.verify, args.result_root)
     missing = [f'--{name.replace("_", "-")}' for name in run_fields if getattr(args, name) is None]
+    if args.result_root is None:
+        missing.append('--result-root')
     if missing:
         p.error('run form requires ' + ', '.join(missing))
     try:
@@ -1262,13 +2123,6 @@ def profile_cli(argv):
         LOG.error('%s', error)
         return 2
     return asyncio.run(run_profile(request))
-
-
-def profile_worker_environment(root, token, source):
-    env = worker_environment(root, token, source)
-    env = {key: value for key, value in env.items() if not key.startswith('AWS_')}
-    env['AWS_EC2_METADATA_DISABLED'] = 'true'
-    return env
 
 
 def atomic_profile_bytes(path, content):
@@ -1628,9 +2482,10 @@ def profile_report_errors(report):
     return errors
 
 
-def verify_profile(directory):
+def verify_profile(directory, result_root):
     try:
-        output = validate_profile_directory(directory, verify=True)
+        result_root = validate_profile_result_root(result_root)
+        output = validate_profile_directory(directory, result_root, verify=True)
     except (OSError, ValueError) as error:
         LOG.error('invalid profile directory: %s', error)
         return 1
@@ -1749,7 +2604,9 @@ def remove_new_profile_output(directory, identity):
 
 async def run_profile(request):
     try:
-        destination = validate_profile_directory(request.output)
+        destination = validate_profile_directory(
+            request.output, request.result_root, workload=request.workload,
+        )
         source = Path(request.source).expanduser().resolve()
         python = Path(request.openbrowser_python).expanduser().absolute()
         chrome = Path(request.chrome).expanduser().absolute()
@@ -1811,6 +2668,7 @@ async def run_profile(request):
     fixture_thread = None
     fixture_thread_started = False
     fixture_thread_stopped = False
+    handle = None
     proc = None
     stdout_log = None
     stderr_log = None
@@ -1831,7 +2689,7 @@ async def run_profile(request):
     source_unchanged = False
     harness_unchanged = False
     source_commit_before = source_commit
-    initial_identities: list | None = None
+    initial_identities: tuple[dict, ...] | None = None
     fixture_created = False
 
     def fail(phase, message):
@@ -1861,8 +2719,6 @@ async def run_profile(request):
         token = uuid.uuid4().hex
         atomic_profile_bytes(runtime_root / '.benchmark-owner', token.encode())
         run_root = runtime_root / 'openbrowser'
-        run_root.mkdir(mode=0o700)
-        run_root.chmod(0o700)
 
         fixture = Fixture(.15)
         fixture_created = True
@@ -1870,57 +2726,35 @@ async def run_profile(request):
         fixture_thread.start()
         fixture_thread_started = True
 
-        stdout_log = os.fdopen(os.open(destination / 'worker.stdout.log', os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), 'w')
-        stderr_log = os.fdopen(os.open(destination / 'worker.stderr.log', os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), 'w')
-        env = profile_worker_environment(run_root, token, source)
-        for variable in ('HOME', 'XDG_CONFIG_HOME', 'XDG_CACHE_HOME'):
-            Path(env[variable]).mkdir(mode=0o700, parents=True, exist_ok=True)
-        env['PATH'] = str(python.parent) + os.pathsep + env.get('PATH', '')
-        command = [
-            str(python), '-u', str(SCRIPT), '--worker', 'openbrowser',
-            '--run-root', str(run_root), '--source', str(source), '--chrome', str(chrome),
-        ]
-        proc = await asyncio.create_subprocess_exec(
-            *command,
-            cwd=run_root,
-            env=env,
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=stderr_log,
+        launch = make_worker_launch(
+            arm='openbrowser', mode=WorkerMode.PROFILE, source_root=source,
+            candidate_python=python, browser_use_python=python,
+            runtime_root=runtime_root, worker_root=run_root,
+            working_directory=run_root, log_directory=destination,
+            log_prefix='worker', owner_token=token, chrome=chrome,
         )
-        try:
-            worker_identity = record(psutil.Process(proc.pid), token)
-            identity_errors = profile_identity_errors(worker_identity, state_required=False)
-            worker_identity_complete = not identity_errors
-            if identity_errors:
-                fail('startup', f'profile worker identity capture is incomplete: {identity_errors!r}')
-        except Exception as error:
-            worker_identity = {'pid': proc.pid, 'state': 'unknown', 'owner_token': token, 'owner_root': str(run_root)}
-            worker_identity_complete = False
-            fail('startup', f'cannot record profile worker identity: {error}')
+        handle = await launch_worker(launch)
+        proc = handle.process
+        stdout_log = handle.stdout_log
+        stderr_log = handle.stderr_log
+        worker_identity = handle.worker_identity
+        identity_errors = profile_identity_errors(worker_identity, state_required=False)
+        worker_identity_complete = not identity_errors
+        if identity_errors:
+            fail('startup', f'profile worker identity capture is incomplete: {identity_errors!r}')
 
         try:
-            response = await send(proc, {'op': 'start'}, stdout_log)
+            response, start_errors = await start_worker(handle)
+            if start_errors:
+                fail('startup', f'OpenBrowser worker startup contract is incomplete: {start_errors!r}')
             if not response.get('ok'):
                 fail('startup', response.get('error', 'OpenBrowser worker startup failed'))
-            else:
+            elif not start_errors:
                 started = response.get('result')
                 if not isinstance(started, dict):
                     fail('startup', 'OpenBrowser worker returned an invalid startup result')
                 else:
-                    owned = started.get('owned')
-                    if isinstance(owned, list):
-                        inventory_errors = []
-                        for index, identity in enumerate(owned):
-                            identity_errors = profile_identity_errors(identity, state_required=False)
-                            if identity_errors:
-                                inventory_errors.append(f'{index}: {identity_errors!r}')
-                        if inventory_errors:
-                            fail('startup', f'OpenBrowser worker returned an invalid owned-process inventory: {inventory_errors!r}')
-                        else:
-                            initial_identities = owned
-                    else:
-                        fail('startup', 'OpenBrowser worker returned an invalid owned-process inventory')
+                    initial_identities = handle.initial_owned
                     browser_runtime = started.get('version')
                     package_data = {
                         'packages': started.get('packages', {}),
@@ -1943,7 +2777,7 @@ async def run_profile(request):
                 'target': target_spec,
             }
             try:
-                response = await send(proc, pair_request, stdout_log)
+                response = await send_operation(handle, pair_request)
                 if not response.get('ok'):
                     fail('profile', response.get('error', 'OpenBrowser worker rejected profile_pair'))
                 else:
@@ -1976,11 +2810,9 @@ async def run_profile(request):
     except Exception as error:
         fail('startup', f'profile startup failed: {type(error).__name__}: {error}')
     finally:
-        if proc is not None:
+        if handle is not None:
             try:
-                cleanup_response = await cleanup_worker(
-                    proc, stdout_log, worker_identity or {}, initial_identities or [], token,
-                )
+                cleanup_response = await cleanup_worker(handle)
             except Exception as error:
                 cleanup_response = {
                     'ok': False,
@@ -2234,7 +3066,7 @@ async def run_profile(request):
         return 1
     if report['status'] == 'complete' and not report['verification_errors']:
         try:
-            verification_result = verify_profile(destination)
+            verification_result = verify_profile(destination, request.result_root)
         except Exception as error:
             verification_result = None
             verification_error = f'offline artifact verification raised {type(error).__name__}: {error}'
@@ -2279,12 +3111,14 @@ def dispatch(argv=None):
 
 async def main(args):
     validate_config(args)
-    destination = Path(args.output).resolve()
+    destination = Path(args.output)
     destination.mkdir(parents=True, exist_ok=False)
+    destination.chmod(0o700)
+    validate_private_directory(destination)
     root = Path(tempfile.mkdtemp(prefix='nb-', dir='/tmp' if os.name == 'posix' else None)).resolve()
     root.chmod(0o700)
     token = uuid.uuid4().hex
-    (root / '.benchmark-owner').write_text(token)
+    atomic_profile_bytes(root / '.benchmark-owner', token.encode())
     source = Path(args.source)
     before = source_manifest(source)
     result = {
@@ -2308,39 +3142,36 @@ async def main(args):
     fixture = Fixture(args.delay)
     fixture_thread = threading.Thread(target=fixture.serve_forever, daemon=True)
     fixture_thread.start()
-    workers = {}
+    workers: dict[str, WorkerHandle] = {}
     try:
         for name, status in result['availability'].items():
             if status['state'] == 'unavailable':
                 LOG.warning('%s unavailable: %s', name, status['reason'])
                 continue
             run_root = root / name
-            run_root.mkdir(mode=0o700)
-            env = worker_environment(run_root, token, source)
-            for variable in ('HOME', 'XDG_CONFIG_HOME', 'XDG_CACHE_HOME'):
-                Path(env[variable]).mkdir(mode=0o700)
-            python = args.openbrowser_python if name == 'openbrowser' else (args.browser_use_python if name == 'browser-use' else sys.executable)
-            env['PATH'] = str(Path(python).parent) + os.pathsep + env.get('PATH', '')
-            stderr = (destination / f'{name}.stderr.log').open('w')
-            stdout = (destination / f'{name}.stdout.log').open('w')
-            command = [str(python), '-u', str(SCRIPT), '--worker', name, '--run-root', str(run_root), '--source', str(source)]
-            for option in ('chrome', 'lightpanda', 'agent_browser'):
-                if getattr(args, option):
-                    command += ['--' + option.replace('_', '-'), getattr(args, option)]
+            launch = make_worker_launch(
+                arm=name, mode=WorkerMode.NAVIGATION, source_root=source.resolve(),
+                candidate_python=Path(args.openbrowser_python).absolute(),
+                browser_use_python=(Path(args.browser_use_python).absolute()
+                                    if args.browser_use_python else None),
+                runtime_root=root, worker_root=run_root, working_directory=run_root,
+                log_directory=destination, log_prefix=name, owner_token=token,
+                chrome=Path(args.chrome).absolute() if args.chrome else None,
+                lightpanda=Path(args.lightpanda).absolute() if args.lightpanda else None,
+                agent_browser=Path(args.agent_browser).absolute() if args.agent_browser else None,
+            )
             try:
-                proc = await asyncio.create_subprocess_exec(*command, cwd=run_root, env=env,
-                            stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=stderr)
-                identity = record(psutil.Process(proc.pid), token)
-                workers[name] = (proc, stdout, stderr, identity)
+                handle = await launch_worker(launch)
+                workers[name] = handle
                 start = time.perf_counter_ns()
-                response = await send(proc, {'op': 'start'}, stdout)
+                response, start_errors = await start_worker(handle)
                 result['startup'][name] = {**response, 'elapsed_ns': time.perf_counter_ns() - start}
-                status['state'] = 'ready' if response.get('ok') else 'failed'
+                if start_errors:
+                    status.update(state='failed', reason='; '.join(start_errors))
+                else:
+                    status['state'] = 'ready' if response.get('ok') else 'failed'
             except Exception as error:
                 status.update(state='failed', reason=repr(error))
-                if name not in workers:
-                    stdout.close()
-                    stderr.close()
         active = [name for name, status in result['availability'].items() if status['state'] == 'ready']
         schedule = [(True, 0, name, 'fast') for name in active]
         for index in range(args.samples):
@@ -2351,10 +3182,10 @@ async def main(args):
             nonce = f'{name}-{kind}-{index}-{uuid.uuid4().hex}'
             url = f'http://127.0.0.1:{fixture.server_address[1]}/fixture?{urlencode({"nonce": nonce, "delayed": int(kind == "delayed")})}'
             sample = {'arm': name, 'index': index, 'kind': kind, 'nonce': nonce, 'url': url}
-            proc, stdout, _, _ = workers[name]
+            handle = workers[name]
             start = time.perf_counter_ns()
             try:
-                response = await send(proc, {'op': 'trial', **sample}, stdout, 40)
+                response = await send_operation(handle, {'op': 'trial', **sample}, 40)
                 if not response.get('ok'):
                     raise RuntimeError(response)
                 sample.update(response['result'])
@@ -2375,16 +3206,23 @@ async def main(args):
         LOG.exception('comparison failed')
     finally:
         all_states = []
-        for name, (proc, stdout, stderr, identity) in workers.items():
-            initial = result['startup'].get(name, {}).get('result', {}).get('owned', [])
-            response = await cleanup_worker(proc, stdout, identity, initial, token)
+        for name, handle in workers.items():
+            try:
+                response = await cleanup_worker(handle)
+            except Exception as error:
+                response = {
+                    'ok': False,
+                    'error': f'{type(error).__name__}: {error}',
+                    'worker_identity': {**handle.worker_identity, 'state': 'unknown'},
+                    'post_worker_exit_identities': [],
+                }
             result['cleanup'][name] = response
-            all_states.extend(r['state'] for r in response['post_worker_exit_identities'])
-            all_states.append(response['worker_identity']['state'])
+            all_states.extend(r.get('state', 'unknown') for r in response.get('post_worker_exit_identities', []))
+            all_states.append(response.get('worker_identity', {}).get('state', 'unknown'))
             if not response.get('ok'):
                 all_states.append('unknown')
-            stdout.close()
-            stderr.close()
+            handle.stdout_log.close()
+            handle.stderr_log.close()
         fixture.shutdown()
         fixture.server_close()
         fixture_thread.join(timeout=5)
