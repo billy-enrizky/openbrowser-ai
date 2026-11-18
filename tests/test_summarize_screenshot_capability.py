@@ -1,20 +1,19 @@
-from io import BytesIO
 import hashlib
-from pathlib import Path
 import subprocess
 import sys
 import tempfile
+from io import BytesIO
+from pathlib import Path
 
-from PIL import Image
 import pytest
-
+from PIL import Image
 
 PROJECT_SOURCE = Path(__file__).resolve().parents[1]
 SCRIPT = PROJECT_SOURCE / "benchmarks" / "summarize_screenshot_capability.py"
 sys.path.insert(0, str(PROJECT_SOURCE / "benchmarks"))
 
-import latest_benchmark_preflight as preflight  # noqa: E402
-import screenshot_capability as capability  # noqa: E402
+import latest_benchmark_preflight as preflight
+import screenshot_capability as capability
 
 INSTALLED_TOOL_KEYS = {"lightpanda", "agent-browser", "chrome_for_testing"}
 
@@ -65,10 +64,12 @@ def _make_attempt(run_root: Path, run_id: str, arm: str, index: int) -> dict:
         "errors": [],
     }
     if arm == "lightpanda":
-        worker_cleanup.update({"process_state": "verified", "process_group_id": worker_identity["pid"]})
-        logs = attempt_dir / 'logs'
+        worker_cleanup.update(
+            {"process_state": "verified", "process_group_id": worker_identity["pid"]}
+        )
+        logs = attempt_dir / "logs"
         logs.mkdir(mode=0o700)
-        script = logs / 'lightpanda.input.js'
+        script = logs / "lightpanda.input.js"
         script.write_bytes(capability.render_lightpanda_script(request))
         script.chmod(0o600)
 
@@ -92,12 +93,14 @@ def _make_attempt(run_root: Path, run_id: str, arm: str, index: int) -> dict:
             "count": 1,
             "successful_count": 1,
             "ok": True,
-            "image_requests": [{
-                "method": "GET",
-                "path": "/pixels.png",
-                "nonce": nonce,
-                "status": 200,
-            }],
+            "image_requests": [
+                {
+                    "method": "GET",
+                    "path": "/pixels.png",
+                    "nonce": nonce,
+                    "status": 200,
+                }
+            ],
         },
         "png": {
             "file": "result.png",
@@ -123,7 +126,9 @@ def _make_attempt(run_root: Path, run_id: str, arm: str, index: int) -> dict:
     return attempt
 
 
-def _write_valid_run(project_root: Path, result_root: Path, *, run_name: str = "screenshot") -> dict:
+def _write_valid_run(
+    project_root: Path, result_root: Path, *, run_name: str = "screenshot"
+) -> dict:
     result_root.mkdir(mode=0o700, exist_ok=True)
     result_root.chmod(0o700)
     run_root = result_root / run_name
@@ -135,7 +140,8 @@ def _write_valid_run(project_root: Path, result_root: Path, *, run_name: str = "
     for relative in preflight.EXECUTED_FILE_PATHS:
         source_path = PROJECT_SOURCE / relative
         executed_files[relative] = (
-            _sha256(source_path) if source_path.is_file()
+            _sha256(source_path)
+            if source_path.is_file()
             else hashlib.sha256(relative.encode()).hexdigest()
         )
     identity = {
@@ -203,8 +209,14 @@ def _write_valid_run(project_root: Path, result_root: Path, *, run_name: str = "
             "browser_use": identity["browser_use_python"],
         },
         "dependency_freezes": {
-            "candidate": {"path": str(candidate_freeze_path), "sha256": _sha256(candidate_freeze_path)},
-            "browser_use": {"path": str(browser_use_freeze_path), "sha256": _sha256(browser_use_freeze_path)},
+            "candidate": {
+                "path": str(candidate_freeze_path),
+                "sha256": _sha256(candidate_freeze_path),
+            },
+            "browser_use": {
+                "path": str(browser_use_freeze_path),
+                "sha256": _sha256(browser_use_freeze_path),
+            },
         },
         "tool_manifest_sha256": tool_manifest_hash,
         "candidate_identity_sha256": identity_hash,
@@ -215,20 +227,25 @@ def _write_valid_run(project_root: Path, result_root: Path, *, run_name: str = "
     version_hash = _sha256(version_path)
     preflight_record = {
         "schema": preflight.PREFLIGHT_SCHEMA,
-        "phase": "screenshot-final" if run_name == "screenshot-final" else "screenshot-run",
+        "phase": "screenshot-final"
+        if run_name == "screenshot-final"
+        else "screenshot-run",
         "candidate_identity_sha256": identity_hash,
         "version_manifest_sha256": version_hash,
-        "checks": [{
-            "name": "latest_versions",
-            "expected": versions,
-            "actual": versions,
-            "state": "passed",
-        }, {
-            "name": "installed_tool_versions",
-            "expected": {name: versions[name] for name in INSTALLED_TOOL_KEYS},
-            "actual": {name: versions[name] for name in INSTALLED_TOOL_KEYS},
-            "state": "passed",
-        }],
+        "checks": [
+            {
+                "name": "latest_versions",
+                "expected": versions,
+                "actual": versions,
+                "state": "passed",
+            },
+            {
+                "name": "installed_tool_versions",
+                "expected": {name: versions[name] for name in INSTALLED_TOOL_KEYS},
+                "actual": {name: versions[name] for name in INSTALLED_TOOL_KEYS},
+                "state": "passed",
+            },
+        ],
         "outcome": "passed",
         "errors": [],
     }
@@ -238,23 +255,28 @@ def _write_valid_run(project_root: Path, result_root: Path, *, run_name: str = "
     smoke_preflight_hashes = {}
     for phase in ("navigation-smoke", "screenshot-smoke"):
         smoke_preflight_path = result_root / f"preflight-{phase}.json"
-        _private_json(smoke_preflight_path, {
-            "schema": preflight.PREFLIGHT_SCHEMA,
-            "phase": phase,
-            "candidate_identity_sha256": identity_hash,
-            "version_manifest_sha256": version_hash,
-            "checks": [{
-                "name": "smoke_fixture_check",
-                "expected": "passed",
-                "actual": "passed",
-                "state": "passed",
-            }],
-            "outcome": "passed",
-            "errors": [],
-        })
-        smoke_preflight_hashes["navigation" if phase == "navigation-smoke" else "screenshot"] = _sha256(
-            smoke_preflight_path
+        _private_json(
+            smoke_preflight_path,
+            {
+                "schema": preflight.PREFLIGHT_SCHEMA,
+                "phase": phase,
+                "candidate_identity_sha256": identity_hash,
+                "version_manifest_sha256": version_hash,
+                "checks": [
+                    {
+                        "name": "smoke_fixture_check",
+                        "expected": "passed",
+                        "actual": "passed",
+                        "state": "passed",
+                    }
+                ],
+                "outcome": "passed",
+                "errors": [],
+            },
         )
+        smoke_preflight_hashes[
+            "navigation" if phase == "navigation-smoke" else "screenshot"
+        ] = _sha256(smoke_preflight_path)
 
     frozen_record = {
         "schema": preflight.FROZEN_HARNESS_SCHEMA,
@@ -305,7 +327,9 @@ def _write_valid_run(project_root: Path, result_root: Path, *, run_name: str = "
     _private_json(run_root / "run-manifest.json", manifest)
     capability.write_screenshot_summary(run_root, manifest)
 
-    report_directory = project_root / "local_docs" / "specs" / "2026-11-17-latest-navigation-benchmark"
+    report_directory = (
+        project_root / "local_docs" / "specs" / "2026-11-17-latest-navigation-benchmark"
+    )
     report_directory.mkdir(mode=0o755, parents=True)
     report_directory.chmod(0o755)
     return {
@@ -321,7 +345,9 @@ def _write_valid_run(project_root: Path, result_root: Path, *, run_name: str = "
     }
 
 
-def _verify_command(project_root: Path, artifacts: dict, report_path: Path) -> list[str]:
+def _verify_command(
+    project_root: Path, artifacts: dict, report_path: Path
+) -> list[str]:
     return [
         sys.executable,
         str(SCRIPT),
@@ -401,7 +427,9 @@ def _restore_lightpanda_passed_attempt(run_root: Path, attempt: dict) -> None:
     }
 
 
-def _set_attempt_failed(attempt: dict, *, remove_png: bool = False, run_root: Path | None = None) -> None:
+def _set_attempt_failed(
+    attempt: dict, *, remove_png: bool = False, run_root: Path | None = None
+) -> None:
     attempt["state"] = "failed"
     attempt["errors"] = ["simulated adapter failure after verified cleanup"]
     attempt["worker_reply"] = None
@@ -425,7 +453,10 @@ def test_verified_screenshot_run_exports_a_sanitized_capability_report(tmp_path)
         project_root = tmp_path / "project"
         project_root.mkdir()
         artifacts = _write_valid_run(project_root, result_root)
-        report_path = artifacts["report_directory"] / "candidate-baseline-screenshot-capability.md"
+        report_path = (
+            artifacts["report_directory"]
+            / "candidate-baseline-screenshot-capability.md"
+        )
 
         result = subprocess.run(
             _verify_command(project_root, artifacts, report_path),
@@ -443,8 +474,14 @@ def test_verified_screenshot_run_exports_a_sanitized_capability_report(tmp_path)
         assert "private-owner-token" not in report
         assert "owner_token" not in report
         for private_detail in (
-            "worker_identity", "pid", "cmdline", "runtime_root", "AWS_",
-            "NAVIGATION_BENCHMARK_OWNER", "worker.stdout.log", "worker.stderr.log",
+            "worker_identity",
+            "pid",
+            "cmdline",
+            "runtime_root",
+            "AWS_",
+            "NAVIGATION_BENCHMARK_OWNER",
+            "worker.stdout.log",
+            "worker.stderr.log",
         ):
             assert private_detail not in report
         assert "elapsed_ns" not in report
@@ -453,17 +490,24 @@ def test_verified_screenshot_run_exports_a_sanitized_capability_report(tmp_path)
 
 
 def test_screenshot_report_rejects_changed_native_script_input(tmp_path):
-    with tempfile.TemporaryDirectory(dir=Path('/tmp').resolve()) as temp:
-        project_root = tmp_path / 'project'
+    with tempfile.TemporaryDirectory(dir=Path("/tmp").resolve()) as temp:
+        project_root = tmp_path / "project"
         project_root.mkdir()
         artifacts = _write_valid_run(project_root, Path(temp))
-        script = artifacts['run_root'] / 'arms/lightpanda/attempt-1/logs/lightpanda.input.js'
+        script = (
+            artifacts["run_root"] / "arms/lightpanda/attempt-1/logs/lightpanda.input.js"
+        )
         script.write_text('throw new Error("different program");\n')
-        report = artifacts['report_directory'] / 'candidate-baseline-screenshot-capability.md'
+        report = (
+            artifacts["report_directory"]
+            / "candidate-baseline-screenshot-capability.md"
+        )
 
         result = subprocess.run(
             _verify_command(project_root, artifacts, report),
-            capture_output=True, text=True, check=False,
+            capture_output=True,
+            text=True,
+            check=False,
         )
 
         assert result.returncode == 1
@@ -476,7 +520,10 @@ def test_screenshot_report_requires_a_complete_verified_run(tmp_path):
         project_root = tmp_path / "project"
         project_root.mkdir()
         artifacts = _write_valid_run(project_root, result_root)
-        report_path = artifacts["report_directory"] / "candidate-baseline-screenshot-capability.md"
+        report_path = (
+            artifacts["report_directory"]
+            / "candidate-baseline-screenshot-capability.md"
+        )
         manifest = artifacts["manifest"]
         manifest["attempts"].pop()
         _refresh_manifest(artifacts["run_root"], manifest)
@@ -513,8 +560,11 @@ def test_screenshot_report_rejects_parent_traversal_in_the_export_path(tmp_path)
         project_root = tmp_path / "project"
         project_root.mkdir()
         artifacts = _write_valid_run(project_root, result_root)
-        traversal = artifacts["report_directory"] / "existing" / ".." / (
-            "candidate-baseline-screenshot-capability.md"
+        traversal = (
+            artifacts["report_directory"]
+            / "existing"
+            / ".."
+            / ("candidate-baseline-screenshot-capability.md")
         )
         (artifacts["report_directory"] / "existing").mkdir()
 
@@ -526,7 +576,10 @@ def test_screenshot_report_rejects_parent_traversal_in_the_export_path(tmp_path)
         )
 
         assert result.returncode == 2
-        assert not (artifacts["report_directory"] / "candidate-baseline-screenshot-capability.md").exists()
+        assert not (
+            artifacts["report_directory"]
+            / "candidate-baseline-screenshot-capability.md"
+        ).exists()
 
 
 def test_candidate_baseline_report_is_never_replaced(tmp_path):
@@ -535,7 +588,10 @@ def test_candidate_baseline_report_is_never_replaced(tmp_path):
         project_root = tmp_path / "project"
         project_root.mkdir()
         artifacts = _write_valid_run(project_root, result_root)
-        report_path = artifacts["report_directory"] / "candidate-baseline-screenshot-capability.md"
+        report_path = (
+            artifacts["report_directory"]
+            / "candidate-baseline-screenshot-capability.md"
+        )
         report_path.write_text("preserve baseline\n")
 
         result = subprocess.run(
@@ -555,7 +611,10 @@ def test_screenshot_report_contains_no_latency_fields(tmp_path):
         project_root = tmp_path / "project"
         project_root.mkdir()
         artifacts = _write_valid_run(project_root, result_root)
-        report_path = artifacts["report_directory"] / "candidate-baseline-screenshot-capability.md"
+        report_path = (
+            artifacts["report_directory"]
+            / "candidate-baseline-screenshot-capability.md"
+        )
 
         result = subprocess.run(
             _verify_command(project_root, artifacts, report_path),
@@ -567,7 +626,12 @@ def test_screenshot_report_contains_no_latency_fields(tmp_path):
         assert result.returncode == 0, result.stderr
         report = report_path.read_text()
         assert "latency" not in report.lower()
-        for field in ("elapsed_ns", "navigation_ns", "post_navigation_ns", "duration_ns"):
+        for field in (
+            "elapsed_ns",
+            "navigation_ns",
+            "post_navigation_ns",
+            "duration_ns",
+        ):
             assert field not in report
 
 
@@ -580,7 +644,10 @@ def test_valid_unsupported_screenshot_capability_remains_reportable(tmp_path):
         manifest = artifacts["manifest"]
         _set_lightpanda_stable_dimension_mismatch(artifacts["run_root"], manifest)
         _refresh_manifest(artifacts["run_root"], manifest)
-        report_path = artifacts["report_directory"] / "candidate-baseline-screenshot-capability.md"
+        report_path = (
+            artifacts["report_directory"]
+            / "candidate-baseline-screenshot-capability.md"
+        )
 
         result = subprocess.run(
             _verify_command(project_root, artifacts, report_path),
@@ -592,18 +659,33 @@ def test_valid_unsupported_screenshot_capability_remains_reportable(tmp_path):
         assert result.returncode == 0, result.stderr
         report = report_path.read_text()
         assert "| lightpanda | unsupported | 6 | 0 | 6 | 0 | 24 | 0 |" in report
-        assert "does not establish that Lightpanda cannot take screenshots generally" in report
+        assert (
+            "does not establish that Lightpanda cannot take screenshots generally"
+            in report
+        )
 
 
 @pytest.mark.parametrize(
     ("outcome", "expected_statuses"),
     [
-        ("inconclusive", {"openbrowser": "failed", "raw-cdp": "passed", "lightpanda": "inconclusive"}),
-        ("failed", {"openbrowser": "passed", "raw-cdp": "passed", "lightpanda": "failed"}),
+        (
+            "inconclusive",
+            {
+                "openbrowser": "failed",
+                "raw-cdp": "passed",
+                "lightpanda": "inconclusive",
+            },
+        ),
+        (
+            "failed",
+            {"openbrowser": "passed", "raw-cdp": "passed", "lightpanda": "failed"},
+        ),
     ],
 )
 def test_valid_nonpassing_capability_statuses_remain_reportable(
-    tmp_path, outcome, expected_statuses,
+    tmp_path,
+    outcome,
+    expected_statuses,
 ):
     with tempfile.TemporaryDirectory(dir=Path("/tmp").resolve()) as temp:
         result_root = Path(temp)
@@ -612,9 +694,18 @@ def test_valid_nonpassing_capability_statuses_remain_reportable(
         artifacts = _write_valid_run(project_root, result_root)
         manifest = artifacts["manifest"]
         target = next(
-            attempt for attempt in manifest["attempts"]
-            if (outcome == "inconclusive" and attempt["arm"] == "openbrowser" and attempt["index"] == 0)
-            or (outcome == "failed" and attempt["arm"] == "lightpanda" and attempt["index"] == 0)
+            attempt
+            for attempt in manifest["attempts"]
+            if (
+                outcome == "inconclusive"
+                and attempt["arm"] == "openbrowser"
+                and attempt["index"] == 0
+            )
+            or (
+                outcome == "failed"
+                and attempt["arm"] == "lightpanda"
+                and attempt["index"] == 0
+            )
         )
         _set_attempt_failed(
             target,
@@ -623,7 +714,10 @@ def test_valid_nonpassing_capability_statuses_remain_reportable(
         )
         _refresh_manifest(artifacts["run_root"], manifest)
         assert manifest["arm_status"] == expected_statuses
-        report_path = artifacts["report_directory"] / "candidate-baseline-screenshot-capability.md"
+        report_path = (
+            artifacts["report_directory"]
+            / "candidate-baseline-screenshot-capability.md"
+        )
 
         result = subprocess.run(
             _verify_command(project_root, artifacts, report_path),
@@ -646,10 +740,15 @@ def test_screenshot_report_rejects_status_precedence_tampering(tmp_path):
         manifest = artifacts["manifest"]
         _set_lightpanda_stable_dimension_mismatch(artifacts["run_root"], manifest)
         manifest["arm_status"]["lightpanda"] = "passed"
-        manifest["work_counts"] = capability.screenshot_work_counts(manifest["attempts"])
+        manifest["work_counts"] = capability.screenshot_work_counts(
+            manifest["attempts"]
+        )
         _private_json(artifacts["run_root"] / "run-manifest.json", manifest)
         capability.write_screenshot_summary(artifacts["run_root"], manifest)
-        report_path = artifacts["report_directory"] / "candidate-baseline-screenshot-capability.md"
+        report_path = (
+            artifacts["report_directory"]
+            / "candidate-baseline-screenshot-capability.md"
+        )
 
         result = subprocess.run(
             _verify_command(project_root, artifacts, report_path),
@@ -671,12 +770,16 @@ def test_valid_mixed_lightpanda_pixel_results_are_inconclusive(tmp_path):
         manifest = artifacts["manifest"]
         _set_lightpanda_stable_dimension_mismatch(artifacts["run_root"], manifest)
         mixed_attempt = next(
-            attempt for attempt in manifest["attempts"]
+            attempt
+            for attempt in manifest["attempts"]
             if attempt["arm"] == "lightpanda" and attempt["index"] == 0
         )
         _restore_lightpanda_passed_attempt(artifacts["run_root"], mixed_attempt)
         _refresh_manifest(artifacts["run_root"], manifest)
-        report_path = artifacts["report_directory"] / "candidate-baseline-screenshot-capability.md"
+        report_path = (
+            artifacts["report_directory"]
+            / "candidate-baseline-screenshot-capability.md"
+        )
 
         result = subprocess.run(
             _verify_command(project_root, artifacts, report_path),
@@ -686,7 +789,10 @@ def test_valid_mixed_lightpanda_pixel_results_are_inconclusive(tmp_path):
         )
 
         assert result.returncode == 0, result.stderr
-        assert "| lightpanda | inconclusive | 6 | 1 | 5 | 0 | 24 | 0 |" in report_path.read_text()
+        assert (
+            "| lightpanda | inconclusive | 6 | 1 | 5 | 0 | 24 | 0 |"
+            in report_path.read_text()
+        )
 
 
 def test_screenshot_report_rejects_boolean_work_counts(tmp_path):
@@ -699,7 +805,10 @@ def test_screenshot_report_rejects_boolean_work_counts(tmp_path):
         manifest["work_counts"]["error_count"] = False
         _private_json(artifacts["run_root"] / "run-manifest.json", manifest)
         capability.write_screenshot_summary(artifacts["run_root"], manifest)
-        report_path = artifacts["report_directory"] / "candidate-baseline-screenshot-capability.md"
+        report_path = (
+            artifacts["report_directory"]
+            / "candidate-baseline-screenshot-capability.md"
+        )
 
         result = subprocess.run(
             _verify_command(project_root, artifacts, report_path),
@@ -714,7 +823,8 @@ def test_screenshot_report_rejects_boolean_work_counts(tmp_path):
 
 @pytest.mark.parametrize("changed_artifact", ("candidate", "preflight"))
 def test_screenshot_report_rejects_candidate_or_preflight_identity_mismatch(
-    tmp_path, changed_artifact,
+    tmp_path,
+    changed_artifact,
 ):
     with tempfile.TemporaryDirectory(dir=Path("/tmp").resolve()) as temp:
         result_root = Path(temp)
@@ -729,7 +839,10 @@ def test_screenshot_report_rejects_candidate_or_preflight_identity_mismatch(
             preflight_record = artifacts["preflight"]
             preflight_record["version_manifest_sha256"] = "9" * 64
             _private_json(artifacts["preflight_path"], preflight_record)
-        report_path = artifacts["report_directory"] / "candidate-baseline-screenshot-capability.md"
+        report_path = (
+            artifacts["report_directory"]
+            / "candidate-baseline-screenshot-capability.md"
+        )
 
         result = subprocess.run(
             _verify_command(project_root, artifacts, report_path),
@@ -749,10 +862,15 @@ def test_screenshot_report_rejects_malformed_request_proof_events(tmp_path):
         project_root.mkdir()
         artifacts = _write_valid_run(project_root, result_root)
         manifest = artifacts["manifest"]
-        manifest["attempts"][0]["request_proof"]["image_requests"][0]["extra"] = "unrecognized"
+        manifest["attempts"][0]["request_proof"]["image_requests"][0]["extra"] = (
+            "unrecognized"
+        )
         _private_json(artifacts["run_root"] / "run-manifest.json", manifest)
         capability.write_screenshot_summary(artifacts["run_root"], manifest)
-        report_path = artifacts["report_directory"] / "candidate-baseline-screenshot-capability.md"
+        report_path = (
+            artifacts["report_directory"]
+            / "candidate-baseline-screenshot-capability.md"
+        )
 
         result = subprocess.run(
             _verify_command(project_root, artifacts, report_path),
@@ -775,7 +893,10 @@ def test_screenshot_report_rejects_tampered_pixel_probe_evidence(tmp_path):
         manifest["attempts"][0]["pixel"]["probes"][0]["actual_rgb"] = [1, 2, 3]
         _private_json(artifacts["run_root"] / "run-manifest.json", manifest)
         capability.write_screenshot_summary(artifacts["run_root"], manifest)
-        report_path = artifacts["report_directory"] / "candidate-baseline-screenshot-capability.md"
+        report_path = (
+            artifacts["report_directory"]
+            / "candidate-baseline-screenshot-capability.md"
+        )
 
         result = subprocess.run(
             _verify_command(project_root, artifacts, report_path),
@@ -796,7 +917,8 @@ def test_screenshot_report_rejects_an_unrecorded_attempt_image(tmp_path):
         artifacts = _write_valid_run(project_root, result_root)
         manifest = artifacts["manifest"]
         attempt = next(
-            record for record in manifest["attempts"]
+            record
+            for record in manifest["attempts"]
             if record["arm"] == "lightpanda" and record["index"] == 0
         )
         attempt["state"] = "failed"
@@ -811,7 +933,10 @@ def test_screenshot_report_rejects_an_unrecorded_attempt_image(tmp_path):
         }
         attempt["mismatch_signature"] = None
         _refresh_manifest(artifacts["run_root"], manifest)
-        report_path = artifacts["report_directory"] / "candidate-baseline-screenshot-capability.md"
+        report_path = (
+            artifacts["report_directory"]
+            / "candidate-baseline-screenshot-capability.md"
+        )
 
         result = subprocess.run(
             _verify_command(project_root, artifacts, report_path),
@@ -834,7 +959,10 @@ def test_screenshot_report_rejects_float_pixel_probe_counts(tmp_path):
         manifest["attempts"][0]["pixel"]["probe_count"] = 4.0
         _private_json(artifacts["run_root"] / "run-manifest.json", manifest)
         capability.write_screenshot_summary(artifacts["run_root"], manifest)
-        report_path = artifacts["report_directory"] / "candidate-baseline-screenshot-capability.md"
+        report_path = (
+            artifacts["report_directory"]
+            / "candidate-baseline-screenshot-capability.md"
+        )
 
         result = subprocess.run(
             _verify_command(project_root, artifacts, report_path),
@@ -853,9 +981,16 @@ def test_screenshot_report_rejects_a_tampered_png_hash(tmp_path):
         project_root = tmp_path / "project"
         project_root.mkdir()
         artifacts = _write_valid_run(project_root, result_root)
-        png_path = artifacts["run_root"] / artifacts["manifest"]["attempts"][0]["directory"] / "result.png"
+        png_path = (
+            artifacts["run_root"]
+            / artifacts["manifest"]["attempts"][0]["directory"]
+            / "result.png"
+        )
         png_path.write_bytes(png_path.read_bytes() + b"tampered")
-        report_path = artifacts["report_directory"] / "candidate-baseline-screenshot-capability.md"
+        report_path = (
+            artifacts["report_directory"]
+            / "candidate-baseline-screenshot-capability.md"
+        )
 
         result = subprocess.run(
             _verify_command(project_root, artifacts, report_path),
@@ -879,7 +1014,10 @@ def test_screenshot_report_rejects_unretired_worker_cleanup(tmp_path):
         worker_cleanup["worker_identity"]["state"] = "alive"
         _private_json(artifacts["run_root"] / "run-manifest.json", manifest)
         capability.write_screenshot_summary(artifacts["run_root"], manifest)
-        report_path = artifacts["report_directory"] / "candidate-baseline-screenshot-capability.md"
+        report_path = (
+            artifacts["report_directory"]
+            / "candidate-baseline-screenshot-capability.md"
+        )
 
         result = subprocess.run(
             _verify_command(project_root, artifacts, report_path),
@@ -905,7 +1043,10 @@ def test_screenshot_report_rejects_frozen_harness_identity_mismatch(tmp_path):
         manifest["frozen_harness_sha256"] = _sha256(artifacts["frozen_path"])
         _private_json(artifacts["run_root"] / "run-manifest.json", manifest)
         capability.write_screenshot_summary(artifacts["run_root"], manifest)
-        report_path = artifacts["report_directory"] / "candidate-baseline-screenshot-capability.md"
+        report_path = (
+            artifacts["report_directory"]
+            / "candidate-baseline-screenshot-capability.md"
+        )
 
         result = subprocess.run(
             _verify_command(project_root, artifacts, report_path),
@@ -923,7 +1064,9 @@ def test_current_report_is_unchanged_when_final_run_verification_fails(tmp_path)
         result_root = Path(temp)
         project_root = tmp_path / "project"
         project_root.mkdir()
-        artifacts = _write_valid_run(project_root, result_root, run_name="screenshot-final")
+        artifacts = _write_valid_run(
+            project_root, result_root, run_name="screenshot-final"
+        )
         report_path = artifacts["report_directory"] / "current-screenshot-capability.md"
         report_path.write_text("existing verified report\n")
         manifest = artifacts["manifest"]
@@ -946,7 +1089,9 @@ def test_current_report_is_replaced_only_after_a_valid_final_run(tmp_path):
         result_root = Path(temp)
         project_root = tmp_path / "project"
         project_root.mkdir()
-        artifacts = _write_valid_run(project_root, result_root, run_name="screenshot-final")
+        artifacts = _write_valid_run(
+            project_root, result_root, run_name="screenshot-final"
+        )
         report_path = artifacts["report_directory"] / "current-screenshot-capability.md"
         report_path.write_text("old report\n")
 

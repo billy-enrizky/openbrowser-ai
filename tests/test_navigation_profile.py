@@ -1,21 +1,20 @@
+import asyncio
 import cProfile
 import hashlib
 import importlib.util
-import asyncio
-from dataclasses import replace
 import io
 import json
 import os
-from pathlib import Path
 import shutil
 import stat
 import subprocess
 import sys
 import tempfile
+from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-
 
 SCRIPT = Path(__file__).resolve().parents[1] / 'benchmarks/navigation_compare.py'
 spec = importlib.util.spec_from_file_location('navigation_compare_profile_tests', SCRIPT)

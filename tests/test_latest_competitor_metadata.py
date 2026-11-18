@@ -10,14 +10,19 @@ from pathlib import Path
 
 import pytest
 
-
-SCRIPT = Path(__file__).resolve().parents[1] / "benchmarks" / "latest_competitor_metadata.py"
-spec = importlib.util.spec_from_file_location("latest_competitor_metadata_under_test", SCRIPT)
+SCRIPT = (
+    Path(__file__).resolve().parents[1] / "benchmarks" / "latest_competitor_metadata.py"
+)
+spec = importlib.util.spec_from_file_location(
+    "latest_competitor_metadata_under_test", SCRIPT
+)
 metadata = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(metadata)
 
 
-LIGHTPANDA_BINARY = b"#!/bin/sh\ntest \"$1\" = version || exit 2\necho 'Lightpanda 1.0.4'\n"
+LIGHTPANDA_BINARY = (
+    b"#!/bin/sh\ntest \"$1\" = version || exit 2\necho 'Lightpanda 1.0.4'\n"
+)
 AGENT_BROWSER_BINARY = b"#!/bin/sh\necho 'agent-browser 0.43.0'\n"
 CHROME_BINARY = b"#!/bin/sh\necho 'Google Chrome for Testing 158.0.8127.36'\n"
 
@@ -56,54 +61,67 @@ def chrome_archive(binary=CHROME_BINARY):
         entry = zipfile.ZipInfo(
             "chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"
         )
-        entry.external_attr = (0o100755 << 16)
+        entry.external_attr = 0o100755 << 16
         bundle.writestr(entry, binary)
     return archive.getvalue()
 
 
 def test_chrome_archive_preserves_internal_framework_symlink_chain(tmp_path):
-    archive = tmp_path / 'chrome.zip'
-    base = 'chrome-mac-arm64/Google Chrome for Testing.app/Contents'
-    framework = f'{base}/Frameworks/Test.framework'
-    with zipfile.ZipFile(archive, 'w') as bundle:
-        bundle.writestr(f'{base}/MacOS/Google Chrome for Testing', CHROME_BINARY)
-        bundle.writestr(f'{framework}/Versions/158/Resources/proof', b'framework data')
+    archive = tmp_path / "chrome.zip"
+    base = "chrome-mac-arm64/Google Chrome for Testing.app/Contents"
+    framework = f"{base}/Frameworks/Test.framework"
+    with zipfile.ZipFile(archive, "w") as bundle:
+        bundle.writestr(f"{base}/MacOS/Google Chrome for Testing", CHROME_BINARY)
+        bundle.writestr(f"{framework}/Versions/158/Resources/proof", b"framework data")
         for path, target in (
-            (f'{framework}/Resources', 'Versions/Current/Resources'),
-            (f'{framework}/Versions/Current', '158'),
+            (f"{framework}/Resources", "Versions/Current/Resources"),
+            (f"{framework}/Versions/Current", "158"),
         ):
             entry = zipfile.ZipInfo(path)
             entry.external_attr = (stat.S_IFLNK | 0o777) << 16
             bundle.writestr(entry, target)
 
-    extraction = tmp_path / 'unpacked'
+    extraction = tmp_path / "unpacked"
     executable = metadata._extract_chrome_archive(archive, extraction)
 
     assert executable.is_file()
-    resources = extraction / 'Google Chrome for Testing.app/Contents/Frameworks/Test.framework/Resources'
+    resources = (
+        extraction
+        / "Google Chrome for Testing.app/Contents/Frameworks/Test.framework/Resources"
+    )
     assert resources.is_symlink()
-    assert (resources / 'proof').read_bytes() == b'framework data'
+    assert (resources / "proof").read_bytes() == b"framework data"
 
 
-@pytest.mark.parametrize('target', ['/tmp/outside', '../../../../outside', 'missing'])
+@pytest.mark.parametrize("target", ["/tmp/outside", "../../../../outside", "missing"])
 def test_chrome_archive_rejects_escaping_or_dangling_symlinks(tmp_path, target):
-    archive = tmp_path / 'chrome.zip'
-    with zipfile.ZipFile(archive, 'w') as bundle:
-        entry = zipfile.ZipInfo('chrome-mac-arm64/unsafe-link')
+    archive = tmp_path / "chrome.zip"
+    with zipfile.ZipFile(archive, "w") as bundle:
+        entry = zipfile.ZipInfo("chrome-mac-arm64/unsafe-link")
         entry.external_attr = (stat.S_IFLNK | 0o777) << 16
         bundle.writestr(entry, target)
 
     with pytest.raises(metadata.MetadataError):
-        metadata._extract_chrome_archive(archive, tmp_path / 'unpacked')
+        metadata._extract_chrome_archive(archive, tmp_path / "unpacked")
 
 
-def response_fixtures(*, lightpanda_digest=None, agent_browser_digest=None, chrome_version="158.0.8127.36"):
-    lightpanda_digest = lightpanda_digest or hashlib.sha256(LIGHTPANDA_BINARY).hexdigest()
-    agent_browser_digest = agent_browser_digest or hashlib.sha256(AGENT_BROWSER_BINARY).hexdigest()
+def response_fixtures(
+    *, lightpanda_digest=None, agent_browser_digest=None, chrome_version="158.0.8127.36"
+):
+    lightpanda_digest = (
+        lightpanda_digest or hashlib.sha256(LIGHTPANDA_BINARY).hexdigest()
+    )
+    agent_browser_digest = (
+        agent_browser_digest or hashlib.sha256(AGENT_BROWSER_BINARY).hexdigest()
+    )
     release_asset = lambda name, url, digest: {
         "name": name,
         "browser_download_url": url,
-        "size": len(LIGHTPANDA_BINARY if name.startswith("lightpanda-") else AGENT_BROWSER_BINARY),
+        "size": len(
+            LIGHTPANDA_BINARY
+            if name.startswith("lightpanda-")
+            else AGENT_BROWSER_BINARY
+        ),
         "digest": None if digest is None else f"sha256:{digest}",
     }
     payloads = {
@@ -117,10 +135,14 @@ def response_fixtures(*, lightpanda_digest=None, agent_browser_digest=None, chro
                     "https://github.com/lightpanda-io/browser/releases/download/1.0.4/lightpanda-aarch64-macos",
                     lightpanda_digest,
                 ),
-                release_asset("lightpanda-x86_64-macos", "https://example.invalid/lightpanda-x64", "a" * 64),
+                release_asset(
+                    "lightpanda-x86_64-macos",
+                    "https://example.invalid/lightpanda-x64",
+                    "a" * 64,
+                ),
             ],
         },
-    "agent_browser_npm_latest": {
+        "agent_browser_npm_latest": {
             "name": "agent-browser",
             "version": "0.43.0",
             "dist": {
@@ -128,7 +150,10 @@ def response_fixtures(*, lightpanda_digest=None, agent_browser_digest=None, chro
                 "integrity": "sha512-TExwnZAW39fUBDJhUPrw8KKGmcjzBo7FxNqoP2/usHG1ODsjGI2jAWq3+Q6I5JYyBMjePFEsj8KGB68mALtglA==",
             },
             "engines": {"node": ">=22.0.0"},
-            "repository": {"type": "git", "url": "git+https://github.com/vercel-labs/agent-browser.git"},
+            "repository": {
+                "type": "git",
+                "url": "git+https://github.com/vercel-labs/agent-browser.git",
+            },
         },
         "agent_browser_github_latest": {
             "tag_name": "v0.43.0",
@@ -140,7 +165,11 @@ def response_fixtures(*, lightpanda_digest=None, agent_browser_digest=None, chro
                     "https://github.com/vercel-labs/agent-browser/releases/download/v0.43.0/agent-browser-darwin-arm64",
                     agent_browser_digest,
                 ),
-                release_asset("agent-browser-linux-x64", "https://example.invalid/agent-linux", "b" * 64),
+                release_asset(
+                    "agent-browser-linux-x64",
+                    "https://example.invalid/agent-linux",
+                    "b" * 64,
+                ),
             ],
         },
         "browser_use_pypi": {
@@ -176,7 +205,10 @@ def response_fixtures(*, lightpanda_digest=None, agent_browser_digest=None, chro
             },
         },
     }
-    return {name: json.dumps(payload, sort_keys=True, separators=(",", ":")).encode() for name, payload in payloads.items()}
+    return {
+        name: json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+        for name, payload in payloads.items()
+    }
 
 
 def fixture_opener(bodies, requested=None):
@@ -196,7 +228,9 @@ def fixture_opener(bodies, requested=None):
     return open_url
 
 
-def test_fetch_records_official_urls_and_exact_response_hashes_from_saved_fixtures(private_result_root):
+def test_fetch_records_official_urls_and_exact_response_hashes_from_saved_fixtures(
+    private_result_root,
+):
     bodies = response_fixtures()
     requested = []
     output = private_result_root / "metadata"
@@ -237,14 +271,18 @@ def test_fetch_records_official_urls_and_exact_response_hashes_from_saved_fixtur
         "browser-harness": "0.1.13",
         "chrome_for_testing": "158.0.8127.36",
     }
-    assert parsed["chrome_download_url"].endswith("/158.0.8127.36/mac-arm64/chrome-mac-arm64.zip")
+    assert parsed["chrome_download_url"].endswith(
+        "/158.0.8127.36/mac-arm64/chrome-mac-arm64.zip"
+    )
 
 
 def test_metadata_files_match_the_documented_output_layout():
     assert metadata.SOURCE_FILES["chrome_for_testing_stable"] == "chrome-stable.json"
 
 
-def test_fetch_rejects_metadata_output_outside_result_root_before_fetching(private_result_root, tmp_path):
+def test_fetch_rejects_metadata_output_outside_result_root_before_fetching(
+    private_result_root, tmp_path
+):
     output = tmp_path / "metadata-outside-result-root"
 
     status = run_metadata_cli(
@@ -382,9 +420,13 @@ def test_npm_integrity_must_be_base64_encoded_sha512_digest(integrity):
         ("agent_browser_github_latest", "agent-browser-darwin-arm64"),
     ],
 )
-def test_metadata_rejects_missing_official_release_digest(private_result_root, source_name, field):
+def test_metadata_rejects_missing_official_release_digest(
+    private_result_root, source_name, field
+):
     payloads = json.loads(response_fixtures()[source_name])
-    next(asset for asset in payloads["assets"] if asset["name"] == field)["digest"] = None
+    next(asset for asset in payloads["assets"] if asset["name"] == field)["digest"] = (
+        None
+    )
     bodies = response_fixtures()
     bodies[source_name] = json.dumps(payloads).encode()
 
@@ -396,7 +438,9 @@ def test_metadata_rejects_missing_official_release_digest(private_result_root, s
         )
 
 
-def test_metadata_rejects_agent_browser_npm_and_release_version_disagreement(private_result_root):
+def test_metadata_rejects_agent_browser_npm_and_release_version_disagreement(
+    private_result_root,
+):
     payloads = json.loads(response_fixtures()["agent_browser_github_latest"])
     payloads["tag_name"] = "v0.43.1"
     bodies = response_fixtures()
@@ -410,7 +454,9 @@ def test_metadata_rejects_agent_browser_npm_and_release_version_disagreement(pri
         )
 
 
-def test_metadata_rejects_malformed_agent_browser_node_engine_metadata(private_result_root):
+def test_metadata_rejects_malformed_agent_browser_node_engine_metadata(
+    private_result_root,
+):
     payloads = json.loads(response_fixtures()["agent_browser_npm_latest"])
     payloads["engines"] = "node >=22"
     bodies = response_fixtures()
@@ -424,10 +470,14 @@ def test_metadata_rejects_malformed_agent_browser_node_engine_metadata(private_r
         )
 
 
-def test_metadata_rejects_chrome_manifest_without_mac_arm64_stable_download(private_result_root):
+def test_metadata_rejects_chrome_manifest_without_mac_arm64_stable_download(
+    private_result_root,
+):
     payloads = json.loads(response_fixtures()["chrome_for_testing_stable"])
     payloads["channels"]["Stable"]["downloads"]["chrome"] = [
-        item for item in payloads["channels"]["Stable"]["downloads"]["chrome"] if item["platform"] != "mac-arm64"
+        item
+        for item in payloads["channels"]["Stable"]["downloads"]["chrome"]
+        if item["platform"] != "mac-arm64"
     ]
     bodies = response_fixtures()
     bodies["chrome_for_testing_stable"] = json.dumps(payloads).encode()
@@ -458,10 +508,14 @@ def test_fetch_refuses_to_overwrite_an_existing_metadata_snapshot(private_result
     assert requested == []
 
 
-def test_metadata_parser_rejects_unknown_manifest_keys_and_tampered_source_bytes(private_result_root):
+def test_metadata_parser_rejects_unknown_manifest_keys_and_tampered_source_bytes(
+    private_result_root,
+):
     output = private_result_root / "metadata"
     bodies = response_fixtures()
-    metadata.fetch_metadata(output, result_root=private_result_root, open_url=fixture_opener(bodies))
+    metadata.fetch_metadata(
+        output, result_root=private_result_root, open_url=fixture_opener(bodies)
+    )
     manifest_path = output / metadata.METADATA_MANIFEST_NAME
     manifest = json.loads(manifest_path.read_text())
     manifest["unexpected"] = True
@@ -477,10 +531,14 @@ def test_metadata_parser_rejects_unknown_manifest_keys_and_tampered_source_bytes
         metadata.parse_metadata_sources(output)
 
 
-def test_download_verifies_official_binaries_and_labels_chrome_hashes_as_local(private_result_root):
+def test_download_verifies_official_binaries_and_labels_chrome_hashes_as_local(
+    private_result_root,
+):
     bodies = response_fixtures()
     metadata_dir = private_result_root / "metadata"
-    metadata.fetch_metadata(metadata_dir, result_root=private_result_root, open_url=fixture_opener(bodies))
+    metadata.fetch_metadata(
+        metadata_dir, result_root=private_result_root, open_url=fixture_opener(bodies)
+    )
     archive_url = "https://storage.googleapis.com/chrome-for-testing-public/158.0.8127.36/mac-arm64/chrome-mac-arm64.zip"
     downloads = {
         "https://github.com/lightpanda-io/browser/releases/download/1.0.4/lightpanda-aarch64-macos": LIGHTPANDA_BINARY,
@@ -498,9 +556,19 @@ def test_download_verifies_official_binaries_and_labels_chrome_hashes_as_local(p
     )
 
     assert manifest["schema"] == "openbrowser-latest-tool-manifest/1"
-    assert set(manifest["tools"]) == {"lightpanda", "agent-browser", "chrome_for_testing"}
-    assert manifest["tools"]["lightpanda"]["official_sha256"] == hashlib.sha256(LIGHTPANDA_BINARY).hexdigest()
-    assert manifest["tools"]["agent-browser"]["official_sha256"] == hashlib.sha256(AGENT_BROWSER_BINARY).hexdigest()
+    assert set(manifest["tools"]) == {
+        "lightpanda",
+        "agent-browser",
+        "chrome_for_testing",
+    }
+    assert (
+        manifest["tools"]["lightpanda"]["official_sha256"]
+        == hashlib.sha256(LIGHTPANDA_BINARY).hexdigest()
+    )
+    assert (
+        manifest["tools"]["agent-browser"]["official_sha256"]
+        == hashlib.sha256(AGENT_BROWSER_BINARY).hexdigest()
+    )
     chrome = manifest["tools"]["chrome_for_testing"]
     assert "official_sha256" not in chrome
     assert chrome["archive_sha256"] == hashlib.sha256(chrome_archive()).hexdigest()
@@ -510,13 +578,20 @@ def test_download_verifies_official_binaries_and_labels_chrome_hashes_as_local(p
         assert Path(manifest["tools"][name]["path"]).stat().st_mode & 0o111
 
 
-def test_download_rejects_a_binary_that_does_not_match_its_official_release_digest(private_result_root):
+def test_download_rejects_a_binary_that_does_not_match_its_official_release_digest(
+    private_result_root,
+):
     output = private_result_root / "metadata"
     bodies = response_fixtures()
-    metadata.fetch_metadata(output, result_root=private_result_root, open_url=fixture_opener(bodies))
+    metadata.fetch_metadata(
+        output, result_root=private_result_root, open_url=fixture_opener(bodies)
+    )
     archive_url = "https://storage.googleapis.com/chrome-for-testing-public/158.0.8127.36/mac-arm64/chrome-mac-arm64.zip"
     downloads = {
-        "https://github.com/lightpanda-io/browser/releases/download/1.0.4/lightpanda-aarch64-macos": LIGHTPANDA_BINARY[:-1] + b"X",
+        "https://github.com/lightpanda-io/browser/releases/download/1.0.4/lightpanda-aarch64-macos": LIGHTPANDA_BINARY[
+            :-1
+        ]
+        + b"X",
         "https://github.com/vercel-labs/agent-browser/releases/download/v0.43.0/agent-browser-darwin-arm64": AGENT_BROWSER_BINARY,
         archive_url: chrome_archive(),
     }

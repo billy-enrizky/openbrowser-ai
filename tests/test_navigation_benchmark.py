@@ -1,19 +1,18 @@
-import importlib.util
 import asyncio
 import contextlib
+import importlib.util
 import io
 import json
 import os
 import shutil
 import statistics
-from pathlib import Path
 import subprocess
 import sys
 import tempfile
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-
 
 SCRIPT = Path(__file__).resolve().parents[1] / 'benchmarks/navigation_compare.py'
 spec = importlib.util.spec_from_file_location('navigation_compare', SCRIPT)
@@ -167,7 +166,7 @@ async def test_arm_trial_reports_elapsed_navigation_and_post_navigation_phases(m
 
     arm.navigate = navigate
     arm.evaluate = evaluate
-    arm.ownership = lambda: []
+    arm.ownership = list
     ticks = iter((100, 150, 180, 200))
     monkeypatch.setattr(benchmark.time, 'perf_counter_ns', lambda: next(ticks))
     monkeypatch.setattr(
@@ -345,7 +344,7 @@ async def test_graceful_shutdown_timeout_still_reaches_owned_cleanup(monkeypatch
     arm = benchmark.Arm.__new__(benchmark.Arm)
     arm.name, arm.browser, arm.proc, arm.cdp = 'openbrowser', Browser(), None, None
     arm.token, arm.owned = 'run', {}
-    arm.ownership = lambda: []
+    arm.ownership = list
     result = await arm.stop()
     assert calls == ['run']
     assert result['errors']
@@ -401,7 +400,7 @@ async def test_stop_uses_each_engines_supported_shutdown_contract(monkeypatch, n
     arm = benchmark.Arm.__new__(benchmark.Arm)
     arm.name, arm.browser, arm.cdp, arm.proc = name, None, Connection(), None
     arm.token, arm.owned = 'run', {}
-    arm.ownership = lambda: []
+    arm.ownership = list
 
     result = await arm.stop()
 
@@ -633,7 +632,7 @@ def mock_raw_startup(tmp_path, monkeypatch, states):
     arm = benchmark.Arm.__new__(benchmark.Arm)
     arm.name, arm.root, arm.chrome, arm.token = 'raw-cdp', tmp_path, 'chrome', 'run'
     arm.mode = benchmark.WorkerMode.NAVIGATION
-    arm.owned, arm.ownership = {}, lambda: []
+    arm.owned, arm.ownership = {}, list
     arm.proc = None
     monkeypatch.setattr(benchmark.subprocess, 'Popen', lambda *args, **kwargs: SimpleNamespace(poll=lambda: None))
     port_file = tmp_path / 'profile/DevToolsActivePort'
