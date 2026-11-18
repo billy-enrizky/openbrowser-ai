@@ -4,6 +4,7 @@ import sys
 import tempfile
 from io import BytesIO
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from PIL import Image
@@ -445,6 +446,36 @@ def _set_attempt_failed(
             "mismatch_signature": None,
         }
         attempt["mismatch_signature"] = None
+
+
+def test_screenshot_run_verifies_frozen_smoke_preflights_once(tmp_path, monkeypatch):
+    with tempfile.TemporaryDirectory(dir=Path("/tmp").resolve()) as temp:
+        result_root = Path(temp)
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+        artifacts = _write_valid_run(project_root, result_root)
+        calls = []
+        validate = preflight.validate_frozen_smoke_preflight_hashes
+
+        def validate_once(root, frozen):
+            calls.append(root)
+            return validate(root, frozen)
+
+        monkeypatch.setattr(
+            preflight, "validate_frozen_smoke_preflight_hashes", validate_once
+        )
+        args = SimpleNamespace(
+            command="verify",
+            candidate_identity=artifacts["identity_path"],
+            preflight=artifacts["preflight_path"],
+            frozen_harness=artifacts["frozen_path"],
+        )
+
+        assert (
+            capability.verify_run_directory(artifacts["run_root"], result_root, args)
+            == 0
+        )
+        assert calls == [result_root]
 
 
 def test_verified_screenshot_run_exports_a_sanitized_capability_report(tmp_path):

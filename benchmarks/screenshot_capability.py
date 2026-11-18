@@ -140,7 +140,7 @@ def inspect_png(content: bytes, index: int) -> dict:
         if image.format != 'PNG':
             return {'parseable': False, 'error': 'screenshot format is not PNG'}
         image.load()
-    except (OSError, ValueError) as error:
+    except (OSError, ValueError, Image.DecompressionBombError) as error:
         return {'parseable': False, 'error': f'PNG decode failed: {type(error).__name__}: {error}'}
 
     width, height = image.size
@@ -1374,7 +1374,7 @@ def contains_latency_fields(value):
     return False
 
 
-def verify_attempt_artifacts(run_root, attempt):
+def verify_attempt_artifacts(run_root, attempt, *, run_id):
     errors = []
     if not isinstance(attempt, dict):
         return ['screenshot attempt record is not an object']
@@ -1395,8 +1395,6 @@ def verify_attempt_artifacts(run_root, attempt):
     except (OSError, ValueError) as error:
         return [f'attempt directory is invalid: {error}']
 
-    attempt_id = attempt.get('attempt_id')
-    run_id = attempt_id.split(':', 1)[0] if isinstance(attempt_id, str) else ''
     expected_attempt_id = f'{run_id}:{arm}:{index}'
     expected_nonce = f'{run_id}-{arm}-{index}'
     if attempt.get('attempt_id') != expected_attempt_id or attempt.get('nonce') != expected_nonce:
@@ -1436,8 +1434,8 @@ def verify_attempt_artifacts(run_root, attempt):
 
     png_record = attempt.get('png')
     pixel = attempt.get('pixel')
+    output = attempt_dir / 'result.png'
     if png_record is not None:
-        output = attempt_dir / 'result.png'
         try:
             info = output.lstat()
             if not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode) != 0o600 \
@@ -1457,8 +1455,11 @@ def verify_attempt_artifacts(run_root, attempt):
                 errors.append('saved PNG mismatch signature does not match the manifest')
         except (OSError, ValueError) as error:
             errors.append(f'saved PNG verification failed: {error}')
-    elif attempt.get('state') in ('passed', 'pixel_mismatch'):
-        errors.append('completed screenshot attempt has no PNG record')
+    else:
+        if output.exists() or output.is_symlink():
+            errors.append('saved PNG has no manifest PNG record')
+        if attempt.get('state') in ('passed', 'pixel_mismatch'):
+            errors.append('completed screenshot attempt has no PNG record')
 
     if arm in ('openbrowser', 'raw-cdp') and attempt.get('worker_reply') is not None and request is not None:
         try:
@@ -1625,7 +1626,7 @@ def verify_screenshot_manifest(run_root, manifest, mode):
     run_id = manifest.get('run_id')
     if not isinstance(run_id, str) or len(run_id) != 32 \
             or any(character not in '0123456789abcdef' for character in run_id):
-        errors.append('screenshot manifest run_id is invalid')
+        return [*errors, 'screenshot manifest run_id is invalid']
     attempts = manifest.get('attempts')
     if not isinstance(attempts, list):
         return [*errors, 'screenshot manifest attempts are not a list']
@@ -1640,7 +1641,7 @@ def verify_screenshot_manifest(run_root, manifest, mode):
     if len(set(actual_keys)) != len(actual_keys):
         errors.append('screenshot manifest contains duplicate attempts')
     for attempt in attempts:
-        errors.extend(verify_attempt_artifacts(run_root, attempt))
+        errors.extend(verify_attempt_artifacts(run_root, attempt, run_id=run_id))
     if mode == 'run':
         controls = {}
         fixture_stopped = isinstance(fixture, dict) and fixture.get('stopped') is True
@@ -1715,17 +1716,15 @@ def verify_run_directory(run_root, result_root, args):
         if identity.get('schema') != 'openbrowser-candidate-identity/1' \
                 or manifest.get('candidate_identity_sha256') != identity_hash:
             raise ValueError('screenshot run candidate identity does not match')
-        version_hash = manifest.get('version_manifest_sha256')
-        if mode == 'run':
-            version_path, version = read_json_artifact(
-                result_root, root / 'version-manifest.json', 'version manifest',
-            )
-            version = benchmark_preflight._validate_version_manifest(version)
-            if version_path.parent != root:
-                raise ValueError('version manifest must be a direct child of RESULT_ROOT')
-            version_hash = navigation.sha256(version_path)
-            if version.get('candidate_identity_sha256') != identity_hash:
-                raise ValueError('version manifest does not match the candidate identity')
+        version_path, version = read_json_artifact(
+            result_root, root / 'version-manifest.json', 'version manifest',
+        )
+        version = benchmark_preflight._validate_version_manifest(version)
+        if version_path.parent != root:
+            raise ValueError('version manifest must be a direct child of RESULT_ROOT')
+        version_hash = navigation.sha256(version_path)
+        if version.get('candidate_identity_sha256') != identity_hash:
+            raise ValueError('version manifest does not match the candidate identity')
         expected_phase = 'screenshot-smoke' if mode == 'smoke' \
             else 'screenshot-final' if Path(run_root).name == 'screenshot-final' \
             else 'screenshot-run'
@@ -1772,7 +1771,6 @@ def verify_run_directory(run_root, result_root, args):
                     or frozen.get('executed_file_sha256') != identity.get('executed_files') \
                     or manifest.get('tool_manifest_sha256') != tool_sha:
                 raise ValueError('screenshot run frozen harness does not match the candidate')
-            benchmark_preflight.validate_frozen_smoke_preflight_hashes(root, frozen)
             benchmark_preflight.validate_frozen_smoke_preflight_hashes(root, frozen)
     except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError) as error:
         LOG.error('%s', error)

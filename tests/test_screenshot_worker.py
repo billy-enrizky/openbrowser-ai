@@ -212,6 +212,26 @@ def test_capture_screenshot_is_stopped_after_failure(tmp_path, monkeypatch):
     assert arm.stopped
 
 
+def test_capture_screenshot_is_stopped_on_eof_after_failure(tmp_path, monkeypatch):
+    request = screenshot_request()
+    arm = FakeArm(fail_capture=True)
+    run_root, replies, arm = asyncio.run(
+        run_worker(tmp_path, monkeypatch, [{"op": "start"}, request], arm)
+    )
+
+    assert len(replies) == 2
+    assert replies[0]["ok"] is True
+    assert replies[1]["ok"] is False
+    assert "screenshot capture failed" in replies[1]["error"]
+    assert arm.calls == [
+        "start",
+        benchmark.parse_screenshot_request("openbrowser", request),
+        "stop",
+    ]
+    assert arm.stopped
+    assert not (run_root / "result.png").exists()
+
+
 def test_openbrowser_screenshot_uses_element_capture_after_ready_marker(
     tmp_path, monkeypatch
 ):
@@ -252,6 +272,11 @@ def test_openbrowser_screenshot_uses_element_capture_after_ready_marker(
 def test_screenshot_readiness_waits_for_matching_marker_and_loaded_image(monkeypatch):
     observations = [
         {"readyState": "complete", "readyMarker": "old-nonce", "imageReady": True},
+        {
+            "readyState": "complete",
+            "readyMarker": "expected-nonce",
+            "imageReady": False,
+        },
         {"readyState": "complete", "readyMarker": "expected-nonce", "imageReady": True},
     ]
     calls = []
@@ -269,8 +294,8 @@ def test_screenshot_readiness_waits_for_matching_marker_and_loaded_image(monkeyp
 
     asyncio.run(arm.wait_for_screenshot_ready("expected-nonce"))
 
-    assert len(calls) == 2
-    assert calls == [benchmark.SCREENSHOT_OBSERVE, benchmark.SCREENSHOT_OBSERVE]
+    assert observations == []
+    assert calls == [benchmark.SCREENSHOT_OBSERVE] * 3
 
 
 def test_raw_cdp_screenshot_sets_fixed_viewport_and_clip(tmp_path, monkeypatch):

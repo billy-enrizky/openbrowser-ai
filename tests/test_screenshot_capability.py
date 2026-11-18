@@ -1,11 +1,13 @@
 import importlib.util
 import json
 import shutil
+import struct
 import sys
 import tempfile
 import threading
 import urllib.request
 import uuid
+import zlib
 from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
@@ -479,6 +481,17 @@ def test_parseable_pixel_mismatch_is_completed_work_not_an_execution_error():
     assert evidence["mismatch_signature"] == "probes=0,1,2,3"
 
 
+def test_screenshot_inspection_records_pillow_decompression_bomb_refusal():
+    content = bytearray(capability.png_for_index(0))
+    content[16:24] = struct.pack(">II", 20000, 20000)
+    content[29:33] = struct.pack(">I", zlib.crc32(content[12:29]))
+
+    evidence = capability.inspect_png(bytes(content), index=0)
+
+    assert evidence["parseable"] is False
+    assert "DecompressionBombError" in evidence["error"]
+
+
 def test_screenshot_work_counts_separate_pixel_mismatch_from_execution_errors():
     attempts = [
         {
@@ -688,9 +701,29 @@ def test_screenshot_verifier_rejects_malformed_image_request_records(
     run_root, attempt = verification_attempt(private_result_root)
     attempt["request_proof"]["image_requests"] = [None]
 
-    errors = capability.verify_attempt_artifacts(run_root, attempt)
+    errors = capability.verify_attempt_artifacts(run_root, attempt, run_id="c" * 32)
 
     assert any("request proof" in error for error in errors)
+
+
+@pytest.mark.parametrize("output_kind", ["regular", "symlink", "dangling-symlink"])
+def test_failed_attempt_rejects_undeclared_png(private_result_root, output_kind):
+    run_root, attempt = verification_attempt(private_result_root)
+    assert capability.verify_attempt_artifacts(run_root, attempt, run_id="c" * 32) == []
+    output = run_root / attempt["directory"] / "result.png"
+    if output_kind == "regular":
+        output.write_bytes(screenshot_png_128(0))
+        output.chmod(0o600)
+    else:
+        target = private_result_root / "target.png"
+        if output_kind == "symlink":
+            target.write_bytes(screenshot_png_128(0))
+            target.chmod(0o600)
+        output.symlink_to(target)
+
+    errors = capability.verify_attempt_artifacts(run_root, attempt, run_id="c" * 32)
+
+    assert any("PNG" in error and "record" in error for error in errors)
 
 
 def test_screenshot_verifier_rejects_unretired_worker_after_failed_attempt(
@@ -698,7 +731,7 @@ def test_screenshot_verifier_rejects_unretired_worker_after_failed_attempt(
 ):
     run_root, attempt = verification_attempt(private_result_root, worker_state="alive")
 
-    errors = capability.verify_attempt_artifacts(run_root, attempt)
+    errors = capability.verify_attempt_artifacts(run_root, attempt, run_id="c" * 32)
 
     assert any("worker is not proven retired" in error for error in errors)
 
@@ -918,48 +951,20 @@ def screenshot_python_version(fixture_python_version, monkeypatch):
     )
 
 
-def test_screenshot_verifier_rejects_a_tampered_png(
-    private_result_root, screenshot_python_version
-):
-    smoke_root = private_result_root / "smoke"
+@pytest.fixture
+def verified_smoke_run(sealed_screenshot_inputs):
+    scenario, _smoke_args = sealed_screenshot_inputs
+    result_root = scenario["result_root"]
+    smoke_root = result_root / "smoke"
     smoke_root.mkdir(mode=0o700)
     smoke_root.chmod(0o700)
     run_root = smoke_root / "screenshot"
     run_root.mkdir(mode=0o700)
     run_root.chmod(0o700)
-    candidate_identity = private_result_root / "candidate-identity.json"
-    preflight_path = private_result_root / "preflight-screenshot-smoke.json"
-    interpreter = preflight_module._inspect_python(
-        sys.executable, root=private_result_root
-    )
-    identity = {
-        "schema": "openbrowser-candidate-identity/1",
-        "candidate_commit": "a" * 40,
-        "candidate_tree": "b" * 40,
-        "runtime_tree": "c" * 40,
-        "release_runtime_tree": "c" * 40,
-        "origin_main_commit": "d" * 40,
-        "origin_main_runtime_tree": "c" * 40,
-        "executed_files": {
-            relative: "e" * 64 for relative in preflight_module.EXECUTED_FILE_PATHS
-        },
-        "candidate_python": interpreter,
-        "browser_use_python": interpreter,
-    }
-    identity_bytes = capability.json.dumps(identity).encode()
-    candidate_identity.write_bytes(identity_bytes)
-    candidate_identity.chmod(0o600)
+    candidate_identity = scenario["identity_path"]
+    preflight_path = result_root / "preflight-screenshot-smoke.json"
     identity_hash = capability.navigation.sha256(candidate_identity)
-    preflight = {
-        "schema": "openbrowser-latest-preflight/1",
-        "phase": "screenshot-smoke",
-        "candidate_identity_sha256": identity_hash,
-        "version_manifest_sha256": "b" * 64,
-        "checks": [],
-        "outcome": "passed",
-        "errors": [],
-    }
-    capability.atomic_json(preflight_path, preflight)
+    version_hash = capability.navigation.sha256(scenario["version_path"])
 
     arms_root = run_root / "arms"
     arms_root.mkdir(mode=0o700)
@@ -1048,10 +1053,12 @@ def test_screenshot_verifier_rejects_a_tampered_png(
         "run_id": "c" * 32,
         "state": "complete",
         "candidate_identity_sha256": identity_hash,
-        "version_manifest_sha256": "b" * 64,
+        "version_manifest_sha256": version_hash,
         "preflight_sha256": capability.navigation.sha256(preflight_path),
         "frozen_harness_sha256": None,
-        "tool_manifest_sha256": "d" * 64,
+        "tool_manifest_sha256": json.loads(scenario["version_path"].read_text())[
+            "tool_manifest_sha256"
+        ],
         "harness_sha256": capability.navigation.sha256(capability.__file__),
         "lightpanda_script_sha256": capability.navigation.sha256(
             Path(capability.__file__).with_name("screenshot_lightpanda.js"),
@@ -1078,11 +1085,53 @@ def test_screenshot_verifier_rejects_a_tampered_png(
         preflight=str(preflight_path),
         frozen_harness=None,
     )
-    assert capability.verify_run_directory(run_root, private_result_root, args) == 0
-    (run_root / "arms/openbrowser/attempt-1/result.png").write_bytes(
-        (run_root / "arms/openbrowser/attempt-1/result.png").read_bytes() + b"tampered",
-    )
-    assert capability.verify_run_directory(run_root, private_result_root, args) == 1
+    assert capability.verify_run_directory(run_root, result_root, args) == 0
+    return result_root, run_root, args, manifest
+
+
+def test_screenshot_verifier_rejects_a_tampered_png(verified_smoke_run):
+    result_root, run_root, args, _manifest = verified_smoke_run
+    output = run_root / "arms/openbrowser/attempt-1/result.png"
+    output.write_bytes(output.read_bytes() + b"tampered")
+    assert capability.verify_run_directory(run_root, result_root, args) == 1
+
+
+def test_screenshot_smoke_rejects_attempts_from_another_run(verified_smoke_run):
+    result_root, run_root, args, manifest = verified_smoke_run
+    manifest["run_id"] = "d" * 32
+    capability.atomic_json(run_root / "run-manifest.json", manifest)
+    capability.write_screenshot_summary(run_root, manifest)
+
+    assert capability.verify_run_directory(run_root, result_root, args) == 1
+
+
+@pytest.mark.parametrize(
+    "change", ["mutated", "missing", "invalid-schema", "wrong-candidate"]
+)
+def test_screenshot_smoke_verifies_actual_version_manifest(verified_smoke_run, change):
+    result_root, run_root, args, manifest = verified_smoke_run
+    version_path = result_root / "version-manifest.json"
+    if change == "missing":
+        version_path.unlink()
+    elif change == "mutated":
+        version_path.write_bytes(version_path.read_bytes() + b" ")
+    else:
+        version = json.loads(version_path.read_text())
+        if change == "invalid-schema":
+            version["schema"] = "unsupported"
+        else:
+            version["candidate_identity_sha256"] = "0" * 64
+        capability.atomic_json(version_path, version)
+        version_hash = capability.navigation.sha256(version_path)
+        manifest["version_manifest_sha256"] = version_hash
+        preflight_path = Path(args.preflight)
+        preflight = json.loads(preflight_path.read_text())
+        preflight["version_manifest_sha256"] = version_hash
+        capability.atomic_json(preflight_path, preflight)
+        manifest["preflight_sha256"] = capability.navigation.sha256(preflight_path)
+        capability.atomic_json(run_root / "run-manifest.json", manifest)
+
+    assert capability.verify_run_directory(run_root, result_root, args) == 1
 
 
 @pytest.mark.asyncio
