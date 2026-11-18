@@ -352,6 +352,34 @@ async def test_graceful_shutdown_timeout_still_reaches_owned_cleanup(monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_stop_reports_identity_state_after_reaping_browser(monkeypatch):
+    reaped = False
+    identity = {'pid': 1234, 'created': 1.0, 'cmdline': ['owned-browser'],
+                'owner_token': 'run', 'owner_root': '/private/tmp/run/raw-cdp'}
+
+    class Process:
+        def wait(self, timeout):
+            nonlocal reaped
+            reaped = True
+
+    async def terminate(identities, token):
+        return [{**identity, 'state': 'zombie'}]
+
+    monkeypatch.setattr(benchmark, 'terminate_owned', terminate)
+    monkeypatch.setattr(benchmark, 'state', lambda _identity: 'absent' if reaped else 'zombie')
+    arm = benchmark.Arm.__new__(benchmark.Arm)
+    arm.name, arm.browser, arm.cdp, arm.proc = 'raw-cdp', None, None, Process()
+    arm.token, arm.owned = 'run', {identity['pid']: identity}
+    arm.ownership = lambda: [identity]
+
+    result = await arm.stop()
+
+    assert reaped is True
+    assert result['errors'] == []
+    assert result['identities'][0]['state'] == 'absent'
+
+
+@pytest.mark.asyncio
 async def test_coordinator_stop_failure_still_reaps_only_verified_owned_identities(monkeypatch):
     worker = {
         'pid': 12, 'created': 2.0, 'cmdline': ['worker'],

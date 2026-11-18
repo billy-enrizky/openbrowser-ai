@@ -894,6 +894,7 @@ return JSON.stringify({{field:f.value,response:await r.json()}})}})()'''
                 failures.append('owned engine did not exit after verified termination')
         if hasattr(self, 'log'):
             self.log.close()
+        identities = [{**identity, 'state': state(identity)} for identity in identities]
         return {'errors': failures, 'identities': identities}
 
 
