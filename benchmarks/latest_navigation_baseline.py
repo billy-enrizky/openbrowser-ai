@@ -517,10 +517,11 @@ async def run_pair_attempts(
             record['error_count'] = max(record['error_count'], len(record['errors']))
             counts['error_count'] = max(counts['error_count'], record['error_count'])
         if record.get('cleanup_ok') is not True:
+            if record['state'] != AttemptState.FAILED.value or not record['errors']:
+                record['errors'].append('worker cleanup is uncertain')
+                record['error_count'] += 1
+                counts['error_count'] += 1
             record['state'] = AttemptState.FAILED.value
-            record['errors'].append('worker cleanup is uncertain')
-            record['error_count'] += 1
-            counts['error_count'] += 1
         _upsert_attempt_reference(pair, record)
         if on_update is not None:
             update = on_update(pair)

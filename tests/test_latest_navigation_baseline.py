@@ -133,6 +133,29 @@ async def test_runner_stops_after_uncertain_worker_cleanup(runner):
     assert pair['state'] == 'failed'
 
 
+@pytest.mark.asyncio
+async def test_cleanup_failure_preserves_hashed_attempt_evidence(runner):
+    evidence = {
+        'state': 'failed', 'cleanup_ok': False,
+        'errors': ['worker cleanup incomplete', 'runtime root retained'],
+        'work_counts': {'attempted_work_count': 24, 'successful_work_count': 24, 'error_count': 2},
+        'error_count': 2,
+    }
+    before = json.dumps(evidence, sort_keys=True)
+
+    async def execute(_number):
+        return evidence
+
+    async def quiet():
+        pytest.fail('uncertain cleanup must stop without retry')
+
+    pair = await runner.run_pair_attempts('lightpanda', execute, quiet)
+
+    assert json.dumps(evidence, sort_keys=True) == before
+    assert pair['state'] == 'failed'
+    assert pair['attempts'][0]['error_count'] == 2
+
+
 def test_incomplete_pair_cannot_rank(runner):
     run_can_rank = getattr(runner, 'run_can_rank', None)
     competitors = getattr(runner, 'COMPETITORS', None)
