@@ -4,6 +4,8 @@ from __future__ import annotations
 import argparse
 import base64
 import binascii
+import ctypes
+import errno
 import hashlib
 import json
 import logging
@@ -13,9 +15,11 @@ import shutil
 import stat
 import subprocess
 import sys
+import tempfile
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
@@ -385,22 +389,32 @@ def _write_new_file(path: Path, body: bytes, *, mode: int = 0o600) -> None:
     if hasattr(os, "O_NOFOLLOW"):
         flags |= os.O_NOFOLLOW
     try:
+        parent_identity = path.parent.lstat()
         descriptor = os.open(path, flags, mode)
     except FileExistsError as exc:
         raise MetadataError(f"refusing to overwrite existing artifact: {path}") from exc
     except OSError as exc:
         raise MetadataError(f"cannot create artifact: {path}") from exc
+    created_identity = None
     try:
         with os.fdopen(descriptor, "wb") as output:
+            created_identity = os.fstat(output.fileno())
             output.write(body)
             output.flush()
             os.fsync(output.fileno())
-    except OSError as exc:
+    except BaseException as exc:
         try:
-            path.unlink()
+            if (
+                created_identity is not None
+                and os.path.samestat(path.lstat(), created_identity)
+                and os.path.samestat(path.parent.lstat(), parent_identity)
+            ):
+                path.unlink()
         except OSError:
             pass
-        raise MetadataError(f"cannot write artifact: {path}") from exc
+        if isinstance(exc, OSError):
+            raise MetadataError(f"cannot write artifact: {path}") from exc
+        raise
 
 
 def _require_private_result_root(path: str | os.PathLike[str]) -> Path:
@@ -521,6 +535,7 @@ def _download_file(
     max_bytes: int,
     expected_sha256: str | None = None,
     expected_size: int | None = None,
+    mode: int = 0o600,
 ) -> tuple[str, int]:
     request = urllib.request.Request(
         url,
@@ -543,6 +558,7 @@ def _download_file(
                 raise MetadataError(f"HTTP download failed with status {status}: {url}")
             descriptor = os.open(destination, flags, 0o600)
             with os.fdopen(descriptor, "wb") as output:
+                os.fchmod(output.fileno(), mode)
                 while True:
                     chunk = response.read(READ_CHUNK_SIZE)
                     if not chunk:
@@ -557,22 +573,13 @@ def _download_file(
                 output.flush()
                 os.fsync(output.fileno())
     except MetadataError:
-        if destination.exists():
-            destination.unlink()
         raise
     except (OSError, urllib.error.URLError, TimeoutError) as exc:
-        if destination.exists():
-            try:
-                destination.unlink()
-            except OSError:
-                pass
         raise MetadataError(f"required binary download is unavailable: {url}") from exc
     checksum = digest.hexdigest()
     if expected_size is not None and total != expected_size:
-        destination.unlink(missing_ok=True)
         raise MetadataError(f"download size mismatch for {url}: expected {expected_size}, got {total}")
     if expected_sha256 is not None and checksum != expected_sha256:
-        destination.unlink(missing_ok=True)
         raise MetadataError(f"official SHA-256 mismatch for downloaded asset: {url}")
     return checksum, total
 
@@ -635,10 +642,9 @@ def _extract_chrome_archive(archive_path: Path, extraction_root: Path) -> Path:
                     flags |= os.O_NOFOLLOW
                 descriptor = os.open(destination, flags, 0o600)
                 with archive.open(info, "r") as source, os.fdopen(descriptor, "wb") as output:
+                    permissions = 0o755 if Path(*relative_parts) == CHROME_EXECUTABLE_RELATIVE else mode & 0o777 or 0o600
+                    os.fchmod(output.fileno(), permissions)
                     shutil.copyfileobj(source, output, READ_CHUNK_SIZE)
-                permissions = mode & 0o777
-                if permissions:
-                    destination.chmod(permissions)
             for destination, target in links:
                 destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
                 if destination.parent.resolve(strict=True) != destination.parent:
@@ -652,15 +658,16 @@ def _extract_chrome_archive(archive_path: Path, extraction_root: Path) -> Path:
     executable = extraction_root / CHROME_EXECUTABLE_RELATIVE
     if not executable.is_file():
         raise MetadataError("Chrome archive is missing its expected mac-arm64 executable")
-    executable.chmod(0o755)
     return executable.resolve(strict=True)
 
 
-def _isolated_version(path: Path) -> str:
+def _isolated_version(path: Path, *, result_root: Path) -> str:
+    root = _require_private_result_root(result_root)
+    scratch = Path(tempfile.mkdtemp(prefix='.tool-version-', dir=root))
     environment = {
         "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
-        "HOME": str(path.parent),
-        "TMPDIR": str(path.parent),
+        "HOME": str(scratch),
+        "TMPDIR": str(scratch),
         "LANG": "C",
     }
     try:
@@ -670,7 +677,7 @@ def _isolated_version(path: Path) -> str:
             capture_output=True,
             text=True,
             timeout=15,
-            cwd=path.parent,
+            cwd=scratch,
             env=environment,
         )
     except (OSError, subprocess.SubprocessError) as exc:
@@ -682,6 +689,526 @@ def _isolated_version(path: Path) -> str:
     if not matches:
         raise MetadataError(f"version command returned no parseable version: {path}")
     return matches[-1]
+
+
+def _rename_noreplace(source: Path, destination: Path) -> None:
+    library = ctypes.CDLL(None, use_errno=True)
+    try:
+        if sys.platform == "darwin":
+            native = library.renamex_np
+            native.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint]
+            arguments = (os.fsencode(source), os.fsencode(destination), 4)
+        elif sys.platform == "linux":
+            native = library.renameat2
+            native.argtypes = [
+                ctypes.c_int,
+                ctypes.c_char_p,
+                ctypes.c_int,
+                ctypes.c_char_p,
+                ctypes.c_uint,
+            ]
+            arguments = (-100, os.fsencode(source), -100, os.fsencode(destination), 1)
+        else:
+            raise MetadataError(
+                "native exclusive moves are unsupported on this platform"
+            )
+    except AttributeError as error:
+        raise MetadataError("native exclusive move symbol is unavailable") from error
+    native.restype = ctypes.c_int
+    ctypes.set_errno(0)
+    if native(*arguments) != 0:
+        number = ctypes.get_errno() or errno.EIO
+        raise OSError(number, os.strerror(number), str(destination))
+
+
+_INSTALL_SCHEMA = "openbrowser-tool-install-plan/1"
+_INSTALL_RECEIPT = ".tool-install-receipt.json"
+_INSTALL_PLAN = "install-plan.json"
+_INSTALL_MANIFEST = "public-manifest.json"
+_INSTALL_ROLES = (
+    "lightpanda",
+    "agent-browser",
+    "chrome-mac-arm64.zip",
+    "chrome-mac-arm64",
+)
+_MAX_INSTALL_PLAN_BYTES = 128 * 1024 * 1024
+
+
+def _write_retained_file(path: Path, body: bytes, *, mode: int = 0o600) -> None:
+    if len(body) > _MAX_INSTALL_PLAN_BYTES:
+        raise MetadataError("installation JSON exceeds size limit")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(path, flags, mode)
+    with os.fdopen(descriptor, "wb") as output:
+        os.fchmod(output.fileno(), mode)
+        output.write(body)
+        output.flush()
+        os.fsync(output.fileno())
+
+
+def _install_exact(value: Any, keys: set[str], where: str) -> dict[str, Any]:
+    if not isinstance(value, dict) or set(value) != keys:
+        raise MetadataError(f"conflict: {where} has unknown or missing keys")
+    return value
+
+
+def _install_integer(value: Any, where: str) -> None:
+    if type(value) is not int or not 0 <= value < 2**64:
+        raise MetadataError(f"conflict: {where} must be an unsigned integer")
+
+
+def _install_json(path: Path) -> tuple[dict[str, Any], os.stat_result, bytes]:
+    def unique_object(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise MetadataError("conflict: duplicate installation JSON key")
+            result[key] = value
+        return result
+
+    descriptor = os.open(
+        path, os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0)
+    )
+    with os.fdopen(descriptor, "rb") as source:
+        identity = os.fstat(source.fileno())
+        if (
+            not stat.S_ISREG(identity.st_mode)
+            or stat.S_IMODE(identity.st_mode) != 0o600
+            or identity.st_uid != os.getuid()
+            or identity.st_size > _MAX_INSTALL_PLAN_BYTES
+        ):
+            raise MetadataError(f"conflict: unsafe installation JSON: {path}")
+        body = source.read(_MAX_INSTALL_PLAN_BYTES + 1)
+    if len(body) > _MAX_INSTALL_PLAN_BYTES:
+        raise MetadataError("conflict: installation JSON exceeds size limit")
+    try:
+        value = json.loads(body, object_pairs_hook=unique_object)
+    except (ValueError, UnicodeDecodeError) as error:
+        raise MetadataError(f"conflict: invalid installation JSON: {path}") from error
+    if not isinstance(value, dict):
+        raise MetadataError("conflict: installation JSON must be an object")
+    return value, identity, body
+
+
+def _install_anchor(path: Path, relative: str) -> dict[str, Any]:
+    info = path.lstat()
+    if (
+        not stat.S_ISDIR(info.st_mode)
+        or stat.S_IMODE(info.st_mode) != 0o700
+        or info.st_uid != os.getuid()
+    ):
+        raise MetadataError(
+            f"conflict: installation ancestor is not a private physical directory: {path}"
+        )
+    return {
+        "path": relative,
+        "dev": info.st_dev,
+        "ino": info.st_ino,
+        "mode": stat.S_IMODE(info.st_mode),
+        "uid": info.st_uid,
+        "gid": info.st_gid,
+    }
+
+
+def _install_anchors(root: Path, tools: Path) -> list[dict[str, Any]]:
+    records = [_install_anchor(root, "")]
+    parent = root
+    for part in tools.relative_to(root).parts:
+        parent /= part
+        records.append(_install_anchor(parent, parent.relative_to(root).as_posix()))
+    return records
+
+
+def _install_node(path: Path, relative: str) -> dict[str, Any]:
+    info = path.lstat()
+    if stat.S_ISREG(info.st_mode):
+        kind = "file"
+    elif stat.S_ISDIR(info.st_mode):
+        kind = "directory"
+    elif stat.S_ISLNK(info.st_mode):
+        kind = "symlink"
+    else:
+        raise MetadataError(f"conflict: unsupported payload node: {path}")
+    return {
+        "path": relative,
+        "dev": info.st_dev,
+        "ino": info.st_ino,
+        "kind": kind,
+        "mode": stat.S_IMODE(info.st_mode),
+        "uid": info.st_uid,
+        "gid": info.st_gid,
+        "size": info.st_size,
+        "mtime_ns": info.st_mtime_ns,
+    }
+
+
+def _install_inventory(root: Path) -> list[dict[str, Any]]:
+    records = []
+    pending = [(root, "")]
+    while pending:
+        path, relative = pending.pop()
+        node = _install_node(path, relative)
+        if node["kind"] == "file":
+            node["sha256"] = sha256_file(path)
+        elif node["kind"] == "symlink":
+            node["target"] = os.readlink(path)
+            if (
+                not node["target"]
+                or "\\" in node["target"]
+                or Path(node["target"]).is_absolute()
+                or not path.resolve(strict=True).is_relative_to(root)
+            ):
+                raise MetadataError(
+                    "conflict: payload symbolic link is not internally closed"
+                )
+        else:
+            for child in sorted(path.iterdir(), reverse=True):
+                pending.append((child, child.relative_to(root).as_posix()))
+        records.append(node)
+        if len(records) > MAX_ARCHIVE_ENTRIES + 1:
+            raise MetadataError("conflict: payload inventory exceeds entry limit")
+    return sorted(records, key=lambda node: node["path"])
+
+
+def _install_nodes_shape(nodes: Any, *, directory: bool) -> None:
+    if not isinstance(nodes, list) or not 1 <= len(nodes) <= MAX_ARCHIVE_ENTRIES + 1:
+        raise MetadataError("conflict: invalid payload inventory length")
+    paths = []
+    base = {"path", "dev", "ino", "kind", "mode", "uid", "gid", "size", "mtime_ns"}
+    for node in nodes:
+        if (
+            not isinstance(node, dict)
+            or not isinstance(node.get("kind"), str)
+            or node["kind"] not in {"file", "directory", "symlink"}
+        ):
+            raise MetadataError("conflict: invalid payload inventory node")
+        extra = (
+            {"sha256"}
+            if node["kind"] == "file"
+            else {"target"}
+            if node["kind"] == "symlink"
+            else set()
+        )
+        _install_exact(node, base | extra, "inventory node")
+        relative = node["path"]
+        if (
+            not isinstance(relative, str)
+            or relative == "."
+            or "\x00" in relative
+            or (
+                relative
+                and (
+                    PurePosixPath(relative).is_absolute()
+                    or ".." in PurePosixPath(relative).parts
+                    or PurePosixPath(relative).as_posix() != relative
+                    or "\\" in relative
+                )
+            )
+        ):
+            raise MetadataError("conflict: noncanonical inventory path")
+        for name in ("dev", "ino", "mode", "uid", "gid", "size", "mtime_ns"):
+            _install_integer(node[name], f"inventory.{name}")
+        if node["mode"] > 0o777 or node["uid"] != os.getuid():
+            raise MetadataError("conflict: unsafe payload permissions or owner")
+        if extra == {"sha256"}:
+            _sha256_hex(node["sha256"], "inventory.sha256")
+        elif extra:
+            target = node["target"]
+            if (
+                not isinstance(target, str)
+                or not target
+                or "\x00" in target
+                or "\\" in target
+                or Path(target).is_absolute()
+            ):
+                raise MetadataError("conflict: unsafe inventory symbolic link")
+        paths.append(relative)
+    if (
+        paths != sorted(set(paths))
+        or paths[0] != ""
+        or nodes[0]["kind"] != ("directory" if directory else "file")
+    ):
+        raise MetadataError("conflict: incomplete or unsorted payload inventory")
+    if not directory and len(nodes) != 1:
+        raise MetadataError("conflict: regular slot has descendants")
+    kinds = {node["path"]: node["kind"] for node in nodes}
+    for relative in paths[1:]:
+        parent = PurePosixPath(relative).parent.as_posix()
+        if kinds.get("" if parent == "." else parent) != "directory":
+            raise MetadataError(
+                "conflict: inventory parent is not a physical directory"
+            )
+
+
+def _install_match(root: Path, nodes: list[dict[str, Any]]) -> None:
+    expected = {node["path"]: node for node in nodes}
+    children: dict[str, list[str]] = {
+        name: [] for name, node in expected.items() if node["kind"] == "directory"
+    }
+    for relative in expected:
+        if relative:
+            parent = PurePosixPath(relative).parent.as_posix()
+            children["" if parent == "." else parent].append(
+                PurePosixPath(relative).name
+            )
+    for relative, node in expected.items():
+        path = root / relative
+        actual = _install_node(path, relative)
+        if actual != {
+            key: value for key, value in node.items() if key not in {"sha256", "target"}
+        }:
+            raise MetadataError(
+                f"conflict: payload identity or metadata changed: {path}"
+            )
+        if node["kind"] == "directory":
+            if sorted(child.name for child in path.iterdir()) != sorted(
+                children[relative]
+            ):
+                raise MetadataError(f"conflict: payload membership changed: {path}")
+        elif node["kind"] == "file":
+            if sha256_file(path) != node["sha256"]:
+                raise MetadataError(f"conflict: payload bytes changed: {path}")
+        elif os.readlink(path) != node["target"] or not path.resolve(
+            strict=True
+        ).is_relative_to(root):
+            raise MetadataError(f"conflict: payload symbolic link changed: {path}")
+
+
+def _install_manifest(
+    parsed: dict[str, Any], tools: Path, slots: dict[str, Any]
+) -> dict[str, Any]:
+    records = {}
+    for name in ("lightpanda", "agent-browser"):
+        release = parsed["release_assets"][name]
+        node = slots[name][0]
+        if (
+            node["sha256"] != release["official_sha256"]
+            or node["size"] != release["size"]
+            or node["mode"] != 0o755
+        ):
+            raise MetadataError(
+                f"conflict: prepared {name} does not match official metadata"
+            )
+        records[name] = {
+            "path": str(tools / name),
+            "installed_version": release["version"],
+            "download_url": release["download_url"],
+            "local_sha256": node["sha256"],
+            "official_sha256": release["official_sha256"],
+        }
+    chrome = {node["path"]: node for node in slots["chrome-mac-arm64"]}.get(
+        CHROME_EXECUTABLE_RELATIVE.as_posix()
+    )
+    if chrome is None or chrome["kind"] != "file" or chrome["mode"] != 0o755:
+        raise MetadataError(
+            "conflict: Chrome executable is not a prepared physical executable"
+        )
+    records["chrome_for_testing"] = {
+        "path": str(tools / "chrome-mac-arm64" / CHROME_EXECUTABLE_RELATIVE),
+        "installed_version": parsed["latest_versions"]["chrome_for_testing"],
+        "download_url": parsed["chrome_download_url"],
+        "local_sha256": chrome["sha256"],
+        "archive_path": str(tools / "chrome-mac-arm64.zip"),
+        "archive_sha256": slots["chrome-mac-arm64.zip"][0]["sha256"],
+    }
+    return {
+        "schema": TOOL_MANIFEST_SCHEMA,
+        "metadata_sha256": parsed["metadata_manifest_sha256"],
+        "tools": records,
+    }
+
+
+def _install_plan_shape(
+    plan: dict[str, Any], root: Path, tools: Path, cache: Path, parsed: dict[str, Any]
+) -> None:
+    _install_exact(
+        plan,
+        {
+            "schema",
+            "cache_id",
+            "metadata_sha256",
+            "root_path",
+            "tools_relative",
+            "anchors",
+            "cache",
+            "slots",
+            "manifest",
+        },
+        "installation plan",
+    )
+    if (
+        plan["schema"] != _INSTALL_SCHEMA
+        or not isinstance(plan["cache_id"], str)
+        or not re.fullmatch("[0-9a-f]{32}", plan["cache_id"])
+        or cache != root / f".tool-install-cache-{plan['cache_id']}"
+        or plan["metadata_sha256"] != parsed["metadata_manifest_sha256"]
+        or plan["root_path"] != str(root)
+        or plan["tools_relative"] != tools.relative_to(root).as_posix()
+    ):
+        raise MetadataError("conflict: installation plan request binding changed")
+    anchors = plan["anchors"]
+    if (
+        not isinstance(anchors, list)
+        or len(anchors) != len(tools.relative_to(root).parts) + 1
+    ):
+        raise MetadataError("conflict: installation ancestor list is invalid")
+    for anchor in [*anchors, plan["cache"]]:
+        _install_exact(
+            anchor, {"path", "dev", "ino", "mode", "uid", "gid"}, "installation anchor"
+        )
+        if not isinstance(anchor["path"], str):
+            raise MetadataError("conflict: anchor path must be a string")
+        for name in ("dev", "ino", "mode", "uid", "gid"):
+            _install_integer(anchor[name], f"anchor.{name}")
+    if anchors != _install_anchors(root, tools) or plan["cache"] != _install_anchor(
+        cache, cache.name
+    ):
+        raise MetadataError("conflict: installation ancestor identity changed")
+    _install_exact(plan["slots"], set(_INSTALL_ROLES), "installation slots")
+    for name in _INSTALL_ROLES:
+        _install_nodes_shape(plan["slots"][name], directory=name == "chrome-mac-arm64")
+    _install_nodes_shape(plan["manifest"], directory=False)
+    if plan["manifest"][0]["mode"] != 0o600:
+        raise MetadataError("conflict: manifest witness mode changed")
+
+
+def _install_optional_stat(path: Path) -> os.stat_result | None:
+    try:
+        return path.lstat()
+    except FileNotFoundError:
+        return None
+
+
+def _inspect_installation(
+    plan: dict[str, Any],
+    root: Path,
+    tools: Path,
+    cache: Path,
+    metadata_root: Path,
+    *,
+    selected: bool,
+) -> tuple[list[str], dict[str, Any], bool]:
+    parsed = parse_metadata_sources(metadata_root)
+    _install_plan_shape(plan, root, tools, cache, parsed)
+    saved, source_identity, _body = _install_json(cache / _INSTALL_PLAN)
+    if saved != plan:
+        raise MetadataError("conflict: persisted installation plan changed")
+    if selected:
+        _receipt, receipt_identity, _receipt_body = _install_json(
+            root / _INSTALL_RECEIPT
+        )
+        if not os.path.samestat(source_identity, receipt_identity):
+            raise MetadataError(
+                "conflict: root receipt is not the retained plan witness"
+            )
+    manifest, _identity, _body = _install_json(cache / _INSTALL_MANIFEST)
+    _install_match(cache / _INSTALL_MANIFEST, plan["manifest"])
+    if manifest != _install_manifest(parsed, tools, plan["slots"]):
+        raise MetadataError(
+            "conflict: public manifest does not match plan and metadata"
+        )
+    positions = []
+    for name in _INSTALL_ROLES:
+        source, destination = cache / name, tools / name
+        source_info, destination_info = (
+            _install_optional_stat(source),
+            _install_optional_stat(destination),
+        )
+        if (source_info is None) == (destination_info is None):
+            raise MetadataError(
+                f"conflict: payload {name} must occupy exactly one planned slot"
+            )
+        location = source if source_info is not None else destination
+        _install_match(location, plan["slots"][name])
+        positions.append("ready" if source_info is not None else "moved")
+    expected_members = {_INSTALL_PLAN, _INSTALL_MANIFEST} | {
+        name for name, position in zip(_INSTALL_ROLES, positions) if position == "ready"
+    }
+    if {path.name for path in cache.iterdir()} != expected_members:
+        raise MetadataError("conflict: retained generation has unexpected members")
+    marker = _install_optional_stat(root / "tool-manifest.json")
+    if marker is not None:
+        if not os.path.samestat(marker, (cache / _INSTALL_MANIFEST).lstat()):
+            raise MetadataError(
+                "conflict: final manifest is not the retained manifest witness"
+            )
+        _install_match(root / "tool-manifest.json", plan["manifest"])
+        if any(position != "moved" for position in positions):
+            raise MetadataError(
+                "conflict: committed marker has incomplete installation"
+            )
+    return positions, manifest, marker is not None
+
+
+def _prepare_installation(
+    root: Path,
+    tools: Path,
+    metadata_root: Path,
+    parsed: dict[str, Any],
+    fetch: Callable[..., Any],
+) -> tuple[Path, dict[str, Any]]:
+    cache_id = uuid.uuid4().hex
+    cache = root / f".tool-install-cache-{cache_id}"
+    try:
+        cache.mkdir(mode=0o700)
+        anchors = _install_anchors(root, tools)
+        for name in ("lightpanda", "agent-browser"):
+            release = parsed["release_assets"][name]
+            _download_file(
+                fetch,
+                release["download_url"],
+                cache / name,
+                max_bytes=256 * 1024 * 1024,
+                expected_sha256=release["official_sha256"],
+                expected_size=release["size"],
+                mode=0o755,
+            )
+        _download_file(
+            fetch,
+            parsed["chrome_download_url"],
+            cache / "chrome-mac-arm64.zip",
+            max_bytes=MAX_ARCHIVE_BYTES,
+        )
+        chrome = _extract_chrome_archive(
+            cache / "chrome-mac-arm64.zip", cache / "chrome-mac-arm64"
+        )
+        slots = {name: _install_inventory(cache / name) for name in _INSTALL_ROLES}
+        for name, path in (
+            ("lightpanda", cache / "lightpanda"),
+            ("agent-browser", cache / "agent-browser"),
+            ("chrome_for_testing", chrome),
+        ):
+            actual = _isolated_version(path, result_root=root)
+            expected = (
+                parsed["latest_versions"][name.replace("-", "_")]
+                if name == "chrome_for_testing"
+                else parsed["release_assets"][name]["version"]
+            )
+            if actual != expected:
+                raise MetadataError(
+                    f"installed {name} version mismatch: expected {expected}, got {actual}"
+                )
+        for name in _INSTALL_ROLES:
+            _install_match(cache / name, slots[name])
+        manifest = _install_manifest(parsed, tools, slots)
+        _write_retained_file(cache / _INSTALL_MANIFEST, _json_bytes(manifest))
+        plan = {
+            "schema": _INSTALL_SCHEMA,
+            "cache_id": cache_id,
+            "metadata_sha256": parsed["metadata_manifest_sha256"],
+            "root_path": str(root),
+            "tools_relative": tools.relative_to(root).as_posix(),
+            "anchors": anchors,
+            "cache": _install_anchor(cache, cache.name),
+            "slots": slots,
+            "manifest": _install_inventory(cache / _INSTALL_MANIFEST),
+        }
+        _write_retained_file(cache / _INSTALL_PLAN, _json_bytes(plan))
+        _inspect_installation(plan, root, tools, cache, metadata_root, selected=False)
+        return cache, plan
+    except BaseException as original:
+        BaseException.add_note(original, f"retained_preparation: {cache}")
+        raise
 
 
 def download_tools(
@@ -696,103 +1223,55 @@ def download_tools(
     metadata_root = _result_directory(
         metadata_dir, root, "metadata input", create=False, require_exists=True
     )
-    tools_root = _result_directory(
-        tools_dir, root, "tools output", create=False, require_exists=False
+    tools = _result_directory(
+        tools_dir, root, "tools output", create=False, require_exists=True
     )
-    output_path = _result_path(manifest_path, root, "tool manifest")
-    if output_path != root / "tool-manifest.json":
+    output = _result_path(manifest_path, root, "tool manifest")
+    if output != root / "tool-manifest.json":
         raise MetadataError("tool manifest must use RESULT_ROOT/tool-manifest.json")
-    if output_path.exists() or output_path.is_symlink():
-        raise MetadataError(f"refusing to overwrite existing tool manifest: {output_path}")
     parsed = parse_metadata_sources(metadata_root)
-    tools_root = _result_directory(
-        tools_root, root, "tools output", create=True, require_exists=True
-    )
-    fetch = _open_url(open_url)
-    releases = parsed["release_assets"]
-    lightpanda = releases["lightpanda"]
-    agent_browser = releases["agent-browser"]
-    chrome_version = parsed["latest_versions"]["chrome_for_testing"]
-    chrome_url = parsed["chrome_download_url"]
-
-    lightpanda_path = tools_root / "lightpanda"
-    agent_browser_path = tools_root / "agent-browser"
-    chrome_archive_path = tools_root / "chrome-mac-arm64.zip"
-    chrome_root = tools_root / "chrome-mac-arm64"
-    if any(path.exists() or path.is_symlink() for path in (lightpanda_path, agent_browser_path, chrome_archive_path, chrome_root)):
-        raise MetadataError("refusing to overwrite an existing tool installation")
-
-    light_hash, _light_size = _download_file(
-        fetch,
-        lightpanda["download_url"],
-        lightpanda_path,
-        max_bytes=256 * 1024 * 1024,
-        expected_sha256=lightpanda["official_sha256"],
-        expected_size=lightpanda["size"],
-    )
-    lightpanda_path.chmod(0o755)
-    agent_hash, _agent_size = _download_file(
-        fetch,
-        agent_browser["download_url"],
-        agent_browser_path,
-        max_bytes=256 * 1024 * 1024,
-        expected_sha256=agent_browser["official_sha256"],
-        expected_size=agent_browser["size"],
-    )
-    agent_browser_path.chmod(0o755)
-    chrome_archive_hash, _archive_size = _download_file(
-        fetch,
-        chrome_url,
-        chrome_archive_path,
-        max_bytes=MAX_ARCHIVE_BYTES,
-    )
-    chrome_path = _extract_chrome_archive(chrome_archive_path, chrome_root)
-
-    installed_versions = {
-        "lightpanda": _isolated_version(lightpanda_path),
-        "agent-browser": _isolated_version(agent_browser_path),
-        "chrome_for_testing": _isolated_version(chrome_path),
-    }
-    expected_versions = {
-        "lightpanda": lightpanda["version"],
-        "agent-browser": agent_browser["version"],
-        "chrome_for_testing": chrome_version,
-    }
-    for name, expected in expected_versions.items():
-        if installed_versions[name] != expected:
-            raise MetadataError(f"installed {name} version mismatch: expected {expected}, got {installed_versions[name]}")
-
-    tool_manifest = {
-        "schema": TOOL_MANIFEST_SCHEMA,
-        "metadata_sha256": parsed["metadata_manifest_sha256"],
-        "tools": {
-            "lightpanda": {
-                "path": str(lightpanda_path.resolve(strict=True)),
-                "installed_version": installed_versions["lightpanda"],
-                "download_url": lightpanda["download_url"],
-                "local_sha256": light_hash,
-                "official_sha256": lightpanda["official_sha256"],
-            },
-            "agent-browser": {
-                "path": str(agent_browser_path.resolve(strict=True)),
-                "installed_version": installed_versions["agent-browser"],
-                "download_url": agent_browser["download_url"],
-                "local_sha256": agent_hash,
-                "official_sha256": agent_browser["official_sha256"],
-            },
-            "chrome_for_testing": {
-                "path": str(chrome_path),
-                "installed_version": installed_versions["chrome_for_testing"],
-                "download_url": chrome_url,
-                "local_sha256": sha256_file(chrome_path),
-                "archive_path": str(chrome_archive_path.resolve(strict=True)),
-                "archive_sha256": chrome_archive_hash,
-            },
-        },
-    }
-    _write_new_file(output_path, _json_bytes(tool_manifest))
-    LOGGER.info("downloaded and verified the current local browser tools")
-    return tool_manifest
+    receipt = root / _INSTALL_RECEIPT
+    if _install_optional_stat(receipt) is None:
+        if _install_optional_stat(output) is not None:
+            raise MetadataError(
+                "refusing existing tool manifest without an owned receipt"
+            )
+        if any(
+            _install_optional_stat(tools / name) is not None for name in _INSTALL_ROLES
+        ):
+            raise MetadataError("refusing to overwrite an existing tool installation")
+        cache, plan = _prepare_installation(
+            root, tools, metadata_root, parsed, _open_url(open_url)
+        )
+        os.link(cache / _INSTALL_PLAN, receipt)
+    else:
+        plan, _identity, _body = _install_json(receipt)
+        cache_id = plan.get("cache_id")
+        if not isinstance(cache_id, str) or not re.fullmatch("[0-9a-f]{32}", cache_id):
+            raise MetadataError("conflict: invalid installation receipt cache ID")
+        cache = root / f".tool-install-cache-{cache_id}"
+    try:
+        positions, manifest, committed = _inspect_installation(
+            plan, root, tools, cache, metadata_root, selected=True
+        )
+        if committed:
+            return manifest
+        for index, name in enumerate(_INSTALL_ROLES):
+            positions, manifest, _committed = _inspect_installation(
+                plan, root, tools, cache, metadata_root, selected=True
+            )
+            if positions[index] == "ready":
+                _rename_noreplace(cache / name, tools / name)
+        positions, manifest, _committed = _inspect_installation(
+            plan, root, tools, cache, metadata_root, selected=True
+        )
+        if positions != ["moved"] * len(_INSTALL_ROLES):
+            raise MetadataError("conflict: installation is not ready to commit")
+        os.link(cache / _INSTALL_MANIFEST, output)
+        return manifest
+    except BaseException as original:
+        BaseException.add_note(original, f"selected installation evidence: {cache}")
+        raise
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -819,8 +1298,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "download-tools":
             download_tools(args.metadata, args.tools, args.manifest, result_root=args.result_root)
             return 0
-    except MetadataError as exc:
-        LOGGER.error("%s", exc)
+    except (MetadataError, OSError) as exc:
+        LOGGER.error("%s", "\n".join((str(exc), *getattr(exc, "__notes__", ()))))
         return 1
     LOGGER.error("unsupported command")
     return 2

@@ -4,6 +4,8 @@ import io
 import json
 import shutil
 import stat
+import subprocess
+import sys
 import uuid
 import zipfile
 from pathlib import Path
@@ -25,6 +27,39 @@ LIGHTPANDA_BINARY = (
 )
 AGENT_BROWSER_BINARY = b"#!/bin/sh\necho 'agent-browser 0.43.0'\n"
 CHROME_BINARY = b"#!/bin/sh\necho 'Google Chrome for Testing 158.0.8127.36'\n"
+
+
+@pytest.mark.parametrize("mutation", ["none", "replacement", "foreign_parent"])
+@pytest.mark.parametrize("write_error", [OSError, KeyboardInterrupt])
+def test_failed_manifest_write_only_removes_its_owned_path(
+    tmp_path, monkeypatch, mutation, write_error
+):
+    parent = tmp_path / "artifacts"
+    parent.mkdir()
+    path = parent / "manifest.json"
+
+    def fail_sync(_descriptor):
+        if mutation == "replacement":
+            path.unlink()
+            path.write_bytes(b"foreign replacement")
+        elif mutation == "foreign_parent":
+            moved = tmp_path / "moved-artifacts"
+            parent.rename(moved)
+            parent.mkdir()
+            metadata.os.link(moved / path.name, path)
+        raise write_error("injected sync failure")
+
+    monkeypatch.setattr(metadata.os, "fsync", fail_sync)
+    expected_error = metadata.MetadataError if write_error is OSError else write_error
+    with pytest.raises(expected_error):
+        metadata._write_new_file(path, b"our manifest")
+
+    if mutation == "none":
+        assert not path.exists()
+    else:
+        assert path.read_bytes() == (
+            b"foreign replacement" if mutation == "replacement" else b"our manifest"
+        )
 
 
 class FixtureResponse(io.BytesIO):
@@ -383,7 +418,17 @@ def test_download_rejects_manifest_outside_result_root_before_creating_tools(
         open_url=fixture_opener(response_fixtures()),
     )
     tools_dir = private_result_root / "tools"
+    tools_dir.mkdir(mode=0o700)
     manifest_path = tmp_path / "tool-manifest-outside-result-root.json"
+
+    with pytest.raises(metadata.MetadataError, match="below RESULT_ROOT"):
+        metadata.download_tools(
+            metadata_dir,
+            tools_dir,
+            manifest_path,
+            result_root=private_result_root,
+            open_url=no_preparation,
+        )
 
     status = run_metadata_cli(
         [
@@ -400,7 +445,7 @@ def test_download_rejects_manifest_outside_result_root_before_creating_tools(
     )
 
     assert status == 1
-    assert not tools_dir.exists()
+    assert list(tools_dir.iterdir()) == []
     assert not manifest_path.exists()
 
 
@@ -546,6 +591,7 @@ def test_download_verifies_official_binaries_and_labels_chrome_hashes_as_local(
         archive_url: chrome_archive(),
     }
     tools_dir = private_result_root / "tools"
+    tools_dir.mkdir(mode=0o700)
 
     manifest = metadata.download_tools(
         metadata_dir,
@@ -596,6 +642,7 @@ def test_download_rejects_a_binary_that_does_not_match_its_official_release_dige
         archive_url: chrome_archive(),
     }
     tools_dir = private_result_root / "tools"
+    tools_dir.mkdir(mode=0o700)
 
     with pytest.raises(metadata.MetadataError, match="official SHA-256 mismatch"):
         metadata.download_tools(
@@ -608,3 +655,762 @@ def test_download_rejects_a_binary_that_does_not_match_its_official_release_dige
 
     assert not (tools_dir / "lightpanda").exists()
     assert not (private_result_root / "tool-manifest.json").exists()
+
+
+@pytest.fixture
+def tool_transaction_inputs(private_result_root):
+    metadata_dir = private_result_root / "metadata"
+    metadata.fetch_metadata(
+        metadata_dir,
+        result_root=private_result_root,
+        open_url=fixture_opener(response_fixtures()),
+    )
+    tools = private_result_root / "tools"
+    tools.mkdir(mode=0o700)
+    (tools / "preexisting").write_bytes(b"preexisting data")
+    archive = io.BytesIO(chrome_archive())
+    with zipfile.ZipFile(archive, "a") as bundle:
+        bundle.writestr("chrome-mac-arm64/ABOUT", b"nonexecuted Chrome resource")
+        directory = zipfile.ZipInfo("chrome-mac-arm64/Empty/")
+        directory.external_attr = (stat.S_IFDIR | 0o700) << 16
+        bundle.writestr(directory, b"")
+        link = zipfile.ZipInfo("chrome-mac-arm64/Current")
+        link.external_attr = (stat.S_IFLNK | 0o777) << 16
+        bundle.writestr(link, "ABOUT")
+    downloads = {
+        "https://github.com/lightpanda-io/browser/releases/download/1.0.4/lightpanda-aarch64-macos": LIGHTPANDA_BINARY,
+        "https://github.com/vercel-labs/agent-browser/releases/download/v0.43.0/agent-browser-darwin-arm64": AGENT_BROWSER_BINARY,
+        "https://storage.googleapis.com/chrome-for-testing-public/158.0.8127.36/mac-arm64/chrome-mac-arm64.zip": archive.getvalue(),
+    }
+    return metadata_dir, tools, private_result_root / "tool-manifest.json", downloads
+
+
+def fresh_installer():
+    spec = importlib.util.spec_from_file_location("fresh_tool_installer", SCRIPT)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def no_preparation(*_args, **_kwargs):
+    pytest.fail("selected retry performed network or version preparation")
+
+
+def selected_cache(root):
+    receipt = json.loads((root / metadata._INSTALL_RECEIPT).read_bytes())
+    return root / f".tool-install-cache-{receipt['cache_id']}"
+
+
+def pause_selected(root, inputs, monkeypatch, *, moved_count=0):
+    metadata_dir, tools, manifest_path, downloads = inputs
+    move, link = metadata._rename_noreplace, metadata.os.link
+    roles = metadata._INSTALL_ROLES
+
+    def pause_move(source, destination):
+        if destination.name == roles[moved_count] and moved_count < len(roles):
+            raise OSError("selected pause")
+        return move(source, destination)
+
+    def pause_commit(source, destination, **kwargs):
+        if destination == manifest_path and moved_count == len(roles):
+            raise OSError("selected pause")
+        return link(source, destination, **kwargs)
+
+    with monkeypatch.context() as patch:
+        if moved_count < len(roles):
+            patch.setattr(metadata, "_rename_noreplace", pause_move)
+        patch.setattr(metadata.os, "link", pause_commit)
+        with pytest.raises(OSError, match="selected pause"):
+            metadata.download_tools(
+                metadata_dir,
+                tools,
+                manifest_path,
+                result_root=root,
+                open_url=fixture_opener(downloads),
+            )
+    return selected_cache(root)
+
+
+@pytest.mark.parametrize("phase", ["receipt", *metadata._INSTALL_ROLES, "manifest"])
+@pytest.mark.parametrize("timing", ["before", "after"])
+@pytest.mark.parametrize("fault", [OSError, KeyboardInterrupt])
+def test_all_publication_boundaries_resume_from_persisted_positions(
+    private_result_root, tool_transaction_inputs, monkeypatch, phase, timing, fault
+):
+    metadata_dir, tools, manifest_path, downloads = tool_transaction_inputs
+    move, link = metadata._rename_noreplace, metadata.os.link
+    fired = []
+
+    def boundary(name, operation, *args, **kwargs):
+        if name == phase and timing == "before":
+            fired.append(True)
+            raise fault("injected publication boundary")
+        result = operation(*args, **kwargs)
+        if name == phase and timing == "after":
+            fired.append(True)
+            raise fault("injected publication boundary")
+        return result
+
+    def move_boundary(source, destination):
+        return boundary(destination.name, move, source, destination)
+
+    def link_boundary(source, destination, **kwargs):
+        name = (
+            "receipt" if destination.name == metadata._INSTALL_RECEIPT else "manifest"
+        )
+        return boundary(name, link, source, destination, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(metadata, "_rename_noreplace", move_boundary)
+        patch.setattr(metadata.os, "link", link_boundary)
+        with pytest.raises(fault, match="injected publication boundary"):
+            metadata.download_tools(
+                metadata_dir,
+                tools,
+                manifest_path,
+                result_root=private_result_root,
+                open_url=fixture_opener(downloads),
+            )
+    assert fired
+    module = fresh_installer()
+    selected = not (phase == "receipt" and timing == "before")
+    with monkeypatch.context() as patch:
+        if selected:
+            patch.setattr(module, "_isolated_version", no_preparation)
+        result = module.download_tools(
+            metadata_dir,
+            tools,
+            manifest_path,
+            result_root=private_result_root,
+            open_url=no_preparation if selected else fixture_opener(downloads),
+        )
+    assert result["schema"] == "openbrowser-latest-tool-manifest/1"
+    assert (tools / "preexisting").read_bytes() == b"preexisting data"
+    assert (tools / "chrome-mac-arm64/Current").is_symlink()
+    assert (
+        tools / "chrome-mac-arm64/Current"
+    ).read_bytes() == b"nonexecuted Chrome resource"
+    assert (
+        manifest_path.read_bytes()
+        == (
+            selected_cache(private_result_root) / metadata._INSTALL_MANIFEST
+        ).read_bytes()
+    )
+
+
+@pytest.mark.parametrize("moved_count", range(5))
+@pytest.mark.parametrize("inspection", ["source", "destination", "receipt", "manifest"])
+def test_transient_inspection_failure_is_unknown_and_fresh_retry_resumes(
+    private_result_root, tool_transaction_inputs, monkeypatch, moved_count, inspection
+):
+    cache = pause_selected(
+        private_result_root,
+        tool_transaction_inputs,
+        monkeypatch,
+        moved_count=moved_count,
+    )
+    metadata_dir, tools, manifest_path, _downloads = tool_transaction_inputs
+    role = metadata._INSTALL_ROLES[min(moved_count, 3)]
+    target = {
+        "source": cache / role,
+        "destination": tools / role,
+        "receipt": private_result_root / metadata._INSTALL_RECEIPT,
+        "manifest": manifest_path,
+    }[inspection]
+    optional = metadata._install_optional_stat
+
+    def cannot_inspect(path):
+        if path == target:
+            raise PermissionError("transient inspection failure")
+        return optional(path)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(metadata, "_install_optional_stat", cannot_inspect)
+        patch.setattr(metadata, "_rename_noreplace", no_preparation)
+        with pytest.raises(PermissionError, match="transient inspection failure"):
+            metadata.download_tools(
+                metadata_dir,
+                tools,
+                manifest_path,
+                result_root=private_result_root,
+                open_url=no_preparation,
+            )
+    module = fresh_installer()
+    with monkeypatch.context() as patch:
+        patch.setattr(module, "_isolated_version", no_preparation)
+        result = module.download_tools(
+            metadata_dir,
+            tools,
+            manifest_path,
+            result_root=private_result_root,
+            open_url=no_preparation,
+        )
+    assert all(Path(tool["path"]).is_file() for tool in result["tools"].values())
+
+
+@pytest.mark.parametrize("stage", ["download", "extract", "manifest", "plan"])
+@pytest.mark.parametrize("timing", ["before", "after"])
+@pytest.mark.parametrize("fault", [OSError, KeyboardInterrupt])
+def test_unselected_preparations_are_retained_and_retry_uses_a_fresh_generation(
+    private_result_root, tool_transaction_inputs, monkeypatch, stage, timing, fault
+):
+    metadata_dir, tools, manifest_path, downloads = tool_transaction_inputs
+    write, download, extract = (
+        metadata._write_retained_file,
+        metadata._download_file,
+        metadata._extract_chrome_archive,
+    )
+    touched = []
+
+    def effect(name, operation, *args, **kwargs):
+        if name == stage and not touched:
+            touched.append(True)
+            if timing == "before":
+                raise fault("interrupted preparation")
+            operation(*args, **kwargs)
+            raise fault("interrupted preparation")
+        return operation(*args, **kwargs)
+
+    def write_boundary(path, body, **kwargs):
+        name = "plan" if path.name == metadata._INSTALL_PLAN else "manifest"
+        return effect(name, write, path, body, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(metadata, "_write_retained_file", write_boundary)
+        patch.setattr(
+            metadata,
+            "_download_file",
+            lambda *args, **kwargs: effect("download", download, *args, **kwargs),
+        )
+        patch.setattr(
+            metadata,
+            "_extract_chrome_archive",
+            lambda *args, **kwargs: effect("extract", extract, *args, **kwargs),
+        )
+        with pytest.raises(fault, match="interrupted preparation"):
+            metadata.download_tools(
+                metadata_dir,
+                tools,
+                manifest_path,
+                result_root=private_result_root,
+                open_url=fixture_opener(downloads),
+            )
+    generations = set(private_result_root.glob(".tool-install-cache-*"))
+    assert generations
+    assert not (private_result_root / metadata._INSTALL_RECEIPT).exists()
+    assert list(tools.iterdir()) == [tools / "preexisting"]
+    result = fresh_installer().download_tools(
+        metadata_dir,
+        tools,
+        manifest_path,
+        result_root=private_result_root,
+        open_url=fixture_opener(downloads),
+    )
+    assert all(path.is_dir() for path in generations)
+    assert (
+        len(set(private_result_root.glob(".tool-install-cache-*")))
+        == len(generations) + 1
+    )
+    assert Path(result["tools"]["lightpanda"]["path"]).read_bytes() == LIGHTPANDA_BINARY
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "resource",
+        "extra",
+        "same_bytes_inode",
+        "bad_plan",
+        "duplicate_plan",
+        "boolean_identity",
+        "witness",
+        "foreign_receipt",
+        "cache_parent",
+        "tools_parent",
+    ],
+)
+def test_selected_corruption_is_preserved_as_conflict_without_repair(
+    private_result_root, tool_transaction_inputs, monkeypatch, mutation
+):
+    metadata_dir, tools, manifest_path, _downloads = tool_transaction_inputs
+    cache = pause_selected(private_result_root, tool_transaction_inputs, monkeypatch)
+    plan_path = cache / metadata._INSTALL_PLAN
+    if mutation == "resource":
+        (cache / "chrome-mac-arm64/ABOUT").write_bytes(b"foreign resource bytes")
+    elif mutation == "extra":
+        (cache / "chrome-mac-arm64/foreign").write_bytes(b"foreign extra")
+    elif mutation == "same_bytes_inode":
+        path = cache / "lightpanda"
+        body = path.read_bytes()
+        path.rename(cache / "old-lightpanda")
+        path.write_bytes(body)
+    elif mutation == "bad_plan":
+        plan_path.write_bytes(b"{")
+    elif mutation == "duplicate_plan":
+        raw = plan_path.read_bytes()
+        plan_path.write_bytes(b'{"schema":"ignored",' + raw[1:])
+    elif mutation == "boolean_identity":
+        plan = json.loads(plan_path.read_bytes())
+        plan["slots"]["lightpanda"][0]["size"] = True
+        plan_path.write_text(json.dumps(plan))
+    elif mutation == "witness":
+        (cache / metadata._INSTALL_MANIFEST).write_bytes(b"{}")
+    elif mutation == "foreign_receipt":
+        receipt = private_result_root / metadata._INSTALL_RECEIPT
+        raw = receipt.read_bytes()
+        receipt.unlink()
+        receipt.write_bytes(raw)
+    elif mutation == "cache_parent":
+        cache.rename(private_result_root / "saved-cache")
+        cache.mkdir(mode=0o700)
+    else:
+        tools.rename(private_result_root / "saved-tools")
+        tools.mkdir(mode=0o700)
+        (tools / "foreign").write_bytes(b"foreign tools")
+    before = {
+        path: path.read_bytes()
+        for parent in (cache, tools)
+        for path in parent.rglob("*")
+        if path.is_file() and not path.is_symlink()
+    }
+    with pytest.raises((metadata.MetadataError, OSError)):
+        metadata.download_tools(
+            metadata_dir,
+            tools,
+            manifest_path,
+            result_root=private_result_root,
+            open_url=no_preparation,
+        )
+    assert not manifest_path.exists()
+    assert {path: path.read_bytes() for path in before} == before
+
+
+@pytest.mark.parametrize(
+    "kind", ["file", "empty_directory", "populated_directory", "symlink"]
+)
+def test_real_native_publication_collision_preserves_foreign_roles(
+    private_result_root, tool_transaction_inputs, monkeypatch, kind
+):
+    metadata_dir, tools, manifest_path, _downloads = tool_transaction_inputs
+    cache = pause_selected(
+        private_result_root, tool_transaction_inputs, monkeypatch, moved_count=3
+    )
+    destination = tools / "chrome-mac-arm64"
+    protected = private_result_root / "foreign-proof"
+    protected.write_bytes(b"foreign data")
+    move = metadata._rename_noreplace
+    identities = []
+
+    def collision(source, target):
+        if target == destination:
+            if kind == "file":
+                target.write_bytes(b"foreign data")
+            elif kind == "symlink":
+                target.symlink_to(protected)
+            else:
+                target.mkdir(mode=0o700)
+                if kind == "populated_directory":
+                    (target / "proof").write_bytes(b"foreign data")
+            identities.append(target.lstat())
+        move(source, target)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(metadata, "_rename_noreplace", collision)
+        with pytest.raises(OSError):
+            metadata.download_tools(
+                metadata_dir,
+                tools,
+                manifest_path,
+                result_root=private_result_root,
+                open_url=no_preparation,
+            )
+    assert metadata.os.path.samestat(destination.lstat(), identities[0])
+    assert (cache / "chrome-mac-arm64").is_dir()
+    assert protected.read_bytes() == b"foreign data"
+    with pytest.raises(metadata.MetadataError, match="exactly one"):
+        metadata.download_tools(
+            metadata_dir,
+            tools,
+            manifest_path,
+            result_root=private_result_root,
+            open_url=no_preparation,
+        )
+    assert not manifest_path.exists()
+
+
+def test_committed_plan_retry_forbids_all_installer_mutation_and_probing(
+    private_result_root, tool_transaction_inputs, monkeypatch
+):
+    metadata_dir, tools, manifest_path, downloads = tool_transaction_inputs
+    expected = metadata.download_tools(
+        metadata_dir,
+        tools,
+        manifest_path,
+        result_root=private_result_root,
+        open_url=fixture_opener(downloads),
+    )
+    module = fresh_installer()
+    write_open = module.os.open
+
+    def read_only_open(path, flags, *args, **kwargs):
+        assert (
+            flags
+            & (
+                module.os.O_WRONLY
+                | module.os.O_RDWR
+                | module.os.O_CREAT
+                | module.os.O_TRUNC
+            )
+            == 0
+        )
+        return write_open(path, flags, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        for name in (
+            "_isolated_version",
+            "_rename_noreplace",
+            "_write_retained_file",
+            "_download_file",
+        ):
+            patch.setattr(module, name, no_preparation)
+        for name in ("link", "unlink", "rmdir", "chmod", "fchmod", "rename", "replace"):
+            patch.setattr(module.os, name, no_preparation)
+        patch.setattr(module.os, "open", read_only_open)
+        patch.setattr(Path, "mkdir", no_preparation)
+        assert (
+            module.download_tools(
+                metadata_dir,
+                tools,
+                manifest_path,
+                result_root=private_result_root,
+                open_url=no_preparation,
+            )
+            == expected
+        )
+
+
+def test_tools_directory_must_preexist_before_any_fetch(private_result_root):
+    metadata_dir = private_result_root / "metadata"
+    metadata.fetch_metadata(
+        metadata_dir,
+        result_root=private_result_root,
+        open_url=fixture_opener(response_fixtures()),
+    )
+    with pytest.raises(metadata.MetadataError, match="does not exist"):
+        metadata.download_tools(
+            metadata_dir,
+            private_result_root / "tools",
+            private_result_root / "tool-manifest.json",
+            result_root=private_result_root,
+            open_url=no_preparation,
+        )
+    assert not (private_result_root / "tools").exists()
+
+
+def test_version_probe_scratch_is_outside_payload_for_installer_and_legacy_consumer(
+    private_result_root, tool_transaction_inputs, monkeypatch
+):
+    metadata_dir, tools, manifest_path, downloads = tool_transaction_inputs
+    run = metadata.subprocess.run
+    seen = []
+
+    def inspect_scratch(command, **kwargs):
+        executable = Path(command[0])
+        scratch = Path(kwargs["cwd"])
+        assert scratch.parent == private_result_root
+        assert not executable.is_relative_to(scratch) and not scratch.is_relative_to(
+            executable.parent
+        )
+        assert kwargs["env"]["HOME"] == kwargs["env"]["TMPDIR"] == str(scratch)
+        seen.append(executable)
+        return run(command, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(metadata.subprocess, "run", inspect_scratch)
+        manifest = metadata.download_tools(
+            metadata_dir,
+            tools,
+            manifest_path,
+            result_root=private_result_root,
+            open_url=fixture_opener(downloads),
+        )
+        spec = importlib.util.spec_from_file_location(
+            "installer_consumer_roundtrip",
+            SCRIPT.with_name("latest_benchmark_preflight.py"),
+        )
+        consumer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(consumer)
+        assert (
+            consumer.load_tool_manifest(
+                manifest_path, result_root=private_result_root, verify_installation=True
+            )
+            == manifest
+        )
+        (private_result_root / metadata._INSTALL_RECEIPT).unlink()
+        assert (
+            consumer.load_tool_manifest(
+                manifest_path, result_root=private_result_root, verify_installation=True
+            )
+            == manifest
+        )
+    assert len(seen) == 9
+    with pytest.raises(metadata.MetadataError, match="without an owned receipt"):
+        metadata.download_tools(
+            metadata_dir,
+            tools,
+            manifest_path,
+            result_root=private_result_root,
+            open_url=no_preparation,
+        )
+
+
+@pytest.mark.parametrize(
+    "number", [metadata.errno.EXDEV, metadata.errno.EINVAL, metadata.errno.ENOSYS]
+)
+def test_native_exclusive_move_errno_has_no_unsafe_fallback(
+    tmp_path, monkeypatch, number
+):
+    class Native:
+        def __call__(self, *_args):
+            metadata.ctypes.set_errno(number)
+            return -1
+
+    class Library:
+        renamex_np = Native()
+
+    monkeypatch.setattr(metadata.sys, "platform", "darwin")
+    monkeypatch.setattr(metadata.ctypes, "CDLL", lambda *_args, **_kwargs: Library())
+    monkeypatch.setattr(metadata.os, "rename", no_preparation)
+    with pytest.raises(OSError) as failure:
+        metadata._rename_noreplace(tmp_path / "source", tmp_path / "destination")
+    assert failure.value.errno == number
+
+
+def test_logging_failure_does_not_replace_publication_interrupt(
+    private_result_root, tool_transaction_inputs, monkeypatch
+):
+    metadata_dir, tools, manifest_path, downloads = tool_transaction_inputs
+
+    def interrupted(*_args, **_kwargs):
+        raise KeyboardInterrupt("original publication interruption")
+
+    def log_failed(*_args, **_kwargs):
+        raise RuntimeError("secondary log error")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(metadata, "_rename_noreplace", interrupted)
+        patch.setattr(metadata.LOGGER, "warning", log_failed)
+        with pytest.raises(
+            KeyboardInterrupt, match="original publication interruption"
+        ):
+            metadata.download_tools(
+                metadata_dir,
+                tools,
+                manifest_path,
+                result_root=private_result_root,
+                open_url=fixture_opener(downloads),
+            )
+    result = fresh_installer().download_tools(
+        metadata_dir,
+        tools,
+        manifest_path,
+        result_root=private_result_root,
+        open_url=no_preparation,
+    )
+    assert Path(result["tools"]["lightpanda"]["path"]).is_file()
+
+
+@pytest.mark.parametrize("source_kind", ["file", "directory"])
+@pytest.mark.parametrize("destination_kind", ["file", "directory"])
+def test_native_exclusive_move_preserves_actual_existing_destinations(
+    tmp_path, source_kind, destination_kind
+):
+    move = getattr(metadata, "_rename_noreplace", None)
+    assert callable(move), "native exclusive move is missing"
+    source, destination = tmp_path / "source", tmp_path / "destination"
+    if source_kind == "directory":
+        source.mkdir(mode=0o700)
+        (source / "proof").write_bytes(b"owned source")
+    else:
+        source.write_bytes(b"owned source")
+    if destination_kind == "directory":
+        destination.mkdir(mode=0o700)
+    else:
+        destination.write_bytes(b"foreign destination")
+    source_identity, destination_identity = source.lstat(), destination.lstat()
+    with pytest.raises(OSError):
+        move(source, destination)
+    assert metadata.os.path.samestat(source.lstat(), source_identity)
+    assert metadata.os.path.samestat(destination.lstat(), destination_identity)
+    if destination_kind == "file":
+        assert destination.read_bytes() == b"foreign destination"
+    else:
+        assert list(destination.iterdir()) == []
+
+
+@pytest.mark.parametrize("kind", ["file", "directory"])
+def test_native_exclusive_move_keeps_preknown_tree_identities(tmp_path, kind):
+    move = getattr(metadata, "_rename_noreplace", None)
+    assert callable(move), "native exclusive move is missing"
+    source, destination = tmp_path / "source", tmp_path / "destination"
+    if kind == "directory":
+        source.mkdir(mode=0o700)
+        (source / "proof").write_bytes(b"owned payload")
+        (source / "alias").symlink_to("proof")
+        nodes = [source, source / "proof", source / "alias"]
+    else:
+        source.write_bytes(b"owned payload")
+        nodes = [source]
+    records = [(node.relative_to(source), node.lstat()) for node in nodes]
+    move(source, destination)
+    assert not source.exists()
+    for relative, before in records:
+        after = (destination / relative).lstat()
+        assert (
+            after.st_dev,
+            after.st_ino,
+            after.st_mode,
+            after.st_size,
+            after.st_mtime_ns,
+        ) == (
+            before.st_dev,
+            before.st_ino,
+            before.st_mode,
+            before.st_size,
+            before.st_mtime_ns,
+        )
+    if kind == "directory":
+        assert (destination / "alias").is_symlink()
+        assert (destination / "alias").read_bytes() == b"owned payload"
+
+
+@pytest.mark.parametrize("bad_path", [".", "bad\x00path"])
+def test_installation_inventory_requires_nonaliased_canonical_paths(
+    private_result_root, tool_transaction_inputs, monkeypatch, bad_path
+):
+    cache = pause_selected(private_result_root, tool_transaction_inputs, monkeypatch)
+    plan = json.loads((cache / metadata._INSTALL_PLAN).read_bytes())
+    nodes = plan["slots"]["chrome-mac-arm64"]
+    nodes.append({**nodes[0], "path": bad_path})
+    nodes.sort(key=lambda node: node["path"])
+    with pytest.raises(metadata.MetadataError):
+        metadata._install_nodes_shape(nodes, directory=True)
+
+
+def test_retained_json_writer_rejects_oversize_before_creating_output(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(metadata, "_MAX_INSTALL_PLAN_BYTES", 128)
+    path = tmp_path / "oversize.json"
+    with pytest.raises(metadata.MetadataError, match="size limit"):
+        metadata._write_retained_file(path, b"x" * 129)
+    assert not path.exists()
+
+
+@pytest.mark.parametrize(
+    "mutation", ["resource", "extra", "foreign_manifest", "missing_payload"]
+)
+def test_committed_retry_rejects_corruption_without_repair(
+    private_result_root, tool_transaction_inputs, monkeypatch, mutation
+):
+    metadata_dir, tools, manifest_path, downloads = tool_transaction_inputs
+    metadata.download_tools(
+        metadata_dir,
+        tools,
+        manifest_path,
+        result_root=private_result_root,
+        open_url=fixture_opener(downloads),
+    )
+    if mutation == "resource":
+        (tools / "chrome-mac-arm64/ABOUT").write_bytes(b"foreign resource")
+    elif mutation == "extra":
+        (tools / "chrome-mac-arm64/foreign").write_bytes(b"foreign extra")
+    elif mutation == "foreign_manifest":
+        body = manifest_path.read_bytes()
+        manifest_path.unlink()
+        manifest_path.write_bytes(body)
+    else:
+        (tools / "lightpanda").rename(private_result_root / "saved-lightpanda")
+    before = manifest_path.read_bytes()
+    module = fresh_installer()
+    with monkeypatch.context() as patch:
+        patch.setattr(module, "_isolated_version", no_preparation)
+        patch.setattr(module, "_rename_noreplace", no_preparation)
+        with pytest.raises(module.MetadataError):
+            module.download_tools(
+                metadata_dir,
+                tools,
+                manifest_path,
+                result_root=private_result_root,
+                open_url=no_preparation,
+            )
+    assert manifest_path.read_bytes() == before
+
+
+def test_missing_native_symbol_fails_closed_without_ordinary_rename(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(metadata.ctypes, "CDLL", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(metadata.os, "rename", no_preparation)
+    with pytest.raises(metadata.MetadataError, match="symbol is unavailable"):
+        metadata._rename_noreplace(tmp_path / "source", tmp_path / "destination")
+
+
+@pytest.mark.parametrize("kind", ["MetadataError", "OSError"])
+def test_metadata_cli_reports_operational_failures_without_traceback(tmp_path, kind):
+    program = (
+        "import sys; "
+        f"sys.path.insert(0, {str(SCRIPT.parent)!r}); "
+        "import latest_competitor_metadata as metadata; "
+        "kind = sys.argv[1]\n"
+        "def fail(*args, **kwargs):\n"
+        "    error_type = metadata.MetadataError if kind == 'MetadataError' else OSError\n"
+        "    error = error_type('operational failure')\n"
+        "    error.add_note('retained installation evidence')\n"
+        "    raise error\n"
+        "metadata.download_tools = fail\n"
+        "raise SystemExit(metadata.main(['download-tools', '--result-root', 'root', "
+        "'--metadata', 'metadata', '--tools', 'tools', '--manifest', 'manifest']))\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", program, kind],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert "operational failure" in result.stderr
+    assert "retained installation evidence" in result.stderr
+    assert "Traceback" not in result.stderr
+
+
+def test_installation_json_rejects_fifo_without_blocking(tmp_path):
+    path = tmp_path / "receipt.json"
+    metadata.os.mkfifo(path, 0o600)
+    original = path.lstat()
+    program = (
+        "import sys; from pathlib import Path; "
+        f"sys.path.insert(0, {str(SCRIPT.parent)!r}); "
+        "import latest_competitor_metadata as metadata\n"
+        "try:\n"
+        "    metadata._install_json(Path(sys.argv[1]))\n"
+        "except metadata.MetadataError as error:\n"
+        "    sys.stderr.write(str(error))\n"
+        "    raise SystemExit(0)\n"
+        "raise SystemExit(1)\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", program, str(path)],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=5,
+    )
+
+    assert result.returncode == 0
+    assert "unsafe installation JSON" in result.stderr
+    assert metadata.os.path.samestat(original, path.lstat())
+    assert stat.S_ISFIFO(path.lstat().st_mode)

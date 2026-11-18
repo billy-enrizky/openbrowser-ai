@@ -29,7 +29,7 @@ export SYSTEM_PATH="/usr/bin:/bin:/usr/sbin:/sbin"
 export UV_BIN="$(command -v uv)"
 chmod 700 "$RESULT_ROOT"
 mkdir -m 700 "$RESULT_ROOT/home" "$RESULT_ROOT/home/config" \
-  "$RESULT_ROOT/home/cache" "$RESULT_ROOT/import-probe"
+  "$RESULT_ROOT/home/cache" "$RESULT_ROOT/import-probe" "$RESULT_ROOT/tools"
 
 safe() {
   env -i HOME="$RESULT_ROOT/home" PATH="$SYSTEM_PATH" TMPDIR=/private/tmp LANG=C \
@@ -65,7 +65,31 @@ export BROWSER_USE_PYTHON="$RESULT_ROOT/browser-use-env/bin/python"
 safe /usr/bin/env UV_PROJECT_ENVIRONMENT="$RESULT_ROOT/candidate-env" \
   "$UV_BIN" sync --frozen --project "$CANDIDATE_ROOT" --extra dev --python 3.12.12 --no-install-project
 safe "$UV_BIN" venv --python 3.12.12 "$RESULT_ROOT/browser-use-env"
+
+safe "$BOOTSTRAP_PYTHON" - "$CANDIDATE_ROOT" "$RESULT_ROOT" <<'PY'
+import os
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(sys.argv[1]) / "benchmarks"))
+from latest_competitor_metadata import parse_metadata_sources
+
+root = Path(sys.argv[2])
+versions = parse_metadata_sources(root / "metadata")["latest_versions"]
+requirements = root / "browser-use-requirements.txt"
+with os.fdopen(os.open(requirements, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w") as output:
+    for name in ("browser-use", "browser-harness"):
+        output.write(f"{name}=={versions[name]}\n")
+PY
+safe "$UV_BIN" pip install --python "$BROWSER_USE_PYTHON" \
+  -r "$RESULT_ROOT/browser-use-requirements.txt"
 ```
+
+The candidate environment intentionally does not install an `openbrowser-ai` distribution. Preflight imports the selected `src/` and binds its runtime Git tree to the release baseline. Installed package metadata is not the authority for that source revision.
+
+Tool installation records a private plan before moving prepared files into their final paths. If installation stops, repeat the same `download-tools` command with the same result root and metadata snapshot. Do not delete partial tools or the receipt to force a retry. A valid completed installation is checked without another download or version command.
+
+Conflicting, modified, or persistently unreadable state is preserved and rejected. Failed preparations and version-check scratch directories can remain below `RESULT_ROOT` and consume disk space. Keep them with failure evidence. The installer requires native exclusive moves and does not fall back to overwrite-capable rename. This campaign downloads macOS arm64 assets; Linux CI tests the filesystem primitive with fixtures.
 
 Set `CHROME`, `LIGHTPANDA`, and `AGENT_BROWSER` to the verified executable paths under `RESULT_ROOT/tools`. If the agent-browser release needs Node, use the absolute Node executable recorded by preflight.
 

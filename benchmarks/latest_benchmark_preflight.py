@@ -648,7 +648,7 @@ def _validate_tool_manifest(value: Any, *, result_root: Path, tools_root: Path, 
                 if sha256_file(archive) != record["archive_sha256"]:
                     raise PreflightError("Chrome archive hash differs from tool manifest")
             try:
-                actual_version = _metadata._isolated_version(resolved)
+                actual_version = _metadata._isolated_version(resolved, result_root=result_root)
             except _metadata.MetadataError as exc:
                 raise PreflightError(f"could not verify installed {name} version") from exc
             if actual_version != record["installed_version"]:
