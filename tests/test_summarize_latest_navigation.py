@@ -2,6 +2,7 @@ import hashlib
 import importlib.util
 import json
 import logging
+import os
 import shutil
 import sys
 import uuid
@@ -49,6 +50,21 @@ INSTALLED_PACKAGE_VERSIONS = {
 }
 
 
+@pytest.fixture(autouse=True)
+def clear_aws_environment(monkeypatch):
+    for name in tuple(os.environ):
+        if name.startswith("AWS_"):
+            monkeypatch.delenv(name, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def capture_summary_logs(monkeypatch):
+    # MCP initialization redirects existing loggers away from pytest's root handler.
+    logger = logging.getLogger("summarize-latest-navigation")
+    monkeypatch.setattr(logger, "handlers", [])
+    monkeypatch.setattr(logger, "propagate", True)
+
+
 @pytest.fixture
 def private_result_root():
     root = (
@@ -58,6 +74,46 @@ def private_result_root():
     root.mkdir(mode=0o700)
     yield root
     shutil.rmtree(root, ignore_errors=True)
+
+
+def test_summary_environment_excludes_inherited_aws_variables():
+    assert not [name for name in os.environ if name.startswith("AWS_")]
+
+
+def test_clear_aws_environment_restores_parent_environment(monkeypatch):
+    inherited = {
+        "AWS_PROFILE": "summary-test-profile",
+        "AWS_CONFIG_FILE": "/summary-test-config",
+        "AWS_SUMMARY_TEST_UNKNOWN": "summary-test-value",
+    }
+    with monkeypatch.context() as parent:
+        for name, value in inherited.items():
+            parent.setenv(name, value)
+        with monkeypatch.context() as isolated:
+            clear_aws_environment.__wrapped__(isolated)
+            assert not [name for name in os.environ if name.startswith("AWS_")]
+        assert {name: os.environ[name] for name in inherited} == inherited
+    assert not [name for name in os.environ if name.startswith("AWS_")]
+
+
+def test_summary_log_capture_restores_parent_configuration(
+    private_result_root, monkeypatch, caplog
+):
+    summarizer = _load_summarizer()
+    caplog.set_level(logging.ERROR, logger="summarize-latest-navigation")
+    parent_handlers = [logging.NullHandler()]
+    with monkeypatch.context() as parent:
+        parent.setattr(summarizer.LOG, "handlers", parent_handlers)
+        parent.setattr(summarizer.LOG, "propagate", False)
+        with monkeypatch.context() as isolated:
+            capture_summary_logs.__wrapped__(isolated)
+            args, _run_root, _project_root = _build_run(
+                private_result_root, boolean_start=True, run_state="incomplete"
+            )
+            assert summarizer.dispatch(args) == 1
+            assert "sample.start_ns must be an exact integer" in caplog.text
+        assert summarizer.LOG.handlers is parent_handlers
+        assert summarizer.LOG.propagate is False
 
 
 def _load_summarizer():
@@ -302,7 +358,10 @@ def _make_attempt(
     cleanup = {
         "ok": True,
         "workers_ok": True,
-        "runtime_root": f"/private/tmp/nb-navigation-{round_number}-{competitor}-{attempt_number}",
+        "runtime_root": str(
+            Path("/tmp").resolve(strict=True)
+            / f"nb-navigation-{round_number}-{competitor}-{attempt_number}"
+        ),
         "runtime_root_removed": True,
         "workers": {},
         "errors": [],
@@ -325,6 +384,9 @@ def _make_attempt(
             "post_worker_exit_identities": [],
         }
         cleanup["workers"][arm]["result"]["identities"] = [
+            dict(cleanup["workers"][arm]["worker_identity"])
+        ]
+        cleanup["workers"][arm]["post_worker_exit_identities"] = [
             dict(cleanup["workers"][arm]["worker_identity"])
         ]
     attempt = {
@@ -1227,6 +1289,193 @@ def test_summary_rejects_cleanup_that_claims_a_live_worker_is_retired(
 
     assert exit_code == 1
     assert "retirement proof" in caplog.text
+
+
+def test_summary_rejects_cleanup_without_post_exit_evidence_for_a_child(
+    private_result_root, caplog
+):
+    summarizer = _load_summarizer()
+    caplog.set_level(logging.ERROR, logger="summarize-latest-navigation")
+    args, run_root, _project_root = _build_run(
+        private_result_root, run_state="incomplete"
+    )
+
+    def omit_child_evidence(attempt):
+        worker = attempt["cleanup"]["workers"]["openbrowser"]
+        child = {**worker["worker_identity"], "pid": 2000, "cmdline": ["chrome"]}
+        worker["result"]["identities"].append(child)
+
+    _rewrite_first_attempt(run_root, omit_child_evidence)
+
+    assert summarizer.dispatch(args) == 1
+    assert "retirement proof" in caplog.text
+
+
+@pytest.mark.parametrize("field", ["pid", "created", "owner_token", "cmdline"])
+def test_summary_rejects_cleanup_with_mismatched_post_exit_identity(
+    private_result_root, caplog, field
+):
+    summarizer = _load_summarizer()
+    caplog.set_level(logging.ERROR, logger="summarize-latest-navigation")
+    args, run_root, _project_root = _build_run(
+        private_result_root, run_state="incomplete"
+    )
+
+    def mismatch_identity(attempt):
+        worker = attempt["cleanup"]["workers"]["openbrowser"]
+        terminal = worker["post_worker_exit_identities"][0]
+        terminal[field] = {
+            "pid": terminal["pid"] + 1,
+            "created": terminal["created"] + 1,
+            "owner_token": "f" * 32,
+            "cmdline": ["different-worker"],
+        }[field]
+
+    _rewrite_first_attempt(run_root, mismatch_identity)
+
+    assert summarizer.dispatch(args) == 1
+    expected_error = (
+        "owner_token differs" if field == "owner_token" else "retirement proof"
+    )
+    assert expected_error in caplog.text
+
+
+@pytest.mark.parametrize("state", ["alive", "zombie", "unknown"])
+def test_summary_rejects_cleanup_with_a_nonretired_post_exit_identity(
+    private_result_root, caplog, state
+):
+    summarizer = _load_summarizer()
+    caplog.set_level(logging.ERROR, logger="summarize-latest-navigation")
+    args, run_root, _project_root = _build_run(
+        private_result_root, run_state="incomplete"
+    )
+
+    def mark_child_not_retired(attempt):
+        worker = attempt["cleanup"]["workers"]["openbrowser"]
+        worker["post_worker_exit_identities"][0]["state"] = state
+
+    _rewrite_first_attempt(run_root, mark_child_not_retired)
+
+    assert summarizer.dispatch(args) == 1
+    assert "retirement proof" in caplog.text
+
+
+@pytest.mark.parametrize("initial_state", ["alive", "zombie", "unknown"])
+@pytest.mark.parametrize("terminal_state", ["absent", "reused"])
+def test_summary_accepts_cleanup_rechecked_after_fallback(
+    private_result_root, initial_state, terminal_state
+):
+    summarizer = _load_summarizer()
+    args, run_root, _project_root = _build_run(
+        private_result_root, run_state="incomplete"
+    )
+
+    def recheck_child_after_fallback(attempt):
+        worker = attempt["cleanup"]["workers"]["openbrowser"]
+        worker["fallback_used"] = True
+        worker["result"]["identities"][0]["state"] = initial_state
+        worker["post_worker_exit_identities"][0]["state"] = terminal_state
+
+    _rewrite_first_attempt(run_root, recheck_child_after_fallback)
+
+    assert summarizer.dispatch(args) == 0
+
+
+def test_summary_rejects_successful_cleanup_with_worker_stop_errors(
+    private_result_root, caplog
+):
+    summarizer = _load_summarizer()
+    caplog.set_level(logging.ERROR, logger="summarize-latest-navigation")
+    args, run_root, _project_root = _build_run(
+        private_result_root, run_state="incomplete"
+    )
+
+    def add_worker_stop_error(attempt):
+        worker = attempt["cleanup"]["workers"]["openbrowser"]
+        worker["result"]["errors"] = ["worker stop verification failed"]
+
+    _rewrite_first_attempt(run_root, add_worker_stop_error)
+
+    assert summarizer.dispatch(args) == 1
+    assert "successful cleanup has worker stop errors" in caplog.text
+
+
+@pytest.mark.parametrize("error_source", ["worker_stop", "coordinator"])
+def test_cleanup_preserves_retired_processes_with_failed_stop_evidence(
+    private_result_root, error_source
+):
+    summarizer = _load_summarizer()
+    runtime_root = private_result_root / "runtime"
+    identity = {
+        "pid": 1000,
+        "created": 1000.0,
+        "cmdline": ["worker"],
+        "owner_token": "a" * 32,
+        "owner_root": str(runtime_root / "openbrowser"),
+        "state": "absent",
+    }
+    worker = {
+        "ok": False,
+        "fallback_used": False,
+        "worker_identity": dict(identity),
+        "post_worker_exit_identities": [dict(identity)],
+        "result": {
+            "identities": [dict(identity)],
+            "errors": ["stop failed"] if error_source == "worker_stop" else [],
+        },
+        "error": "worker stop: stop failed"
+        if error_source == "worker_stop"
+        else "cannot close worker input",
+    }
+
+    assert (
+        summarizer._validate_worker_cleanup(
+            worker, "openbrowser", runtime_root, "worker", set(), require_ok=False
+        )
+        is False
+    )
+    with pytest.raises(summarizer.VerificationError, match="cleanup is not verified"):
+        summarizer._validate_worker_cleanup(
+            worker, "openbrowser", runtime_root, "worker", set(), require_ok=True
+        )
+
+
+@pytest.mark.parametrize(
+    ("ok", "error"),
+    [
+        (True, None),
+        (True, "coordinator failed"),
+        (False, None),
+        (False, ""),
+        (False, "   "),
+    ],
+)
+def test_cleanup_rejects_unknown_fallback_without_failed_coordinator_evidence(
+    private_result_root, ok, error
+):
+    summarizer = _load_summarizer()
+    runtime_root = private_result_root / "runtime"
+    worker = {
+        "ok": ok,
+        "fallback_used": None,
+        "worker_identity": {
+            "pid": 1000,
+            "created": 1000.0,
+            "cmdline": ["worker"],
+            "owner_token": "a" * 32,
+            "owner_root": str(runtime_root / "openbrowser"),
+            "state": "absent",
+        },
+        "post_worker_exit_identities": [],
+        "result": {"identities": [], "errors": []},
+    }
+    if error is not None:
+        worker["error"] = error
+
+    with pytest.raises(summarizer.VerificationError):
+        summarizer._validate_worker_cleanup(
+            worker, "openbrowser", runtime_root, "worker", set(), require_ok=False
+        )
 
 
 def test_summary_preserves_but_never_ranks_a_crashed_in_flight_sample(

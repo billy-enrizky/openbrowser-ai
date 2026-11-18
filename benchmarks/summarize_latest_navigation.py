@@ -778,8 +778,17 @@ def _validate_worker_cleanup(value: Any, arm: str, runtime_root: Path, where: st
         raise VerificationError(f'{where} has unknown or missing cleanup keys')
     if 'error' in worker and not isinstance(worker['error'], str):
         raise VerificationError(f'{where}.error must be a string')
-    if type(worker['ok']) is not bool or type(worker['fallback_used']) is not bool:
-        raise VerificationError(f'{where} cleanup flags must be Booleans')
+    if type(worker["ok"]) is not bool:
+        raise VerificationError(f"{where} cleanup flags must be Booleans")
+    if type(worker["fallback_used"]) is not bool and not (
+        worker["fallback_used"] is None
+        and worker["ok"] is False
+        and worker.get("error", "").strip()
+    ):
+        raise VerificationError(
+            f"{where}.fallback_used may be unknown only for failed cleanup "
+            "with a non-empty coordinator error; otherwise it must be a Boolean"
+        )
     worker_identity = _validate_process_identity(
         worker['worker_identity'], f'{where}.worker_identity', state_required=True,
         owner_root=str(runtime_root / arm),
@@ -790,31 +799,68 @@ def _validate_worker_cleanup(value: Any, arm: str, runtime_root: Path, where: st
     if not isinstance(post, list):
         raise VerificationError(f'{where}.post_worker_exit_identities must be a list')
     post_states = []
+    post_identity_keys = set()
     for index, item in enumerate(post):
         identity = _validate_process_identity(
-            item, f'{where}.post_worker_exit_identities[{index}]', state_required=True,
-            owner_token=token, owner_root=str(runtime_root / arm),
+            item,
+            f"{where}.post_worker_exit_identities[{index}]",
+            state_required=True,
+            owner_token=token,
+            owner_root=str(runtime_root / arm),
         )
-        post_states.append(identity['state'])
-    if 'result' in worker:
-        result = _exact_keys(worker['result'], WORKER_STOP_RESULT_KEYS, f'{where}.result')
-        if not isinstance(result['identities'], list):
-            raise VerificationError(f'{where}.result.identities must be a list')
-        _string_list(result['errors'], f'{where}.result.errors')
-        for index, item in enumerate(result['identities']):
-            _validate_process_identity(
-                item, f'{where}.result.identities[{index}]', state_required=True,
-                owner_token=token, owner_root=str(runtime_root / arm),
+        post_states.append(identity["state"])
+        post_identity_keys.add(
+            (
+                identity["pid"],
+                identity["created"],
+                identity["owner_token"],
+                tuple(identity["cmdline"]),
             )
-    elif worker['ok']:
-        raise VerificationError(f'{where} successful cleanup lacks a worker stop result')
-    retired = worker_identity['state'] in {'absent', 'reused'} \
-        and all(state in {'absent', 'reused'} for state in post_states)
-    if worker['ok'] is not retired:
-        raise VerificationError(f'{where}.ok does not match worker retirement proof')
-    if require_ok and worker['ok'] is not True:
-        raise VerificationError(f'{where} cleanup is not verified')
-    return worker['ok']
+        )
+    result_identity_keys = set()
+    result_errors = []
+    if "result" in worker:
+        result = _exact_keys(
+            worker["result"], WORKER_STOP_RESULT_KEYS, f"{where}.result"
+        )
+        if not isinstance(result["identities"], list):
+            raise VerificationError(f"{where}.result.identities must be a list")
+        result_errors = _string_list(result["errors"], f"{where}.result.errors")
+        if worker["ok"] and result_errors:
+            raise VerificationError(
+                f"{where} successful cleanup has worker stop errors"
+            )
+        for index, item in enumerate(result["identities"]):
+            identity = _validate_process_identity(
+                item,
+                f"{where}.result.identities[{index}]",
+                state_required=True,
+                owner_token=token,
+                owner_root=str(runtime_root / arm),
+            )
+            result_identity_keys.add(
+                (
+                    identity["pid"],
+                    identity["created"],
+                    identity["owner_token"],
+                    tuple(identity["cmdline"]),
+                )
+            )
+    elif worker["ok"]:
+        raise VerificationError(
+            f"{where} successful cleanup lacks a worker stop result"
+        )
+    retired = (
+        worker_identity["state"] in {"absent", "reused"}
+        and all(state in {"absent", "reused"} for state in post_states)
+        and result_identity_keys.issubset(post_identity_keys)
+    )
+    cleanup_ok = retired and not result_errors and not worker.get("error")
+    if worker["ok"] is not cleanup_ok:
+        raise VerificationError(f"{where}.ok does not match worker retirement proof")
+    if require_ok and worker["ok"] is not True:
+        raise VerificationError(f"{where} cleanup is not verified")
+    return worker["ok"]
 
 
 def _validate_attempt_cleanup(value: Any, expected_arms: tuple[str, ...], where: str,
