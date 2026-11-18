@@ -1,141 +1,251 @@
-# Compare local navigation contracts
+# Compare latest local browser adapters
 
-Run the same navigation, JavaScript input assignment, and POST through OpenBrowser, raw CDP, Lightpanda, agent-browser, and browser-use. This diagnostic uses native local engines and fresh private profiles. It does not invoke an LLM, AWS, Docker, or a user's browser session.
+This benchmark measures a shared local navigation task through OpenBrowser, raw Chrome DevTools Protocol (CDP), Lightpanda, agent-browser, and browser-use. A separate suite tests a small screenshot pixel contract. It does not use AWS, public websites, an LLM, Docker, or a user's browser profile.
 
-## Prepare the runtimes
+The numbers cover only these versions, this local host, these adapters, and the documented fixture tasks. They cannot establish a win across every browser, task, or product dimension. Do not use these numbers to update the public MCP or CLI comparison page.
 
-Use Python 3.12 or later. The coordinator and each worker need `psutil` and `websockets>=15.0.1`. The OpenBrowser worker also needs the selected source revision's dependencies. Use an existing environment or prepare an isolated environment before measurement. The script never installs packages or downloads browsers.
+## What the results measure
 
-The initial adapter versions are Lightpanda `1.0.4`, agent-browser `0.43.0`, browser-use `1.0.5`, and browser-harness `0.1.13`. These versions were current in official metadata fetched on 2026-11-15. The browser-use adapter uses that release's `Browser('chromium')` API, not the older `BrowserSession` API. A later incompatible API fails startup rather than silently removing the arm.
+The navigation suite uses a local loopback fixture. Each sample proves one successful fixture page request, one JavaScript field mutation, and one POST side effect. The delayed workload also proves one delayed script request.
 
-To prepare a separate browser-use environment, run these commands outside the measurement:
+- `navigation_ns` ends when the adapter returns after the shared `load` milestone.
+- `elapsed_ns` includes the page checks, field mutation, POST, audit read, and task assertions.
+- `post_navigation_ns` is the part of `elapsed_ns` after the adapter returns.
+- The report gives the median, minimum, maximum, attempted work, successful work, and error count.
+- A comparison is a clear pairwise win only when OpenBrowser's p50 is lower and its measured range does not overlap the competitor's range in both rounds.
+- The screenshot suite reports capability only. It does not time screenshot calls or rank screenshot speed.
 
-```sh
-uv venv "$TOOLS/browser-use-env" --python 3.12
-uv pip install --python "$TOOLS/browser-use-env/bin/python" \
-	'browser-use==1.0.5' 'browser-harness==0.1.13' \
-	'psutil==7.2.2' 'websockets==15.0.1'
-uv pip freeze --python "$TOOLS/browser-use-env/bin/python" > "$TOOLS/browser-use-freeze.txt"
-```
+A navigation run uses two rounds, four competitors, six samples per workload and arm, and one warmup per arm. Round two reverses competitor order. Each pair keeps OpenBrowser and one competitor resident. The screenshot suite runs six nonce-bound attempts for OpenBrowser, raw CDP, and Lightpanda. It checks a 128 by 128 PNG and four hidden RGB probes. `unsupported` applies only when all six Lightpanda attempts fail the same pixel assertion, all six image requests pass, and both controls pass all six attempts.
 
-Set `TOOLS` to a dedicated tools directory first. Obtain native Lightpanda and agent-browser binaries from their official release assets. Obtain Chrome for Testing from the Stable channel download manifest. Select assets for your operating system and architecture. Verify the release digests before execution. Do not point any browser profile or runtime directory at an existing user profile. Neither benchmark mode accepts a browser-profile path.
+## Prepare a private local result root
 
-Use these official metadata endpoints to resolve and retain release pins before a run:
-
-- [Lightpanda latest release and asset digests](https://api.github.com/repos/lightpanda-io/browser/releases/latest).
-- [agent-browser npm release and integrity](https://registry.npmjs.org/agent-browser/latest).
-- [agent-browser native release assets](https://api.github.com/repos/vercel-labs/agent-browser/releases/latest).
-- [browser-use package version and file hashes](https://pypi.org/pypi/browser-use/json).
-- [browser-harness 0.1.13 package metadata](https://pypi.org/pypi/browser-harness/0.1.13/json).
-- [Chrome for Testing downloadable Stable channel](https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json).
-
-For example, `curl -fsSL URL -o FILE.json` saves an endpoint response. Combine retained responses into a JSON object and pass its path with `--version-manifest`. The script records that object's contents and SHA-256. This evidence is optional and does not certify that a release remains current. Runtime versions, executable hashes, and installed worker package versions are recorded separately. Retain your full dependency freeze with the results.
-
-## Run after the source stops changing
-
-Run from the repository root. Set these variables to your existing native runtimes:
+Run the commands from a clean candidate checkout. Commit the benchmark scripts before creating the candidate identity. Use a new `RESULT_ROOT` for every benchmark campaign.
 
 ```sh
-export NAV_BENCH_SOURCE="$PWD"
-export NAV_BENCH_OPENBROWSER_PYTHON="$PWD/.venv/bin/python"
-export NAV_BENCH_CHROME="$CHROME_EXECUTABLE"
-export NAV_BENCH_LIGHTPANDA="$LIGHTPANDA_EXECUTABLE"
-export NAV_BENCH_AGENT_BROWSER="$AGENT_BROWSER_EXECUTABLE"
-export NAV_BENCH_BROWSER_USE_PYTHON="$TOOLS/browser-use-env/bin/python"
+export PROJECT_ROOT="$PWD"
+export CANDIDATE_ROOT="$PROJECT_ROOT"
+export RESULT_ROOT="$(mktemp -d /private/tmp/openbrowser-latest-navigation.XXXXXX)"
+export SYSTEM_PATH="/usr/bin:/bin:/usr/sbin:/sbin"
+export UV_BIN="$(command -v uv)"
+chmod 700 "$RESULT_ROOT"
+mkdir -m 700 "$RESULT_ROOT/home" "$RESULT_ROOT/home/config" \
+  "$RESULT_ROOT/home/cache" "$RESULT_ROOT/import-probe"
 
-uv run --no-project --offline --python "$NAV_BENCH_OPENBROWSER_PYTHON" \
-	benchmarks/navigation_compare.py --output "$RESULTS/new-run" --samples 5
-uv run --no-project --offline --python "$NAV_BENCH_OPENBROWSER_PYTHON" \
-	benchmarks/navigation_compare.py --verify "$RESULTS/new-run"
+safe() {
+  env -i HOME="$RESULT_ROOT/home" PATH="$SYSTEM_PATH" TMPDIR=/private/tmp LANG=C \
+    XDG_CONFIG_HOME="$RESULT_ROOT/home/config" \
+    XDG_CACHE_HOME="$RESULT_ROOT/home/cache" \
+    UV_CACHE_DIR="$RESULT_ROOT/uv-cache" \
+    AWS_EC2_METADATA_DISABLED=true AWS_CONFIG_FILE=/dev/null \
+    AWS_SHARED_CREDENTIALS_FILE=/dev/null "$@"
+}
 ```
 
-Set `RESULTS` to a results parent directory. Each output directory must be new. These commands use the existing Python environments without dependency synchronization. The script prepends the chosen worker interpreter's directory to its `PATH` and checks that OpenBrowser imports from `--source`.
+The `safe` function removes inherited credentials and cloud configuration. Its AWS variables disable accidental SDK lookup. The benchmark makes no AWS calls.
 
-Every executable variable also has a CLI option. Use `--source`, `--openbrowser-python`, `--chrome`, `--lightpanda`, `--agent-browser`, and `--browser-use-python` to override the corresponding environment variable.
+## Fetch the current competitor versions
 
-All five arms are requested by default. Missing optional tools are recorded as `unavailable`, with zero successes and no latency value. They make the run and verification exit with code 1. An installed tool that fails startup is recorded as `failed`. Its unexecuted samples remain `not_run`, not successes. Invalid configuration exits with code 2.
-
-To test only OpenBrowser and raw CDP, add `--arms raw-cdp openbrowser`. This produces a two-arm result, not a five-arm comparison. For a smoke check, use `--samples 1`. Use at least five samples per workload and arm before interpreting latency. The pure contract tests require no browsers:
+Fetch official release metadata before each run. The metadata command retains the source responses, response hashes, release versions, and official asset digests. The download command checks each published digest before it accepts an executable. Chrome archive and executable hashes are local hashes, not official digests.
 
 ```sh
-uv run --no-sync --offline pytest tests/test_navigation_benchmark.py -q
+export BOOTSTRAP_PYTHON="/absolute/path/to/python3.12"
+safe "$BOOTSTRAP_PYTHON" "$CANDIDATE_ROOT/benchmarks/latest_competitor_metadata.py" fetch \
+  --result-root "$RESULT_ROOT" --output "$RESULT_ROOT/metadata"
+safe "$BOOTSTRAP_PYTHON" "$CANDIDATE_ROOT/benchmarks/latest_competitor_metadata.py" download-tools \
+  --result-root "$RESULT_ROOT" --metadata "$RESULT_ROOT/metadata" \
+  --tools "$RESULT_ROOT/tools" --manifest "$RESULT_ROOT/tool-manifest.json"
 ```
 
-## Read the result
-
-Each arm starts once and receives one fast-page warmup. Measured rounds rotate the arm order. Each round includes a fast page and a page with a deferred external script. The deferred script response waits `--delay` seconds, which defaults to `0.15`. Every page has a fresh nonce and `Cache-Control: no-store`.
-
-Verification requires exactly one successful fast-page warmup per ready arm, including the same document, side-effect, and timed server-evidence checks as measured trials. Missing, duplicate, failed, or invalid warmups fail verification. Warmups remain excluded from measured latency summaries.
-
-The timed interval includes all of this work:
-
-1. Navigate through the adapter's load wait.
-2. Assert the exact URL, title, nonce, complete document state, load-event marker, and deferred-script marker.
-3. Assign the nonce to an input through JavaScript and await exactly one POST response.
-4. Recheck the final document and retained input value.
-5. Read the loopback server's audit snapshot and assert one successful document response, one POST response, and the delayed script response when required. Each required request must begin and finish inside the timed interval.
-
-Assertions finish before the timer stops. The server audit and final observation add work beyond navigation latency. Later settling cannot repair a failed sample. A final server snapshot also detects duplicate side effects after a sample returns. Startup, warmup, ownership scans, and shutdown are outside measured latency. The input operation is DOM assignment, not keyboard input.
-
-`results.json` retains integer nanoseconds, observations, failures, timeout flags, server timestamps, source manifests, runtime versions, executable hashes, load averages, and process ownership. Load averages are `null` when the platform has no load-average API or the operating system reports that the value is unavailable. `samples.jsonl` retains each immediate trial result. `results.json` contains the final server snapshots. `sha256.json` covers the result files and worker logs. The verifier checks hashes, measured-attempt accounting, workload assertions, source stability, and recorded cleanup identities. It does not establish a browser engine's CPU limiter or authenticate a third-party release digest.
-
-Each workload summary separates `expected`, `attempted`, `successful`, `failures`, `timeouts`, `unavailable`, and `not_run`. Timeouts are a subset of failures. Successful samples alone enter the median and range. Failures remain in the attempted denominator. Missing samples prevent successful verification.
-
-The script creates a private run directory, sanitizes browser configuration variables, and gives each worker private home, configuration, socket, and profile directories. On POSIX, the run directory uses `/tmp` to keep Unix socket paths short. Chrome uses `--use-mock-keychain` so an isolated home cannot block on the host keychain. The agent-browser and browser-use releases already set that flag. The raw-CDP and OpenBrowser adapters add it explicitly.
-
-Cleanup captures descendants and private PID-file identities without treating ancestry alone as ownership. Each process must carry the actual run token and private runtime and home paths. The run directory's ownership marker must match. An explicit Chrome profile argument must identify that runtime's private profile. Graceful shutdown has a ten-second deadline. Before each terminate or kill signal, the fallback rechecks that ownership evidence, the private runtime root, PID creation time, and exact command line. Unverified live processes are not signaled and prevent successful cleanup verification. The directory is deleted only after recorded processes are absent or their PIDs have been reused. On uncertain cleanup, the script retains the directory and reports its path. It never runs a global browser kill or daemon reap. Raw artifacts contain local paths and process command lines. Review them before publishing.
-
-## Limit the performance claim
-
-The adapters do not have the same engine, IPC cost, or wait policy:
-
-- `raw-cdp` uses a persistent Python WebSocket to Chrome and waits for `Page.loadEventFired`.
-- `lightpanda` uses the same CDP adapter against the Lightpanda engine. Its Chrome compatibility version string is not its release version.
-- `agent-browser` uses its native CLI and private daemon. `open` uses the release's default load strategy. Per-command CLI startup and IPC are inside the timer.
-- `browser-use` uses `Browser('chromium')`, `goto_url`, and the prescribed `wait_for_load`. Browser-harness `0.1.13` polls document readiness every `0.3` seconds.
-- `openbrowser` uses the selected local source's `BrowserSession.navigate_to` default wait and direct CDP evaluation.
-
-The Chrome executable and mock-keychain isolation flag are shared across the Chrome arms. Other library launch defaults are not forced into one common configuration. Effective command lines remain in the ownership records. The deferred-script workload avoids making rendering-engine image support a prerequisite.
-
-The script labels cross-tool performance inconclusive. No universal winner follows from these numbers. It does not measure cold-start latency, a complete browser-agent task, public-site compatibility, or production behavior. Use the opt-in profile command below for a separate untimed diagnostic, and alternate source revisions for a before-and-after claim. Do not compare these timings directly with an older diagnostic that excluded final assertions or the server audit from its timer.
-
-## Collect one workload-specific profile
-
-Use profile mode only to inspect one OpenBrowser call path after a verified baseline identifies a loss. The command runs one unprofiled `fast` warmup, then one profiled `fast` or `delayed` trial in the same OpenBrowser worker. It does not start a competitor, add a benchmark sample, or report a latency rank. It does not change the normal benchmark timer, schedule, result shape, or files.
-
-Set `NAV_BENCH_CANDIDATE_SOURCE`, `NAV_BENCH_CANDIDATE_PYTHON`, `NAV_BENCH_CHROME`, and `NAV_BENCH_VERSION_MANIFEST` to the identities checked by the performance preflight. The manifest must contain the current candidate commit and harness digest, plus the Python and Chrome versions and hashes. Create a new profile directory below a private temporary parent:
+Create isolated Python environments for OpenBrowser and browser-use. Install browser-use and browser-harness at the exact versions recorded by `metadata`. Freeze both environments. Let preflight reject any version or hash that differs from the saved metadata.
 
 ```sh
-PROFILE_PARENT="$(mktemp -d /tmp/openbrowser-profile.XXXXXX)"
-chmod 700 "$PROFILE_PARENT"
-PROFILE_DIR="$PROFILE_PARENT/fast"
-test ! -e "$PROFILE_DIR"
+export CANDIDATE_PYTHON="$RESULT_ROOT/candidate-env/bin/python"
+export BROWSER_USE_PYTHON="$RESULT_ROOT/browser-use-env/bin/python"
 
-uv run --no-project --offline --python "$NAV_BENCH_CANDIDATE_PYTHON" \
-  "$NAV_BENCH_CANDIDATE_SOURCE/benchmarks/navigation_compare.py" profile \
-  --source "$NAV_BENCH_CANDIDATE_SOURCE" \
-  --openbrowser-python "$NAV_BENCH_CANDIDATE_PYTHON" \
-  --chrome "$NAV_BENCH_CHROME" \
-  --version-manifest "$NAV_BENCH_VERSION_MANIFEST" \
-  --workload fast \
-  --output "$PROFILE_DIR"
+safe /usr/bin/env UV_PROJECT_ENVIRONMENT="$RESULT_ROOT/candidate-env" \
+  "$UV_BIN" sync --frozen --project "$CANDIDATE_ROOT" --extra dev --python 3.12.12 --no-install-project
+safe "$UV_BIN" venv --python 3.12.12 "$RESULT_ROOT/browser-use-env"
 ```
 
-The run form requires all six options shown above. Use `--workload delayed` to profile that fixed 0.15-second task instead. Profile mode does not accept `--arms`, `--samples`, or `--delay`. The output parent must have mode `0700`. The output directory must be new and below physical `/tmp`; reject `..` segments and every symlink component below `/tmp`. The run creates a separate marked OpenBrowser runtime root and gives the worker a private home, configuration, cache, and profile. The worker removes inherited `AWS_` variables and sets only `AWS_EC2_METADATA_DISABLED=true` among AWS variables.
+Set `CHROME`, `LIGHTPANDA`, and `AGENT_BROWSER` to the verified executable paths under `RESULT_ROOT/tools`. If the agent-browser release needs Node, use the absolute Node executable recorded by preflight.
 
-A complete profile directory contains `profile.json`, the copied `version-manifest.json`, `worker.stdout.log`, `worker.stderr.log`, `trial.pstats`, and `sha256.json`. The report schema is `openbrowser-navigation-profile/1`. It records the source commit and Python source hashes, harness hash, copied manifest hash, Python and Chrome identities, raw `Browser.getVersion()` data, package versions, one warmup record, one target record, stats metadata, cleanup identities, and error arrays. Files use mode `0600`; `sha256.json` hashes every file except itself. A complete report has `status: "complete"`, no failed phase, one successful fast warmup, one successful selected target, `sample.outcome: "success"` in both records, stable source, valid task and server evidence, verified worker and fixture cleanup, and copied stats. A failure report has `profile: null`, non-empty error arrays, and the first failing phase.
-
-Verify a saved profile offline. Verification reads only the report, copied manifest, hash list, and listed artifacts. It does not read the source tree or start a worker or browser. It checks every hash, report invariant, task proof, copied manifest identity, stats file, and cleanup record. It does not change the profile directory.
+For the macOS arm64 assets downloaded by the metadata command, use these paths:
 
 ```sh
-env -u NAV_BENCH_CANDIDATE_SOURCE -u NAV_BENCH_CHROME -u NAV_BENCH_VERSION_MANIFEST \
-  uv run --no-project --offline --python "$NAV_BENCH_CANDIDATE_PYTHON" \
-  "$NAV_BENCH_CANDIDATE_SOURCE/benchmarks/navigation_compare.py" \
-  profile --verify "$PROFILE_DIR"
+export CHROME="$RESULT_ROOT/tools/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"
+export LIGHTPANDA="$RESULT_ROOT/tools/lightpanda"
+export AGENT_BROWSER="$RESULT_ROOT/tools/agent-browser"
 ```
 
-Both forms return `0` only for a complete, verified profile. A run or verify failure returns `1`. Invalid options or invalid run inputs before output creation return `2`. If copying the manifest fails before worker startup, the new output directory is removed when safe and no report is written. Failures after output creation write a failed report when the filesystem permits. If cleanup is uncertain, the worker runtime root is retained. A report or hash write failure returns `1`; the output directory is incomplete and does not verify.
+Create `candidate-freeze.txt` and `browser-use-freeze.txt` with `uv pip freeze`. The browser-use environment must pin the current metadata versions of browser-use and browser-harness. The candidate environment must use the selected source revision's lockfile.
 
-The `trial.pstats` report is diagnostic call-path data. Its `elapsed_ns` values are not benchmark measurements. cProfile includes `Arm.trial`'s final `self.ownership()` scan, which runs after `elapsed_ns` is recorded. Exclude that scan when choosing runtime hypotheses. Do not use profile data for p50, ranking, speedup, or competitor-win claims. Use the normal unprofiled benchmark for latency and a separate reviewed plan before any runtime source change.
+```sh
+(umask 077; safe "$UV_BIN" pip freeze --python "$CANDIDATE_PYTHON" > "$RESULT_ROOT/candidate-freeze.txt")
+(umask 077; safe "$UV_BIN" pip freeze --python "$BROWSER_USE_PYTHON" > "$RESULT_ROOT/browser-use-freeze.txt")
+```
 
-For frozen published measurements, use the harness revision recorded with those results. Later ownership and metadata hardening changes the file hash even when the timed workload is unchanged. Smoke-validation samples from a later revision do not replace or join the published timing samples.
+## Seal the candidate and preflight
+
+Create `candidate-identity.json` only after the benchmark files are committed and the source working tree is clean. The identity binds the candidate commit, runtime tree, interpreter paths, tool identities, and exact runner and verifier file hashes.
+
+Create the candidate identity, prove the import, then seal the version manifest. Create an empty import-probe directory below `RESULT_ROOT` before the second command.
+
+```sh
+safe "$CANDIDATE_PYTHON" "$CANDIDATE_ROOT/benchmarks/latest_benchmark_preflight.py" identity \
+  --source "$CANDIDATE_ROOT" --python "$CANDIDATE_PYTHON" \
+  --browser-use-python "$BROWSER_USE_PYTHON" \
+  --candidate-freeze "$RESULT_ROOT/candidate-freeze.txt" \
+  --browser-use-freeze "$RESULT_ROOT/browser-use-freeze.txt" \
+  --tool-manifest "$RESULT_ROOT/tool-manifest.json" \
+  --output "$RESULT_ROOT/candidate-identity.json"
+safe "$CANDIDATE_PYTHON" "$CANDIDATE_ROOT/benchmarks/latest_benchmark_preflight.py" source-import-proof \
+  --source "$CANDIDATE_ROOT" --python "$CANDIDATE_PYTHON" \
+  --cwd "$RESULT_ROOT/import-probe" --identity "$RESULT_ROOT/candidate-identity.json" \
+  --output "$RESULT_ROOT/source-import-proof.json"
+safe "$CANDIDATE_PYTHON" "$CANDIDATE_ROOT/benchmarks/latest_benchmark_preflight.py" seal \
+  --source "$CANDIDATE_ROOT" --python "$CANDIDATE_PYTHON" \
+  --browser-use-python "$BROWSER_USE_PYTHON" \
+  --metadata "$RESULT_ROOT/metadata" --tools "$RESULT_ROOT/tools" \
+  --candidate-freeze "$RESULT_ROOT/candidate-freeze.txt" \
+  --browser-use-freeze "$RESULT_ROOT/browser-use-freeze.txt" \
+  --tool-manifest "$RESULT_ROOT/tool-manifest.json" \
+  --identity "$RESULT_ROOT/candidate-identity.json" \
+  --source-import-proof "$RESULT_ROOT/source-import-proof.json" \
+  --version-manifest "$RESULT_ROOT/version-manifest.json"
+```
+
+Run `latest_benchmark_preflight.py verify` before every smoke or full suite. Use the same sealed inputs and a new output named `preflight-<phase>.json` for each phase.
+
+```sh
+safe "$CANDIDATE_PYTHON" "$CANDIDATE_ROOT/benchmarks/latest_benchmark_preflight.py" verify \
+  --source "$CANDIDATE_ROOT" --python "$CANDIDATE_PYTHON" \
+  --browser-use-python "$BROWSER_USE_PYTHON" \
+  --metadata "$RESULT_ROOT/metadata" --tools "$RESULT_ROOT/tools" \
+  --candidate-freeze "$RESULT_ROOT/candidate-freeze.txt" \
+  --browser-use-freeze "$RESULT_ROOT/browser-use-freeze.txt" \
+  --tool-manifest "$RESULT_ROOT/tool-manifest.json" \
+  --identity "$RESULT_ROOT/candidate-identity.json" \
+  --version-manifest "$RESULT_ROOT/version-manifest.json" \
+  --phase navigation-smoke --output "$RESULT_ROOT/preflight-navigation-smoke.json"
+```
+
+Use phase `screenshot-smoke` and output `preflight-screenshot-smoke.json` for the screenshot control. For a full baseline, fetch metadata into a new `metadata-check/navigation` directory, pass it with `--metadata-check`, and use phase `navigation-run` or `screenshot-run` with the matching output filename.
+
+The preflight command exits nonzero if the source, interpreter, version, download digest, executable, freeze, or artifact path differs from the sealed identity. It rejects AWS credentials and writes only below `RESULT_ROOT`.
+
+## Run and freeze both control smokes
+
+Before the full baseline, run one OpenBrowser and raw-CDP navigation smoke and one OpenBrowser and raw-CDP screenshot smoke. Verify each smoke offline. The navigation smoke checks that the delayed fixture adds at least 100 milliseconds to each control's `navigation_ns`. It is sensitivity evidence, not a competitor ranking.
+
+Before each smoke, run `latest_benchmark_preflight.py verify` with the matching phase name and output path. For example, create `preflight-navigation-smoke.json` with phase `navigation-smoke`. Create `preflight-screenshot-smoke.json` with phase `screenshot-smoke`.
+
+```sh
+safe "$CANDIDATE_PYTHON" "$CANDIDATE_ROOT/benchmarks/latest_navigation_baseline.py" smoke \
+  --candidate-identity "$RESULT_ROOT/candidate-identity.json" \
+  --preflight "$RESULT_ROOT/preflight-navigation-smoke.json" \
+  --version-manifest "$RESULT_ROOT/version-manifest.json" \
+  --source "$CANDIDATE_ROOT" --python "$CANDIDATE_PYTHON" --chrome "$CHROME" \
+  --output "$RESULT_ROOT/smoke/navigation"
+safe "$CANDIDATE_PYTHON" "$CANDIDATE_ROOT/benchmarks/summarize_latest_navigation.py" verify-smoke \
+  --run-root "$RESULT_ROOT/smoke/navigation" \
+  --candidate-identity "$RESULT_ROOT/candidate-identity.json" \
+  --preflight "$RESULT_ROOT/preflight-navigation-smoke.json"
+```
+
+Run the screenshot smoke with `screenshot_capability.py smoke`. Verify it with `screenshot_capability.py verify-smoke`. The screenshot smoke has no Lightpanda arm and produces no capability classification.
+
+```sh
+safe "$CANDIDATE_PYTHON" "$CANDIDATE_ROOT/benchmarks/screenshot_capability.py" smoke \
+  --candidate-identity "$RESULT_ROOT/candidate-identity.json" \
+  --preflight "$RESULT_ROOT/preflight-screenshot-smoke.json" \
+  --version-manifest "$RESULT_ROOT/version-manifest.json" \
+  --source "$CANDIDATE_ROOT" --python "$CANDIDATE_PYTHON" --chrome "$CHROME" \
+  --output "$RESULT_ROOT/smoke/screenshot"
+safe "$CANDIDATE_PYTHON" "$CANDIDATE_ROOT/benchmarks/screenshot_capability.py" verify-smoke \
+  --run-root "$RESULT_ROOT/smoke/screenshot" \
+  --candidate-identity "$RESULT_ROOT/candidate-identity.json" \
+  --preflight "$RESULT_ROOT/preflight-screenshot-smoke.json"
+```
+
+After both smoke verifiers pass, create the immutable harness record. This command reruns both offline verifiers and records the hashes of the two smoke preflights and the two smoke manifests.
+
+```sh
+safe "$CANDIDATE_PYTHON" "$CANDIDATE_ROOT/benchmarks/latest_benchmark_preflight.py" freeze-harness \
+  --source "$CANDIDATE_ROOT" \
+  --identity "$RESULT_ROOT/candidate-identity.json" \
+  --version-manifest "$RESULT_ROOT/version-manifest.json" \
+  --tool-manifest "$RESULT_ROOT/tool-manifest.json" \
+  --candidate-freeze "$RESULT_ROOT/candidate-freeze.txt" \
+  --browser-use-freeze "$RESULT_ROOT/browser-use-freeze.txt" \
+  --navigation-preflight "$RESULT_ROOT/preflight-navigation-smoke.json" \
+  --screenshot-preflight "$RESULT_ROOT/preflight-screenshot-smoke.json" \
+  --navigation-smoke "$RESULT_ROOT/smoke/navigation" \
+  --screenshot-smoke "$RESULT_ROOT/smoke/screenshot" \
+  --output "$RESULT_ROOT/frozen-harness.json"
+```
+
+Any runner, verifier, tool, dependency freeze, smoke, or smoke-preflight change requires a new candidate identity, both new smokes, and a new frozen harness.
+
+## Run the latest-version baseline
+
+Fetch current metadata into a new `metadata-check/navigation` directory immediately before the run. Run `latest_benchmark_preflight.py verify` with phase `navigation-run`, and pass that new metadata check directory with `--metadata-check`. Then run the fixed pairwise schedule:
+
+```sh
+safe "$CANDIDATE_PYTHON" "$CANDIDATE_ROOT/benchmarks/latest_navigation_baseline.py" run \
+  --frozen-harness "$RESULT_ROOT/frozen-harness.json" \
+  --candidate-identity "$RESULT_ROOT/candidate-identity.json" \
+  --preflight "$RESULT_ROOT/preflight-navigation-run.json" \
+  --version-manifest "$RESULT_ROOT/version-manifest.json" \
+  --source "$CANDIDATE_ROOT" --python "$CANDIDATE_PYTHON" --chrome "$CHROME" \
+  --lightpanda "$LIGHTPANDA" --agent-browser "$AGENT_BROWSER" \
+  --browser-use-python "$BROWSER_USE_PYTHON" \
+  --rounds 2 --samples 6 --output "$RESULT_ROOT/navigation"
+```
+
+Verify the raw artifacts offline and write a sanitized summary only after all eight pair blocks verify:
+
+```sh
+safe "$CANDIDATE_PYTHON" "$CANDIDATE_ROOT/benchmarks/summarize_latest_navigation.py" verify \
+  --run-root "$RESULT_ROOT/navigation" \
+  --frozen-harness "$RESULT_ROOT/frozen-harness.json" \
+  --candidate-identity "$RESULT_ROOT/candidate-identity.json" \
+  --preflight "$RESULT_ROOT/preflight-navigation-run.json" \
+  --output "$RESULT_ROOT/navigation/summary.json" \
+  --project-root "$PROJECT_ROOT" \
+  --sanitized-output "$PROJECT_ROOT/local_docs/specs/2026-11-17-latest-navigation-benchmark/candidate-baseline-summary.md"
+```
+
+Run `screenshot_capability.py run` separately with six attempts per arm. Verify it with both `screenshot_capability.py verify` and `summarize_screenshot_capability.py verify`. The sanitized screenshot report contains no latency field. Do not merge it into the navigation score.
+
+```sh
+safe "$CANDIDATE_PYTHON" "$CANDIDATE_ROOT/benchmarks/screenshot_capability.py" run \
+  --frozen-harness "$RESULT_ROOT/frozen-harness.json" \
+  --candidate-identity "$RESULT_ROOT/candidate-identity.json" \
+  --preflight "$RESULT_ROOT/preflight-screenshot-run.json" \
+  --version-manifest "$RESULT_ROOT/version-manifest.json" \
+  --source "$CANDIDATE_ROOT" --python "$CANDIDATE_PYTHON" \
+  --chrome "$CHROME" --lightpanda "$LIGHTPANDA" \
+  --output "$RESULT_ROOT/screenshot" --attempts-per-arm 6
+safe "$CANDIDATE_PYTHON" "$CANDIDATE_ROOT/benchmarks/screenshot_capability.py" verify \
+  --run-root "$RESULT_ROOT/screenshot" \
+  --frozen-harness "$RESULT_ROOT/frozen-harness.json" \
+  --candidate-identity "$RESULT_ROOT/candidate-identity.json" \
+  --preflight "$RESULT_ROOT/preflight-screenshot-run.json"
+safe "$CANDIDATE_PYTHON" "$CANDIDATE_ROOT/benchmarks/summarize_screenshot_capability.py" verify \
+  --run-root "$RESULT_ROOT/screenshot" \
+  --frozen-harness "$RESULT_ROOT/frozen-harness.json" \
+  --candidate-identity "$RESULT_ROOT/candidate-identity.json" \
+  --preflight "$RESULT_ROOT/preflight-screenshot-run.json" \
+  --project-root "$PROJECT_ROOT" \
+  --sanitized-output "$PROJECT_ROOT/local_docs/specs/2026-11-17-latest-navigation-benchmark/candidate-baseline-screenshot-capability.md"
+```
+
+The run artifacts stay private below `RESULT_ROOT`. Sanitized reports omit process identities, owner tokens, local result paths, environment values, and raw logs. Keep failed attempts and incomplete manifests. Never overwrite raw results.
+
+## Optimize only from measured evidence
+
+Do not edit `src/openbrowser` during benchmark construction or the baseline. If repeated unprofiled data shows a clear OpenBrowser loss, run an unreported profile and map its hot path to OpenBrowser source. A profile alone is not a latency measurement.
+
+Test one source-backed hypothesis at a time. Keep a runtime change only if two independent counterbalanced runs each improve fast-task `navigation_ns` p50 by at least 10 percent, both runs pass the no-regression gate, and the full regression suite stays green. If no source-mapped bottleneck exists or the measurement spread exceeds the effect, stop without a runtime edit or speedup claim.
+
+A benchmark-only change does not create a release. A common-navigation result is not an MCP or CLI result. Do not update `https://docs.openbrowser.me/comparison` from this harness.
