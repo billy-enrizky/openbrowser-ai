@@ -1029,3 +1029,656 @@ def test_navigation_phase_errors_reject_boolean_and_out_of_order_times(runner):
         "out of order" in error
         for error in runner.navigation_phase_errors(sample, "sample")
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "failure_point", ["initial_manifest", "running_manifest", "source", "cancel"]
+)
+async def test_attempt_owns_resources_before_setup_and_through_cancellation(
+    runner, private_result_root, monkeypatch, failure_point
+):
+    run_root = private_result_root / "navigation"
+    run_root.mkdir(mode=0o700)
+    runtime_roots = []
+    references = []
+    handles = []
+    cleaned = []
+    started = asyncio.Event()
+    allocate = runner.new_runtime_root
+
+    def allocate_runtime():
+        runtime_root, token = allocate()
+        runtime_roots.append(runtime_root)
+        return runtime_root, token
+
+    async def launch_worker(launch):
+        handle = SimpleNamespace(
+            launch=launch,
+            state=runner.navigation.WorkerState.CREATED,
+            worker_identity={
+                "pid": 2000,
+                "created": 2000.0,
+                "cmdline": [str(launch.interpreter), "worker"],
+                "owner_token": launch.owner_token,
+                "owner_root": str(launch.worker_root),
+            },
+        )
+        handles.append(handle)
+        return handle
+
+    async def start_worker(handle):
+        handle.state = runner.navigation.WorkerState.READY
+        started.set()
+        await asyncio.Event().wait()
+
+    async def cleanup_worker(handle):
+        cleaned.append(handle)
+        return {
+            "ok": True,
+            "worker_identity": {**handle.worker_identity, "state": "absent"},
+            "post_worker_exit_identities": [],
+        }
+
+    if failure_point in {"initial_manifest", "running_manifest"}:
+        writer_name = (
+            "write_new_json" if failure_point == "initial_manifest" else "atomic_json"
+        )
+        writer = getattr(runner, writer_name)
+        failed = False
+
+        def fail_once(path, value):
+            nonlocal failed
+            if not failed:
+                failed = True
+                raise OSError("injected manifest write failure")
+            return writer(path, value)
+
+        monkeypatch.setattr(runner, writer_name, fail_once)
+
+    monkeypatch.setattr(runner, "new_runtime_root", allocate_runtime)
+    monkeypatch.setattr(runner.navigation, "launch_worker", launch_worker)
+    monkeypatch.setattr(runner.navigation, "start_worker", start_worker)
+    monkeypatch.setattr(runner.navigation, "cleanup_worker", cleanup_worker)
+    args = SimpleNamespace(
+        source=(
+            private_result_root / "missing"
+            if failure_point == "source"
+            else private_result_root
+        ),
+        python=sys.executable,
+        chrome="/tmp/chrome",
+    )
+    task = asyncio.create_task(
+        runner.run_pair_attempt(
+            args,
+            result_root=private_result_root,
+            run_root=run_root,
+            fixture=SimpleNamespace(server_address=("127.0.0.1", 12345)),
+            run_id="e" * 32,
+            round_number=1,
+            competitor="raw-cdp",
+            attempt_number=1,
+            samples_per_workload=1,
+            on_update=references.append,
+        )
+    )
+    try:
+        if failure_point == "cancel":
+            await asyncio.wait_for(started.wait(), timeout=5)
+            task.cancel()
+        outcome = (await asyncio.gather(task, return_exceptions=True))[0]
+        caught = outcome if isinstance(outcome, BaseException) else None
+        assert runtime_roots and not runtime_roots[0].exists()
+        assert cleaned == handles
+        manifest_path = (
+            run_root / "round-1/pair-raw-cdp/attempt-1/attempt-manifest.json"
+        )
+        saved = json.loads(manifest_path.read_text())
+        assert saved["state"] == "failed"
+        assert saved["cleanup"]["ok"] is False
+        assert saved["cleanup"]["runtime_root_removed"] is True
+        assert saved["work_counts"]["error_count"] == 1
+        assert references[-1]["state"] == "failed"
+        assert references[-1]["cleanup_ok"] is False
+        assert references[-1]["manifest_sha256"] == runner.preflight.sha256_file(
+            manifest_path
+        )
+        if failure_point == "cancel":
+            assert isinstance(caught, asyncio.CancelledError)
+            assert any("CancelledError" in error for error in saved["errors"])
+        else:
+            assert caught is None
+            assert not handles
+    finally:
+        if not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        for runtime_root in runtime_roots:
+            shutil.rmtree(runtime_root, ignore_errors=True)
+
+
+@pytest.mark.asyncio
+async def test_cancelled_attempt_retains_runtime_when_owned_worker_is_unproven(
+    runner, private_result_root, monkeypatch
+):
+    run_root = private_result_root / "navigation"
+    run_root.mkdir(mode=0o700)
+    references = []
+    runtime_roots = []
+    allocate = runner.new_runtime_root
+
+    def allocate_runtime():
+        root, token = allocate()
+        runtime_roots.append(root)
+        return root, token
+
+    async def launch_worker(launch):
+        return SimpleNamespace(launch=launch, worker_identity={"pid": 2000})
+
+    async def start_worker(_handle):
+        raise asyncio.CancelledError("injected cancellation")
+
+    async def cleanup_worker(handle):
+        return {
+            "ok": False,
+            "worker_identity": {**handle.worker_identity, "state": "unknown"},
+            "post_worker_exit_identities": [],
+        }
+
+    monkeypatch.setattr(runner, "new_runtime_root", allocate_runtime)
+    monkeypatch.setattr(runner.navigation, "launch_worker", launch_worker)
+    monkeypatch.setattr(runner.navigation, "start_worker", start_worker)
+    monkeypatch.setattr(runner.navigation, "cleanup_worker", cleanup_worker)
+    try:
+        with pytest.raises(asyncio.CancelledError):
+            await runner.run_pair_attempt(
+                SimpleNamespace(
+                    source=private_result_root,
+                    python=sys.executable,
+                    chrome="/tmp/chrome",
+                ),
+                result_root=private_result_root,
+                run_root=run_root,
+                fixture=SimpleNamespace(server_address=("127.0.0.1", 12345)),
+                run_id="f" * 32,
+                round_number=1,
+                competitor="raw-cdp",
+                attempt_number=1,
+                samples_per_workload=1,
+                on_update=references.append,
+            )
+        assert runtime_roots[0].is_dir()
+        manifest_path = (
+            run_root / "round-1/pair-raw-cdp/attempt-1/attempt-manifest.json"
+        )
+        saved = json.loads(manifest_path.read_text())
+        assert saved["state"] == "failed"
+        assert saved["cleanup"]["runtime_root_removed"] is False
+        assert (
+            saved["cleanup"]["workers"]["openbrowser"]["worker_identity"]["state"]
+            == "unknown"
+        )
+        assert references[-1]["state"] == "failed"
+        assert references[-1]["cleanup_ok"] is False
+        assert references[-1]["manifest_sha256"] == runner.preflight.sha256_file(
+            manifest_path
+        )
+    finally:
+        for runtime_root in runtime_roots:
+            shutil.rmtree(runtime_root, ignore_errors=True)
+
+
+@pytest.mark.asyncio
+async def test_cancellation_during_worker_cleanup_waits_for_owned_resource_proof(
+    runner, private_result_root, monkeypatch
+):
+    run_root = private_result_root / "navigation"
+    run_root.mkdir(mode=0o700)
+    cleanup_started = asyncio.Event()
+    cleanup_release = asyncio.Event()
+    references = []
+    handles = []
+    cleaned = []
+    roots = []
+    allocate = runner.new_runtime_root
+
+    def allocate_runtime():
+        root, token = allocate()
+        roots.append(root)
+        return root, token
+
+    async def launch_worker(launch):
+        handle = SimpleNamespace(
+            launch=launch, worker_identity={"pid": 2000 + len(handles)}
+        )
+        handles.append(handle)
+        return handle
+
+    async def start_worker(_handle):
+        return {"ok": True}, []
+
+    async def failed_trial(_handle, _fixture, _request, *, is_warmup):
+        assert is_warmup
+        return {"state": "failed", "errors": ["injected warmup failure"]}
+
+    async def cleanup_worker(handle):
+        cleanup_started.set()
+        await cleanup_release.wait()
+        cleaned.append(handle)
+        return {
+            "ok": True,
+            "worker_identity": {**handle.worker_identity, "state": "absent"},
+            "post_worker_exit_identities": [],
+        }
+
+    monkeypatch.setattr(runner, "new_runtime_root", allocate_runtime)
+    monkeypatch.setattr(runner.navigation, "launch_worker", launch_worker)
+    monkeypatch.setattr(runner.navigation, "start_worker", start_worker)
+    monkeypatch.setattr(runner.navigation, "cleanup_worker", cleanup_worker)
+    monkeypatch.setattr(runner, "execute_trial", failed_trial)
+    task = asyncio.create_task(
+        runner.run_pair_attempt(
+            SimpleNamespace(
+                source=private_result_root, python=sys.executable, chrome="/tmp/chrome"
+            ),
+            result_root=private_result_root,
+            run_root=run_root,
+            fixture=SimpleNamespace(server_address=("127.0.0.1", 12345)),
+            run_id="a" * 32,
+            round_number=1,
+            competitor="raw-cdp",
+            attempt_number=1,
+            samples_per_workload=1,
+            on_update=references.append,
+        )
+    )
+    try:
+        await asyncio.wait_for(cleanup_started.wait(), timeout=5)
+        task.cancel()
+        await asyncio.sleep(0)
+        cleanup_release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert cleaned == list(reversed(handles))
+        assert roots and not roots[0].exists()
+        saved = json.loads(
+            (
+                run_root / "round-1/pair-raw-cdp/attempt-1/attempt-manifest.json"
+            ).read_text()
+        )
+        assert saved["state"] == "failed"
+        assert saved["cleanup"]["ok"] is True
+        assert any("CancelledError" in error for error in saved["errors"])
+        assert references[-1]["cleanup_ok"] is True
+        assert references[-1]["state"] == "failed"
+    finally:
+        cleanup_release.set()
+        if not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        for root in roots:
+            shutil.rmtree(root, ignore_errors=True)
+
+
+@pytest.fixture
+def offline_navigation_verifier():
+    path = SCRIPT.with_name("summarize_latest_navigation.py")
+    spec = importlib.util.spec_from_file_location(
+        "resource_cleanup_offline_verifier", path
+    )
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("started_workers", [0, 1, 2])
+async def test_partial_setup_cleanup_preserves_public_two_arm_proof_contract(
+    runner, offline_navigation_verifier, monkeypatch, started_workers
+):
+    root, token = runner.new_runtime_root()
+    arms = ("openbrowser", "raw-cdp")
+    handles = {
+        arm: SimpleNamespace(
+            worker_identity={
+                "pid": 2000 + index,
+                "created": 2000.0 + index,
+                "cmdline": ["/private/tmp/fake-worker", arm],
+                "owner_token": token,
+                "owner_root": str(root / arm),
+            }
+        )
+        for index, arm in enumerate(arms[:started_workers])
+    }
+
+    async def cleanup_worker(handle):
+        return {
+            "ok": True,
+            "fallback_used": False,
+            "result": {"identities": [], "errors": []},
+            "worker_identity": {**handle.worker_identity, "state": "absent"},
+            "post_worker_exit_identities": [],
+        }
+
+    monkeypatch.setattr(runner.navigation, "cleanup_worker", cleanup_worker)
+    try:
+        cleanup = await runner.cleanup_pair_workers(handles, arms, root, token)
+        offline_navigation_verifier._validate_attempt_cleanup(
+            cleanup, arms, "partial setup", terminal_state="failed"
+        )
+        assert cleanup["workers_ok"] is (started_workers == 2)
+        assert cleanup["ok"] is (started_workers == 2)
+        assert cleanup["runtime_root_removed"] is True
+        assert not root.exists()
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cancel_phase", ["first_warmup", "first_measured"])
+async def test_cancelled_trial_artifacts_are_accepted_by_actual_offline_verifier(
+    runner, offline_navigation_verifier, private_result_root, monkeypatch, cancel_phase
+):
+    run_root = private_result_root / "navigation"
+    run_root.mkdir(mode=0o700)
+    started = asyncio.Event()
+    references = []
+    requests = []
+    handles = []
+
+    class Ledger:
+        server_address = ("127.0.0.1", 12345)
+
+        def snapshot(self, nonce):
+            return {
+                "requests": [
+                    {
+                        "path": path,
+                        "method": method,
+                        "nonce": nonce,
+                        "status": 200,
+                        "received_ns": start,
+                        "completed_ns": end,
+                        "bytes": 64,
+                    }
+                    for path, method, start, end in (
+                        ("/fixture", "GET", 110, 120),
+                        ("/effect", "POST", 160, 170),
+                    )
+                ],
+                "effects": 1,
+            }
+
+    async def launch_worker(launch):
+        handle = SimpleNamespace(
+            launch=launch,
+            state=runner.navigation.WorkerState.READY,
+            worker_identity={
+                "pid": 2000 + len(handles),
+                "created": 2000.0 + len(handles),
+                "cmdline": ["/private/tmp/fake-worker", launch.arm],
+                "owner_token": launch.owner_token,
+                "owner_root": str(launch.worker_root),
+            },
+        )
+        handles.append(handle)
+        return handle
+
+    async def start_worker(_handle):
+        return {"ok": True}, []
+
+    async def send_operation(_handle, request, *, timeout):
+        requests.append(request)
+        if len(requests) == (1 if cancel_phase == "first_warmup" else 3):
+            started.set()
+            await asyncio.Event().wait()
+        nonce, url = request["nonce"], request["url"]
+        observation = {
+            "url": url,
+            "title": f"fixture-{nonce}",
+            "readyState": "complete",
+            "marker": nonce,
+            "loaded": nonce,
+            "scriptDone": nonce,
+        }
+        return {
+            "ok": True,
+            "result": {
+                **request,
+                "outcome": "success",
+                "start_ns": 100,
+                "navigation_return_ns": 150,
+                "end_ns": 200,
+                "elapsed_ns": 100,
+                "navigation_ns": 50,
+                "post_navigation_ns": 50,
+                "checked_ns": 190,
+                "navigation_observation": {**observation, "field": ""},
+                "final_observation": {**observation, "field": nonce},
+                "effect_observation": {
+                    "field": nonce,
+                    "response": {"count": 1, "nonce": nonce, "payload": nonce},
+                },
+            },
+        }
+
+    async def cleanup_worker(handle):
+        return {
+            "ok": True,
+            "fallback_used": False,
+            "result": {"identities": [], "errors": []},
+            "worker_identity": {**handle.worker_identity, "state": "absent"},
+            "post_worker_exit_identities": [],
+        }
+
+    async def monitor(stop, _samples):
+        await stop.wait()
+
+    monkeypatch.setattr(runner.navigation, "launch_worker", launch_worker)
+    monkeypatch.setattr(runner.navigation, "start_worker", start_worker)
+    monkeypatch.setattr(runner.navigation, "send_operation", send_operation)
+    monkeypatch.setattr(runner.navigation, "cleanup_worker", cleanup_worker)
+    monkeypatch.setattr(runner, "monitor_pair_host", monitor)
+    task = asyncio.create_task(
+        runner.run_pair_attempt(
+            SimpleNamespace(
+                source=private_result_root, python=sys.executable, chrome="/tmp/chrome"
+            ),
+            result_root=private_result_root,
+            run_root=run_root,
+            fixture=Ledger(),
+            run_id="b" * 32,
+            round_number=1,
+            competitor="raw-cdp",
+            attempt_number=1,
+            samples_per_workload=1,
+            on_update=references.append,
+        )
+    )
+    try:
+        await asyncio.wait_for(started.wait(), timeout=5)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        attempt, totals = offline_navigation_verifier._verify_attempt(
+            run_root,
+            {"run_id": "b" * 32, "samples_per_workload": 1},
+            {"round": 1, "competitor": "raw-cdp"},
+            references[-1],
+            set(),
+        )
+        collection = "warmups" if cancel_phase == "first_warmup" else "samples"
+        assert attempt[collection][-1]["state"] == "failed"
+        assert attempt[collection][-1]["sample"] is None
+        assert attempt[collection][-1]["nonce"] == requests[-1]["nonce"]
+        assert any(
+            "CancelledError" in error for error in attempt[collection][-1]["errors"]
+        )
+        assert totals["attempted_work_count"] == (cancel_phase == "first_measured")
+        assert totals["successful_work_count"] == 0
+        assert attempt["cleanup"]["ok"] is True
+    finally:
+        if not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("acquired_workers", [0, 1])
+async def test_failed_setup_manifest_roundtrips_actual_offline_attempt_verifier(
+    runner,
+    offline_navigation_verifier,
+    private_result_root,
+    monkeypatch,
+    acquired_workers,
+):
+    run_root = private_result_root / "navigation"
+    run_root.mkdir(mode=0o700)
+    references = []
+
+    async def launch_worker(launch):
+        return SimpleNamespace(
+            worker_identity={
+                "pid": 2000,
+                "created": 2000.0,
+                "cmdline": ["/private/tmp/fake-worker", launch.arm],
+                "owner_token": launch.owner_token,
+                "owner_root": str(launch.worker_root),
+            }
+        )
+
+    async def start_worker(_handle):
+        raise RuntimeError("injected setup failure")
+
+    async def cleanup_worker(handle):
+        return {
+            "ok": True,
+            "fallback_used": False,
+            "result": {"identities": [], "errors": []},
+            "worker_identity": {**handle.worker_identity, "state": "absent"},
+            "post_worker_exit_identities": [],
+        }
+
+    monkeypatch.setattr(runner.navigation, "launch_worker", launch_worker)
+    monkeypatch.setattr(runner.navigation, "start_worker", start_worker)
+    monkeypatch.setattr(runner.navigation, "cleanup_worker", cleanup_worker)
+    reference = await runner.run_pair_attempt(
+        SimpleNamespace(
+            source=private_result_root
+            if acquired_workers
+            else private_result_root / "missing",
+            python=sys.executable,
+            chrome="/tmp/chrome",
+        ),
+        result_root=private_result_root,
+        run_root=run_root,
+        fixture=SimpleNamespace(server_address=("127.0.0.1", 12345)),
+        run_id="c" * 32,
+        round_number=1,
+        competitor="raw-cdp",
+        attempt_number=1,
+        samples_per_workload=1,
+        on_update=references.append,
+    )
+    attempt, totals = offline_navigation_verifier._verify_attempt(
+        run_root,
+        {"run_id": "c" * 32, "samples_per_workload": 1},
+        {"round": 1, "competitor": "raw-cdp"},
+        reference,
+        set(),
+    )
+    assert len(attempt["cleanup"]["workers"]) == acquired_workers
+    assert attempt["cleanup"]["workers_ok"] is False
+    assert attempt["cleanup"]["ok"] is False
+    assert attempt["cleanup"]["runtime_root_removed"] is True
+    assert attempt["state"] == references[-1]["state"] == "failed"
+    assert totals["attempted_work_count"] == totals["successful_work_count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_cleanup_exception_manifest_roundtrips_actual_offline_verifier(
+    runner, offline_navigation_verifier, private_result_root, monkeypatch
+):
+    run_root = private_result_root / "navigation"
+    run_root.mkdir(mode=0o700)
+    runtime_roots = []
+
+    async def launch_worker(launch):
+        runtime_roots.append(launch.worker_root.parent)
+        return SimpleNamespace(
+            worker_identity={
+                "pid": 2000,
+                "created": 2000.0,
+                "cmdline": ["/private/tmp/fake-worker", launch.arm],
+                "owner_token": launch.owner_token,
+                "owner_root": str(launch.worker_root),
+            }
+        )
+
+    async def start_worker(_handle):
+        raise RuntimeError("injected setup failure")
+
+    async def cleanup_worker(_handle):
+        raise OSError("injected cleanup coordinator failure")
+
+    monkeypatch.setattr(runner.navigation, "launch_worker", launch_worker)
+    monkeypatch.setattr(runner.navigation, "start_worker", start_worker)
+    monkeypatch.setattr(runner.navigation, "cleanup_worker", cleanup_worker)
+    try:
+        reference = await runner.run_pair_attempt(
+            SimpleNamespace(
+                source=private_result_root,
+                python=sys.executable,
+                chrome="/tmp/chrome",
+            ),
+            result_root=private_result_root,
+            run_root=run_root,
+            fixture=SimpleNamespace(server_address=("127.0.0.1", 12345)),
+            run_id="d" * 32,
+            round_number=1,
+            competitor="raw-cdp",
+            attempt_number=1,
+            samples_per_workload=1,
+        )
+        attempt, totals = offline_navigation_verifier._verify_attempt(
+            run_root,
+            {"run_id": "d" * 32, "samples_per_workload": 1},
+            {"round": 1, "competitor": "raw-cdp"},
+            reference,
+            set(),
+        )
+        cleanup = attempt["cleanup"]
+        worker = cleanup["workers"]["openbrowser"]
+        assert worker["ok"] is False
+        assert worker["fallback_used"] is None
+        assert worker["worker_identity"]["state"] == "unknown"
+        assert worker["error"] == "OSError: injected cleanup coordinator failure"
+        assert worker["post_worker_exit_identities"] == []
+        assert cleanup["workers_ok"] is cleanup["ok"] is False
+        assert cleanup["runtime_root_removed"] is False
+        assert runtime_roots and runtime_roots[0].is_dir()
+        assert reference["state"] == attempt["state"] == "failed"
+        assert reference["cleanup_ok"] is reference["runtime_root_removed"] is False
+        assert totals["attempted_work_count"] == totals["successful_work_count"] == 0
+        assert totals["sample_results"] == []
+        pair_result, _validated, _declared = offline_navigation_verifier._verify_pair(
+            run_root,
+            {"run_id": "d" * 32, "samples_per_workload": 1, "state": "incomplete"},
+            {
+                "round": 1,
+                "competitor": "raw-cdp",
+                "arms": ["openbrowser", "raw-cdp"],
+                "state": "failed",
+                "attempts": [reference],
+                "retry_host_checks": [],
+                "errors": attempt["errors"],
+            },
+            set(),
+        )
+        assert pair_result["state"] == "failed"
+        assert pair_result["metrics"] is None
+    finally:
+        for root in runtime_roots:
+            shutil.rmtree(root, ignore_errors=True)

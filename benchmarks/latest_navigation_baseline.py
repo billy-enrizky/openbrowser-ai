@@ -1167,7 +1167,6 @@ async def run_pair_attempt(
         raise ValueError('pair competitor or attempt number is invalid')
     attempt_dir = create_pair_directories(run_root, round_number, competitor, attempt_number)
     log_directory = create_private_child(attempt_dir, 'logs')
-    runtime_root, owner_token = new_runtime_root()
     arms = ('openbrowser', competitor)
     attempt_manifest = {
         'schema': ATTEMPT_SCHEMA,
@@ -1185,7 +1184,7 @@ async def run_pair_attempt(
         'cleanup': {
             'ok': False,
             'workers_ok': False,
-            'runtime_root': str(runtime_root),
+            'runtime_root': None,
             'runtime_root_removed': False,
             'workers': {},
             'errors': [],
@@ -1206,13 +1205,6 @@ async def run_pair_attempt(
         atomic_json(manifest_path, attempt_manifest)
         await publish_attempt_reference()
 
-    write_new_json(manifest_path, attempt_manifest)
-    await publish_attempt_reference()
-    attempt_manifest['state'] = transition_attempt(
-        AttemptState.PENDING, 'start',
-    ).value
-    await persist_attempt_manifest()
-
     handles: dict[str, navigation.WorkerHandle] = {}
     warmups: list[dict[str, Any]] = []
     samples: list[dict[str, Any]] = []
@@ -1220,8 +1212,18 @@ async def run_pair_attempt(
     host_samples: list[dict[str, Any]] = []
     host_stop = asyncio.Event()
     host_task = None
-    source_root = Path(args.source).expanduser().resolve(strict=True)
+    interruption: BaseException | None = None
+    pending_trial: tuple[dict[str, Any], bool, str] | None = None
+    runtime_root, owner_token = new_runtime_root()
     try:
+        attempt_manifest['cleanup']['runtime_root'] = str(runtime_root)
+        write_new_json(manifest_path, attempt_manifest)
+        await publish_attempt_reference()
+        attempt_manifest['state'] = transition_attempt(
+            AttemptState.PENDING, 'start',
+        ).value
+        await persist_attempt_manifest()
+        source_root = Path(args.source).expanduser().resolve(strict=True)
         for arm in arms:
             launch = navigation.make_worker_launch(
                 arm=arm,
@@ -1253,11 +1255,13 @@ async def run_pair_attempt(
                 break
 
         async def execute(arm: str, workload: str, index: int, *, is_warmup: bool):
+            nonlocal pending_trial
             request = _trial_request(
                 run_id, round_number, competitor, attempt_number,
                 arm, workload, index, fixture.server_address[1],
             )
             label = f'{round_number}/{competitor}/{attempt_number}/{arm}/{workload}/{index}'
+            pending_trial = (request, is_warmup, label)
             if not is_warmup:
                 attempt_manifest['execution_order'].append({
                     'workload': workload, 'index': index, 'arm': arm,
@@ -1269,6 +1273,7 @@ async def run_pair_attempt(
                 attempt_manifest['errors'] = errors
                 await persist_attempt_manifest()
             record = await execute_trial(handles[arm], fixture, request, is_warmup=is_warmup)
+            pending_trial = None
             return record, label
 
         if len(handles) == len(arms) and not errors:
@@ -1310,43 +1315,105 @@ async def run_pair_attempt(
                             break
                     if errors:
                         break
-    except Exception as error:
-        errors.append(f'{type(error).__name__}: {error}')
-    finally:
-        if host_task is not None:
-            host_stop.set()
+    except BaseException as error:
+        LOG.debug("attempt execution failed", exc_info=True)
+        failure = f"{type(error).__name__}: {error}"
+        if pending_trial is None:
+            errors.append(failure)
+        else:
+            request, is_warmup, label = pending_trial
+            trial_errors = [failure]
             try:
-                await host_task
-            except Exception as error:
-                errors.append(f'host monitor failed: {type(error).__name__}: {error}')
+                request_proof = fixture.snapshot(request["nonce"])
+            except Exception as proof_error:
+                LOG.debug("interrupted trial proof failed", exc_info=True)
+                request_proof = {"requests": [], "effects": 0}
+                trial_errors.append(
+                    f"fixture proof failed: {type(proof_error).__name__}: {proof_error}"
+                )
+            record = {
+                "arm": request["arm"],
+                "workload": request["kind"],
+                "index": request["index"],
+                "nonce": request["nonce"],
+                "url": request["url"],
+                "warmup": is_warmup,
+                "state": AttemptState.FAILED.value,
+                "sample": None,
+                "request_proof": request_proof,
+                "errors": trial_errors,
+            }
+            (warmups if is_warmup else samples).append(record)
+            errors.extend(f"{label}: {trial_error}" for trial_error in trial_errors)
+        if not isinstance(error, Exception):
+            interruption = error
+    finally:
 
-    cleanup = await cleanup_pair_workers(handles, arms, runtime_root, owner_token)
-    errors.extend(cleanup['errors'])
-    host_gate = aggregate_host_gate(host_samples)
-    counts = work_counts(samples)
-    counts['error_count'] = len(errors)
-    if not cleanup['ok'] or errors:
-        terminal_state = AttemptState.FAILED.value
-    elif host_gate['state'] != HostGateState.CLEAR.value:
-        terminal_state = AttemptState.CONTAMINATED.value
-    elif any(sample.get('state') != AttemptState.VERIFIED.value for sample in samples) \
-            or any(warmup.get('state') != AttemptState.VERIFIED.value for warmup in warmups):
-        terminal_state = AttemptState.FAILED.value
-    else:
-        terminal_state = AttemptState.VERIFIED.value
-    attempt_manifest.update({
-        'warmups': warmups,
-        'samples': samples,
-        'host_samples': host_samples,
-        'host_gate': host_gate,
-        'work_counts': counts,
-        'cleanup': cleanup,
-        'errors': errors,
-    })
-    attempt_manifest['state'] = transition_attempt(
-        AttemptState.RUNNING, terminal_state,
-    ).value
-    await persist_attempt_manifest()
+        async def cleanup_owned_resources() -> dict[str, Any]:
+            nonlocal interruption
+            if host_task is not None:
+                host_stop.set()
+                try:
+                    await host_task
+                except BaseException as error:
+                    LOG.debug("host monitor failed", exc_info=True)
+                    errors.append(
+                        f"host monitor failed: {type(error).__name__}: {error}"
+                    )
+                    if not isinstance(error, Exception) and interruption is None:
+                        interruption = error
+            return await cleanup_pair_workers(handles, arms, runtime_root, owner_token)
+
+        cleanup_task = asyncio.create_task(cleanup_owned_resources())
+        try:
+            while True:
+                try:
+                    cleanup = await asyncio.shield(cleanup_task)
+                    break
+                except asyncio.CancelledError as error:
+                    if cleanup_task.cancelled():
+                        raise
+                    if interruption is None:
+                        errors.append(f"{type(error).__name__}: {error}")
+                        interruption = error
+            errors.extend(cleanup["errors"])
+            host_gate = aggregate_host_gate(host_samples)
+            counts = work_counts(samples)
+            counts["error_count"] = len(errors)
+            if not cleanup["ok"] or errors:
+                terminal_state = AttemptState.FAILED.value
+            elif host_gate["state"] != HostGateState.CLEAR.value:
+                terminal_state = AttemptState.CONTAMINATED.value
+            elif any(
+                sample.get("state") != AttemptState.VERIFIED.value for sample in samples
+            ) or any(
+                warmup.get("state") != AttemptState.VERIFIED.value for warmup in warmups
+            ):
+                terminal_state = AttemptState.FAILED.value
+            else:
+                terminal_state = AttemptState.VERIFIED.value
+            attempt_manifest.update(
+                {
+                    "warmups": warmups,
+                    "samples": samples,
+                    "host_samples": host_samples,
+                    "host_gate": host_gate,
+                    "work_counts": counts,
+                    "cleanup": cleanup,
+                    "errors": errors,
+                }
+            )
+            attempt_manifest["state"] = transition_attempt(
+                AttemptState.RUNNING,
+                terminal_state,
+            ).value
+            await persist_attempt_manifest()
+        except Exception:
+            if interruption is None:
+                raise
+            LOG.exception("cannot persist interrupted attempt cleanup")
+    if interruption is not None:
+        raise interruption
     return _pair_attempt_reference(run_root, manifest_path, attempt_manifest)
 
 
@@ -1441,19 +1508,22 @@ async def cleanup_pair_workers(
 ) -> dict[str, Any]:
     workers = {}
     errors = []
-    workers_ok = len(handles) == len(expected_arms)
+    owned_workers_clean = set(handles).issubset(expected_arms)
+    workers_ok = len(handles) == len(expected_arms) and owned_workers_clean
     for arm, handle in reversed(list(handles.items())):
         try:
             cleanup = await navigation.cleanup_worker(handle)
         except Exception as error:
             cleanup = {
-                'ok': False,
-                'worker_identity': {**handle.worker_identity, 'state': 'unknown'},
-                'post_worker_exit_identities': [],
-                'error': f'{type(error).__name__}: {error}',
+                "ok": False,
+                "fallback_used": None,
+                "worker_identity": {**handle.worker_identity, "state": "unknown"},
+                "post_worker_exit_identities": [],
+                "error": f"{type(error).__name__}: {error}",
             }
         workers[arm] = cleanup
         if cleanup.get('ok') is not True:
+            owned_workers_clean = False
             workers_ok = False
             errors.append(f'{arm} worker cleanup is incomplete')
 
@@ -1466,7 +1536,7 @@ async def cleanup_pair_workers(
             if isinstance(identity, dict)
         )
     runtime_root_removed = False
-    if workers_ok and navigation.removal_allowed(runtime_root, owner_token, states):
+    if owned_workers_clean and navigation.removal_allowed(runtime_root, owner_token, states):
         try:
             shutil.rmtree(runtime_root)
             runtime_root_removed = not runtime_root.exists()
