@@ -142,7 +142,7 @@ def inspect_png(content: bytes, index: int) -> dict:
         image.load()
     except UnidentifiedImageError:
         return {'parseable': False, 'error': 'PNG decode failed: UnidentifiedImageError: cannot identify image file'}
-    except (OSError, ValueError, Image.DecompressionBombError) as error:
+    except (OSError, ValueError, SyntaxError, Image.DecompressionBombError) as error:
         return {'parseable': False, 'error': f'PNG decode failed: {type(error).__name__}: {error}'}
 
     width, height = image.size

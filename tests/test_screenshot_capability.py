@@ -336,6 +336,19 @@ def screenshot_png_128(index):
     return output.getvalue()
 
 
+def screenshot_png_with_invalid_trailing_ztxt(index):
+    content = screenshot_png_128(index)
+    kind = b"zTXt"
+    payload = b"proof\x00\x01invalid compression"
+    chunk = (
+        struct.pack(">I", len(payload))
+        + kind
+        + payload
+        + struct.pack(">I", zlib.crc32(kind + payload))
+    )
+    return content[:-12] + chunk + content[-12:]
+
+
 def verification_attempt(result_root, *, worker_state="absent"):
     run_root = result_root / "screenshot"
     attempt_dir = run_root / "arms" / "openbrowser" / "attempt-1"
@@ -491,6 +504,19 @@ def test_screenshot_inspection_records_pillow_decompression_bomb_refusal():
 
     assert evidence["parseable"] is False
     assert "DecompressionBombError" in evidence["error"]
+
+
+def test_screenshot_inspection_records_trailing_ztxt_syntax_error():
+    content = screenshot_png_with_invalid_trailing_ztxt(0)
+    with Image.open(BytesIO(content)) as image:
+        assert image.format == "PNG"
+
+    evidence = capability.inspect_png(content, index=0)
+
+    assert evidence == {
+        "parseable": False,
+        "error": "PNG decode failed: SyntaxError: Unknown compression method 1 in zTXt chunk",
+    }
 
 
 def test_screenshot_work_counts_separate_pixel_mismatch_from_execution_errors():
@@ -735,6 +761,8 @@ async def run_browser_capture_failure(monkeypatch, run_root, attempt, failure):
     content = (
         b"not a PNG" if failure == "decode" else screenshot_png_128(attempt["index"])
     )
+    if failure == "decode-syntax":
+        content = screenshot_png_with_invalid_trailing_ztxt(attempt["index"])
     captures = []
 
     async def launch_worker(launch):
@@ -834,7 +862,10 @@ async def run_browser_capture_failure(monkeypatch, run_root, attempt, failure):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("failure", ["reply", "reply-schema", "hash", "decode", "cleanup-finishes", "no-file"])
+@pytest.mark.parametrize(
+    "failure",
+    ["reply", "reply-schema", "hash", "decode", "decode-syntax", "cleanup-finishes", "no-file"],
+)
 async def test_browser_failure_retains_captured_png_evidence(
     private_result_root, monkeypatch, failure
 ):
@@ -848,6 +879,9 @@ async def test_browser_failure_retains_captured_png_evidence(
         assert attempt["worker_reply"] is None
     if failure == "hash":
         assert any("bytes do not match the worker reply" in error for error in attempt["errors"])
+    if failure == "decode-syntax":
+        assert attempt["parseable_png"] is False
+        assert "SyntaxError" in attempt["pixel"]["error"]
     assert attempt["cleanup_ok"] is True
     assert attempt["runtime_root_removed"] is True
     if captures:
@@ -862,7 +896,9 @@ async def test_browser_failure_retains_captured_png_evidence(
     counts = capability.screenshot_work_counts([attempt])
     assert counts["successful_work_count"] == 0
     assert counts["attempted_work_count"] == 1
-    assert counts["completed_work_count"] == int(bool(captures) and failure != "decode")
+    assert counts["completed_work_count"] == int(
+        bool(captures) and failure not in ("decode", "decode-syntax")
+    )
     assert counts["error_count"] == len(attempt["errors"])
 
 
@@ -888,7 +924,9 @@ async def test_browser_failure_does_not_adopt_unsafe_png(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("failure", ["reply", "reply-schema", "hash", "decode", "no-file"])
+@pytest.mark.parametrize(
+    "failure", ["reply", "reply-schema", "hash", "decode", "decode-syntax", "no-file"]
+)
 async def test_produced_browser_failure_is_reportable_without_passing_capability(
     private_result_root, tmp_path, monkeypatch, failure
 ):
@@ -915,6 +953,59 @@ async def test_produced_browser_failure_is_reportable_without_passing_capability
     report = report_path.read_text()
     assert "| openbrowser | failed |" in report
     assert "| lightpanda | inconclusive |" in report
+
+
+@pytest.mark.asyncio
+async def test_screenshot_run_continues_after_trailing_ztxt_decode_failure(
+    private_result_root, monkeypatch
+):
+    output = private_result_root / "smoke" / "screenshot"
+    args = SimpleNamespace(command="smoke", attempts_per_arm=1, output=str(output))
+    monkeypatch.setattr(
+        capability,
+        "validate_screenshot_inputs",
+        lambda *_args: {
+            "candidate_identity_sha256": "a" * 64,
+            "version_manifest_sha256": "b" * 64,
+            "preflight_sha256": "c" * 64,
+            "frozen_harness_sha256": "d" * 64,
+        },
+    )
+    launched = []
+
+    async def failed_capture(_args, _fixture, _attempt_dir, record):
+        launched.append((record["arm"], record["index"]))
+        record["request_proof"] = {
+            "image_requests": [
+                {
+                    "method": "GET",
+                    "path": "/pixels.png",
+                    "nonce": record["nonce"],
+                    "status": 200,
+                }
+            ],
+        }
+        await run_browser_capture_failure(monkeypatch, output, record, "decode-syntax")
+        return record
+
+    monkeypatch.setattr(capability, "execute_attempt", failed_capture)
+    code = await capability.run_screenshot(args, private_result_root, output)
+
+    manifest = json.loads((output / "run-manifest.json").read_text())
+    assert code == 1
+    assert launched == [(arm, 0) for arm in capability.SMOKE_ARMS]
+    assert manifest["state"] == "complete"
+    assert manifest["cleanup"]["ok"] is True
+    assert manifest["work_counts"]["attempted_work_count"] == 2
+    assert manifest["work_counts"]["completed_work_count"] == 0
+    for record in manifest["attempts"]:
+        assert record["state"] == "failed"
+        assert record["cleanup_ok"] is True
+        assert record["runtime_root_removed"] is True
+        assert "SyntaxError" in record["pixel"]["error"]
+        assert capability.verify_attempt_artifacts(
+            output, record, run_id=manifest["run_id"]
+        ) == []
 
 
 def test_screenshot_verifier_rejects_unretired_worker_after_failed_attempt(
