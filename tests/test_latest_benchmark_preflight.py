@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 import uuid
+import venv
 import zipfile
 from pathlib import Path
 
@@ -187,6 +188,10 @@ def git(source, *args):
             "GIT_CONFIG_NOSYSTEM": "1",
             "GIT_CONFIG_GLOBAL": os.devnull,
             "GIT_OPTIONAL_LOCKS": "0",
+            "GIT_AUTHOR_NAME": "Benchmark Test",
+            "GIT_AUTHOR_EMAIL": "benchmark-test@example.invalid",
+            "GIT_COMMITTER_NAME": "Benchmark Test",
+            "GIT_COMMITTER_EMAIL": "benchmark-test@example.invalid",
         },
     )
     return result.stdout.strip()
@@ -244,6 +249,24 @@ def create_candidate_repo(source):
     git(source, "tag", "v0.1.56", "HEAD")
     git(source, "update-ref", "refs/remotes/origin/main", "HEAD")
     assert git(source, "status", "--porcelain", "--untracked-files=all") == ""
+
+
+def test_git_fixture_commits_in_a_clone_without_global_identity(tmp_path):
+    source = tmp_path / "source"
+    source.mkdir()
+    create_candidate_repo(source)
+    clone = tmp_path / "clone"
+    git(source, "clone", "-q", str(source), str(clone))
+    git(clone, "config", "user.useConfigOnly", "true")
+    (clone / "fixture.txt").write_text("isolated fixture\n")
+    git(clone, "add", "fixture.txt")
+
+    git(clone, "commit", "-qm", "fixture without host identity")
+
+    assert git(clone, "status", "--porcelain") == ""
+    assert git(clone, "log", "-1", "--format=%an <%ae>") == (
+        "Benchmark Test <benchmark-test@example.invalid>"
+    )
 
 
 def prepare_scenario():
@@ -432,8 +455,29 @@ def test_source_import_proof_uses_selected_source_and_ignores_source_dotenv(scen
 
 
 def test_import_probe_preserves_virtual_environment_dependencies(scenario):
+    environment = scenario["result_root"] / "selected-environment"
+    venv.EnvBuilder(with_pip=False, symlinks=True).create(environment)
+    python = environment / "bin/python"
+    isolated = preflight._safe_environment(scenario["result_root"])
+    purelib = Path(
+        subprocess.run(
+            [
+                str(python),
+                "-c",
+                "import sys,sysconfig;sys.stdout.write(sysconfig.get_path('purelib'))",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            env=isolated,
+        ).stdout
+    )
+    assert purelib.is_relative_to(environment)
+    (purelib / "openbrowser_benchmark_venv_only.py").write_text("VALUE = True\n")
     package = scenario["source_root"] / "src/openbrowser/__init__.py"
-    package.write_text(package.read_text() + "\nfrom PIL import Image\n")
+    package.write_text(
+        package.read_text() + "\nimport openbrowser_benchmark_venv_only\n"
+    )
     git(scenario["source_root"], "add", "src/openbrowser/__init__.py")
     git(
         scenario["source_root"],
@@ -444,9 +488,21 @@ def test_import_probe_preserves_virtual_environment_dependencies(scenario):
     cwd = scenario["result_root"] / "venv-import-probe"
     cwd.mkdir(mode=0o700)
 
+    interpreter = preflight._inspect_python(python, root=scenario["result_root"])
+    with pytest.raises(
+        preflight.PreflightError, match="openbrowser_benchmark_venv_only"
+    ):
+        preflight._source_import_report(
+            scenario["source_root"],
+            {**interpreter, "supplied_path": interpreter["resolved_path"]},
+            cwd,
+            preflight.sha256_file(scenario["identity_path"]),
+            result_root=scenario["result_root"],
+        )
+
     report = preflight._source_import_report(
         scenario["source_root"],
-        scenario["identity"]["candidate_python"],
+        interpreter,
         cwd,
         preflight.sha256_file(scenario["identity_path"]),
         result_root=scenario["result_root"],
