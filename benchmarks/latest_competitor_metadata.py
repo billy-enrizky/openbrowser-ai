@@ -1226,6 +1226,8 @@ def download_tools(
     tools = _result_directory(
         tools_dir, root, "tools output", create=False, require_exists=True
     )
+    if tools != root / "tools":
+        raise MetadataError("tools output must use RESULT_ROOT/tools")
     output = _result_path(manifest_path, root, "tool manifest")
     if output != root / "tool-manifest.json":
         raise MetadataError("tool manifest must use RESULT_ROOT/tool-manifest.json")

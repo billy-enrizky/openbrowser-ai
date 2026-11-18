@@ -960,6 +960,7 @@ def test_selected_corruption_is_preserved_as_conflict_without_repair(
         raw = receipt.read_bytes()
         receipt.unlink()
         receipt.write_bytes(raw)
+        receipt.chmod(0o600)
     elif mutation == "cache_parent":
         cache.rename(private_result_root / "saved-cache")
         cache.mkdir(mode=0o700)
@@ -973,7 +974,8 @@ def test_selected_corruption_is_preserved_as_conflict_without_repair(
         for path in parent.rglob("*")
         if path.is_file() and not path.is_symlink()
     }
-    with pytest.raises((metadata.MetadataError, OSError)):
+    expected_reason = "retained plan witness" if mutation == "foreign_receipt" else None
+    with pytest.raises((metadata.MetadataError, OSError), match=expected_reason):
         metadata.download_tools(
             metadata_dir,
             tools,
@@ -983,6 +985,10 @@ def test_selected_corruption_is_preserved_as_conflict_without_repair(
         )
     assert not manifest_path.exists()
     assert {path: path.read_bytes() for path in before} == before
+    if mutation == "foreign_receipt":
+        assert receipt.read_bytes() == raw
+        assert stat.S_IMODE(receipt.lstat().st_mode) == 0o600
+        assert not metadata.os.path.samestat(receipt.lstat(), plan_path.lstat())
 
 
 @pytest.mark.parametrize(
@@ -1190,19 +1196,22 @@ def test_logging_failure_does_not_replace_publication_interrupt(
     private_result_root, tool_transaction_inputs, monkeypatch
 ):
     metadata_dir, tools, manifest_path, downloads = tool_transaction_inputs
+    logging_calls = []
 
     def interrupted(*_args, **_kwargs):
         raise KeyboardInterrupt("original publication interruption")
 
     def log_failed(*_args, **_kwargs):
+        logging_calls.append(_args)
         raise RuntimeError("secondary log error")
 
     with monkeypatch.context() as patch:
         patch.setattr(metadata, "_rename_noreplace", interrupted)
-        patch.setattr(metadata.LOGGER, "warning", log_failed)
+        for method in ("warning", "error", "exception"):
+            patch.setattr(metadata.LOGGER, method, log_failed)
         with pytest.raises(
             KeyboardInterrupt, match="original publication interruption"
-        ):
+        ) as failure:
             metadata.download_tools(
                 metadata_dir,
                 tools,
@@ -1210,6 +1219,11 @@ def test_logging_failure_does_not_replace_publication_interrupt(
                 result_root=private_result_root,
                 open_url=fixture_opener(downloads),
             )
+    assert logging_calls == []
+    assert any(
+        note.startswith("selected installation evidence:")
+        for note in failure.value.__notes__
+    )
     result = fresh_installer().download_tools(
         metadata_dir,
         tools,
@@ -1414,3 +1428,29 @@ def test_installation_json_rejects_fifo_without_blocking(tmp_path):
     assert "unsafe installation JSON" in result.stderr
     assert metadata.os.path.samestat(original, path.lstat())
     assert stat.S_ISFIFO(path.lstat().st_mode)
+
+
+def test_installer_rejects_noncanonical_tools_directory_before_preparation(
+    private_result_root, tool_transaction_inputs
+):
+    metadata_dir, _tools, manifest, _downloads = tool_transaction_inputs
+    alternate = private_result_root / "alternate-tools"
+    alternate.mkdir(mode=0o700)
+    proof = alternate / "preexisting"
+    proof.write_bytes(b"preserve this data")
+    original = proof.lstat()
+
+    with pytest.raises(metadata.MetadataError, match="RESULT_ROOT/tools"):
+        metadata.download_tools(
+            metadata_dir,
+            alternate,
+            manifest,
+            result_root=private_result_root,
+            open_url=no_preparation,
+        )
+
+    assert proof.read_bytes() == b"preserve this data"
+    assert metadata.os.path.samestat(original, proof.lstat())
+    assert not manifest.exists()
+    assert not (private_result_root / metadata._INSTALL_RECEIPT).exists()
+    assert not list(private_result_root.glob(".tool-install-cache-*"))
