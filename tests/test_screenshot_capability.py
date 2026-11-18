@@ -1,3 +1,4 @@
+import hashlib
 import importlib.util
 import json
 import shutil
@@ -726,6 +727,196 @@ def test_failed_attempt_rejects_undeclared_png(private_result_root, output_kind)
     assert any("PNG" in error and "record" in error for error in errors)
 
 
+async def run_browser_capture_failure(monkeypatch, run_root, attempt, failure):
+    attempt_dir = run_root / attempt["directory"]
+    output = attempt_dir / "result.png"
+    if output.exists():
+        output.unlink()
+    content = (
+        b"not a PNG" if failure == "decode" else screenshot_png_128(attempt["index"])
+    )
+    captures = []
+
+    async def launch_worker(launch):
+        identity = {
+            "pid": 52000,
+            "created": 1.0,
+            "cmdline": ["/tmp/screenshot-worker"],
+            "owner_token": launch.owner_token,
+            "owner_root": str(launch.worker_root),
+        }
+        return SimpleNamespace(
+            worker_identity=identity,
+            stdout_log=capability.open_private_log(
+                launch.log_directory / "worker.stdout.log"
+            ),
+            stderr_log=capability.open_private_log(
+                launch.log_directory / "worker.stderr.log"
+            ),
+        )
+
+    async def start_worker(_handle):
+        return {"ok": True}, []
+
+    async def send_operation(_handle, request, _timeout):
+        if failure != "no-file":
+            if failure in ("symlink", "dangling-symlink"):
+                target = run_root.parent / "foreign.png"
+                if failure == "symlink":
+                    target.write_bytes(content)
+                    target.chmod(0o600)
+                output.symlink_to(target)
+            else:
+                output.write_bytes(b"partial" if failure == "cleanup-finishes" else content)
+                output.chmod(0o644 if failure == "mode" else 0o600)
+            captures.append(content)
+        if failure in ("hash", "decode"):
+            return {
+                "ok": True,
+                "result": {
+                    "schema": "openbrowser-screenshot-reply/1",
+                    "attempt_id": request["attempt_id"],
+                    "arm": attempt["arm"],
+                    "nonce": request["nonce"],
+                    "ready_marker": request["nonce"],
+                    "output": "result.png",
+                    "byte_count": len(content),
+                    "sha256": "0" * 64 if failure == "hash" else hashlib.sha256(content).hexdigest(),
+                },
+            }
+        if failure == "reply-schema":
+            return {"ok": True, "result": {"schema": "invalid-screenshot-reply"}}
+        return {"ok": False, "error": "injected failure after physical capture"}
+
+    async def cleanup_worker(handle):
+        if failure == "cleanup-finishes":
+            output.write_bytes(content)
+            output.chmod(0o600)
+        return {
+            "ok": True,
+            "fallback_used": False,
+            "worker_identity": {**handle.worker_identity, "state": "absent"},
+            "post_worker_exit_identities": [],
+            "errors": [],
+        }
+
+    monkeypatch.setattr(
+        capability.navigation, "make_worker_launch", lambda **kwargs: SimpleNamespace(**kwargs)
+    )
+    monkeypatch.setattr(capability.navigation, "launch_worker", launch_worker)
+    monkeypatch.setattr(capability.navigation, "start_worker", start_worker)
+    monkeypatch.setattr(capability.navigation, "send_operation", send_operation)
+    monkeypatch.setattr(capability.navigation, "cleanup_worker", cleanup_worker)
+    proof = attempt["request_proof"]
+    fixture = SimpleNamespace(
+        snapshot=lambda _nonce: {"image_requests": proof["image_requests"]}
+    )
+    if failure == "owner":
+        lstat = Path.lstat
+
+        def foreign_owner(path, *args, **kwargs):
+            info = lstat(path, *args, **kwargs)
+            if path == output:
+                fields = list(info)
+                fields[4] = capability.os.geteuid() + 1
+                return capability.os.stat_result(fields)
+            return info
+
+        monkeypatch.setattr(Path, "lstat", foreign_owner)
+    result = await capability.execute_browser_attempt(
+        SimpleNamespace(source=str(SCRIPT.parents[1]), python=sys.executable, chrome="/tmp/chrome"),
+        fixture,
+        attempt_dir,
+        attempt,
+    )
+    attempt.update(result)
+    return captures
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["reply", "reply-schema", "hash", "decode", "cleanup-finishes", "no-file"])
+async def test_browser_failure_retains_captured_png_evidence(
+    private_result_root, monkeypatch, failure
+):
+    run_root, attempt = verification_attempt(private_result_root)
+
+    captures = await run_browser_capture_failure(monkeypatch, run_root, attempt, failure)
+
+    assert attempt["state"] == "failed"
+    assert attempt["errors"]
+    if failure != "decode":
+        assert attempt["worker_reply"] is None
+    if failure == "hash":
+        assert any("bytes do not match the worker reply" in error for error in attempt["errors"])
+    assert attempt["cleanup_ok"] is True
+    assert attempt["runtime_root_removed"] is True
+    if captures:
+        assert attempt["png"] is not None
+        assert attempt["png"]["byte_count"] == len(captures[0])
+        assert attempt["png"]["sha256"] == hashlib.sha256(captures[0]).hexdigest()
+        assert attempt["pixel"] == capability.inspect_png(captures[0], attempt["index"])
+        assert (run_root / attempt["directory"] / "result.png").read_bytes() == captures[0]
+    else:
+        assert attempt["png"] is None
+    assert capability.verify_attempt_artifacts(run_root, attempt, run_id="c" * 32) == []
+    counts = capability.screenshot_work_counts([attempt])
+    assert counts["successful_work_count"] == 0
+    assert counts["attempted_work_count"] == 1
+    assert counts["completed_work_count"] == int(bool(captures) and failure != "decode")
+    assert counts["error_count"] == len(attempt["errors"])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["mode", "owner", "symlink", "dangling-symlink"])
+async def test_browser_failure_does_not_adopt_unsafe_png(
+    private_result_root, monkeypatch, failure
+):
+    run_root, attempt = verification_attempt(private_result_root)
+
+    await run_browser_capture_failure(monkeypatch, run_root, attempt, failure)
+
+    output = run_root / attempt["directory"] / "result.png"
+    assert attempt["state"] in ("failed", "incomplete")
+    assert attempt["png"] is None
+    assert output.exists() or output.is_symlink()
+    assert any("PNG" in error or "screenshot output" in error for error in attempt["errors"])
+    assert capability.verify_attempt_artifacts(run_root, attempt, run_id="c" * 32)
+    if failure == "mode":
+        assert output.stat().st_mode & 0o777 == 0o644
+    elif failure != "owner":
+        assert output.is_symlink()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["reply", "reply-schema", "hash", "decode", "no-file"])
+async def test_produced_browser_failure_is_reportable_without_passing_capability(
+    private_result_root, tmp_path, monkeypatch, failure
+):
+    import test_summarize_screenshot_capability as summary_tests
+
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    artifacts = summary_tests._write_valid_run(project_root, private_result_root)
+    manifest = artifacts["manifest"]
+    target = manifest["attempts"][0]
+    await run_browser_capture_failure(monkeypatch, artifacts["run_root"], target, failure)
+    summary_tests._refresh_manifest(artifacts["run_root"], manifest)
+
+    assert manifest["arm_status"] == {
+        "openbrowser": "failed", "raw-cdp": "passed", "lightpanda": "inconclusive"
+    }
+    assert capability.verify_screenshot_manifest(artifacts["run_root"], manifest, "run") == []
+    report_path = artifacts["report_directory"] / "candidate-baseline-screenshot-capability.md"
+    result = capability.subprocess.run(
+        summary_tests._verify_command(project_root, artifacts, report_path),
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    report = report_path.read_text()
+    assert "| openbrowser | failed |" in report
+    assert "| lightpanda | inconclusive |" in report
+
+
 def test_screenshot_verifier_rejects_unretired_worker_after_failed_attempt(
     private_result_root,
 ):
@@ -737,9 +928,11 @@ def test_screenshot_verifier_rejects_unretired_worker_after_failed_attempt(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("exit_code", [0, 1])
 async def test_lightpanda_attempt_retires_owned_child_after_parent_exit(
     private_result_root,
     monkeypatch,
+    exit_code,
 ):
     attempt_dir = (
         private_result_root / "screenshot" / "arms" / "lightpanda" / "attempt-1"
@@ -766,6 +959,7 @@ async def test_lightpanda_attempt_retires_owned_child_after_parent_exit(
         "index": 0,
         "nonce": request["nonce"],
         "request": request,
+        "directory": "arms/lightpanda/attempt-1",
     }
 
     class FakeProcessRef:
@@ -776,7 +970,7 @@ async def test_lightpanda_attempt_retires_owned_child_after_parent_exit(
         pid = 52000
 
         async def wait(self):
-            return 0
+            return exit_code
 
     child = FakeProcessRef(52001)
     group_members = [child]
@@ -802,6 +996,9 @@ async def test_lightpanda_attempt_retires_owned_child_after_parent_exit(
 
     async def spawn_process(*_args, **kwargs):
         process_started_new_session.append(kwargs.get("start_new_session") is True)
+        output = Path(kwargs["cwd"]) / "result.png"
+        output.write_bytes(screenshot_png_128(0))
+        output.chmod(0o600)
         return FinishedProcess()
 
     async def terminate_owned(processes, _token, grace=2):
@@ -862,17 +1059,6 @@ async def test_lightpanda_attempt_retires_owned_child_after_parent_exit(
             "ok": True,
         },
     )
-    monkeypatch.setattr(
-        capability,
-        "verify_png_file",
-        lambda *_args, **_kwargs: {
-            "file": "result.png",
-            "byte_count": 4,
-            "sha256": "a" * 64,
-            "pixel": {"parseable": True, "mismatch_signature": None},
-        },
-    )
-
     result = await capability.execute_lightpanda_attempt(
         SimpleNamespace(
             source=str(private_result_root),
@@ -889,6 +1075,11 @@ async def test_lightpanda_attempt_retires_owned_child_after_parent_exit(
     assert result["cleanup_ok"] is True
     assert result["runtime_root_removed"] is True
     assert result["worker_cleanup"].get("process_state") == "verified"
+    assert result["state"] == ("failed" if exit_code else "passed")
+    attempt.update(result)
+    assert capability.verify_attempt_artifacts(
+        private_result_root / "screenshot", attempt, run_id=run_id
+    ) == []
 
 
 def test_lightpanda_cleanup_state_machine_rejects_illegal_transitions():

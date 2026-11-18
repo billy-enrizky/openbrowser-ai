@@ -23,7 +23,7 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import BytesIO
 
-from PIL import Image
+from PIL import Image, UnidentifiedImageError
 from urllib.parse import parse_qs, quote, urlsplit
 
 import latest_benchmark_preflight as benchmark_preflight
@@ -140,6 +140,8 @@ def inspect_png(content: bytes, index: int) -> dict:
         if image.format != 'PNG':
             return {'parseable': False, 'error': 'screenshot format is not PNG'}
         image.load()
+    except UnidentifiedImageError:
+        return {'parseable': False, 'error': 'PNG decode failed: UnidentifiedImageError: cannot identify image file'}
     except (OSError, ValueError, Image.DecompressionBombError) as error:
         return {'parseable': False, 'error': f'PNG decode failed: {type(error).__name__}: {error}'}
 
@@ -734,8 +736,9 @@ async def execute_browser_attempt(args, fixture, attempt_dir, attempt):
             raise RuntimeError(response.get('error', repr(start_errors)) if isinstance(response, dict)
                                else repr(start_errors))
         response = await navigation.send_operation(handle, request_value, 60)
-        reply = navigation.parse_screenshot_reply(request, response)
-        png = verify_png_file(attempt_dir / 'result.png', index, reply)
+        candidate_reply = navigation.parse_screenshot_reply(request, response)
+        png = verify_png_file(attempt_dir / 'result.png', index, candidate_reply)
+        reply = candidate_reply
         pixel = png['pixel']
         if not pixel['parseable']:
             errors.append(pixel.get('error', 'screenshot PNG could not be parsed'))
@@ -768,6 +771,14 @@ async def execute_browser_attempt(args, fixture, attempt_dir, attempt):
         else:
             cleanup['ok'] = False
             errors.append('screenshot worker cleanup or runtime-root removal is unverified')
+
+    output = attempt_dir / 'result.png'
+    if png is None and cleanup.get('ok') is True and (output.exists() or output.is_symlink()):
+        try:
+            png = verify_png_file(output, index)
+            pixel = png['pixel']
+        except (OSError, ValueError) as error:
+            errors.append(f'failed screenshot PNG evidence is unverified: {type(error).__name__}: {error}')
 
     attempt_state = 'incomplete' if cleanup.get('ok') is not True else 'failed'
     if cleanup.get('ok') is True and not errors:
