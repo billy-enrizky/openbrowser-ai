@@ -437,6 +437,8 @@ def test_preflight_success_writes_phase_evidence_without_mutating_sealed_manifes
     assert result["outcome"] == "passed"
     assert result["errors"] == []
     assert result["checks"]
+    names = [check['name'] for check in result['checks']]
+    assert len(names) == len(set(names)), 'preflight checks must have unique identities'
     assert all(check["state"] == "passed" for check in result["checks"])
     assert scenario["version_path"].read_bytes() == version_before
     assert scenario["identity_path"].read_bytes() == identity_before
@@ -462,7 +464,19 @@ def test_preflight_rejects_output_filename_that_does_not_match_phase(scenario):
             output=output,
         )
 
+
     assert not output.exists()
+
+
+def test_preflight_artifact_rejects_duplicate_check_identities():
+    check = {'name': 'executed_file_sha256', 'expected': True, 'actual': True, 'state': 'passed'}
+    result = {
+        'schema': preflight.PREFLIGHT_SCHEMA, 'phase': 'navigation-smoke',
+        'candidate_identity_sha256': 'a' * 64, 'version_manifest_sha256': 'b' * 64,
+        'checks': [check, dict(check)], 'outcome': 'passed', 'errors': [],
+    }
+    with pytest.raises(preflight.PreflightError, match='duplicate'):
+        preflight._validate_preflight_result(result)
 
 
 def test_preflight_rejects_raw_parent_traversal_in_output_path(scenario):

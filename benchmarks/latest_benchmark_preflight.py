@@ -1856,7 +1856,7 @@ def verify_preflight(
         identity_sha = sha256_bytes(identity_raw)
         if version_value is not None:
             _check_equal(checks, errors, "candidate_identity_sha256", version_value["candidate_identity_sha256"], identity_sha)
-            _check_equal(checks, errors, "executed_file_sha256", identity_value["executed_files"], version_value["executed_file_sha256"])
+            _check_equal(checks, errors, "version_executed_file_sha256", identity_value["executed_files"], version_value["executed_file_sha256"])
     else:
         identity_sha = sha256_bytes(identity_raw) if identity_raw else None
     version_sha = sha256_bytes(version_raw) if version_raw else None
@@ -2105,10 +2105,14 @@ def _validate_preflight_result(value: Any) -> dict[str, Any]:
     checks = result.get("checks")
     if not isinstance(checks, list):
         raise PreflightError("preflight artifact.checks must be a list")
+    check_names = set()
     for index, raw_check in enumerate(checks):
         check = _require_object(raw_check, f"preflight artifact.checks[{index}]")
         _require_exact_keys(check, PREFLIGHT_CHECK_KEYS, f"preflight artifact.checks[{index}]")
-        _require_nonempty_string(check.get("name"), f"preflight artifact.checks[{index}].name")
+        name = _require_nonempty_string(check.get("name"), f"preflight artifact.checks[{index}].name")
+        if name in check_names:
+            raise PreflightError(f'preflight artifact contains duplicate check name: {name}')
+        check_names.add(name)
         if check.get("state") not in {"passed", "failed"}:
             raise PreflightError("preflight check state must be passed or failed")
     errors = result.get("errors")
