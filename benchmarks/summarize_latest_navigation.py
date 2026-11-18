@@ -838,6 +838,10 @@ def _validate_worker_cleanup(value: Any, arm: str, runtime_root: Path, where: st
                 owner_token=token,
                 owner_root=str(runtime_root / arm),
             )
+            if worker["ok"] and identity["state"] not in {"absent", "reused"}:
+                raise VerificationError(
+                    f"{where} successful cleanup has nonretired worker stop identities"
+                )
             result_identity_keys.add(
                 (
                     identity["pid"],
@@ -1270,7 +1274,11 @@ def _verify_pair(run_root: Path, run_manifest: dict[str, Any], value: Any,
             raise VerificationError('verified pair must end with one verified attempt and no pair errors')
     elif attempts:
         terminal_attempt_state = attempts[-1]['state']
-        expected_pair_state = 'running' if terminal_attempt_state == 'pending' else terminal_attempt_state
+        expected_pair_state = (
+            'running' if terminal_attempt_state == 'pending' or (
+                pair['state'] == 'running' and terminal_attempt_state == 'contaminated'
+            ) else terminal_attempt_state
+        )
         if pair['state'] != expected_pair_state:
             raise VerificationError('pair state differs from its final attempt state')
     elif pair['state'] not in {'pending', 'running'}:

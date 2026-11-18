@@ -534,13 +534,11 @@ async def test_pair_attempt_runs_both_arms_and_proves_each_workload(
             )
             persisted = json.loads(manifest_path.read_text())
             measured_count = len(order) - 2
-            assert len(persisted["execution_order"]) == measured_count
-            assert persisted["execution_order"][-1] == {
-                "workload": request["kind"],
-                "index": request["index"],
-                "arm": request["arm"],
-            }
+            assert len(persisted["execution_order"]) == measured_count - 1
             assert len(persisted["samples"]) == measured_count - 1
+            assert (
+                persisted["work_counts"]["attempted_work_count"] == measured_count - 1
+            )
         return {"ok": True, "result": successful_sample(request)}
 
     async def cleanup_worker(handle):
@@ -559,7 +557,7 @@ async def test_pair_attempt_runs_both_arms_and_proves_each_workload(
                 "classification_errors": [],
             }
         )
-        await stop.wait()
+        await asyncio.wait_for(stop.wait(), timeout=5)
 
     monkeypatch.setattr(runner.navigation, "launch_worker", launch_worker)
     monkeypatch.setattr(runner.navigation, "start_worker", start_worker)
@@ -1036,7 +1034,7 @@ def test_navigation_phase_errors_reject_boolean_and_out_of_order_times(runner):
     "failure_point", ["initial_manifest", "running_manifest", "source", "cancel"]
 )
 async def test_attempt_owns_resources_before_setup_and_through_cancellation(
-    runner, private_result_root, monkeypatch, failure_point
+    runner, offline_navigation_verifier, private_result_root, monkeypatch, failure_point
 ):
     run_root = private_result_root / "navigation"
     run_root.mkdir(mode=0o700)
@@ -1068,14 +1066,17 @@ async def test_attempt_owns_resources_before_setup_and_through_cancellation(
         return handle
 
     async def start_worker(handle):
+        assert failure_point == "cancel", "unexpected worker start during setup failure"
         handle.state = runner.navigation.WorkerState.READY
         started.set()
-        await asyncio.Event().wait()
+        await asyncio.wait_for(asyncio.Event().wait(), timeout=5)
 
     async def cleanup_worker(handle):
         cleaned.append(handle)
         return {
             "ok": True,
+            "fallback_used": False,
+            "result": {"identities": [], "errors": []},
             "worker_identity": {**handle.worker_identity, "state": "absent"},
             "post_worker_exit_identities": [],
         }
@@ -1127,7 +1128,11 @@ async def test_attempt_owns_resources_before_setup_and_through_cancellation(
         if failure_point == "cancel":
             await asyncio.wait_for(started.wait(), timeout=5)
             task.cancel()
-        outcome = (await asyncio.gather(task, return_exceptions=True))[0]
+        outcome = (
+            await asyncio.wait_for(
+                asyncio.gather(task, return_exceptions=True), timeout=5
+            )
+        )[0]
         caught = outcome if isinstance(outcome, BaseException) else None
         assert runtime_roots and not runtime_roots[0].exists()
         assert cleaned == handles
@@ -1144,6 +1149,26 @@ async def test_attempt_owns_resources_before_setup_and_through_cancellation(
         assert references[-1]["manifest_sha256"] == runner.preflight.sha256_file(
             manifest_path
         )
+        pair = {
+            "round": 1,
+            "competitor": "raw-cdp",
+            "arms": ["openbrowser", "raw-cdp"],
+            "state": "failed",
+            "attempts": [references[-1]],
+            "retry_host_checks": [],
+            "errors": saved["errors"],
+        }
+        run = {"run_id": "e" * 32, "samples_per_workload": 1, "state": "incomplete"}
+        verified_attempt, totals = offline_navigation_verifier._verify_attempt(
+            run_root, run, pair, references[-1], set()
+        )
+        summary_pair, _validated, _declared = offline_navigation_verifier._verify_pair(
+            run_root, run, pair, set()
+        )
+        assert verified_attempt == saved
+        assert totals["attempted_work_count"] == totals["successful_work_count"] == 0
+        assert summary_pair["state"] == "failed"
+        assert summary_pair["metrics"] is None
         if failure_point == "cancel":
             assert isinstance(caught, asyncio.CancelledError)
             assert any("CancelledError" in error for error in saved["errors"])
@@ -1153,7 +1178,9 @@ async def test_attempt_owns_resources_before_setup_and_through_cancellation(
     finally:
         if not task.done():
             task.cancel()
-            await asyncio.gather(task, return_exceptions=True)
+            await asyncio.wait_for(
+                asyncio.gather(task, return_exceptions=True), timeout=5
+            )
         for runtime_root in runtime_roots:
             shutil.rmtree(runtime_root, ignore_errors=True)
 
@@ -1264,7 +1291,7 @@ async def test_cancellation_during_worker_cleanup_waits_for_owned_resource_proof
 
     async def cleanup_worker(handle):
         cleanup_started.set()
-        await cleanup_release.wait()
+        await asyncio.wait_for(cleanup_release.wait(), timeout=5)
         cleaned.append(handle)
         return {
             "ok": True,
@@ -1299,7 +1326,7 @@ async def test_cancellation_during_worker_cleanup_waits_for_owned_resource_proof
         await asyncio.sleep(0)
         cleanup_release.set()
         with pytest.raises(asyncio.CancelledError):
-            await task
+            await asyncio.wait_for(task, timeout=5)
         assert cleaned == list(reversed(handles))
         assert roots and not roots[0].exists()
         saved = json.loads(
@@ -1316,7 +1343,9 @@ async def test_cancellation_during_worker_cleanup_waits_for_owned_resource_proof
         cleanup_release.set()
         if not task.done():
             task.cancel()
-            await asyncio.gather(task, return_exceptions=True)
+            await asyncio.wait_for(
+                asyncio.gather(task, return_exceptions=True), timeout=5
+            )
         for root in roots:
             shutil.rmtree(root, ignore_errors=True)
 
@@ -1433,7 +1462,7 @@ async def test_cancelled_trial_artifacts_are_accepted_by_actual_offline_verifier
         requests.append(request)
         if len(requests) == (1 if cancel_phase == "first_warmup" else 3):
             started.set()
-            await asyncio.Event().wait()
+            await asyncio.wait_for(asyncio.Event().wait(), timeout=5)
         nonce, url = request["nonce"], request["url"]
         observation = {
             "url": url,
@@ -1474,7 +1503,7 @@ async def test_cancelled_trial_artifacts_are_accepted_by_actual_offline_verifier
         }
 
     async def monitor(stop, _samples):
-        await stop.wait()
+        await asyncio.wait_for(stop.wait(), timeout=5)
 
     monkeypatch.setattr(runner.navigation, "launch_worker", launch_worker)
     monkeypatch.setattr(runner.navigation, "start_worker", start_worker)
@@ -1501,7 +1530,7 @@ async def test_cancelled_trial_artifacts_are_accepted_by_actual_offline_verifier
         await asyncio.wait_for(started.wait(), timeout=5)
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
-            await task
+            await asyncio.wait_for(task, timeout=5)
         attempt, totals = offline_navigation_verifier._verify_attempt(
             run_root,
             {"run_id": "b" * 32, "samples_per_workload": 1},
@@ -1522,7 +1551,9 @@ async def test_cancelled_trial_artifacts_are_accepted_by_actual_offline_verifier
     finally:
         if not task.done():
             task.cancel()
-            await asyncio.gather(task, return_exceptions=True)
+            await asyncio.wait_for(
+                asyncio.gather(task, return_exceptions=True), timeout=5
+            )
 
 
 @pytest.mark.asyncio
@@ -1682,3 +1713,505 @@ async def test_cleanup_exception_manifest_roundtrips_actual_offline_verifier(
     finally:
         for root in runtime_roots:
             shutil.rmtree(root, ignore_errors=True)
+
+
+@pytest.fixture
+def checkpoint_attempt(runner, private_result_root, monkeypatch):
+    run_root = private_result_root / "navigation"
+    run_root.mkdir(mode=0o700)
+    requests = []
+    handles = []
+    ledgers = {}
+
+    class Ledger:
+        server_address = ("127.0.0.1", 12345)
+
+        def __init__(self, *_args):
+            self.stopped = threading.Event()
+
+        def serve_forever(self):
+            self.stopped.wait(timeout=5)
+
+        def shutdown(self):
+            self.stopped.set()
+
+        def server_close(self):
+            return None
+
+        def snapshot(self, nonce):
+            return ledgers.get(nonce, {"requests": [], "effects": 0})
+
+    async def launch_worker(launch):
+        handle = SimpleNamespace(
+            state=runner.navigation.WorkerState.READY,
+            worker_identity={
+                "pid": 3000 + len(handles),
+                "created": float(3000 + len(handles)),
+                "cmdline": ["/private/tmp/fake-worker", launch.arm],
+                "owner_token": launch.owner_token,
+                "owner_root": str(launch.worker_root),
+            },
+        )
+        handles.append(handle)
+        return handle
+
+    async def start_worker(_handle):
+        return {"ok": True}, []
+
+    async def send_operation(_handle, request, *, timeout):
+        requests.append(request)
+        nonce, url = request["nonce"], request["url"]
+        paths = [("/fixture", "GET"), ("/effect", "POST")]
+        if request["kind"] == "delayed":
+            paths.append(("/slow.js", "GET"))
+        ledgers[nonce] = {
+            "requests": [
+                {
+                    "path": path,
+                    "method": method,
+                    "nonce": nonce,
+                    "status": 200,
+                    "received_ns": 110,
+                    "completed_ns": 120,
+                    "bytes": 64,
+                }
+                for path, method in paths
+            ],
+            "effects": 1,
+        }
+        observation = {
+            "url": url,
+            "title": f"fixture-{nonce}",
+            "readyState": "complete",
+            "marker": nonce,
+            "loaded": nonce,
+            "scriptDone": nonce,
+        }
+        return {
+            "ok": True,
+            "result": {
+                **request,
+                "outcome": "success",
+                "start_ns": 100,
+                "navigation_return_ns": 150,
+                "end_ns": 200,
+                "elapsed_ns": 100,
+                "navigation_ns": 50,
+                "post_navigation_ns": 50,
+                "checked_ns": 190,
+                "navigation_observation": {**observation, "field": ""},
+                "final_observation": {**observation, "field": nonce},
+                "effect_observation": {
+                    "field": nonce,
+                    "response": {
+                        "count": 1,
+                        "nonce": nonce,
+                        "payload": nonce,
+                    },
+                },
+            },
+        }
+
+    async def cleanup_worker(handle):
+        return {
+            "ok": True,
+            "fallback_used": False,
+            "result": {"identities": [], "errors": []},
+            "worker_identity": {**handle.worker_identity, "state": "absent"},
+            "post_worker_exit_identities": [],
+        }
+
+    async def monitor(stop, samples):
+        samples.append(
+            {
+                "captured_at_utc": "2026-11-18T00:00:00Z",
+                "load_1m": 0.0,
+                "logical_cpu_count": 8,
+                "processes": [],
+                "classification_errors": [],
+            }
+        )
+        await asyncio.wait_for(stop.wait(), timeout=5)
+
+    monkeypatch.setattr(runner.navigation, "launch_worker", launch_worker)
+    monkeypatch.setattr(runner.navigation, "start_worker", start_worker)
+    monkeypatch.setattr(runner.navigation, "send_operation", send_operation)
+    monkeypatch.setattr(runner.navigation, "cleanup_worker", cleanup_worker)
+    monkeypatch.setattr(runner.navigation, "Fixture", Ledger)
+    monkeypatch.setattr(runner, "monitor_pair_host", monitor)
+
+    async def execute(on_update=None):
+        return await runner.run_pair_attempt(
+            SimpleNamespace(
+                source=private_result_root, python=sys.executable, chrome="/tmp/chrome"
+            ),
+            result_root=private_result_root,
+            run_root=run_root,
+            fixture=Ledger(),
+            run_id="e" * 32,
+            round_number=1,
+            competitor="raw-cdp",
+            attempt_number=1,
+            samples_per_workload=1,
+            on_update=on_update,
+        )
+
+    return SimpleNamespace(
+        execute=execute,
+        run_root=run_root,
+        requests=requests,
+        path=run_root / "round-1/pair-raw-cdp/attempt-1/attempt-manifest.json",
+        run={"run_id": "e" * 32, "samples_per_workload": 1, "state": "incomplete"},
+        pair={
+            "round": 1,
+            "competitor": "raw-cdp",
+            "arms": ["openbrowser", "raw-cdp"],
+            "state": "pending",
+            "attempts": [],
+            "retry_host_checks": [],
+            "errors": [],
+        },
+    )
+
+
+@pytest.mark.asyncio
+async def test_reused_attempt_preserves_verified_manifest_and_digest(
+    runner, offline_navigation_verifier, checkpoint_attempt, monkeypatch
+):
+    harness = checkpoint_attempt
+    reference = await asyncio.wait_for(harness.execute(), timeout=5)
+    before = harness.path.read_bytes()
+    calls = len(harness.requests)
+
+    def no_allocation():
+        pytest.fail("reused attempt must be rejected before runtime allocation")
+
+    monkeypatch.setattr(runner, "new_runtime_root", no_allocation)
+    with pytest.raises((FileExistsError, ValueError)):
+        await asyncio.wait_for(harness.execute(), timeout=5)
+    assert harness.path.read_bytes() == before
+    assert len(harness.requests) == calls
+    attempt, totals = offline_navigation_verifier._verify_attempt(
+        harness.run_root, harness.run, harness.pair, reference, set()
+    )
+    assert attempt["state"] == "verified"
+    assert totals["attempted_work_count"] == totals["successful_work_count"] == 4
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("boundary", ["write", "callback"])
+async def test_pre_dispatch_checkpoint_failure_does_not_invent_measured_work(
+    runner, offline_navigation_verifier, checkpoint_attempt, monkeypatch, boundary
+):
+    harness = checkpoint_attempt
+    writer = runner.atomic_json
+    references = []
+    failed = False
+    eligible_checkpoints = 0
+
+    def should_fail(value):
+        nonlocal eligible_checkpoints
+        eligible = (
+            not failed
+            and value["state"] == "running"
+            and len(value["warmups"]) == 2
+            and not value["samples"]
+        )
+        if eligible:
+            eligible_checkpoints += 1
+        return eligible and eligible_checkpoints == 2
+
+    def write(path, value):
+        nonlocal failed
+        if boundary == "write" and should_fail(value):
+            failed = True
+            raise OSError("pre-dispatch checkpoint failure")
+        writer(path, value)
+
+    def update(reference):
+        nonlocal failed
+        value = json.loads(harness.path.read_bytes())
+        if boundary == "callback" and should_fail(value):
+            failed = True
+            raise OSError("pre-dispatch checkpoint failure")
+        references.append(reference)
+
+    monkeypatch.setattr(runner, "atomic_json", write)
+    reference = await asyncio.wait_for(harness.execute(update), timeout=5)
+    assert failed
+    assert len(harness.requests) == 2
+    attempt, totals = offline_navigation_verifier._verify_attempt(
+        harness.run_root, harness.run, harness.pair, reference, set()
+    )
+    assert attempt["state"] == "failed"
+    assert attempt["execution_order"] == attempt["samples"] == []
+    assert totals["attempted_work_count"] == totals["successful_work_count"] == 0
+    assert totals["error_count"] == 1
+    assert reference == references[-1]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("boundary", ["before_write", "after_write", "callback"])
+async def test_terminal_checkpoint_failure_reconciles_child_without_rewriting_execution_truth(
+    runner, offline_navigation_verifier, checkpoint_attempt, monkeypatch, boundary
+):
+    harness = checkpoint_attempt
+    writer = runner.atomic_json
+    failed = False
+
+    def write(path, value):
+        nonlocal failed
+        if value["state"] == "verified" and boundary != "callback":
+            failed = True
+            if boundary == "after_write":
+                writer(path, value)
+            raise OSError("terminal checkpoint failure")
+        writer(path, value)
+
+    def update(reference):
+        nonlocal failed
+        if reference["state"] == "verified" and boundary == "callback":
+            failed = True
+            raise OSError("terminal checkpoint failure")
+        runner._upsert_attempt_reference(harness.pair, reference)
+
+    monkeypatch.setattr(runner, "atomic_json", write)
+
+    async def execute(_number):
+        return await harness.execute(update)
+
+    async def quiet():
+        pytest.fail("checkpoint failure must not retry measured work")
+
+    with pytest.raises(Exception, match="terminal checkpoint failure"):
+        await asyncio.wait_for(
+            runner.run_pair_attempts(
+                "raw-cdp",
+                execute,
+                quiet,
+                pair_record=harness.pair,
+            ),
+            timeout=5,
+        )
+    assert failed
+    reference = harness.pair["attempts"][-1]
+    attempt, totals = offline_navigation_verifier._verify_attempt(
+        harness.run_root, harness.run, harness.pair, reference, set()
+    )
+    assert (
+        attempt["state"]
+        == reference["state"]
+        == ("running" if boundary == "before_write" else "verified")
+    )
+    assert len(harness.requests) == 6
+    assert totals["attempted_work_count"] == totals["successful_work_count"] == 4
+    pair_result, validated, _declared = offline_navigation_verifier._verify_pair(
+        harness.run_root, harness.run, harness.pair, set()
+    )
+    assert pair_result["state"] == (
+        "unverified" if boundary == "before_write" else "verified"
+    )
+    assert validated["attempted_work_count"] == 4
+    assert harness.pair["errors"] == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "boundary", ["before_write", "after_write", "callback", "unreadable"]
+)
+@pytest.mark.parametrize("host_contaminated", [False, True])
+async def test_checkpoint_coordinator_failure_run_roundtrips_actual_offline_verifier(
+    runner,
+    offline_navigation_verifier,
+    checkpoint_attempt,
+    monkeypatch,
+    boundary,
+    host_contaminated,
+):
+    root = checkpoint_attempt.run_root.parent
+    output = root / "navigation-final"
+    inputs = {
+        "identity": {
+            "candidate_commit": "a" * 40,
+            "candidate_tree": "b" * 40,
+            "executed_files": {},
+        },
+        "identity_sha256": "c" * 64,
+        "version_sha256": "d" * 64,
+        "preflight_sha256": "e" * 64,
+        "frozen_harness_sha256": "f" * 64,
+        "source_root": root,
+        "source_snapshot": {},
+    }
+    host_sample = {
+        "captured_at_utc": "2026-11-18T00:00:00Z",
+        "load_1m": 0.0,
+        "logical_cpu_count": 8,
+        "processes": [],
+        "classification_errors": [],
+    }
+
+    async def host_preflight():
+        return {
+            "state": "clear",
+            "reasons": [],
+            "logical_cpu_count": 8,
+            "uptime": "test",
+            "samples": [host_sample],
+        }
+
+    async def monitor_pair_host(stop, samples):
+        samples.append({**host_sample, "load_1m": 99.0 if host_contaminated else 0.0})
+        await asyncio.wait_for(stop.wait(), timeout=5)
+
+    writer = runner.atomic_json
+    reader = runner.read_json_artifact
+    failed = False
+
+    def write(path, value):
+        nonlocal failed
+        child_terminal = path.name == "attempt-manifest.json" and value["state"] in {
+            "verified",
+            "contaminated",
+        }
+        parent_callback = (
+            path.name == "run-manifest.json"
+            and value["pairs"]
+            and value["pairs"][-1]["attempts"]
+            and value["pairs"][-1]["state"] == "running"
+            and value["pairs"][-1]["attempts"][-1]["state"]
+            in {"verified", "contaminated"}
+        )
+        if not failed and (
+            (boundary == "callback" and parent_callback)
+            or (boundary != "callback" and child_terminal)
+        ):
+            failed = True
+            if boundary == "after_write":
+                writer(path, value)
+            raise OSError("terminal checkpoint coordinator failure")
+        writer(path, value)
+
+    def read(result_root, value, where):
+        if boundary == "unreadable" and where == "last attempt checkpoint":
+            raise OSError("checkpoint became unreadable")
+        return reader(result_root, value, where)
+
+    monkeypatch.setattr(runner, "validate_navigation_inputs", lambda *_args: inputs)
+    monkeypatch.setattr(runner, "collect_host_preflight", host_preflight)
+    monkeypatch.setattr(runner, "monitor_pair_host", monitor_pair_host)
+    monkeypatch.setattr(runner.preflight, "_git_snapshot", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(runner.preflight, "_hash_executed_files", lambda *_args: {})
+    monkeypatch.setattr(runner, "atomic_json", write)
+    monkeypatch.setattr(runner, "read_json_artifact", read)
+    status = await asyncio.wait_for(
+        runner.run_navigation(
+            SimpleNamespace(
+                command="run",
+                output=output,
+                rounds=2,
+                samples=6,
+                source=root,
+                python=sys.executable,
+                chrome="/tmp/chrome",
+            )
+        ),
+        timeout=5,
+    )
+    assert failed and status == 1
+    manifest = json.loads((output / "run-manifest.json").read_bytes())
+    evidence = offline_navigation_verifier._verify_run_manifest(
+        output, manifest, "run", set()
+    )
+    assert manifest["state"] == "incomplete"
+    assert manifest["failed_phase"] == "run"
+    assert "terminal checkpoint coordinator failure" in manifest["errors"][0]
+    assert len(checkpoint_attempt.requests) == 26
+    assert len(manifest["pairs"]) == 1
+    assert evidence["complete"] is False
+    pair = evidence["pair_results"]["round-1/raw-cdp"]
+    if boundary in {"after_write", "callback"}:
+        assert pair["state"] == ("running" if host_contaminated else "verified")
+        child = manifest["pairs"][0]["attempts"][0]
+        assert child["state"] == ("contaminated" if host_contaminated else "verified")
+    else:
+        assert pair["state"] == "unverified"
+    if host_contaminated:
+        assert pair["metrics"] is None
+    if boundary in {"after_write", "callback"}:
+        invalid_states = (
+            {
+                "contaminated": "terminal contaminated pair is missing its post-pair host check",
+                "failed": "pair state differs from its final attempt state",
+                "verified": "verified pair must end with one verified attempt",
+            }
+            if host_contaminated
+            else {"running": "pair state differs from its final attempt state"}
+        )
+        for invalid_state, message in invalid_states.items():
+            invalid_pair = {**manifest["pairs"][0], "state": invalid_state}
+            with pytest.raises(
+                offline_navigation_verifier.VerificationError, match=message
+            ):
+                offline_navigation_verifier._verify_pair(
+                    output, manifest, invalid_pair, set()
+                )
+    if boundary == "unreadable":
+        assert evidence["work_counts"]["attempted_work_count"] == 0
+        assert manifest["pairs"][0]["attempts"][0]["manifest_sha256"] is None
+    else:
+        assert evidence["work_counts"]["attempted_work_count"] == 24
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("after_write", [False, True])
+async def test_cancelled_trial_with_terminal_io_failure_keeps_committed_reference_coherent(
+    runner, offline_navigation_verifier, checkpoint_attempt, monkeypatch, after_write
+):
+    harness = checkpoint_attempt
+    references = []
+    sender = runner.navigation.send_operation
+    writer = runner.atomic_json
+
+    async def cancel_measured(handle, request, *, timeout):
+        if len(harness.requests) == 2:
+            harness.requests.append(request)
+            raise asyncio.CancelledError("in-flight measured trial")
+        return await sender(handle, request, timeout=timeout)
+
+    def fail_terminal(path, value):
+        if value["state"] == "failed":
+            if after_write:
+                writer(path, value)
+            raise OSError("cancelled terminal checkpoint failure")
+        writer(path, value)
+
+    monkeypatch.setattr(runner.navigation, "send_operation", cancel_measured)
+    monkeypatch.setattr(runner, "atomic_json", fail_terminal)
+    with pytest.raises(asyncio.CancelledError, match="in-flight measured trial"):
+        await asyncio.wait_for(harness.execute(references.append), timeout=5)
+    reference = references[-1]
+    harness.pair.update(state="running", attempts=[reference])
+    summary, validated, _declared = offline_navigation_verifier._verify_pair(
+        harness.run_root, harness.run, harness.pair, set()
+    )
+    assert summary["state"] == "unverified"
+    assert summary["metrics"] is None
+    if after_write:
+        assert (
+            runner.preflight.sha256_file(harness.path) != reference["manifest_sha256"]
+        )
+        actual_reference = runner._pair_attempt_reference(
+            harness.run_root, harness.path, json.loads(harness.path.read_bytes())
+        )
+        actual, totals = offline_navigation_verifier._verify_attempt(
+            harness.run_root, harness.run, harness.pair, actual_reference, set()
+        )
+        assert actual["state"] == "failed"
+        assert totals["attempted_work_count"] == 1
+    else:
+        assert (
+            runner.preflight.sha256_file(harness.path) == reference["manifest_sha256"]
+        )
+        assert validated["attempted_work_count"] == 0
+    assert len(harness.requests) == 3

@@ -1,5 +1,6 @@
 import hashlib
 import importlib.util
+import io
 import json
 import logging
 import os
@@ -1360,10 +1361,10 @@ def test_summary_rejects_cleanup_with_a_nonretired_post_exit_identity(
     assert "retirement proof" in caplog.text
 
 
-@pytest.mark.parametrize("initial_state", ["alive", "zombie", "unknown"])
+@pytest.mark.parametrize("stop_state", ["absent", "reused"])
 @pytest.mark.parametrize("terminal_state", ["absent", "reused"])
 def test_summary_accepts_cleanup_rechecked_after_fallback(
-    private_result_root, initial_state, terminal_state
+    private_result_root, stop_state, terminal_state
 ):
     summarizer = _load_summarizer()
     args, run_root, _project_root = _build_run(
@@ -1373,12 +1374,141 @@ def test_summary_accepts_cleanup_rechecked_after_fallback(
     def recheck_child_after_fallback(attempt):
         worker = attempt["cleanup"]["workers"]["openbrowser"]
         worker["fallback_used"] = True
-        worker["result"]["identities"][0]["state"] = initial_state
+        worker["result"]["identities"][0]["state"] = stop_state
         worker["post_worker_exit_identities"][0]["state"] = terminal_state
 
     _rewrite_first_attempt(run_root, recheck_child_after_fallback)
 
     assert summarizer.dispatch(args) == 0
+
+
+@pytest.mark.parametrize(
+    "stop_state", ["absent", "reused", "alive", "zombie", "unknown"]
+)
+@pytest.mark.parametrize("terminal_state", ["absent", "reused"])
+async def test_worker_stop_cleanup_round_trip_preserves_stop_outcome(
+    private_result_root, monkeypatch, stop_state, terminal_state
+):
+    summarizer = _load_summarizer()
+    import navigation_compare as navigation
+
+    runtime_root = private_result_root / "runtime"
+    worker_identity = {
+        "pid": 1000,
+        "created": 1000.0,
+        "cmdline": ["worker"],
+        "owner_token": "a" * 32,
+        "owner_root": str(runtime_root / "openbrowser"),
+    }
+    child = {**worker_identity, "pid": 1001, "cmdline": ["chrome"]}
+    progress_child = {**child, "pid": 1002}
+    stop_result = {"identities": [{**child, "state": stop_state}], "errors": []}
+
+    class FakeArm:
+        def __init__(self, _args):
+            pass
+
+        async def stop(self):
+            return stop_result
+
+    stdout = io.StringIO()
+    with monkeypatch.context() as protocol:
+        protocol.setattr(navigation, "Arm", FakeArm)
+        protocol.setattr(navigation.sys, "stdin", io.StringIO('{"op":"stop"}\n'))
+        protocol.setattr(navigation.sys, "stdout", stdout)
+        await navigation.worker(SimpleNamespace(worker_mode="navigation"))
+    reply = json.loads(stdout.getvalue().removeprefix(navigation.PREFIX))
+    stop_ok = stop_state in {"absent", "reused"}
+    assert reply["ok"] is stop_ok
+    assert reply["result"] == stop_result
+
+    class Process:
+        stdin = io.StringIO()
+        returncode = 0
+
+        async def wait(self):
+            return self.returncode
+
+    async def send(_process, request, _log, timeout):
+        assert request == {"op": "stop"}
+        assert timeout == 60
+        return reply
+
+    terminated = False
+
+    def identity_state(identity):
+        # Earlier progress may still need fallback even after a successful stop.
+        if identity["pid"] == progress_child["pid"] and not terminated:
+            return "alive"
+        return terminal_state
+
+    async def terminate(identities, token):
+        nonlocal terminated
+        assert identities == [worker_identity, progress_child, child]
+        assert token == worker_identity["owner_token"]
+        terminated = True
+
+    monkeypatch.setattr(navigation, "send", send)
+    monkeypatch.setattr(navigation, "identity_state", identity_state)
+    monkeypatch.setattr(navigation, "descendant_identities", lambda *_args: [])
+    monkeypatch.setattr(navigation, "terminate_owned", terminate)
+    handle = navigation.WorkerHandle(
+        process=Process(),
+        stdout_log=io.StringIO(),
+        stderr_log=io.StringIO(),
+        worker_identity=worker_identity,
+        initial_owned=(progress_child,),
+        owner_token=worker_identity["owner_token"],
+        mode=navigation.WorkerMode.NAVIGATION,
+        state=navigation.WorkerState.READY,
+    )
+    cleanup = await navigation.cleanup_worker(handle)
+    assert terminated
+    assert cleanup["fallback_used"] is True
+    assert cleanup["ok"] is stop_ok
+    assert all(
+        identity["state"] == terminal_state
+        for identity in cleanup["post_worker_exit_identities"]
+    )
+    assert (
+        summarizer._validate_worker_cleanup(
+            cleanup, "openbrowser", runtime_root, "worker", set(), require_ok=stop_ok
+        )
+        is stop_ok
+    )
+
+    if not stop_ok:
+        assert cleanup["error"] == "worker process cleanup is incomplete"
+        with pytest.raises(
+            summarizer.VerificationError, match="cleanup is not verified"
+        ):
+            summarizer._validate_worker_cleanup(
+                cleanup, "openbrowser", runtime_root, "worker", set(), require_ok=True
+            )
+        missing_stop_error = dict(cleanup)
+        del missing_stop_error["error"]
+        with pytest.raises(summarizer.VerificationError, match="retirement proof"):
+            summarizer._validate_worker_cleanup(
+                missing_stop_error,
+                "openbrowser",
+                runtime_root,
+                "worker",
+                set(),
+                require_ok=False,
+            )
+        forged_success = {**missing_stop_error, "ok": True}
+        with pytest.raises(
+            summarizer.VerificationError,
+            match="successful cleanup has nonretired worker stop identities",
+        ):
+            summarizer._validate_worker_cleanup(
+                forged_success,
+                "openbrowser",
+                runtime_root,
+                "worker",
+                set(),
+                require_ok=False,
+            )
 
 
 def test_summary_rejects_successful_cleanup_with_worker_stop_errors(
@@ -1472,7 +1602,10 @@ def test_cleanup_rejects_unknown_fallback_without_failed_coordinator_evidence(
     if error is not None:
         worker["error"] = error
 
-    with pytest.raises(summarizer.VerificationError):
+    with pytest.raises(
+        summarizer.VerificationError,
+        match="fallback_used may be unknown only for failed cleanup",
+    ):
         summarizer._validate_worker_cleanup(
             worker, "openbrowser", runtime_root, "worker", set(), require_ok=False
         )

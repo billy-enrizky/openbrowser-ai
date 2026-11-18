@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from copy import deepcopy
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -427,6 +428,12 @@ def _upsert_attempt_reference(pair: dict[str, Any], reference: dict[str, Any]) -
 
 
 
+class AttemptCheckpointFailure(RuntimeError):
+    def __init__(self, error: Exception, reference: dict[str, Any]):
+        super().__init__(f'attempt checkpoint failed: {type(error).__name__}: {error}')
+        self.reference = reference
+
+
 async def run_pair_attempts(
     competitor: str,
     execute_attempt: Callable[[int], Awaitable[dict[str, Any]]],
@@ -488,6 +495,16 @@ async def run_pair_attempts(
                 break
         try:
             record = await execute_attempt(attempt_number)
+        except AttemptCheckpointFailure as error:
+            _upsert_attempt_reference(pair, error.reference)
+            child_state = error.reference['state']
+            pair['state'] = (
+                PairState.RUNNING.value if child_state in {
+                    AttemptState.PENDING.value, AttemptState.CONTAMINATED.value,
+                }
+                else child_state
+            )
+            raise
         except Exception as error:
             record = {'state': AttemptState.FAILED.value, 'cleanup_ok': False,
                       'errors': [f'{type(error).__name__}: {error}']}
@@ -876,7 +893,7 @@ def _update_run_work_counts(manifest: dict[str, Any]) -> None:
 
 def _pair_attempt_reference(run_root: Path, manifest_path: Path, attempt_manifest: dict[str, Any]) -> dict[str, Any]:
     relative = manifest_path.parent.relative_to(run_root).as_posix()
-    return {
+    return deepcopy({
         'attempt_number': attempt_manifest['attempt_number'],
         'state': attempt_manifest['state'],
         'directory': relative,
@@ -887,7 +904,7 @@ def _pair_attempt_reference(run_root: Path, manifest_path: Path, attempt_manifes
         'work_counts': attempt_manifest['work_counts'],
         'error_count': attempt_manifest['work_counts']['error_count'],
         'errors': attempt_manifest['errors'],
-    }
+    })
 
 
 async def _stop_fixture(fixture, thread, record):
@@ -1126,6 +1143,7 @@ async def run_navigation(args) -> int:
             and not manifest['errors']
         terminal_event = 'all_pairs_verified' if complete else 'pair_incomplete'
         manifest['state'] = transition_run(RunState.VERIFYING, terminal_event).value
+    _run_attempt_work_counts(manifest)
     atomic_json(manifest_path, manifest)
     return navigation_run_exit_code(manifest)
 
@@ -1261,17 +1279,12 @@ async def run_pair_attempt(
                 arm, workload, index, fixture.server_address[1],
             )
             label = f'{round_number}/{competitor}/{attempt_number}/{arm}/{workload}/{index}'
-            pending_trial = (request, is_warmup, label)
             if not is_warmup:
+                await persist_attempt_manifest()
                 attempt_manifest['execution_order'].append({
                     'workload': workload, 'index': index, 'arm': arm,
                 })
-                counts_before_sample = work_counts(samples)
-                counts_before_sample['attempted_work_count'] += 1
-                counts_before_sample['error_count'] = len(errors)
-                attempt_manifest['work_counts'] = counts_before_sample
-                attempt_manifest['errors'] = errors
-                await persist_attempt_manifest()
+            pending_trial = (request, is_warmup, label)
             record = await execute_trial(handles[arm], fixture, request, is_warmup=is_warmup)
             pending_trial = None
             return record, label
@@ -1408,9 +1421,38 @@ async def run_pair_attempt(
                 terminal_state,
             ).value
             await persist_attempt_manifest()
-        except Exception:
+        except Exception as error:
             if interruption is None:
-                raise
+                try:
+                    _, published, raw = read_json_artifact(
+                        result_root, manifest_path, 'last attempt checkpoint',
+                    )
+                    for field in ('schema', 'run_id', 'round', 'competitor', 'attempt_number'):
+                        if published[field] != attempt_manifest[field]:
+                            raise ValueError('last attempt checkpoint identity changed')
+                    reference = _pair_attempt_reference(run_root, manifest_path, published)
+                    reference['manifest_sha256'] = preflight.sha256_bytes(raw)
+                except (OSError, ValueError, KeyError, TypeError) as read_error:
+                    failure = (
+                        f'{type(error).__name__}: {error}; last checkpoint unavailable: '
+                        f'{type(read_error).__name__}: {read_error}'
+                    )
+                    reference = {
+                        'attempt_number': attempt_number,
+                        'state': AttemptState.FAILED.value,
+                        'directory': attempt_dir.relative_to(run_root).as_posix(),
+                        'manifest_sha256': None,
+                        'cleanup_ok': False,
+                        'runtime_root_removed': False,
+                        'host_gate': {
+                            'state': HostGateState.UNKNOWN.value,
+                            'reasons': ['last attempt checkpoint is unavailable'],
+                        },
+                        'work_counts': {**zero_work_counts(), 'error_count': 1},
+                        'error_count': 1,
+                        'errors': [failure],
+                    }
+                raise AttemptCheckpointFailure(error, reference) from error
             LOG.exception("cannot persist interrupted attempt cleanup")
     if interruption is not None:
         raise interruption
@@ -1429,7 +1471,9 @@ def new_runtime_root() -> tuple[Path, str]:
 def create_pair_directories(run_root: Path, round_number: int, competitor: str, attempt_number: int) -> Path:
     round_root = create_private_directory(run_root / f'round-{round_number}')
     pair_root = create_private_directory(round_root / f'pair-{competitor}')
-    return create_private_child(pair_root, f'attempt-{attempt_number}')
+    attempt_root = pair_root / f'attempt-{attempt_number}'
+    attempt_root.mkdir(mode=0o700, exist_ok=False)
+    return navigation.validate_private_directory(attempt_root)
 
 
 def _trial_request(run_id: str, round_number: int, competitor: str, attempt_number: int,
