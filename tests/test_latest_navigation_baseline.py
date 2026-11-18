@@ -2418,29 +2418,39 @@ async def test_repeated_cancellation_waits_for_committed_reference_publication(
 
 
 @pytest.mark.parametrize("mask", [0o200, 0o400, 0o777])
-def test_attempt_directory_normalizes_restrictive_umask(tmp_path, mask):
+@pytest.mark.parametrize("inherited_mask", [0o022, 0o200])
+def test_attempt_directory_normalizes_restrictive_umask(tmp_path, mask, inherited_mask):
     import subprocess
+    import textwrap
 
-    run_root = tmp_path / "run"
-    run_root.mkdir(mode=0o700)
-    program = (
-        "import os,sys; from pathlib import Path; "
-        f"sys.path.insert(0, {str(SCRIPT.parent)!r}); "
-        "import latest_navigation_baseline as baseline; "
-        "os.umask(int(sys.argv[2])); "
-        "path=baseline.create_pair_directories(Path(sys.argv[1]),1,'raw-cdp',1); "
-        "assert path.stat().st_mode & 0o777 == 0o700"
-    )
+    program = textwrap.dedent(f"""
+        import os, sys, tempfile
+        from pathlib import Path
+        sys.path.insert(0, {str(SCRIPT.parent)!r})
+        import latest_navigation_baseline as baseline
+        with tempfile.TemporaryDirectory(dir=Path('/tmp').resolve(strict=True)) as directory:
+            run_root = Path(directory)
+            run_root.chmod(0o700)
+            path = None
+            try:
+                os.umask(int(sys.argv[1]))
+                path = baseline.create_pair_directories(run_root, 1, 'raw-cdp', 1)
+                assert path.stat().st_mode & 0o777 == 0o700
+            finally:
+                if path is not None:
+                    path.chmod(0o700)
+        sys.stdout.write(directory)
+    """)
     result = subprocess.run(
-        [sys.executable, "-c", program, str(run_root), str(mask)],
+        [sys.executable, "-c", program, str(mask)],
         cwd=tmp_path,
         capture_output=True,
         text=True,
         check=False,
         timeout=10,
+        umask=inherited_mask,
     )
-    attempt = run_root / "round-1/pair-raw-cdp/attempt-1"
-    if attempt.exists():
-        attempt.chmod(0o700)
 
     assert result.returncode == 0, result.stderr
+    assert Path(result.stdout).parent == Path('/tmp').resolve(strict=True)
+    assert not Path(result.stdout).exists()
