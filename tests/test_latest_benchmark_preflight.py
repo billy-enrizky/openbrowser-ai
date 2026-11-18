@@ -12,7 +12,6 @@ from pathlib import Path
 
 import pytest
 
-
 ROOT = Path(__file__).resolve().parents[1]
 METADATA_SCRIPT = ROOT / "benchmarks" / "latest_competitor_metadata.py"
 PREFLIGHT_SCRIPT = ROOT / "benchmarks" / "latest_benchmark_preflight.py"
@@ -26,7 +25,9 @@ def load_module(name, path):
     return module
 
 
-metadata = load_module("latest_competitor_metadata_for_preflight_tests", METADATA_SCRIPT)
+metadata = load_module(
+    "latest_competitor_metadata_for_preflight_tests", METADATA_SCRIPT
+)
 preflight = load_module("latest_benchmark_preflight_under_test", PREFLIGHT_SCRIPT)
 
 
@@ -37,7 +38,9 @@ def clear_aws_environment(monkeypatch):
             monkeypatch.delenv(name, raising=False)
 
 
-LIGHTPANDA_BINARY = b"#!/bin/sh\ntest \"$1\" = version || exit 2\necho 'Lightpanda 1.0.4'\n"
+LIGHTPANDA_BINARY = (
+    b"#!/bin/sh\ntest \"$1\" = version || exit 2\necho 'Lightpanda 1.0.4'\n"
+)
 AGENT_BROWSER_BINARY = b"#!/bin/sh\necho 'agent-browser 0.43.0'\n"
 CHROME_BINARY = b"#!/bin/sh\necho 'Google Chrome for Testing 158.0.8127.36'\n"
 CHROME_ARCHIVE_URL = "https://storage.googleapis.com/chrome-for-testing-public/158.0.8127.36/mac-arm64/chrome-mac-arm64.zip"
@@ -96,7 +99,10 @@ def saved_responses(chrome_version="158.0.8127.36"):
                 "integrity": "sha512-TExwnZAW39fUBDJhUPrw8KKGmcjzBo7FxNqoP2/usHG1ODsjGI2jAWq3+Q6I5JYyBMjePFEsj8KGB68mALtglA==",
             },
             "engines": {"node": ">=22.0.0"},
-            "repository": {"type": "git", "url": "git+https://github.com/vercel-labs/agent-browser.git"},
+            "repository": {
+                "type": "git",
+                "url": "git+https://github.com/vercel-labs/agent-browser.git",
+            },
         },
         "agent_browser_github_latest": {
             "tag_name": "v0.43.0",
@@ -111,8 +117,16 @@ def saved_responses(chrome_version="158.0.8127.36"):
                 }
             ],
         },
-        "browser_use_pypi": {"info": {"name": "browser-use", "version": "1.0.6"}, "urls": [], "releases": {}},
-        "browser_harness_pypi": {"info": {"name": "browser-harness", "version": "0.1.13"}, "urls": [], "releases": {}},
+        "browser_use_pypi": {
+            "info": {"name": "browser-use", "version": "1.0.6"},
+            "urls": [],
+            "releases": {},
+        },
+        "browser_harness_pypi": {
+            "info": {"name": "browser-harness", "version": "0.1.13"},
+            "urls": [],
+            "releases": {},
+        },
         "chrome_for_testing_stable": {
             "timestamp": "2026-11-17T00:00:00Z",
             "channels": {
@@ -123,7 +137,10 @@ def saved_responses(chrome_version="158.0.8127.36"):
                     "downloads": {
                         "chrome": [
                             {"platform": "mac-arm64", "url": chrome_url},
-                            {"platform": "mac-x64", "url": "https://example.invalid/chrome-x64.zip"},
+                            {
+                                "platform": "mac-x64",
+                                "url": "https://example.invalid/chrome-x64.zip",
+                            },
                         ]
                     },
                 }
@@ -218,7 +235,9 @@ def create_candidate_repo(source):
         file_path.parent.mkdir(parents=True, exist_ok=True)
         file_path.write_text(f"# frozen fixture for {relative}\n")
     (source / "tests" / "test_dummy.py").parent.mkdir(parents=True, exist_ok=True)
-    (source / "tests" / "test_dummy.py").write_text("def test_dummy():\n    assert True\n")
+    (source / "tests" / "test_dummy.py").write_text(
+        "def test_dummy():\n    assert True\n"
+    )
     (source / "uv.lock").write_text("version = 1\n")
     git(source, "add", "--all")
     git(source, "commit", "-qm", "candidate")
@@ -297,17 +316,29 @@ def prepare_scenario():
         )
         frozen_harness = {
             "schema": "openbrowser-frozen-harness/1",
-            "candidate_identity_sha256": hashlib.sha256(identity_path.read_bytes()).hexdigest(),
-            "version_manifest_sha256": hashlib.sha256(version_path.read_bytes()).hexdigest(),
-            "tool_manifest_sha256": hashlib.sha256(tool_manifest_path.read_bytes()).hexdigest(),
-            "candidate_freeze_sha256": hashlib.sha256(candidate_freeze.read_bytes()).hexdigest(),
-            "browser_use_freeze_sha256": hashlib.sha256(browser_use_freeze.read_bytes()).hexdigest(),
+            "candidate_identity_sha256": hashlib.sha256(
+                identity_path.read_bytes()
+            ).hexdigest(),
+            "version_manifest_sha256": hashlib.sha256(
+                version_path.read_bytes()
+            ).hexdigest(),
+            "tool_manifest_sha256": hashlib.sha256(
+                tool_manifest_path.read_bytes()
+            ).hexdigest(),
+            "candidate_freeze_sha256": hashlib.sha256(
+                candidate_freeze.read_bytes()
+            ).hexdigest(),
+            "browser_use_freeze_sha256": hashlib.sha256(
+                browser_use_freeze.read_bytes()
+            ).hexdigest(),
             "smoke_preflight_sha256": {"navigation": "3" * 64, "screenshot": "4" * 64},
             "smoke_manifest_sha256": {"navigation": "1" * 64, "screenshot": "2" * 64},
             "executed_file_sha256": identity["executed_files"],
         }
         frozen_harness_path = result_root / "frozen-harness.json"
-        frozen_harness_path.write_text(json.dumps(frozen_harness, sort_keys=True, separators=(",", ":")) + "\n")
+        frozen_harness_path.write_text(
+            json.dumps(frozen_harness, sort_keys=True, separators=(",", ":")) + "\n"
+        )
         return {
             "result_root": result_root,
             "source_root": source_root,
@@ -331,18 +362,68 @@ def prepare_scenario():
 
 
 @pytest.fixture
-def scenario():
+def fixture_python_version(monkeypatch):
+    version = ".".join(map(str, sys.version_info[:3]))
+    monkeypatch.setattr(preflight, "PYTHON_VERSION_REQUIRED", version)
+    return version
+
+
+@pytest.fixture
+def scenario(fixture_python_version):
     prepared = prepare_scenario()
     yield prepared
     shutil.rmtree(prepared["result_root"], ignore_errors=True)
     shutil.rmtree(prepared["source_root"], ignore_errors=True)
 
 
+@pytest.mark.parametrize("version", ["3.12.11", "3.12.13"])
+def test_production_interpreter_probe_rejects_an_unpinned_patch(
+    monkeypatch, tmp_path, version
+):
+    assert preflight.PYTHON_VERSION_REQUIRED == "3.12.12"
+    report = json.dumps({"executable": sys.executable, "version": version})
+    monkeypatch.setattr(
+        preflight.subprocess,
+        "run",
+        lambda *_args, **_kwargs: subprocess.CompletedProcess([], 0, stdout=report),
+    )
+
+    with pytest.raises(
+        preflight.PreflightError, match=f"must be 3.12.12, got {version}"
+    ):
+        preflight._inspect_python(sys.executable, root=tmp_path)
+
+
+@pytest.mark.parametrize("version", ["3.12.11", "3.12.13"])
+def test_production_interpreter_record_rejects_an_unpinned_patch(version):
+    assert preflight.PYTHON_VERSION_REQUIRED == "3.12.12"
+    interpreter = {
+        "supplied_path": sys.executable,
+        "resolved_path": str(Path(sys.executable).resolve()),
+        "version": version,
+        "executable_sha256": "a" * 64,
+    }
+
+    with pytest.raises(preflight.PreflightError, match="version must be 3.12.12"):
+        preflight._validate_interpreter(interpreter, "candidate_python")
+
+
+def test_fixture_interpreter_uses_the_running_python_patch(
+    fixture_python_version, tmp_path
+):
+    interpreter = preflight._inspect_python(sys.executable, root=tmp_path)
+
+    assert interpreter["version"] == ".".join(map(str, sys.version_info[:3]))
+    assert interpreter["version"] == fixture_python_version
+
+
 def test_source_import_proof_uses_selected_source_and_ignores_source_dotenv(scenario):
     proof = scenario["proof"]
     assert proof["outcome"] == "passed"
-    assert Path(proof["module_file"]).resolve().is_relative_to(
-        (scenario["source_root"] / "src" / "openbrowser").resolve()
+    assert (
+        Path(proof["module_file"])
+        .resolve()
+        .is_relative_to((scenario["source_root"] / "src" / "openbrowser").resolve())
     )
     assert proof["dotenv_disabled"] is True
     assert proof["source_sentinel_in_environment"] is False
@@ -354,19 +435,29 @@ def test_import_probe_preserves_virtual_environment_dependencies(scenario):
     package = scenario["source_root"] / "src/openbrowser/__init__.py"
     package.write_text(package.read_text() + "\nfrom PIL import Image\n")
     git(scenario["source_root"], "add", "src/openbrowser/__init__.py")
-    git(scenario["source_root"], "commit", "-qm", "exercise virtual environment dependency")
+    git(
+        scenario["source_root"],
+        "commit",
+        "-qm",
+        "exercise virtual environment dependency",
+    )
     cwd = scenario["result_root"] / "venv-import-probe"
     cwd.mkdir(mode=0o700)
 
     report = preflight._source_import_report(
-        scenario["source_root"], scenario["identity"]["candidate_python"], cwd,
-        preflight.sha256_file(scenario["identity_path"]), result_root=scenario["result_root"],
+        scenario["source_root"],
+        scenario["identity"]["candidate_python"],
+        cwd,
+        preflight.sha256_file(scenario["identity_path"]),
+        result_root=scenario["result_root"],
     )
 
     assert report["outcome"] == "passed"
 
 
-def test_preflight_rejects_a_result_root_with_the_wrong_owner_uid(monkeypatch, scenario):
+def test_preflight_rejects_a_result_root_with_the_wrong_owner_uid(
+    monkeypatch, scenario
+):
     actual_owner = scenario["result_root"].stat().st_uid
     monkeypatch.setattr(preflight.os, "getuid", lambda: actual_owner + 1)
 
@@ -413,7 +504,9 @@ def test_preflight_verify_rejects_wrong_candidate_interpreter(scenario):
     assert any(check["state"] == "failed" for check in result["checks"])
 
 
-def test_preflight_success_writes_phase_evidence_without_mutating_sealed_manifests(scenario):
+def test_preflight_success_writes_phase_evidence_without_mutating_sealed_manifests(
+    scenario,
+):
     version_before = scenario["version_path"].read_bytes()
     identity_before = scenario["identity_path"].read_bytes()
     output = scenario["result_root"] / "preflight-navigation-smoke.json"
@@ -437,8 +530,8 @@ def test_preflight_success_writes_phase_evidence_without_mutating_sealed_manifes
     assert result["outcome"] == "passed"
     assert result["errors"] == []
     assert result["checks"]
-    names = [check['name'] for check in result['checks']]
-    assert len(names) == len(set(names)), 'preflight checks must have unique identities'
+    names = [check["name"] for check in result["checks"]]
+    assert len(names) == len(set(names)), "preflight checks must have unique identities"
     assert all(check["state"] == "passed" for check in result["checks"])
     assert scenario["version_path"].read_bytes() == version_before
     assert scenario["identity_path"].read_bytes() == identity_before
@@ -448,7 +541,9 @@ def test_preflight_success_writes_phase_evidence_without_mutating_sealed_manifes
 def test_preflight_rejects_output_filename_that_does_not_match_phase(scenario):
     output = scenario["result_root"] / "preflight-unexpected.json"
 
-    with pytest.raises(preflight.PreflightError, match="preflight-navigation-smoke.json"):
+    with pytest.raises(
+        preflight.PreflightError, match="preflight-navigation-smoke.json"
+    ):
         preflight.verify_preflight(
             source=scenario["source_root"],
             python=sys.executable,
@@ -464,18 +559,26 @@ def test_preflight_rejects_output_filename_that_does_not_match_phase(scenario):
             output=output,
         )
 
-
     assert not output.exists()
 
 
 def test_preflight_artifact_rejects_duplicate_check_identities():
-    check = {'name': 'executed_file_sha256', 'expected': True, 'actual': True, 'state': 'passed'}
-    result = {
-        'schema': preflight.PREFLIGHT_SCHEMA, 'phase': 'navigation-smoke',
-        'candidate_identity_sha256': 'a' * 64, 'version_manifest_sha256': 'b' * 64,
-        'checks': [check, dict(check)], 'outcome': 'passed', 'errors': [],
+    check = {
+        "name": "executed_file_sha256",
+        "expected": True,
+        "actual": True,
+        "state": "passed",
     }
-    with pytest.raises(preflight.PreflightError, match='duplicate'):
+    result = {
+        "schema": preflight.PREFLIGHT_SCHEMA,
+        "phase": "navigation-smoke",
+        "candidate_identity_sha256": "a" * 64,
+        "version_manifest_sha256": "b" * 64,
+        "checks": [check, dict(check)],
+        "outcome": "passed",
+        "errors": [],
+    }
+    with pytest.raises(preflight.PreflightError, match="duplicate"):
         preflight._validate_preflight_result(result)
 
 
@@ -505,7 +608,9 @@ def test_preflight_rejects_raw_parent_traversal_in_output_path(scenario):
 
 def test_preflight_verify_rejects_changed_dependency_freeze_without_resealing(scenario):
     before = scenario["version_path"].read_bytes()
-    scenario["candidate_freeze"].write_text(scenario["candidate_freeze"].read_text() + "requests==2.32.0\n")
+    scenario["candidate_freeze"].write_text(
+        scenario["candidate_freeze"].read_text() + "requests==2.32.0\n"
+    )
     output = scenario["result_root"] / "preflight-navigation-run.json"
 
     result = preflight.verify_preflight(
@@ -529,11 +634,15 @@ def test_preflight_verify_rejects_changed_dependency_freeze_without_resealing(sc
 
 
 def test_seal_rejects_source_import_working_directory_outside_result_root(scenario):
-    outside = scenario["result_root"].parent / f"openbrowser-import-decoy-{uuid.uuid4().hex}"
+    outside = (
+        scenario["result_root"].parent / f"openbrowser-import-decoy-{uuid.uuid4().hex}"
+    )
     outside.mkdir(mode=0o700)
     proof = json.loads(scenario["proof_path"].read_text())
     proof["working_directory"] = str(outside)
-    scenario["proof_path"].write_text(json.dumps(proof, sort_keys=True, separators=(",", ":")) + "\n")
+    scenario["proof_path"].write_text(
+        json.dumps(proof, sort_keys=True, separators=(",", ":")) + "\n"
+    )
     output = scenario["result_root"] / "second-version-manifest.json"
 
     try:
@@ -582,7 +691,11 @@ def test_preflight_rejects_latest_metadata_advance(scenario):
         output=output,
     )
 
-    freshness = next(check for check in result["checks"] if check["name"] == "latest_metadata_freshness")
+    freshness = next(
+        check
+        for check in result["checks"]
+        if check["name"] == "latest_metadata_freshness"
+    )
     assert result["outcome"] == "failed"
     assert freshness["state"] == "failed"
 
@@ -606,7 +719,9 @@ def test_preflight_rejects_inherited_aws_credentials(scenario, monkeypatch):
         output=output,
     )
 
-    no_aws = next(check for check in result["checks"] if check["name"] == "no_aws_environment")
+    no_aws = next(
+        check for check in result["checks"] if check["name"] == "no_aws_environment"
+    )
     assert result["outcome"] == "failed"
     assert no_aws["state"] == "failed"
     assert "AWS_PROFILE" in no_aws["actual"]["unexpected_names"]
@@ -638,7 +753,9 @@ def test_identity_rejects_dirty_candidate_checkout(scenario):
 
 def test_runtime_variant_accepts_only_src_openbrowser_differences(scenario):
     prepare_smoke_preflight_files(scenario)
-    treatment = scenario["result_root"].parent / f"openbrowser-treatment-{uuid.uuid4().hex}"
+    treatment = (
+        scenario["result_root"].parent / f"openbrowser-treatment-{uuid.uuid4().hex}"
+    )
     subprocess.run(
         ["git", "clone", "-q", str(scenario["source_root"]), str(treatment)],
         check=True,
@@ -647,7 +764,8 @@ def test_runtime_variant_accepts_only_src_openbrowser_differences(scenario):
     )
     try:
         (treatment / "src" / "openbrowser" / "config.py").write_text(
-            (treatment / "src" / "openbrowser" / "config.py").read_text() + "\n# runtime treatment\n"
+            (treatment / "src" / "openbrowser" / "config.py").read_text()
+            + "\n# runtime treatment\n"
         )
         git(treatment, "add", "src/openbrowser/config.py")
         git(treatment, "commit", "-qm", "runtime-only treatment")
@@ -666,7 +784,9 @@ def test_runtime_variant_accepts_only_src_openbrowser_differences(scenario):
 
         assert result["schema"] == "openbrowser-runtime-variant/1"
         assert result["changed_paths"] == ["src/openbrowser/config.py"]
-        assert all(path.startswith("src/openbrowser/") for path in result["changed_paths"])
+        assert all(
+            path.startswith("src/openbrowser/") for path in result["changed_paths"]
+        )
         assert output.is_file()
     finally:
         shutil.rmtree(treatment, ignore_errors=True)
@@ -674,7 +794,9 @@ def test_runtime_variant_accepts_only_src_openbrowser_differences(scenario):
 
 def test_runtime_variant_rejects_benchmark_harness_changes(scenario):
     prepare_smoke_preflight_files(scenario)
-    treatment = scenario["result_root"].parent / f"openbrowser-treatment-{uuid.uuid4().hex}"
+    treatment = (
+        scenario["result_root"].parent / f"openbrowser-treatment-{uuid.uuid4().hex}"
+    )
     subprocess.run(
         ["git", "clone", "-q", str(scenario["source_root"]), str(treatment)],
         check=True,
@@ -682,7 +804,9 @@ def test_runtime_variant_rejects_benchmark_harness_changes(scenario):
         text=True,
     )
     try:
-        (treatment / "benchmarks" / "latest_navigation_baseline.py").write_text("# changed harness\n")
+        (treatment / "benchmarks" / "latest_navigation_baseline.py").write_text(
+            "# changed harness\n"
+        )
         git(treatment, "add", "benchmarks/latest_navigation_baseline.py")
         git(treatment, "commit", "-qm", "invalid harness treatment")
 
@@ -701,9 +825,13 @@ def test_runtime_variant_rejects_benchmark_harness_changes(scenario):
         shutil.rmtree(treatment, ignore_errors=True)
 
 
-def test_preflight_accepts_a_valid_runtime_variant_and_binds_its_shared_harness(scenario):
+def test_preflight_accepts_a_valid_runtime_variant_and_binds_its_shared_harness(
+    scenario,
+):
     prepare_smoke_preflight_files(scenario)
-    treatment = scenario["result_root"].parent / f"openbrowser-treatment-{uuid.uuid4().hex}"
+    treatment = (
+        scenario["result_root"].parent / f"openbrowser-treatment-{uuid.uuid4().hex}"
+    )
     subprocess.run(
         ["git", "clone", "-q", str(scenario["source_root"]), str(treatment)],
         check=True,
@@ -727,7 +855,9 @@ def test_preflight_accepts_a_valid_runtime_variant_and_binds_its_shared_harness(
             scenario["tool_manifest_path"],
             variant_path,
         )
-        experiment_root = scenario["result_root"] / "experiments" / "runtime-only" / "replicate-1"
+        experiment_root = (
+            scenario["result_root"] / "experiments" / "runtime-only" / "replicate-1"
+        )
         experiment_root.mkdir(mode=0o700, parents=True)
         output = experiment_root / "preflight-experiment-1.json"
 
@@ -748,7 +878,14 @@ def test_preflight_accepts_a_valid_runtime_variant_and_binds_its_shared_harness(
         )
 
         assert result["outcome"] == "passed", result["errors"]
-        assert next(check for check in result["checks"] if check["name"] == "runtime_variant_shared_inputs")["state"] == "passed"
+        assert (
+            next(
+                check
+                for check in result["checks"]
+                if check["name"] == "runtime_variant_shared_inputs"
+            )["state"]
+            == "passed"
+        )
     finally:
         shutil.rmtree(treatment, ignore_errors=True)
 
@@ -767,7 +904,9 @@ def prepare_smoke_preflight_files(scenario):
             "phase": phase,
             "candidate_identity_sha256": identity_sha,
             "version_manifest_sha256": version_sha,
-            "checks": [{"name": "fixture", "expected": True, "actual": True, "state": "passed"}],
+            "checks": [
+                {"name": "fixture", "expected": True, "actual": True, "state": "passed"}
+            ],
             "outcome": "passed",
             "errors": [],
         }
@@ -778,7 +917,9 @@ def prepare_smoke_preflight_files(scenario):
     frozen_path = scenario["frozen_harness_path"]
     frozen = json.loads(frozen_path.read_text())
     frozen["smoke_preflight_sha256"] = hashes
-    frozen_path.write_text(json.dumps(frozen, sort_keys=True, separators=(",", ":")) + "\n")
+    frozen_path.write_text(
+        json.dumps(frozen, sort_keys=True, separators=(",", ":")) + "\n"
+    )
     frozen_path.chmod(0o600)
     return paths
 
@@ -798,7 +939,8 @@ def prepare_smoke_freeze_inputs(scenario):
         manifest = {
             "schema": (
                 "openbrowser-latest-navigation-smoke/1"
-                if name == "navigation" else "openbrowser-screenshot-smoke/1"
+                if name == "navigation"
+                else "openbrowser-screenshot-smoke/1"
             ),
             "mode": "smoke",
             "run_id": "a" * 32,
@@ -808,7 +950,8 @@ def prepare_smoke_freeze_inputs(scenario):
             "preflight_sha256": preflight.sha256_file(preflight_path),
             "harness_sha256": scenario["identity"]["executed_files"][
                 "benchmarks/latest_navigation_baseline.py"
-                if name == "navigation" else "benchmarks/screenshot_capability.py"
+                if name == "navigation"
+                else "benchmarks/screenshot_capability.py"
             ],
             "cleanup": {"ok": True},
             "fixture": {"stopped": True},
@@ -829,17 +972,23 @@ def prepare_smoke_freeze_inputs(scenario):
     return inputs
 
 
-def test_freeze_harness_binds_both_smoke_preflights_and_manifests(scenario, monkeypatch):
+def test_freeze_harness_binds_both_smoke_preflights_and_manifests(
+    scenario, monkeypatch
+):
     smoke_inputs = prepare_smoke_freeze_inputs(scenario)
     verifier_calls = []
     logged_errors = []
     original_run = subprocess.run
-    monkeypatch.setattr(preflight.LOGGER, "error", lambda *args: logged_errors.append(args))
+    monkeypatch.setattr(
+        preflight.LOGGER, "error", lambda *args: logged_errors.append(args)
+    )
 
     def run_with_offline_verifiers(command, *args, **kwargs):
         command_text = " ".join(str(value) for value in command)
         if "verify-smoke" in command_text:
-            assert command[0] == scenario["identity"]["candidate_python"]["supplied_path"]
+            assert (
+                command[0] == scenario["identity"]["candidate_python"]["supplied_path"]
+            )
             verifier_calls.append(command_text)
             return subprocess.CompletedProcess(command, 0, "", "")
         return original_run(command, *args, **kwargs)
@@ -850,17 +999,28 @@ def test_freeze_harness_binds_both_smoke_preflights_and_manifests(scenario, monk
     output.unlink()
     command = [
         "freeze-harness",
-        "--source", str(scenario["source_root"]),
-        "--identity", str(scenario["identity_path"]),
-        "--version-manifest", str(scenario["version_path"]),
-        "--tool-manifest", str(scenario["tool_manifest_path"]),
-        "--candidate-freeze", str(scenario["candidate_freeze"]),
-        "--browser-use-freeze", str(scenario["browser_use_freeze"]),
-        "--navigation-preflight", str(smoke_inputs["navigation"]["preflight"]),
-        "--screenshot-preflight", str(smoke_inputs["screenshot"]["preflight"]),
-        "--navigation-smoke", str(smoke_inputs["navigation"]["smoke_root"]),
-        "--screenshot-smoke", str(smoke_inputs["screenshot"]["smoke_root"]),
-        "--output", str(output),
+        "--source",
+        str(scenario["source_root"]),
+        "--identity",
+        str(scenario["identity_path"]),
+        "--version-manifest",
+        str(scenario["version_path"]),
+        "--tool-manifest",
+        str(scenario["tool_manifest_path"]),
+        "--candidate-freeze",
+        str(scenario["candidate_freeze"]),
+        "--browser-use-freeze",
+        str(scenario["browser_use_freeze"]),
+        "--navigation-preflight",
+        str(smoke_inputs["navigation"]["preflight"]),
+        "--screenshot-preflight",
+        str(smoke_inputs["screenshot"]["preflight"]),
+        "--navigation-smoke",
+        str(smoke_inputs["navigation"]["smoke_root"]),
+        "--screenshot-smoke",
+        str(smoke_inputs["screenshot"]["smoke_root"]),
+        "--output",
+        str(output),
     ]
     exit_code = preflight.main(command)
 
@@ -885,7 +1045,9 @@ def test_freeze_harness_binds_both_smoke_preflights_and_manifests(scenario, monk
     assert len(verifier_calls) == 4
 
 
-def test_freeze_harness_does_not_write_when_a_smoke_verifier_fails(scenario, monkeypatch):
+def test_freeze_harness_does_not_write_when_a_smoke_verifier_fails(
+    scenario, monkeypatch
+):
     smoke_inputs = prepare_smoke_freeze_inputs(scenario)
     result_root = scenario["result_root"]
     output = result_root / "frozen-harness.json"
@@ -894,28 +1056,46 @@ def test_freeze_harness_does_not_write_when_a_smoke_verifier_fails(scenario, mon
 
     def fail_screenshot_verifier(command, *args, **kwargs):
         command_text = " ".join(str(value) for value in command)
-        if "screenshot_capability.py" in command_text and "verify-smoke" in command_text:
-            return subprocess.CompletedProcess(command, 1, "", "screenshot control failed")
+        if (
+            "screenshot_capability.py" in command_text
+            and "verify-smoke" in command_text
+        ):
+            return subprocess.CompletedProcess(
+                command, 1, "", "screenshot control failed"
+            )
         if "verify-smoke" in command_text:
             return subprocess.CompletedProcess(command, 0, "", "")
         return original_run(command, *args, **kwargs)
 
     monkeypatch.setattr(subprocess, "run", fail_screenshot_verifier)
     monkeypatch.setattr(preflight.LOGGER, "error", lambda *_args: None)
-    exit_code = preflight.main([
-        "freeze-harness",
-        "--source", str(scenario["source_root"]),
-        "--identity", str(scenario["identity_path"]),
-        "--version-manifest", str(scenario["version_path"]),
-        "--tool-manifest", str(scenario["tool_manifest_path"]),
-        "--candidate-freeze", str(scenario["candidate_freeze"]),
-        "--browser-use-freeze", str(scenario["browser_use_freeze"]),
-        "--navigation-preflight", str(smoke_inputs["navigation"]["preflight"]),
-        "--screenshot-preflight", str(smoke_inputs["screenshot"]["preflight"]),
-        "--navigation-smoke", str(smoke_inputs["navigation"]["smoke_root"]),
-        "--screenshot-smoke", str(smoke_inputs["screenshot"]["smoke_root"]),
-        "--output", str(output),
-    ])
+    exit_code = preflight.main(
+        [
+            "freeze-harness",
+            "--source",
+            str(scenario["source_root"]),
+            "--identity",
+            str(scenario["identity_path"]),
+            "--version-manifest",
+            str(scenario["version_path"]),
+            "--tool-manifest",
+            str(scenario["tool_manifest_path"]),
+            "--candidate-freeze",
+            str(scenario["candidate_freeze"]),
+            "--browser-use-freeze",
+            str(scenario["browser_use_freeze"]),
+            "--navigation-preflight",
+            str(smoke_inputs["navigation"]["preflight"]),
+            "--screenshot-preflight",
+            str(smoke_inputs["screenshot"]["preflight"]),
+            "--navigation-smoke",
+            str(smoke_inputs["navigation"]["smoke_root"]),
+            "--screenshot-smoke",
+            str(smoke_inputs["screenshot"]["smoke_root"]),
+            "--output",
+            str(output),
+        ]
+    )
 
     assert exit_code == 1
     assert not output.exists()
