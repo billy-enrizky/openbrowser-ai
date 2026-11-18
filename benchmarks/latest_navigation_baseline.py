@@ -247,6 +247,7 @@ def one_minute_load() -> float | None:
 
 
 def _process_cpu_snapshot() -> dict[str, Any]:
+    captured_wall_time = time.time()
     processes = {}
     errors = []
     try:
@@ -254,14 +255,33 @@ def _process_cpu_snapshot() -> dict[str, Any]:
     except navigation.psutil.Error as error:
         owned = set()
         errors.append(f'cannot identify benchmark process tree: {type(error).__name__}')
+    inventory = []
     for process in navigation.psutil.process_iter():
         try:
             pid = process.pid
+            if pid == 0:
+                continue
             created = process.create_time()
-            cpu = process.cpu_times()
+            inventory.append((process, pid, created, process.name()))
+        except navigation.psutil.NoSuchProcess:
+            continue
+        except navigation.psutil.Error as error:
+            errors.append(f'cannot identify process: {type(error).__name__}')
+    try:
+        counters = process_cpu_seconds()
+    except (ValueError, OSError, subprocess.SubprocessError) as error:
+        counters = {}
+        errors.append(f'cannot read process CPU table: {type(error).__name__}: {error}')
+    for process, pid, created, name in inventory:
+        try:
+            if not process.is_running():
+                continue
+            if pid not in counters:
+                errors.append(f'process {pid} has no CPU counter')
+                continue
             processes[(pid, created)] = {
-                'pid': pid, 'created': created, 'name': process.name(),
-                'cpu_seconds': cpu.user + cpu.system,
+                'pid': pid, 'created': created, 'name': name,
+                'cpu_seconds': counters[pid],
                 'excluded': (pid, created) in owned,
             }
         except navigation.psutil.NoSuchProcess:
@@ -270,10 +290,41 @@ def _process_cpu_snapshot() -> dict[str, Any]:
             errors.append(f'cannot classify process CPU: {type(error).__name__}')
     return {
         'captured_monotonic': time.monotonic(),
+        'captured_wall_time': captured_wall_time,
         'load_1m': one_minute_load(),
         'processes': processes,
         'classification_errors': errors,
     }
+
+
+def process_cpu_seconds() -> dict[int, float]:
+    result = subprocess.run(
+        ['/bin/ps', '-A', '-o', 'pid=,time='], check=False, capture_output=True,
+        text=True, timeout=5, cwd='/private/tmp', env=_host_command_environment(),
+    )
+    if result.returncode != 0:
+        raise ValueError('macOS process CPU table is unavailable')
+    counters = {}
+    for row in result.stdout.splitlines():
+        fields = row.split()
+        if len(fields) != 2 or not fields[0].isdigit():
+            raise ValueError('macOS process CPU table has an invalid row')
+        pid = int(fields[0])
+        parts = fields[1].split(':')
+        if pid in counters or len(parts) not in (2, 3) or any(not part.isdigit() for part in parts[:-1]):
+            raise ValueError('macOS process CPU table has invalid or duplicate counters')
+        seconds = float(parts[-1])
+        if not math.isfinite(seconds) or not 0 <= seconds < 60:
+            raise ValueError('macOS process CPU seconds are invalid')
+        total = seconds + int(parts[-2]) * 60
+        if len(parts) == 3:
+            if not 0 <= int(parts[-2]) < 60:
+                raise ValueError('macOS process CPU minutes are invalid')
+            total += int(parts[0]) * 3600
+        counters[pid] = total
+    if not counters:
+        raise ValueError('macOS process CPU table is empty')
+    return counters
 
 
 def _host_sample_since(previous: dict[str, Any], logical_cpus: int) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -290,9 +341,14 @@ def _host_sample_since(previous: dict[str, Any], logical_cpus: int) -> tuple[dic
             else:
                 old = previous['processes'].get(key)
                 if old is None:
-                    errors.append(f'process {process["pid"]} has no baseline CPU sample')
-                    continue
-                delta = process['cpu_seconds'] - old['cpu_seconds']
+                    started = key[1]
+                    previous_wall = previous.get('captured_wall_time')
+                    if previous_wall is None or started < previous_wall:
+                        errors.append(f'process {process["pid"]} has no baseline CPU sample')
+                        continue
+                    delta = process['cpu_seconds']
+                else:
+                    delta = process['cpu_seconds'] - old['cpu_seconds']
                 if delta < 0 or not math.isfinite(delta):
                     errors.append(f'process {process["pid"]} CPU delta is invalid')
                     continue

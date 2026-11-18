@@ -1151,7 +1151,7 @@ def dispatch(argv=None):
             if args.command == 'smoke' and args.attempts_per_arm not in (None, 1):
                 raise ValueError('screenshot smoke uses one attempt per control arm')
             args.attempts_per_arm = 6 if args.command == 'run' else 1
-            return run_screenshot(args, result_root, output)
+            return asyncio.run(run_screenshot(args, result_root, output))
         result_root, run_root = result_root_for_run(args.run_root, args.command)
         return verify_run_directory(run_root, result_root, args)
     except (ValueError, OSError, KeyError, TypeError) as error:

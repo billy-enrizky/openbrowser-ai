@@ -932,6 +932,25 @@ def test_screenshot_smoke_accepts_sealed_executable_inputs(sealed_screenshot_inp
     assert result['candidate_commit'] == scenario['identity']['candidate_commit']
 
 
+def test_screenshot_cli_executes_the_async_smoke(private_result_root, monkeypatch):
+    called = []
+
+    async def smoke(args, root, output):
+        called.append((args.command, root, output))
+        return 0
+
+    monkeypatch.setattr(capability, 'run_screenshot', smoke)
+    result = capability.dispatch([
+        'smoke', '--candidate-identity', '/identity', '--preflight', '/preflight',
+        '--version-manifest', '/versions', '--source', '/source',
+        '--python', sys.executable, '--chrome', '/chrome',
+        '--output', str(private_result_root / 'smoke/screenshot'),
+    ])
+
+    assert result == 0
+    assert called == [('smoke', private_result_root, private_result_root / 'smoke/screenshot')]
+
+
 @pytest.mark.parametrize('changed', ['source', 'chrome_path', 'chrome_bytes', 'python'])
 def test_screenshot_smoke_rejects_changed_executable_inputs(sealed_screenshot_inputs, changed):
     scenario, args = sealed_screenshot_inputs

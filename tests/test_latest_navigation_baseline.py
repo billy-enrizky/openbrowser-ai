@@ -221,6 +221,44 @@ def test_host_sample_computes_cpu_delta_and_excludes_benchmark_processes(runner,
     ]
 
 
+def test_macos_cpu_table_parses_cumulative_time_without_task_port_access(runner, monkeypatch):
+    import subprocess
+
+    monkeypatch.setattr(runner.subprocess, 'run', lambda *args, **kwargs:
+                        subprocess.CompletedProcess(args, 0, ' 1 0:58.26\n 42 2:03:04.50\n', ''))
+    assert runner.process_cpu_seconds() == {1: 58.26, 42: 7384.5}
+
+
+def test_host_sample_classifies_a_process_born_after_previous_capture(runner, monkeypatch):
+    previous = {
+        'captured_monotonic': 10.0, 'captured_wall_time': 100.0,
+        'processes': {}, 'classification_errors': [],
+    }
+    current = {
+        'captured_monotonic': 20.0, 'captured_wall_time': 110.0, 'load_1m': 1.0,
+        'processes': {(42, 105.0): {
+            'pid': 42, 'name': 'new process', 'cpu_seconds': 2.0, 'excluded': False,
+        }},
+        'classification_errors': [],
+    }
+    monkeypatch.setattr(runner, '_process_cpu_snapshot', lambda: current)
+
+    sample, _current = runner._host_sample_since(previous, 8)
+
+    assert sample['classification_errors'] == []
+    assert sample['processes'][0]['cpu_percent'] == 20.0
+
+
+@pytest.mark.parametrize('output', ['', '42 invalid\n', '42 -1:00\n', '42 1:00\n42 2:00\n'])
+def test_macos_cpu_table_rejects_unverifiable_counters(runner, monkeypatch, output):
+    import subprocess
+
+    monkeypatch.setattr(runner.subprocess, 'run', lambda *args, **kwargs:
+                        subprocess.CompletedProcess(args, 0, output, ''))
+    with pytest.raises(ValueError):
+        runner.process_cpu_seconds()
+
+
 def test_navigation_run_pair_and_attempt_state_machines_reject_shortcuts(runner):
     assert runner.transition_run('preparing', 'preflight_passed') == 'preflighted'
     with pytest.raises(ValueError, match='illegal navigation run transition'):
