@@ -2169,14 +2169,14 @@ async def test_cancelled_trial_with_terminal_io_failure_keeps_committed_referenc
     runner, offline_navigation_verifier, checkpoint_attempt, monkeypatch, after_write
 ):
     harness = checkpoint_attempt
-    references = []
     sender = runner.navigation.send_operation
     writer = runner.atomic_json
+    interruption = asyncio.CancelledError("in-flight measured trial")
 
     async def cancel_measured(handle, request, *, timeout):
         if len(harness.requests) == 2:
             harness.requests.append(request)
-            raise asyncio.CancelledError("in-flight measured trial")
+            raise interruption
         return await sender(handle, request, timeout=timeout)
 
     def fail_terminal(path, value):
@@ -2186,35 +2186,235 @@ async def test_cancelled_trial_with_terminal_io_failure_keeps_committed_referenc
             raise OSError("cancelled terminal checkpoint failure")
         writer(path, value)
 
+    async def execute(_number):
+        return await harness.execute(
+            lambda reference: runner._upsert_attempt_reference(harness.pair, reference)
+        )
+
+    async def quiet():
+        pytest.fail("cancelled attempts must not retry")
+
     monkeypatch.setattr(runner.navigation, "send_operation", cancel_measured)
     monkeypatch.setattr(runner, "atomic_json", fail_terminal)
-    with pytest.raises(asyncio.CancelledError, match="in-flight measured trial"):
-        await asyncio.wait_for(harness.execute(references.append), timeout=5)
-    reference = references[-1]
-    harness.pair.update(state="running", attempts=[reference])
+    with pytest.raises(asyncio.CancelledError) as caught:
+        await runner.run_pair_attempts(
+            "raw-cdp", execute, quiet, pair_record=harness.pair
+        )
+    assert caught.value is interruption
+    reference = harness.pair["attempts"][-1]
+    assert runner.preflight.sha256_file(harness.path) == reference["manifest_sha256"]
     summary, validated, _declared = offline_navigation_verifier._verify_pair(
         harness.run_root, harness.run, harness.pair, set()
     )
-    assert summary["state"] == "unverified"
+    assert summary["state"] == ("failed" if after_write else "unverified")
     assert summary["metrics"] is None
-    if after_write:
-        assert (
-            runner.preflight.sha256_file(harness.path) != reference["manifest_sha256"]
-        )
-        actual_reference = runner._pair_attempt_reference(
-            harness.run_root, harness.path, json.loads(harness.path.read_bytes())
-        )
-        actual, totals = offline_navigation_verifier._verify_attempt(
-            harness.run_root, harness.run, harness.pair, actual_reference, set()
-        )
-        assert actual["state"] == "failed"
-        assert totals["attempted_work_count"] == 1
-    else:
-        assert (
-            runner.preflight.sha256_file(harness.path) == reference["manifest_sha256"]
-        )
-        assert validated["attempted_work_count"] == 0
+    assert validated["attempted_work_count"] == int(after_write)
+    assert validated["successful_work_count"] == 0
     assert len(harness.requests) == 3
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("boundary", ["before_write", "after_write", "callback", "unreadable"])
+@pytest.mark.parametrize("repeated_cancel", [False, True])
+async def test_cancelled_checkpoint_run_finalizes_committed_evidence_before_propagating(
+    runner, offline_navigation_verifier, checkpoint_attempt, monkeypatch,
+    boundary, repeated_cancel,
+):
+    harness = checkpoint_attempt
+    root = harness.run_root.parent
+    output = root / "navigation-final"
+    interruption = asyncio.CancelledError("original measured cancellation")
+    inputs = {
+        "identity": {"candidate_commit": "a" * 40, "candidate_tree": "b" * 40,
+                     "executed_files": {}},
+        "identity_sha256": "c" * 64, "version_sha256": "d" * 64,
+        "preflight_sha256": "e" * 64, "frozen_harness_sha256": "f" * 64,
+        "source_root": root, "source_snapshot": {},
+    }
+    sender = runner.navigation.send_operation
+    writer = runner.atomic_json
+    reader = runner.read_json_artifact
+    cleanup_worker = runner.navigation.cleanup_worker
+    fixture_class = runner.navigation.Fixture
+    cleanup_started, cleanup_release = asyncio.Event(), asyncio.Event()
+    fixture_started, fixture_release = threading.Event(), threading.Event()
+    failed = False
+
+    async def host_preflight():
+        return {"state": "clear", "reasons": [], "logical_cpu_count": 8,
+                "uptime": "test", "samples": [{
+                    "captured_at_utc": "2026-11-18T00:00:00Z", "load_1m": 0.0,
+                    "logical_cpu_count": 8, "processes": [], "classification_errors": [],
+                }]}
+
+    async def cancel_measured(handle, request, *, timeout):
+        if len(harness.requests) == 2:
+            harness.requests.append(request)
+            raise interruption
+        return await sender(handle, request, timeout=timeout)
+
+    async def cleanup(handle):
+        if repeated_cancel:
+            cleanup_started.set()
+            await asyncio.wait_for(cleanup_release.wait(), timeout=5)
+        return await cleanup_worker(handle)
+
+    class Fixture(fixture_class):
+        def shutdown(self):
+            if repeated_cancel:
+                fixture_started.set()
+                assert fixture_release.wait(timeout=5), "fixture retirement was abandoned"
+            super().shutdown()
+
+    def write(path, value):
+        nonlocal failed
+        child_terminal = path.name == "attempt-manifest.json" and value["state"] == "failed"
+        parent_callback = (
+            path.name == "run-manifest.json" and value["state"] == "running"
+            and value["pairs"] and value["pairs"][-1]["attempts"]
+            and value["pairs"][-1]["attempts"][-1]["state"] == "failed"
+        )
+        if not failed and ((boundary == "callback" and parent_callback)
+                           or (boundary != "callback" and child_terminal)):
+            failed = True
+            if boundary == "after_write":
+                writer(path, value)
+            raise OSError("cancelled checkpoint publication failure")
+        writer(path, value)
+
+    def read(result_root, value, where):
+        if boundary == "unreadable" and where == "last attempt checkpoint":
+            raise OSError("committed checkpoint unreadable")
+        return reader(result_root, value, where)
+
+    monkeypatch.setattr(runner, "validate_navigation_inputs", lambda *_args: inputs)
+    monkeypatch.setattr(runner, "collect_host_preflight", host_preflight)
+    monkeypatch.setattr(runner.preflight, "_git_snapshot", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(runner.preflight, "_hash_executed_files", lambda *_args: {})
+    monkeypatch.setattr(runner.navigation, "send_operation", cancel_measured)
+    monkeypatch.setattr(runner.navigation, "cleanup_worker", cleanup)
+    monkeypatch.setattr(runner.navigation, "Fixture", Fixture)
+    monkeypatch.setattr(runner, "atomic_json", write)
+    monkeypatch.setattr(runner, "read_json_artifact", read)
+    task = asyncio.create_task(runner.run_navigation(SimpleNamespace(
+        command="run", output=output, rounds=2, samples=6,
+        source=root, python=sys.executable, chrome="/tmp/chrome",
+    )))
+    try:
+        if repeated_cancel:
+            await asyncio.wait_for(cleanup_started.wait(), timeout=5)
+            for _ in range(2):
+                task.cancel("repeat during worker cleanup")
+                await asyncio.sleep(0)
+            assert not task.done()
+            cleanup_release.set()
+            assert await asyncio.to_thread(fixture_started.wait, 5)
+            for _ in range(2):
+                task.cancel("repeat during fixture retirement")
+                await asyncio.sleep(0)
+            assert not task.done()
+            fixture_release.set()
+        with pytest.raises(asyncio.CancelledError) as caught:
+            await asyncio.wait_for(task, timeout=5)
+        assert caught.value is interruption
+        assert failed
+        manifest = json.loads((output / "run-manifest.json").read_bytes())
+        assert manifest["state"] == "incomplete"
+        assert manifest["failed_phase"] == "run"
+        assert any("original measured cancellation" in error for error in manifest["errors"])
+        assert any("checkpoint publication failure" in error for error in manifest["errors"])
+        assert manifest["fixture"] == {"started": True, "stopped": True,
+                                        "socket_closed": True, "thread_stopped": True}
+        assert not runner.run_can_rank(manifest)
+        evidence = offline_navigation_verifier._verify_run_manifest(output, manifest, "run", set())
+        assert evidence["complete"] is False
+        assert len(manifest["pairs"]) == 1 and len(harness.requests) == 3
+        pair = evidence["pair_results"]["round-1/raw-cdp"]
+        assert pair["metrics"] is None
+        assert evidence["work_counts"]["attempted_work_count"] == int(boundary in {"after_write", "callback"})
+        assert evidence["work_counts"]["successful_work_count"] == 0
+        child = manifest["pairs"][0]["attempts"][0]
+        if boundary == "unreadable":
+            assert child["manifest_sha256"] is None
+            assert manifest["cleanup"]["ok"] is False
+        else:
+            child_path = output / child["directory"] / "attempt-manifest.json"
+            assert child["manifest_sha256"] == runner.preflight.sha256_file(child_path)
+            assert child["state"] == ("failed" if boundary in {"after_write", "callback"} else "running")
+            assert manifest["cleanup"]["ok"] is (boundary in {"after_write", "callback"})
+    finally:
+        cleanup_release.set()
+        fixture_release.set()
+        if not task.done():
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("callback_fails", [False, True])
+async def test_repeated_cancellation_waits_for_committed_reference_publication(
+    runner, offline_navigation_verifier, checkpoint_attempt, monkeypatch, callback_fails
+):
+    harness = checkpoint_attempt
+    sender = runner.navigation.send_operation
+    interruption = asyncio.CancelledError("original publication interruption")
+    prior_cause = RuntimeError("original cancellation cause")
+    publication_started, publication_release = asyncio.Event(), asyncio.Event()
+
+    async def cancel_measured(handle, request, *, timeout):
+        if len(harness.requests) == 2:
+            harness.requests.append(request)
+            raise interruption from prior_cause
+        return await sender(handle, request, timeout=timeout)
+
+    async def update(reference):
+        runner._upsert_attempt_reference(harness.pair, reference)
+        if reference["state"] == "failed":
+            publication_started.set()
+            await asyncio.wait_for(publication_release.wait(), timeout=5)
+            if callback_fails:
+                raise OSError("parent write failed after reference upsert")
+
+    async def execute(_number):
+        return await harness.execute(update)
+
+    async def quiet():
+        pytest.fail("cancelled publication must not retry execution")
+
+    monkeypatch.setattr(runner.navigation, "send_operation", cancel_measured)
+    task = asyncio.create_task(runner.run_pair_attempts(
+        "raw-cdp", execute, quiet, pair_record=harness.pair
+    ))
+    try:
+        await asyncio.wait_for(publication_started.wait(), timeout=5)
+        for _ in range(2):
+            task.cancel("repeat cancellation during parent publication")
+            await asyncio.sleep(0)
+        assert not task.done(), "publication must finish before interruption propagates"
+        publication_release.set()
+        with pytest.raises(asyncio.CancelledError) as caught:
+            await asyncio.wait_for(task, timeout=5)
+        assert caught.value is interruption
+        if callback_fails:
+            assert isinstance(interruption.__cause__, runner.AttemptCheckpointFailure)
+            assert "parent write failed after reference upsert" in str(interruption.__cause__)
+        else:
+            assert interruption.__cause__ is prior_cause
+        summary, totals, _declared = offline_navigation_verifier._verify_pair(
+            harness.run_root, harness.run, harness.pair, set()
+        )
+        assert harness.pair["state"] == summary["state"] == "failed"
+        assert summary["metrics"] is None
+        assert totals["attempted_work_count"] == 1
+        assert totals["successful_work_count"] == 0
+        assert harness.pair["attempts"][-1]["manifest_sha256"] == runner.preflight.sha256_file(harness.path)
+    finally:
+        publication_release.set()
+        if not task.done():
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
 
 
 @pytest.mark.parametrize("mask", [0o200, 0o400, 0o777])

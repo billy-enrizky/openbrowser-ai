@@ -508,6 +508,19 @@ async def run_pair_attempts(
         except Exception as error:
             record = {'state': AttemptState.FAILED.value, 'cleanup_ok': False,
                       'errors': [f'{type(error).__name__}: {error}']}
+        except BaseException as interruption:
+            checkpoint_failure = interruption.__cause__
+            if isinstance(checkpoint_failure, AttemptCheckpointFailure):
+                _upsert_attempt_reference(pair, checkpoint_failure.reference)
+            if pair['attempts']:
+                child_state = pair['attempts'][-1]['state']
+                pair['state'] = (
+                    PairState.RUNNING.value if child_state in {
+                        AttemptState.PENDING.value, AttemptState.CONTAMINATED.value,
+                    }
+                    else child_state
+                )
+            raise
         if not isinstance(record, dict):
             record = {'state': AttemptState.FAILED.value, 'cleanup_ok': False,
                       'errors': ['pair attempt returned no record']}
@@ -999,6 +1012,7 @@ async def run_navigation(args) -> int:
     runtime_roots_removed = True
     workers_ok = True
     fixture_errors = []
+    interruption: BaseException | None = None
     try:
         fixture = navigation.Fixture(.15)
         fixture_thread = threading.Thread(target=fixture.serve_forever, daemon=True)
@@ -1093,12 +1107,29 @@ async def run_navigation(args) -> int:
                     break
             if stop_new_work:
                 break
-    except Exception as error:
+    except BaseException as error:
         manifest['failed_phase'] = manifest.get('failed_phase') or 'run'
         manifest['errors'].append(f'{type(error).__name__}: {error}')
+        if isinstance(error.__cause__, AttemptCheckpointFailure):
+            manifest['errors'].append(str(error.__cause__))
+        if not isinstance(error, Exception):
+            interruption = error
         stop_new_work = True
     finally:
-        fixture_errors = await _stop_fixture(fixture, fixture_thread, manifest['fixture'])
+        fixture_task = asyncio.create_task(
+            _stop_fixture(fixture, fixture_thread, manifest['fixture'])
+        )
+        while True:
+            try:
+                fixture_errors = await asyncio.shield(fixture_task)
+                break
+            except asyncio.CancelledError as error:
+                if fixture_task.cancelled():
+                    raise
+                if interruption is None:
+                    interruption = error
+                    manifest['failed_phase'] = manifest.get('failed_phase') or 'run'
+                    manifest['errors'].append(f'{type(error).__name__}: {error}')
         if fixture_errors:
             manifest['failed_phase'] = manifest.get('failed_phase') or 'cleanup'
             manifest['errors'].extend(fixture_errors)
@@ -1144,7 +1175,14 @@ async def run_navigation(args) -> int:
         terminal_event = 'all_pairs_verified' if complete else 'pair_incomplete'
         manifest['state'] = transition_run(RunState.VERIFYING, terminal_event).value
     _run_attempt_work_counts(manifest)
-    atomic_json(manifest_path, manifest)
+    try:
+        atomic_json(manifest_path, manifest)
+    except Exception:
+        if interruption is None:
+            raise
+        LOG.exception('cannot persist interrupted run finalization')
+    if interruption is not None:
+        raise interruption
     return navigation_run_exit_code(manifest)
 
 
@@ -1377,18 +1415,21 @@ async def run_pair_attempt(
                         interruption = error
             return await cleanup_pair_workers(handles, arms, runtime_root, owner_token)
 
-        cleanup_task = asyncio.create_task(cleanup_owned_resources())
-        try:
+        async def complete_owned(awaitable):
+            nonlocal interruption
+            task = asyncio.create_task(awaitable)
             while True:
                 try:
-                    cleanup = await asyncio.shield(cleanup_task)
-                    break
+                    return await asyncio.shield(task)
                 except asyncio.CancelledError as error:
-                    if cleanup_task.cancelled():
+                    if task.cancelled():
                         raise
                     if interruption is None:
                         errors.append(f"{type(error).__name__}: {error}")
                         interruption = error
+
+        try:
+            cleanup = await complete_owned(cleanup_owned_resources())
             errors.extend(cleanup["errors"])
             host_gate = aggregate_host_gate(host_samples)
             counts = work_counts(samples)
@@ -1420,40 +1461,41 @@ async def run_pair_attempt(
                 AttemptState.RUNNING,
                 terminal_state,
             ).value
-            await persist_attempt_manifest()
+            await complete_owned(persist_attempt_manifest())
         except Exception as error:
-            if interruption is None:
-                try:
-                    _, published, raw = read_json_artifact(
-                        result_root, manifest_path, 'last attempt checkpoint',
-                    )
-                    for field in ('schema', 'run_id', 'round', 'competitor', 'attempt_number'):
-                        if published[field] != attempt_manifest[field]:
-                            raise ValueError('last attempt checkpoint identity changed')
-                    reference = _pair_attempt_reference(run_root, manifest_path, published)
-                    reference['manifest_sha256'] = preflight.sha256_bytes(raw)
-                except (OSError, ValueError, KeyError, TypeError) as read_error:
-                    failure = (
-                        f'{type(error).__name__}: {error}; last checkpoint unavailable: '
-                        f'{type(read_error).__name__}: {read_error}'
-                    )
-                    reference = {
-                        'attempt_number': attempt_number,
-                        'state': AttemptState.FAILED.value,
-                        'directory': attempt_dir.relative_to(run_root).as_posix(),
-                        'manifest_sha256': None,
-                        'cleanup_ok': False,
-                        'runtime_root_removed': False,
-                        'host_gate': {
-                            'state': HostGateState.UNKNOWN.value,
-                            'reasons': ['last attempt checkpoint is unavailable'],
-                        },
-                        'work_counts': {**zero_work_counts(), 'error_count': 1},
-                        'error_count': 1,
-                        'errors': [failure],
-                    }
-                raise AttemptCheckpointFailure(error, reference) from error
-            LOG.exception("cannot persist interrupted attempt cleanup")
+            try:
+                _, published, raw = read_json_artifact(
+                    result_root, manifest_path, 'last attempt checkpoint',
+                )
+                for field in ('schema', 'run_id', 'round', 'competitor', 'attempt_number'):
+                    if published[field] != attempt_manifest[field]:
+                        raise ValueError('last attempt checkpoint identity changed')
+                reference = _pair_attempt_reference(run_root, manifest_path, published)
+                reference['manifest_sha256'] = preflight.sha256_bytes(raw)
+            except (OSError, ValueError, KeyError, TypeError) as read_error:
+                failure = (
+                    f'{type(error).__name__}: {error}; last checkpoint unavailable: '
+                    f'{type(read_error).__name__}: {read_error}'
+                )
+                reference = {
+                    'attempt_number': attempt_number,
+                    'state': AttemptState.FAILED.value,
+                    'directory': attempt_dir.relative_to(run_root).as_posix(),
+                    'manifest_sha256': None,
+                    'cleanup_ok': False,
+                    'runtime_root_removed': False,
+                    'host_gate': {
+                        'state': HostGateState.UNKNOWN.value,
+                        'reasons': ['last attempt checkpoint is unavailable'],
+                    },
+                    'work_counts': {**zero_work_counts(), 'error_count': 1},
+                    'error_count': 1,
+                    'errors': [failure],
+                }
+            checkpoint_failure = AttemptCheckpointFailure(error, reference)
+            if interruption is not None:
+                raise interruption from checkpoint_failure
+            raise checkpoint_failure from error
     if interruption is not None:
         raise interruption
     return _pair_attempt_reference(run_root, manifest_path, attempt_manifest)
