@@ -242,6 +242,10 @@ safe "$CANDIDATE_PYTHON" "$CANDIDATE_ROOT/benchmarks/summarize_screenshot_capabi
 
 The run artifacts stay private below `RESULT_ROOT`. Sanitized reports omit process identities, owner tokens, local result paths, environment values, and raw logs. Keep failed attempts and incomplete manifests. Never overwrite raw results.
 
+Each Lightpanda attempt saves its validated URL and nonce in a private mode-0600 `logs/lightpanda.input.js` generated from the frozen PandaScript template. Offline verification requires the exact request-bound script before accepting a passed or pixel-mismatch attempt.
+
+Cleanup follows each engine's native protocol. Raw CDP sends `Browser.close`. Lightpanda closes its connection and retires verified owned processes without that unsupported command. The worker reaps only exact recorded zombie children before recording final cleanup states.
+
 ## Optimize only from measured evidence
 
 Do not edit `src/openbrowser` during benchmark construction or the baseline. If repeated unprofiled data shows a clear OpenBrowser loss, run an unreported profile and map its hot path to OpenBrowser source. A profile alone is not a latency measurement.
