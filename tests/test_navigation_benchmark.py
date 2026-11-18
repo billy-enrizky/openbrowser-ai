@@ -380,6 +380,73 @@ async def test_stop_reports_identity_state_after_reaping_browser(monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('name', ['raw-cdp', 'lightpanda'])
+async def test_stop_uses_each_engines_supported_shutdown_contract(monkeypatch, name):
+    calls = []
+
+    class Connection:
+        async def send(self, method):
+            calls.append(method)
+            if name == 'lightpanda':
+                raise RuntimeError("'Browser.close' wasn't found")
+
+        async def close(self):
+            calls.append('close connection')
+
+    async def terminate(identities, token):
+        calls.append('retire owned processes')
+        return []
+
+    monkeypatch.setattr(benchmark, 'terminate_owned', terminate)
+    arm = benchmark.Arm.__new__(benchmark.Arm)
+    arm.name, arm.browser, arm.cdp, arm.proc = name, None, Connection(), None
+    arm.token, arm.owned = 'run', {}
+    arm.ownership = lambda: []
+
+    result = await arm.stop()
+
+    assert result['errors'] == []
+    expected = ['close connection', 'retire owned processes']
+    assert calls == (['Browser.close'] + expected if name == 'raw-cdp' else expected)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('case', ['owned child', 'different owner', 'different parent', 'reused pid'])
+async def test_stop_reaps_only_its_exact_owned_zombie_child(monkeypatch, case):
+    reaped = False
+    identity = {'pid': 1234, 'created': 1.0, 'cmdline': ['owned-daemon'],
+                'owner_token': 'other' if case == 'different owner' else 'run',
+                'owner_root': '/private/tmp/run/browser-use'}
+
+    class Process:
+        def create_time(self):
+            return 2.0 if case == 'reused pid' else 1.0
+
+        def ppid(self):
+            return os.getpid() + 1 if case == 'different parent' else os.getpid()
+
+        def wait(self, timeout):
+            nonlocal reaped
+            reaped = True
+
+    async def terminate(identities, token):
+        return [{**identity, 'state': 'zombie'}]
+
+    monkeypatch.setattr(benchmark, 'terminate_owned', terminate)
+    monkeypatch.setattr(benchmark.psutil, 'Process', lambda _pid: Process())
+    monkeypatch.setattr(benchmark, 'state', lambda _identity: 'absent' if reaped else 'zombie')
+    arm = benchmark.Arm.__new__(benchmark.Arm)
+    arm.name, arm.browser, arm.cdp, arm.proc = 'browser-use', None, None, None
+    arm.token, arm.owned = 'run', {identity['pid']: identity}
+    arm.ownership = lambda: [identity]
+
+    result = await arm.stop()
+
+    assert reaped is (case == 'owned child')
+    assert result['identities'][0]['state'] == ('absent' if reaped else 'zombie')
+
+
+@pytest.mark.asyncio
 async def test_coordinator_stop_failure_still_reaps_only_verified_owned_identities(monkeypatch):
     worker = {
         'pid': 12, 'created': 2.0, 'cmdline': ['worker'],

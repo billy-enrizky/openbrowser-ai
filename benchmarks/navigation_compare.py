@@ -881,7 +881,8 @@ return JSON.stringify({{field:f.value,response:await r.json()}})}})()'''
                     else:
                         await self.browser.kill()
                 elif self.cdp:
-                    await self.cdp.send('Browser.close')
+                    if self.name == 'raw-cdp':
+                        await self.cdp.send('Browser.close')
                     await self.cdp.close()
         except Exception as error:
             failures.append(repr(error))
@@ -894,6 +895,18 @@ return JSON.stringify({{field:f.value,response:await r.json()}})}})()'''
                 failures.append('owned engine did not exit after verified termination')
         if hasattr(self, 'log'):
             self.log.close()
+        for identity in identities:
+            if profile_identity_errors(identity) or identity['owner_token'] != self.token \
+                    or state(identity) != 'zombie':
+                continue
+            try:
+                process = psutil.Process(identity['pid'])
+                if process.create_time() == identity['created'] and process.ppid() == os.getpid():
+                    await asyncio.to_thread(process.wait, timeout=2)
+            except psutil.NoSuchProcess:
+                continue
+            except psutil.Error as error:
+                failures.append(f'owned child could not be reaped: {type(error).__name__}: {error}')
         identities = [{**identity, 'state': state(identity)} for identity in identities]
         return {'errors': failures, 'identities': identities}
 
