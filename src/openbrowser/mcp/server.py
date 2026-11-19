@@ -151,6 +151,14 @@ def _exec_timeout_seconds() -> float:
 		return 110.0
 
 
+def _shutdown_timeout_seconds() -> float:
+	raw = os.environ.get('OPENBROWSER_SHUTDOWN_TIMEOUT', '')
+	try:
+		return max(1.0, float(raw)) if raw else 20.0
+	except ValueError:
+		return 20.0
+
+
 def _create_mcp_file_system() -> Any:
 	"""Create a FileSystem instance for MCP mode, or None if unavailable."""
 	if not FILESYSTEM_AVAILABLE:
@@ -626,15 +634,18 @@ class _BrowserOwner:
 						raise cleanup.caller_cancellation
 				raise
 
-	async def _is_cdp_alive(self) -> bool:
+	async def _is_cdp_alive(self, *, deadline: float | None = None) -> bool:
 		"""Check if the browser session's CDP WebSocket is still connected."""
 		if not self.browser_session:
 			return False
 		root = getattr(self.browser_session, '_cdp_client_root', None)
 		if root is None:
 			return False
+		timeout = _CDP_HEALTH_CHECK_TIMEOUT_SECONDS
+		if deadline is not None:
+			timeout = min(timeout, max(0.1, deadline - time.monotonic()))
 		try:
-			await asyncio.wait_for(root.send.Browser.getVersion(), timeout=_CDP_HEALTH_CHECK_TIMEOUT_SECONDS)
+			await asyncio.wait_for(root.send.Browser.getVersion(), timeout=timeout)
 			return True
 		except Exception:
 			return False
@@ -643,19 +654,20 @@ class _BrowserOwner:
 		"""Complete owned cleanup without confusing worker and caller cancellation."""
 		async def owned_cleanup() -> bool:
 			try:
+				timeout = _shutdown_timeout_seconds()
 				result = session.kill()
 				if inspect.isawaitable(result):
-					await result
+					await asyncio.wait_for(result, timeout=timeout)
 				else:
 					from openbrowser.browser.events import BrowserStopEvent
 					event = session.event_bus.dispatch(BrowserStopEvent(force=True))
 					if inspect.isawaitable(event):
-						await event
+						await asyncio.wait_for(event, timeout=timeout)
 					event_result = getattr(event, 'event_result', None)
 					if callable(event_result):
 						result = event_result(raise_if_any=True, raise_if_none=False)
 						if inspect.isawaitable(result):
-							await result
+							await asyncio.wait_for(result, timeout=timeout)
 				return True
 			except BaseException:
 				return False
@@ -666,16 +678,16 @@ class _BrowserOwner:
 		result = completion.result()[0]
 		return _CleanupOutcome(result is True, caller_cancellation)
 
-	async def _recover_browser_session(self) -> None:
+	async def _recover_browser_session(self, *, deadline: float | None = None) -> None:
 		"""Serialize recovery with execution and lifecycle cleanup."""
 		if self._execution_task is asyncio.current_task():
-			await self._recover_browser_session_locked()
+			await self._recover_browser_session_locked(deadline=deadline)
 			return
 
 		async with self._execution_lock:
-			await self._recover_browser_session_locked()
+			await self._recover_browser_session_locked(deadline=deadline)
 
-	async def _recover_browser_session_locked(self) -> None:
+	async def _recover_browser_session_locked(self, *, deadline: float | None = None) -> None:
 		"""Kill the dead browser session and create a fresh one.
 
 		Called when we detect the CDP WebSocket has disconnected (e.g. Chrome
@@ -736,7 +748,12 @@ class _BrowserOwner:
 
 			self.browser_session = session
 			try:
-				await asyncio.wait_for(session.start(), timeout=_start_timeout_seconds())
+				start_timeout = (
+					min(_start_timeout_seconds(), max(0.1, deadline - time.monotonic()))
+					if deadline is not None
+					else _start_timeout_seconds()
+				)
+				await asyncio.wait_for(session.start(), timeout=start_timeout)
 				self._browser_generation += 1
 				session.seed_generation(self._browser_generation)
 
@@ -832,7 +849,13 @@ class _BrowserOwner:
 			if deadline is not None
 			else None
 		)
-		await self._ensure_namespace(start_timeout=start_timeout)
+		try:
+			await self._ensure_namespace(start_timeout=start_timeout)
+		except TimeoutError:
+			return (
+				'Error: Browser startup timed out before the code could run. '
+				'Run get_status before retrying.'
+			)
 		assert self._namespace is not None
 
 		# Keep executor in sync (namespace may be set externally, e.g. tests)
@@ -845,9 +868,9 @@ class _BrowserOwner:
 		# Only attempt recovery when we already had a browser session (i.e. it died).
 		# If browser_session is None, _ensure_namespace hasn't launched one yet
 		# or the code doesn't need a browser -- skip recovery to avoid hanging.
-		if self.browser_session and not await self._is_cdp_alive():
+		if self.browser_session and not await self._is_cdp_alive(deadline=deadline):
 			try:
-				await self._recover_browser_session()
+				await self._recover_browser_session(deadline=deadline)
 			except Exception as recovery_err:
 				logger.error('Pre-flight CDP recovery failed: %s', recovery_err)
 				return (

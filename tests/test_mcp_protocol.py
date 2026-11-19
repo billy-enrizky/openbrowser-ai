@@ -460,6 +460,8 @@ async def test_catalog_is_snapshot_and_cannot_mutate_validation(monkeypatch):
         assert "$.code" in result.content[0].text
         assert "not of type" in result.content[0].text
         assert server.browser_session is None
+        owner = server._contexts._entries[context_id].owner
+        assert owner.browser_session is None
 
 
 @pytest.mark.asyncio

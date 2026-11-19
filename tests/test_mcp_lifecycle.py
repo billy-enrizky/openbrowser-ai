@@ -177,3 +177,46 @@ async def test_idle_expiry_preserves_user_variables(mcp_server):
 	assert mcp_server.browser_session is None
 	assert mcp_server._namespace is None
 	assert mcp_server._pending_variables['user_value'] == 42
+
+
+@pytest.mark.asyncio
+async def test_execute_code_reports_browser_start_timeout(mcp_server, monkeypatch):
+	from openbrowser.mcp import server as mcp_mod
+
+	session = MagicMock()
+
+	async def hanging_start():
+		await asyncio.sleep(60)
+
+	session.start = AsyncMock(side_effect=hanging_start)
+	mcp_server.browser_session = None
+	with (
+		patch.object(mcp_mod, 'BrowserSession', return_value=session),
+		patch.object(mcp_mod, '_start_timeout_seconds', return_value=0.01),
+		patch.object(
+			mcp_server,
+			'_kill_session_safely',
+			new_callable=AsyncMock,
+			return_value=_CleanupOutcome(True),
+		),
+	):
+		result = await mcp_server._execute_code('x = 1')
+
+	assert 'Browser startup timed out' in result
+	assert 'get_status' in result
+	assert mcp_server.browser_session is None
+
+
+@pytest.mark.asyncio
+async def test_kill_session_timeout_is_a_cleanup_failure(mcp_server, monkeypatch):
+	from openbrowser.mcp import server as mcp_mod
+
+	async def hanging_kill():
+		await asyncio.sleep(60)
+
+	session = MagicMock()
+	session.kill = hanging_kill
+	monkeypatch.setattr(mcp_mod, '_shutdown_timeout_seconds', lambda: 0.01)
+	outcome = await mcp_server._kill_session_safely(session)
+	assert outcome.succeeded is False
+	assert outcome.caller_cancellation is None
