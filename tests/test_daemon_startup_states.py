@@ -468,12 +468,14 @@ def test_cleanup_preserves_a_replaced_socket_path(daemon_paths):
 def test_cleanup_preserves_a_replacement_socket(daemon_paths):
     pid_path, socket_path, _ = daemon_paths
     pid_path.write_text(str(os.getpid()))
+    moved_path = socket_path.with_name('original.sock')
     original = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     original.bind(str(socket_path))
     bound_identity = _socket_path_identity(socket_path)
     assert bound_identity is not None
-    original.close()
-    socket_path.unlink()
+    # Move the bound socket aside so its inode stays allocated. A delete then
+    # bind can reuse the freed inode, which made this test platform-dependent.
+    socket_path.rename(moved_path)
     replacement = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     replacement.bind(str(socket_path))
     try:
@@ -487,7 +489,9 @@ def test_cleanup_preserves_a_replacement_socket(daemon_paths):
         assert not pid_path.exists()
     finally:
         replacement.close()
+        original.close()
         socket_path.unlink(missing_ok=True)
+        moved_path.unlink(missing_ok=True)
 
 
 @pytest.mark.skipif(os.name == 'nt', reason='Unix socket semantics')
