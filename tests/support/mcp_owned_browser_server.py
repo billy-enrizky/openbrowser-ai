@@ -68,14 +68,16 @@ async def main() -> None:
         "browser": kwargs["browser_session"],
     }
     server._build_browser_profile = lambda: None
+    module.OpenBrowserContext._build_browser_profile = lambda self: None
 
-    async def alive():
+    async def alive(self=None):
         if (directory / "health-self-cancel").exists():
             (directory / "health-self-cancel").unlink()
             raise asyncio.CancelledError("browser health worker terminated itself")
         return not (directory / "recover").exists()
 
     server._is_cdp_alive = alive
+    module.OpenBrowserContext._is_cdp_alive = alive
     try:
         await server.run()
     finally:

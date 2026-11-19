@@ -48,9 +48,13 @@ class CodeExecutor:
         """Return the live namespace for inspection or transfer by an owner."""
         return self._namespace
 
-    def set_namespace(self, namespace: dict[str, Any]) -> None:
-        """Set the execution namespace (for external initialization)."""
+    def set_namespace(self, namespace: dict[str, Any] | None) -> None:
+        """Set or clear the execution namespace (for external initialization)."""
         self._namespace = namespace
+
+    def clear_namespace(self) -> None:
+        """Drop the active namespace without executing anything."""
+        self._namespace = None
 
     async def execute(self, code: str) -> ExecutionResult:
         """Execute Python code and return the result.

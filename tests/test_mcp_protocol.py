@@ -43,6 +43,7 @@ class Wire:
     def __init__(self, process):
         self.process = process
         self.stderr_task = asyncio.create_task(process.stderr.read())
+        self.context_id = None
 
     async def send(self, ident, method, params=None, *, modern=True):
         message = {"jsonrpc": "2.0", "method": method}
@@ -62,11 +63,38 @@ class Wire:
         assert message["id"] == ident, message
         return message
 
-    async def request(self, ident, method, params=None, *, modern=True):
+    async def _raw_request(self, ident, method, params=None, *, modern=True):
         await self.send(ident, method, params, modern=modern)
         message = await self.receive(ident)
         assert "error" not in message, message
         return message["result"]
+
+    async def ensure_context(self):
+        if self.context_id is None:
+            created = await self._raw_request(
+                "__context__",
+                "tools/call",
+                {"name": "create_context", "arguments": {}},
+            )
+            self.context_id = created["structuredContent"]["context_id"]
+        return self.context_id
+
+    async def request(self, ident, method, params=None, *, modern=True, inject_context=True):
+        if modern and inject_context and method == "tools/call":
+            name = (params or {}).get("name")
+            if name in {"execute_code", "get_status", "reset_browser"}:
+                context_id = await self.ensure_context()
+                params = dict(params or {})
+                arguments = dict(params.get("arguments") or {})
+                arguments["context_id"] = context_id
+                params["arguments"] = arguments
+        return await self._raw_request(ident, method, params, modern=modern)
+
+    async def send_tool(self, ident, name, arguments=None, *, modern=True):
+        params = {"name": name, "arguments": dict(arguments or {})}
+        if modern and name in {"execute_code", "get_status", "reset_browser"}:
+            params["arguments"]["context_id"] = await self.ensure_context()
+        await self.send(ident, "tools/call", params, modern=modern)
 
     async def finish(self, *, pending_ids=()):
         if self.process.stdin and not self.process.stdin.is_closing():
@@ -123,9 +151,11 @@ async def test_real_entrypoint_modern_first_catalog_and_status_without_handshake
         assert catalog["ttlMs"] == 60000
         assert catalog["cacheScope"] == "private"
         assert [tool["name"] for tool in catalog["tools"]] == [
+            "create_context",
             "execute_code",
             "get_status",
             "reset_browser",
+            "close_context",
         ]
         identity = catalog["_meta"]["io.modelcontextprotocol/serverInfo"]
         assert identity == {
@@ -153,10 +183,15 @@ async def test_latest_sdk_real_stdio_discovery_and_direct_calls(tmp_path, mode):
     async with Client(params, mode=mode) as client:
         assert client.protocol_version == "2026-07-28"
         catalog = await client.list_tools()
-        assert len(catalog.tools) == 3
-        status = await client.call_tool("get_status", {})
+        assert len(catalog.tools) == 5
+        created = await client.call_tool("create_context", {})
+        assert not created.is_error
+        context_id = created.structured_content["context_id"]
+        status = await client.call_tool("get_status", {"context_id": context_id})
         assert not status.is_error
         assert json.loads(status.content[0].text)["browser"]["phase"] == "stopped"
+        closed = await client.call_tool("close_context", {"context_id": context_id})
+        assert not closed.is_error
         if mode == "auto":
             assert client.server_info.name == "openbrowser"
             caps = client.server_capabilities
@@ -343,11 +378,7 @@ async def test_real_executor_state_print_extra_keys_reset_and_process_isolation(
 @pytest.mark.asyncio
 async def test_cancelled_execution_has_no_reply_and_releases_execution_lock(tmp_path):
     async with wire(tmp_path, browser_fixture=True) as c:
-        await c.send(
-            1,
-            "tools/call",
-            {"name": "execute_code", "arguments": {"code": "await wait_for_cancel()"}},
-        )
+        await c.send_tool(1, "execute_code", {"code": "await wait_for_cancel()"})
         for ident in range(2, 22):
             status = await c.request(ident, "tools/call", {"name": "get_status"})
             if json.loads(status["content"][0]["text"])["namespace_variables"]:
@@ -387,11 +418,7 @@ async def test_active_eof_stops_real_protocol_process(tmp_path):
             "OPENBROWSER_TEST_CANCEL_UNWOUND": str(unwound),
         },
     ) as c:
-        await c.send(
-            1,
-            "tools/call",
-            {"name": "execute_code", "arguments": {"code": "await wait_for_cancel()"}},
-        )
+        await c.send_tool(1, "execute_code", {"code": "await wait_for_cancel()"})
         await wait_for_file(entered, "execute_code never entered wait_for_cancel")
         await c.finish(pending_ids=(1,))
     assert unwound.exists(), "active call did not unwind before the process exited"
@@ -404,16 +431,18 @@ async def test_catalog_is_snapshot_and_cannot_mutate_validation(monkeypatch):
     server = module.OpenBrowserServer()
     async with Client(server.server) as client:
         catalog = await client.list_tools(cache_mode="refresh")
-        original = catalog.tools[0].description
-        catalog.tools[0].input_schema["properties"]["code"]["type"] = "number"
+        execute = next(tool for tool in catalog.tools if tool.name == "execute_code")
+        original = execute.description
+        execute.input_schema["properties"]["code"]["type"] = "number"
         monkeypatch.delenv("OPENBROWSER_COMPACT_DESCRIPTION")
         fresh = await client.list_tools(cache_mode="refresh")
+        fresh_execute = next(tool for tool in fresh.tools if tool.name == "execute_code")
         assert (
-            fresh.tools[0].description
+            fresh_execute.description
             == original
             == module._EXECUTE_CODE_DESCRIPTION_COMPACT
         )
-        assert fresh.tools[0].input_schema["properties"]["code"]["type"] == "string"
+        assert fresh_execute.input_schema["properties"]["code"]["type"] == "string"
         result = await client.call_tool("execute_code", {"code": 5})
         assert result.is_error
         assert server.browser_session is None
@@ -463,10 +492,12 @@ async def test_dispatch_exception_is_explicit_tool_error(monkeypatch):
         raise RuntimeError("dispatcher failed")
 
     monkeypatch.setattr(server, "_handle_tool", fail)
-    async with Client(server.server) as client:
-        result = await client.call_tool("get_status", {})
-        assert result.is_error
-        assert result.content[0].text == "Error: dispatcher failed"
+    handler = server.server.get_request_handler("tools/call").handler
+    result = await handler(
+        None, module.types.CallToolRequestParams(name="get_status", arguments={})
+    )
+    assert result.is_error
+    assert result.content[0].text == "Error: dispatcher failed"
 
 
 @pytest.mark.asyncio
@@ -475,37 +506,89 @@ async def test_exact_catalog_input_contracts_and_annotations(monkeypatch):
     server = module.OpenBrowserServer()
     async with Client(server.server) as client:
         catalog = await client.list_tools()
-    execute, status, reset = catalog.tools
+    assert [tool.name for tool in catalog.tools] == [
+        "create_context",
+        "execute_code",
+        "get_status",
+        "reset_browser",
+        "close_context",
+    ]
+    create, execute, status, reset, close = catalog.tools
+    context_property = {
+        "type": "string",
+        "description": (
+            "Opaque context handle returned by create_context. Pass the same value "
+            "on every stateful call for that context."
+        ),
+    }
+    assert create.input_schema == {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": False,
+    }
+    assert create.output_schema == {
+        "type": "object",
+        "properties": {"context_id": context_property},
+        "required": ["context_id"],
+        "additionalProperties": False,
+    }
     assert execute.input_schema == {
         "type": "object",
         "properties": {
+            "context_id": context_property,
             "code": {
                 "type": "string",
                 "description": "Python code to execute. All browser functions are async (use await).",
-            }
+            },
         },
-        "required": ["code"],
+        "required": ["context_id", "code"],
     }
     assert status.input_schema == {
         "type": "object",
-        "properties": {},
+        "properties": {"context_id": context_property},
+        "required": ["context_id"],
         "additionalProperties": False,
     }
     assert reset.input_schema == {
         "type": "object",
         "properties": {
+            "context_id": context_property,
             "clear_variables": {
                 "type": "boolean",
                 "description": "Also discard user-defined Python variables.",
                 "default": False,
-            }
+            },
         },
+        "required": ["context_id"],
+        "additionalProperties": False,
+    }
+    assert close.input_schema == {
+        "type": "object",
+        "properties": {"context_id": context_property},
+        "required": ["context_id"],
+        "additionalProperties": False,
+    }
+    assert close.output_schema == {
+        "type": "object",
+        "properties": {
+            "context_id": context_property,
+            "status": {"type": "string", "enum": ["closed", "close_failed"]},
+            "error_code": {"type": ["string", "null"]},
+            "retryable": {"type": "boolean"},
+        },
+        "required": ["context_id", "status", "retryable"],
         "additionalProperties": False,
     }
     assert [
         tool.annotations.model_dump(by_alias=True, exclude_none=True)
         for tool in catalog.tools
     ] == [
+        {
+            "readOnlyHint": False,
+            "destructiveHint": False,
+            "openWorldHint": False,
+            "idempotentHint": False,
+        },
         {
             "readOnlyHint": False,
             "destructiveHint": True,
@@ -524,7 +607,47 @@ async def test_exact_catalog_input_contracts_and_annotations(monkeypatch):
             "openWorldHint": False,
             "idempotentHint": True,
         },
+        {
+            "readOnlyHint": False,
+            "destructiveHint": True,
+            "openWorldHint": False,
+            "idempotentHint": True,
+        },
     ]
+
+    legacy = await server.server.get_request_handler("tools/list").handler(None, None)
+    assert [tool.name for tool in legacy.tools] == [
+        "execute_code",
+        "get_status",
+        "reset_browser",
+    ]
+    legacy_execute, legacy_status, legacy_reset = legacy.tools
+    assert legacy_execute.input_schema == {
+        "type": "object",
+        "properties": {
+            "code": {
+                "type": "string",
+                "description": "Python code to execute. All browser functions are async (use await).",
+            }
+        },
+        "required": ["code"],
+    }
+    assert legacy_status.input_schema == {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": False,
+    }
+    assert legacy_reset.input_schema == {
+        "type": "object",
+        "properties": {
+            "clear_variables": {
+                "type": "boolean",
+                "description": "Also discard user-defined Python variables.",
+                "default": False,
+            }
+        },
+        "additionalProperties": False,
+    }
 
 
 @pytest.mark.asyncio
@@ -597,7 +720,7 @@ async def test_owned_cleanup_cancellation_preserves_real_stdio_usability(
             if mode == "reset"
             else {"name": "execute_code", "arguments": {"code": "answer = 99"}}
         )
-        await c.send(2, "tools/call", operation, modern=modern)
+        await c.send_tool(2, operation["name"], operation.get("arguments"), modern=modern)
         if mode == "cancel-start":
             await wait_for_barrier(barriers / "start-1")
             await c.send(
@@ -669,7 +792,7 @@ async def test_eof_during_owned_cleanup_finishes_bounded_and_releases_owner(tmp_
             "tools/call",
             {"name": "execute_code", "arguments": {"code": "answer = 42"}},
         )
-        await c.send(2, "tools/call", {"name": "reset_browser"})
+        await c.send_tool(2, "reset_browser")
         await wait_for_barrier(barriers / "kill-1")
         c.process.stdin.close()
         (barriers / "release-1").touch()
@@ -723,7 +846,7 @@ async def test_failed_owned_cleanup_retains_owner_and_cancellation_keeps_transpo
             {"name": "execute_code", "arguments": {"code": "answer = 42"}},
             modern=modern,
         )
-        await c.send(2, "tools/call", {"name": "reset_browser"}, modern=modern)
+        await c.send_tool(2, "reset_browser", modern=modern)
         await wait_for_barrier(barriers / "kill-1")
         if mode != "reset-child-cancel":
             await c.send(
@@ -946,3 +1069,284 @@ async def test_executor_timeout_keeps_existing_partial_state_and_transport_usabl
         )
         assert cleared["content"][0]["text"] == "False\n"
         await c.finish()
+
+
+@pytest.mark.asyncio
+async def test_two_modern_contexts_are_isolated_and_close_invalidates_handle(tmp_path):
+    async with wire(tmp_path, browser_fixture=True) as c:
+        first = await c._raw_request(
+            "ctx-a", "tools/call", {"name": "create_context", "arguments": {}}
+        )
+        second = await c._raw_request(
+            "ctx-b", "tools/call", {"name": "create_context", "arguments": {}}
+        )
+        first_id = first["structuredContent"]["context_id"]
+        second_id = second["structuredContent"]["context_id"]
+        assert first_id != second_id
+        assert json.loads(first["content"][0]["text"]) == {"context_id": first_id}
+
+        before = await c._raw_request(
+            "status-a",
+            "tools/call",
+            {"name": "get_status", "arguments": {"context_id": first_id}},
+        )
+        assert json.loads(before["content"][0]["text"])["browser"]["phase"] == "stopped"
+
+        await c._raw_request(
+            "exec-a",
+            "tools/call",
+            {
+                "name": "execute_code",
+                "arguments": {"context_id": first_id, "code": "alpha = 'first'"},
+            },
+        )
+        isolated = await c._raw_request(
+            "exec-b",
+            "tools/call",
+            {
+                "name": "execute_code",
+                "arguments": {
+                    "context_id": second_id,
+                    "code": "print('alpha' in globals())",
+                },
+            },
+        )
+        assert isolated["content"][0]["text"] == "False\n"
+
+        first_status = await c._raw_request(
+            "status-a2",
+            "tools/call",
+            {"name": "get_status", "arguments": {"context_id": first_id}},
+        )
+        second_status = await c._raw_request(
+            "status-b2",
+            "tools/call",
+            {"name": "get_status", "arguments": {"context_id": second_id}},
+        )
+        first_count = json.loads(first_status["content"][0]["text"])["namespace_variables"]
+        second_count = json.loads(second_status["content"][0]["text"])["namespace_variables"]
+        assert first_count == second_count + 1
+
+        closed = await c._raw_request(
+            "close-a",
+            "tools/call",
+            {"name": "close_context", "arguments": {"context_id": first_id}},
+        )
+        assert closed["structuredContent"]["status"] == "closed"
+        assert not closed["isError"]
+
+        missing = await c._raw_request(
+            "status-a3",
+            "tools/call",
+            {"name": "get_status", "arguments": {"context_id": first_id}},
+        )
+        assert missing["isError"] is True
+        assert "context_not_found" in missing["content"][0]["text"]
+
+        after = await c._raw_request(
+            "exec-b2",
+            "tools/call",
+            {
+                "name": "execute_code",
+                "arguments": {"context_id": second_id, "code": "print('still open')"},
+            },
+        )
+        assert "still open" in after["content"][0]["text"]
+        await c._raw_request(
+            "close-b",
+            "tools/call",
+            {"name": "close_context", "arguments": {"context_id": second_id}},
+        )
+        await c.finish()
+
+
+@pytest.mark.asyncio
+async def test_modern_context_capacity_returns_before_allocation(tmp_path):
+    async with wire(
+        tmp_path,
+        browser_fixture=True,
+        extra_env={"OPENBROWSER_MCP_MAX_CONTEXTS": "2"},
+    ) as c:
+        first = await c._raw_request(
+            "ctx-a", "tools/call", {"name": "create_context", "arguments": {}}
+        )
+        await c._raw_request(
+            "ctx-b", "tools/call", {"name": "create_context", "arguments": {}}
+        )
+        limited = await c._raw_request(
+            "ctx-c", "tools/call", {"name": "create_context", "arguments": {}}
+        )
+        assert limited["isError"] is True
+        assert "context_limit_reached" in limited["content"][0]["text"]
+        first_id = first["structuredContent"]["context_id"]
+        await c._raw_request(
+            "close-a",
+            "tools/call",
+            {"name": "close_context", "arguments": {"context_id": first_id}},
+        )
+        replacement = await c._raw_request(
+            "ctx-d", "tools/call", {"name": "create_context", "arguments": {}}
+        )
+        assert replacement["isError"] is False
+        await c.finish()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "version", ["2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25"]
+)
+async def test_all_allowlisted_legacy_versions_keep_three_tools(tmp_path, version):
+    async with wire(tmp_path, browser_fixture=True) as c:
+        init = await c.request(
+            1,
+            "initialize",
+            {
+                "protocolVersion": version,
+                "capabilities": {},
+                "clientInfo": {"name": "legacy-matrix", "version": "1"},
+            },
+            modern=False,
+        )
+        assert init["protocolVersion"] == version
+        await c.send(None, "notifications/initialized", modern=False)
+        catalog = await c.request(2, "tools/list", modern=False)
+        assert [tool["name"] for tool in catalog["tools"]] == [
+            "execute_code",
+            "get_status",
+            "reset_browser",
+        ]
+        status = await c.request(
+            3, "tools/call", {"name": "get_status", "arguments": {}}, modern=False
+        )
+        assert json.loads(status["content"][0]["text"])["browser"]["phase"] == "stopped"
+        await c.finish()
+
+
+@pytest.mark.asyncio
+async def test_unsupported_protocol_version_is_rejected(tmp_path):
+    async with wire(tmp_path) as c:
+        meta = {
+            **META,
+            "io.modelcontextprotocol/protocolVersion": "9999-01-01",
+        }
+        await c.send(1, "tools/list", {"_meta": meta}, modern=False)
+        message = await c.receive(1)
+        assert "error" in message
+        await c.finish()
+
+
+@pytest.mark.asyncio
+async def test_modern_stateful_calls_without_handle_are_rejected_before_effect(tmp_path):
+    async with wire(tmp_path) as c:
+        for ident, (name, arguments) in enumerate(
+            [
+                ("execute_code", {"code": "pass"}),
+                ("get_status", {}),
+                ("reset_browser", {}),
+            ],
+            1,
+        ):
+            result = await c.request(
+                ident,
+                "tools/call",
+                {"name": name, "arguments": arguments},
+                inject_context=False,
+            )
+            assert result["isError"] is True
+            assert "context_id" in result["content"][0]["text"]
+        created = await c._raw_request(
+            "ctx", "tools/call", {"name": "create_context", "arguments": {}}
+        )
+        context_id = created["structuredContent"]["context_id"]
+        status = await c._raw_request(
+            "status",
+            "tools/call",
+            {"name": "get_status", "arguments": {"context_id": context_id}},
+        )
+        assert json.loads(status["content"][0]["text"])["browser"]["phase"] == "stopped"
+        await c.finish()
+
+
+@pytest.mark.asyncio
+async def test_close_failure_is_explicit_and_retryable_over_stdio(tmp_path):
+    barriers = tmp_path / "barriers"
+    barriers.mkdir()
+    async with wire(
+        tmp_path,
+        fixture=ROOT / "tests/support/mcp_owned_browser_server.py",
+        extra_env={
+            "OPENBROWSER_TEST_BARRIERS": str(barriers),
+            "OPENBROWSER_TEST_OWNED_MODE": "reset-failure",
+        },
+    ) as c:
+        created = await c._raw_request(
+            "ctx", "tools/call", {"name": "create_context", "arguments": {}}
+        )
+        context_id = created["structuredContent"]["context_id"]
+        await c._raw_request(
+            "exec",
+            "tools/call",
+            {
+                "name": "execute_code",
+                "arguments": {"context_id": context_id, "code": "answer = 42"},
+            },
+        )
+        (barriers / "release-1").touch()
+        first = await c._raw_request(
+            "close-1",
+            "tools/call",
+            {"name": "close_context", "arguments": {"context_id": context_id}},
+        )
+        assert first["isError"] is True
+        assert first["structuredContent"] == json.loads(first["content"][0]["text"])
+        assert first["structuredContent"] == {
+            "context_id": context_id,
+            "status": "close_failed",
+            "error_code": "cleanup_failed",
+            "retryable": True,
+        }
+        blocked = await c._raw_request(
+            "status-1",
+            "tools/call",
+            {"name": "get_status", "arguments": {"context_id": context_id}},
+        )
+        assert blocked["isError"] is True
+        assert "context_close_failed" in blocked["content"][0]["text"]
+
+        second = await c._raw_request(
+            "close-2",
+            "tools/call",
+            {"name": "close_context", "arguments": {"context_id": context_id}},
+        )
+        assert second["isError"] is False
+        assert second["structuredContent"] == json.loads(second["content"][0]["text"])
+        assert second["structuredContent"]["status"] == "closed"
+        missing = await c._raw_request(
+            "status-2",
+            "tools/call",
+            {"name": "get_status", "arguments": {"context_id": context_id}},
+        )
+        assert missing["isError"] is True
+        assert "context_not_found" in missing["content"][0]["text"]
+        await c.finish()
+
+
+@pytest.mark.asyncio
+async def test_context_errors_do_not_leak_handles_to_telemetry(monkeypatch):
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(module, "TELEMETRY_AVAILABLE", True)
+    server = module.OpenBrowserServer()
+    events = []
+    server._telemetry = SimpleNamespace(capture=events.append)
+    handler = server.server.get_request_handler("tools/call").handler
+    result = await handler(
+        SimpleNamespace(protocol_version="2026-07-28"),
+        module.types.CallToolRequestParams(
+            name="get_status", arguments={"context_id": "secret-handle"}
+        ),
+    )
+    assert result.is_error
+    assert len(events) == 1
+    assert events[0].error_message == "context_not_found"
+    assert "secret-handle" not in str(events[0])

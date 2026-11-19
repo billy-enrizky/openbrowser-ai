@@ -87,7 +87,7 @@ async def test_reset_browser_finishes_state_changes_before_cancellation(mcp_serv
 	assert mcp_server.browser_session is None
 	assert mcp_server._namespace is None
 	assert mcp_server._pending_variables['user_value'] == 42
-	assert mcp_server._executor.namespace == {}
+	assert mcp_server._executor.namespace is None
 
 
 @pytest.mark.asyncio

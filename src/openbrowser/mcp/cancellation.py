@@ -23,7 +23,7 @@ class _CleanupOutcome:
 async def _drain_owned_completion(
 	completion: asyncio.Future[Any],
 	*,
-	on_first_cancellation: Callable[[], None] | None = None,
+	on_first_cancellation: Callable[[], object] | None = None,
 ) -> asyncio.CancelledError | None:
 	"""Await an owned operation and return the caller's first cancellation.
 

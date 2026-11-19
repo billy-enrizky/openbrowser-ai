@@ -18,6 +18,8 @@ Or as an MCP server in Claude Desktop or other MCP clients:
     }
 """
 
+from __future__ import annotations
+
 import os
 import sys
 
@@ -26,19 +28,19 @@ os.environ['OPENBROWSER_LOGGING_LEVEL'] = 'critical'
 os.environ['OPENBROWSER_SETUP_LOGGING'] = 'false'
 
 import asyncio
-from collections.abc import Callable
-from copy import deepcopy
-from dataclasses import dataclass
 import inspect
 import json
 import logging
 import shutil
 import time
 import uuid
+import weakref
+from copy import deepcopy
+from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
-import anyio
 from jsonschema import Draft202012Validator
 
 # Configure logging for MCP mode - redirect to stderr but preserve critical diagnostics
@@ -90,7 +92,11 @@ logging.disable(logging.CRITICAL)
 
 # Import openbrowser modules
 from openbrowser.browser import BrowserProfile, BrowserSession
-from openbrowser.browser.lifecycle import LifecycleMachine, LifecyclePhase, LifecycleTransitionError
+from openbrowser.browser.lifecycle import (
+	LifecycleMachine,
+	LifecyclePhase,
+	LifecycleTransitionError,
+)
 from openbrowser.code_use.executor import DEFAULT_MAX_OUTPUT_CHARS, CodeExecutor
 from openbrowser.code_use.namespace import create_namespace
 from openbrowser.config import (
@@ -112,46 +118,21 @@ except Exception:
 
 logger = logging.getLogger(__name__)
 
-_MCP_WORKSPACE_DIR = Path.home() / 'Downloads' / 'openbrowser-mcp' / 'workspace'
+from openbrowser.mcp.cancellation import _CleanupOutcome, _drain_owned_completion
+
+_MCP_WORKSPACE_ROOT = os.environ.get('OPENBROWSER_MCP_WORKSPACE_DIR', '').strip()
+_MCP_WORKSPACE_DIR = (
+	Path(_MCP_WORKSPACE_ROOT).expanduser()
+	if _MCP_WORKSPACE_ROOT
+	else Path.home() / 'Downloads' / 'openbrowser-mcp' / 'workspace'
+)
 _CDP_HEALTH_CHECK_TIMEOUT_SECONDS = 2.0
 
-
-@dataclass(frozen=True)
-class _CleanupOutcome:
-	succeeded: bool
-	caller_cancellation: asyncio.CancelledError | None = None
-
-
-async def _drain_owned_completion(
-	completion: asyncio.Future[Any],
-	*,
-	on_first_cancellation: Callable[[], None] | None = None,
-) -> asyncio.CancelledError | None:
-	"""Await an owned operation and return the caller's first cancellation.
-
-	Once the caller cancels, the AnyIO shield prevents the MCP request scope
-	from re-cancelling this drain loop. Direct ``Task.cancel()`` calls are
-	still absorbed, so the owned operation always reaches its final state
-	before the request unwinds.
-	"""
-	caller_cancellation: asyncio.CancelledError | None = None
-	while not completion.done():
-		try:
-			await asyncio.shield(completion)
-		except asyncio.CancelledError as error:
-			if caller_cancellation is not None:
-				continue
-			caller_cancellation = error
-			if on_first_cancellation is not None:
-				on_first_cancellation()
-			with anyio.CancelScope(shield=True):
-				while not completion.done():
-					try:
-						await asyncio.shield(completion)
-					except asyncio.CancelledError:
-						continue
-			break
-	return caller_cancellation
+MODERN_PROTOCOL_VERSION = '2026-07-28'
+LEGACY_PROTOCOL_VERSIONS = frozenset(
+	{'2024-11-05', '2025-03-26', '2025-06-18', '2025-11-25'}
+)
+_DEFAULT_MAX_CONTEXTS = 16
 
 
 def _start_timeout_seconds() -> float:
@@ -175,6 +156,175 @@ def _create_mcp_file_system() -> Any:
 	if not FILESYSTEM_AVAILABLE:
 		return None
 	return FileSystem(base_dir=str(_MCP_WORKSPACE_DIR), create_default_files=False)
+
+
+def _max_contexts() -> int:
+	"""Read the positive context capacity override, or use the default."""
+	raw = os.environ.get('OPENBROWSER_MCP_MAX_CONTEXTS', '')
+	try:
+		value = int(raw)
+	except (TypeError, ValueError):
+		return _DEFAULT_MAX_CONTEXTS
+	return value if value > 0 else _DEFAULT_MAX_CONTEXTS
+
+
+_PROCESS_OUTPUT_LOCKS: weakref.WeakKeyDictionary[Any, asyncio.Lock] = weakref.WeakKeyDictionary()
+
+
+def _process_output_lock() -> asyncio.Lock:
+	"""Return one stdout-capture lock for every server on this event loop."""
+	loop = asyncio.get_running_loop()
+	lock = _PROCESS_OUTPUT_LOCKS.get(loop)
+	if lock is None:
+		lock = asyncio.Lock()
+		_PROCESS_OUTPUT_LOCKS[loop] = lock
+	return lock
+
+
+def _tool_catalog(description: str, *, modern: bool) -> tuple[types.Tool, ...]:
+	"""Build the exact legacy or modern catalog from one source."""
+	context_property = {
+		'type': 'string',
+		'description': (
+			'Opaque context handle returned by create_context. Pass the same value '
+			'on every stateful call for that context.'
+		),
+	}
+	execute_properties: dict[str, Any] = {
+		'code': {
+			'type': 'string',
+			'description': 'Python code to execute. All browser functions are async (use await).',
+		},
+	}
+	if modern:
+		execute_properties = {'context_id': context_property, **execute_properties}
+	execute_schema: dict[str, Any] = {
+		'type': 'object',
+		'properties': execute_properties,
+		'required': ['context_id', 'code'] if modern else ['code'],
+	}
+	status_schema: dict[str, Any] = {
+		'type': 'object',
+		'properties': {'context_id': context_property} if modern else {},
+		'additionalProperties': False,
+	}
+	if modern:
+		status_schema['required'] = ['context_id']
+	reset_properties: dict[str, Any] = {
+		'clear_variables': {
+			'type': 'boolean',
+			'description': 'Also discard user-defined Python variables.',
+			'default': False,
+		},
+	}
+	if modern:
+		reset_properties = {'context_id': context_property, **reset_properties}
+	reset_schema: dict[str, Any] = {
+		'type': 'object',
+		'properties': reset_properties,
+		'additionalProperties': False,
+	}
+	if modern:
+		reset_schema['required'] = ['context_id']
+
+	execute = types.Tool(
+		name='execute_code',
+		description=description,
+		input_schema=execute_schema,
+		annotations=types.ToolAnnotations(
+			read_only_hint=False,
+			destructive_hint=True,
+			open_world_hint=True,
+			idempotent_hint=False,
+		),
+	)
+	status = types.Tool(
+		name='get_status',
+		description=(
+			'Return OpenBrowser server, browser, profile, and tab state as JSON. '
+			'Read-only and does not start a browser. Use this before retrying a failed task.'
+			+ (' Requires context_id from create_context.' if modern else '')
+		),
+		input_schema=status_schema,
+		annotations=types.ToolAnnotations(
+			read_only_hint=True,
+			destructive_hint=False,
+			open_world_hint=False,
+			idempotent_hint=True,
+		),
+	)
+	reset = types.Tool(
+		name='reset_browser',
+		description=(
+			'Close the current browser session and release its profile. '
+			'User-defined Python variables are preserved unless clear_variables is true. '
+			'The next execute_code call starts a fresh browser.'
+			+ (' Requires context_id from create_context.' if modern else '')
+		),
+		input_schema=reset_schema,
+		annotations=types.ToolAnnotations(
+			read_only_hint=False,
+			destructive_hint=True,
+			open_world_hint=False,
+			idempotent_hint=True,
+		),
+	)
+	if not modern:
+		return (execute, status, reset)
+
+	create = types.Tool(
+		name='create_context',
+		description=(
+			'Create an isolated OpenBrowser context and return its context_id. '
+			'Call this once, then pass context_id to execute_code, get_status, and reset_browser. '
+			'The context lives until close_context or server exit and cannot be resumed by a new server process. '
+			'Close it with close_context when finished.'
+		),
+		input_schema={'type': 'object', 'properties': {}, 'additionalProperties': False},
+		output_schema={
+			'type': 'object',
+			'properties': {'context_id': context_property},
+			'required': ['context_id'],
+			'additionalProperties': False,
+		},
+		annotations=types.ToolAnnotations(
+			read_only_hint=False,
+			destructive_hint=False,
+			open_world_hint=False,
+			idempotent_hint=False,
+		),
+	)
+	close = types.Tool(
+		name='close_context',
+		description=(
+			'Close an OpenBrowser context and release its browser and profile. '
+			'The context_id cannot be used after a successful close.'
+		),
+		input_schema={
+			'type': 'object',
+			'properties': {'context_id': context_property},
+			'required': ['context_id'],
+			'additionalProperties': False,
+		},
+		output_schema={
+			'type': 'object',
+			'properties': {
+				'context_id': context_property,
+				'status': {'type': 'string', 'enum': ['closed', 'close_failed']},
+				'error_code': {'type': ['string', 'null']},
+				'retryable': {'type': 'boolean'},
+			},
+			'required': ['context_id', 'status', 'retryable'],
+			'additionalProperties': False,
+		},
+		annotations=types.ToolAnnotations(
+			read_only_hint=False,
+			destructive_hint=True,
+			open_world_hint=False,
+			idempotent_hint=True,
+		),
+	)
+	return (create, execute, status, reset, close)
 
 
 def _ensure_all_loggers_use_stderr():
@@ -267,33 +417,32 @@ from openbrowser.code_use.descriptions import (
 )
 
 
-class OpenBrowserServer:
-	"""MCP Server exposing CodeAgent code execution environment.
+class _BrowserOwner:
+	"""Own the browser, namespace, profile, and lifecycle for one context."""
 
-	Provides ``execute_code`` plus ``get_status`` and ``reset_browser``.
-	``execute_code`` runs Python code in a persistent namespace populated with
-	browser automation functions from ``create_namespace()`` (navigate, click,
-	evaluate, etc.).
-	"""
-
-	def __init__(self, session_timeout_minutes: int = 10):
-		_ensure_all_loggers_use_stderr()
-
-		self.config = load_openbrowser_config()
+	def __init__(
+		self,
+		*,
+		owner_id: str,
+		config: dict[str, Any],
+		session_timeout_minutes: int = 10,
+		adapter: Any = None,
+		workspace_dir: Path | None = None,
+		downloads_dir: Path | None = None,
+	):
+		self.owner_id = owner_id
+		self._adapter = adapter
+		self.config = config
 		self.browser_session: BrowserSession | None = None
-		self._lifecycle = LifecycleMachine('mcp_server')
-		self._browser_lifecycle = LifecycleMachine('mcp_browser')
+		self._browser_lifecycle = LifecycleMachine(f'mcp_browser:{owner_id}')
 		self._browser_generation = 0
 		self._pending_variables: dict[str, Any] = {}
 		self._profile_summary: dict[str, Any] | None = None
-		self._instance_id = uuid.uuid4().hex
 		self._managed_profile_dir: Path | None = None
 		self._managed_storage_state: Path | None = None
-		self._telemetry = ProductTelemetry() if TELEMETRY_AVAILABLE else None
-		self._start_time = time.time()
-
-		# CodeAgent namespace -- persistent across execute_code calls
-		self._namespace: dict[str, Any] | None = None
+		self._workspace_dir = workspace_dir or (_MCP_WORKSPACE_DIR / owner_id)
+		self._downloads_dir = downloads_dir or (Path.home() / 'Downloads' / 'openbrowser-mcp' / owner_id)
+		self._file_system: Any = None
 		try:
 			max_output = int(os.environ.get('OPENBROWSER_MAX_OUTPUT', '0'))
 		except (ValueError, TypeError):
@@ -304,194 +453,30 @@ class OpenBrowserServer:
 		# Session management
 		self.session_timeout_minutes = session_timeout_minutes
 		self._last_activity = time.time()
-		self._cleanup_task: Any = None
 		self._lifecycle_lock = asyncio.Lock()
 		self._execution_lock = asyncio.Lock()
 		self._execution_task: asyncio.Task[Any] | None = None
 
-		self._setup_handlers()
+	def _server(self) -> Any:
+		"""Return the adapter that owns server-wide state, or this legacy owner."""
+		return self._adapter if self._adapter is not None else self
 
-	def _setup_handlers(self):
-		"""Configure SDK callbacks from one instance-owned catalog and schema source."""
+	@property
+	def _namespace(self) -> dict[str, Any] | None:
+		"""Compatibility view of the executor's single active namespace."""
+		return self._executor.namespace
 
-		description = _EXECUTE_CODE_DESCRIPTION
-		if os.environ.get('OPENBROWSER_COMPACT_DESCRIPTION', '').lower() in ('1', 'true', 'yes'):
-			description = _EXECUTE_CODE_DESCRIPTION_COMPACT
-		tool_catalog = (
-			types.Tool(
-				name='execute_code',
-				description=description,
-				input_schema={
-					'type': 'object',
-					'properties': {
-						'code': {
-							'type': 'string',
-							'description': 'Python code to execute. All browser functions are async (use await).',
-						},
-					},
-					'required': ['code'],
-				},
-				annotations=types.ToolAnnotations(
-					read_only_hint=False,
-					destructive_hint=True,
-					open_world_hint=True,
-					idempotent_hint=False,
-				),
-			),
-			types.Tool(
-				name='get_status',
-				description=(
-					'Return OpenBrowser server, browser, profile, and tab state as JSON. '
-					'Read-only and does not start a browser. Use this before retrying a failed task.'
-				),
-				input_schema={
-					'type': 'object',
-					'properties': {},
-					'additionalProperties': False,
-				},
-				annotations=types.ToolAnnotations(
-					read_only_hint=True,
-					destructive_hint=False,
-					open_world_hint=False,
-					idempotent_hint=True,
-				),
-			),
-			types.Tool(
-				name='reset_browser',
-				description=(
-					'Close the current browser session and release its profile. '
-					'User-defined Python variables are preserved unless clear_variables is true. '
-					'The next execute_code call starts a fresh browser.'
-				),
-				input_schema={
-					'type': 'object',
-					'properties': {
-						'clear_variables': {
-							'type': 'boolean',
-							'description': 'Also discard user-defined Python variables.',
-							'default': False,
-						},
-					},
-					'additionalProperties': False,
-				},
-				annotations=types.ToolAnnotations(
-					read_only_hint=False,
-					destructive_hint=True,
-					open_world_hint=False,
-					idempotent_hint=True,
-				),
-			),
-		)
-		tools_by_name = {tool.name: tool for tool in tool_catalog}
-		validators = {}
-		for tool in tool_catalog:
-			Draft202012Validator.check_schema(tool.input_schema)
-			validators[tool.name] = Draft202012Validator(tool.input_schema)
+	@_namespace.setter
+	def _namespace(self, namespace: dict[str, Any] | None) -> None:
+		self._executor.set_namespace(namespace)
 
-		async def handle_list_tools(
-			ctx: ServerRequestContext, params: types.PaginatedRequestParams | None
-		) -> types.ListToolsResult:
-			return types.ListToolsResult(tools=[tool.model_copy(deep=True) for tool in tool_catalog])
-
-		async def handle_list_resources(
-			ctx: ServerRequestContext, params: types.PaginatedRequestParams | None
-		) -> types.ListResourcesResult:
-			return types.ListResourcesResult(resources=[])
-
-		async def handle_list_resource_templates(
-			ctx: ServerRequestContext, params: types.PaginatedRequestParams | None
-		) -> types.ListResourceTemplatesResult:
-			return types.ListResourceTemplatesResult(resource_templates=[])
-
-		async def handle_list_prompts(
-			ctx: ServerRequestContext, params: types.PaginatedRequestParams | None
-		) -> types.ListPromptsResult:
-			return types.ListPromptsResult(prompts=[])
-
-		async def handle_call_tool(
-			ctx: ServerRequestContext, params: types.CallToolRequestParams
-		) -> types.CallToolResult:
-			start_time = time.time()
-			error_msg = None
-			telemetry_error = None
-			try:
-				if params.name not in tools_by_name:
-					raise MCPError(code=-32602, message=f'Unknown tool: {params.name}')
-				arguments = params.arguments if params.arguments is not None else {}
-				validation_error = next(validators[params.name].iter_errors(arguments), None)
-				if validation_error is not None:
-					error_msg = f'Invalid arguments: {validation_error.message}'
-					# The validator message contains a repr of the rejected value.
-					# Keep that detail client-facing, never in outbound telemetry.
-					telemetry_error = 'invalid_tool_arguments'
-				elif params.name == 'execute_code' and not arguments['code'].strip():
-					error_msg = 'Error: No code provided'
-				if error_msg is not None:
-					return types.CallToolResult(content=[types.TextContent(type='text', text=error_msg)], is_error=True)
-				async def owned_call() -> str | BaseException:
-					try:
-						return await self._handle_tool(params.name, arguments)
-					except asyncio.CancelledError:
-						raise
-					except BaseException as error:
-						return error
-
-				operation = asyncio.create_task(owned_call())
-				completion = asyncio.gather(operation, return_exceptions=True)
-				caller_cancellation = await _drain_owned_completion(
-					completion, on_first_cancellation=operation.cancel
-				)
-				result = completion.result()[0]
-				if caller_cancellation is not None:
-					raise caller_cancellation
-				if operation.cancelled():
-					raise RuntimeError('Tool operation was cancelled')
-				if isinstance(result, BaseException):
-					raise result
-				return types.CallToolResult(content=[types.TextContent(type='text', text=result)])
-			except asyncio.CancelledError as error:
-				error_msg = f'{type(error).__name__}: {error}'
-				raise
-			except MCPError as error:
-				error_msg = str(error)
-				raise
-			except Exception as error:
-				error_msg = str(error)
-				logger.error('Tool execution failed: %s', error, exc_info=True)
-				return types.CallToolResult(content=[types.TextContent(type='text', text=f'Error: {error}')], is_error=True)
-			except BaseException as error:
-				error_msg = f'{type(error).__name__}: {error}'
-				raise
-			finally:
-				if self._telemetry and TELEMETRY_AVAILABLE:
-					self._telemetry.capture(
-						MCPServerTelemetryEvent(
-							version=get_openbrowser_version(),
-							action='tool_call',
-							tool_name=params.name,
-							duration_seconds=time.time() - start_time,
-							error_message=telemetry_error if telemetry_error is not None else error_msg,
-						)
-					)
-
-		def get_tool_input_schema(name: str) -> dict[str, Any] | None:
-			tool = tools_by_name.get(name)
-			return deepcopy(tool.input_schema) if tool is not None else None
-
-		self.server = Server(
-			'openbrowser',
-			version=get_openbrowser_version(),
-			on_list_tools=handle_list_tools,
-			on_list_resources=handle_list_resources,
-			on_list_resource_templates=handle_list_resource_templates,
-			on_list_prompts=handle_list_prompts,
-			on_call_tool=handle_call_tool,
-			get_tool_input_schema=get_tool_input_schema,
-			cache_hints={
-				method: CacheHint(ttl_ms=60_000, scope='private')
-				for method in ('tools/list', 'resources/list', 'resources/templates/list', 'prompts/list')
-			},
-		)
+	def _create_owner_file_system(self) -> Any:
+		"""Create one FileSystem per owner and reuse it across namespace rebuilds."""
+		if not FILESYSTEM_AVAILABLE:
+			return None
+		if self._file_system is None:
+			self._file_system = FileSystem(base_dir=str(self._workspace_dir), create_default_files=False)
+		return self._file_system
 
 	async def _handle_tool(self, name: str, arguments: dict[str, Any]) -> str:
 		"""Dispatch one MCP tool call to its implementation."""
@@ -511,7 +496,7 @@ class OpenBrowserServer:
 		profile_config = dict(get_default_profile(self.config))
 		explicit_user_data_dir = profile_config.get('user_data_dir')
 		profile_data = {
-			'downloads_path': str(Path.home() / 'Downloads' / 'openbrowser-mcp'),
+			'downloads_path': str(self._downloads_dir),
 			'wait_between_actions': 0.5,
 			'keep_alive': True,
 			'device_scale_factor': 1.0,
@@ -544,7 +529,7 @@ class OpenBrowserServer:
 
 		profile_data = apply_managed_browser_profile_defaults(profile_data, managed_default_dir)
 		args = list(profile_data.get('args') or [])
-		ownership_marker = f'--openbrowser-instance-id={self._instance_id}'
+		ownership_marker = f'--openbrowser-instance-id={self.owner_id}'
 		if not any(argument.startswith('--openbrowser-instance-id=') for argument in args):
 			args.append(ownership_marker)
 		profile_data['args'] = args
@@ -554,14 +539,14 @@ class OpenBrowserServer:
 			'user_data_dir': str(profile.user_data_dir) if profile.user_data_dir else None,
 			'headless': profile.headless,
 			'storage_state': str(storage_state) if isinstance(storage_state, (str, Path)) else None,
-			'instance_id': self._instance_id,
+			'instance_id': self.owner_id,
 		}
 		return profile
 
 	def _get_managed_profile_dir(self) -> Path:
 		"""Return the stable isolated profile directory for this MCP instance."""
 		if self._managed_profile_dir is None:
-			self._managed_profile_dir = CONFIG.OPENBROWSER_PROFILES_DIR / f'mcp-{self._instance_id}'
+			self._managed_profile_dir = CONFIG.OPENBROWSER_PROFILES_DIR / f'mcp-{self.owner_id}'
 		self._managed_profile_dir.mkdir(parents=True, exist_ok=True)
 		return self._managed_profile_dir
 
@@ -615,13 +600,12 @@ class OpenBrowserServer:
 				self._namespace = create_namespace(
 					browser_session=self.browser_session,
 					tools=self._tools,
-					file_system=_create_mcp_file_system(),
+					file_system=self._create_owner_file_system(),
 				)
 				for key, value in self._pending_variables.items():
 					if not key.startswith('__') and key not in self._namespace:
 						self._namespace[key] = value
 				self._pending_variables.clear()
-				self._executor.set_namespace(self._namespace)
 				self._browser_lifecycle.transition(LifecyclePhase.READY, reason='browser ready')
 			except BaseException as error:
 				message = f'{type(error).__name__}: {error}'
@@ -750,7 +734,7 @@ class OpenBrowserServer:
 				self._namespace = create_namespace(
 					browser_session=self.browser_session,
 					tools=self._tools,
-					file_system=_create_mcp_file_system(),
+					file_system=self._create_owner_file_system(),
 				)
 				# Copy user-defined variables from old namespace
 				for key, val in old_ns.items():
@@ -787,11 +771,17 @@ class OpenBrowserServer:
 		return any(kw in text for kw in keywords)
 
 	async def _execute_code(self, code: str) -> str:
-		"""Serialize execution with browser lifecycle operations."""
+		"""Serialize execution with browser lifecycle operations and stdout capture."""
+		server = self._server()
+		loop = asyncio.get_running_loop()
+		if server._output_lock is None or server._output_lock_loop is not loop:
+			server._output_lock = _process_output_lock()
+			server._output_lock_loop = loop
 		async with self._execution_lock:
 			self._execution_task = asyncio.current_task()
 			try:
-				return await self._execute_code_locked(code)
+				async with server._output_lock:
+					return await self._execute_code_locked(code)
 			finally:
 				self._last_activity = time.time()
 				self._execution_task = None
@@ -876,15 +866,16 @@ class OpenBrowserServer:
 			version = None
 
 		return {
-			'server': self._lifecycle.snapshot().to_dict(),
+			'server': self._server()._lifecycle.snapshot().to_dict(),
 			'browser': browser,
 			'profile': self._profile_summary,
-			'instance_id': self._instance_id,
+			'instance_id': self._server()._instance_id,
+			'context_id': getattr(self, 'context_id', None),
 			'namespace_variables': namespace_variables,
 			'pending_variables': len(self._pending_variables),
 			'session_timeout_minutes': self.session_timeout_minutes,
 			'exec_timeout': _exec_timeout_seconds(),
-			'uptime_seconds': max(0.0, time.time() - self._start_time),
+			'uptime_seconds': max(0.0, time.time() - self._server()._start_time),
 			'version': version,
 		}
 
@@ -917,7 +908,6 @@ class OpenBrowserServer:
 						self.browser_session = None
 
 				self._namespace = None
-				self._executor.set_namespace({})
 				if clear_variables:
 					self._pending_variables.clear()
 				else:
@@ -971,19 +961,27 @@ class OpenBrowserServer:
 		if caller_cancellation is not None:
 			raise caller_cancellation
 
-	async def _shutdown_locked(self) -> None:
-		"""Perform shutdown while isolated from cancellation of the caller."""
-		cleanup_task = self._cleanup_task
-		self._cleanup_task = None
-		if cleanup_task:
-			cleanup_task.cancel()
-			try:
-				await cleanup_task
-			except asyncio.CancelledError:
-				pass
-			except Exception as e:
-				logger.error('Error stopping cleanup task: %s', e)
+	async def _close_owned(self) -> None:
+		"""Run owner cleanup as an owned worker and drain caller cancellation."""
 
+		async def owned_cleanup() -> None:
+			await self._shutdown_owner_locked()
+
+		task = asyncio.create_task(owned_cleanup())
+		completion = asyncio.gather(task, return_exceptions=True)
+		caller_cancellation = await _drain_owned_completion(completion)
+		result = completion.result()[0]
+		if caller_cancellation is not None:
+			raise caller_cancellation
+		if isinstance(result, BaseException):
+			raise result
+
+	async def _shutdown_locked(self) -> None:
+		"""Subclasses provide their own shutdown boundary."""
+		raise NotImplementedError
+
+	async def _shutdown_owner_locked(self) -> None:
+		"""Close one owner's browser and namespace while its caller is isolated."""
 		async with self._execution_lock:
 			async with self._lifecycle_lock:
 				session = self.browser_session
@@ -1060,39 +1058,615 @@ class OpenBrowserServer:
 					if cleanup.caller_cancellation is not None:
 						raise cleanup.caller_cancellation
 
+
+class ContextPhase(str, Enum):
+	"""The explicit lifecycle of one modern MCP application context."""
+
+	ACTIVE = 'active'
+	CLOSING = 'closing'
+	CLOSE_FAILED = 'close_failed'
+	CLOSED = 'closed'
+
+
+class ServerAdmission(str, Enum):
+	"""Whether the server may admit new context work."""
+
+	RUNNING = 'running'
+	STOPPING = 'stopping'
+	STOPPED = 'stopped'
+	FAILED = 'failed'
+
+
+@dataclass(frozen=True)
+class CloseResult:
+	"""Typed outcome of one close attempt, keyed by its context."""
+
+	context_id: str
+	status: str
+	error_code: str | None = None
+	retryable: bool = False
+
+	def __post_init__(self) -> None:
+		if self.status == 'closed' and (self.error_code is not None or self.retryable):
+			raise ValueError('A closed result has no error and is not retryable')
+		if self.status == 'close_failed' and (self.error_code is None or not self.retryable):
+			raise ValueError('A close_failed result needs an error code and is retryable')
+		if self.status not in {'closed', 'close_failed'}:
+			raise ValueError(f'Unknown close status: {self.status}')
+
+
+class ContextUnavailable(RuntimeError):
+	"""A stable error code for a context that cannot be used."""
+
+	def __init__(self, code: str, message: str):
+		self.code = code
+		super().__init__(message)
+
+
+@dataclass
+class ContextEntry:
+	"""Registry state for one context, including its in-flight lease count."""
+
+	context_id: str
+	owner: Any
+	phase: ContextPhase = ContextPhase.ACTIVE
+	active_calls: int = 0
+	close_task: asyncio.Task[CloseResult] | None = None
+	drained: asyncio.Event = field(default_factory=asyncio.Event)
+
+	def __post_init__(self) -> None:
+		self.drained.set()
+
+
+class ContextLease:
+	"""One admitted tool call against a context."""
+
+	def __init__(self, registry: Any, entry: ContextEntry):
+		self._registry = registry
+		self.entry = entry
+
+	@property
+	def owner(self) -> Any:
+		return self.entry.owner
+
+	async def __aenter__(self) -> Any:
+		return self.entry.owner
+
+	async def __aexit__(self, *_: object) -> None:
+		self._registry.release(self.entry)
+
+
+class OpenBrowserContext(_BrowserOwner):
+	"""One isolated browser and Python namespace selected by an explicit handle."""
+
+	def __init__(self, server: Any, context_id: str):
+		owner_id = uuid.uuid4().hex
+		super().__init__(
+			owner_id=owner_id,
+			config=server.config,
+			session_timeout_minutes=server.session_timeout_minutes,
+			adapter=server,
+			workspace_dir=_MCP_WORKSPACE_DIR / owner_id,
+			downloads_dir=Path.home() / 'Downloads' / 'openbrowser-mcp' / owner_id,
+		)
+		self.context_id = context_id
+
+	async def _shutdown_locked(self) -> None:
+		await self._shutdown_owner_locked()
+
+
+class ContextRegistry:
+	"""Admission, lookup, leasing, and close serialization for application contexts."""
+
+	def __init__(self, server: Any):
+		self._server = server
+		self._lock = asyncio.Lock()
+		self._entries: dict[str, ContextEntry] = {}
+		self._legacy_entry: ContextEntry | None = None
+		self._admission = ServerAdmission.RUNNING
+		self.max_contexts = _max_contexts()
+
+	@property
+	def admission(self) -> ServerAdmission:
+		return self._admission
+
+	def _open_count_unlocked(self) -> int:
+		return len(self._entries) + (1 if self._legacy_entry is not None else 0)
+
+	def snapshot(self) -> list[ContextEntry]:
+		entries = list(self._entries.values())
+		if self._legacy_entry is not None:
+			entries.append(self._legacy_entry)
+		return entries
+
+	async def create(self) -> str:
+		async with self._lock:
+			if self._admission is not ServerAdmission.RUNNING:
+				raise ContextUnavailable('server_stopping', 'Server is shutting down')
+			if self._open_count_unlocked() >= self.max_contexts:
+				raise ContextUnavailable(
+					'context_limit_reached',
+					f'At most {self.max_contexts} contexts may be open at once',
+				)
+			context_id = uuid.uuid4().hex
+			owner = OpenBrowserContext(self._server, context_id)
+			self._entries[context_id] = ContextEntry(context_id=context_id, owner=owner)
+			return context_id
+
+	async def acquire(self, context_id: str) -> ContextLease:
+		async with self._lock:
+			if self._admission is not ServerAdmission.RUNNING:
+				raise ContextUnavailable('server_stopping', 'Server is shutting down')
+			entry = self._entries.get(context_id)
+			if entry is None:
+				raise ContextUnavailable('context_not_found', f'No open context: {context_id}')
+			if entry.phase is ContextPhase.CLOSING:
+				raise ContextUnavailable('context_closing', f'Context is closing: {context_id}')
+			if entry.phase is ContextPhase.CLOSE_FAILED:
+				raise ContextUnavailable('context_close_failed', f'Context close failed: {context_id}')
+			if entry.phase is not ContextPhase.ACTIVE:
+				raise ContextUnavailable('context_not_found', f'No open context: {context_id}')
+			entry.active_calls += 1
+			entry.drained.clear()
+			return ContextLease(self, entry)
+
+	async def acquire_legacy(self) -> ContextLease:
+		async with self._lock:
+			if self._admission is not ServerAdmission.RUNNING:
+				raise ContextUnavailable('server_stopping', 'Server is shutting down')
+			if self._legacy_entry is None:
+				if self._open_count_unlocked() >= self.max_contexts:
+					raise ContextUnavailable(
+						'context_limit_reached',
+						f'At most {self.max_contexts} contexts may be open at once',
+					)
+				self._legacy_entry = ContextEntry(context_id='__legacy__', owner=self._server)
+			entry = self._legacy_entry
+			entry.active_calls += 1
+			entry.drained.clear()
+			return ContextLease(self, entry)
+
+	def release(self, entry: ContextEntry) -> None:
+		"""Release one lease atomically on the event-loop thread."""
+		if entry.active_calls > 0:
+			entry.active_calls -= 1
+		if entry.active_calls == 0:
+			entry.drained.set()
+
+	async def _close_entry_task(self, entry: ContextEntry) -> asyncio.Task[CloseResult]:
+		async with self._lock:
+			if entry.phase is ContextPhase.CLOSED:
+				raise ContextUnavailable('context_not_found', f'No open context: {entry.context_id}')
+			if entry.close_task is None:
+				entry.phase = ContextPhase.CLOSING
+				entry.close_task = asyncio.create_task(self._close_entry(entry))
+			return entry.close_task
+
+	async def close(self, context_id: str) -> CloseResult:
+		async with self._lock:
+			entry = self._entries.get(context_id)
+		if entry is None:
+			raise ContextUnavailable('context_not_found', f'No open context: {context_id}')
+		task = await self._close_entry_task(entry)
+		return await self._join_close(task)
+
+	async def _join_close(self, task: asyncio.Task[CloseResult]) -> CloseResult:
+		completion = asyncio.gather(task, return_exceptions=True)
+		caller_cancellation = await _drain_owned_completion(completion)
+		result = completion.result()[0]
+		if caller_cancellation is not None:
+			raise caller_cancellation
+		if isinstance(result, BaseException):
+			raise result
+		return result
+
+	async def _close_entry(self, entry: ContextEntry) -> CloseResult:
+		try:
+			await entry.drained.wait()
+			await entry.owner._close_owned()
+			result = CloseResult(context_id=entry.context_id, status='closed', error_code=None, retryable=False)
+		except asyncio.CancelledError:
+			logger.error('Context cleanup was cancelled by its own worker: %s', entry.context_id)
+			result = CloseResult(context_id=entry.context_id, status='close_failed', error_code='cleanup_cancelled', retryable=True)
+		except Exception as error:
+			logger.error('Context cleanup failed for %s: %s', entry.context_id, error, exc_info=True)
+			result = CloseResult(context_id=entry.context_id, status='close_failed', error_code='cleanup_failed', retryable=True)
+		async with self._lock:
+			if result.status == 'closed':
+				entry.phase = ContextPhase.CLOSED
+				self._entries.pop(entry.context_id, None)
+				if self._legacy_entry is entry:
+					self._legacy_entry = None
+			else:
+				entry.phase = ContextPhase.CLOSE_FAILED
+			entry.close_task = None
+		return result
+
+	async def stop_admission(self) -> None:
+		async with self._lock:
+			self._admission = ServerAdmission.STOPPING
+
+	async def set_admission(self, phase: ServerAdmission) -> None:
+		async with self._lock:
+			self._admission = phase
+
+	async def mark_legacy_closed(self) -> None:
+		"""Retire a legacy entry after a direct successful cleanup retry."""
+		async with self._lock:
+			if self._legacy_entry is not None:
+				self._legacy_entry.phase = ContextPhase.CLOSED
+				self._legacy_entry.close_task = None
+				self._legacy_entry = None
+
+	async def close_all(self) -> list[CloseResult]:
+		async with self._lock:
+			self._admission = ServerAdmission.STOPPING
+			entries = list(self._entries.values())
+			if self._legacy_entry is not None:
+				entries.append(self._legacy_entry)
+		results: list[CloseResult] = []
+		for entry in entries:
+			try:
+				task = await self._close_entry_task(entry)
+				results.append(await self._join_close(task))
+			except ContextUnavailable:
+				continue
+		async with self._lock:
+			self._admission = (
+				ServerAdmission.FAILED
+				if any(result.status != 'closed' for result in results)
+				else ServerAdmission.STOPPED
+			)
+		return results
+
+
+class OpenBrowserServer(_BrowserOwner):
+	"""MCP adapter and registry, plus the exact legacy no-handle owner."""
+
+	def __init__(self, session_timeout_minutes: int = 10):
+		_ensure_all_loggers_use_stderr()
+
+		config = load_openbrowser_config()
+		self._instance_id = uuid.uuid4().hex
+		self._lifecycle = LifecycleMachine('mcp_server')
+		self._telemetry = ProductTelemetry() if TELEMETRY_AVAILABLE else None
+		self._start_time = time.time()
+		self._output_lock: asyncio.Lock | None = None
+		self._output_lock_loop: Any = None
+		self._cleanup_task: Any = None
+		super().__init__(
+			owner_id=self._instance_id,
+			config=config,
+			session_timeout_minutes=session_timeout_minutes,
+			adapter=None,
+		)
+		self._contexts = ContextRegistry(self)
+		self._setup_handlers()
+
+	def _protocol_era(self, version: str | None) -> str:
+		if version is None:
+			return 'legacy'
+		if version == MODERN_PROTOCOL_VERSION:
+			return 'modern'
+		if version in LEGACY_PROTOCOL_VERSIONS:
+			return 'legacy'
+		raise MCPError(code=-32602, message=f'Unsupported protocol version: {version}')
+
+	def _setup_handlers(self):
+		"""Configure SDK callbacks from explicit legacy and modern catalogs."""
+
+		description = _EXECUTE_CODE_DESCRIPTION
+		if os.environ.get('OPENBROWSER_COMPACT_DESCRIPTION', '').lower() in ('1', 'true', 'yes'):
+			description = _EXECUTE_CODE_DESCRIPTION_COMPACT
+		self._legacy_tools = _tool_catalog(description, modern=False)
+		self._modern_tools = _tool_catalog(description, modern=True)
+		self._legacy_by_name = {tool.name: tool for tool in self._legacy_tools}
+		self._modern_by_name = {tool.name: tool for tool in self._modern_tools}
+		self._legacy_validators = {
+			tool.name: Draft202012Validator(tool.input_schema) for tool in self._legacy_tools
+		}
+		self._modern_validators = {
+			tool.name: Draft202012Validator(tool.input_schema) for tool in self._modern_tools
+		}
+		for tool in (*self._legacy_tools, *self._modern_tools):
+			Draft202012Validator.check_schema(tool.input_schema)
+			if tool.output_schema is not None:
+				Draft202012Validator.check_schema(tool.output_schema)
+
+		async def handle_list_tools(
+			ctx: ServerRequestContext, params: types.PaginatedRequestParams | None
+		) -> types.ListToolsResult:
+			era = self._protocol_era(getattr(ctx, 'protocol_version', None))
+			catalog = self._modern_tools if era == 'modern' else self._legacy_tools
+			return types.ListToolsResult(tools=[tool.model_copy(deep=True) for tool in catalog])
+
+		async def handle_list_resources(
+			ctx: ServerRequestContext, params: types.PaginatedRequestParams | None
+		) -> types.ListResourcesResult:
+			return types.ListResourcesResult(resources=[])
+
+		async def handle_list_resource_templates(
+			ctx: ServerRequestContext, params: types.PaginatedRequestParams | None
+		) -> types.ListResourceTemplatesResult:
+			return types.ListResourceTemplatesResult(resource_templates=[])
+
+		async def handle_list_prompts(
+			ctx: ServerRequestContext, params: types.PaginatedRequestParams | None
+		) -> types.ListPromptsResult:
+			return types.ListPromptsResult(prompts=[])
+
+		async def handle_call_tool(
+			ctx: ServerRequestContext, params: types.CallToolRequestParams
+		) -> types.CallToolResult:
+			start_time = time.time()
+			error_msg = None
+			telemetry_error = None
+			try:
+				era = self._protocol_era(getattr(ctx, 'protocol_version', None))
+				catalog = self._modern_tools if era == 'modern' else self._legacy_tools
+				by_name = self._modern_by_name if era == 'modern' else self._legacy_by_name
+				validators = self._modern_validators if era == 'modern' else self._legacy_validators
+				if params.name not in by_name:
+					raise MCPError(code=-32602, message=f'Unknown tool: {params.name}')
+				arguments = dict(params.arguments or {})
+				validation_error = next(validators[params.name].iter_errors(arguments), None)
+				if validation_error is not None:
+					error_msg = f'Invalid arguments: {validation_error.message}'
+					# The validator message can contain a repr of user data.
+					# Keep it client-facing, never in outbound telemetry.
+					telemetry_error = 'invalid_tool_arguments'
+					return types.CallToolResult(
+						content=[types.TextContent(type='text', text=error_msg)], is_error=True
+					)
+				if params.name == 'execute_code' and not arguments['code'].strip():
+					error_msg = 'Error: No code provided'
+					return types.CallToolResult(
+						content=[types.TextContent(type='text', text=error_msg)], is_error=True
+					)
+
+				if era == 'modern':
+					if params.name == 'create_context':
+						try:
+							return await self._create_context_result()
+						except ContextUnavailable as error:
+							telemetry_error = error.code
+							error_msg = f'Error: {error.code}: {error}'
+							return types.CallToolResult(
+								content=[types.TextContent(type='text', text=error_msg)], is_error=True
+							)
+					if params.name == 'close_context':
+						try:
+							return await self._close_context_result(arguments['context_id'])
+						except ContextUnavailable as error:
+							telemetry_error = error.code
+							error_msg = f'Error: {error.code}: {error}'
+							return types.CallToolResult(
+								content=[types.TextContent(type='text', text=error_msg)], is_error=True
+							)
+					context_id = arguments.pop('context_id')
+					try:
+						lease = await self._contexts.acquire(context_id)
+					except ContextUnavailable as error:
+						telemetry_error = error.code
+						error_msg = f'Error: {error.code}: {error}'
+						return types.CallToolResult(
+							content=[types.TextContent(type='text', text=error_msg)], is_error=True
+						)
+					try:
+						text, is_error = await self._run_owned_tool(lease.owner, params.name, arguments)
+					finally:
+						self._contexts.release(lease.entry)
+				else:
+					if params.name in ('create_context', 'close_context'):
+						raise MCPError(code=-32602, message=f'Unknown tool: {params.name}')
+					try:
+						lease = await self._contexts.acquire_legacy()
+					except ContextUnavailable as error:
+						telemetry_error = error.code
+						error_msg = f'Error: {error.code}: {error}'
+						return types.CallToolResult(
+							content=[types.TextContent(type='text', text=error_msg)], is_error=True
+						)
+					try:
+						text, is_error = await self._run_owned_tool(self, params.name, arguments)
+					finally:
+						self._contexts.release(lease.entry)
+				return types.CallToolResult(
+					content=[types.TextContent(type='text', text=text)], is_error=is_error
+				)
+			except asyncio.CancelledError as error:
+				error_msg = f'{type(error).__name__}: {error}'
+				raise
+			except MCPError as error:
+				error_msg = str(error)
+				raise
+			except Exception as error:
+				error_msg = str(error)
+				logger.error('Tool execution failed: %s', error, exc_info=True)
+				return types.CallToolResult(
+					content=[types.TextContent(type='text', text=f'Error: {error}')], is_error=True
+				)
+			except BaseException as error:
+				error_msg = f'{type(error).__name__}: {error}'
+				raise
+			finally:
+				if self._telemetry and TELEMETRY_AVAILABLE:
+					self._telemetry.capture(
+						MCPServerTelemetryEvent(
+							version=get_openbrowser_version(),
+							action='tool_call',
+							tool_name=params.name,
+							duration_seconds=time.time() - start_time,
+							error_message=telemetry_error if telemetry_error is not None else error_msg,
+						)
+					)
+
+		def get_tool_input_schema(name: str) -> dict[str, Any] | None:
+			tool = self._modern_by_name.get(name) or self._legacy_by_name.get(name)
+			return deepcopy(tool.input_schema) if tool is not None else None
+
+		self.server = Server(
+			'openbrowser',
+			version=get_openbrowser_version(),
+			on_list_tools=handle_list_tools,
+			on_list_resources=handle_list_resources,
+			on_list_resource_templates=handle_list_resource_templates,
+			on_list_prompts=handle_list_prompts,
+			on_call_tool=handle_call_tool,
+			get_tool_input_schema=get_tool_input_schema,
+			cache_hints={
+				method: CacheHint(ttl_ms=60_000, scope='private')
+				for method in ('tools/list', 'resources/list', 'resources/templates/list', 'prompts/list')
+			},
+		)
+
+	async def _run_owned_tool(self, owner: Any, name: str, arguments: dict[str, Any]) -> tuple[str, bool]:
+		"""Run one validated application call as an owned, drained task."""
+
+		async def owned_call() -> str | BaseException:
+			try:
+				return await owner._handle_tool(name, arguments)
+			except asyncio.CancelledError:
+				raise
+			except BaseException as error:
+				return error
+
+		operation = asyncio.create_task(owned_call())
+		completion = asyncio.gather(operation, return_exceptions=True)
+		caller_cancellation = await _drain_owned_completion(
+			completion, on_first_cancellation=operation.cancel
+		)
+		result = completion.result()[0]
+		if caller_cancellation is not None:
+			raise caller_cancellation
+		if operation.cancelled():
+			return 'Error: Tool operation was cancelled', True
+		if isinstance(result, BaseException):
+			raise result
+		return result, False
+
+	async def _create_context_result(self) -> types.CallToolResult:
+		context_id = await self._contexts.create()
+		payload = {'context_id': context_id}
+		return types.CallToolResult(
+			content=[types.TextContent(type='text', text=json.dumps(payload))],
+			structured_content=payload,
+		)
+
+	async def _close_context_result(self, context_id: str) -> types.CallToolResult:
+		result = await self._contexts.close(context_id)
+		payload = {
+			'context_id': result.context_id,
+			'status': result.status,
+			'error_code': result.error_code,
+			'retryable': result.retryable,
+		}
+		return types.CallToolResult(
+			content=[types.TextContent(type='text', text=json.dumps(payload))],
+			structured_content=payload,
+			is_error=result.status != 'closed',
+		)
+
+	async def _shutdown_locked(self) -> None:
+		"""Fence new work, close every context, then close the legacy owner."""
+		cleanup_task = self._cleanup_task
+		self._cleanup_task = None
+		if cleanup_task:
+			cleanup_task.cancel()
+			try:
+				await cleanup_task
+			except asyncio.CancelledError:
+				pass
+			except Exception as error:
+				logger.error('Error stopping cleanup task: %s', error)
+
+		await self._contexts.stop_admission()
+		results = await self._contexts.close_all()
+		failures = [result for result in results if result.status != 'closed']
+		owner_error: Exception | None = None
+		if self.browser_session is not None or self._executor.namespace is not None:
+			try:
+				await self._shutdown_owner_locked()
+			except Exception as error:
+				owner_error = error
+				failures.append(
+					CloseResult(
+						context_id='__legacy__',
+						status='close_failed',
+						error_code='cleanup_failed',
+						retryable=True,
+					)
+				)
+			else:
+				await self._contexts.mark_legacy_closed()
+				failures = [result for result in failures if result.context_id != '__legacy__']
+		if failures:
+			await self._contexts.set_admission(ServerAdmission.FAILED)
+			if owner_error is not None and len(failures) == 1:
+				raise owner_error
+			message = 'Context cleanup failed: ' + ', '.join(
+				f'{result.context_id}:{result.error_code or result.status}' for result in failures
+			)
+			raise RuntimeError(message)
+		await self._contexts.set_admission(ServerAdmission.STOPPED)
+
 	async def _start_cleanup_task(self) -> None:
-		"""Start the background cleanup task."""
+		"""Start the background cleanup task for every active owner."""
 
 		async def cleanup_loop():
 			while True:
 				try:
 					await self._cleanup_expired_session()
+					for entry in self._contexts.snapshot():
+						if entry.phase is not ContextPhase.ACTIVE or entry.owner is self:
+							continue
+						try:
+							await entry.owner._cleanup_expired_session()
+						except Exception as error:
+							logger.error('Idle cleanup failed for %s: %s', entry.context_id, error)
 					await asyncio.sleep(120)
-				except Exception as e:
-					logger.error('Error in cleanup task: %s', e)
+				except asyncio.CancelledError:
+					raise
+				except Exception as error:
+					logger.error('Error in cleanup task: %s', error)
 					await asyncio.sleep(120)
 
 		self._cleanup_task = asyncio.create_task(cleanup_loop())
 
 	async def run(self):
-		"""Run the MCP server."""
+		"""Run the MCP server and clean up before the transport context exits."""
 		self._lifecycle.transition(LifecyclePhase.STARTING, reason='mcp server starting')
+		shutdown_attempted = False
 		try:
 			await self._start_cleanup_task()
 			self._lifecycle.transition(LifecyclePhase.READY, reason='mcp server ready')
 
 			async with mcp.server.stdio.stdio_server() as (read_stream, write_stream):
-				await self.server.run(
-					read_stream,
-					write_stream,
-					self.server.create_initialization_options(),
-				)
-		finally:
+				try:
+					await self.server.run(
+						read_stream,
+						write_stream,
+						self.server.create_initialization_options(),
+					)
+				finally:
+					try:
+						self._lifecycle.transition(LifecyclePhase.STOPPING, reason='mcp server stopping')
+					except LifecycleTransitionError:
+						pass
+					shutdown_attempted = True
+					await self._shutdown()
+		except BaseException as error:
+			if not shutdown_attempted:
+				try:
+					await self._shutdown()
+				except BaseException as shutdown_error:
+					logger.error('Shutdown after startup failure also failed: %s', shutdown_error)
 			try:
-				self._lifecycle.transition(LifecyclePhase.STOPPING, reason='mcp server stopping')
+				self._lifecycle.fail(error, reason='mcp server shutdown failed')
 			except LifecycleTransitionError:
 				pass
-			await self._shutdown()
+			raise
+		else:
 			try:
 				self._lifecycle.transition(
 					LifecyclePhase.STOPPED,
