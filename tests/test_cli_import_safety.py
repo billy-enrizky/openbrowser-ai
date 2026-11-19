@@ -4,11 +4,14 @@ import os
 import re
 import subprocess
 import sys
+from importlib.metadata import entry_points
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
 import pytest
+from click.testing import CliRunner
 
-from openbrowser.cli import CliMode, select_cli_mode
+from openbrowser.cli import CliMode, main, select_cli_mode
 
 ROOT = Path(__file__).parents[1]
 
@@ -151,3 +154,23 @@ def test_template_generation_creates_the_bundled_default(module, tmp_path):
     assert result.returncode == 0, result.stderr
     assert output.exists()
     assert 'Agent' in output.read_text(encoding='utf-8')
+
+
+def test_installed_console_script_maps_to_cli_entry():
+    matches = [
+        entry
+        for entry in entry_points(group='console_scripts')
+        if entry.name == 'openbrowser-ai'
+    ]
+    assert matches
+    assert matches[0].value == 'openbrowser.cli_entry:cli'
+
+
+def test_prompt_value_init_keeps_prompt_mode(monkeypatch):
+    monkeypatch.setattr('openbrowser.cli.Agent', object())
+    prompt = AsyncMock()
+    with patch('openbrowser.cli.run_prompt_mode', prompt):
+        result = CliRunner().invoke(main, ['-p', 'init'])
+    assert result.exit_code == 0, result.output
+    prompt.assert_awaited_once()
+    assert prompt.await_args.args[0] == 'init'

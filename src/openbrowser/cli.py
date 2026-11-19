@@ -18,12 +18,12 @@ class CliMode(str, Enum):
 
 def select_cli_mode(args: list[str]) -> CliMode | None:
 	"""Return the explicit fast-path mode for argv, or None for Click."""
-	if ('-p' in args or '--prompt' in args) and '-c' not in args:
-		# Prompt mode owns its value. "openbrowser-ai -p init" is a prompt,
-		# not the init subcommand. Click still gives --mcp precedence.
-		return None
 	if '--mcp' in args:
 		return CliMode.MCP
+	if ('-p' in args or '--prompt' in args) and '-c' not in args:
+		# Prompt mode owns its value. "openbrowser-ai -p init" is a prompt,
+		# not the init subcommand. --mcp keeps its fast path above.
+		return None
 	if '-c' in args:
 		return CliMode.EXECUTE_CODE
 	if args and args[0] == 'daemon':

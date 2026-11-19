@@ -12,7 +12,7 @@ load_dotenv()
 async def main() -> None:
 	browser_profile = BrowserProfile(
 		headless=True,
-		keep_alive=True,
+		keep_alive=False,
 		wait_between_actions=0.5,
 		viewport={'width': 1440, 'height': 900},
 	)
