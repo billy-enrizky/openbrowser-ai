@@ -15,11 +15,33 @@ import json
 import logging
 import os
 import signal
+import stat
+import tempfile
 import time
+from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
+from typing import Any
 
-from openbrowser.browser.lifecycle import LifecycleMachine, LifecyclePhase, LifecycleTransitionError
-from openbrowser.daemon import IS_WINDOWS, WINDOWS_PORT, get_pid_path, get_socket_path
+from openbrowser.browser.lifecycle import (
+    LifecycleMachine,
+    LifecyclePhase,
+    LifecycleTransitionError,
+)
+from openbrowser.browser.storage_state import StorageStatePhase, StorageStateSnapshot
+from openbrowser.daemon import (
+    EXIT_OWNER_BUSY,
+    IS_WINDOWS,
+    WINDOWS_PORT,
+    get_pid_path,
+    get_socket_path,
+)
+from openbrowser.daemon.ownership import (
+    DaemonOwnerLock,
+    SocketEntryIdentity,
+    owner_lock_path_for_pid_file,
+    socket_entry_identity,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +49,7 @@ DEFAULT_IDLE_TIMEOUT = 600  # 10 minutes
 DEFAULT_EXEC_TIMEOUT = 110  # Leave room for the client to receive a timeout response
 DAEMON_INIT_TIMEOUT = 30  # Bound browser startup so clients never wait indefinitely
 DAEMON_CLEANUP_TIMEOUT = 5  # Bound cleanup after failed startup
+PID_FILE_WRITE_GRACE_SECONDS = 2.0  # Let another owner finish publishing an empty file
 
 
 def _init_timeout() -> float:
@@ -38,50 +61,402 @@ def _init_timeout() -> float:
         return float(DAEMON_INIT_TIMEOUT)
 
 
-def _read_pid() -> int | None:
-    """Read PID from file, return None if stale or missing.
+class DaemonStartupPhase(str, Enum):
+    """Explicit phases of daemon ownership and socket startup."""
 
-    A PID file with a live process is only considered valid if the daemon
-    socket is also connectable. A process killed with SIGKILL skips
-    finally/_cleanup_pid(), leaving a stale PID + dead socket.
+    IDLE = 'idle'
+    CHECKING_OWNERSHIP = 'checking_ownership'
+    CLEANING_STALE_LOCK = 'cleaning_stale_lock'
+    ACQUIRING_OWNERSHIP = 'acquiring_ownership'
+    BINDING_SOCKET = 'binding_socket'
+    LISTENING = 'listening'
+    FAILED = 'failed'
+    STOPPED = 'stopped'
+
+
+class PidOwnerState(str, Enum):
+    """Ownership classification for a daemon PID and socket pair."""
+
+    ABSENT = 'absent'
+    ACTIVE = 'active'
+    UNRESPONSIVE = 'unresponsive'
+    STALE = 'stale'
+
+
+class SocketProbeState(str, Enum):
+    """Safety classification for a daemon socket path."""
+
+    ABSENT = 'absent'
+    ACTIVE = 'active'
+    FOREIGN = 'foreign'
+    UNKNOWN = 'unknown'
+
+
+@dataclass(frozen=True)
+class PidInspection:
+    """Ownership inspection result, including stale-file cleanup actions."""
+
+    state: PidOwnerState
+    pid: int | None = None
+    detail: str | None = None
+    stale_pid_removed: bool = False
+
+
+# Names kept for the existing status/tests; the implementation is shared with
+# the daemon client so both sides classify and compare the same entry.
+SocketPathIdentity = SocketEntryIdentity
+_socket_path_identity = socket_entry_identity
+
+
+def _probe_socket(path: Path) -> SocketProbeState:
+    """Classify a socket without treating an unprovable failure as stale."""
+    if IS_WINDOWS:
+        return SocketProbeState.UNKNOWN
+    import socket as _socket
+
+    try:
+        if not stat.S_ISSOCK(path.lstat().st_mode):
+            return SocketProbeState.FOREIGN
+    except FileNotFoundError:
+        return SocketProbeState.ABSENT
+    except OSError:
+        return SocketProbeState.UNKNOWN
+
+    handle = None
+    try:
+        handle = _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM)
+        handle.settimeout(1.0)
+        handle.connect(str(path))
+        return SocketProbeState.ACTIVE
+    except (FileNotFoundError, ConnectionRefusedError, ValueError):
+        return SocketProbeState.ABSENT
+    except OSError:
+        return SocketProbeState.UNKNOWN
+    finally:
+        if handle is not None:
+            handle.close()
+
+
+def _is_openbrowser_daemon_process(pid: int) -> bool | None:
+    """Return whether this PID is the daemon for this socket path."""
+    try:
+        import psutil
+    except ImportError:
+        return None
+    try:
+        from openbrowser.daemon.diagnostics import is_daemon_cmdline
+
+        process = psutil.Process(pid)
+        if not is_daemon_cmdline(process.cmdline()):
+            return False
+        try:
+            environment = process.environ()
+        except (psutil.AccessDenied, OSError):
+            return None
+        configured = str(environment.get('OPENBROWSER_SOCKET') or '').strip()
+        if not configured:
+            from openbrowser.daemon import SOCKET_PATH
+
+            owner_socket = SOCKET_PATH.expanduser()
+        else:
+            owner_socket = Path(configured).expanduser()
+            if not owner_socket.is_absolute():
+                return None
+        return owner_socket.resolve() == get_socket_path().resolve()
+    except (psutil.Error, OSError, RuntimeError):
+        return None
+
+
+def _pid_file_age_seconds(path: Path) -> float | None:
+    """Return the age of a PID file, or None when its metadata is unavailable."""
+    try:
+        return max(0.0, time.time() - path.stat().st_mtime)
+    except OSError:
+        return None
+
+
+def _daemon_pid_exists(pid: int) -> bool | None:
+    """Return process liveness without sending a signal on any platform."""
+    try:
+        import psutil
+    except ImportError:
+        return None
+    try:
+        return psutil.pid_exists(pid)
+    except (psutil.Error, OSError):
+        return None
+
+
+_LOOPBACK_ADDRESSES = frozenset({'127.0.0.1', '::1'})
+
+
+def _windows_pid_owns_listener(pid: int) -> bool | None:
+    """Return whether a Windows PID owns the daemon loopback listener."""
+    try:
+        import psutil
+    except ImportError:
+        return None
+    try:
+        for connection in psutil.net_connections(kind='tcp'):
+            address = connection.laddr
+            if (
+                connection.pid == pid
+                and connection.status == psutil.CONN_LISTEN
+                and address
+                and address.port == WINDOWS_PORT
+                and address.ip in _LOOPBACK_ADDRESSES
+            ):
+                return True
+        return False
+    except (psutil.Error, OSError):
+        return None
+
+
+def _inspect_pid() -> PidInspection:
+    """Inspect PID/socket ownership and remove stale files.
+
+    A live OpenBrowser daemon is never treated as stale only because its
+    socket is not yet accepting connections. That window exists while the
+    owner is still binding and must not be stolen by another server.
     """
     pid_path = get_pid_path()
     if not pid_path.exists():
-        return None
+        return PidInspection(state=PidOwnerState.ABSENT)
     try:
-        pid = int(pid_path.read_text().strip())
-        os.kill(pid, 0)  # raises OSError if dead
-    except (ValueError, OSError):
+        content = pid_path.read_bytes().strip()
+    except FileNotFoundError:
+        return PidInspection(state=PidOwnerState.ABSENT)
+    except OSError as error:
+        return PidInspection(
+            state=PidOwnerState.UNRESPONSIVE,
+            detail=f'PID file cannot be read: {type(error).__name__}: {error}',
+        )
+    try:
+        pid = int(content)
+        if not 0 < pid < 2**31:
+            raise ValueError('PID is outside the supported range')
+    except (ValueError, OverflowError):
+        age = _pid_file_age_seconds(pid_path)
+        if age is None:
+            return PidInspection(
+                state=PidOwnerState.UNRESPONSIVE,
+                detail='PID file is empty or incomplete and its age cannot be checked safely',
+            )
+        if age < PID_FILE_WRITE_GRACE_SECONDS:
+            return PidInspection(
+                state=PidOwnerState.UNRESPONSIVE,
+                detail='PID file is empty or incomplete and may still be written',
+            )
+        try:
+            pid_path.unlink(missing_ok=True)
+        except OSError as error:
+            return PidInspection(
+                state=PidOwnerState.UNRESPONSIVE,
+                detail=f'Invalid PID file could not be removed: {type(error).__name__}: {error}',
+            )
+        return PidInspection(
+            state=PidOwnerState.STALE,
+            detail='PID file was invalid and was removed',
+            stale_pid_removed=True,
+        )
+
+    process_exists = _daemon_pid_exists(pid)
+    if process_exists is False:
         pid_path.unlink(missing_ok=True)
-        return None
+        return PidInspection(
+            state=PidOwnerState.STALE,
+            detail=f'PID {pid} no longer exists',
+            stale_pid_removed=True,
+        )
+    if process_exists is None:
+        return PidInspection(
+            state=PidOwnerState.UNRESPONSIVE,
+            pid=pid,
+            detail=f'PID {pid} could not be checked safely',
+        )
 
     if not IS_WINDOWS:
-        import socket as _socket
-        sock_path = str(get_socket_path())
-        try:
-            s = _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM)
-            s.settimeout(1.0)
-            s.connect(sock_path)
-            s.close()
-        except OSError:
-            logger.warning('PID %d alive but socket unresponsive -- cleaning stale lock', pid)
+        socket_state = _probe_socket(get_socket_path())
+        if socket_state is SocketProbeState.UNKNOWN:
+            return PidInspection(
+                state=PidOwnerState.UNRESPONSIVE,
+                pid=pid,
+                detail=f'PID {pid} may own the daemon socket, but its state cannot be proven safely',
+            )
+        if socket_state is SocketProbeState.ACTIVE:
+            return PidInspection(state=PidOwnerState.ACTIVE, pid=pid)
+        if socket_state is SocketProbeState.FOREIGN:
+            return PidInspection(
+                state=PidOwnerState.UNRESPONSIVE,
+                pid=pid,
+                detail=f'PID {pid} exists but the socket path is occupied by a non-socket file',
+            )
+        daemon_process = _is_openbrowser_daemon_process(pid)
+        if daemon_process is False:
             pid_path.unlink(missing_ok=True)
-            get_socket_path().unlink(missing_ok=True)
-            return None
+            return PidInspection(
+                state=PidOwnerState.STALE,
+                detail=f'PID {pid} was reused by a non-daemon process',
+                stale_pid_removed=True,
+            )
+        return PidInspection(
+            state=PidOwnerState.UNRESPONSIVE,
+            pid=pid,
+            detail=f'PID {pid} owns the daemon lock but its socket is not accepting connections',
+        )
 
-    return pid
+    daemon_process = _is_openbrowser_daemon_process(pid)
+    if daemon_process is False:
+        pid_path.unlink(missing_ok=True)
+        return PidInspection(
+            state=PidOwnerState.STALE,
+            detail=f'PID {pid} was reused by a non-daemon process',
+            stale_pid_removed=True,
+        )
+    listener = _windows_pid_owns_listener(pid)
+    if listener is True:
+        return PidInspection(state=PidOwnerState.ACTIVE, pid=pid)
+    if listener is False:
+        return PidInspection(
+            state=PidOwnerState.UNRESPONSIVE,
+            pid=pid,
+            detail=f'PID {pid} owns the daemon PID file but not the loopback listener',
+        )
+    return PidInspection(
+        state=PidOwnerState.UNRESPONSIVE,
+        pid=pid,
+        detail=f'PID {pid} listener ownership could not be verified safely',
+    )
+
+
+def _read_pid() -> int | None:
+    """Return a live daemon PID, or None after cleaning proven stale files."""
+    inspection = _inspect_pid()
+    if inspection.state in (PidOwnerState.ACTIVE, PidOwnerState.UNRESPONSIVE):
+        return inspection.pid
+    return None
+
+
+def _peek_pid() -> int | None:
+    """Read the PID file without changing ownership or deleting anything."""
+    try:
+        return int(get_pid_path().read_text().strip())
+    except (OSError, ValueError):
+        return None
+
+
+def _acquire_pid_file(pid: int | None = None) -> bool:
+    """Publish a complete PID file without exposing an empty owner file."""
+    owner = os.getpid() if pid is None else pid
+    pid_path = get_pid_path()
+    pid_path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary = tempfile.mkstemp(
+        prefix=f'.{pid_path.name}.',
+        suffix='.tmp',
+        dir=pid_path.parent,
+    )
+    temporary_path = Path(temporary)
+    try:
+        try:
+            if hasattr(os, 'fchmod'):
+                os.fchmod(descriptor, 0o600)
+            os.write(descriptor, str(owner).encode('utf-8'))
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+        try:
+            os.link(temporary_path, pid_path)
+        except FileExistsError:
+            return False
+        except OSError:
+            # Some filesystems do not support hard links. Fall back to an
+            # exclusive create while keeping the complete-content window small.
+            try:
+                handle = os.open(pid_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+            except FileExistsError:
+                return False
+            try:
+                os.write(handle, str(owner).encode('utf-8'))
+                os.fsync(handle)
+            except BaseException:
+                pid_path.unlink(missing_ok=True)
+                raise
+            finally:
+                os.close(handle)
+        return True
+    finally:
+        temporary_path.unlink(missing_ok=True)
 
 
 def _write_pid() -> None:
+    """Write this process PID, raising if another owner exists."""
+    if not _acquire_pid_file():
+        raise FileExistsError(f'PID file already exists: {get_pid_path()}')
+
+
+def _cleanup_pid(
+    expected_pid: int | None = None,
+    *,
+    remove_socket: bool = True,
+    socket_identity: SocketPathIdentity | None = None,
+) -> None:
+    """Remove daemon files only when this process still owns them.
+
+    ``socket_identity`` is the identity captured after binding. When given,
+    the socket path is removed only while it still names that same socket
+    entry, so a replacement file at the same path survives shutdown.
+    """
     pid_path = get_pid_path()
-    pid_path.parent.mkdir(parents=True, exist_ok=True)
-    pid_path.write_text(str(os.getpid()))
-    pid_path.chmod(0o600)
+    owner_verified = expected_pid is None
+    if expected_pid is not None and pid_path.exists():
+        try:
+            owner = int(pid_path.read_text().strip())
+        except (ValueError, OSError):
+            logger.warning('Skipping daemon cleanup; PID file ownership cannot be verified')
+            return
+        if owner != expected_pid:
+            logger.warning('Skipping daemon cleanup; PID file now belongs to %d', owner)
+            return
+        owner_verified = True
+    if remove_socket and owner_verified:
+        socket_path = get_socket_path()
+        current_identity = _socket_path_identity(socket_path)
+        if socket_identity is None:
+            logger.warning('Skipping daemon socket cleanup; no bound socket identity was captured')
+        elif current_identity is None:
+            pass
+        elif not current_identity.is_socket:
+            logger.warning('Skipping daemon socket cleanup; path is not a socket')
+        elif current_identity != socket_identity:
+            logger.warning('Skipping daemon socket cleanup; path no longer names the bound socket')
+        else:
+            try:
+                socket_path.unlink(missing_ok=True)
+            except OSError:
+                logger.warning('Failed to remove daemon socket', exc_info=True)
+    pid_path.unlink(missing_ok=True)
 
 
-def _cleanup_pid() -> None:
-    get_pid_path().unlink(missing_ok=True)
-    get_socket_path().unlink(missing_ok=True)
+_STARTUP_TRANSITIONS: dict[DaemonStartupPhase, frozenset[DaemonStartupPhase]] = {
+    DaemonStartupPhase.IDLE: frozenset({DaemonStartupPhase.CHECKING_OWNERSHIP, DaemonStartupPhase.FAILED}),
+    DaemonStartupPhase.CHECKING_OWNERSHIP: frozenset(
+        {
+            DaemonStartupPhase.CLEANING_STALE_LOCK,
+            DaemonStartupPhase.ACQUIRING_OWNERSHIP,
+            DaemonStartupPhase.FAILED,
+        }
+    ),
+    DaemonStartupPhase.CLEANING_STALE_LOCK: frozenset(
+        {DaemonStartupPhase.ACQUIRING_OWNERSHIP, DaemonStartupPhase.FAILED}
+    ),
+    DaemonStartupPhase.ACQUIRING_OWNERSHIP: frozenset(
+        {DaemonStartupPhase.BINDING_SOCKET, DaemonStartupPhase.FAILED}
+    ),
+    DaemonStartupPhase.BINDING_SOCKET: frozenset({DaemonStartupPhase.LISTENING, DaemonStartupPhase.FAILED}),
+    DaemonStartupPhase.LISTENING: frozenset({DaemonStartupPhase.STOPPED, DaemonStartupPhase.FAILED}),
+    DaemonStartupPhase.FAILED: frozenset(),
+    DaemonStartupPhase.STOPPED: frozenset(),
+}
 
 
 class DaemonServer:
@@ -105,6 +480,87 @@ class DaemonServer:
         self._needs_browser_recovery = False
         self._profile_summary: dict[str, object] | None = None
         self._browser_generation = 0
+        self._startup_phase = DaemonStartupPhase.IDLE
+        self._startup_detail: str | None = None
+        self._startup_history: list[DaemonStartupPhase] = []
+        self._startup_stale_pid_removed = False
+        self._startup_stale_socket_removed = False
+        self._startup_owner_pid: int | None = None
+        self._startup_owner_state: PidOwnerState | None = None
+        self._startup_owner_busy = False
+        self._bound_socket_identity: SocketPathIdentity | None = None
+        self._storage_state_preload = StorageStateSnapshot(phase=StorageStatePhase.NOT_CONFIGURED)
+
+    def _set_startup(self, phase: DaemonStartupPhase, detail: str | None = None) -> None:
+        """Move the startup machine through an explicitly allowed transition."""
+        if phase is self._startup_phase:
+            self._startup_detail = detail
+            return
+        if phase not in _STARTUP_TRANSITIONS[self._startup_phase]:
+            raise RuntimeError(f'Invalid daemon startup transition: {self._startup_phase.value} -> {phase.value}')
+        self._startup_phase = phase
+        self._startup_detail = detail
+        self._startup_history.append(phase)
+
+    def _fail_startup(self, detail: str, error: BaseException | str | None = None) -> None:
+        """Record one terminal startup failure without hiding it as a clean stop."""
+        bounded = detail if len(detail) <= 500 else f'{detail[:497]}...'
+        self._set_startup(DaemonStartupPhase.FAILED, bounded)
+        if self._lifecycle.phase is not LifecyclePhase.FAILED:
+            try:
+                self._lifecycle.fail(error or bounded, reason='daemon start failed')
+            except LifecycleTransitionError:
+                pass
+
+    def _record_storage_state(self, storage_state: object) -> None:
+        """Record profile storage-state metadata for pre-browser status."""
+        if isinstance(storage_state, (str, Path)):
+            path = str(storage_state)
+            expanded: Path | None = None
+            try:
+                expanded = Path(path).expanduser()
+                size = expanded.stat().st_size
+            except FileNotFoundError:
+                self._storage_state_preload = StorageStateSnapshot(
+                    phase=StorageStatePhase.SKIPPED,
+                    path=str(expanded) if expanded is not None else path,
+                    detail='storage-state file does not exist',
+                )
+            except (OSError, RuntimeError) as error:
+                self._storage_state_preload = StorageStateSnapshot(
+                    phase=StorageStatePhase.FAILED,
+                    path=path,
+                    error=f'{type(error).__name__}: {error}',
+                    detail='storage-state path could not be resolved or inspected',
+                )
+            else:
+                self._storage_state_preload = StorageStateSnapshot(
+                    phase=StorageStatePhase.PENDING,
+                    path=str(expanded),
+                    bytes=size,
+                )
+            return
+        if isinstance(storage_state, dict):
+            self._storage_state_preload = StorageStateSnapshot(
+                phase=StorageStatePhase.SKIPPED,
+                detail='in-memory storage state is not loaded from a file',
+            )
+            return
+        self._storage_state_preload = StorageStateSnapshot(phase=StorageStatePhase.NOT_CONFIGURED)
+
+    def _storage_state_snapshot(self) -> StorageStateSnapshot:
+        """Return the watchdog-owned load state, or the pre-load view."""
+        watchdog = getattr(self._session, '_storage_state_watchdog', None)
+        snapshot = getattr(watchdog, 'storage_state_snapshot', None)
+        if callable(snapshot):
+            try:
+                value = snapshot()
+            except Exception:
+                logger.warning('Could not read storage-state snapshot', exc_info=True)
+            else:
+                if isinstance(value, StorageStateSnapshot):
+                    return value
+        return self._storage_state_preload
 
     def _default_profile_dir(self) -> Path:
         """Choose a stable profile directory for this daemon socket."""
@@ -122,7 +578,11 @@ class DaemonServer:
     def _build_browser_profile(self):
         """Build a BrowserProfile from config with daemon defaults."""
         from openbrowser.browser import BrowserProfile
-        from openbrowser.config import CONFIG, apply_managed_browser_profile_defaults, get_default_profile, load_openbrowser_config
+        from openbrowser.config import (
+            apply_managed_browser_profile_defaults,
+            get_default_profile,
+            load_openbrowser_config,
+        )
 
         config = load_openbrowser_config()
         profile_config = dict(get_default_profile(config))
@@ -171,6 +631,7 @@ class DaemonServer:
             'headless': profile.headless,
             'storage_state': str(storage_state) if isinstance(storage_state, (str, Path)) else None,
         }
+        self._record_storage_state(storage_state)
         return profile
 
     async def _ensure_executor(self):
@@ -187,7 +648,10 @@ class DaemonServer:
             logging.getLogger('openbrowser').setLevel(logging.ERROR)
 
             from openbrowser.browser import BrowserSession
-            from openbrowser.code_use.executor import DEFAULT_MAX_OUTPUT_CHARS, CodeExecutor
+            from openbrowser.code_use.executor import (
+                DEFAULT_MAX_OUTPUT_CHARS,
+                CodeExecutor,
+            )
             from openbrowser.code_use.namespace import create_namespace
             from openbrowser.tools.service import CodeAgentTools
 
@@ -199,7 +663,7 @@ class DaemonServer:
                     await asyncio.wait_for(session.start(), timeout=init_timeout)
                 except asyncio.TimeoutError as exc:
                     raise TimeoutError(f'Browser initialization timed out after {init_timeout:g}s') from exc
-                seeded = session.seed_generation(getattr(self, '_browser_generation', 0))
+                seeded: Any = session.seed_generation(getattr(self, '_browser_generation', 0))
                 if inspect.isawaitable(seeded):
                     await seeded
 
@@ -210,8 +674,9 @@ class DaemonServer:
                     max_output = int(os.environ.get('OPENBROWSER_MAX_OUTPUT', '0'))
                 except (ValueError, TypeError):
                     max_output = 0
-                self._executor = CodeExecutor(max_output_chars=max_output if max_output > 0 else DEFAULT_MAX_OUTPUT_CHARS)
-                self._executor.set_namespace(namespace)
+                executor = CodeExecutor(max_output_chars=max_output if max_output > 0 else DEFAULT_MAX_OUTPUT_CHARS)
+                executor.set_namespace(namespace)
+                self._executor = executor
                 self._session = session
                 self._browser_error = None
                 self._needs_browser_recovery = False
@@ -307,7 +772,7 @@ class DaemonServer:
             try:
                 await asyncio.wait_for(session.start(), timeout=getattr(self, '_init_timeout', _init_timeout()))
                 self._browser_generation = getattr(self, '_browser_generation', 0) + 1
-                seeded = session.seed_generation(self._browser_generation)
+                seeded: Any = session.seed_generation(self._browser_generation)
                 if inspect.isawaitable(seeded):
                     await seeded
                 tools = CodeAgentTools()
@@ -315,7 +780,10 @@ class DaemonServer:
                 for key, value in (old_namespace or {}).items():
                     if not key.startswith('__') and key not in namespace:
                         namespace[key] = value
-                self._executor.set_namespace(namespace)
+                executor = self._executor
+                if executor is None:
+                    raise RuntimeError('Cannot recover a browser without an executor')
+                executor.set_namespace(namespace)
                 self._session = session
                 self._browser_error = None
                 self._needs_browser_recovery = False
@@ -355,6 +823,7 @@ class DaemonServer:
             version = None
 
         snapshot = self._lifecycle.snapshot()
+        storage_state = self._storage_state_snapshot()
         return {
             'pid': os.getpid(),
             'state': snapshot.phase.value,
@@ -370,6 +839,16 @@ class DaemonServer:
             'uptime_seconds': max(0.0, time.time() - self._started_at),
             'version': version,
             'browser': browser,
+            'startup': {
+                'phase': self._startup_phase.value,
+                'detail': self._startup_detail,
+                'history': [phase.value for phase in self._startup_history],
+                'stale_pid_removed': self._startup_stale_pid_removed,
+                'stale_socket_removed': self._startup_stale_socket_removed,
+                'owner_pid': self._startup_owner_pid,
+                'owner_state': self._startup_owner_state.value if self._startup_owner_state else None,
+            },
+            'storage_state': storage_state.to_dict(),
         }
 
     def _error_response(
@@ -408,6 +887,21 @@ class DaemonServer:
             return False
         return True
 
+    async def _close_server_on_startup_failure(self) -> None:
+        """Close a listener that was created before the listen loop was entered."""
+        server = self._server
+        if server is None:
+            return
+        try:
+            closed: Any = server.close()
+            if inspect.isawaitable(closed):
+                await closed
+            waited: Any = server.wait_closed()
+            if inspect.isawaitable(waited):
+                await waited
+        except BaseException:
+            logger.warning('Failed to close daemon listener after startup failure', exc_info=True)
+
     async def _handle_request(self, data: dict) -> dict:
         """Handle a single JSON request."""
         self._last_activity = time.time()
@@ -439,9 +933,17 @@ class DaemonServer:
                                 code='cdp_recovery_failed',
                                 hint='Run `openbrowser-ai daemon doctor` or `openbrowser-ai daemon reset` before retrying.',
                             )
+                    executor = self._executor
+                    if executor is None:
+                        return self._error_response(
+                            req_id,
+                            'Browser executor is unavailable after initialization',
+                            code='daemon_start_failed',
+                            hint='Run `openbrowser-ai daemon reset` and retry.',
+                        )
                     failed_session = self._session
                     result = await asyncio.wait_for(
-                        self._executor.execute(code), timeout=self._exec_timeout
+                        executor.execute(code), timeout=self._exec_timeout
                     )
 
                     # Recover while still holding the execution lock so the next
@@ -594,28 +1096,77 @@ class DaemonServer:
                 self._stop_event.set()
                 break
 
-    async def run(self):
+    async def serve_daemon(self):
         """Start the daemon and listen for connections."""
         self._lifecycle.transition(LifecyclePhase.STARTING, reason='daemon starting')
         self._running = True
         self._last_activity = time.time()
 
         sock_path = get_socket_path()
-        sock_path.parent.mkdir(parents=True, exist_ok=True)
-
-        # Check if another daemon is already running
-        existing_pid = _read_pid()
-        if existing_pid and existing_pid != os.getpid():
-            logger.error('Another daemon is already running (PID %d)', existing_pid)
-            self._lifecycle.fail(f'Another daemon is already running (PID {existing_pid})', reason='daemon start failed')
-            return
-
-        # Clean up stale socket
-        sock_path.unlink(missing_ok=True)
-
-        _write_pid()
-
+        owner_lock = DaemonOwnerLock(owner_lock_path_for_pid_file(get_pid_path()))
+        owner_lock_acquired = False
+        acquired_pid = False
+        bound_socket = False
+        idle_task: asyncio.Task | None = None
         try:
+            sock_path.parent.mkdir(parents=True, exist_ok=True)
+            self._set_startup(DaemonStartupPhase.CHECKING_OWNERSHIP, f'pid_file={get_pid_path()}')
+            if not owner_lock.acquire():
+                existing_pid = _peek_pid()
+                self._startup_owner_pid = existing_pid
+                self._startup_owner_state = PidOwnerState.UNRESPONSIVE
+                self._startup_owner_busy = True
+                message = f'Another daemon owns the startup lock (PID {existing_pid or "unknown"})'
+                logger.error('%s', message)
+                self._fail_startup(message)
+                return
+            owner_lock_acquired = True
+            inspection = _inspect_pid()
+            self._startup_owner_state = inspection.state
+            self._startup_stale_pid_removed = inspection.stale_pid_removed
+            if inspection.stale_pid_removed:
+                self._set_startup(
+                    DaemonStartupPhase.CLEANING_STALE_LOCK,
+                    f'removed_stale_pid={inspection.stale_pid_removed}',
+                )
+            if inspection.state in (PidOwnerState.ACTIVE, PidOwnerState.UNRESPONSIVE):
+                self._startup_owner_pid = inspection.pid
+                message = inspection.detail or f'PID {inspection.pid} already owns the daemon lock'
+                logger.error('%s', message)
+                self._fail_startup(message)
+                return
+
+            self._set_startup(DaemonStartupPhase.ACQUIRING_OWNERSHIP)
+            if not _acquire_pid_file(os.getpid()):
+                existing_pid = _peek_pid()
+                self._startup_owner_pid = existing_pid
+                message = f'Another daemon acquired the PID file (PID {existing_pid or "unknown"})'
+                logger.error('%s', message)
+                self._fail_startup(message)
+                return
+
+            acquired_pid = True
+            self._startup_owner_pid = os.getpid()
+            self._set_startup(DaemonStartupPhase.BINDING_SOCKET, str(sock_path))
+            socket_probe = SocketProbeState.ABSENT
+            socket_identity = _socket_path_identity(sock_path)
+            if not IS_WINDOWS:
+                socket_probe = _probe_socket(sock_path)
+                if socket_probe is SocketProbeState.FOREIGN:
+                    message = 'Daemon socket path exists but is not a Unix socket file'
+                    logger.error('%s', message)
+                    self._fail_startup(message)
+                    return
+                if socket_probe is not SocketProbeState.ABSENT:
+                    message = (
+                        'Daemon socket accepts connections but has no live PID owner'
+                        if socket_probe is SocketProbeState.ACTIVE
+                        else 'Daemon socket state is unknown and cannot be replaced safely'
+                    )
+                    logger.error('%s', message)
+                    self._fail_startup(message)
+                    return
+
             if IS_WINDOWS:
                 # Windows: TCP on loopback only (no Unix sockets available).
                 # Any local process can connect; consider a shared-secret
@@ -624,11 +1175,35 @@ class DaemonServer:
                     self._handle_client, '127.0.0.1', WINDOWS_PORT
                 )
             else:
+                current_identity = _socket_path_identity(sock_path)
+                if socket_identity is None:
+                    if current_identity is not None:
+                        message = 'Daemon socket path appeared during startup'
+                        logger.error('%s', message)
+                        self._fail_startup(message)
+                        return
+                elif current_identity != socket_identity or not socket_identity.is_socket:
+                    message = 'Daemon socket path changed during startup'
+                    logger.error('%s', message)
+                    self._fail_startup(message)
+                    return
+                else:
+                    # The PID file and owner lock prove this is the stale path.
+                    sock_path.unlink(missing_ok=True)
+                    self._startup_stale_socket_removed = True
                 self._server = await asyncio.start_unix_server(
                     self._handle_client, path=str(sock_path)
                 )
+                bound_socket = True
+                # Captured immediately after the bind. On macOS a Unix socket
+                # fd reports the socket object, not the filesystem entry, so
+                # fstat cannot corroborate this identity portably.
+                self._bound_socket_identity = _socket_path_identity(sock_path)
+                self._startup_owner_state = PidOwnerState.ACTIVE
                 # Restrict socket permissions to owner only
                 os.chmod(str(sock_path), 0o600)
+            if IS_WINDOWS:
+                self._startup_owner_state = PidOwnerState.ACTIVE
 
             # Register signal handlers on the running event loop
             loop = asyncio.get_running_loop()
@@ -640,32 +1215,56 @@ class DaemonServer:
 
             # Start idle timeout checker
             idle_task = asyncio.create_task(self._idle_check_loop())
+            self._set_startup(DaemonStartupPhase.LISTENING, str(sock_path))
             self._lifecycle.transition(LifecyclePhase.READY, reason='daemon listening')
 
             async with self._server:
                 await self._stop_event.wait()
-
-            idle_task.cancel()
-            await asyncio.gather(idle_task, return_exceptions=True)
-
+        except BaseException as error:
+            await self._close_server_on_startup_failure()
+            self._fail_startup(f'{type(error).__name__}: {error}', error)
+            raise
         finally:
-            if self._lifecycle.phase is not LifecyclePhase.STOPPING:
+            self._running = False
+            try:
+                if idle_task is not None:
+                    idle_task.cancel()
+                    await asyncio.gather(idle_task, return_exceptions=True)
+                if (
+                    self._lifecycle.phase is not LifecyclePhase.FAILED
+                    and self._lifecycle.phase is not LifecyclePhase.STOPPING
+                ):
+                    try:
+                        self._lifecycle.transition(LifecyclePhase.STOPPING, reason='daemon stopping')
+                    except LifecycleTransitionError:
+                        pass
+                if self._session:
+                    await self._close_session_bounded(self._session)
+            finally:
                 try:
-                    self._lifecycle.transition(LifecyclePhase.STOPPING, reason='daemon stopping')
-                except LifecycleTransitionError:
-                    pass
-            if self._session:
-                await self._close_session_bounded(self._session)
-            _cleanup_pid()
-            if self._lifecycle.phase is not LifecyclePhase.STOPPED:
-                try:
-                    self._lifecycle.transition(
-                        LifecyclePhase.STOPPED,
-                        reason='daemon stopped',
-                        increment_generation=True,
-                    )
-                except LifecycleTransitionError:
-                    pass
+                    if acquired_pid:
+                        try:
+                            _cleanup_pid(
+                                expected_pid=os.getpid(),
+                                remove_socket=bound_socket,
+                                socket_identity=self._bound_socket_identity,
+                            )
+                        except OSError:
+                            logger.warning('Failed to remove daemon ownership files', exc_info=True)
+                    if self._startup_phase is not DaemonStartupPhase.FAILED:
+                        self._set_startup(DaemonStartupPhase.STOPPED, 'daemon stopped')
+                    if self._lifecycle.phase not in (LifecyclePhase.FAILED, LifecyclePhase.STOPPED):
+                        try:
+                            self._lifecycle.transition(
+                                LifecyclePhase.STOPPED,
+                                reason='daemon stopped',
+                                increment_generation=True,
+                            )
+                        except LifecycleTransitionError:
+                            pass
+                finally:
+                    if owner_lock_acquired:
+                        owner_lock.release()
 
 
 async def _main():
@@ -680,7 +1279,9 @@ async def _main():
         idle_timeout=int(_env_number('OPENBROWSER_IDLE_TIMEOUT', DEFAULT_IDLE_TIMEOUT)),
         exec_timeout=_env_number('OPENBROWSER_EXEC_TIMEOUT', DEFAULT_EXEC_TIMEOUT),
     )
-    await daemon.run()
+    await daemon.serve_daemon()
+    if daemon._startup_phase is DaemonStartupPhase.FAILED or daemon._lifecycle.phase is LifecyclePhase.FAILED:
+        raise SystemExit(EXIT_OWNER_BUSY if daemon._startup_owner_busy is True else 1)
 
 
 if __name__ == '__main__':

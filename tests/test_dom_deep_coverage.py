@@ -16,10 +16,6 @@
 import asyncio
 import json
 import logging
-import os
-import signal
-import time
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -27,13 +23,9 @@ import pytest
 from openbrowser.dom.service import DomService
 from openbrowser.dom.views import (
     DOMRect,
-    EnhancedAXNode,
-    EnhancedAXProperty,
     EnhancedDOMTreeNode,
     EnhancedSnapshotNode,
     NodeType,
-    SerializedDOMState,
-    TargetAllTrees,
 )
 
 logger = logging.getLogger(__name__)
@@ -984,7 +976,7 @@ class TestDaemonServerRunWindows:
     @pytest.mark.asyncio
     async def test_run_windows_server(self):
         """Line 303: Windows TCP server branch."""
-        from openbrowser.daemon.server import DaemonServer
+        from openbrowser.daemon.server import DaemonServer, PidInspection, PidOwnerState
 
         daemon = DaemonServer()
         mock_sock = MagicMock()
@@ -1002,14 +994,16 @@ class TestDaemonServerRunWindows:
             daemon._stop_event.set()
 
         with patch("openbrowser.daemon.server.get_socket_path", return_value=mock_sock), \
-             patch("openbrowser.daemon.server._read_pid", return_value=None), \
-             patch("openbrowser.daemon.server._write_pid"), \
+             patch("openbrowser.daemon.server._inspect_pid", return_value=PidInspection(state=PidOwnerState.ABSENT)), \
+             patch("openbrowser.daemon.server._acquire_pid_file", return_value=True), \
+             patch("openbrowser.daemon.server.DaemonOwnerLock.acquire", return_value=True), \
+             patch("openbrowser.daemon.server._socket_path_identity", return_value=None), \
              patch("openbrowser.daemon.server._cleanup_pid"), \
              patch("openbrowser.daemon.server.IS_WINDOWS", True), \
              patch("asyncio.start_server", new_callable=AsyncMock, return_value=mock_server):
 
             asyncio.create_task(stop_quickly())
-            await daemon.run()
+            await daemon.serve_daemon()
 
 
 class TestDaemonServerRunCleanupKillError:
@@ -1018,7 +1012,12 @@ class TestDaemonServerRunCleanupKillError:
     @pytest.mark.asyncio
     async def test_run_cleanup_kill_error(self):
         """Lines 333-334: session kill error during cleanup is suppressed."""
-        from openbrowser.daemon.server import DaemonServer
+        from openbrowser.daemon.server import (
+            DaemonServer,
+            PidInspection,
+            PidOwnerState,
+            SocketProbeState,
+        )
 
         daemon = DaemonServer()
         mock_sock = MagicMock()
@@ -1037,15 +1036,18 @@ class TestDaemonServerRunCleanupKillError:
             daemon._stop_event.set()
 
         with patch("openbrowser.daemon.server.get_socket_path", return_value=mock_sock), \
-             patch("openbrowser.daemon.server._read_pid", return_value=None), \
-             patch("openbrowser.daemon.server._write_pid"), \
+             patch("openbrowser.daemon.server._inspect_pid", return_value=PidInspection(state=PidOwnerState.ABSENT)), \
+             patch("openbrowser.daemon.server._acquire_pid_file", return_value=True), \
+             patch("openbrowser.daemon.server.DaemonOwnerLock.acquire", return_value=True), \
+             patch("openbrowser.daemon.server._probe_socket", return_value=SocketProbeState.ABSENT), \
+             patch("openbrowser.daemon.server._socket_path_identity", return_value=None), \
              patch("openbrowser.daemon.server._cleanup_pid"), \
              patch("openbrowser.daemon.server.IS_WINDOWS", False), \
              patch("asyncio.start_unix_server", new_callable=AsyncMock, return_value=mock_server), \
              patch("os.chmod"):
 
             asyncio.create_task(stop_quickly())
-            await daemon.run()
+            await daemon.serve_daemon()
             # Should not raise despite kill error
 
 
@@ -1220,7 +1222,9 @@ class TestGetEnhancedDomTreeFromBrowserSession:
     @pytest.mark.asyncio
     async def test_cached_dom_tree(self):
         """Lines 115-116: returns cached enhanced_dom_tree."""
-        from openbrowser.dom.markdown_extractor import _get_enhanced_dom_tree_from_browser_session
+        from openbrowser.dom.markdown_extractor import (
+            _get_enhanced_dom_tree_from_browser_session,
+        )
 
         mock_tree = MagicMock()
         mock_session = MagicMock()
@@ -1234,7 +1238,9 @@ class TestGetEnhancedDomTreeFromBrowserSession:
     @pytest.mark.asyncio
     async def test_build_dom_tree_when_not_cached(self):
         """Lines 118-123: builds dom tree when not cached."""
-        from openbrowser.dom.markdown_extractor import _get_enhanced_dom_tree_from_browser_session
+        from openbrowser.dom.markdown_extractor import (
+            _get_enhanced_dom_tree_from_browser_session,
+        )
 
         mock_tree = MagicMock()
         mock_session = MagicMock()
@@ -1255,7 +1261,9 @@ class TestGetEnhancedDomTreeFromBrowserSession:
     @pytest.mark.asyncio
     async def test_raises_when_no_watchdog(self):
         """Line 112: raises when DOMWatchdog is not available."""
-        from openbrowser.dom.markdown_extractor import _get_enhanced_dom_tree_from_browser_session
+        from openbrowser.dom.markdown_extractor import (
+            _get_enhanced_dom_tree_from_browser_session,
+        )
 
         mock_session = MagicMock()
         mock_session._dom_watchdog = None

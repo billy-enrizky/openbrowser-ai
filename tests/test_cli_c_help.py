@@ -110,7 +110,7 @@ class TestCliCHelp:
 
         def run_daemon():
             asyncio.set_event_loop(loop)
-            loop.run_until_complete(server.run())
+            loop.run_until_complete(server.serve_daemon())
 
         with (
             patch('openbrowser.daemon.server.get_socket_path', return_value=sock),
