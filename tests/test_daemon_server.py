@@ -39,8 +39,12 @@ class TestDaemonServerHelpers:
 
     def test_read_pid_invalid_content(self, tmp_path):
         """_read_pid handles non-integer PID file gracefully."""
+        import time
+
         pid_file = tmp_path / "daemon.pid"
         pid_file.write_text("not_a_number")
+        old = time.time() - 5
+        os.utime(pid_file, (old, old))
         with patch("openbrowser.daemon.server.get_pid_path", return_value=pid_file):
             result = _read_pid()
             assert result is None

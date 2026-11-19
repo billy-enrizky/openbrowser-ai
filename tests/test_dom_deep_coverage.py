@@ -984,7 +984,7 @@ class TestDaemonServerRunWindows:
     @pytest.mark.asyncio
     async def test_run_windows_server(self):
         """Line 303: Windows TCP server branch."""
-        from openbrowser.daemon.server import DaemonServer
+        from openbrowser.daemon.server import DaemonServer, PidInspection, PidOwnerState
 
         daemon = DaemonServer()
         mock_sock = MagicMock()
@@ -1002,8 +1002,8 @@ class TestDaemonServerRunWindows:
             daemon._stop_event.set()
 
         with patch("openbrowser.daemon.server.get_socket_path", return_value=mock_sock), \
-             patch("openbrowser.daemon.server._read_pid", return_value=None), \
-             patch("openbrowser.daemon.server._write_pid"), \
+             patch("openbrowser.daemon.server._inspect_pid", return_value=PidInspection(state=PidOwnerState.ABSENT)), \
+             patch("openbrowser.daemon.server._acquire_pid_file", return_value=True), \
              patch("openbrowser.daemon.server._cleanup_pid"), \
              patch("openbrowser.daemon.server.IS_WINDOWS", True), \
              patch("asyncio.start_server", new_callable=AsyncMock, return_value=mock_server):
@@ -1018,7 +1018,7 @@ class TestDaemonServerRunCleanupKillError:
     @pytest.mark.asyncio
     async def test_run_cleanup_kill_error(self):
         """Lines 333-334: session kill error during cleanup is suppressed."""
-        from openbrowser.daemon.server import DaemonServer
+        from openbrowser.daemon.server import DaemonServer, PidInspection, PidOwnerState, SocketProbeState
 
         daemon = DaemonServer()
         mock_sock = MagicMock()
@@ -1037,8 +1037,9 @@ class TestDaemonServerRunCleanupKillError:
             daemon._stop_event.set()
 
         with patch("openbrowser.daemon.server.get_socket_path", return_value=mock_sock), \
-             patch("openbrowser.daemon.server._read_pid", return_value=None), \
-             patch("openbrowser.daemon.server._write_pid"), \
+             patch("openbrowser.daemon.server._inspect_pid", return_value=PidInspection(state=PidOwnerState.ABSENT)), \
+             patch("openbrowser.daemon.server._acquire_pid_file", return_value=True), \
+             patch("openbrowser.daemon.server._probe_socket", return_value=SocketProbeState.ABSENT), \
              patch("openbrowser.daemon.server._cleanup_pid"), \
              patch("openbrowser.daemon.server.IS_WINDOWS", False), \
              patch("asyncio.start_unix_server", new_callable=AsyncMock, return_value=mock_server), \

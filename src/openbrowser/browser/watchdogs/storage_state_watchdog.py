@@ -2,7 +2,7 @@
 
 import asyncio
 import json
-import os
+import time
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -18,6 +18,7 @@ from openbrowser.browser.events import (
 	StorageStateLoadedEvent,
 	StorageStateSavedEvent,
 )
+from openbrowser.browser.storage_state import StorageStatePhase, StorageStateSnapshot
 from openbrowser.browser.watchdog_base import BaseWatchdog
 
 
@@ -45,6 +46,17 @@ class StorageStateWatchdog(BaseWatchdog):
 	_monitoring_task: asyncio.Task | None = PrivateAttr(default=None)
 	_last_cookie_state: list[dict] = PrivateAttr(default_factory=list)
 	_save_lock: asyncio.Lock = PrivateAttr(default_factory=asyncio.Lock)
+	_load_phase: StorageStatePhase | None = PrivateAttr(default=None)
+	_load_path: str | None = PrivateAttr(default=None)
+	_load_bytes: int | None = PrivateAttr(default=None)
+	_load_started: float | None = PrivateAttr(default=None)
+	_load_ms: float | None = PrivateAttr(default=None)
+	_load_elapsed: float | None = PrivateAttr(default=None)
+	_load_error: str | None = PrivateAttr(default=None)
+	_load_detail: str | None = PrivateAttr(default=None)
+	_load_cookies: int = PrivateAttr(default=0)
+	_load_origins: int = PrivateAttr(default=0)
+	_load_scripts: int = PrivateAttr(default=0)
 
 	async def on_BrowserConnectedEvent(self, event: BrowserConnectedEvent) -> None:
 		"""Start monitoring when browser starts."""
@@ -79,11 +91,88 @@ class StorageStateWatchdog(BaseWatchdog):
 		path = event.path
 		if path is None:
 			# Use profile default path if available
-			if self.browser_session.browser_profile.storage_state:
-				path = str(self.browser_session.browser_profile.storage_state)
+			configured = self.browser_session.browser_profile.storage_state
+			if isinstance(configured, (str, Path)):
+				path = str(configured)
 			else:
 				path = None  # Skip loading if no path available
 		await self._load_storage_state(path)
+
+	def storage_state_snapshot(self) -> StorageStateSnapshot:
+		"""Return the explicit file-load state, including a pre-load view."""
+		if self._load_phase is not None:
+			elapsed_ms = self._load_elapsed
+			if self._load_phase is StorageStatePhase.LOADING and self._load_started is not None:
+				elapsed_ms = max(0.0, (time.monotonic() - self._load_started) * 1000.0)
+			return StorageStateSnapshot(
+				phase=self._load_phase,
+				path=self._load_path,
+				bytes=self._load_bytes,
+				load_ms=self._load_ms,
+				elapsed_ms=elapsed_ms,
+				error=self._load_error,
+				detail=self._load_detail,
+				cookies_count=self._load_cookies,
+				origins_count=self._load_origins,
+				script_count=self._load_scripts,
+			)
+
+		configured = self.browser_session.browser_profile.storage_state
+		if not configured:
+			return StorageStateSnapshot(phase=StorageStatePhase.NOT_CONFIGURED)
+		if not isinstance(configured, (str, Path)):
+			return StorageStateSnapshot(
+				phase=StorageStatePhase.SKIPPED,
+				detail='in-memory storage state is not loaded from a file',
+			)
+		path = self._expand_storage_path(configured)
+		if not path.exists():
+			return StorageStateSnapshot(
+				phase=StorageStatePhase.SKIPPED,
+				path=str(path),
+				detail='storage-state file does not exist',
+			)
+		return StorageStateSnapshot(
+			phase=StorageStatePhase.PENDING,
+			path=str(path),
+			bytes=self._storage_file_size(path),
+		)
+
+	@staticmethod
+	def _expand_storage_path(path: str | Path) -> Path:
+		return Path(path).expanduser()
+
+	@staticmethod
+	def _storage_file_size(path: Path) -> int | None:
+		try:
+			return path.stat().st_size
+		except OSError:
+			return None
+
+	def _finish_load(
+		self,
+		phase: StorageStatePhase,
+		*,
+		path: Path | None,
+		error: str | None = None,
+		detail: str | None = None,
+		cookies_count: int = 0,
+		origins_count: int = 0,
+		script_count: int = 0,
+	) -> None:
+		started = self._load_started
+		self._load_phase = phase
+		self._load_path = str(path) if path is not None else None
+		self._load_bytes = self._storage_file_size(path) if path is not None else None
+		self._load_ms = max(0.0, (time.monotonic() - started) * 1000.0) if started is not None else None
+		elapsed_ms = self._load_ms
+		self._load_started = None
+		self._load_error = error
+		self._load_detail = detail
+		self._load_cookies = cookies_count
+		self._load_origins = origins_count
+		self._load_scripts = script_count
+		self._load_elapsed = elapsed_ms
 
 	async def _start_monitoring(self) -> None:
 		"""Start the monitoring task."""
@@ -230,24 +319,66 @@ class StorageStateWatchdog(BaseWatchdog):
 
 	async def _load_storage_state(self, path: str | None = None) -> None:
 		"""Load browser storage state from file."""
+		load_path = path or self.browser_session.browser_profile.storage_state
+		if not load_path:
+			self._finish_load(
+				StorageStatePhase.NOT_CONFIGURED,
+				path=None,
+				detail='storage state is disabled',
+			)
+			return
+		if not isinstance(load_path, (str, Path)):
+			self._finish_load(
+				StorageStatePhase.SKIPPED,
+				path=None,
+				detail='in-memory storage state is not loaded from a file',
+			)
+			return
+
+		json_path = self._expand_storage_path(load_path)
+		if not json_path.exists():
+			self._finish_load(
+				StorageStatePhase.SKIPPED,
+				path=json_path,
+				detail='storage-state file does not exist',
+			)
+			return
 		if not self.browser_session.cdp_client:
+			self._finish_load(
+				StorageStatePhase.FAILED,
+				path=json_path,
+				error='No CDP client available for loading storage state',
+			)
 			self.logger.warning('[StorageStateWatchdog] No CDP client available for loading')
 			return
 
-		load_path = path or self.browser_session.browser_profile.storage_state
-		if not load_path or not os.path.exists(str(load_path)):
-			return
+		self._load_phase = StorageStatePhase.LOADING
+		self._load_path = str(json_path)
+		self._load_bytes = self._storage_file_size(json_path)
+		self._load_started = time.monotonic()
+		self._load_ms = None
+		self._load_elapsed = None
+		self._load_error = None
+		self._load_detail = None
+		self._load_cookies = 0
+		self._load_origins = 0
+		self._load_scripts = 0
+		cookies_count = 0
+		origins_count = 0
+		script_count = 0
 
 		try:
 			# Read the storage state file asynchronously
 			import anyio
 
-			content = await anyio.Path(str(load_path)).read_text()
+			content = await anyio.Path(str(json_path)).read_text()
 			storage = json.loads(content)
+			script_count = 0
 
 			# Apply cookies if present
 			if 'cookies' in storage and storage['cookies']:
 				await self.browser_session._cdp_set_cookies(storage['cookies'])
+				cookies_count = len(storage['cookies'])
 				self._last_cookie_state = storage['cookies'].copy()
 				self.logger.debug(f'[StorageStateWatchdog] Added {len(storage["cookies"])} cookies from storage state')
 
@@ -269,22 +400,62 @@ class StorageStateWatchdog(BaseWatchdog):
 							self._record_warning(warning)
 						for script in scripts:
 							await self.browser_session._cdp_add_init_script(script)
+							script_count += 1
+					origins_count += 1
 				self.logger.debug(
 					f'[StorageStateWatchdog] Applied localStorage/sessionStorage from {len(storage["origins"])} origins'
 				)
 
+			self._finish_load(
+				StorageStatePhase.LOADED,
+				path=json_path,
+				detail='storage state loaded',
+				cookies_count=cookies_count,
+				origins_count=origins_count,
+				script_count=script_count,
+			)
+
 			self.event_bus.dispatch(
 				StorageStateLoadedEvent(
-					path=str(load_path),
-					cookies_count=len(storage.get('cookies', [])),
-					origins_count=len(storage.get('origins', [])),
+					path=str(json_path),
+					cookies_count=cookies_count,
+					origins_count=origins_count,
 				)
 			)
 
-			self.logger.debug(f'[StorageStateWatchdog] Loaded storage state from: {load_path}')
+			self.logger.debug(f'[StorageStateWatchdog] Loaded storage state from: {json_path}')
 
+		except asyncio.CancelledError:
+			self._finish_load(
+				StorageStatePhase.CANCELLED,
+				path=json_path,
+				error='storage-state load cancelled',
+				detail=(
+					f'cancelled after applying {script_count} initialization scripts'
+					if script_count
+					else 'cancelled before any initialization script was applied'
+				),
+				cookies_count=cookies_count,
+				origins_count=origins_count,
+				script_count=script_count,
+			)
+			raise
 		except Exception as e:
-			self._record_warning(f'Failed to load storage state: {type(e).__name__}: {e}')
+			error = f'{type(e).__name__}: {e}'
+			self._finish_load(
+				StorageStatePhase.FAILED,
+				path=json_path,
+				error=error,
+				detail=(
+					f'failed after applying {script_count} initialization scripts'
+					if script_count
+					else 'failed before any initialization script was applied'
+				),
+				cookies_count=cookies_count,
+				origins_count=origins_count,
+				script_count=script_count,
+			)
+			self._record_warning(f'Failed to load storage state: {error}')
 			self.logger.error(f'[StorageStateWatchdog] Failed to load storage state: {e}')
 
 	def _record_warning(self, warning: str) -> None:
