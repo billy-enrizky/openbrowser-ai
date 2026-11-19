@@ -318,6 +318,49 @@ class TestDaemonClientRecoveryDiscovery:
 
 
     @pytest.mark.asyncio
+    async def test_force_stop_runs_browser_cleanup_before_a_filesystem_error(self, tmp_path):
+        """A refused file cleanup must not hide a browser that still needs killing."""
+        client = DaemonClient()
+        client.status = AsyncMock(return_value=DaemonResponse(success=False, output='', error='unresponsive'))
+        client.stop = AsyncMock(return_value=DaemonResponse(success=False, output='', error='unresponsive'))
+        client._read_pid = MagicMock(return_value=123)
+        process = MagicMock()
+        process.cmdline.return_value = ['python', '-m', 'openbrowser.daemon.server']
+        pid_path = tmp_path / 'daemon.pid'
+        socket_path = tmp_path / 'daemon.sock'
+        pid_path.write_text('123')
+
+        with (
+            patch('openbrowser.daemon.client.get_pid_path', return_value=pid_path),
+            patch('openbrowser.daemon.client.get_socket_path', return_value=socket_path),
+            patch('psutil.Process', return_value=process),
+            patch.object(client, '_socket_state', new_callable=AsyncMock, return_value='stale'),
+            patch.object(
+                client,
+                '_remove_stale_daemon_files',
+                new_callable=AsyncMock,
+                return_value=DaemonResponse(
+                    success=False,
+                    output='',
+                    error='foreign socket',
+                    error_code='daemon_socket_foreign',
+                ),
+            ),
+            patch.object(client, '_profile_dirs_for_daemon', return_value=['/tmp/profile']),
+            patch.object(
+                client,
+                '_kill_recorded_browsers',
+                new_callable=AsyncMock,
+                return_value=(True, None),
+            ) as cleanup,
+        ):
+            result = await client.force_stop(timeout=0.01)
+
+        assert result.error_code == 'daemon_socket_foreign'
+        assert result.error == 'foreign socket'
+        cleanup.assert_awaited_once_with(['/tmp/profile'], 0.01)
+
+    @pytest.mark.asyncio
     async def test_stale_cleanup_refuses_while_another_owner_holds_the_lock(self, tmp_path):
         from openbrowser.daemon.ownership import (
             DaemonOwnerLock,

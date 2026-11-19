@@ -83,6 +83,7 @@ class TestDaemonServerHelpers:
 
     def test_cleanup_pid(self, tmp_path):
         """_cleanup_pid removes the PID file and the socket file this daemon bound."""
+        import shutil
         import socket
         import tempfile
 
@@ -104,6 +105,7 @@ class TestDaemonServerHelpers:
         finally:
             listener.close()
             sock_file.unlink(missing_ok=True)
+            shutil.rmtree(short_dir, ignore_errors=True)
 
     def test_cleanup_pid_preserves_a_non_socket_path(self, tmp_path):
         """A regular file at the socket path is not this daemon's socket."""
@@ -121,6 +123,7 @@ class TestDaemonServerHelpers:
 
     def test_cleanup_pid_without_identity_preserves_the_socket(self, tmp_path):
         """Removal needs the identity captured at bind time, not a mode check."""
+        import shutil
         import socket
         import tempfile
 
@@ -140,6 +143,7 @@ class TestDaemonServerHelpers:
         finally:
             listener.close()
             sock_file.unlink(missing_ok=True)
+            shutil.rmtree(short_dir, ignore_errors=True)
 
     def test_cleanup_pid_missing_files(self, tmp_path):
         """_cleanup_pid does not raise when files already gone."""

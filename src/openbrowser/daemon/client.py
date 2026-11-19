@@ -746,9 +746,13 @@ class DaemonClient:
             )
 
         cleanup_error = await self._remove_stale_daemon_files()
-        if cleanup_error is not None:
-            return cleanup_error
+        # The daemon is already gone, so a filesystem refusal must not hide a
+        # browser that still needs killing. Run the recorded cleanup first.
         browser_ok, browser_error = await self._kill_recorded_browsers(profile_dirs, timeout)
+        if cleanup_error is not None:
+            if not browser_ok:
+                cleanup_error.error = f'{cleanup_error.error}. Browser cleanup also failed: {browser_error}'
+            return cleanup_error
         if not browser_ok:
             return DaemonResponse(
                 success=False,

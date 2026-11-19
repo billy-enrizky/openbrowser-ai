@@ -475,7 +475,7 @@ class StorageStateWatchdog(BaseWatchdog):
 				path=json_path,
 				error='storage-state load cancelled',
 				detail=(
-					f'cancelled after sending {storage_script_attempts} initialization-script registration(s); '
+					f'cancelled after attempting {storage_script_attempts} initialization-script registration(s); '
 					f'{script_count} confirmed'
 					if storage_script_attempts
 					else 'cancelled before any initialization script was sent'
@@ -494,7 +494,7 @@ class StorageStateWatchdog(BaseWatchdog):
 				path=json_path,
 				error=error,
 				detail=(
-					f'failed after sending {storage_script_attempts} initialization-script registration(s); '
+					f'failed after attempting {storage_script_attempts} initialization-script registration(s); '
 					f'{script_count} confirmed'
 					if storage_script_attempts
 					else 'failed before any initialization script was sent'

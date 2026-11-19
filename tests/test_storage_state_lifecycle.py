@@ -245,7 +245,7 @@ async def test_partial_application_is_reported_on_failure(tmp_path):
     assert snapshot.script_count == 1
     assert snapshot.storage_script_attempts == 2
     assert snapshot.origins_count == 1
-    assert snapshot.detail == 'failed after sending 2 initialization-script registration(s); 1 confirmed'
+    assert snapshot.detail == 'failed after attempting 2 initialization-script registration(s); 1 confirmed'
     assert snapshot.error is not None and 'apply failed' in snapshot.error
 
 
