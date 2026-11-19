@@ -39,6 +39,9 @@ def _run_python(source: str, *, timeout: int = 30) -> subprocess.CompletedProces
         (['init'], CliMode.INIT),
         (['--template', 'default'], CliMode.TEMPLATE),
         (['-p', 'init'], None),
+        (['-p', '--mcp'], None),
+        (['-p', 'task', '--mcp'], CliMode.MCP),
+        (['--prompt=init'], None),
         (['--prompt', '--template'], None),
         (['--version'], None),
         ([], None),
@@ -174,3 +177,13 @@ def test_prompt_value_init_keeps_prompt_mode(monkeypatch):
     assert result.exit_code == 0, result.output
     prompt.assert_awaited_once()
     assert prompt.await_args.args[0] == 'init'
+
+
+def test_prompt_value_mcp_keeps_prompt_mode(monkeypatch):
+    monkeypatch.setattr('openbrowser.cli.Agent', object())
+    prompt = AsyncMock()
+    with patch('openbrowser.cli.run_prompt_mode', prompt):
+        result = CliRunner().invoke(main, ['-p', '--mcp'])
+    assert result.exit_code == 0, result.output
+    prompt.assert_awaited_once()
+    assert prompt.await_args.args[0] == '--mcp'

@@ -18,21 +18,33 @@ class CliMode(str, Enum):
 
 def select_cli_mode(args: list[str]) -> CliMode | None:
 	"""Return the explicit fast-path mode for argv, or None for Click."""
-	if '--mcp' in args:
+	prompt_values = {
+		i + 1
+		for i, arg in enumerate(args[:-1])
+		if arg in ('-p', '--prompt')
+	}
+
+	def has_flag(flag: str) -> bool:
+		return any(
+			arg == flag and index not in prompt_values
+			for index, arg in enumerate(args)
+		)
+
+	if has_flag('--mcp'):
 		return CliMode.MCP
-	if ('-p' in args or '--prompt' in args) and '-c' not in args:
-		# Prompt mode owns its value. "openbrowser-ai -p init" is a prompt,
-		# not the init subcommand. --mcp keeps its fast path above.
-		return None
-	if '-c' in args:
+	if has_flag('-c'):
 		return CliMode.EXECUTE_CODE
+	if any(arg in ('-p', '--prompt') or arg.startswith('--prompt=') for arg in args):
+		# Prompt mode owns its value. "openbrowser-ai -p init" and
+		# "openbrowser-ai -p --mcp" are prompts, not modes.
+		return None
 	if args and args[0] == 'daemon':
 		return CliMode.DAEMON
 	if args and args[0] == 'install':
 		return CliMode.INSTALL
-	if 'init' in args:
+	if args and args[0] == 'init':
 		return CliMode.INIT
-	if '--template' in args:
+	if has_flag('--template'):
 		return CliMode.TEMPLATE
 	return None
 
