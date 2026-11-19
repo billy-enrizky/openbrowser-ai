@@ -15,6 +15,7 @@ on:
       - 'src/**'
       - 'tests/**'
       - 'pyproject.toml'
+      - 'uv.lock'
       - '.github/workflows/test.yml'
   pull_request:
     branches: [main, develop]
@@ -22,6 +23,7 @@ on:
       - 'src/**'
       - 'tests/**'
       - 'pyproject.toml'
+      - 'uv.lock'
       - '.github/workflows/test.yml'
   workflow_dispatch:
 
@@ -60,6 +62,13 @@ jobs:
       - name: Install dependencies
         run: |
           uv pip install --system -e ".[all,dev]"
+
+      - name: Prepare isolated MCP 1.x compatibility client
+        run: |
+          uv venv --python "${{ matrix.python-version }}" "$RUNNER_TEMP/mcp1-client"
+          uv pip install --python "$RUNNER_TEMP/mcp1-client/bin/python" "mcp==1.26.0"
+          "$RUNNER_TEMP/mcp1-client/bin/python" -c 'from importlib.metadata import version; assert version("mcp") == "1.26.0"'
+          echo "OPENBROWSER_TEST_MCP1_PYTHON=$RUNNER_TEMP/mcp1-client/bin/python" >> "$GITHUB_ENV"
 
       - name: Run tests with coverage
         run: |
