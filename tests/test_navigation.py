@@ -1460,18 +1460,70 @@ async def wait_primary_terminal(operation):
         await asyncio.wait_for(operation._changed.wait(), 2)
 
 
+@pytest.fixture
+async def policy_phase_clock(monkeypatch):
+    import threading
+    import time
+    loop = asyncio.get_running_loop()
+    real_time = loop.time
+    floor = real_time()
+    running = False
+    closed = threading.Event()
+    def clock():
+        return max(floor, real_time()) if running else floor
+    def resume(deadline=None):
+        nonlocal floor, running
+        if closed.is_set() or running:
+            return
+        floor = max(floor, real_time() if deadline is None else deadline)
+        running = True
+    def watchdog():
+        if not closed.is_set():
+            loop.call_soon_threadsafe(resume)
+    guard = threading.Timer(2, watchdog)
+    guard.daemon = True
+    with monkeypatch.context() as clock_patch:
+        clock_patch.setattr(loop, 'time', clock)
+        guard.start()
+        try:
+            yield resume
+        finally:
+            closed.set()
+            guard.cancel()
+            guard.join()
+            last_virtual = clock()
+            floor, running = last_virtual, False
+            remaining = floor - real_time()
+            if remaining > 0:
+                await asyncio.to_thread(time.sleep, remaining)
+            assert real_time() >= last_virtual
+    assert loop.time() >= last_virtual
+
+
 @pytest.mark.parametrize('ending', ['timeout', 'cancel', 'double_cancel'])
 @pytest.mark.parametrize('pre_ack', [False, True])
-async def test_policy_sent_job_survives_primary_timeout_and_repeated_caller_cancellation(ending, pre_ack):
+@pytest.mark.parametrize('setup_delay', [0, .2])
+async def test_policy_sent_job_survives_primary_timeout_and_repeated_caller_cancellation(ending, pre_ack, setup_delay, policy_phase_clock):
+    import time
     from openbrowser.browser.navigation import NavigationTimeoutError
-    session, _, _, frame, patches, controls = policy_handler_fixture(pre_ack)
+    session, client, _, frame, patches, controls = policy_handler_fixture(pre_ack)
     controls.hold_action = True
+    read_frame = client.send.Page.getFrameTree.side_effect
+    first_read = True
+    async def delayed_frame_read(**kwargs):
+        nonlocal first_read
+        if first_read:
+            first_read = False
+            time.sleep(setup_delay)
+        return read_frame(**kwargs)
+    client.send.Page.getFrameTree.side_effect = delayed_frame_read
     task = None
     try:
         with patches[0], patches[1]:
             task = asyncio.create_task(session.navigate_to('https://allowed.test/start', timeout_ms=150 if ending == 'timeout' else 5000))
             await asyncio.wait_for(controls.action.wait(), 1)
             op = session._navigation_monitor.active
+            policy_phase_clock(op.deadline + .001 if ending == 'timeout' else None)
             if ending != 'timeout':
                 task.cancel()
             await wait_primary_terminal(op)
