@@ -4,8 +4,37 @@ from __future__ import annotations
 
 import errno
 import os
+import stat
+from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO
+
+
+@dataclass(frozen=True)
+class SocketEntryIdentity:
+    """Filesystem identity of a directory entry, without following symlinks."""
+
+    device: int
+    inode: int
+    is_socket: bool
+
+
+def socket_entry_identity(path: Path) -> SocketEntryIdentity | None:
+    """Return the current directory-entry identity, or None when it is absent."""
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        return None
+    return SocketEntryIdentity(
+        device=info.st_dev,
+        inode=info.st_ino,
+        is_socket=stat.S_ISSOCK(info.st_mode),
+    )
+
+
+def owner_lock_path_for_pid_file(pid_path: Path) -> Path:
+    """Return the lifetime lock path paired with a daemon PID file."""
+    return pid_path.with_suffix('.owner.lock')
 
 
 class DaemonOwnerLock:

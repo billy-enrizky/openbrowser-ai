@@ -33,6 +33,7 @@ class StorageStateSnapshot:
 	cookies_count: int = 0
 	origins_count: int = 0
 	script_count: int = 0
+	storage_script_attempts: int = 0
 
 	def to_dict(self) -> dict[str, Any]:
 		return {
@@ -46,4 +47,5 @@ class StorageStateSnapshot:
 			'cookies_count': self.cookies_count,
 			'origins_count': self.origins_count,
 			'script_count': self.script_count,
+			'storage_script_attempts': self.storage_script_attempts,
 		}

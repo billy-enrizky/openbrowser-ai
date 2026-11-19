@@ -17,6 +17,7 @@ def _make_watchdog(path):
     session = create_autospec(BrowserSession, instance=True)
     session.logger = logging.getLogger('test-storage-state-lifecycle')
     session.cdp_client = MagicMock()
+    session._cdp_client_root = MagicMock()
     session._cdp_set_cookies = AsyncMock()
     session._cdp_add_init_script = AsyncMock()
     session._storage_state_warnings = []
@@ -54,8 +55,9 @@ def test_storage_state_is_pending_before_load(tmp_path):
     assert snapshot.bytes == state_path.stat().st_size
 
 
-def test_in_memory_storage_state_is_explicitly_skipped():
-    watchdog = _make_watchdog({'cookies': [], 'origins': []})
+@pytest.mark.parametrize('state', [{}, {'cookies': [], 'origins': []}])
+def test_in_memory_storage_state_is_explicitly_skipped(state):
+    watchdog = _make_watchdog(state)
 
     snapshot = watchdog.storage_state_snapshot()
 
@@ -98,13 +100,58 @@ async def test_missing_cdp_client_is_reported_as_failed(tmp_path):
     state_path = tmp_path / 'state.json'
     state_path.write_text('{"cookies": [], "origins": []}')
     watchdog = _make_watchdog(state_path)
-    watchdog.browser_session.cdp_client = None
+    watchdog.browser_session._cdp_client_root = None
 
     await watchdog._load_storage_state(path=str(state_path))
 
     snapshot = watchdog.storage_state_snapshot()
     assert snapshot.phase is StorageStatePhase.FAILED
-    assert snapshot.error == 'No CDP client available for loading storage state'
+    assert snapshot.error == 'Browser is not connected; no CDP client is available'
+
+
+@pytest.mark.asyncio
+async def test_non_object_json_is_reported_as_failed(tmp_path):
+    state_path = tmp_path / 'state.json'
+    state_path.write_text('[]')
+    watchdog = _make_watchdog(state_path)
+
+    await watchdog._load_storage_state(path=str(state_path))
+
+    snapshot = watchdog.storage_state_snapshot()
+    assert snapshot.phase is StorageStatePhase.FAILED
+    assert snapshot.error is not None
+    assert 'storage state must be a JSON object' in snapshot.error
+
+
+@pytest.mark.asyncio
+async def test_unresolved_home_path_is_reported_as_failed(tmp_path):
+    watchdog = _make_watchdog('~openbrowser-user-that-does-not-exist/state.json')
+
+    with patch('pathlib.Path.expanduser', side_effect=RuntimeError('home unavailable')):
+        await watchdog._load_storage_state()
+
+    snapshot = watchdog.storage_state_snapshot()
+    assert snapshot.phase is StorageStatePhase.FAILED
+    assert snapshot.error is not None
+    assert 'RuntimeError' in snapshot.error
+
+
+@pytest.mark.asyncio
+async def test_snapshot_bytes_come_from_the_bytes_that_were_parsed(tmp_path):
+    state_path = tmp_path / 'state.json'
+    # The on-disk file is deliberately longer than the bytes the parser sees,
+    # so a stat-based size would not match the parsed snapshot.
+    state_path.write_text('{\n  "cookies": [],\n  "origins": []\n}\n')
+    watchdog = _make_watchdog(state_path)
+    parsed = b'{"cookies":[],"origins":[]}'
+    assert len(parsed) != state_path.stat().st_size
+
+    with patch('anyio.Path.read_bytes', new_callable=AsyncMock, return_value=parsed):
+        await watchdog._load_storage_state(path=str(state_path))
+
+    snapshot = watchdog.storage_state_snapshot()
+    assert snapshot.phase is StorageStatePhase.LOADED
+    assert snapshot.bytes == len(parsed)
 
 
 @pytest.mark.asyncio
@@ -114,7 +161,7 @@ async def test_cancelled_load_has_a_terminal_phase(tmp_path):
     watchdog = _make_watchdog(state_path)
 
     with (
-        patch('anyio.Path.read_text', new_callable=AsyncMock, side_effect=asyncio.CancelledError),
+        patch('anyio.Path.read_bytes', new_callable=AsyncMock, side_effect=asyncio.CancelledError),
         pytest.raises(asyncio.CancelledError),
     ):
         await watchdog._load_storage_state(path=str(state_path))
@@ -140,6 +187,44 @@ def test_loading_snapshot_reports_elapsed_time(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_loading_snapshot_publishes_partial_script_progress(tmp_path):
+    state_path = tmp_path / 'state.json'
+    state = {
+        'cookies': [],
+        'origins': [
+            {'origin': 'https://example.com', 'localStorage': [{'name': 'key', 'value': 'value'}]},
+        ],
+    }
+    state_path.write_text(json.dumps(state))
+    watchdog = _make_watchdog(state_path)
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def add_script(_script):
+        entered.set()
+        await release.wait()
+
+    watchdog.browser_session._cdp_add_init_script = AsyncMock(side_effect=add_script)
+    load_task = asyncio.create_task(watchdog._load_storage_state(path=str(state_path)))
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=1)
+        snapshot = watchdog.storage_state_snapshot()
+        assert snapshot.phase is StorageStatePhase.LOADING
+        assert snapshot.storage_script_attempts == 1
+        assert snapshot.script_count == 0
+        assert snapshot.origins_count == 0
+    finally:
+        release.set()
+        await asyncio.wait_for(load_task, timeout=1)
+
+    snapshot = watchdog.storage_state_snapshot()
+    assert snapshot.phase is StorageStatePhase.LOADED
+    assert snapshot.storage_script_attempts == 1
+    assert snapshot.script_count == 1
+    assert snapshot.origins_count == 1
+
+
+@pytest.mark.asyncio
 async def test_partial_application_is_reported_on_failure(tmp_path):
     state_path = tmp_path / 'state.json'
     state = {
@@ -158,8 +243,9 @@ async def test_partial_application_is_reported_on_failure(tmp_path):
     snapshot = watchdog.storage_state_snapshot()
     assert snapshot.phase is StorageStatePhase.FAILED
     assert snapshot.script_count == 1
+    assert snapshot.storage_script_attempts == 2
     assert snapshot.origins_count == 1
-    assert snapshot.detail == 'failed after applying 1 initialization scripts'
+    assert snapshot.detail == 'failed after sending 2 initialization-script registration(s); 1 confirmed'
     assert snapshot.error is not None and 'apply failed' in snapshot.error
 
 
@@ -188,5 +274,6 @@ async def test_large_storage_state_reports_counts_and_batched_scripts(tmp_path):
     assert snapshot.cookies_count == 1
     assert snapshot.origins_count == 1
     assert snapshot.script_count > 1
+    assert snapshot.storage_script_attempts == snapshot.script_count
     assert watchdog.browser_session._cdp_add_init_script.await_count == snapshot.script_count
     assert watchdog.event_bus.dispatch.call_count == 1

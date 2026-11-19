@@ -30,12 +30,18 @@ from openbrowser.browser.lifecycle import (
 )
 from openbrowser.browser.storage_state import StorageStatePhase, StorageStateSnapshot
 from openbrowser.daemon import (
+    EXIT_OWNER_BUSY,
     IS_WINDOWS,
     WINDOWS_PORT,
     get_pid_path,
     get_socket_path,
 )
-from openbrowser.daemon.ownership import DaemonOwnerLock
+from openbrowser.daemon.ownership import (
+    DaemonOwnerLock,
+    SocketEntryIdentity,
+    owner_lock_path_for_pid_file,
+    socket_entry_identity,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -96,6 +102,12 @@ class PidInspection:
     stale_pid_removed: bool = False
 
 
+# Names kept for the existing status/tests; the implementation is shared with
+# the daemon client so both sides classify and compare the same entry.
+SocketPathIdentity = SocketEntryIdentity
+_socket_path_identity = socket_entry_identity
+
+
 def _probe_socket(path: Path) -> SocketProbeState:
     """Classify a socket without treating an unprovable failure as stale."""
     if IS_WINDOWS:
@@ -103,7 +115,7 @@ def _probe_socket(path: Path) -> SocketProbeState:
     import socket as _socket
 
     try:
-        if not stat.S_ISSOCK(path.stat().st_mode):
+        if not stat.S_ISSOCK(path.lstat().st_mode):
             return SocketProbeState.FOREIGN
     except FileNotFoundError:
         return SocketProbeState.ABSENT
@@ -150,7 +162,7 @@ def _is_openbrowser_daemon_process(pid: int) -> bool | None:
             owner_socket = Path(configured).expanduser()
             if not owner_socket.is_absolute():
                 return None
-        return owner_socket == get_socket_path()
+        return owner_socket.resolve() == get_socket_path().resolve()
     except (psutil.Error, OSError, RuntimeError):
         return None
 
@@ -163,11 +175,6 @@ def _pid_file_age_seconds(path: Path) -> float | None:
         return None
 
 
-def _daemon_owner_lock_path() -> Path:
-    """Return the lifetime ownership lock derived from the PID path."""
-    return get_pid_path().with_suffix('.owner.lock')
-
-
 def _daemon_pid_exists(pid: int) -> bool | None:
     """Return process liveness without sending a signal on any platform."""
     try:
@@ -176,6 +183,31 @@ def _daemon_pid_exists(pid: int) -> bool | None:
         return None
     try:
         return psutil.pid_exists(pid)
+    except (psutil.Error, OSError):
+        return None
+
+
+_LOOPBACK_ADDRESSES = frozenset({'127.0.0.1', '::1'})
+
+
+def _windows_pid_owns_listener(pid: int) -> bool | None:
+    """Return whether a Windows PID owns the daemon loopback listener."""
+    try:
+        import psutil
+    except ImportError:
+        return None
+    try:
+        for connection in psutil.net_connections(kind='tcp'):
+            address = connection.laddr
+            if (
+                connection.pid == pid
+                and connection.status == psutil.CONN_LISTEN
+                and address
+                and address.port == WINDOWS_PORT
+                and address.ip in _LOOPBACK_ADDRESSES
+            ):
+                return True
+        return False
     except (psutil.Error, OSError):
         return None
 
@@ -191,7 +223,7 @@ def _inspect_pid() -> PidInspection:
     if not pid_path.exists():
         return PidInspection(state=PidOwnerState.ABSENT)
     try:
-        content = pid_path.read_text().strip()
+        content = pid_path.read_bytes().strip()
     except FileNotFoundError:
         return PidInspection(state=PidOwnerState.ABSENT)
     except OSError as error:
@@ -205,7 +237,12 @@ def _inspect_pid() -> PidInspection:
             raise ValueError('PID is outside the supported range')
     except (ValueError, OverflowError):
         age = _pid_file_age_seconds(pid_path)
-        if age is not None and age < PID_FILE_WRITE_GRACE_SECONDS:
+        if age is None:
+            return PidInspection(
+                state=PidOwnerState.UNRESPONSIVE,
+                detail='PID file is empty or incomplete and its age cannot be checked safely',
+            )
+        if age < PID_FILE_WRITE_GRACE_SECONDS:
             return PidInspection(
                 state=PidOwnerState.UNRESPONSIVE,
                 detail='PID file is empty or incomplete and may still be written',
@@ -276,7 +313,20 @@ def _inspect_pid() -> PidInspection:
             detail=f'PID {pid} was reused by a non-daemon process',
             stale_pid_removed=True,
         )
-    return PidInspection(state=PidOwnerState.ACTIVE, pid=pid)
+    listener = _windows_pid_owns_listener(pid)
+    if listener is True:
+        return PidInspection(state=PidOwnerState.ACTIVE, pid=pid)
+    if listener is False:
+        return PidInspection(
+            state=PidOwnerState.UNRESPONSIVE,
+            pid=pid,
+            detail=f'PID {pid} owns the daemon PID file but not the loopback listener',
+        )
+    return PidInspection(
+        state=PidOwnerState.UNRESPONSIVE,
+        pid=pid,
+        detail=f'PID {pid} listener ownership could not be verified safely',
+    )
 
 
 def _read_pid() -> int | None:
@@ -344,8 +394,18 @@ def _write_pid() -> None:
         raise FileExistsError(f'PID file already exists: {get_pid_path()}')
 
 
-def _cleanup_pid(expected_pid: int | None = None, *, remove_socket: bool = True) -> None:
-    """Remove daemon files only when this process still owns the PID file."""
+def _cleanup_pid(
+    expected_pid: int | None = None,
+    *,
+    remove_socket: bool = True,
+    socket_identity: SocketPathIdentity | None = None,
+) -> None:
+    """Remove daemon files only when this process still owns them.
+
+    ``socket_identity`` is the identity captured after binding. When given,
+    the socket path is removed only while it still names that same socket
+    entry, so a replacement file at the same path survives shutdown.
+    """
     pid_path = get_pid_path()
     owner_verified = expected_pid is None
     if expected_pid is not None and pid_path.exists():
@@ -359,10 +419,21 @@ def _cleanup_pid(expected_pid: int | None = None, *, remove_socket: bool = True)
             return
         owner_verified = True
     if remove_socket and owner_verified:
-        try:
-            get_socket_path().unlink(missing_ok=True)
-        except OSError:
-            logger.warning('Failed to remove daemon socket', exc_info=True)
+        socket_path = get_socket_path()
+        current_identity = _socket_path_identity(socket_path)
+        if socket_identity is None:
+            logger.warning('Skipping daemon socket cleanup; no bound socket identity was captured')
+        elif current_identity is None:
+            pass
+        elif not current_identity.is_socket:
+            logger.warning('Skipping daemon socket cleanup; path is not a socket')
+        elif current_identity != socket_identity:
+            logger.warning('Skipping daemon socket cleanup; path no longer names the bound socket')
+        else:
+            try:
+                socket_path.unlink(missing_ok=True)
+            except OSError:
+                logger.warning('Failed to remove daemon socket', exc_info=True)
     pid_path.unlink(missing_ok=True)
 
 
@@ -416,8 +487,9 @@ class DaemonServer:
         self._startup_stale_socket_removed = False
         self._startup_owner_pid: int | None = None
         self._startup_owner_state: PidOwnerState | None = None
-        self._storage_state_path: str | None = None
-        self._storage_state_bytes: int | None = None
+        self._startup_owner_busy = False
+        self._bound_socket_identity: SocketPathIdentity | None = None
+        self._storage_state_preload = StorageStateSnapshot(phase=StorageStatePhase.NOT_CONFIGURED)
 
     def _set_startup(self, phase: DaemonStartupPhase, detail: str | None = None) -> None:
         """Move the startup machine through an explicitly allowed transition."""
@@ -444,14 +516,37 @@ class DaemonServer:
         """Record profile storage-state metadata for pre-browser status."""
         if isinstance(storage_state, (str, Path)):
             path = str(storage_state)
-            self._storage_state_path = path
+            expanded: Path | None = None
             try:
-                self._storage_state_bytes = Path(path).expanduser().stat().st_size
-            except OSError:
-                self._storage_state_bytes = None
+                expanded = Path(path).expanduser()
+                size = expanded.stat().st_size
+            except FileNotFoundError:
+                self._storage_state_preload = StorageStateSnapshot(
+                    phase=StorageStatePhase.SKIPPED,
+                    path=str(expanded) if expanded is not None else path,
+                    detail='storage-state file does not exist',
+                )
+            except (OSError, RuntimeError) as error:
+                self._storage_state_preload = StorageStateSnapshot(
+                    phase=StorageStatePhase.FAILED,
+                    path=path,
+                    error=f'{type(error).__name__}: {error}',
+                    detail='storage-state path could not be resolved or inspected',
+                )
+            else:
+                self._storage_state_preload = StorageStateSnapshot(
+                    phase=StorageStatePhase.PENDING,
+                    path=str(expanded),
+                    bytes=size,
+                )
             return
-        self._storage_state_path = None
-        self._storage_state_bytes = None
+        if isinstance(storage_state, dict):
+            self._storage_state_preload = StorageStateSnapshot(
+                phase=StorageStatePhase.SKIPPED,
+                detail='in-memory storage state is not loaded from a file',
+            )
+            return
+        self._storage_state_preload = StorageStateSnapshot(phase=StorageStatePhase.NOT_CONFIGURED)
 
     def _storage_state_snapshot(self) -> StorageStateSnapshot:
         """Return the watchdog-owned load state, or the pre-load view."""
@@ -465,13 +560,7 @@ class DaemonServer:
             else:
                 if isinstance(value, StorageStateSnapshot):
                     return value
-        if self._storage_state_path:
-            return StorageStateSnapshot(
-                phase=StorageStatePhase.PENDING,
-                path=self._storage_state_path,
-                bytes=self._storage_state_bytes,
-            )
-        return StorageStateSnapshot(phase=StorageStatePhase.NOT_CONFIGURED)
+        return self._storage_state_preload
 
     def _default_profile_dir(self) -> Path:
         """Choose a stable profile directory for this daemon socket."""
@@ -798,6 +887,21 @@ class DaemonServer:
             return False
         return True
 
+    async def _close_server_on_startup_failure(self) -> None:
+        """Close a listener that was created before the listen loop was entered."""
+        server = self._server
+        if server is None:
+            return
+        try:
+            closed: Any = server.close()
+            if inspect.isawaitable(closed):
+                await closed
+            waited: Any = server.wait_closed()
+            if inspect.isawaitable(waited):
+                await waited
+        except BaseException:
+            logger.warning('Failed to close daemon listener after startup failure', exc_info=True)
+
     async def _handle_request(self, data: dict) -> dict:
         """Handle a single JSON request."""
         self._last_activity = time.time()
@@ -999,7 +1103,7 @@ class DaemonServer:
         self._last_activity = time.time()
 
         sock_path = get_socket_path()
-        owner_lock = DaemonOwnerLock(_daemon_owner_lock_path())
+        owner_lock = DaemonOwnerLock(owner_lock_path_for_pid_file(get_pid_path()))
         owner_lock_acquired = False
         acquired_pid = False
         bound_socket = False
@@ -1011,6 +1115,7 @@ class DaemonServer:
                 existing_pid = _peek_pid()
                 self._startup_owner_pid = existing_pid
                 self._startup_owner_state = PidOwnerState.UNRESPONSIVE
+                self._startup_owner_busy = True
                 message = f'Another daemon owns the startup lock (PID {existing_pid or "unknown"})'
                 logger.error('%s', message)
                 self._fail_startup(message)
@@ -1044,7 +1149,7 @@ class DaemonServer:
             self._startup_owner_pid = os.getpid()
             self._set_startup(DaemonStartupPhase.BINDING_SOCKET, str(sock_path))
             socket_probe = SocketProbeState.ABSENT
-            stale_socket = sock_path.exists()
+            socket_identity = _socket_path_identity(sock_path)
             if not IS_WINDOWS:
                 socket_probe = _probe_socket(sock_path)
                 if socket_probe is SocketProbeState.FOREIGN:
@@ -1070,13 +1175,30 @@ class DaemonServer:
                     self._handle_client, '127.0.0.1', WINDOWS_PORT
                 )
             else:
-                # The PID file proves this process owns the now-stale socket path.
-                sock_path.unlink(missing_ok=True)
-                self._startup_stale_socket_removed = stale_socket
+                current_identity = _socket_path_identity(sock_path)
+                if socket_identity is None:
+                    if current_identity is not None:
+                        message = 'Daemon socket path appeared during startup'
+                        logger.error('%s', message)
+                        self._fail_startup(message)
+                        return
+                elif current_identity != socket_identity or not socket_identity.is_socket:
+                    message = 'Daemon socket path changed during startup'
+                    logger.error('%s', message)
+                    self._fail_startup(message)
+                    return
+                else:
+                    # The PID file and owner lock prove this is the stale path.
+                    sock_path.unlink(missing_ok=True)
+                    self._startup_stale_socket_removed = True
                 self._server = await asyncio.start_unix_server(
                     self._handle_client, path=str(sock_path)
                 )
                 bound_socket = True
+                # Captured immediately after the bind. On macOS a Unix socket
+                # fd reports the socket object, not the filesystem entry, so
+                # fstat cannot corroborate this identity portably.
+                self._bound_socket_identity = _socket_path_identity(sock_path)
                 self._startup_owner_state = PidOwnerState.ACTIVE
                 # Restrict socket permissions to owner only
                 os.chmod(str(sock_path), 0o600)
@@ -1099,6 +1221,7 @@ class DaemonServer:
             async with self._server:
                 await self._stop_event.wait()
         except BaseException as error:
+            await self._close_server_on_startup_failure()
             self._fail_startup(f'{type(error).__name__}: {error}', error)
             raise
         finally:
@@ -1121,7 +1244,11 @@ class DaemonServer:
                 try:
                     if acquired_pid:
                         try:
-                            _cleanup_pid(expected_pid=os.getpid(), remove_socket=bound_socket)
+                            _cleanup_pid(
+                                expected_pid=os.getpid(),
+                                remove_socket=bound_socket,
+                                socket_identity=self._bound_socket_identity,
+                            )
                         except OSError:
                             logger.warning('Failed to remove daemon ownership files', exc_info=True)
                     if self._startup_phase is not DaemonStartupPhase.FAILED:
@@ -1154,7 +1281,7 @@ async def _main():
     )
     await daemon.serve_daemon()
     if daemon._startup_phase is DaemonStartupPhase.FAILED or daemon._lifecycle.phase is LifecyclePhase.FAILED:
-        raise SystemExit(1)
+        raise SystemExit(EXIT_OWNER_BUSY if daemon._startup_owner_busy is True else 1)
 
 
 if __name__ == '__main__':

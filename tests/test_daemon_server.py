@@ -82,17 +82,64 @@ class TestDaemonServerHelpers:
             assert mode == 0o600
 
     def test_cleanup_pid(self, tmp_path):
-        """_cleanup_pid removes PID and socket files."""
+        """_cleanup_pid removes the PID file and the socket file this daemon bound."""
+        import socket
+        import tempfile
+
+        short_dir = Path(tempfile.mkdtemp(prefix="ob_clean_", dir="/tmp"))
+        pid_file = tmp_path / "daemon.pid"
+        sock_file = short_dir / "daemon.sock"
+        pid_file.write_text("12345")
+        listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        listener.bind(str(sock_file))
+        try:
+            from openbrowser.daemon.server import _socket_path_identity
+
+            identity = _socket_path_identity(sock_file)
+            with patch("openbrowser.daemon.server.get_pid_path", return_value=pid_file), \
+                 patch("openbrowser.daemon.server.get_socket_path", return_value=sock_file):
+                _cleanup_pid(socket_identity=identity)
+                assert not pid_file.exists()
+                assert not sock_file.exists()
+        finally:
+            listener.close()
+            sock_file.unlink(missing_ok=True)
+
+    def test_cleanup_pid_preserves_a_non_socket_path(self, tmp_path):
+        """A regular file at the socket path is not this daemon's socket."""
         pid_file = tmp_path / "daemon.pid"
         sock_file = tmp_path / "daemon.sock"
         pid_file.write_text("12345")
-        sock_file.write_text("socket")
+        sock_file.write_text("not a socket")
 
         with patch("openbrowser.daemon.server.get_pid_path", return_value=pid_file), \
              patch("openbrowser.daemon.server.get_socket_path", return_value=sock_file):
             _cleanup_pid()
+
+        assert not pid_file.exists()
+        assert sock_file.read_text() == "not a socket"
+
+    def test_cleanup_pid_without_identity_preserves_the_socket(self, tmp_path):
+        """Removal needs the identity captured at bind time, not a mode check."""
+        import socket
+        import tempfile
+
+        short_dir = Path(tempfile.mkdtemp(prefix="ob_noident_", dir="/tmp"))
+        pid_file = tmp_path / "daemon.pid"
+        sock_file = short_dir / "daemon.sock"
+        pid_file.write_text("12345")
+        listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        listener.bind(str(sock_file))
+        try:
+            with patch("openbrowser.daemon.server.get_pid_path", return_value=pid_file), \
+                 patch("openbrowser.daemon.server.get_socket_path", return_value=sock_file):
+                _cleanup_pid()
+
             assert not pid_file.exists()
-            assert not sock_file.exists()
+            assert sock_file.exists()
+        finally:
+            listener.close()
+            sock_file.unlink(missing_ok=True)
 
     def test_cleanup_pid_missing_files(self, tmp_path):
         """_cleanup_pid does not raise when files already gone."""

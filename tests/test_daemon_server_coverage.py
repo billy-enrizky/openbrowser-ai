@@ -47,7 +47,7 @@ class TestPidFunctions:
         sock_path = Path(tempfile.mktemp(suffix='.sock', dir='/tmp'))
         mock_path = MagicMock()
         mock_path.exists.return_value = True
-        mock_path.read_text.return_value = str(os.getpid())
+        mock_path.read_bytes.return_value = str(os.getpid()).encode()
 
         server_sock = _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM)
         server_sock.bind(str(sock_path))
@@ -98,18 +98,21 @@ class TestPidFunctions:
 
         assert pid_path.read_text() == "12345"
 
-    def test_cleanup_pid(self):
-        """Test _cleanup_pid."""
+    def test_cleanup_pid(self, tmp_path):
+        """Test _cleanup_pid keeps the PID cleanup and preserves foreign paths."""
         from openbrowser.daemon.server import _cleanup_pid
 
-        mock_pid = MagicMock()
-        mock_sock = MagicMock()
+        pid_path = tmp_path / "daemon.pid"
+        socket_path = tmp_path / "daemon.sock"
+        pid_path.write_text("12345")
+        socket_path.write_text("not a socket")
 
-        with patch("openbrowser.daemon.server.get_pid_path", return_value=mock_pid):
-            with patch("openbrowser.daemon.server.get_socket_path", return_value=mock_sock):
+        with patch("openbrowser.daemon.server.get_pid_path", return_value=pid_path):
+            with patch("openbrowser.daemon.server.get_socket_path", return_value=socket_path):
                 _cleanup_pid()
-                mock_pid.unlink.assert_called_once_with(missing_ok=True)
-                mock_sock.unlink.assert_called_once_with(missing_ok=True)
+
+        assert not pid_path.exists()
+        assert socket_path.read_text() == "not a socket"
 
 
 class TestDaemonServerBuildProfile:
@@ -480,7 +483,11 @@ class TestDaemonServerRun:
 
         daemon_server._session = None
 
-        from openbrowser.daemon.server import PidInspection, PidOwnerState, SocketProbeState
+        from openbrowser.daemon.server import (
+            PidInspection,
+            PidOwnerState,
+            SocketProbeState,
+        )
 
         inspection = PidInspection(state=PidOwnerState.ABSENT)
 
@@ -496,7 +503,8 @@ class TestDaemonServerRun:
                             "openbrowser.daemon.server._probe_socket",
                             return_value=SocketProbeState.ABSENT,
                         ):
-                            with patch("openbrowser.daemon.server._cleanup_pid"):
+                            with patch("openbrowser.daemon.server._socket_path_identity", return_value=None), \
+                                 patch("openbrowser.daemon.server._cleanup_pid"):
                                 with patch("openbrowser.daemon.server.IS_WINDOWS", False):
                                     with patch(
                                         "asyncio.start_unix_server",
@@ -517,7 +525,11 @@ class TestDaemonServerRun:
         daemon_server._session = MagicMock()
         daemon_server._session.kill = AsyncMock()
 
-        from openbrowser.daemon.server import PidInspection, PidOwnerState, SocketProbeState
+        from openbrowser.daemon.server import (
+            PidInspection,
+            PidOwnerState,
+            SocketProbeState,
+        )
 
         inspection = PidInspection(state=PidOwnerState.ABSENT)
 
@@ -537,7 +549,8 @@ class TestDaemonServerRun:
                             "openbrowser.daemon.server._probe_socket",
                             return_value=SocketProbeState.ABSENT,
                         ):
-                            with patch("openbrowser.daemon.server._cleanup_pid"):
+                            with patch("openbrowser.daemon.server._socket_path_identity", return_value=None), \
+                                 patch("openbrowser.daemon.server._cleanup_pid"):
                                 with patch("openbrowser.daemon.server.IS_WINDOWS", False):
                                     with patch(
                                         "asyncio.start_unix_server",

@@ -9,23 +9,46 @@ modules so the -c CLI path stays fast (<50ms import time).
 """
 
 import asyncio
-from contextlib import asynccontextmanager
 import errno
 import json
+import logging
 import os
+import stat
 import subprocess
 import sys
 import time
-import stat
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
-from openbrowser.daemon import DAEMON_DIR, IS_WINDOWS, WINDOWS_PORT, get_log_path, get_pid_path, get_socket_path
+from openbrowser.daemon import (
+    DAEMON_DIR,
+    EXIT_OWNER_BUSY,
+    IS_WINDOWS,
+    WINDOWS_PORT,
+    get_log_path,
+    get_pid_path,
+    get_socket_path,
+)
+from openbrowser.daemon.ownership import (
+    DaemonOwnerLock,
+    SocketEntryIdentity,
+    owner_lock_path_for_pid_file,
+    socket_entry_identity,
+)
+
+logger = logging.getLogger(__name__)
 
 CONNECT_TIMEOUT = 10.0
 READ_TIMEOUT = 140.0  # Slightly above the server's default execution timeout
 STATUS_TIMEOUT = 5.0
 DAEMON_START_TIMEOUT = 20.0
+# How long to wait for a competing starter before retrying our own startup.
+OWNER_ADOPT_GRACE = 5.0
+
+
+class _StartRetry(Exception):
+    """A transient owner held the lock; retry the whole startup once."""
 
 
 def _start_timeout() -> float:
@@ -193,18 +216,39 @@ class DaemonClient:
             return False
         return bool(payload.get('success'))
 
-    async def _socket_accepts_connection(self) -> bool:
-        """Return True when the daemon socket accepts a connection."""
+    async def _probe_within(self, deadline: float) -> bool:
+        """Probe status without exceeding the remaining startup budget."""
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return False
+        try:
+            return await asyncio.wait_for(self._probe(), timeout=remaining)
+        except asyncio.TimeoutError:
+            return False
+
+    async def _socket_state(self) -> str:
+        """Classify the daemon socket as 'live', 'stale', or 'unknown'.
+
+        Only a refused or missing socket proves that a socket file is stale.
+        Permission errors and timeouts leave its state unknown, so callers
+        must not delete the path.
+        """
         try:
             reader, writer = await self._connect()
-        except (ConnectionRefusedError, FileNotFoundError, OSError, asyncio.TimeoutError):
-            return False
+        except (FileNotFoundError, ConnectionRefusedError):
+            return 'stale'
+        except (OSError, asyncio.TimeoutError):
+            return 'unknown'
         writer.close()
         try:
             await writer.wait_closed()
         except Exception:
             pass
-        return True
+        return 'live'
+
+    async def _socket_accepts_connection(self) -> bool:
+        """Return True when the daemon socket accepts a connection."""
+        return await self._socket_state() == 'live'
 
     def _daemon_owner_for_socket(self) -> dict | None:
         """Return the current user's daemon process that owns this socket."""
@@ -266,7 +310,18 @@ class DaemonClient:
     async def _start_daemon(self):
         """Serialize daemon startup across processes before spawning."""
         async with self._start_lock():
-            await self._start_daemon_unlocked()
+            try:
+                await self._start_daemon_unlocked()
+            except _StartRetry:
+                # The lock holder released without leaving a daemon behind
+                # (for example a concurrent stale cleanup). Start once more.
+                try:
+                    await self._start_daemon_unlocked()
+                except _StartRetry:
+                    raise OSError(
+                        'Daemon startup is already in progress for this socket. '
+                        'Wait for it to finish or run `openbrowser-ai daemon doctor`.'
+                    ) from None
 
     @asynccontextmanager
     async def _start_lock(self):
@@ -280,8 +335,14 @@ class DaemonClient:
             handle.flush()
         locked = False
         try:
-            await asyncio.to_thread(self._lock_start_file, handle)
-            locked = True
+            locked = await asyncio.to_thread(
+                self._lock_start_file, handle, time.monotonic() + _start_timeout()
+            )
+            if not locked:
+                raise OSError(
+                    'Another process is starting or stopping the daemon for this socket. '
+                    'Wait for it to finish or run `openbrowser-ai daemon doctor`.'
+                )
             yield
         finally:
             try:
@@ -291,23 +352,34 @@ class DaemonClient:
                 handle.close()
 
     @staticmethod
-    def _lock_start_file(handle) -> None:
+    def _lock_start_file(handle, deadline: float) -> bool:
+        """Try to take the cross-process start lock until the deadline."""
         if IS_WINDOWS:
             import msvcrt
 
             while True:
                 handle.seek(0)
                 try:
-                    msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
-                    return
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                    return True
                 except OSError as error:
                     if error.errno not in (errno.EACCES, errno.EDEADLK):
                         raise
-                    continue
-        else:
-            import fcntl
+                if time.monotonic() >= deadline:
+                    return False
+                time.sleep(0.1)
+        import fcntl
 
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        while True:
+            try:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                return True
+            except OSError as error:
+                if error.errno not in (errno.EACCES, errno.EAGAIN):
+                    raise
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(0.1)
 
     @staticmethod
     def _unlock_start_file(handle) -> None:
@@ -330,32 +402,71 @@ class DaemonClient:
         if IS_WINDOWS and await self._probe(timeout=STATUS_TIMEOUT):
             return
 
-        if not IS_WINDOWS and get_socket_path().exists():
+        socket_path = get_socket_path()
+        socket_observed: SocketEntryIdentity | None = None
+        if not IS_WINDOWS:
+            socket_observed = socket_entry_identity(socket_path)
+            if socket_observed is not None and not socket_observed.is_socket:
+                raise OSError(
+                    'Daemon socket path exists but is not a Unix socket file. '
+                    'Inspect the path before retrying.'
+                )
+        if socket_observed is not None:
             if await self._probe(timeout=STATUS_TIMEOUT):
                 return
-            if await self._socket_accepts_connection():
+            socket_state = await self._socket_state()
+            if socket_state == 'live':
                 raise OSError(
                     'Daemon is running but did not answer status in time. '
                     'Wait for the current execution to finish or run `openbrowser-ai daemon restart`.'
                 )
+            if socket_state == 'unknown':
+                raise OSError(
+                    'Daemon socket state cannot be verified safely. '
+                    'Inspect the path, then run `openbrowser-ai daemon doctor`.'
+                )
 
-        owner = self._daemon_owner_for_socket()
-        if owner is not None:
-            raise OSError(
-                f'Daemon PID {owner["pid"]} owns this socket but is not accepting connections. '
-                'Run `openbrowser-ai daemon reap` or `openbrowser-ai daemon restart`.'
-            )
-        verified_pid = self._verified_daemon_pid()
-        if verified_pid is not None:
-            raise OSError(
-                f'Daemon PID {verified_pid} owns a PID file for this socket but is not accepting connections. '
-                'Run `openbrowser-ai daemon reap` or `openbrowser-ai daemon restart`.'
-            )
-        socket_path = get_socket_path()
-        if not IS_WINDOWS and socket_path.exists():
-            self._remove_stale_socket(socket_path)
-        get_pid_path().unlink(missing_ok=True)
+        owner_lock = DaemonOwnerLock(owner_lock_path_for_pid_file(get_pid_path()))
+        lock_deadline = time.monotonic() + _start_timeout()
+        while not owner_lock.acquire():
+            # Another process (for example a direct `python -m
+            # openbrowser.daemon.server` launch) owns startup. Adopt its
+            # daemon once it answers instead of reporting a false failure.
+            if await self._probe_within(lock_deadline):
+                return
+            if time.monotonic() >= lock_deadline:
+                raise OSError(
+                    'Daemon startup is already in progress for this socket. '
+                    'Wait for it to finish or run `openbrowser-ai daemon doctor`.'
+                )
+            await asyncio.sleep(0.2)
+        try:
+            owner = self._daemon_owner_for_socket()
+            if owner is not None:
+                raise OSError(
+                    f'Daemon PID {owner["pid"]} owns this socket but is not accepting connections. '
+                    'Run `openbrowser-ai daemon reap` or `openbrowser-ai daemon restart`.'
+                )
+            verified_pid = self._verified_daemon_pid()
+            if verified_pid is not None:
+                raise OSError(
+                    f'Daemon PID {verified_pid} owns a PID file for this socket but is not accepting connections. '
+                    'Run `openbrowser-ai daemon reap` or `openbrowser-ai daemon restart`.'
+                )
+            if not IS_WINDOWS:
+                current_identity = socket_entry_identity(socket_path)
+                if current_identity is not None:
+                    if current_identity != socket_observed:
+                        raise OSError(
+                            'Daemon socket path changed during startup. '
+                            'Inspect the path before retrying.'
+                        )
+                    self._remove_stale_socket(socket_path)
+            get_pid_path().unlink(missing_ok=True)
+        finally:
+            owner_lock.release()
 
+        deadline = time.monotonic() + _start_timeout()
         with open(os.open(str(log_file), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), 'w') as log_handle:
             self._last_process = subprocess.Popen(
                 [sys.executable, '-m', 'openbrowser.daemon.server'],
@@ -364,22 +475,62 @@ class DaemonClient:
                 start_new_session=True,
             )
 
-        deadline = time.time() + _start_timeout()
-        while time.time() < deadline:
+        while time.monotonic() < deadline:
             if self._last_process.poll() is not None:
+                if await self._probe_within(deadline):
+                    return
+                if self._last_process.returncode == EXIT_OWNER_BUSY:
+                    # Another starter won the ownership race. Wait briefly for
+                    # its daemon; if the lock holder was a cleanup rather than
+                    # a starter, retry startup from the top once.
+                    grace_deadline = min(deadline, time.monotonic() + OWNER_ADOPT_GRACE)
+                    while time.monotonic() < grace_deadline:
+                        if await self._probe_within(grace_deadline):
+                            return
+                        await asyncio.sleep(0.2)
+                    raise _StartRetry()
                 tail = self._tail_log(log_file)
                 raise TimeoutError(
                     f'Daemon exited with code {self._last_process.returncode} during startup. '
                     f'Log: {log_file}\n{tail}'
                 )
             if IS_WINDOWS or get_socket_path().exists():
-                if await self._probe():
+                if await self._probe_within(deadline):
                     return
             await asyncio.sleep(0.2)
+        if await self._probe_within(time.monotonic() + 1.0):
+            return
+        await self._terminate_started_child()
         tail = self._tail_log(log_file)
         raise TimeoutError(
             f'Daemon did not become ready within {_start_timeout():g}s. Log: {log_file}\n{tail}'
         )
+
+    async def _terminate_started_child(self) -> None:
+        """Stop and reap the child this client launched, with bounded escalation."""
+        process = self._last_process
+        if process is None or process.poll() is not None:
+            return
+        await asyncio.to_thread(self._terminate_process, process)
+
+    @staticmethod
+    def _terminate_process(process) -> None:
+        """Terminate then kill a child without blocking the event loop."""
+        try:
+            process.terminate()
+        except OSError:
+            logger.warning('Could not terminate the daemon child', exc_info=True)
+            return
+        try:
+            process.wait(timeout=5)
+            return
+        except subprocess.TimeoutExpired:
+            pass
+        try:
+            process.kill()
+            process.wait(timeout=5)
+        except (OSError, subprocess.TimeoutExpired):
+            logger.warning('Daemon child did not exit after kill; it may still hold the owner lock')
 
     async def execute(self, code: str) -> DaemonResponse:
         """Execute code via the daemon. Auto-starts only before the request is sent."""
@@ -452,6 +603,20 @@ class DaemonClient:
 
     async def force_stop(self, *, timeout: float = 5.0) -> DaemonResponse:
         """Stop the daemon, terminating only the verified daemon process if needed."""
+        try:
+            async with self._start_lock():
+                return await self._force_stop_unlocked(timeout=timeout)
+        except OSError as error:
+            return DaemonResponse(
+                success=False,
+                output='',
+                error=str(error),
+                error_code='daemon_busy',
+                hint='Wait for the current daemon operation to finish, then retry.',
+            )
+
+    async def _force_stop_unlocked(self, *, timeout: float) -> DaemonResponse:
+        """Force-stop the daemon while the cross-process start lock is held."""
         status = await self.status()
         status_payload: dict = {}
         if status.success:
@@ -468,8 +633,8 @@ class DaemonClient:
 
         response = await self.stop()
         if response.success:
-            deadline = time.time() + timeout
-            while time.time() < deadline:
+            deadline = time.monotonic() + timeout
+            while time.monotonic() < deadline:
                 if not get_socket_path().exists():
                     still_alive = False
                     if isinstance(status_pid, int):
@@ -511,11 +676,9 @@ class DaemonClient:
                     error_code='daemon_stop_timeout',
                     hint='The daemon is still alive. Run `openbrowser-ai daemon reap` or inspect the listening process.',
                 )
-            verification = await self._stop_verification_error()
-            if verification is not None:
-                return verification
-            get_pid_path().unlink(missing_ok=True)
-            get_socket_path().unlink(missing_ok=True)
+            cleanup_error = await self._remove_stale_daemon_files()
+            if cleanup_error is not None:
+                return cleanup_error
             browser_ok, browser_error = await self._kill_recorded_browsers(profile_dirs, timeout)
             if not browser_ok:
                 return DaemonResponse(
@@ -582,11 +745,9 @@ class DaemonClient:
                 error_code='daemon_force_stop_failed',
             )
 
-        verification = await self._stop_verification_error()
-        if verification is not None:
-            return verification
-        get_pid_path().unlink(missing_ok=True)
-        get_socket_path().unlink(missing_ok=True)
+        cleanup_error = await self._remove_stale_daemon_files()
+        if cleanup_error is not None:
+            return cleanup_error
         browser_ok, browser_error = await self._kill_recorded_browsers(profile_dirs, timeout)
         if not browser_ok:
             return DaemonResponse(
@@ -634,6 +795,92 @@ class DaemonClient:
                 continue
             matched.append(str(profile_dir.expanduser().resolve()))
         return matched
+
+    async def _remove_stale_daemon_files(self) -> DaemonResponse | None:
+        """Remove PID and socket files only while no other owner can claim them.
+
+        Returns an error response instead of deleting a path that this client
+        cannot prove is the stale daemon socket.
+        """
+        try:
+            owner_lock = DaemonOwnerLock(owner_lock_path_for_pid_file(get_pid_path()))
+            acquired = owner_lock.acquire()
+        except OSError as error:
+            return DaemonResponse(
+                success=False,
+                output='',
+                error=f'Could not inspect daemon ownership: {type(error).__name__}: {error}',
+                error_code='daemon_cleanup_failed',
+                hint='Check the daemon directory permissions and the socket path.',
+            )
+        if not acquired:
+            return DaemonResponse(
+                success=False,
+                output='',
+                error='Another process owns daemon startup or shutdown for this socket',
+                error_code='daemon_busy',
+                hint='Wait for the current daemon operation to finish, then retry.',
+            )
+        try:
+            socket_path = get_socket_path()
+            try:
+                observed = socket_entry_identity(socket_path)
+            except OSError as error:
+                return DaemonResponse(
+                    success=False,
+                    output='',
+                    error=f'Could not inspect the daemon socket path: {type(error).__name__}: {error}',
+                    error_code='daemon_cleanup_failed',
+                    hint='Check permissions on the daemon directory and socket path.',
+                )
+            state = await self._socket_state()
+            if state == 'live':
+                return DaemonResponse(
+                    success=False,
+                    output='',
+                    error='Daemon socket still accepts connections',
+                    error_code='daemon_stop_timeout',
+                    hint='The daemon is still alive. Inspect it or run `openbrowser-ai daemon reap`.',
+                )
+            if state == 'unknown':
+                return DaemonResponse(
+                    success=False,
+                    output='',
+                    error='Daemon socket state cannot be verified safely',
+                    error_code='daemon_socket_unverified',
+                    hint='Inspect the socket path before removing it.',
+                )
+            owner = self._daemon_owner_for_socket()
+            if owner is not None:
+                return DaemonResponse(
+                    success=False,
+                    output='',
+                    error=f'Daemon PID {owner["pid"]} is still running',
+                    error_code='daemon_stop_timeout',
+                    hint='Run `openbrowser-ai daemon reap` to verify and stop the owning daemon process.',
+                )
+            if socket_entry_identity(socket_path) != observed:
+                return DaemonResponse(
+                    success=False,
+                    output='',
+                    error='Daemon socket path changed during cleanup',
+                    error_code='daemon_socket_changed',
+                    hint='Inspect the path before removing it.',
+                )
+            try:
+                self._remove_stale_socket(socket_path)
+            except OSError as error:
+                return DaemonResponse(
+                    success=False,
+                    output='',
+                    error=str(error),
+                    error_code='daemon_socket_foreign',
+                    hint='Inspect the path before removing it. It is not a daemon socket.',
+                )
+            get_pid_path().unlink(missing_ok=True)
+        finally:
+            owner_lock.release()
+        return None
 
     @staticmethod
     def _remove_stale_socket(path: Path) -> None:

@@ -12,6 +12,10 @@ PID_PATH = DAEMON_DIR / 'daemon.pid'
 IS_WINDOWS = platform.system() == 'Windows'
 WINDOWS_PORT = 19222
 
+# EX_TEMPFAIL: another process owns daemon startup for this socket, so the
+# caller should wait for that owner instead of treating this as a hard failure.
+EXIT_OWNER_BUSY = 75
+
 
 def get_socket_path() -> Path:
     """Return the daemon socket path, respecting OPENBROWSER_SOCKET env var."""

@@ -16,16 +16,20 @@ import pytest
 from openbrowser.browser.lifecycle import LifecycleMachine, LifecyclePhase
 from openbrowser.browser.storage_state import StorageStatePhase, StorageStateSnapshot
 from openbrowser.daemon.server import (
+    WINDOWS_PORT,
     DaemonServer,
     DaemonStartupPhase,
     PidInspection,
     PidOwnerState,
+    SocketPathIdentity,
     SocketProbeState,
     _cleanup_pid,
     _daemon_pid_exists,
     _inspect_pid,
     _is_openbrowser_daemon_process,
     _probe_socket,
+    _socket_path_identity,
+    _windows_pid_owns_listener,
 )
 
 
@@ -40,6 +44,16 @@ def daemon_paths():
 
 
 class _FakeServer:
+    def __init__(self):
+        self.closed = False
+        self.waited_closed = False
+
+    def close(self):
+        self.closed = True
+
+    async def wait_closed(self):
+        self.waited_closed = True
+
     async def __aenter__(self):
         return self
 
@@ -250,6 +264,25 @@ def test_daemon_identity_includes_the_owned_socket(daemon_paths):
         assert _is_openbrowser_daemon_process(123) is False
 
 
+@pytest.mark.skipif(os.name == 'nt', reason='Unix symlink semantics')
+def test_daemon_identity_compares_resolved_socket_paths(tmp_path):
+    real_directory = tmp_path / 'real'
+    real_directory.mkdir()
+    actual_socket = real_directory / 'daemon.sock'
+    linked_directory = tmp_path / 'linked'
+    linked_directory.symlink_to(real_directory, target_is_directory=True)
+    process = MagicMock()
+    process.cmdline.return_value = ['python', '-m', 'openbrowser.daemon.server']
+    process.environ.return_value = {'OPENBROWSER_SOCKET': str(linked_directory / 'daemon.sock')}
+
+    with (
+        patch('psutil.Process', return_value=process),
+        patch('openbrowser.daemon.diagnostics.is_daemon_cmdline', return_value=True),
+        patch('openbrowser.daemon.server.get_socket_path', return_value=actual_socket),
+    ):
+        assert _is_openbrowser_daemon_process(123) is True
+
+
 def test_liveness_probe_never_sends_a_signal():
     with (
         patch('psutil.pid_exists', return_value=True),
@@ -366,6 +399,7 @@ async def test_chmod_failure_removes_the_bound_socket(daemon_paths):
     pid_path, socket_path, _ = daemon_paths
     server = DaemonServer(idle_timeout=5, exec_timeout=2)
     cleanup = MagicMock()
+    fake_server = _FakeServer()
 
     with (
         patch('openbrowser.daemon.server.get_pid_path', return_value=pid_path),
@@ -373,7 +407,7 @@ async def test_chmod_failure_removes_the_bound_socket(daemon_paths):
         patch('openbrowser.daemon.server._inspect_pid', return_value=PidInspection(state=PidOwnerState.ABSENT)),
         patch('openbrowser.daemon.server.IS_WINDOWS', False),
         patch('openbrowser.daemon.server._cleanup_pid', cleanup),
-        patch('asyncio.start_unix_server', new_callable=AsyncMock, return_value=_FakeServer()),
+        patch('asyncio.start_unix_server', new_callable=AsyncMock, return_value=fake_server),
         patch('os.chmod', side_effect=OSError('chmod failed')),
         pytest.raises(OSError, match='chmod failed'),
     ):
@@ -381,6 +415,8 @@ async def test_chmod_failure_removes_the_bound_socket(daemon_paths):
 
     cleanup.assert_called_once()
     assert cleanup.call_args.kwargs['remove_socket'] is True
+    assert fake_server.closed is True
+    assert fake_server.waited_closed is True
     assert server._startup_phase is DaemonStartupPhase.FAILED
 
 
@@ -399,7 +435,81 @@ def test_cleanup_does_not_remove_another_owners_files(daemon_paths):
 
         _cleanup_pid(expected_pid=456)
         assert not pid_path.exists()
-        assert not socket_path.exists()
+        # A regular file at the socket path was never this daemon's socket.
+        assert socket_path.read_text() == 'keep me'
+
+
+@pytest.mark.skipif(os.name == 'nt', reason='Unix socket semantics')
+def test_cleanup_preserves_a_replaced_socket_path(daemon_paths):
+    pid_path, socket_path, _ = daemon_paths
+    pid_path.write_text(str(os.getpid()))
+    listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    listener.bind(str(socket_path))
+    try:
+        bound_identity = _socket_path_identity(socket_path)
+        assert bound_identity is not None and bound_identity.is_socket
+        socket_path.unlink()
+        socket_path.write_text('replacement')
+
+        with (
+            patch('openbrowser.daemon.server.get_pid_path', return_value=pid_path),
+            patch('openbrowser.daemon.server.get_socket_path', return_value=socket_path),
+        ):
+            _cleanup_pid(expected_pid=os.getpid(), socket_identity=bound_identity)
+
+        assert socket_path.read_text() == 'replacement'
+        assert not pid_path.exists()
+    finally:
+        listener.close()
+        socket_path.unlink(missing_ok=True)
+
+
+@pytest.mark.skipif(os.name == 'nt', reason='Unix socket semantics')
+def test_cleanup_preserves_a_replacement_socket(daemon_paths):
+    pid_path, socket_path, _ = daemon_paths
+    pid_path.write_text(str(os.getpid()))
+    original = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    original.bind(str(socket_path))
+    bound_identity = _socket_path_identity(socket_path)
+    assert bound_identity is not None
+    original.close()
+    socket_path.unlink()
+    replacement = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    replacement.bind(str(socket_path))
+    try:
+        with (
+            patch('openbrowser.daemon.server.get_pid_path', return_value=pid_path),
+            patch('openbrowser.daemon.server.get_socket_path', return_value=socket_path),
+        ):
+            _cleanup_pid(expected_pid=os.getpid(), socket_identity=bound_identity)
+
+        assert socket_path.exists()
+        assert not pid_path.exists()
+    finally:
+        replacement.close()
+        socket_path.unlink(missing_ok=True)
+
+
+@pytest.mark.skipif(os.name == 'nt', reason='Unix socket semantics')
+def test_cleanup_removes_the_socket_it_bound(daemon_paths):
+    pid_path, socket_path, _ = daemon_paths
+    pid_path.write_text(str(os.getpid()))
+    listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    listener.bind(str(socket_path))
+    bound_identity = _socket_path_identity(socket_path)
+    assert bound_identity is not None
+    try:
+        with (
+            patch('openbrowser.daemon.server.get_pid_path', return_value=pid_path),
+            patch('openbrowser.daemon.server.get_socket_path', return_value=socket_path),
+        ):
+            _cleanup_pid(expected_pid=os.getpid(), socket_identity=bound_identity)
+    finally:
+        listener.close()
+        socket_path.unlink(missing_ok=True)
+
+    assert not socket_path.exists()
+    assert not pid_path.exists()
 
 
 def test_regular_file_is_not_mistaken_for_a_live_socket(daemon_paths):
@@ -408,6 +518,109 @@ def test_regular_file_is_not_mistaken_for_a_live_socket(daemon_paths):
 
     with patch('openbrowser.daemon.server.IS_WINDOWS', False):
         assert _probe_socket(socket_path) is SocketProbeState.FOREIGN
+
+
+@pytest.mark.skipif(os.name == 'nt', reason='Unix symlink semantics')
+def test_dangling_socket_symlink_is_preserved_as_foreign(daemon_paths, tmp_path):
+    _, socket_path, _ = daemon_paths
+    socket_path.symlink_to(tmp_path / 'missing-target')
+
+    with patch('openbrowser.daemon.server.IS_WINDOWS', False):
+        identity = _socket_path_identity(socket_path)
+        assert identity is not None and identity.is_socket is False
+        assert _probe_socket(socket_path) is SocketProbeState.FOREIGN
+
+
+def test_pid_file_with_unknown_age_reports_unverifiable_age(daemon_paths):
+    pid_path, socket_path, _ = daemon_paths
+    pid_path.write_text('invalid')
+
+    with (
+        patch('openbrowser.daemon.server.get_pid_path', return_value=pid_path),
+        patch('openbrowser.daemon.server.get_socket_path', return_value=socket_path),
+        patch('openbrowser.daemon.server.IS_WINDOWS', False),
+        patch('openbrowser.daemon.server._pid_file_age_seconds', return_value=None),
+    ):
+        inspection = _inspect_pid()
+
+    assert inspection.state is PidOwnerState.UNRESPONSIVE
+    assert inspection.detail == 'PID file is empty or incomplete and its age cannot be checked safely'
+
+
+def test_pid_file_with_unknown_age_is_preserved(daemon_paths):
+    pid_path, socket_path, _ = daemon_paths
+    pid_path.write_text('invalid')
+
+    with (
+        patch('openbrowser.daemon.server.get_pid_path', return_value=pid_path),
+        patch('openbrowser.daemon.server.get_socket_path', return_value=socket_path),
+        patch('openbrowser.daemon.server.IS_WINDOWS', False),
+        patch('openbrowser.daemon.server._pid_file_age_seconds', return_value=None),
+    ):
+        inspection = _inspect_pid()
+
+    assert inspection.state is PidOwnerState.UNRESPONSIVE
+    assert pid_path.exists()
+
+
+def test_invalid_utf8_pid_file_is_reclaimed_when_old(daemon_paths):
+    pid_path, socket_path, _ = daemon_paths
+    pid_path.write_bytes(b'\xff\xfe')
+    old = time.time() - 5
+    os.utime(pid_path, (old, old))
+
+    with (
+        patch('openbrowser.daemon.server.get_pid_path', return_value=pid_path),
+        patch('openbrowser.daemon.server.get_socket_path', return_value=socket_path),
+        patch('openbrowser.daemon.server.IS_WINDOWS', False),
+    ):
+        inspection = _inspect_pid()
+
+    assert inspection.state is PidOwnerState.STALE
+    assert not pid_path.exists()
+
+
+def test_windows_listener_filter_requires_loopback():
+    from types import SimpleNamespace
+
+    records = [
+        SimpleNamespace(pid=42, status='LISTEN', laddr=SimpleNamespace(ip='0.0.0.0', port=WINDOWS_PORT)),
+        SimpleNamespace(pid=42, status='LISTEN', laddr=SimpleNamespace(ip='127.0.0.1', port=WINDOWS_PORT + 1)),
+        SimpleNamespace(pid=7, status='LISTEN', laddr=SimpleNamespace(ip='127.0.0.1', port=WINDOWS_PORT)),
+    ]
+    with patch('psutil.net_connections', return_value=records), patch('psutil.CONN_LISTEN', 'LISTEN'):
+        assert _windows_pid_owns_listener(42) is False
+
+    records.append(SimpleNamespace(pid=42, status='LISTEN', laddr=SimpleNamespace(ip='127.0.0.1', port=WINDOWS_PORT)))
+    with patch('psutil.net_connections', return_value=records), patch('psutil.CONN_LISTEN', 'LISTEN'):
+        assert _windows_pid_owns_listener(42) is True
+
+
+def test_windows_owner_requires_the_loopback_listener(daemon_paths):
+    pid_path, socket_path, _ = daemon_paths
+    pid_path.write_text(str(os.getpid()))
+
+    with (
+        patch('openbrowser.daemon.server.get_pid_path', return_value=pid_path),
+        patch('openbrowser.daemon.server.get_socket_path', return_value=socket_path),
+        patch('openbrowser.daemon.server.IS_WINDOWS', True),
+        patch('openbrowser.daemon.server._daemon_pid_exists', return_value=True),
+        patch('openbrowser.daemon.server._is_openbrowser_daemon_process', return_value=True),
+        patch('openbrowser.daemon.server._windows_pid_owns_listener', return_value=False),
+    ):
+        inspection = _inspect_pid()
+    assert inspection.state is PidOwnerState.UNRESPONSIVE
+
+    with (
+        patch('openbrowser.daemon.server.get_pid_path', return_value=pid_path),
+        patch('openbrowser.daemon.server.get_socket_path', return_value=socket_path),
+        patch('openbrowser.daemon.server.IS_WINDOWS', True),
+        patch('openbrowser.daemon.server._daemon_pid_exists', return_value=True),
+        patch('openbrowser.daemon.server._is_openbrowser_daemon_process', return_value=True),
+        patch('openbrowser.daemon.server._windows_pid_owns_listener', return_value=True),
+    ):
+        inspection = _inspect_pid()
+    assert inspection.state is PidOwnerState.ACTIVE
 
 
 @pytest.mark.asyncio
@@ -427,6 +640,33 @@ async def test_foreign_socket_path_is_refused_and_preserved(daemon_paths):
     assert server._startup_phase is DaemonStartupPhase.FAILED
     assert not pid_path.exists()
     assert socket_path.read_text() == 'ordinary file'
+
+
+@pytest.mark.asyncio
+async def test_socket_identity_change_is_refused_before_unlink(daemon_paths):
+    pid_path, socket_path, _ = daemon_paths
+    socket_path.write_text('replace me')
+    server = DaemonServer(idle_timeout=5, exec_timeout=2)
+    start_server = AsyncMock()
+
+    with (
+        patch('openbrowser.daemon.server.get_pid_path', return_value=pid_path),
+        patch('openbrowser.daemon.server.get_socket_path', return_value=socket_path),
+        patch('openbrowser.daemon.server._inspect_pid', return_value=PidInspection(state=PidOwnerState.ABSENT)),
+        patch('openbrowser.daemon.server.IS_WINDOWS', False),
+        patch('openbrowser.daemon.server._probe_socket', return_value=SocketProbeState.ABSENT),
+        patch(
+            'openbrowser.daemon.server._socket_path_identity',
+            side_effect=[SocketPathIdentity(1, 1, True), SocketPathIdentity(1, 2, True)],
+        ),
+        patch('asyncio.start_unix_server', start_server),
+    ):
+        await server.serve_daemon()
+
+    start_server.assert_not_awaited()
+    assert server._startup_phase is DaemonStartupPhase.FAILED
+    assert server._startup_detail == 'Daemon socket path changed during startup'
+    assert socket_path.read_text() == 'replace me'
 
 
 def test_status_reads_storage_state_from_the_watchdog():
@@ -486,6 +726,27 @@ def test_status_reports_configured_storage_state_before_browser_start(tmp_path):
     assert status['storage_state']['bytes'] == state_path.stat().st_size
 
 
+def test_status_preload_preserves_missing_in_memory_and_unresolved_states(tmp_path):
+    server = DaemonServer(idle_timeout=5, exec_timeout=2)
+    server._profile_summary = {
+        'user_data_dir': str(tmp_path / 'profile'),
+        'headless': True,
+        'storage_state': None,
+    }
+
+    server._record_storage_state(str(tmp_path / 'missing.json'))
+    assert server._status_payload()['storage_state']['phase'] == 'skipped'
+
+    server._record_storage_state({})
+    assert server._status_payload()['storage_state']['phase'] == 'skipped'
+
+    with patch('pathlib.Path.expanduser', side_effect=RuntimeError('home unavailable')):
+        server._record_storage_state('~/state.json')
+    status = server._status_payload()['storage_state']
+    assert status['phase'] == 'failed'
+    assert 'RuntimeError' in status['error']
+
+
 @pytest.mark.asyncio
 async def test_main_exits_nonzero_when_startup_fails():
     from openbrowser.daemon.server import _main
@@ -512,6 +773,7 @@ async def test_real_daemon_process_reports_status_and_cleans_up(daemon_paths, mo
     environment = os.environ.copy()
     environment['OPENBROWSER_SOCKET'] = str(socket_path)
     environment['PYTHONPATH'] = str(repository_root / 'src')
+    environment.pop('OPENBROWSER_STORAGE_STATE', None)
     monkeypatch.setenv('OPENBROWSER_SOCKET', str(socket_path))
 
     process = subprocess.Popen(

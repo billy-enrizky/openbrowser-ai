@@ -44,24 +44,22 @@ Targets specific missed lines across:
 
 import asyncio
 import base64
-from contextlib import asynccontextmanager
 import io
 import json
 import logging
 import os
-import sys
 import tempfile
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from functools import cache
 from pathlib import Path
-from typing import Any
-from unittest.mock import AsyncMock, MagicMock, PropertyMock, create_autospec, patch
+from unittest.mock import AsyncMock, MagicMock, create_autospec, patch
 
 import pytest
 from PIL import Image
 from pydantic import BaseModel
 
 from openbrowser.browser.session import BrowserSession
+from openbrowser.daemon.ownership import SocketEntryIdentity
 
 logger = logging.getLogger(__name__)
 
@@ -138,6 +136,7 @@ class TestPythonHighlights:
     def test_process_element_highlight_bg_y1_negative(self):
         """Lines 209-212: bg_y1 < 0 clamping path."""
         from PIL import Image, ImageDraw
+
         from openbrowser.browser.python_highlights import process_element_highlight
 
         img = Image.new("RGB", (200, 200), "black")
@@ -162,6 +161,7 @@ class TestPythonHighlights:
     def test_process_element_highlight_bg_y2_exceeds_height(self):
         """Lines 219-222: bg_y2 > img_height clamping path."""
         from PIL import Image, ImageDraw
+
         from openbrowser.browser.python_highlights import process_element_highlight
 
         # Tiny image with element placed at bottom edge
@@ -215,7 +215,9 @@ class TestPythonHighlights:
     @pytest.mark.asyncio
     async def test_create_highlighted_screenshot_async_cdp_exception(self):
         """Lines 524-525: CDP viewport info exception path."""
-        from openbrowser.browser.python_highlights import create_highlighted_screenshot_async
+        from openbrowser.browser.python_highlights import (
+            create_highlighted_screenshot_async,
+        )
 
         # Create a small valid PNG
         img = Image.new("RGB", (10, 10), "blue")
@@ -247,7 +249,6 @@ class TestAgentService:
 
     def test_agent_id_suffix_starts_with_digit(self):
         """Line 630: agent_id_suffix starting with a digit gets 'a' prefix."""
-        from openbrowser.agent.service import Agent
 
         # An ID that ends with 4 digits
         test_id = "12345678-1234-1234-1234-123456781234"
@@ -361,7 +362,7 @@ class TestConfig:
 
     def test_load_and_migrate_config_file_deleted_cache(self):
         """Lines 334-335: FileNotFoundError during cache check."""
-        from openbrowser.config import load_and_migrate_config, _config_cache
+        from openbrowser.config import _config_cache, load_and_migrate_config
 
         with tempfile.TemporaryDirectory() as tmp:
             config_path = Path(tmp) / "config.json"
@@ -384,7 +385,7 @@ class TestConfig:
 
     def test_load_and_migrate_config_write_error(self):
         """Lines 382-383: write failure on fresh config creation."""
-        from openbrowser.config import load_and_migrate_config, _config_cache
+        from openbrowser.config import _config_cache, load_and_migrate_config
 
         with tempfile.TemporaryDirectory() as tmp:
             config_path = Path(tmp) / "config.json"
@@ -522,6 +523,11 @@ class TestDaemonClient:
         socket_path = tmp_path / "daemon.sock"
         socket_path.touch()
         with patch.object(client, "_probe", side_effect=mock_probe), \
+             patch.object(client, "_socket_state", new_callable=AsyncMock, return_value="stale"), \
+             patch(
+                 "openbrowser.daemon.client.socket_entry_identity",
+                 return_value=SocketEntryIdentity(1, 1, True),
+             ), \
              patch.object(client, "_start_lock", self._no_start_lock), \
              patch("openbrowser.daemon.client.get_socket_path", return_value=socket_path), \
              patch("openbrowser.daemon.client.get_pid_path", return_value=tmp_path / "daemon.pid"), \
@@ -650,8 +656,9 @@ class TestLoggingConfig:
 
     def test_add_logging_level_method_already_defined_on_logger_class(self):
         """Line 94: raise if method already defined on logger class."""
-        from openbrowser.logging_config import addLoggingLevel
         import logging as log_mod
+
+        from openbrowser.logging_config import addLoggingLevel
 
         # Create a unique level name that doesn't exist
         unique_name = "XUNIQUETESTLVL"
@@ -668,8 +675,9 @@ class TestLoggingConfig:
 
     def test_add_logging_level_log_for_level_not_enabled(self):
         """Line 101: logForLevel when level is not enabled."""
-        from openbrowser.logging_config import addLoggingLevel
         import logging as log_mod
+
+        from openbrowser.logging_config import addLoggingLevel
 
         unique_name = "XTRACELVL2"
         unique_method = "xtracelvl2"
@@ -851,7 +859,6 @@ class TestChatCerebras:
 
     def test_no_valid_execution_path(self):
         """Line 193: raise when no valid ainvoke execution path."""
-        from openbrowser.llm.cerebras.chat import ChatCerebras
 
         # The error is raised if no conditions match (unreachable in normal flow)
         # We test the error message string directly
@@ -919,7 +926,7 @@ class TestLLMMessages:
 
     def test_system_message_text_returns_empty_for_invalid_content(self):
         """Line 187: SystemMessage.text returns '' for non-str/non-list."""
-        from openbrowser.llm.messages import SystemMessage, ContentPartTextParam
+        from openbrowser.llm.messages import ContentPartTextParam, SystemMessage
 
         msg = SystemMessage(content="sys")
         assert msg.text == "sys"
@@ -1504,7 +1511,7 @@ class TestDefaultActionWatchdog:
         with pytest.raises(RuntimeError, match="key dispatch failed"):
             try:
                 raise RuntimeError("key dispatch failed")
-            except Exception as e:
+            except Exception:
                 raise
 
     def test_scroll_to_text_not_found(self):

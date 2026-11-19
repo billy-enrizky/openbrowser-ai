@@ -6,8 +6,8 @@ import os
 import shutil
 import socket
 import subprocess
-import tempfile
 import sys
+import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -200,12 +200,12 @@ class TestDaemonClientRecoveryDiscovery:
         pid_path = tmp_path / 'daemon.pid'
         socket_path = tmp_path / 'daemon.sock'
         pid_path.write_text('123')
-        socket_path.write_text('')
 
         with (
             patch('openbrowser.daemon.client.get_pid_path', return_value=pid_path),
             patch('openbrowser.daemon.client.get_socket_path', return_value=socket_path),
             patch('psutil.Process', return_value=process),
+            patch.object(client, '_socket_state', new_callable=AsyncMock, return_value='stale'),
             patch.object(client, '_profile_dirs_for_daemon', return_value=['/tmp/profile']) as discover,
             patch.object(
                 client,
@@ -318,6 +318,101 @@ class TestDaemonClientRecoveryDiscovery:
 
 
     @pytest.mark.asyncio
+    async def test_stale_cleanup_refuses_while_another_owner_holds_the_lock(self, tmp_path):
+        from openbrowser.daemon.ownership import (
+            DaemonOwnerLock,
+            owner_lock_path_for_pid_file,
+        )
+
+        client = DaemonClient()
+        pid_path = tmp_path / 'daemon.pid'
+        socket_path = tmp_path / 'daemon.sock'
+        pid_path.write_text('4321')
+        socket_path.write_text('owner sentinel')
+        lock = DaemonOwnerLock(owner_lock_path_for_pid_file(pid_path))
+        assert lock.acquire()
+        try:
+            with (
+                patch('openbrowser.daemon.client.get_pid_path', return_value=pid_path),
+                patch('openbrowser.daemon.client.get_socket_path', return_value=socket_path),
+            ):
+                result = await client._remove_stale_daemon_files()
+        finally:
+            lock.release()
+
+        assert result is not None
+        assert result.error_code == 'daemon_busy'
+        assert pid_path.read_text() == '4321'
+        assert socket_path.read_text() == 'owner sentinel'
+
+    @pytest.mark.asyncio
+    async def test_stale_cleanup_refuses_a_socket_that_changed(self, tmp_path):
+        from openbrowser.daemon.ownership import SocketEntryIdentity
+
+        client = DaemonClient()
+        pid_path = tmp_path / 'daemon.pid'
+        socket_path = tmp_path / 'daemon.sock'
+        pid_path.write_text('4321')
+        socket_path.write_text('replacement')
+
+        with (
+            patch('openbrowser.daemon.client.get_pid_path', return_value=pid_path),
+            patch('openbrowser.daemon.client.get_socket_path', return_value=socket_path),
+            patch.object(client, '_socket_state', new_callable=AsyncMock, return_value='stale'),
+            patch.object(client, '_daemon_owner_for_socket', return_value=None),
+            patch(
+                'openbrowser.daemon.client.socket_entry_identity',
+                side_effect=[None, SocketEntryIdentity(1, 1, True)],
+            ),
+        ):
+            result = await client._remove_stale_daemon_files()
+
+        assert result is not None
+        assert result.error_code == 'daemon_socket_changed'
+        assert socket_path.read_text() == 'replacement'
+        assert pid_path.exists()
+
+    @pytest.mark.asyncio
+    async def test_stale_cleanup_preserves_a_foreign_path(self, tmp_path):
+        client = DaemonClient()
+        pid_path = tmp_path / 'daemon.pid'
+        socket_path = tmp_path / 'daemon.sock'
+        pid_path.write_text('4321')
+        socket_path.write_text('not a socket')
+
+        with (
+            patch('openbrowser.daemon.client.get_pid_path', return_value=pid_path),
+            patch('openbrowser.daemon.client.get_socket_path', return_value=socket_path),
+            patch.object(client, '_socket_state', new_callable=AsyncMock, return_value='stale'),
+        ):
+            result = await client._remove_stale_daemon_files()
+
+        assert result is not None
+        assert result.error_code == 'daemon_socket_foreign'
+        assert socket_path.read_text() == 'not a socket'
+        assert pid_path.exists()
+
+    @pytest.mark.asyncio
+    async def test_stale_cleanup_refuses_an_unverifiable_socket_state(self, tmp_path):
+        client = DaemonClient()
+        pid_path = tmp_path / 'daemon.pid'
+        socket_path = tmp_path / 'daemon.sock'
+        pid_path.write_text('4321')
+        socket_path.write_text('unreadable socket')
+
+        with (
+            patch('openbrowser.daemon.client.get_pid_path', return_value=pid_path),
+            patch('openbrowser.daemon.client.get_socket_path', return_value=socket_path),
+            patch.object(client, '_socket_state', new_callable=AsyncMock, return_value='unknown'),
+        ):
+            result = await client._remove_stale_daemon_files()
+
+        assert result is not None
+        assert result.error_code == 'daemon_socket_unverified'
+        assert socket_path.read_text() == 'unreadable socket'
+        assert pid_path.exists()
+
+    @pytest.mark.asyncio
     async def test_force_stop_without_pid_does_not_hide_a_live_listener(self, tmp_path):
         client = DaemonClient()
         client.status = AsyncMock(return_value=DaemonResponse(success=False, output='', error='unresponsive'))
@@ -353,6 +448,7 @@ class TestDaemonClientRecoveryDiscovery:
             patch('openbrowser.daemon.client.get_pid_path', return_value=pid_path),
             patch('psutil.Process', side_effect=__import__('psutil').NoSuchProcess(999)),
             patch.object(client, '_socket_accepts_connection', new_callable=AsyncMock, return_value=True),
+            patch.object(client, '_socket_state', new_callable=AsyncMock, return_value='live'),
         ):
             result = await client.force_stop(timeout=0.01)
 

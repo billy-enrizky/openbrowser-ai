@@ -5,11 +5,9 @@ import json
 import logging
 import os
 import tempfile
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, create_autospec, patch
 
 import pytest
-from bubus import EventBus
 
 from openbrowser.browser.session import BrowserSession
 
@@ -43,7 +41,9 @@ def _make_mock_browser_session():
 
 
 def _make_storage_watchdog(session=None, event_bus=None):
-    from openbrowser.browser.watchdogs.storage_state_watchdog import StorageStateWatchdog
+    from openbrowser.browser.watchdogs.storage_state_watchdog import (
+        StorageStateWatchdog,
+    )
 
     if session is None:
         session = _make_mock_browser_session()
@@ -499,11 +499,18 @@ class TestSaveStorageState:
 
 class TestLoadStorageState:
     @pytest.mark.asyncio
-    async def test_no_cdp_client(self):
+    async def test_no_cdp_client(self, tmp_path):
         session = _make_mock_browser_session()
-        session.cdp_client = None
+        session._cdp_client_root = None
         watchdog = _make_storage_watchdog(session=session)
-        await watchdog._load_storage_state(path="/tmp/state.json")
+        state_path = tmp_path / "state.json"
+        state_path.write_text('{"cookies": [], "origins": []}')
+
+        await watchdog._load_storage_state(path=str(state_path))
+
+        snapshot = watchdog.storage_state_snapshot()
+        assert snapshot.phase.value == "failed"
+        assert snapshot.error == "Browser is not connected; no CDP client is available"
 
     @pytest.mark.asyncio
     async def test_no_path(self):
@@ -650,7 +657,9 @@ class TestLoadStorageState:
 
 class TestMergeStorageStates:
     def test_merge_new_cookies(self):
-        from openbrowser.browser.watchdogs.storage_state_watchdog import StorageStateWatchdog
+        from openbrowser.browser.watchdogs.storage_state_watchdog import (
+            StorageStateWatchdog,
+        )
 
         existing = {
             "cookies": [{"name": "a", "domain": ".x.com", "path": "/", "value": "1"}],
@@ -665,7 +674,9 @@ class TestMergeStorageStates:
         assert len(result["origins"]) == 2
 
     def test_merge_overwrites_existing(self):
-        from openbrowser.browser.watchdogs.storage_state_watchdog import StorageStateWatchdog
+        from openbrowser.browser.watchdogs.storage_state_watchdog import (
+            StorageStateWatchdog,
+        )
 
         existing = {
             "cookies": [{"name": "a", "domain": ".x.com", "path": "/", "value": "old"}],
@@ -680,7 +691,9 @@ class TestMergeStorageStates:
         assert result["cookies"][0]["value"] == "new"
 
     def test_merge_empty_states(self):
-        from openbrowser.browser.watchdogs.storage_state_watchdog import StorageStateWatchdog
+        from openbrowser.browser.watchdogs.storage_state_watchdog import (
+            StorageStateWatchdog,
+        )
 
         result = StorageStateWatchdog._merge_storage_states({}, {})
         assert result["cookies"] == []
