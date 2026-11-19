@@ -253,8 +253,6 @@ class CodeAgent:
 				logger.info(f'Extracted URL from task, navigating to: {initial_url}')
 				# Use the navigate action from namespace
 				await self.namespace['navigate'](initial_url)
-				# Wait for page load
-				await asyncio.sleep(2)
 
 				# Record this navigation as a cell in the notebook
 				nav_code = f"await navigate('{initial_url}')"

@@ -222,6 +222,8 @@ asyncio.run(main())
 
 Cancelling `navigate_to()` cancels that request without replaying navigation. An overlapping request raises `NavigationBusyError`; wait for the active request to finish before trying again. A download handoff still returns `None`, but is recorded as `download`, not document readiness. `session.lifecycle_snapshot()["navigation"]` reports the active or last operation, including its requested URL, observed URL, generation, phase, and error.
 
+When CodeAgent extracts an initial URL from its task, it awaits the registered `navigate` action without an additional fixed delay. The default action awaits the navigation contract above. If you replace `navigate` with a custom action, that action must await the readiness your task needs before returning. CodeAgent does not add a load or hydration check after a custom action returns, even if the action waits only for `commit`.
+
 ## Configuration
 
 ### Environment Variables
