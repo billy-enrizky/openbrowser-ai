@@ -643,7 +643,10 @@ class _BrowserOwner:
 			return False
 		timeout = _CDP_HEALTH_CHECK_TIMEOUT_SECONDS
 		if deadline is not None:
-			timeout = min(timeout, max(0.1, deadline - time.monotonic()))
+			remaining = deadline - time.monotonic()
+			if remaining <= 0:
+				return False
+			timeout = min(timeout, remaining)
 		try:
 			await asyncio.wait_for(root.send.Browser.getVersion(), timeout=timeout)
 			return True
@@ -696,7 +699,7 @@ class _BrowserOwner:
 		call works transparently.
 		"""
 		async with self._lifecycle_lock:
-			if self.browser_session and await self._is_cdp_alive():
+			if self.browser_session and await self._is_cdp_alive(deadline=deadline):
 				return
 
 			logger.info('CDP connection lost, recovering browser session')
@@ -735,6 +738,17 @@ class _BrowserOwner:
 					raise RuntimeError('Unable to safely close the old browser session during recovery')
 			else:
 				self._namespace = None
+
+			if deadline is not None and time.monotonic() >= deadline:
+				try:
+					self._browser_lifecycle.transition(
+						LifecyclePhase.STOPPED,
+						reason='recovery deadline exhausted',
+						increment_generation=True,
+					)
+				except LifecycleTransitionError:
+					pass
+				raise TimeoutError('Browser recovery exceeded the execution deadline')
 
 			# 2. Create a brand-new session. The local watchdog owns its profile
 			# lease and can reclaim only its recorded browser process.
@@ -844,8 +858,13 @@ class _BrowserOwner:
 	async def _execute_code_locked(self, code: str, *, deadline: float | None = None) -> str:
 		"""Execute Python code in the persistent namespace."""
 		now = time.monotonic()
+		if deadline is not None and now >= deadline:
+			return (
+				'Error: Execution timed out before browser startup. '
+				'Run get_status before retrying.'
+			)
 		start_timeout = (
-			min(_start_timeout_seconds(), max(0.1, deadline - now))
+			min(_start_timeout_seconds(), deadline - now)
 			if deadline is not None
 			else None
 		)
@@ -877,15 +896,25 @@ class _BrowserOwner:
 					f'Error: Browser connection lost and recovery failed: {type(recovery_err).__name__}: {recovery_err}\n\n'
 					'Run get_status, then reset_browser before retrying.'
 				)
+		if deadline is not None and time.monotonic() >= deadline:
+			return (
+				'Error: Execution timed out after browser recovery. '
+				'Run get_status before retrying.'
+			)
 
 		# Execute via shared CodeExecutor with a bound that leaves room for the
 		# calling agent to receive the timeout message before its own timeout.
 		try:
 			remaining = (
-				max(0.1, deadline - time.monotonic())
+				deadline - time.monotonic()
 				if deadline is not None
 				else _exec_timeout_seconds()
 			)
+			if remaining <= 0:
+				return (
+					'Error: Execution timed out before user code could run. '
+					'Run get_status before retrying.'
+				)
 			result = await asyncio.wait_for(
 				self._executor.execute(code),
 				timeout=remaining,

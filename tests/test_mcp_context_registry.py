@@ -1,6 +1,7 @@
 """Explicit context registry state, isolation, capacity, and close semantics."""
 
 import asyncio
+import time
 from pathlib import Path
 from types import MethodType, SimpleNamespace
 from unittest.mock import MagicMock
@@ -441,3 +442,32 @@ async def test_explicit_profile_path_is_shared_by_explicit_opt_in(
     second_profile = second._build_browser_profile()
     assert Path(first_profile.user_data_dir).resolve() == shared.resolve()
     assert Path(second_profile.user_data_dir).resolve() == shared.resolve()
+
+
+@pytest.mark.asyncio
+async def test_expired_deadline_does_not_start_user_code(registry):
+    _, contexts = registry
+    context_id = await contexts.create()
+    owner = contexts._entries[context_id].owner
+    result = await owner._execute_code_locked(
+        "started = True", deadline=time.monotonic() - 1
+    )
+    assert "timed out" in result.lower()
+    assert owner._namespace is None
+
+
+@pytest.mark.asyncio
+async def test_recovery_deadline_exhaustion_stops_after_old_cleanup(registry):
+    _, contexts = registry
+    context_id = await contexts.create()
+    owner = contexts._entries[context_id].owner
+    owner.browser_session = MagicMock()
+
+    async def kill(_session):
+        return module._CleanupOutcome(True)
+
+    owner._kill_session_safely = kill
+    with pytest.raises(TimeoutError):
+        await owner._recover_browser_session_locked(deadline=time.monotonic() - 1)
+    assert owner.browser_session is None
+    assert owner._browser_lifecycle.phase is LifecyclePhase.STOPPED
