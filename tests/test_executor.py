@@ -1,6 +1,7 @@
 # tests/test_executor.py
-import pytest
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 
 @pytest.fixture
@@ -124,3 +125,30 @@ class TestCodeExecutor:
         assert result.success is True
         assert len(result.output) <= 200  # some overhead for truncation message
         assert 'truncated' in result.output
+
+
+@pytest.mark.asyncio
+async def test_clear_namespace_during_execution_does_not_break_cleanup(mock_namespace):
+    import asyncio
+
+    from openbrowser.code_use.executor import CodeExecutor
+
+    executor = CodeExecutor()
+    namespace = dict(mock_namespace)
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def pause() -> None:
+        started.set()
+        await release.wait()
+
+    namespace['pause'] = pause
+    executor.set_namespace(namespace)
+    task = asyncio.create_task(executor.execute('await pause()'))
+    await asyncio.wait_for(started.wait(), timeout=5)
+    executor.clear_namespace()
+    release.set()
+    result = await asyncio.wait_for(task, timeout=5)
+    assert result.success is True
+    assert '__ob_exec__' not in namespace
+    assert executor.namespace is None

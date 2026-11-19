@@ -1,10 +1,13 @@
 """Explicit context registry state, isolation, capacity, and close semantics."""
 
 import asyncio
+from pathlib import Path
 from types import MethodType, SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 
+from openbrowser.browser.lifecycle import LifecyclePhase
 from openbrowser.mcp import server as module
 
 
@@ -16,10 +19,11 @@ async def _event(event: asyncio.Event, label: str) -> None:
 
 
 async def _settle(task: asyncio.Task[object], label: str):
-    try:
-        return await asyncio.wait_for(task, timeout=5)
-    except TimeoutError:
+    _done, pending = await asyncio.wait({task}, timeout=5)
+    if pending:
+        task.cancel()
         pytest.fail(f"Timed out waiting for {label}", pytrace=False)
+    return task.result()
 
 
 @pytest.fixture()
@@ -182,7 +186,7 @@ async def test_server_output_lock_serializes_execute_code_across_contexts(regist
     active = 0
     maximum = 0
 
-    async def fake_execute(self, code):
+    async def fake_execute(self, code, *, deadline=None):
         nonlocal active, maximum
         active += 1
         maximum = max(maximum, active)
@@ -224,10 +228,12 @@ async def test_close_drains_an_admitted_call_before_cleanup(registry):
     entry.owner._close_owned = close_owned
     lease = await contexts.acquire(context_id)
     close_task = asyncio.create_task(contexts.close(context_id))
-    await asyncio.sleep(0)
-    assert not cleanup_started.is_set()
-    contexts.release(lease.entry)
-    assert (await close_task).status == "closed"
+    try:
+        await _event(entry.drain_waiting, "close drain wait")
+        assert not cleanup_started.is_set()
+    finally:
+        contexts.release(lease.entry)
+    assert (await _settle(close_task, "close result")).status == "closed"
     assert cleanup_started.is_set()
 
 
@@ -240,11 +246,9 @@ async def test_cancelled_lease_holder_releases_on_unwind(registry):
     started = asyncio.Event()
 
     async def holder():
-        try:
+        async with lease:
             started.set()
             await asyncio.sleep(3600)
-        finally:
-            contexts.release(lease.entry)
 
     task = asyncio.create_task(holder())
     await _event(started, "lease holder start")
@@ -348,7 +352,7 @@ async def test_process_output_lock_is_shared_between_servers(registry):
     first_server, _ = registry
     second_server = module.OpenBrowserServer()
 
-    async def fake_execute(self, code):
+    async def fake_execute(self, code, *, deadline=None):
         return code
 
     first_server._execute_code_locked = MethodType(fake_execute, first_server)
@@ -357,3 +361,83 @@ async def test_process_output_lock_is_shared_between_servers(registry):
         first_server._execute_code("a"), second_server._execute_code("b")
     )
     assert first_server._output_lock is second_server._output_lock
+
+
+@pytest.mark.asyncio
+async def test_execution_times_out_waiting_for_the_shared_output_lock(
+    registry, monkeypatch
+):
+    _, contexts = registry
+    context_id = await contexts.create()
+    owner = contexts._entries[context_id].owner
+    lock = module._process_output_lock()
+    await lock.acquire()
+    monkeypatch.setenv("OPENBROWSER_MCP_EXEC_TIMEOUT", "0.1")
+    try:
+        result = await asyncio.wait_for(owner._execute_code("x = 1"), timeout=2)
+    finally:
+        lock.release()
+    assert "shared output lock" in result
+    assert owner._execution_lock.locked() is False
+
+
+@pytest.mark.asyncio
+async def test_recovery_cancellation_reports_stopped_and_keeps_variables(registry):
+    _, contexts = registry
+    context_id = await contexts.create()
+    owner = contexts._entries[context_id].owner
+    cancellation = asyncio.CancelledError("caller cancelled")
+    owner.browser_session = MagicMock()
+    owner._namespace = {"answer": 42}
+
+    async def kill(_session):
+        return module._CleanupOutcome(True, cancellation)
+
+    owner._kill_session_safely = kill
+    with pytest.raises(asyncio.CancelledError) as raised:
+        await owner._recover_browser_session_locked()
+    assert raised.value is cancellation
+    assert owner._browser_lifecycle.phase is LifecyclePhase.STOPPED
+    assert owner._pending_variables == {"answer": 42}
+
+
+@pytest.mark.asyncio
+async def test_shutdown_retries_a_failed_modern_context(registry):
+    server, contexts = registry
+    context_id = await contexts.create()
+    entry = contexts._entries[context_id]
+    attempts = 0
+
+    async def close_owned():
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise RuntimeError("controlled first cleanup failure")
+
+    entry.owner._close_owned = close_owned
+    await server._shutdown()
+    assert attempts == 2
+    assert context_id not in contexts._entries
+    assert contexts.admission is module.ServerAdmission.STOPPED
+
+
+@pytest.mark.asyncio
+async def test_explicit_profile_path_is_shared_by_explicit_opt_in(
+    monkeypatch, tmp_path
+):
+    shared = tmp_path / "shared-profile"
+    monkeypatch.setattr(module, "TELEMETRY_AVAILABLE", False)
+    monkeypatch.setattr(
+        module,
+        "load_openbrowser_config",
+        lambda: {"browser_profile": {"user_data_dir": str(shared)}},
+    )
+    server = module.OpenBrowserServer()
+    first_id = await server._contexts.create()
+    second_id = await server._contexts.create()
+    first = server._contexts._entries[first_id].owner
+    second = server._contexts._entries[second_id].owner
+    first_profile = first._build_browser_profile()
+    second_profile = second._build_browser_profile()
+    assert Path(first_profile.user_data_dir).resolve() == shared.resolve()
+    assert Path(second_profile.user_data_dir).resolve() == shared.resolve()

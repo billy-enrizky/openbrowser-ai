@@ -62,17 +62,17 @@
     {
       "name": "scrape_data",
       "description": "Extract structured data from a website",
-      "text": "First call create_context and keep its context_id. Then use execute_code with that context_id to write Python that navigates to {url}, extracts data using evaluate() for JS DOM queries or Python string processing, and prints structured results. Call close_context when finished."
+      "text": "For a 2026-07-28 client, first call create_context and keep its context_id. Then use execute_code with that context_id to write Python that navigates to {url}, extracts data using evaluate() for JS DOM queries or Python string processing, and prints structured results. Call close_context when finished. Older clients call execute_code directly without a context_id."
     },
     {
       "name": "fill_form",
       "description": "Fill out and submit a web form",
-      "text": "First call create_context and keep its context_id. Then use execute_code with that context_id to navigate to {url}, get browser state to find form fields, and use input_text() and click() to fill and submit the form with: {field_data}. Call close_context when finished."
+      "text": "For a 2026-07-28 client, first call create_context and keep its context_id. Then use execute_code with that context_id to navigate to {url}, get browser state to find form fields, and use input_text() and click() to fill and submit the form with: {field_data}. Call close_context when finished. Older clients call execute_code directly without a context_id."
     },
     {
       "name": "research_topic",
       "description": "Research a topic across multiple websites",
-      "text": "First call create_context and keep its context_id. Then use execute_code with that context_id to navigate to multiple sites, extract content using evaluate() or page text, and aggregate findings about {topic} using Python data structures. Call close_context when finished."
+      "text": "For a 2026-07-28 client, first call create_context and keep its context_id. Then use execute_code with that context_id to navigate to multiple sites, extract content using evaluate() or page text, and aggregate findings about {topic} using Python data structures. Call close_context when finished. Older clients call execute_code directly without a context_id."
     }
   ],
   "keywords": [

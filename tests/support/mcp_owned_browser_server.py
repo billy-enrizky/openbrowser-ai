@@ -20,6 +20,14 @@ async def main() -> None:
     server = module.OpenBrowserServer()
     owners = []
     killed = []
+    contexts = []
+    original_context_init = module.OpenBrowserContext.__init__
+
+    def capture_context(self, owner_server, context_id):
+        original_context_init(self, owner_server, context_id)
+        contexts.append(self)
+
+    module.OpenBrowserContext.__init__ = capture_context
 
     class Browser:
         def __init__(self, **kwargs):
@@ -93,6 +101,19 @@ async def main() -> None:
             )
             + "\n"
         )
+        if contexts:
+            modern = contexts[-1]
+            sys.stderr.write(
+                "MODERN_FINAL "
+                + json.dumps(
+                    {
+                        "owner": getattr(modern.browser_session, "ident", None),
+                        "execution_locked": modern._execution_lock.locked(),
+                        "lifecycle_locked": modern._lifecycle_lock.locked(),
+                    }
+                )
+                + "\n"
+            )
 
 
 if __name__ == "__main__":

@@ -29,6 +29,14 @@ META = {
 }
 
 
+def modern_final(stderr: str) -> dict | None:
+    line = next(
+        (line for line in stderr.splitlines() if line.startswith("MODERN_FINAL ")),
+        None,
+    )
+    return json.loads(line.removeprefix("MODERN_FINAL ")) if line else None
+
+
 def child_env(home: Path) -> dict[str, str]:
     return {
         "PATH": os.environ.get("PATH", ""),
@@ -443,8 +451,14 @@ async def test_catalog_is_snapshot_and_cannot_mutate_validation(monkeypatch):
             == module._EXECUTE_CODE_DESCRIPTION_COMPACT
         )
         assert fresh_execute.input_schema["properties"]["code"]["type"] == "string"
-        result = await client.call_tool("execute_code", {"code": 5})
+        created = await client.call_tool("create_context", {})
+        context_id = created.structured_content["context_id"]
+        result = await client.call_tool(
+            "execute_code", {"context_id": context_id, "code": 5}
+        )
         assert result.is_error
+        assert "$.code" in result.content[0].text
+        assert "not of type" in result.content[0].text
         assert server.browser_session is None
 
 
@@ -773,6 +787,12 @@ async def test_owned_cleanup_cancellation_preserves_real_stdio_usability(
         assert state["owner"] is None
         assert not state["execution_locked"] and not state["lifecycle_locked"]
         assert blocked_owner in state["killed"]
+        if modern:
+            modern_state = modern_final(stderr)
+            assert modern_state is not None
+            assert modern_state["owner"] is None
+            assert not modern_state["execution_locked"]
+            assert not modern_state["lifecycle_locked"]
 
 
 @pytest.mark.asyncio
@@ -903,6 +923,12 @@ async def test_failed_owned_cleanup_retains_owner_and_cancellation_keeps_transpo
             "lifecycle_locked": False,
             "killed": [1, 2],
         }
+        if modern:
+            modern_state = modern_final(stderr)
+            assert modern_state is not None
+            assert modern_state["owner"] is None
+            assert not modern_state["execution_locked"]
+            assert not modern_state["lifecycle_locked"]
 
 
 @pytest.mark.asyncio
@@ -1008,11 +1034,16 @@ async def test_owned_tool_self_cancellation_is_error_without_losing_request_tran
             for line in stderr.splitlines()
             if line.startswith("OWNED_FINAL ")
         )
-        assert json.loads(final)["owner"] is None
-        assert (
-            not json.loads(final)["execution_locked"]
-            and not json.loads(final)["lifecycle_locked"]
-        )
+        final_state = json.loads(final)
+        assert final_state["owner"] is None
+        assert not final_state["execution_locked"]
+        assert not final_state["lifecycle_locked"]
+        if modern:
+            modern_state = modern_final(stderr)
+            assert modern_state is not None
+            assert modern_state["owner"] is None
+            assert not modern_state["execution_locked"]
+            assert not modern_state["lifecycle_locked"]
 
 
 @pytest.mark.asyncio

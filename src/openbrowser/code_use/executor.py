@@ -63,7 +63,8 @@ class CodeExecutor:
         stdout is captured and returned. Variables persist across calls.
         Serialized via asyncio.Lock to protect sys.stdout from concurrent access.
         """
-        if self._namespace is None:
+        namespace = self._namespace
+        if namespace is None:
             return ExecutionResult(success=False, output='Error: namespace not initialized', error='namespace not initialized')
 
         if not code.strip():
@@ -87,10 +88,10 @@ class CodeExecutor:
 
             try:
                 compiled = compile(wrapped, '<execute_code>', 'exec')
-                exec(compiled, self._namespace)
+                exec(compiled, namespace)
 
                 with contextlib.redirect_stdout(stdout_capture):
-                    result = await self._namespace['__ob_exec__'](self._namespace)
+                    result = await namespace['__ob_exec__'](namespace)
 
                 output = stdout_capture.getvalue()
 
@@ -114,8 +115,8 @@ class CodeExecutor:
                 return ExecutionResult(success=False, output=error_output, error=raw_error)
 
             finally:
-                self._namespace.pop('__ob_exec__', None)
-                self._namespace.pop('__ob_result__', None)
+                namespace.pop('__ob_exec__', None)
+                namespace.pop('__ob_result__', None)
 
     def _truncate(self, text: str) -> str:
         if self._max_output_chars and len(text) > self._max_output_chars:

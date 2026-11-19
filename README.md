@@ -444,7 +444,7 @@ The MCP server exposes five tools to 2026-07-28 clients and the original three t
 - `reset_browser` closes a stuck browser and preserves user-defined Python variables unless `clear_variables` is true.
 - `close_context` closes one context and releases its browser and profile. The handle cannot be used after a successful close.
 
-A context is process-local. It lives until `close_context` or server exit, and a new MCP server process cannot resume the same handle. Older clients that negotiate `2024-11-05`, `2025-03-26`, `2025-06-18`, or `2025-11-25` receive the original three-tool catalog and a legacy no-handle context. A modern request without `context_id` is rejected before any browser effect.
+A context is process-local. It lives until `close_context` or server exit, and a new MCP server process cannot resume the same handle. Older clients that negotiate `2024-11-05`, `2025-03-26`, `2025-06-18`, or `2025-11-25` receive the original three-tool catalog and a legacy no-handle context. A modern stateful request without the handle returned by `create_context` is rejected before any browser effect. `create_context` itself takes no handle.
 
 If a browser connection fails, call `get_status` before retrying. Do not replay a page-changing action blindly because the first attempt may have partially run.
 

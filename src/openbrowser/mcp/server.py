@@ -562,7 +562,7 @@ class _BrowserOwner:
 			shutil.copy2(source_path, destination)
 		self._managed_storage_state = destination
 
-	async def _ensure_namespace(self):
+	async def _ensure_namespace(self, *, start_timeout: float | None = None):
 		"""Lazily initialize browser session, tools, and namespace on first use."""
 		if self._namespace is not None:
 			return
@@ -592,7 +592,10 @@ class _BrowserOwner:
 				profile = self._build_browser_profile()
 				session = BrowserSession(browser_profile=profile)
 				self.browser_session = session
-				await asyncio.wait_for(session.start(), timeout=_start_timeout_seconds())
+				await asyncio.wait_for(
+					session.start(),
+					timeout=start_timeout if start_timeout is not None else _start_timeout_seconds(),
+				)
 				session.seed_generation(self._browser_generation)
 
 				# Create CodeAgent tools and namespace
@@ -707,6 +710,14 @@ class _BrowserOwner:
 						self._pending_variables = {
 							key: value for key, value in merged.items() if not key.startswith('__')
 						}
+						try:
+							self._browser_lifecycle.transition(
+								LifecyclePhase.STOPPED,
+								reason='browser recovery interrupted',
+								increment_generation=True,
+							)
+						except LifecycleTransitionError:
+							pass
 					raise cleanup.caller_cancellation
 				if not cleanup.succeeded:
 					raise RuntimeError('Unable to safely close the old browser session during recovery')
@@ -777,18 +788,51 @@ class _BrowserOwner:
 		if server._output_lock is None or server._output_lock_loop is not loop:
 			server._output_lock = _process_output_lock()
 			server._output_lock_loop = loop
-		async with self._execution_lock:
+		timeout = _exec_timeout_seconds()
+		deadline = time.monotonic() + timeout
+
+		async def acquire(lock: asyncio.Lock) -> bool:
+			remaining = deadline - time.monotonic()
+			if remaining <= 0:
+				return False
+			try:
+				await asyncio.wait_for(lock.acquire(), timeout=remaining)
+				return True
+			except TimeoutError:
+				return False
+
+		if not await acquire(self._execution_lock):
+			return (
+				f'Error: Execution timed out after {timeout:g}s while waiting for the context execution lock. '
+				'The code may still be running. Run get_status before retrying.'
+			)
+		try:
 			self._execution_task = asyncio.current_task()
 			try:
-				async with server._output_lock:
-					return await self._execute_code_locked(code)
+				if not await acquire(server._output_lock):
+					return (
+						f'Error: Execution timed out after {timeout:g}s while waiting for the shared output lock. '
+						'Another context is still executing. Run get_status before retrying.'
+					)
+				try:
+					return await self._execute_code_locked(code, deadline=deadline)
+				finally:
+					server._output_lock.release()
 			finally:
 				self._last_activity = time.time()
 				self._execution_task = None
+		finally:
+			self._execution_lock.release()
 
-	async def _execute_code_locked(self, code: str) -> str:
+	async def _execute_code_locked(self, code: str, *, deadline: float | None = None) -> str:
 		"""Execute Python code in the persistent namespace."""
-		await self._ensure_namespace()
+		now = time.monotonic()
+		start_timeout = (
+			min(_start_timeout_seconds(), max(0.1, deadline - now))
+			if deadline is not None
+			else None
+		)
+		await self._ensure_namespace(start_timeout=start_timeout)
 		assert self._namespace is not None
 
 		# Keep executor in sync (namespace may be set externally, e.g. tests)
@@ -814,11 +858,16 @@ class _BrowserOwner:
 		# Execute via shared CodeExecutor with a bound that leaves room for the
 		# calling agent to receive the timeout message before its own timeout.
 		try:
+			remaining = (
+				max(0.1, deadline - time.monotonic())
+				if deadline is not None
+				else _exec_timeout_seconds()
+			)
 			result = await asyncio.wait_for(
 				self._executor.execute(code),
-				timeout=_exec_timeout_seconds(),
+				timeout=remaining,
 			)
-		except asyncio.TimeoutError:
+		except TimeoutError:
 			return (
 				f'Error: Execution timed out after {_exec_timeout_seconds():g}s. '
 				'The code may still be running. Run get_status before retrying.'
@@ -1113,6 +1162,7 @@ class ContextEntry:
 	active_calls: int = 0
 	close_task: asyncio.Task[CloseResult] | None = None
 	drained: asyncio.Event = field(default_factory=asyncio.Event)
+	drain_waiting: asyncio.Event = field(default_factory=asyncio.Event)
 
 	def __post_init__(self) -> None:
 		self.drained.set()
@@ -1239,6 +1289,7 @@ class ContextRegistry:
 				raise ContextUnavailable('context_not_found', f'No open context: {entry.context_id}')
 			if entry.close_task is None:
 				entry.phase = ContextPhase.CLOSING
+				entry.drain_waiting.clear()
 				entry.close_task = asyncio.create_task(self._close_entry(entry))
 			return entry.close_task
 
@@ -1262,6 +1313,7 @@ class ContextRegistry:
 
 	async def _close_entry(self, entry: ContextEntry) -> CloseResult:
 		try:
+			entry.drain_waiting.set()
 			await entry.drained.wait()
 			await entry.owner._close_owned()
 			result = CloseResult(context_id=entry.context_id, status='closed', error_code=None, retryable=False)
@@ -1411,7 +1463,12 @@ class OpenBrowserServer(_BrowserOwner):
 				arguments = dict(params.arguments or {})
 				validation_error = next(validators[params.name].iter_errors(arguments), None)
 				if validation_error is not None:
-					error_msg = f'Invalid arguments: {validation_error.message}'
+					location = (
+						f' at {validation_error.json_path}'
+						if validation_error.json_path and validation_error.json_path != '$'
+						else ''
+					)
+					error_msg = f'Invalid arguments{location}: {validation_error.message}'
 					# The validator message can contain a repr of user data.
 					# Keep it client-facing, never in outbound telemetry.
 					telemetry_error = 'invalid_tool_arguments'
@@ -1583,6 +1640,15 @@ class OpenBrowserServer(_BrowserOwner):
 		await self._contexts.stop_admission()
 		results = await self._contexts.close_all()
 		failures = [result for result in results if result.status != 'closed']
+		for failure in list(failures):
+			if failure.context_id == '__legacy__':
+				continue
+			try:
+				retry = await self._contexts.close(failure.context_id)
+			except Exception:
+				continue
+			if retry.status == 'closed':
+				failures.remove(failure)
 		owner_error: Exception | None = None
 		if self.browser_session is not None or self._executor.namespace is not None:
 			try:

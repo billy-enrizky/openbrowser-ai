@@ -19,7 +19,7 @@ def _marker(name: str) -> None:
         Path(value).write_text(name)
 
 
-async def ensure_namespace(self) -> None:
+async def ensure_namespace(self, *, start_timeout: float | None = None) -> None:
     if self._namespace is not None:
         return
 
