@@ -70,7 +70,7 @@ class TestPidFunctions:
         mock_path.read_text.return_value = "99999999"
 
         with patch("openbrowser.daemon.server.get_pid_path", return_value=mock_path):
-            with patch("os.kill", side_effect=ProcessLookupError("No such process")):
+            with patch("openbrowser.daemon.server._daemon_pid_exists", return_value=False):
                 result = _read_pid()
                 assert result is None
 
@@ -462,9 +462,10 @@ class TestDaemonServerRun:
                 "openbrowser.daemon.server._inspect_pid",
                 return_value=PidInspection(state=PidOwnerState.ACTIVE, pid=99999),
             ):
-                with patch("os.getpid", return_value=1):
-                    await daemon_server.run()
-                    assert daemon_server._startup_phase.value == "failed"
+                with patch("openbrowser.daemon.server.DaemonOwnerLock.acquire", return_value=True):
+                    with patch("os.getpid", return_value=1):
+                        await daemon_server.serve_daemon()
+                        assert daemon_server._startup_phase.value == "failed"
 
     @pytest.mark.asyncio
     async def test_run_unix_server(self, daemon_server):
@@ -490,20 +491,21 @@ class TestDaemonServerRun:
         with patch("openbrowser.daemon.server.get_socket_path", return_value=mock_sock):
             with patch("openbrowser.daemon.server._inspect_pid", return_value=inspection):
                 with patch("openbrowser.daemon.server._acquire_pid_file", return_value=True):
-                    with patch(
-                        "openbrowser.daemon.server._probe_socket",
-                        return_value=SocketProbeState.ABSENT,
-                    ):
-                        with patch("openbrowser.daemon.server._cleanup_pid"):
-                            with patch("openbrowser.daemon.server.IS_WINDOWS", False):
-                                with patch(
-                                    "asyncio.start_unix_server",
-                                    new_callable=AsyncMock,
-                                    return_value=mock_server,
-                                ):
-                                    with patch("os.chmod"):
-                                        asyncio.create_task(stop_after_start())
-                                        await daemon_server.run()
+                    with patch("openbrowser.daemon.server.DaemonOwnerLock.acquire", return_value=True):
+                        with patch(
+                            "openbrowser.daemon.server._probe_socket",
+                            return_value=SocketProbeState.ABSENT,
+                        ):
+                            with patch("openbrowser.daemon.server._cleanup_pid"):
+                                with patch("openbrowser.daemon.server.IS_WINDOWS", False):
+                                    with patch(
+                                        "asyncio.start_unix_server",
+                                        new_callable=AsyncMock,
+                                        return_value=mock_server,
+                                    ):
+                                        with patch("os.chmod"):
+                                            asyncio.create_task(stop_after_start())
+                                            await daemon_server.serve_daemon()
 
     @pytest.mark.asyncio
     async def test_run_cleanup_session(self, daemon_server):
@@ -530,21 +532,22 @@ class TestDaemonServerRun:
         with patch("openbrowser.daemon.server.get_socket_path", return_value=mock_sock):
             with patch("openbrowser.daemon.server._inspect_pid", return_value=inspection):
                 with patch("openbrowser.daemon.server._acquire_pid_file", return_value=True):
-                    with patch(
-                        "openbrowser.daemon.server._probe_socket",
-                        return_value=SocketProbeState.ABSENT,
-                    ):
-                        with patch("openbrowser.daemon.server._cleanup_pid"):
-                            with patch("openbrowser.daemon.server.IS_WINDOWS", False):
-                                with patch(
-                                    "asyncio.start_unix_server",
-                                    new_callable=AsyncMock,
-                                    return_value=mock_server,
-                                ):
-                                    with patch("os.chmod"):
-                                        asyncio.create_task(stop_quickly())
-                                        await daemon_server.run()
-                                        daemon_server._session.kill.assert_called_once()
+                    with patch("openbrowser.daemon.server.DaemonOwnerLock.acquire", return_value=True):
+                        with patch(
+                            "openbrowser.daemon.server._probe_socket",
+                            return_value=SocketProbeState.ABSENT,
+                        ):
+                            with patch("openbrowser.daemon.server._cleanup_pid"):
+                                with patch("openbrowser.daemon.server.IS_WINDOWS", False):
+                                    with patch(
+                                        "asyncio.start_unix_server",
+                                        new_callable=AsyncMock,
+                                        return_value=mock_server,
+                                    ):
+                                        with patch("os.chmod"):
+                                            asyncio.create_task(stop_quickly())
+                                            await daemon_server.serve_daemon()
+                                            daemon_server._session.kill.assert_called_once()
 
 
 class TestDaemonMain:
@@ -557,7 +560,7 @@ class TestDaemonMain:
 
         with patch("openbrowser.daemon.server.DaemonServer") as mock_cls:
             mock_instance = MagicMock()
-            mock_instance.run = AsyncMock()
+            mock_instance.serve_daemon = AsyncMock()
             mock_cls.return_value = mock_instance
             await _main()
-            mock_instance.run.assert_called_once()
+            mock_instance.serve_daemon.assert_called_once()

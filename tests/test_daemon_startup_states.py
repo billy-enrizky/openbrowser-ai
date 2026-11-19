@@ -22,6 +22,7 @@ from openbrowser.daemon.server import (
     PidOwnerState,
     SocketProbeState,
     _cleanup_pid,
+    _daemon_pid_exists,
     _inspect_pid,
     _is_openbrowser_daemon_process,
     _probe_socket,
@@ -30,7 +31,8 @@ from openbrowser.daemon.server import (
 
 @pytest.fixture
 def daemon_paths():
-    directory = Path(tempfile.mkdtemp(prefix='ob-daemon-states-', dir='/tmp'))
+    shortest_directory = None if os.name == 'nt' else '/tmp'
+    directory = Path(tempfile.mkdtemp(prefix='ob-daemon-states-', dir=shortest_directory))
     yield directory / 'daemon.pid', directory / 'daemon.sock', directory
     for path in sorted(directory.rglob('*'), reverse=True):
         path.unlink(missing_ok=True)
@@ -67,7 +69,7 @@ async def test_startup_reaches_listening_then_stopped(daemon_paths):
         patch('asyncio.start_unix_server', new_callable=AsyncMock, return_value=fake_server),
         patch('os.chmod'),
     ):
-        run_task = asyncio.create_task(server.run())
+        run_task = asyncio.create_task(server.serve_daemon())
         await _wait_for_phase(server, DaemonStartupPhase.LISTENING)
 
         assert server._startup_history == [
@@ -96,6 +98,41 @@ async def test_startup_reaches_listening_then_stopped(daemon_paths):
 
 
 @pytest.mark.asyncio
+async def test_owner_lock_refuses_a_second_starter(daemon_paths):
+    pid_path, socket_path, _ = daemon_paths
+    first = DaemonServer(idle_timeout=5, exec_timeout=2)
+    second = DaemonServer(idle_timeout=5, exec_timeout=2)
+
+    with (
+        patch('openbrowser.daemon.server.get_pid_path', return_value=pid_path),
+        patch('openbrowser.daemon.server.get_socket_path', return_value=socket_path),
+        patch('openbrowser.daemon.server._inspect_pid', return_value=PidInspection(state=PidOwnerState.ABSENT)),
+        patch('openbrowser.daemon.server.IS_WINDOWS', False),
+        patch('asyncio.start_unix_server', new_callable=AsyncMock, return_value=_FakeServer()),
+        patch('os.chmod'),
+    ):
+        first_task = asyncio.create_task(first.serve_daemon())
+        await _wait_for_phase(first, DaemonStartupPhase.LISTENING)
+        first_pid = pid_path.read_text()
+
+        await asyncio.wait_for(second.serve_daemon(), timeout=2)
+
+        assert second._startup_phase is DaemonStartupPhase.FAILED
+        assert 'startup lock' in (second._startup_detail or '')
+        assert second._startup_owner_pid == int(first_pid)
+        assert pid_path.read_text() == first_pid
+
+        first._stop_event.set()
+        await asyncio.wait_for(first_task, timeout=2)
+
+        third = DaemonServer(idle_timeout=5, exec_timeout=2)
+        third_task = asyncio.create_task(third.serve_daemon())
+        await _wait_for_phase(third, DaemonStartupPhase.LISTENING)
+        third._stop_event.set()
+        await asyncio.wait_for(third_task, timeout=2)
+
+
+@pytest.mark.asyncio
 async def test_stale_pid_is_removed_and_reported(daemon_paths):
     pid_path, socket_path, _ = daemon_paths
     pid_path.write_text('99999999')
@@ -109,7 +146,7 @@ async def test_stale_pid_is_removed_and_reported(daemon_paths):
         patch('asyncio.start_unix_server', new_callable=AsyncMock, return_value=_FakeServer()),
         patch('os.chmod'),
     ):
-        run_task = asyncio.create_task(server.run())
+        run_task = asyncio.create_task(server.serve_daemon())
         await _wait_for_phase(server, DaemonStartupPhase.LISTENING)
 
         assert DaemonStartupPhase.CLEANING_STALE_LOCK in server._startup_history
@@ -213,6 +250,16 @@ def test_daemon_identity_includes_the_owned_socket(daemon_paths):
         assert _is_openbrowser_daemon_process(123) is False
 
 
+def test_liveness_probe_never_sends_a_signal():
+    with (
+        patch('psutil.pid_exists', return_value=True),
+        patch('os.kill') as kill,
+    ):
+        assert _daemon_pid_exists(os.getpid()) is True
+
+    kill.assert_not_called()
+
+
 @pytest.mark.asyncio
 async def test_unresponsive_live_owner_fails_without_deleting_files(daemon_paths):
     pid_path, socket_path, _ = daemon_paths
@@ -232,7 +279,7 @@ async def test_unresponsive_live_owner_fails_without_deleting_files(daemon_paths
             ),
         ),
     ):
-        await server.run()
+        await server.serve_daemon()
 
     assert server._startup_phase is DaemonStartupPhase.FAILED
     assert server._startup_owner_pid == 4242
@@ -257,7 +304,7 @@ async def test_pid_acquisition_race_does_not_bind_or_delete_owner_files(daemon_p
         patch('openbrowser.daemon.server._peek_pid', return_value=4242),
         patch('asyncio.start_unix_server', start_server),
     ):
-        await server.run()
+        await server.serve_daemon()
 
     start_server.assert_not_awaited()
     assert server._startup_phase is DaemonStartupPhase.FAILED
@@ -283,7 +330,7 @@ async def test_busy_socket_without_pid_owner_is_refused_and_preserved(daemon_pat
             patch('openbrowser.daemon.server.IS_WINDOWS', False),
             patch('asyncio.start_unix_server', start_server),
         ):
-            await server.run()
+            await server.serve_daemon()
     finally:
         listener.close()
 
@@ -307,7 +354,7 @@ async def test_bind_failure_remains_failed_after_cleanup(daemon_paths):
         patch('asyncio.start_unix_server', new_callable=AsyncMock, side_effect=OSError('bind failed')),
         pytest.raises(OSError, match='bind failed'),
     ):
-        await server.run()
+        await server.serve_daemon()
 
     assert server._startup_phase is DaemonStartupPhase.FAILED
     assert server._lifecycle.phase is LifecyclePhase.FAILED
@@ -330,7 +377,7 @@ async def test_chmod_failure_removes_the_bound_socket(daemon_paths):
         patch('os.chmod', side_effect=OSError('chmod failed')),
         pytest.raises(OSError, match='chmod failed'),
     ):
-        await server.run()
+        await server.serve_daemon()
 
     cleanup.assert_called_once()
     assert cleanup.call_args.kwargs['remove_socket'] is True
@@ -375,7 +422,7 @@ async def test_foreign_socket_path_is_refused_and_preserved(daemon_paths):
         patch('openbrowser.daemon.server._inspect_pid', return_value=PidInspection(state=PidOwnerState.ABSENT)),
         patch('openbrowser.daemon.server.IS_WINDOWS', False),
     ):
-        await server.run()
+        await server.serve_daemon()
 
     assert server._startup_phase is DaemonStartupPhase.FAILED
     assert not pid_path.exists()
@@ -410,12 +457,41 @@ def test_status_reads_storage_state_from_the_watchdog():
     assert status['storage_state']['script_count'] == 4
 
 
+def test_status_reports_configured_storage_state_before_browser_start(tmp_path):
+    state_path = tmp_path / 'state.json'
+    state_path.write_text('{"cookies": [], "origins": []}')
+    server = DaemonServer(idle_timeout=5, exec_timeout=2)
+    profile = MagicMock()
+    profile.user_data_dir = tmp_path / 'profile'
+    profile.headless = True
+    profile.storage_state = str(state_path)
+
+    with (
+        patch('openbrowser.browser.BrowserProfile', return_value=profile),
+        patch('openbrowser.config.load_openbrowser_config', return_value={}),
+        patch(
+            'openbrowser.config.get_default_profile',
+            return_value={'storage_state': str(state_path)},
+        ),
+        patch(
+            'openbrowser.config.apply_managed_browser_profile_defaults',
+            side_effect=lambda profile_data, default_user_data_dir=None: dict(profile_data),
+        ),
+    ):
+        status = server._status_payload()
+
+    assert server._session is None
+    assert status['storage_state']['phase'] == 'pending'
+    assert status['storage_state']['path'] == str(state_path)
+    assert status['storage_state']['bytes'] == state_path.stat().st_size
+
+
 @pytest.mark.asyncio
 async def test_main_exits_nonzero_when_startup_fails():
     from openbrowser.daemon.server import _main
 
     instance = MagicMock()
-    instance.run = AsyncMock()
+    instance.serve_daemon = AsyncMock()
     instance._startup_phase = DaemonStartupPhase.FAILED
     instance._lifecycle = LifecycleMachine('daemon', phase=LifecyclePhase.FAILED)
 

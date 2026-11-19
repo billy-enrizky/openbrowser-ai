@@ -9,10 +9,11 @@ mocked so no real Chrome is needed.
 import asyncio
 import json
 import os
-import pytest
 import uuid
 from pathlib import Path
-from unittest.mock import patch, MagicMock, AsyncMock
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 
 @pytest.fixture
@@ -61,8 +62,8 @@ def mock_namespace():
 
 async def _start_daemon_with_mock(daemon_env, mock_namespace, idle_timeout=600):
     """Start a DaemonServer that uses a pre-built mock namespace."""
-    from openbrowser.daemon.server import DaemonServer
     from openbrowser.code_use.executor import CodeExecutor
+    from openbrowser.daemon.server import DaemonServer
 
     server = DaemonServer(idle_timeout=idle_timeout)
     executor = CodeExecutor()
@@ -70,7 +71,7 @@ async def _start_daemon_with_mock(daemon_env, mock_namespace, idle_timeout=600):
     server._executor = executor
 
     pid_path = daemon_env.parent / f'{daemon_env.stem}.pid'
-    task = asyncio.create_task(server.run())
+    task = asyncio.create_task(server.serve_daemon())
     deadline = asyncio.get_running_loop().time() + 10
     while not daemon_env.exists():
         if task.done():
@@ -96,7 +97,7 @@ async def test_start_daemon_helper_surfaces_server_startup_failure(daemon_env, m
     async def fail_to_start(self):
         raise OSError('synthetic socket bind failure')
 
-    monkeypatch.setattr(DaemonServer, 'run', fail_to_start)
+    monkeypatch.setattr(DaemonServer, 'serve_daemon', fail_to_start)
     with pytest.raises(OSError, match='synthetic socket bind failure'):
         await _start_daemon_with_mock(daemon_env, mock_namespace)
 

@@ -1004,12 +1004,13 @@ class TestDaemonServerRunWindows:
         with patch("openbrowser.daemon.server.get_socket_path", return_value=mock_sock), \
              patch("openbrowser.daemon.server._inspect_pid", return_value=PidInspection(state=PidOwnerState.ABSENT)), \
              patch("openbrowser.daemon.server._acquire_pid_file", return_value=True), \
+             patch("openbrowser.daemon.server.DaemonOwnerLock.acquire", return_value=True), \
              patch("openbrowser.daemon.server._cleanup_pid"), \
              patch("openbrowser.daemon.server.IS_WINDOWS", True), \
              patch("asyncio.start_server", new_callable=AsyncMock, return_value=mock_server):
 
             asyncio.create_task(stop_quickly())
-            await daemon.run()
+            await daemon.serve_daemon()
 
 
 class TestDaemonServerRunCleanupKillError:
@@ -1039,6 +1040,7 @@ class TestDaemonServerRunCleanupKillError:
         with patch("openbrowser.daemon.server.get_socket_path", return_value=mock_sock), \
              patch("openbrowser.daemon.server._inspect_pid", return_value=PidInspection(state=PidOwnerState.ABSENT)), \
              patch("openbrowser.daemon.server._acquire_pid_file", return_value=True), \
+             patch("openbrowser.daemon.server.DaemonOwnerLock.acquire", return_value=True), \
              patch("openbrowser.daemon.server._probe_socket", return_value=SocketProbeState.ABSENT), \
              patch("openbrowser.daemon.server._cleanup_pid"), \
              patch("openbrowser.daemon.server.IS_WINDOWS", False), \
@@ -1046,7 +1048,7 @@ class TestDaemonServerRunCleanupKillError:
              patch("os.chmod"):
 
             asyncio.create_task(stop_quickly())
-            await daemon.run()
+            await daemon.serve_daemon()
             # Should not raise despite kill error
 
 

@@ -9,7 +9,6 @@ Usage:
 """
 
 import asyncio
-import errno
 import hashlib
 import inspect
 import json
@@ -30,7 +29,13 @@ from openbrowser.browser.lifecycle import (
     LifecycleTransitionError,
 )
 from openbrowser.browser.storage_state import StorageStatePhase, StorageStateSnapshot
-from openbrowser.daemon import IS_WINDOWS, WINDOWS_PORT, get_pid_path, get_socket_path
+from openbrowser.daemon import (
+    IS_WINDOWS,
+    WINDOWS_PORT,
+    get_pid_path,
+    get_socket_path,
+)
+from openbrowser.daemon.ownership import DaemonOwnerLock
 
 logger = logging.getLogger(__name__)
 
@@ -158,6 +163,23 @@ def _pid_file_age_seconds(path: Path) -> float | None:
         return None
 
 
+def _daemon_owner_lock_path() -> Path:
+    """Return the lifetime ownership lock derived from the PID path."""
+    return get_pid_path().with_suffix('.owner.lock')
+
+
+def _daemon_pid_exists(pid: int) -> bool | None:
+    """Return process liveness without sending a signal on any platform."""
+    try:
+        import psutil
+    except ImportError:
+        return None
+    try:
+        return psutil.pid_exists(pid)
+    except (psutil.Error, OSError):
+        return None
+
+
 def _inspect_pid() -> PidInspection:
     """Inspect PID/socket ownership and remove stale files.
 
@@ -201,27 +223,19 @@ def _inspect_pid() -> PidInspection:
             stale_pid_removed=True,
         )
 
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
+    process_exists = _daemon_pid_exists(pid)
+    if process_exists is False:
         pid_path.unlink(missing_ok=True)
         return PidInspection(
             state=PidOwnerState.STALE,
             detail=f'PID {pid} no longer exists',
             stale_pid_removed=True,
         )
-    except OSError as error:
-        if error.errno == errno.ESRCH:
-            pid_path.unlink(missing_ok=True)
-            return PidInspection(
-                state=PidOwnerState.STALE,
-                detail=f'PID {pid} no longer exists',
-                stale_pid_removed=True,
-            )
+    if process_exists is None:
         return PidInspection(
             state=PidOwnerState.UNRESPONSIVE,
             pid=pid,
-            detail=f'PID {pid} exists but cannot be inspected: {type(error).__name__}: {error}',
+            detail=f'PID {pid} could not be checked safely',
         )
 
     if not IS_WINDOWS:
@@ -344,9 +358,12 @@ def _cleanup_pid(expected_pid: int | None = None, *, remove_socket: bool = True)
             logger.warning('Skipping daemon cleanup; PID file now belongs to %d', owner)
             return
         owner_verified = True
-    pid_path.unlink(missing_ok=True)
     if remove_socket and owner_verified:
-        get_socket_path().unlink(missing_ok=True)
+        try:
+            get_socket_path().unlink(missing_ok=True)
+        except OSError:
+            logger.warning('Failed to remove daemon socket', exc_info=True)
+    pid_path.unlink(missing_ok=True)
 
 
 _STARTUP_TRANSITIONS: dict[DaemonStartupPhase, frozenset[DaemonStartupPhase]] = {
@@ -975,19 +992,30 @@ class DaemonServer:
                 self._stop_event.set()
                 break
 
-    async def run(self):
+    async def serve_daemon(self):
         """Start the daemon and listen for connections."""
         self._lifecycle.transition(LifecyclePhase.STARTING, reason='daemon starting')
         self._running = True
         self._last_activity = time.time()
 
         sock_path = get_socket_path()
+        owner_lock = DaemonOwnerLock(_daemon_owner_lock_path())
+        owner_lock_acquired = False
         acquired_pid = False
         bound_socket = False
         idle_task: asyncio.Task | None = None
         try:
             sock_path.parent.mkdir(parents=True, exist_ok=True)
             self._set_startup(DaemonStartupPhase.CHECKING_OWNERSHIP, f'pid_file={get_pid_path()}')
+            if not owner_lock.acquire():
+                existing_pid = _peek_pid()
+                self._startup_owner_pid = existing_pid
+                self._startup_owner_state = PidOwnerState.UNRESPONSIVE
+                message = f'Another daemon owns the startup lock (PID {existing_pid or "unknown"})'
+                logger.error('%s', message)
+                self._fail_startup(message)
+                return
+            owner_lock_acquired = True
             inspection = _inspect_pid()
             self._startup_owner_state = inspection.state
             self._startup_stale_pid_removed = inspection.stale_pid_removed
@@ -1090,22 +1118,26 @@ class DaemonServer:
                 if self._session:
                     await self._close_session_bounded(self._session)
             finally:
-                if acquired_pid:
-                    try:
-                        _cleanup_pid(expected_pid=os.getpid(), remove_socket=bound_socket)
-                    except OSError:
-                        logger.warning('Failed to remove daemon ownership files', exc_info=True)
-                if self._startup_phase is not DaemonStartupPhase.FAILED:
-                    self._set_startup(DaemonStartupPhase.STOPPED, 'daemon stopped')
-                if self._lifecycle.phase not in (LifecyclePhase.FAILED, LifecyclePhase.STOPPED):
-                    try:
-                        self._lifecycle.transition(
-                            LifecyclePhase.STOPPED,
-                            reason='daemon stopped',
-                            increment_generation=True,
-                        )
-                    except LifecycleTransitionError:
-                        pass
+                try:
+                    if acquired_pid:
+                        try:
+                            _cleanup_pid(expected_pid=os.getpid(), remove_socket=bound_socket)
+                        except OSError:
+                            logger.warning('Failed to remove daemon ownership files', exc_info=True)
+                    if self._startup_phase is not DaemonStartupPhase.FAILED:
+                        self._set_startup(DaemonStartupPhase.STOPPED, 'daemon stopped')
+                    if self._lifecycle.phase not in (LifecyclePhase.FAILED, LifecyclePhase.STOPPED):
+                        try:
+                            self._lifecycle.transition(
+                                LifecyclePhase.STOPPED,
+                                reason='daemon stopped',
+                                increment_generation=True,
+                            )
+                        except LifecycleTransitionError:
+                            pass
+                finally:
+                    if owner_lock_acquired:
+                        owner_lock.release()
 
 
 async def _main():
@@ -1120,7 +1152,7 @@ async def _main():
         idle_timeout=int(_env_number('OPENBROWSER_IDLE_TIMEOUT', DEFAULT_IDLE_TIMEOUT)),
         exec_timeout=_env_number('OPENBROWSER_EXEC_TIMEOUT', DEFAULT_EXEC_TIMEOUT),
     )
-    await daemon.run()
+    await daemon.serve_daemon()
     if daemon._startup_phase is DaemonStartupPhase.FAILED or daemon._lifecycle.phase is LifecyclePhase.FAILED:
         raise SystemExit(1)
 
