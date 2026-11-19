@@ -72,7 +72,7 @@ all = [
 ]
 
 [project.scripts]
-openbrowser-ai = "openbrowser.cli:main"
+openbrowser-ai = "openbrowser.cli_entry:cli"
 
 [build-system]
 requires = ["hatchling", "hatch-vcs"]
