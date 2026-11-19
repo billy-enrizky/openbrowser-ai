@@ -367,16 +367,34 @@ async def test_cancelled_execution_has_no_reply_and_releases_execution_lock(tmp_
         await c.finish()
 
 
+async def wait_for_file(path: Path, message: str, timeout: float = 10) -> None:
+    deadline = asyncio.get_running_loop().time() + timeout
+    while not path.exists():
+        if asyncio.get_running_loop().time() >= deadline:
+            pytest.fail(message)
+        await asyncio.sleep(0.01)
+
+
 @pytest.mark.asyncio
 async def test_active_eof_stops_real_protocol_process(tmp_path):
-    async with wire(tmp_path, browser_fixture=True) as c:
+    entered = tmp_path / "cancel-entered"
+    unwound = tmp_path / "cancel-unwound"
+    async with wire(
+        tmp_path,
+        browser_fixture=True,
+        extra_env={
+            "OPENBROWSER_TEST_CANCEL_ENTERED": str(entered),
+            "OPENBROWSER_TEST_CANCEL_UNWOUND": str(unwound),
+        },
+    ) as c:
         await c.send(
             1,
             "tools/call",
             {"name": "execute_code", "arguments": {"code": "await wait_for_cancel()"}},
         )
-        await c.request(2, "tools/call", {"name": "get_status"})
+        await wait_for_file(entered, "execute_code never entered wait_for_cancel")
         await c.finish(pending_ids=(1,))
+    assert unwound.exists(), "active call did not unwind before the process exited"
 
 
 @pytest.mark.asyncio

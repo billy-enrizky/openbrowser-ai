@@ -26,6 +26,7 @@ os.environ['OPENBROWSER_LOGGING_LEVEL'] = 'critical'
 os.environ['OPENBROWSER_SETUP_LOGGING'] = 'false'
 
 import asyncio
+from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
 import inspect
@@ -37,6 +38,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+import anyio
 from jsonschema import Draft202012Validator
 
 # Configure logging for MCP mode - redirect to stderr but preserve critical diagnostics
@@ -118,6 +120,38 @@ _CDP_HEALTH_CHECK_TIMEOUT_SECONDS = 2.0
 class _CleanupOutcome:
 	succeeded: bool
 	caller_cancellation: asyncio.CancelledError | None = None
+
+
+async def _drain_owned_completion(
+	completion: asyncio.Future[Any],
+	*,
+	on_first_cancellation: Callable[[], None] | None = None,
+) -> asyncio.CancelledError | None:
+	"""Await an owned operation and return the caller's first cancellation.
+
+	Once the caller cancels, the AnyIO shield prevents the MCP request scope
+	from re-cancelling this drain loop. Direct ``Task.cancel()`` calls are
+	still absorbed, so the owned operation always reaches its final state
+	before the request unwinds.
+	"""
+	caller_cancellation: asyncio.CancelledError | None = None
+	while not completion.done():
+		try:
+			await asyncio.shield(completion)
+		except asyncio.CancelledError as error:
+			if caller_cancellation is not None:
+				continue
+			caller_cancellation = error
+			if on_first_cancellation is not None:
+				on_first_cancellation()
+			with anyio.CancelScope(shield=True):
+				while not completion.done():
+					try:
+						await asyncio.shield(completion)
+					except asyncio.CancelledError:
+						continue
+			break
+	return caller_cancellation
 
 
 def _start_timeout_seconds() -> float:
@@ -379,6 +413,7 @@ class OpenBrowserServer:
 		) -> types.CallToolResult:
 			start_time = time.time()
 			error_msg = None
+			telemetry_error = None
 			try:
 				if params.name not in tools_by_name:
 					raise MCPError(code=-32602, message=f'Unknown tool: {params.name}')
@@ -386,6 +421,9 @@ class OpenBrowserServer:
 				validation_error = next(validators[params.name].iter_errors(arguments), None)
 				if validation_error is not None:
 					error_msg = f'Invalid arguments: {validation_error.message}'
+					# The validator message contains a repr of the rejected value.
+					# Keep that detail client-facing, never in outbound telemetry.
+					telemetry_error = 'invalid_tool_arguments'
 				elif params.name == 'execute_code' and not arguments['code'].strip():
 					error_msg = 'Error: No code provided'
 				if error_msg is not None:
@@ -400,14 +438,9 @@ class OpenBrowserServer:
 
 				operation = asyncio.create_task(owned_call())
 				completion = asyncio.gather(operation, return_exceptions=True)
-				caller_cancellation = None
-				while not completion.done():
-					try:
-						await asyncio.shield(completion)
-					except asyncio.CancelledError as error:
-						if caller_cancellation is None:
-							caller_cancellation = error
-							operation.cancel()
+				caller_cancellation = await _drain_owned_completion(
+					completion, on_first_cancellation=operation.cancel
+				)
 				result = completion.result()[0]
 				if caller_cancellation is not None:
 					raise caller_cancellation
@@ -437,7 +470,7 @@ class OpenBrowserServer:
 							action='tool_call',
 							tool_name=params.name,
 							duration_seconds=time.time() - start_time,
-							error_message=error_msg,
+							error_message=telemetry_error if telemetry_error is not None else error_msg,
 						)
 					)
 
@@ -642,13 +675,7 @@ class OpenBrowserServer:
 
 		cleanup_task = asyncio.create_task(owned_cleanup())
 		completion = asyncio.gather(cleanup_task, return_exceptions=True)
-		caller_cancellation = None
-		while not completion.done():
-			try:
-				await asyncio.shield(completion)
-			except asyncio.CancelledError as error:
-				if caller_cancellation is None:
-					caller_cancellation = error
+		caller_cancellation = await _drain_owned_completion(completion)
 		result = completion.result()[0]
 		return _CleanupOutcome(result is True, caller_cancellation)
 
@@ -691,6 +718,11 @@ class OpenBrowserServer:
 				if not cleanup.succeeded:
 					self._browser_lifecycle.fail('Unable to safely close the old browser session during recovery', reason='browser recovery cleanup failed')
 				if cleanup.caller_cancellation is not None:
+					if cleanup.succeeded:
+						merged = {**self._pending_variables, **old_ns}
+						self._pending_variables = {
+							key: value for key, value in merged.items() if not key.startswith('__')
+						}
 					raise cleanup.caller_cancellation
 				if not cleanup.succeeded:
 					raise RuntimeError('Unable to safely close the old browser session during recovery')
@@ -926,13 +958,7 @@ class OpenBrowserServer:
 
 		shutdown_task = asyncio.create_task(owned_shutdown())
 		completion = asyncio.gather(shutdown_task, return_exceptions=True)
-		caller_cancellation = None
-		while not completion.done():
-			try:
-				await asyncio.shield(completion)
-			except asyncio.CancelledError as error:
-				if caller_cancellation is None:
-					caller_cancellation = error
+		caller_cancellation = await _drain_owned_completion(completion)
 		result = completion.result()[0]
 		if isinstance(result, BaseException):
 			if self._browser_lifecycle.phase is not LifecyclePhase.FAILED:

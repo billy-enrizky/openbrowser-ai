@@ -9,6 +9,22 @@ import pytest
 from openbrowser.browser.lifecycle import LifecyclePhase
 from openbrowser.mcp import server as module
 
+_EVENT_TIMEOUT_SECONDS = 10.0
+
+
+async def _event(event: asyncio.Event, label: str) -> None:
+    try:
+        await asyncio.wait_for(event.wait(), timeout=_EVENT_TIMEOUT_SECONDS)
+    except asyncio.TimeoutError:
+        pytest.fail(f"Timed out waiting for {label}", pytrace=False)
+
+
+async def _settle(task: asyncio.Task[object], label: str):
+    try:
+        return await asyncio.wait_for(task, timeout=_EVENT_TIMEOUT_SECONDS)
+    except asyncio.TimeoutError:
+        pytest.fail(f"Timed out waiting for {label}", pytrace=False)
+
 
 def test_cleanup_outcome_is_named_and_frozen():
     cancellation = asyncio.CancelledError("original")
@@ -40,7 +56,7 @@ async def test_cleanup_retains_first_observed_cancellation_after_repeated_cancel
 
     async def kill():
         started.set()
-        await release.wait()
+        await _event(release, "worker release")
         if fails:
             raise RuntimeError("owned kill failed")
 
@@ -48,13 +64,13 @@ async def test_cleanup_retains_first_observed_cancellation_after_repeated_cancel
     session = MagicMock()
     session.kill = kill
     task = asyncio.create_task(mcp_server._kill_session_safely(session))
-    await started.wait()
+    await _event(started, "worker start")
     task.cancel("first")
-    await seen[0].wait()
+    await _event(seen[0], "first cancellation")
     task.cancel("second")
-    await seen[1].wait()
+    await _event(seen[1], "second cancellation")
     release.set()
-    outcome = await task
+    outcome = await _settle(task, "cleanup outcome")
     assert outcome.succeeded is (not fails)
     assert outcome.caller_cancellation is observed[0]
     assert observed[0] is not observed[1]
@@ -190,20 +206,20 @@ async def test_shutdown_retains_first_outer_cancellation_when_cleanup_later_fail
 
     async def shutdown():
         started.set()
-        await release.wait()
+        await _event(release, "worker release")
         raise RuntimeError("shutdown cleanup failed")
 
     monkeypatch.setattr(module.asyncio, "shield", capture)
     monkeypatch.setattr(mcp_server, "_shutdown_locked", shutdown)
     task = asyncio.create_task(mcp_server._shutdown())
-    await started.wait()
+    await _event(started, "worker start")
     task.cancel("first")
-    await seen[0].wait()
+    await _event(seen[0], "first cancellation")
     task.cancel("second")
-    await seen[1].wait()
+    await _event(seen[1], "second cancellation")
     release.set()
     with pytest.raises(asyncio.CancelledError) as raised:
-        await task
+        await _settle(task, "cancelled task")
     assert raised.value is observed[0]
     assert mcp_server.browser_session is session
     assert mcp_server._browser_lifecycle.phase is LifecyclePhase.FAILED
@@ -231,7 +247,7 @@ async def test_owned_cleanup_repeated_raw_cancellation_preserves_identity_and_tr
 
     async def kill():
         started.set()
-        await release.wait()
+        await _event(release, "worker release")
         if fails:
             raise RuntimeError("owned kill failed")
 
@@ -242,14 +258,14 @@ async def test_owned_cleanup_repeated_raw_cancellation_preserves_identity_and_tr
     monkeypatch.setattr(module.asyncio, "shield", capture)
     method = mcp_server._reset_browser if operation == "reset" else mcp_server._shutdown
     task = asyncio.create_task(method())
-    await started.wait()
+    await _event(started, "worker start")
     task.cancel("first")
-    await seen[0].wait()
+    await _event(seen[0], "first cancellation")
     task.cancel("second")
-    await seen[1].wait()
+    await _event(seen[1], "second cancellation")
     release.set()
     with pytest.raises(asyncio.CancelledError) as raised:
-        await task
+        await _settle(task, "cancelled task")
     assert raised.value is observed[0]
     assert mcp_server.browser_session is (session if fails else None)
     if fails:
@@ -332,20 +348,20 @@ async def test_simultaneous_cleanup_and_caller_cancel_keep_only_actual_caller_ex
         nonlocal worker
         worker = asyncio.current_task()
         started.set()
-        await release.wait()
+        await _event(release, "worker release")
 
     session = MagicMock()
     session.kill = kill
     monkeypatch.setattr(module.asyncio, "shield", capture)
     caller = asyncio.create_task(mcp_server._kill_session_safely(session))
-    await started.wait()
+    await _event(started, "worker start")
     if order == "caller-first":
         caller.cancel("genuine caller cancellation")
         worker.cancel("cleanup worker cancellation")
     else:
         worker.cancel("cleanup worker cancellation")
         caller.cancel("genuine caller cancellation")
-    outcome = await caller
+    outcome = await _settle(caller, "cleanup caller")
     assert not outcome.succeeded
     assert len(observed) == 1
     assert outcome.caller_cancellation is observed[0]
@@ -463,7 +479,7 @@ async def test_validated_tool_owner_is_cancelled_once_and_drained_before_telemet
             child_cancellations.append(error)
             app_cancelled.set()
             try:
-                await release.wait()
+                await _event(release, "worker release")
             except asyncio.CancelledError as later:
                 child_cancellations.append(later)
                 raise
@@ -480,16 +496,16 @@ async def test_validated_tool_owner_is_cancelled_once_and_drained_before_telemet
     handler = server.server.get_request_handler("tools/call").handler
     params = module.types.CallToolRequestParams(name="get_status", arguments={})
     request = asyncio.create_task(handler(None, params))
-    await started.wait()
+    await _event(started, "worker start")
     request.cancel("first caller cancellation")
-    await app_cancelled.wait()
+    await _event(app_cancelled, "application cancellation")
     request.cancel("second caller cancellation")
-    await repeated.wait()
+    await _event(repeated, "repeated cancellation")
     assert not request.done()
     assert telemetry == []
     release.set()
     with pytest.raises(asyncio.CancelledError) as raised:
-        await request
+        await _settle(request, "cancelled request")
     assert raised.value is observed[0]
     assert len(child_cancellations) == 1
     assert len(telemetry) == 1 and telemetry[0][1]
@@ -514,6 +530,51 @@ async def test_tool_validation_precedes_application_task_creation(monkeypatch):
             ),
         )
     assert result.is_error
+
+
+@pytest.mark.asyncio
+async def test_invalid_arguments_never_reach_telemetry_values(monkeypatch):
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(module, "TELEMETRY_AVAILABLE", True)
+    server = module.OpenBrowserServer()
+    events = []
+    server._telemetry = SimpleNamespace(capture=events.append)
+    handler = server.server.get_request_handler("tools/call").handler
+
+    result = await handler(
+        None,
+        module.types.CallToolRequestParams(
+            name="execute_code", arguments={"code": {"password": "hunter2"}}
+        ),
+    )
+
+    assert result.is_error
+    assert "hunter2" in result.content[0].text
+    assert len(events) == 1
+    assert events[0].error_message == "invalid_tool_arguments"
+    assert "hunter2" not in str(events[0])
+
+
+@pytest.mark.asyncio
+async def test_recovery_cancellation_preserves_namespace_variables(mcp_server, monkeypatch):
+    cancellation = asyncio.CancelledError("caller cancelled")
+    session = MagicMock()
+    mcp_server.browser_session = session
+    mcp_server._namespace = {"answer": 42, "__private": 1}
+    monkeypatch.setattr(
+        mcp_server,
+        "_kill_session_safely",
+        AsyncMock(return_value=module._CleanupOutcome(True, cancellation)),
+    )
+
+    with pytest.raises(asyncio.CancelledError) as raised:
+        await mcp_server._recover_browser_session_locked()
+
+    assert raised.value is cancellation
+    assert mcp_server.browser_session is None
+    assert mcp_server._namespace is None
+    assert mcp_server._pending_variables == {"answer": 42}
 
 
 @pytest.mark.asyncio
@@ -599,7 +660,7 @@ async def test_tool_caller_and_application_cancellation_race_keeps_caller_identi
             None, module.types.CallToolRequestParams(name="get_status", arguments={})
         )
     )
-    await started.wait()
+    await _event(started, "worker start")
     if order == "caller-first":
         caller.cancel("request cancellation")
         worker.cancel("application cancellation")
@@ -607,7 +668,7 @@ async def test_tool_caller_and_application_cancellation_race_keeps_caller_identi
         worker.cancel("application cancellation")
         caller.cancel("request cancellation")
     with pytest.raises(asyncio.CancelledError) as raised:
-        await caller
+        await _settle(caller, "cancelled caller")
     assert len(observed) == 1 and raised.value is observed[0]
 
 

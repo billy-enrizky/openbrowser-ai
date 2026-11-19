@@ -23,22 +23,13 @@ def test_mcp_sdk_requirements_require_current_callback_api():
     ]
 
     assert mcp_requirements
-    assert all(
-        Version("2.3.0") in requirement.specifier for requirement in mcp_requirements
-    )
-    assert all(
-        Version("2.2.0") not in requirement.specifier
-        for requirement in mcp_requirements
-    )
-
-    assert all(
-        Version("3.0.0") not in requirement.specifier
-        for requirement in mcp_requirements
-    )
-    assert all(
-        Version("1.26.0") not in requirement.specifier
-        for requirement in mcp_requirements
-    )
+    for requirement in mcp_requirements:
+        bounds = {(spec.operator, spec.version) for spec in requirement.specifier}
+        assert (">=", "2.3.0") in bounds, requirement
+        assert ("<", "3.0.0") in bounds, requirement
+        assert Version("2.2.1") not in requirement.specifier, requirement
+        assert Version("3.1.0") not in requirement.specifier, requirement
+        assert Version("1.26.0") not in requirement.specifier, requirement
     assert any(
         Requirement(requirement).name == "jsonschema"
         for requirement in project["dependencies"]
