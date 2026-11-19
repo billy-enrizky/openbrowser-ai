@@ -7,7 +7,7 @@ mode: "wide"
 
 ## Overview
 
-The MCP (Model Context Protocol) Server exposes OpenBrowser's browser automation through three tools for AI assistants like Claude Desktop, Claude Code, and other MCP-compatible clients. `execute_code` runs Python to navigate, interact with, and extract data from web pages. `get_status` reports lifecycle and tab state without starting a browser, and `reset_browser` recovers a stuck browser while preserving user variables by default. No external LLM API keys required -- the MCP client provides the intelligence.
+The MCP (Model Context Protocol) Server exposes OpenBrowser's browser automation to AI assistants like Claude Desktop, Claude Code, and other MCP-compatible clients. A 2026-07-28 client calls `create_context` to get a server-minted `context_id`, passes that handle to `execute_code`, `get_status`, and `reset_browser`, and calls `close_context` when finished. `execute_code` runs Python to navigate, interact with, and extract data from web pages. `get_status` reports lifecycle and tab state without starting a browser, and `reset_browser` recovers a stuck browser while preserving user variables by default. Older clients that negotiate `2024-11-05`, `2025-03-26`, `2025-06-18`, or `2025-11-25` receive the original three-tool catalog with a legacy no-handle context. No external LLM API keys required -- the MCP client provides the intelligence.
 
 ## Quick Start
 
@@ -82,16 +82,20 @@ Optional configuration:
 | `OPENBROWSER_ALLOWED_DOMAINS` | Comma-separated domain whitelist | (none) |
 | `OPENBROWSER_COMPACT_DESCRIPTION` | Minimal tool description (~500 tokens vs ~1,430) | `false` |
 | `OPENBROWSER_MAX_OUTPUT` | Maximum output characters per execution | `10000` |
+| `OPENBROWSER_MCP_MAX_CONTEXTS` | Maximum open modern contexts plus the activated legacy context | `16` |
+| `OPENBROWSER_MCP_WORKSPACE_DIR` | Base directory for per-context workspaces | `~/Downloads/openbrowser-mcp/workspace` |
 
 ## Tools
 
-The MCP server exposes three tools:
+Modern 2026-07-28 clients see five tools. Older clients see the original three.
 
 | Tool | Use |
 |---|---|
-| `execute_code` | Run Python in a persistent namespace with browser automation functions. Functions are async unless noted; use `await`. |
-| `get_status` | Read the server, browser, profile, and tab state as JSON. It does not start or mutate a browser. |
+| `create_context` | Create an isolated browser and Python namespace. Returns `context_id` in text and `structuredContent`. Does not start a browser until the first stateful call. |
+| `execute_code` | Run Python in one context's persistent namespace with browser automation functions. Modern calls require `context_id`; functions are async unless noted. |
+| `get_status` | Read the server, context, browser, profile, and tab state as JSON. It does not start or mutate a browser. |
 | `reset_browser` | Close a stuck browser and release its profile. User variables are preserved unless `clear_variables` is true. |
+| `close_context` | Close one context and release its browser and profile. A successful close invalidates the handle. |
 
 If a browser connection fails, call `get_status` before retrying. A page-changing action may have partially run, so do not replay it blindly.
 
@@ -120,7 +124,7 @@ Prefer indexed actions whenever an element index exists. Coordinate actions use 
 
 **Pre-imported libraries**: `json`, `csv`, `re`, `datetime`, `asyncio`, `Path`, `requests`, `numpy`, `pandas`, `matplotlib`, `BeautifulSoup`
 
-Variables and state persist between `execute_code` calls within the same session.
+Variables and state persist between `execute_code` calls within the same context. A context is process-local: it lives until `close_context` or server exit, and a new MCP server process cannot resume the same handle. Default workspaces and downloads are isolated per context; close retains the files.
 
 ## Example Usage
 

@@ -4,8 +4,8 @@
   "name": "openbrowser",
   "display_name": "OpenBrowser AI Browser Automation",
   "version": "0.1.29",
-  "description": "CodeAgent MCP server -- execute Python code with browser automation functions, persistent namespace, and isolated browser profiles",
-  "long_description": "OpenBrowser CodeAgent exposes execute_code, get_status, and reset_browser tools. execute_code runs Python code in a persistent namespace with browser automation functions. Write multi-step workflows in Python with full access to navigate, click, type, evaluate JS, and more.\n\n### Key Features:\n- **Code Execution**: Write Python code with async browser functions (await navigate, click, evaluate, etc.)\n- **Persistent Namespace**: Variables and state persist between execute_code calls\n- **Recovery Tools**: get_status reports lifecycle and tab state without starting a browser; reset_browser closes a stuck browser while preserving user variables by default\n- **Isolated Browser Profiles**: Each MCP server process gets an isolated profile so concurrent servers cannot terminate or corrupt one another's browser\n- **Saved Login Sessions**: Configure an explicit user-data directory or stable storage-state source when authenticated sessions must survive MCP restarts\n- **Browser Automation**: Full browser control via CodeAgent functions\n- **JavaScript Evaluation**: Run JS in page context via evaluate()\n- **Data Libraries**: numpy, pandas, matplotlib, BeautifulSoup available\n- **Standard Libraries**: json, csv, re, datetime, requests, asyncio, Path\n\n### Use Cases:\n- Web scraping with Python data processing\n- Automated testing with assertions\n- Research and information gathering\n- Form filling and multi-step workflows\n- DOM extraction via evaluate() + Python post-processing",
+  "description": "CodeAgent MCP server with explicit application contexts, persistent namespaces, and isolated browser profiles",
+  "long_description": "OpenBrowser CodeAgent exposes create_context, execute_code, get_status, reset_browser, and close_context to 2026-07-28 MCP clients. create_context returns a server-minted context_id; later stateful calls pass that handle explicitly. execute_code runs Python with browser automation functions in a persistent per-context namespace. Older clients that negotiate 2024-11-05 through 2025-11-25 receive the original three-tool catalog and a legacy no-handle context.\n\n### Key Features:\n- **Explicit Contexts**: Modern clients create, use, and close isolated application contexts instead of relying on process identity\n- **Code Execution**: Write Python code with async browser functions (await navigate, click, evaluate, etc.)\n- **Persistent Namespace**: Variables and state persist between execute_code calls within one context\n- **Recovery Tools**: get_status reports lifecycle and tab state without starting a browser; reset_browser closes a stuck browser while preserving user variables by default\n- **Isolated Resources**: Each context has its own managed profile, workspace, default downloads directory, namespace, and locks\n- **Legacy Compatibility**: Older stdio clients keep the original three tools without context IDs\n- **Browser Automation**: Full browser control via CodeAgent functions\n- **JavaScript Evaluation**: Run JS in page context via evaluate()\n- **Data Libraries**: numpy, pandas, matplotlib, BeautifulSoup available\n- **Standard Libraries**: json, csv, re, datetime, requests, asyncio, Path",
   "icon": "icon.png",
   "homepage": "https://github.com/billy-enrizky/openbrowser-ai",
   "documentation": "https://github.com/billy-enrizky/openbrowser-ai",
@@ -38,6 +38,10 @@
   },
   "tools": [
     {
+      "name": "create_context",
+      "description": "Create an isolated OpenBrowser context and return its context_id. Does not start a browser until the first stateful call."
+    },
+    {
       "name": "execute_code",
       "description": "Execute Python code in a persistent namespace with browser automation functions (navigate, click, evaluate, etc.). All functions are async -- use await."
     },
@@ -48,23 +52,27 @@
     {
       "name": "reset_browser",
       "description": "Close the current browser session and release its profile. User-defined Python variables are preserved unless clear_variables is true."
+    },
+    {
+      "name": "close_context",
+      "description": "Close one OpenBrowser context and release its browser and profile. A successful close invalidates the handle."
     }
   ],
   "prompts": [
     {
       "name": "scrape_data",
       "description": "Extract structured data from a website",
-      "text": "Use execute_code to write Python that navigates to {url}, extracts data using evaluate() for JS DOM queries or Python string processing, and prints structured results."
+      "text": "First call create_context and keep its context_id. Then use execute_code with that context_id to write Python that navigates to {url}, extracts data using evaluate() for JS DOM queries or Python string processing, and prints structured results. Call close_context when finished."
     },
     {
       "name": "fill_form",
       "description": "Fill out and submit a web form",
-      "text": "Use execute_code to navigate to {url}, get browser state to find form fields, then use input_text() and click() to fill and submit the form with: {field_data}."
+      "text": "First call create_context and keep its context_id. Then use execute_code with that context_id to navigate to {url}, get browser state to find form fields, and use input_text() and click() to fill and submit the form with: {field_data}. Call close_context when finished."
     },
     {
       "name": "research_topic",
       "description": "Research a topic across multiple websites",
-      "text": "Use execute_code to navigate to multiple sites, extract content using evaluate() or page text, and aggregate findings about {topic} using Python data structures."
+      "text": "First call create_context and keep its context_id. Then use execute_code with that context_id to navigate to multiple sites, extract content using evaluate() or page text, and aggregate findings about {topic} using Python data structures. Call close_context when finished."
     }
   ],
   "keywords": [
