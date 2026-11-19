@@ -2,8 +2,62 @@
 
 # Check for MCP mode early to prevent logging initialization
 import sys
+from enum import Enum
 
-if '--mcp' in sys.argv:
+
+class CliMode(str, Enum):
+	"""Explicit CLI modes selected before Click loads heavy dependencies."""
+
+	MCP = 'mcp'
+	EXECUTE_CODE = 'execute_code'
+	DAEMON = 'daemon'
+	INSTALL = 'install'
+	INIT = 'init'
+	TEMPLATE = 'template'
+
+
+def select_cli_mode(args: list[str]) -> CliMode | None:
+	"""Return the explicit fast-path mode for argv, or None for Click."""
+	if ('-p' in args or '--prompt' in args) and '-c' not in args:
+		# Prompt mode owns its value. "openbrowser-ai -p init" is a prompt,
+		# not the init subcommand. Click still gives --mcp precedence.
+		return None
+	if '--mcp' in args:
+		return CliMode.MCP
+	if '-c' in args:
+		return CliMode.EXECUTE_CODE
+	if args and args[0] == 'daemon':
+		return CliMode.DAEMON
+	if args and args[0] == 'install':
+		return CliMode.INSTALL
+	if 'init' in args:
+		return CliMode.INIT
+	if '--template' in args:
+		return CliMode.TEMPLATE
+	return None
+
+
+# Fast paths execute only when this module is the process entry point. The
+# __test__ seam keeps the existing source-executing coverage tests honest.
+INIT_TEMPLATES = {
+	'default': {
+		'file': 'default_template.py',
+		'description': 'Simplest setup - capable of any web task with minimal configuration',
+	},
+	'advanced': {
+		'file': 'advanced_template.py',
+		'description': 'All configuration options shown with defaults',
+	},
+	'tools': {
+		'file': 'tools_template.py',
+		'description': 'Custom action examples - extend the agent with your own functions',
+	},
+}
+
+_RUN_FAST_PATHS = __name__ in {'__main__', '__test__'}
+_mode = select_cli_mode(sys.argv[1:]) if _RUN_FAST_PATHS else None
+
+if _mode is CliMode.MCP:
 	import asyncio
 	import logging
 	import os
@@ -39,7 +93,7 @@ if '--mcp' in sys.argv:
 	sys.exit(0)
 
 # Check for -c (execute code) mode early -- minimal imports for fast startup
-if '-c' in sys.argv:
+if _mode is CliMode.EXECUTE_CODE:
 	import os
 	os.environ['OPENBROWSER_SETUP_LOGGING'] = 'false'
 	try:
@@ -102,7 +156,7 @@ if '-c' in sys.argv:
 	sys.exit(0)
 
 # Check for daemon subcommand early
-if len(sys.argv) > 1 and sys.argv[1] == 'daemon':
+if _mode is CliMode.DAEMON:
 	import os
 	os.environ['OPENBROWSER_SETUP_LOGGING'] = 'false'
 	try:
@@ -373,7 +427,7 @@ if len(sys.argv) > 1 and sys.argv[1] == 'daemon':
 	sys.exit(0)
 
 # Special case: install command doesn't need CLI dependencies
-if len(sys.argv) > 1 and sys.argv[1] == 'install':
+if _mode is CliMode.INSTALL:
 	import platform
 	import subprocess
 
@@ -397,7 +451,7 @@ if len(sys.argv) > 1 and sys.argv[1] == 'install':
 	sys.exit(0)
 
 # Check for init subcommand early to avoid loading heavy dependencies
-if 'init' in sys.argv:
+if _mode is CliMode.INIT:
 	from openbrowser.init_cmd import INIT_TEMPLATES
 	from openbrowser.init_cmd import main as init_main
 
@@ -423,12 +477,10 @@ if 'init' in sys.argv:
 	sys.exit(0)
 
 # Check for --template flag early to avoid loading heavy dependencies
-if '--template' in sys.argv:
+if _mode is CliMode.TEMPLATE:
 	from pathlib import Path
 
 	import click
-
-	from openbrowser.init_cmd import INIT_TEMPLATES
 
 	# Parse template and output from sys.argv
 	try:
@@ -962,20 +1014,6 @@ def install():
 # ============================================================================
 
 # Template metadata
-INIT_TEMPLATES = {
-	'default': {
-		'file': 'default_template.py',
-		'description': 'Simplest setup - capable of any web task with minimal configuration',
-	},
-	'advanced': {
-		'file': 'advanced_template.py',
-		'description': 'All configuration options shown with defaults',
-	},
-	'tools': {
-		'file': 'tools_template.py',
-		'description': 'Custom action examples - extend the agent with your own functions',
-	},
-}
 
 
 def _run_template_generation(template: str, output: str | None, force: bool):
