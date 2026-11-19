@@ -462,6 +462,8 @@ async def test_recovery_deadline_exhaustion_stops_after_old_cleanup(registry):
     context_id = await contexts.create()
     owner = contexts._entries[context_id].owner
     owner.browser_session = MagicMock()
+    owner._namespace = {"answer": 42}
+    owner._browser_generation = 3
 
     async def kill(_session):
         return module._CleanupOutcome(True)
@@ -471,3 +473,29 @@ async def test_recovery_deadline_exhaustion_stops_after_old_cleanup(registry):
         await owner._recover_browser_session_locked(deadline=time.monotonic() - 1)
     assert owner.browser_session is None
     assert owner._browser_lifecycle.phase is LifecyclePhase.STOPPED
+    assert owner._pending_variables == {"answer": 42}
+    assert owner._browser_generation == 4
+
+
+@pytest.mark.asyncio
+async def test_expired_health_budget_does_not_trigger_recovery(registry):
+    _, contexts = registry
+    context_id = await contexts.create()
+    owner = contexts._entries[context_id].owner
+    owner._namespace = {"__builtins__": __builtins__}
+    owner.browser_session = MagicMock()
+
+    async def slow_dead(*, deadline=None):
+        await asyncio.sleep(0.02)
+        return False
+
+    async def forbid_recovery(**kwargs):
+        pytest.fail("recovery ran after the execution budget expired", pytrace=False)
+
+    owner._is_cdp_alive = slow_dead
+    owner._recover_browser_session = forbid_recovery
+    result = await owner._execute_code_locked(
+        "x = 1", deadline=time.monotonic() + 0.01
+    )
+    assert "health check" in result
+    assert "timed out" in result.lower()

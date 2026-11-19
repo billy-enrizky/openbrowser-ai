@@ -740,6 +740,11 @@ class _BrowserOwner:
 				self._namespace = None
 
 			if deadline is not None and time.monotonic() >= deadline:
+				merged = {**self._pending_variables, **old_ns}
+				self._pending_variables = {
+					key: value for key, value in merged.items() if not key.startswith('__')
+				}
+				self._browser_generation += 1
 				try:
 					self._browser_lifecycle.transition(
 						LifecyclePhase.STOPPED,
@@ -888,6 +893,11 @@ class _BrowserOwner:
 		# If browser_session is None, _ensure_namespace hasn't launched one yet
 		# or the code doesn't need a browser -- skip recovery to avoid hanging.
 		if self.browser_session and not await self._is_cdp_alive(deadline=deadline):
+			if deadline is not None and time.monotonic() >= deadline:
+				return (
+					'Error: Execution timed out during the browser health check. '
+					'Run get_status before retrying.'
+				)
 			try:
 				await self._recover_browser_session(deadline=deadline)
 			except Exception as recovery_err:
