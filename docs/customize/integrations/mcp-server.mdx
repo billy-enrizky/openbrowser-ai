@@ -7,7 +7,7 @@ mode: "wide"
 
 ## Overview
 
-The MCP (Model Context Protocol) Server exposes OpenBrowser's browser automation through three tools for AI assistants like Claude Desktop, Claude Code, and other MCP-compatible clients. `execute_code` runs Python to navigate, interact with, and extract data from web pages. `get_status` reports lifecycle and tab state without starting a browser, and `reset_browser` recovers a stuck browser while preserving user variables by default. No external LLM API keys required -- the MCP client provides the intelligence.
+The MCP (Model Context Protocol) Server exposes OpenBrowser's browser automation to AI assistants like Claude Desktop, Claude Code, and other MCP-compatible clients. A 2026-07-28 client calls `create_context` to get a server-minted `context_id`, passes that handle to `execute_code`, `get_status`, and `reset_browser`, and calls `close_context` when finished. `execute_code` runs Python to navigate, interact with, and extract data from web pages. `get_status` reports lifecycle and tab state without starting a browser, and `reset_browser` recovers a stuck browser while preserving user variables by default. Older clients that negotiate `2024-11-05`, `2025-03-26`, `2025-06-18`, or `2025-11-25` receive the original three-tool catalog with a legacy no-handle context. No external LLM API keys required -- the MCP client provides the intelligence.
 
 ## Quick Start
 
@@ -82,16 +82,20 @@ Optional configuration:
 | `OPENBROWSER_ALLOWED_DOMAINS` | Comma-separated domain whitelist | (none) |
 | `OPENBROWSER_COMPACT_DESCRIPTION` | Minimal tool description (~500 tokens vs ~1,430) | `false` |
 | `OPENBROWSER_MAX_OUTPUT` | Maximum output characters per execution | `10000` |
+| `OPENBROWSER_MCP_MAX_CONTEXTS` | Maximum open modern contexts plus the activated legacy context | `16` |
+| `OPENBROWSER_MCP_WORKSPACE_DIR` | Base directory for per-context workspaces | `~/Downloads/openbrowser-mcp/workspace` |
 
 ## Tools
 
-The MCP server exposes three tools:
+Modern 2026-07-28 clients see five tools. Older clients see the original three.
 
 | Tool | Use |
 |---|---|
-| `execute_code` | Run Python in a persistent namespace with browser automation functions. Functions are async unless noted; use `await`. |
-| `get_status` | Read the server, browser, profile, and tab state as JSON. It does not start or mutate a browser. |
+| `create_context` | Create an isolated browser and Python namespace. Returns `context_id` in text and `structuredContent`. Does not start a browser until the first stateful call. |
+| `execute_code` | Run Python in one context's persistent namespace with browser automation functions. Modern calls require `context_id`; functions are async unless noted. |
+| `get_status` | Read the server, context, browser, profile, and tab state as JSON. It does not start or mutate a browser. |
 | `reset_browser` | Close a stuck browser and release its profile. User variables are preserved unless `clear_variables` is true. |
+| `close_context` | Close one context and release its browser and profile. A successful close invalidates the handle. |
 
 If a browser connection fails, call `get_status` before retrying. A page-changing action may have partially run, so do not replay it blindly.
 
@@ -120,7 +124,7 @@ Prefer indexed actions whenever an element index exists. Coordinate actions use 
 
 **Pre-imported libraries**: `json`, `csv`, `re`, `datetime`, `asyncio`, `Path`, `requests`, `numpy`, `pandas`, `matplotlib`, `BeautifulSoup`
 
-Variables and state persist between `execute_code` calls within the same session.
+Variables and state persist between `execute_code` calls within the same context. A context is process-local: it lives until `close_context` or server exit, and a new MCP server process cannot resume the same handle. Default workspaces and downloads are isolated per context; close retains the files.
 
 ## Example Usage
 
@@ -142,44 +146,52 @@ You can also connect to the MCP server programmatically:
 
 ```python
 import asyncio
-from mcp import ClientSession, StdioServerParameters
-from mcp.client.stdio import stdio_client
+
+from mcp import Client, StdioServerParameters
 
 async def use_browser_mcp():
     server_params = StdioServerParameters(
         command="uvx",
-        args=["openbrowser-ai", "--mcp"]
+        args=["openbrowser-ai", "--mcp"],
     )
 
-    async with stdio_client(server_params) as (read, write):
-        async with ClientSession(read, write) as session:
-            await session.initialize()
-
-            # Navigate and extract page title
-            result = await session.call_tool(
+    async with Client(server_params) as client:
+        created = await client.call_tool("create_context", {})
+        context_id = created.structured_content["context_id"]
+        try:
+            result = await client.call_tool(
                 "execute_code",
-                arguments={"code": """
+                {
+                    "context_id": context_id,
+                    "code": """
 await navigate('https://example.com')
 state = await browser.get_browser_state_summary()
 print(f"Title: {state.title}")
 print(f"URL: {state.url}")
-"""}
+""",
+                },
             )
             print(result.content[0].text)
 
-            # Extract data with JavaScript
-            result = await session.call_tool(
+            result = await client.call_tool(
                 "execute_code",
-                arguments={"code": """
+                {
+                    "context_id": context_id,
+                    "code": """
 links = await evaluate('Array.from(document.querySelectorAll("a")).map(a => ({text: a.textContent, href: a.href}))')
 for link in links:
     print(f"{link['text']}: {link['href']}")
-"""}
+""",
+                },
             )
             print(result.content[0].text)
+        finally:
+            await client.call_tool("close_context", {"context_id": context_id})
 
 asyncio.run(use_browser_mcp())
 ```
+
+Older clients that negotiate `2024-11-05`, `2025-03-26`, `2025-06-18`, or `2025-11-25` keep the original `ClientSession` flow and call `execute_code` without `context_id`.
 
 ## CLI Execute Mode
 

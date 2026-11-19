@@ -15,6 +15,7 @@ on:
       - 'src/**'
       - 'tests/**'
       - 'pyproject.toml'
+      - 'uv.lock'
       - '.github/workflows/test.yml'
   pull_request:
     branches: [main, develop]
@@ -22,6 +23,7 @@ on:
       - 'src/**'
       - 'tests/**'
       - 'pyproject.toml'
+      - 'uv.lock'
       - '.github/workflows/test.yml'
   workflow_dispatch:
 
@@ -57,13 +59,20 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Install dependencies
+      - name: Install locked dependencies
         run: |
-          uv pip install --system -e ".[all,dev]"
+          uv sync --locked --all-extras
+
+      - name: Prepare isolated MCP 1.x compatibility client
+        run: |
+          uv venv --python "${{ matrix.python-version }}" "$RUNNER_TEMP/mcp1-client"
+          uv pip install --python "$RUNNER_TEMP/mcp1-client/bin/python" "mcp==1.26.0"
+          "$RUNNER_TEMP/mcp1-client/bin/python" -c 'from importlib.metadata import version; assert version("mcp") == "1.26.0"'
+          echo "OPENBROWSER_TEST_MCP1_PYTHON=$RUNNER_TEMP/mcp1-client/bin/python" >> "$GITHUB_ENV"
 
       - name: Run tests with coverage
         run: |
-          pytest tests/ -v --tb=short -m "not integration" --cov=src/openbrowser --cov-branch --cov-report=xml --cov-report=term-missing
+          uv run --locked pytest tests/ -v --tb=short -m "not integration" --cov=src/openbrowser --cov-branch --cov-report=xml --cov-report=term-missing
         env:
           PYTHONPATH: ${{ github.workspace }}
 

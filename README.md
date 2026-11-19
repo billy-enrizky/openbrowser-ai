@@ -436,11 +436,15 @@ uvx openbrowser-ai --mcp
 
 ### Tools
 
-The MCP server exposes three tools:
+The MCP server exposes five tools to 2026-07-28 clients and the original three tools to older clients:
 
-- `execute_code` runs Python code in a persistent namespace with browser automation functions.
-- `get_status` returns server, browser, profile, and tab state as JSON. It is read-only and does not start a browser.
+- `create_context` creates an isolated browser and Python namespace and returns a server-minted `context_id`. It does not start a browser until the first stateful call.
+- `execute_code` runs Python code in the namespace for one context. Modern calls require `context_id`.
+- `get_status` returns server, context, browser, profile, and tab state as JSON. It is read-only and does not start a browser.
 - `reset_browser` closes a stuck browser and preserves user-defined Python variables unless `clear_variables` is true.
+- `close_context` closes one context and releases its browser and profile. The handle cannot be used after a successful close.
+
+A context is process-local. It lives until `close_context` or server exit, and a new MCP server process cannot resume the same handle. Older clients that negotiate `2024-11-05`, `2025-03-26`, `2025-06-18`, or `2025-11-25` receive the original three-tool catalog and a legacy no-handle context. A modern stateful request without the handle returned by `create_context` is rejected before any browser effect. `create_context` itself takes no handle.
 
 If a browser connection fails, call `get_status` before retrying. Do not replay a page-changing action blindly because the first attempt may have partially run.
 
@@ -475,6 +479,8 @@ Prefer indexed actions whenever an element index exists. Coordinate actions use 
 | `OPENBROWSER_MAX_OUTPUT` | Max output characters per execution | `10000` |
 | `OPENBROWSER_MCP_START_TIMEOUT` | Browser startup bound in seconds | `30` |
 | `OPENBROWSER_MCP_EXEC_TIMEOUT` | Seconds before a tool call returns a timeout result | `110` |
+| `OPENBROWSER_MCP_MAX_CONTEXTS` | Maximum open modern contexts plus the activated legacy context | `16` |
+| `OPENBROWSER_MCP_WORKSPACE_DIR` | Base directory for per-context workspaces | `~/Downloads/openbrowser-mcp/workspace` |
 
 ## Benchmark: Token Efficiency
 

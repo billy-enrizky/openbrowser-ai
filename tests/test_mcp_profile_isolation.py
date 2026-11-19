@@ -284,7 +284,7 @@ async def test_cancelled_initialization_clears_session_after_cleanup(isolated_mc
 
     with (
         patch.object(mcp_mod, 'BrowserSession', return_value=session),
-        patch.object(server, '_kill_session_safely', new_callable=AsyncMock, return_value=(True, True)),
+        patch.object(server, '_kill_session_safely', new_callable=AsyncMock, return_value=mcp_mod._CleanupOutcome(True, asyncio.CancelledError())),
     ):
         with pytest.raises(asyncio.CancelledError):
             await server._ensure_namespace()
@@ -507,7 +507,9 @@ async def test_kill_session_safely_drains_after_repeated_cancellation(isolated_m
     cleanup_task.cancel()
     allow_kill.set()
 
-    assert await cleanup_task == (True, True)
+    outcome = await cleanup_task
+    assert outcome.succeeded
+    assert isinstance(outcome.caller_cancellation, asyncio.CancelledError)
 
 
 @pytest.mark.asyncio
@@ -520,7 +522,7 @@ async def test_sync_kill_compatibility_dispatches_forced_stop_and_checks_result(
     session.kill.return_value = None
     session.event_bus.dispatch.return_value = stop_event
 
-    assert await server._kill_session_safely(session) == (True, False)
+    assert await server._kill_session_safely(session) == mcp_mod._CleanupOutcome(True)
 
     dispatched_event = session.event_bus.dispatch.call_args.args[0]
     assert dispatched_event.force is True
