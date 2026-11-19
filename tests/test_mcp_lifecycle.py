@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from openbrowser.browser.lifecycle import LifecyclePhase
+from openbrowser.mcp.server import _CleanupOutcome
 
 
 @pytest.mark.asyncio
@@ -79,7 +80,7 @@ async def test_reset_browser_finishes_state_changes_before_cancellation(mcp_serv
 	mcp_server.browser_session = session
 	mcp_server._namespace = {'user_value': 42}
 
-	with patch.object(mcp_server, '_kill_session_safely', new_callable=AsyncMock, return_value=(True, True)):
+	with patch.object(mcp_server, '_kill_session_safely', new_callable=AsyncMock, return_value=_CleanupOutcome(True, asyncio.CancelledError())):
 		with pytest.raises(asyncio.CancelledError):
 			await mcp_server._handle_tool('reset_browser', {})
 
@@ -118,7 +119,7 @@ async def test_namespace_start_timeout_cleans_up(mcp_server):
 	with (
 		patch.object(mcp_mod, 'BrowserSession', return_value=session),
 		patch.object(mcp_mod, '_start_timeout_seconds', return_value=0.01),
-		patch.object(mcp_server, '_kill_session_safely', new_callable=AsyncMock, return_value=(True, False)),
+		patch.object(mcp_server, '_kill_session_safely', new_callable=AsyncMock, return_value=_CleanupOutcome(True)),
 	):
 		with pytest.raises(asyncio.TimeoutError):
 			await mcp_server._ensure_namespace()

@@ -10,10 +10,9 @@ Configuration:
     - Sets up logging for test visibility
 
 Shared Stubs:
-    DummyServer and DummyTypes provide minimal MCP SDK stubs so that
-    OpenBrowserServer can initialise without the real mcp package installed.
-    These are defined once here to prevent stub drift between unit and
-    integration tests.
+    DummyServer only replaces stream serving. DummyTypes aliases real protocol
+    models so application tests cannot hide model or registration incompatibilities.
+    Protocol tests use the actual SDK Server and real subprocess streams instead.
 
 Path Setup:
     The src directory is added to sys.path to enable imports like:
@@ -25,6 +24,8 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+from mcp import types as DummyTypes
+from mcp.server import Server as SDKServer
 
 # Add the src directory to the path so tests can import using openbrowser
 # This allows consistent import paths across all test modules
@@ -40,60 +41,11 @@ from openbrowser.mcp import server as mcp_server_module  # noqa: E402
 # ---------------------------------------------------------------------------
 
 
-class DummyServer:
-    """Minimal stub for mcp.server.Server so OpenBrowserServer can initialise."""
-
-    def __init__(self, name):
-        pass
-
-    def list_tools(self):
-        return lambda f: f
-
-    def list_resources(self):
-        return lambda f: f
-
-    def list_resource_templates(self):
-        return lambda f: f
-
-    def list_prompts(self):
-        return lambda f: f
-
-    def call_tool(self):
-        return lambda f: f
-
-    def get_capabilities(self, **kwargs):
-        return {}
+class DummyServer(SDKServer):
+    """Register real SDK callbacks and models, but do not serve unit-test streams."""
 
     async def run(self, *args, **kwargs):
         return None
-
-
-class DummyTypes:
-    """Minimal stub for mcp.types."""
-
-    class ToolAnnotations:
-        def __init__(self, **kwargs):
-            pass
-
-    class Tool:
-        def __init__(self, **kwargs):
-            pass
-
-    class Resource:
-        def __init__(self, **kwargs):
-            pass
-
-    class ResourceTemplate:
-        def __init__(self, **kwargs):
-            pass
-
-    class Prompt:
-        pass
-
-    class TextContent:
-        def __init__(self, type: str, text: str):
-            self.type = type
-            self.text = text
 
 
 # ---------------------------------------------------------------------------
@@ -142,7 +94,7 @@ def make_mock_browser_state(url="https://example.com", title="Example", tabs=Non
 
 @pytest.fixture()
 def mcp_server(monkeypatch):
-    """Create an OpenBrowserServer with dummy MCP SDK stubs."""
+    """Create an application owner without serving streams; use real SDK models."""
     monkeypatch.setattr(mcp_server_module, "MCP_AVAILABLE", True)
     monkeypatch.setattr(mcp_server_module, "Server", DummyServer)
     monkeypatch.setattr(mcp_server_module, "types", DummyTypes)

@@ -27,6 +27,7 @@ os.environ['OPENBROWSER_SETUP_LOGGING'] = 'false'
 
 import asyncio
 from copy import deepcopy
+from dataclasses import dataclass
 import inspect
 import json
 import logging
@@ -35,6 +36,8 @@ import time
 import uuid
 from pathlib import Path
 from typing import Any
+
+from jsonschema import Draft202012Validator
 
 # Configure logging for MCP mode - redirect to stderr but preserve critical diagnostics
 logging.basicConfig(
@@ -111,6 +114,12 @@ _MCP_WORKSPACE_DIR = Path.home() / 'Downloads' / 'openbrowser-mcp' / 'workspace'
 _CDP_HEALTH_CHECK_TIMEOUT_SECONDS = 2.0
 
 
+@dataclass(frozen=True)
+class _CleanupOutcome:
+	succeeded: bool
+	caller_cancellation: asyncio.CancelledError | None = None
+
+
 def _start_timeout_seconds() -> float:
 	raw = os.environ.get('OPENBROWSER_MCP_START_TIMEOUT', '')
 	try:
@@ -163,8 +172,8 @@ _ensure_all_loggers_use_stderr()
 try:
 	import mcp.server.stdio
 	import mcp.types as types
-	from mcp.server import NotificationOptions, Server
-	from mcp.server.models import InitializationOptions
+	from mcp import MCPError
+	from mcp.server import CacheHint, Server, ServerRequestContext
 
 	MCP_AVAILABLE = True
 
@@ -236,7 +245,6 @@ class OpenBrowserServer:
 	def __init__(self, session_timeout_minutes: int = 10):
 		_ensure_all_loggers_use_stderr()
 
-		self.server = Server('openbrowser')
 		self.config = load_openbrowser_config()
 		self.browser_session: BrowserSession | None = None
 		self._lifecycle = LifecycleMachine('mcp_server')
@@ -270,116 +278,187 @@ class OpenBrowserServer:
 		self._setup_handlers()
 
 	def _setup_handlers(self):
-		"""Setup MCP server handlers."""
+		"""Configure SDK callbacks from one instance-owned catalog and schema source."""
 
-		@self.server.list_tools()
-		async def handle_list_tools() -> list[types.Tool]:
-			"""List the code execution and recovery tools."""
-			description = _EXECUTE_CODE_DESCRIPTION
-			if os.environ.get('OPENBROWSER_COMPACT_DESCRIPTION', '').lower() in ('1', 'true', 'yes'):
-				description = _EXECUTE_CODE_DESCRIPTION_COMPACT
-			return [
-				types.Tool(
-					name='execute_code',
-					description=description,
-					inputSchema={
-						'type': 'object',
-						'properties': {
-							'code': {
-								'type': 'string',
-								'description': 'Python code to execute. All browser functions are async (use await).',
-							},
+		description = _EXECUTE_CODE_DESCRIPTION
+		if os.environ.get('OPENBROWSER_COMPACT_DESCRIPTION', '').lower() in ('1', 'true', 'yes'):
+			description = _EXECUTE_CODE_DESCRIPTION_COMPACT
+		tool_catalog = (
+			types.Tool(
+				name='execute_code',
+				description=description,
+				input_schema={
+					'type': 'object',
+					'properties': {
+						'code': {
+							'type': 'string',
+							'description': 'Python code to execute. All browser functions are async (use await).',
 						},
-						'required': ['code'],
 					},
-					annotations=types.ToolAnnotations(
-						readOnlyHint=False,
-						destructiveHint=True,
-						openWorldHint=True,
-						idempotentHint=False,
-					),
+					'required': ['code'],
+				},
+				annotations=types.ToolAnnotations(
+					read_only_hint=False,
+					destructive_hint=True,
+					open_world_hint=True,
+					idempotent_hint=False,
 				),
-				types.Tool(
-					name='get_status',
-					description=(
-						'Return OpenBrowser server, browser, profile, and tab state as JSON. '
-						'Read-only and does not start a browser. Use this before retrying a failed task.'
-					),
-					inputSchema={
-						'type': 'object',
-						'properties': {},
-						'additionalProperties': False,
-					},
-					annotations=types.ToolAnnotations(
-						readOnlyHint=True,
-						destructiveHint=False,
-						openWorldHint=False,
-						idempotentHint=True,
-					),
+			),
+			types.Tool(
+				name='get_status',
+				description=(
+					'Return OpenBrowser server, browser, profile, and tab state as JSON. '
+					'Read-only and does not start a browser. Use this before retrying a failed task.'
 				),
-				types.Tool(
-					name='reset_browser',
-					description=(
-						'Close the current browser session and release its profile. '
-						'User-defined Python variables are preserved unless clear_variables is true. '
-						'The next execute_code call starts a fresh browser.'
-					),
-					inputSchema={
-						'type': 'object',
-						'properties': {
-							'clear_variables': {
-								'type': 'boolean',
-								'description': 'Also discard user-defined Python variables.',
-								'default': False,
-							},
+				input_schema={
+					'type': 'object',
+					'properties': {},
+					'additionalProperties': False,
+				},
+				annotations=types.ToolAnnotations(
+					read_only_hint=True,
+					destructive_hint=False,
+					open_world_hint=False,
+					idempotent_hint=True,
+				),
+			),
+			types.Tool(
+				name='reset_browser',
+				description=(
+					'Close the current browser session and release its profile. '
+					'User-defined Python variables are preserved unless clear_variables is true. '
+					'The next execute_code call starts a fresh browser.'
+				),
+				input_schema={
+					'type': 'object',
+					'properties': {
+						'clear_variables': {
+							'type': 'boolean',
+							'description': 'Also discard user-defined Python variables.',
+							'default': False,
 						},
-						'additionalProperties': False,
 					},
-					annotations=types.ToolAnnotations(
-						readOnlyHint=False,
-						destructiveHint=True,
-						openWorldHint=False,
-						idempotentHint=True,
-					),
+					'additionalProperties': False,
+				},
+				annotations=types.ToolAnnotations(
+					read_only_hint=False,
+					destructive_hint=True,
+					open_world_hint=False,
+					idempotent_hint=True,
 				),
-			]
+			),
+		)
+		tools_by_name = {tool.name: tool for tool in tool_catalog}
+		validators = {}
+		for tool in tool_catalog:
+			Draft202012Validator.check_schema(tool.input_schema)
+			validators[tool.name] = Draft202012Validator(tool.input_schema)
 
-		@self.server.list_resources()
-		async def handle_list_resources() -> list[types.Resource]:
-			return []
+		async def handle_list_tools(
+			ctx: ServerRequestContext, params: types.PaginatedRequestParams | None
+		) -> types.ListToolsResult:
+			return types.ListToolsResult(tools=[tool.model_copy(deep=True) for tool in tool_catalog])
 
-		@self.server.list_resource_templates()
-		async def handle_list_resource_templates() -> list[types.ResourceTemplate]:
-			return []
+		async def handle_list_resources(
+			ctx: ServerRequestContext, params: types.PaginatedRequestParams | None
+		) -> types.ListResourcesResult:
+			return types.ListResourcesResult(resources=[])
 
-		@self.server.list_prompts()
-		async def handle_list_prompts() -> list[types.Prompt]:
-			return []
+		async def handle_list_resource_templates(
+			ctx: ServerRequestContext, params: types.PaginatedRequestParams | None
+		) -> types.ListResourceTemplatesResult:
+			return types.ListResourceTemplatesResult(resource_templates=[])
 
-		@self.server.call_tool()
-		async def handle_call_tool(name: str, arguments: dict[str, Any] | None) -> list[types.TextContent]:
-			"""Handle tool execution."""
+		async def handle_list_prompts(
+			ctx: ServerRequestContext, params: types.PaginatedRequestParams | None
+		) -> types.ListPromptsResult:
+			return types.ListPromptsResult(prompts=[])
+
+		async def handle_call_tool(
+			ctx: ServerRequestContext, params: types.CallToolRequestParams
+		) -> types.CallToolResult:
 			start_time = time.time()
 			error_msg = None
 			try:
-				result = await self._handle_tool(name, arguments or {})
-				return [types.TextContent(type='text', text=result)]
-			except Exception as e:
-				error_msg = str(e)
-				logger.error('Tool execution failed: %s', e, exc_info=True)
-				return [types.TextContent(type='text', text=f'Error: {str(e)}')]
+				if params.name not in tools_by_name:
+					raise MCPError(code=-32602, message=f'Unknown tool: {params.name}')
+				arguments = params.arguments if params.arguments is not None else {}
+				validation_error = next(validators[params.name].iter_errors(arguments), None)
+				if validation_error is not None:
+					error_msg = f'Invalid arguments: {validation_error.message}'
+				elif params.name == 'execute_code' and not arguments['code'].strip():
+					error_msg = 'Error: No code provided'
+				if error_msg is not None:
+					return types.CallToolResult(content=[types.TextContent(type='text', text=error_msg)], is_error=True)
+				async def owned_call() -> str | BaseException:
+					try:
+						return await self._handle_tool(params.name, arguments)
+					except asyncio.CancelledError:
+						raise
+					except BaseException as error:
+						return error
+
+				operation = asyncio.create_task(owned_call())
+				completion = asyncio.gather(operation, return_exceptions=True)
+				caller_cancellation = None
+				while not completion.done():
+					try:
+						await asyncio.shield(completion)
+					except asyncio.CancelledError as error:
+						if caller_cancellation is None:
+							caller_cancellation = error
+							operation.cancel()
+				result = completion.result()[0]
+				if caller_cancellation is not None:
+					raise caller_cancellation
+				if operation.cancelled():
+					raise RuntimeError('Tool operation was cancelled')
+				if isinstance(result, BaseException):
+					raise result
+				return types.CallToolResult(content=[types.TextContent(type='text', text=result)])
+			except asyncio.CancelledError as error:
+				error_msg = f'{type(error).__name__}: {error}'
+				raise
+			except MCPError as error:
+				error_msg = str(error)
+				raise
+			except Exception as error:
+				error_msg = str(error)
+				logger.error('Tool execution failed: %s', error, exc_info=True)
+				return types.CallToolResult(content=[types.TextContent(type='text', text=f'Error: {error}')], is_error=True)
+			except BaseException as error:
+				error_msg = f'{type(error).__name__}: {error}'
+				raise
 			finally:
 				if self._telemetry and TELEMETRY_AVAILABLE:
-					duration = time.time() - start_time
 					self._telemetry.capture(
 						MCPServerTelemetryEvent(
 							version=get_openbrowser_version(),
 							action='tool_call',
-							tool_name=name,
-							duration_seconds=duration,
+							tool_name=params.name,
+							duration_seconds=time.time() - start_time,
 							error_message=error_msg,
 						)
 					)
+
+		def get_tool_input_schema(name: str) -> dict[str, Any] | None:
+			tool = tools_by_name.get(name)
+			return deepcopy(tool.input_schema) if tool is not None else None
+
+		self.server = Server(
+			'openbrowser',
+			version=get_openbrowser_version(),
+			on_list_tools=handle_list_tools,
+			on_list_resources=handle_list_resources,
+			on_list_resource_templates=handle_list_resource_templates,
+			on_list_prompts=handle_list_prompts,
+			on_call_tool=handle_call_tool,
+			get_tool_input_schema=get_tool_input_schema,
+			cache_hints={
+				method: CacheHint(ttl_ms=60_000, scope='private')
+				for method in ('tools/list', 'resources/list', 'resources/templates/list', 'prompts/list')
+			},
+		)
 
 	async def _handle_tool(self, name: str, arguments: dict[str, Any]) -> str:
 		"""Dispatch one MCP tool call to its implementation."""
@@ -516,15 +595,15 @@ class OpenBrowserServer:
 				self._browser_lifecycle.fail(message, reason='browser start failed')
 				logger.error('Failed to initialize browser session: %s', error)
 				if session is not None:
-					cleanup_succeeded, was_cancelled = await self._kill_session_safely(session)
-					if not cleanup_succeeded:
+					cleanup = await self._kill_session_safely(session)
+					if not cleanup.succeeded:
 						logger.error('Failed to clean up browser session after initialization failure')
-					if cleanup_succeeded and self.browser_session is session:
+					if cleanup.succeeded and self.browser_session is session:
 						self.browser_session = None
-					if cleanup_succeeded:
+					if cleanup.succeeded:
 						self._namespace = None
-					if was_cancelled:
-						raise asyncio.CancelledError
+					if cleanup.caller_cancellation is not None and not isinstance(error, asyncio.CancelledError):
+						raise cleanup.caller_cancellation
 				raise
 
 	async def _is_cdp_alive(self) -> bool:
@@ -540,54 +619,38 @@ class OpenBrowserServer:
 		except Exception:
 			return False
 
-	async def _kill_session_safely(self, session: BrowserSession) -> tuple[bool, bool]:
-		"""Kill a session without allowing cancellation to interrupt cleanup."""
-		try:
-			kill_result = session.kill()
-		except BaseException:
-			return False, False
-		if not inspect.isawaitable(kill_result):
-			# Keep compatibility with lightweight session doubles and older session
-			# implementations that expose only the stop event lifecycle.
+	async def _kill_session_safely(self, session: BrowserSession) -> _CleanupOutcome:
+		"""Complete owned cleanup without confusing worker and caller cancellation."""
+		async def owned_cleanup() -> bool:
 			try:
-				from openbrowser.browser.events import BrowserStopEvent
-				event = session.event_bus.dispatch(BrowserStopEvent(force=True))
-				if inspect.isawaitable(event):
-					await event
-				event_result = getattr(event, 'event_result', None)
-				if callable(event_result):
-					result = event_result(raise_if_any=True, raise_if_none=False)
-					if inspect.isawaitable(result):
-						await result
-				return True, False
+				result = session.kill()
+				if inspect.isawaitable(result):
+					await result
+				else:
+					from openbrowser.browser.events import BrowserStopEvent
+					event = session.event_bus.dispatch(BrowserStopEvent(force=True))
+					if inspect.isawaitable(event):
+						await event
+					event_result = getattr(event, 'event_result', None)
+					if callable(event_result):
+						result = event_result(raise_if_any=True, raise_if_none=False)
+						if inspect.isawaitable(result):
+							await result
+				return True
 			except BaseException:
-				return False, False
+				return False
 
-		kill_task = asyncio.create_task(kill_result)
-		was_cancelled = False
-		try:
-			await asyncio.shield(kill_task)
-		except asyncio.CancelledError:
-			was_cancelled = True
-		except BaseException:
-			return False, False
-
-		# A caller can be cancelled more than once while the owned browser is
-		# being stopped. Keep draining the shielded task until it reaches a
-		# terminal state so a second cancellation cannot orphan the browser.
-		while not kill_task.done():
+		cleanup_task = asyncio.create_task(owned_cleanup())
+		completion = asyncio.gather(cleanup_task, return_exceptions=True)
+		caller_cancellation = None
+		while not completion.done():
 			try:
-				await asyncio.shield(kill_task)
-			except asyncio.CancelledError:
-				was_cancelled = True
-			except BaseException:
-				return False, was_cancelled
-
-		try:
-			kill_task.result()
-		except BaseException:
-			return False, was_cancelled
-		return True, was_cancelled
+				await asyncio.shield(completion)
+			except asyncio.CancelledError as error:
+				if caller_cancellation is None:
+					caller_cancellation = error
+		result = completion.result()[0]
+		return _CleanupOutcome(result is True, caller_cancellation)
 
 	async def _recover_browser_session(self) -> None:
 		"""Serialize recovery with execution and lifecycle cleanup."""
@@ -620,14 +683,16 @@ class OpenBrowserServer:
 			old_session = self.browser_session
 			old_ns = self._namespace or {}
 			if old_session:
-				cleanup_succeeded, was_cancelled = await self._kill_session_safely(old_session)
-				if cleanup_succeeded and self.browser_session is old_session:
+				cleanup = await self._kill_session_safely(old_session)
+				if cleanup.succeeded and self.browser_session is old_session:
 					self.browser_session = None
-				if cleanup_succeeded:
+				if cleanup.succeeded:
 					self._namespace = None
-				if was_cancelled:
-					raise asyncio.CancelledError
-				if not cleanup_succeeded:
+				if not cleanup.succeeded:
+					self._browser_lifecycle.fail('Unable to safely close the old browser session during recovery', reason='browser recovery cleanup failed')
+				if cleanup.caller_cancellation is not None:
+					raise cleanup.caller_cancellation
+				if not cleanup.succeeded:
 					raise RuntimeError('Unable to safely close the old browser session during recovery')
 			else:
 				self._namespace = None
@@ -668,14 +733,14 @@ class OpenBrowserServer:
 				)
 			except BaseException as error:
 				self._browser_lifecycle.fail(error, reason='browser recovery failed')
-				cleanup_succeeded, was_cancelled = await self._kill_session_safely(session)
-				if not cleanup_succeeded:
+				cleanup = await self._kill_session_safely(session)
+				if not cleanup.succeeded:
 					logger.error('Failed to clean up replacement browser session')
-				if cleanup_succeeded and self.browser_session is session:
+				if cleanup.succeeded and self.browser_session is session:
 					self.browser_session = None
 				self._namespace = None
-				if was_cancelled:
-					raise asyncio.CancelledError
+				if cleanup.caller_cancellation is not None and not isinstance(error, asyncio.CancelledError):
+					raise cleanup.caller_cancellation
 				raise
 
 			logger.info('Browser session recovered successfully')
@@ -797,15 +862,17 @@ class OpenBrowserServer:
 			async with self._lifecycle_lock:
 				session = self.browser_session
 				old_namespace = self._namespace or {}
-				was_cancelled = False
+				cleanup = _CleanupOutcome(True)
 
 				if session is not None:
-					cleanup_succeeded, was_cancelled = await self._kill_session_safely(session)
-					if not cleanup_succeeded:
+					cleanup = await self._kill_session_safely(session)
+					if not cleanup.succeeded:
 						self._browser_lifecycle.fail(
 							'Unable to close the browser session during reset',
 							reason='browser reset failed',
 						)
+						if cleanup.caller_cancellation is not None:
+							raise cleanup.caller_cancellation
 						return json.dumps(
 							{
 								'ok': False,
@@ -833,8 +900,8 @@ class OpenBrowserServer:
 					)
 				except LifecycleTransitionError:
 					pass
-				if was_cancelled:
-					raise asyncio.CancelledError
+				if cleanup.caller_cancellation is not None:
+					raise cleanup.caller_cancellation
 
 				return json.dumps(
 					{
@@ -847,18 +914,36 @@ class OpenBrowserServer:
 				)
 
 	async def _shutdown(self) -> None:
-		"""Stop background cleanup and release this server's browser ownership."""
-		shutdown_task = asyncio.create_task(self._shutdown_locked())
-		cancellation_requested = False
-		while not shutdown_task.done():
+		"""Release ownership, separating the shutdown worker from its caller."""
+		async def owned_shutdown() -> BaseException | None:
 			try:
-				await asyncio.shield(shutdown_task)
+				await self._shutdown_locked()
 			except asyncio.CancelledError:
-				cancellation_requested = True
+				raise
+			except BaseException as error:
+				return error
+			return None
 
-		shutdown_task.result()
-		if cancellation_requested:
-			raise asyncio.CancelledError
+		shutdown_task = asyncio.create_task(owned_shutdown())
+		completion = asyncio.gather(shutdown_task, return_exceptions=True)
+		caller_cancellation = None
+		while not completion.done():
+			try:
+				await asyncio.shield(completion)
+			except asyncio.CancelledError as error:
+				if caller_cancellation is None:
+					caller_cancellation = error
+		result = completion.result()[0]
+		if isinstance(result, BaseException):
+			if self._browser_lifecycle.phase is not LifecyclePhase.FAILED:
+				self._browser_lifecycle.fail(result, reason='shutdown failed')
+			if caller_cancellation is not None:
+				raise caller_cancellation
+			if shutdown_task.cancelled():
+				raise RuntimeError('Owned shutdown cleanup was cancelled') from result
+			raise result
+		if caller_cancellation is not None:
+			raise caller_cancellation
 
 	async def _shutdown_locked(self) -> None:
 		"""Perform shutdown while isolated from cancellation of the caller."""
@@ -888,8 +973,8 @@ class OpenBrowserServer:
 						pass
 					return
 
-				cleanup_succeeded, was_cancelled = await self._kill_session_safely(session)
-				if cleanup_succeeded and self.browser_session is session:
+				cleanup = await self._kill_session_safely(session)
+				if cleanup.succeeded and self.browser_session is session:
 					self.browser_session = None
 					self._namespace = None
 					try:
@@ -900,14 +985,16 @@ class OpenBrowserServer:
 						)
 					except LifecycleTransitionError:
 						pass
-				elif not cleanup_succeeded:
+				elif not cleanup.succeeded:
 					self._browser_lifecycle.fail(
 						'Unable to safely close the browser session during shutdown',
 						reason='shutdown failed',
 					)
+					if cleanup.caller_cancellation is not None:
+						raise cleanup.caller_cancellation
 					raise RuntimeError('Unable to safely close the browser session during shutdown')
-				if was_cancelled:
-					raise asyncio.CancelledError
+				if cleanup.caller_cancellation is not None:
+					raise cleanup.caller_cancellation
 
 	async def _cleanup_expired_session(self) -> None:
 		"""Close browser session if idle beyond timeout."""
@@ -923,8 +1010,8 @@ class OpenBrowserServer:
 				if current_time - self._last_activity > timeout_seconds:
 					logger.info('Auto-closing idle browser session')
 					old_namespace = self._namespace or {}
-					cleanup_succeeded, was_cancelled = await self._kill_session_safely(session)
-					if cleanup_succeeded and self.browser_session is session:
+					cleanup = await self._kill_session_safely(session)
+					if cleanup.succeeded and self.browser_session is session:
 						self.browser_session = None
 						self._namespace = None
 						self._pending_variables = {
@@ -941,10 +1028,11 @@ class OpenBrowserServer:
 							)
 						except LifecycleTransitionError:
 							pass
-					elif not cleanup_succeeded:
+					elif not cleanup.succeeded:
+						self._browser_lifecycle.fail('Unable to close the idle browser session', reason='idle cleanup failed')
 						logger.error('Error closing idle session: cleanup failed')
-					if was_cancelled:
-						raise asyncio.CancelledError
+					if cleanup.caller_cancellation is not None:
+						raise cleanup.caller_cancellation
 
 	async def _start_cleanup_task(self) -> None:
 		"""Start the background cleanup task."""
@@ -971,15 +1059,8 @@ class OpenBrowserServer:
 				await self.server.run(
 					read_stream,
 					write_stream,
-					InitializationOptions(
-						server_name='openbrowser',
-						server_version=get_openbrowser_version(),
-						capabilities=self.server.get_capabilities(
-							notification_options=NotificationOptions(),
-							experimental_capabilities={},
-						),
-					),
-				),
+					self.server.create_initialization_options(),
+				)
 		finally:
 			try:
 				self._lifecycle.transition(LifecyclePhase.STOPPING, reason='mcp server stopping')

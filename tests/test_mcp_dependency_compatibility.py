@@ -7,8 +7,8 @@ from packaging.requirements import Requirement
 from packaging.version import Version
 
 
-def test_mcp_sdk_requirements_exclude_incompatible_v2_api():
-    """The server uses the MCP 1.x decorator API, not the MCP 2.x callback API."""
+def test_mcp_sdk_requirements_require_current_callback_api():
+    """Every install group requires the migrated SDK and excludes future majors."""
     project = tomllib.loads((Path(__file__).parents[1] / "pyproject.toml").read_text())[
         "project"
     ]
@@ -24,9 +24,29 @@ def test_mcp_sdk_requirements_exclude_incompatible_v2_api():
 
     assert mcp_requirements
     assert all(
-        Version("1.26.0") in requirement.specifier for requirement in mcp_requirements
+        Version("2.3.0") in requirement.specifier for requirement in mcp_requirements
     )
     assert all(
-        Version("2.0.0") not in requirement.specifier
+        Version("2.2.0") not in requirement.specifier
         for requirement in mcp_requirements
     )
+
+    assert all(
+        Version("3.0.0") not in requirement.specifier
+        for requirement in mcp_requirements
+    )
+    assert all(
+        Version("1.26.0") not in requirement.specifier
+        for requirement in mcp_requirements
+    )
+    assert any(
+        Requirement(requirement).name == "jsonschema"
+        for requirement in project["dependencies"]
+    )
+
+
+def test_lock_selects_current_sdk_and_matching_protocol_types():
+    lock = tomllib.loads((Path(__file__).parents[1] / "uv.lock").read_text())
+    packages = {package["name"]: package.get("version") for package in lock["package"]}
+    assert packages["mcp"] == "2.3.0"
+    assert packages["mcp-types"] == "2.3.0"
