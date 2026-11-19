@@ -218,7 +218,7 @@ class TestDaemonClientRecoveryDiscovery:
 
         assert result.success is True
         discover.assert_called_once_with(process, 123)
-        cleanup.assert_awaited_once_with(['/tmp/profile'], 0.01)
+        cleanup.assert_awaited_once_with(['/tmp/profile'], 0.01, expected_owner_pid=123)
 
     @pytest.mark.skipif(os.name == 'nt', reason='Unix sockets are not used on Windows')
     def test_remove_stale_socket_deletes_a_socket_file(self):
@@ -358,7 +358,69 @@ class TestDaemonClientRecoveryDiscovery:
 
         assert result.error_code == 'daemon_socket_foreign'
         assert result.error == 'foreign socket'
-        cleanup.assert_awaited_once_with(['/tmp/profile'], 0.01)
+        cleanup.assert_awaited_once_with(['/tmp/profile'], 0.01, expected_owner_pid=123)
+
+    @pytest.mark.asyncio
+    async def test_force_stop_does_not_kill_browsers_when_another_owner_is_live(self, tmp_path):
+        """An ambiguous cleanup state must not signal a replacement owner's browser."""
+        client = DaemonClient()
+        client.status = AsyncMock(return_value=DaemonResponse(success=False, output='', error='unresponsive'))
+        client.stop = AsyncMock(return_value=DaemonResponse(success=False, output='', error='unresponsive'))
+        client._read_pid = MagicMock(return_value=123)
+        process = MagicMock()
+        process.cmdline.return_value = ['python', '-m', 'openbrowser.daemon.server']
+        pid_path = tmp_path / 'daemon.pid'
+        pid_path.write_text('123')
+
+        with (
+            patch('openbrowser.daemon.client.get_pid_path', return_value=pid_path),
+            patch('openbrowser.daemon.client.get_socket_path', return_value=tmp_path / 'daemon.sock'),
+            patch('psutil.Process', return_value=process),
+            patch.object(client, '_socket_state', new_callable=AsyncMock, return_value='stale'),
+            patch.object(
+                client,
+                '_remove_stale_daemon_files',
+                new_callable=AsyncMock,
+                return_value=DaemonResponse(
+                    success=False,
+                    output='',
+                    error='another owner',
+                    error_code='daemon_busy',
+                ),
+            ),
+            patch.object(client, '_profile_dirs_for_daemon', return_value=['/tmp/profile']),
+            patch.object(
+                client,
+                '_kill_recorded_browsers',
+                new_callable=AsyncMock,
+                return_value=(True, None),
+            ) as cleanup,
+        ):
+            result = await client.force_stop(timeout=0.01)
+
+        assert result.error_code == 'daemon_busy'
+        cleanup.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_kill_recorded_browser_skips_a_replacement_lease(self, tmp_path):
+        """A lease rewritten by a new owner is never signalled."""
+        client = DaemonClient()
+
+        with (
+            patch(
+                'openbrowser.browser.watchdogs.profile_lease.ProfileLease.read_metadata',
+                return_value={'owner_pid': 456, 'browser': {'pid': 321}},
+            ),
+            patch('psutil.Process') as process,
+        ):
+            result = await client._kill_recorded_browser(
+                str(tmp_path),
+                1.0,
+                expected_owner_pid=123,
+            )
+
+        assert result == (True, None)
+        process.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_stale_cleanup_refuses_while_another_owner_holds_the_lock(self, tmp_path):

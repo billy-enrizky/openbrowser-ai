@@ -649,7 +649,11 @@ class DaemonClient:
                     verification = await self._stop_verification_error()
                     if verification is not None:
                         return verification
-                    browser_ok, browser_error = await self._kill_recorded_browsers(profile_dirs, timeout)
+                    browser_ok, browser_error = await self._kill_recorded_browsers(
+                        profile_dirs,
+                        timeout,
+                        expected_owner_pid=status_pid if isinstance(status_pid, int) else None,
+                    )
                     if not browser_ok:
                         return DaemonResponse(
                             success=False,
@@ -746,9 +750,20 @@ class DaemonClient:
             )
 
         cleanup_error = await self._remove_stale_daemon_files()
-        # The daemon is already gone, so a filesystem refusal must not hide a
-        # browser that still needs killing. Run the recorded cleanup first.
-        browser_ok, browser_error = await self._kill_recorded_browsers(profile_dirs, timeout)
+        if cleanup_error is not None and cleanup_error.error_code not in (
+            'daemon_socket_foreign',
+            'daemon_cleanup_failed',
+        ):
+            # Another owner or listener may be live. Do not signal any browser.
+            return cleanup_error
+        # The daemon is gone and no other owner is proven live, so a refused
+        # file cleanup must not hide a browser that still needs killing. The
+        # lease must still name the daemon PID that was stopped.
+        browser_ok, browser_error = await self._kill_recorded_browsers(
+            profile_dirs,
+            timeout,
+            expected_owner_pid=pid,
+        )
         if cleanup_error is not None:
             if not browser_ok:
                 cleanup_error.error = f'{cleanup_error.error}. Browser cleanup also failed: {browser_error}'
@@ -897,19 +912,35 @@ class DaemonClient:
             raise OSError(f'Refusing to remove non-socket daemon path: {path}')
         path.unlink(missing_ok=True)
 
-    async def _kill_recorded_browsers(self, profile_dirs: list[str], timeout: float) -> tuple[bool, str | None]:
+    async def _kill_recorded_browsers(
+        self,
+        profile_dirs: list[str],
+        timeout: float,
+        *,
+        expected_owner_pid: int | None = None,
+    ) -> tuple[bool, str | None]:
         """Kill the verified browser recorded by each matching profile lease."""
         seen: set[str] = set()
         for profile_dir in profile_dirs:
             if not profile_dir or profile_dir in seen:
                 continue
             seen.add(profile_dir)
-            browser_ok, browser_error = await self._kill_recorded_browser(profile_dir, timeout)
+            browser_ok, browser_error = await self._kill_recorded_browser(
+                profile_dir,
+                timeout,
+                expected_owner_pid=expected_owner_pid,
+            )
             if not browser_ok:
                 return False, browser_error
         return True, None
 
-    async def _kill_recorded_browser(self, profile_dir: str | None, timeout: float) -> tuple[bool, str | None]:
+    async def _kill_recorded_browser(
+        self,
+        profile_dir: str | None,
+        timeout: float,
+        *,
+        expected_owner_pid: int | None = None,
+    ) -> tuple[bool, str | None]:
         """Kill the browser recorded by the profile lease, using verified identity."""
         if not profile_dir:
             return True, None
@@ -917,6 +948,11 @@ class DaemonClient:
             from openbrowser.browser.watchdogs.profile_lease import ProfileLease
 
             metadata = ProfileLease.read_metadata(profile_dir)
+            if expected_owner_pid is not None and (
+                not isinstance(metadata, dict) or metadata.get('owner_pid') != expected_owner_pid
+            ):
+                # A replacement owner rewrote this lease. Never signal its browser.
+                return True, None
             browser = metadata.get('browser') if isinstance(metadata, dict) else None
             if not isinstance(browser, dict):
                 return True, None
