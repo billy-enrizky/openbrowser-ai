@@ -28,7 +28,9 @@ EXECUTE_CODE_DESCRIPTION_COMPACT = """Execute Python code with browser automatio
 
 ## State
 - `state = await browser.get_browser_state_summary()` -- Get page URL, title, interactive elements
-- Elements shown as `[i_N]` -- use N as the index for click/input_text
+- Elements shown as `[i_N]` -- use the integer N for click/input_text, not the label text
+- Indexes belong to the latest browser state. A missing, invalid, or stale index raises `ActionReadinessError`; re-read browser state before retrying
+- `evaluate()` can change the DOM without refreshing indexes. Re-read browser state after DOM-changing JavaScript or a navigation
 - Prefer indexed actions whenever an index exists. For no-index targets, `x` and `y` are CSS viewport pixels. If converting screenshot pixels, divide by `window.devicePixelRatio` first.
 
 ## Libraries
@@ -101,6 +103,8 @@ EXECUTE_CODE_DESCRIPTION = """Execute Python code in a persistent namespace with
   - `state.title` -- page title
   - `state.tabs` -- list of open tabs (each has .target_id, .url, .title). For switch()/close(), use the last 4 chars of target_id or the full target_id.
   - `state.dom_state.selector_map` -- dict of {index: element} for all interactive elements
+- Indexes belong to the latest browser state. `click`, `input_text`, `upload_file`, `dropdown_options`, and `select_dropdown` raise `ActionReadinessError` when the index is missing, invalid, or not in the current state. `scroll(index=...)` raises it when a supplied index is invalid or stale; its index is optional and 0 means the whole page. Re-read browser state before retrying
+- `evaluate()` can change the DOM without refreshing indexes. Re-read browser state after DOM-changing JavaScript or a navigation
   - Each element has: `.tag_name`, `.attributes` (dict), `.get_all_children_text(max_depth=N)` (text content)
 
 ## File System
