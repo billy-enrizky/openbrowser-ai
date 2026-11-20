@@ -104,10 +104,16 @@ def load_snapshot_for_configuration(configured: object) -> StorageStateSnapshot:
 	"""Derive the truthful pre-load view from a configured storage source."""
 	if configured is None or configured == '':
 		return StorageStateSnapshot(phase=StorageStatePhase.NOT_CONFIGURED)
-	if not isinstance(configured, (str, Path)):
+	if isinstance(configured, dict):
 		return StorageStateSnapshot(
 			phase=StorageStatePhase.SKIPPED,
 			detail='in-memory storage state is not loaded from a file',
+		)
+	if not isinstance(configured, (str, Path)):
+		return StorageStateSnapshot(
+			phase=StorageStatePhase.FAILED,
+			error=f'Unsupported storage-state source type: {type(configured).__name__}',
+			detail='storage_state must be a path, mapping, or None',
 		)
 	path: Path | None = None
 	try:
@@ -137,10 +143,16 @@ def save_snapshot_for_configuration(configured: object) -> StorageStateSaveSnaps
 	"""Derive the truthful pre-save view from a configured storage source."""
 	if configured is None or configured == '':
 		return StorageStateSaveSnapshot(phase=StorageStateSavePhase.NOT_CONFIGURED)
-	if not isinstance(configured, (str, Path)):
+	if isinstance(configured, dict):
 		return StorageStateSaveSnapshot(
 			phase=StorageStateSavePhase.SKIPPED,
 			detail='in-memory storage state is not saved to a file',
+		)
+	if not isinstance(configured, (str, Path)):
+		return StorageStateSaveSnapshot(
+			phase=StorageStateSavePhase.FAILED,
+			error=f'Unsupported storage-state source type: {type(configured).__name__}',
+			detail='storage_state must be a path, mapping, or None',
 		)
 	try:
 		path = _expand_path(configured)

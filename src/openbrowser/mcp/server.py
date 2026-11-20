@@ -542,11 +542,22 @@ class _BrowserOwner:
 		except Exception:
 			return None
 		configured = profile_config.get('storage_state')
-		if profile_config.get('user_data_dir'):
-			return configured
 		if isinstance(configured, dict):
 			return configured
-		return CONFIG.OPENBROWSER_PROFILES_DIR / f'mcp-{self.owner_id}' / 'storage_state.json'
+		if configured is not None and not isinstance(configured, (str, Path)):
+			return configured
+		if profile_config.get('user_data_dir'):
+			return configured
+		return self._managed_storage_state_path_preview()
+
+	def _managed_storage_state_path_preview(self) -> Path:
+		"""Compute the managed state path without creating configuration directories."""
+		config_dir_env = os.getenv('OPENBROWSER_CONFIG_DIR')
+		if config_dir_env:
+			config_dir = Path(config_dir_env).expanduser().resolve()
+		else:
+			config_dir = CONFIG.XDG_CONFIG_HOME / 'openbrowser'
+		return config_dir / 'profiles' / f'mcp-{self.owner_id}' / 'storage_state.json'
 
 	def _build_browser_profile(self):
 		"""Build a BrowserProfile from config with MCP defaults."""

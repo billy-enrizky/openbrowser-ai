@@ -872,7 +872,7 @@ async def test_save_path_resolution_failure_keeps_the_requested_path(tmp_path):
     snapshot = watchdog.storage_state_save_snapshot()
     failures = _dispatched_events(watchdog.event_bus, StorageStateFailedEvent)
     assert snapshot.phase is StorageStateSavePhase.FAILED
-    assert snapshot.path == str(state_path.resolve())
+    assert snapshot.path == str(state_path)
     assert len(failures) == 1
     assert failures[0].path == str(state_path)
 
