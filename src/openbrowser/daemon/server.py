@@ -23,6 +23,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
+from openbrowser.browser.download_state import redacted_outcome
 from openbrowser.browser.lifecycle import (
     LifecycleMachine,
     LifecyclePhase,
@@ -548,6 +549,26 @@ class DaemonServer:
             return
         self._storage_state_preload = StorageStateSnapshot(phase=StorageStatePhase.NOT_CONFIGURED)
 
+    def _downloads_snapshot(self) -> dict:
+        """Return a bounded download outcome summary without starting a browser."""
+        reader = getattr(self._session, 'download_outcomes', None)
+        if not callable(reader):
+            return {'count': 0, 'pending': 0, 'recent': []}
+        try:
+            outcomes = list(reader())
+        except Exception:
+            logger.warning('Could not read download outcomes', exc_info=True)
+            return {'count': 0, 'pending': 0, 'recent': [], 'error': 'download outcomes unavailable'}
+        snapshot = {
+            'count': len(outcomes),
+            'pending': sum(1 for outcome in outcomes if not outcome.get('terminal')),
+            'recent': [redacted_outcome(outcome) for outcome in outcomes[-10:]],
+        }
+        error = getattr(self._session, 'download_outcomes_error', None)
+        if isinstance(error, str):
+            snapshot['error'] = error
+        return snapshot
+
     def _storage_state_snapshot(self) -> StorageStateSnapshot:
         """Return the watchdog-owned load state, or the pre-load view."""
         watchdog = getattr(self._session, '_storage_state_watchdog', None)
@@ -824,6 +845,7 @@ class DaemonServer:
 
         snapshot = self._lifecycle.snapshot()
         storage_state = self._storage_state_snapshot()
+        downloads = self._downloads_snapshot()
         return {
             'pid': os.getpid(),
             'state': snapshot.phase.value,
@@ -849,6 +871,7 @@ class DaemonServer:
                 'owner_state': self._startup_owner_state.value if self._startup_owner_state else None,
             },
             'storage_state': storage_state.to_dict(),
+            'downloads': downloads,
         }
 
     def _error_response(

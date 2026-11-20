@@ -438,6 +438,8 @@ class BrowserSession(BaseModel):
 	_cached_browser_state_summary: Any = PrivateAttr(default=None)
 	_cached_selector_map: dict[int, EnhancedDOMTreeNode] = PrivateAttr(default_factory=dict)
 	_downloaded_files: list[str] = PrivateAttr(default_factory=list)  # Track files downloaded during this session
+	_download_history: list[dict[str, object]] = PrivateAttr(default_factory=list)  # Last outcomes, kept after reset
+	_download_outcomes_error: str | None = PrivateAttr(default=None)  # Last reader failure, surfaced in status
 	_closed_popup_messages: list[str] = PrivateAttr(default_factory=list)  # Store messages from auto-closed JavaScript dialogs
 	_storage_state_warnings: list[str] = PrivateAttr(default_factory=list)
 
@@ -595,6 +597,7 @@ class BrowserSession(BaseModel):
 		self._cached_browser_state_summary = None
 		self._cached_selector_map.clear()
 		self._downloaded_files.clear()
+		self._download_history = await self._capture_download_history()
 		self._storage_state_warnings.clear()
 
 		self.agent_focus = None
@@ -2026,6 +2029,75 @@ class BrowserSession(BaseModel):
 				self.logger.warning(f'FileDownloadedEvent has no path: {event}')
 			else:
 				self.logger.debug(f'File already tracked: {event.path}')
+
+	@property
+	def downloads_registry(self):
+		"""Return the downloads registry, or None before the watchdog is attached."""
+		return getattr(self._downloads_watchdog, '_download_registry', None)
+
+	@property
+	def download_outcomes_error(self) -> str | None:
+		"""Return the last download-outcome reader failure, if any."""
+		return self._download_outcomes_error
+
+	async def _capture_download_history(self) -> list[dict[str, object]]:
+		"""Cancel and drain in-flight downloads, then keep the final history."""
+		watchdog = self._downloads_watchdog
+		reader = getattr(watchdog, 'shutdown', None)
+		if not callable(reader):
+			return list(self._download_history)
+		try:
+			return list(await reader())
+		except Exception:
+			self.logger.warning('Could not capture download history', exc_info=True)
+			return list(self._download_history)
+
+	def download_outcomes(self) -> list[dict[str, object]]:
+		"""Return bounded download outcomes, including history after a stop."""
+		watchdog = self._downloads_watchdog
+		reader = getattr(watchdog, 'download_outcomes', None)
+		if callable(reader):
+			try:
+				outcomes = reader()
+			except Exception as error:
+				self._download_outcomes_error = f'{type(error).__name__}: {error}'
+				self.logger.warning('Could not read download outcomes', exc_info=True)
+			else:
+				self._download_outcomes_error = None
+				return outcomes
+		return list(self._download_history)
+
+	def latest_download_outcome(self) -> dict[str, object] | None:
+		"""Return the most recent download outcome, terminal or not."""
+		watchdog = self._downloads_watchdog
+		reader = getattr(watchdog, 'latest_download_outcome', None)
+		if callable(reader):
+			try:
+				return reader()
+			except Exception as error:
+				self._download_outcomes_error = f'{type(error).__name__}: {error}'
+				self.logger.warning('Could not read the latest download outcome', exc_info=True)
+		return self._download_history[-1] if self._download_history else None
+
+	async def wait_for_download(
+		self,
+		*,
+		timeout: float = 30.0,
+		url: str | None = None,
+		download_id: str | None = None,
+		lookback: float = 0.0,
+	) -> dict[str, object]:
+		"""Wait for one terminal download outcome recorded by the watchdog."""
+		watchdog = self._downloads_watchdog
+		waiter = getattr(watchdog, 'wait_for_download', None)
+		if not callable(waiter):
+			raise RuntimeError('Downloads watchdog is not attached. Start the browser before waiting for a download.')
+		return await waiter(
+			timeout=timeout,
+			url=url,
+			download_id=download_id,
+			lookback=lookback,
+		)
 
 	async def on_BrowserStopEvent(self, event: BrowserStopEvent) -> None:
 		"""Handle browser stop request."""

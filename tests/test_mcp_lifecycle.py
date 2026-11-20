@@ -141,6 +141,21 @@ async def test_profile_failure_marks_browser_lifecycle_failed(mcp_server):
 
 
 @pytest.mark.asyncio
+async def test_status_reports_download_outcomes(mcp_server):
+	mcp_server.browser_session = MagicMock()
+	mcp_server.browser_session.download_outcomes.return_value = [
+		{'download_id': 'a', 'phase': 'completed', 'terminal': True},
+		{'download_id': 'b', 'phase': 'failed', 'terminal': True, 'stage': 'fetch'},
+	]
+
+	status = mcp_server._status_payload()
+
+	assert status['downloads']['count'] == 2
+	assert status['downloads']['pending'] == 0
+	assert status['downloads']['recent'][-1]['stage'] == 'fetch'
+
+
+@pytest.mark.asyncio
 async def test_reset_then_execute_restores_pending_variables(mcp_server):
 	old_session = MagicMock()
 	old_session.kill = AsyncMock()

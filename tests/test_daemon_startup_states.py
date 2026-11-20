@@ -730,6 +730,42 @@ def test_status_reports_configured_storage_state_before_browser_start(tmp_path):
     assert status['storage_state']['bytes'] == state_path.stat().st_size
 
 
+def test_status_reports_download_outcomes():
+    server = DaemonServer(idle_timeout=5, exec_timeout=2)
+    server._profile_summary = {
+        'user_data_dir': '/tmp/profile',
+        'headless': True,
+        'storage_state': None,
+    }
+    session = MagicMock()
+    session.download_outcomes.return_value = [
+        {'download_id': 'a', 'phase': 'completed', 'terminal': True},
+        {
+            'download_id': 'b',
+            'phase': 'failed',
+            'terminal': True,
+            'url': 'https://example.com/a?token=secret',
+            'error': 'x' * 500,
+        },
+    ]
+    server._session = session
+
+    status = server._status_payload()
+
+    assert status['downloads']['count'] == 2
+    assert status['downloads']['pending'] == 0
+    assert status['downloads']['recent'][-1]['phase'] == 'failed'
+    assert status['downloads']['recent'][-1]['download_ref']
+    assert 'download_id' not in status['downloads']['recent'][-1]
+    assert 'secret' not in status['downloads']['recent'][-1]['url']
+    assert status['downloads']['recent'][-1]['url'].endswith('?redacted')
+    assert len(status['downloads']['recent'][-1]['error']) <= 303
+
+    session.download_outcomes.return_value = []
+    session.download_outcomes_error = 'RuntimeError: reader broke'
+    assert server._status_payload()['downloads']['error'] == 'RuntimeError: reader broke'
+
+
 def test_status_preload_preserves_missing_in_memory_and_unresolved_states(tmp_path):
     server = DaemonServer(idle_timeout=5, exec_timeout=2)
     server._profile_summary = {
