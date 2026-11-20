@@ -57,31 +57,31 @@ jobs:
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             uv run --locked python scripts/ci/select_tests.py \
               --base "${{ github.event.pull_request.base.sha }}" \
-              --output selection.json --summary
+              --output "$RUNNER_TEMP/selection.json" --summary
           else
             uv run --locked python scripts/ci/select_tests.py --force-all \
-              --output selection.json --summary
+              --output "$RUNNER_TEMP/selection.json" --summary
           fi
       - name: Verify shard coverage and balance
         shell: bash
         run: |
           set -euo pipefail
           uv run --locked python scripts/ci/shard_tests.py \
-            --selection selection.json \
+            --selection "$RUNNER_TEMP/selection.json" \
             --timings tests/ci/test_timings.json \
             --shards "$SHARDS" --verify-all
       - name: Run selector and sharder tests
         run: |
           uv run --locked pytest tests/ci/test_select_tests.py \
             tests/ci/test_shard_tests.py tests/ci/test_check_baseline.py \
-            tests/ci/test_audit_runs.py -q --tb=short
+            tests/ci/test_audit_runs.py -q --tb=short -p no:cacheprovider
       - name: Prove selection catches a planted break
         run: uv run --locked python scripts/ci/prove_selection.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: selection
-          path: selection.json
+          path: ${{ runner.temp }}/selection.json
           retention-days: 1
 
   static:
@@ -139,7 +139,7 @@ jobs:
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             uv run --locked python scripts/ci/select_tests.py \
               --base "${{ github.event.pull_request.base.sha }}" \
-              --output selection.json --summary
+              --output "$RUNNER_TEMP/selection.json" --summary
           else
             uv run --locked python scripts/ci/select_tests.py --force-all \
               --output selection.json --summary
