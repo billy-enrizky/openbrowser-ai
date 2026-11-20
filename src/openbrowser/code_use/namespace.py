@@ -10,11 +10,10 @@ import csv
 import datetime
 import json
 import logging
-import os
 import re
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import unquote, urlparse
 
 import requests
@@ -296,6 +295,7 @@ def create_namespace(
 	file_system: FileSystem | None = None,
 	available_file_paths: list[str] | None = None,
 	sensitive_data: dict[str, str | dict[str, str]] | None = None,
+	completion_callback: Callable[[Any], None] | None = None,
 ) -> dict[str, Any]:
 	"""
 	Create a namespace with all browser tools available as functions.
@@ -310,6 +310,7 @@ def create_namespace(
 		file_system: Optional file system for file operations
 		available_file_paths: Optional list of available file paths
 		sensitive_data: Optional sensitive data dictionary
+		completion_callback: Optional sink for a successful done action result
 
 	Returns:
 		Dictionary containing all available functions and objects
@@ -602,7 +603,7 @@ def create_namespace(
 		# Resolve and verify final path stays inside downloads directory
 		final_path = (dl_dir / filename).resolve()
 		if not str(final_path).startswith(str(dl_dir)):
-			raise ValueError(f'Invalid filename: path traversal detected')
+			raise ValueError('Invalid filename: path traversal detected')
 
 		# Handle filename conflicts
 		if final_path.exists():
@@ -919,8 +920,16 @@ def create_namespace(
 				# not wrapped in ActionResult
 				if hasattr(result, 'extracted_content'):
 					# Special handling for done action - mark task as complete
-					if act_name == 'done' and hasattr(result, 'is_done') and result.is_done:
+					if (
+						act_name == 'done'
+						and hasattr(result, 'is_done')
+						and result.is_done
+						and not getattr(result, 'error', None)
+					):
+						if completion_callback is not None:
+							completion_callback(result)
 						namespace['_task_done'] = True
+						namespace['_task_done_by_action'] = True
 						# Store the extracted content as the final result
 						if result.extracted_content:
 							namespace['_task_result'] = result.extracted_content

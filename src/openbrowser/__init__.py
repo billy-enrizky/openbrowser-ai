@@ -7,18 +7,17 @@ Performance optimizations:
 - Event loop error handling patched at module load
 """
 
+import logging
 import os
 from typing import TYPE_CHECKING
-
-import logging
 
 logger = logging.getLogger('openbrowser')
 
 # Only set up logging if not in MCP mode or daemon mode
 if os.environ.get('OPENBROWSER_SETUP_LOGGING', 'true').lower() != 'false':
 	try:
-		from openbrowser.logging_config import setup_logging
 		from openbrowser.config import CONFIG
+		from openbrowser.logging_config import setup_logging
 
 		debug_log_file = getattr(CONFIG, 'OPENBROWSER_DEBUG_LOG_FILE', None)
 		info_log_file = getattr(CONFIG, 'OPENBROWSER_INFO_LOG_FILE', None)
@@ -61,11 +60,10 @@ if TYPE_CHECKING:
 
 	# from openbrowser.agent.service import Agent
 	from openbrowser.agent.views import AgentHistoryList
-	from openbrowser.models import ActionResult
-	from openbrowser.tools.registry.views import ActionModel
 	from openbrowser.browser import BrowserProfile, BrowserSession
 	from openbrowser.browser import BrowserSession as Browser
-	from openbrowser.code_use.service import CodeAgent
+	from openbrowser.code_use.service import CodeAgent, CodeAgentStateError
+	from openbrowser.code_use.views import CodeAgentPhase, CodeAgentRunStatus
 	from openbrowser.dom.service import DomService
 	from openbrowser.llm import models
 	from openbrowser.llm.anthropic.chat import ChatAnthropic
@@ -76,6 +74,8 @@ if TYPE_CHECKING:
 	from openbrowser.llm.oci_raw.chat import ChatOCIRaw
 	from openbrowser.llm.ollama.chat import ChatOllama
 	from openbrowser.llm.openai.chat import ChatOpenAI
+	from openbrowser.models import ActionResult
+	from openbrowser.tools.registry.views import ActionModel
 	from openbrowser.tools.service import Controller, Tools
 
 
@@ -87,6 +87,9 @@ _LAZY_IMPORTS: dict[str, tuple[str, str | None]] = {
 	'BrowserAgent': ('openbrowser.agent.service', 'Agent'),  # Alias for backward compatibility
 	# Code-use agent (Jupyter notebook-like execution)
 	'CodeAgent': ('openbrowser.code_use.service', 'CodeAgent'),
+	'CodeAgentStateError': ('openbrowser.code_use.service', 'CodeAgentStateError'),
+	'CodeAgentPhase': ('openbrowser.code_use.views', 'CodeAgentPhase'),
+	'CodeAgentRunStatus': ('openbrowser.code_use.views', 'CodeAgentRunStatus'),
 	# System prompt (moderate weight due to agent.views imports)
 	'SystemPrompt': ('openbrowser.agent.prompts', 'SystemPrompt'),
 	# Agent views (very heavy - over 1 second!)
@@ -154,6 +157,9 @@ __all__ = [
 	'Agent',
 	'BrowserAgent',  # Alias for Agent
 	'CodeAgent',
+	'CodeAgentPhase',
+	'CodeAgentRunStatus',
+	'CodeAgentStateError',
 	'BrowserSession',
 	'Browser',  # Alias for BrowserSession
 	'BrowserProfile',

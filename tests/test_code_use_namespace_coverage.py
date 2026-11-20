@@ -11,22 +11,19 @@ get_namespace_documentation.
 
 import asyncio
 import base64
-import json
 import logging
 import os
 import tempfile
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from openbrowser.code_use.namespace import (
     EvaluateError,
-    _strip_js_comments,
     create_namespace,
     evaluate,
     get_namespace_documentation,
-    validate_task_completion,
 )
 
 logger = logging.getLogger(__name__)
@@ -610,10 +607,17 @@ class TestListDownloadsEdgeCases:
 
 
 class TestActionWrapper:
-    def _make_ns_with_action(self, action_name="test_action", param_fields=None, action_result=None):
+    def _make_ns_with_action(
+        self,
+        action_name="test_action",
+        param_fields=None,
+        action_result=None,
+        completion_callback=None,
+    ):
         """Create namespace with a mock action registered."""
+        from pydantic import create_model
+
         from openbrowser.models import ActionResult
-        from pydantic import BaseModel, create_model
 
         bs = _make_mock_browser_session()
 
@@ -632,7 +636,7 @@ class TestActionWrapper:
         mock_tools = MagicMock()
         mock_tools.registry.registry.actions = {action_name: mock_action}
 
-        ns = create_namespace(bs, tools=mock_tools)
+        ns = create_namespace(bs, tools=mock_tools, completion_callback=completion_callback)
         return ns, mock_func
 
     @pytest.mark.asyncio
@@ -646,7 +650,6 @@ class TestActionWrapper:
 
     @pytest.mark.asyncio
     async def test_action_wrapper_index_none_guard(self):
-        from pydantic import Field
 
         ns, mock_func = self._make_ns_with_action(
             "click",
@@ -663,7 +666,6 @@ class TestActionWrapper:
         )
         # Pass full 32-char target ID, should be truncated to 4 chars
         await ns["switch"](tab_id="12345678901234567890123456781234")
-        call_kwargs = mock_func.call_args
         # Verify it was constructed (not erroring)
         assert mock_func.called
 
@@ -695,12 +697,15 @@ class TestActionWrapper:
             extracted_content="Task complete",
             attachments=["/tmp/file.txt"],
         )
+        completion_callback = MagicMock()
         ns, mock_func = self._make_ns_with_action(
             "done",
             param_fields={"text": (str, ...), "success": (bool, True), "files_to_display": (list, [])},
             action_result=result,
+            completion_callback=completion_callback,
         )
-        output = await ns["done"](text="Task complete", success=True)
+        await ns["done"](text="Task complete", success=True)
+        completion_callback.assert_called_once_with(result)
         assert ns.get("_task_done") is True
         assert ns.get("_task_result") == "Task complete"
         assert ns.get("_task_success") is True
@@ -718,6 +723,25 @@ class TestActionWrapper:
         )
         with pytest.raises(RuntimeError, match="Something went wrong"):
             await ns["navigate"](url="https://example.com")
+
+    @pytest.mark.asyncio
+    async def test_done_error_does_not_authorize_completion(self):
+        from openbrowser.models import ActionResult
+
+        result = ActionResult(is_done=True, error="done failed")
+        completion_callback = MagicMock()
+        ns, mock_func = self._make_ns_with_action(
+            "done",
+            param_fields={"text": (str, ...), "success": (bool, True), "files_to_display": (list, [])},
+            action_result=result,
+            completion_callback=completion_callback,
+        )
+
+        with pytest.raises(RuntimeError, match="done failed"):
+            await ns["done"](text="Task complete", success=True)
+
+        completion_callback.assert_not_called()
+        assert "_task_done" not in ns
 
     @pytest.mark.asyncio
     async def test_action_wrapper_returns_none_for_no_content(self):

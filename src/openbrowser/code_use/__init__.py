@@ -2,6 +2,9 @@
 
 __all__ = [
 	'CodeAgent',
+	'CodeAgentPhase',
+	'CodeAgentRunStatus',
+	'CodeAgentStateError',
 	'create_namespace',
 	'export_to_ipynb',
 	'session_to_python_script',
@@ -14,6 +17,9 @@ __all__ = [
 # create_namespace is needed (e.g. MCP server mode).
 _LAZY_IMPORTS = {
 	'CodeAgent': ('openbrowser.code_use.service', 'CodeAgent'),
+	'CodeAgentStateError': ('openbrowser.code_use.service', 'CodeAgentStateError'),
+	'CodeAgentPhase': ('openbrowser.code_use.views', 'CodeAgentPhase'),
+	'CodeAgentRunStatus': ('openbrowser.code_use.views', 'CodeAgentRunStatus'),
 	'create_namespace': ('openbrowser.code_use.namespace', 'create_namespace'),
 	'export_to_ipynb': ('openbrowser.code_use.notebook_export', 'export_to_ipynb'),
 	'session_to_python_script': ('openbrowser.code_use.notebook_export', 'session_to_python_script'),
