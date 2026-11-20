@@ -73,6 +73,7 @@ NON_PYTHON_PREFIXES = (
     "STAD68/",
     "STAD80/",
 )
+NON_PYTHON_FILES = {".gitignore"}
 NON_PYTHON_SUFFIXES = {
     ".md",
     ".mdx",
@@ -96,6 +97,7 @@ NON_PYTHON_SUFFIXES = {
     ".sh",
     ".ps1",
     ".lock",
+    ".pkl",
 }
 
 
@@ -307,6 +309,8 @@ def _is_shared(path: str) -> bool:
 
 
 def _is_non_python(path: str) -> bool:
+    if path in NON_PYTHON_FILES:
+        return True
     if path.startswith(DOCS_PREFIXES) or path.startswith(NON_PYTHON_PREFIXES):
         return True
     return Path(path).suffix.lower() in NON_PYTHON_SUFFIXES

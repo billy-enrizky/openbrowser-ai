@@ -246,3 +246,12 @@ def test_needs_mcp1_true_when_protocol_test_is_selected(tmp_path: Path) -> None:
     result = select(root, [], force_all=True)
     payload = result.as_dict()
     assert payload["needs_mcp1"] is True
+
+
+@pytest.mark.parametrize("path", [".gitignore", "hk.pkl"])
+def test_hook_config_selects_nothing(tmp_path: Path, path: str) -> None:
+    root = make_repo(tmp_path)
+    write(root, path, "text\n")
+    result = select(root, [path])
+    assert result.mode == "selected"
+    assert result.files == []

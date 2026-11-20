@@ -1,0 +1,55 @@
+amends "package://github.com/jdx/hk/releases/download/v2.13.0/hk@2.13.0#/Config.pkl"
+
+local ruffFix = new Step {
+  glob = List("**/*.py")
+  fix = "uv run --locked ruff check --fix {{files}}"
+}
+
+local ruffFormat = new Step {
+  glob = List("**/*.py")
+  fix = "uv run --locked ruff format {{files}}"
+}
+
+local ruffBaseline = new Step {
+  check = "uv run --locked python scripts/ci/check_baseline.py --tool ruff"
+}
+
+local formatBaseline = new Step {
+  check = "uv run --locked python scripts/ci/check_baseline.py --tool format"
+}
+
+local pyrightBaseline = new Step {
+  check = "uv run --locked python scripts/ci/check_baseline.py --tool pyright"
+}
+
+hooks {
+  ["check"] {
+    steps {
+      ["ruff-baseline"] = ruffBaseline
+      ["format-baseline"] = formatBaseline
+      ["pyright-baseline"] = pyrightBaseline
+    }
+  }
+  ["fix"] {
+    steps {
+      ["ruff-fix"] = ruffFix
+      ["ruff-format"] = ruffFormat
+    }
+  }
+  ["pre-commit"] {
+    fix = true
+    stage = true
+    stash = "git"
+    steps {
+      ["ruff-fix"] = ruffFix
+      ["ruff-format"] = ruffFormat
+    }
+  }
+  ["pre-push"] {
+    steps {
+      ["ruff-baseline"] = ruffBaseline
+      ["format-baseline"] = formatBaseline
+      ["pyright-baseline"] = pyrightBaseline
+    }
+  }
+}
