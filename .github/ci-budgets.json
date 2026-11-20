@@ -1,6 +1,8 @@
 {
   "static": 60,
   "test-shard": 150,
+  "test-parallel": 120,
+  "test-serial": 60,
   "selection-guard": 120,
   "coverage": 900
 }
