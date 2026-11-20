@@ -6,6 +6,7 @@ import inspect
 import logging
 import math
 import os
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from functools import cached_property
 from pathlib import Path
@@ -1734,6 +1735,262 @@ class BrowserSession(BaseModel):
 				self._retire_navigation(operation)
 				if acquired:
 					self._navigation_lock.release()
+
+	@staticmethod
+	def _owned_navigation_timeout(event_timeout: float | None) -> float:
+		"""Keep the request deadline just inside the event bus deadline."""
+		if event_timeout is None:
+			return 30.0
+		if not math.isfinite(event_timeout) or event_timeout < 0.01:
+			raise NavigationError('Navigation timeout must be at least 0.01 seconds')
+		if event_timeout <= 0.1:
+			return event_timeout / 2
+		return event_timeout - 0.1
+
+	async def _owned_ready_navigation(
+		self,
+		*,
+		prepare: Callable[
+			[CDPClient, CDPSession], Awaitable[tuple[str, Literal['history', 'reload'], Callable[[], Awaitable[None]]]]
+		],
+		navigation_id: str | None,
+		event_timeout: float | None,
+		wait_until: WaitUntil = 'load',
+	) -> str:
+		"""Run a caller-owned navigation that has no Page.navigate response body.
+
+		Used by history and reload. The caller owns the target and the trigger,
+		while the operation owns admission, the deadline, the commit evidence,
+		the final binding check, and the terminal publication.
+		"""
+		event_bus = self.event_bus
+		loop = asyncio.get_running_loop()
+		timeout = self._owned_navigation_timeout(event_timeout)
+		deadline = loop.time() + timeout
+		operation: NavigationOperation | None = None
+		acquired = False
+		task = asyncio.current_task()
+		try:
+			root = self._cdp_client_root
+			focus = self.agent_focus
+			if root is None or focus is None:
+				raise NavigationError('Cannot navigate: browser not connected')
+			if self._navigation_lock.locked():
+				raise NavigationBusyError('Another navigation is in progress')
+			await self._navigation_lock.acquire()
+			acquired = True
+			async with asyncio.timeout_at(deadline):
+				requested_url, commit_kind, trigger = await prepare(root, focus)
+				policy = self._security_watchdog
+				if policy is not None and not policy._is_url_allowed(requested_url):
+					raise NavigationBlockedError(f'Navigation to {requested_url} blocked by security policy')
+				operation = NavigationOperation(
+					navigation_id or uuid7str(), self._lifecycle.generation, requested_url, wait_until, deadline=deadline
+				)
+				self._reserve_navigation(operation)
+				self._navigation_task, self._navigation_task_operation = task, operation
+				operation.select_target(focus.target_id, focus.session_id)
+				await self._await_navigation_event(
+					event_bus,
+					NavigationStartedEvent(
+						target_id=focus.target_id,
+						url=requested_url,
+						navigation_id=operation.navigation_id,
+						navigation_generation=operation.generation,
+					),
+				)
+				self._check_navigation_owner(operation, root, focus)
+				self._navigation_monitor.bind(root)
+				tree = await root.send.Page.getFrameTree(session_id=operation.session_id)
+				operation.capture_document(tree['frameTree']['frame'])
+				self._check_navigation_owner(operation, root, focus)
+				await root.send.Page.setLifecycleEventsEnabled(params={'enabled': True}, session_id=operation.session_id)
+				self._check_navigation_owner(operation, root, focus)
+				operation.transition(NavigationPhase.NAVIGATING)
+				operation.begin_trigger()
+				if commit_kind == 'history':
+					operation.expect_history_commit(requested_url)
+				else:
+					operation.expect_reload_commit()
+				await trigger()
+				self._check_navigation_owner(operation, root, focus)
+				await operation.wait_ready()
+				self._check_navigation_owner(operation, root, focus)
+				tree = await root.send.Page.getFrameTree(session_id=operation.session_id)
+				frame = tree['frameTree']['frame']
+				if frame.get('id') != operation.frame_id or frame.get('loaderId') != operation.loader_id:
+					raise NavigationError('Navigation live document binding changed')
+				operation.observed_url = frame.get('url', '') + frame.get('urlFragment', '')
+				if policy is not None and not policy._is_url_allowed(operation.observed_url):
+					# Notify and confirm containment after the request deadline
+					# so a near-expired deadline cannot turn this into a timeout.
+					blocked_url = operation.observed_url
+					operation.transition(NavigationPhase.NOTIFYING)
+				else:
+					if self.agent_focus is None or self.agent_focus.target_id != operation.target_id:
+						raise NavigationError('Agent focus changed during navigation')
+					operation.transition(NavigationPhase.NOTIFYING)
+					await self._await_navigation_event(
+						event_bus,
+						NavigationCompleteEvent(
+							target_id=focus.target_id,
+							url=operation.observed_url,
+							navigation_id=operation.navigation_id,
+							navigation_generation=operation.generation,
+						),
+					)
+					self._check_navigation_owner(operation, root, focus)
+					await self._await_navigation_event(
+						event_bus,
+						AgentFocusChangedEvent(
+							target_id=focus.target_id,
+							url=operation.observed_url,
+							navigation_id=operation.navigation_id,
+							navigation_generation=operation.generation,
+							navigation_session_id=operation.session_id,
+						),
+					)
+					self._check_navigation_owner(operation, root, focus)
+					if self.agent_focus is None or self.agent_focus.target_id != operation.target_id:
+						raise NavigationError('Agent focus changed during navigation')
+					operation.finish(NavigationPhase.SUCCEEDED)
+					return operation.observed_url or requested_url
+			if blocked_url is not None:
+				assert operation is not None
+				await self._await_navigation_event(
+					event_bus,
+					NavigationCompleteEvent(
+						target_id=focus.target_id,
+						url=blocked_url,
+						navigation_id=operation.navigation_id,
+						navigation_generation=operation.generation,
+					),
+				)
+				if not await self._confirm_blocked_containment(root, focus):
+					raise NavigationError(
+						f'Navigation to {blocked_url} was blocked, but page containment '
+						'was not confirmed. Run get_status and reset_browser before continuing.'
+					)
+				raise NavigationBlockedError(f'Navigation to {blocked_url} blocked by security policy')
+			raise NavigationError('Navigation ended without a terminal result')
+		except asyncio.CancelledError:
+			if operation is not None:
+				operation.finish(
+					NavigationPhase.TIMED_OUT if loop.time() >= deadline else NavigationPhase.CANCELLED,
+					'Navigation cancelled',
+				)
+			raise
+		except TimeoutError as error:
+			expired = loop.time() >= deadline
+			if operation is not None:
+				if expired:
+					operation.finish(NavigationPhase.TIMED_OUT, 'Navigation deadline expired')
+				else:
+					operation.finish(NavigationPhase.FAILED, error)
+			if expired:
+				raise NavigationTimeoutError('Navigation deadline expired') from error
+			raise NavigationError(str(error)) from error
+		except Exception as error:
+			if operation is not None:
+				operation.finish(NavigationPhase.FAILED, error)
+			if isinstance(error, NavigationError):
+				raise
+			raise NavigationError(str(error)) from error
+		finally:
+			try:
+				if operation is not None and operation.phase not in (NavigationPhase.SUCCEEDED, NavigationPhase.DOWNLOAD):
+					tasks = self._cancel_navigation_tasks(operation)
+					if tasks:
+						await asyncio.wait(tasks, timeout=1.0)
+			finally:
+				if operation is not None:
+					self._publish_navigation_finished(operation, event_bus)
+					if self._navigation_task is task and self._navigation_task_operation is operation:
+						self._navigation_task = self._navigation_task_operation = None
+					self._retire_navigation(operation)
+				if acquired:
+					self._navigation_lock.release()
+
+	async def _confirm_blocked_containment(self, root: CDPClient, focus: CDPSession, timeout: float = 0.5) -> bool:
+		"""Wait briefly for the security watchdog to blank a blocked page.
+
+		Returns True only when the live frame is confirmed to be about:blank.
+		"""
+		loop = asyncio.get_running_loop()
+		deadline = loop.time() + timeout
+		while loop.time() < deadline:
+			remaining = max(0.01, deadline - loop.time())
+			try:
+				tree = await asyncio.wait_for(
+					root.send.Page.getFrameTree(session_id=focus.session_id), timeout=remaining
+				)
+				if tree['frameTree']['frame'].get('url') == 'about:blank':
+					return True
+			except Exception:
+				return False
+			await asyncio.sleep(min(0.05, max(0.0, deadline - loop.time())))
+		self.logger.warning('Blocked navigation containment was not confirmed before the error returned')
+		return False
+
+	async def _history_target(
+		self, root: CDPClient, focus: CDPSession, delta: int
+	) -> tuple[str, Literal['history'], Callable[[], Awaitable[None]]]:
+		history = await root.send.Page.getNavigationHistory(session_id=focus.session_id)
+		entries = history.get('entries') or []
+		current = history.get('currentIndex')
+		if not isinstance(current, int) or not isinstance(entries, list):
+			raise NavigationError('Page.getNavigationHistory returned a malformed response')
+		index = current + delta
+		if index < 0:
+			raise NavigationError('Cannot go back: no previous history entry')
+		if index >= len(entries):
+			raise NavigationError('Cannot go forward: no next history entry')
+		entry = entries[index]
+		if not isinstance(entry, dict) or not isinstance(entry.get('id'), int) or not isinstance(entry.get('url'), str):
+			raise NavigationError('Page.getNavigationHistory returned a malformed entry')
+		entry_id = entry['id']
+
+		async def trigger() -> None:
+			await root.send.Page.navigateToHistoryEntry(params={'entryId': entry_id}, session_id=focus.session_id)
+
+		return entry['url'], 'history', trigger
+
+	async def go_back(self, *, navigation_id: str | None = None, event_timeout: float | None = None) -> str:
+		"""Go back one history entry and wait for the page load to complete."""
+		return await self._owned_ready_navigation(
+			prepare=lambda root, focus: self._history_target(root, focus, -1),
+			navigation_id=navigation_id,
+			event_timeout=event_timeout,
+		)
+
+	async def go_forward(self, *, navigation_id: str | None = None, event_timeout: float | None = None) -> str:
+		"""Go forward one history entry and wait for the page load to complete."""
+		return await self._owned_ready_navigation(
+			prepare=lambda root, focus: self._history_target(root, focus, 1),
+			navigation_id=navigation_id,
+			event_timeout=event_timeout,
+		)
+
+	async def refresh(self, *, navigation_id: str | None = None, event_timeout: float | None = None) -> str:
+		"""Reload the current page and wait for the new document to load."""
+
+		async def prepare(
+			root: CDPClient, focus: CDPSession
+		) -> tuple[str, Literal['reload'], Callable[[], Awaitable[None]]]:
+			tree = await root.send.Page.getFrameTree(session_id=focus.session_id)
+			frame = tree['frameTree']['frame']
+			url = frame.get('url', '') + frame.get('urlFragment', '')
+
+			async def trigger() -> None:
+				await root.send.Page.reload(session_id=focus.session_id)
+
+			return url, 'reload', trigger
+
+		return await self._owned_ready_navigation(
+			prepare=prepare,
+			navigation_id=navigation_id,
+			event_timeout=event_timeout,
+		)
 
 	async def on_SwitchTabEvent(self, event: SwitchTabEvent) -> TargetID:
 		"""Handle tab switching - core browser functionality."""

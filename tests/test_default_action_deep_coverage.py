@@ -569,28 +569,28 @@ class TestInputTextElementNodeImplDeep:
 @pytest.mark.asyncio
 class TestNavigationEventsDeep:
     async def test_go_back_exception(self):
+        from openbrowser.browser.events import GoBackEvent
+
         wd, session = _make_watchdog()
-        cdp = _make_cdp_session_mock()
-        cdp.cdp_client.send.Page.getNavigationHistory = AsyncMock(side_effect=RuntimeError("nav"))
-        session.get_or_create_cdp_session = AsyncMock(return_value=cdp)
+        session.go_back = AsyncMock(side_effect=RuntimeError("nav"))
         with pytest.raises(RuntimeError, match="nav"):
-            await wd.on_GoBackEvent(MagicMock())
+            await wd.on_GoBackEvent(GoBackEvent())
 
     async def test_go_forward_exception(self):
+        from openbrowser.browser.events import GoForwardEvent
+
         wd, session = _make_watchdog()
-        cdp = _make_cdp_session_mock()
-        cdp.cdp_client.send.Page.getNavigationHistory = AsyncMock(side_effect=RuntimeError("fwd"))
-        session.get_or_create_cdp_session = AsyncMock(return_value=cdp)
+        session.go_forward = AsyncMock(side_effect=RuntimeError("fwd"))
         with pytest.raises(RuntimeError, match="fwd"):
-            await wd.on_GoForwardEvent(MagicMock())
+            await wd.on_GoForwardEvent(GoForwardEvent())
 
     async def test_refresh_exception(self):
+        from openbrowser.browser.events import RefreshEvent
+
         wd, session = _make_watchdog()
-        cdp = _make_cdp_session_mock()
-        cdp.cdp_client.send.Page.reload = AsyncMock(side_effect=RuntimeError("reload"))
-        session.get_or_create_cdp_session = AsyncMock(return_value=cdp)
+        session.refresh = AsyncMock(side_effect=RuntimeError("reload"))
         with pytest.raises(RuntimeError, match="reload"):
-            await wd.on_RefreshEvent(MagicMock())
+            await wd.on_RefreshEvent(RefreshEvent())
 
     async def test_wait_exception(self):
         wd, _ = _make_watchdog()

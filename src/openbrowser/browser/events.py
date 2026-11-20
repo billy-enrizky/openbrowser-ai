@@ -215,19 +215,19 @@ class BrowserStateRequestEvent(BaseEvent[BrowserStateSummary]):
 # 	state: Literal['attached', 'detached', 'visible', 'hidden'] | None = None
 
 
-class GoBackEvent(BaseEvent[None]):
+class GoBackEvent(BaseEvent[str]):
 	"""Navigate back in browser history."""
 
 	event_timeout: float | None = _get_timeout('TIMEOUT_GoBackEvent', 15.0)  # seconds
 
 
-class GoForwardEvent(BaseEvent[None]):
+class GoForwardEvent(BaseEvent[str]):
 	"""Navigate forward in browser history."""
 
 	event_timeout: float | None = _get_timeout('TIMEOUT_GoForwardEvent', 15.0)  # seconds
 
 
-class RefreshEvent(BaseEvent[None]):
+class RefreshEvent(BaseEvent[str]):
 	"""Refresh/reload the current page."""
 
 	event_timeout: float | None = _get_timeout('TIMEOUT_RefreshEvent', 15.0)  # seconds

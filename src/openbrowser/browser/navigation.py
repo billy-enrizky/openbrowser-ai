@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, ClassVar, Literal
+from urllib.parse import urlsplit
 
 WaitUntil = Literal['load', 'domcontentloaded', 'networkidle', 'commit']
 
@@ -84,6 +86,22 @@ class ContainmentAttempt:
 			'loader_id': self.commit.loader_id, 'error': self.error}
 
 
+def _same_history_url(url: Any, expected: str | None) -> bool:
+	"""Compare a within-document event URL with the selected history entry.
+
+	URLs cannot distinguish two entries with identical URLs and different
+	history state. A racing same-URL event is an accepted limit.
+	"""
+	if expected is None:
+		return True
+	if not isinstance(url, str):
+		return False
+	left, right = urlsplit(url), urlsplit(expected)
+	return (left.scheme, left.netloc, left.path, left.query, left.fragment) == (
+		right.scheme, right.netloc, right.path, right.query, right.fragment
+	)
+
+
 @dataclass
 class NavigationOperation:
 	"""One event-owned request and the evidence that can complete it."""
@@ -106,12 +124,15 @@ class NavigationOperation:
 	_evidence: list[tuple[str, dict[str, Any]]] = field(default_factory=list, repr=False)
 	_current_frame: str | None = None
 	_current_loader: str | None = None
-	_response_kind: Literal['document', 'same_document', 'download'] | None = None
+	_response_kind: Literal['document', 'same_document', 'download', 'history'] | None = None
 	policy_commit: NavigationCommit | None = None
 	containment: ContainmentAttempt | None = None
 	policy_task: asyncio.Task[None] | None = field(default=None, repr=False)
 	policy_changed: asyncio.Event = field(default_factory=asyncio.Event, repr=False)
 	_policy_open: bool = False
+	_trigger_issued: bool = False
+	_within_committed: bool = False
+	_expected_within_url: str | None = None
 	EVIDENCE_LIMIT: ClassVar[int] = 256
 
 	@property
@@ -149,7 +170,7 @@ class NavigationOperation:
 			raise NavigationError('Navigation target binding is immutable')
 		self.target_id, self.session_id = target_id, session_id
 
-	def capture_document(self, frame: dict[str, Any]) -> None:
+	def capture_document(self, frame: Mapping[str, Any]) -> None:
 		self._current_frame = frame['id']
 		self._current_loader = frame.get('loaderId')
 		self.observed_url = frame.get('url', '') + frame.get('urlFragment', '')
@@ -171,7 +192,7 @@ class NavigationOperation:
 			and (self.containment is None or self.containment.phase is not ContainmentPhase.REVOKED)) or (
 			self.containment is not None and self.containment.requires_retirement)
 
-	def record_commit(self, frame: dict[str, Any]) -> None:
+	def record_commit(self, frame: Mapping[str, Any]) -> None:
 		if not self._policy_open or frame.get('parentId') or frame.get('id') != self._current_frame:
 			return
 		loader, url = frame.get('loaderId'), frame.get('url')
@@ -209,7 +230,41 @@ class NavigationOperation:
 		if self._current_frame is not None and frame_id != self._current_frame:
 			return
 		payload = event.get('frame', {}) if kind == 'frame' else event
-		if self._response_kind is not None and kind != 'within' and payload.get('loaderId') != self.loader_id:
+		if kind == 'within' and self._response_kind == 'history':
+			if self._trigger_issued and self.loader_id is None:
+				if not _same_history_url(payload.get('url'), self._expected_within_url):
+					return
+				self.loader_id = self._current_loader
+				self.observed_url = payload.get('url', self.observed_url)
+				self._within_committed = True
+			elif self.loader_id is not None:
+				# A pushState after a document commit updates the URL without
+				# replacing the loader this operation is waiting for.
+				self.observed_url = payload.get('url', self.observed_url)
+			else:
+				return
+			if len(self._evidence) >= self.EVIDENCE_LIMIT:
+				self.finish(NavigationPhase.FAILED, 'Navigation evidence limit exceeded')
+				return
+			self._evidence.append(
+				('within', {key: payload[key] for key in ('frameId', 'loaderId', 'name', 'url') if key in payload})
+			)
+			self._changed.set()
+			return
+		if (
+			kind == 'frame'
+			and self._response_kind in ('document', 'history')
+			and self.loader_id is None
+			and self._trigger_issued
+		):
+			loader = payload.get('loaderId')
+			if isinstance(loader, str) and loader and loader != self._current_loader:
+				self.loader_id = loader
+		if (
+			self._response_kind is not None
+			and kind != 'within'
+			and payload.get('loaderId') != self.loader_id
+		):
 			return
 		if len(self._evidence) >= self.EVIDENCE_LIMIT:
 			self.finish(NavigationPhase.FAILED, 'Navigation evidence limit exceeded')
@@ -243,6 +298,43 @@ class NavigationOperation:
 		self.transition(NavigationPhase.WAITING)
 		self._changed.set()
 
+	def begin_trigger(self) -> None:
+		"""Mark that the history or reload command is about to be issued.
+
+		Evidence received before this point cannot be the commit for this
+		request, so it is discarded.
+		"""
+		self._trigger_issued = True
+		self._evidence.clear()
+
+	def expect_history_commit(self, expected_url: str | None = None) -> None:
+		"""Accept either a new document or a within-document commit.
+
+		History traversal can produce either shape for the same entry,
+		including SPA entries created with ``history.pushState`` that change
+		the path or query without a new document. A within event only counts
+		when its URL matches the selected history entry, so a page timer that
+		changes the URL during the request cannot satisfy it.
+		"""
+		if self._response_kind is not None:
+			raise NavigationError('Navigation already has a commit expectation')
+		self._response_kind = 'history'
+		self._expected_within_url = expected_url
+		self.frame_id = self._current_frame
+		self.loader_id = None
+		self.transition(NavigationPhase.WAITING)
+		self._changed.set()
+
+	def expect_reload_commit(self) -> None:
+		"""Expect a new document loader from a reload command."""
+		if self._response_kind is not None:
+			raise NavigationError('Navigation already has a commit expectation')
+		self._response_kind = 'document'
+		self.frame_id = self._current_frame
+		self.loader_id = None
+		self.transition(NavigationPhase.WAITING)
+		self._changed.set()
+
 	@property
 	def ready(self) -> bool:
 		if self.terminal or self._response_kind is None:
@@ -250,6 +342,10 @@ class NavigationOperation:
 		if self.is_download:
 			return True
 		# A loader-less response acknowledges same-document navigation.
+		if self._response_kind == 'history' and self._within_committed:
+			return True
+		if self._response_kind == 'history' and self.loader_id is None:
+			return False
 		same_document = self._response_kind == 'same_document'
 		milestone = {'domcontentloaded': 'DOMContentLoaded', 'load': 'load', 'networkidle': 'networkIdle'}.get(self.wait_until)
 		ready = same_document and self.wait_until == 'commit'
@@ -257,7 +353,9 @@ class NavigationOperation:
 			frame_id = data.get('id') if kind == 'frame' else data.get('frameId')
 			if frame_id != self.frame_id:
 				continue
-			if kind == 'within' and same_document:
+			if kind == 'within' and self._response_kind == 'history':
+				self.observed_url = data.get('url', self.observed_url)
+			elif kind == 'within' and same_document:
 				self.observed_url = data.get('url', self.observed_url)
 			elif data.get('loaderId') == self.loader_id:
 				if kind == 'frame':

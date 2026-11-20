@@ -43,7 +43,7 @@ EXECUTE_CODE_DESCRIPTION = """Execute Python code in a persistent namespace with
 ## Navigation
 
 - `await navigate(url: str, new_tab: bool = False)` -- Navigate to a URL. Set new_tab=True to open in a new tab.
-- `await go_back()` -- Go back to the previous page in browser history.
+- `await go_back()` -- Go back to the previous page in browser history. Waits for the page load to complete and returns the final URL.
 - `await wait(seconds: float = 3)` -- Wait for the requested duration, capped at 30 seconds. Fractional seconds are accepted. Use after actions that trigger page loads.
 
 ## Element Interaction
