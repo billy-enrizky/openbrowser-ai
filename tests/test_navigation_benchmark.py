@@ -331,6 +331,14 @@ def test_external_paths_and_missing_optional_arms_are_explicit(tmp_path, monkeyp
     assert states['browser-use']['state'] == 'unavailable'
 
 
+def test_executable_metadata_accepts_an_arm_specific_version_command(tmp_path):
+    binary = tmp_path / 'lightpanda'
+    binary.write_text('#!/bin/sh\nif [ "$1" = "version" ]; then echo 1.0.4; else exit 1; fi\n')
+    binary.chmod(0o700)
+    assert benchmark.executable_metadata(str(binary), ('version',))['version'] == '1.0.4'
+    assert 'unavailable' in benchmark.executable_metadata(str(binary))['version']
+
+
 def test_config_requires_pins_for_a_pinned_claim(tmp_path):
     source = tmp_path / 'source'
     (source / 'src/openbrowser').mkdir(parents=True)
