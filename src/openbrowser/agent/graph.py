@@ -87,6 +87,8 @@ class AgentGraphBuilder:
         # Local variable for faster access
         agent = self.agent
         agent.state.n_steps = agent._current_step_number(step)
+        agent.state.step_sequence_started = True
+        agent.state.step_sequence_is_next = False
         agent.logger.info(f'\nStep {agent.state.n_steps}:')
         
         try:
@@ -147,6 +149,7 @@ class AgentGraphBuilder:
             # === EXECUTE ===
             is_done = False
             results = []
+            step_failed = False
             
             if model_output and model_output.action:
                 results = await agent.multi_act(model_output.action)
@@ -158,17 +161,10 @@ class AgentGraphBuilder:
                 
                 is_done = any(r.is_done for r in results if r)
                 
-                # Update the single failure counter in AgentState
                 if any(r.error for r in results if r):
-                    agent.state.consecutive_failures += 1
-                elif agent.state.consecutive_failures > 0:
-                    agent.state.consecutive_failures = 0
-                
-                # Log final result
-                if results and results[-1].is_done:
-                    agent.logger.info(f'\n Final Result:\n{results[-1].extracted_content}\n\n')
+                    step_failed = True
             else:
-                agent.state.consecutive_failures += 1
+                step_failed = True
                 agent.state.last_result = [ActionResult(error='The model returned no actions')]
 
             # === FINALIZE ===
@@ -192,14 +188,25 @@ class AgentGraphBuilder:
                 and agent.history.history[-1].result
                 and agent.history.history[-1].result[-1].is_done is True
             )
+            await agent._check_stop_or_pause()
+            if agent.state.stopped:
+                agent._neutralize_unaccepted_done()
+                raise AgentRunInterrupted(agent._pending_stop_reason or 'stopped')
             
             # Fast sync operations
             try:
                 agent.save_file_system_state()
             except Exception as error:
                 if not is_done:
-                    raise
-                agent.logger.error(f'Failed to save file system state after accepted done: {error}')
+                    step_failed = True
+                    agent.logger.error(f'Failed to save file system state after step: {error}')
+                else:
+                    agent.logger.error(f'Failed to save file system state after accepted done: {error}')
+
+            if step_failed:
+                agent.state.consecutive_failures += 1
+            elif agent.state.consecutive_failures > 0:
+                agent.state.consecutive_failures = 0
             return {
                 "step_number": step + 1,
                 "is_done": is_done,
@@ -222,7 +229,7 @@ class AgentGraphBuilder:
         except asyncio.TimeoutError:
             agent.logger.error("LLM timeout")
             if agent.state.stopped:
-                agent._finish_run(AgentRunPhase.STOPPED, 'stopped', False)
+                agent._finish_run(AgentRunPhase.STOPPED, agent._pending_stop_reason or 'stopped', False)
                 return {
                     "step_number": step + 1,
                     "is_done": False,
@@ -236,7 +243,7 @@ class AgentGraphBuilder:
         except Exception as e:
             logger.error(f"Step error: {e}")
             if agent.state.stopped:
-                agent._finish_run(AgentRunPhase.STOPPED, 'stopped', False)
+                agent._finish_run(AgentRunPhase.STOPPED, agent._pending_stop_reason or 'stopped', False)
                 return {
                     "step_number": step + 1,
                     "is_done": False,

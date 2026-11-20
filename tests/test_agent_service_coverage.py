@@ -9,6 +9,7 @@ import logging
 import tempfile
 import time
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Optional
 from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
@@ -21,6 +22,20 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Helpers for creating mock objects
 # ---------------------------------------------------------------------------
+
+
+def _write_step_done(agent, *, success=True):
+    """Simulate a manual step writing its own done history item."""
+    from openbrowser.models import ActionResult
+
+    async def step(_step_info=None):
+        agent.history.history.append(
+            SimpleNamespace(
+                result=[ActionResult(is_done=True, success=success, extracted_content="done")]
+            )
+        )
+
+    return step
 
 
 def _make_mock_llm(model="test-model", provider="test-provider"):
@@ -318,6 +333,59 @@ class TestAgentInit:
         assert agent.task is not None
         assert agent.state is not None
         assert agent.history is not None
+
+    def test_injected_paused_state_clears_the_pause_event(self):
+        from openbrowser.agent.views import AgentState
+
+        agent = self._create_agent(injected_agent_state=AgentState(paused=True))
+
+        assert agent.state.paused is True
+        assert agent._external_pause_event.is_set() is False
+
+    def test_injected_unpaused_state_sets_the_pause_event(self):
+        from openbrowser.agent.views import AgentState
+
+        agent = self._create_agent(injected_agent_state=AgentState())
+
+        assert agent._external_pause_event.is_set() is True
+
+    def test_restored_first_step_continues_at_step_two(self):
+        from openbrowser.agent.views import AgentState
+
+        agent = self._create_agent(
+            injected_agent_state=AgentState(n_steps=1, step_sequence_started=True)
+        )
+
+        agent._begin_run(5)
+
+        assert agent._run_step_base == 1
+        assert agent._current_step_number(0) == 2
+
+    def test_fresh_injected_state_starts_at_step_one(self):
+        from openbrowser.agent.views import AgentState
+
+        agent = self._create_agent(injected_agent_state=AgentState())
+
+        agent._begin_run(5)
+
+        assert agent._run_step_base == 0
+        assert agent._current_step_number(0) == 1
+
+    def test_restored_manual_next_state_continues_at_step_two(self):
+        from openbrowser.agent.views import AgentState
+
+        agent = self._create_agent(
+            injected_agent_state=AgentState(
+                n_steps=2,
+                step_sequence_started=True,
+                step_sequence_is_next=True,
+            )
+        )
+
+        agent._begin_run(5)
+
+        assert agent._run_step_base == 1
+        assert agent._current_step_number(0) == 2
 
     def test_agent_init_with_browser_alias_conflict(self):
         """Test that providing both browser and browser_session raises ValueError."""
@@ -1714,7 +1782,7 @@ class TestAgentAsyncMethods:
         agent = self._create_agent()
         step_info = AgentStepInfo(step_number=5, max_steps=10)
 
-        with patch.object(agent, "step", new_callable=AsyncMock):
+        with patch.object(agent, "step", new_callable=AsyncMock, side_effect=_write_step_done(agent)):
             with patch.object(type(agent.history), "is_done", return_value=True):
                 with patch.object(agent, "log_completion", new_callable=AsyncMock):
                     is_done, is_valid = await agent.take_step(step_info)
@@ -1729,7 +1797,7 @@ class TestAgentAsyncMethods:
         done_callback = MagicMock()
         agent.register_done_callback = done_callback
 
-        with patch.object(agent, "step", new_callable=AsyncMock):
+        with patch.object(agent, "step", new_callable=AsyncMock, side_effect=_write_step_done(agent)):
             with patch.object(type(agent.history), "is_done", return_value=True):
                 with patch.object(type(agent.history), "is_successful", return_value=True):
                     with patch.object(agent, "log_completion", new_callable=AsyncMock):
@@ -1746,7 +1814,7 @@ class TestAgentAsyncMethods:
         done_callback = AsyncMock()
         agent.register_done_callback = done_callback
 
-        with patch.object(agent, "step", new_callable=AsyncMock):
+        with patch.object(agent, "step", new_callable=AsyncMock, side_effect=_write_step_done(agent)):
             with patch.object(type(agent.history), "is_done", return_value=True):
                 with patch.object(type(agent.history), "is_successful", return_value=True):
                     with patch.object(agent, "log_completion", new_callable=AsyncMock):
@@ -1786,7 +1854,7 @@ class TestAgentAsyncMethods:
         agent = self._create_agent()
         step_info = AgentStepInfo(step_number=0, max_steps=10)
 
-        with patch.object(agent, "step", new_callable=AsyncMock):
+        with patch.object(agent, "step", new_callable=AsyncMock, side_effect=_write_step_done(agent)):
             with patch.object(type(agent.history), "is_done", return_value=True):
                 with patch.object(agent, "log_completion", new_callable=AsyncMock):
                     result = await agent._execute_step(0, 10, step_info)
@@ -1829,7 +1897,7 @@ class TestAgentAsyncMethods:
         done_callback = MagicMock()
         agent.register_done_callback = done_callback
 
-        with patch.object(agent, "step", new_callable=AsyncMock):
+        with patch.object(agent, "step", new_callable=AsyncMock, side_effect=_write_step_done(agent)):
             with patch.object(type(agent.history), "is_done", return_value=True):
                 with patch.object(type(agent.history), "is_successful", return_value=True):
                     with patch.object(agent, "log_completion", new_callable=AsyncMock):
@@ -1846,7 +1914,7 @@ class TestAgentAsyncMethods:
         done_callback = AsyncMock()
         agent.register_done_callback = done_callback
 
-        with patch.object(agent, "step", new_callable=AsyncMock):
+        with patch.object(agent, "step", new_callable=AsyncMock, side_effect=_write_step_done(agent)):
             with patch.object(type(agent.history), "is_done", return_value=True):
                 with patch.object(type(agent.history), "is_successful", return_value=True):
                     with patch.object(agent, "log_completion", new_callable=AsyncMock):
@@ -1919,14 +1987,15 @@ class TestAgentAsyncMethods:
         agent.telemetry = MagicMock()
         agent._run_phase = AgentRunPhase.RUNNING
 
-        agent._on_force_exit(max_steps=10)
+        agent._on_force_exit()
+        agent._finish_run(AgentRunPhase.STOPPED, 'sigint', False)
+        agent._log_agent_event(max_steps=10, agent_run_error='SIGINT: Cancelled by user')
 
         event = agent.telemetry.capture.call_args.args[0]
         assert agent.status.phase is AgentRunPhase.STOPPED
         assert event.terminal_phase == 'stopped'
         assert event.terminal_reason == 'sigint'
         assert event.success is False
-        agent.telemetry.flush.assert_called_once()
 
     def test_log_agent_event_with_history(self):
         from openbrowser.agent.views import AgentHistory, AgentOutput, StepMetadata

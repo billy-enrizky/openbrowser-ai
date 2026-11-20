@@ -901,6 +901,7 @@ class TestStepNode:
 
         r = MagicMock(); r.is_done = False; r.error = None
         agent.multi_act.return_value = [r]
+        agent.state.consecutive_failures = 2
 
         result = await builder._step_node({"step_number": 5, "max_steps": 100, "is_done": False})
         assert result["step_number"] == 6
@@ -1080,7 +1081,7 @@ class TestStepNode:
         assert result["step_number"] == 1
 
     @pytest.mark.asyncio
-    async def test_final_result_logged(self):
+    async def test_final_result_not_logged_before_history_acceptance(self):
         builder = _make_graph_builder()
         agent = builder.agent
 
@@ -1094,7 +1095,7 @@ class TestStepNode:
         agent.multi_act.return_value = [r]
 
         await builder._step_node({"step_number": 0, "max_steps": 100, "is_done": False})
-        agent.logger.info.assert_any_call('\n Final Result:\nFinal answer\n\n')
+        assert all('Final Result' not in str(call) for call in agent.logger.info.call_args_list)
 
     @pytest.mark.asyncio
     async def test_no_history_when_empty_results(self):

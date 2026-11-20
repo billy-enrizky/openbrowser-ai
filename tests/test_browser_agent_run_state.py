@@ -47,6 +47,8 @@ def make_graph_agent(*, max_failures=2, final_response_after_failure=True):
 	agent._pending_stop_reason = None
 	agent._external_pause_event = asyncio.Event()
 	agent._external_pause_event.set()
+	agent.register_should_stop_callback = None
+	agent.register_external_agent_status_raise_error_callback = None
 	agent._current_step_number = Agent._current_step_number.__get__(agent, SimpleNamespace)
 	agent._finish_run = Agent._finish_run.__get__(agent, SimpleNamespace)
 	agent._done_terminal_phase = Agent._done_terminal_phase.__get__(agent, SimpleNamespace)
@@ -56,6 +58,8 @@ def make_graph_agent(*, max_failures=2, final_response_after_failure=True):
 	agent._neutralize_unaccepted_done = Agent._neutralize_unaccepted_done.__get__(agent, SimpleNamespace)
 	agent._publish_completion = Agent._publish_completion.__get__(agent, SimpleNamespace)
 	agent._check_stop_or_pause = AsyncMock()
+	agent.pause = Agent.pause.__get__(agent, SimpleNamespace)
+	agent.resume = Agent.resume.__get__(agent, SimpleNamespace)
 	agent._update_action_models_for_page = AsyncMock()
 	agent._force_done_after_last_step = AsyncMock()
 	agent._force_done_after_failure = AsyncMock()
@@ -107,6 +111,12 @@ def make_live_agent():
 	agent._run_active = False
 	agent._step_sequence_initialized = False
 	agent._pending_stop_reason = None
+	agent._force_exit_requested = False
+	agent.token_cost_service = SimpleNamespace(usage_history=[])
+	agent._force_exit_telemetry_logged = False
+	agent.use_signal_handler = False
+	agent.register_should_stop_callback = None
+	agent.register_external_agent_status_raise_error_callback = None
 	return agent
 
 
@@ -121,6 +131,7 @@ def make_full_live_agent():
 	agent._log_agent_event = MagicMock()
 	agent._log_final_outcome_messages = MagicMock()
 	agent.token_cost_service = SimpleNamespace(
+		usage_history=[],
 		get_usage_summary=AsyncMock(return_value=None),
 		log_usage_summary=AsyncMock(),
 	)
@@ -159,26 +170,83 @@ def test_force_exit_uses_the_stop_transition():
 	agent._log_agent_event = MagicMock()
 	agent.telemetry = MagicMock()
 
-	agent._on_force_exit(5)
-	agent._on_force_exit(5)
+	agent._on_force_exit()
+	agent._on_force_exit()
 
 	assert agent.state.stopped is True
-	assert agent.status.phase is AgentRunPhase.STOPPED
-	assert agent.status.terminal_reason == 'sigint'
-	assert agent._force_exit_telemetry_logged is True
+	assert agent.status.phase is AgentRunPhase.STOPPING
+	assert agent._pending_stop_reason == 'sigint'
+	assert agent._force_exit_requested is True
+	assert agent._force_exit_telemetry_logged is False
+	agent._log_agent_event.assert_not_called()
+	agent.telemetry.flush.assert_not_called()
+
+
+def test_a_later_stop_request_does_not_overwrite_the_accepted_reason():
+	agent = make_live_agent()
+	agent._run_phase = AgentRunPhase.RUNNING
+
+	agent._on_force_exit()
+	assert agent.stop() is True
+
+	assert agent._pending_stop_reason == 'sigint'
+
+
+def test_force_exit_after_a_terminal_phase_does_nothing():
+	agent = make_live_agent()
+	agent._run_phase = AgentRunPhase.SUCCEEDED
+
+	agent._on_force_exit()
+
+	assert agent._force_exit_requested is False
+	assert agent._pending_stop_reason is None
+	assert agent.state.stopped is False
+
+
+async def test_force_exit_flushes_telemetry_once_after_the_terminal_event():
+	agent = make_full_live_agent()
+	agent.telemetry = MagicMock()
+	agent._on_force_exit()
+
+	await agent.run(max_steps=5)
+
 	agent._log_agent_event.assert_called_once()
 	agent.telemetry.flush.assert_called_once()
 
 
-async def test_stop_before_run_is_retained_without_starting_a_browser():
+async def test_finalizer_logs_telemetry_before_a_cancelled_usage_summary():
+	agent = make_full_live_agent()
+	agent.stop()
+	agent.token_cost_service.log_usage_summary = AsyncMock(side_effect=asyncio.CancelledError())
+
+	with pytest.raises(asyncio.CancelledError):
+		await agent.run(max_steps=5)
+
+	agent._log_agent_event.assert_called_once()
+	assert agent.status.phase is AgentRunPhase.STOPPED
+
+
+async def test_stop_checkpoint_raises_the_accepted_reason():
 	agent = make_live_agent()
-	agent._run_with_langgraph = AsyncMock()
+	agent.state.stopped = True
+	agent._pending_stop_reason = 'sigint'
+
+	with pytest.raises(AgentRunInterrupted) as exc_info:
+		await agent._check_stop_or_pause()
+
+	assert exc_info.value.reason == 'sigint'
+
+
+async def test_stop_before_run_is_retained_without_starting_a_browser():
+	agent = make_full_live_agent()
 
 	assert agent.stop() is True
 	history = await agent.run(max_steps=5)
 
 	assert history is agent.history
-	agent._run_with_langgraph.assert_not_awaited()
+	agent.browser_session.start.assert_not_awaited()
+	agent.eventbus.stop.assert_awaited_once()
+	agent.close.assert_awaited_once()
 	assert agent.status.phase is AgentRunPhase.STOPPED
 	assert agent.status.terminal_reason == 'stopped_before_start'
 	assert agent.status.success is False
@@ -225,6 +293,71 @@ async def test_initial_failed_done_finishes_without_completion():
 	callback.assert_not_awaited()
 
 
+async def test_initial_actions_stop_keeps_the_accepted_reason():
+	agent = make_full_live_agent()
+
+	async def initial_stop():
+		append_history(agent, content='partial')
+		agent.state.stopped = True
+		agent._pending_stop_reason = 'external_stop'
+
+	agent._execute_initial_actions = AsyncMock(side_effect=initial_stop)
+
+	with patch('openbrowser.agent.graph.create_agent_graph') as graph_factory:
+		await agent.run(max_steps=5)
+
+	graph_factory.assert_not_called()
+	assert agent.status.phase is AgentRunPhase.STOPPED
+	assert agent.status.terminal_reason == 'external_stop'
+	agent.log_completion.assert_not_awaited()
+
+
+async def test_initial_done_waits_for_an_accepted_pause():
+	agent = make_full_live_agent()
+	reached_pause = asyncio.Event()
+
+	async def initial_done():
+		append_history(agent, done=True, success=True, content='startup done')
+		agent.state.paused = True
+		agent._external_pause_event.clear()
+		reached_pause.set()
+
+	agent._execute_initial_actions = AsyncMock(side_effect=initial_done)
+
+	with patch('openbrowser.agent.graph.create_agent_graph') as graph_factory:
+		run_task = asyncio.create_task(agent.run(max_steps=5))
+		await asyncio.wait_for(reached_pause.wait(), timeout=1)
+		await asyncio.sleep(0)
+		assert not run_task.done()
+
+		assert agent.resume() is True
+		await asyncio.wait_for(run_task, timeout=1)
+
+	graph_factory.assert_not_called()
+	assert agent.status.phase is AgentRunPhase.SUCCEEDED
+	assert agent.status.terminal_reason == 'done'
+	agent.log_completion.assert_awaited_once()
+
+
+async def test_initial_done_honors_an_external_stop_callback():
+	agent = make_full_live_agent()
+
+	async def initial_done():
+		append_history(agent, done=True, success=True, content='startup done')
+
+	agent._execute_initial_actions = AsyncMock(side_effect=initial_done)
+	agent.register_should_stop_callback = AsyncMock(return_value=True)
+
+	with patch('openbrowser.agent.graph.create_agent_graph') as graph_factory:
+		await agent.run(max_steps=5)
+
+	graph_factory.assert_not_called()
+	assert agent.status.phase is AgentRunPhase.STOPPED
+	assert agent.status.terminal_reason == 'external_stop'
+	assert agent.history.history[-1].result[-1].is_done is False
+	agent.log_completion.assert_not_awaited()
+
+
 async def test_add_new_task_rejects_an_in_flight_run():
 	agent = make_live_agent()
 	started = asyncio.Event()
@@ -247,9 +380,8 @@ async def test_add_new_task_rejects_an_in_flight_run():
 
 
 async def test_stopped_follow_up_does_not_report_the_previous_task_result():
-	agent = make_live_agent()
+	agent = make_full_live_agent()
 	agent._message_manager = MagicMock()
-	agent.eventbus = MagicMock()
 	agent.id = 'agent-id'
 	append_history(agent, done=True, success=True, content='previous result')
 	agent.state.n_steps = 1
@@ -431,6 +563,29 @@ def test_follow_up_continues_after_a_historyless_run():
 	assert agent._current_step_number(0) == 2
 
 
+def test_restored_step_sequence_does_not_reset_without_history():
+	agent = make_live_agent()
+	agent._step_sequence_initialized = True
+	agent.state.n_steps = 12
+
+	agent._begin_run(5)
+
+	assert agent._run_step_base == 12
+	assert agent._current_step_number(0) == 13
+
+
+def test_manual_step_advances_the_next_graph_run():
+	agent = make_live_agent()
+	agent.state.step_sequence_started = True
+	agent.state.step_sequence_is_next = True
+	agent.state.n_steps = 2
+
+	agent._begin_run(5)
+
+	assert agent._run_step_base == 1
+	assert agent._current_step_number(0) == 2
+
+
 async def test_step_counter_and_failure_counter_have_one_authority():
 	agent = make_graph_agent()
 	builder = AgentGraphBuilder(agent)
@@ -459,6 +614,125 @@ async def test_step_counter_and_failure_counter_have_one_authority():
 	assert agent.state.consecutive_failures == 2
 	assert agent.state.n_steps == 1
 	assert agent.history.history[-1].metadata.step_number == 1
+
+
+async def test_action_error_and_bookkeeping_failure_increment_once():
+	agent = make_graph_agent(max_failures=5, final_response_after_failure=False)
+	builder = AgentGraphBuilder(agent)
+	browser_state = MagicMock()
+	browser_state.url = 'https://example.com'
+	agent.browser_session.get_browser_state_summary.return_value = browser_state
+	model_output = MagicMock()
+	model_output.action = [MagicMock()]
+	agent._get_model_output_with_retry.return_value = model_output
+	result = ActionResult(error='boom')
+	agent.multi_act.return_value = [result]
+
+	async def add_history(model_output, browser_state, results, metadata=None, state_message=None):
+		agent.history.history.append(SimpleNamespace(result=results, metadata=metadata))
+
+	agent._make_history_item = AsyncMock(side_effect=add_history)
+	agent.save_file_system_state.side_effect = RuntimeError('disk full')
+
+	await builder._step_node({'step_number': 0, 'max_steps': 5, 'is_done': False})
+
+	assert agent.state.consecutive_failures == 1
+
+
+async def test_manual_step_defers_accepted_success_result_to_the_observer():
+	agent = make_live_agent()
+	agent._check_and_update_downloads = AsyncMock()
+	agent.state.last_result = [
+		ActionResult(is_done=True, success=True, extracted_content='accepted answer')
+	]
+	logger = agent.logger
+
+	with patch.object(logger, 'info') as log_info:
+		await agent._post_process()
+
+	log_info.assert_not_called()
+
+
+async def test_manual_follow_up_does_not_reuse_the_previous_done():
+	agent = make_live_agent()
+	agent.log_completion = AsyncMock()
+	append_history(agent, done=True, success=True, content='previous result')
+	agent._run_history_start = len(agent.history.history)
+	agent.step = AsyncMock()
+
+	is_done, is_valid = await agent.take_step(AgentStepInfo(step_number=5, max_steps=10))
+	step_done = await agent._execute_step(0, 10, AgentStepInfo(step_number=0, max_steps=10))
+
+	assert (is_done, is_valid) == (False, False)
+	assert step_done is False
+	agent.log_completion.assert_not_awaited()
+
+
+async def test_manual_multi_action_failure_increments_once():
+	agent = make_live_agent()
+	agent._check_and_update_downloads = AsyncMock()
+	agent.state.consecutive_failures = 1
+	agent.state.last_result = [
+		ActionResult(extracted_content='ok'),
+		ActionResult(error='boom'),
+	]
+
+	await agent._post_process()
+
+	assert agent.state.consecutive_failures == 2
+
+
+async def test_manual_pause_checkpoint_does_not_enter_a_run_phase():
+	agent = make_live_agent()
+	agent._check_stop_or_pause = Agent._check_stop_or_pause.__get__(agent, SimpleNamespace)
+	agent.resume = Agent.resume.__get__(agent, SimpleNamespace)
+	agent.state.paused = True
+	agent._external_pause_event.clear()
+
+	checkpoint = asyncio.create_task(agent._check_stop_or_pause())
+	await asyncio.sleep(0)
+	assert not checkpoint.done()
+
+	assert agent.resume() is True
+	await asyncio.wait_for(checkpoint, timeout=1)
+
+	assert agent._run_phase is AgentRunPhase.IDLE
+
+
+async def test_pause_after_done_history_waits_before_routing(monkeypatch):
+	agent = make_graph_agent()
+	agent._check_stop_or_pause = Agent._check_stop_or_pause.__get__(agent, SimpleNamespace)
+	builder = AgentGraphBuilder(agent)
+	browser_state = MagicMock()
+	browser_state.url = 'https://example.com'
+	agent.browser_session.get_browser_state_summary.return_value = browser_state
+	model_output = MagicMock()
+	model_output.action = [MagicMock()]
+	agent._get_model_output_with_retry.return_value = model_output
+	result = ActionResult(is_done=True, success=True, extracted_content='done')
+	agent.multi_act.return_value = [result]
+	paused = asyncio.Event()
+
+	async def add_history_then_pause(model_output, browser_state, results, metadata=None, state_message=None):
+		agent.history.history.append(SimpleNamespace(result=results, metadata=metadata))
+		agent.state.paused = True
+		agent._external_pause_event.clear()
+		paused.set()
+
+	agent._make_history_item = AsyncMock(side_effect=add_history_then_pause)
+	monkeypatch.setattr('builtins.print', lambda *args, **kwargs: None)
+	step_task = asyncio.create_task(
+		builder._step_node({'step_number': 0, 'max_steps': 5, 'is_done': False})
+	)
+	await asyncio.wait_for(paused.wait(), timeout=1)
+	await asyncio.sleep(0)
+	assert not step_task.done()
+
+	assert agent.resume() is True
+	result_state = await asyncio.wait_for(step_task, timeout=1)
+
+	assert result_state['is_done'] is True
+	assert agent.history.is_successful() is True
 
 
 async def test_real_graph_reaches_success_once_and_keeps_global_step_numbers():
@@ -749,6 +1023,76 @@ async def test_multi_act_returns_completed_actions_for_external_interrupt():
 	assert agent._pending_stop_reason == 'external_interrupt'
 
 
+async def test_multi_act_preserves_a_stop_reason_recorded_before_the_checkpoint():
+	agent = make_live_agent()
+	agent.browser_session.browser_profile = SimpleNamespace(wait_between_actions=0)
+	agent.file_system = None
+	agent.settings = SimpleNamespace(page_extraction_llm=None)
+	agent.sensitive_data = None
+	agent.available_file_paths = []
+	agent.tools = MagicMock()
+	first = ActionResult(extracted_content='clicked')
+	agent.tools.act = AsyncMock(return_value=first)
+	agent._check_stop_or_pause = AsyncMock(
+		side_effect=[None, AgentRunInterrupted('sigint')]
+	)
+	agent._pending_stop_reason = 'sigint'
+	actions = [MagicMock(), MagicMock()]
+	actions[0].model_dump.return_value = {}
+	actions[1].model_dump.return_value = {}
+
+	results = await agent.multi_act(actions)
+
+	assert results == [first]
+	assert agent._pending_stop_reason == 'sigint'
+
+
+async def test_multi_act_does_not_overwrite_an_accepted_reason_with_a_raw_interrupt():
+	agent = make_live_agent()
+	agent.browser_session.browser_profile = SimpleNamespace(wait_between_actions=0)
+	agent.file_system = None
+	agent.settings = SimpleNamespace(page_extraction_llm=None)
+	agent.sensitive_data = None
+	agent.available_file_paths = []
+	agent.tools = MagicMock()
+	first = ActionResult(extracted_content='clicked')
+	agent.tools.act = AsyncMock(return_value=first)
+	agent._check_stop_or_pause = AsyncMock(side_effect=[None, InterruptedError()])
+	agent._pending_stop_reason = 'sigint'
+	actions = [MagicMock(), MagicMock()]
+	actions[0].model_dump.return_value = {}
+	actions[1].model_dump.return_value = {}
+
+	results = await agent.multi_act(actions)
+
+	assert results == [first]
+	assert agent._pending_stop_reason == 'sigint'
+
+
+async def test_log_completion_reports_only_an_accepted_final_result():
+	agent = make_live_agent()
+	append_history(agent, done=True, success=True, content='accepted answer')
+	logger = agent.logger
+
+	with patch.object(logger, 'info') as log_info:
+		await agent.log_completion()
+
+	messages = [str(call.args[0]) for call in log_info.call_args_list if call.args]
+	assert any('Task completed successfully' in message for message in messages)
+	assert any('Final Result' in message and 'accepted answer' in message for message in messages)
+
+
+async def test_log_completion_stays_quiet_without_accepted_success():
+	agent = make_live_agent()
+	append_history(agent, done=True, success=False, content='failed answer')
+	logger = agent.logger
+
+	with patch.object(logger, 'info') as log_info:
+		await agent.log_completion()
+
+	log_info.assert_not_called()
+
+
 async def test_stopped_and_max_step_runs_do_not_call_done_callback():
 	for phase, reason, success in [
 		(AgentRunPhase.STOPPED, 'stopped', False),
@@ -790,11 +1134,14 @@ async def test_failed_done_does_not_call_done_callback():
 
 async def test_manual_step_paths_publish_completion_only_for_success():
 	agent = make_live_agent()
-	agent.step = AsyncMock()
 	agent.log_completion = AsyncMock()
 	callback = AsyncMock()
 	agent.register_done_callback = callback
-	append_history(agent, done=True, success=False, content='failed')
+
+	async def failed_done_step(_step_info=None):
+		append_history(agent, done=True, success=False, content='failed')
+
+	agent.step = AsyncMock(side_effect=failed_done_step)
 
 	is_done, _ = await agent.take_step(AgentStepInfo(step_number=5, max_steps=10))
 	assert is_done is True
@@ -858,14 +1205,63 @@ async def test_done_callback_cancellation_does_not_change_success():
 	callback.assert_awaited_once_with(agent.history)
 
 
+async def test_caller_cancellation_during_completion_propagates():
+	agent = make_graph_agent()
+	started = asyncio.Event()
+
+	async def slow_completion():
+		started.set()
+		await asyncio.sleep(60)
+
+	agent.log_completion = AsyncMock(side_effect=slow_completion)
+	agent._run_phase = AgentRunPhase.SUCCEEDED
+	agent._run_terminal_reason = 'done'
+	agent._run_success = True
+	builder = AgentGraphBuilder(agent)
+	builder.graph = MagicMock()
+	builder.graph.ainvoke = AsyncMock()
+
+	task = asyncio.create_task(builder.run(max_steps=5))
+	await asyncio.wait_for(started.wait(), timeout=1)
+	task.cancel()
+
+	with pytest.raises(asyncio.CancelledError):
+		await task
+
+	assert agent._run_phase is AgentRunPhase.SUCCEEDED
+
+
 def test_manual_steps_reject_an_active_run():
 	agent = make_live_agent()
 	agent._run_active = True
 
-	with pytest.raises(AgentRunStateError, match='run is active'):
+	with pytest.raises(AgentRunStateError, match='operation is already active'):
 		asyncio.run(agent.take_step(AgentStepInfo(step_number=1, max_steps=2)))
-	with pytest.raises(AgentRunStateError, match='run is active'):
+	with pytest.raises(AgentRunStateError, match='operation is already active'):
 		asyncio.run(agent._execute_step(0, 2, AgentStepInfo(step_number=0, max_steps=2)))
+
+
+async def test_manual_step_holds_the_operation_slot_across_hooks():
+	agent = make_live_agent()
+	agent.step = AsyncMock()
+	started = asyncio.Event()
+	release = asyncio.Event()
+
+	async def on_step_start(_agent):
+		started.set()
+		await release.wait()
+
+	manual_task = asyncio.create_task(
+		agent._execute_step(0, 2, AgentStepInfo(step_number=0, max_steps=2), on_step_start=on_step_start)
+	)
+	await asyncio.wait_for(started.wait(), timeout=1)
+
+	with pytest.raises(AgentRunStateError, match='run is already active'):
+		await agent.run(max_steps=2)
+
+	release.set()
+	await asyncio.wait_for(manual_task, timeout=1)
+	assert agent._run_active is False
 
 
 def test_final_failure_message_uses_current_run_success():

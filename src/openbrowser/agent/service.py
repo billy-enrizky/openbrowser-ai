@@ -8,6 +8,7 @@ import tempfile
 import time
 from collections.abc import Awaitable, Callable
 from datetime import datetime
+from functools import wraps
 from pathlib import Path
 from typing import Any, Generic, Literal, TypeVar
 from urllib.parse import urlparse
@@ -121,6 +122,22 @@ Context = TypeVar('Context')
 
 
 AgentHookFunc = Callable[['Agent'], Awaitable[None]]
+
+
+def _exclusive_agent_operation(method):
+	"""Serialize manual steps with a foreground run."""
+
+	@wraps(method)
+	async def wrapper(self, *args, **kwargs):
+		if self._run_active:
+			raise AgentRunStateError('Agent operation is already active')
+		self._run_active = True
+		try:
+			return await method(self, *args, **kwargs)
+		finally:
+			self._run_active = False
+
+	return wrapper
 
 
 class Agent(Generic[Context, AgentStructuredOutput]):
@@ -311,8 +328,14 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 		self._run_step_base = 0
 		self._run_history_start = 0
 		self._run_active = False
-		self._step_sequence_initialized = False
+		self._step_sequence_initialized = (
+			injected_agent_state is not None
+			and injected_agent_state.step_sequence_started
+			and not injected_agent_state.step_sequence_is_next
+		)
+		self._run_usage_start = 0
 		self._pending_stop_reason: str | None = None
+		self._force_exit_requested = False
 		self.use_signal_handler = use_signal_handler
 
 		# Initialize agent directory
@@ -462,7 +485,8 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 
 		# Event-based pause control (kept out of AgentState for serialization)
 		self._external_pause_event = asyncio.Event()
-		self._external_pause_event.set()
+		if not self.state.paused:
+			self._external_pause_event.set()
 
 		# LangGraph graph builder (lazy initialization)
 		self._graph_builder = None
@@ -496,14 +520,17 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 		self._run_success = None
 		self._run_result = None
 		self._run_error = None
-		self._pending_stop_reason = None
 		self._run_started_at = time.time()
 		self._run_finished_at = None
-		if self._step_sequence_initialized:
+		if self.state.step_sequence_is_next:
+			self._run_step_base = max(0, self.state.n_steps - 1)
+		elif self._step_sequence_initialized:
 			self._run_step_base = self.state.n_steps
 		else:
 			self._run_step_base = self.state.n_steps if self.history.history else 0
-			self._step_sequence_initialized = True
+		self._step_sequence_initialized = True
+		self.state.step_sequence_is_next = False
+		self._run_usage_start = len(self.token_cost_service.usage_history)
 		self._run_history_start = len(self.history.history)
 		self.state.n_steps = self._run_step_base
 
@@ -566,6 +593,16 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 		result = self._current_run_last_result()
 		return result is not None and result.is_done is True
 
+	def _done_result_since(self, history_start: int) -> ActionResult | None:
+		"""Return a done result only when this operation wrote the history item."""
+		if len(self.history.history) <= history_start:
+			return None
+		item = self.history.history[-1]
+		if not item.result:
+			return None
+		result = item.result[-1]
+		return result if result.is_done is True else None
+
 	def _neutralize_unaccepted_done(self) -> None:
 		"""Remove a done marker that a stop request invalidated."""
 		if len(self.history.history) <= self._run_history_start:
@@ -583,29 +620,27 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 			return AgentRunPhase.FAILED
 		return AgentRunPhase.SUCCEEDED if result.success is True else AgentRunPhase.FAILED
 
-	def _on_force_exit(self, max_steps: int) -> None:
-		"""Stop the active run and flush exit telemetry once."""
-		if getattr(self, '_force_exit_telemetry_logged', False):
+	def _request_stop(self, reason: str) -> None:
+		"""Record the first accepted stop reason; later requests do not overwrite it."""
+		if self._pending_stop_reason is None:
+			self._pending_stop_reason = reason
+
+	def _on_force_exit(self) -> None:
+		"""Request a stop without finalizing in-flight work."""
+		if self._force_exit_requested or self._run_phase in TERMINAL_AGENT_RUN_PHASES:
 			return
-		self._force_exit_telemetry_logged = True
+		self._force_exit_requested = True
+		self._request_stop('sigint')
 		self.stop()
-		if self._run_phase not in TERMINAL_AGENT_RUN_PHASES:
-			self._finish_run(AgentRunPhase.STOPPED, 'sigint', False)
-		try:
-			self._log_agent_event(max_steps=max_steps, agent_run_error='SIGINT: Cancelled by user')
-		except Exception as error:
-			self.logger.error(f'Failed to log force-exit telemetry: {error}')
-		if hasattr(self, 'telemetry') and self.telemetry:
-			try:
-				self.telemetry.flush()
-			except Exception as error:
-				self.logger.error(f'Failed to flush force-exit telemetry: {error}')
 
 	async def _publish_completion(self) -> None:
 		"""Publish a successful completion without letting observers fail the task."""
 		try:
 			await self.log_completion()
 		except asyncio.CancelledError:
+			current_task = asyncio.current_task()
+			if current_task is not None and current_task.cancelling():
+				raise
 			self.logger.warning('Completion logging was cancelled after success')
 		except Exception as error:
 			self.logger.exception(f'Completion logging failed after success: {error}')
@@ -621,6 +656,9 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 				if inspect.isawaitable(callback_result):
 					await callback_result
 		except asyncio.CancelledError:
+			current_task = asyncio.current_task()
+			if current_task is not None and current_task.cancelling():
+				raise
 			self.logger.warning('Done callback was cancelled after success')
 		except Exception as error:
 			self.logger.exception(f'Done callback failed after success: {error}')
@@ -821,6 +859,7 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 		self._run_result = None
 		self._run_error = None
 		self._pending_stop_reason = None
+		self._force_exit_requested = False
 		self._run_started_at = None
 		self._run_finished_at = None
 		self._run_step_base = 0
@@ -834,28 +873,38 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 		"""Wait while paused, and raise a typed interruption for stop."""
 		while True:
 			if self.state.stopped:
-				raise AgentRunInterrupted('stopped')
+				raise AgentRunInterrupted(self._pending_stop_reason or 'stopped')
 
 			if self.register_should_stop_callback and await self.register_should_stop_callback():
 				self.logger.info('External callback requested stop')
+				self._request_stop('external_stop')
 				self.state.stopped = True
-				raise AgentRunInterrupted('external_stop')
+				raise AgentRunInterrupted(self._pending_stop_reason or 'external_stop')
+
+			if self.state.stopped:
+				raise AgentRunInterrupted(self._pending_stop_reason or 'stopped')
 
 			if (
 				self.register_external_agent_status_raise_error_callback
 				and await self.register_external_agent_status_raise_error_callback()
 			):
-				raise AgentRunInterrupted('external_interrupt')
+				self._request_stop('external_interrupt')
+				raise AgentRunInterrupted(self._pending_stop_reason or 'external_interrupt')
 
 			if self.state.stopped:
-				raise AgentRunInterrupted('stopped')
+				raise AgentRunInterrupted(self._pending_stop_reason or 'stopped')
 
 			if not self.state.paused:
-				if self._run_phase in {AgentRunPhase.STARTING, AgentRunPhase.PAUSED}:
+				if (
+					self._run_phase is not AgentRunPhase.IDLE
+					and self._run_phase not in TERMINAL_AGENT_RUN_PHASES
+					and self._run_phase in {AgentRunPhase.STARTING, AgentRunPhase.PAUSED}
+				):
 					self._run_phase = AgentRunPhase.RUNNING
 				return
 
-			self._run_phase = AgentRunPhase.PAUSED
+			if self._run_phase is not AgentRunPhase.IDLE and self._run_phase not in TERMINAL_AGENT_RUN_PHASES:
+				self._run_phase = AgentRunPhase.PAUSED
 			await self._external_pause_event.wait()
 
 	@observe(name='agent.step', ignore_output=True, ignore_input=True)
@@ -863,7 +912,7 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 	async def step(self, step_info: AgentStepInfo | None = None) -> None:
 		"""Execute one step of the task"""
 		# Initialize timing first, before any exceptions can occur
-
+		self.state.step_sequence_started = True
 		self.step_start_time = time.time()
 
 		browser_state_summary = None
@@ -986,8 +1035,8 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 		# Check for new downloads after executing actions
 		await self._check_and_update_downloads('after executing actions')
 
-		# check for action errors  and len more than 1
-		if self.state.last_result and len(self.state.last_result) == 1 and self.state.last_result[-1].error:
+		# Any failed action in the step counts once, matching the graph path.
+		if self.state.last_result and any(result.error for result in self.state.last_result):
 			self.state.consecutive_failures += 1
 			self.logger.debug(f'🔄 Step {self.state.n_steps}: Consecutive failures: {self.state.consecutive_failures}')
 			return
@@ -996,14 +1045,10 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 			self.state.consecutive_failures = 0
 			self.logger.debug(f'🔄 Step {self.state.n_steps}: Consecutive failures reset to: {self.state.consecutive_failures}')
 
-		# Log completion results
+		# Log failure results; an accepted success is logged by log_completion().
 		if self.state.last_result and len(self.state.last_result) > 0 and self.state.last_result[-1].is_done:
 			success = self.state.last_result[-1].success
-			if success:
-				# Green color for success
-				self.logger.info(f'\n📄 \033[32m Final Result:\033[0m \n{self.state.last_result[-1].extracted_content}\n\n')
-			else:
-				# Red color for failure
+			if not success:
 				self.logger.info(f'\n📄 \033[31m Final Result:\033[0m \n{self.state.last_result[-1].extracted_content}\n\n')
 			if self.state.last_result[-1].attachments:
 				total_attachments = len(self.state.last_result[-1].attachments)
@@ -1065,6 +1110,7 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 
 		# Increment step counter after step is fully completed
 		self.state.n_steps += 1
+		self.state.step_sequence_is_next = True
 
 	async def _force_done_after_last_step(self, step_info: AgentStepInfo | None = None) -> None:
 		"""Handle special processing for the last step"""
@@ -1492,11 +1538,15 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 	def _log_agent_event(self, max_steps: int, agent_run_error: str | None = None) -> None:
 		"""Sent the agent event for this run to telemetry"""
 
-		token_summary = self.token_cost_service.get_usage_tokens_for_model(self.llm.model)
+		token_summary = self.token_cost_service.get_usage_tokens_for_model(
+			self.llm.model, since_index=self._run_usage_start
+		)
+		run_history = self.history.history[self._run_history_start :]
+		run_history_view = AgentHistoryList(history=run_history, usage=None)
 
 		# Prepare action_history data correctly
 		action_history_data = []
-		for item in self.history.history:
+		for item in run_history:
 			if item.model_output and item.model_output.action:
 				# Convert each ActionModel in the step to its dictionary representation
 				step_actions = [
@@ -1516,7 +1566,7 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 		elif self.state.stopped or self._run_phase is AgentRunPhase.STOPPING:
 			run_success = False
 		else:
-			run_success = self.history.is_successful()
+			run_success = run_history_view.is_successful()
 
 		self.telemetry.capture(
 			AgentTelemetryEvent(
@@ -1532,31 +1582,31 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 				if self.browser_session and self.browser_session.cdp_url
 				else None,
 				agent_type=None,  # Regular Agent (not code-use)
-				action_errors=self.history.errors(),
+				action_errors=run_history_view.errors(),
 				action_history=action_history_data,
-				urls_visited=self.history.urls(),
+				urls_visited=run_history_view.urls(),
 				steps=self.state.n_steps,
 				total_input_tokens=token_summary.prompt_tokens,
 				total_output_tokens=token_summary.completion_tokens,
 				prompt_cached_tokens=token_summary.prompt_cached_tokens,
 				total_tokens=token_summary.total_tokens,
-				total_duration_seconds=self.history.total_duration_seconds(),
+				total_duration_seconds=run_history_view.total_duration_seconds(),
 				success=run_success,
 				final_result_response=final_result_str,
 				error_message=agent_run_error or self._run_error,
-			terminal_phase=self._run_phase.value if self._run_phase in TERMINAL_AGENT_RUN_PHASES else None,
-			terminal_reason=self._run_terminal_reason,
+				terminal_phase=self._run_phase.value if self._run_phase in TERMINAL_AGENT_RUN_PHASES else None,
+				terminal_reason=self._run_terminal_reason,
 			)
 		)
 
+	@_exclusive_agent_operation
 	async def take_step(self, step_info: AgentStepInfo | None = None) -> tuple[bool, bool]:
 		"""Take a step
 
 		Returns:
 		        Tuple[bool, bool]: (is_done, is_valid)
 		"""
-		if self._run_active:
-			raise AgentRunStateError('Cannot take a manual step while a run is active')
+		history_start = len(self.history.history)
 		if step_info is not None and step_info.step_number == 0:
 			# First step
 			self._log_first_step_startup()
@@ -1570,8 +1620,9 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 
 		await self.step(step_info)
 
-		if self.history.is_done():
-			if self.history.is_successful() is True:
+		done_result = self._done_result_since(history_start)
+		if done_result is not None:
+			if done_result.success is True:
 				await self._publish_completion()
 			return True, True
 
@@ -1718,6 +1769,7 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 
 		return None
 
+	@_exclusive_agent_operation
 	async def _execute_step(
 		self,
 		step: int,
@@ -1732,8 +1784,7 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 		Returns:
 			bool: True if task is done, False otherwise
 		"""
-		if self._run_active:
-			raise AgentRunStateError('Cannot execute a manual step while a run is active')
+		history_start = len(self.history.history)
 		if on_step_start is not None:
 			await on_step_start(self)
 
@@ -1755,8 +1806,9 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 		if on_step_end is not None:
 			await on_step_end(self)
 
-		if self.history.is_done():
-			if self.history.is_successful() is True:
+		done_result = self._done_result_since(history_start)
+		if done_result is not None:
+			if done_result.success is True:
 				await self._publish_completion()
 
 			return True
@@ -1789,14 +1841,6 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 		self._run_active = True
 		try:
 			self._begin_run(max_steps)
-			if self.state.stopped:
-				self._finish_run(AgentRunPhase.STOPPED, 'stopped_before_start', False)
-				if hasattr(self, 'telemetry') and self.telemetry:
-					try:
-						self._log_agent_event(max_steps=max_steps, agent_run_error='stopped_before_start')
-					except Exception as error:
-						self.logger.error(f'Failed to log pre-start stop telemetry: {error}')
-				return self.history
 			try:
 				return await self._run_with_langgraph(max_steps, on_step_start, on_step_end)
 			except asyncio.CancelledError:
@@ -1854,7 +1898,7 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 				loop=loop,
 				pause_callback=self.pause,
 				resume_callback=self.resume,
-				custom_exit_callback=lambda: self._on_force_exit(max_steps),
+				custom_exit_callback=self._on_force_exit,
 				exit_on_second_int=True,
 			)
 			signal_handler.register()
@@ -1887,6 +1931,7 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 			else:
 				try:
 					await self._execute_initial_actions()
+					await self._check_stop_or_pause()
 				except AgentRunInterrupted as error:
 					self._finish_run(AgentRunPhase.STOPPED, error.reason, False)
 				except InterruptedError:
@@ -1894,7 +1939,7 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 
 			if self._run_phase not in TERMINAL_AGENT_RUN_PHASES:
 				if self.state.stopped:
-					self._finish_run(AgentRunPhase.STOPPED, 'stopped', False)
+					self._finish_run(AgentRunPhase.STOPPED, self._pending_stop_reason or 'stopped', False)
 				elif self._run_has_done():
 					phase = self._done_terminal_phase()
 					success = phase is AgentRunPhase.SUCCEEDED
@@ -1960,15 +2005,22 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 			raise e
 
 		finally:
-			await self.token_cost_service.log_usage_summary()
 			if signal_handler is not None:
 				signal_handler.unregister()
 
+			if agent_run_error is None and self._pending_stop_reason == 'sigint':
+				agent_run_error = 'SIGINT: Cancelled by user'
 			if not self._force_exit_telemetry_logged:
 				try:
 					self._log_agent_event(max_steps=max_steps, agent_run_error=agent_run_error)
+					if self._force_exit_requested:
+						self._force_exit_telemetry_logged = True
+						if getattr(self, 'telemetry', None):
+							self.telemetry.flush()
 				except Exception as log_e:
 					self.logger.error(f'Failed to log telemetry event: {log_e}', exc_info=True)
+
+			await self.token_cost_service.log_usage_summary()
 
 			if self.settings.generate_gif:
 				output_path: str = 'agent_history.gif'
@@ -2026,10 +2078,17 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 					break
 
 			except AgentRunInterrupted as error:
-				if results and error.reason in {'stopped', 'external_stop', 'external_interrupt'}:
+				if results and error.reason in {'stopped', 'sigint', 'external_stop', 'external_interrupt'}:
 					self.state.stopped = True
-					self._pending_stop_reason = error.reason
+					self._request_stop(error.reason)
 					self.logger.info('Stop requested after completed actions; retaining partial results')
+					break
+				raise
+			except InterruptedError:
+				if results:
+					self.state.stopped = True
+					self._request_stop('external_interrupt')
+					self.logger.info('Interrupt requested after completed actions; retaining partial results')
 					break
 				raise
 			except Exception as e:
@@ -2079,11 +2138,13 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 			self.logger.info(f'  {action_header}')
 
 	async def log_completion(self) -> None:
-		"""Log the completion of the task"""
-		# self._task_end_time = time.time()
-		# self._task_duration = self._task_end_time - self._task_start_time TODO: this is not working when using take_step
-		if self.history.is_successful():
-			self.logger.info('✅ Task completed successfully')
+		"""Log an accepted successful completion and its final result."""
+		if not self.history.is_successful():
+			return
+		self.logger.info('✅ Task completed successfully')
+		final_result = self._run_final_result()
+		if final_result:
+			self.logger.info(f'\n📄 Final Result:\n{final_result}\n\n')
 
 	async def rerun_history(
 		self,
@@ -2316,6 +2377,7 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 		"""
 		if self._run_phase in TERMINAL_AGENT_RUN_PHASES:
 			return False
+		self._request_stop('stopped')
 		if self.state.stopped:
 			return True
 		self.logger.info('⏹️ Agent stopping')

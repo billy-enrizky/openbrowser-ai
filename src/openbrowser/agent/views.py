@@ -68,6 +68,8 @@ class AgentState(BaseModel):
 
 	agent_id: str = Field(default_factory=uuid7str)
 	n_steps: int = 1
+	step_sequence_started: bool = False
+	step_sequence_is_next: bool = False
 	consecutive_failures: int = 0
 	last_result: list[ActionResult] | None = None
 	last_plan: str | None = None
