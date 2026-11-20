@@ -1,0 +1,11 @@
+{
+  "_note": "Example only. Refresh every version from the official release metadata before a current run. A pin proves the recorded run matches these versions; it does not prove they are the latest.",
+  "captured_utc": "2026-11-20T00:00:00Z",
+  "pins": {
+    "lightpanda": {"version": "1.0.4"},
+    "agent-browser": {"version": "0.43.0"},
+    "browser-use": {"version": "1.0.6"},
+    "chrome": {"version": "130.0.6723.58"},
+    "openbrowser": {"source_commit": "a9022ad4"}
+  }
+}

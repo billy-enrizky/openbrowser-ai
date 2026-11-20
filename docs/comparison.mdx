@@ -11,9 +11,11 @@ Two benchmark suites measuring OpenBrowser against competitors:
 1. **[CLI Benchmark](/cli-comparison)** (2026-03-15) -- 4-way comparison of CLI tools driven by an LLM via a single Bash tool
 2. **MCP Benchmark** (below) -- 3-way comparison of MCP servers as tool providers
 
+> **Historical benchmark, not a current-version ranking.** Both runs on this page were recorded on the date shown. Competitor tools were installed from `@latest` at run time, but their resolved versions were not written to the retained artifacts. The 5-step token benchmark's raw per-response files are also not retained in this repository. Treat these numbers as historical observations for the versions installed on the run date, not as a comparison against today's releases. No universal winner follows from them. See [Provenance and limits](#provenance-and-limits).
+
 ## MCP Server Comparison
 
-Benchmark date: 2026-02-21 | OpenBrowser MCP v0.1.26 (CodeAgent, 1 tool) | Playwright MCP (latest) | Chrome DevTools MCP (latest)
+Benchmark date: 2026-02-21 | OpenBrowser MCP v0.1.26 (CodeAgent, 1 tool) | Playwright MCP (resolved version not recorded) | Chrome DevTools MCP (resolved version not recorded)
 
 ### Overview
 
@@ -24,7 +26,7 @@ Three approaches to browser automation via MCP, measured on identical tasks.
 | **Maintainer** | Microsoft | Chrome DevTools team (Google) | OpenBrowser |
 | **GitHub Stars** | 27,400+ | 26,200+ | -- |
 | **Engine** | Playwright (Chromium/Firefox/WebKit) | Puppeteer (CDP) | Raw CDP (direct) |
-| **Tools** | 22 core (34 total) | 26 | 1 at benchmark (`execute_code`); 3 current |
+| **Tools** | 22 core (34 total) | 26 | 1 at benchmark (`execute_code`); `get_status` and `reset_browser` were added after v0.1.26 |
 | **Approach** | A11y snapshot with every action | A11y snapshot on demand | CodeAgent -- Python code execution with browser namespace |
 | **Element IDs** | `ref` from snapshot (`[ref=e25]`) | `uid` from snapshot (`uid=1_2`) | Numeric index from state |
 | **Transport** | stdio | stdio | stdio |
@@ -311,7 +313,7 @@ Cost per benchmark run based on Bedrock API token usage (input + output tokens a
 
 Playwright sends the full page with every response, so the LLM gets the answer immediately but pays for ~120K tokens per Wikipedia page load. OpenBrowser returns compact results (~30-800 chars per call), so the LLM needs more round-trips to navigate and extract but pays far fewer tokens overall.
 
-For a single simple task, Playwright's approach is fast. At scale (thousands of workflows, complex pages, multi-step agents), the MCP response size difference is 144x.
+For a single simple task, Playwright's approach is fast. In the 2026-02-21 six-task run, the mean MCP response size ratio across the six tasks was 144x. Complex pages drove most of the difference. That ratio is a historical observation, not a current-version guarantee.
 
 ### Tool Surface Comparison
 
@@ -323,9 +325,9 @@ Navigation, interaction, form filling, file upload, drag and drop, hover, key pr
 
 Input automation (click, drag, fill, fill_form, hover, press_key, handle_dialog, upload_file), navigation (navigate_page, new_page, close_page, list_pages, select_page, wait_for), emulation (emulate, resize_page), performance tracing (start/stop/analyze), network debugging (list/get requests), JS execution, console messages, screenshots, DOM snapshots.
 
-#### OpenBrowser MCP (CodeAgent, 3 tools)
+#### OpenBrowser MCP (CodeAgent, execute_code in v0.1.26)
 
-The benchmark run used v0.1.26 with `execute_code`. `get_status` and `reset_browser` are additive lifecycle tools in the current server.
+The benchmark run used v0.1.26 with `execute_code`. `get_status` and `reset_browser` were added after v0.1.26 and were not part of the benchmarked server.
 
 | Tool | Capabilities |
 |------|-------------|
@@ -335,10 +337,10 @@ The benchmark run used v0.1.26 with `execute_code`. `get_status` and `reset_brow
 
 ### Unique to OpenBrowser
 
-Features no competitor offers:
+This section describes the benchmarked OpenBrowser v0.1.26 server. The benchmark itself used `execute_code` only. The `get_status` and `reset_browser` lifecycle tools were added after v0.1.26 and were not part of the comparison. The feature differences below were observed against the other two servers in the 2026-02-21 run:
 
-- **CodeAgent architecture** -- the core `execute_code` tool runs Python in a persistent namespace. The LLM writes code to navigate, extract, and process data rather than calling individual tools. Variables and state persist between calls. `get_status` and `reset_browser` provide lifecycle diagnostics without changing that execution model.
-- **144x smaller MCP responses** -- returns only the data the code explicitly extracts, not full page dumps
+- **CodeAgent architecture** -- the core `execute_code` tool runs Python in a persistent namespace. The LLM writes code to navigate, extract, and process data rather than calling individual tools. Variables and state persist between calls.
+- **144x smaller mean MCP responses across the six tasks in the 2026-02-21 run** -- returns only the data the code explicitly extracts, not full page dumps
 - **JS evaluation with Python processing** -- `await evaluate("JS expression")` returns Python objects directly (dicts, lists, strings), enabling pandas/regex/json processing in the same code block
 - **Built-in libraries** -- json, pandas, numpy, matplotlib, csv, re, datetime, requests, BeautifulSoup available in the execution namespace
 - **File system access** -- `file_system` object for reading/writing local files from browser automation code
@@ -346,6 +348,9 @@ Features no competitor offers:
 - **Task completion signal** -- `done(text, success)` to explicitly mark task completion with a result
 
 ### Gaps vs Competitors
+
+Feature lists below are from the versions tested on 2026-02-21. Competitor resolved versions were not recorded. Check current documentation before relying on a gap.
+
 
 | Capability | Playwright MCP | Chrome DevTools MCP | OpenBrowser MCP |
 |-----------|:-:|:-:|:-:|
@@ -367,6 +372,14 @@ Features no competitor offers:
 | Progressive disclosure | No | No | Yes (code extracts only what's needed) |
 | Session reuse | No | Puppeteer-managed | Yes (existing Chrome) |
 
+### Provenance and limits
+
+- The 5-step token benchmark was recorded on 2026-02-21 with OpenBrowser MCP v0.1.26. The Playwright MCP and Chrome DevTools MCP resolved versions were not recorded.
+- The 6-task LLM benchmark was recorded on the same date with Claude Sonnet 4.6 on AWS Bedrock, 5 runs per server, and a 10,000-sample bootstrap. The retained aggregate is `benchmarks/e2e_llm_stats_results.json`. It records the model, run count, and server aggregates, but not the competitor tool versions or a timestamp. The page date is a page record, not an artifact field.
+- The per-response files cited by earlier revisions of this page are not present in the repository. Their numbers cannot be recomputed from the retained files. The tables on this page remain a historical summary, not a reproducible artifact.
+- Token volume is not task success, latency, or cost for every workload. The six tasks are a fixed local sample against public sites. Treat differences in tool count and response shape as design tradeoffs, not a universal winner.
+- Do not compare these numbers with a later release without a new pinned run. The native navigation harness is a separate lane and is not a source for this page.
+
 ### Benchmark Methodology Notes
 
 #### Token Usage Benchmark (5-step workflow)
@@ -374,7 +387,7 @@ Features no competitor offers:
 - Response sizes measured as total JSON-RPC response character count
 - Estimated tokens = characters / 4 (standard approximation for mixed English/JSON)
 - 5-step workflow uses matched operations: navigate, get state/snapshot, click, go back, get state/snapshot
-- Raw benchmark data: `benchmarks/playwright_results.json`, `benchmarks/cdp_results.json`, `benchmarks/openbrowser_results.json`
+- Raw per-response data for the 5-step run: not retained in this repository. The numbers above are the retained summary.
 
 #### E2E LLM Benchmark (6 real-world tasks, N=5 runs)
 - Model: Claude Sonnet 4.6 on AWS Bedrock (Converse API)
@@ -385,8 +398,8 @@ Features no competitor offers:
 - All tasks run against live websites (Wikipedia, httpbin.org, news.ycombinator.com, github.com, example.com)
 - Bedrock API token usage measured from the Converse API `usage` field (actual billed tokens)
 - MCP response sizes measured from tool response character counts
-- Playwright MCP tested via `npx @playwright/mcp@latest`
-- Chrome DevTools MCP tested via `npx -y chrome-devtools-mcp@latest`
+- Playwright MCP installed from `npx @playwright/mcp@latest` on the run date; the resolved version was not recorded
+- Chrome DevTools MCP installed from `npx -y chrome-devtools-mcp@latest` on the run date; the resolved version was not recorded
 - OpenBrowser MCP v0.1.26 tested via `uvx openbrowser-ai[mcp]==0.1.26 --mcp`
 - All tests run on macOS, M-series Apple Silicon
 - Benchmark scripts: `benchmarks/e2e_llm_benchmark.py`, `benchmarks/e2e_llm_stats.py`

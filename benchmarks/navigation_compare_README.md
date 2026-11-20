@@ -6,14 +6,14 @@ Run the same navigation, JavaScript input assignment, and POST through OpenBrows
 
 Use Python 3.12 or later. The coordinator and each worker need `psutil` and `websockets>=15.0.1`. The OpenBrowser worker also needs the selected source revision's dependencies. Use an existing environment or prepare an isolated environment before measurement. The script never installs packages or downloads browsers.
 
-The initial adapter versions are Lightpanda `1.0.4`, agent-browser `0.43.0`, browser-use `1.0.5`, and browser-harness `0.1.13`. These versions were current in official metadata fetched on 2026-11-15. The browser-use adapter uses that release's `Browser('chromium')` API, not the older `BrowserSession` API. A later incompatible API fails startup rather than silently removing the arm.
+The adapter versions used for the 2026-11-15 diagnostic were Lightpanda `1.0.4`, agent-browser `0.43.0`, browser-use `1.0.5`, and browser-harness `0.1.13`. That run is historical. The checked-in example pin uses browser-use `1.0.6`. A pinned run must refresh the pin from official metadata before anyone calls the result current. The browser-use adapter uses the `Browser('chromium')` API introduced in 1.0.5, not the older `BrowserSession` API. A later incompatible API fails startup rather than silently removing the arm.
 
 To prepare a separate browser-use environment, run these commands outside the measurement:
 
 ```sh
 uv venv "$TOOLS/browser-use-env" --python 3.12
 uv pip install --python "$TOOLS/browser-use-env/bin/python" \
-	'browser-use==1.0.5' 'browser-harness==0.1.13' \
+	'browser-use==1.0.6' 'browser-harness==0.1.13' \
 	'psutil==7.2.2' 'websockets==15.0.1'
 uv pip freeze --python "$TOOLS/browser-use-env/bin/python" > "$TOOLS/browser-use-freeze.txt"
 ```
@@ -30,6 +30,40 @@ Use these official metadata endpoints to resolve and retain release pins before 
 - [Chrome for Testing downloadable Stable channel](https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json).
 
 For example, `curl -fsSL URL -o FILE.json` saves an endpoint response. Combine retained responses into a JSON object and pass its path with `--version-manifest`. The script records that object's contents and SHA-256. This evidence is optional and does not certify that a release remains current. Runtime versions, executable hashes, and installed worker package versions are recorded separately. Retain your full dependency freeze with the results.
+
+## Claim tiers and pins
+
+A result is one of two tiers:
+
+- `historical` (default): the run is retained, but it is never called current. No pin file is required.
+- `pinned`: every requested, ready arm must match a pin. A pinned run is not automatically current. Calling it current requires checking the pins against official release metadata at capture time. The run fails verification if a pin is missing, a recorded version is missing, or a recorded version does not match.
+
+A pinned run requires `--pins` with a canonical pin file:
+
+```json
+{
+  "captured_utc": "2026-11-20T10:00:00Z",
+  "pins": {
+    "lightpanda": {"version": "1.0.4"},
+    "agent-browser": {"version": "0.43.0"},
+    "browser-use": {"version": "1.0.6"},
+    "chrome": {"version": "130.0.6723.58"},
+    "openbrowser": {"source_commit": "a9022ad4"}
+  }
+}
+```
+
+Every pin has a `version`, except OpenBrowser, which may use a `source_commit` prefix instead. Chrome is a shared pin for every Chrome-based arm. A pinned run requires `captured_utc` in the pin file, exact version-token matches rather than substring matches, and a clean OpenBrowser source tree when the pin uses `source_commit`. The commit prefix must be at least seven characters. The harness retains the raw pin file, its SHA-256, the recorded executable and package versions, and the verification result. A pin only proves that the run matches the recorded versions. It does not prove that those versions are still the latest. Refresh the pin file from official metadata before a pinned run, and check the pins before calling the result current.
+
+A pinned run:
+
+```sh
+uv run --no-project --offline --python "$NAV_BENCH_OPENBROWSER_PYTHON" \
+	benchmarks/navigation_compare.py --output "$RESULTS/new-run" --samples 5 \
+	--claim-tier pinned --pins "$RESULTS/pins.json"
+```
+
+Without `--claim-tier pinned`, the result is historical even when the versions happen to be current.
 
 ## Run after the source stops changing
 
@@ -97,6 +131,6 @@ The adapters do not have the same engine, IPC cost, or wait policy:
 
 The Chrome executable and mock-keychain isolation flag are shared across the Chrome arms. Other library launch defaults are not forced into one common configuration. Effective command lines remain in the ownership records. The deferred-script workload avoids making rendering-engine image support a prerequisite.
 
-The script labels cross-tool performance inconclusive. No universal winner follows from these numbers. It does not measure cold-start latency, a complete browser-agent task, public-site compatibility, or production behavior. Record unrelated host load, profile the limiter in a separate untimed diagnostic, and alternate source revisions for a before-and-after claim. Do not compare these timings directly with an older diagnostic that excluded final assertions or the server audit from its timer.
+The script labels cross-tool performance inconclusive. No universal winner follows from these numbers. This is the `native-navigation` lane only. It does not measure CodeAgent task success, MCP tool behavior, CLI or daemon behavior, agent framework behavior, cold-start latency, public-site compatibility, or production behavior. It is not a basis for a comparison-page update. Every result records `claim_scope` with those unmeasured surfaces, `cross_tool_ranking: inconclusive`, and `publishable_to_comparison_page: false`; verification rejects a widened scope. Record unrelated host load, profile the limiter in a separate untimed diagnostic, and alternate source revisions for a before-and-after claim. Do not compare these timings directly with an older diagnostic that excluded final assertions or the server audit from its timer.
 
 For frozen published measurements, use the harness revision recorded with those results. Later ownership and metadata hardening changes the file hash even when the timed workload is unchanged. Smoke-validation samples from a later revision do not replace or join the published timing samples.
