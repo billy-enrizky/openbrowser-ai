@@ -309,3 +309,18 @@ def test_shared_dag_is_classified_once():
 	result = transfer_namespace({'dag': value})
 
 	assert 'dag' in result.variables
+	copied = result.variables['dag']
+	# The DAG copy preserves the shared alias at every level.
+	assert copied[0] is copied[1]
+
+
+def test_cached_classification_respects_depth_at_each_use():
+	leaf = [[0]]
+	deep: object = leaf
+	for _ in range(50):
+		deep = [deep]
+
+	result = transfer_namespace({'deep': deep})
+
+	assert result.variables == {}
+	assert 'deeply' in result.dropped['deep']

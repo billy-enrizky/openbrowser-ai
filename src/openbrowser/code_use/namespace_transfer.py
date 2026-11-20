@@ -87,6 +87,9 @@ class NamespaceValueKind(str, Enum):
 	OPAQUE = 'opaque'
 
 
+_Classification = tuple[NamespaceValueKind, str | None, int]
+
+
 @dataclass
 class NamespaceTransfer:
 	"""Result of classifying one namespace before a browser rebuild."""
@@ -142,64 +145,82 @@ def _classify(
 	value: Any,
 	old_browser: Any,
 	active: set[int],
-	cache: dict[int, tuple[NamespaceValueKind, str | None]],
+	cache: dict[int, _Classification],
 	depth: int = 0,
-) -> tuple[NamespaceValueKind, str | None]:
+) -> _Classification:
+	"""Classify a value and return its kind, reason, and nesting height."""
 	if type(value) in _SCALAR_TYPES:
-		return NamespaceValueKind.SCALAR, None
+		return NamespaceValueKind.SCALAR, None, 0
 	if old_browser is not None and value is old_browser:
-		return NamespaceValueKind.OPAQUE, 'references the previous browser session'
+		return NamespaceValueKind.OPAQUE, 'references the previous browser session', 0
 	if depth > _MAX_DEPTH:
-		return NamespaceValueKind.OPAQUE, 'nested too deeply to transfer'
+		return NamespaceValueKind.OPAQUE, 'nested too deeply to transfer', 0
 
 	key = id(value)
 	cached = cache.get(key)
 	if cached is not None:
+		kind, reason, height = cached
+		if kind is NamespaceValueKind.SCALAR and depth + height > _MAX_DEPTH:
+			# The same container can be shallow in one place and too deep in
+			# another, so the cached height must be checked at each use.
+			return NamespaceValueKind.OPAQUE, 'nested too deeply to transfer', 0
 		return cached
 
 	if type(value) is dict:
 		if key in active:
-			return NamespaceValueKind.OPAQUE, 'cyclic container'
+			return NamespaceValueKind.OPAQUE, 'cyclic container', 0
 		active.add(key)
 		try:
+			height = 0
 			for dict_key, item in value.items():
 				if type(dict_key) not in _SCALAR_TYPES:
-					result: tuple[NamespaceValueKind, str | None] = (
+					result: _Classification = (
 						NamespaceValueKind.OPAQUE,
 						f'non-scalar dict key ({type(dict_key).__name__})',
+						0,
 					)
 					cache[key] = result
 					return result
-				kind, reason = _classify(item, old_browser, active, cache, depth + 1)
+				kind, reason, child_height = _classify(item, old_browser, active, cache, depth + 1)
 				if kind is not NamespaceValueKind.SCALAR:
-					result = (NamespaceValueKind.OPAQUE, reason or 'contains a non-scalar value')
+					result = (NamespaceValueKind.OPAQUE, reason or 'contains a non-scalar value', 0)
 					cache[key] = result
 					return result
-			cache[key] = (NamespaceValueKind.SCALAR, None)
-			return cache[key]
+				height = max(height, child_height)
+			height += 1
+			if depth + height > _MAX_DEPTH:
+				result = (NamespaceValueKind.OPAQUE, 'nested too deeply to transfer', 0)
+			else:
+				result = (NamespaceValueKind.SCALAR, None, height)
+			cache[key] = result
+			return result
 		finally:
 			active.discard(key)
 
 	if type(value) in (list, tuple, set, frozenset):
 		if key in active:
-			return NamespaceValueKind.OPAQUE, 'cyclic container'
+			return NamespaceValueKind.OPAQUE, 'cyclic container', 0
 		active.add(key)
 		try:
+			height = 0
 			for item in value:
-				kind, reason = _classify(item, old_browser, active, cache, depth + 1)
+				kind, reason, child_height = _classify(item, old_browser, active, cache, depth + 1)
 				if kind is not NamespaceValueKind.SCALAR:
-					result = (
-						NamespaceValueKind.OPAQUE,
-						reason or f'contains a non-scalar value ({type(item).__name__})',
-					)
+					result = (NamespaceValueKind.OPAQUE, reason or f'contains a non-scalar value ({type(item).__name__})', 0)
 					cache[key] = result
 					return result
-			cache[key] = (NamespaceValueKind.SCALAR, None)
-			return cache[key]
+				height = max(height, child_height)
+			height += 1
+			if depth + height > _MAX_DEPTH:
+				result = (NamespaceValueKind.OPAQUE, 'nested too deeply to transfer', 0)
+			else:
+				result = (NamespaceValueKind.SCALAR, None, height)
+			cache[key] = result
+			return result
 		finally:
 			active.discard(key)
 
-	cache[key] = (NamespaceValueKind.OPAQUE, f'unsupported type {type(value).__name__}')
+	cache[key] = (NamespaceValueKind.OPAQUE, f'unsupported type {type(value).__name__}', 0)
 	return cache[key]
 
 
@@ -253,7 +274,7 @@ def transfer_namespace(
 	"""
 	result = NamespaceTransfer()
 	memo: dict[int, Any] = {}
-	cache: dict[int, tuple[NamespaceValueKind, str | None]] = {}
+	cache: dict[int, _Classification] = {}
 	for name, value in old_namespace.items():
 		if not isinstance(name, str) or name.startswith('_'):
 			continue
@@ -272,7 +293,7 @@ def transfer_namespace(
 			# An optional binding that is not present in this process is a
 			# user value under a reserved name. Fall through to classification.
 		try:
-			kind, reason = _classify(value, old_browser_session, set(), cache)
+			kind, reason, _height = _classify(value, old_browser_session, set(), cache)
 			if kind is NamespaceValueKind.SCALAR:
 				result.variables[name] = _copy_scalar(value, memo)
 				continue
