@@ -572,7 +572,7 @@ def create_namespace(
 			dl_dir.mkdir(parents=True, exist_ok=True)
 		except OSError as error:
 			if isinstance(registry, DownloadRegistry):
-				registry.fail(
+				registry.reject(
 					download_id,
 					stage='write',
 					error=f'{type(error).__name__}: {error}',

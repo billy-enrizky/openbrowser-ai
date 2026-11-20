@@ -964,6 +964,7 @@ class DownloadsWatchdog(BaseWatchdog):
 
 				# With two attempts suggesting the same name, a name match cannot
 				# prove ownership. Leave both to the CDP progress event.
+				self._prune_ambiguous_paths()
 				if self._polling_names.get(family, 0) > 1:
 					if Path(downloads_dir).exists():
 						for candidate in Path(downloads_dir).iterdir():
@@ -1589,6 +1590,13 @@ class DownloadsWatchdog(BaseWatchdog):
 		self._download_serial += 1
 		return f'{prefix}-{self._download_serial}'
 
+	def _prune_ambiguous_paths(self) -> None:
+		"""Release tombstoned paths that no longer exist on disk."""
+		if not self._ambiguous_paths:
+			return
+		self._ambiguous_paths = {path for path in self._ambiguous_paths if Path(path).exists()}
+
+	@staticmethod
 	@staticmethod
 	def _download_family(suggested: str) -> str:
 		"""Return the base name shared by all browser duplicate suffixes."""

@@ -567,6 +567,7 @@ async def test_namespace_download_file_records_a_directory_failure(tmp_path):
 	outcome = registry.latest()
 	assert outcome.phase is DownloadPhase.FAILED
 	assert outcome.stage == 'write'
+	assert outcome.rejected is True
 
 
 @pytest.mark.asyncio
@@ -584,3 +585,17 @@ async def test_lookback_still_works_when_an_unrelated_download_is_pending():
 	)
 
 	assert outcome.download_id == 'recent-b'
+
+
+def test_prune_ambiguous_paths_releases_deleted_files(tmp_path):
+	watchdog, _ = _make_watchdog(str(tmp_path))
+	live = tmp_path / 'report.pdf'
+	live.write_bytes(b'x')
+	gone = tmp_path / 'gone.pdf'
+	gone.write_bytes(b'x')
+	watchdog._ambiguous_paths = {str(live), str(gone)}
+	gone.unlink()
+
+	watchdog._prune_ambiguous_paths()
+
+	assert watchdog._ambiguous_paths == {str(live)}

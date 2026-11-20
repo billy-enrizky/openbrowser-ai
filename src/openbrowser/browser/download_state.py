@@ -48,6 +48,7 @@ class DownloadOutcome:
 	detail: str | None = None
 	from_cache: bool = False
 	auto_download: bool = False
+	rejected: bool = False
 	requested_at: float = field(default_factory=time.time)
 	finished_at: float | None = None
 	_requested_monotonic: float = field(default_factory=time.monotonic, repr=False, compare=False)
@@ -80,6 +81,7 @@ class DownloadOutcome:
 			'detail': self.detail,
 			'from_cache': self.from_cache,
 			'auto_download': self.auto_download,
+			'rejected': self.rejected,
 			'requested_at': self.requested_at,
 			'finished_at': self.finished_at,
 			'duration_ms': self.duration_ms,
@@ -209,7 +211,7 @@ class DownloadRegistry:
 		if outcome.phase is DownloadPhase.CANCELLED:
 			# A cancelled attempt stays cancelled even if a late file appears.
 			return outcome
-		if outcome.phase is DownloadPhase.FAILED and outcome.stage == 'capacity':
+		if outcome.rejected:
 			# A rejected transfer was never tracked; it cannot become a success.
 			return outcome
 		# A file that appears after a timeout is stronger evidence than the
@@ -271,6 +273,7 @@ class DownloadRegistry:
 			stage=stage,
 			error=error,
 			detail=detail,
+			rejected=True,
 			finished_at=time.time(),
 			_finished_monotonic=time.monotonic(),
 		)
@@ -458,7 +461,7 @@ class DownloadRegistry:
 			# attempt is failed with a capacity error the caller can inspect.
 			download_id = pending.pop(0)
 			outcome = self._outcomes[download_id]
-			outcome.stage = 'capacity'
+			outcome.stage = 'capacity_evicted'
 			outcome.error = f'Too many active downloads (limit {self._max_active})'
 			outcome.phase = DownloadPhase.FAILED
 			outcome.finished_at = time.time()

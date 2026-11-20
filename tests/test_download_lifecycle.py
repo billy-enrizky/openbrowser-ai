@@ -334,7 +334,7 @@ def test_active_capacity_fails_the_oldest_pending_attempt():
 	assert phases['p1'] is DownloadPhase.FAILED
 	assert phases['p2'] is DownloadPhase.STARTED
 	assert phases['p3'] is DownloadPhase.STARTED
-	assert registry.get('p1').stage == 'capacity'
+	assert registry.get('p1').stage == 'capacity_evicted'
 
 
 def test_redacted_outcome_handles_malformed_and_non_string_urls():
@@ -464,3 +464,18 @@ def test_redacted_outcome_scrubs_urls_inside_error_text():
 	assert 'pass' not in redacted['error']
 	assert 'X-Amz-Signature' not in redacted['detail']
 	assert 'https://example.com/file?redacted' in redacted['error']
+
+
+def test_an_admitted_capacity_eviction_can_still_complete():
+	registry = DownloadRegistry(max_outcomes=10, max_active=1)
+	registry.start('admitted')
+	registry.start('newer')
+
+	evicted = registry.get('admitted')
+	assert evicted.phase is DownloadPhase.FAILED
+	assert evicted.stage == 'capacity_evicted'
+	assert evicted.rejected is False
+
+	completed = registry.complete('admitted', path='/tmp/admitted.bin', file_size=4)
+
+	assert completed.phase is DownloadPhase.COMPLETED
