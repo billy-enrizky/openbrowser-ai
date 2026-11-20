@@ -18,14 +18,21 @@ from typing import Any
 from urllib.parse import unquote, urlparse
 
 import requests
+from pydantic import ValidationError
 
 from openbrowser.browser import BrowserSession
+
 try:
 	from openbrowser.filesystem.file_system import FileSystem
 except ImportError:
 	FileSystem = None  # type: ignore[assignment,misc]
 from openbrowser.llm.base import BaseChatModel
+from openbrowser.tools.action_readiness import (
+	readiness_error_from_validation_error,
+	validate_index_value,
+)
 from openbrowser.tools.service import CodeAgentTools, Tools
+from openbrowser.tools.views import IndexedAction
 
 logger = logging.getLogger(__name__)
 
@@ -822,18 +829,27 @@ def create_namespace(
 						if i < len(field_names):
 							kwargs[field_names[i]] = arg
 
-				# Guard: catch index=None before Pydantic validation for a clear error
-				if 'index' in kwargs and kwargs['index'] is None:
-					field_info = par_model.model_fields.get('index')
-					if field_info and field_info.is_required():
-						raise ValueError(
-							f'{act_name}() requires a valid element index, got index=None. '
-							f'Read the current browser state and use an [i_N] index from the DOM tree.'
-						)
+				# Readiness guard: indexed actions fail with a typed error and a
+				# refresh hint before Pydantic produces a raw schema error.
+				if 'index' in kwargs:
+					if isinstance(par_model, type) and issubclass(par_model, IndexedAction):
+						kwargs['index'] = validate_index_value(kwargs['index'], action=act_name)
+					elif kwargs['index'] is None:
+						field_info = par_model.model_fields.get('index')
+						if field_info and field_info.is_required():
+							raise ValueError(
+								f'{act_name}() requires a valid element index, got index=None. '
+								f'Read the current browser state and use an [i_N] index from the DOM tree.'
+							)
 
 				# Create params from kwargs
 				try:
 					params = par_model(**kwargs)
+				except ValidationError as e:
+					readiness = readiness_error_from_validation_error(e)
+					if readiness is not None:
+						raise readiness.with_action(act_name) from e
+					raise ValueError(f'Invalid parameters for {act_name}: {e}') from e
 				except Exception as e:
 					raise ValueError(f'Invalid parameters for {act_name}: {e}') from e
 
@@ -931,7 +947,7 @@ def create_namespace(
 		namespace_action_name = 'input_text' if action_name == 'input' else action_name
 
 		# Add the wrapper to the namespace
-		namespace[namespace_action_name] = make_action_wrapper(action_name, param_model, action_function)
+		namespace[namespace_action_name] = make_action_wrapper(namespace_action_name, param_model, action_function)
 
 	return namespace
 

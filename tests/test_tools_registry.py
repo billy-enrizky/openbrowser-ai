@@ -14,6 +14,7 @@ from openbrowser.tools.registry.views import (
     RegisteredAction,
     SpecialActionParameters,
 )
+from openbrowser.tools.views import ClickElementAction
 
 logger = logging.getLogger(__name__)
 
@@ -339,6 +340,25 @@ class TestRegistryExecuteAction:
     async def test_execute_with_invalid_params_raises(self, registry_with_action):
         with pytest.raises(RuntimeError, match="Invalid parameters"):
             await registry_with_action.execute_action("simple", {"wrong_param": 123})
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("params", [{}, {"index": None}])
+    async def test_execute_action_preserves_readiness_error(self, params):
+        registry = Registry()
+
+        @registry.action("Click action", param_model=ClickElementAction)
+        async def click(index: int):
+            return "clicked"
+
+        from openbrowser.tools.action_readiness import ActionReadinessError
+
+        with pytest.raises(ActionReadinessError) as exc_info:
+            await registry.execute_action("click", params)
+
+        message = str(exc_info.value)
+        assert "Invalid parameters" not in message
+        assert "element_index_missing" in message
+        assert "get_status" in message
 
     @pytest.mark.asyncio
     async def test_execute_action_success(self, registry_with_action):

@@ -8,13 +8,17 @@ from inspect import Parameter, iscoroutinefunction, signature
 from types import UnionType
 from typing import Any, Generic, Optional, TypeVar, Union, get_args, get_origin
 
-from pydantic import BaseModel, Field, RootModel, create_model
+from pydantic import BaseModel, Field, RootModel, ValidationError, create_model
 
 from openbrowser.browser import BrowserSession
 from openbrowser.filesystem.file_system import FileSystem
 from openbrowser.llm.base import BaseChatModel
 from openbrowser.observability import observe_debug
 from openbrowser.telemetry.service import ProductTelemetry
+from openbrowser.tools.action_readiness import (
+	ActionReadinessError,
+	readiness_error_from_validation_error,
+)
 from openbrowser.tools.registry.views import (
 	ActionModel,
 	ActionRegistry,
@@ -326,8 +330,14 @@ class Registry(Generic[Context]):
 			# Create the validated Pydantic model
 			try:
 				validated_params = action.param_model(**params)
+			except ValidationError as e:
+				readiness = readiness_error_from_validation_error(e)
+				if readiness is not None:
+					# Keep the typed message and hint instead of a Pydantic dump.
+					raise readiness from e
+				raise ValueError(f'Invalid parameters for action {action_name}: {type(e)}: {e}') from e
 			except Exception as e:
-				raise ValueError(f'Invalid parameters {params} for action {action_name}: {type(e)}: {e}') from e
+				raise ValueError(f'Invalid parameters for action {action_name}: {type(e)}: {e}') from e
 
 			if sensitive_data:
 				# Get current URL if browser_session is provided
@@ -375,6 +385,9 @@ class Registry(Generic[Context]):
 			except Exception as e:
 				raise
 
+		except ActionReadinessError:
+			# Keep the typed readiness message and refresh hint intact.
+			raise
 		except ValueError as e:
 			# Preserve ValueError messages from validation
 			if 'requires browser_session but none provided' in str(e) or 'requires page_extraction_llm but none provided' in str(

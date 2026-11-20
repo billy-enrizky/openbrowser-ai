@@ -54,8 +54,14 @@ def _make_mock_browser_session():
     mock_event.__await__ = lambda self: event_future.__await__()
 
     session.event_bus.dispatch = MagicMock(return_value=mock_event)
-    session.get_element_by_index = AsyncMock(return_value=None)
-    session.get_selector_map = AsyncMock(return_value={})
+    # A test that needs an element sets session._selector_nodes[index] = node.
+    session._selector_nodes = {}
+    session.get_element_by_index = AsyncMock(
+        side_effect=lambda index: session._selector_nodes.get(index)
+    )
+    session.get_selector_map = AsyncMock(
+        side_effect=lambda: dict(session._selector_nodes)
+    )
     session.get_target_id_from_tab_id = AsyncMock(return_value="full_target_id_1234")
     session.highlight_interaction_element = AsyncMock()
     session.is_file_input = MagicMock(return_value=False)
@@ -158,7 +164,7 @@ class TestInputSensitiveKeyDetection:
         tools = Tools()
         session = _make_mock_browser_session()
         node = _make_mock_node("input")
-        session.get_element_by_index = AsyncMock(return_value=node)
+        session._selector_nodes[3] = node
         event = _make_awaitable_event()
         session.event_bus.dispatch = MagicMock(return_value=event)
 
@@ -178,7 +184,7 @@ class TestInputSensitiveKeyDetection:
         tools = Tools()
         session = _make_mock_browser_session()
         node = _make_mock_node("input")
-        session.get_element_by_index = AsyncMock(return_value=node)
+        session._selector_nodes[3] = node
         event = _make_awaitable_event()
         session.event_bus.dispatch = MagicMock(return_value=event)
 
@@ -430,17 +436,17 @@ class TestBaseToolsUploadFile:
         """Element not found in selector map (lines 419-421)."""
         tools = Tools()
         session = _make_mock_browser_session()
-        session.get_selector_map = AsyncMock(return_value={})
+        session._selector_nodes[1] = _make_mock_node("input")
 
         with patch("os.path.exists", return_value=True):
             result = await tools.registry.execute_action(
                 "upload_file",
-                {"index": 1, "path": "/tmp/test.txt"},
+                {"index": 2, "path": "/tmp/test.txt"},
                 browser_session=session,
                 available_file_paths=["/tmp/test.txt"],
             )
         assert result.error is not None
-        assert "does not exist" in result.error
+        assert "element_index_stale" in result.error
 
     @pytest.mark.asyncio
     async def test_upload_file_find_file_input_near_element_direct(self):
@@ -976,7 +982,7 @@ class TestDropdownOptionsNoData:
         tools = Tools()
         session = _make_mock_browser_session()
         node = _make_mock_node("select")
-        session.get_element_by_index = AsyncMock(return_value=node)
+        session._selector_nodes[5] = node
         # Return empty dict (falsy-like when checked)
         event = _make_awaitable_event(result=None)
         session.event_bus.dispatch = MagicMock(return_value=event)
@@ -1002,7 +1008,7 @@ class TestSelectDropdownNoData:
         tools = Tools()
         session = _make_mock_browser_session()
         node = _make_mock_node("select")
-        session.get_element_by_index = AsyncMock(return_value=node)
+        session._selector_nodes[5] = node
         event = _make_awaitable_event(result=None)
         session.event_bus.dispatch = MagicMock(return_value=event)
 

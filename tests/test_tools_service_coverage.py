@@ -55,8 +55,14 @@ def _make_mock_browser_session():
     mock_event.__await__ = lambda self: event_future.__await__()
 
     session.event_bus.dispatch = MagicMock(return_value=mock_event)
-    session.get_element_by_index = AsyncMock(return_value=None)
-    session.get_selector_map = AsyncMock(return_value={})
+    # Readiness reads the selector map; keep both lookups on one source.
+    session._selector_nodes = {}
+    session.get_element_by_index = AsyncMock(
+        side_effect=lambda index: session._selector_nodes.get(index)
+    )
+    session.get_selector_map = AsyncMock(
+        side_effect=lambda: dict(session._selector_nodes)
+    )
     session.get_target_id_from_tab_id = AsyncMock(return_value="full_target_id_1234")
     session.highlight_interaction_element = AsyncMock()
     session.is_file_input = MagicMock(return_value=False)
@@ -366,7 +372,7 @@ class TestClickAction:
         tools = Tools()
         session = _make_mock_browser_session()
         node = _make_mock_node("button")
-        session.get_element_by_index = AsyncMock(return_value=node)
+        session._selector_nodes[5] = node
         event = _make_awaitable_event()
         session.event_bus.dispatch = MagicMock(return_value=event)
 
@@ -382,21 +388,22 @@ class TestClickAction:
     async def test_click_element_not_found(self):
         tools = Tools()
         session = _make_mock_browser_session()
-        session.get_element_by_index = AsyncMock(return_value=None)
+        session._selector_nodes[1] = _make_mock_node("div")
 
         result = await tools.registry.execute_action(
             "click",
             {"index": 99},
             browser_session=session,
         )
-        assert "not available" in result.extracted_content
+        assert result.error is not None
+        assert "element_index_stale" in result.error
 
     @pytest.mark.asyncio
     async def test_click_validation_error_select_element(self):
         tools = Tools()
         session = _make_mock_browser_session()
         node = _make_mock_node("select")
-        session.get_element_by_index = AsyncMock(return_value=node)
+        session._selector_nodes[5] = node
         event = _make_awaitable_event(
             result={"validation_error": "Cannot click on <select> elements."}
         )
@@ -417,7 +424,7 @@ class TestClickAction:
         tools = Tools()
         session = _make_mock_browser_session()
         node = _make_mock_node("input")
-        session.get_element_by_index = AsyncMock(return_value=node)
+        session._selector_nodes[5] = node
         event = _make_awaitable_event(
             result={"validation_error": "Cannot click on file input elements."}
         )
@@ -436,7 +443,7 @@ class TestClickAction:
         tools = Tools()
         session = _make_mock_browser_session()
         node = _make_mock_node("button")
-        session.get_element_by_index = AsyncMock(return_value=node)
+        session._selector_nodes[5] = node
         event = _make_awaitable_event(result={"x": 100, "y": 200})
         session.event_bus.dispatch = MagicMock(return_value=event)
 
@@ -455,7 +462,7 @@ class TestClickAction:
         tools = Tools()
         session = _make_mock_browser_session()
         node = _make_mock_node("button")
-        session.get_element_by_index = AsyncMock(return_value=node)
+        session._selector_nodes[5] = node
 
         err = BrowserError("click failed")
         err.long_term_memory = "Click failed on element"
@@ -476,7 +483,7 @@ class TestClickAction:
         tools = Tools()
         session = _make_mock_browser_session()
         node = _make_mock_node("button")
-        session.get_element_by_index = AsyncMock(return_value=node)
+        session._selector_nodes[5] = node
 
         event = _make_awaitable_event(side_effect=Exception("random error"))
         session.event_bus.dispatch = MagicMock(return_value=event)
@@ -501,7 +508,7 @@ class TestInputAction:
         tools = Tools()
         session = _make_mock_browser_session()
         node = _make_mock_node("input")
-        session.get_element_by_index = AsyncMock(return_value=node)
+        session._selector_nodes[3] = node
         event = _make_awaitable_event()
         session.event_bus.dispatch = MagicMock(return_value=event)
 
@@ -517,21 +524,22 @@ class TestInputAction:
     async def test_input_element_not_found(self):
         tools = Tools()
         session = _make_mock_browser_session()
-        session.get_element_by_index = AsyncMock(return_value=None)
+        session._selector_nodes[1] = _make_mock_node("div")
 
         result = await tools.registry.execute_action(
             "input",
             {"index": 3, "text": "hello"},
             browser_session=session,
         )
-        assert "not available" in result.extracted_content
+        assert result.error is not None
+        assert "element_index_stale" in result.error
 
     @pytest.mark.asyncio
     async def test_input_with_sensitive_data(self):
         tools = Tools()
         session = _make_mock_browser_session()
         node = _make_mock_node("input")
-        session.get_element_by_index = AsyncMock(return_value=node)
+        session._selector_nodes[3] = node
         event = _make_awaitable_event()
         session.event_bus.dispatch = MagicMock(return_value=event)
 
@@ -548,7 +556,7 @@ class TestInputAction:
         tools = Tools()
         session = _make_mock_browser_session()
         node = _make_mock_node("input")
-        session.get_element_by_index = AsyncMock(return_value=node)
+        session._selector_nodes[3] = node
         event = _make_awaitable_event()
         session.event_bus.dispatch = MagicMock(return_value=event)
 
@@ -568,7 +576,7 @@ class TestInputAction:
         tools = Tools()
         session = _make_mock_browser_session()
         node = _make_mock_node("input")
-        session.get_element_by_index = AsyncMock(return_value=node)
+        session._selector_nodes[3] = node
 
         err = BrowserError("type failed")
         err.long_term_memory = "Type failed"
@@ -589,7 +597,7 @@ class TestInputAction:
         tools = Tools()
         session = _make_mock_browser_session()
         node = _make_mock_node("input")
-        session.get_element_by_index = AsyncMock(return_value=node)
+        session._selector_nodes[3] = node
         event = _make_awaitable_event(side_effect=Exception("type error"))
         session.event_bus.dispatch = MagicMock(return_value=event)
 
@@ -883,7 +891,7 @@ class TestScrollAction:
         tools = Tools()
         session = _make_mock_browser_session()
         node = _make_mock_node("div")
-        session.get_element_by_index = AsyncMock(return_value=node)
+        session._selector_nodes[5] = node
         event = _make_awaitable_event()
         session.event_bus.dispatch = MagicMock(return_value=event)
 
@@ -898,7 +906,7 @@ class TestScrollAction:
     async def test_scroll_element_not_found(self):
         tools = Tools()
         session = _make_mock_browser_session()
-        session.get_element_by_index = AsyncMock(return_value=None)
+        session._selector_nodes[1] = _make_mock_node("div")
 
         result = await tools.registry.execute_action(
             "scroll",
@@ -906,7 +914,7 @@ class TestScrollAction:
             browser_session=session,
         )
         assert result.error is not None
-        assert "not found" in result.error
+        assert "element_index_stale" in result.error
 
     @pytest.mark.asyncio
     async def test_scroll_viewport_fallback(self):
@@ -1059,7 +1067,7 @@ class TestDropdownActions:
         tools = Tools()
         session = _make_mock_browser_session()
         node = _make_mock_node("select")
-        session.get_element_by_index = AsyncMock(return_value=node)
+        session._selector_nodes[5] = node
         event = _make_awaitable_event(
             result={
                 "short_term_memory": "Options: A, B, C",
@@ -1079,21 +1087,22 @@ class TestDropdownActions:
     async def test_dropdown_options_element_not_found(self):
         tools = Tools()
         session = _make_mock_browser_session()
-        session.get_element_by_index = AsyncMock(return_value=None)
+        session._selector_nodes[1] = _make_mock_node("div")
 
         result = await tools.registry.execute_action(
             "dropdown_options",
             {"index": 99},
             browser_session=session,
         )
-        assert "not available" in result.extracted_content
+        assert result.error is not None
+        assert "element_index_stale" in result.error
 
     @pytest.mark.asyncio
     async def test_select_dropdown_success(self):
         tools = Tools()
         session = _make_mock_browser_session()
         node = _make_mock_node("select")
-        session.get_element_by_index = AsyncMock(return_value=node)
+        session._selector_nodes[5] = node
         event = _make_awaitable_event(
             result={"success": "true", "message": "Selected: Option A"}
         )
@@ -1110,21 +1119,22 @@ class TestDropdownActions:
     async def test_select_dropdown_element_not_found(self):
         tools = Tools()
         session = _make_mock_browser_session()
-        session.get_element_by_index = AsyncMock(return_value=None)
+        session._selector_nodes[1] = _make_mock_node("div")
 
         result = await tools.registry.execute_action(
             "select_dropdown",
             {"index": 99, "text": "Option A"},
             browser_session=session,
         )
-        assert "not available" in result.extracted_content
+        assert result.error is not None
+        assert "element_index_stale" in result.error
 
     @pytest.mark.asyncio
     async def test_select_dropdown_failure_structured(self):
         tools = Tools()
         session = _make_mock_browser_session()
         node = _make_mock_node("select")
-        session.get_element_by_index = AsyncMock(return_value=node)
+        session._selector_nodes[5] = node
         event = _make_awaitable_event(
             result={
                 "success": "false",
@@ -1146,7 +1156,7 @@ class TestDropdownActions:
         tools = Tools()
         session = _make_mock_browser_session()
         node = _make_mock_node("select")
-        session.get_element_by_index = AsyncMock(return_value=node)
+        session._selector_nodes[5] = node
         event = _make_awaitable_event(
             result={"success": "false", "error": "No such option"}
         )
@@ -1944,17 +1954,17 @@ class TestCodeAgentToolsUploadFile:
     async def test_upload_file_element_not_in_selector_map(self):
         tools = CodeAgentTools()
         session = _make_mock_browser_session()
-        session.get_selector_map = AsyncMock(return_value={})
+        session._selector_nodes[1] = _make_mock_node("input")
 
         with patch("os.path.exists", return_value=True):
             result = await tools.registry.execute_action(
                 "upload_file",
-                {"index": 1, "path": "/tmp/test.txt"},
+                {"index": 2, "path": "/tmp/test.txt"},
                 browser_session=session,
                 available_file_paths=["/tmp/test.txt"],
             )
         assert result.error is not None
-        assert "does not exist" in result.error
+        assert "element_index_stale" in result.error
 
 
 # ---------------------------------------------------------------------------

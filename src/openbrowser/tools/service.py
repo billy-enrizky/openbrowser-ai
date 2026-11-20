@@ -12,8 +12,6 @@ except ImportError:
 	Laminar = None  # type: ignore
 from pydantic import BaseModel
 
-from openbrowser.models import ActionResult
-from openbrowser.tools.registry.views import ActionModel
 from openbrowser.browser import BrowserSession
 from openbrowser.browser.events import (
 	ClickElementEvent,
@@ -28,14 +26,20 @@ from openbrowser.browser.events import (
 	TypeTextEvent,
 	UploadFileEvent,
 )
-from openbrowser.browser.views import BrowserError
 from openbrowser.browser.tabs import TabError, TabRegistry
+from openbrowser.browser.views import BrowserError
 from openbrowser.dom.service import EnhancedDOMTreeNode
 from openbrowser.filesystem.file_system import FileSystem
 from openbrowser.llm.base import BaseChatModel
 from openbrowser.llm.messages import SystemMessage, UserMessage
+from openbrowser.models import ActionResult
 from openbrowser.observability import observe_debug
+from openbrowser.tools.action_readiness import (
+	ActionReadinessError,
+	require_element_index,
+)
 from openbrowser.tools.registry.service import Registry
+from openbrowser.tools.registry.views import ActionModel
 from openbrowser.tools.utils import get_click_description
 from openbrowser.tools.views import (
 	ClickElementAction,
@@ -254,16 +258,14 @@ class Tools(Generic[Context]):
 		async def click(params: ClickElementAction, browser_session: BrowserSession):
 			# Dispatch click event with node
 			try:
-				assert params.index != 0, (
-					'Cannot click on element with index 0. If there are no interactive elements use wait(), refresh(), etc. to troubleshoot'
-				)
-
-				# Look up the node from the selector map
-				node = await browser_session.get_element_by_index(params.index)
-				if node is None:
-					msg = f'Element index {params.index} not available - page may have changed. Try refreshing browser state.'
-					logger.warning(f'⚠️ {msg}')
-					return ActionResult(extracted_content=msg)
+				# Require an index that exists in the current browser state.
+				selector_map = await browser_session.get_selector_map()
+				try:
+					index = require_element_index(params.index, selector_map=selector_map, action='click')
+				except ActionReadinessError as readiness_error:
+					logger.warning(f'⚠️ {readiness_error}')
+					return ActionResult(error=str(readiness_error))
+				node = selector_map[index]
 
 				# Get description of clicked element
 				element_desc = get_click_description(node)
@@ -316,12 +318,14 @@ class Tools(Generic[Context]):
 			has_sensitive_data: bool = False,
 			sensitive_data: dict[str, str | dict[str, str]] | None = None,
 		):
-			# Look up the node from the selector map
-			node = await browser_session.get_element_by_index(params.index)
-			if node is None:
-				msg = f'Element index {params.index} not available - page may have changed. Try refreshing browser state.'
-				logger.warning(f'⚠️ {msg}')
-				return ActionResult(extracted_content=msg)
+			# Require an index that exists in the current browser state.
+			selector_map = await browser_session.get_selector_map()
+			try:
+				index = require_element_index(params.index, selector_map=selector_map, action='input_text')
+			except ActionReadinessError as readiness_error:
+				logger.warning(f'⚠️ {readiness_error}')
+				return ActionResult(error=str(readiness_error))
+			node = selector_map[index]
 
 			# Highlight the element being typed into (truly non-blocking)
 			asyncio.create_task(browser_session.highlight_interaction_element(node))
@@ -427,11 +431,12 @@ class Tools(Generic[Context]):
 
 			# Get the selector map to find the node
 			selector_map = await browser_session.get_selector_map()
-			if params.index not in selector_map:
-				msg = f'Element with index {params.index} does not exist.'
-				return ActionResult(error=msg)
+			try:
+				index = require_element_index(params.index, selector_map=selector_map, action='upload_file')
+			except ActionReadinessError as readiness_error:
+				return ActionResult(error=str(readiness_error))
 
-			node = selector_map[params.index]
+			node = selector_map[index]
 
 			# Helper function to find file input near the selected element
 			def find_file_input_near_element(
@@ -757,11 +762,12 @@ You will be given a query and the markdown of a webpage that has been filtered t
 				# Special case: index 0 means scroll the whole page (root/body element)
 				node = None
 				if params.index is not None and params.index != 0:
-					node = await browser_session.get_element_by_index(params.index)
-					if node is None:
-						# Element does not exist
-						msg = f'Element index {params.index} not found in browser state'
-						return ActionResult(error=msg)
+					selector_map = await browser_session.get_selector_map()
+					try:
+						index = require_element_index(params.index, selector_map=selector_map, action='scroll')
+					except ActionReadinessError as readiness_error:
+						return ActionResult(error=str(readiness_error))
+					node = selector_map[index]
 
 				direction = 'down' if params.down else 'up'
 				target = f'element {params.index}' if params.index is not None and params.index != 0 else ''
@@ -973,12 +979,14 @@ You will be given a query and the markdown of a webpage that has been filtered t
 		)
 		async def dropdown_options(params: GetDropdownOptionsAction, browser_session: BrowserSession):
 			"""Get all options from a native dropdown or ARIA menu"""
-			# Look up the node from the selector map
-			node = await browser_session.get_element_by_index(params.index)
-			if node is None:
-				msg = f'Element index {params.index} not available - page may have changed. Try refreshing browser state.'
-				logger.warning(f'⚠️ {msg}')
-				return ActionResult(extracted_content=msg)
+			# Require an index that exists in the current browser state.
+			selector_map = await browser_session.get_selector_map()
+			try:
+				index = require_element_index(params.index, selector_map=selector_map, action='dropdown_options')
+			except ActionReadinessError as readiness_error:
+				logger.warning(f'⚠️ {readiness_error}')
+				return ActionResult(error=str(readiness_error))
+			node = selector_map[index]
 
 			# Dispatch GetDropdownOptionsEvent to the event handler
 
@@ -1001,12 +1009,14 @@ You will be given a query and the markdown of a webpage that has been filtered t
 		)
 		async def select_dropdown(params: SelectDropdownOptionAction, browser_session: BrowserSession):
 			"""Select dropdown option by the text of the option you want to select"""
-			# Look up the node from the selector map
-			node = await browser_session.get_element_by_index(params.index)
-			if node is None:
-				msg = f'Element index {params.index} not available - page may have changed. Try refreshing browser state.'
-				logger.warning(f'⚠️ {msg}')
-				return ActionResult(extracted_content=msg)
+			# Require an index that exists in the current browser state.
+			selector_map = await browser_session.get_selector_map()
+			try:
+				index = require_element_index(params.index, selector_map=selector_map, action='select_dropdown')
+			except ActionReadinessError as readiness_error:
+				logger.warning(f'⚠️ {readiness_error}')
+				return ActionResult(error=str(readiness_error))
+			node = selector_map[index]
 
 			# Dispatch SelectDropdownOptionEvent to the event handler
 			from openbrowser.browser.events import SelectDropdownOptionEvent
@@ -1708,11 +1718,12 @@ class CodeAgentTools(Tools[Context]):
 
 			# Get the selector map to find the node
 			selector_map = await browser_session.get_selector_map()
-			if params.index not in selector_map:
-				msg = f'Element with index {params.index} does not exist.'
-				return ActionResult(error=msg)
+			try:
+				index = require_element_index(params.index, selector_map=selector_map, action='upload_file')
+			except ActionReadinessError as readiness_error:
+				return ActionResult(error=str(readiness_error))
 
-			node = selector_map[params.index]
+			node = selector_map[index]
 
 			# Helper function to find file input near the selected element
 			def find_file_input_near_element(

@@ -1,6 +1,52 @@
+from collections.abc import Mapping
 from typing import Generic, Literal, TypeVar
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from openbrowser.tools.action_readiness import (
+	ActionReadinessCode,
+	ActionReadinessError,
+	normalize_optional_index,
+	validate_index_value,
+)
+
+
+class IndexedAction(BaseModel):
+	"""Base for actions that require a 1-based element index from browser state.
+
+	Inheriting validates the index value at the model boundary. A custom
+	handler that also needs state readiness must call
+	``require_element_index(index, selector_map=...)`` from its service path.
+	Actions may use an ``index`` field for a different, possibly 0-based
+	purpose without inheriting this class.
+	"""
+
+	@model_validator(mode='before')
+	@classmethod
+	def _validate_index_readiness(cls, data):
+		if not isinstance(data, Mapping) or isinstance(data, cls):
+			return data
+		normalized = dict(data)
+		field = cls.model_fields.get('index')
+		if 'index' not in normalized:
+			if field is not None and field.is_required():
+				raise ActionReadinessError(
+					ActionReadinessCode.MISSING,
+					'index is required, but it was omitted.',
+					action=cls.__name__,
+				)
+			return normalized
+		normalized['index'] = validate_index_value(normalized['index'], action=cls.__name__)
+		return normalized
+
+
+class OptionalIndexedAction(BaseModel):
+	"""Base for actions with an optional index; 0 keeps the action's sentinel."""
+
+	@field_validator('index', mode='before', check_fields=False)
+	@classmethod
+	def _validate_optional_index(cls, value):
+		return normalize_optional_index(value, action=cls.__name__, sentinel=0)
 
 
 # Action Input Models
@@ -34,14 +80,14 @@ class NavigateAction(BaseModel):
 GoToUrlAction = NavigateAction
 
 
-class ClickElementAction(BaseModel):
+class ClickElementAction(IndexedAction):
 	index: int = Field(ge=1, description='from browser_state. All interactive elements work except <select> or file inputs.')
 	# expect_download: bool = Field(default=False, description='set True if expecting a download, False otherwise')  # moved to downloads_watchdog.py
 	# click_count: int = 1  # TODO
 
 
-class InputTextAction(BaseModel):
-	index: int = Field(ge=1, description='from browser_state')
+class InputTextAction(IndexedAction):
+	index: int = Field(ge=1, description='1-based index from browser_state')
 	text: str
 	clear: bool = Field(default=True, description='1=clear, 0=append')
 
@@ -74,18 +120,21 @@ class CloseTabAction(BaseModel):
 	)
 
 
-class ScrollAction(BaseModel):
+class ScrollAction(OptionalIndexedAction):
 	down: bool = Field(description='down=True=scroll down, down=False scroll up')
 	pages: float = Field(default=1.0, description='0.5=half page, 1=full page, 10=to bottom/top')
-	index: int | None = Field(default=None, description='Optional element index to scroll within specific container')
+	index: int | None = Field(
+		default=None,
+		description='Optional 1-based element index to scroll within a specific container. 0 scrolls the whole page.',
+	)
 
 
 class SendKeysAction(BaseModel):
 	keys: str = Field(description='keys (Escape, Enter, PageDown) or shortcuts (Control+o)')
 
 
-class UploadFileAction(BaseModel):
-	index: int
+class UploadFileAction(IndexedAction):
+	index: int = Field(ge=1, description='1-based index of the file input from browser_state')
 	path: str
 
 
@@ -97,12 +146,12 @@ class NoParamsAction(BaseModel):
 	model_config = ConfigDict(extra='ignore')
 
 
-class GetDropdownOptionsAction(BaseModel):
-	index: int
+class GetDropdownOptionsAction(IndexedAction):
+	index: int = Field(ge=1, description='1-based index of the dropdown from browser_state')
 
 
-class SelectDropdownOptionAction(BaseModel):
-	index: int
+class SelectDropdownOptionAction(IndexedAction):
+	index: int = Field(ge=1, description='1-based index of the dropdown from browser_state')
 	text: str = Field(description='exact text/value')
 
 
