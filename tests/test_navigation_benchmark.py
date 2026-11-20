@@ -1,3 +1,4 @@
+import hashlib
 import importlib.util
 import asyncio
 import contextlib
@@ -339,7 +340,7 @@ def test_config_requires_pins_for_a_pinned_claim(tmp_path):
         benchmark.validate_config(benchmark.parser().parse_args(base))
 
     pins = tmp_path / 'pins.json'
-    pins.write_text(json.dumps({'pins': {'chrome': {'version': '130.0.6723.58'}}}))
+    pins.write_text(json.dumps({'captured_utc': '2026-11-20T00:00:00Z', 'pins': {'chrome': {'version': '130.0.6723.58'}}}))
     benchmark.validate_config(benchmark.parser().parse_args([*base, '--pins', str(pins)]))
 
     broken = tmp_path / 'broken.json'
@@ -746,6 +747,30 @@ def test_checked_in_pin_example_matches_the_schema():
     assert set(pins['pins']) == {'lightpanda', 'agent-browser', 'browser-use', 'chrome', 'openbrowser'}
     assert pins['pins']['browser-use']['version'] == '1.0.6'
     assert pins['pins']['openbrowser']['source_commit']
+
+
+def test_verify_cross_checks_the_retained_pin_snapshot(tmp_path):
+    pins = {'captured_utc': '2026-11-20T00:00:00Z', 'pins': {'chrome': {'version': '130.0.6723.58'}}}
+    raw = json.dumps(pins).encode()
+    (tmp_path / 'pins.json').write_bytes(raw)
+    result = {'metadata': {'pins': pins, 'pins_sha256': hashlib.sha256(raw).hexdigest()}}
+    assert benchmark.pin_snapshot_errors(tmp_path, result) == []
+    (tmp_path / 'pins.json').write_text('{"pins": {}}')
+    assert benchmark.pin_snapshot_errors(tmp_path, result)
+
+
+def test_pinned_config_requires_a_capture_time_before_measurement(tmp_path):
+    source = tmp_path / 'source'
+    (source / 'src/openbrowser').mkdir(parents=True)
+    (source / 'src/openbrowser/__init__.py').touch()
+    pins = tmp_path / 'pins.json'
+    pins.write_text(json.dumps({'pins': {'chrome': {'version': '130.0.6723.58'}}}))
+    args = benchmark.parser().parse_args([
+        '--source', str(source), '--output', str(tmp_path / 'out'),
+        '--claim-tier', 'pinned', '--pins', str(pins),
+    ])
+    with pytest.raises(ValueError, match='captured_utc'):
+        benchmark.validate_config(args)
 
 
 def test_pin_file_requires_a_pins_object_and_an_identity(tmp_path):

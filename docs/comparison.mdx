@@ -11,7 +11,7 @@ Two benchmark suites measuring OpenBrowser against competitors:
 1. **[CLI Benchmark](/cli-comparison)** (2026-03-15) -- 4-way comparison of CLI tools driven by an LLM via a single Bash tool
 2. **MCP Benchmark** (below) -- 3-way comparison of MCP servers as tool providers
 
-> **Historical benchmark, not a current-version ranking.** Both runs on this page were recorded on the date shown. Competitor tools were installed from `@latest` at run time, but their resolved versions were not written to the retained artifacts. The 5-step token benchmark's raw per-response files are also not retained in this repository. Treat these numbers as historical observations for the versions installed on the run date, not as a comparison against today's releases. No universal winner follows from them. See [Provenance and limits](#provenance-and-limits).
+> **Historical benchmark, not a current-version ranking.** Both runs on this page were recorded on the date shown. The 6-task LLM run installed Playwright MCP and Chrome DevTools MCP from `@latest` at run time, but their resolved versions were not written to the retained artifacts. The 5-step run's install method was not retained. The 5-step token benchmark's raw per-response files are also not retained in this repository. Treat these numbers as historical observations for the versions installed on the run date, not as a comparison against today's releases. No universal winner follows from them. See [Provenance and limits](#provenance-and-limits).
 
 ## MCP Server Comparison
 
@@ -313,7 +313,7 @@ Cost per benchmark run based on Bedrock API token usage (input + output tokens a
 
 Playwright sends the full page with every response, so the LLM gets the answer immediately but pays for ~120K tokens per Wikipedia page load. OpenBrowser returns compact results (~30-800 chars per call), so the LLM needs more round-trips to navigate and extract but pays far fewer tokens overall.
 
-For a single simple task, Playwright's approach is fast. In the 2026-02-21 six-task run, the ratio of mean total MCP response characters per six-task run was 144x. Complex pages drove most of the difference. That ratio is a historical observation, not a current-version guarantee.
+For a single simple task, Playwright's approach is fast. In the 2026-02-21 six-task run, the ratio of mean total MCP response characters per six-task run, averaged over five runs per server, was 144x. Complex pages drove most of the difference. That ratio is a historical observation, not a current-version guarantee.
 
 ### Tool Surface Comparison
 
@@ -337,7 +337,7 @@ The benchmark run used v0.1.26 with `execute_code`. `get_status` and `reset_brow
 
 ### Unique to OpenBrowser
 
-This section describes the benchmarked OpenBrowser v0.1.26 server. The benchmark itself used `execute_code` only. The `get_status` and `reset_browser` lifecycle tools were added after v0.1.26 and were not part of the comparison. The feature differences below were observed against the other two servers in the 2026-02-21 run:
+This section describes the benchmarked OpenBrowser v0.1.26 server. The benchmark itself used `execute_code` only. The `get_status` and `reset_browser` lifecycle tools were added after v0.1.26 and were not part of the comparison. The feature bullets below describe the v0.1.26 server. The run measured response size and tool counts; it did not benchmark each feature:
 
 - **CodeAgent architecture** -- the core `execute_code` tool runs Python in a persistent namespace. The LLM writes code to navigate, extract, and process data rather than calling individual tools. Variables and state persist between calls.
 - **144x smaller mean total MCP response characters per six-task run in 2026-02-21** -- returns only the data the code explicitly extracts, not full page dumps

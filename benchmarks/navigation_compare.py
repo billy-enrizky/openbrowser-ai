@@ -898,7 +898,9 @@ def validate_config(args):
     if args.claim_tier == 'pinned' and not args.pins:
         raise ValueError('a pinned claim requires --pins')
     if args.pins:
-        load_pins(args.pins)
+        pins = load_pins(args.pins)
+        if args.claim_tier == 'pinned' and not valid_timestamp(pins.get('captured_utc')):
+            raise ValueError('a pinned claim requires a valid captured_utc')
 
 
 def availability(args):
@@ -1089,6 +1091,27 @@ async def main(args):
     return 1 if result['verification_errors'] else 0
 
 
+def pin_snapshot_errors(directory, result):
+    meta = result.get('metadata', {})
+    if meta.get('pins') is None:
+        return []
+    path = Path(directory) / 'pins.json'
+    if not path.is_file():
+        return ['pinned result is missing pins.json']
+    raw = path.read_bytes()
+    errors = []
+    if hashlib.sha256(raw).hexdigest() != meta.get('pins_sha256'):
+        errors.append('pins.json hash does not match pins_sha256')
+    try:
+        parsed = parse_pins(raw)
+    except (ValueError, json.JSONDecodeError) as error:
+        errors.append(f'pins.json does not parse: {error}')
+    else:
+        if parsed != meta.get('pins'):
+            errors.append('pins.json does not match metadata pins')
+    return errors
+
+
 def verify(directory):
     directory = Path(directory)
     hashes = json.loads((directory / 'sha256.json').read_text())
@@ -1100,6 +1123,7 @@ def verify(directory):
             errors.append(f'file hash mismatch: {name}')
     result = json.loads((directory / 'results.json').read_text())
     errors.extend(result_errors(result))
+    errors.extend(pin_snapshot_errors(directory, result))
     for error in errors:
         LOG.error('%s', error)
     if not errors:
