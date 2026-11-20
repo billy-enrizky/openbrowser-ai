@@ -23,7 +23,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
-from openbrowser.browser.download_state import redacted_outcome
+from openbrowser.browser.download_state import downloads_summary
 from openbrowser.browser.lifecycle import (
     LifecycleMachine,
     LifecyclePhase,
@@ -551,23 +551,7 @@ class DaemonServer:
 
     def _downloads_snapshot(self) -> dict:
         """Return a bounded download outcome summary without starting a browser."""
-        reader = getattr(self._session, 'download_outcomes', None)
-        if not callable(reader):
-            return {'count': 0, 'pending': 0, 'recent': []}
-        try:
-            outcomes = list(reader())
-        except Exception:
-            logger.warning('Could not read download outcomes', exc_info=True)
-            return {'count': 0, 'pending': 0, 'recent': [], 'error': 'download outcomes unavailable'}
-        snapshot = {
-            'count': len(outcomes),
-            'pending': sum(1 for outcome in outcomes if not outcome.get('terminal')),
-            'recent': [redacted_outcome(outcome) for outcome in outcomes[-10:]],
-        }
-        error = getattr(self._session, 'download_outcomes_error', None)
-        if isinstance(error, str):
-            snapshot['error'] = error
-        return snapshot
+        return downloads_summary(self._session)
 
     def _storage_state_snapshot(self) -> StorageStateSnapshot:
         """Return the watchdog-owned load state, or the pre-load view."""

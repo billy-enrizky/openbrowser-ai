@@ -92,7 +92,7 @@ logging.disable(logging.CRITICAL)
 
 # Import openbrowser modules
 from openbrowser.browser import BrowserProfile, BrowserSession
-from openbrowser.browser.download_state import redacted_outcome
+from openbrowser.browser.download_state import downloads_summary
 from openbrowser.browser.lifecycle import (
 	LifecycleMachine,
 	LifecyclePhase,
@@ -959,22 +959,7 @@ class _BrowserOwner:
 
 	def _downloads_snapshot(self) -> dict[str, Any]:
 		"""Return a bounded download outcome summary without starting the browser."""
-		reader = getattr(self.browser_session, 'download_outcomes', None)
-		if not callable(reader):
-			return {'count': 0, 'pending': 0, 'recent': []}
-		try:
-			outcomes = list(reader())
-		except Exception:
-			return {'count': 0, 'pending': 0, 'recent': [], 'error': 'download outcomes unavailable'}
-		snapshot = {
-			'count': len(outcomes),
-			'pending': sum(1 for outcome in outcomes if not outcome.get('terminal')),
-			'recent': [redacted_outcome(outcome) for outcome in outcomes[-10:]],
-		}
-		error = getattr(self.browser_session, 'download_outcomes_error', None)
-		if isinstance(error, str):
-			snapshot['error'] = error
-		return snapshot
+		return downloads_summary(self.browser_session)
 
 	def _status_payload(self) -> dict[str, Any]:
 		"""Build a JSON-safe status snapshot without starting the browser."""

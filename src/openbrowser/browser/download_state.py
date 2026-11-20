@@ -9,9 +9,11 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import re
 import time
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 
@@ -155,6 +157,8 @@ class DownloadRegistry:
 		detail: str | None = None,
 	) -> DownloadOutcome:
 		outcome = self._get_or_create(download_id, url=url, file_name=file_name, source=source)
+		if outcome.terminal:
+			return outcome
 		self._update_metadata(outcome, url=url, file_name=file_name, source=source, detail=detail)
 		return outcome
 
@@ -172,6 +176,8 @@ class DownloadRegistry:
 			file_name=file_name,
 			source=source or 'unknown',
 		)
+		if outcome.terminal:
+			return outcome
 		self._update_metadata(outcome, url=url, file_name=file_name, source=source)
 		self._advance(outcome, DownloadPhase.STARTED)
 		return outcome
@@ -202,6 +208,9 @@ class DownloadRegistry:
 			return outcome
 		if outcome.phase is DownloadPhase.CANCELLED:
 			# A cancelled attempt stays cancelled even if a late file appears.
+			return outcome
+		if outcome.phase is DownloadPhase.FAILED and outcome.stage == 'capacity':
+			# A rejected transfer was never tracked; it cannot become a success.
 			return outcome
 		# A file that appears after a timeout is stronger evidence than the
 		# earlier failure, so allow that one upgrade.
@@ -238,6 +247,36 @@ class DownloadRegistry:
 		outcome.stage = stage
 		outcome.error = error
 		self._advance(outcome, DownloadPhase.FAILED)
+		return outcome
+
+	def reject(
+		self,
+		download_id: str,
+		*,
+		stage: str,
+		error: str,
+		url: str = '',
+		source: str = 'unknown',
+		detail: str | None = None,
+	) -> DownloadOutcome:
+		"""Record a terminal rejection without admitting an active attempt."""
+		existing = self._outcomes.get(download_id)
+		if existing is not None:
+			return self.fail(download_id, stage=stage, error=error, url=url, source=source, detail=detail)
+		outcome = DownloadOutcome(
+			download_id=download_id,
+			phase=DownloadPhase.FAILED,
+			url=url,
+			source=source,
+			stage=stage,
+			error=error,
+			detail=detail,
+			finished_at=time.time(),
+			_finished_monotonic=time.monotonic(),
+		)
+		self._outcomes[download_id] = outcome
+		self._record_terminal_order(download_id)
+		self._trim()
 		return outcome
 
 	def cancel(self, download_id: str, *, detail: str | None = None) -> DownloadOutcome:
@@ -430,7 +469,7 @@ class DownloadRegistry:
 			if len(self._terminal_order) <= 1:
 				return
 			evictable = None
-			for download_id in self._terminal_order:
+			for download_id in self._terminal_order[:-1]:
 				outcome = self._outcomes.get(download_id)
 				if outcome is None:
 					continue
@@ -487,6 +526,13 @@ def redacted_outcome(payload: dict[str, object], *, max_text: int = 300) -> dict
 			return value[:limit] + '...'
 		return value
 
+	def _redact_text(value: object) -> object:
+		if not isinstance(value, str) or not value:
+			return value
+		# Scrub any embedded URL, including signed query strings.
+		scrubbed = re.sub(r'[a-zA-Z][a-zA-Z0-9+.-]*://[^\s\"\'<>]+', lambda m: str(_redact_url(m.group(0))), value)
+		return _truncate(scrubbed)
+
 	def _redact_url(value: object) -> object:
 		if not isinstance(value, str):
 			return '<redacted>'
@@ -503,9 +549,12 @@ def redacted_outcome(payload: dict[str, object], *, max_text: int = 300) -> dict
 		return _truncate(urlunsplit((parsed.scheme, host, parsed.path, query, '')))
 
 	redacted = dict(payload)
-	for key in ('file_name', 'path', 'error', 'detail', 'mime_type'):
+	for key in ('file_name', 'path', 'mime_type'):
 		if key in redacted:
 			redacted[key] = _truncate(redacted[key])
+	for key in ('error', 'detail'):
+		if key in redacted:
+			redacted[key] = _redact_text(redacted[key])
 	# Never expose an internal key that may embed a URL or token. Keep a stable
 	# opaque reference so a status reader can still correlate entries.
 	internal_id = redacted.pop('download_id', None)
@@ -514,3 +563,30 @@ def redacted_outcome(payload: dict[str, object], *, max_text: int = 300) -> dict
 	if 'url' in redacted:
 		redacted['url'] = _redact_url(redacted['url'])
 	return redacted
+
+
+def redacted_text(value: object, *, max_length: int = 300) -> object:
+	"""Scrub URL credentials and queries and cap free text for status."""
+	payload = redacted_outcome({'detail': value}, max_text=max_length)
+	return payload.get('detail')
+
+
+def downloads_summary(owner: object) -> dict[str, object]:
+	"""Return a bounded, redacted download summary for any status owner."""
+	reader = getattr(owner, 'download_outcomes', None)
+	if not callable(reader):
+		return {'count': 0, 'pending': 0, 'recent': []}
+	reader_fn: Any = reader
+	try:
+		outcomes = list(reader_fn())
+	except Exception:
+		return {'count': 0, 'pending': 0, 'recent': [], 'error': 'download outcomes unavailable'}
+	snapshot: dict[str, object] = {
+		'count': len(outcomes),
+		'pending': sum(1 for outcome in outcomes if not outcome.get('terminal')),
+		'recent': [redacted_outcome(outcome) for outcome in outcomes[-10:]],
+	}
+	error = getattr(owner, 'download_outcomes_error', None)
+	if isinstance(error, str):
+		snapshot['error'] = redacted_text(error)
+	return snapshot

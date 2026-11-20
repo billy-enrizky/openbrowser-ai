@@ -84,6 +84,7 @@ async def test_progress_completed_records_the_terminal_path():
 			'session-1',
 		)
 
+		Path(tmpdir, 'b.bin').write_bytes(b'payload')
 		progress(
 			{
 				'guid': 'g-2',
@@ -113,9 +114,8 @@ async def test_progress_canceled_is_a_terminal_failure():
 		progress({'guid': 'g-3', 'state': 'canceled'}, 'session-1')
 
 		outcome = watchdog.latest_download_outcome()
-		assert outcome['phase'] == 'failed'
-		assert outcome['stage'] == 'cdp_progress'
-		assert 'canceled' in outcome['error']
+		assert outcome['phase'] == 'cancelled'
+		assert 'canceled' in outcome['detail']
 
 
 @pytest.mark.asyncio
@@ -127,6 +127,7 @@ async def test_a_late_failure_cannot_overwrite_completed():
 			{'guid': 'g-4', 'url': 'https://example.com/d.bin', 'suggestedFilename': 'd.bin'},
 			'session-1',
 		)
+		Path(tmpdir, 'd.bin').write_bytes(b'payload')
 		progress(
 			{'guid': 'g-4', 'state': 'completed', 'filePath': str(Path(tmpdir) / 'd.bin')},
 			'session-1',
@@ -201,6 +202,7 @@ async def test_wait_for_download_returns_the_terminal_outcome():
 				{'guid': 'g-6', 'url': 'https://example.com/f.bin', 'suggestedFilename': 'f.bin'},
 				'session-1',
 			)
+			Path(tmpdir, 'f.bin').write_bytes(b'payload')
 			progress(
 				{'guid': 'g-6', 'state': 'completed', 'filePath': str(Path(tmpdir) / 'f.bin')},
 				'session-1',
@@ -319,20 +321,22 @@ async def test_namespace_download_file_records_a_completed_outcome():
 	registry = DownloadRegistry()
 	session._downloads_watchdog = _fake_watchdog(registry)
 	object.__setattr__(session, 'get_or_create_cdp_session', AsyncMock(side_effect=RuntimeError('no browser')))
-	session.browser_profile.downloads_path = tempfile.mkdtemp(prefix='ob-download-lifecycle-')
 
-	tools = MagicMock()
-	tools.registry.registry.actions = {}
-	namespace = create_namespace(session, tools=tools)
+	with tempfile.TemporaryDirectory(prefix='ob-download-lifecycle-') as downloads_dir:
+		session.browser_profile.downloads_path = downloads_dir
+		tools = MagicMock()
+		tools.registry.registry.actions = {}
+		namespace = create_namespace(session, tools=tools)
 
-	response = MagicMock()
-	response.raise_for_status = MagicMock()
-	response.iter_content = MagicMock(return_value=[b'payload'])
+		response = MagicMock()
+		response.raise_for_status = MagicMock()
+		response.iter_content = MagicMock(return_value=[b'payload'])
 
-	with patch('openbrowser.code_use.namespace.requests.get', return_value=response):
-		path = await namespace['download_file']('https://example.com/file.bin')
+		with patch('openbrowser.code_use.namespace.requests.get', return_value=response):
+			path = await namespace['download_file']('https://example.com/file.bin')
 
-	assert Path(path).read_bytes() == b'payload'
+		assert Path(path).read_bytes() == b'payload'
+
 	outcome = registry.latest()
 	assert outcome.phase == DownloadPhase.COMPLETED
 	assert outcome.source == 'namespace'
@@ -469,7 +473,6 @@ async def test_namespace_download_file_accepts_an_empty_browser_fetch():
 	session = BrowserSession()
 	registry = DownloadRegistry()
 	session._downloads_watchdog = _fake_watchdog(registry)
-	session.browser_profile.downloads_path = tempfile.mkdtemp(prefix='ob-empty-fetch-')
 	fake_cdp = MagicMock()
 	fake_cdp.session_id = 'cdp-empty'
 	fake_cdp.cdp_client.send.Runtime.evaluate = AsyncMock(
@@ -477,13 +480,16 @@ async def test_namespace_download_file_accepts_an_empty_browser_fetch():
 	)
 	object.__setattr__(session, 'get_or_create_cdp_session', AsyncMock(return_value=fake_cdp))
 
-	tools = MagicMock()
-	tools.registry.registry.actions = {}
-	namespace = create_namespace(session, tools=tools)
+	with tempfile.TemporaryDirectory(prefix='ob-empty-fetch-') as downloads_dir:
+		session.browser_profile.downloads_path = downloads_dir
+		tools = MagicMock()
+		tools.registry.registry.actions = {}
+		namespace = create_namespace(session, tools=tools)
 
-	path = await namespace['download_file']('https://example.com/empty.bin')
+		path = await namespace['download_file']('https://example.com/empty.bin')
 
-	assert Path(path).read_bytes() == b''
+		assert Path(path).read_bytes() == b''
+
 	outcome = registry.latest()
 	assert outcome.phase is DownloadPhase.COMPLETED
 	assert outcome.file_size == 0
@@ -528,14 +534,39 @@ async def test_namespace_download_file_refuses_at_capacity():
 	registry = DownloadRegistry(max_active=1)
 	registry.start('already-running', url='https://example.com/slow')
 	session._downloads_watchdog = _fake_watchdog(registry)
-	session.browser_profile.downloads_path = tempfile.mkdtemp(prefix='ob-capacity-')
 
+	with tempfile.TemporaryDirectory(prefix='ob-capacity-') as downloads_dir:
+		session.browser_profile.downloads_path = downloads_dir
+		tools = MagicMock()
+		tools.registry.registry.actions = {}
+		namespace = create_namespace(session, tools=tools)
+
+		with pytest.raises(RuntimeError, match='Too many active downloads'):
+			await namespace['download_file']('https://example.com/other.bin')
+
+
+@pytest.mark.asyncio
+async def test_namespace_download_file_records_a_directory_failure(tmp_path):
+	from openbrowser.browser.download_state import DownloadRegistry
+	from openbrowser.browser.session import BrowserSession
+	from openbrowser.code_use.namespace import create_namespace
+
+	session = BrowserSession()
+	registry = DownloadRegistry()
+	session._downloads_watchdog = _fake_watchdog(registry)
+	blocker = tmp_path / 'not-a-directory'
+	blocker.write_text('x')
+	session.browser_profile.downloads_path = str(blocker)
 	tools = MagicMock()
 	tools.registry.registry.actions = {}
 	namespace = create_namespace(session, tools=tools)
 
-	with pytest.raises(RuntimeError, match='Too many active downloads'):
-		await namespace['download_file']('https://example.com/other.bin')
+	with pytest.raises(OSError):
+		await namespace['download_file']('https://example.com/x.bin')
+
+	outcome = registry.latest()
+	assert outcome.phase is DownloadPhase.FAILED
+	assert outcome.stage == 'write'
 
 
 @pytest.mark.asyncio

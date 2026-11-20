@@ -563,7 +563,23 @@ def create_namespace(
 		if not dl_path:
 			dl_path = str(Path.home() / 'Downloads' / 'openbrowser-mcp')
 		dl_dir = Path(str(dl_path)).expanduser().resolve()
-		dl_dir.mkdir(parents=True, exist_ok=True)
+
+		registry = getattr(browser_session, 'downloads_registry', None)
+		from openbrowser.browser.download_state import DownloadPhase, DownloadRegistry
+
+		download_id = f'namespace:{url}:{time.time_ns()}'
+		try:
+			dl_dir.mkdir(parents=True, exist_ok=True)
+		except OSError as error:
+			if isinstance(registry, DownloadRegistry):
+				registry.fail(
+					download_id,
+					stage='write',
+					error=f'{type(error).__name__}: {error}',
+					url=url,
+					source='namespace',
+				)
+			raise
 
 		# Determine filename from URL if not provided
 		if not filename:
@@ -590,10 +606,6 @@ def create_namespace(
 				counter += 1
 			filename = f'{stem} ({counter}){ext}'
 			final_path = dl_dir / filename
-
-		registry = getattr(browser_session, 'downloads_registry', None)
-		download_id = f'namespace:{url}:{time.time_ns()}'
-		from openbrowser.browser.download_state import DownloadRegistry
 
 		if isinstance(registry, DownloadRegistry):
 			active = registry.active_count()
@@ -666,6 +678,10 @@ def create_namespace(
 								source='namespace',
 							)
 						size_kb = len(file_bytes) / 1024
+						if isinstance(registry, DownloadRegistry):
+							current = registry.get(download_id)
+							if current is not None and current.phase is DownloadPhase.CANCELLED:
+								raise asyncio.CancelledError('download cancelled during reset')
 						logger.info(f'Downloaded {filename} ({size_kb:.1f} KB) via browser fetch')
 						return str(final_path)
 				else:
@@ -678,6 +694,11 @@ def create_namespace(
 			js_error = 'Browser fetch timed out after 120s'
 		except Exception as e:
 			js_error = f'{type(e).__name__}: {e}'
+
+		if isinstance(registry, DownloadRegistry):
+			current = registry.get(download_id)
+			if current is not None and current.phase is DownloadPhase.CANCELLED:
+				raise asyncio.CancelledError('download cancelled during reset')
 
 		# Strategy 2: Python requests fallback (no browser cookies)
 		try:
@@ -698,6 +719,10 @@ def create_namespace(
 					detail='browser fetch failed; python requests fallback succeeded',
 				)
 			size_kb = file_size / 1024
+			if isinstance(registry, DownloadRegistry):
+				current = registry.get(download_id)
+				if current is not None and current.phase is DownloadPhase.CANCELLED:
+					raise asyncio.CancelledError('download cancelled during reset')
 			logger.info(f'Downloaded {filename} ({size_kb:.1f} KB) via Python requests (fallback)')
 			return str(final_path)
 		except asyncio.CancelledError:
@@ -755,10 +780,14 @@ def create_namespace(
 	) -> dict[str, Any]:
 		"""Wait for the next download to reach a terminal phase.
 
-		Use this after clicking a link or submitting a form that triggers a
-		download. Returns the terminal outcome, including `path`, `file_size`,
-		`phase`, `stage`, and `error`. Raises TimeoutError with the last
-		observed phase when no terminal outcome appears in time.
+		Start the waiter before clicking a link or submitting a form so a fast
+		download cannot finish first:
+		`waiter = asyncio.create_task(wait_for_download(timeout=30))`.
+		If the download may already have finished, pass `lookback=5` to accept
+		a terminal outcome from the last five seconds. Returns the terminal
+		outcome, including `path`, `file_size`, `phase`, `stage`, and `error`.
+		Raises TimeoutError with the last observed phase when no terminal
+		outcome appears in time.
 		"""
 		return await browser_session.wait_for_download(timeout=timeout, url=url, lookback=lookback)
 

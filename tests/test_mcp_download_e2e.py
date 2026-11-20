@@ -239,6 +239,11 @@ class TestClickTriggeredDownload:
         async def run():
             session = server.browser_session
             await session.navigate_to(urls["html_url"])
+            before = {
+                outcome["download_id"]
+                for outcome in session.download_outcomes()
+                if outcome.get("terminal")
+            }
             # Start waiting before the click so the outcome cannot predate the wait.
             waiter = asyncio.create_task(session.wait_for_download(timeout=30))
             await asyncio.sleep(0.2)
@@ -247,10 +252,18 @@ class TestClickTriggeredDownload:
                 params={"expression": "document.getElementById('dl').click()"},
                 session_id=cdp.session_id,
             )
-            return await waiter
+            outcome = await waiter
+            new_terminals = [
+                entry
+                for entry in session.download_outcomes()
+                if entry.get("terminal") and entry["download_id"] not in before
+            ]
+            return outcome, new_terminals
 
-        outcome = loop.run_until_complete(run())
+        outcome, new_terminals = loop.run_until_complete(run())
 
+        assert len(new_terminals) == 1, new_terminals
+        assert new_terminals[0]["download_id"] == outcome["download_id"]
         assert outcome["phase"] == "completed", outcome
         saved = Path(str(outcome["path"]))
         assert saved.exists(), outcome

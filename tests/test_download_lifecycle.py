@@ -424,3 +424,43 @@ def test_redaction_strips_queries_from_file_urls_and_paths():
 	assert file_url['url'].endswith('?redacted')
 	assert 'secret' not in path_like['url']
 	assert path_like['url'].endswith('?redacted')
+
+
+def test_capacity_rejection_does_not_fail_an_admitted_attempt():
+	registry = DownloadRegistry(max_outcomes=10, max_active=2)
+	registry.start('admitted', url='https://example.com/a')
+
+	rejected = registry.reject(
+		'rejected',
+		stage='capacity',
+		error='Too many active downloads (limit 2)',
+		url='https://example.com/b',
+	)
+
+	assert rejected.phase is DownloadPhase.FAILED
+	assert registry.get('admitted').phase is DownloadPhase.STARTED
+
+
+def test_capacity_rejection_cannot_be_upgraded_by_a_late_completion():
+	registry = DownloadRegistry()
+	registry.reject('rejected', stage='capacity', error='too many')
+
+	outcome = registry.complete('rejected', path='/tmp/late.bin', file_size=3)
+
+	assert outcome.phase is DownloadPhase.FAILED
+	assert outcome.stage == 'capacity'
+	assert outcome.path is None
+
+
+def test_redacted_outcome_scrubs_urls_inside_error_text():
+	payload = {
+		'error': 'Requests failed for https://user:pass@example.com/file?token=secret with 403',
+		'detail': 'see https://example.com/other?X-Amz-Signature=abc',
+	}
+
+	redacted = redacted_outcome(payload)
+
+	assert 'secret' not in redacted['error']
+	assert 'pass' not in redacted['error']
+	assert 'X-Amz-Signature' not in redacted['detail']
+	assert 'https://example.com/file?redacted' in redacted['error']

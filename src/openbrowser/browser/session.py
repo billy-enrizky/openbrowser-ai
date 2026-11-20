@@ -2047,10 +2047,16 @@ class BrowserSession(BaseModel):
 		if not callable(reader):
 			return list(self._download_history)
 		try:
-			return list(await reader())
+			return [dict(outcome) for outcome in await reader()]
 		except Exception:
 			self.logger.warning('Could not capture download history', exc_info=True)
-			return list(self._download_history)
+			snapshot = getattr(watchdog, 'download_outcomes', None)
+			if callable(snapshot):
+				try:
+					return [dict(outcome) for outcome in snapshot()]
+				except Exception:
+					pass
+			return [dict(outcome) for outcome in self._download_history]
 
 	def download_outcomes(self) -> list[dict[str, object]]:
 		"""Return bounded download outcomes, including history after a stop."""
@@ -2064,8 +2070,8 @@ class BrowserSession(BaseModel):
 				self.logger.warning('Could not read download outcomes', exc_info=True)
 			else:
 				self._download_outcomes_error = None
-				return outcomes
-		return list(self._download_history)
+				return [dict(outcome) for outcome in outcomes]
+		return [dict(outcome) for outcome in self._download_history]
 
 	def latest_download_outcome(self) -> dict[str, object] | None:
 		"""Return the most recent download outcome, terminal or not."""
@@ -2077,7 +2083,7 @@ class BrowserSession(BaseModel):
 			except Exception as error:
 				self._download_outcomes_error = f'{type(error).__name__}: {error}'
 				self.logger.warning('Could not read the latest download outcome', exc_info=True)
-		return self._download_history[-1] if self._download_history else None
+		return dict(self._download_history[-1]) if self._download_history else None
 
 	async def wait_for_download(
 		self,

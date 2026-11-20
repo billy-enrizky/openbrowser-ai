@@ -66,7 +66,9 @@ class DownloadsWatchdog(BaseWatchdog):
 	_network_callback_registered: bool = PrivateAttr(default=False)  # Track if global network callback is registered
 	_download_registry: DownloadRegistry = PrivateAttr(default_factory=DownloadRegistry)  # Terminal outcome per download
 	_download_serial: int = PrivateAttr(default=0)  # Unique synthetic id for guid-less events
-	_polling_names: dict[str, int] = PrivateAttr(default_factory=dict)  # Active pollers per suggested name
+	_polling_names: dict[str, int] = PrivateAttr(default_factory=dict)  # Active pollers per name family
+	_ambiguous_paths: set[str] = PrivateAttr(default_factory=set)  # Files seen while two pollers competed
+	_downloads_admission: bool = PrivateAttr(default=True)  # False once shutdown starts
 
 	async def on_BrowserLaunchEvent(self, event: BrowserLaunchEvent) -> None:
 		self.logger.debug(f'[DownloadsWatchdog] Received BrowserLaunchEvent, EventBus ID: {id(self.event_bus)}')
@@ -78,6 +80,8 @@ class DownloadsWatchdog(BaseWatchdog):
 			self.logger.debug(f'[DownloadsWatchdog] Ensured downloads directory exists: {expanded_path}')
 		self._download_registry.clear()
 		self._polling_names.clear()
+		self._ambiguous_paths.clear()
+		self._downloads_admission = True
 		self._cdp_downloads_info.clear()
 
 	async def on_TabCreatedEvent(self, event: TabCreatedEvent) -> None:
@@ -186,8 +190,11 @@ class DownloadsWatchdog(BaseWatchdog):
 			except (AssertionError, KeyError):
 				suggested_filename = None
 			download_id = guid or self._next_synthetic_download_id('cdp')
+			if not self._downloads_admission:
+				self.logger.debug('[DownloadsWatchdog] Shutdown started; ignoring new download')
+				return
 			if self._download_registry.active_count() >= self._download_registry.max_active:
-				self._download_registry.fail(
+				self._download_registry.reject(
 					download_id,
 					stage='capacity',
 					error=f"Too many active downloads (limit {self._download_registry.max_active})",
@@ -224,10 +231,9 @@ class DownloadsWatchdog(BaseWatchdog):
 				return
 			# A browser-canceled transfer is a terminal failure, not silence.
 			if event.get('state') == 'canceled':
-				self._download_registry.fail(
+				self._download_registry.cancel(
 					download_id,
-					stage='cdp_progress',
-					error='download canceled by the browser',
+					detail='download canceled by the browser',
 				)
 				return
 			# Check if download is complete
@@ -235,7 +241,13 @@ class DownloadsWatchdog(BaseWatchdog):
 				file_path = event.get('filePath')
 				total_bytes = event.get('totalBytes')
 				if self.browser_session.is_local:
-					if file_path:
+					if file_path and not Path(file_path).exists():
+						# Reported but not written yet. Leave the attempt started
+						# so the polling path can confirm it.
+						self.logger.debug(
+							f'[DownloadsWatchdog] Reported path is not present yet: {file_path}'
+						)
+					elif file_path:
 						self.logger.debug(f'[DownloadsWatchdog] Download completed: {file_path}')
 						# Track the download
 						self._track_download(file_path)
@@ -551,6 +563,7 @@ class DownloadsWatchdog(BaseWatchdog):
 				download_id,
 				path=existing_path,
 				file_name=Path(existing_path).name,
+				from_cache=True,
 				source='session_cache',
 				detail='already downloaded in this session',
 			)
@@ -634,8 +647,18 @@ class DownloadsWatchdog(BaseWatchdog):
 				download_path = os.path.join(downloads_dir, final_filename)
 
 				# Save the file asynchronously
-				async with await anyio.open_file(download_path, 'wb') as f:
-					await f.write(bytes(download_result['data']))
+				try:
+					async with await anyio.open_file(download_path, 'wb') as f:
+						await f.write(bytes(payload))
+				except OSError as write_error:
+					self._download_registry.fail(
+						download_id,
+						stage='write',
+						error=f'{type(write_error).__name__}: {write_error}',
+						url=url,
+						source='js_fetch',
+					)
+					return None
 
 				# Verify file was written successfully
 				if os.path.exists(download_path):
@@ -942,6 +965,14 @@ class DownloadsWatchdog(BaseWatchdog):
 				# With two attempts suggesting the same name, a name match cannot
 				# prove ownership. Leave both to the CDP progress event.
 				if self._polling_names.get(family, 0) > 1:
+					if Path(downloads_dir).exists():
+						for candidate in Path(downloads_dir).iterdir():
+							if (
+								candidate.is_file()
+								and candidate.name not in initial_files
+								and self._download_name_matches(candidate.name, suggested_filename)
+							):
+								self._ambiguous_paths.add(str(candidate))
 					continue
 
 				if Path(downloads_dir).exists():
@@ -950,6 +981,7 @@ class DownloadsWatchdog(BaseWatchdog):
 							file_path.is_file()
 							and not file_path.name.startswith('.')
 							and file_path.name not in initial_files
+							and str(file_path) not in self._ambiguous_paths
 							and self._download_name_matches(file_path.name, suggested_filename)
 						):
 							try:
@@ -1363,6 +1395,7 @@ class DownloadsWatchdog(BaseWatchdog):
 					file_name=Path(existing_path).name,
 					file_type='pdf',
 					mime_type='application/pdf',
+					from_cache=True,
 					source='session_cache',
 					detail='already downloaded in this session',
 				)
@@ -1438,8 +1471,18 @@ class DownloadsWatchdog(BaseWatchdog):
 					download_path = os.path.join(downloads_dir, final_filename)
 
 					# Save the PDF asynchronously
-					async with await anyio.open_file(download_path, 'wb') as f:
-						await f.write(bytes(download_result['data']))
+					try:
+						async with await anyio.open_file(download_path, 'wb') as f:
+							await f.write(bytes(download_result['data']))
+					except OSError as write_error:
+						self._download_registry.fail(
+							attempt_id,
+							stage='write',
+							error=f'{type(write_error).__name__}: {write_error}',
+							url=pdf_url,
+							source='pdf',
+						)
+						return None
 
 					# Verify file was written successfully
 					if os.path.exists(download_path):
@@ -1582,6 +1625,7 @@ class DownloadsWatchdog(BaseWatchdog):
 
 	async def shutdown(self) -> list[dict[str, object]]:
 		"""Cancel and drain in-flight download tasks, then return final history."""
+		self._downloads_admission = False
 		for task in list(self._cdp_event_tasks):
 			if not task.done():
 				task.cancel()

@@ -146,13 +146,16 @@ async def test_status_reports_download_outcomes(mcp_server):
 	mcp_server.browser_session.download_outcomes.return_value = [
 		{'download_id': 'a', 'phase': 'completed', 'terminal': True},
 		{'download_id': 'b', 'phase': 'failed', 'terminal': True, 'stage': 'fetch'},
+		{'download_id': 'c', 'phase': 'started', 'terminal': False},
 	]
 
 	status = mcp_server._status_payload()
 
-	assert status['downloads']['count'] == 2
-	assert status['downloads']['pending'] == 0
-	assert status['downloads']['recent'][-1]['stage'] == 'fetch'
+	assert status['downloads']['count'] == 3
+	assert status['downloads']['pending'] == 1
+	assert status['downloads']['recent'][-1]['phase'] == 'started'
+	failed = [entry for entry in status['downloads']['recent'] if entry['phase'] == 'failed']
+	assert failed[0]['stage'] == 'fetch'
 
 
 @pytest.mark.asyncio
