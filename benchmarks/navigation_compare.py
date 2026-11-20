@@ -251,6 +251,18 @@ class Cdp:
         await self.reader
 
 
+def openbrowser_profile(profile_cls, root, chrome):
+    """Build the benchmark profile without network-fetched extensions."""
+    return profile_cls(
+        headless=True,
+        executable_path=str(chrome),
+        args=['--use-mock-keychain'],
+        user_data_dir=Path(root) / 'profile',
+        downloads_path=Path(root) / 'downloads',
+        enable_default_extensions=False,
+    )
+
+
 class Arm:
     def __init__(self, args):
         self.name, self.root = args.worker, Path(args.run_root)
@@ -365,8 +377,7 @@ class Arm:
             module = Path(openbrowser.__file__).resolve()
             if not module.is_relative_to(self.source / 'src'):
                 raise RuntimeError('OpenBrowser imported from wrong source')
-            self.browser = BrowserSession(browser_profile=BrowserProfile(headless=True, executable_path=str(self.chrome), args=['--use-mock-keychain'],
-                                            user_data_dir=self.root / 'profile', downloads_path=self.root / 'downloads'))
+            self.browser = BrowserSession(browser_profile=openbrowser_profile(BrowserProfile, self.root, self.chrome))
             await self.browser.start()
             self.version = await self.browser.cdp_client.send.Browser.getVersion()
         self.ownership()
@@ -926,11 +937,11 @@ def source_manifest(source):
     return {str(p.relative_to(source)): sha256(p) for p in sorted((source / 'src/openbrowser').rglob('*.py'))}
 
 
-def executable_metadata(path):
+def executable_metadata(path, version_args=('--version',)):
     if not path:
         return None
     try:
-        version = subprocess.check_output([path, '--version'], text=True, stderr=subprocess.STDOUT, timeout=10).strip()
+        version = subprocess.check_output([path, *version_args], text=True, stderr=subprocess.STDOUT, timeout=10).strip()
     except (OSError, subprocess.SubprocessError) as error:
         version = f'unavailable: {error}'
     return {'path': path, 'sha256': sha256(path), 'version': version}
@@ -967,8 +978,12 @@ async def main(args):
             'load_start': load_average(), 'script_sha256': sha256(SCRIPT),
             'samples_per_workload_arm': args.samples, 'source_commit': git_value(source, 'rev-parse', 'HEAD'),
             'source_dirty': git_value(source, 'status', '--porcelain'), 'source_manifest': before,
-            'executables': {key: executable_metadata(getattr(args, key)) for key in
-                            ('chrome', 'lightpanda', 'agent_browser', 'browser_use_python', 'openbrowser_python')},
+            'executables': {
+                key: executable_metadata(
+                    getattr(args, key), ('version',) if key == 'lightpanda' else ('--version',)
+                )
+                for key in ('chrome', 'lightpanda', 'agent_browser', 'browser_use_python', 'openbrowser_python')
+            },
             'scope': 'Local native warm-operation diagnostic. No LLM, cloud, or Docker workflow.',
             'performance_verdict': 'inconclusive: different engines, IPC and default wait semantics; no limiter profile',
             'claim_tier': args.claim_tier, 'requested_arms': list(args.arms), 'claim_scope': claim_scope(),
