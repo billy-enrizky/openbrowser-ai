@@ -7,7 +7,10 @@ ROOT = Path(__file__).resolve().parents[1]
 _BACKEND = str(ROOT / 'backend')
 sys.path.insert(0, _BACKEND)
 try:
-    from app.services.task_terminal import classify_task_terminal  # noqa: E402
+    from app.services.task_terminal import (  # noqa: E402
+        cancellation_display_content,
+        classify_task_terminal,
+    )
 finally:
     sys.path.remove(_BACKEND)
 
@@ -62,3 +65,9 @@ def test_browser_agent_completion_contract_is_unchanged():
 
     assert terminal.kind == 'completed'
     assert terminal.content == 'browser result'
+
+
+def test_cancellation_display_content_keeps_partial_results_after_reload():
+    assert cancellation_display_content('partial data') == 'Task was cancelled. partial data'
+    assert cancellation_display_content('Task was cancelled') == 'Task was cancelled'
+    assert cancellation_display_content('Cancelled by user') == 'Task was cancelled'

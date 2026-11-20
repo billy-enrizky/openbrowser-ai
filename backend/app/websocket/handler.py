@@ -27,7 +27,10 @@ from app.models.schemas import (
 )
 from app.services.agent_service import agent_manager
 from app.services.chat_service import ChatService, conversation_title_from_prompt
-from app.services.task_terminal import classify_task_terminal
+from app.services.task_terminal import (
+    cancellation_display_content,
+    classify_task_terminal,
+)
 from app.services.vnc_service import vnc_service
 
 logger = logging.getLogger(__name__)
@@ -488,6 +491,9 @@ async def run_agent_task(
         }
         terminal = classify_task_terminal(result)
         content = terminal.content
+        persisted_content = (
+            cancellation_display_content(content) if terminal.kind == "cancelled" else content
+        )
         if terminal.kind == "cancelled":
             message_type = WSMessageType.TASK_CANCELLED
             message_data = {"reason": content}
@@ -518,7 +524,7 @@ async def run_agent_task(
                 principal=principal,
                 task_id=session.task_id,
                 conversation_id=conversation_id,
-                content=content,
+                content=persisted_content,
                 metadata=task_metadata,
             )
         except Exception as persistence_error:
@@ -582,11 +588,7 @@ async def handle_cancel_task(client_id: str, message: WSMessage):
         accepted = False
         if session and session.completed_at is None:
             accepted = await session.cancel()
-        reply = (
-            "Cancellation requested. Waiting for the current step to finish."
-            if accepted
-            else "Task is not running. No stop was sent."
-        )
+        reply = "Cancellation requested." if accepted else "Task is not running. No stop was sent."
         await connection_manager.send_message(
             client_id,
             WSMessage(

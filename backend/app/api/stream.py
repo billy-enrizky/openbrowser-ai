@@ -33,7 +33,10 @@ from app.models.schemas import (
 from app.services.agent_service import agent_manager
 from app.services.chat_service import ChatService
 from app.services.event_buffer import event_buffer
-from app.services.task_terminal import classify_task_terminal
+from app.services.task_terminal import (
+    cancellation_display_content,
+    classify_task_terminal,
+)
 from app.websocket.handler import (
     _persist_assistant_message,
     _persist_task_user_message,
@@ -263,6 +266,9 @@ async def _run_agent(
         }
         terminal = classify_task_terminal(result)
         content = terminal.content
+        persisted_content = (
+            cancellation_display_content(content) if terminal.kind == "cancelled" else content
+        )
         if terminal.kind == "cancelled":
             event_buffer.push(task_id, "task_cancelled", {"reason": content})
             task_metadata = {**task_metadata, "cancelled": True}
@@ -287,7 +293,7 @@ async def _run_agent(
                 principal=principal,
                 task_id=task_id,
                 conversation_id=conversation_id,
-                content=content,
+                content=persisted_content,
                 metadata=task_metadata,
             )
         except Exception as persistence_error:

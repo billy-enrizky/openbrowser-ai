@@ -383,7 +383,7 @@ class CodeAgent:
 				if not task.done():
 					task.cancel()
 			await asyncio.gather(validation_task, stop_task, return_exceptions=True)
-		if stop_task in done:
+		if stop_task in done or self._stop_requested():
 			return None
 		return validation_task.result()
 

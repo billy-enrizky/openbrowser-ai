@@ -4,12 +4,20 @@ from dataclasses import dataclass
 from typing import Any, Literal, Mapping
 
 TaskTerminalKind = Literal["completed", "failed", "cancelled"]
+_DEFAULT_CANCELLATION_MESSAGES = frozenset({"Task was cancelled", "Cancelled by user"})
 
 
 @dataclass(frozen=True)
 class TaskTerminal:
     kind: TaskTerminalKind
     content: str
+
+
+def cancellation_display_content(content: str) -> str:
+    """Build the persisted cancellation text shown after a reload."""
+    if content in _DEFAULT_CANCELLATION_MESSAGES:
+        return "Task was cancelled"
+    return f"Task was cancelled. {content}"
 
 
 def classify_task_terminal(result: Mapping[str, Any]) -> TaskTerminal:
