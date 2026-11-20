@@ -74,8 +74,9 @@ jobs:
         run: |
           uv run --locked python scripts/ci/budget.py --name selection-guard -- \
             uv run --locked pytest tests/ci/test_select_tests.py \
-            tests/ci/test_shard_tests.py tests/ci/test_check_baseline.py \
-            tests/ci/test_audit_runs.py -q --tb=short -p no:cacheprovider
+            tests/ci/test_shard_tests.py tests/ci/test_split_shard.py \
+            tests/ci/test_check_baseline.py tests/ci/test_audit_runs.py \
+            -q --tb=short -p no:cacheprovider
       - name: Prove selection catches a planted break
         if: github.event_name != 'pull_request'
         run: |
@@ -191,26 +192,43 @@ jobs:
             cat /tmp/collect.txt
             exit "$collect_status"
           fi
-          # The MCP protocol file is the only file over 20 seconds. Its
-          # subprocess tests are independent, so that shard uses test-level
-          # xdist. Every other shard keeps a test file in one worker.
-          dist=loadfile
-          workers=auto
-          if grep -Fqx 'tests/test_mcp_protocol.py' shard.txt; then
-            dist=load
-          fi
-          if grep -Fqx 'tests/test_navigation.py' shard.txt; then
-            workers=1
-          fi
-          uv run --locked python scripts/ci/budget.py --name test-shard -- \
-            uv run --locked pytest "${files[@]}" -q -m "not integration" \
-            -n "$workers" --dist "$dist" --tb=short \
-            --junitxml=junit-${{ matrix.os }}-${{ matrix.shard }}.xml
+          uv run --locked python scripts/ci/split_shard.py \
+            --input shard.txt \
+            --serial-file tests/test_navigation.py \
+            --parallel-output parallel.txt \
+            --serial-output serial.txt
+
+          run_group() {
+            local name="$1" list="$2" workers="$3" junit="$4"
+            local group=()
+            while IFS= read -r file; do
+              if [ -n "$file" ]; then
+                group+=("$file")
+              fi
+            done < "$list"
+            if [ ${#group[@]} -eq 0 ]; then
+              return 0
+            fi
+            if [ "$workers" = "0" ]; then
+              uv run --locked python scripts/ci/budget.py --name "$name" -- \
+                uv run --locked pytest "${group[@]}" -q -m "not integration" \
+                -n 0 --tb=short --junitxml="$junit"
+            else
+              uv run --locked python scripts/ci/budget.py --name "$name" -- \
+                uv run --locked pytest "${group[@]}" -q -m "not integration" \
+                -n "$workers" --dist load --tb=short --junitxml="$junit"
+            fi
+          }
+
+          run_group test-parallel parallel.txt auto \
+            "junit-${{ matrix.os }}-${{ matrix.shard }}-parallel.xml"
+          run_group test-serial serial.txt 0 \
+            "junit-${{ matrix.os }}-${{ matrix.shard }}-serial.xml"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: junit-${{ matrix.os }}-${{ matrix.shard }}
-          path: junit-${{ matrix.os }}-${{ matrix.shard }}.xml
+          path: junit-${{ matrix.os }}-${{ matrix.shard }}*.xml
           if-no-files-found: ignore
           retention-days: 7
 
