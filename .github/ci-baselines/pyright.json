@@ -7,20 +7,6 @@
       }
     }
   },
-  "src/openbrowser/agent/graph.py": {
-    "reportAttributeAccessIssue": {
-      "e5b2aff271ca0ec0": {
-        "count": 1,
-        "message": "Cannot access attribute \"ainvoke\" for class \"StateGraph[Unknown, None, Unknown, Unknown]\" Attribute \"ainvoke\" is unknown"
-      }
-    },
-    "reportReturnType": {
-      "2269ab2b26f3948b": {
-        "count": 1,
-        "message": "Type \"CompiledStateGraph[GraphState, None, GraphState, GraphState]\" is not assignable to return type \"StateGraph[Unknown, None, Unknown, Unknown]\" \"CompiledStat"
-      }
-    }
-  },
   "src/openbrowser/agent/service.py": {
     "reportAttributeAccessIssue": {
       "f898e4775d0ca8d3": {

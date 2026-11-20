@@ -426,7 +426,7 @@
         "message": "Line too long (169 > 120)"
       },
       "d06cd8cc2d0f5834": {
-        "count": 4,
+        "count": 3,
         "message": "Line too long (124 > 120)"
       },
       "de99c07e6bc123d2": {
@@ -441,10 +441,6 @@
         "count": 1,
         "message": "Line too long (131 > 120)"
       },
-      "f2e7922f9231ae53": {
-        "count": 1,
-        "message": "Line too long (122 > 120)"
-      },
       "f6c588489f8fe6d2": {
         "count": 1,
         "message": "Line too long (140 > 120)"
@@ -452,30 +448,6 @@
       "fb5cca1462bf2646": {
         "count": 1,
         "message": "Line too long (132 > 120)"
-      }
-    },
-    "F841": {
-      "1bd4fc45ee883101": {
-        "count": 1,
-        "message": "Local variable `time_elapsed` is assigned to but never used"
-      },
-      "6de7b0297f20cadc": {
-        "count": 1,
-        "message": "Local variable `action_count` is assigned to but never used"
-      },
-      "dc01073aef3d7544": {
-        "count": 1,
-        "message": "Local variable `cached_element_hashes` is assigned to but never used"
-      },
-      "f107a3f595f71513": {
-        "count": 1,
-        "message": "Local variable `final_result_str` is assigned to but never used"
-      }
-    },
-    "I001": {
-      "2ae03c24054492f4": {
-        "count": 1,
-        "message": "Import block is un-sorted or un-formatted"
       }
     },
     "RUF005": {
@@ -492,14 +464,8 @@
     },
     "SIM102": {
       "a3103375679eb0fb": {
-        "count": 4,
+        "count": 2,
         "message": "Use a single `if` statement instead of nested `if` statements"
-      }
-    },
-    "SIM105": {
-      "3fcbb9faecd6d8f6": {
-        "count": 1,
-        "message": "Use `contextlib.suppress(InterruptedError)` instead of `try`-`except`-`pass`"
       }
     },
     "SIM108": {
@@ -548,12 +514,6 @@
         "message": "Line too long (122 > 120)"
       }
     },
-    "F841": {
-      "f40545e8730acb8a": {
-        "count": 1,
-        "message": "Local variable `message` is assigned to but never used"
-      }
-    },
     "RUF010": {
       "cc3db4c3f79e8a7e": {
         "count": 3,
@@ -576,6 +536,12 @@
       "c84ef749dec51075": {
         "count": 1,
         "message": "Unused `noqa` directive (unused: `F401`)"
+      }
+    },
+    "UP042": {
+      "7e51985ea3a75481": {
+        "count": 1,
+        "message": "Class AgentRunPhase inherits from both `str` and `enum.Enum`"
       }
     },
     "UP046": {
@@ -3736,20 +3702,6 @@
         "message": "Line too long (122 > 120)"
       }
     },
-    "F841": {
-      "4a70c661e4a7d538": {
-        "count": 1,
-        "message": "Local variable `C_BLUE` is assigned to but never used"
-      },
-      "899785ddfc362772": {
-        "count": 1,
-        "message": "Local variable `C_YELLOW` is assigned to but never used"
-      },
-      "add08c765e9c5e15": {
-        "count": 1,
-        "message": "Local variable `models` is assigned to but never used"
-      }
-    },
     "RUF006": {
       "908e2d4cde5c6cc6": {
         "count": 1,
@@ -4390,64 +4342,10 @@
     }
   },
   "tests/test_agent_gif_graph_coverage.py": {
-    "E501": {
-      "263c14c12dac1866": {
-        "count": 1,
-        "message": "Line too long (128 > 120)"
-      },
-      "d06cd8cc2d0f5834": {
-        "count": 9,
-        "message": "Line too long (124 > 120)"
-      }
-    },
     "E702": {
       "93305337879cc83a": {
         "count": 50,
         "message": "Multiple statements on one line (semicolon)"
-      }
-    },
-    "F401": {
-      "2b49ef99999deb96": {
-        "count": 1,
-        "message": "`sys` imported but unused"
-      },
-      "3f7b98b8ed56d4b4": {
-        "count": 1,
-        "message": "`unittest.mock.call` imported but unused"
-      },
-      "51d54c8f4ab88e11": {
-        "count": 1,
-        "message": "`dataclasses.dataclass` imported but unused"
-      },
-      "5bb8cbac01c8c5b6": {
-        "count": 1,
-        "message": "`typing.TypedDict` imported but unused"
-      },
-      "7cb0e64e5881f886": {
-        "count": 1,
-        "message": "`unittest.mock.PropertyMock` imported but unused"
-      },
-      "7cc56244543f1b58": {
-        "count": 1,
-        "message": "`io` imported but unused"
-      },
-      "831cc53d9bfe66dc": {
-        "count": 1,
-        "message": "`typing.Literal` imported but unused"
-      },
-      "8802690ed60109cb": {
-        "count": 1,
-        "message": "`typing.Any` imported but unused"
-      },
-      "b01aeeb380fc571b": {
-        "count": 1,
-        "message": "`time` imported but unused"
-      }
-    },
-    "I001": {
-      "2ae03c24054492f4": {
-        "count": 2,
-        "message": "Import block is un-sorted or un-formatted"
       }
     },
     "RUF059": {
@@ -4616,50 +4514,6 @@
         "message": "Line too long (122 > 120)"
       }
     },
-    "F401": {
-      "163ed5fab7212b7e": {
-        "count": 1,
-        "message": "`json` imported but unused"
-      },
-      "3f7b98b8ed56d4b4": {
-        "count": 1,
-        "message": "`unittest.mock.call` imported but unused"
-      },
-      "78dff7293fedbc16": {
-        "count": 1,
-        "message": "`re` imported but unused"
-      },
-      "8802690ed60109cb": {
-        "count": 1,
-        "message": "`typing.Any` imported but unused"
-      },
-      "8e60da0dd1782b87": {
-        "count": 2,
-        "message": "`openbrowser.models.ActionResult` imported but unused"
-      },
-      "99987f2c392ad002": {
-        "count": 1,
-        "message": "`pydantic.Field` imported but unused"
-      },
-      "99bee82a1373f9c6": {
-        "count": 1,
-        "message": "`gc` imported but unused"
-      },
-      "f522c6ba7a35ad75": {
-        "count": 1,
-        "message": "`openbrowser.agent.views.AgentOutput` imported but unused"
-      }
-    },
-    "F841": {
-      "26fa6e48c5b27c29": {
-        "count": 4,
-        "message": "Local variable `result` is assigned to but never used"
-      },
-      "7da6b2a2784d8b53": {
-        "count": 2,
-        "message": "Local variable `CustomAction` is assigned to but never used"
-      }
-    },
     "RUF059": {
       "352709638ae77e8d": {
         "count": 2,
@@ -4688,7 +4542,7 @@
     },
     "UP045": {
       "a5acde5c1c48717b": {
-        "count": 46,
+        "count": 44,
         "message": "Use `X | None` for type annotations"
       }
     }
@@ -4865,6 +4719,14 @@
       }
     }
   },
+  "tests/test_browser_agent_backend_status.py": {
+    "RUF100": {
+      "16ef4f9f2b601749": {
+        "count": 1,
+        "message": "Unused `noqa` directive (unused: `E402`)"
+      }
+    }
+  },
   "tests/test_browser_events.py": {
     "F401": {
       "0c02de5a09a3c277": {
@@ -4930,12 +4792,6 @@
       "13dd53ca618d29d3": {
         "count": 1,
         "message": "Line too long (121 > 120)"
-      }
-    },
-    "I001": {
-      "2ae03c24054492f4": {
-        "count": 1,
-        "message": "Import block is un-sorted or un-formatted"
       }
     },
     "SIM117": {
@@ -8620,18 +8476,6 @@
       "26fa6e48c5b27c29": {
         "count": 2,
         "message": "Local variable `result` is assigned to but never used"
-      }
-    }
-  },
-  "tests/test_tokens_service.py": {
-    "F401": {
-      "6166f4e197130227": {
-        "count": 1,
-        "message": "`openbrowser.tokens.views.TokenUsageEntry` imported but unused"
-      },
-      "815302daa986ab6d": {
-        "count": 1,
-        "message": "`openbrowser.tokens.views.ModelPricing` imported but unused"
       }
     }
   },
