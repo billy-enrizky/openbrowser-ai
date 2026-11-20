@@ -6,13 +6,10 @@ All external dependencies (PIL, langgraph, browser sessions, etc.) are mocked.
 
 import asyncio
 import base64
-import io
+import inspect
 import logging
-import sys
-import time
-from dataclasses import dataclass
-from typing import Any, Literal, TypedDict
-from unittest.mock import AsyncMock, MagicMock, PropertyMock, call, patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -471,8 +468,9 @@ class TestCreateHistoryGif:
 
     def test_gif_logo_inner_type_error(self):
         """files() / 'static' raises TypeError -> caught by except (AttributeError, TypeError) at line 139-140."""
-        from openbrowser.agent.gif import create_history_gif
         import importlib.resources
+
+        from openbrowser.agent.gif import create_history_gif
 
         mock_Image, mock_ImageFont, mock_ImageDraw, mock_img, mock_draw = _setup_pil_mocks()
         regular = _make_font_mock(40)
@@ -496,8 +494,9 @@ class TestCreateHistoryGif:
 
     def test_gif_logo_path_not_file_debug_logged(self):
         """Logo path is_file returns False -> line 138 debug log."""
-        from openbrowser.agent.gif import create_history_gif
         import importlib.resources
+
+        from openbrowser.agent.gif import create_history_gif
 
         mock_Image, mock_ImageFont, mock_ImageDraw, mock_img, mock_draw = _setup_pil_mocks()
         regular = _make_font_mock(40)
@@ -699,7 +698,12 @@ def _make_mock_agent(has_downloads=False, max_failures=3,
     agent._force_done_after_failure = AsyncMock()
     agent._get_model_output_with_retry = AsyncMock()
     agent._handle_post_llm_processing = AsyncMock()
-    agent._make_history_item = AsyncMock()
+    from openbrowser.agent.views import AgentHistoryList, AgentRunPhase
+
+    def add_history(model_output, browser_state, results, metadata=None, state_message=None):
+        agent.history.history.append(SimpleNamespace(result=results, metadata=metadata))
+
+    agent._make_history_item = AsyncMock(side_effect=add_history)
     agent.multi_act = AsyncMock()
     agent.save_file_system_state = MagicMock()
     agent.log_completion = AsyncMock()
@@ -715,9 +719,44 @@ def _make_mock_agent(has_downloads=False, max_failures=3,
     agent.tools = MagicMock()
     agent.tools.registry.get_prompt_description.return_value = "actions"
 
-    history = MagicMock()
-    history.is_done.return_value = False
-    agent.history = history
+    agent.history = AgentHistoryList(history=[])
+
+    agent._run_phase = AgentRunPhase.RUNNING
+    agent._run_max_steps = 0
+    agent._run_terminal_reason = None
+    agent._run_success = None
+    agent._run_result = None
+    agent._run_error = None
+    agent._run_started_at = None
+    agent._run_finished_at = None
+    agent._run_step_base = 0
+    agent._current_step_number = lambda step: step + 1
+
+    def finish_run(phase, reason, success, result=None, error=None):
+        agent._run_phase = phase
+        agent._run_terminal_reason = reason
+        agent._run_success = success
+        agent._run_result = result
+        agent._run_error = error
+
+    def done_terminal_phase():
+        result = agent.history.history[-1].result[-1]
+        return AgentRunPhase.SUCCEEDED if result.success is True else AgentRunPhase.FAILED
+
+    agent._finish_run = MagicMock(side_effect=finish_run)
+    agent._done_terminal_phase = MagicMock(side_effect=done_terminal_phase)
+    agent._neutralize_unaccepted_done = MagicMock()
+
+    async def publish_completion():
+        await agent.log_completion()
+        callback = agent.register_done_callback
+        if callback:
+            if inspect.iscoroutinefunction(callback):
+                await callback(agent.history)
+            else:
+                callback(agent.history)
+
+    agent._publish_completion = publish_completion
 
     return agent
 
@@ -741,7 +780,7 @@ class TestGraphState:
         from openbrowser.agent.graph import GraphState
         state: GraphState = {
             "step_number": 0, "max_steps": 100,
-            "is_done": False, "consecutive_failures": 0,
+            "is_done": False,
         }
         assert state["step_number"] == 0
         assert state["max_steps"] == 100
@@ -783,6 +822,9 @@ class TestShouldContinue:
 
     def test_done_when_is_done(self):
         builder = _make_graph_builder()
+        builder.agent.history.history.append(
+            SimpleNamespace(result=[SimpleNamespace(is_done=True, success=True, extracted_content='done')])
+        )
         assert builder._should_continue({"is_done": True, "step_number": 1, "max_steps": 100}) == "done"
 
     def test_done_when_stopped(self):
@@ -795,7 +837,7 @@ class TestShouldContinue:
         agent = _make_mock_agent()
         agent.state.paused = True
         builder = _make_graph_builder(agent)
-        assert builder._should_continue({"is_done": False, "step_number": 1, "max_steps": 100}) == "done"
+        assert builder._should_continue({"is_done": False, "step_number": 1, "max_steps": 100}) == "continue"
 
     def test_done_when_max_steps_reached(self):
         builder = _make_graph_builder()
@@ -803,15 +845,16 @@ class TestShouldContinue:
 
     def test_error_when_max_failures(self):
         agent = _make_mock_agent(max_failures=3, final_response_after_failure=True)
+        agent.state.consecutive_failures = 4
         builder = _make_graph_builder(agent)
         assert builder._should_continue({
-            "is_done": False, "step_number": 1, "max_steps": 100, "consecutive_failures": 4
+            "is_done": False, "step_number": 1, "max_steps": 100
         }) == "error"
 
     def test_continue_normal(self):
         builder = _make_graph_builder()
         assert builder._should_continue({
-            "is_done": False, "step_number": 1, "max_steps": 100, "consecutive_failures": 0
+            "is_done": False, "step_number": 1, "max_steps": 100
         }) == "continue"
 
     def test_continue_with_empty_state(self):
@@ -840,10 +883,10 @@ class TestStepNode:
         r = MagicMock(); r.is_done = True; r.error = None; r.extracted_content = "done"
         agent.multi_act.return_value = [r]
 
-        result = await builder._step_node({"step_number": 0, "max_steps": 100, "is_done": False, "consecutive_failures": 0})
+        result = await builder._step_node({"step_number": 0, "max_steps": 100, "is_done": False})
         assert result["step_number"] == 1
         assert result["is_done"] is True
-        assert result["consecutive_failures"] == 0
+        assert agent.state.consecutive_failures == 0
 
     @pytest.mark.asyncio
     async def test_success_not_done_resets_failures(self):
@@ -858,10 +901,11 @@ class TestStepNode:
 
         r = MagicMock(); r.is_done = False; r.error = None
         agent.multi_act.return_value = [r]
+        agent.state.consecutive_failures = 2
 
-        result = await builder._step_node({"step_number": 5, "max_steps": 100, "is_done": False, "consecutive_failures": 2})
+        result = await builder._step_node({"step_number": 5, "max_steps": 100, "is_done": False})
         assert result["step_number"] == 6
-        assert result["consecutive_failures"] == 0
+        assert agent.state.consecutive_failures == 0
 
     @pytest.mark.asyncio
     async def test_single_action_error_increments_failures(self):
@@ -877,8 +921,9 @@ class TestStepNode:
         r = MagicMock(); r.is_done = False; r.error = "oops"
         agent.multi_act.return_value = [r]
 
-        result = await builder._step_node({"step_number": 3, "max_steps": 100, "is_done": False, "consecutive_failures": 1})
-        assert result["consecutive_failures"] == 2
+        agent.state.consecutive_failures = 1
+        await builder._step_node({"step_number": 3, "max_steps": 100, "is_done": False})
+        assert agent.state.consecutive_failures == 2
 
     @pytest.mark.asyncio
     async def test_empty_action_increments_failures(self):
@@ -891,8 +936,8 @@ class TestStepNode:
         mo = MagicMock(); mo.action = []
         agent._get_model_output_with_retry.return_value = mo
 
-        result = await builder._step_node({"step_number": 0, "max_steps": 100, "is_done": False, "consecutive_failures": 0})
-        assert result["consecutive_failures"] == 1
+        await builder._step_node({"step_number": 0, "max_steps": 100, "is_done": False})
+        assert agent.state.consecutive_failures == 1
 
     @pytest.mark.asyncio
     async def test_none_model_output_increments_failures(self):
@@ -903,8 +948,8 @@ class TestStepNode:
         agent.browser_session.get_browser_state_summary.return_value = bs
         agent._get_model_output_with_retry.return_value = None
 
-        result = await builder._step_node({"step_number": 0, "max_steps": 100, "is_done": False, "consecutive_failures": 0})
-        assert result["consecutive_failures"] == 1
+        await builder._step_node({"step_number": 0, "max_steps": 100, "is_done": False})
+        assert agent.state.consecutive_failures == 1
 
     @pytest.mark.asyncio
     async def test_with_downloads_path(self):
@@ -920,7 +965,7 @@ class TestStepNode:
         r = MagicMock(); r.is_done = False; r.error = None
         agent.multi_act.return_value = [r]
 
-        await builder._step_node({"step_number": 0, "max_steps": 100, "is_done": False, "consecutive_failures": 0})
+        await builder._step_node({"step_number": 0, "max_steps": 100, "is_done": False})
         assert agent._check_and_update_downloads.call_count >= 2
 
     @pytest.mark.asyncio
@@ -928,9 +973,11 @@ class TestStepNode:
         builder = _make_graph_builder()
         builder.agent._check_stop_or_pause.side_effect = InterruptedError("stopped")
 
-        result = await builder._step_node({"step_number": 2, "max_steps": 100, "is_done": False, "consecutive_failures": 0})
-        assert result["is_done"] is True
+        result = await builder._step_node({"step_number": 2, "max_steps": 100, "is_done": False})
+        assert result["is_done"] is False
         assert result["step_number"] == 3
+        assert builder.agent._run_terminal_reason == "external_interrupt"
+        assert builder.agent._run_phase.value == "stopped"
 
     @pytest.mark.asyncio
     async def test_timeout_error(self):
@@ -949,17 +996,18 @@ class TestStepNode:
             raise asyncio.TimeoutError()
 
         with patch('asyncio.wait_for', side_effect=wait_for_timeout):
-            result = await builder._step_node({"step_number": 1, "max_steps": 100, "is_done": False, "consecutive_failures": 0})
+            await builder._step_node({"step_number": 1, "max_steps": 100, "is_done": False})
 
-        assert result["consecutive_failures"] == 1
+        assert agent.state.consecutive_failures == 1
 
     @pytest.mark.asyncio
     async def test_generic_exception(self):
         builder = _make_graph_builder()
         builder.agent._check_stop_or_pause.side_effect = RuntimeError("boom")
+        builder.agent.state.consecutive_failures = 1
 
-        result = await builder._step_node({"step_number": 0, "max_steps": 100, "is_done": False, "consecutive_failures": 1})
-        assert result["consecutive_failures"] == 2
+        await builder._step_node({"step_number": 0, "max_steps": 100, "is_done": False})
+        assert builder.agent.state.consecutive_failures == 2
 
     @pytest.mark.asyncio
     async def test_no_browser_state(self):
@@ -973,14 +1021,14 @@ class TestStepNode:
         r = MagicMock(); r.is_done = False; r.error = None
         agent.multi_act.return_value = [r]
 
-        result = await builder._step_node({"step_number": 0, "max_steps": 100, "is_done": False, "consecutive_failures": 0})
+        result = await builder._step_node({"step_number": 0, "max_steps": 100, "is_done": False})
 
         assert result["step_number"] == 1
         agent._make_history_item.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_multiple_results_error_not_single(self):
-        """len(results) > 1 with error should NOT increment failures."""
+        """A multi-action step with any error increments the one failure counter."""
         builder = _make_graph_builder()
         agent = builder.agent
 
@@ -994,8 +1042,8 @@ class TestStepNode:
         r2 = MagicMock(); r2.is_done = False; r2.error = None
         agent.multi_act.return_value = [r1, r2]
 
-        result = await builder._step_node({"step_number": 0, "max_steps": 100, "is_done": False, "consecutive_failures": 0})
-        assert result["consecutive_failures"] == 0
+        await builder._step_node({"step_number": 0, "max_steps": 100, "is_done": False})
+        assert agent.state.consecutive_failures == 1
 
     @pytest.mark.asyncio
     async def test_history_item_and_save(self):
@@ -1011,7 +1059,7 @@ class TestStepNode:
         r = MagicMock(); r.is_done = False; r.error = None
         agent.multi_act.return_value = [r]
 
-        await builder._step_node({"step_number": 0, "max_steps": 100, "is_done": False, "consecutive_failures": 0})
+        await builder._step_node({"step_number": 0, "max_steps": 100, "is_done": False})
         agent._make_history_item.assert_called_once()
         agent.save_file_system_state.assert_called_once()
 
@@ -1033,7 +1081,7 @@ class TestStepNode:
         assert result["step_number"] == 1
 
     @pytest.mark.asyncio
-    async def test_final_result_logged(self):
+    async def test_final_result_not_logged_before_history_acceptance(self):
         builder = _make_graph_builder()
         agent = builder.agent
 
@@ -1046,8 +1094,8 @@ class TestStepNode:
         r = MagicMock(); r.is_done = True; r.error = None; r.extracted_content = "Final answer"
         agent.multi_act.return_value = [r]
 
-        await builder._step_node({"step_number": 0, "max_steps": 100, "is_done": False, "consecutive_failures": 0})
-        agent.logger.info.assert_any_call('\n Final Result:\nFinal answer\n\n')
+        await builder._step_node({"step_number": 0, "max_steps": 100, "is_done": False})
+        assert all('Final Result' not in str(call) for call in agent.logger.info.call_args_list)
 
     @pytest.mark.asyncio
     async def test_no_history_when_empty_results(self):
@@ -1060,7 +1108,7 @@ class TestStepNode:
         mo = MagicMock(); mo.action = []
         agent._get_model_output_with_retry.return_value = mo
 
-        await builder._step_node({"step_number": 0, "max_steps": 100, "is_done": False, "consecutive_failures": 0})
+        await builder._step_node({"step_number": 0, "max_steps": 100, "is_done": False})
         agent._make_history_item.assert_not_called()
 
 
@@ -1089,7 +1137,13 @@ class TestGraphBuilderRun:
             compiled = AsyncMock(); compiled.ainvoke = AsyncMock()
             mock_sg.return_value.compile.return_value = compiled
             agent = _make_mock_agent()
-            agent.history.is_done.return_value = True
+            from openbrowser.agent.views import AgentRunPhase
+            agent.history.history.append(
+                SimpleNamespace(result=[SimpleNamespace(is_done=True, success=True, extracted_content='done')])
+            )
+            agent._run_phase = AgentRunPhase.SUCCEEDED
+            agent._run_success = True
+            agent._run_terminal_reason = 'done'
             sync_cb = MagicMock()
             agent.register_done_callback = sync_cb
             from openbrowser.agent.graph import AgentGraphBuilder
@@ -1104,7 +1158,13 @@ class TestGraphBuilderRun:
             compiled = AsyncMock(); compiled.ainvoke = AsyncMock()
             mock_sg.return_value.compile.return_value = compiled
             agent = _make_mock_agent()
-            agent.history.is_done.return_value = True
+            from openbrowser.agent.views import AgentRunPhase
+            agent.history.history.append(
+                SimpleNamespace(result=[SimpleNamespace(is_done=True, success=True, extracted_content='done')])
+            )
+            agent._run_phase = AgentRunPhase.SUCCEEDED
+            agent._run_success = True
+            agent._run_terminal_reason = 'done'
             async_cb = AsyncMock()
             agent.register_done_callback = async_cb
             from openbrowser.agent.graph import AgentGraphBuilder
@@ -1119,7 +1179,6 @@ class TestGraphBuilderRun:
             compiled = AsyncMock(); compiled.ainvoke = AsyncMock()
             mock_sg.return_value.compile.return_value = compiled
             agent = _make_mock_agent()
-            agent.history.is_done.return_value = False
             from openbrowser.agent.graph import AgentGraphBuilder
             builder = AgentGraphBuilder(agent)
             await builder.run(max_steps=100)
@@ -1131,7 +1190,13 @@ class TestGraphBuilderRun:
             compiled = AsyncMock(); compiled.ainvoke = AsyncMock()
             mock_sg.return_value.compile.return_value = compiled
             agent = _make_mock_agent()
-            agent.history.is_done.return_value = True
+            from openbrowser.agent.views import AgentRunPhase
+            agent.history.history.append(
+                SimpleNamespace(result=[SimpleNamespace(is_done=True, success=True, extracted_content='done')])
+            )
+            agent._run_phase = AgentRunPhase.SUCCEEDED
+            agent._run_success = True
+            agent._run_terminal_reason = 'done'
             agent.register_done_callback = None
             from openbrowser.agent.graph import AgentGraphBuilder
             builder = AgentGraphBuilder(agent)

@@ -7,8 +7,8 @@ import json
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, call, patch
 
-import pytest
 import psutil
+import pytest
 
 from openbrowser.browser.watchdogs.local_browser_watchdog import LocalBrowserWatchdog
 from openbrowser.browser.watchdogs.profile_lease import ProfileInUseError, ProfileLease
@@ -174,7 +174,14 @@ async def test_windows_cleanup_uses_cdp_and_never_force_kills(monkeypatch):
 	process = MagicMock()
 	process.pid = 123
 	process.create_time.return_value = 20.0
-	process.is_running.side_effect = [True, False]
+	running_calls = 0
+
+	def is_running():
+		nonlocal running_calls
+		running_calls += 1
+		return running_calls == 1
+
+	process.is_running.side_effect = is_running
 	record = _browser_record(Path('/tmp/profile'), pid=123, start_time=20.0)
 
 	monkeypatch.setattr(
@@ -279,7 +286,14 @@ async def test_windows_cleanup_uses_recorded_cdp_endpoint(monkeypatch):
 	process = MagicMock()
 	process.pid = 123
 	process.create_time.return_value = 20.0
-	process.is_running.side_effect = [True, False]
+	running_calls = 0
+
+	def is_running():
+		nonlocal running_calls
+		running_calls += 1
+		return running_calls == 1
+
+	process.is_running.side_effect = is_running
 	record = _browser_record(Path('/tmp/profile'), pid=123, start_time=20.0)
 
 	monkeypatch.setattr(

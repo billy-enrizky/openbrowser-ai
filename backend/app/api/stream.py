@@ -482,4 +482,5 @@ async def cancel_task(
 
     accepted = await session.cancel()
     # The run task owns the terminal event after cooperative cleanup.
-    return {"status": "cancelled" if accepted else "not_running", "task_id": task_id}
+    next_status = "stopping" if accepted and session.is_running else "cancelled" if accepted else "not_running"
+    return {"status": next_status, "task_id": task_id}

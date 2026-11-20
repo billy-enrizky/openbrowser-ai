@@ -59,7 +59,13 @@ if TYPE_CHECKING:
 	from openbrowser.agent.service import Agent as BrowserAgent  # Alias
 
 	# from openbrowser.agent.service import Agent
-	from openbrowser.agent.views import AgentHistoryList
+	from openbrowser.agent.views import (
+		AgentHistoryList,
+		AgentRunInterrupted,
+		AgentRunPhase,
+		AgentRunStateError,
+		AgentRunStatus,
+	)
 	from openbrowser.browser import BrowserProfile, BrowserSession
 	from openbrowser.browser import BrowserSession as Browser
 	from openbrowser.code_use.service import CodeAgent, CodeAgentStateError
@@ -85,6 +91,10 @@ _LAZY_IMPORTS: dict[str, tuple[str, str | None]] = {
 	# Agent service (heavy due to dependencies)
 	'Agent': ('openbrowser.agent.service', 'Agent'),
 	'BrowserAgent': ('openbrowser.agent.service', 'Agent'),  # Alias for backward compatibility
+	'AgentRunPhase': ('openbrowser.agent.views', 'AgentRunPhase'),
+	'AgentRunStatus': ('openbrowser.agent.views', 'AgentRunStatus'),
+	'AgentRunStateError': ('openbrowser.agent.views', 'AgentRunStateError'),
+	'AgentRunInterrupted': ('openbrowser.agent.views', 'AgentRunInterrupted'),
 	# Code-use agent (Jupyter notebook-like execution)
 	'CodeAgent': ('openbrowser.code_use.service', 'CodeAgent'),
 	'CodeAgentStateError': ('openbrowser.code_use.service', 'CodeAgentStateError'),
@@ -156,6 +166,10 @@ def __getattr__(name: str):
 __all__ = [
 	'Agent',
 	'BrowserAgent',  # Alias for Agent
+	'AgentRunPhase',
+	'AgentRunStatus',
+	'AgentRunStateError',
+	'AgentRunInterrupted',
 	'CodeAgent',
 	'CodeAgentPhase',
 	'CodeAgentRunStatus',

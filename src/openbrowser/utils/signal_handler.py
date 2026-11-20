@@ -42,8 +42,8 @@ class SignalHandler:
     def __init__(
         self,
         loop: asyncio.AbstractEventLoop | None = None,
-        pause_callback: Callable[[], None] | None = None,
-        resume_callback: Callable[[], None] | None = None,
+        pause_callback: Callable[[], Any] | None = None,
+        resume_callback: Callable[[], Any] | None = None,
         custom_exit_callback: Callable[[], None] | None = None,
         exit_on_second_int: bool = True,
     ):
@@ -106,7 +106,7 @@ class SignalHandler:
                 self.unregister()
                 raise KeyboardInterrupt
     
-    def _schedule_callback(self, callback: Callable[[], None]) -> None:
+    def _schedule_callback(self, callback: Callable[[], Any]) -> None:
         """Schedule a callback on the event loop."""
         if self._loop:
             self._loop.call_soon_threadsafe(callback)
