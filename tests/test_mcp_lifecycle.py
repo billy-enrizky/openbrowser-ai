@@ -22,6 +22,48 @@ async def test_get_status_does_not_start_browser(mcp_server):
 
 
 @pytest.mark.asyncio
+async def test_get_status_reports_storage_state_previews_without_browser(mcp_server, tmp_path):
+	state_path = tmp_path / 'state.json'
+	state_path.write_text('{"cookies": [], "origins": []}')
+	mcp_server._profile_summary = {'storage_state': str(state_path)}
+
+	payload = json.loads(await mcp_server._handle_tool('get_status', {}))
+
+	assert payload['storage_state']['phase'] == 'pending'
+	assert payload['storage_state']['path'] == str(state_path)
+	assert payload['storage_state_save']['phase'] == 'idle'
+	assert payload['storage_state_save']['path'] == str(state_path)
+
+
+@pytest.mark.asyncio
+async def test_get_status_uses_config_storage_state_before_browser(mcp_server, tmp_path):
+	state_path = tmp_path / 'config-state.json'
+	state_path.write_text('{"cookies": [], "origins": []}')
+	mcp_server.config = {'browser_profile': {'storage_state': str(state_path)}}
+	mcp_server._profile_summary = None
+
+	payload = json.loads(await mcp_server._handle_tool('get_status', {}))
+
+	assert payload['storage_state']['phase'] == 'pending'
+	assert payload['storage_state']['path'] == str(state_path)
+	assert payload['storage_state_save']['phase'] == 'idle'
+	assert payload['storage_state_save']['path'] == str(state_path)
+
+
+@pytest.mark.asyncio
+async def test_get_status_reports_dict_storage_state_as_skipped(mcp_server):
+	mcp_server.config = {
+		'browser_profile': {'storage_state': {'cookies': [], 'origins': []}}
+	}
+	mcp_server._profile_summary = None
+
+	payload = json.loads(await mcp_server._handle_tool('get_status', {}))
+
+	assert payload['storage_state']['phase'] == 'skipped'
+	assert payload['storage_state_save']['phase'] == 'skipped'
+
+
+@pytest.mark.asyncio
 async def test_reset_browser_preserves_user_variables(mcp_server):
 	session = MagicMock()
 	session.kill = AsyncMock()

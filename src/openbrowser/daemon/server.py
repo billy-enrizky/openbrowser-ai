@@ -29,7 +29,12 @@ from openbrowser.browser.lifecycle import (
     LifecyclePhase,
     LifecycleTransitionError,
 )
-from openbrowser.browser.storage_state import StorageStatePhase, StorageStateSnapshot
+from openbrowser.browser.storage_state import (
+    StorageStatePhase,
+    StorageStateSavePhase,
+    StorageStateSaveSnapshot,
+    StorageStateSnapshot,
+)
 from openbrowser.code_use.namespace_transfer import transfer_namespace
 from openbrowser.daemon import (
     EXIT_OWNER_BUSY,
@@ -494,6 +499,7 @@ class DaemonServer:
         self._startup_owner_busy = False
         self._bound_socket_identity: SocketPathIdentity | None = None
         self._storage_state_preload = StorageStateSnapshot(phase=StorageStatePhase.NOT_CONFIGURED)
+        self._storage_state_save_preload = StorageStateSaveSnapshot(phase=StorageStateSavePhase.NOT_CONFIGURED)
 
     def _set_startup(self, phase: DaemonStartupPhase, detail: str | None = None) -> None:
         """Move the startup machine through an explicitly allowed transition."""
@@ -522,20 +528,33 @@ class DaemonServer:
             path = str(storage_state)
             expanded: Path | None = None
             try:
-                expanded = Path(path).expanduser()
+                expanded = Path(path).expanduser().resolve()
                 size = expanded.stat().st_size
             except FileNotFoundError:
+                resolved = str(expanded) if expanded is not None else path
                 self._storage_state_preload = StorageStateSnapshot(
                     phase=StorageStatePhase.SKIPPED,
-                    path=str(expanded) if expanded is not None else path,
+                    path=resolved,
                     detail='storage-state file does not exist',
                 )
+                self._storage_state_save_preload = StorageStateSaveSnapshot(
+                    phase=StorageStateSavePhase.IDLE,
+                    path=resolved,
+                    detail='storage-state file does not exist yet',
+                )
             except (OSError, RuntimeError) as error:
+                error_text = f'{type(error).__name__}: {error}'
                 self._storage_state_preload = StorageStateSnapshot(
                     phase=StorageStatePhase.FAILED,
                     path=path,
-                    error=f'{type(error).__name__}: {error}',
+                    error=error_text,
                     detail='storage-state path could not be resolved or inspected',
+                )
+                self._storage_state_save_preload = StorageStateSaveSnapshot(
+                    phase=StorageStateSavePhase.FAILED,
+                    path=path,
+                    error=error_text,
+                    detail='storage-state path could not be resolved',
                 )
             else:
                 self._storage_state_preload = StorageStateSnapshot(
@@ -543,14 +562,23 @@ class DaemonServer:
                     path=str(expanded),
                     bytes=size,
                 )
+                self._storage_state_save_preload = StorageStateSaveSnapshot(
+                    phase=StorageStateSavePhase.IDLE,
+                    path=str(expanded),
+                )
             return
         if isinstance(storage_state, dict):
             self._storage_state_preload = StorageStateSnapshot(
                 phase=StorageStatePhase.SKIPPED,
                 detail='in-memory storage state is not loaded from a file',
             )
+            self._storage_state_save_preload = StorageStateSaveSnapshot(
+                phase=StorageStateSavePhase.SKIPPED,
+                detail='in-memory storage state is not saved to a file',
+            )
             return
         self._storage_state_preload = StorageStateSnapshot(phase=StorageStatePhase.NOT_CONFIGURED)
+        self._storage_state_save_preload = StorageStateSaveSnapshot(phase=StorageStateSavePhase.NOT_CONFIGURED)
 
     def _downloads_snapshot(self) -> dict:
         """Return a bounded download outcome summary without starting a browser."""
@@ -569,6 +597,20 @@ class DaemonServer:
                 if isinstance(value, StorageStateSnapshot):
                     return value
         return self._storage_state_preload
+
+    def _storage_state_save_snapshot(self) -> StorageStateSaveSnapshot:
+        """Return the watchdog-owned save state, or the pre-save view."""
+        watchdog = getattr(self._session, '_storage_state_watchdog', None)
+        snapshot = getattr(watchdog, 'storage_state_save_snapshot', None)
+        if callable(snapshot):
+            try:
+                value = snapshot()
+            except Exception:
+                logger.warning('Could not read storage-state save snapshot', exc_info=True)
+            else:
+                if isinstance(value, StorageStateSaveSnapshot):
+                    return value
+        return self._storage_state_save_preload
 
     def _default_profile_dir(self) -> Path:
         """Choose a stable profile directory for this daemon socket."""
@@ -873,6 +915,7 @@ class DaemonServer:
                 'owner_state': self._startup_owner_state.value if self._startup_owner_state else None,
             },
             'storage_state': storage_state.to_dict(),
+            'storage_state_save': self._storage_state_save_snapshot().to_dict(),
             'namespace_transfer': self._last_namespace_transfer,
             'downloads': downloads,
         }

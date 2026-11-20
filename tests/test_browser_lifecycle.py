@@ -644,3 +644,18 @@ async def test_bounded_cleanup_force_releases_a_stuck_task():
 
 	force_stop.assert_called_once()
 	force_reset.assert_called_once()
+
+
+def test_lifecycle_snapshot_includes_storage_state_previews(tmp_path):
+	state_path = tmp_path / 'state.json'
+	state_path.write_text('{"cookies": [], "origins": []}')
+	session = BrowserSession(
+		browser_profile=BrowserProfile(headless=True, storage_state=str(state_path))
+	)
+
+	snapshot = session.lifecycle_snapshot()
+
+	assert snapshot['storage_state']['phase'] == 'pending'
+	assert snapshot['storage_state']['path'] == str(state_path)
+	assert snapshot['storage_state_save']['phase'] == 'idle'
+	assert snapshot['storage_state_save']['path'] == str(state_path)

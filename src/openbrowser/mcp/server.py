@@ -526,6 +526,22 @@ class _BrowserOwner:
 			return await self._reset_browser(clear_variables=bool(arguments.get('clear_variables', False)))
 		return f'Unknown tool: {name}'
 
+	def _configured_storage_source(self) -> object:
+		"""Resolve the configured storage source without starting a browser."""
+		if self._profile_summary:
+			mode = self._profile_summary.get('storage_state_mode')
+			if mode == 'memory':
+				return {}
+			if mode == 'file':
+				return self._profile_summary.get('storage_state')
+			if mode == 'none':
+				return None
+			return self._profile_summary.get('storage_state')
+		try:
+			return dict(get_default_profile(self.config)).get('storage_state')
+		except Exception:
+			return None
+
 	def _build_browser_profile(self):
 		"""Build a BrowserProfile from config with MCP defaults."""
 		profile_config = dict(get_default_profile(self.config))
@@ -570,10 +586,20 @@ class _BrowserOwner:
 		profile_data['args'] = args
 		profile = BrowserProfile(**profile_data)
 		storage_state = profile.storage_state
+		if isinstance(storage_state, (str, Path)):
+			storage_state_mode = 'file'
+			storage_state_summary = str(storage_state)
+		elif isinstance(storage_state, dict):
+			storage_state_mode = 'memory'
+			storage_state_summary = None
+		else:
+			storage_state_mode = 'none'
+			storage_state_summary = None
 		self._profile_summary = {
 			'user_data_dir': str(profile.user_data_dir) if profile.user_data_dir else None,
 			'headless': profile.headless,
-			'storage_state': str(storage_state) if isinstance(storage_state, (str, Path)) else None,
+			'storage_state': storage_state_summary,
+			'storage_state_mode': storage_state_mode,
 			'instance_id': self.owner_id,
 		}
 		return profile
@@ -1001,6 +1027,19 @@ class _BrowserOwner:
 		if self._namespace is not None:
 			namespace_variables = sum(1 for key in self._namespace if not key.startswith('__'))
 
+		configured_storage_state = self._configured_storage_source()
+		if 'storage_state' in browser and 'storage_state_save' in browser:
+			storage_state = browser['storage_state']
+			storage_state_save = browser['storage_state_save']
+		else:
+			from openbrowser.browser.storage_state import (
+				load_snapshot_for_configuration,
+				save_snapshot_for_configuration,
+			)
+
+			storage_state = load_snapshot_for_configuration(configured_storage_state).to_dict()
+			storage_state_save = save_snapshot_for_configuration(configured_storage_state).to_dict()
+
 		try:
 			version = get_openbrowser_version()
 		except Exception:
@@ -1020,6 +1059,8 @@ class _BrowserOwner:
 			'uptime_seconds': max(0.0, time.time() - self._server()._start_time),
 			'version': version,
 			'downloads': self._downloads_snapshot(),
+			'storage_state': storage_state,
+			'storage_state_save': storage_state_save,
 		}
 
 	async def _reset_browser(self, *, clear_variables: bool = False) -> str:
