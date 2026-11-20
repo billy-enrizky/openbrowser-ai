@@ -23,6 +23,61 @@ class ExecutionStatus(str, Enum):
 	ERROR = 'error'
 
 
+class CodeAgentPhase(str, Enum):
+	"""Explicit lifecycle phase of one CodeAgent run."""
+
+	IDLE = 'idle'
+	STARTING = 'starting'
+	RUNNING = 'running'
+	EXECUTING = 'executing'
+	VALIDATING = 'validating'
+	SUCCEEDED = 'succeeded'
+	FAILED = 'failed'
+	MAX_STEPS = 'max_steps'
+	CANCELLED = 'cancelled'
+
+
+TERMINAL_CODE_AGENT_PHASES = frozenset({
+	CodeAgentPhase.SUCCEEDED,
+	CodeAgentPhase.FAILED,
+	CodeAgentPhase.MAX_STEPS,
+	CodeAgentPhase.CANCELLED,
+})
+
+
+class CodeAgentCompletion(BaseModel):
+	"""Run-owned completion recorded by the actual done action."""
+
+	model_config = ConfigDict(extra='forbid', frozen=True)
+
+	success: bool
+	result: str | None = None
+	attachments: tuple[str, ...] = ()
+
+
+class CodeAgentRunStatus(BaseModel):
+	"""A snapshot of one CodeAgent run, including terminal truth."""
+
+	model_config = ConfigDict(extra='forbid')
+
+	phase: CodeAgentPhase = CodeAgentPhase.IDLE
+	step: int = 0
+	max_steps: int = 0
+	success: bool | None = None
+	terminal_reason: str | None = None
+	cancellation_requested: bool = False
+	closed: bool = False
+	result: str | None = None
+	error: str | None = None
+	attachments: list[str] = Field(default_factory=list)
+	started_at: float | None = None
+	finished_at: float | None = None
+
+	@property
+	def terminal(self) -> bool:
+		return self.phase in TERMINAL_CODE_AGENT_PHASES
+
+
 class CodeCell(BaseModel):
 	"""Represents a code cell in the notebook-like execution."""
 

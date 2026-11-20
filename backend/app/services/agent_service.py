@@ -3,14 +3,18 @@
 import asyncio
 import logging
 import os
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, Callable
 from uuid import uuid4
 
 from app.core.config import settings
-from app.services.vnc_service import vnc_service, VncSession, VNC_AVAILABLE
+from app.services.vnc_service import VNC_AVAILABLE, VncSession, vnc_service
 
 logger = logging.getLogger(__name__)
+
+
+def _utcnow() -> datetime:
+    return datetime.now(UTC).replace(tzinfo=None)
 
 # Chromium kiosk flags applied when VNC is enabled to prevent users from
 # closing the browser or accessing browser chrome (address bar, menus, etc.)
@@ -70,6 +74,7 @@ class AgentSession:
         self.agent: Any = None
         self.browser_session: Any = None
         self.cdp_bridge: Any = None  # CDPBridge instance when using current browser
+        self._debugger_attached = False
         self.vnc_session: VncSession | None = None
         self.is_running = False
         self.is_paused = False
@@ -80,6 +85,42 @@ class AgentSession:
         self.error: str | None = None
         self.started_at: datetime | None = None
         self.completed_at: datetime | None = None
+
+    @property
+    def task_status(self) -> str:
+        """Return the user-visible lifecycle state of this session."""
+        if self.is_cancelled and not self.is_running:
+            return 'cancelled'
+        if self.completed_at is not None:
+            if self.is_cancelled:
+                return 'cancelled'
+            return 'completed' if self.success else 'failed'
+        return 'running' if self.is_running else 'pending'
+
+    def _cancelled_start_result(self, reason: str) -> dict[str, Any]:
+        """Finish startup without constructing an agent."""
+        if self.completed_at is None:
+            self.completed_at = _utcnow()
+        self.result = self.result or 'Task was cancelled'
+        self.success = False
+        self.error = None
+        duration = (self.completed_at - self.started_at).total_seconds() if self.started_at else 0
+        total_steps = len(getattr(self.agent, 'complete_history', []) or [])
+        status = getattr(self.agent, 'status', None)
+        attachments = list(getattr(status, 'attachments', []) or [])
+        self._log("warning", "Task was cancelled before agent startup completed", "agent")
+        return {
+            'task_id': self.task_id,
+            'result': self.result,
+            'success': False,
+            'cancelled': True,
+            'phase': 'cancelled',
+            'terminal_phase': 'cancelled',
+            'terminal_reason': reason,
+            'total_steps': total_steps,
+            'duration_seconds': duration,
+            'attachments': attachments,
+        }
     
     def _log(self, level: str, message: str, source: str | None = None, step_number: int | None = None):
         """Send log message to callback if available."""
@@ -113,8 +154,8 @@ class AgentSession:
 
     async def _setup_current_browser(self, BrowserSession, BrowserProfile):
         """Set up browser session using the current browser via Chrome extension."""
-        from app.websocket.extension_handler import extension_manager
         from app.services.cdp_bridge import CDPBridge
+        from app.websocket.extension_handler import extension_manager
 
         # Find a connected extension
         extension_id = extension_manager.get_any_extension_id()
@@ -144,6 +185,7 @@ class AgentSession:
                 break
         else:
             raise RuntimeError("Timed out waiting for Chrome extension to attach debugger to a tab")
+        self._debugger_attached = True
 
         # Create browser session that connects to the bridge
         browser_profile = BrowserProfile(
@@ -203,15 +245,20 @@ class AgentSession:
             raise RuntimeError("Agent is already running")
         
         self.is_running = True
-        self.started_at = datetime.utcnow()
+        self.started_at = _utcnow()
         self._log("info", f"Starting task: {self.task[:100]}...", "agent")
         
         try:
+            if self.is_cancelled:
+                return self._cancelled_start_result('cancelled_before_start')
+
             # Set up VNC session first (if enabled)
             self.vnc_session = await self._setup_vnc()
+            if self.is_cancelled:
+                return self._cancelled_start_result('cancelled_during_setup')
             
             # Import openbrowser components
-            from openbrowser import Agent, CodeAgent, BrowserSession, BrowserProfile
+            from openbrowser import Agent, BrowserProfile, BrowserSession, CodeAgent
 
             self._log("info", "Initializing browser session...", "agent")
 
@@ -221,6 +268,9 @@ class AgentSession:
             else:
                 # Standard flow: launch a new browser instance
                 await self._setup_new_browser(BrowserSession, BrowserProfile)
+
+            if self.is_cancelled:
+                return self._cancelled_start_result('cancelled_during_setup')
 
             logger.info("Browser session started successfully")
             self._log("info", "Browser session started successfully", "browser")
@@ -273,22 +323,38 @@ class AgentSession:
             logger.info(f"Starting {self.agent_type} agent for task: {self.task[:50]}...")
             self._log("info", f"Starting {self.agent_type} agent execution...", "agent")
             
+            if self.is_cancelled and hasattr(self.agent, 'stop'):
+                self.agent.stop()
             if self.agent_type == "code":
                 result = await self._run_code_agent()
             else:
                 result = await self._run_browser_agent()
-            
-            self.completed_at = datetime.utcnow()
-            self._log("info", f"Task completed successfully", "agent")
+
+            if self.completed_at is None:
+                self.completed_at = _utcnow()
+            if result.get('cancelled'):
+                self._log("warning", "Task was cancelled", "agent")
+            elif not result.get('success'):
+                self._log(
+                    "error",
+                    f"Task failed: {result.get('terminal_reason') or self.error or 'agent reported failure'}",
+                    "agent",
+                )
+            else:
+                self._log("info", "Task completed successfully", "agent")
             return result
             
         except asyncio.CancelledError:
             self.is_cancelled = True
+            self.completed_at = _utcnow()
             self.error = "Task was cancelled"
             self._log("warning", "Task was cancelled", "agent")
             raise
         except Exception as e:
+            if self.is_cancelled:
+                return self._cancelled_start_result('cancelled_during_setup')
             logger.exception(f"Agent error: {e}")
+            self.completed_at = _utcnow()
             self.error = str(e)
             self._log("error", f"Agent error: {str(e)}", "agent")
             if self.on_error_callback:
@@ -302,29 +368,72 @@ class AgentSession:
         """Run CodeAgent with step tracking."""
         # CodeAgent doesn't have per-step callbacks like Agent,
         # so we run it and extract results after
-        session = await self.agent.run(max_steps=self.max_steps)
-        
-        # Extract results from CodeAgent
-        is_done = self.agent._is_task_done()
-        task_result = self.agent.namespace.get('_task_result', '')
-        task_success = self.agent.namespace.get('_task_success', False)
-        
-        self.result = task_result if task_result else "Task completed"
-        self.success = task_success if is_done else False
-        
+        await self.agent.run(max_steps=self.max_steps)
+        if self.completed_at is None:
+            self.completed_at = _utcnow()
+
+        status = getattr(self.agent, 'status', None)
+        phase = getattr(status, 'phase', None)
+        phase_value = getattr(phase, 'value', phase)
+        terminal_result = getattr(status, 'result', None) if status is not None else None
+        terminal_error = getattr(status, 'error', None) if status is not None else None
+        terminal_reason = getattr(status, 'terminal_reason', None) if status is not None else None
+        terminal_success = getattr(status, 'success', None) if status is not None else None
+
+        if phase_value == 'cancelled':
+            self.is_cancelled = True
+            self.result = terminal_result or 'Task was cancelled'
+            self.success = False
+        elif phase_value == 'failed':
+            self.is_cancelled = False
+            self.error = terminal_error or terminal_reason or 'Task failed'
+            self.result = terminal_result or f'Task failed: {self.error}'
+            self.success = False
+        elif phase_value == 'max_steps':
+            self.is_cancelled = False
+            self.result = terminal_result or 'Task incomplete: maximum steps reached'
+            self.success = False
+        elif phase_value == 'succeeded':
+            self.is_cancelled = False
+            self.result = terminal_result if terminal_result is not None else 'Task completed'
+            self.success = terminal_success is True
+        elif status is None:
+            # Legacy fallback for agents without an explicit status.
+            is_done = self.agent._is_task_done()
+            task_result = self.agent.namespace.get('_task_result', '')
+            task_success = self.agent.namespace.get('_task_success', False)
+            self.result = task_result if task_result else 'Task completed'
+            self.success = bool(task_success) if is_done else False
+        else:
+            self.is_cancelled = bool(getattr(status, 'cancellation_requested', False))
+            self.error = f'CodeAgent returned without a terminal phase: {phase_value}'
+            self.result = 'Task finished without a terminal state'
+            self.success = False
+        if not self.result:
+            self.result = 'Task completed' if self.success else 'Task finished without a result'
+
+        terminal_phases = {'succeeded', 'failed', 'max_steps', 'cancelled'}
+        terminal_phase = phase_value if phase_value in terminal_phases else None
+
         # Collect file attachments from CodeAgent
         attachments = self._collect_code_agent_attachments()
-        
-        # Send final output
+
+        # Send final output with the truthful success flag
         if self.on_output_callback:
-            self.on_output_callback(self.result, True)
-        
+            self.on_output_callback(self.result, bool(self.success))
+
+        if self.completed_at is None:
+            self.completed_at = _utcnow()
         duration = (self.completed_at - self.started_at).total_seconds() if self.completed_at and self.started_at else 0
-        
+
         return {
             "task_id": self.task_id,
             "result": self.result,
-            "success": self.success,
+            "success": bool(self.success),
+            "cancelled": bool(self.is_cancelled),
+            "phase": phase_value,
+            "terminal_phase": terminal_phase,
+            "terminal_reason": terminal_reason,
             "total_steps": len(self.agent.complete_history),
             "duration_seconds": duration,
             "attachments": attachments,
@@ -354,11 +463,22 @@ class AgentSession:
             logger.info(f"Current working directory: {cwd}")
             self._log("info", f"Current working directory: {cwd}", "agent")
             
-            # First, check for _task_attachments (set by done() function)
-            # These are file paths that were explicitly requested to be displayed
-            if '_task_attachments' in namespace and isinstance(namespace['_task_attachments'], list):
-                self._log("info", f"Found _task_attachments: {namespace['_task_attachments']}", "agent")
-                for file_path in namespace['_task_attachments']:
+            # Prefer the run-owned snapshot after done(); namespace values can
+            # still be mutated by user code after that await completes.
+            status = getattr(self.agent, 'status', None)
+            status_attachments = getattr(status, 'attachments', None)
+            if status is not None and isinstance(status_attachments, list):
+                attachment_paths = list(status_attachments)
+                self._log("info", f"Using CodeAgent attachment snapshot: {attachment_paths}", "agent")
+            elif '_task_attachments' in namespace and isinstance(namespace['_task_attachments'], list):
+                attachment_paths = list(namespace['_task_attachments'])
+                self._log("info", f"Found _task_attachments: {attachment_paths}", "agent")
+            else:
+                attachment_paths = []
+                self._log("info", "No completion attachment snapshot found", "agent")
+
+            if attachment_paths:
+                for file_path in attachment_paths:
                     if isinstance(file_path, str):
                         # Try multiple locations for the file
                         paths_to_try = [
@@ -418,9 +538,6 @@ class AgentSession:
                             # Log all tried paths for debugging
                             for p in paths_to_try:
                                 logger.debug(f"  Tried: {p} (exists: {Path(p).exists()})")
-            else:
-                self._log("info", "No _task_attachments found in namespace", "agent")
-            
             # Also check for common file-related variables as fallback
             file_vars = ['output_file', 'result_file', 'data_file', 'csv_file', 'json_file', 'saved_file']
             for var_name in file_vars:
@@ -468,24 +585,28 @@ class AgentSession:
     async def _run_browser_agent(self) -> dict[str, Any]:
         """Run Browser Agent with step tracking."""
         history = await self.agent.run(max_steps=self.max_steps)
+        if self.completed_at is None:
+            self.completed_at = _utcnow()
+        cancelled = bool(self.is_cancelled)
         
         # Extract results
-        self.result = history.final_result() or "Task completed"
-        self.success = history.is_successful()
+        self.result = history.final_result() or ("Task was cancelled" if cancelled else "Task completed")
+        self.success = False if cancelled else history.is_successful()
         
         # Collect file attachments from Browser Agent
         attachments = self._collect_browser_agent_attachments(history)
         
         # Send final output
         if self.on_output_callback:
-            self.on_output_callback(self.result, True)
+            self.on_output_callback(self.result, bool(self.success))
         
         duration = history.total_duration_seconds() if history else 0
         
         return {
             "task_id": self.task_id,
             "result": self.result,
-            "success": self.success,
+            "success": bool(self.success),
+            "cancelled": cancelled,
             "total_steps": len(history.history) if history else 0,
             "duration_seconds": duration,
             "attachments": attachments,
@@ -651,11 +772,17 @@ class AgentSession:
             self.agent.resume()
             self.is_paused = False
 
-    async def cancel(self):
-        """Cancel the agent."""
+    async def cancel(self) -> bool:
+        """Cancel the agent and report whether the request was accepted."""
+        if self.completed_at is not None:
+            return False
         if self.agent and hasattr(self.agent, 'stop'):
-            self.agent.stop()
+            accepted = self.agent.stop() is not False
+            if accepted:
+                self.is_cancelled = True
+            return accepted
         self.is_cancelled = True
+        return True
 
     async def _cleanup(self):
         """Clean up resources."""
@@ -673,7 +800,7 @@ class AgentSession:
                 await self.cdp_bridge.stop()
                 self.cdp_bridge = None
             # Detach debugger via extension
-            if self.use_current_browser:
+            if self.use_current_browser and self._debugger_attached:
                 try:
                     from app.websocket.extension_handler import extension_manager
                     extension_id = extension_manager.get_any_extension_id()
@@ -681,6 +808,7 @@ class AgentSession:
                         await extension_manager.send_command(extension_id, {
                             "type": "detach_debugger",
                         })
+                        self._debugger_attached = False
                 except Exception:
                     pass
             # Clean up VNC session

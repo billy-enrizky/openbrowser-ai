@@ -4,7 +4,9 @@ import asyncio
 import datetime
 import logging
 import re
+import time
 import traceback
+from asyncio import CancelledError
 from pathlib import Path
 from typing import Any
 
@@ -34,11 +36,20 @@ from openbrowser.utils import get_openbrowser_version
 
 from .formatting import format_browser_state_for_llm
 from .namespace import EvaluateError, create_namespace
-from .utils import detect_token_limit_issue, extract_code_blocks, extract_url_from_task, truncate_message_content
+from .utils import (
+	detect_token_limit_issue,
+	extract_code_blocks,
+	extract_url_from_task,
+	truncate_message_content,
+)
 from .views import (
+	TERMINAL_CODE_AGENT_PHASES,
+	CodeAgentCompletion,
 	CodeAgentHistory,
 	CodeAgentModelOutput,
+	CodeAgentPhase,
 	CodeAgentResult,
+	CodeAgentRunStatus,
 	CodeAgentState,
 	CodeAgentStepMetadata,
 	ExecutionStatus,
@@ -46,6 +57,10 @@ from .views import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+class CodeAgentStateError(RuntimeError):
+	"""A CodeAgent run was requested from an invalid lifecycle phase."""
 
 
 class CodeAgent:
@@ -201,7 +216,235 @@ class CodeAgent:
 		# Telemetry
 		self.telemetry = ProductTelemetry()
 
+		# Explicit run state
+		self._phase = CodeAgentPhase.IDLE
+		self._step = 0
+		self._terminal_reason: str | None = None
+		self._terminal_success: bool | None = None
+		self._terminal_result: str | None = None
+		self._run_error: str | None = None
+		self._run_started_at: float | None = None
+		self._run_finished_at: float | None = None
+		self._stop_event = asyncio.Event()
+		self._closed = False
+		self._close_lock = asyncio.Lock()
+		self._completion: CodeAgentCompletion | None = None
+		self._partial_result_text: str | None = None
+		self._last_step_output: str | None = None
+		self._last_step_error: str | None = None
+
+	@property
+	def status(self) -> CodeAgentRunStatus:
+		"""Return a snapshot of this agent's run lifecycle."""
+		attachments = list(self._completion.attachments) if self._completion is not None else []
+		return CodeAgentRunStatus(
+			phase=self._phase,
+			step=self._step,
+			max_steps=self.max_steps,
+			success=self._terminal_success,
+			terminal_reason=self._terminal_reason,
+			cancellation_requested=self._stop_event.is_set(),
+				closed=self._closed,
+			result=self._terminal_result,
+			error=self._run_error,
+			attachments=list(attachments) if isinstance(attachments, list) else [],
+			started_at=self._run_started_at,
+			finished_at=self._run_finished_at,
+		)
+
+	def stop(self) -> bool:
+		"""Request cooperative cancellation between awaits.
+
+		A request before ``run()`` is retained and cancels the next run without
+		initializing the browser. A cell that is already executing is not
+		interrupted; the caller can cancel the ``run()`` task for that. A request
+		after a terminal phase is rejected.
+		"""
+		if self._closed or self._phase in TERMINAL_CODE_AGENT_PHASES:
+			return False
+		self._stop_event.set()
+		return True
+
+	def _record_done_action(self, result: Any) -> None:
+		"""Record completion from the real done action, not a mutable namespace flag."""
+		if self._phase in TERMINAL_CODE_AGENT_PHASES:
+			return
+		if getattr(result, 'is_done', False) is not True or getattr(result, 'error', None):
+			return
+		attachments = getattr(result, 'attachments', None) or ()
+		if isinstance(attachments, str):
+			attachments = (attachments,)
+		result_text = getattr(result, 'extracted_content', None)
+		if result_text is not None and not isinstance(result_text, str):
+			result_text = str(result_text)
+		self._completion = CodeAgentCompletion(
+			success=getattr(result, 'success', True) is not False,
+			result=result_text,
+			attachments=tuple(str(item) for item in attachments if item is not None),
+		)
+
+	def _clear_done_state(self) -> None:
+		self.namespace['_task_done'] = False
+		self.namespace.pop('_task_done_by_action', None)
+		self.namespace.pop('_task_result', None)
+		self.namespace.pop('_task_success', None)
+		self.namespace.pop('_task_attachments', None)
+		self._completion = None
+
+	def _finish(
+		self,
+		phase: CodeAgentPhase,
+		reason: str,
+		success: bool,
+		*,
+		result: str | None = None,
+		error: str | None = None,
+	) -> None:
+		if phase not in TERMINAL_CODE_AGENT_PHASES:
+			raise ValueError(f'not a terminal CodeAgent phase: {phase.value}')
+		if self._phase in TERMINAL_CODE_AGENT_PHASES:
+			if self._phase is phase:
+				return
+			raise CodeAgentStateError(f'CodeAgent already finished as {self._phase.value}')
+		self._phase = phase
+		self._terminal_reason = reason
+		self._terminal_success = success
+		self._terminal_result = result
+		if error is not None:
+			self._run_error = error
+		self._run_finished_at = time.time()
+
+	def _finish_done(self, result: str | None) -> None:
+		if self._phase in TERMINAL_CODE_AGENT_PHASES:
+			return
+		completion = self._completion
+		if completion is None:
+			self._finish(
+				CodeAgentPhase.FAILED,
+				'done_not_invoked',
+				False,
+				result=None,
+				error='task completion was requested without the done() action',
+			)
+			return
+		final_result = completion.result if completion.result is not None else result
+		self._finish(
+			CodeAgentPhase.SUCCEEDED if completion.success else CodeAgentPhase.FAILED,
+			'done' if completion.success else 'done_failed',
+			completion.success,
+			result=final_result,
+		)
+
+	def _done_result(self, fallback: str | None = None) -> str | None:
+		if self._completion is not None and self._completion.result is not None:
+			return self._completion.result
+		value = self.namespace.get('_task_result')
+		if value is not None:
+			return str(value)
+		return fallback
+
+	def _partial_result(self) -> str | None:
+		if self._terminal_result is not None:
+			return self._terminal_result
+		done_result = self._done_result()
+		if done_result:
+			return done_result
+		if self._partial_result_text:
+			return self._partial_result_text
+		if self.complete_history:
+			last = self.complete_history[-1].result[0] if self.complete_history[-1].result else None
+			if last and last.extracted_content:
+				return last.extracted_content
+		return self._last_step_output
+
+	def _finish_cancelled(self) -> None:
+		if self._phase in TERMINAL_CODE_AGENT_PHASES:
+			return
+		self._finish(CodeAgentPhase.CANCELLED, 'cancelled', False, result=self._partial_result())
+
+	def _stop_requested(self) -> bool:
+		return self._stop_event.is_set()
+
+	async def _validate_with_stop(self, final_result: str | None) -> tuple[bool, str] | None:
+		"""Return validation output, or None when an accepted stop wins."""
+		from .namespace import validate_task_completion
+
+		validation_task = asyncio.create_task(
+			validate_task_completion(task=self.task, output=final_result, llm=self.llm)
+		)
+		stop_task = asyncio.create_task(self._stop_event.wait())
+		try:
+			done, _ = await asyncio.wait(
+				{validation_task, stop_task},
+				return_when=asyncio.FIRST_COMPLETED,
+			)
+		finally:
+			for task in (validation_task, stop_task):
+				if not task.done():
+					task.cancel()
+			await asyncio.gather(validation_task, stop_task, return_exceptions=True)
+		if stop_task in done or self._stop_requested():
+			return None
+		return validation_task.result()
+
 	async def run(self, max_steps: int | None = None) -> NotebookSession:
+		"""Run the agent under an explicit lifecycle, or raise before mutating it."""
+		if self._phase is not CodeAgentPhase.IDLE:
+			raise CodeAgentStateError(
+				f'CodeAgent has already entered phase {self._phase.value}; create a new instance for another task'
+			)
+		if self._closed:
+			raise CodeAgentStateError('CodeAgent is closed; create a new instance')
+		self._phase = CodeAgentPhase.STARTING
+		self._step = 0
+		self._terminal_reason = self._terminal_success = self._terminal_result = self._run_error = None
+		self._run_started_at = time.time()
+		self._run_finished_at = None
+		self._completion = None
+		self._partial_result_text = None
+		if max_steps is not None:
+			self.max_steps = max_steps
+		try:
+			if self._stop_requested():
+				self._finish_cancelled()
+				logger.warning('TASK CANCELLED')
+				session = self.session
+			else:
+				session = await self._run_inner(max_steps)
+		except CancelledError:
+			if self._phase not in TERMINAL_CODE_AGENT_PHASES:
+				self._finish(CodeAgentPhase.CANCELLED, 'task_cancelled', False, result=self._partial_result())
+				logger.warning('TASK CANCELLED')
+			raise
+		except Exception as error:
+			if self._phase not in TERMINAL_CODE_AGENT_PHASES:
+				if self._stop_requested():
+					self._finish_cancelled()
+					logger.warning('TASK CANCELLED')
+				else:
+					self._finish(
+						CodeAgentPhase.FAILED,
+						'run_error',
+						False,
+						error=f'{type(error).__name__}: {error}',
+					)
+					logger.error(f'TASK FAILED: {self._terminal_reason}')
+			raise
+		finally:
+			if self._phase not in TERMINAL_CODE_AGENT_PHASES:
+				if self._is_task_done():
+					self._finish_done(self._done_result())
+				else:
+					self._finish(CodeAgentPhase.MAX_STEPS, 'max_steps', False, result=self._partial_result())
+			if self._run_finished_at is None:
+				self._run_finished_at = time.time()
+			try:
+				await self.close()
+			except Exception as error:
+				logger.warning(f'Failed to close CodeAgent browser during run finalization: {error}')
+		return session
+
+	async def _run_inner(self, max_steps: int | None = None) -> NotebookSession:
 		"""
 		Run the agent to complete the task.
 
@@ -234,6 +477,7 @@ class CodeAgent:
 			file_system=self.file_system,
 			available_file_paths=self.available_file_paths,
 			sensitive_data=self.sensitive_data,
+			completion_callback=self._record_done_action,
 		)
 
 		# Initialize conversation with task
@@ -288,7 +532,12 @@ class CodeAgent:
 				logger.warning(f'Failed to get initial browser state: {e}')
 
 		# Main execution loop
+		self._phase = CodeAgentPhase.RUNNING
 		for step in range(self.max_steps):
+			self._step = step + 1
+			if self._stop_requested():
+				self._finish_cancelled()
+				break
 			logger.info(f'\n\n\n\n\n\n\nStep {step + 1}/{self.max_steps}')
 
 			# Start timing this step
@@ -338,9 +587,15 @@ class CodeAgent:
 						logger.warning(f'Failed to get browser state before LLM call: {e}')
 
 				# Get code from LLM (this also adds to self._llm_messages)
+				if self._stop_requested():
+					self._finish_cancelled()
+					break
 				try:
 					code, full_llm_response = await self._get_code_from_llm()
 				except Exception as llm_error:
+					if self._stop_requested():
+						self._finish_cancelled()
+						break
 					# LLM call failed - count as consecutive error and retry
 					self._consecutive_errors += 1
 					logger.warning(
@@ -350,27 +605,53 @@ class CodeAgent:
 					# Check if we've hit the consecutive error limit
 					if self._consecutive_errors >= self.max_failures:
 						logger.error(f'Terminating: {self.max_failures} consecutive LLM failures')
+						self._finish(
+							CodeAgentPhase.FAILED,
+							'max_failures',
+							False,
+							error=f'{self.max_failures} consecutive LLM failures: {llm_error}',
+						)
 						break
 
 					await asyncio.sleep(1)  # Brief pause before retry
 					continue
 
 				if not code or code.strip() == '':
+					if self._stop_requested():
+						self._finish_cancelled()
+						break
 					# If task is already done, empty code is fine (LLM explaining completion)
 					if self._is_task_done():
 						logger.info('Task already marked as done, LLM provided explanation without code')
 						# Add the text response to history as a non-code step
+						screenshot_path = (await self._capture_screenshot(step + 1))[0]
+						if self._stop_requested():
+							self._finish_cancelled()
+							break
 						await self._add_step_to_complete_history(
 							model_output_code='',
 							full_llm_response=full_llm_response,
 							output=full_llm_response,  # Treat the explanation as output
 							error=None,
-							screenshot_path=(await self._capture_screenshot(step + 1))[0],
+							screenshot_path=screenshot_path,
 						)
+						if self._stop_requested():
+							self._finish_cancelled()
+							break
+						self._finish_done(self._done_result())
 						break  # Exit the loop since task is done
 
 					logger.warning('LLM returned empty code - no code blocks found in response')
 					self._consecutive_errors += 1
+					if self._consecutive_errors >= self.max_failures:
+						logger.error(f'Terminating: {self.max_failures} consecutive empty LLM responses')
+						self._finish(
+							CodeAgentPhase.FAILED,
+							'max_failures',
+							False,
+							error=f'{self.max_failures} consecutive empty LLM responses',
+						)
+						break
 
 					# Add feedback message to help LLM understand the error
 					# This is critical for models like Gemini that may not follow code block format
@@ -395,8 +676,13 @@ class CodeAgent:
 							logger.warning(f'Failed to get new browser state: {e}')
 					continue
 
+				if self._stop_requested():
+					self._finish_cancelled()
+					break
+
 				# Execute code blocks sequentially if multiple python blocks exist
 				# This allows JS/bash blocks to be injected into namespace before Python code uses them
+				self._phase = CodeAgentPhase.EXECUTING
 				all_blocks = self.namespace.get('_all_code_blocks', {})
 				python_blocks = [k for k in sorted(all_blocks.keys()) if k.startswith('python_')]
 
@@ -406,6 +692,9 @@ class CodeAgent:
 					error = None
 
 					for i, block_key in enumerate(python_blocks):
+						if self._stop_requested():
+							self._finish_cancelled()
+							break
 						logger.info(f'Executing Python block {i + 1}/{len(python_blocks)}')
 						block_code = all_blocks[block_key]
 						block_output, block_error, _ = await self._execute_code(block_code)
@@ -413,6 +702,11 @@ class CodeAgent:
 						# Accumulate outputs
 						if block_output:
 							output = (output or '') + block_output
+							if self._stop_requested():
+								self._last_step_output = output
+								self._last_step_error = error
+								self._finish_cancelled()
+								break
 						if block_error:
 							error = block_error
 							# Stop on first error
@@ -421,8 +715,16 @@ class CodeAgent:
 					# Single Python block - execute normally
 					output, error, _ = await self._execute_code(code)
 
+				if self._phase in TERMINAL_CODE_AGENT_PHASES:
+					break
+				self._phase = CodeAgentPhase.RUNNING
+				self._last_step_output = output
+				self._last_step_error = error
 				# Track consecutive errors
 				if error:
+					if self._stop_requested():
+						self._finish_cancelled()
+						break
 					self._consecutive_errors += 1
 					logger.warning(f'Consecutive errors: {self._consecutive_errors}/{self.max_failures}')
 
@@ -430,6 +732,12 @@ class CodeAgent:
 					if self._consecutive_errors >= self.max_failures:
 						logger.error(
 							f'Terminating: {self.max_failures} consecutive errors reached. The agent is unable to make progress.'
+						)
+						self._finish(
+							CodeAgentPhase.FAILED,
+							'max_failures',
+							False,
+							error=f'{self.max_failures} consecutive errors without progress',
 						)
 						# Add termination message to complete history before breaking
 						await self._add_step_to_complete_history(
@@ -444,15 +752,22 @@ class CodeAgent:
 					# Reset consecutive error counter on success
 					self._consecutive_errors = 0
 
+				if self._stop_requested():
+					self._finish_cancelled()
+					break
+
 				# Check if task is done - validate completion first if not at limits
 				if self._is_task_done():
 					# Get the final result from namespace (from done() call)
-					final_result: str | None = self.namespace.get('_task_result')  # type: ignore[assignment]
+					final_result = self._done_result()
+					completion_candidate = self._completion
 
 					# Check if we should validate (not at step/error limits and under max validations)
 					steps_remaining = self.max_steps - step - 1
 					should_validate = (
-						self._validation_count < self.max_validations  # Haven't exceeded max validations
+						self._completion is not None
+						and self._completion.success  # Self-reported failure is already terminal
+						and self._validation_count < self.max_validations  # Haven't exceeded max validations
 						and steps_remaining >= 4  # At least 4 steps away from limit
 						and self._consecutive_errors < 3  # Not close to error limit (8 consecutive)
 					)
@@ -460,15 +775,27 @@ class CodeAgent:
 					if should_validate:
 						self._validation_count += 1
 						logger.info('Validating task completion with LLM...')
-						from .namespace import validate_task_completion
 
-						is_complete, reasoning = await validate_task_completion(
-							task=self.task,
-							output=final_result,
-							llm=self.llm,
-						)
+						self._phase = CodeAgentPhase.VALIDATING
+						validation = await self._validate_with_stop(final_result)
+						self._phase = CodeAgentPhase.RUNNING
+						if validation is None:
+							self._finish_cancelled()
+							break
+						is_complete, reasoning = validation
 
-						if not is_complete:
+						if self._completion is not completion_candidate:
+							logger.warning('Completion changed during validation; requiring a fresh done() call')
+							self._clear_done_state()
+							self._llm_messages.append(
+								UserMessage(
+									content=(
+										'The done() result changed while validation was running. '
+										'Call done() again with the final result after the task is complete.'
+									)
+								)
+							)
+						elif not is_complete:
 							# Task not truly complete - inject feedback and continue
 							logger.warning('Validator: Task not complete, continuing...')
 							validation_feedback = (
@@ -480,9 +807,7 @@ class CodeAgent:
 							)
 
 							# Clear the done flag so execution continues
-							self.namespace['_task_done'] = False
-							self.namespace.pop('_task_result', None)
-							self.namespace.pop('_task_success', None)
+							self._clear_done_state()
 
 							# Add validation feedback to LLM messages
 							self._llm_messages.append(UserMessage(content=validation_feedback))
@@ -493,6 +818,7 @@ class CodeAgent:
 							# Override output with done message for final step
 							if final_result:
 								output = final_result
+							self._finish_done(final_result)
 					else:
 						# At limits - skip validation and accept done()
 						if self._validation_count >= self.max_validations:
@@ -503,10 +829,11 @@ class CodeAgent:
 							logger.info('At step/error limits - skipping validation')
 						if final_result:
 							output = final_result
+						self._finish_done(final_result)
 
 				if output:
 					# Check if this is the final done() output
-					if self._is_task_done():
+					if self._phase is CodeAgentPhase.SUCCEEDED:
 						# Show done() output more prominently
 						logger.info(
 							f'✓ Task completed - Final output from done():\n{output[:300] if len(output) > 300 else output}'
@@ -515,6 +842,8 @@ class CodeAgent:
 						attachments: list[str] | None = self.namespace.get('_task_attachments')  # type: ignore[assignment]
 						if attachments:
 							logger.info(f'Files displayed: {", ".join(attachments)}')
+					elif self._phase is CodeAgentPhase.FAILED:
+						logger.error(f'Task failed - output from done(success=False):\n{output}')
 					else:
 						logger.info(f'Code output:\n{output}')
 
@@ -546,13 +875,21 @@ class CodeAgent:
 					screenshot_path=screenshot_path,
 				)
 
+				if self._stop_requested():
+					self._finish_cancelled()
+					break
+
 				# Check if task is done (after validation)
 				if self._is_task_done():
 					# Get the final result from namespace
-					final_result: str | None = self.namespace.get('_task_result', output)  # type: ignore[assignment]
-					logger.info('Task completed successfully')
-					if final_result:
-						logger.info(f'Final result: {final_result}')
+					final_result = self._done_result(output)
+					self._finish_done(final_result)
+					if self._phase is CodeAgentPhase.SUCCEEDED:
+						logger.info('Task completed successfully')
+						if final_result:
+							logger.info(f'Final result: {final_result}')
+					else:
+						logger.error(f'Task ended with done(success=False): {final_result}')
 					break
 				# If validation rejected done(), continue to next iteration
 				# The feedback message has already been added to _llm_messages
@@ -565,18 +902,26 @@ class CodeAgent:
 			except Exception as e:
 				logger.error(f'Error in step {step + 1}: {e}')
 				traceback.print_exc()
+				if self._phase not in TERMINAL_CODE_AGENT_PHASES:
+					if self._stop_requested():
+						self._finish_cancelled()
+					else:
+						self._finish(CodeAgentPhase.FAILED, 'step_error', False, error=f'{type(e).__name__}: {e}')
 				break
 		else:
 			# Loop completed without break - max_steps reached
 			logger.warning(f'Maximum steps ({self.max_steps}) reached without task completion')
 
+		if self._stop_requested() and self._phase not in TERMINAL_CODE_AGENT_PHASES:
+			self._finish_cancelled()
+
 		# If task is not done, capture the last step's output as partial result
-		if not self._is_task_done() and self.complete_history:
+		if not self._is_task_done() and (self.complete_history or self._last_step_output is not None):
 			# Get the last step's output/error and use it as final extracted_content
-			last_step = self.complete_history[-1]
-			last_result = last_step.result[0] if last_step.result else None
-			last_output = last_result.extracted_content if last_result else None
-			last_error = last_result.error if last_result else None
+			last_step = self.complete_history[-1] if self.complete_history else None
+			last_result = last_step.result[0] if last_step and last_step.result else None
+			last_output = (last_result.extracted_content if last_result else None) or self._last_step_output
+			last_error = (last_result.error if last_result else None) or self._last_step_error
 
 			# Build a partial result message from the last step
 			partial_result_parts = []
@@ -610,23 +955,28 @@ class CodeAgent:
 				last_result.success = False
 
 			logger.info(f'\nPartial result captured from last step:\n{partial_result}')
+			self._partial_result_text = partial_result
 
-		# Log final summary if task was completed
-		if self._is_task_done():
+		if self._phase not in TERMINAL_CODE_AGENT_PHASES:
+			self._finish(CodeAgentPhase.MAX_STEPS, 'max_steps', False, result=self._partial_result())
+
+		# Log the explicit terminal result
+		if self._phase is CodeAgentPhase.SUCCEEDED:
 			logger.info('\n' + '=' * 60)
 			logger.info('TASK COMPLETED SUCCESSFULLY')
 			logger.info('=' * 60)
-			final_result: str | None = self.namespace.get('_task_result')  # type: ignore[assignment]
-			if final_result:
-				logger.info(f'\nFinal Output:\n{final_result}')
-
-			attachments: list[str] | None = self.namespace.get('_task_attachments')  # type: ignore[assignment]
+			if self._terminal_result:
+				logger.info(f'\nFinal Output:\n{self._terminal_result}')
+			attachments = self.status.attachments
 			if attachments:
 				logger.info(f'\nFiles Attached:\n{chr(10).join(attachments)}')
 			logger.info('=' * 60 + '\n')
-
-		# Auto-close browser if keep_alive is False
-		await self.close()
+		elif self._phase is CodeAgentPhase.FAILED:
+			logger.error(f'TASK FAILED: {self._terminal_reason}')
+		elif self._phase is CodeAgentPhase.CANCELLED:
+			logger.warning('TASK CANCELLED')
+		else:
+			logger.warning(f'TASK INCOMPLETE: {self._terminal_reason}')
 
 		# Store usage summary for history property
 		self.usage_summary = await self.token_cost_service.get_usage_summary()
@@ -842,7 +1192,6 @@ Call done() in a separate final step after verifying results.'''
 
 		output = None
 		error = None
-		browser_state = None
 
 		try:
 			# Capture output
@@ -865,6 +1214,7 @@ Call done() in a separate final step after verifying results.'''
 
 				# Check if code contains await expressions - if so, wrap in async function
 				# This mimics how Jupyter/IPython handles top-level await
+				tree: ast.Module | None = None
 				try:
 					tree = ast.parse(code, mode='exec')
 					has_await = any(isinstance(node, (ast.Await, ast.AsyncWith, ast.AsyncFor)) for node in ast.walk(tree))
@@ -873,6 +1223,7 @@ Call done() in a separate final step after verifying results.'''
 					has_await = False
 
 				if has_await:
+					assert tree is not None
 					# When code has await, we must wrap in async function
 					# To make variables persist naturally (like Jupyter without needing 'global'):
 					# 1. Extract all assigned variable names from the code
@@ -908,7 +1259,7 @@ Call done() in a separate final step after verifying results.'''
 						# Filter to only existing namespace vars (like Jupyter does)
 						# Include both: assigned vars that exist + user's explicit globals
 						existing_vars = {name for name in (assigned_names | user_global_names) if name in self.namespace}
-					except Exception as e:
+					except Exception:
 						existing_vars = set()
 
 					# Build global declaration if needed
@@ -953,15 +1304,8 @@ __code_exec_coro__ = __code_exec__()
 					# No await - execute directly at module level for natural variable scoping
 					# This means x = x + 10 will work without needing 'global x'
 
-					# Track variables before execution
-					vars_before = set(self.namespace.keys())
-
 					compiled_code = compile(code, '<code>', 'exec')
 					exec(compiled_code, self.namespace, self.namespace)
-
-					# Track newly created/modified variables (info shown in "Available" section)
-					vars_after = set(self.namespace.keys())
-					new_vars = vars_after - vars_before
 
 				# Get output
 				output_value = sys.stdout.getvalue()
@@ -1084,13 +1428,9 @@ __code_exec_coro__ = __code_exec__()
 				if hasattr(e, '__traceback__'):
 					# Walk the traceback to find the frame with '<code>' filename
 					tb = e.__traceback__
-					user_code_lineno = None
 					while tb is not None:
 						frame = tb.tb_frame
 						if frame.f_code.co_filename == '<code>':
-							# Found the frame executing user code
-							# Get the line number from the traceback
-							user_code_lineno = tb.tb_lineno
 							break
 						tb = tb.tb_next
 
@@ -1156,8 +1496,9 @@ __code_exec_coro__ = __code_exec__()
 
 	def _is_task_done(self) -> bool:
 		"""Check if the task is marked as done in the namespace."""
-		# Check if 'done' was called by looking for a special marker in namespace
-		return self.namespace.get('_task_done', False)
+		# Namespace flags remain readable for compatibility, but only the
+		# run-owned completion can authorize a successful terminal phase.
+		return self._completion is not None or bool(self.namespace.get('_task_done', False))
 
 	async def _capture_screenshot(self, step_number: int) -> tuple[str | None, str | None]:
 		"""Capture and store screenshot for eval tracking.
@@ -1206,14 +1547,9 @@ __code_exec_coro__ = __code_exec__()
 			except Exception as e:
 				logger.debug(f'Failed to get browser URL/title for history: {e}')
 
-		# Check if this is a done result
-		is_done = self._is_task_done()
-
-		# Get self-reported success from done() call if task is done
-		self_reported_success: bool | None = None
-		if is_done:
-			task_success = self.namespace.get('_task_success')
-			self_reported_success = task_success if isinstance(task_success, bool) else None
+		# Only a run-owned completion marks public history as done.
+		is_done = self._completion is not None
+		self_reported_success = self._completion.success if self._completion is not None else None
 
 		# Create result entry using typed model
 		result_entry = CodeAgentResult(
@@ -1273,8 +1609,7 @@ __code_exec_coro__ = __code_exec__()
 				action_history_data.append(None)
 
 		# Get final result from the last step or namespace (type-safe)
-		final_result: Any = self.namespace.get('_task_result')
-		final_result_str: str | None = final_result if isinstance(final_result, str) else None
+		final_result: str | None = self._terminal_result or self._done_result()
 
 		# Get URLs visited from complete_history (type-safe access)
 		urls_visited: list[str] = []
@@ -1291,8 +1626,11 @@ __code_exec_coro__ = __code_exec__()
 
 		# Determine success from task completion status (type-safe)
 		is_done = self._is_task_done()
-		task_success: Any = self.namespace.get('_task_success')
-		self_reported_success: bool | None = task_success if isinstance(task_success, bool) else (False if is_done else None)
+		if self._terminal_success is not None:
+			self_reported_success: bool | None = self._terminal_success
+		else:
+			task_success: Any = self.namespace.get('_task_success')
+			self_reported_success = task_success if isinstance(task_success, bool) else (False if is_done else None)
 
 		self.telemetry.capture(
 			AgentTelemetryEvent(
@@ -1318,8 +1656,8 @@ __code_exec_coro__ = __code_exec__()
 				total_tokens=token_summary.total_tokens,
 				total_duration_seconds=sum(step.metadata.duration_seconds for step in self.complete_history if step.metadata),
 				success=self_reported_success,
-				final_result_response=final_result_str,
-				error_message=agent_run_error,
+				final_result_response=final_result,
+				error_message=agent_run_error or self._run_error,
 			)
 		)
 
@@ -1422,13 +1760,17 @@ __code_exec_coro__ = __code_exec__()
 		return MockAgentHistoryList(self.complete_history, self.usage_summary)
 
 	async def close(self) -> None:
-		"""Close the browser session."""
-		if self.browser_session:
-			# Check if we should close the browser based on keep_alive setting
-			if not self.browser_session.browser_profile.keep_alive:
-				await self.browser_session.kill()
-			else:
-				logger.debug('Browser keep_alive is True, not closing browser session')
+		"""Close the browser session at most once."""
+		async with self._close_lock:
+			if self._closed:
+				return
+			if self.browser_session:
+				# Check if we should close the browser based on keep_alive setting
+				if not self.browser_session.browser_profile.keep_alive:
+					await self.browser_session.kill()
+				else:
+					logger.debug('Browser keep_alive is True, not closing browser session')
+			self._closed = True
 
 	async def __aenter__(self) -> 'CodeAgent':
 		"""Async context manager entry."""

@@ -6,9 +6,8 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Query
 
 from app.models.schemas import (
-    CreateTaskRequest,
-    TaskListResponse,
     TaskListItem,
+    TaskListResponse,
     TaskResponse,
     TaskStatus,
 )
@@ -31,9 +30,7 @@ async def list_tasks(
     # In production, this would query a database
     tasks = []
     for task_id, session in agent_manager.sessions.items():
-        status_val = TaskStatus.RUNNING if session.is_running else (
-            TaskStatus.COMPLETED if session.success else TaskStatus.FAILED
-        )
+        status_val = TaskStatus(session.task_status)
         if status and status_val != status:
             continue
             
@@ -66,9 +63,7 @@ async def get_task(task_id: str):
     if not session:
         raise HTTPException(status_code=404, detail="Task not found")
     
-    status = TaskStatus.RUNNING if session.is_running else (
-        TaskStatus.COMPLETED if session.success else TaskStatus.FAILED
-    )
+    status = TaskStatus(session.task_status)
     
     return TaskResponse(
         id=task_id,
@@ -91,9 +86,9 @@ async def cancel_task(task_id: str):
     if not session:
         raise HTTPException(status_code=404, detail="Task not found")
     
-    if not session.is_running:
+    if session.completed_at is not None:
         raise HTTPException(status_code=400, detail="Task is not running")
     
-    await session.cancel()
-    return {"status": "cancelled", "task_id": task_id}
+    accepted = await session.cancel()
+    return {"status": "cancelled" if accepted else "not_running", "task_id": task_id}
 

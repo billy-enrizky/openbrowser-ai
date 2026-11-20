@@ -451,18 +451,26 @@ export default function Home() {
         void refreshChatList();
         break;
 
-      case "task_cancelled":
+      case "task_cancelled": {
         setIsLoading(false);
         setVncInfo(null);
+        const cancelReason = typeof data.reason === "string" ? data.reason.trim() : "";
+        const cancelContent =
+          cancelReason &&
+          cancelReason !== "Task was cancelled" &&
+          cancelReason !== "Cancelled by user"
+            ? `Task was cancelled. ${cancelReason}`
+            : "Task was cancelled";
         addMessage({
           id: crypto.randomUUID(),
           role: "assistant",
-          content: "Task was cancelled",
+          content: cancelContent,
           timestamp: new Date(),
           taskId: task_id,
         });
         void refreshChatList();
         break;
+      }
 
       case "extension_status": {
         break;

@@ -6,11 +6,16 @@ from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
 
-from app.core.auth import AuthConfigError, AuthPrincipal, AuthTokenError, authenticate_websocket
+from app.core.auth import (
+    AuthConfigError,
+    AuthPrincipal,
+    AuthTokenError,
+    authenticate_websocket,
+)
 from app.db.session import get_session_factory, is_database_configured
 from app.models.schemas import (
-    AgentType,
     FileAttachment,
+    WSLogData,
     WSMessage,
     WSMessageType,
     WSOutputData,
@@ -18,11 +23,14 @@ from app.models.schemas import (
     WSStartTaskData,
     WSStepUpdateData,
     WSTaskCompletedData,
-    WSLogData,
     WSVncInfoData,
 )
 from app.services.agent_service import agent_manager
 from app.services.chat_service import ChatService, conversation_title_from_prompt
+from app.services.task_terminal import (
+    cancellation_display_content,
+    classify_task_terminal,
+)
 from app.services.vnc_service import vnc_service
 
 logger = logging.getLogger(__name__)
@@ -472,19 +480,43 @@ async def run_agent_task(
                     url=att,
                 ))
         
-        # Send completion message
+        task_metadata = {
+            "success": result.get("success", False),
+            "total_steps": result.get("total_steps", 0),
+            "duration_seconds": result.get("duration_seconds", 0),
+            "phase": result.get("phase"),
+            "terminal_phase": result.get("terminal_phase"),
+            "terminal_reason": result.get("terminal_reason"),
+            "attachments": [a.model_dump() for a in attachments],
+        }
+        terminal = classify_task_terminal(result)
+        content = terminal.content
+        persisted_content = (
+            cancellation_display_content(content) if terminal.kind == "cancelled" else content
+        )
+        if terminal.kind == "cancelled":
+            message_type = WSMessageType.TASK_CANCELLED
+            message_data = {"reason": content}
+            task_metadata = {**task_metadata, "cancelled": True}
+        elif terminal.kind == "failed":
+            message_type = WSMessageType.TASK_FAILED
+            message_data = {"error": content}
+            task_metadata = {**task_metadata, "is_error": True}
+        else:
+            message_type = WSMessageType.TASK_COMPLETED
+            message_data = WSTaskCompletedData(
+                result=terminal.content,
+                success=bool(result.get("success", False)),
+                total_steps=result.get("total_steps", 0),
+                duration_seconds=result.get("duration_seconds", 0),
+                attachments=attachments,
+            ).model_dump()
         await connection_manager.send_message(
             client_id,
             WSMessage(
-                type=WSMessageType.TASK_COMPLETED,
+                type=message_type,
                 task_id=session.task_id,
-                data=WSTaskCompletedData(
-                    result=result.get("result", ""),
-                    success=result.get("success", False),
-                    total_steps=result.get("total_steps", 0),
-                    duration_seconds=result.get("duration_seconds", 0),
-                    attachments=attachments,
-                ).model_dump(),
+                data=message_data,
             ),
         )
         try:
@@ -492,13 +524,8 @@ async def run_agent_task(
                 principal=principal,
                 task_id=session.task_id,
                 conversation_id=conversation_id,
-                content=result.get("result", "") or "Task completed successfully.",
-                metadata={
-                    "success": result.get("success", False),
-                    "total_steps": result.get("total_steps", 0),
-                    "duration_seconds": result.get("duration_seconds", 0),
-                    "attachments": [a.model_dump() for a in attachments],
-                },
+                content=persisted_content,
+                metadata=task_metadata,
             )
         except Exception as persistence_error:
             logger.exception("Failed to persist task completion message: %s", persistence_error)
@@ -558,16 +585,18 @@ async def handle_cancel_task(client_id: str, message: WSMessage):
     """Handle CANCEL_TASK message."""
     if message.task_id:
         session = await agent_manager.get_session(message.task_id)
-        if session:
-            await session.cancel()
-            await connection_manager.send_message(
-                client_id,
-                WSMessage(
-                    type=WSMessageType.TASK_CANCELLED,
-                    task_id=message.task_id,
-                    data={"reason": "Cancelled by user"},
-                ),
-            )
+        accepted = False
+        if session and session.completed_at is None:
+            accepted = await session.cancel()
+        reply = "Cancellation requested." if accepted else "Task is not running. No stop was sent."
+        await connection_manager.send_message(
+            client_id,
+            WSMessage(
+                type=WSMessageType.LOG,
+                task_id=message.task_id,
+                data=WSLogData(level="warning", message=reply, source="agent").model_dump(),
+            ),
+        )
 
 
 async def handle_pause_task(client_id: str, message: WSMessage):

@@ -239,10 +239,14 @@ async def _run_code_agent(
         result.steps_taken = (
             len(agent.complete_history) if hasattr(agent, "complete_history") else 0
         )
-        result.success = agent_result is not None
+        status = agent.status
+        result.success = status.success is True
+        result.error_message = status.error
         result.final_output = (
-            str(agent_result.output)[:500]
-            if agent_result and hasattr(agent_result, "output")
+            str(status.result)[:500]
+            if status.result is not None
+            else str(getattr(agent_result, "output", ""))[:500]
+            if agent_result and getattr(agent_result, "output", None)
             else None
         )
 

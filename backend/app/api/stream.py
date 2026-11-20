@@ -20,22 +20,23 @@ from fastapi.responses import StreamingResponse
 
 from app.core.auth import AuthPrincipal, get_current_user, verify_token_string
 from app.core.config import settings
+from app.db.session import get_session_factory, is_database_configured
 from app.models.schemas import (
-    AgentType,
     CreateTaskRequest,
     FileAttachment,
     WSLogData,
-    WSMessageType,
     WSOutputData,
     WSScreenshotData,
-    WSStepUpdateData,
     WSTaskCompletedData,
     WSVncInfoData,
 )
-from app.db.session import get_session_factory, is_database_configured
 from app.services.agent_service import agent_manager
 from app.services.chat_service import ChatService
 from app.services.event_buffer import event_buffer
+from app.services.task_terminal import (
+    cancellation_display_content,
+    classify_task_terminal,
+)
 from app.websocket.handler import (
     _persist_assistant_message,
     _persist_task_user_message,
@@ -254,34 +255,49 @@ async def _run_agent(
                     FileAttachment(name=att.split("/")[-1], url=att).model_dump()
                 )
 
-        event_buffer.push(
-            task_id,
-            "task_completed",
-            WSTaskCompletedData(
-                result=result.get("result", ""),
-                success=result.get("success", False),
-                total_steps=result.get("total_steps", 0),
-                duration_seconds=result.get("duration_seconds", 0),
-                attachments=[FileAttachment(**a) for a in attachments],
-            ).model_dump(),
+        task_metadata = {
+            "success": result.get("success", False),
+            "total_steps": result.get("total_steps", 0),
+            "duration_seconds": result.get("duration_seconds", 0),
+            "phase": result.get("phase"),
+            "terminal_phase": result.get("terminal_phase"),
+            "terminal_reason": result.get("terminal_reason"),
+            "attachments": attachments,
+        }
+        terminal = classify_task_terminal(result)
+        content = terminal.content
+        persisted_content = (
+            cancellation_display_content(content) if terminal.kind == "cancelled" else content
         )
+        if terminal.kind == "cancelled":
+            event_buffer.push(task_id, "task_cancelled", {"reason": content})
+            task_metadata = {**task_metadata, "cancelled": True}
+        elif terminal.kind == "failed":
+            event_buffer.push(task_id, "task_failed", {"error": content})
+            task_metadata = {**task_metadata, "is_error": True}
+        else:
+            event_buffer.push(
+                task_id,
+                "task_completed",
+                WSTaskCompletedData(
+                    result=terminal.content,
+                    success=bool(result.get("success", False)),
+                    total_steps=result.get("total_steps", 0),
+                    duration_seconds=result.get("duration_seconds", 0),
+                    attachments=[FileAttachment(**a) for a in attachments],
+                ).model_dump(),
+            )
 
-        # Persist assistant completion message
         try:
             await _persist_assistant_message(
                 principal=principal,
                 task_id=task_id,
                 conversation_id=conversation_id,
-                content=result.get("result", "") or "Task completed successfully.",
-                metadata={
-                    "success": result.get("success", False),
-                    "total_steps": result.get("total_steps", 0),
-                    "duration_seconds": result.get("duration_seconds", 0),
-                    "attachments": attachments,
-                },
+                content=persisted_content,
+                metadata=task_metadata,
             )
         except Exception as persistence_error:
-            logger.exception("Failed to persist task completion: %s", persistence_error)
+            logger.exception("Failed to persist task result: %s", persistence_error)
 
     except asyncio.CancelledError:
         event_buffer.push(
@@ -461,7 +477,9 @@ async def cancel_task(
             status_code=404,
             content={"detail": f"No active session for task {task_id}"},
         )
+    if session.completed_at is not None:
+        return {"status": "not_running", "task_id": task_id}
 
-    await session.cancel()
-    event_buffer.push(task_id, "task_cancelled", {"reason": "Cancelled by user"})
-    return {"status": "cancelled", "task_id": task_id}
+    accepted = await session.cancel()
+    # The run task owns the terminal event after cooperative cleanup.
+    return {"status": "cancelled" if accepted else "not_running", "task_id": task_id}
