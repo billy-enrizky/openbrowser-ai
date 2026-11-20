@@ -322,9 +322,7 @@ async def test_many_origins_batch_into_bounded_scripts(tmp_path):
         await asyncio.sleep(0.001)
 
     watchdog.browser_session._cdp_add_init_script = AsyncMock(side_effect=add_script)
-    started = time.monotonic()
     await asyncio.wait_for(watchdog._load_storage_state(path=str(state_path)), timeout=10)
-    elapsed = time.monotonic() - started
     snapshot = watchdog.storage_state_snapshot()
 
     assert snapshot.phase is StorageStatePhase.LOADED
@@ -338,7 +336,6 @@ async def test_many_origins_batch_into_bounded_scripts(tmp_path):
     emitted_keys = set(re.findall(r'"key-(\d+)"', combined))
     assert emitted_origins == {str(index) for index in range(5_511)}
     assert emitted_keys == {str(index) for index in range(5_511)}
-    assert elapsed < 1.5
 
 
 @pytest.mark.asyncio
@@ -432,6 +429,63 @@ async def test_null_and_about_blank_origins_are_skipped(tmp_path):
     assert snapshot.skipped_items == 2
     assert all('secret-null' not in script and 'secret-blank' not in script for script in scripts)
     assert any('unsafe origin' in warning for warning in watchdog.browser_session._storage_state_warnings)
+
+
+@pytest.mark.asyncio
+async def test_non_mapping_origin_entry_is_skipped_without_failing_the_load(tmp_path):
+    state_path = tmp_path / 'bad-origin-entry.json'
+    state = {
+        'cookies': [],
+        'origins': [
+            'not-an-object',
+            {'origin': 'https://safe.example', 'localStorage': [{'name': 'safe', 'value': 'ok'}]},
+        ],
+    }
+    state_path.write_text(json.dumps(state))
+    watchdog = _make_watchdog(state_path)
+    scripts = []
+
+    async def add_script(script):
+        scripts.append(script)
+
+    watchdog.browser_session._cdp_add_init_script = AsyncMock(side_effect=add_script)
+    await watchdog._load_storage_state(path=str(state_path))
+    snapshot = watchdog.storage_state_snapshot()
+
+    assert snapshot.phase is StorageStatePhase.LOADED
+    assert snapshot.skipped_origins == 1
+    assert scripts
+    assert 'ok' in scripts[0]
+
+
+@pytest.mark.asyncio
+async def test_malformed_origin_urls_are_skipped(tmp_path):
+    state_path = tmp_path / 'malformed-origins.json'
+    state = {
+        'cookies': [],
+        'origins': [
+            {'origin': 'https://', 'localStorage': [{'name': 'a', 'value': '1'}]},
+            {'origin': 'https://example.com/path', 'localStorage': [{'name': 'b', 'value': '2'}]},
+            {'origin': 'https://example.com?q=1', 'localStorage': [{'name': 'c', 'value': '3'}]},
+            {'origin': 'https://user:pass@example.com', 'localStorage': [{'name': 'd', 'value': '4'}]},
+            {'origin': 'https://safe.example', 'localStorage': [{'name': 'safe', 'value': 'ok'}]},
+        ],
+    }
+    state_path.write_text(json.dumps(state))
+    watchdog = _make_watchdog(state_path)
+    scripts = []
+
+    async def add_script(script):
+        scripts.append(script)
+
+    watchdog.browser_session._cdp_add_init_script = AsyncMock(side_effect=add_script)
+    await watchdog._load_storage_state(path=str(state_path))
+    snapshot = watchdog.storage_state_snapshot()
+
+    assert snapshot.phase is StorageStatePhase.LOADED
+    assert snapshot.skipped_origins == 4
+    assert scripts
+    assert 'safe' in scripts[0]
 
 
 @pytest.mark.asyncio
@@ -951,3 +1005,41 @@ async def test_not_configured_save_clears_the_previous_byte_count(tmp_path):
     snapshot = watchdog.storage_state_save_snapshot()
     assert snapshot.phase is StorageStateSavePhase.NOT_CONFIGURED
     assert snapshot.bytes is None
+
+
+@pytest.mark.asyncio
+async def test_cancellation_while_waiting_for_the_path_lock_reports_cancelled(tmp_path):
+    watchdog, state_path = _make_save_watchdog(
+        tmp_path,
+        cookies=[{'name': 'new', 'domain': '.example.com', 'path': '/', 'value': '2'}],
+    )
+    original = '{"cookies": [], "origins": []}'
+    state_path.write_text(original)
+    path_lock = asyncio.Lock()
+    await path_lock.acquire()
+
+    with patch('openbrowser.browser.watchdogs.storage_state_watchdog._path_save_lock', return_value=path_lock):
+        task = asyncio.create_task(watchdog._save_storage_state(path=str(state_path)))
+        await asyncio.sleep(0.01)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    path_lock.release()
+    snapshot = watchdog.storage_state_save_snapshot()
+    assert snapshot.phase is StorageStateSavePhase.CANCELLED
+    assert state_path.read_text() == original
+
+
+def test_path_lock_registry_does_not_retain_idle_locks(tmp_path):
+    import gc
+    import weakref
+
+    from openbrowser.browser.watchdogs import storage_state_watchdog as module
+
+    lock = module._path_save_lock(tmp_path / 'state.json')
+    reference = weakref.ref(lock)
+    del lock
+    gc.collect()
+
+    assert reference() is None

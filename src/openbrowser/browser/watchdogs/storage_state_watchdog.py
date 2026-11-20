@@ -10,6 +10,8 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, ClassVar
+from urllib.parse import urlsplit
+from weakref import WeakValueDictionary
 
 from bubus import BaseEvent
 from cdp_use.cdp.network import Cookie
@@ -35,12 +37,35 @@ from openbrowser.browser.storage_state import (
 )
 from openbrowser.browser.watchdog_base import BaseWatchdog
 
-_PATH_SAVE_LOCKS: dict[str, asyncio.Lock] = {}
+_PATH_SAVE_LOCKS: WeakValueDictionary[str, asyncio.Lock] = WeakValueDictionary()
 
 
 def _path_save_lock(path: Path) -> asyncio.Lock:
 	key = str(path.expanduser().resolve())
-	return _PATH_SAVE_LOCKS.setdefault(key, asyncio.Lock())
+	lock = _PATH_SAVE_LOCKS.get(key)
+	if lock is None:
+		lock = asyncio.Lock()
+		_PATH_SAVE_LOCKS[key] = lock
+	return lock
+
+
+def _is_safe_storage_origin(origin: str) -> bool:
+	"""Accept only a serialized http or https origin with no path or credentials."""
+	if not origin or origin in {'null', 'about:blank'}:
+		return False
+	try:
+		parsed = urlsplit(origin)
+	except ValueError:
+		return False
+	return (
+		parsed.scheme in {'http', 'https'}
+		and bool(parsed.netloc)
+		and parsed.path == ''
+		and not parsed.query
+		and not parsed.fragment
+		and parsed.username is None
+		and parsed.password is None
+	)
 
 
 class StorageStateMergeError(RuntimeError):
@@ -383,106 +408,120 @@ class StorageStateWatchdog(BaseWatchdog):
 				)
 				return
 
-			async with _path_save_lock(json_path):
-				self._save_phase = StorageStateSavePhase.SAVING
-				self._save_path = str(json_path)
-				self._save_bytes = None
-				self._save_started = time.monotonic()
-				self._save_ms = None
-				self._save_elapsed = None
-				self._save_error = None
-				self._save_detail = None
-				self._save_cookies = 0
-				self._save_origins = 0
-				caller_cancelled = False
-				try:
-					cdp_session = await self.browser_session.get_or_create_cdp_session(target_id=None)
-					if cdp_session is None:
-						raise RuntimeError('No CDP session available for storage-state save')
-					storage_state = await self.browser_session._cdp_get_storage_state()
-					if not isinstance(storage_state, dict):
-						raise ValueError('storage state must be a mapping')
-					cookies = storage_state.get('cookies', [])
-					origins = storage_state.get('origins', [])
-					if not isinstance(cookies, list) or not all(isinstance(cookie, dict) for cookie in cookies):
-						raise ValueError('storage-state cookies must be a list of objects')
-					if not isinstance(origins, list) or not all(isinstance(origin, dict) for origin in origins):
-						raise ValueError('storage-state origins must be a list of objects')
-					last_cookie_state = [dict(cookie) for cookie in cookies]
-					cancel_event = threading.Event()
-					writer_task = asyncio.create_task(
-						asyncio.to_thread(
-							self._write_storage_state,
-							json_path,
-							dict(storage_state),
-							cancel_event,
-						)
+			self._save_phase = StorageStateSavePhase.SAVING
+			self._save_path = str(json_path)
+			self._save_bytes = None
+			self._save_started = time.monotonic()
+			self._save_ms = None
+			self._save_elapsed = None
+			self._save_error = None
+			self._save_detail = None
+			self._save_cookies = 0
+			self._save_origins = 0
+			try:
+				async with _path_save_lock(json_path):
+					await self._save_storage_state_locked(json_path)
+			except asyncio.CancelledError:
+				if self._save_phase is StorageStateSavePhase.SAVING:
+					self._finish_save(
+						StorageStateSavePhase.CANCELLED,
+						path=json_path,
+						error='storage-state save cancelled',
+						detail='cancelled while waiting for the path lock; previous file preserved',
 					)
-					while not writer_task.done():
-						try:
-							await asyncio.shield(writer_task)
-						except asyncio.CancelledError:
-							caller_cancelled = True
-							cancel_event.set()
-					if writer_task.cancelled():
-						raise RuntimeError('storage-state writer was cancelled')
-					outcome = writer_task.result()
-					if outcome.cancelled:
-						self._finish_save(
-							StorageStateSavePhase.CANCELLED,
-							path=json_path,
-							detail='cancelled before the commit gate; previous file preserved',
-							cookies_count=outcome.cookies_count,
-							origins_count=outcome.origins_count,
-						)
-					else:
-						self._last_cookie_state = last_cookie_state
-						self._finish_save(
-							StorageStateSavePhase.SAVED,
-							path=json_path,
-							cookies_count=outcome.cookies_count,
-							origins_count=outcome.origins_count,
-							bytes_count=outcome.bytes,
-						)
-						self.event_bus.dispatch(
-							StorageStateSavedEvent(
-								path=str(json_path),
-								cookies_count=outcome.cookies_count,
-								origins_count=outcome.origins_count,
-								bytes=outcome.bytes,
-								save_ms=self._save_ms,
-							)
-						)
-						self.logger.debug(
-							f'[StorageStateWatchdog] Saved storage state to {json_path} '
-							f'({outcome.cookies_count} cookies, {outcome.origins_count} origins, '
-							f'{outcome.bytes} bytes)'
-						)
+				raise
+
+	async def _save_storage_state_locked(self, json_path: Path) -> None:
+		"""Run CDP collection and the owned writer while holding the path lock."""
+		caller_cancelled = False
+		try:
+			cdp_session = await self.browser_session.get_or_create_cdp_session(target_id=None)
+			if cdp_session is None:
+				raise RuntimeError('No CDP session available for storage-state save')
+			storage_state = await self.browser_session._cdp_get_storage_state()
+			if not isinstance(storage_state, dict):
+				raise ValueError('storage state must be a mapping')
+			cookies = storage_state.get('cookies', [])
+			origins = storage_state.get('origins', [])
+			if not isinstance(cookies, list) or not all(isinstance(cookie, dict) for cookie in cookies):
+				raise ValueError('storage-state cookies must be a list of objects')
+			if not isinstance(origins, list) or not all(isinstance(origin, dict) for origin in origins):
+				raise ValueError('storage-state origins must be a list of objects')
+			last_cookie_state = [dict(cookie) for cookie in cookies]
+			cancel_event = threading.Event()
+			writer_task = asyncio.create_task(
+				asyncio.to_thread(
+					self._write_storage_state,
+					json_path,
+					dict(storage_state),
+					cancel_event,
+				)
+			)
+			while not writer_task.done():
+				try:
+					await asyncio.shield(writer_task)
 				except asyncio.CancelledError:
-					if self._save_phase is StorageStateSavePhase.SAVING:
-						self._finish_save(
-							StorageStateSavePhase.CANCELLED,
-							path=json_path,
-							error='storage-state save cancelled',
-							detail='cancelled before the commit gate; previous file preserved',
-						)
-					raise
-				except Exception as error:
-					error_text = f'{type(error).__name__}: {error}'
-					if self._save_phase is StorageStateSavePhase.SAVING:
-						self._finish_save(
-							StorageStateSavePhase.FAILED,
-							path=json_path,
-							error=error_text,
-							detail='save failed; previous file preserved',
-						)
-						self._record_warning(f'Failed to save storage state: {error_text}')
-						self.logger.error(f'[StorageStateWatchdog] Failed to save storage state: {error}')
-					if caller_cancelled:
-						raise asyncio.CancelledError() from error
-				else:
-					if caller_cancelled:
-						raise asyncio.CancelledError()
+					caller_cancelled = True
+					cancel_event.set()
+			if writer_task.cancelled():
+				raise RuntimeError('storage-state writer was cancelled')
+			outcome = writer_task.result()
+			if outcome.cancelled:
+				self._finish_save(
+					StorageStateSavePhase.CANCELLED,
+					path=json_path,
+					detail='cancelled before the commit gate; previous file preserved',
+					cookies_count=outcome.cookies_count,
+					origins_count=outcome.origins_count,
+				)
+			else:
+				self._last_cookie_state = last_cookie_state
+				self._finish_save(
+					StorageStateSavePhase.SAVED,
+					path=json_path,
+					cookies_count=outcome.cookies_count,
+					origins_count=outcome.origins_count,
+					bytes_count=outcome.bytes,
+				)
+				self.event_bus.dispatch(
+					StorageStateSavedEvent(
+						path=str(json_path),
+						cookies_count=outcome.cookies_count,
+						origins_count=outcome.origins_count,
+						bytes=outcome.bytes,
+						save_ms=self._save_ms,
+					)
+				)
+				self.logger.debug(
+					f'[StorageStateWatchdog] Saved storage state to {json_path} '
+					f'({outcome.cookies_count} cookies, {outcome.origins_count} origins, '
+					f'{outcome.bytes} bytes)'
+				)
+		except asyncio.CancelledError:
+			if self._save_phase is StorageStateSavePhase.SAVING:
+				self._finish_save(
+					StorageStateSavePhase.CANCELLED,
+					path=json_path,
+					error='storage-state save cancelled',
+					detail='cancelled before the commit gate; previous file preserved',
+				)
+			raise
+		except Exception as error:
+			error_text = f'{type(error).__name__}: {error}'
+			if self._save_phase is StorageStateSavePhase.SAVING:
+				self._finish_save(
+					StorageStateSavePhase.FAILED,
+					path=json_path,
+					error=error_text,
+					detail='save failed; previous file preserved',
+				)
+				self._record_warning(f'Failed to save storage state: {error_text}')
+				self.logger.error(f'[StorageStateWatchdog] Failed to save storage state: {error}')
+			if caller_cancelled:
+				raise asyncio.CancelledError() from error
+		else:
+			if caller_cancelled:
+				raise asyncio.CancelledError()
 
 	def _write_storage_state(
 		self,
@@ -656,8 +695,14 @@ class StorageStateWatchdog(BaseWatchdog):
 			for origin in storage.get('origins', []) or []:
 				origins_count += 1
 				self._load_origins = origins_count
+				if not isinstance(origin, dict):
+					skipped_origins += 1
+					self._load_skipped_origins = skipped_origins
+					self._load_skipped_items = skipped_items
+					self._emit_warning('storage state contains an invalid origin entry; skipped')
+					continue
 				origin_name = str(origin.get('origin') or '').strip()
-				if not origin_name or origin_name in {'null', 'about:blank'} or '://' not in origin_name:
+				if not _is_safe_storage_origin(origin_name):
 					origin_items = sum(
 						len(origin.get(storage_type) or [])
 						for storage_type in ('localStorage', 'sessionStorage')

@@ -538,9 +538,15 @@ class _BrowserOwner:
 				return None
 			return self._profile_summary.get('storage_state')
 		try:
-			return dict(get_default_profile(self.config)).get('storage_state')
+			profile_config = dict(get_default_profile(self.config))
 		except Exception:
 			return None
+		configured = profile_config.get('storage_state')
+		if profile_config.get('user_data_dir'):
+			return configured
+		if isinstance(configured, dict):
+			return configured
+		return CONFIG.OPENBROWSER_PROFILES_DIR / f'mcp-{self.owner_id}' / 'storage_state.json'
 
 	def _build_browser_profile(self):
 		"""Build a BrowserProfile from config with MCP defaults."""
