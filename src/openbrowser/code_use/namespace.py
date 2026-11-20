@@ -310,7 +310,7 @@ def create_namespace(
 		file_system: Optional file system for file operations
 		available_file_paths: Optional list of available file paths
 		sensitive_data: Optional sensitive data dictionary
-		completion_callback: Optional sink for a successful done action result
+		completion_callback: Optional sink for a done action result without an error
 
 	Returns:
 		Dictionary containing all available functions and objects

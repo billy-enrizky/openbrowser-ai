@@ -140,7 +140,7 @@ async def run_agent_task(task_name: str, instruction: str) -> TaskResult:
             max_actions_per_step=10,
         )
         
-        await agent.run()
+        result = await agent.run()
         execution_time = time.time() - start_time
         
         # Check for output files
@@ -235,7 +235,7 @@ async def run_code_agent_task(task_name: str, instruction: str) -> TaskResult:
             max_failures=3,
         )
         
-        result = await agent.run()
+        await agent.run()
         execution_time = time.time() - start_time
         
         # Check for output files in the working directory

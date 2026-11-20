@@ -100,6 +100,26 @@ async def test_completion_callback_is_authoritative(monkeypatch):
     assert agent.status.result == 'real'
 
 
+async def test_run_passes_the_completion_callback_to_the_namespace(monkeypatch):
+    agent = make_agent(
+        monkeypatch,
+        [('print("work")', 'work')],
+        AsyncMock(return_value=('output', None, None)),
+        max_steps=1,
+    )
+    captured = {}
+
+    def create_namespace_spy(**kwargs):
+        captured.update(kwargs)
+        return {'_all_code_blocks': {}}
+
+    monkeypatch.setattr(service, 'create_namespace', create_namespace_spy)
+
+    await agent.run()
+
+    assert captured['completion_callback'] == agent._record_done_action
+
+
 async def test_status_returns_an_attachment_snapshot(monkeypatch):
     agent = make_agent(monkeypatch, [('await done("final")', 'done')], None)
     done_execute.agent = agent
@@ -114,10 +134,16 @@ async def test_status_returns_an_attachment_snapshot(monkeypatch):
 
 async def test_status_ignores_untrusted_namespace_attachments(monkeypatch):
     agent = make_agent(monkeypatch, [('print("work")', 'work')], None, max_steps=1)
-    agent.namespace['_task_attachments'] = ['forged.csv']
+
+    async def execute(code):
+        agent.namespace['_task_attachments'] = ['forged.csv']
+        return 'work', None, None
+
+    agent._execute_code = AsyncMock(side_effect=execute)
 
     await agent.run()
 
+    assert agent.namespace['_task_attachments'] == ['forged.csv']
     assert agent.status.attachments == []
 
 
@@ -156,6 +182,24 @@ async def test_stop_during_empty_code_screenshot_cancels_before_done(monkeypatch
 
     assert agent.status.phase is CodeAgentPhase.CANCELLED
     assert agent.status.success is False
+
+
+async def test_stop_during_empty_code_history_cancels_before_done(monkeypatch):
+    agent = make_agent(monkeypatch, [], None)
+
+    async def respond():
+        record_done(agent, 'x')
+        return '', 'done'
+
+    async def write_history(**kwargs):
+        agent.stop()
+
+    agent._get_code_from_llm = AsyncMock(side_effect=respond)
+    agent._add_step_to_complete_history = AsyncMock(side_effect=write_history)
+
+    await agent.run()
+
+    assert agent.status.phase is CodeAgentPhase.CANCELLED
 
 
 async def test_done_success_false_is_failed(monkeypatch):
@@ -384,6 +428,7 @@ async def test_stop_between_python_blocks_prevents_later_blocks(monkeypatch):
     await agent.run()
 
     assert agent.status.phase is CodeAgentPhase.CANCELLED
+    assert agent.status.result == 'first'
     agent._execute_code.assert_awaited_once_with('first')
 
 
@@ -427,6 +472,32 @@ async def test_stop_during_validation_error_wins_over_failure(monkeypatch):
     monkeypatch.setattr(namespace_module, 'validate_task_completion', validate)
 
     await agent.run()
+
+    assert agent.status.phase is CodeAgentPhase.CANCELLED
+    assert agent.status.terminal_reason == 'cancelled'
+
+
+async def test_stop_cancels_a_pending_validation_call(monkeypatch):
+    agent = make_agent(
+        monkeypatch,
+        [('await done("final")', 'done')],
+        None,
+        max_validations=1,
+    )
+    done_execute.agent = agent
+    agent._execute_code = AsyncMock(side_effect=done_execute('final'))
+    started = asyncio.Event()
+
+    async def validate(**kwargs):
+        started.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(namespace_module, 'validate_task_completion', validate)
+    run_task = asyncio.create_task(agent.run())
+    await started.wait()
+    assert agent.stop() is True
+
+    await asyncio.wait_for(run_task, timeout=1)
 
     assert agent.status.phase is CodeAgentPhase.CANCELLED
     assert agent.status.terminal_reason == 'cancelled'
@@ -490,6 +561,22 @@ async def test_run_error_sets_failed_and_reraises(monkeypatch):
     assert status.finished_at is not None
 
 
+async def test_stop_during_startup_error_wins_over_failure(monkeypatch):
+    agent = make_agent(monkeypatch, [], None)
+
+    async def fail_after_stop(max_steps):
+        agent.stop()
+        raise RuntimeError('setup failed')
+
+    agent._run_inner = fail_after_stop
+
+    with pytest.raises(RuntimeError, match='setup failed'):
+        await agent.run()
+
+    assert agent.status.phase is CodeAgentPhase.CANCELLED
+    assert agent.status.terminal_reason == 'cancelled'
+
+
 async def test_rejected_validation_clears_attachments(monkeypatch):
     calls = {'n': 0}
 
@@ -542,6 +629,39 @@ async def test_rejected_validation_does_not_leave_completion_authorized(monkeypa
 
     assert agent.status.phase is CodeAgentPhase.FAILED
     assert agent.status.terminal_reason == 'done_not_invoked'
+
+
+async def test_completion_changed_during_validation_requires_a_fresh_done(monkeypatch):
+    agent = make_agent(
+        monkeypatch,
+        [
+            ('await done("first")', 'done'),
+            ('print("work")', 'work'),
+            ('print("work")', 'work'),
+            ('print("work")', 'work'),
+            ('print("work")', 'work'),
+        ],
+        None,
+        max_steps=5,
+        max_validations=1,
+    )
+
+    async def execute(code):
+        if 'done' in code:
+            record_done(agent, 'first')
+        return 'output', None, None
+
+    async def validate(**kwargs):
+        record_done(agent, 'second')
+        return True, 'complete'
+
+    agent._execute_code = AsyncMock(side_effect=execute)
+    monkeypatch.setattr(namespace_module, 'validate_task_completion', validate)
+
+    await agent.run()
+
+    assert agent.status.phase is CodeAgentPhase.MAX_STEPS
+    assert agent.status.terminal_reason == 'max_steps'
 
 
 async def test_second_run_raises_instead_of_duplicating_messages(monkeypatch):

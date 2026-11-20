@@ -13,7 +13,8 @@ import logging
 import os
 import tempfile
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -107,8 +108,9 @@ class TestLLMAutoDetection:
     @patch("openbrowser.code_use.service.get_openbrowser_version", return_value="0.1.0")
     def test_llm_fallback_both_fail(self, *mocks):
         """When llm=None and both ChatBrowserUse and ChatGoogle imports fail, raise RuntimeError."""
-        from openbrowser.code_use.service import CodeAgent
         import builtins
+
+        from openbrowser.code_use.service import CodeAgent
 
         real_import = builtins.__import__
 
@@ -324,8 +326,14 @@ class TestAddStepToCompleteHistory:
     @pytest.mark.asyncio
     async def test_add_step_when_done(self):
         agent = _create_agent()
-        agent.namespace["_task_done"] = True
-        agent.namespace["_task_success"] = True
+        agent._record_done_action(
+            SimpleNamespace(
+                is_done=True,
+                success=True,
+                extracted_content="result",
+                attachments=[],
+            )
+        )
         agent._step_start_time = datetime.datetime.now().timestamp()
         agent._last_llm_usage = None
 
@@ -340,6 +348,25 @@ class TestAddStepToCompleteHistory:
         result = agent.complete_history[0].result[0]
         assert result.is_done is True
         assert result.success is True
+
+    @pytest.mark.asyncio
+    async def test_add_step_namespace_done_flag_is_not_accepted(self):
+        agent = _create_agent()
+        agent.namespace["_task_done"] = True
+        agent.namespace["_task_success"] = True
+        agent._step_start_time = datetime.datetime.now().timestamp()
+        agent._last_llm_usage = None
+
+        await agent._add_step_to_complete_history(
+            model_output_code="print('forged')",
+            full_llm_response="forged",
+            output="forged",
+            error=None,
+            screenshot_path=None,
+        )
+        result = agent.complete_history[0].result[0]
+        assert result.is_done is False
+        assert result.success is None
 
     @pytest.mark.asyncio
     async def test_add_step_with_error(self):
@@ -693,7 +720,6 @@ class TestScreenshotPaths:
         agent = _create_agent()
         from openbrowser.code_use.views import (
             CodeAgentHistory,
-            CodeAgentModelOutput,
             CodeAgentResult,
             CodeAgentState,
             CodeAgentStepMetadata,
@@ -1092,7 +1118,7 @@ class TestRun:
                                 agent.token_cost_service = MagicMock()
                                 agent.token_cost_service.get_usage_summary = AsyncMock(return_value=None)
                                 agent.token_cost_service.log_usage_summary = AsyncMock()
-                                session = await agent.run(max_steps=5)
+                                await agent.run(max_steps=5)
 
         # Verify navigate was actually called with the extracted URL
         mock_navigate.assert_called_once_with("https://example.com")
@@ -1116,7 +1142,7 @@ class TestRun:
                             agent.token_cost_service = MagicMock()
                             agent.token_cost_service.get_usage_summary = AsyncMock(return_value=None)
                             agent.token_cost_service.log_usage_summary = AsyncMock()
-                            session = await agent.run(max_steps=2)
+                            await agent.run(max_steps=2)
 
     @pytest.mark.asyncio
     async def test_run_consecutive_errors_limit(self):
@@ -1138,7 +1164,7 @@ class TestRun:
                             agent.token_cost_service = MagicMock()
                             agent.token_cost_service.get_usage_summary = AsyncMock(return_value=None)
                             agent.token_cost_service.log_usage_summary = AsyncMock()
-                            session = await agent.run(max_steps=10)
+                            await agent.run(max_steps=10)
 
     @pytest.mark.asyncio
     async def test_run_empty_code_retry(self):
@@ -1173,7 +1199,7 @@ class TestRun:
                             agent.token_cost_service = MagicMock()
                             agent.token_cost_service.get_usage_summary = AsyncMock(return_value=None)
                             agent.token_cost_service.log_usage_summary = AsyncMock()
-                            session = await agent.run(max_steps=5)
+                            await agent.run(max_steps=5)
 
     @pytest.mark.asyncio
     async def test_run_no_browser_session_creates_one(self):
@@ -1196,4 +1222,4 @@ class TestRun:
                             agent.token_cost_service = MagicMock()
                             agent.token_cost_service.get_usage_summary = AsyncMock(return_value=None)
                             agent.token_cost_service.log_usage_summary = AsyncMock()
-                            session = await agent.run(max_steps=1)
+                            await agent.run(max_steps=1)

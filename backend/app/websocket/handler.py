@@ -575,12 +575,26 @@ async def run_agent_task(
         await agent_manager.remove_session(session.task_id)
 
 
-async def handle_cancel_task(_client_id: str, message: WSMessage):
+async def handle_cancel_task(client_id: str, message: WSMessage):
     """Handle CANCEL_TASK message."""
     if message.task_id:
         session = await agent_manager.get_session(message.task_id)
+        accepted = False
         if session and session.completed_at is None:
-            await session.cancel()
+            accepted = await session.cancel()
+        reply = (
+            "Cancellation requested. Waiting for the current step to finish."
+            if accepted
+            else "Task is not running. No stop was sent."
+        )
+        await connection_manager.send_message(
+            client_id,
+            WSMessage(
+                type=WSMessageType.LOG,
+                task_id=message.task_id,
+                data=WSLogData(level="warning", message=reply, source="agent").model_dump(),
+            ),
+        )
 
 
 async def handle_pause_task(client_id: str, message: WSMessage):

@@ -1,9 +1,9 @@
 """Backend propagation of the explicit CodeAgent terminal status."""
 
 import sys
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -114,6 +114,7 @@ async def test_start_cancelled_before_setup_allocates_no_resources(monkeypatch):
         use_current_browser=False,
     )
     await session.cancel()
+    assert session.task_status == 'cancelled'
     session._setup_vnc = AsyncMock()
     session._setup_new_browser = AsyncMock()
     session._create_llm = MagicMock()
@@ -310,7 +311,7 @@ async def test_code_status_reports_elapsed_time():
         reason='done',
         success=True,
     )
-    session.started_at = datetime.now() - timedelta(seconds=2)
+    session.started_at = datetime.now(UTC).replace(tzinfo=None) - timedelta(seconds=2)
     session.completed_at = None
 
     result = await session._run_code_agent()
@@ -395,3 +396,29 @@ async def test_browser_agent_result_carries_accepted_cancellation():
     assert result['success'] is False
     assert result['result'] == 'partial'
     assert session.completed_at is not None
+
+
+@pytest.mark.asyncio
+async def test_cleanup_only_detaches_a_debugger_this_session_attached(monkeypatch):
+    extension_manager = SimpleNamespace(
+        get_any_extension_id=MagicMock(return_value='extension-id'),
+        send_command=AsyncMock(),
+    )
+    extension_handler = ModuleType('app.websocket.extension_handler')
+    extension_handler.extension_manager = extension_manager
+    monkeypatch.setitem(sys.modules, 'app.websocket.extension_handler', extension_handler)
+    session = AgentSession(
+        task_id='task-1',
+        task='Do the thing',
+        enable_vnc=False,
+        use_current_browser=True,
+    )
+
+    await session._cleanup()
+    extension_manager.send_command.assert_not_awaited()
+
+    session._debugger_attached = True
+    await session._cleanup()
+    extension_manager.send_command.assert_awaited_once_with(
+        'extension-id', {'type': 'detach_debugger'}
+    )

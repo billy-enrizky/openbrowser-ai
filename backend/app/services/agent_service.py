@@ -74,6 +74,7 @@ class AgentSession:
         self.agent: Any = None
         self.browser_session: Any = None
         self.cdp_bridge: Any = None  # CDPBridge instance when using current browser
+        self._debugger_attached = False
         self.vnc_session: VncSession | None = None
         self.is_running = False
         self.is_paused = False
@@ -88,6 +89,8 @@ class AgentSession:
     @property
     def task_status(self) -> str:
         """Return the user-visible lifecycle state of this session."""
+        if self.is_cancelled and not self.is_running:
+            return 'cancelled'
         if self.completed_at is not None:
             if self.is_cancelled:
                 return 'cancelled'
@@ -182,6 +185,7 @@ class AgentSession:
                 break
         else:
             raise RuntimeError("Timed out waiting for Chrome extension to attach debugger to a tab")
+        self._debugger_attached = True
 
         # Create browser session that connects to the bridge
         browser_profile = BrowserProfile(
@@ -330,10 +334,10 @@ class AgentSession:
                 self.completed_at = _utcnow()
             if result.get('cancelled'):
                 self._log("warning", "Task was cancelled", "agent")
-            elif result.get('terminal_phase') and not result.get('success'):
+            elif not result.get('success'):
                 self._log(
                     "error",
-                    f"Task failed: {result.get('terminal_reason') or self.error or 'unknown'}",
+                    f"Task failed: {result.get('terminal_reason') or self.error or 'agent reported failure'}",
                     "agent",
                 )
             else:
@@ -796,7 +800,7 @@ class AgentSession:
                 await self.cdp_bridge.stop()
                 self.cdp_bridge = None
             # Detach debugger via extension
-            if self.use_current_browser:
+            if self.use_current_browser and self._debugger_attached:
                 try:
                     from app.websocket.extension_handler import extension_manager
                     extension_id = extension_manager.get_any_extension_id()
@@ -804,6 +808,7 @@ class AgentSession:
                         await extension_manager.send_command(extension_id, {
                             "type": "detach_debugger",
                         })
+                        self._debugger_attached = False
                 except Exception:
                     pass
             # Clean up VNC session
