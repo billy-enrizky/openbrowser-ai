@@ -2083,11 +2083,14 @@ async def test_policy_sent_job_survives_primary_timeout_and_repeated_caller_canc
     task = None
     try:
         with patches[0], patches[1]:
-            task = asyncio.create_task(session.navigate_to('https://allowed.test/start', timeout_ms=150 if ending == 'timeout' else 5000))
-            # The policy action is dispatched by a retained event-bus task. Under
-            # xdist load the event loop can take longer than one second to
-            # schedule it. This is a test observation window; the navigation
-            # deadline above is unchanged.
+            # A 150ms forced timeout was too short for the commit and policy
+            # arming on a loaded Linux runner. The test still asserts the
+            # timed_out phase and the policy task survival.
+            timeout_ms = 1000 if ending == 'timeout' else 5000
+            task = asyncio.create_task(session.navigate_to('https://allowed.test/start', timeout_ms=timeout_ms))
+            await asyncio.wait_for(controls.committed.wait(), 5)
+            # The policy action is dispatched by a retained event-bus task. This
+            # observation window is not a product timeout.
             await asyncio.wait_for(controls.action.wait(), 5)
             op = session._navigation_monitor.active
             if ending != 'timeout':
