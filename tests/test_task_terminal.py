@@ -24,6 +24,20 @@ def test_codeagent_cancellation_routes_to_cancelled():
     assert terminal.content == 'partial data'
 
 
+def test_browser_agent_stopped_phase_routes_to_cancelled():
+    terminal = classify_task_terminal(
+        {
+            'terminal_phase': 'stopped',
+            'terminal_reason': 'stopped',
+            'success': False,
+            'result': 'partial',
+        }
+    )
+
+    assert terminal.kind == 'cancelled'
+    assert terminal.content == 'partial'
+
+
 def test_codeagent_terminal_failure_routes_to_failed():
     terminal = classify_task_terminal(
         {
@@ -46,6 +60,22 @@ def test_codeagent_success_routes_to_completed():
     assert terminal.content == 'final'
 
 
+def test_explicit_failed_phase_overrides_a_success_flag():
+    terminal = classify_task_terminal(
+        {'terminal_phase': 'failed', 'terminal_reason': 'run_error', 'success': True}
+    )
+
+    assert terminal.kind == 'failed'
+
+
+def test_explicit_succeeded_phase_requires_success():
+    terminal = classify_task_terminal(
+        {'terminal_phase': 'succeeded', 'success': False, 'result': 'partial'}
+    )
+
+    assert terminal.kind == 'failed'
+
+
 def test_codeagent_nonterminal_phase_routes_to_failed():
     terminal = classify_task_terminal(
         {
@@ -60,10 +90,10 @@ def test_codeagent_nonterminal_phase_routes_to_failed():
     assert terminal.content == 'Task finished without a terminal state'
 
 
-def test_browser_agent_completion_contract_is_unchanged():
+def test_legacy_browser_result_without_terminal_phase_uses_history():
     terminal = classify_task_terminal({'success': False, 'result': 'browser result'})
 
-    assert terminal.kind == 'completed'
+    assert terminal.kind == 'failed'
     assert terminal.content == 'browser result'
 
 

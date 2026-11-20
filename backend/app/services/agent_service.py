@@ -89,12 +89,25 @@ class AgentSession:
     @property
     def task_status(self) -> str:
         """Return the user-visible lifecycle state of this session."""
-        if self.is_cancelled and not self.is_running:
-            return 'cancelled'
+        agent_status = getattr(self.agent, 'status', None)
+        agent_phase = getattr(agent_status, 'phase', None)
+        agent_phase_value = getattr(agent_phase, 'value', agent_phase)
         if self.completed_at is not None:
             if self.is_cancelled:
                 return 'cancelled'
             return 'completed' if self.success else 'failed'
+        if self.is_cancelled:
+            if self.is_running:
+                return 'stopping'
+            return 'cancelled'
+        if agent_phase_value == 'succeeded':
+            return 'completed'
+        if agent_phase_value in {'failed', 'max_steps'}:
+            return 'failed'
+        if agent_phase_value in {'stopped', 'cancelled'}:
+            return 'cancelled'
+        if (self.is_paused or agent_phase_value == 'paused') and self.is_running:
+            return 'paused'
         return 'running' if self.is_running else 'pending'
 
     def _cancelled_start_result(self, reason: str) -> dict[str, Any]:
@@ -317,6 +330,7 @@ class AgentSession:
                     browser_session=self.browser_session,  # Use browser_session parameter
                     use_vision=self.use_vision,
                     register_new_step_callback=step_callback,
+                    use_signal_handler=False,
                 )
             
             # Run the agent
@@ -584,14 +598,64 @@ class AgentSession:
 
     async def _run_browser_agent(self) -> dict[str, Any]:
         """Run Browser Agent with step tracking."""
-        history = await self.agent.run(max_steps=self.max_steps)
+        history = None
+        run_error_message = None
+        try:
+            history = await self.agent.run(max_steps=self.max_steps)
+        except asyncio.CancelledError:
+            raise
+        except Exception as run_error:
+            status = getattr(self.agent, 'status', None)
+            phase = getattr(status, 'phase', None)
+            phase_value = getattr(phase, 'value', phase)
+            if phase_value not in {'succeeded', 'failed', 'max_steps', 'stopped', 'cancelled'}:
+                raise
+            run_error_message = f'{type(run_error).__name__}: {run_error}'
+            history = getattr(self.agent, 'history', None)
+
         if self.completed_at is None:
             self.completed_at = _utcnow()
-        cancelled = bool(self.is_cancelled)
-        
-        # Extract results
-        self.result = history.final_result() or ("Task was cancelled" if cancelled else "Task completed")
-        self.success = False if cancelled else history.is_successful()
+
+        status = getattr(self.agent, 'status', None)
+        phase = getattr(status, 'phase', None)
+        phase_value = getattr(phase, 'value', phase)
+        terminal_phases = {'succeeded', 'failed', 'max_steps', 'stopped', 'cancelled'}
+        terminal_phase = phase_value if phase_value in terminal_phases else None
+        terminal_result = getattr(status, 'result', None) if status is not None else None
+        terminal_error = getattr(status, 'error', None) if status is not None else None
+        terminal_reason = getattr(status, 'terminal_reason', None) if status is not None else None
+        terminal_success = getattr(status, 'success', None) if status is not None else None
+        cancelled = phase_value in {'stopped', 'cancelled'} or bool(self.is_cancelled)
+
+        if cancelled:
+            self.is_cancelled = True
+            legacy_result = history.final_result() if status is None else None
+            self.result = terminal_result or legacy_result or 'Task was cancelled'
+            self.success = False
+        elif phase_value == 'failed':
+            self.is_cancelled = False
+            self.error = terminal_error or run_error_message or terminal_reason or 'Task failed'
+            self.result = terminal_result or f'Task failed: {self.error}'
+            self.success = False
+        elif phase_value == 'max_steps':
+            self.is_cancelled = False
+            self.result = terminal_result or 'Task incomplete: maximum steps reached'
+            self.success = False
+        elif phase_value == 'succeeded':
+            self.is_cancelled = False
+            self.result = terminal_result or history.final_result() or 'Task completed'
+            self.success = terminal_success is True
+        elif status is None:
+            self.result = history.final_result() or 'Task completed'
+            self.success = history.is_successful()
+        else:
+            self.is_cancelled = bool(getattr(status, 'stop_requested', False))
+            self.error = f'Browser Agent returned without a terminal phase: {phase_value}'
+            self.result = 'Task finished without a terminal state'
+            self.success = False
+
+        if not self.result:
+            self.result = 'Task completed' if self.success else 'Task finished without a result'
         
         # Collect file attachments from Browser Agent
         attachments = self._collect_browser_agent_attachments(history)
@@ -607,6 +671,9 @@ class AgentSession:
             "result": self.result,
             "success": bool(self.success),
             "cancelled": cancelled,
+            "phase": phase_value,
+            "terminal_phase": terminal_phase,
+            "terminal_reason": terminal_reason,
             "total_steps": len(history.history) if history else 0,
             "duration_seconds": duration,
             "attachments": attachments,
@@ -760,17 +827,21 @@ class AgentSession:
             from openbrowser import ChatBrowserUse
             return ChatBrowserUse()
 
-    async def pause(self):
-        """Pause the agent."""
+    async def pause(self) -> bool:
+        """Pause the agent and report whether the request was accepted."""
         if self.agent and hasattr(self.agent, 'pause'):
-            self.agent.pause()
-            self.is_paused = True
+            accepted = bool(self.agent.pause())
+            self.is_paused = accepted
+            return accepted
+        return False
 
-    async def resume(self):
-        """Resume the agent."""
+    async def resume(self) -> bool:
+        """Resume the agent and report whether it was paused."""
         if self.agent and hasattr(self.agent, 'resume'):
-            self.agent.resume()
+            accepted = bool(self.agent.resume())
             self.is_paused = False
+            return accepted
+        return False
 
     async def cancel(self) -> bool:
         """Cancel the agent and report whether the request was accepted."""
@@ -780,6 +851,7 @@ class AgentSession:
             accepted = self.agent.stop() is not False
             if accepted:
                 self.is_cancelled = True
+                self.is_paused = False
             return accepted
         self.is_cancelled = True
         return True
