@@ -14,9 +14,11 @@ from openbrowser.tools.action_readiness import (
 class IndexedAction(BaseModel):
 	"""Base for actions that require a 1-based element index from browser state.
 
-	Custom actions that take a browser element index should inherit this class
-	so they get the same typed readiness contract. Actions may use an ``index``
-	field for a different, possibly 0-based purpose without inheriting it.
+	Inheriting validates the index value at the model boundary. A custom
+	handler that also needs state readiness must call
+	``require_element_index(index, selector_map=...)`` from its service path.
+	Actions may use an ``index`` field for a different, possibly 0-based
+	purpose without inheriting this class.
 	"""
 
 	@model_validator(mode='before')
