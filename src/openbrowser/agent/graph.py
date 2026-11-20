@@ -180,28 +180,29 @@ class AgentGraphBuilder:
                 )
 
             history_item_added = len(agent.history.history) > history_count_before
-            if agent.state.stopped:
-                agent._neutralize_unaccepted_done()
-                raise AgentRunInterrupted(agent._pending_stop_reason or 'stopped')
             is_done = bool(
                 history_item_added
                 and agent.history.history[-1].result
                 and agent.history.history[-1].result[-1].is_done is True
             )
-            await agent._check_stop_or_pause()
-            if agent.state.stopped:
-                agent._neutralize_unaccepted_done()
-                raise AgentRunInterrupted(agent._pending_stop_reason or 'stopped')
-            
-            # Fast sync operations
+
+            # Persist completed actions before honoring a stop or pause.
             try:
                 agent.save_file_system_state()
             except Exception as error:
                 if not is_done:
                     step_failed = True
+                    agent.state.last_result = [
+                        ActionResult(error=f'File system state save failed: {error}')
+                    ]
                     agent.logger.error(f'Failed to save file system state after step: {error}')
                 else:
                     agent.logger.error(f'Failed to save file system state after accepted done: {error}')
+
+            await agent._check_stop_or_pause()
+            if agent.state.stopped:
+                agent._neutralize_unaccepted_done()
+                raise AgentRunInterrupted(agent._pending_stop_reason or 'stopped')
 
             if step_failed:
                 agent.state.consecutive_failures += 1

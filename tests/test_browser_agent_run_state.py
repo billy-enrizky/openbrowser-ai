@@ -616,6 +616,29 @@ async def test_step_counter_and_failure_counter_have_one_authority():
 	assert agent.history.history[-1].metadata.step_number == 1
 
 
+async def test_bookkeeping_failure_on_a_clean_step_marks_the_next_prompt_failed():
+	agent = make_graph_agent(max_failures=5, final_response_after_failure=False)
+	builder = AgentGraphBuilder(agent)
+	browser_state = MagicMock()
+	browser_state.url = 'https://example.com'
+	agent.browser_session.get_browser_state_summary.return_value = browser_state
+	model_output = MagicMock()
+	model_output.action = [MagicMock()]
+	agent._get_model_output_with_retry.return_value = model_output
+	agent.multi_act.return_value = [ActionResult(extracted_content='clicked')]
+
+	async def add_history(model_output, browser_state, results, metadata=None, state_message=None):
+		agent.history.history.append(SimpleNamespace(result=results, metadata=metadata))
+
+	agent._make_history_item = AsyncMock(side_effect=add_history)
+	agent.save_file_system_state.side_effect = RuntimeError('disk full')
+
+	await builder._step_node({'step_number': 0, 'max_steps': 5, 'is_done': False})
+
+	assert agent.state.consecutive_failures == 1
+	assert agent.state.last_result[-1].error == 'File system state save failed: disk full'
+
+
 async def test_action_error_and_bookkeeping_failure_increment_once():
 	agent = make_graph_agent(max_failures=5, final_response_after_failure=False)
 	builder = AgentGraphBuilder(agent)
@@ -822,6 +845,7 @@ async def test_real_graph_stop_after_history_invalidates_done():
 	assert agent._run_success is False
 	assert agent.history.is_done() is False
 	assert agent.history.is_successful() is None
+	agent.save_file_system_state.assert_called_once()
 	agent.log_completion.assert_not_awaited()
 	callback.assert_not_awaited()
 

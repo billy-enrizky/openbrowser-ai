@@ -379,7 +379,7 @@ class AgentSession:
             try:
                 await self._cleanup()
             except asyncio.CancelledError:
-                if self.completed_at is None:
+                if self.result is None:
                     raise
                 logger.warning('Cleanup was cancelled after the task reached a terminal result')
 
