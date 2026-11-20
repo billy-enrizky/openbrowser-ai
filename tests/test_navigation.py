@@ -1,4 +1,6 @@
 import asyncio
+import time
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -7,6 +9,33 @@ import pytest
 from openbrowser.browser.navigation import (
     NavigationBusyError, NavigationError, NavigationMonitor, NavigationOperation, NavigationPhase,
 )
+
+
+async def _reap_process(process, timeout=2.0):
+    """Kill an unfinished child and always reap it, tolerating an exit race."""
+    if process.returncode is None:
+        try:
+            process.kill()
+        except ProcessLookupError:
+            pass
+    await asyncio.wait_for(process.wait(), timeout)
+
+
+async def _wait_for_ready_port(path, process, timeout=5.0):
+    """Wait until the child has atomically published a complete port value."""
+    deadline = time.monotonic() + timeout
+    last_error = None
+    while time.monotonic() < deadline:
+        if getattr(process, 'returncode', None) is not None:
+            raise RuntimeError(f'fixture exited {process.returncode} before readiness')
+        try:
+            text = Path(path).read_text().strip()
+            if text:
+                return int(text)
+        except (FileNotFoundError, ValueError) as error:
+            last_error = error
+        await asyncio.sleep(0.01)
+    raise TimeoutError(f'fixture readiness file never contained a complete port: {last_error}')
 
 
 def operation(wait_until='load'):
@@ -2200,9 +2229,40 @@ async def test_reset_does_not_cancel_sent_policy_action_or_replace_before_retire
         await session._drain_navigation_event_pumps(session.event_bus)
 
 
+async def test_ready_port_rejects_an_empty_file_and_accepts_complete_contents(tmp_path):
+    path = tmp_path / 'port'
+    path.touch()
+    process = SimpleNamespace(returncode=None)
+    waiter = asyncio.create_task(_wait_for_ready_port(path, process, timeout=1.0))
+    await asyncio.sleep(0.05)
+    assert not waiter.done(), 'an empty readiness file must not count as ready'
+    path.write_text('12345')
+    assert await asyncio.wait_for(waiter, 1.0) == 12345
+
+
+async def test_reap_process_tolerates_an_already_exited_child():
+    process = SimpleNamespace(returncode=7, kill=MagicMock(), wait=AsyncMock())
+    await _reap_process(process)
+    process.kill.assert_not_called()
+    process.wait.assert_awaited_once()
+
+
+async def test_reap_process_tolerates_an_exit_race_before_kill():
+    process = SimpleNamespace(returncode=None, kill=MagicMock(side_effect=ProcessLookupError), wait=AsyncMock())
+    await _reap_process(process)
+    process.wait.assert_awaited_once()
+
+
+async def test_ready_port_surfaces_an_early_child_exit(tmp_path):
+    path = tmp_path / 'port'
+    process = SimpleNamespace(returncode=7)
+    with pytest.raises(RuntimeError, match='exited 7'):
+        await _wait_for_ready_port(path, process, timeout=1.0)
+
+
 @pytest.mark.parametrize('endpoint', ['owned', 'remote_same_pid', 'other_local_port', 'unowned_same_port',
     'other_ipv4_address', 'missing_peer', 'unknown_family'])
-async def test_owned_browser_exit_revokes_unconfirmed_policy_authority_and_allows_retry(tmp_path, endpoint):
+async def test_owned_browser_exit_revokes_unconfirmed_policy_authority_and_allows_retry(tmp_path, endpoint, request):
     import sys
     import socket
     import psutil
@@ -2218,7 +2278,7 @@ async def test_owned_browser_exit_revokes_unconfirmed_policy_authority_and_allow
     ready, close, closed = (tmp_path / name for name in ('port', 'close-listener', 'listener-closed'))
     code = ('import socket,sys,time\nfrom pathlib import Path\n'
         's=socket.socket(); s.bind(("127.0.0.1",0)); s.listen(); s.settimeout(.01)\n'
-        'Path(sys.argv[1]).write_text(str(s.getsockname()[1]))\n'
+        'tmp=Path(sys.argv[1]+".tmp"); tmp.write_text(str(s.getsockname()[1])); tmp.replace(sys.argv[1])\n'
         'connections=[]; end=time.monotonic()+30\n'
         'while time.monotonic()<end:\n'
         ' if s is not None and Path(sys.argv[2]).exists():\n'
@@ -2229,11 +2289,20 @@ async def test_owned_browser_exit_revokes_unconfirmed_policy_authority_and_allow
         ' time.sleep(.01)\n')
     process = await asyncio.create_subprocess_exec(sys.executable, '-c', code, str(ready), str(close), str(closed),
         f'--user-data-dir={profile}', marker)
-    for _ in range(200):
-        if ready.exists():
-            break
-        await asyncio.sleep(.01)
-    port = int(ready.read_text())
+
+    def reap_unfinished_child():
+        if process.returncode is None:
+            try:
+                process.kill()
+            except ProcessLookupError:
+                pass
+
+    request.addfinalizer(reap_unfinished_child)
+    try:
+        port = await _wait_for_ready_port(ready, process)
+    except BaseException:
+        await _reap_process(process)
+        raise
     owned = psutil.Process(process.pid)
     _reader, writer = await asyncio.open_connection('127.0.0.1', port)
     actual_socket = writer.transport.get_extra_info('socket')
