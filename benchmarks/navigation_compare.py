@@ -15,8 +15,10 @@ import json
 import logging
 import math
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 import platform
+import re
 import shutil
 import socket
 import statistics
@@ -37,6 +39,9 @@ LOG = logging.getLogger('comparison')
 PREFIX = 'BENCH_RESULT:'
 SCRIPT = Path(__file__).resolve()
 ARMS = ('raw-cdp', 'lightpanda', 'agent-browser', 'browser-use', 'openbrowser')
+CLAIM_TIERS = ('historical', 'pinned')
+LANE = 'native-navigation'
+CHROME_ARMS = {'raw-cdp', 'agent-browser', 'browser-use', 'openbrowser'}
 OBSERVE = """JSON.stringify({url:location.href,title:document.title,
 readyState:document.readyState,marker:document.getElementById('marker')?.textContent,
 loaded:document.documentElement.dataset.loaded,scriptDone:document.documentElement.dataset.scriptDone,
@@ -587,6 +592,167 @@ def workload_errors(sample, server, through_ns):
     return errors
 
 
+def claim_scope():
+    """The only claim this lane can support."""
+    return {
+        'lane': LANE,
+        'measured': [
+            'local navigation through the adapter load wait',
+            'one DOM input assignment',
+            'one loopback POST response',
+            'fast page and deferred-external-script page',
+        ],
+        'not_measured': [
+            'CodeAgent task success', 'MCP tool behavior', 'CLI or daemon behavior',
+            'agent framework behavior', 'cold start', 'public-site compatibility',
+            'production behavior', 'CPU limiter or engine profile',
+        ],
+        'cross_tool_ranking': 'inconclusive',
+        'publishable_to_comparison_page': False,
+    }
+
+
+def valid_timestamp(value):
+    if not isinstance(value, str) or not value:
+        return False
+    try:
+        parsed = datetime.fromisoformat(value.replace('Z', '+00:00'))
+    except ValueError:
+        return False
+    return parsed.tzinfo is not None and parsed.utcoffset() == timezone.utc.utcoffset(parsed)
+
+
+def parse_pins(raw):
+    """Parse and validate the canonical pin file from one byte snapshot."""
+    data = json.loads(raw.decode('utf-8') if isinstance(raw, bytes) else raw)
+    pins = data.get('pins')
+    if not isinstance(pins, dict):
+        raise ValueError('pin file must contain a pins object')
+    cleaned = {}
+    for name, pin in pins.items():
+        if not isinstance(name, str) or not name:
+            raise ValueError('pin names must be non-empty strings')
+        if not isinstance(pin, dict):
+            raise ValueError(f'pin {name} must be an object')
+        version = pin.get('version')
+        commit = pin.get('source_commit')
+        if not (isinstance(version, str) and version) and not (isinstance(commit, str) and commit):
+            raise ValueError(f'pin {name} must have a version or source_commit string')
+        cleaned[name] = dict(pin)
+    captured = data.get('captured_utc')
+    if captured is not None and not valid_timestamp(captured):
+        raise ValueError('captured_utc must be an ISO 8601 timestamp')
+    return {'captured_utc': captured, 'pins': cleaned}
+
+
+def load_pins(path):
+    """Load and validate the canonical pin file from disk."""
+    return parse_pins(Path(path).read_bytes())
+
+
+def version_matches(pin, actual):
+    """Match a pin as a complete version token, preserving suffixes."""
+    if not isinstance(pin, str) or not pin or not isinstance(actual, str) or not actual:
+        return False
+    return re.search(rf'(?<![0-9A-Za-z.+-]){re.escape(pin)}(?![0-9A-Za-z.+-])', actual) is not None
+
+
+def recorded_versions(result, arm):
+    meta = result.get('metadata', {})
+    executables = meta.get('executables') or {}
+    startup = result.get('startup') or {}
+    chrome = (executables.get('chrome') or {}).get('version')
+    if arm == 'raw-cdp':
+        return {'chrome': chrome}
+    if arm == 'agent-browser':
+        return {'agent-browser': (executables.get('agent_browser') or {}).get('version'), 'chrome': chrome}
+    if arm == 'lightpanda':
+        return {'lightpanda': (executables.get('lightpanda') or {}).get('version')}
+    if arm == 'browser-use':
+        loaded = ((startup.get('browser-use') or {}).get('result') or {}).get('loaded_packages') or {}
+        return {'browser-use': loaded.get('browser-use'), 'chrome': chrome}
+    if arm == 'openbrowser':
+        return {'chrome': chrome}
+    return {}
+
+
+def _pin_version_errors(errors, label, pin, actual):
+    version = (pin or {}).get('version')
+    if not version:
+        errors.append(f'{label}: no pinned version for a pinned claim')
+        return
+    if not actual:
+        errors.append(f'{label}: recorded version is missing')
+        return
+    if not version_matches(version, actual):
+        errors.append(f'{label}: recorded version {actual!r} does not match pin {version!r}')
+
+
+def claim_errors(result):
+    errors = []
+    meta = result.get('metadata', {})
+    tier = meta.get('claim_tier', 'historical')
+    if tier not in CLAIM_TIERS:
+        errors.append(f'unknown claim tier: {tier!r}')
+        return errors
+    scope = meta.get('claim_scope')
+    expected = claim_scope()
+    if scope is not None and scope != expected:
+        errors.append('claim scope does not match the native-navigation canonical scope')
+    if scope is None and tier == 'pinned':
+        errors.append('pinned claim requires a claim_scope')
+    if 'scope' in meta and meta['scope'] != 'Local native warm-operation diagnostic. No LLM, cloud, or Docker workflow.':
+        errors.append('legacy scope statement was changed')
+    if 'performance_verdict' in meta and meta['performance_verdict'] != 'inconclusive: different engines, IPC and default wait semantics; no limiter profile':
+        errors.append('legacy performance verdict must remain the canonical inconclusive verdict')
+    if tier != 'pinned':
+        return errors
+    pin_record = meta.get('pins') or {}
+    if not valid_timestamp(pin_record.get('captured_utc')):
+        errors.append('pinned claim requires a valid captured_utc')
+    pins = pin_record.get('pins') or {}
+    availability = result.get('availability') or {}
+    requested = meta.get('requested_arms') or list(availability)
+    if set(requested) != set(availability):
+        errors.append('requested_arms does not match availability')
+    for arm in requested:
+        if arm not in ARMS:
+            errors.append(f'unknown requested arm: {arm}')
+            continue
+        if availability.get(arm, {}).get('state') != 'ready':
+            continue
+        versions = recorded_versions(result, arm)
+        if arm == 'raw-cdp':
+            _pin_version_errors(errors, 'raw-cdp/chrome', pins.get('chrome'), versions.get('chrome'))
+        elif arm == 'lightpanda':
+            _pin_version_errors(errors, 'lightpanda', pins.get('lightpanda'), versions.get('lightpanda'))
+        elif arm == 'agent-browser':
+            _pin_version_errors(errors, 'agent-browser', pins.get('agent-browser'), versions.get('agent-browser'))
+            _pin_version_errors(errors, 'agent-browser/chrome', pins.get('chrome'), versions.get('chrome'))
+        elif arm == 'browser-use':
+            _pin_version_errors(errors, 'browser-use', pins.get('browser-use'), versions.get('browser-use'))
+            _pin_version_errors(errors, 'browser-use/chrome', pins.get('chrome'), versions.get('chrome'))
+        elif arm == 'openbrowser':
+            pin = pins.get('openbrowser') or {}
+            if pin.get('version'):
+                errors.append('openbrowser: pin must use source_commit, not an installed-package version')
+            elif pin.get('source_commit'):
+                actual = meta.get('source_commit') or ''
+                want = pin['source_commit']
+                if len(want) < 7:
+                    errors.append('openbrowser/source: source_commit pin must be at least 7 characters')
+                elif not actual or len(actual) < len(want) or not actual.startswith(want):
+                    errors.append(f'openbrowser/source: commit {actual!r} does not match pin {want!r}')
+            else:
+                errors.append('openbrowser: pin must use source_commit')
+            if meta.get('source_dirty') != '':
+                errors.append('openbrowser/source: source tree was not verified clean during the pinned run')
+            _pin_version_errors(errors, 'openbrowser/chrome', pins.get('chrome'), versions.get('chrome'))
+    if any(arm in CHROME_ARMS for arm in requested) and 'chrome' not in pins:
+        errors.append('pinned claim requires a chrome pin for Chrome-based arms')
+    return errors
+
+
 def summarize(samples, states, count):
     result = {}
     for name, status in states.items():
@@ -664,6 +830,7 @@ def result_errors(result):
         errors.append('owned runtime cleanup is incomplete')
     if result.get('error'):
         errors.append(result['error'])
+    errors.extend(claim_errors(result))
     return errors
 
 
@@ -697,6 +864,9 @@ def parser():
     p.add_argument('--browser-use-python', default=os.getenv('NAV_BENCH_BROWSER_USE_PYTHON'))
     p.add_argument('--openbrowser-python', default=os.getenv('NAV_BENCH_OPENBROWSER_PYTHON', sys.executable))
     p.add_argument('--version-manifest', help='Optional JSON release-discovery evidence, copied into results')
+    p.add_argument('--claim-tier', choices=CLAIM_TIERS, default='historical',
+                   help='historical (default) or pinned; pinned requires --pins and exact version matches')
+    p.add_argument('--pins', help='Canonical pin file required for a pinned claim')
     p.add_argument('--samples', type=int, default=5)
     p.add_argument('--delay', type=float, default=.15)
     p.add_argument('--arms', nargs='+', choices=ARMS, default=list(ARMS))
@@ -725,6 +895,12 @@ def validate_config(args):
             setattr(args, key, str(path))
     if args.version_manifest:
         json.loads(Path(args.version_manifest).read_text())
+    if args.claim_tier == 'pinned' and not args.pins:
+        raise ValueError('a pinned claim requires --pins')
+    if args.pins:
+        pins = load_pins(args.pins)
+        if args.claim_tier == 'pinned' and not valid_timestamp(pins.get('captured_utc')):
+            raise ValueError('a pinned claim requires a valid captured_utc')
 
 
 def availability(args):
@@ -795,6 +971,7 @@ async def main(args):
                             ('chrome', 'lightpanda', 'agent_browser', 'browser_use_python', 'openbrowser_python')},
             'scope': 'Local native warm-operation diagnostic. No LLM, cloud, or Docker workflow.',
             'performance_verdict': 'inconclusive: different engines, IPC and default wait semantics; no limiter profile',
+            'claim_tier': args.claim_tier, 'requested_arms': list(args.arms), 'claim_scope': claim_scope(),
             'delay_seconds': args.delay, 'runtime_root': str(root), 'owner_token': token,
         },
         'availability': availability(args), 'startup': {}, 'warmup': [], 'samples': [], 'cleanup': {},
@@ -802,6 +979,11 @@ async def main(args):
     if args.version_manifest:
         result['metadata']['release_discovery'] = json.loads(Path(args.version_manifest).read_text())
         result['metadata']['release_discovery_sha256'] = sha256(args.version_manifest)
+    if args.pins:
+        pin_bytes = Path(args.pins).read_bytes()
+        result['metadata']['pins'] = parse_pins(pin_bytes)
+        result['metadata']['pins_sha256'] = hashlib.sha256(pin_bytes).hexdigest()
+        (destination / 'pins.json').write_bytes(pin_bytes)
     fixture = Fixture(args.delay)
     fixture_thread = threading.Thread(target=fixture.serve_forever, daemon=True)
     fixture_thread.start()
@@ -909,6 +1091,27 @@ async def main(args):
     return 1 if result['verification_errors'] else 0
 
 
+def pin_snapshot_errors(directory, result):
+    meta = result.get('metadata', {})
+    if meta.get('pins') is None:
+        return []
+    path = Path(directory) / 'pins.json'
+    if not path.is_file():
+        return ['pinned result is missing pins.json']
+    raw = path.read_bytes()
+    errors = []
+    if hashlib.sha256(raw).hexdigest() != meta.get('pins_sha256'):
+        errors.append('pins.json hash does not match pins_sha256')
+    try:
+        parsed = parse_pins(raw)
+    except (ValueError, json.JSONDecodeError) as error:
+        errors.append(f'pins.json does not parse: {error}')
+    else:
+        if parsed != meta.get('pins'):
+            errors.append('pins.json does not match metadata pins')
+    return errors
+
+
 def verify(directory):
     directory = Path(directory)
     hashes = json.loads((directory / 'sha256.json').read_text())
@@ -920,6 +1123,7 @@ def verify(directory):
             errors.append(f'file hash mismatch: {name}')
     result = json.loads((directory / 'results.json').read_text())
     errors.extend(result_errors(result))
+    errors.extend(pin_snapshot_errors(directory, result))
     for error in errors:
         LOG.error('%s', error)
     if not errors:

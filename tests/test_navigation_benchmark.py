@@ -1,3 +1,4 @@
+import hashlib
 import importlib.util
 import asyncio
 import contextlib
@@ -330,6 +331,24 @@ def test_external_paths_and_missing_optional_arms_are_explicit(tmp_path, monkeyp
     assert states['browser-use']['state'] == 'unavailable'
 
 
+def test_config_requires_pins_for_a_pinned_claim(tmp_path):
+    source = tmp_path / 'source'
+    (source / 'src/openbrowser').mkdir(parents=True)
+    (source / 'src/openbrowser/__init__.py').touch()
+    base = ['--source', str(source), '--output', str(tmp_path / 'out'), '--claim-tier', 'pinned']
+    with pytest.raises(ValueError, match='pinned claim requires --pins'):
+        benchmark.validate_config(benchmark.parser().parse_args(base))
+
+    pins = tmp_path / 'pins.json'
+    pins.write_text(json.dumps({'captured_utc': '2026-11-20T00:00:00Z', 'pins': {'chrome': {'version': '130.0.6723.58'}}}))
+    benchmark.validate_config(benchmark.parser().parse_args([*base, '--pins', str(pins)]))
+
+    broken = tmp_path / 'broken.json'
+    broken.write_text(json.dumps({'pins': {'chrome': {}}}))
+    with pytest.raises(ValueError, match='version or source_commit'):
+        benchmark.validate_config(benchmark.parser().parse_args([*base, '--pins', str(broken)]))
+
+
 @pytest.mark.parametrize('extra', [['--samples', '0'], ['--delay', 'nan'], ['--delay', '-1'],
                                    ['--arms', 'raw-cdp', 'raw-cdp']])
 def test_config_rejects_invalid_measurement_and_duplicate_arms(tmp_path, extra):
@@ -527,7 +546,11 @@ def verified_result():
     samples = [completed_sample(kind) for kind in ('fast', 'delayed')]
     result = {
         'metadata': {'samples_per_workload_arm': 1, 'source_unchanged': True,
-                     'source_manifest': {'source.py': 'hash'}, 'source_manifest_end': {'source.py': 'hash'}},
+                     'source_manifest': {'source.py': 'hash'}, 'source_manifest_end': {'source.py': 'hash'},
+                     'claim_tier': 'historical', 'requested_arms': ['raw-cdp'],
+                     'claim_scope': benchmark.claim_scope(),
+                     'scope': 'Local native warm-operation diagnostic. No LLM, cloud, or Docker workflow.',
+                     'performance_verdict': 'inconclusive: different engines, IPC and default wait semantics; no limiter profile'},
         'availability': {'raw-cdp': {'state': 'ready'}}, 'samples': samples, 'warmup': [completed_sample('fast')],
         'startup': {'raw-cdp': {'ok': True}},
         'cleanup': {'root_removed': True, 'raw-cdp': {'ok': True,
@@ -535,6 +558,240 @@ def verified_result():
     }
     result['summary'] = benchmark.summarize(samples, result['availability'], 1)
     return result
+
+
+def pinned_result():
+    result = verified_result()
+    result['metadata'].update({
+        'claim_tier': 'pinned',
+        'requested_arms': ['raw-cdp'],
+        'executables': {'chrome': {'version': 'Google Chrome 130.0.6723.58'}},
+        'source_commit': 'a9022ad43db84fa8f37c9e77bb767ad5c57f5132',
+        'pins': {'captured_utc': '2026-11-20T00:00:00Z', 'pins': {'chrome': {'version': '130.0.6723.58'}}},
+    })
+    return result
+
+
+def test_pinned_claim_accepts_matching_pins():
+    result = pinned_result()
+    assert benchmark.claim_errors(result) == []
+    assert benchmark.result_errors(result) == []
+
+
+def test_pinned_claim_requires_a_pin_for_each_ready_arm():
+    result = pinned_result()
+    result['metadata']['pins'] = {'captured_utc': '2026-11-20T00:00:00Z', 'pins': {}}
+    assert any('raw-cdp/chrome' in error for error in benchmark.claim_errors(result))
+
+
+def test_pinned_claim_rejects_a_version_mismatch():
+    result = pinned_result()
+    result['metadata']['executables']['chrome']['version'] = 'Google Chrome 129.0.0.1'
+    assert any('does not match pin' in error for error in benchmark.claim_errors(result))
+    assert any('does not match pin' in error for error in benchmark.result_errors(result))
+
+
+def test_pinned_claim_rejects_an_invalid_capture_time():
+    result = pinned_result()
+    result['metadata']['pins']['captured_utc'] = 'unknown'
+    assert any('captured_utc' in error for error in benchmark.claim_errors(result))
+
+
+def test_pinned_claim_rejects_a_missing_recorded_version():
+    result = pinned_result()
+    result['metadata']['executables']['chrome'] = {}
+    assert any('recorded version is missing' in error for error in benchmark.claim_errors(result))
+
+
+def test_captured_utc_requires_an_aware_utc_timestamp():
+    assert benchmark.valid_timestamp('2026-11-20T00:00:00Z')
+    assert benchmark.valid_timestamp('2026-11-20T00:00:00+00:00')
+    assert not benchmark.valid_timestamp('2026-11-20T00:00:00')
+    assert not benchmark.valid_timestamp('2026-11-20')
+    assert not benchmark.valid_timestamp('2026-11-20T00:00:00+05:00')
+    assert not benchmark.valid_timestamp('unknown')
+
+
+def test_version_matches_full_tokens_only():
+    assert benchmark.version_matches('1.0.6', '1.0.6')
+    assert benchmark.version_matches('130.0.6723.58', 'Google Chrome 130.0.6723.58')
+    assert not benchmark.version_matches('1.0.6', '1.0.6rc1')
+    assert not benchmark.version_matches('1.0.6', '1.0.6-rc1')
+    assert not benchmark.version_matches('130.0.6723.58', '130.0.6723.581')
+
+
+def test_version_match_is_exact_and_preserves_suffixes():
+    result = pinned_result()
+    result['metadata']['executables']['chrome']['version'] = 'Google Chrome 130.0.6723.581'
+    assert any('does not match pin' in error for error in benchmark.claim_errors(result))
+
+    result = verified_result()
+    result['availability'] = {'browser-use': {'state': 'ready'}}
+    result['metadata'].update({
+        'claim_tier': 'pinned', 'requested_arms': ['browser-use'],
+        'executables': {'chrome': {'version': 'Google Chrome 130.0.6723.58'}},
+        'pins': {'captured_utc': '2026-11-20T00:00:00Z', 'pins': {'browser-use': {'version': '1.0.6'}, 'chrome': {'version': '130.0.6723.58'}}},
+    })
+    result['startup'] = {'browser-use': {'result': {'loaded_packages': {'browser-use': '1.0.6'}}}}
+    assert benchmark.claim_errors(result) == []
+    result['startup']['browser-use']['result']['loaded_packages']['browser-use'] = '1.0.6rc1'
+    assert any('does not match pin' in error for error in benchmark.claim_errors(result))
+
+
+def test_pinned_claim_reconciles_requested_arms_with_availability():
+    result = pinned_result()
+    result['metadata']['requested_arms'] = ['raw-cdp']
+    result['availability'] = {'raw-cdp': {'state': 'ready'}, 'browser-use': {'state': 'ready'}}
+    assert any('requested_arms does not match availability' in error for error in benchmark.claim_errors(result))
+
+
+def test_pinned_claim_falls_back_to_availability_when_requested_arms_is_missing():
+    result = pinned_result()
+    result['metadata'].pop('requested_arms')
+    assert benchmark.claim_errors(result) == []
+
+
+def test_legacy_claim_statements_are_checked_without_a_claim_scope():
+    result = verified_result()
+    result['metadata'].pop('claim_scope')
+    assert benchmark.claim_errors(result) == []
+    result['metadata']['performance_verdict'] = 'openbrowser wins'
+    assert benchmark.claim_errors(result)
+    result['metadata']['performance_verdict'] = 'inconclusive: OpenBrowser wins universally'
+    assert benchmark.claim_errors(result)
+    result['metadata'].pop('performance_verdict')
+    result['metadata']['scope'] = 'production winner'
+    assert benchmark.claim_errors(result)
+
+
+def test_pinned_lightpanda_claim_does_not_require_chrome():
+    result = verified_result()
+    result['availability'] = {'lightpanda': {'state': 'ready'}}
+    result['metadata'].update({
+        'claim_tier': 'pinned', 'requested_arms': ['lightpanda'],
+        'executables': {'lightpanda': {'version': 'Lightpanda 1.0.4'}},
+        'pins': {'captured_utc': '2026-11-20T00:00:00Z', 'pins': {'lightpanda': {'version': '1.0.4'}}},
+    })
+    assert benchmark.claim_errors(result) == []
+
+
+def test_openbrowser_source_pin_requires_a_clean_tree_and_a_real_prefix():
+    def result(commit='a9022ad43db84fa8f37c9e77bb767ad5c57f5132', pin='a9022ad4', dirty=''):
+        value = verified_result()
+        value['availability'] = {'openbrowser': {'state': 'ready'}}
+        value['metadata'].update({
+            'claim_tier': 'pinned', 'requested_arms': ['openbrowser'],
+            'source_commit': commit, 'source_dirty': dirty,
+            'executables': {'chrome': {'version': 'Google Chrome 130.0.6723.58'}},
+            'pins': {'captured_utc': '2026-11-20T00:00:00Z',
+                     'pins': {'openbrowser': {'source_commit': pin},
+                              'chrome': {'version': '130.0.6723.58'}}},
+        })
+        return value
+
+    assert benchmark.claim_errors(result()) == []
+    assert any('at least 7' in error for error in benchmark.claim_errors(result(pin='a902')))
+    assert any('not verified clean' in error for error in benchmark.claim_errors(result(dirty=' M src/x.py')))
+    assert any('does not match pin' in error for error in benchmark.claim_errors(
+        result(commit='b0000000000000000000000000000000000000000')))
+    version_only = result()
+    version_only['metadata']['pins']['pins']['openbrowser'] = {'version': '0.1.57'}
+    assert any('must use source_commit' in error for error in benchmark.claim_errors(version_only))
+    dirty = result(dirty=' M src/x.py')
+    assert any('was not verified clean' in error for error in benchmark.claim_errors(dirty))
+    unverified = result(dirty=None)
+    assert any('was not verified clean' in error for error in benchmark.claim_errors(unverified))
+
+
+def test_historical_run_may_retain_pins_without_enforcing_them():
+    result = verified_result()
+    result['metadata']['pins'] = {'captured_utc': '2026-11-20T00:00:00Z', 'pins': {'chrome': {'version': '999.0.0'}}}
+    assert benchmark.claim_errors(result) == []
+
+
+def test_legacy_historical_artifact_without_claim_fields_is_still_verifiable():
+    result = verified_result()
+    for key in ('claim_tier', 'claim_scope', 'requested_arms', 'scope', 'performance_verdict'):
+        result['metadata'].pop(key, None)
+    assert benchmark.result_errors(result) == []
+
+
+def test_historical_claim_does_not_require_pins():
+    result = verified_result()
+    assert result['metadata']['claim_tier'] == 'historical'
+    assert benchmark.claim_errors(result) == []
+
+
+@pytest.mark.parametrize('change', [
+    {'publishable_to_comparison_page': True},
+    {'cross_tool_ranking': 'openbrowser wins'},
+    {'lane': 'all-surfaces'},
+    {'not_measured': []},
+    {'measured': ['CodeAgent task success']},
+])
+def test_claim_scope_cannot_be_widened(change):
+    result = verified_result()
+    result['metadata']['claim_scope'] = {**benchmark.claim_scope(), **change}
+    assert benchmark.claim_errors(result)
+
+
+def test_comparison_page_does_not_cite_the_native_navigation_lane():
+    page = (Path(__file__).resolve().parents[1] / 'docs/comparison.mdx').read_text()
+    assert 'navigation_compare' not in page
+    assert 'navigation_results' not in page
+
+
+def test_checked_in_pin_example_matches_the_schema():
+    example = Path(__file__).resolve().parents[1] / 'benchmarks/navigation_pins.example.json'
+    pins = benchmark.load_pins(example)
+    assert set(pins['pins']) == {'lightpanda', 'agent-browser', 'browser-use', 'chrome', 'openbrowser'}
+    assert pins['pins']['browser-use']['version'] == '1.0.6'
+    assert pins['pins']['openbrowser']['source_commit']
+
+
+def test_verify_cross_checks_the_retained_pin_snapshot(tmp_path):
+    pins = {'captured_utc': '2026-11-20T00:00:00Z', 'pins': {'chrome': {'version': '130.0.6723.58'}}}
+    raw = json.dumps(pins).encode()
+    (tmp_path / 'pins.json').write_bytes(raw)
+    result = {'metadata': {'pins': pins, 'pins_sha256': hashlib.sha256(raw).hexdigest()}}
+    assert benchmark.pin_snapshot_errors(tmp_path, result) == []
+    (tmp_path / 'pins.json').write_text('{"pins": {}}')
+    assert benchmark.pin_snapshot_errors(tmp_path, result)
+
+
+def test_pinned_config_requires_a_capture_time_before_measurement(tmp_path):
+    source = tmp_path / 'source'
+    (source / 'src/openbrowser').mkdir(parents=True)
+    (source / 'src/openbrowser/__init__.py').touch()
+    pins = tmp_path / 'pins.json'
+    pins.write_text(json.dumps({'pins': {'chrome': {'version': '130.0.6723.58'}}}))
+    args = benchmark.parser().parse_args([
+        '--source', str(source), '--output', str(tmp_path / 'out'),
+        '--claim-tier', 'pinned', '--pins', str(pins),
+    ])
+    with pytest.raises(ValueError, match='captured_utc'):
+        benchmark.validate_config(args)
+
+
+def test_pin_file_requires_a_pins_object_and_an_identity(tmp_path):
+    good = tmp_path / 'good.json'
+    good.write_text(json.dumps({'pins': {'browser-use': {'version': '1.0.6'}}}))
+    assert benchmark.load_pins(good)['pins']['browser-use']['version'] == '1.0.6'
+
+    missing = tmp_path / 'missing.json'
+    missing.write_text(json.dumps({}))
+    with pytest.raises(ValueError, match='pins object'):
+        benchmark.load_pins(missing)
+
+    empty = tmp_path / 'empty.json'
+    empty.write_text(json.dumps({'pins': {'browser-use': {}}}))
+    with pytest.raises(ValueError, match='version or source_commit'):
+        benchmark.load_pins(empty)
+
+    bad_time = tmp_path / 'bad-time.json'
+    bad_time.write_text(json.dumps({'captured_utc': 'unknown', 'pins': {'browser-use': {'version': '1.0.6'}}}))
+    with pytest.raises(ValueError, match='ISO 8601'):
+        benchmark.load_pins(bad_time)
 
 
 def test_verifier_accepts_all_workloads_and_proven_cleanup():
