@@ -320,7 +320,10 @@ def test_cached_classification_respects_depth_at_each_use():
 	for _ in range(50):
 		deep = [deep]
 
-	result = transfer_namespace({'deep': deep})
+	# Classify the leaf shallowly first, then reuse the cached entry deep in
+	# the chain. The cached height must be re-checked at the second use.
+	result = transfer_namespace({'shallow': leaf, 'deep': deep})
 
-	assert result.variables == {}
+	assert 'shallow' in result.variables
+	assert 'deep' in result.dropped
 	assert 'deeply' in result.dropped['deep']
