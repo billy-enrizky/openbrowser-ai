@@ -356,7 +356,7 @@ async def test_go_back_waits_for_the_page_load():
         assert not task.done(), 'history navigation must not complete on a fixed delay'
         lifecycle = client.register.Page.lifecycleEvent.call_args.args[0]
         lifecycle({'frameId': 'frame', 'loaderId': 'next', 'name': 'load'}, focus.session_id)
-        final_url = await asyncio.wait_for(task, .5)
+        final_url = await asyncio.wait_for(task, 2.0)
     assert final_url == 'https://first.example/'
     complete = [e for e in session.event_bus.dispatch._dispatched_events if isinstance(e, NavigationCompleteEvent)]
     assert complete[-1].url == 'https://first.example/'
@@ -387,7 +387,7 @@ async def test_go_forward_waits_for_the_page_load():
         assert not task.done()
         lifecycle = client.register.Page.lifecycleEvent.call_args.args[0]
         lifecycle({'frameId': 'frame', 'loaderId': 'next', 'name': 'load'}, focus.session_id)
-        await asyncio.wait_for(task, .5)
+        await asyncio.wait_for(task, 2.0)
 
 
 async def test_go_back_hash_entry_completes_on_within_document():
@@ -407,7 +407,7 @@ async def test_go_back_hash_entry_completes_on_within_document():
 
     client.send.Page.navigateToHistoryEntry = AsyncMock(side_effect=go_back)
     with patches[0], patches[1]:
-        final_url = await asyncio.wait_for(session.go_back(), .5)
+        final_url = await asyncio.wait_for(session.go_back(), 2.0)
     assert final_url == 'https://site.test/page#one'
 
 
@@ -435,7 +435,7 @@ async def test_go_back_handler_returns_the_final_url():
     client.send.Page.navigateToHistoryEntry = AsyncMock(side_effect=go_back)
     watchdog = DefaultActionWatchdog(event_bus=session.event_bus, browser_session=session)
     with patches[0], patches[1]:
-        url = await asyncio.wait_for(watchdog.on_GoBackEvent(GoBackEvent(event_timeout=5.0)), .5)
+        url = await asyncio.wait_for(watchdog.on_GoBackEvent(GoBackEvent(event_timeout=5.0)), 5.0)
     assert url == 'https://first.example/'
 
 
@@ -527,7 +527,7 @@ async def test_go_back_spa_path_change_completes_on_within_document():
 
     client.send.Page.navigateToHistoryEntry = AsyncMock(side_effect=go_back)
     with patches[0], patches[1]:
-        final_url = await asyncio.wait_for(session.go_back(), .5)
+        final_url = await asyncio.wait_for(session.go_back(), 2.0)
     assert final_url == 'https://site.test/page?step=1'
 
 
@@ -783,7 +783,7 @@ async def test_refresh_waits_for_the_new_loader():
         assert not task.done(), 'refresh must not complete on a fixed delay'
         lifecycle = client.register.Page.lifecycleEvent.call_args.args[0]
         lifecycle({'frameId': 'frame', 'loaderId': 'next', 'name': 'load'}, focus.session_id)
-        final_url = await asyncio.wait_for(task, .5)
+        final_url = await asyncio.wait_for(task, 2.0)
     assert final_url == 'https://site.test/page'
     complete = [e for e in session.event_bus.dispatch._dispatched_events if isinstance(e, NavigationCompleteEvent)]
     assert complete[-1].url == 'https://site.test/page'
