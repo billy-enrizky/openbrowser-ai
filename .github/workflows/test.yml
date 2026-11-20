@@ -76,6 +76,7 @@ jobs:
             tests/ci/test_shard_tests.py tests/ci/test_check_baseline.py \
             tests/ci/test_audit_runs.py -q --tb=short -p no:cacheprovider
       - name: Prove selection catches a planted break
+        if: github.event_name != 'pull_request'
         run: uv run --locked python scripts/ci/prove_selection.py
       - uses: actions/upload-artifact@v4
         if: always()

@@ -92,6 +92,10 @@ def main(argv: list[str] | None = None) -> int:
                     "pytest",
                     *selected,
                     "-q",
+                    "-n",
+                    "auto",
+                    "--dist",
+                    "load",
                     "--tb=short",
                     "--maxfail=1",
                     f"--junitxml={junit_path}",
@@ -120,7 +124,19 @@ def main(argv: list[str] | None = None) -> int:
             source.write_text(original, encoding="utf-8")
 
     restored = run(
-        [sys.executable, "-m", "pytest", *selected, "-q", "--tb=short", "--maxfail=1"],
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            *selected,
+            "-q",
+            "-n",
+            "auto",
+            "--dist",
+            "load",
+            "--tb=short",
+            "--maxfail=1",
+        ],
         root,
     )
     if restored.returncode != 0:
