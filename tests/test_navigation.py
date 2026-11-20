@@ -576,7 +576,7 @@ async def test_go_back_contains_a_blocked_commit_that_never_finishes_loading():
 
     def frame_tree(**kwargs):
         calls.append(1)
-        if len(calls) >= 2:
+        if len(calls) >= 3:
             return {'frameTree': {'frame': {'id': 'frame', 'loaderId': 'blank', 'url': 'about:blank'}}}
         return {'frameTree': {'frame': dict(frame)}}
 

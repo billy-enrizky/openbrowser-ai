@@ -1782,7 +1782,9 @@ class BrowserSession(BaseModel):
 				requested_url, commit_kind, trigger = await prepare(root, focus)
 				policy = self._security_watchdog
 				if policy is None:
-					from openbrowser.browser.watchdogs.security_watchdog import SecurityWatchdog
+					from openbrowser.browser.watchdogs.security_watchdog import (
+						SecurityWatchdog,
+					)
 
 					policy = SecurityWatchdog(event_bus=event_bus, browser_session=self)
 				if not policy._is_url_allowed(requested_url):
@@ -1819,6 +1821,12 @@ class BrowserSession(BaseModel):
 				self._check_navigation_owner(operation, root, focus)
 				await operation.wait_commit()
 				self._check_navigation_owner(operation, root, focus)
+				tree = await root.send.Page.getFrameTree(session_id=operation.session_id)
+				self._check_navigation_owner(operation, root, focus)
+				committed_frame = tree['frameTree']['frame']
+				if committed_frame.get('id') != operation.frame_id or committed_frame.get('loaderId') != operation.loader_id:
+					raise NavigationError('Navigation live document binding changed after commit')
+				operation.observed_url = committed_frame.get('url', '') + committed_frame.get('urlFragment', '')
 				committed_url = operation.observed_url or requested_url
 				if not policy._is_url_allowed(committed_url):
 					# Contain at commit, before a blocked document can finish loading.
@@ -1861,6 +1869,7 @@ class BrowserSession(BaseModel):
 						)
 						self._check_navigation_owner(operation, root, focus)
 						tree = await root.send.Page.getFrameTree(session_id=operation.session_id)
+						self._check_navigation_owner(operation, root, focus)
 						live = tree['frameTree']['frame']
 						if live.get('id') != operation.frame_id or live.get('loaderId') != operation.loader_id:
 							raise NavigationError('Navigation live document binding changed after notification')
