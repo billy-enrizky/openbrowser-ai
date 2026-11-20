@@ -1053,6 +1053,7 @@ class _BrowserOwner:
 				self._namespace = None
 				if clear_variables:
 					self._pending_variables.clear()
+					self._last_namespace_transfer = NamespaceTransfer().to_dict()
 				else:
 					self._merge_pending_variables(self._carry_namespace(old_namespace, session))
 				self._browser_generation += 1

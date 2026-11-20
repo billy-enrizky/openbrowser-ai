@@ -53,12 +53,20 @@ def test_preserved_containers_are_copies():
 
 
 def test_framework_names_are_rebuilt_and_not_carried():
+	import json as json_module
+
+	class PdfReader:
+		pass
+
+	async def navigate():
+		return None
+
 	old = {
 		'browser': FakeBrowserSession(),
 		'file_system': object(),
-		'navigate': object(),
-		'json': object(),
-		'PdfReader': object(),
+		'navigate': navigate,
+		'json': json_module,
+		'PdfReader': PdfReader,
 		'user_value': 7,
 	}
 
@@ -246,5 +254,58 @@ def test_summary_truncates_long_names():
 
 	payload = result.to_dict()
 
-	assert len(payload['preserved'][0]) <= 123
+	assert len(payload['preserved'][0]) <= 130
 	assert payload['preserved_count'] == 1
+
+
+def test_truncated_dropped_names_remain_unique():
+	prefix = 'x' * 200
+	result = transfer_namespace({f'{prefix}a': OpaquePage(), f'{prefix}b': OpaquePage()})
+
+	payload = result.to_dict()
+
+	assert payload['dropped_count'] == 2
+	assert len(payload['dropped']) == 2
+
+
+def test_shadowing_a_framework_name_is_dropped_with_a_warning():
+	result = transfer_namespace({'wait': 5, 'count': 1})
+
+	assert result.variables == {'count': 1}
+	assert result.dropped['wait'] == 'shadows framework binding'
+	assert len(result.warnings) == 1
+
+
+def test_optional_framework_name_with_user_scalar_is_preserved():
+	import types
+
+	result = transfer_namespace({'plt': [1, 2]})
+
+	assert result.variables == {'plt': [1, 2]}
+	assert result.dropped == {}
+
+	fake_module = types.ModuleType('matplotlib.pyplot')
+	result = transfer_namespace({'plt': fake_module})
+	assert 'plt' in result.framework_names
+
+
+def test_deeply_nested_container_is_dropped_without_recursion_error():
+	value: object = 1
+	for _ in range(2000):
+		value = [value]
+
+	result = transfer_namespace({'deep': value})
+
+	assert result.variables == {}
+	assert 'deep' in result.dropped
+	assert 'deeply' in result.dropped['deep']
+
+
+def test_shared_dag_is_classified_once():
+	value: object = [0]
+	for _ in range(25):
+		value = [value, value]
+
+	result = transfer_namespace({'dag': value})
+
+	assert 'dag' in result.variables

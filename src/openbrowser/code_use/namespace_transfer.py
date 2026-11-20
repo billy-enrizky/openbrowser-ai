@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import types
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
@@ -9,7 +11,7 @@ from typing import Any
 MAX_WARNINGS = 20
 
 # Names the new namespace always provides. They are rebuilt, never carried.
-FRAMEWORK_NAMES = frozenset(
+ALWAYS_FRAMEWORK_NAMES = frozenset(
 	{
 		'browser',
 		'file_system',
@@ -20,17 +22,6 @@ FRAMEWORK_NAMES = frozenset(
 		're',
 		'datetime',
 		'requests',
-		'np',
-		'numpy',
-		'pd',
-		'pandas',
-		'plt',
-		'matplotlib',
-		'BeautifulSoup',
-		'bs4',
-		'PdfReader',
-		'pypdf',
-		'tabulate',
 		'evaluate',
 		'done',
 		'navigate',
@@ -48,24 +39,44 @@ FRAMEWORK_NAMES = frozenset(
 		'wait_for_download',
 		'download_outcomes',
 		'download_failures',
+		'input_text',
 		'close',
 		'dropdown_options',
 		'go_back',
-		'input',
 		'switch',
 		'upload_file',
 		'wait',
 	}
 )
 
+OPTIONAL_FRAMEWORK_NAMES = frozenset(
+	{
+		'np',
+		'numpy',
+		'pd',
+		'pandas',
+		'plt',
+		'matplotlib',
+		'BeautifulSoup',
+		'bs4',
+		'PdfReader',
+		'pypdf',
+		'tabulate',
+	}
+)
+
+FRAMEWORK_NAMES = ALWAYS_FRAMEWORK_NAMES | OPTIONAL_FRAMEWORK_NAMES
+
 _SCALAR_TYPES = (type(None), bool, int, float, complex, str, bytes, bytearray)
 _MAX_LABEL_LENGTH = 120
+_MAX_DEPTH = 50
 
 
-def _truncate_label(value: str, limit: int = _MAX_LABEL_LENGTH) -> str:
+def _truncate_label(value: str, limit: int = _MAX_LABEL_LENGTH, *, unique: bool = False) -> str:
 	if len(value) <= limit:
 		return value
-	return value[:limit] + '...'
+	suffix = '#' + hashlib.sha256(value.encode('utf-8')).hexdigest()[:6] if unique else ''
+	return value[:limit] + '...' + suffix
 
 
 class NamespaceValueKind(str, Enum):
@@ -87,10 +98,10 @@ class NamespaceTransfer:
 
 	def to_dict(self) -> dict[str, object]:
 		"""Return a bounded, JSON-safe summary for status and reset responses."""
-		preserved = [_truncate_label(name) for name in sorted(self.variables)]
-		framework = [_truncate_label(name) for name in sorted(self.framework_names)]
+		preserved = [_truncate_label(name, unique=True) for name in sorted(self.variables)]
+		framework = [_truncate_label(name, unique=True) for name in sorted(self.framework_names)]
 		dropped_items = [
-			(_truncate_label(name), _truncate_label(reason, 200))
+			(_truncate_label(name, unique=True), _truncate_label(reason, 200))
 			for name, reason in self.dropped.items()
 		]
 		return {
@@ -107,48 +118,89 @@ class NamespaceTransfer:
 		}
 
 
-def _is_framework_name(name: str) -> bool:
-	"""Only names the replacement namespace actually binds are framework."""
-	return name in FRAMEWORK_NAMES
+def _looks_like_framework_value(name: str, value: Any) -> bool:
+	"""Whether a value is the kind of object this framework name binds."""
+	if name == 'file_system' and value is None:
+		return True
+	if isinstance(value, (types.ModuleType, types.FunctionType, types.BuiltinFunctionType, types.MethodType, type)):
+		return True
+	if type(value).__name__.startswith('_Missing'):
+		return True
+	if name in ('browser', 'file_system') and type(value) not in _SCALAR_TYPES:
+		return True
+	return False
 
 
-def _classify(value: Any, old_browser: Any, seen: set[int]) -> tuple[NamespaceValueKind, str | None]:
+def _is_framework_binding(name: str, value: Any) -> bool:
+	"""A framework name is rebuilt only when it holds a framework value."""
+	if name in ALWAYS_FRAMEWORK_NAMES or name in OPTIONAL_FRAMEWORK_NAMES:
+		return _looks_like_framework_value(name, value)
+	return False
+
+
+def _classify(
+	value: Any,
+	old_browser: Any,
+	active: set[int],
+	cache: dict[int, tuple[NamespaceValueKind, str | None]],
+	depth: int = 0,
+) -> tuple[NamespaceValueKind, str | None]:
 	if type(value) in _SCALAR_TYPES:
 		return NamespaceValueKind.SCALAR, None
 	if old_browser is not None and value is old_browser:
 		return NamespaceValueKind.OPAQUE, 'references the previous browser session'
+	if depth > _MAX_DEPTH:
+		return NamespaceValueKind.OPAQUE, 'nested too deeply to transfer'
+
+	key = id(value)
+	cached = cache.get(key)
+	if cached is not None:
+		return cached
 
 	if type(value) is dict:
-		if id(value) in seen:
+		if key in active:
 			return NamespaceValueKind.OPAQUE, 'cyclic container'
-		seen.add(id(value))
+		active.add(key)
 		try:
-			for key, item in value.items():
-				if type(key) not in _SCALAR_TYPES:
-					return NamespaceValueKind.OPAQUE, f'non-scalar dict key ({type(key).__name__})'
-				kind, reason = _classify(item, old_browser, seen)
+			for dict_key, item in value.items():
+				if type(dict_key) not in _SCALAR_TYPES:
+					result: tuple[NamespaceValueKind, str | None] = (
+						NamespaceValueKind.OPAQUE,
+						f'non-scalar dict key ({type(dict_key).__name__})',
+					)
+					cache[key] = result
+					return result
+				kind, reason = _classify(item, old_browser, active, cache, depth + 1)
 				if kind is not NamespaceValueKind.SCALAR:
-					return NamespaceValueKind.OPAQUE, reason or 'contains a non-scalar value'
-			return NamespaceValueKind.SCALAR, None
+					result = (NamespaceValueKind.OPAQUE, reason or 'contains a non-scalar value')
+					cache[key] = result
+					return result
+			cache[key] = (NamespaceValueKind.SCALAR, None)
+			return cache[key]
 		finally:
-			seen.discard(id(value))
+			active.discard(key)
 
 	if type(value) in (list, tuple, set, frozenset):
-		if id(value) in seen:
+		if key in active:
 			return NamespaceValueKind.OPAQUE, 'cyclic container'
-		seen.add(id(value))
+		active.add(key)
 		try:
 			for item in value:
-				kind, reason = _classify(item, old_browser, seen)
+				kind, reason = _classify(item, old_browser, active, cache, depth + 1)
 				if kind is not NamespaceValueKind.SCALAR:
-					if reason and 'previous browser' in reason:
-						return NamespaceValueKind.OPAQUE, reason
-					return NamespaceValueKind.OPAQUE, f'contains a non-scalar value ({type(item).__name__})'
-			return NamespaceValueKind.SCALAR, None
+					result = (
+						NamespaceValueKind.OPAQUE,
+						reason or f'contains a non-scalar value ({type(item).__name__})',
+					)
+					cache[key] = result
+					return result
+			cache[key] = (NamespaceValueKind.SCALAR, None)
+			return cache[key]
 		finally:
-			seen.discard(id(value))
+			active.discard(key)
 
-	return NamespaceValueKind.OPAQUE, f'unsupported type {type(value).__name__}'
+	cache[key] = (NamespaceValueKind.OPAQUE, f'unsupported type {type(value).__name__}')
+	return cache[key]
 
 
 def _copy_scalar(value: Any, memo: dict[int, Any]) -> Any:
@@ -201,16 +253,31 @@ def transfer_namespace(
 	"""
 	result = NamespaceTransfer()
 	memo: dict[int, Any] = {}
+	cache: dict[int, tuple[NamespaceValueKind, str | None]] = {}
 	for name, value in old_namespace.items():
 		if not isinstance(name, str) or name.startswith('_'):
 			continue
-		if _is_framework_name(name):
-			result.framework_names.append(name)
-			continue
-		kind, reason = _classify(value, old_browser_session, set())
-		if kind is NamespaceValueKind.SCALAR:
-			result.variables[name] = _copy_scalar(value, memo)
-			continue
+		if name in FRAMEWORK_NAMES:
+			if _is_framework_binding(name, value):
+				result.framework_names.append(name)
+				continue
+			if name in ALWAYS_FRAMEWORK_NAMES:
+				reason = 'shadows framework binding'
+				result.dropped[name] = reason
+				if len(result.warnings) < MAX_WARNINGS:
+					result.warnings.append(
+						f"Dropped namespace variable '{name}': {reason}. Reassign it after recovery."
+					)
+				continue
+			# An optional binding that is not present in this process is a
+			# user value under a reserved name. Fall through to classification.
+		try:
+			kind, reason = _classify(value, old_browser_session, set(), cache)
+			if kind is NamespaceValueKind.SCALAR:
+				result.variables[name] = _copy_scalar(value, memo)
+				continue
+		except RecursionError:
+			reason = 'nested too deeply to transfer'
 		reason = reason or 'unsupported value'
 		result.dropped[name] = reason
 		if len(result.warnings) < MAX_WARNINGS:

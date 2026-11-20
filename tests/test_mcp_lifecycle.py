@@ -26,10 +26,13 @@ async def test_reset_browser_preserves_user_variables(mcp_server):
 	session = MagicMock()
 	session.kill = AsyncMock()
 	mcp_server.browser_session = session
+	async def navigate():
+		return None
+
 	mcp_server._namespace = {
 		'user_value': 42,
 		'browser': object(),
-		'navigate': object(),
+		'navigate': navigate,
 	}
 	mcp_server._browser_lifecycle.transition(LifecyclePhase.STARTING)
 	mcp_server._browser_lifecycle.transition(LifecyclePhase.READY)
@@ -306,3 +309,25 @@ async def test_recovery_drops_stale_browser_values_and_keeps_scalars(mcp_server)
 	dropped = mcp_server._last_namespace_transfer['dropped']
 	assert 'previous browser session' in dropped['old_page']
 	assert 'previous browser session' in dropped['pages']
+
+
+@pytest.mark.asyncio
+async def test_reset_browser_clear_variables_resets_transfer_summary(mcp_server):
+	session = MagicMock()
+	session.kill = AsyncMock()
+	mcp_server.browser_session = session
+	mcp_server._namespace = {'answer': 42, 'old_page': session}
+
+	await mcp_server._handle_tool('reset_browser', {})
+
+	second = MagicMock()
+	second.kill = AsyncMock()
+	mcp_server.browser_session = second
+	mcp_server._namespace = {'answer': 43}
+
+	result = await mcp_server._handle_tool('reset_browser', {'clear_variables': True})
+	payload = json.loads(result)
+
+	assert payload['namespace_transfer']['preserved_count'] == 0
+	assert payload['namespace_transfer']['dropped_count'] == 0
+	assert mcp_server._pending_variables == {}

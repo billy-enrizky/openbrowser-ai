@@ -183,10 +183,11 @@ async def test_recovery_preserves_user_variables(daemon_server):
 	assert new_namespace['user_value'] == 42
 	assert 'stale' not in new_namespace
 	assert 'pages' not in new_namespace
-	dropped = daemon_server._last_namespace_transfer['dropped']
+	status_transfer = daemon_server._status_payload()['namespace_transfer']
+	dropped = status_transfer['dropped']
 	assert 'previous browser session' in dropped['stale']
 	assert 'previous browser session' in dropped['pages']
-	assert daemon_server._status_payload()['namespace_transfer']['preserved'] == ['user_value']
+	assert status_transfer['preserved'] == ['user_value']
 	assert daemon_server._session is new_session
 	assert daemon_server._browser_generation == 1
 	assert new_session.seed_generation.call_args.args[0] == 1
@@ -353,3 +354,34 @@ def test_error_response_is_structured(daemon_server):
 	assert response['error_code'] == 'test_error'
 	assert response['hint'] == 'do the thing'
 	assert 'state' in response
+
+
+@pytest.mark.asyncio
+async def test_failed_recovery_keeps_only_scalars_in_the_live_namespace(daemon_server):
+	old_session = MagicMock()
+	old_session.kill = AsyncMock()
+	daemon_server._session = old_session
+
+	executor = MagicMock()
+	executor.namespace = {
+		'user_value': 42,
+		'stale': old_session,
+		'pages': [old_session],
+		'browser': object(),
+	}
+	daemon_server._executor = executor
+
+	new_session = MagicMock()
+	new_session.kill = AsyncMock()
+	new_session.start = AsyncMock(side_effect=RuntimeError('start failed'))
+	daemon_server._build_browser_profile = MagicMock(return_value=MagicMock())
+
+	with patch('openbrowser.browser.BrowserSession', return_value=new_session):
+		with pytest.raises(RuntimeError, match='start failed'):
+			await daemon_server._recover_browser_session()
+
+	sanitized = executor.set_namespace.call_args.args[0]
+	assert sanitized == {'user_value': 42}
+	assert daemon_server._session is None
+	assert 'stale' in daemon_server._last_namespace_transfer['dropped']
+	assert 'previous browser session' in daemon_server._last_namespace_transfer['dropped']['stale']
