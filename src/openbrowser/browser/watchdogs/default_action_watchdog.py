@@ -20,6 +20,7 @@ from openbrowser.browser.events import (
 	UploadFileEvent,
 	WaitEvent,
 )
+from openbrowser.browser.navigation import NavigationError
 from openbrowser.browser.views import BrowserError, URLNotAllowedError
 from openbrowser.browser.watchdog_base import BaseWatchdog
 from openbrowser.dom.service import EnhancedDOMTreeNode
@@ -1783,25 +1784,34 @@ class DefaultActionWatchdog(BaseWatchdog):
 
 	async def on_GoBackEvent(self, event: GoBackEvent) -> str:
 		"""Go back one history entry and wait for the page load."""
-		url = await self.browser_session.go_back(
-			navigation_id=event.event_id, event_timeout=event.event_timeout
-		)
+		try:
+			url = await self.browser_session.go_back(
+				navigation_id=event.event_id, event_timeout=event.event_timeout
+			)
+		except asyncio.CancelledError as error:
+			raise NavigationError('Go back was cancelled') from error
 		self.logger.info(f'🔙 Navigated back to {url}')
 		return url
 
 	async def on_GoForwardEvent(self, event: GoForwardEvent) -> str:
 		"""Go forward one history entry and wait for the page load."""
-		url = await self.browser_session.go_forward(
-			navigation_id=event.event_id, event_timeout=event.event_timeout
-		)
+		try:
+			url = await self.browser_session.go_forward(
+				navigation_id=event.event_id, event_timeout=event.event_timeout
+			)
+		except asyncio.CancelledError as error:
+			raise NavigationError('Go forward was cancelled') from error
 		self.logger.info(f'🔜 Navigated forward to {url}')
 		return url
 
 	async def on_RefreshEvent(self, event: RefreshEvent) -> str:
 		"""Reload the target and wait for the new document to load."""
-		url = await self.browser_session.refresh(
-			navigation_id=event.event_id, event_timeout=event.event_timeout
-		)
+		try:
+			url = await self.browser_session.refresh(
+				navigation_id=event.event_id, event_timeout=event.event_timeout
+			)
+		except asyncio.CancelledError as error:
+			raise NavigationError('Refresh was cancelled') from error
 		self.logger.info(f'🔄 Target refreshed: {url}')
 		return url
 

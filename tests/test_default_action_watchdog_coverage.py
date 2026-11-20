@@ -712,6 +712,20 @@ class TestNavigationEvents:
             await watchdog.on_GoBackEvent(GoBackEvent())
 
     @pytest.mark.asyncio
+    async def test_go_back_translates_cancellation_for_the_event_bus(self):
+        import asyncio
+
+        from openbrowser.browser.events import GoBackEvent
+        from openbrowser.browser.navigation import NavigationError
+
+        session = _make_mock_browser_session()
+        session.go_back = AsyncMock(side_effect=asyncio.CancelledError())
+        watchdog = _make_watchdog(session=session)
+
+        with pytest.raises(NavigationError, match='cancelled'):
+            await watchdog.on_GoBackEvent(GoBackEvent())
+
+    @pytest.mark.asyncio
     async def test_go_forward_delegates_to_the_session(self):
         from openbrowser.browser.events import GoForwardEvent
 

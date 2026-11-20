@@ -1743,9 +1743,7 @@ class BrowserSession(BaseModel):
 			return 30.0
 		if not math.isfinite(event_timeout) or event_timeout < 0.01:
 			raise NavigationError('Navigation timeout must be at least 0.01 seconds')
-		if event_timeout <= 0.1:
-			return event_timeout / 2
-		return event_timeout - 0.1
+		return event_timeout - min(0.1, event_timeout / 2)
 
 	async def _owned_ready_navigation(
 		self,
@@ -1768,6 +1766,7 @@ class BrowserSession(BaseModel):
 		timeout = self._owned_navigation_timeout(event_timeout)
 		deadline = loop.time() + timeout
 		operation: NavigationOperation | None = None
+		blocked_url: str | None = None
 		acquired = False
 		task = asyncio.current_task()
 		try:
@@ -1782,7 +1781,11 @@ class BrowserSession(BaseModel):
 			async with asyncio.timeout_at(deadline):
 				requested_url, commit_kind, trigger = await prepare(root, focus)
 				policy = self._security_watchdog
-				if policy is not None and not policy._is_url_allowed(requested_url):
+				if policy is None:
+					from openbrowser.browser.watchdogs.security_watchdog import SecurityWatchdog
+
+					policy = SecurityWatchdog(event_bus=event_bus, browser_session=self)
+				if not policy._is_url_allowed(requested_url):
 					raise NavigationBlockedError(f'Navigation to {requested_url} blocked by security policy')
 				operation = NavigationOperation(
 					navigation_id or uuid7str(), self._lifecycle.generation, requested_url, wait_until, deadline=deadline
@@ -1814,57 +1817,64 @@ class BrowserSession(BaseModel):
 					operation.expect_reload_commit()
 				await trigger()
 				self._check_navigation_owner(operation, root, focus)
-				await operation.wait_ready()
+				await operation.wait_commit()
 				self._check_navigation_owner(operation, root, focus)
-				tree = await root.send.Page.getFrameTree(session_id=operation.session_id)
-				frame = tree['frameTree']['frame']
-				if frame.get('id') != operation.frame_id or frame.get('loaderId') != operation.loader_id:
-					raise NavigationError('Navigation live document binding changed')
-				operation.observed_url = frame.get('url', '') + frame.get('urlFragment', '')
-				if policy is not None and not policy._is_url_allowed(operation.observed_url):
-					# Notify and confirm containment after the request deadline
-					# so a near-expired deadline cannot turn this into a timeout.
-					blocked_url = operation.observed_url
+				committed_url = operation.observed_url or requested_url
+				if not policy._is_url_allowed(committed_url):
+					# Contain at commit, before a blocked document can finish loading.
+					blocked_url = committed_url
 					operation.transition(NavigationPhase.NOTIFYING)
 				else:
-					if self.agent_focus is None or self.agent_focus.target_id != operation.target_id:
-						raise NavigationError('Agent focus changed during navigation')
-					operation.transition(NavigationPhase.NOTIFYING)
-					await self._await_navigation_event(
-						event_bus,
-						NavigationCompleteEvent(
-							target_id=focus.target_id,
-							url=operation.observed_url,
-							navigation_id=operation.navigation_id,
-							navigation_generation=operation.generation,
-						),
-					)
+					await operation.wait_ready()
 					self._check_navigation_owner(operation, root, focus)
-					await self._await_navigation_event(
-						event_bus,
-						AgentFocusChangedEvent(
-							target_id=focus.target_id,
-							url=operation.observed_url,
-							navigation_id=operation.navigation_id,
-							navigation_generation=operation.generation,
-							navigation_session_id=operation.session_id,
-						),
-					)
-					self._check_navigation_owner(operation, root, focus)
-					if self.agent_focus is None or self.agent_focus.target_id != operation.target_id:
-						raise NavigationError('Agent focus changed during navigation')
-					operation.finish(NavigationPhase.SUCCEEDED)
-					return operation.observed_url or requested_url
+					tree = await root.send.Page.getFrameTree(session_id=operation.session_id)
+					frame = tree['frameTree']['frame']
+					if frame.get('id') != operation.frame_id or frame.get('loaderId') != operation.loader_id:
+						raise NavigationError('Navigation live document binding changed')
+					operation.observed_url = frame.get('url', '') + frame.get('urlFragment', '')
+					if not policy._is_url_allowed(operation.observed_url):
+						blocked_url = operation.observed_url
+						operation.transition(NavigationPhase.NOTIFYING)
+					else:
+						if not self._navigation_focus_owns(focus, operation):
+							raise NavigationError('Agent focus changed during navigation')
+						operation.transition(NavigationPhase.NOTIFYING)
+						await self._await_navigation_event(
+							event_bus,
+							NavigationCompleteEvent(
+								target_id=focus.target_id,
+								url=operation.observed_url,
+								navigation_id=operation.navigation_id,
+								navigation_generation=operation.generation,
+							),
+						)
+						self._check_navigation_owner(operation, root, focus)
+						await self._await_navigation_event(
+							event_bus,
+							AgentFocusChangedEvent(
+								target_id=focus.target_id,
+								url=operation.observed_url,
+								navigation_id=operation.navigation_id,
+								navigation_generation=operation.generation,
+								navigation_session_id=operation.session_id,
+							),
+						)
+						self._check_navigation_owner(operation, root, focus)
+						tree = await root.send.Page.getFrameTree(session_id=operation.session_id)
+						live = tree['frameTree']['frame']
+						if live.get('id') != operation.frame_id or live.get('loaderId') != operation.loader_id:
+							raise NavigationError('Navigation live document binding changed after notification')
+						if not self._navigation_focus_owns(focus, operation):
+							raise NavigationError('Agent focus changed during navigation')
+						operation.finish(NavigationPhase.SUCCEEDED)
+						return operation.observed_url or requested_url
 			if blocked_url is not None:
 				assert operation is not None
+				# The completion observation is unmarked on purpose: the request
+				# deadline has expired, and containment must not depend on it.
 				await self._await_navigation_event(
 					event_bus,
-					NavigationCompleteEvent(
-						target_id=focus.target_id,
-						url=blocked_url,
-						navigation_id=operation.navigation_id,
-						navigation_generation=operation.generation,
-					),
+					NavigationCompleteEvent(target_id=focus.target_id, url=blocked_url),
 				)
 				if not await self._confirm_blocked_containment(root, focus):
 					raise NavigationError(
@@ -1910,6 +1920,14 @@ class BrowserSession(BaseModel):
 					self._retire_navigation(operation)
 				if acquired:
 					self._navigation_lock.release()
+
+	def _navigation_focus_owns(self, focus: CDPSession, operation: NavigationOperation) -> bool:
+		return (
+			self.agent_focus is not None
+			and self.agent_focus.target_id == operation.target_id
+			and self.agent_focus.session_id == operation.session_id
+			and focus.target_id == operation.target_id
+		)
 
 	async def _confirm_blocked_containment(self, root: CDPClient, focus: CDPSession, timeout: float = 0.5) -> bool:
 		"""Wait briefly for the security watchdog to blank a blocked page.

@@ -266,6 +266,8 @@ class NavigationOperation:
 			and payload.get('loaderId') != self.loader_id
 		):
 			return
+		if kind == 'frame' and self.loader_id is not None and payload.get('loaderId') == self.loader_id:
+			self.observed_url = payload.get('url', '') + payload.get('urlFragment', '')
 		if len(self._evidence) >= self.EVIDENCE_LIMIT:
 			self.finish(NavigationPhase.FAILED, 'Navigation evidence limit exceeded')
 			return
@@ -363,6 +365,25 @@ class NavigationOperation:
 				if self.wait_until == 'commit' or (kind == 'lifecycle' and data.get('name') == milestone):
 					ready = True
 		return ready
+
+	@property
+	def committed(self) -> bool:
+		"""True once the selected target has produced a document or within commit."""
+		if self._response_kind == 'history' and self._within_committed:
+			return True
+		if self.loader_id is None:
+			return False
+		return any(
+			kind == 'frame' and data.get('loaderId') == self.loader_id for kind, data in self._evidence
+		)
+
+	async def wait_commit(self) -> None:
+		"""Wait for the commit only, before the document load milestone."""
+		while not self.committed:
+			if self.terminal:
+				raise NavigationError(self.last_error or f'Navigation is {self.phase.value}')
+			self._changed.clear()
+			await self._changed.wait()
 
 	async def wait_ready(self) -> None:
 		while not self.ready:

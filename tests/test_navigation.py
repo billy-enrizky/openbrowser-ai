@@ -219,6 +219,17 @@ def test_monitor_ignores_wrong_session_old_root_and_terminal_callbacks():
     assert not op.ready
 
 
+def test_owned_navigation_timeout_is_monotonic_and_keeps_a_margin():
+    from openbrowser.browser import BrowserSession
+
+    session = BrowserSession()
+    assert session._owned_navigation_timeout(0.1) < session._owned_navigation_timeout(0.101)
+    assert session._owned_navigation_timeout(15.0) == 14.9
+    assert session._owned_navigation_timeout(None) == 30.0
+    with pytest.raises(NavigationError, match='at least 0.01'):
+        session._owned_navigation_timeout(0.001)
+
+
 def test_monitor_refuses_overlap():
     monitor = NavigationMonitor()
     monitor.reserve(operation())
@@ -288,7 +299,7 @@ async def test_handler_waits_for_actual_load_and_publishes_final_url():
     client.send.Page.navigate.side_effect = navigate
     with patches[0], patches[1]:
         task = asyncio.create_task(session.on_NavigateToUrlEvent(NavigateToUrlEvent(url='https://example.com/')))
-        await sent.wait()
+        await _wait_for_trigger(task, sent)
         await asyncio.sleep(0)
         assert not task.done()
         callback = client.register.Page.lifecycleEvent.call_args.args[0]
@@ -310,6 +321,15 @@ def _history_client(client, *, current_url, entries, current_index, loader='old'
     return frame
 
 
+async def _wait_for_trigger(task, sent, timeout=1.0):
+    try:
+        await asyncio.wait_for(sent.wait(), timeout=timeout)
+    except asyncio.TimeoutError:
+        if task.done():
+            await task
+        raise AssertionError('navigation finished before the trigger ran') from None
+
+
 async def test_go_back_waits_for_the_page_load():
     from openbrowser.browser.events import NavigationCompleteEvent
     session, client, focus, _, patches = handler_fixture()
@@ -329,7 +349,7 @@ async def test_go_back_waits_for_the_page_load():
     client.send.Page.navigateToHistoryEntry = AsyncMock(side_effect=go_back)
     with patches[0], patches[1]:
         task = asyncio.create_task(session.go_back())
-        await sent.wait()
+        await _wait_for_trigger(task, sent)
         callback = client.register.Page.frameNavigated.call_args.args[0]
         callback({'frame': {'id': 'frame', 'loaderId': 'next', 'url': 'https://first.example/'}}, focus.session_id)
         await asyncio.sleep(0.6)
@@ -360,7 +380,7 @@ async def test_go_forward_waits_for_the_page_load():
     client.send.Page.navigateToHistoryEntry = AsyncMock(side_effect=go_forward)
     with patches[0], patches[1]:
         task = asyncio.create_task(session.go_forward())
-        await sent.wait()
+        await _wait_for_trigger(task, sent)
         callback = client.register.Page.frameNavigated.call_args.args[0]
         callback({'frame': {'id': 'frame', 'loaderId': 'next', 'url': 'https://second.example/'}}, focus.session_id)
         await asyncio.sleep(0.6)
@@ -472,7 +492,7 @@ async def test_go_back_fails_when_the_agent_focus_changes():
     client.send.Page.navigateToHistoryEntry = AsyncMock(side_effect=go_back)
     with patches[0], patches[1]:
         task = asyncio.create_task(session.go_back())
-        await sent.wait()
+        await _wait_for_trigger(task, sent)
         other = MagicMock()
         other.target_id = 'other-target'
         object.__setattr__(session, 'agent_focus', other)
@@ -509,6 +529,60 @@ async def test_go_back_spa_path_change_completes_on_within_document():
     with patches[0], patches[1]:
         final_url = await asyncio.wait_for(session.go_back(), .5)
     assert final_url == 'https://site.test/page?step=1'
+
+
+async def test_go_back_without_an_attached_policy_fails_closed():
+    from openbrowser.browser.navigation import NavigationBlockedError
+    session, client, _, _, patches = handler_fixture()
+    session._security_watchdog = None
+    session.browser_profile.allowed_domains = ['allowed.example']
+    _history_client(
+        client,
+        current_url='https://allowed.example/second',
+        entries=[
+            {'id': 1, 'url': 'https://blocked.example/first'},
+            {'id': 2, 'url': 'https://allowed.example/second'},
+        ],
+        current_index=1,
+    )
+    with patches[0], patches[1], pytest.raises(NavigationBlockedError):
+        await session.go_back()
+    assert not session._navigation_lock.locked()
+
+
+async def test_go_back_contains_a_blocked_commit_that_never_finishes_loading():
+    from types import SimpleNamespace
+
+    from openbrowser.browser.navigation import NavigationBlockedError
+    session, client, focus, _, patches = handler_fixture()
+    session._security_watchdog = SimpleNamespace(_is_url_allowed=lambda url: 'blocked' not in url)
+    frame = _history_client(
+        client,
+        current_url='https://second.example/',
+        entries=[{'id': 1, 'url': 'https://safe.example/one'}, {'id': 2, 'url': 'https://second.example/'}],
+        current_index=1,
+    )
+
+    async def go_back(**kwargs):
+        frame.update(loaderId='next', url='https://blocked.example/bad')
+        frame_callback = client.register.Page.frameNavigated.call_args.args[0]
+        frame_callback(
+            {'frame': {'id': 'frame', 'loaderId': 'next', 'url': 'https://blocked.example/bad'}}, focus.session_id
+        )
+        return {}
+
+    client.send.Page.navigateToHistoryEntry = AsyncMock(side_effect=go_back)
+    calls = []
+
+    def frame_tree(**kwargs):
+        calls.append(1)
+        if len(calls) >= 2:
+            return {'frameTree': {'frame': {'id': 'frame', 'loaderId': 'blank', 'url': 'about:blank'}}}
+        return {'frameTree': {'frame': dict(frame)}}
+
+    client.send.Page.getFrameTree = AsyncMock(side_effect=frame_tree)
+    with patches[0], patches[1], pytest.raises(NavigationBlockedError):
+        await session.go_back(event_timeout=0.5)
 
 
 async def test_go_back_rejects_a_changed_document_binding():
@@ -680,7 +754,7 @@ async def test_go_back_cancellation_is_terminal_and_releases_the_lock():
     client.send.Page.navigateToHistoryEntry = AsyncMock(side_effect=go_back)
     with patches[0], patches[1]:
         task = asyncio.create_task(session.go_back())
-        await sent.wait()
+        await _wait_for_trigger(task, sent)
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
@@ -702,7 +776,7 @@ async def test_refresh_waits_for_the_new_loader():
     client.send.Page.reload = AsyncMock(side_effect=reload)
     with patches[0], patches[1]:
         task = asyncio.create_task(session.refresh())
-        await sent.wait()
+        await _wait_for_trigger(task, sent)
         callback = client.register.Page.frameNavigated.call_args.args[0]
         callback({'frame': {'id': 'frame', 'loaderId': 'next', 'url': 'https://site.test/page'}}, focus.session_id)
         await asyncio.sleep(1.1)
