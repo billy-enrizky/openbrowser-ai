@@ -30,9 +30,9 @@ async def test_get_status_reports_storage_state_previews_without_browser(mcp_ser
 	payload = json.loads(await mcp_server._handle_tool('get_status', {}))
 
 	assert payload['storage_state']['phase'] == 'pending'
-	assert payload['storage_state']['path'] == str(state_path)
+	assert payload['storage_state']['path'] == str(state_path.resolve())
 	assert payload['storage_state_save']['phase'] == 'idle'
-	assert payload['storage_state_save']['path'] == str(state_path)
+	assert payload['storage_state_save']['path'] == str(state_path.resolve())
 
 
 @pytest.mark.asyncio
@@ -50,9 +50,9 @@ async def test_get_status_uses_config_storage_state_before_browser(mcp_server, t
 	payload = json.loads(await mcp_server._handle_tool('get_status', {}))
 
 	assert payload['storage_state']['phase'] == 'pending'
-	assert payload['storage_state']['path'] == str(state_path)
+	assert payload['storage_state']['path'] == str(state_path.resolve())
 	assert payload['storage_state_save']['phase'] == 'idle'
-	assert payload['storage_state_save']['path'] == str(state_path)
+	assert payload['storage_state_save']['path'] == str(state_path.resolve())
 
 
 @pytest.mark.asyncio

@@ -56,7 +56,7 @@ def test_storage_state_is_pending_before_load(tmp_path):
     snapshot = watchdog.storage_state_snapshot()
 
     assert snapshot.phase is StorageStatePhase.PENDING
-    assert snapshot.path == str(state_path)
+    assert snapshot.path == str(state_path.resolve())
     assert snapshot.bytes == state_path.stat().st_size
 
 
@@ -279,7 +279,7 @@ async def test_large_storage_state_reports_counts_and_batched_scripts(tmp_path):
 
     snapshot = watchdog.storage_state_snapshot()
     assert snapshot.phase is StorageStatePhase.LOADED
-    assert snapshot.path == str(state_path)
+    assert snapshot.path == str(state_path.resolve())
     assert snapshot.bytes is not None and snapshot.bytes > 40_000_000
     assert snapshot.load_ms is not None and snapshot.load_ms >= 0
     assert snapshot.elapsed_ms == snapshot.load_ms
@@ -567,7 +567,7 @@ async def test_save_success_records_phase_backup_and_event(tmp_path):
     events = _dispatched_events(watchdog.event_bus, StorageStateSavedEvent)
 
     assert snapshot.phase is StorageStateSavePhase.SAVED
-    assert snapshot.path == str(state_path)
+    assert snapshot.path == str(state_path.resolve())
     assert snapshot.bytes is not None and snapshot.bytes > 0
     assert snapshot.save_ms is not None
     assert snapshot.cookies_count == 2
@@ -634,7 +634,7 @@ async def test_save_preview_phases_follow_the_configured_source(tmp_path):
     file_backed = _make_watchdog(tmp_path / 'state.json')
     preview = file_backed.storage_state_save_snapshot()
     assert preview.phase is StorageStateSavePhase.IDLE
-    assert preview.path == str(tmp_path / 'state.json')
+    assert preview.path == str((tmp_path / 'state.json').resolve())
 
 
 @pytest.mark.asyncio
@@ -872,7 +872,7 @@ async def test_save_path_resolution_failure_keeps_the_requested_path(tmp_path):
     snapshot = watchdog.storage_state_save_snapshot()
     failures = _dispatched_events(watchdog.event_bus, StorageStateFailedEvent)
     assert snapshot.phase is StorageStateSavePhase.FAILED
-    assert snapshot.path == str(state_path)
+    assert snapshot.path == str(state_path.resolve())
     assert len(failures) == 1
     assert failures[0].path == str(state_path)
 

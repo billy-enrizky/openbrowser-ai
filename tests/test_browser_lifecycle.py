@@ -656,6 +656,6 @@ def test_lifecycle_snapshot_includes_storage_state_previews(tmp_path):
 	snapshot = session.lifecycle_snapshot()
 
 	assert snapshot['storage_state']['phase'] == 'pending'
-	assert snapshot['storage_state']['path'] == str(state_path)
+	assert snapshot['storage_state']['path'] == str(state_path.resolve())
 	assert snapshot['storage_state_save']['phase'] == 'idle'
-	assert snapshot['storage_state_save']['path'] == str(state_path)
+	assert snapshot['storage_state_save']['path'] == str(state_path.resolve())

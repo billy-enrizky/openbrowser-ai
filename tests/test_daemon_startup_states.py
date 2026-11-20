@@ -766,10 +766,10 @@ def test_status_reports_configured_storage_state_before_browser_start(tmp_path):
 
     assert server._session is None
     assert status['storage_state']['phase'] == 'pending'
-    assert status['storage_state']['path'] == str(state_path)
+    assert status['storage_state']['path'] == str(state_path.resolve())
     assert status['storage_state']['bytes'] == state_path.stat().st_size
     assert status['storage_state_save']['phase'] == 'idle'
-    assert status['storage_state_save']['path'] == str(state_path)
+    assert status['storage_state_save']['path'] == str(state_path.resolve())
 
 
 def test_status_reports_download_outcomes():
