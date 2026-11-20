@@ -68,8 +68,22 @@ def test_one_file_fewer_than_shards() -> None:
 def test_all_missing_timings_use_the_fallback() -> None:
     bins = allocate(["a.py", "b.py"], {}, 2)
     assert bins == [["a.py"], ["b.py"]]
+    assert shard_totals(bins, {}) == [1.0, 1.0]
 
 
 def test_ties_break_by_path() -> None:
     bins = allocate(["b.py", "a.py"], {"a.py": 1.0, "b.py": 1.0}, 2)
     assert bins == [["a.py"], ["b.py"]]
+
+
+def test_allocation_is_order_independent() -> None:
+    files = ["a.py", "b.py", "c.py", "d.py"]
+    timings = {"a.py": 4.0, "b.py": 3.0, "c.py": 2.0, "d.py": 1.0}
+    assert allocate(files, timings, 2) == allocate(list(reversed(files)), timings, 2)
+
+
+def test_non_finite_timing_is_rejected(tmp_path: Path) -> None:
+    path = tmp_path / "timings.json"
+    path.write_text('{"a.py": Infinity}\n', encoding="utf-8")
+    with pytest.raises(ValueError, match="not finite"):
+        load_timings(path)

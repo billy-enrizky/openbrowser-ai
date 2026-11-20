@@ -1,6 +1,6 @@
 {
   "static": 60,
   "test-shard": 150,
-  "selection-guard": 60,
+  "selection-guard": 120,
   "coverage": 900
 }

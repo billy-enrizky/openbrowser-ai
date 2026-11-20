@@ -101,10 +101,14 @@ def collect(tool: str, root: Path) -> dict[tuple[str, str, str], dict[str, Any]]
 def collect_format(root: Path) -> set[str]:
     command = [tool_path("ruff"), "format", "--check", "src", "tests", "scripts"]
     result = subprocess.run(command, cwd=root, text=True, capture_output=True, check=False)
+    if result.returncode not in (0, 1):
+        raise SystemExit(f"ruff format failed to run: {result.stderr.strip()}")
     files: set[str] = set()
     for line in (result.stdout + result.stderr).splitlines():
         stripped = line.strip()
-        if stripped.startswith("-->"):
+        if stripped.startswith("Would reformat:"):
+            files.add(stripped.removeprefix("Would reformat:").strip())
+        elif stripped.startswith("-->"):
             value = stripped[3:].strip()
             files.add(value.rsplit(":", 2)[0])
     return files

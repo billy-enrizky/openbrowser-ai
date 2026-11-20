@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import signal
@@ -14,22 +15,24 @@ from pathlib import Path
 
 
 def kill_tree(process: subprocess.Popen[bytes]) -> None:
-    if process.poll() is not None:
-        return
-    try:
-        if os.name == "posix":
+    if os.name == "posix":
+        with contextlib.suppress(ProcessLookupError):
             os.killpg(process.pid, signal.SIGTERM)
-        else:
-            process.terminate()
-        process.wait(timeout=10)
-    except (ProcessLookupError, subprocess.TimeoutExpired):
         try:
-            if os.name == "posix":
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            with contextlib.suppress(ProcessLookupError):
                 os.killpg(process.pid, signal.SIGKILL)
-            else:
-                process.kill()
-        except ProcessLookupError:
-            pass
+            with contextlib.suppress(subprocess.TimeoutExpired):
+                process.wait(timeout=5)
+        return
+    if process.poll() is None:
+        process.terminate()
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=5)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -62,6 +65,13 @@ def main(argv: list[str] | None = None) -> int:
     if os.name == "posix":
         kwargs["start_new_session"] = True
     process = subprocess.Popen(command, cwd=root, **kwargs)
+
+    def forward(signum: int, frame: object) -> None:
+        kill_tree(process)
+        raise SystemExit(128 + signum)
+
+    signal.signal(signal.SIGINT, forward)
+    signal.signal(signal.SIGTERM, forward)
     try:
         code = process.wait(timeout=hard_timeout)
         elapsed = time.monotonic() - started

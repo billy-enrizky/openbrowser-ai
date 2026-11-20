@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import statistics
 import sys
 from pathlib import Path
@@ -31,9 +32,12 @@ def load_timings(path: Path) -> dict[str, float]:
             value = value.get("seconds")
         if not isinstance(value, (int, float)):
             raise ValueError(f"timing for {key} is not a number")
-        if value < 0:
+        numeric = float(value)
+        if not math.isfinite(numeric):
+            raise ValueError(f"timing for {key} is not finite")
+        if numeric < 0:
             raise ValueError(f"timing for {key} is negative")
-        timings[str(key)] = float(value)
+        timings[str(key)] = numeric
     return timings
 
 
@@ -97,7 +101,10 @@ def main(argv: list[str] | None = None) -> int:
 
     totals = shard_totals(bins, timings)
     for index, (bin_, total) in enumerate(zip(bins, totals, strict=False), start=1):
-        print(f"shard {index}/{args.shards}: files={len(bin_)} recorded_seconds={total:.1f}")
+        print(
+            f"shard {index}/{args.shards}: files={len(bin_)} recorded_seconds={total:.1f}",
+            file=sys.stderr,
+        )
 
     flat = [file for bin_ in bins for file in bin_]
     if sorted(flat) != sorted(files):
@@ -110,7 +117,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.verify_all:
         print(
             f"verified: {len(files)} files, {args.shards} shards, "
-            f"max={max(totals) if totals else 0:.1f}s, mean={statistics.mean(totals) if totals else 0:.1f}s"
+            f"max={max(totals) if totals else 0:.1f}s, mean={statistics.mean(totals) if totals else 0:.1f}s",
+            file=sys.stderr,
         )
 
     if args.json:

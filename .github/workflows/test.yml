@@ -72,12 +72,15 @@ jobs:
             --shards "$SHARDS" --verify-all
       - name: Run selector and sharder tests
         run: |
-          uv run --locked pytest tests/ci/test_select_tests.py \
+          uv run --locked python scripts/ci/budget.py --name selection-guard -- \
+            uv run --locked pytest tests/ci/test_select_tests.py \
             tests/ci/test_shard_tests.py tests/ci/test_check_baseline.py \
             tests/ci/test_audit_runs.py -q --tb=short -p no:cacheprovider
       - name: Prove selection catches a planted break
         if: github.event_name != 'pull_request'
-        run: uv run --locked python scripts/ci/prove_selection.py
+        run: |
+          uv run --locked python scripts/ci/budget.py --name selection-guard -- \
+            uv run --locked python scripts/ci/prove_selection.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -175,14 +178,28 @@ jobs:
               files+=("$file")
             fi
           done < shard.txt
+          set +e
+          uv run --locked pytest "${files[@]}" -q -m "not integration" \
+            --collect-only > /tmp/collect.txt 2>&1
+          collect_status=$?
+          set -e
+          if [ "$collect_status" -eq 5 ]; then
+            echo "no non-integration tests in shard ${{ matrix.shard }}"
+            exit 0
+          fi
+          if [ "$collect_status" -ne 0 ]; then
+            cat /tmp/collect.txt
+            exit "$collect_status"
+          fi
           uv run --locked python scripts/ci/budget.py --name test-shard -- \
             uv run --locked pytest "${files[@]}" -q -m "not integration" \
-            -n auto --dist load --tb=short --junitxml=junit.xml
+            -n auto --dist load --tb=short \
+            --junitxml=junit-${{ matrix.os }}-${{ matrix.shard }}.xml
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: junit-${{ matrix.os }}-${{ matrix.shard }}
-          path: junit.xml
+          path: junit-${{ matrix.os }}-${{ matrix.shard }}.xml
           if-no-files-found: ignore
           retention-days: 7
 

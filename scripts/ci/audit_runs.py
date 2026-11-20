@@ -15,13 +15,22 @@ import os
 import re
 import subprocess
 import sys
-import urllib.error
 import urllib.request
 from collections import defaultdict
 from typing import Any
 
 API = "https://api.github.com"
-MAIN_STEP_PREFIX = "run "
+MAIN_STEP_MARKERS = (
+    "run selected tests",
+    "run the full suite",
+    "run tests with coverage",
+    "run ruff",
+    "run static",
+    "run selector",
+    "prove selection",
+    "build and import",
+    "record ubuntu",
+)
 
 
 def token() -> str:
@@ -79,10 +88,14 @@ def normalize_job(name: str) -> str:
 
 
 def main_step(job: dict[str, Any]) -> dict[str, Any] | None:
-    for step in job.get("steps") or []:
-        if (step.get("name") or "").lower().startswith(MAIN_STEP_PREFIX):
-            return step
-    return None
+    steps = job.get("steps") or []
+    candidates = [
+        step for step in steps if any(marker in (step.get("name") or "").lower() for marker in MAIN_STEP_MARKERS)
+    ]
+    if candidates:
+        return candidates[-1]
+    runs = [step for step in steps if (step.get("name") or "").lower().startswith("run ")]
+    return runs[-1] if runs else None
 
 
 def fetch_runs(repo: str, limit: int, auth: str) -> list[dict[str, Any]]:

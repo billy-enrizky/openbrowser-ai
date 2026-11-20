@@ -58,6 +58,45 @@ SHARED_PREFIXES = (
 )
 SOURCE_SUFFIX = ".py"
 MCP1_TEST = "tests/test_mcp_protocol.py"
+DOCS_PREFIXES = ("docs/", "local_docs/")
+NON_PYTHON_PREFIXES = (
+    "frontend/",
+    "landing/",
+    "presentation/",
+    "infra/",
+    "data/",
+    "results/",
+    "extension/",
+    "plugin/",
+    "env-for-ica/",
+    "CSC490/",
+    "STAD68/",
+    "STAD80/",
+)
+NON_PYTHON_SUFFIXES = {
+    ".md",
+    ".mdx",
+    ".rst",
+    ".txt",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".svg",
+    ".ico",
+    ".pdf",
+    ".html",
+    ".css",
+    ".js",
+    ".ts",
+    ".tsx",
+    ".yml",
+    ".yaml",
+    ".json",
+    ".sh",
+    ".ps1",
+    ".lock",
+}
 
 
 @dataclass
@@ -260,7 +299,30 @@ def _test_imports(root: Path, tests: Iterable[str]) -> tuple[dict[str, set[str]]
 
 
 def _is_shared(path: str) -> bool:
-    return path in SHARED_EXACT or any(path.startswith(prefix) for prefix in SHARED_PREFIXES)
+    return (
+        path.endswith("/__init__.py")
+        or path in SHARED_EXACT
+        or any(path.startswith(prefix) for prefix in SHARED_PREFIXES)
+    )
+
+
+def _is_non_python(path: str) -> bool:
+    if path.startswith(DOCS_PREFIXES) or path.startswith(NON_PYTHON_PREFIXES):
+        return True
+    return Path(path).suffix.lower() in NON_PYTHON_SUFFIXES
+
+
+def _test_module_names(path: str) -> set[str]:
+    rel = path.removeprefix("tests/").removesuffix(".py")
+    parts = rel.split("/")
+    if parts and parts[-1] == "__init__":
+        parts.pop()
+    names: set[str] = set()
+    for index in range(len(parts)):
+        names.add(".".join(parts[index:]))
+    if parts:
+        names.add("tests." + ".".join(parts))
+    return {name for name in names if name}
 
 
 def _is_source(path: str) -> bool:
@@ -328,6 +390,11 @@ def select(
     test_paths = [path for path in normalized if path.startswith(TEST_PREFIX + "/") and path.endswith(".py")]
     selected_tests = {path for path in test_paths if path in tests}
 
+    test_non_python = [path for path in normalized if path.startswith(TEST_PREFIX + "/") and not path.endswith(".py")]
+    if test_non_python:
+        reasons.append(f"non-Python test input changed: {', '.join(test_non_python)}")
+        return Selection(tests, "all", reasons, normalized)
+
     non_python_source = [path for path in source_paths if not path.endswith(".py")]
     if non_python_source:
         reasons.append(f"non-Python source input changed: {', '.join(non_python_source)}")
@@ -354,6 +421,13 @@ def select(
         reasons.append(f"source module is not in the import map: {', '.join(unknown)}")
         return Selection(tests, "all", reasons, normalized)
 
+    imports: dict[str, set[str]] = {}
+    if changed_modules or test_paths:
+        imports, failed_tests = _test_imports(root, tests)
+        if failed_tests:
+            reasons.append(f"test parse failed: {', '.join(failed_tests)}")
+            return Selection(tests, "all", reasons, normalized)
+
     if changed_modules:
         graph, failed_sources = _source_graph(root, modules)
         if failed_sources:
@@ -361,10 +435,6 @@ def select(
             return Selection(tests, "all", reasons, normalized)
         reverse = _reverse_graph(graph)
         affected = _affected_modules(changed_modules, reverse, modules)
-        imports, failed_tests = _test_imports(root, tests)
-        if failed_tests:
-            reasons.append(f"test parse failed: {', '.join(failed_tests)}")
-            return Selection(tests, "all", reasons, normalized)
         reached = {test for test, names in imports.items() if names & affected}
         if not reached:
             reasons.append("no test imports an affected source module")
@@ -372,13 +442,24 @@ def select(
         selected_tests |= reached
         reasons.append(f"{len(changed_modules)} source modules affected {len(affected)} modules")
 
-    if not selected_tests and (source_paths or test_paths):
-        reasons.append("selection produced no tests for a code change")
-        return Selection(tests, "all", reasons, normalized)
+    if test_paths:
+        changed_test_modules: set[str] = set()
+        for path in test_paths:
+            changed_test_modules |= _test_module_names(path)
+        dependent = {test for test, names in imports.items() if names & changed_test_modules}
+        selected_tests |= dependent
+        reasons.append(f"{len(changed_test_modules)} test module names affected {len(dependent)} test files")
 
     if not normalized:
         reasons.append("empty diff")
         return Selection([], "selected", reasons, normalized)
+
+    if not selected_tests:
+        if all(_is_non_python(path) for path in normalized):
+            reasons.append("no Python tests apply to this diff")
+            return Selection([], "selected", reasons, normalized)
+        reasons.append("unclassified paths; selecting all tests")
+        return Selection(tests, "all", reasons, normalized)
 
     reasons.append(f"selected {len(selected_tests)} of {len(tests)} test files")
     return Selection(sorted(selected_tests), "selected", reasons, normalized)

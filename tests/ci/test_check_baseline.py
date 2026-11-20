@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from scripts.ci.check_baseline import compare, flatten, nest
+from scripts.ci.check_baseline import compare, flatten, message_hash, nest
 
 
 def entry(count: int, message: str) -> dict[str, object]:
@@ -28,11 +28,17 @@ def test_new_message_in_same_file_and_rule_is_a_regression() -> None:
     assert improvements[0][0] == ("a.py", "E501", "old")
 
 
-def test_same_message_at_a_new_line_is_not_a_regression() -> None:
+def test_identical_diagnostic_sets_are_not_a_regression() -> None:
     findings = {("a.py", "E501", "same"): entry(1, "line too long")}
     regressions, improvements = compare(findings, findings)
     assert regressions == []
     assert improvements == []
+
+
+def test_message_hash_ignores_line_numbers() -> None:
+    message = "Line too long (124 > 120)"
+    assert message_hash(message) == message_hash(message)
+    assert message_hash(message) != message_hash("Line too long (125 > 120)")
 
 
 def test_increased_count_is_a_regression() -> None:

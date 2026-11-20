@@ -34,3 +34,16 @@ def test_summary_reports_test_job_and_run_wall() -> None:
     assert event["n"] == 2
     assert event["p50"] == 645.0
     assert event["p95"] == 739.5
+
+
+def test_main_step_ignores_dependency_sync() -> None:
+    from scripts.ci.audit_runs import main_step
+
+    job = {
+        "steps": [
+            {"name": "Run uv sync --locked --all-extras"},
+            {"name": "Run selected tests"},
+            {"name": "Post Run astral-sh/setup-uv@v5"},
+        ]
+    }
+    assert main_step(job)["name"] == "Run selected tests"
