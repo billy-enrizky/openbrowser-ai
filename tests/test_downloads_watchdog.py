@@ -403,12 +403,15 @@ class TestDownloadFileFromUrl:
         mock_cdp = MagicMock()
         mock_cdp.session_id = 'sid-123'
         mock_cdp.cdp_client.send.Runtime.evaluate = AsyncMock(return_value={
-            'result': {'value': {'data': [], 'responseSize': 0}}
+            'result': {'value': {'responseSize': 0}}
         })
         session.get_or_create_cdp_session.return_value = mock_cdp
 
         result = await watchdog.download_file_from_url('https://example.com/file.pdf', 'target-1')
         assert result is None
+        outcome = watchdog.latest_download_outcome()
+        assert outcome['phase'] == 'failed'
+        assert outcome['stage'] == 'fetch'
 
     async def test_filename_from_url(self):
         with tempfile.TemporaryDirectory() as tmpdir:

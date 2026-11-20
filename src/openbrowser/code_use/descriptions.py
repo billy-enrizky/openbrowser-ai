@@ -7,7 +7,7 @@ dependency-free (no openbrowser imports) so the CLI -c fast path can
 load it without pulling in heavy packages.
 """
 
-EXECUTE_CODE_DESCRIPTION_COMPACT = """Execute Python code with browser automation. All functions are async (use await). Use print() to return output. Variables and browser login state persist between calls.
+EXECUTE_CODE_DESCRIPTION_COMPACT = """Execute Python code with browser automation. Most functions are async (use await); download_outcomes() and download_failures() are synchronous. Use print() to return output. Variables and browser login state persist between calls.
 
 ## Core Functions
 - `await navigate(url, new_tab=False)` -- Go to URL
@@ -22,6 +22,10 @@ EXECUTE_CODE_DESCRIPTION_COMPACT = """Execute Python code with browser automatio
 - `await select_dropdown(index, text)` -- Select dropdown option
 - `await done(text, success=True)` -- Signal task complete
 
+## Downloads
+- `waiter = asyncio.create_task(wait_for_download(timeout=30))` then click, then `await waiter` -- returns phase, path, error
+- `download_outcomes()` / `download_failures()` -- Synchronous recent attempts and failures
+
 ## State
 - `state = await browser.get_browser_state_summary()` -- Get page URL, title, interactive elements
 - Elements shown as `[i_N]` -- use N as the index for click/input_text
@@ -32,7 +36,7 @@ json, asyncio, Path, csv, re, datetime, requests (pre-imported)
 Optional: numpy/np, pandas/pd, BeautifulSoup, PdfReader
 """
 
-EXECUTE_CODE_DESCRIPTION = """Execute Python code in a persistent namespace with browser automation functions. All functions are async -- use `await`. Use print() to return output. Variables and browser login state persist between calls.
+EXECUTE_CODE_DESCRIPTION = """Execute Python code in a persistent namespace with browser automation functions. Most functions are async -- use `await`. The download helpers `download_outcomes()` and `download_failures()` are synchronous. Use print() to return output. Variables and browser login state persist between calls.
 
 ## Navigation
 
@@ -75,6 +79,11 @@ EXECUTE_CODE_DESCRIPTION = """Execute Python code in a persistent namespace with
   Example: `path = await download_file('https://example.com/report.pdf')`
   Example: `path = await download_file('https://example.com/data', filename='export.csv')`
   After downloading, read PDFs with: `reader = PdfReader(path); text = reader.pages[0].extract_text()`
+- `await wait_for_download(timeout: float = 30.0, url: str | None = None, lookback: float = 0.0)` -- Wait for one download to reach a terminal phase. Start the wait before the click so a fast download cannot finish first. Returns a dict with `phase` (`completed`, `failed`, or `cancelled`), `path`, `file_size`, `file_type`, `stage`, and `error`. Raises TimeoutError with the last observed phase when nothing finishes in time. If the download may already have finished, pass `lookback=5` to accept a terminal outcome from the last five seconds.
+  Example: `waiter = asyncio.create_task(wait_for_download(timeout=30)); await click(12); outcome = await waiter; print(outcome['phase'], outcome['path'])`
+  If it failed, `outcome['stage']` names where it stopped and `outcome['error']` says why.
+- `download_outcomes()` -- Synchronous. Return recent download attempts, oldest first, with their last phase and terminal detail.
+- `download_failures()` -- Synchronous. Return only the attempts that ended in `failed`, with `stage` and `error`.
 - `list_downloads()` -- List all files in the downloads directory. Returns a list of absolute file paths.
 
 ## CSS Selectors

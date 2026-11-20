@@ -92,6 +92,7 @@ logging.disable(logging.CRITICAL)
 
 # Import openbrowser modules
 from openbrowser.browser import BrowserProfile, BrowserSession
+from openbrowser.browser.download_state import downloads_summary
 from openbrowser.browser.lifecycle import (
 	LifecycleMachine,
 	LifecyclePhase,
@@ -956,6 +957,10 @@ class _BrowserOwner:
 
 		return result.output
 
+	def _downloads_snapshot(self) -> dict[str, Any]:
+		"""Return a bounded download outcome summary without starting the browser."""
+		return downloads_summary(self.browser_session)
+
 	def _status_payload(self) -> dict[str, Any]:
 		"""Build a JSON-safe status snapshot without starting the browser."""
 		browser = self._browser_lifecycle.snapshot().to_dict()
@@ -988,6 +993,7 @@ class _BrowserOwner:
 			'exec_timeout': _exec_timeout_seconds(),
 			'uptime_seconds': max(0.0, time.time() - self._server()._start_time),
 			'version': version,
+			'downloads': self._downloads_snapshot(),
 		}
 
 	async def _reset_browser(self, *, clear_variables: bool = False) -> str:

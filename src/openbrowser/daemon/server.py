@@ -23,6 +23,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
+from openbrowser.browser.download_state import downloads_summary
 from openbrowser.browser.lifecycle import (
     LifecycleMachine,
     LifecyclePhase,
@@ -548,6 +549,10 @@ class DaemonServer:
             return
         self._storage_state_preload = StorageStateSnapshot(phase=StorageStatePhase.NOT_CONFIGURED)
 
+    def _downloads_snapshot(self) -> dict:
+        """Return a bounded download outcome summary without starting a browser."""
+        return downloads_summary(self._session)
+
     def _storage_state_snapshot(self) -> StorageStateSnapshot:
         """Return the watchdog-owned load state, or the pre-load view."""
         watchdog = getattr(self._session, '_storage_state_watchdog', None)
@@ -824,6 +829,7 @@ class DaemonServer:
 
         snapshot = self._lifecycle.snapshot()
         storage_state = self._storage_state_snapshot()
+        downloads = self._downloads_snapshot()
         return {
             'pid': os.getpid(),
             'state': snapshot.phase.value,
@@ -849,6 +855,7 @@ class DaemonServer:
                 'owner_state': self._startup_owner_state.value if self._startup_owner_state else None,
             },
             'storage_state': storage_state.to_dict(),
+            'downloads': downloads,
         }
 
     def _error_response(

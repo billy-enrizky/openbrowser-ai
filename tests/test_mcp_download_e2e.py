@@ -78,7 +78,11 @@ def test_file_server():
     txt_path.write_text("hello world")
 
     html_path = Path(tmp_dir) / "index.html"
-    html_path.write_text("<html><body><h1>Test Server</h1></body></html>")
+    html_path.write_text(
+        "<html><body><h1>Test Server</h1>"
+        '<a id="dl" href="/data.txt" download="clicked.txt">Download</a>'
+        "</body></html>"
+    )
 
     handler = partial(SimpleHTTPRequestHandler, directory=tmp_dir)
     server = HTTPServer(("127.0.0.1", 0), handler)
@@ -192,6 +196,11 @@ class TestDownloadFilePDF:
         content = downloaded.read_bytes()
         assert content.startswith(b"%PDF"), "Downloaded file is not a valid PDF"
         assert len(content) == len(MINIMAL_PDF)
+        outcomes = server.browser_session.download_outcomes()
+        matching = [outcome for outcome in outcomes if outcome.get('path') == str(downloaded)]
+        assert matching, f"download_file did not record an outcome: {outcomes}"
+        assert matching[-1]['phase'] == 'completed'
+        assert matching[-1]['file_size'] == len(MINIMAL_PDF)
 
     def test_download_pdf_custom_filename(self, mcp_server_with_browser):
         """download_file() with explicit filename."""
@@ -219,6 +228,47 @@ class TestDownloadFilePDF:
         assert "report (1).pdf" in result or "report" in result
         downloaded = Path(result.strip())
         assert downloaded.exists()
+
+
+class TestClickTriggeredDownload:
+    """A page click that starts a download must produce one terminal outcome."""
+
+    def test_click_download_reports_one_terminal_outcome(self, mcp_server_with_browser):
+        server, loop, urls, dl_dir = mcp_server_with_browser
+
+        async def run():
+            session = server.browser_session
+            await session.navigate_to(urls["html_url"])
+            before = {
+                outcome["download_id"]
+                for outcome in session.download_outcomes()
+                if outcome.get("terminal")
+            }
+            # Start waiting before the click so the outcome cannot predate the wait.
+            waiter = asyncio.create_task(session.wait_for_download(timeout=30))
+            await asyncio.sleep(0.2)
+            cdp = await session.get_or_create_cdp_session()
+            await cdp.cdp_client.send.Runtime.evaluate(
+                params={"expression": "document.getElementById('dl').click()"},
+                session_id=cdp.session_id,
+            )
+            outcome = await waiter
+            new_terminals = [
+                entry
+                for entry in session.download_outcomes()
+                if entry.get("terminal") and entry["download_id"] not in before
+            ]
+            return outcome, new_terminals
+
+        outcome, new_terminals = loop.run_until_complete(run())
+
+        assert len(new_terminals) == 1, new_terminals
+        assert new_terminals[0]["download_id"] == outcome["download_id"]
+        assert outcome["phase"] == "completed", outcome
+        saved = Path(str(outcome["path"]))
+        assert saved.exists(), outcome
+        assert saved.read_bytes() == b"hello world"
+        assert outcome["file_size"] == len(b"hello world")
 
 
 class TestDownloadFileText:

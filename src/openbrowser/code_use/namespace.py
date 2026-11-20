@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import re
+import time
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlparse
@@ -562,7 +563,23 @@ def create_namespace(
 		if not dl_path:
 			dl_path = str(Path.home() / 'Downloads' / 'openbrowser-mcp')
 		dl_dir = Path(str(dl_path)).expanduser().resolve()
-		dl_dir.mkdir(parents=True, exist_ok=True)
+
+		registry = getattr(browser_session, 'downloads_registry', None)
+		from openbrowser.browser.download_state import DownloadPhase, DownloadRegistry
+
+		download_id = f'namespace:{url}:{time.time_ns()}'
+		try:
+			dl_dir.mkdir(parents=True, exist_ok=True)
+		except OSError as error:
+			if isinstance(registry, DownloadRegistry):
+				registry.reject(
+					download_id,
+					stage='write',
+					error=f'{type(error).__name__}: {error}',
+					url=url,
+					source='namespace',
+				)
+			raise
 
 		# Determine filename from URL if not provided
 		if not filename:
@@ -589,6 +606,16 @@ def create_namespace(
 				counter += 1
 			filename = f'{stem} ({counter}){ext}'
 			final_path = dl_dir / filename
+
+		if isinstance(registry, DownloadRegistry):
+			active = registry.active_count()
+			limit = registry.max_active
+			if isinstance(active, int) and isinstance(limit, int) and active >= limit:
+				raise RuntimeError(
+					f'Too many active downloads (limit {limit}). '
+					'Wait for one to finish or inspect download_outcomes().'
+				)
+			registry.start(download_id, url=url, file_name=filename, source='namespace')
 
 		# Strategy 1: Browser JS fetch (preserves cookies/auth)
 		js_error = None
@@ -630,23 +657,48 @@ def create_namespace(
 				)
 			else:
 				data = result.get('result', {}).get('value', {})
-				if data and data.get('base64'):
+				base64_value = data.get('base64') if isinstance(data, dict) else None
+				# An empty string is a valid zero-byte file, not missing data.
+				if isinstance(base64_value, str):
 					try:
-						file_bytes = base64.b64decode(data['base64'])
+						file_bytes = base64.b64decode(base64_value)
 					except Exception as b64_err:
 						js_error = f'Invalid base64 encoding: {b64_err}'
 					else:
 						with open(final_path, 'wb') as f:
 							f.write(file_bytes)
+						if registry is not None:
+							registry.complete(
+								download_id,
+								path=str(final_path),
+								file_size=len(file_bytes),
+								file_name=final_path.name,
+								mime_type=data.get('type') or None,
+								url=url,
+								source='namespace',
+							)
 						size_kb = len(file_bytes) / 1024
+						if isinstance(registry, DownloadRegistry):
+							current = registry.get(download_id)
+							if current is not None and current.phase is DownloadPhase.CANCELLED:
+								raise asyncio.CancelledError('download cancelled during reset')
 						logger.info(f'Downloaded {filename} ({size_kb:.1f} KB) via browser fetch')
 						return str(final_path)
 				else:
 					js_error = 'No data received from browser fetch'
+		except asyncio.CancelledError:
+			if registry is not None:
+				registry.cancel(download_id, detail='download_file cancelled')
+			raise
 		except asyncio.TimeoutError:
 			js_error = 'Browser fetch timed out after 120s'
 		except Exception as e:
 			js_error = f'{type(e).__name__}: {e}'
+
+		if isinstance(registry, DownloadRegistry):
+			current = registry.get(download_id)
+			if current is not None and current.phase is DownloadPhase.CANCELLED:
+				raise asyncio.CancelledError('download cancelled during reset')
 
 		# Strategy 2: Python requests fallback (no browser cookies)
 		try:
@@ -656,10 +708,41 @@ def create_namespace(
 				for chunk in response.iter_content(chunk_size=8192):
 					f.write(chunk)
 			file_size = final_path.stat().st_size
+			if registry is not None:
+				registry.complete(
+					download_id,
+					path=str(final_path),
+					file_size=file_size,
+					file_name=final_path.name,
+					url=url,
+					source='namespace',
+					detail='browser fetch failed; python requests fallback succeeded',
+				)
 			size_kb = file_size / 1024
+			if isinstance(registry, DownloadRegistry):
+				current = registry.get(download_id)
+				if current is not None and current.phase is DownloadPhase.CANCELLED:
+					raise asyncio.CancelledError('download cancelled during reset')
 			logger.info(f'Downloaded {filename} ({size_kb:.1f} KB) via Python requests (fallback)')
 			return str(final_path)
+		except asyncio.CancelledError:
+			if registry is not None:
+				registry.cancel(download_id, detail='download_file cancelled')
+			raise
 		except Exception as req_error:
+			error_message = (
+				f'Download failed.  Browser fetch error: {js_error}  Python requests error: {req_error}'
+				if js_error
+				else f'Download failed: {type(req_error).__name__}: {req_error}'
+			)
+			if registry is not None:
+				registry.fail(
+					download_id,
+					stage='namespace_fetch',
+					error=error_message,
+					url=url,
+					source='namespace',
+				)
 			if js_error:
 				raise RuntimeError(
 					f'Download failed.\n'
@@ -689,6 +772,36 @@ def create_namespace(
 			return []
 
 	namespace['list_downloads'] = list_downloads
+
+	async def wait_for_download(
+		timeout: float = 30.0,
+		url: str | None = None,
+		lookback: float = 0.0,
+	) -> dict[str, Any]:
+		"""Wait for the next download to reach a terminal phase.
+
+		Start the waiter before clicking a link or submitting a form so a fast
+		download cannot finish first:
+		`waiter = asyncio.create_task(wait_for_download(timeout=30))`.
+		If the download may already have finished, pass `lookback=5` to accept
+		a terminal outcome from the last five seconds. Returns the terminal
+		outcome, including `path`, `file_size`, `phase`, `stage`, and `error`.
+		Raises TimeoutError with the last observed phase when no terminal
+		outcome appears in time.
+		"""
+		return await browser_session.wait_for_download(timeout=timeout, url=url, lookback=lookback)
+
+	def download_outcomes() -> list[dict[str, Any]]:
+		"""Return recent download attempts, oldest first, with their last phase."""
+		return browser_session.download_outcomes()
+
+	def download_failures() -> list[dict[str, Any]]:
+		"""Return download attempts that ended in the failed phase."""
+		return [outcome for outcome in browser_session.download_outcomes() if outcome.get('phase') == 'failed']
+
+	namespace['wait_for_download'] = wait_for_download
+	namespace['download_outcomes'] = download_outcomes
+	namespace['download_failures'] = download_failures
 
 	# Inject all tools as functions into the namespace
 	# Skip 'evaluate' since we have a custom implementation above
