@@ -11,6 +11,16 @@ from openbrowser.browser.navigation import (
 )
 
 
+async def _reap_process(process, timeout=2.0):
+    """Kill an unfinished child and always reap it, tolerating an exit race."""
+    if process.returncode is None:
+        try:
+            process.kill()
+        except ProcessLookupError:
+            pass
+    await asyncio.wait_for(process.wait(), timeout)
+
+
 async def _wait_for_ready_port(path, process, timeout=5.0):
     """Wait until the child has atomically published a complete port value."""
     deadline = time.monotonic() + timeout
@@ -2230,6 +2240,19 @@ async def test_ready_port_rejects_an_empty_file_and_accepts_complete_contents(tm
     assert await asyncio.wait_for(waiter, 1.0) == 12345
 
 
+async def test_reap_process_tolerates_an_already_exited_child():
+    process = SimpleNamespace(returncode=7, kill=MagicMock(), wait=AsyncMock())
+    await _reap_process(process)
+    process.kill.assert_not_called()
+    process.wait.assert_awaited_once()
+
+
+async def test_reap_process_tolerates_an_exit_race_before_kill():
+    process = SimpleNamespace(returncode=None, kill=MagicMock(side_effect=ProcessLookupError), wait=AsyncMock())
+    await _reap_process(process)
+    process.wait.assert_awaited_once()
+
+
 async def test_ready_port_surfaces_an_early_child_exit(tmp_path):
     path = tmp_path / 'port'
     process = SimpleNamespace(returncode=7)
@@ -2269,14 +2292,16 @@ async def test_owned_browser_exit_revokes_unconfirmed_policy_authority_and_allow
 
     def reap_unfinished_child():
         if process.returncode is None:
-            process.kill()
+            try:
+                process.kill()
+            except ProcessLookupError:
+                pass
 
     request.addfinalizer(reap_unfinished_child)
     try:
         port = await _wait_for_ready_port(ready, process)
     except BaseException:
-        process.kill()
-        await asyncio.wait_for(process.wait(), 2)
+        await _reap_process(process)
         raise
     owned = psutil.Process(process.pid)
     _reader, writer = await asyncio.open_connection('127.0.0.1', port)
