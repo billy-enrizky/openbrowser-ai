@@ -622,9 +622,9 @@ def valid_timestamp(value):
     return parsed.tzinfo is not None and parsed.utcoffset() == timezone.utc.utcoffset(parsed)
 
 
-def load_pins(path):
-    """Load and validate the canonical pin file."""
-    data = json.loads(Path(path).read_text())
+def parse_pins(raw):
+    """Parse and validate the canonical pin file from one byte snapshot."""
+    data = json.loads(raw.decode('utf-8') if isinstance(raw, bytes) else raw)
     pins = data.get('pins')
     if not isinstance(pins, dict):
         raise ValueError('pin file must contain a pins object')
@@ -643,6 +643,11 @@ def load_pins(path):
     if captured is not None and not valid_timestamp(captured):
         raise ValueError('captured_utc must be an ISO 8601 timestamp')
     return {'captured_utc': captured, 'pins': cleaned}
+
+
+def load_pins(path):
+    """Load and validate the canonical pin file from disk."""
+    return parse_pins(Path(path).read_bytes())
 
 
 def version_matches(pin, actual):
@@ -667,8 +672,7 @@ def recorded_versions(result, arm):
         loaded = ((startup.get('browser-use') or {}).get('result') or {}).get('loaded_packages') or {}
         return {'browser-use': loaded.get('browser-use'), 'chrome': chrome}
     if arm == 'openbrowser':
-        loaded = ((startup.get('openbrowser') or {}).get('result') or {}).get('loaded_packages') or {}
-        return {'openbrowser': loaded.get('openbrowser-ai'), 'chrome': chrome}
+        return {'chrome': chrome}
     return {}
 
 
@@ -692,16 +696,15 @@ def claim_errors(result):
         errors.append(f'unknown claim tier: {tier!r}')
         return errors
     scope = meta.get('claim_scope')
-    if scope is not None:
-        expected = claim_scope()
-        if scope != expected:
-            errors.append('claim scope does not match the native-navigation canonical scope')
-        if meta.get('scope') != 'Local native warm-operation diagnostic. No LLM, cloud, or Docker workflow.':
-            errors.append('legacy scope statement was changed')
-        if meta.get('performance_verdict') != 'inconclusive: different engines, IPC and default wait semantics; no limiter profile':
-            errors.append('legacy performance verdict must remain the canonical inconclusive verdict')
-    elif tier == 'pinned':
+    expected = claim_scope()
+    if scope is not None and scope != expected:
+        errors.append('claim scope does not match the native-navigation canonical scope')
+    if scope is None and tier == 'pinned':
         errors.append('pinned claim requires a claim_scope')
+    if 'scope' in meta and meta['scope'] != 'Local native warm-operation diagnostic. No LLM, cloud, or Docker workflow.':
+        errors.append('legacy scope statement was changed')
+    if 'performance_verdict' in meta and meta['performance_verdict'] != 'inconclusive: different engines, IPC and default wait semantics; no limiter profile':
+        errors.append('legacy performance verdict must remain the canonical inconclusive verdict')
     if tier != 'pinned':
         return errors
     pin_record = meta.get('pins') or {}
@@ -731,10 +734,8 @@ def claim_errors(result):
             _pin_version_errors(errors, 'browser-use/chrome', pins.get('chrome'), versions.get('chrome'))
         elif arm == 'openbrowser':
             pin = pins.get('openbrowser') or {}
-            if pin.get('version') and pin.get('source_commit'):
-                errors.append('openbrowser: pin must use version or source_commit, not both')
-            elif pin.get('version'):
-                _pin_version_errors(errors, 'openbrowser', pin, versions.get('openbrowser'))
+            if pin.get('version'):
+                errors.append('openbrowser: pin must use source_commit, not an installed-package version')
             elif pin.get('source_commit'):
                 actual = meta.get('source_commit') or ''
                 want = pin['source_commit']
@@ -743,9 +744,9 @@ def claim_errors(result):
                 elif not actual or len(actual) < len(want) or not actual.startswith(want):
                     errors.append(f'openbrowser/source: commit {actual!r} does not match pin {want!r}')
             else:
-                errors.append('openbrowser: no pinned version or source commit for a pinned claim')
-            if meta.get('source_dirty'):
-                errors.append('openbrowser/source: source tree was dirty during the pinned run')
+                errors.append('openbrowser: pin must use source_commit')
+            if meta.get('source_dirty') != '':
+                errors.append('openbrowser/source: source tree was not verified clean during the pinned run')
             _pin_version_errors(errors, 'openbrowser/chrome', pins.get('chrome'), versions.get('chrome'))
     if any(arm in CHROME_ARMS for arm in requested) and 'chrome' not in pins:
         errors.append('pinned claim requires a chrome pin for Chrome-based arms')
@@ -977,9 +978,10 @@ async def main(args):
         result['metadata']['release_discovery'] = json.loads(Path(args.version_manifest).read_text())
         result['metadata']['release_discovery_sha256'] = sha256(args.version_manifest)
     if args.pins:
-        result['metadata']['pins'] = load_pins(args.pins)
-        result['metadata']['pins_sha256'] = sha256(args.pins)
-        shutil.copyfile(args.pins, destination / 'pins.json')
+        pin_bytes = Path(args.pins).read_bytes()
+        result['metadata']['pins'] = parse_pins(pin_bytes)
+        result['metadata']['pins_sha256'] = hashlib.sha256(pin_bytes).hexdigest()
+        (destination / 'pins.json').write_bytes(pin_bytes)
     fixture = Fixture(args.delay)
     fixture_thread = threading.Thread(target=fixture.serve_forever, daemon=True)
     fixture_thread.start()

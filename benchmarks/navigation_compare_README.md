@@ -53,7 +53,7 @@ A pinned run requires `--pins` with a canonical pin file:
 }
 ```
 
-Every pin has a `version`, except OpenBrowser, which may use a `source_commit` prefix instead. Chrome is a shared pin for every Chrome-based arm. A pinned run requires `captured_utc` in the pin file, exact version-token matches rather than substring matches, and a clean OpenBrowser source tree when the pin uses `source_commit`. The commit prefix must be at least seven characters. The harness retains the raw pin file, its SHA-256, the recorded executable and package versions, and the verification result. A pin only proves that the run matches the recorded versions. It does not prove that those versions are still the latest. Refresh the pin file from official metadata before a pinned run, and check the pins before calling the result current.
+Every pin has a `version`, except OpenBrowser, which must use a `source_commit` prefix. An installed-package version is not accepted for OpenBrowser, because the worker imports the selected source tree. Chrome is a shared pin for every Chrome-based arm. A pinned run requires `captured_utc` in the pin file, exact version-token matches rather than substring matches, and a verified clean OpenBrowser source tree for a pinned OpenBrowser run. The commit prefix must be at least seven characters. The harness retains the raw pin file, its SHA-256, the recorded executable and package versions, and the verification result. A pin only proves that the run matches the recorded versions. It does not prove that those versions are still the latest. Refresh the pin file from official metadata before a pinned run, and check the pins before calling the result current.
 
 A pinned run:
 

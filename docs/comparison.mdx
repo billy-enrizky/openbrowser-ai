@@ -313,7 +313,7 @@ Cost per benchmark run based on Bedrock API token usage (input + output tokens a
 
 Playwright sends the full page with every response, so the LLM gets the answer immediately but pays for ~120K tokens per Wikipedia page load. OpenBrowser returns compact results (~30-800 chars per call), so the LLM needs more round-trips to navigate and extract but pays far fewer tokens overall.
 
-For a single simple task, Playwright's approach is fast. In the 2026-02-21 six-task run, the mean MCP response size ratio across the six tasks was 144x. Complex pages drove most of the difference. That ratio is a historical observation, not a current-version guarantee.
+For a single simple task, Playwright's approach is fast. In the 2026-02-21 six-task run, the ratio of mean total MCP response characters per six-task run was 144x. Complex pages drove most of the difference. That ratio is a historical observation, not a current-version guarantee.
 
 ### Tool Surface Comparison
 
@@ -340,7 +340,7 @@ The benchmark run used v0.1.26 with `execute_code`. `get_status` and `reset_brow
 This section describes the benchmarked OpenBrowser v0.1.26 server. The benchmark itself used `execute_code` only. The `get_status` and `reset_browser` lifecycle tools were added after v0.1.26 and were not part of the comparison. The feature differences below were observed against the other two servers in the 2026-02-21 run:
 
 - **CodeAgent architecture** -- the core `execute_code` tool runs Python in a persistent namespace. The LLM writes code to navigate, extract, and process data rather than calling individual tools. Variables and state persist between calls.
-- **144x smaller mean MCP responses across the six tasks in the 2026-02-21 run** -- returns only the data the code explicitly extracts, not full page dumps
+- **144x smaller mean total MCP response characters per six-task run in 2026-02-21** -- returns only the data the code explicitly extracts, not full page dumps
 - **JS evaluation with Python processing** -- `await evaluate("JS expression")` returns Python objects directly (dicts, lists, strings), enabling pandas/regex/json processing in the same code block
 - **Built-in libraries** -- json, pandas, numpy, matplotlib, csv, re, datetime, requests, BeautifulSoup available in the execution namespace
 - **File system access** -- `file_system` object for reading/writing local files from browser automation code

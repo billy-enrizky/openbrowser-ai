@@ -650,11 +650,16 @@ def test_pinned_claim_falls_back_to_availability_when_requested_arms_is_missing(
     assert benchmark.claim_errors(result) == []
 
 
-def test_legacy_performance_verdict_cannot_be_changed_to_a_winner():
+def test_legacy_claim_statements_are_checked_without_a_claim_scope():
     result = verified_result()
+    result['metadata'].pop('claim_scope')
+    assert benchmark.claim_errors(result) == []
     result['metadata']['performance_verdict'] = 'openbrowser wins'
     assert benchmark.claim_errors(result)
     result['metadata']['performance_verdict'] = 'inconclusive: OpenBrowser wins universally'
+    assert benchmark.claim_errors(result)
+    result['metadata'].pop('performance_verdict')
+    result['metadata']['scope'] = 'production winner'
     assert benchmark.claim_errors(result)
 
 
@@ -670,7 +675,7 @@ def test_pinned_lightpanda_claim_does_not_require_chrome():
 
 
 def test_openbrowser_source_pin_requires_a_clean_tree_and_a_real_prefix():
-    def result(commit='a9022ad43db84fa8f37c9e77bb767ad5c57f5132', pin='a9022ad4', dirty=None):
+    def result(commit='a9022ad43db84fa8f37c9e77bb767ad5c57f5132', pin='a9022ad4', dirty=''):
         value = verified_result()
         value['availability'] = {'openbrowser': {'state': 'ready'}}
         value['metadata'].update({
@@ -685,16 +690,16 @@ def test_openbrowser_source_pin_requires_a_clean_tree_and_a_real_prefix():
 
     assert benchmark.claim_errors(result()) == []
     assert any('at least 7' in error for error in benchmark.claim_errors(result(pin='a902')))
-    assert any('dirty' in error for error in benchmark.claim_errors(result(dirty=' M src/x.py')))
+    assert any('not verified clean' in error for error in benchmark.claim_errors(result(dirty=' M src/x.py')))
     assert any('does not match pin' in error for error in benchmark.claim_errors(
         result(commit='b0000000000000000000000000000000000000000')))
-    both = result()
-    both['metadata']['pins']['pins']['openbrowser'] = {'version': '0.1.57', 'source_commit': 'a9022ad4'}
-    assert any('not both' in error for error in benchmark.claim_errors(both))
     version_only = result()
     version_only['metadata']['pins']['pins']['openbrowser'] = {'version': '0.1.57'}
-    version_only['metadata']['source_dirty'] = ' M src/x.py'
-    assert any('dirty' in error for error in benchmark.claim_errors(version_only))
+    assert any('must use source_commit' in error for error in benchmark.claim_errors(version_only))
+    dirty = result(dirty=' M src/x.py')
+    assert any('was not verified clean' in error for error in benchmark.claim_errors(dirty))
+    unverified = result(dirty=None)
+    assert any('was not verified clean' in error for error in benchmark.claim_errors(unverified))
 
 
 def test_historical_run_may_retain_pins_without_enforcing_them():
