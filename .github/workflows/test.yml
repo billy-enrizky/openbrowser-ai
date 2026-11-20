@@ -191,9 +191,16 @@ jobs:
             cat /tmp/collect.txt
             exit "$collect_status"
           fi
+          # The MCP protocol file is the only file over 20 seconds. Its
+          # subprocess tests are independent, so that shard uses test-level
+          # xdist. Every other shard keeps a test file in one worker.
+          dist=loadfile
+          if grep -Fqx 'tests/test_mcp_protocol.py' shard.txt; then
+            dist=load
+          fi
           uv run --locked python scripts/ci/budget.py --name test-shard -- \
             uv run --locked pytest "${files[@]}" -q -m "not integration" \
-            -n auto --dist loadfile --tb=short \
+            -n auto --dist "$dist" --tb=short \
             --junitxml=junit-${{ matrix.os }}-${{ matrix.shard }}.xml
       - uses: actions/upload-artifact@v4
         if: always()
