@@ -15,9 +15,10 @@ class TaskTerminal:
 
 def cancellation_display_content(content: str) -> str:
     """Build the persisted cancellation text shown after a reload."""
-    if content in _DEFAULT_CANCELLATION_MESSAGES:
+    normalized = content.strip()
+    if not normalized or normalized in _DEFAULT_CANCELLATION_MESSAGES:
         return "Task was cancelled"
-    return f"Task was cancelled. {content}"
+    return f"Task was cancelled. {normalized}"
 
 
 def classify_task_terminal(result: Mapping[str, Any]) -> TaskTerminal:

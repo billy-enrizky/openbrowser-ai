@@ -96,15 +96,15 @@ class AgentSession:
             if self.is_cancelled:
                 return 'cancelled'
             return 'completed' if self.success else 'failed'
-        if self.is_cancelled:
-            if self.is_running:
-                return 'stopping'
-            return 'cancelled'
         if agent_phase_value == 'succeeded':
             return 'completed'
         if agent_phase_value in {'failed', 'max_steps'}:
             return 'failed'
         if agent_phase_value in {'stopped', 'cancelled'}:
+            return 'cancelled'
+        if self.is_cancelled:
+            if self.is_running:
+                return 'stopping'
             return 'cancelled'
         if (self.is_paused or agent_phase_value == 'paused') and self.is_running:
             return 'paused'
@@ -376,7 +376,12 @@ class AgentSession:
             raise
         finally:
             self.is_running = False
-            await self._cleanup()
+            try:
+                await self._cleanup()
+            except asyncio.CancelledError:
+                if self.completed_at is None:
+                    raise
+                logger.warning('Cleanup was cancelled after the task reached a terminal result')
 
     async def _run_code_agent(self) -> dict[str, Any]:
         """Run CodeAgent with step tracking."""
@@ -603,7 +608,12 @@ class AgentSession:
         try:
             history = await self.agent.run(max_steps=self.max_steps)
         except asyncio.CancelledError:
-            raise
+            status = getattr(self.agent, 'status', None)
+            phase = getattr(status, 'phase', None)
+            phase_value = getattr(phase, 'value', phase)
+            if phase_value not in {'succeeded', 'failed', 'max_steps', 'stopped', 'cancelled'}:
+                raise
+            history = getattr(self.agent, 'history', None)
         except Exception as run_error:
             status = getattr(self.agent, 'status', None)
             phase = getattr(status, 'phase', None)

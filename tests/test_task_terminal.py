@@ -15,6 +15,12 @@ finally:
     sys.path.remove(_BACKEND)
 
 
+def test_cancellation_display_content_trims_before_comparison():
+	assert cancellation_display_content('Cancelled by user ') == 'Task was cancelled'
+	assert cancellation_display_content('  ') == 'Task was cancelled'
+	assert cancellation_display_content(' partial ') == 'Task was cancelled. partial'
+
+
 def test_codeagent_cancellation_routes_to_cancelled():
     terminal = classify_task_terminal(
         {'cancelled': True, 'success': False, 'result': 'partial data'}

@@ -1,5 +1,6 @@
 """Backend propagation of explicit Browser Agent terminal state."""
 
+import asyncio
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -221,6 +222,78 @@ async def test_browser_agent_run_error_maps_terminal_status():
 
 
 @pytest.mark.asyncio
+async def test_cancellation_after_committed_success_preserves_result():
+	session = make_session(
+		AgentRunStatus(
+			phase=AgentRunPhase.SUCCEEDED,
+			success=True,
+			terminal_reason='done',
+			result='accepted',
+		),
+		history_success=True,
+		final_result='accepted',
+	)
+	session.agent.run = AsyncMock(side_effect=asyncio.CancelledError())
+
+	result = await session._run_browser_agent()
+
+	assert result['success'] is True
+	assert result['cancelled'] is False
+	assert result['terminal_phase'] == 'succeeded'
+	assert result['result'] == 'accepted'
+
+
+@pytest.mark.asyncio
+async def test_cancellation_after_committed_max_steps_preserves_the_outcome():
+	session = make_session(
+		AgentRunStatus(
+			phase=AgentRunPhase.MAX_STEPS,
+			success=False,
+			terminal_reason='max_steps',
+			result='partial',
+		),
+		history_success=None,
+		final_result='partial',
+	)
+	session.agent.run = AsyncMock(side_effect=asyncio.CancelledError())
+
+	result = await session._run_browser_agent()
+
+	assert result['success'] is False
+	assert result['cancelled'] is False
+	assert result['terminal_phase'] == 'max_steps'
+	assert result['terminal_reason'] == 'max_steps'
+	assert result['result'] == 'partial'
+
+
+@pytest.mark.asyncio
+async def test_task_status_prefers_a_terminal_phase_over_pending_cancellation():
+	session = make_session(
+		AgentRunStatus(
+			phase=AgentRunPhase.STOPPED,
+			success=False,
+			terminal_reason='stopped',
+			result='partial',
+		),
+		history_success=None,
+	)
+	session.is_cancelled = True
+	session.is_running = True
+	session.completed_at = None
+
+	assert session.task_status == 'cancelled'
+
+	session.agent.status = AgentRunStatus(
+		phase=AgentRunPhase.SUCCEEDED,
+		success=True,
+		terminal_reason='done',
+		result='accepted',
+	)
+
+	assert session.task_status == 'completed'
+
+
+@pytest.mark.asyncio
 async def test_browser_agent_start_disables_process_signal_handler(monkeypatch):
 	session = AgentSession(
 		task_id='task-1',
@@ -264,3 +337,48 @@ async def test_browser_agent_start_disables_process_signal_handler(monkeypatch):
 	await session.start()
 
 	assert captured['use_signal_handler'] is False
+
+@pytest.mark.asyncio
+async def test_cleanup_cancellation_preserves_a_committed_result(monkeypatch):
+	session = AgentSession(
+		task_id='task-1',
+		task='Do the thing',
+		agent_type='browser',
+		enable_vnc=False,
+		use_current_browser=False,
+	)
+
+	class FakeAgent:
+		def __init__(self, **kwargs):
+			pass
+
+		def stop(self):
+			return True
+
+	async def committed_result():
+		session.completed_at = datetime.now(UTC).replace(tzinfo=None)
+		session.result = 'accepted'
+		session.success = True
+		return {
+			'task_id': session.task_id,
+			'result': 'accepted',
+			'success': True,
+			'cancelled': False,
+			'terminal_phase': 'succeeded',
+			'terminal_reason': 'done',
+			'total_steps': 1,
+			'duration_seconds': 1,
+			'attachments': [],
+		}
+
+	monkeypatch.setattr(openbrowser, 'Agent', FakeAgent)
+	monkeypatch.setattr(session, '_setup_vnc', AsyncMock(return_value=None))
+	monkeypatch.setattr(session, '_setup_new_browser', AsyncMock())
+	monkeypatch.setattr(session, '_create_llm', MagicMock(return_value=MagicMock()))
+	monkeypatch.setattr(session, '_cleanup', AsyncMock(side_effect=asyncio.CancelledError()))
+	monkeypatch.setattr(session, '_run_browser_agent', committed_result)
+
+	result = await session.start()
+
+	assert result['success'] is True
+	assert result['result'] == 'accepted'
