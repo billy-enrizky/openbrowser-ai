@@ -9,7 +9,7 @@ import pytest
 
 from openbrowser.llm.views import ChatInvokeUsage
 from openbrowser.tokens.service import TokenCost, xdg_cache_home
-from openbrowser.tokens.views import ModelPricing, TokenCostCalculated, TokenUsageEntry
+from openbrowser.tokens.views import TokenCostCalculated
 
 logger = logging.getLogger(__name__)
 
@@ -281,6 +281,17 @@ class TestTokenCostGetUsageTokens:
         assert result.prompt_tokens == 300  # 100 + 200
         assert result.completion_tokens == 150  # 50 + 100
         assert result.total_tokens == 450
+
+    def test_since_index_limits_usage_to_the_current_run(self):
+        tc = TokenCost()
+        tc.add_usage("gpt-4", _make_usage(prompt_tokens=100, completion_tokens=50))
+        tc.add_usage("gpt-4", _make_usage(prompt_tokens=200, completion_tokens=100))
+
+        result = tc.get_usage_tokens_for_model("gpt-4", since_index=1)
+
+        assert result.prompt_tokens == 200
+        assert result.completion_tokens == 100
+        assert result.total_tokens == 300
 
     def test_returns_zeros_for_unknown_model(self):
         tc = TokenCost()

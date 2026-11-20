@@ -1658,6 +1658,8 @@ __code_exec_coro__ = __code_exec__()
 				success=self_reported_success,
 				final_result_response=final_result,
 				error_message=agent_run_error or self._run_error,
+				terminal_phase=self._phase.value if self._phase in TERMINAL_CODE_AGENT_PHASES else None,
+				terminal_reason=self._terminal_reason,
 			)
 		)
 

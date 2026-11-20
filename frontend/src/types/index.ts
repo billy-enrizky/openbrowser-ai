@@ -50,7 +50,7 @@ export type BrowserViewerMode = "embedded" | "popup";
 
 export type AgentType = "browser" | "code";
 
-export type TaskStatus = "pending" | "running" | "completed" | "failed" | "cancelled";
+export type TaskStatus = "pending" | "running" | "paused" | "stopping" | "completed" | "failed" | "cancelled";
 
 // LLM Model types
 export interface LLMModel {
