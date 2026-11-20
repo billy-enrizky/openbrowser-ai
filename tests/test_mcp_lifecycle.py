@@ -38,12 +38,38 @@ async def test_reset_browser_preserves_user_variables(mcp_server):
 	payload = json.loads(result)
 
 	assert payload['ok'] is True
-	assert payload['preserved_variables'] == 3
+	assert payload['preserved_variables'] == 1
 	assert mcp_server.browser_session is None
 	assert mcp_server._namespace is None
 	assert 'user_value' in mcp_server._pending_variables
-	assert 'browser' in mcp_server._pending_variables
+	assert 'browser' not in mcp_server._pending_variables
+	assert 'browser' in payload['namespace_transfer']['framework']
+	assert 'navigate' in payload['namespace_transfer']['framework']
 	assert payload['browser']['phase'] == 'stopped'
+
+
+@pytest.mark.asyncio
+async def test_reset_browser_drops_stale_browser_references(mcp_server):
+	session = MagicMock()
+	session.kill = AsyncMock()
+	mcp_server.browser_session = session
+	mcp_server._namespace = {
+		'count': 2,
+		'old_browser': session,
+		'pages': [session],
+		'page': object(),
+	}
+
+	result = await mcp_server._handle_tool('reset_browser', {})
+	payload = json.loads(result)
+
+	assert payload['preserved_variables'] == 1
+	assert mcp_server._pending_variables == {'count': 2}
+	dropped = payload['namespace_transfer']['dropped']
+	assert 'previous browser session' in dropped['old_browser']
+	assert 'previous browser session' in dropped['pages']
+	assert 'page' in dropped
+	assert len(payload['namespace_transfer']['warnings']) == 3
 
 
 @pytest.mark.asyncio
@@ -238,3 +264,45 @@ async def test_kill_session_timeout_is_a_cleanup_failure(mcp_server, monkeypatch
 	outcome = await mcp_server._kill_session_safely(session)
 	assert outcome.succeeded is False
 	assert outcome.caller_cancellation is None
+
+
+@pytest.mark.asyncio
+async def test_recovery_drops_stale_browser_values_and_keeps_scalars(mcp_server):
+	old_session = MagicMock()
+	old_session.kill = AsyncMock()
+	mcp_server.browser_session = old_session
+	mcp_server._namespace = {
+		'answer': 42,
+		'old_page': old_session,
+		'pages': [old_session],
+	}
+	mcp_server._browser_lifecycle.transition(LifecyclePhase.STARTING)
+	mcp_server._browser_lifecycle.transition(LifecyclePhase.READY)
+
+	new_session = MagicMock()
+	new_session.start = AsyncMock()
+	new_session.seed_generation = MagicMock()
+
+	with (
+		patch.object(mcp_server, '_is_cdp_alive', new_callable=AsyncMock, return_value=False),
+		patch.object(
+			mcp_server,
+			'_kill_session_safely',
+			new_callable=AsyncMock,
+			return_value=_CleanupOutcome(True),
+		),
+		patch.object(mcp_server, '_build_browser_profile', return_value=MagicMock()),
+		patch('openbrowser.mcp.server.BrowserSession', return_value=new_session),
+		patch('openbrowser.mcp.server.create_namespace', return_value={}),
+		patch('openbrowser.mcp.server.CodeAgentTools', return_value=MagicMock()),
+		patch.object(mcp_server, '_create_owner_file_system', return_value=None),
+	):
+		await mcp_server._recover_browser_session()
+
+	assert mcp_server.browser_session is new_session
+	assert mcp_server._namespace == {'answer': 42}
+	assert 'old_page' not in mcp_server._namespace
+	assert 'pages' not in mcp_server._namespace
+	dropped = mcp_server._last_namespace_transfer['dropped']
+	assert 'previous browser session' in dropped['old_page']
+	assert 'previous browser session' in dropped['pages']

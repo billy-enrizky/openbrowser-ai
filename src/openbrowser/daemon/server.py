@@ -30,6 +30,7 @@ from openbrowser.browser.lifecycle import (
     LifecycleTransitionError,
 )
 from openbrowser.browser.storage_state import StorageStatePhase, StorageStateSnapshot
+from openbrowser.code_use.namespace_transfer import transfer_namespace
 from openbrowser.daemon import (
     EXIT_OWNER_BUSY,
     IS_WINDOWS,
@@ -479,6 +480,7 @@ class DaemonServer:
         self._lifecycle = LifecycleMachine('daemon')
         self._browser_error: str | None = None
         self._needs_browser_recovery = False
+        self._last_namespace_transfer: dict[str, object] = {}
         self._profile_summary: dict[str, object] | None = None
         self._browser_generation = 0
         self._startup_phase = DaemonStartupPhase.IDLE
@@ -761,6 +763,7 @@ class DaemonServer:
             old_namespace = getattr(self._executor, 'namespace', None) if self._executor else {}
             if not isinstance(old_namespace, dict):
                 old_namespace = {}
+            old_session = self._session
             if self._session:
                 closed = await self._close_session_bounded(self._session)
                 if not closed:
@@ -782,9 +785,13 @@ class DaemonServer:
                     await seeded
                 tools = CodeAgentTools()
                 namespace = create_namespace(browser_session=session, tools=tools)
-                for key, value in (old_namespace or {}).items():
-                    if not key.startswith('__') and key not in namespace:
+                transfer = transfer_namespace(old_namespace or {}, old_browser_session=old_session)
+                for key, value in transfer.variables.items():
+                    if key not in namespace:
                         namespace[key] = value
+                if transfer.warnings:
+                    logger.warning('Namespace transfer: %s', '; '.join(transfer.warnings))
+                self._last_namespace_transfer = transfer.to_dict()
                 executor = self._executor
                 if executor is None:
                     raise RuntimeError('Cannot recover a browser without an executor')
@@ -855,6 +862,7 @@ class DaemonServer:
                 'owner_state': self._startup_owner_state.value if self._startup_owner_state else None,
             },
             'storage_state': storage_state.to_dict(),
+            'namespace_transfer': self._last_namespace_transfer,
             'downloads': downloads,
         }
 

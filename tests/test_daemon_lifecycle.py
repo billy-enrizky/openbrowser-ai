@@ -161,6 +161,8 @@ async def test_recovery_preserves_user_variables(daemon_server):
 		'user_value': 42,
 		'browser': object(),
 		'navigate': object(),
+		'stale': old_session,
+		'pages': [old_session],
 	}
 	executor = MagicMock()
 	executor.namespace = old_namespace
@@ -179,6 +181,12 @@ async def test_recovery_preserves_user_variables(daemon_server):
 
 	new_namespace = executor.set_namespace.call_args.args[0]
 	assert new_namespace['user_value'] == 42
+	assert 'stale' not in new_namespace
+	assert 'pages' not in new_namespace
+	dropped = daemon_server._last_namespace_transfer['dropped']
+	assert 'previous browser session' in dropped['stale']
+	assert 'previous browser session' in dropped['pages']
+	assert daemon_server._status_payload()['namespace_transfer']['preserved'] == ['user_value']
 	assert daemon_server._session is new_session
 	assert daemon_server._browser_generation == 1
 	assert new_session.seed_generation.call_args.args[0] == 1
