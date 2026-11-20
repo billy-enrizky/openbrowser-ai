@@ -66,6 +66,101 @@ def test_same_document_load_waits_for_the_existing_document_load():
     assert op.ready
 
 
+async def test_history_document_commit_adopts_the_next_loader():
+    op = operation()
+    op.expect_history_commit()
+    op.begin_trigger()
+    assert not op.ready
+    op.observe('frame', {'frame': {'id': 'frame', 'loaderId': 'next', 'url': 'https://example.com/'}})
+    assert op.loader_id == 'next'
+    assert not op.ready
+    op.observe('lifecycle', {'frameId': 'frame', 'loaderId': 'next', 'name': 'load'})
+    assert op.ready
+    assert op.observed_url == 'https://example.com/'
+
+
+async def test_history_ignores_the_old_loader_as_a_commit():
+    op = operation()
+    op.expect_history_commit()
+    op.begin_trigger()
+    op.observe('frame', {'frame': {'id': 'frame', 'loaderId': 'old', 'url': 'https://example.com/'}})
+    assert op.loader_id is None
+    assert not op.ready
+
+
+async def test_history_ignores_a_child_frame_commit():
+    op = operation()
+    op.expect_history_commit()
+    op.begin_trigger()
+    op.observe('frame', {'frame': {'id': 'child', 'parentId': 'frame', 'loaderId': 'next', 'url': 'https://ad.example/'}})
+    assert op.loader_id is None
+    assert not op.ready
+
+
+async def test_history_ignores_evidence_from_before_the_trigger():
+    op = operation()
+    op.expect_history_commit()
+    op.observe('frame', {'frame': {'id': 'frame', 'loaderId': 'next', 'url': 'https://example.com/'}})
+    assert op.loader_id is None
+    op.begin_trigger()
+    assert op._evidence == []
+    op.observe('lifecycle', {'frameId': 'frame', 'loaderId': 'next', 'name': 'load'})
+    assert not op.ready
+
+
+async def test_history_within_after_a_document_commit_does_not_replace_the_loader():
+    op = operation()
+    op.expect_history_commit()
+    op.begin_trigger()
+    op.observe('frame', {'frame': {'id': 'frame', 'loaderId': 'next', 'url': 'https://example.com/a'}})
+    assert op.loader_id == 'next'
+    op.observe('within', {'frameId': 'frame', 'loaderId': 'next', 'url': 'https://example.com/b'})
+    assert op.loader_id == 'next'
+    assert not op.ready
+    op.observe('lifecycle', {'frameId': 'frame', 'loaderId': 'next', 'name': 'load'})
+    assert op.ready
+    assert op.observed_url == 'https://example.com/b'
+
+
+async def test_reload_requires_a_new_document_loader():
+    op = operation()
+    op.expect_reload_commit()
+    op.begin_trigger()
+    op.observe('within', {'frameId': 'frame', 'loaderId': 'old', 'url': 'https://example.com/#x'})
+    assert not op.ready
+    op.observe('frame', {'frame': {'id': 'frame', 'loaderId': 'next', 'url': 'https://example.com/'}})
+    op.observe('lifecycle', {'frameId': 'frame', 'loaderId': 'next', 'name': 'load'})
+    assert op.ready
+
+
+async def test_history_same_document_waits_for_the_within_event():
+    op = operation()
+    op.expect_history_commit()
+    op.begin_trigger()
+    op.observe('lifecycle', {'frameId': 'frame', 'loaderId': 'old', 'name': 'load'})
+    assert not op.ready, 'a current-document lifecycle event is not a history commit'
+    op.observe('within', {'frameId': 'frame', 'loaderId': 'old', 'url': 'https://example.com/#two'})
+    assert op.ready
+    assert op.observed_url == 'https://example.com/#two'
+
+
+async def test_history_within_must_match_the_selected_entry():
+    op = operation()
+    op.expect_history_commit('https://example.com/target')
+    op.begin_trigger()
+    op.observe('within', {'frameId': 'frame', 'loaderId': 'old', 'url': 'https://example.com/timer'})
+    assert not op.ready, 'a page timer must not satisfy the traversal'
+    op.observe('within', {'frameId': 'frame', 'loaderId': 'old', 'url': 'https://example.com/target'})
+    assert op.ready
+
+
+async def test_history_commit_cannot_be_expected_twice():
+    op = operation()
+    op.expect_history_commit()
+    with pytest.raises(NavigationError, match='already has a commit expectation'):
+        op.expect_history_commit()
+
+
 def test_explicit_document_loader_is_not_a_same_document_acknowledgment():
     op = operation('commit')
     op.accept_response({'frameId': 'frame', 'loaderId': 'old'})
@@ -122,6 +217,17 @@ def test_monitor_ignores_wrong_session_old_root_and_terminal_callbacks():
     monitor.invalidate()
     callback({'frameId': 'frame', 'loaderId': 'next', 'name': 'load'}, 'session')
     assert not op.ready
+
+
+def test_owned_navigation_timeout_is_monotonic_and_keeps_a_margin():
+    from openbrowser.browser import BrowserSession
+
+    session = BrowserSession()
+    assert session._owned_navigation_timeout(0.1) < session._owned_navigation_timeout(0.101)
+    assert session._owned_navigation_timeout(15.0) == 14.9
+    assert session._owned_navigation_timeout(None) == 30.0
+    with pytest.raises(NavigationError, match='at least 0.01'):
+        session._owned_navigation_timeout(0.001)
 
 
 def test_monitor_refuses_overlap():
@@ -193,7 +299,7 @@ async def test_handler_waits_for_actual_load_and_publishes_final_url():
     client.send.Page.navigate.side_effect = navigate
     with patches[0], patches[1]:
         task = asyncio.create_task(session.on_NavigateToUrlEvent(NavigateToUrlEvent(url='https://example.com/')))
-        await sent.wait()
+        await _wait_for_trigger(task, sent)
         await asyncio.sleep(0)
         assert not task.done()
         callback = client.register.Page.lifecycleEvent.call_args.args[0]
@@ -202,6 +308,485 @@ async def test_handler_waits_for_actual_load_and_publishes_final_url():
     emitted = session.event_bus.dispatch._dispatched_events
     complete = [e for e in emitted if isinstance(e, NavigationCompleteEvent)]
     assert complete[0].url == 'https://redirect.example/#done'
+
+
+def _history_client(client, *, current_url, entries, current_index, loader='old'):
+    frame = {'id': 'frame', 'loaderId': loader, 'url': current_url}
+    client.send.Page.getFrameTree = AsyncMock(
+        side_effect=lambda **kw: {'frameTree': {'frame': dict(frame)}},
+    )
+    client.send.Page.getNavigationHistory = AsyncMock(
+        return_value={'currentIndex': current_index, 'entries': entries},
+    )
+    return frame
+
+
+async def _wait_for_trigger(task, sent, timeout=1.0):
+    try:
+        await asyncio.wait_for(sent.wait(), timeout=timeout)
+    except asyncio.TimeoutError:
+        if task.done():
+            await task
+        raise AssertionError('navigation finished before the trigger ran') from None
+
+
+async def test_go_back_waits_for_the_page_load():
+    from openbrowser.browser.events import NavigationCompleteEvent
+    session, client, focus, _, patches = handler_fixture()
+    frame = _history_client(
+        client,
+        current_url='https://second.example/',
+        entries=[{'id': 1, 'url': 'https://first.example/'}, {'id': 2, 'url': 'https://second.example/'}],
+        current_index=1,
+    )
+    sent = asyncio.Event()
+
+    async def go_back(**kwargs):
+        frame.update(loaderId='next', url='https://first.example/')
+        sent.set()
+        return {}
+
+    client.send.Page.navigateToHistoryEntry = AsyncMock(side_effect=go_back)
+    with patches[0], patches[1]:
+        task = asyncio.create_task(session.go_back())
+        await _wait_for_trigger(task, sent)
+        callback = client.register.Page.frameNavigated.call_args.args[0]
+        callback({'frame': {'id': 'frame', 'loaderId': 'next', 'url': 'https://first.example/'}}, focus.session_id)
+        await asyncio.sleep(0.6)
+        assert not task.done(), 'history navigation must not complete on a fixed delay'
+        lifecycle = client.register.Page.lifecycleEvent.call_args.args[0]
+        lifecycle({'frameId': 'frame', 'loaderId': 'next', 'name': 'load'}, focus.session_id)
+        final_url = await asyncio.wait_for(task, 2.0)
+    assert final_url == 'https://first.example/'
+    complete = [e for e in session.event_bus.dispatch._dispatched_events if isinstance(e, NavigationCompleteEvent)]
+    assert complete[-1].url == 'https://first.example/'
+
+
+async def test_go_forward_waits_for_the_page_load():
+    session, client, focus, _, patches = handler_fixture()
+    frame = _history_client(
+        client,
+        current_url='https://first.example/',
+        entries=[{'id': 1, 'url': 'https://first.example/'}, {'id': 2, 'url': 'https://second.example/'}],
+        current_index=0,
+    )
+    sent = asyncio.Event()
+
+    async def go_forward(**kwargs):
+        frame.update(loaderId='next', url='https://second.example/')
+        sent.set()
+        return {}
+
+    client.send.Page.navigateToHistoryEntry = AsyncMock(side_effect=go_forward)
+    with patches[0], patches[1]:
+        task = asyncio.create_task(session.go_forward())
+        await _wait_for_trigger(task, sent)
+        callback = client.register.Page.frameNavigated.call_args.args[0]
+        callback({'frame': {'id': 'frame', 'loaderId': 'next', 'url': 'https://second.example/'}}, focus.session_id)
+        await asyncio.sleep(0.6)
+        assert not task.done()
+        lifecycle = client.register.Page.lifecycleEvent.call_args.args[0]
+        lifecycle({'frameId': 'frame', 'loaderId': 'next', 'name': 'load'}, focus.session_id)
+        await asyncio.wait_for(task, 2.0)
+
+
+async def test_go_back_hash_entry_completes_on_within_document():
+    session, client, focus, _, patches = handler_fixture()
+    frame = _history_client(
+        client,
+        current_url='https://site.test/page#two',
+        entries=[{'id': 1, 'url': 'https://site.test/page#one'}, {'id': 2, 'url': 'https://site.test/page#two'}],
+        current_index=1,
+    )
+
+    async def go_back(**kwargs):
+        frame.update(url='https://site.test/page', urlFragment='#one')
+        callback = client.register.Page.navigatedWithinDocument.call_args.args[0]
+        callback({'frameId': 'frame', 'loaderId': 'old', 'url': 'https://site.test/page#one'}, focus.session_id)
+        return {}
+
+    client.send.Page.navigateToHistoryEntry = AsyncMock(side_effect=go_back)
+    with patches[0], patches[1]:
+        final_url = await asyncio.wait_for(session.go_back(), 2.0)
+    assert final_url == 'https://site.test/page#one'
+
+
+async def test_go_back_handler_returns_the_final_url():
+    from openbrowser.browser.events import GoBackEvent
+    from openbrowser.browser.watchdogs.default_action_watchdog import (
+        DefaultActionWatchdog,
+    )
+    session, client, focus, _, patches = handler_fixture()
+    frame = _history_client(
+        client,
+        current_url='https://second.example/',
+        entries=[{'id': 1, 'url': 'https://first.example/'}, {'id': 2, 'url': 'https://second.example/'}],
+        current_index=1,
+    )
+
+    async def go_back(**kwargs):
+        frame.update(loaderId='next', url='https://first.example/')
+        frame_callback = client.register.Page.frameNavigated.call_args.args[0]
+        frame_callback({'frame': {'id': 'frame', 'loaderId': 'next', 'url': 'https://first.example/'}}, focus.session_id)
+        lifecycle = client.register.Page.lifecycleEvent.call_args.args[0]
+        lifecycle({'frameId': 'frame', 'loaderId': 'next', 'name': 'load'}, focus.session_id)
+        return {}
+
+    client.send.Page.navigateToHistoryEntry = AsyncMock(side_effect=go_back)
+    watchdog = DefaultActionWatchdog(event_bus=session.event_bus, browser_session=session)
+    with patches[0], patches[1]:
+        url = await asyncio.wait_for(watchdog.on_GoBackEvent(GoBackEvent(event_timeout=5.0)), 5.0)
+    assert url == 'https://first.example/'
+
+
+async def test_go_back_without_history_fails_and_releases_the_lock():
+    session, client, _, _, patches = handler_fixture()
+    _history_client(
+        client,
+        current_url='https://first.example/',
+        entries=[{'id': 1, 'url': 'https://first.example/'}],
+        current_index=0,
+    )
+    with patches[0], patches[1], pytest.raises(NavigationError, match='no previous history entry'):
+        await session.go_back()
+    assert not session._navigation_lock.locked()
+
+
+async def test_go_back_timeout_is_terminal_and_releases_admission():
+    session, client, focus, _, patches = handler_fixture()
+    frame = _history_client(
+        client,
+        current_url='https://second.example/',
+        entries=[{'id': 1, 'url': 'https://first.example/'}, {'id': 2, 'url': 'https://second.example/'}],
+        current_index=1,
+    )
+
+    async def go_back(**kwargs):
+        frame.update(loaderId='next', url='https://first.example/')
+        callback = client.register.Page.frameNavigated.call_args.args[0]
+        callback({'frame': {'id': 'frame', 'loaderId': 'next', 'url': 'https://first.example/'}}, focus.session_id)
+        return {}
+
+    client.send.Page.navigateToHistoryEntry = AsyncMock(side_effect=go_back)
+    with patches[0], patches[1], pytest.raises(TimeoutError):
+        await session.go_back(event_timeout=0.05)
+    assert session.lifecycle_snapshot()['navigation']['phase'] == 'timed_out'
+    assert not session._navigation_lock.locked()
+
+
+async def test_go_back_fails_when_the_agent_focus_changes():
+    session, client, focus, _, patches = handler_fixture()
+    frame = _history_client(
+        client,
+        current_url='https://second.example/',
+        entries=[{'id': 1, 'url': 'https://first.example/'}, {'id': 2, 'url': 'https://second.example/'}],
+        current_index=1,
+    )
+    sent = asyncio.Event()
+
+    async def go_back(**kwargs):
+        frame.update(loaderId='next', url='https://first.example/')
+        sent.set()
+        return {}
+
+    client.send.Page.navigateToHistoryEntry = AsyncMock(side_effect=go_back)
+    with patches[0], patches[1]:
+        task = asyncio.create_task(session.go_back())
+        await _wait_for_trigger(task, sent)
+        other = MagicMock()
+        other.target_id = 'other-target'
+        object.__setattr__(session, 'agent_focus', other)
+        frame_callback = client.register.Page.frameNavigated.call_args.args[0]
+        frame_callback({'frame': {'id': 'frame', 'loaderId': 'next', 'url': 'https://first.example/'}}, focus.session_id)
+        lifecycle = client.register.Page.lifecycleEvent.call_args.args[0]
+        lifecycle({'frameId': 'frame', 'loaderId': 'next', 'name': 'load'}, focus.session_id)
+        with pytest.raises(NavigationError, match='Agent focus changed'):
+            await task
+    assert not session._navigation_lock.locked()
+
+
+async def test_go_back_spa_path_change_completes_on_within_document():
+    session, client, focus, _, patches = handler_fixture()
+    frame = _history_client(
+        client,
+        current_url='https://site.test/page?step=2',
+        entries=[
+            {'id': 1, 'url': 'https://site.test/page?step=1'},
+            {'id': 2, 'url': 'https://site.test/page?step=2'},
+        ],
+        current_index=1,
+    )
+
+    async def go_back(**kwargs):
+        frame.update(url='https://site.test/page?step=1')
+        callback = client.register.Page.navigatedWithinDocument.call_args.args[0]
+        callback(
+            {'frameId': 'frame', 'loaderId': 'old', 'url': 'https://site.test/page?step=1'}, focus.session_id
+        )
+        return {}
+
+    client.send.Page.navigateToHistoryEntry = AsyncMock(side_effect=go_back)
+    with patches[0], patches[1]:
+        final_url = await asyncio.wait_for(session.go_back(), 2.0)
+    assert final_url == 'https://site.test/page?step=1'
+
+
+async def test_go_back_without_an_attached_policy_fails_closed():
+    from openbrowser.browser.navigation import NavigationBlockedError
+    session, client, _, _, patches = handler_fixture()
+    session._security_watchdog = None
+    session.browser_profile.allowed_domains = ['allowed.example']
+    _history_client(
+        client,
+        current_url='https://allowed.example/second',
+        entries=[
+            {'id': 1, 'url': 'https://blocked.example/first'},
+            {'id': 2, 'url': 'https://allowed.example/second'},
+        ],
+        current_index=1,
+    )
+    with patches[0], patches[1], pytest.raises(NavigationBlockedError):
+        await session.go_back()
+    assert not session._navigation_lock.locked()
+
+
+async def test_go_back_contains_a_blocked_commit_that_never_finishes_loading():
+    from types import SimpleNamespace
+
+    from openbrowser.browser.navigation import NavigationBlockedError
+    session, client, focus, _, patches = handler_fixture()
+    session._security_watchdog = SimpleNamespace(_is_url_allowed=lambda url: 'blocked' not in url)
+    frame = _history_client(
+        client,
+        current_url='https://second.example/',
+        entries=[{'id': 1, 'url': 'https://safe.example/one'}, {'id': 2, 'url': 'https://second.example/'}],
+        current_index=1,
+    )
+
+    async def go_back(**kwargs):
+        frame.update(loaderId='next', url='https://blocked.example/bad')
+        frame_callback = client.register.Page.frameNavigated.call_args.args[0]
+        frame_callback(
+            {'frame': {'id': 'frame', 'loaderId': 'next', 'url': 'https://blocked.example/bad'}}, focus.session_id
+        )
+        return {}
+
+    client.send.Page.navigateToHistoryEntry = AsyncMock(side_effect=go_back)
+    calls = []
+
+    def frame_tree(**kwargs):
+        calls.append(1)
+        if len(calls) >= 3:
+            return {'frameTree': {'frame': {'id': 'frame', 'loaderId': 'blank', 'url': 'about:blank'}}}
+        return {'frameTree': {'frame': dict(frame)}}
+
+    client.send.Page.getFrameTree = AsyncMock(side_effect=frame_tree)
+    with patches[0], patches[1], pytest.raises(NavigationBlockedError):
+        await session.go_back(event_timeout=0.5)
+
+
+async def test_go_back_rejects_a_changed_document_binding():
+    session, client, _, _, patches = handler_fixture()
+    frame = _history_client(
+        client,
+        current_url='https://second.example/',
+        entries=[{'id': 1, 'url': 'https://first.example/'}, {'id': 2, 'url': 'https://second.example/'}],
+        current_index=1,
+    )
+
+    async def go_back(**kwargs):
+        frame.update(loaderId='next', url='https://first.example/')
+        frame_callback = client.register.Page.frameNavigated.call_args.args[0]
+        frame_callback({'frame': {'id': 'frame', 'loaderId': 'next', 'url': 'https://first.example/'}}, kwargs['session_id'])
+        lifecycle = client.register.Page.lifecycleEvent.call_args.args[0]
+        lifecycle({'frameId': 'frame', 'loaderId': 'next', 'name': 'load'}, kwargs['session_id'])
+        frame.update(loaderId='other')
+        return {}
+
+    client.send.Page.navigateToHistoryEntry = AsyncMock(side_effect=go_back)
+    with patches[0], patches[1], pytest.raises(NavigationError, match='live document binding changed'):
+        await session.go_back()
+
+
+async def test_go_back_rejects_a_blocked_final_url():
+    from types import SimpleNamespace
+
+    from openbrowser.browser.navigation import NavigationBlockedError
+    session, client, focus, _, patches = handler_fixture()
+    session._security_watchdog = SimpleNamespace(_is_url_allowed=lambda url: 'blocked' not in url)
+    frame = _history_client(
+        client,
+        current_url='https://second.example/',
+        entries=[{'id': 1, 'url': 'https://safe.example/one'}, {'id': 2, 'url': 'https://second.example/'}],
+        current_index=1,
+    )
+
+    async def go_back(**kwargs):
+        frame.update(loaderId='next', url='https://blocked.example/bad')
+        frame_callback = client.register.Page.frameNavigated.call_args.args[0]
+        frame_callback(
+            {'frame': {'id': 'frame', 'loaderId': 'next', 'url': 'https://blocked.example/bad'}}, focus.session_id
+        )
+        lifecycle = client.register.Page.lifecycleEvent.call_args.args[0]
+        lifecycle({'frameId': 'frame', 'loaderId': 'next', 'name': 'load'}, focus.session_id)
+        return {}
+
+    client.send.Page.navigateToHistoryEntry = AsyncMock(side_effect=go_back)
+    from openbrowser.browser.events import NavigationCompleteEvent
+
+    calls = []
+
+    def frame_tree(**kwargs):
+        calls.append(1)
+        if len(calls) >= 3:
+            return {'frameTree': {'frame': {'id': 'frame', 'loaderId': 'blank', 'url': 'about:blank'}}}
+        return {'frameTree': {'frame': dict(frame)}}
+
+    client.send.Page.getFrameTree = AsyncMock(side_effect=frame_tree)
+    with patches[0], patches[1], pytest.raises(NavigationBlockedError):
+        await session.go_back()
+    complete = [e for e in session.event_bus.dispatch._dispatched_events if isinstance(e, NavigationCompleteEvent)]
+    assert complete[-1].url == 'https://blocked.example/bad'
+
+
+async def test_blocked_containment_outlives_the_navigation_deadline():
+    from types import SimpleNamespace
+
+    from openbrowser.browser.navigation import NavigationBlockedError
+    session, client, focus, _, patches = handler_fixture()
+    session._security_watchdog = SimpleNamespace(_is_url_allowed=lambda url: 'blocked' not in url)
+    frame = _history_client(
+        client,
+        current_url='https://second.example/',
+        entries=[{'id': 1, 'url': 'https://safe.example/one'}, {'id': 2, 'url': 'https://second.example/'}],
+        current_index=1,
+    )
+
+    async def go_back(**kwargs):
+        frame.update(loaderId='next', url='https://blocked.example/bad')
+        frame_callback = client.register.Page.frameNavigated.call_args.args[0]
+        frame_callback(
+            {'frame': {'id': 'frame', 'loaderId': 'next', 'url': 'https://blocked.example/bad'}}, focus.session_id
+        )
+        lifecycle = client.register.Page.lifecycleEvent.call_args.args[0]
+        lifecycle({'frameId': 'frame', 'loaderId': 'next', 'name': 'load'}, focus.session_id)
+        return {}
+
+    client.send.Page.navigateToHistoryEntry = AsyncMock(side_effect=go_back)
+    calls = []
+
+    def slow_blank(**kwargs):
+        calls.append(1)
+        if len(calls) >= 3:
+            return {'frameTree': {'frame': {'id': 'frame', 'loaderId': 'blank', 'url': 'about:blank'}}}
+        return {'frameTree': {'frame': dict(frame)}}
+
+    client.send.Page.getFrameTree = AsyncMock(side_effect=slow_blank)
+    original_dispatch = session._await_navigation_event
+
+    async def slow_dispatch(bus, event):
+        from openbrowser.browser.events import NavigationCompleteEvent
+
+        if isinstance(event, NavigationCompleteEvent):
+            await asyncio.sleep(0.05)
+        return await original_dispatch(bus, event)
+
+    session._await_navigation_event = slow_dispatch
+    with patches[0], patches[1], pytest.raises(NavigationBlockedError):
+        await session.go_back(event_timeout=0.02)
+
+
+async def test_go_back_reports_unconfirmed_containment():
+    from types import SimpleNamespace
+
+    session, client, focus, _, patches = handler_fixture()
+    session._security_watchdog = SimpleNamespace(_is_url_allowed=lambda url: 'blocked' not in url)
+    session._confirm_blocked_containment = AsyncMock(return_value=False)
+    frame = _history_client(
+        client,
+        current_url='https://second.example/',
+        entries=[{'id': 1, 'url': 'https://safe.example/one'}, {'id': 2, 'url': 'https://second.example/'}],
+        current_index=1,
+    )
+
+    async def go_back(**kwargs):
+        frame.update(loaderId='next', url='https://blocked.example/bad')
+        frame_callback = client.register.Page.frameNavigated.call_args.args[0]
+        frame_callback(
+            {'frame': {'id': 'frame', 'loaderId': 'next', 'url': 'https://blocked.example/bad'}}, focus.session_id
+        )
+        lifecycle = client.register.Page.lifecycleEvent.call_args.args[0]
+        lifecycle({'frameId': 'frame', 'loaderId': 'next', 'name': 'load'}, focus.session_id)
+        return {}
+
+    client.send.Page.navigateToHistoryEntry = AsyncMock(side_effect=go_back)
+    with patches[0], patches[1], pytest.raises(NavigationError, match='containment was not confirmed'):
+        await session.go_back()
+
+
+async def test_go_forward_without_next_entry_fails_and_releases_the_lock():
+    session, client, _, _, patches = handler_fixture()
+    _history_client(
+        client,
+        current_url='https://only.example/',
+        entries=[{'id': 1, 'url': 'https://only.example/'}],
+        current_index=0,
+    )
+    with patches[0], patches[1], pytest.raises(NavigationError, match='no next history entry'):
+        await session.go_forward()
+    assert not session._navigation_lock.locked()
+
+
+async def test_go_back_cancellation_is_terminal_and_releases_the_lock():
+    session, client, _, _, patches = handler_fixture()
+    _history_client(
+        client,
+        current_url='https://second.example/',
+        entries=[{'id': 1, 'url': 'https://first.example/'}, {'id': 2, 'url': 'https://second.example/'}],
+        current_index=1,
+    )
+    sent = asyncio.Event()
+
+    async def go_back(**kwargs):
+        sent.set()
+        return {}
+
+    client.send.Page.navigateToHistoryEntry = AsyncMock(side_effect=go_back)
+    with patches[0], patches[1]:
+        task = asyncio.create_task(session.go_back())
+        await _wait_for_trigger(task, sent)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    assert session.lifecycle_snapshot()['navigation']['phase'] == 'cancelled'
+    assert not session._navigation_lock.locked()
+
+
+async def test_refresh_waits_for_the_new_loader():
+    from openbrowser.browser.events import NavigationCompleteEvent
+    session, client, focus, frame, patches = handler_fixture()
+    frame.update(url='https://site.test/page')
+    sent = asyncio.Event()
+
+    async def reload(**kwargs):
+        frame.update(loaderId='next')
+        sent.set()
+        return {}
+
+    client.send.Page.reload = AsyncMock(side_effect=reload)
+    with patches[0], patches[1]:
+        task = asyncio.create_task(session.refresh())
+        await _wait_for_trigger(task, sent)
+        callback = client.register.Page.frameNavigated.call_args.args[0]
+        callback({'frame': {'id': 'frame', 'loaderId': 'next', 'url': 'https://site.test/page'}}, focus.session_id)
+        await asyncio.sleep(1.1)
+        assert not task.done(), 'refresh must not complete on a fixed delay'
+        lifecycle = client.register.Page.lifecycleEvent.call_args.args[0]
+        lifecycle({'frameId': 'frame', 'loaderId': 'next', 'name': 'load'}, focus.session_id)
+        final_url = await asyncio.wait_for(task, 2.0)
+    assert final_url == 'https://site.test/page'
+    complete = [e for e in session.event_bus.dispatch._dispatched_events if isinstance(e, NavigationCompleteEvent)]
+    assert complete[-1].url == 'https://site.test/page'
 
 
 async def test_handler_timeout_is_terminal_and_releases_admission():

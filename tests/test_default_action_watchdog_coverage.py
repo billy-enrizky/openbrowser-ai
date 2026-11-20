@@ -682,56 +682,78 @@ class TestRequiresDirectValueAssignment:
 
 class TestNavigationEvents:
     @pytest.mark.asyncio
-    async def test_go_back(self):
-        session = _make_mock_browser_session()
-        cdp_session = _make_cdp_session_mock()
-        session.get_or_create_cdp_session = AsyncMock(return_value=cdp_session)
-        watchdog = _make_watchdog(session=session)
+    async def test_go_back_delegates_to_the_session(self):
+        from openbrowser.browser.events import GoBackEvent
 
-        event = MagicMock()
-        with patch("asyncio.sleep", new_callable=AsyncMock):
-            await watchdog.on_GoBackEvent(event)
-        cdp_session.cdp_client.send.Page.navigateToHistoryEntry.assert_awaited()
+        session = _make_mock_browser_session()
+        session.go_back = AsyncMock(return_value="https://previous.example/")
+        watchdog = _make_watchdog(session=session)
+        event = GoBackEvent()
+
+        url = await watchdog.on_GoBackEvent(event)
+
+        assert url == "https://previous.example/"
+        session.go_back.assert_awaited_once_with(
+            navigation_id=event.event_id, event_timeout=15.0
+        )
 
     @pytest.mark.asyncio
-    async def test_go_back_no_history(self):
+    async def test_go_back_propagates_no_history(self):
+        from openbrowser.browser.events import GoBackEvent
+        from openbrowser.browser.navigation import NavigationError
+
         session = _make_mock_browser_session()
-        cdp_session = _make_cdp_session_mock()
-        cdp_session.cdp_client.send.Page.getNavigationHistory = AsyncMock(return_value={
-            "currentIndex": 0, "entries": [{"id": 1, "url": "https://only.com"}]
-        })
-        session.get_or_create_cdp_session = AsyncMock(return_value=cdp_session)
+        session.go_back = AsyncMock(
+            side_effect=NavigationError("Cannot go back: no previous history entry")
+        )
         watchdog = _make_watchdog(session=session)
 
-        event = MagicMock()
-        await watchdog.on_GoBackEvent(event)
-        cdp_session.cdp_client.send.Page.navigateToHistoryEntry.assert_not_awaited()
+        with pytest.raises(NavigationError, match="no previous history entry"):
+            await watchdog.on_GoBackEvent(GoBackEvent())
 
     @pytest.mark.asyncio
-    async def test_go_forward(self):
+    async def test_go_back_translates_cancellation_for_the_event_bus(self):
+        import asyncio
+
+        from openbrowser.browser.events import GoBackEvent
+        from openbrowser.browser.navigation import NavigationError
+
         session = _make_mock_browser_session()
-        cdp_session = _make_cdp_session_mock()
-        session.get_or_create_cdp_session = AsyncMock(return_value=cdp_session)
+        session.go_back = AsyncMock(side_effect=asyncio.CancelledError())
         watchdog = _make_watchdog(session=session)
 
-        event = MagicMock()
-        with patch("asyncio.sleep", new_callable=AsyncMock):
-            await watchdog.on_GoForwardEvent(event)
-        cdp_session.cdp_client.send.Page.navigateToHistoryEntry.assert_awaited()
+        with pytest.raises(NavigationError, match='cancelled'):
+            await watchdog.on_GoBackEvent(GoBackEvent())
 
     @pytest.mark.asyncio
-    async def test_go_forward_no_next(self):
+    async def test_go_forward_delegates_to_the_session(self):
+        from openbrowser.browser.events import GoForwardEvent
+
         session = _make_mock_browser_session()
-        cdp_session = _make_cdp_session_mock()
-        cdp_session.cdp_client.send.Page.getNavigationHistory = AsyncMock(return_value={
-            "currentIndex": 0, "entries": [{"id": 1, "url": "https://only.com"}]
-        })
-        session.get_or_create_cdp_session = AsyncMock(return_value=cdp_session)
+        session.go_forward = AsyncMock(return_value="https://next.example/")
+        watchdog = _make_watchdog(session=session)
+        event = GoForwardEvent()
+
+        url = await watchdog.on_GoForwardEvent(event)
+
+        assert url == "https://next.example/"
+        session.go_forward.assert_awaited_once_with(
+            navigation_id=event.event_id, event_timeout=15.0
+        )
+
+    @pytest.mark.asyncio
+    async def test_go_forward_propagates_no_next(self):
+        from openbrowser.browser.events import GoForwardEvent
+        from openbrowser.browser.navigation import NavigationError
+
+        session = _make_mock_browser_session()
+        session.go_forward = AsyncMock(
+            side_effect=NavigationError("Cannot go forward: no next history entry")
+        )
         watchdog = _make_watchdog(session=session)
 
-        event = MagicMock()
-        await watchdog.on_GoForwardEvent(event)
-        cdp_session.cdp_client.send.Page.navigateToHistoryEntry.assert_not_awaited()
+        with pytest.raises(NavigationError, match="no next history entry"):
+            await watchdog.on_GoForwardEvent(GoForwardEvent())
 
 
 # ---------------------------------------------------------------------------
@@ -740,16 +762,20 @@ class TestNavigationEvents:
 
 class TestOnRefreshEvent:
     @pytest.mark.asyncio
-    async def test_refresh(self):
-        session = _make_mock_browser_session()
-        cdp_session = _make_cdp_session_mock()
-        session.get_or_create_cdp_session = AsyncMock(return_value=cdp_session)
-        watchdog = _make_watchdog(session=session)
+    async def test_refresh_delegates_to_the_session(self):
+        from openbrowser.browser.events import RefreshEvent
 
-        event = MagicMock()
-        with patch("asyncio.sleep", new_callable=AsyncMock):
-            await watchdog.on_RefreshEvent(event)
-        cdp_session.cdp_client.send.Page.reload.assert_awaited()
+        session = _make_mock_browser_session()
+        session.refresh = AsyncMock(return_value="https://site.example/")
+        watchdog = _make_watchdog(session=session)
+        event = RefreshEvent()
+
+        url = await watchdog.on_RefreshEvent(event)
+
+        assert url == "https://site.example/"
+        session.refresh.assert_awaited_once_with(
+            navigation_id=event.event_id, event_timeout=15.0
+        )
 
 
 # ---------------------------------------------------------------------------

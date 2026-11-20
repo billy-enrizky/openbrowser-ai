@@ -344,6 +344,20 @@ class TestGoBackAction:
         assert "Navigated back" in result.extracted_content
 
     @pytest.mark.asyncio
+    async def test_go_back_reports_the_final_url(self):
+        tools = Tools()
+        session = _make_mock_browser_session()
+        event = _make_awaitable_event(result="https://final.example/")
+        session.event_bus.dispatch = MagicMock(return_value=event)
+
+        result = await tools.registry.execute_action(
+            "go_back",
+            {},
+            browser_session=session,
+        )
+        assert result.extracted_content == "Navigated back to https://final.example/"
+
+    @pytest.mark.asyncio
     async def test_go_back_failure(self):
         tools = Tools()
         session = _make_mock_browser_session()

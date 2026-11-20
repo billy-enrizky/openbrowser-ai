@@ -20,6 +20,7 @@ from openbrowser.browser.events import (
 	UploadFileEvent,
 	WaitEvent,
 )
+from openbrowser.browser.navigation import NavigationError
 from openbrowser.browser.views import BrowserError, URLNotAllowedError
 from openbrowser.browser.watchdog_base import BaseWatchdog
 from openbrowser.dom.service import EnhancedDOMTreeNode
@@ -1781,81 +1782,38 @@ class DefaultActionWatchdog(BaseWatchdog):
 		assert self.browser_session.agent_focus is not None, 'CDP session not initialized - browser may not be connected yet'
 		return self.browser_session.agent_focus.session_id
 
-	async def on_GoBackEvent(self, event: GoBackEvent) -> None:
-		"""Handle navigate back request with CDP."""
-		cdp_session = await self.browser_session.get_or_create_cdp_session()
+	async def on_GoBackEvent(self, event: GoBackEvent) -> str:
+		"""Go back one history entry and wait for the page load."""
 		try:
-			# Get CDP client and session
-
-			# Get navigation history
-			history = await cdp_session.cdp_client.send.Page.getNavigationHistory(session_id=cdp_session.session_id)
-			current_index = history['currentIndex']
-			entries = history['entries']
-
-			# Check if we can go back
-			if current_index <= 0:
-				self.logger.warning('⚠️ Cannot go back - no previous entry in history')
-				return
-
-			# Navigate to the previous entry
-			previous_entry_id = entries[current_index - 1]['id']
-			await cdp_session.cdp_client.send.Page.navigateToHistoryEntry(
-				params={'entryId': previous_entry_id}, session_id=cdp_session.session_id
+			url = await self.browser_session.go_back(
+				navigation_id=event.event_id, event_timeout=event.event_timeout
 			)
+		except asyncio.CancelledError as error:
+			raise NavigationError('Go back was cancelled') from error
+		self.logger.info(f'🔙 Navigated back to {url}')
+		return url
 
-			# Wait for navigation
-			await asyncio.sleep(0.5)
-			# Navigation is handled by BrowserSession via events
-
-			self.logger.info(f'🔙 Navigated back to {entries[current_index - 1]["url"]}')
-		except Exception as e:
-			raise
-
-	async def on_GoForwardEvent(self, event: GoForwardEvent) -> None:
-		"""Handle navigate forward request with CDP."""
-		cdp_session = await self.browser_session.get_or_create_cdp_session()
+	async def on_GoForwardEvent(self, event: GoForwardEvent) -> str:
+		"""Go forward one history entry and wait for the page load."""
 		try:
-			# Get navigation history
-			history = await cdp_session.cdp_client.send.Page.getNavigationHistory(session_id=cdp_session.session_id)
-			current_index = history['currentIndex']
-			entries = history['entries']
-
-			# Check if we can go forward
-			if current_index >= len(entries) - 1:
-				self.logger.warning('⚠️ Cannot go forward - no next entry in history')
-				return
-
-			# Navigate to the next entry
-			next_entry_id = entries[current_index + 1]['id']
-			await cdp_session.cdp_client.send.Page.navigateToHistoryEntry(
-				params={'entryId': next_entry_id}, session_id=cdp_session.session_id
+			url = await self.browser_session.go_forward(
+				navigation_id=event.event_id, event_timeout=event.event_timeout
 			)
+		except asyncio.CancelledError as error:
+			raise NavigationError('Go forward was cancelled') from error
+		self.logger.info(f'🔜 Navigated forward to {url}')
+		return url
 
-			# Wait for navigation
-			await asyncio.sleep(0.5)
-			# Navigation is handled by BrowserSession via events
-
-			self.logger.info(f'🔜 Navigated forward to {entries[current_index + 1]["url"]}')
-		except Exception as e:
-			raise
-
-	async def on_RefreshEvent(self, event: RefreshEvent) -> None:
-		"""Handle target refresh request with CDP."""
-		cdp_session = await self.browser_session.get_or_create_cdp_session()
+	async def on_RefreshEvent(self, event: RefreshEvent) -> str:
+		"""Reload the target and wait for the new document to load."""
 		try:
-			# Reload the target
-			await cdp_session.cdp_client.send.Page.reload(session_id=cdp_session.session_id)
-
-			# Wait for reload
-			await asyncio.sleep(1.0)
-
-			# Note: We don't clear cached state here - let the next state fetch rebuild as needed
-
-			# Navigation is handled by BrowserSession via events
-
-			self.logger.info('🔄 Target refreshed')
-		except Exception as e:
-			raise
+			url = await self.browser_session.refresh(
+				navigation_id=event.event_id, event_timeout=event.event_timeout
+			)
+		except asyncio.CancelledError as error:
+			raise NavigationError('Refresh was cancelled') from error
+		self.logger.info(f'🔄 Target refreshed: {url}')
+		return url
 
 	@observe_debug(ignore_input=True, ignore_output=True, name='wait_event_handler')
 	async def on_WaitEvent(self, event: WaitEvent) -> None:

@@ -222,7 +222,8 @@ class Tools(Generic[Context]):
 			try:
 				event = browser_session.event_bus.dispatch(GoBackEvent())
 				await event
-				memory = 'Navigated back'
+				final_url = await event.event_result(raise_if_any=True, raise_if_none=False)
+				memory = f'Navigated back to {final_url}' if isinstance(final_url, str) and final_url else 'Navigated back'
 				msg = f'🔙  {memory}'
 				logger.info(msg)
 				return ActionResult(extracted_content=memory)
