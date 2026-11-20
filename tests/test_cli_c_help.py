@@ -5,6 +5,7 @@ import asyncio
 import os
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import uuid
@@ -16,13 +17,23 @@ import pytest
 
 def _run_cli(*args: str, env: dict | None = None) -> subprocess.CompletedProcess:
     """Run the CLI entry-point as a subprocess."""
+    merged = dict(os.environ)
+    if env:
+        merged.update(env)
     return subprocess.run(
         [sys.executable, '-m', 'openbrowser.cli', *args],
         capture_output=True,
         text=True,
         timeout=30,
-        env=env,
+        env=merged,
     )
+
+
+@pytest.fixture()
+def short_socket_env():
+    root = '/tmp' if os.name != 'nt' else None
+    with tempfile.TemporaryDirectory(prefix='ob_', dir=root) as tmp:
+        yield {'OPENBROWSER_SOCKET': str(Path(tmp) / 'd.sock')}
 
 
 class TestCliCHelp:
@@ -53,37 +64,27 @@ class TestCliCHelp:
         result = _run_cli('-c')
         assert 'evaluate' in result.stdout
 
-    def test_c_no_arg_verbose_when_daemon_not_running(self):
+    def test_c_no_arg_verbose_when_daemon_not_running(self, short_socket_env):
         """When daemon is not running, output should be the verbose description with section headers."""
-        # Stop daemon first to ensure cold-start path
-        subprocess.run(
-            [sys.executable, '-m', 'openbrowser.cli', 'daemon', 'stop'],
-            capture_output=True,
-            timeout=10,
-        )
-        result = _run_cli('-c')
+        env = short_socket_env
+        _run_cli('daemon', 'stop', env=env)
+        result = _run_cli('-c', env=env)
         assert result.returncode == 0
         # Verbose description has the '## Navigation' section header
         assert '## Navigation' in result.stdout
 
-    def test_c_no_arg_compact_when_daemon_running(self):
+    def test_c_no_arg_compact_when_daemon_running(self, short_socket_env):
         """When daemon is already running, output should be the compact description."""
-        # Ensure daemon is started
-        subprocess.run(
-            [sys.executable, '-m', 'openbrowser.cli', 'daemon', 'start'],
-            capture_output=True,
-            timeout=20,
-        )
-        result = _run_cli('-c')
-        assert result.returncode == 0
-        # Compact description has '## Core Functions' but NOT '## Navigation'
-        assert '## Core Functions' in result.stdout
-        # Clean up: stop the daemon
-        subprocess.run(
-            [sys.executable, '-m', 'openbrowser.cli', 'daemon', 'stop'],
-            capture_output=True,
-            timeout=10,
-        )
+        env = short_socket_env
+        try:
+            started = _run_cli('daemon', 'start', env=env)
+            assert started.returncode == 0, started.stderr
+            result = _run_cli('-c', env=env)
+            assert result.returncode == 0
+            # Compact description has '## Core Functions' but NOT '## Navigation'
+            assert '## Core Functions' in result.stdout
+        finally:
+            _run_cli('daemon', 'stop', env=env)
 
     def test_c_with_code_still_works(self):
         """openbrowser-ai -c 'print(1+1)' should execute code via a mock daemon."""
