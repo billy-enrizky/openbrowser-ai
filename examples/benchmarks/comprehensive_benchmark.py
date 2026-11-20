@@ -108,7 +108,7 @@ async def run_agent_task(task_name: str, instruction: str) -> dict:
         browser = Browser(browser_profile=browser_profile)
         
         agent = Agent(task=instruction, llm=llm, browser=browser, max_failures=5, max_actions_per_step=10)
-        result = await agent.run()
+        await agent.run()
         
         execution_time = time.time() - start_time
         steps = len(result.history) if result else 0
@@ -167,8 +167,9 @@ async def run_code_agent_task(task_name: str, instruction: str) -> dict:
         
         execution_time = time.time() - start_time
         steps = len(agent.complete_history) if hasattr(agent, 'complete_history') else 0
-        success = result is not None
-        final_output = str(result.output)[:200] if result and hasattr(result, 'output') else None
+        status = agent.status
+        success = status.success is True
+        final_output = str(status.result)[:200] if status.result is not None else None
         
         logger.info(f"[CodeAgent] Done: {task_name} in {execution_time:.2f}s, steps={steps}, success={success}")
         
@@ -179,7 +180,7 @@ async def run_code_agent_task(task_name: str, instruction: str) -> dict:
             "execution_time": execution_time,
             "steps": steps,
             "final_output": final_output,
-            "error": None
+            "error": status.error,
         }
     except Exception as e:
         execution_time = time.time() - start_time

@@ -140,7 +140,7 @@ async def run_agent_task(task_name: str, instruction: str) -> TaskResult:
             max_actions_per_step=10,
         )
         
-        result = await agent.run()
+        await agent.run()
         execution_time = time.time() - start_time
         
         # Check for output files
@@ -247,15 +247,11 @@ async def run_code_agent_task(task_name: str, instruction: str) -> TaskResult:
                     output_files.append(f.name)
         
         # Get final output
-        final_output = None
-        if result and hasattr(result, 'output'):
-            final_output = result.output
+        status = agent.status
+        final_output = status.result
         
         # Determine success
-        success = result is not None and (
-            hasattr(result, 'success') and result.success or
-            hasattr(result, 'status') and result.status == 'completed'
-        )
+        success = status.success is True
         
         steps_taken = len(agent.complete_history) if hasattr(agent, 'complete_history') else 0
         
@@ -267,6 +263,7 @@ async def run_code_agent_task(task_name: str, instruction: str) -> TaskResult:
             task_instruction=instruction,
             success=success,
             execution_time=execution_time,
+            error_message=status.error,
             output_files=output_files,
             steps_taken=steps_taken,
             final_output=final_output
