@@ -220,7 +220,7 @@ jobs:
             fi
           }
 
-          run_group test-parallel parallel.txt auto \
+          run_group test-parallel parallel.txt 4 \
             "junit-${{ matrix.os }}-${{ matrix.shard }}-parallel.xml"
           run_group test-serial serial.txt 0 \
             "junit-${{ matrix.os }}-${{ matrix.shard }}-serial.xml"
