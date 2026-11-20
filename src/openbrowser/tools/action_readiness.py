@@ -67,7 +67,11 @@ class ActionReadinessError(ValueError):
 
 
 def _bounded_repr(value: Any, limit: int = 120) -> str:
-	text = repr(value)
+	"""Render a value safely, even beyond CPython's integer digit limit."""
+	try:
+		text = repr(value)
+	except Exception:
+		return f'<unrepresentable {type(value).__name__}>'
 	if len(text) <= limit:
 		return text
 	return f'{text[:limit]}... ({len(text)} chars)'
@@ -136,7 +140,7 @@ def validate_index_value(index: Any, *, action: str | None = None) -> int:
 	if value < 1:
 		raise ActionReadinessError(
 			ActionReadinessCode.INVALID,
-			f'element indexes are 1-based; got {value}.',
+			f'element indexes are 1-based; got {_bounded_repr(value)}.',
 			action=action,
 		)
 	return value
@@ -148,7 +152,7 @@ def available_index_summary(selector_map: dict[int, Any]) -> str:
 	if not indexes:
 		return 'none'
 	sample = indexes[:_AVAILABLE_SAMPLE]
-	text = ', '.join(str(index) for index in sample)
+	text = ', '.join(_bounded_repr(index) for index in sample)
 	if len(indexes) > _AVAILABLE_SAMPLE:
 		text += f' (showing {_AVAILABLE_SAMPLE} of {len(indexes)})'
 	return text
@@ -172,7 +176,7 @@ def require_element_index(
 		available = available_index_summary(selector_map)
 		raise ActionReadinessError(
 			ActionReadinessCode.STALE,
-			f'index {index} is not in the current browser state. Available indexes: {available}.',
+			f'index {_bounded_repr(index)} is not in the current browser state. Available indexes: {available}.',
 			action=action,
 		)
 	return index

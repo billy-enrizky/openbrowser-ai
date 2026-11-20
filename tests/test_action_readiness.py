@@ -109,6 +109,22 @@ def test_rejected_values_are_not_echoed_in_full():
 	assert len(message) < 700
 
 
+def test_huge_integers_never_escape_as_formatting_errors():
+	with pytest.raises(ActionReadinessError) as exc_info:
+		validate_index_value(-(10**5000), action='click')
+
+	assert exc_info.value.code is ActionReadinessCode.INVALID
+	assert 'unrepresentable int' in str(exc_info.value)
+	assert len(str(exc_info.value)) < 700
+
+	with pytest.raises(ActionReadinessError) as exc_info:
+		require_element_index(10**5000, selector_map=_map(1), action='click')
+
+	assert exc_info.value.code is ActionReadinessCode.STALE
+	assert 'unrepresentable int' in str(exc_info.value)
+	assert len(str(exc_info.value)) < 700
+
+
 def test_long_browser_state_labels_are_bounded():
 	with pytest.raises(ActionReadinessError) as exc_info:
 		validate_index_value('i_' + '9' * 1000, action='click')
@@ -269,6 +285,9 @@ def test_descriptions_explain_the_readiness_contract():
 	for description in (EXECUTE_CODE_DESCRIPTION, EXECUTE_CODE_DESCRIPTION_COMPACT):
 		assert 'ActionReadinessError' in description
 		assert 'latest browser state' in description
+
+	assert 'stale index fails the action' in EXECUTE_CODE_DESCRIPTION_COMPACT
+	assert 'RuntimeError' in EXECUTE_CODE_DESCRIPTION
 
 
 # ---------------------------------------------------------------------------
