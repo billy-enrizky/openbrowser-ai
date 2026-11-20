@@ -343,6 +343,8 @@ def test_openbrowser_benchmark_profile_disables_default_extensions(tmp_path):
     assert captured['enable_default_extensions'] is False
     assert captured['headless'] is True
     assert captured['args'] == ['--use-mock-keychain']
+    assert captured['user_data_dir'] == tmp_path / 'profile'
+    assert captured['downloads_path'] == tmp_path / 'downloads'
 
 
 def test_executable_metadata_accepts_an_arm_specific_version_command(tmp_path):
