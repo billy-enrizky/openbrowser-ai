@@ -110,19 +110,26 @@ def test_rejected_values_are_not_echoed_in_full():
 
 
 def test_huge_integers_never_escape_as_formatting_errors():
-	with pytest.raises(ActionReadinessError) as exc_info:
-		validate_index_value(-(10**5000), action='click')
+	import sys
 
-	assert exc_info.value.code is ActionReadinessCode.INVALID
-	assert 'unrepresentable int' in str(exc_info.value)
-	assert len(str(exc_info.value)) < 700
+	previous = sys.get_int_max_str_digits()
+	sys.set_int_max_str_digits(4300)
+	try:
+		with pytest.raises(ActionReadinessError) as exc_info:
+			validate_index_value(-(10**5000), action='click')
 
-	with pytest.raises(ActionReadinessError) as exc_info:
-		require_element_index(10**5000, selector_map=_map(1), action='click')
+		assert exc_info.value.code is ActionReadinessCode.INVALID
+		assert 'unrepresentable int' in str(exc_info.value)
+		assert len(str(exc_info.value)) < 700
 
-	assert exc_info.value.code is ActionReadinessCode.STALE
-	assert 'unrepresentable int' in str(exc_info.value)
-	assert len(str(exc_info.value)) < 700
+		with pytest.raises(ActionReadinessError) as exc_info:
+			require_element_index(10**5000, selector_map=_map(1), action='click')
+
+		assert exc_info.value.code is ActionReadinessCode.STALE
+		assert 'unrepresentable int' in str(exc_info.value)
+		assert len(str(exc_info.value)) < 700
+	finally:
+		sys.set_int_max_str_digits(previous)
 
 
 def test_long_browser_state_labels_are_bounded():
@@ -276,6 +283,31 @@ def test_scroll_keeps_its_zero_sentinel_and_rejects_labels():
 	assert 'Pass 3 without' in str(exc_info.value)
 
 
+@pytest.mark.parametrize('index', [True, -1])
+def test_scroll_rejects_booleans_and_negative_indexes(index):
+	from openbrowser.tools.views import ScrollAction
+
+	with pytest.raises(ValidationError) as exc_info:
+		ScrollAction(down=True, index=index)
+
+	assert 'Action readiness' in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_scroll_stale_index_returns_the_typed_message():
+	from openbrowser.tools.views import ScrollAction
+
+	result = await _action('scroll')(
+		params=ScrollAction(down=True, pages=1.0, index=9),
+		browser_session=_FakeBrowser(_map(1)),
+	)
+
+	assert result.error is not None
+	assert 'element_index_stale' in result.error
+	assert 'scroll()' in result.error
+	assert result.extracted_content is None
+
+
 def test_descriptions_explain_the_readiness_contract():
 	from openbrowser.code_use.descriptions import (
 		EXECUTE_CODE_DESCRIPTION,
@@ -336,8 +368,23 @@ async def test_namespace_wrapper_handles_an_omitted_index():
 		await namespace['click']()
 
 	assert exc_info.value.code is ActionReadinessCode.MISSING
+	assert exc_info.value.action == 'click'
 	assert 'get_status' in str(exc_info.value)
 	tools.action.function.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_namespace_wrapper_reports_the_public_input_text_name():
+	from openbrowser.code_use.namespace import create_namespace
+
+	tools = _NamespaceTools(InputTextAction, action_name='input')
+	namespace = create_namespace(_FakeBrowser(_map(1)), tools=tools)
+
+	with pytest.raises(ActionReadinessError) as exc_info:
+		await namespace['input_text'](index=None, text='hello')
+
+	assert exc_info.value.action == 'input_text'
+	assert 'input()' not in str(exc_info.value)
 
 
 @pytest.mark.asyncio

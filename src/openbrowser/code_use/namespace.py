@@ -848,7 +848,7 @@ def create_namespace(
 				except ValidationError as e:
 					readiness = readiness_error_from_validation_error(e)
 					if readiness is not None:
-						raise readiness from e
+						raise readiness.with_action(act_name) from e
 					raise ValueError(f'Invalid parameters for {act_name}: {e}') from e
 				except Exception as e:
 					raise ValueError(f'Invalid parameters for {act_name}: {e}') from e
@@ -947,7 +947,7 @@ def create_namespace(
 		namespace_action_name = 'input_text' if action_name == 'input' else action_name
 
 		# Add the wrapper to the namespace
-		namespace[namespace_action_name] = make_action_wrapper(action_name, param_model, action_function)
+		namespace[namespace_action_name] = make_action_wrapper(namespace_action_name, param_model, action_function)
 
 	return namespace
 

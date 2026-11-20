@@ -65,6 +65,10 @@ class ActionReadinessError(ValueError):
 		prefix = f'{self.action}() ' if self.action else ''
 		return f'Action readiness [{self.code.value}]: {prefix}{self.detail} {self.hint}'
 
+	def with_action(self, action: str) -> 'ActionReadinessError':
+		"""Return the same failure named by the public callable."""
+		return ActionReadinessError(self.code, self.detail, action=action, hint=self.hint)
+
 
 def _bounded_repr(value: Any, limit: int = 120) -> str:
 	"""Render a value safely, even beyond CPython's integer digit limit."""
