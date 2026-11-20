@@ -12,7 +12,6 @@ Performance optimizations:
 """
 
 import asyncio
-import inspect
 import logging
 import time
 from typing import TYPE_CHECKING, Literal, TypedDict
@@ -23,8 +22,11 @@ if TYPE_CHECKING:
     from openbrowser.agent.service import Agent
 
 from openbrowser.agent.views import (
+    TERMINAL_AGENT_RUN_PHASES,
     ActionResult,
     AgentHistoryList,
+    AgentRunInterrupted,
+    AgentRunPhase,
     AgentStepInfo,
     StepMetadata,
 )
@@ -40,7 +42,6 @@ class GraphState(TypedDict, total=False):
     step_number: int
     max_steps: int
     is_done: bool
-    consecutive_failures: int
 
 
 class AgentGraphBuilder:
@@ -63,7 +64,7 @@ class AgentGraphBuilder:
         self._max_failures = agent.settings.max_failures + int(agent.settings.final_response_after_failure)
         self.graph = self._build_graph()
     
-    def _build_graph(self) -> StateGraph:
+    def _build_graph(self):
         """Build minimal StateGraph: START -> step -> [continue/done/error]."""
         graph = StateGraph(GraphState)
         graph.add_node("step", self._step_node)
@@ -83,11 +84,10 @@ class AgentGraphBuilder:
         t0 = time.time()
         step = state.get("step_number", 0)
         max_steps = state.get("max_steps", 100)
-        failures = state.get("consecutive_failures", 0)
-        
         # Local variable for faster access
         agent = self.agent
-        agent.logger.info(f'\nStep {step}:')
+        agent.state.n_steps = agent._current_step_number(step)
+        agent.logger.info(f'\nStep {agent.state.n_steps}:')
         
         try:
             # Single stop/pause check
@@ -130,6 +130,7 @@ class AgentGraphBuilder:
                 agent._force_done_after_last_step(step_info),
                 agent._force_done_after_failure(),
             )
+            await agent._check_stop_or_pause()
             
             # === PLAN ===
             model_output = await asyncio.wait_for(
@@ -137,6 +138,7 @@ class AgentGraphBuilder:
                 timeout=agent.settings.llm_timeout
             )
             agent.state.last_model_output = model_output
+            await agent._check_stop_or_pause()
             
             # Post-LLM processing (parallel with action check)
             if browser_state:
@@ -156,58 +158,126 @@ class AgentGraphBuilder:
                 
                 is_done = any(r.is_done for r in results if r)
                 
-                # Update failures
-                if any(r.error for r in results if r) and len(results) == 1:
-                    failures += 1
-                elif failures > 0:
-                    failures = 0
-                agent.state.consecutive_failures = failures
+                # Update the single failure counter in AgentState
+                if any(r.error for r in results if r):
+                    agent.state.consecutive_failures += 1
+                elif agent.state.consecutive_failures > 0:
+                    agent.state.consecutive_failures = 0
                 
                 # Log final result
                 if results and results[-1].is_done:
                     agent.logger.info(f'\n Final Result:\n{results[-1].extracted_content}\n\n')
             else:
-                failures += 1
-            
+                agent.state.consecutive_failures += 1
+                agent.state.last_result = [ActionResult(error='The model returned no actions')]
+
             # === FINALIZE ===
             t1 = time.time()
+            history_count_before = len(agent.history.history)
             
             # History item creation
             if results and browser_state:
                 await agent._make_history_item(
                     model_output, browser_state, results,
-                    StepMetadata(step_number=step, step_start_time=t0, step_end_time=t1),
+                    StepMetadata(step_number=agent.state.n_steps, step_start_time=t0, step_end_time=t1),
                     state_message=agent._message_manager.last_state_message_text,
                 )
+
+            history_item_added = len(agent.history.history) > history_count_before
+            if agent.state.stopped:
+                agent._neutralize_unaccepted_done()
+                raise AgentRunInterrupted(agent._pending_stop_reason or 'stopped')
+            is_done = bool(
+                history_item_added
+                and agent.history.history[-1].result
+                and agent.history.history[-1].result[-1].is_done is True
+            )
             
             # Fast sync operations
-            agent.save_file_system_state()
-            agent.state.n_steps = step + 1
-            
-            return {"step_number": step + 1, "is_done": is_done, "consecutive_failures": failures}
-            
+            try:
+                agent.save_file_system_state()
+            except Exception as error:
+                if not is_done:
+                    raise
+                agent.logger.error(f'Failed to save file system state after accepted done: {error}')
+            return {
+                "step_number": step + 1,
+                "is_done": is_done,
+            }
+
+        except AgentRunInterrupted as error:
+            agent.logger.info(f'Interrupted: {error.reason}')
+            agent._finish_run(AgentRunPhase.STOPPED, error.reason, False)
+            return {
+                "step_number": step + 1,
+                "is_done": False,
+            }
         except InterruptedError:
             agent.logger.info('Interrupted')
-            return {"step_number": step + 1, "is_done": True}
+            agent._finish_run(AgentRunPhase.STOPPED, 'external_interrupt', False)
+            return {
+                "step_number": step + 1,
+                "is_done": False,
+            }
         except asyncio.TimeoutError:
             agent.logger.error("LLM timeout")
-            return {"step_number": step + 1, "consecutive_failures": failures + 1}
+            if agent.state.stopped:
+                agent._finish_run(AgentRunPhase.STOPPED, 'stopped', False)
+                return {
+                    "step_number": step + 1,
+                    "is_done": False,
+                }
+            agent.state.consecutive_failures += 1
+            agent.state.last_result = [ActionResult(error='LLM timeout')]
+            return {
+                "step_number": step + 1,
+                "is_done": False,
+            }
         except Exception as e:
             logger.error(f"Step error: {e}")
+            if agent.state.stopped:
+                agent._finish_run(AgentRunPhase.STOPPED, 'stopped', False)
+                return {
+                    "step_number": step + 1,
+                    "is_done": False,
+                }
             agent.state.last_result = [ActionResult(error=str(e))]
-            return {"step_number": step + 1, "consecutive_failures": failures + 1}
+            agent.state.consecutive_failures += 1
+            return {
+                "step_number": step + 1,
+                "is_done": False,
+            }
     
     def _should_continue(self, state: GraphState) -> Literal["continue", "done", "error"]:
         """Fast routing decision."""
+        agent = self.agent
+        if agent._run_phase in TERMINAL_AGENT_RUN_PHASES:
+            return "error" if agent._run_phase is AgentRunPhase.FAILED else "done"
+        if agent.state.stopped:
+            agent._neutralize_unaccepted_done()
+            agent._finish_run(AgentRunPhase.STOPPED, agent._pending_stop_reason or 'stopped', False)
+            return "done"
         if state.get("is_done"):
-            self.agent.logger.info('Task completed')
-            return "done"
-        if self.agent.state.stopped or self.agent.state.paused:
-            return "done"
-        if state.get("step_number", 0) >= state.get("max_steps", 100):
-            return "done"
-        if state.get("consecutive_failures", 0) >= self._max_failures:
+            phase = agent._done_terminal_phase()
+            success = phase is AgentRunPhase.SUCCEEDED
+            reason = 'done' if success else (
+                'done_failed' if agent.history.is_successful() is False else 'done_without_success'
+            )
+            agent._finish_run(phase, reason, success)
+            if success:
+                agent.logger.info('Task completed')
+            return "done" if success else "error"
+        if agent.state.consecutive_failures >= self._max_failures:
+            agent._finish_run(
+                AgentRunPhase.FAILED,
+                'max_failures',
+                False,
+                error=f'{agent.state.consecutive_failures} consecutive failures',
+            )
             return "error"
+        if state.get("step_number", 0) >= state.get("max_steps", 100):
+            agent._finish_run(AgentRunPhase.MAX_STEPS, 'max_steps', False)
+            return "done"
         return "continue"
     
     async def run(self, max_steps: int = 100) -> AgentHistoryList:
@@ -216,18 +286,15 @@ class AgentGraphBuilder:
             "step_number": 0,
             "max_steps": max_steps,
             "is_done": False,
-            "consecutive_failures": 0
         }
-        await self.graph.ainvoke(state, config={"recursion_limit": max_steps + 10})
-        
-        if self.agent.history.is_done():
-            await self.agent.log_completion()
-            cb = self.agent.register_done_callback
-            if cb:
-                if inspect.iscoroutinefunction(cb):
-                    await cb(self.agent.history)
-                else:
-                    cb(self.agent.history)
+        if self.agent._run_phase not in TERMINAL_AGENT_RUN_PHASES:
+            await self.graph.ainvoke(state, config={"recursion_limit": max_steps + 10})
+
+        if self.agent._run_phase not in TERMINAL_AGENT_RUN_PHASES:
+            self.agent._finish_run(AgentRunPhase.FAILED, 'missing_terminal_state', False)
+
+        if self.agent._run_success is True:
+            await self.agent._publish_completion()
         
         return self.agent.history
 

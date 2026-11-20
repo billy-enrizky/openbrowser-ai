@@ -63,6 +63,8 @@ class AgentTelemetryEvent(BaseTelemetryEvent):
 	success: bool | None
 	final_result_response: str | None
 	error_message: str | None
+	terminal_phase: str | None = None
+	terminal_reason: str | None = None
 
 	name: str = field(default='agent_event', repr=False)
 

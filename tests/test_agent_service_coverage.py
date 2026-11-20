@@ -5,18 +5,15 @@ All LLM calls, browser connections, and external services are mocked.
 """
 
 import asyncio
-import gc
-import json
 import logging
-import re
 import tempfile
 import time
 from pathlib import Path
-from typing import Any, Optional
-from unittest.mock import AsyncMock, MagicMock, PropertyMock, call, patch
+from typing import Optional
+from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
-from pydantic import BaseModel, Field, ValidationError, create_model
+from pydantic import BaseModel, ValidationError, create_model
 
 logger = logging.getLogger(__name__)
 
@@ -599,21 +596,27 @@ class TestAgentInit:
 
     def test_pause(self):
         agent = self._create_agent()
+        from openbrowser.agent.views import AgentRunPhase
+        agent._run_phase = AgentRunPhase.RUNNING
         with patch("builtins.print"):
-            agent.pause()
+            assert agent.pause() is True
         assert agent.state.paused is True
 
     def test_resume(self):
         agent = self._create_agent()
+        from openbrowser.agent.views import AgentRunPhase
+        agent._run_phase = AgentRunPhase.RUNNING
         with patch("builtins.print"):
             agent.pause()
         with patch("builtins.print"):
-            agent.resume()
+            assert agent.resume() is True
         assert agent.state.paused is False
 
     def test_stop(self):
         agent = self._create_agent()
-        agent.stop()
+        from openbrowser.agent.views import AgentRunPhase
+        agent._run_phase = AgentRunPhase.RUNNING
+        assert agent.stop() is True
         assert agent.state.stopped is True
 
     def test_save_history_default_path(self, tmp_path):
@@ -673,8 +676,6 @@ class TestAgentInit:
         agent = self._create_agent()
         from openbrowser.agent.views import AgentOutput
 
-        ActionModel = _get_action_model_base()
-        CustomAction = create_model("CA", __base__=ActionModel, done=(Optional[dict], None))
         parsed = AgentOutput(
             evaluation_previous_goal="ok",
             memory="mem",
@@ -859,8 +860,28 @@ class TestAgentAsyncMethods:
     async def test_check_stop_or_pause_paused(self):
         agent = self._create_agent()
         agent.state.paused = True
-        with pytest.raises(InterruptedError):
-            await agent._check_stop_or_pause()
+        agent._external_pause_event.clear()
+        check = asyncio.create_task(agent._check_stop_or_pause())
+        await asyncio.sleep(0)
+        assert not check.done()
+        with patch("builtins.print"):
+            assert agent.resume() is True
+        await asyncio.wait_for(check, timeout=1)
+
+    @pytest.mark.asyncio
+    async def test_check_stop_or_pause_paused_then_stopped(self):
+        from openbrowser.agent.views import AgentRunInterrupted, AgentRunPhase
+
+        agent = self._create_agent()
+        agent._run_phase = AgentRunPhase.RUNNING
+        agent.state.paused = True
+        agent._external_pause_event.clear()
+        check = asyncio.create_task(agent._check_stop_or_pause())
+        await asyncio.sleep(0)
+        assert agent.stop() is True
+
+        with pytest.raises(AgentRunInterrupted, match='stopped'):
+            await asyncio.wait_for(check, timeout=1)
 
     @pytest.mark.asyncio
     async def test_check_stop_or_pause_should_stop_callback(self):
@@ -1676,7 +1697,6 @@ class TestAgentAsyncMethods:
     @pytest.mark.asyncio
     async def test_take_step_first_step(self):
         from openbrowser.agent.views import AgentStepInfo
-        from openbrowser.models import ActionResult
 
         agent = self._create_agent()
         step_info = AgentStepInfo(step_number=0, max_steps=10)
@@ -1711,10 +1731,11 @@ class TestAgentAsyncMethods:
 
         with patch.object(agent, "step", new_callable=AsyncMock):
             with patch.object(type(agent.history), "is_done", return_value=True):
-                with patch.object(agent, "log_completion", new_callable=AsyncMock):
-                    is_done, _ = await agent.take_step(step_info)
-                    assert is_done is True
-                    done_callback.assert_called_once()
+                with patch.object(type(agent.history), "is_successful", return_value=True):
+                    with patch.object(agent, "log_completion", new_callable=AsyncMock):
+                        is_done, _ = await agent.take_step(step_info)
+                        assert is_done is True
+                        done_callback.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_take_step_done_with_async_callback(self):
@@ -1727,10 +1748,11 @@ class TestAgentAsyncMethods:
 
         with patch.object(agent, "step", new_callable=AsyncMock):
             with patch.object(type(agent.history), "is_done", return_value=True):
-                with patch.object(agent, "log_completion", new_callable=AsyncMock):
-                    is_done, _ = await agent.take_step(step_info)
-                    assert is_done is True
-                    done_callback.assert_called_once()
+                with patch.object(type(agent.history), "is_successful", return_value=True):
+                    with patch.object(agent, "log_completion", new_callable=AsyncMock):
+                        is_done, _ = await agent.take_step(step_info)
+                        assert is_done is True
+                        done_callback.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_take_step_first_step_interrupted(self):
@@ -1773,7 +1795,6 @@ class TestAgentAsyncMethods:
     @pytest.mark.asyncio
     async def test_execute_step_timeout(self):
         from openbrowser.agent.views import AgentStepInfo
-        from openbrowser.models import ActionResult
 
         agent = self._create_agent()
         step_info = AgentStepInfo(step_number=0, max_steps=10)
@@ -1810,10 +1831,11 @@ class TestAgentAsyncMethods:
 
         with patch.object(agent, "step", new_callable=AsyncMock):
             with patch.object(type(agent.history), "is_done", return_value=True):
-                with patch.object(agent, "log_completion", new_callable=AsyncMock):
-                    result = await agent._execute_step(0, 10, step_info)
-                    assert result is True
-                    done_callback.assert_called_once()
+                with patch.object(type(agent.history), "is_successful", return_value=True):
+                    with patch.object(agent, "log_completion", new_callable=AsyncMock):
+                        result = await agent._execute_step(0, 10, step_info)
+                        assert result is True
+                        done_callback.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_execute_step_done_with_async_done_callback(self):
@@ -1826,10 +1848,11 @@ class TestAgentAsyncMethods:
 
         with patch.object(agent, "step", new_callable=AsyncMock):
             with patch.object(type(agent.history), "is_done", return_value=True):
-                with patch.object(agent, "log_completion", new_callable=AsyncMock):
-                    result = await agent._execute_step(0, 10, step_info)
-                    assert result is True
-                    done_callback.assert_called_once()
+                with patch.object(type(agent.history), "is_successful", return_value=True):
+                    with patch.object(agent, "log_completion", new_callable=AsyncMock):
+                        result = await agent._execute_step(0, 10, step_info)
+                        assert result is True
+                        done_callback.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_get_next_action_timeout(self):
@@ -1870,6 +1893,40 @@ class TestAgentAsyncMethods:
         agent.telemetry = MagicMock()
         agent._log_agent_event(max_steps=10, agent_run_error="Something failed")
         agent.telemetry.capture.assert_called_once()
+
+    def test_log_agent_event_includes_terminal_metadata(self):
+        from openbrowser.agent.views import AgentRunPhase
+
+        agent = self._create_agent()
+        agent.telemetry = MagicMock()
+        agent._run_phase = AgentRunPhase.MAX_STEPS
+        agent._run_terminal_reason = 'max_steps'
+        agent._run_success = False
+        agent._run_result = 'partial'
+
+        agent._log_agent_event(max_steps=10)
+
+        event = agent.telemetry.capture.call_args.args[0]
+        assert event.terminal_phase == 'max_steps'
+        assert event.terminal_reason == 'max_steps'
+        assert event.success is False
+        assert event.final_result_response == '"partial"'
+
+    def test_force_exit_emits_terminal_telemetry(self):
+        from openbrowser.agent.views import AgentRunPhase
+
+        agent = self._create_agent()
+        agent.telemetry = MagicMock()
+        agent._run_phase = AgentRunPhase.RUNNING
+
+        agent._on_force_exit(max_steps=10)
+
+        event = agent.telemetry.capture.call_args.args[0]
+        assert agent.status.phase is AgentRunPhase.STOPPED
+        assert event.terminal_phase == 'stopped'
+        assert event.terminal_reason == 'sigint'
+        assert event.success is False
+        agent.telemetry.flush.assert_called_once()
 
     def test_log_agent_event_with_history(self):
         from openbrowser.agent.views import AgentHistory, AgentOutput, StepMetadata
@@ -1994,7 +2051,12 @@ class TestAgentAsyncMethods:
 
     @pytest.mark.asyncio
     async def test_rerun_history_retry_failure(self):
-        from openbrowser.agent.views import AgentHistory, AgentHistoryList, AgentOutput, StepMetadata
+        from openbrowser.agent.views import (
+            AgentHistory,
+            AgentHistoryList,
+            AgentOutput,
+            StepMetadata,
+        )
         from openbrowser.browser.views import BrowserStateHistory
         from openbrowser.models import ActionResult
 
@@ -2029,7 +2091,12 @@ class TestAgentAsyncMethods:
 
     @pytest.mark.asyncio
     async def test_rerun_history_retry_skip(self):
-        from openbrowser.agent.views import AgentHistory, AgentHistoryList, AgentOutput, StepMetadata
+        from openbrowser.agent.views import (
+            AgentHistory,
+            AgentHistoryList,
+            AgentOutput,
+            StepMetadata,
+        )
         from openbrowser.browser.views import BrowserStateHistory
         from openbrowser.models import ActionResult
 
@@ -2060,7 +2127,7 @@ class TestAgentAsyncMethods:
 
         with patch.object(agent, "_execute_history_step", new_callable=AsyncMock, side_effect=RuntimeError("fail")):
             # skip_failures=True means it should not raise
-            result = await agent.rerun_history(history, max_retries=1, skip_failures=True, delay_between_actions=0.01)
+            await agent.rerun_history(history, max_retries=1, skip_failures=True, delay_between_actions=0.01)
             # Result may be empty since all retries failed but skip_failures=True
 
     @pytest.mark.asyncio
@@ -2757,10 +2824,6 @@ class TestLogNextActionSummary(TestAgentAsyncMethods):
         agent._log_next_action_summary(output)
 
     def test_log_next_action_summary_empty_actions(self):
-        from openbrowser.agent.views import AgentOutput
-        ActionModel = _get_action_model_base()
-        CustomAction = create_model("CA", __base__=ActionModel, done=(Optional[dict], None))
-
         agent = self._create_agent()
         output = MagicMock()
         output.action = []
@@ -3009,6 +3072,26 @@ class TestRunWithLanggraph(TestAgentAsyncMethods):
             mock_sh_instance.unregister.assert_called_once()
 
     @pytest.mark.asyncio
+    async def test_run_with_langgraph_can_disable_signal_handler(self):
+        agent = self._create_agent()
+        agent.use_signal_handler = False
+        agent._log_agent_run = AsyncMock()
+        agent._log_first_step_startup = MagicMock()
+        agent._execute_initial_actions = AsyncMock()
+        agent._log_agent_event = MagicMock()
+        agent._log_final_outcome_messages = MagicMock()
+        agent.close = AsyncMock()
+
+        mock_graph = MagicMock()
+        mock_graph.run = AsyncMock()
+
+        with patch("openbrowser.agent.graph.create_agent_graph", return_value=mock_graph), \
+             patch("openbrowser.utils.SignalHandler") as mock_sh:
+            await agent._run_with_langgraph(max_steps=5)
+
+        mock_sh.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_run_with_langgraph_keyboard_interrupt(self):
         agent = self._create_agent()
         agent._log_agent_run = AsyncMock()
@@ -3066,7 +3149,7 @@ class TestRunWithLanggraph(TestAgentAsyncMethods):
              patch("openbrowser.utils.SignalHandler") as mock_sh, \
              patch("openbrowser.agent.gif.create_history_gif") as mock_gif:
             mock_sh.return_value = MagicMock()
-            result = await agent._run_with_langgraph(max_steps=5)
+            await agent._run_with_langgraph(max_steps=5)
             mock_gif.assert_called_once()
 
     @pytest.mark.asyncio
@@ -3087,7 +3170,7 @@ class TestRunWithLanggraph(TestAgentAsyncMethods):
              patch("openbrowser.utils.SignalHandler") as mock_sh, \
              patch("openbrowser.agent.gif.create_history_gif") as mock_gif:
             mock_sh.return_value = MagicMock()
-            result = await agent._run_with_langgraph(max_steps=5)
+            await agent._run_with_langgraph(max_steps=5)
             mock_gif.assert_called_once_with(task=agent.task, history=agent.history, output_path="/tmp/custom.gif")
 
     @pytest.mark.asyncio
@@ -3107,7 +3190,7 @@ class TestRunWithLanggraph(TestAgentAsyncMethods):
         with patch("openbrowser.agent.graph.create_agent_graph", return_value=mock_graph), \
              patch("openbrowser.utils.SignalHandler") as mock_sh:
             mock_sh.return_value = MagicMock()
-            result = await agent._run_with_langgraph(max_steps=5)
+            await agent._run_with_langgraph(max_steps=5)
             assert agent.history._output_model_schema == agent.output_model_schema
 
     @pytest.mark.asyncio

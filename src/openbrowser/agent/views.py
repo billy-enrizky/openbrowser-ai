@@ -4,6 +4,7 @@ import json
 import logging
 import traceback
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from typing import Any, Generic, Literal
 
@@ -14,7 +15,11 @@ from uuid_extensions import uuid7str
 
 from openbrowser.agent.message_manager.views import MessageManagerState
 from openbrowser.browser.views import BrowserStateHistory
-from openbrowser.dom.views import DEFAULT_INCLUDE_ATTRIBUTES, DOMInteractedElement, DOMSelectorMap
+from openbrowser.dom.views import (
+	DEFAULT_INCLUDE_ATTRIBUTES,
+	DOMInteractedElement,
+	DOMSelectorMap,
+)
 
 # from openbrowser.dom.history_tree_processor.service import (
 # 	DOMElementNode,
@@ -76,6 +81,65 @@ class AgentState(BaseModel):
 
 	message_manager_state: MessageManagerState = Field(default_factory=MessageManagerState)
 	file_system_state: FileSystemState | None = None
+
+
+class AgentRunPhase(str, Enum):
+	"""Explicit lifecycle phase of one Browser Agent run."""
+
+	IDLE = 'idle'
+	STARTING = 'starting'
+	RUNNING = 'running'
+	PAUSED = 'paused'
+	STOPPING = 'stopping'
+	SUCCEEDED = 'succeeded'
+	FAILED = 'failed'
+	MAX_STEPS = 'max_steps'
+	STOPPED = 'stopped'
+	CANCELLED = 'cancelled'
+
+
+TERMINAL_AGENT_RUN_PHASES = frozenset({
+	AgentRunPhase.SUCCEEDED,
+	AgentRunPhase.FAILED,
+	AgentRunPhase.MAX_STEPS,
+	AgentRunPhase.STOPPED,
+	AgentRunPhase.CANCELLED,
+})
+
+
+class AgentRunStatus(BaseModel):
+	"""Snapshot of one Browser Agent run."""
+
+	model_config = ConfigDict(extra='forbid')
+
+	phase: AgentRunPhase = AgentRunPhase.IDLE
+	step: int = 0
+	max_steps: int = 0
+	consecutive_failures: int = 0
+	success: bool | None = None
+	terminal_reason: str | None = None
+	result: str | None = None
+	error: str | None = None
+	pause_requested: bool = False
+	stop_requested: bool = False
+	started_at: float | None = None
+	finished_at: float | None = None
+
+	@property
+	def terminal(self) -> bool:
+		return self.phase in TERMINAL_AGENT_RUN_PHASES
+
+
+class AgentRunStateError(RuntimeError):
+	"""A Browser Agent run was requested from an invalid lifecycle phase."""
+
+
+class AgentRunInterrupted(InterruptedError):
+	"""Cooperative interruption with an explicit cause."""
+
+	def __init__(self, reason: str):
+		self.reason = reason
+		super().__init__(reason)
 
 
 @dataclass
@@ -611,7 +675,6 @@ class AgentError:
 	@staticmethod
 	def format_error(error: Exception, include_trace: bool = False) -> str:
 		"""Format error message based on error type and optionally include trace"""
-		message = ''
 		if isinstance(error, ValidationError):
 			return f'{AgentError.VALIDATION_ERROR}\nDetails: {str(error)}'
 		if isinstance(error, RateLimitError):
