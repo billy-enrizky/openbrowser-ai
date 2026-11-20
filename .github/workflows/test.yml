@@ -1,6 +1,6 @@
 # Fast, honest CI.
 #
-# - PRs run the tests the diff can reach, on Ubuntu, in four measured shards.
+# - PRs run the tests the diff can reach, on Ubuntu, in six measured shards.
 # - The merge queue runs the full non-integration suite on Ubuntu and macOS.
 # - Lint, format, and type check are a ratchet: existing findings are visible,
 #   new findings fail the job.
