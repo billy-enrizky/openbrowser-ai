@@ -381,22 +381,22 @@ class AgentSession:
     async def _cleanup_after_run(self) -> None:
         """Run cleanup to completion even if the caller is cancelled."""
         cleanup_task = asyncio.create_task(self._cleanup())
-        cancelled = False
+        caller_cancelled = False
         while not cleanup_task.done():
             try:
                 await asyncio.shield(cleanup_task)
             except asyncio.CancelledError:
-                cancelled = True
+                caller_cancelled = True
         if cleanup_task.cancelled():
-            cancelled = True
+            logger.warning('Cleanup task was cancelled independently')
         else:
             cleanup_error = cleanup_task.exception()
             if cleanup_error is not None:
                 logger.warning(f"Cleanup error: {cleanup_error}")
-        if cancelled:
+        if caller_cancelled:
             if self.result is None:
                 raise asyncio.CancelledError()
-            logger.warning('Cleanup was cancelled after the task reached a terminal result')
+            logger.warning('Cleanup was interrupted after the task reached a terminal result')
 
     async def _run_code_agent(self) -> dict[str, Any]:
         """Run CodeAgent with step tracking."""

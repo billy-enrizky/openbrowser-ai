@@ -350,6 +350,7 @@ async def test_cleanup_cancellation_preserves_a_committed_result(monkeypatch):
 		use_current_browser=False,
 	)
 	cleanup_started = asyncio.Event()
+	cleanup_finished = asyncio.Event()
 
 	class FakeAgent:
 		def __init__(self, **kwargs):
@@ -377,6 +378,7 @@ async def test_cleanup_cancellation_preserves_a_committed_result(monkeypatch):
 	async def slow_cleanup():
 		cleanup_started.set()
 		await asyncio.sleep(0.05)
+		cleanup_finished.set()
 
 	monkeypatch.setattr(openbrowser, 'Agent', FakeAgent)
 	monkeypatch.setattr(session, '_setup_vnc', AsyncMock(return_value=None))
@@ -393,6 +395,7 @@ async def test_cleanup_cancellation_preserves_a_committed_result(monkeypatch):
 
 	assert result['success'] is True
 	assert result['result'] == 'accepted'
+	assert cleanup_finished.is_set()
 
 
 @pytest.mark.asyncio
