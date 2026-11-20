@@ -334,6 +334,7 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 			and not injected_agent_state.step_sequence_is_next
 		)
 		self._run_usage_start = 0
+		self._step_result_produced = False
 		self._pending_stop_reason: str | None = None
 		self._force_exit_requested = False
 		self.use_signal_handler = use_signal_handler
@@ -570,6 +571,12 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 
 	def _current_step_number(self, graph_step: int) -> int:
 		return self._run_step_base + graph_step + 1
+
+	def _begin_manual_step(self) -> None:
+		"""Normalize the public number before a manual step uses it."""
+		if self.state.step_sequence_started and not self.state.step_sequence_is_next:
+			self.state.n_steps += 1
+		self.state.step_sequence_started = True
 
 	def _run_final_result(self) -> str | None:
 		"""Return the last result written by the current run only."""
@@ -912,7 +919,8 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 	async def step(self, step_info: AgentStepInfo | None = None) -> None:
 		"""Execute one step of the task"""
 		# Initialize timing first, before any exceptions can occur
-		self.state.step_sequence_started = True
+		self._begin_manual_step()
+		self._step_result_produced = False
 		self.step_start_time = time.time()
 
 		browser_state_summary = None
@@ -1027,6 +1035,7 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 
 		result = await self.multi_act(self.state.last_model_output.action)
 		self.state.last_result = result
+		self._step_result_produced = True
 
 	async def _post_process(self) -> None:
 		"""Handle post-action processing like download tracking and result logging"""
@@ -1078,12 +1087,13 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 			self.logger.error(f'{prefix}{error_msg}')
 
 		self.state.last_result = [ActionResult(error=error_msg)]
+		self._step_result_produced = True
 		return None
 
 	async def _finalize(self, browser_state_summary: BrowserStateSummary | None) -> None:
 		"""Finalize the step with history, logging, and events"""
 		step_end_time = time.time()
-		if not self.state.last_result:
+		if not self._step_result_produced or not self.state.last_result:
 			return
 
 		if browser_state_summary:

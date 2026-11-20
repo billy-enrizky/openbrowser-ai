@@ -312,10 +312,11 @@ async def test_browser_agent_start_disables_process_signal_handler(monkeypatch):
 			return True
 
 	monkeypatch.setattr(openbrowser, 'Agent', FakeAgent)
+	cleanup = AsyncMock()
 	monkeypatch.setattr(session, '_setup_vnc', AsyncMock(return_value=None))
 	monkeypatch.setattr(session, '_setup_new_browser', AsyncMock())
 	monkeypatch.setattr(session, '_create_llm', MagicMock(return_value=MagicMock()))
-	monkeypatch.setattr(session, '_cleanup', AsyncMock())
+	monkeypatch.setattr(session, '_cleanup', cleanup)
 	monkeypatch.setattr(
 		session,
 		'_run_browser_agent',
@@ -337,6 +338,7 @@ async def test_browser_agent_start_disables_process_signal_handler(monkeypatch):
 	await session.start()
 
 	assert captured['use_signal_handler'] is False
+	cleanup.assert_awaited_once()
 
 @pytest.mark.asyncio
 async def test_cleanup_cancellation_preserves_a_committed_result(monkeypatch):
@@ -347,6 +349,7 @@ async def test_cleanup_cancellation_preserves_a_committed_result(monkeypatch):
 		enable_vnc=False,
 		use_current_browser=False,
 	)
+	cleanup_started = asyncio.Event()
 
 	class FakeAgent:
 		def __init__(self, **kwargs):
@@ -371,19 +374,26 @@ async def test_cleanup_cancellation_preserves_a_committed_result(monkeypatch):
 			'attachments': [],
 		}
 
+	async def slow_cleanup():
+		cleanup_started.set()
+		await asyncio.sleep(0.05)
+
 	monkeypatch.setattr(openbrowser, 'Agent', FakeAgent)
 	monkeypatch.setattr(session, '_setup_vnc', AsyncMock(return_value=None))
 	monkeypatch.setattr(session, '_setup_new_browser', AsyncMock())
 	monkeypatch.setattr(session, '_create_llm', MagicMock(return_value=MagicMock()))
-	cleanup = AsyncMock(side_effect=asyncio.CancelledError())
-	monkeypatch.setattr(session, '_cleanup', cleanup)
+	monkeypatch.setattr(session, '_cleanup', slow_cleanup)
 	monkeypatch.setattr(session, '_run_browser_agent', committed_result)
 
-	result = await session.start()
+	run_task = asyncio.create_task(session.start())
+	await asyncio.wait_for(cleanup_started.wait(), timeout=1)
+	run_task.cancel()
+
+	result = await asyncio.wait_for(run_task, timeout=2)
 
 	assert result['success'] is True
 	assert result['result'] == 'accepted'
-	cleanup.assert_awaited_once()
+
 
 @pytest.mark.asyncio
 async def test_cleanup_cancellation_still_raises_before_a_committed_result(monkeypatch):
@@ -394,6 +404,7 @@ async def test_cleanup_cancellation_still_raises_before_a_committed_result(monke
 		enable_vnc=False,
 		use_current_browser=False,
 	)
+	cleanup_started = asyncio.Event()
 
 	class FakeAgent:
 		def __init__(self, **kwargs):
@@ -402,12 +413,15 @@ async def test_cleanup_cancellation_still_raises_before_a_committed_result(monke
 		def stop(self):
 			return True
 
-	cleanup = AsyncMock(side_effect=asyncio.CancelledError())
+	async def slow_cleanup():
+		cleanup_started.set()
+		await asyncio.sleep(0.05)
+
 	monkeypatch.setattr(openbrowser, 'Agent', FakeAgent)
 	monkeypatch.setattr(session, '_setup_vnc', AsyncMock(return_value=None))
 	monkeypatch.setattr(session, '_setup_new_browser', AsyncMock())
 	monkeypatch.setattr(session, '_create_llm', MagicMock(return_value=MagicMock()))
-	monkeypatch.setattr(session, '_cleanup', cleanup)
+	monkeypatch.setattr(session, '_cleanup', slow_cleanup)
 	monkeypatch.setattr(
 		session,
 		'_run_browser_agent',
@@ -417,4 +431,4 @@ async def test_cleanup_cancellation_still_raises_before_a_committed_result(monke
 	with pytest.raises(asyncio.CancelledError):
 		await session.start()
 
-	cleanup.assert_awaited_once()
+	assert cleanup_started.is_set()

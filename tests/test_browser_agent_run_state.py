@@ -662,6 +662,49 @@ async def test_action_error_and_bookkeeping_failure_increment_once():
 	assert agent.state.consecutive_failures == 1
 
 
+async def test_finalize_does_not_write_a_previous_task_result():
+	agent = make_live_agent()
+	previous = append_history(agent, done=True, success=True, content='previous result')
+	agent.state.last_result = [previous]
+	agent.state.last_model_output = MagicMock()
+	agent._make_history_item = AsyncMock()
+	agent._log_step_completion_summary = MagicMock()
+	agent.save_file_system_state = MagicMock()
+	agent._step_result_produced = False
+
+	await agent._finalize(MagicMock())
+
+	agent._make_history_item.assert_not_awaited()
+	agent.save_file_system_state.assert_not_called()
+	assert agent.state.n_steps == 1
+
+
+def test_manual_step_after_graph_run_advances_the_number():
+	agent = make_live_agent()
+	agent.state.step_sequence_started = True
+	agent.state.step_sequence_is_next = False
+	agent.state.n_steps = 1
+
+	agent._begin_manual_step()
+
+	assert agent.state.n_steps == 2
+
+	agent.state.step_sequence_is_next = True
+	agent._begin_manual_step()
+
+	assert agent.state.n_steps == 2
+
+
+def test_fresh_manual_step_starts_at_number_one():
+	agent = make_live_agent()
+	agent.state.step_sequence_started = False
+	agent.state.n_steps = 1
+
+	agent._begin_manual_step()
+
+	assert agent.state.n_steps == 1
+
+
 async def test_manual_step_defers_accepted_success_result_to_the_observer():
 	agent = make_live_agent()
 	agent._check_and_update_downloads = AsyncMock()
