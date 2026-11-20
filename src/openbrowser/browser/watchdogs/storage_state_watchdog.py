@@ -2,12 +2,18 @@
 
 import asyncio
 import json
+import os
+import shutil
+import threading
 import time
+import uuid
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, ClassVar
 
 from bubus import BaseEvent
 from cdp_use.cdp.network import Cookie
+from filelock import FileLock
 from pydantic import Field, PrivateAttr
 
 from openbrowser.browser.events import (
@@ -15,11 +21,40 @@ from openbrowser.browser.events import (
 	BrowserStopEvent,
 	LoadStorageStateEvent,
 	SaveStorageStateEvent,
+	StorageStateFailedEvent,
 	StorageStateLoadedEvent,
 	StorageStateSavedEvent,
 )
-from openbrowser.browser.storage_state import StorageStatePhase, StorageStateSnapshot
+from openbrowser.browser.storage_state import (
+	StorageStatePhase,
+	StorageStateSavePhase,
+	StorageStateSaveSnapshot,
+	StorageStateSnapshot,
+	load_snapshot_for_configuration,
+	save_snapshot_for_configuration,
+)
 from openbrowser.browser.watchdog_base import BaseWatchdog
+
+_PATH_SAVE_LOCKS: dict[str, asyncio.Lock] = {}
+
+
+def _path_save_lock(path: Path) -> asyncio.Lock:
+	key = str(path.expanduser().resolve())
+	return _PATH_SAVE_LOCKS.setdefault(key, asyncio.Lock())
+
+
+class StorageStateMergeError(RuntimeError):
+	"""An existing storage-state file could not be read or merged."""
+
+
+@dataclass(frozen=True)
+class _StorageWriteOutcome:
+	"""Result of the owned storage-state writer thread."""
+
+	cancelled: bool
+	bytes: int
+	cookies_count: int
+	origins_count: int
 
 
 class StorageStateWatchdog(BaseWatchdog):
@@ -35,12 +70,14 @@ class StorageStateWatchdog(BaseWatchdog):
 	EMITS: ClassVar[list[type[BaseEvent]]] = [
 		StorageStateSavedEvent,
 		StorageStateLoadedEvent,
+		StorageStateFailedEvent,
 	]
 
 	# Configuration
 	auto_save_interval: float = Field(default=30.0)  # Auto-save every 30 seconds
 	save_on_change: bool = Field(default=True)  # Save immediately when cookies change
-	max_script_bytes_per_origin: int = Field(default=256_000)  # Bound one injected storage script
+	max_script_bytes_per_origin: int = Field(default=256_000)  # Bound one packed injected script
+	save_lock_timeout: float = Field(default=5.0)  # Cross-process writer lock timeout
 
 	# Private state
 	_monitoring_task: asyncio.Task | None = PrivateAttr(default=None)
@@ -58,6 +95,19 @@ class StorageStateWatchdog(BaseWatchdog):
 	_load_origins: int = PrivateAttr(default=0)
 	_load_scripts: int = PrivateAttr(default=0)
 	_load_storage_script_attempts: int = PrivateAttr(default=0)
+	_load_skipped_items: int = PrivateAttr(default=0)
+	_load_skipped_origins: int = PrivateAttr(default=0)
+	_save_phase: StorageStateSavePhase | None = PrivateAttr(default=None)
+	_save_path: str | None = PrivateAttr(default=None)
+	_save_bytes: int | None = PrivateAttr(default=None)
+	_save_started: float | None = PrivateAttr(default=None)
+	_save_ms: float | None = PrivateAttr(default=None)
+	_save_elapsed: float | None = PrivateAttr(default=None)
+	_save_error: str | None = PrivateAttr(default=None)
+	_save_detail: str | None = PrivateAttr(default=None)
+	_save_cookies: int = PrivateAttr(default=0)
+	_save_origins: int = PrivateAttr(default=0)
+	_warnings_suppressed: int = PrivateAttr(default=0)
 
 	async def on_BrowserConnectedEvent(self, event: BrowserConnectedEvent) -> None:
 		"""Start monitoring when browser starts."""
@@ -117,42 +167,37 @@ class StorageStateWatchdog(BaseWatchdog):
 				origins_count=self._load_origins,
 				script_count=self._load_scripts,
 				storage_script_attempts=self._load_storage_script_attempts,
+				skipped_items=self._load_skipped_items,
+				skipped_origins=self._load_skipped_origins,
 			)
 
 		configured = self.browser_session.browser_profile.storage_state
-		if configured is None or configured == '':
-			return StorageStateSnapshot(phase=StorageStatePhase.NOT_CONFIGURED)
-		if not isinstance(configured, (str, Path)):
-			return StorageStateSnapshot(
-				phase=StorageStatePhase.SKIPPED,
-				detail='in-memory storage state is not loaded from a file',
+		return load_snapshot_for_configuration(configured)
+
+	def storage_state_save_snapshot(self) -> StorageStateSaveSnapshot:
+		"""Return the explicit file-save state, including a pre-save view."""
+		if self._save_phase is not None:
+			elapsed_ms = self._save_elapsed
+			if self._save_phase is StorageStateSavePhase.SAVING and self._save_started is not None:
+				elapsed_ms = max(0.0, (time.monotonic() - self._save_started) * 1000.0)
+			return StorageStateSaveSnapshot(
+				phase=self._save_phase,
+				path=self._save_path,
+				bytes=self._save_bytes,
+				save_ms=self._save_ms,
+				elapsed_ms=elapsed_ms,
+				error=self._save_error,
+				detail=self._save_detail,
+				cookies_count=self._save_cookies,
+				origins_count=self._save_origins,
 			)
-		path: Path | None = None
-		try:
-			path = self._expand_storage_path(configured)
-			size = path.stat().st_size
-		except FileNotFoundError:
-			return StorageStateSnapshot(
-				phase=StorageStatePhase.SKIPPED,
-				path=str(path) if path is not None else str(configured),
-				detail='storage-state file does not exist',
-			)
-		except (OSError, RuntimeError) as error:
-			return StorageStateSnapshot(
-				phase=StorageStatePhase.FAILED,
-				path=str(configured),
-				error=f'{type(error).__name__}: {error}',
-				detail='storage-state path could not be resolved or inspected',
-			)
-		return StorageStateSnapshot(
-			phase=StorageStatePhase.PENDING,
-			path=str(path),
-			bytes=size,
-		)
+
+		configured = self.browser_session.browser_profile.storage_state
+		return save_snapshot_for_configuration(configured)
 
 	@staticmethod
 	def _expand_storage_path(path: str | Path) -> Path:
-		return Path(path).expanduser()
+		return Path(path).expanduser().resolve()
 
 	def _finish_load(
 		self,
@@ -166,12 +211,13 @@ class StorageStateWatchdog(BaseWatchdog):
 		script_count: int = 0,
 		storage_script_attempts: int = 0,
 		bytes_count: int | None = None,
+		skipped_items: int = 0,
+		skipped_origins: int = 0,
 	) -> None:
 		started = self._load_started
 		self._load_phase = phase
 		self._load_path = str(path) if path is not None else None
-		if bytes_count is not None:
-			self._load_bytes = bytes_count
+		self._load_bytes = bytes_count
 		self._load_ms = max(0.0, (time.monotonic() - started) * 1000.0) if started is not None else None
 		elapsed_ms = self._load_ms
 		self._load_started = None
@@ -182,6 +228,52 @@ class StorageStateWatchdog(BaseWatchdog):
 		self._load_scripts = script_count
 		self._load_storage_script_attempts = storage_script_attempts
 		self._load_elapsed = elapsed_ms
+		self._load_skipped_items = skipped_items
+		self._load_skipped_origins = skipped_origins
+		if phase is StorageStatePhase.FAILED:
+			self.event_bus.dispatch(
+				StorageStateFailedEvent(
+					operation='load',
+					path=self._load_path,
+					phase=phase.value,
+					error=error,
+					detail=detail,
+				)
+			)
+
+	def _finish_save(
+		self,
+		phase: StorageStateSavePhase,
+		*,
+		path: Path | None,
+		error: str | None = None,
+		detail: str | None = None,
+		cookies_count: int = 0,
+		origins_count: int = 0,
+		bytes_count: int | None = None,
+	) -> None:
+		started = self._save_started
+		self._save_phase = phase
+		self._save_path = str(path) if path is not None else None
+		self._save_bytes = bytes_count
+		self._save_ms = max(0.0, (time.monotonic() - started) * 1000.0) if started is not None else None
+		elapsed_ms = self._save_ms
+		self._save_started = None
+		self._save_error = error
+		self._save_detail = detail
+		self._save_cookies = cookies_count
+		self._save_origins = origins_count
+		self._save_elapsed = elapsed_ms
+		if phase is StorageStateSavePhase.FAILED:
+			self.event_bus.dispatch(
+				StorageStateFailedEvent(
+					operation='save',
+					path=self._save_path,
+					phase=phase.value,
+					error=error,
+					detail=detail,
+				)
+			)
 
 	async def _start_monitoring(self) -> None:
 		"""Start the monitoring task."""
@@ -263,71 +355,203 @@ class StorageStateWatchdog(BaseWatchdog):
 	async def _save_storage_state(self, path: str | None = None) -> None:
 		"""Save browser storage state to file."""
 		async with self._save_lock:
-			# Check if CDP client is available
-			assert await self.browser_session.get_or_create_cdp_session(target_id=None)
-
 			save_path = path or self.browser_session.browser_profile.storage_state
 			if not save_path:
+				self._finish_save(
+					StorageStateSavePhase.NOT_CONFIGURED,
+					path=None,
+					detail='storage state is not configured',
+				)
 				return
 
-			# Skip saving if the storage state is already a dict (indicates it was loaded from memory)
-			# We only save to file if it started as a file path
 			if isinstance(save_path, dict):
-				self.logger.debug('[StorageStateWatchdog] Storage state is already a dict, skipping file save')
+				self._finish_save(
+					StorageStateSavePhase.SKIPPED,
+					path=None,
+					detail='in-memory storage state is not saved to a file',
+				)
 				return
 
 			try:
-				# Get current storage state using CDP
-				storage_state = await self.browser_session._cdp_get_storage_state()
-
-				# Update our last known state
-				self._last_cookie_state = storage_state.get('cookies', []).copy()
-
-				# Convert path to Path object
 				json_path = Path(save_path).expanduser().resolve()
-				json_path.parent.mkdir(parents=True, exist_ok=True)
+			except (OSError, RuntimeError) as error:
+				self._finish_save(
+					StorageStateSavePhase.FAILED,
+					path=Path(save_path),
+					error=f'{type(error).__name__}: {error}',
+					detail='storage-state save path could not be resolved',
+				)
+				return
 
-				# Merge with existing state if file exists
-				merged_state = storage_state
-				if json_path.exists():
-					try:
-						existing_state = json.loads(json_path.read_text())
-						merged_state = self._merge_storage_states(existing_state, dict(storage_state))
-					except Exception as e:
-						self.logger.error(f'[StorageStateWatchdog] Failed to merge with existing state: {e}')
-
-				# Write atomically
-				temp_path = json_path.with_suffix('.json.tmp')
-				temp_path.write_text(json.dumps(merged_state, indent=4))
-
-				# Backup existing file
-				if json_path.exists():
-					backup_path = json_path.with_suffix('.json.bak')
-					json_path.replace(backup_path)
-
-				# Move temp to final
-				temp_path.replace(json_path)
-
-				# Emit success event
-				self.event_bus.dispatch(
-					StorageStateSavedEvent(
-						path=str(json_path),
-						cookies_count=len(merged_state.get('cookies', [])),
-						origins_count=len(merged_state.get('origins', [])),
+			async with _path_save_lock(json_path):
+				self._save_phase = StorageStateSavePhase.SAVING
+				self._save_path = str(json_path)
+				self._save_bytes = None
+				self._save_started = time.monotonic()
+				self._save_ms = None
+				self._save_elapsed = None
+				self._save_error = None
+				self._save_detail = None
+				self._save_cookies = 0
+				self._save_origins = 0
+				caller_cancelled = False
+				try:
+					cdp_session = await self.browser_session.get_or_create_cdp_session(target_id=None)
+					if cdp_session is None:
+						raise RuntimeError('No CDP session available for storage-state save')
+					storage_state = await self.browser_session._cdp_get_storage_state()
+					if not isinstance(storage_state, dict):
+						raise ValueError('storage state must be a mapping')
+					cookies = storage_state.get('cookies', [])
+					origins = storage_state.get('origins', [])
+					if not isinstance(cookies, list) or not all(isinstance(cookie, dict) for cookie in cookies):
+						raise ValueError('storage-state cookies must be a list of objects')
+					if not isinstance(origins, list) or not all(isinstance(origin, dict) for origin in origins):
+						raise ValueError('storage-state origins must be a list of objects')
+					last_cookie_state = [dict(cookie) for cookie in cookies]
+					cancel_event = threading.Event()
+					writer_task = asyncio.create_task(
+						asyncio.to_thread(
+							self._write_storage_state,
+							json_path,
+							dict(storage_state),
+							cancel_event,
+						)
 					)
-				)
+					while not writer_task.done():
+						try:
+							await asyncio.shield(writer_task)
+						except asyncio.CancelledError:
+							caller_cancelled = True
+							cancel_event.set()
+					if writer_task.cancelled():
+						raise RuntimeError('storage-state writer was cancelled')
+					outcome = writer_task.result()
+					if outcome.cancelled:
+						self._finish_save(
+							StorageStateSavePhase.CANCELLED,
+							path=json_path,
+							detail='cancelled before the commit gate; previous file preserved',
+							cookies_count=outcome.cookies_count,
+							origins_count=outcome.origins_count,
+						)
+					else:
+						self._last_cookie_state = last_cookie_state
+						self._finish_save(
+							StorageStateSavePhase.SAVED,
+							path=json_path,
+							cookies_count=outcome.cookies_count,
+							origins_count=outcome.origins_count,
+							bytes_count=outcome.bytes,
+						)
+						self.event_bus.dispatch(
+							StorageStateSavedEvent(
+								path=str(json_path),
+								cookies_count=outcome.cookies_count,
+								origins_count=outcome.origins_count,
+								bytes=outcome.bytes,
+								save_ms=self._save_ms,
+							)
+						)
+						self.logger.debug(
+							f'[StorageStateWatchdog] Saved storage state to {json_path} '
+							f'({outcome.cookies_count} cookies, {outcome.origins_count} origins, '
+							f'{outcome.bytes} bytes)'
+						)
+				except asyncio.CancelledError:
+					if self._save_phase is StorageStateSavePhase.SAVING:
+						self._finish_save(
+							StorageStateSavePhase.CANCELLED,
+							path=json_path,
+							error='storage-state save cancelled',
+							detail='cancelled before the commit gate; previous file preserved',
+						)
+					raise
+				except Exception as error:
+					error_text = f'{type(error).__name__}: {error}'
+					if self._save_phase is StorageStateSavePhase.SAVING:
+						self._finish_save(
+							StorageStateSavePhase.FAILED,
+							path=json_path,
+							error=error_text,
+							detail='save failed; previous file preserved',
+						)
+						self._record_warning(f'Failed to save storage state: {error_text}')
+						self.logger.error(f'[StorageStateWatchdog] Failed to save storage state: {error}')
+					if caller_cancelled:
+						raise asyncio.CancelledError() from error
+				else:
+					if caller_cancelled:
+						raise asyncio.CancelledError()
 
-				self.logger.debug(
-					f'[StorageStateWatchdog] Saved storage state to {json_path} '
-					f'({len(merged_state.get("cookies", []))} cookies, '
-					f'{len(merged_state.get("origins", []))} origins)'
-				)
+	def _write_storage_state(
+		self,
+		json_path: Path,
+		storage_state: dict[str, Any],
+		cancel_event: threading.Event,
+	) -> _StorageWriteOutcome:
+		"""Read, merge, write, gate, and commit one storage-state file."""
+		json_path.parent.mkdir(parents=True, exist_ok=True)
+		lock_path = json_path.with_name(f'{json_path.name}.lock')
+		with FileLock(str(lock_path), timeout=self.save_lock_timeout):
+			merged = dict(storage_state)
+			if json_path.exists():
+				try:
+					existing = json.loads(json_path.read_text())
+				except Exception as error:
+					raise StorageStateMergeError(
+						f'Could not read existing storage state {json_path}: {error}'
+					) from error
+				if not isinstance(existing, dict):
+					raise StorageStateMergeError(
+						f'Existing storage state {json_path} is not a JSON object'
+					)
+				merged = self._merge_storage_states(existing, merged)
 
-			except Exception as e:
-				self.logger.error(f'[StorageStateWatchdog] Failed to save storage state: {e}')
+			data = json.dumps(merged, indent=4).encode('utf-8')
+			temp_path = json_path.with_name(
+				f'.{json_path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp'
+			)
+			try:
+				self._write_temp(temp_path, data)
+				if cancel_event.is_set():
+					return _StorageWriteOutcome(
+						cancelled=True,
+						bytes=len(data),
+						cookies_count=len(merged.get('cookies', [])),
+						origins_count=len(merged.get('origins', [])),
+					)
+				if json_path.exists():
+					self._backup_existing(json_path, json_path.with_suffix('.json.bak'))
+				self._commit_temp(temp_path, json_path)
+				return _StorageWriteOutcome(
+					cancelled=False,
+					bytes=len(data),
+					cookies_count=len(merged.get('cookies', [])),
+					origins_count=len(merged.get('origins', [])),
+				)
+			finally:
+				temp_path.unlink(missing_ok=True)
+
+	@staticmethod
+	def _write_temp(temp_path: Path, data: bytes) -> Path:
+		with open(temp_path, 'wb') as handle:
+			handle.write(data)
+			handle.flush()
+			os.fsync(handle.fileno())
+		return temp_path
+
+	@staticmethod
+	def _backup_existing(json_path: Path, backup_path: Path) -> None:
+		shutil.copy2(json_path, backup_path)
+
+	@staticmethod
+	def _commit_temp(temp_path: Path, json_path: Path) -> None:
+		os.replace(temp_path, json_path)
 
 	async def _load_storage_state(self, path: str | None = None) -> None:
 		"""Load browser storage state from file."""
+		self._load_phase = None
 		load_path = path or self.browser_session.browser_profile.storage_state
 		if load_path is None or load_path == '':
 			self._load_bytes = None
@@ -398,10 +622,14 @@ class StorageStateWatchdog(BaseWatchdog):
 		self._load_origins = 0
 		self._load_scripts = 0
 		self._load_storage_script_attempts = 0
+		self._load_skipped_items = 0
+		self._load_skipped_origins = 0
 		cookies_count = 0
 		origins_count = 0
 		script_count = 0
 		storage_script_attempts = 0
+		skipped_items = 0
+		skipped_origins = 0
 		content_bytes: int | None = None
 
 		try:
@@ -421,42 +649,69 @@ class StorageStateWatchdog(BaseWatchdog):
 				self._last_cookie_state = storage['cookies'].copy()
 				self.logger.debug(f'[StorageStateWatchdog] Added {len(storage["cookies"])} cookies from storage state')
 
-			if 'origins' in storage and storage['origins']:
-				for origin in storage['origins']:
-					origin_name = str(origin.get('origin') or '')
-					for storage_type, key in (('localStorage', 'localStorage'), ('sessionStorage', 'sessionStorage')):
-						items = origin.get(key) or []
-						if not items:
-							continue
-						scripts = self._build_storage_scripts(storage_type, items, origin_name)
-						if len(scripts) > 1:
-							warning = (
-								f'{storage_type} for {origin_name or "<unknown origin>"} was split into '
-								f'{len(scripts)} scripts to respect the size bound'
-							)
-							self.logger.warning('[StorageStateWatchdog] %s', warning)
-							self._record_warning(warning)
-						for script in scripts:
-							storage_script_attempts += 1
-							self._load_storage_script_attempts = storage_script_attempts
-							await self.browser_session._cdp_add_init_script(script)
-							script_count += 1
-							self._load_scripts = script_count
-					origins_count += 1
-					self._load_origins = origins_count
-				self.logger.debug(
-					f'[StorageStateWatchdog] Applied localStorage/sessionStorage from {len(storage["origins"])} origins'
+			groups: dict[str, list[tuple[str, list[dict[str, Any]]]]] = {
+				'localStorage': [],
+				'sessionStorage': [],
+			}
+			for origin in storage.get('origins', []) or []:
+				origins_count += 1
+				self._load_origins = origins_count
+				origin_name = str(origin.get('origin') or '').strip()
+				if not origin_name or origin_name in {'null', 'about:blank'} or '://' not in origin_name:
+					origin_items = sum(
+						len(origin.get(storage_type) or [])
+						for storage_type in ('localStorage', 'sessionStorage')
+					)
+					skipped_origins += 1
+					skipped_items += origin_items
+					self._load_skipped_origins = skipped_origins
+					self._load_skipped_items = skipped_items
+					warning = (
+						f'storage state contains an unsafe origin {origin_name!r}; skipped '
+						f'{origin_items} item(s) to avoid injecting values into an unrelated site'
+					)
+					self._emit_warning(warning)
+					continue
+				for storage_type in ('localStorage', 'sessionStorage'):
+					items = origin.get(storage_type) or []
+					if items:
+						groups[storage_type].append((origin_name, items))
+
+			for storage_type, entries in groups.items():
+				scripts, split_origins, skipped = self._build_storage_scripts(storage_type, entries)
+				skipped_items += skipped
+				self._load_skipped_items = skipped_items
+				for origin_name in split_origins:
+					warning = (
+						f'{storage_type} for {origin_name or "<unknown origin>"} was split into '
+						f'multiple bounded scripts'
+					)
+					self._emit_warning(warning)
+				for script in scripts:
+					storage_script_attempts += 1
+					self._load_storage_script_attempts = storage_script_attempts
+					await self.browser_session._cdp_add_init_script(script)
+					script_count += 1
+					self._load_scripts = script_count
+
+			detail = 'storage state loaded'
+			if skipped_items or skipped_origins:
+				detail = (
+					f'storage state loaded with {skipped_items} skipped item(s) '
+					f'and {skipped_origins} skipped origin(s)'
 				)
 
 			self._finish_load(
 				StorageStatePhase.LOADED,
 				path=json_path,
-				detail='storage state loaded',
+				detail=detail,
 				cookies_count=cookies_count,
 				origins_count=origins_count,
 				script_count=script_count,
 				storage_script_attempts=storage_script_attempts,
 				bytes_count=content_bytes,
+				skipped_items=skipped_items,
+				skipped_origins=skipped_origins,
 			)
 
 			self.event_bus.dispatch(
@@ -464,6 +719,11 @@ class StorageStateWatchdog(BaseWatchdog):
 					path=str(json_path),
 					cookies_count=cookies_count,
 					origins_count=origins_count,
+					bytes=content_bytes,
+					load_ms=self._load_ms,
+					script_count=script_count,
+					skipped_items=skipped_items,
+					skipped_origins=skipped_origins,
 				)
 			)
 
@@ -485,6 +745,8 @@ class StorageStateWatchdog(BaseWatchdog):
 				script_count=script_count,
 				storage_script_attempts=storage_script_attempts,
 				bytes_count=content_bytes,
+				skipped_items=skipped_items,
+				skipped_origins=skipped_origins,
 			)
 			raise
 		except Exception as e:
@@ -504,9 +766,25 @@ class StorageStateWatchdog(BaseWatchdog):
 				script_count=script_count,
 				storage_script_attempts=storage_script_attempts,
 				bytes_count=content_bytes,
+				skipped_items=skipped_items,
+				skipped_origins=skipped_origins,
 			)
 			self._record_warning(f'Failed to load storage state: {error}')
 			self.logger.error(f'[StorageStateWatchdog] Failed to load storage state: {e}')
+
+	def _emit_warning(self, warning: str) -> None:
+		"""Record and log a warning with a shared bounded cap."""
+		warnings = getattr(self.browser_session, '_storage_state_warnings', None)
+		if warnings is None:
+			self.logger.warning('[StorageStateWatchdog] %s', warning)
+			return
+		if len(warnings) < 20:
+			warnings.append(warning)
+			self.logger.warning('[StorageStateWatchdog] %s', warning)
+			return
+		self._warnings_suppressed += 1
+		if self._warnings_suppressed == 1:
+			self.logger.warning('[StorageStateWatchdog] additional storage-state warnings suppressed')
 
 	def _record_warning(self, warning: str) -> None:
 		warnings = getattr(self.browser_session, '_storage_state_warnings', None)
@@ -518,35 +796,73 @@ class StorageStateWatchdog(BaseWatchdog):
 	def _build_storage_scripts(
 		self,
 		storage_type: str,
-		items: list[dict[str, Any]],
-		origin: str = '',
-	) -> list[str]:
-		"""Build one bounded initialization script per chunk of storage items."""
-		clean_items = [
-			[str(item.get('name', '')), str(item.get('value', ''))]
-			for item in items
-			if isinstance(item, dict) and item.get('name') is not None
-		]
-		if not clean_items:
-			return []
-
-		accessor = 'window.localStorage' if storage_type == 'localStorage' else 'window.sessionStorage'
-		origin_guard = f'if (window.location.origin !== {json.dumps(origin)}) {{ return; }}' if origin else ''
-		prefix = f'(() => {{{origin_guard}const items = '
-		suffix = (
-			f';for (const [key, value] of items) {{ try {{ {accessor}.setItem(key, value); }} '
-			'catch (error) {} }})();'
-		)
-		overhead = len(prefix.encode('utf-8')) + len(suffix.encode('utf-8'))
+		groups: list[tuple[str, list[dict[str, Any]]]],
+	) -> tuple[list[str], list[str], int]:
+		"""Pack many origin blocks into bounded scripts."""
+		prefix = '(() => {'
+		suffix = '})();'
 		limit = max(1, int(self.max_script_bytes_per_origin))
+		blocks: list[str] = []
+		split_origins: list[str] = []
+		skipped_items = 0
+
+		for origin, items in groups:
+			clean_items: list[list[str]] = []
+			for item in items:
+				if not isinstance(item, dict) or item.get('name') is None:
+					skipped_items += 1
+					continue
+				clean_items.append([str(item.get('name', '')), str(item.get('value', ''))])
+			if not clean_items:
+				continue
+
+			origin_blocks, origin_skipped = self._split_origin_blocks(
+				storage_type,
+				origin,
+				clean_items,
+				limit,
+				prefix,
+				suffix,
+			)
+			skipped_items += origin_skipped
+			if len(origin_blocks) > 1:
+				split_origins.append(origin)
+			blocks.extend(origin_blocks)
+
+		scripts: list[str] = []
+		current = prefix
+		for block in blocks:
+			candidate = current + block
+			if current != prefix and len((candidate + suffix).encode('utf-8')) > limit:
+				scripts.append(current + suffix)
+				current = prefix + block
+			else:
+				current = candidate
+		if current != prefix:
+			scripts.append(current + suffix)
+		return scripts, split_origins, skipped_items
+
+	def _split_origin_blocks(
+		self,
+		storage_type: str,
+		origin: str,
+		items: list[list[str]],
+		limit: int,
+		prefix: str,
+		suffix: str,
+	) -> tuple[list[str], int]:
+		"""Split one origin into blocks that fit, skipping indivisible oversize items."""
+		script_overhead = len(prefix.encode('utf-8')) + len(suffix.encode('utf-8'))
+		block_overhead = len(self._render_storage_block(storage_type, origin, []).encode('utf-8'))
+		item_budget = max(1, limit - script_overhead - block_overhead)
 
 		chunks: list[list[list[str]]] = []
 		current: list[list[str]] = []
-		current_size = 2  # JSON array brackets
-		for item in clean_items:
-			item_size = len(json.dumps(item, ensure_ascii=False, separators=(',', ':')).encode('utf-8'))
+		current_size = 2
+		for item in items:
+			item_size = len(json.dumps(item, ensure_ascii=True, separators=(',', ':')).encode('utf-8'))
 			candidate_size = current_size + (1 if current else 0) + item_size
-			if current and overhead + candidate_size > limit:
+			if current and candidate_size > item_budget:
 				chunks.append(current)
 				current = [item]
 				current_size = 2 + item_size
@@ -556,19 +872,73 @@ class StorageStateWatchdog(BaseWatchdog):
 		if current:
 			chunks.append(current)
 
-		scripts = []
+		blocks: list[str] = []
+		skipped = 0
 		for chunk in chunks:
-			payload = json.dumps(chunk, ensure_ascii=False, separators=(',', ':'))
-			script = f'{prefix}{payload}{suffix}'
-			if len(chunk) == 1 and len(script.encode('utf-8')) > limit:
-				warning = (
-					f'{storage_type} entry {chunk[0][0]!r} for {origin or "<unknown origin>"} '
-					f'exceeds max_script_bytes_per_origin={limit}; keeping it in one script to avoid data loss'
-				)
-				self.logger.warning('[StorageStateWatchdog] %s', warning)
-				self._record_warning(warning)
-			scripts.append(script)
-		return scripts
+			if len((prefix + self._render_storage_block(storage_type, origin, chunk) + suffix).encode('utf-8')) <= limit:
+				blocks.append(self._render_storage_block(storage_type, origin, chunk))
+				continue
+			sub_blocks, sub_skipped = self._split_oversized_items(
+				storage_type,
+				origin,
+				chunk,
+				limit,
+				prefix,
+				suffix,
+			)
+			blocks.extend(sub_blocks)
+			skipped += sub_skipped
+		return blocks, skipped
+
+	def _split_oversized_items(
+		self,
+		storage_type: str,
+		origin: str,
+		items: list[list[str]],
+		limit: int,
+		prefix: str,
+		suffix: str,
+	) -> tuple[list[str], int]:
+		block = self._render_storage_block(storage_type, origin, items)
+		if len((prefix + block + suffix).encode('utf-8')) <= limit:
+			return [block], 0
+		if len(items) == 1:
+			emitted_bytes = len((prefix + block + suffix).encode('utf-8'))
+			warning = (
+				f'{storage_type} entry {items[0][0]!r} for {origin} would emit '
+				f'{emitted_bytes} bytes, exceeding max_script_bytes_per_origin={limit}; skipped'
+			)
+			self._emit_warning(warning)
+			return [], 1
+		middle = len(items) // 2
+		left_blocks, left_skipped = self._split_oversized_items(
+			storage_type,
+			origin,
+			items[:middle],
+			limit,
+			prefix,
+			suffix,
+		)
+		right_blocks, right_skipped = self._split_oversized_items(
+			storage_type,
+			origin,
+			items[middle:],
+			limit,
+			prefix,
+			suffix,
+		)
+		return left_blocks + right_blocks, left_skipped + right_skipped
+
+	@staticmethod
+	def _render_storage_block(storage_type: str, origin: str, items: list[list[str]]) -> str:
+		accessor = 'window.localStorage' if storage_type == 'localStorage' else 'window.sessionStorage'
+		items_json = json.dumps(items, ensure_ascii=True, separators=(',', ':'))
+		body = (
+			f'const items={items_json};'
+			f'for(const [key,value] of items){{try{{{accessor}.setItem(key,value);}}catch(error){{}}}}'
+		)
+		origin_json = json.dumps(origin, ensure_ascii=True)
+		return f'if(window.location.origin==={origin_json}){{{body}}}'
 
 	@staticmethod
 	def _merge_storage_states(existing: dict[str, Any], new: dict[str, Any]) -> dict[str, Any]:
