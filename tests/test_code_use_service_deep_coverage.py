@@ -67,11 +67,16 @@ def _make_mock_session():
 
 def _create_agent(task="Test task", llm=None, browser=None, **kwargs):
     from openbrowser.code_use.service import CodeAgent
+    from openbrowser.filesystem.file_system import FileSystem
 
     if llm is None:
         llm = _make_mock_llm()
     if browser is None:
         browser = _make_mock_session()
+    if "file_system" not in kwargs:
+        kwargs["file_system"] = FileSystem(
+            base_dir=tempfile.mkdtemp(prefix="openbrowser-test-")
+        )
 
     with patch(*PATCHES[:1]), patch(*PATCHES[1:2]), \
          patch(PATCHES[2], return_value="0.1.0"):

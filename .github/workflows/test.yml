@@ -193,7 +193,7 @@ jobs:
           fi
           uv run --locked python scripts/ci/budget.py --name test-shard -- \
             uv run --locked pytest "${files[@]}" -q -m "not integration" \
-            -n auto --dist load --tb=short \
+            -n auto --dist loadfile --tb=short \
             --junitxml=junit-${{ matrix.os }}-${{ matrix.shard }}.xml
       - uses: actions/upload-artifact@v4
         if: always()
