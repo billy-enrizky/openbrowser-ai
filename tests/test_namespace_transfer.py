@@ -327,3 +327,16 @@ def test_cached_classification_respects_depth_at_each_use():
 	assert 'shallow' in result.variables
 	assert 'deep' in result.dropped
 	assert 'deeply' in result.dropped['deep']
+
+
+def test_depth_failure_is_not_cached_for_a_shallower_use():
+	leaf = [[0]]
+	deep: object = leaf
+	for _ in range(50):
+		deep = [deep]
+
+	result = transfer_namespace({'deep': deep, 'shallow': leaf})
+
+	assert 'deep' in result.dropped
+	assert 'deeply' in result.dropped['deep']
+	assert result.variables['shallow'] == [[0]]

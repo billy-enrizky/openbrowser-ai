@@ -184,14 +184,15 @@ def _classify(
 				kind, reason, child_height = _classify(item, old_browser, active, cache, depth + 1)
 				if kind is not NamespaceValueKind.SCALAR:
 					result = (NamespaceValueKind.OPAQUE, reason or 'contains a non-scalar value', 0)
-					cache[key] = result
+					if reason != 'nested too deeply to transfer':
+						cache[key] = result
 					return result
 				height = max(height, child_height)
 			height += 1
 			if depth + height > _MAX_DEPTH:
-				result = (NamespaceValueKind.OPAQUE, 'nested too deeply to transfer', 0)
-			else:
-				result = (NamespaceValueKind.SCALAR, None, height)
+				# Depth is use-dependent, so never cache this failure.
+				return NamespaceValueKind.OPAQUE, 'nested too deeply to transfer', 0
+			result = (NamespaceValueKind.SCALAR, None, height)
 			cache[key] = result
 			return result
 		finally:
@@ -207,14 +208,15 @@ def _classify(
 				kind, reason, child_height = _classify(item, old_browser, active, cache, depth + 1)
 				if kind is not NamespaceValueKind.SCALAR:
 					result = (NamespaceValueKind.OPAQUE, reason or f'contains a non-scalar value ({type(item).__name__})', 0)
-					cache[key] = result
+					if reason != 'nested too deeply to transfer':
+						cache[key] = result
 					return result
 				height = max(height, child_height)
 			height += 1
 			if depth + height > _MAX_DEPTH:
-				result = (NamespaceValueKind.OPAQUE, 'nested too deeply to transfer', 0)
-			else:
-				result = (NamespaceValueKind.SCALAR, None, height)
+				# Depth is use-dependent, so never cache this failure.
+				return NamespaceValueKind.OPAQUE, 'nested too deeply to transfer', 0
+			result = (NamespaceValueKind.SCALAR, None, height)
 			cache[key] = result
 			return result
 		finally:
