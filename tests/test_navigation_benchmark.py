@@ -331,6 +331,20 @@ def test_external_paths_and_missing_optional_arms_are_explicit(tmp_path, monkeyp
     assert states['browser-use']['state'] == 'unavailable'
 
 
+def test_openbrowser_benchmark_profile_disables_default_extensions(tmp_path):
+    captured = {}
+
+    def profile_cls(**kwargs):
+        captured.update(kwargs)
+        return kwargs
+
+    benchmark.openbrowser_profile(profile_cls, tmp_path, tmp_path / 'chrome')
+
+    assert captured['enable_default_extensions'] is False
+    assert captured['headless'] is True
+    assert captured['args'] == ['--use-mock-keychain']
+
+
 def test_executable_metadata_accepts_an_arm_specific_version_command(tmp_path):
     binary = tmp_path / 'lightpanda'
     binary.write_text('#!/bin/sh\nif [ "$1" = "version" ]; then echo 1.0.4; else exit 1; fi\n')

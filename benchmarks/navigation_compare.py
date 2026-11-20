@@ -251,6 +251,18 @@ class Cdp:
         await self.reader
 
 
+def openbrowser_profile(profile_cls, root, chrome):
+    """Build the benchmark profile without network-fetched extensions."""
+    return profile_cls(
+        headless=True,
+        executable_path=str(chrome),
+        args=['--use-mock-keychain'],
+        user_data_dir=Path(root) / 'profile',
+        downloads_path=Path(root) / 'downloads',
+        enable_default_extensions=False,
+    )
+
+
 class Arm:
     def __init__(self, args):
         self.name, self.root = args.worker, Path(args.run_root)
@@ -365,8 +377,7 @@ class Arm:
             module = Path(openbrowser.__file__).resolve()
             if not module.is_relative_to(self.source / 'src'):
                 raise RuntimeError('OpenBrowser imported from wrong source')
-            self.browser = BrowserSession(browser_profile=BrowserProfile(headless=True, executable_path=str(self.chrome), args=['--use-mock-keychain'],
-                                            user_data_dir=self.root / 'profile', downloads_path=self.root / 'downloads'))
+            self.browser = BrowserSession(browser_profile=openbrowser_profile(BrowserProfile, self.root, self.chrome))
             await self.browser.start()
             self.version = await self.browser.cdp_client.send.Browser.getVersion()
         self.ownership()
