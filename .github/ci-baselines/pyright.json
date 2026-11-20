@@ -1,0 +1,376 @@
+{
+  "src/openbrowser/agent/gif.py": {
+    "reportArgumentType": {
+      "4e68e8097d65d3b9": {
+        "count": 1,
+        "message": "Argument of type \"Traversable\" cannot be assigned to parameter \"fp\" of type \"StrOrBytesPath | IO[bytes]\" in function \"open\" Type \"Traversable\" is not assignable"
+      }
+    }
+  },
+  "src/openbrowser/agent/graph.py": {
+    "reportAttributeAccessIssue": {
+      "e5b2aff271ca0ec0": {
+        "count": 1,
+        "message": "Cannot access attribute \"ainvoke\" for class \"StateGraph[Unknown, None, Unknown, Unknown]\" Attribute \"ainvoke\" is unknown"
+      }
+    },
+    "reportReturnType": {
+      "2269ab2b26f3948b": {
+        "count": 1,
+        "message": "Type \"CompiledStateGraph[GraphState, None, GraphState, GraphState]\" is not assignable to return type \"StateGraph[Unknown, None, Unknown, Unknown]\" \"CompiledStat"
+      }
+    }
+  },
+  "src/openbrowser/agent/service.py": {
+    "reportAttributeAccessIssue": {
+      "f898e4775d0ca8d3": {
+        "count": 1,
+        "message": "Cannot access attribute \"sub\" for class \"None\" Attribute \"sub\" is unknown"
+      }
+    },
+    "reportGeneralTypeIssues": {
+      "e3432db071aee588": {
+        "count": 1,
+        "message": "\"None\" is not awaitable \"None\" is incompatible with protocol \"Awaitable[_T_co@Awaitable]\" \"__await__\" is not present"
+      }
+    }
+  },
+  "src/openbrowser/browser/profile.py": {
+    "reportMissingImports": {
+      "e69aacc8a275bf48": {
+        "count": 1,
+        "message": "Import \"screeninfo\" could not be resolved"
+      }
+    }
+  },
+  "src/openbrowser/browser/session.py": {
+    "reportArgumentType": {
+      "31deec01d296f6aa": {
+        "count": 1,
+        "message": "Argument of type \"dict[str, str | list[CallArgument] | bool | None]\" cannot be assigned to parameter \"params\" of type \"CallFunctionOnParameters\" in function \"ca"
+      },
+      "3c66309b0dd6cc15": {
+        "count": 1,
+        "message": "Argument of type \"str | None\" cannot be assigned to parameter \"target_id\" of type \"str\" in function \"get\" Type \"str | None\" is not assignable to type \"str\" \"Non"
+      },
+      "50686f7a6c1f3929": {
+        "count": 6,
+        "message": "Argument of type \"CDPClient | None\" cannot be assigned to parameter \"root\" of type \"CDPClient\" in function \"_check_navigation_owner\" Type \"CDPClient | None\" is "
+      },
+      "6cf3e624e0787175": {
+        "count": 1,
+        "message": "Argument of type \"str | Path | None\" cannot be assigned to parameter \"args\" of type \"StrPath\" in function \"__new__\" Type \"str | Path | None\" is not assignable t"
+      },
+      "8a1a9e13db583651": {
+        "count": 3,
+        "message": "Argument of type \"CDPClient | None\" cannot be assigned to parameter \"root\" of type \"CDPClient\" in function \"_marked_navigation\" Type \"CDPClient | None\" is not a"
+      },
+      "a50d02dc71165bcc": {
+        "count": 1,
+        "message": "Argument of type \"Literal['preparing', 'navigating', 'waiting', 'notifying', 'succeeded', 'download', 'failed', 'timed_out', 'cancelled']\" cannot be assigned to"
+      },
+      "cf12a45484cb753a": {
+        "count": 1,
+        "message": "Argument of type \"str | None\" cannot be assigned to parameter \"target_id\" of type \"str\" in function \"update\" Type \"str | None\" is not assignable to type \"str\" \""
+      },
+      "e20235885e175816": {
+        "count": 2,
+        "message": "Argument of type \"list[TargetInfo]\" cannot be assigned to parameter \"pages\" of type \"Iterable[dict[str, Any]]\" in function \"sync_from_pages\" \"list[TargetInfo]\" "
+      },
+      "f160fe34a16d8dc6": {
+        "count": 1,
+        "message": "Argument of type \"str | Path | None\" cannot be assigned to parameter \"args\" of type \"StrPath\" in function \"__init__\" Type \"str | Path | None\" is not assignable "
+      }
+    },
+    "reportGeneralTypeIssues": {
+      "2e82dfcb79ac433a": {
+        "count": 2,
+        "message": "\"object\" is not awaitable \"object\" is incompatible with protocol \"Awaitable[_T_co@Awaitable]\" \"__await__\" is not present"
+      },
+      "9663c68054f0265b": {
+        "count": 2,
+        "message": "\"object\" is not iterable \"__iter__\" method not defined"
+      }
+    },
+    "reportInconsistentOverload": {
+      "442590fd9c4b8863": {
+        "count": 1,
+        "message": "\"__init__\" is marked as overload, but additional overloads are missing"
+      }
+    },
+    "reportOperatorIssue": {
+      "b911ecc10731130c": {
+        "count": 1,
+        "message": "Operator \">=\" not supported for types \"float\" and \"float | None\" Operator \">=\" not supported for types \"float\" and \"None\""
+      }
+    },
+    "reportOptionalMemberAccess": {
+      "ce9754179aa5e02d": {
+        "count": 2,
+        "message": "\"transport\" is not a known attribute of \"None\""
+      },
+      "f4a3a5cc9ead99b5": {
+        "count": 3,
+        "message": "\"send\" is not a known attribute of \"None\""
+      }
+    },
+    "reportReturnType": {
+      "723612f45700e18d": {
+        "count": 1,
+        "message": "Type \"object\" is not assignable to return type \"dict[str, object] | None\" Type \"object\" is not assignable to type \"dict[str, object] | None\" \"object\" is not ass"
+      }
+    }
+  },
+  "src/openbrowser/browser/watchdog_base.py": {
+    "reportArgumentType": {
+      "50686f7a6c1f3929": {
+        "count": 1,
+        "message": "Argument of type \"CDPClient | None\" cannot be assigned to parameter \"root\" of type \"CDPClient\" in function \"_check_navigation_owner\" Type \"CDPClient | None\" is "
+      },
+      "5f69e1aae781ad13": {
+        "count": 1,
+        "message": "Argument of type \"Task[Any] | None\" cannot be assigned to parameter \"element\" of type \"Task[Any]\" in function \"add\" Type \"Task[Any] | None\" is not assignable to"
+      },
+      "8a1a9e13db583651": {
+        "count": 1,
+        "message": "Argument of type \"CDPClient | None\" cannot be assigned to parameter \"root\" of type \"CDPClient\" in function \"_marked_navigation\" Type \"CDPClient | None\" is not a"
+      }
+    }
+  },
+  "src/openbrowser/browser/watchdogs/aboutblank_watchdog.py": {
+    "reportAssignmentType": {
+      "b7b6930bfaf38074": {
+        "count": 1,
+        "message": "Type \"list[type[NavigateToUrlEvent] | type[CloseTabEvent] | type[TabCreatedEvent] | type[SwitchTabEvent] | type[AboutBlankDVDScreensaverShownEvent]]\" is not ass"
+      }
+    }
+  },
+  "src/openbrowser/browser/watchdogs/local_browser_watchdog.py": {
+    "reportArgumentType": {
+      "1d8fda81a0f8d0a6": {
+        "count": 1,
+        "message": "Argument of type \"Any | None\" cannot be assigned to parameter \"x\" of type \"ConvertibleToInt\" in function \"__new__\" Type \"Any | None\" is not assignable to type \""
+      },
+      "4729ddb3dba5828c": {
+        "count": 1,
+        "message": "Argument of type \"Any | None\" cannot be assigned to parameter \"x\" of type \"ConvertibleToFloat\" in function \"__new__\" Type \"Any | None\" is not assignable to type"
+      },
+      "55ed7a6888d2138e": {
+        "count": 1,
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"x\" of type \"ConvertibleToInt\" in function \"__new__\" Type \"Unknown | None\" is not assignable t"
+      },
+      "65c8603203f197a5": {
+        "count": 1,
+        "message": "Argument of type \"Any | None\" cannot be assigned to parameter \"x\" of type \"ConvertibleToInt\" in function \"__new__\" Type \"Any | None\" is not assignable to type \""
+      },
+      "6c193cc556504c54": {
+        "count": 1,
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"x\" of type \"ConvertibleToInt\" in function \"__new__\" Type \"Unknown | None\" is not assignable t"
+      },
+      "6cf3e624e0787175": {
+        "count": 1,
+        "message": "Argument of type \"str | Path | None\" cannot be assigned to parameter \"args\" of type \"StrPath\" in function \"__new__\" Type \"str | Path | None\" is not assignable t"
+      },
+      "da31c9cd79e33175": {
+        "count": 1,
+        "message": "Argument of type \"Any | None\" cannot be assigned to parameter \"x\" of type \"ConvertibleToFloat\" in function \"__new__\" Type \"Any | None\" is not assignable to type"
+      },
+      "f160fe34a16d8dc6": {
+        "count": 1,
+        "message": "Argument of type \"str | Path | None\" cannot be assigned to parameter \"args\" of type \"StrPath\" in function \"__init__\" Type \"str | Path | None\" is not assignable "
+      }
+    }
+  },
+  "src/openbrowser/browser/watchdogs/profile_lease.py": {
+    "reportArgumentType": {
+      "4729ddb3dba5828c": {
+        "count": 1,
+        "message": "Argument of type \"Any | None\" cannot be assigned to parameter \"x\" of type \"ConvertibleToFloat\" in function \"__new__\" Type \"Any | None\" is not assignable to type"
+      },
+      "da31c9cd79e33175": {
+        "count": 1,
+        "message": "Argument of type \"Any | None\" cannot be assigned to parameter \"x\" of type \"ConvertibleToFloat\" in function \"__new__\" Type \"Any | None\" is not assignable to type"
+      }
+    }
+  },
+  "src/openbrowser/cli.py": {
+    "reportOptionalCall": {
+      "ec6541f706d30c04": {
+        "count": 1,
+        "message": "Object of type \"None\" cannot be called"
+      }
+    },
+    "reportOptionalMemberAccess": {
+      "77cf80e8469e590c": {
+        "count": 1,
+        "message": "\"model_validate\" is not a known attribute of \"None\""
+      }
+    }
+  },
+  "src/openbrowser/cli_templates/advanced_template.py": {
+    "reportArgumentType": {
+      "059d7d3d38bd6802": {
+        "count": 1,
+        "message": "Argument of type \"dict[str, int]\" cannot be assigned to parameter \"viewport\" of type \"ViewportSize | None\" in function \"__init__\" Type \"dict[str, int]\" is not a"
+      }
+    }
+  },
+  "src/openbrowser/code_use/namespace.py": {
+    "reportInvalidTypeForm": {
+      "25055f70f8719275": {
+        "count": 1,
+        "message": "Variable not allowed in type expression"
+      }
+    }
+  },
+  "src/openbrowser/daemon/client.py": {
+    "reportArgumentType": {
+      "9b2855f6c46cec14": {
+        "count": 2,
+        "message": "Argument of type \"Any | None\" cannot be assigned to parameter \"start_time\" of type \"float | str\" in function \"process_matches_identity\" Type \"Any | None\" is not"
+      }
+    },
+    "reportAttributeAccessIssue": {
+      "4d725b956cf49857": {
+        "count": 1,
+        "message": "\"LK_NBLCK\" is not a known attribute of module \"msvcrt\""
+      },
+      "9af9c51aab1ca02d": {
+        "count": 2,
+        "message": "\"locking\" is not a known attribute of module \"msvcrt\""
+      },
+      "cc19a690e19801c1": {
+        "count": 1,
+        "message": "\"LK_UNLCK\" is not a known attribute of module \"msvcrt\""
+      }
+    }
+  },
+  "src/openbrowser/init_cmd.py": {
+    "reportMissingImports": {
+      "4bccd6da0a8cdaea": {
+        "count": 1,
+        "message": "Import \"InquirerPy.prompts.list\" could not be resolved"
+      },
+      "adbea2687947dcce": {
+        "count": 1,
+        "message": "Import \"InquirerPy.utils\" could not be resolved"
+      },
+      "fbef6978734da84a": {
+        "count": 1,
+        "message": "Import \"InquirerPy.base.control\" could not be resolved"
+      }
+    }
+  },
+  "src/openbrowser/integrations/gmail/service.py": {
+    "reportMissingImports": {
+      "c92798bf8bfb0446": {
+        "count": 1,
+        "message": "Import \"googleapiclient.discovery\" could not be resolved"
+      },
+      "ee2dbc6aa7640379": {
+        "count": 1,
+        "message": "Import \"google_auth_oauthlib.flow\" could not be resolved"
+      },
+      "f53ea969329403b4": {
+        "count": 1,
+        "message": "Import \"googleapiclient.errors\" could not be resolved"
+      }
+    }
+  },
+  "src/openbrowser/llm/aws/chat_anthropic.py": {
+    "reportPrivateImportUsage": {
+      "17ed4c8a03417000": {
+        "count": 1,
+        "message": "\"AsyncAnthropicBedrock\" is not exported from module \"anthropic\" Import from \"._client\" instead"
+      }
+    }
+  },
+  "src/openbrowser/llm/oci_raw/chat.py": {
+    "reportMissingImports": {
+      "3bd6791289611ba5": {
+        "count": 1,
+        "message": "Import \"oci.generative_ai_inference\" could not be resolved"
+      },
+      "a4ea9e801700bbf0": {
+        "count": 1,
+        "message": "Import \"oci\" could not be resolved"
+      },
+      "c8bd593b8225fcfd": {
+        "count": 1,
+        "message": "Import \"oci.generative_ai_inference.models\" could not be resolved"
+      }
+    }
+  },
+  "src/openbrowser/llm/oci_raw/serializer.py": {
+    "reportMissingImports": {
+      "c8bd593b8225fcfd": {
+        "count": 1,
+        "message": "Import \"oci.generative_ai_inference.models\" could not be resolved"
+      }
+    }
+  },
+  "src/openbrowser/llm/tests/test_chat_models.py": {
+    "reportMissingImports": {
+      "a4ea9e801700bbf0": {
+        "count": 1,
+        "message": "Import \"oci\" could not be resolved"
+      }
+    }
+  },
+  "src/openbrowser/llm/tests/test_single_step.py": {
+    "reportMissingImports": {
+      "a4ea9e801700bbf0": {
+        "count": 1,
+        "message": "Import \"oci\" could not be resolved"
+      }
+    }
+  },
+  "src/openbrowser/mcp/server.py": {
+    "reportOptionalMemberAccess": {
+      "a1655acccb289683": {
+        "count": 1,
+        "message": "\"mkdir\" is not a known attribute of \"None\""
+      }
+    },
+    "reportReturnType": {
+      "bc2613278818813d": {
+        "count": 1,
+        "message": "Type \"Path | None\" is not assignable to return type \"Path\" Type \"Path | None\" is not assignable to type \"Path\" \"None\" is not assignable to \"Path\""
+      }
+    }
+  },
+  "src/openbrowser/tools/service.py": {
+    "reportOptionalMemberAccess": {
+      "26173b932b25726f": {
+        "count": 2,
+        "message": "\"display_file\" is not a known attribute of \"None\""
+      },
+      "b17ecc620ed670d9": {
+        "count": 1,
+        "message": "\"get_file\" is not a known attribute of \"None\""
+      },
+      "b1e6796ddaa788f8": {
+        "count": 2,
+        "message": "\"get_dir\" is not a known attribute of \"None\""
+      }
+    }
+  },
+  "src/openbrowser/utils/__init__.py": {
+    "reportArgumentType": {
+      "b5cee3729c041f70": {
+        "count": 1,
+        "message": "Argument of type \"ModuleSpec | None\" cannot be assigned to parameter \"spec\" of type \"ModuleSpec\" in function \"module_from_spec\" Type \"ModuleSpec | None\" is not "
+      }
+    },
+    "reportOptionalMemberAccess": {
+      "59a920d65657d673": {
+        "count": 1,
+        "message": "\"loader\" is not a known attribute of \"None\""
+      },
+      "a54529ed010a6cf0": {
+        "count": 1,
+        "message": "\"exec_module\" is not a known attribute of \"None\""
+      }
+    }
+  }
+}

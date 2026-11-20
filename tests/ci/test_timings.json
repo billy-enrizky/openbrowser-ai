@@ -1,0 +1,629 @@
+{
+  "_meta": {
+    "recorded_at": "2026-11-20T21:20:13.116476+00:00",
+    "method": "exponential moving average, alpha=0.7",
+    "files_recorded": 5
+  },
+  "files": {
+    "tests/ci/test_audit_runs.py": {
+      "seconds": 0.0,
+      "samples": 1
+    },
+    "tests/ci/test_backend_singleton.py": {
+      "seconds": 0.001,
+      "samples": 1
+    },
+    "tests/ci/test_check_baseline.py": {
+      "seconds": 0.0,
+      "samples": 1
+    },
+    "tests/ci/test_select_tests.py": {
+      "seconds": 2.549,
+      "samples": 1
+    },
+    "tests/ci/test_shard_tests.py": {
+      "seconds": 0.007,
+      "samples": 1
+    },
+    "tests/test_action_readiness.py": {
+      "seconds": 0.028,
+      "samples": 1
+    },
+    "tests/test_actor_element.py": {
+      "seconds": 0.7,
+      "samples": 1
+    },
+    "tests/test_actor_element_page_gaps.py": {
+      "seconds": 0.17,
+      "samples": 1
+    },
+    "tests/test_actor_mouse.py": {
+      "seconds": 0.013,
+      "samples": 1
+    },
+    "tests/test_actor_page.py": {
+      "seconds": 0.05,
+      "samples": 1
+    },
+    "tests/test_actor_utils.py": {
+      "seconds": 0.0,
+      "samples": 1
+    },
+    "tests/test_advanced_features.py": {
+      "seconds": 2.572,
+      "samples": 1
+    },
+    "tests/test_agent_gif_graph_coverage.py": {
+      "seconds": 0.789,
+      "samples": 1
+    },
+    "tests/test_agent_message_manager_coverage.py": {
+      "seconds": 0.01,
+      "samples": 1
+    },
+    "tests/test_agent_prompts_coverage.py": {
+      "seconds": 0.01,
+      "samples": 1
+    },
+    "tests/test_agent_service.py": {
+      "seconds": 0.004,
+      "samples": 1
+    },
+    "tests/test_agent_service_coverage.py": {
+      "seconds": 23.569,
+      "samples": 1
+    },
+    "tests/test_agent_service_deep_coverage.py": {
+      "seconds": 0.356,
+      "samples": 1
+    },
+    "tests/test_agent_session_code_status.py": {
+      "seconds": 0.028,
+      "samples": 1
+    },
+    "tests/test_agent_views.py": {
+      "seconds": 0.006,
+      "samples": 1
+    },
+    "tests/test_agent_views_coverage.py": {
+      "seconds": 0.024,
+      "samples": 1
+    },
+    "tests/test_browser_events.py": {
+      "seconds": 0.0,
+      "samples": 1
+    },
+    "tests/test_browser_lifecycle.py": {
+      "seconds": 0.409,
+      "samples": 1
+    },
+    "tests/test_browser_ownership_watchdog.py": {
+      "seconds": 0.314,
+      "samples": 1
+    },
+    "tests/test_browser_profile.py": {
+      "seconds": 0.021,
+      "samples": 1
+    },
+    "tests/test_browser_profile_wait_time.py": {
+      "seconds": 0.0,
+      "samples": 1
+    },
+    "tests/test_browser_session_coverage.py": {
+      "seconds": 4.06,
+      "samples": 1
+    },
+    "tests/test_browser_views.py": {
+      "seconds": 0.002,
+      "samples": 1
+    },
+    "tests/test_cli_c_help.py": {
+      "seconds": 6.819,
+      "samples": 1
+    },
+    "tests/test_cli_coverage.py": {
+      "seconds": 0.013,
+      "samples": 1
+    },
+    "tests/test_cli_deep_coverage.py": {
+      "seconds": 0.183,
+      "samples": 1
+    },
+    "tests/test_cli_import_safety.py": {
+      "seconds": 4.743,
+      "samples": 1
+    },
+    "tests/test_code_use_formatting.py": {
+      "seconds": 0.022,
+      "samples": 1
+    },
+    "tests/test_code_use_init_coverage.py": {
+      "seconds": 0.002,
+      "samples": 1
+    },
+    "tests/test_code_use_initial_navigation.py": {
+      "seconds": 4.93,
+      "samples": 1
+    },
+    "tests/test_code_use_namespace.py": {
+      "seconds": 0.035,
+      "samples": 1
+    },
+    "tests/test_code_use_namespace_coverage.py": {
+      "seconds": 0.048,
+      "samples": 1
+    },
+    "tests/test_code_use_service.py": {
+      "seconds": 0.017,
+      "samples": 1
+    },
+    "tests/test_code_use_service_coverage.py": {
+      "seconds": 7.727,
+      "samples": 1
+    },
+    "tests/test_code_use_service_deep_coverage.py": {
+      "seconds": 4.855,
+      "samples": 1
+    },
+    "tests/test_code_use_utils.py": {
+      "seconds": 0.001,
+      "samples": 1
+    },
+    "tests/test_code_use_views.py": {
+      "seconds": 0.003,
+      "samples": 1
+    },
+    "tests/test_codeagent_run_state.py": {
+      "seconds": 0.111,
+      "samples": 1
+    },
+    "tests/test_comparison_claims.py": {
+      "seconds": 0.001,
+      "samples": 1
+    },
+    "tests/test_config.py": {
+      "seconds": 0.006,
+      "samples": 1
+    },
+    "tests/test_config_coverage.py": {
+      "seconds": 0.015,
+      "samples": 1
+    },
+    "tests/test_containment_retirement.py": {
+      "seconds": 0.627,
+      "samples": 1
+    },
+    "tests/test_crash_watchdog_coverage.py": {
+      "seconds": 1.756,
+      "samples": 1
+    },
+    "tests/test_daemon.py": {
+      "seconds": 0.002,
+      "samples": 1
+    },
+    "tests/test_daemon_client.py": {
+      "seconds": 0.086,
+      "samples": 1
+    },
+    "tests/test_daemon_client_coverage.py": {
+      "seconds": 0.76,
+      "samples": 1
+    },
+    "tests/test_daemon_diagnostics.py": {
+      "seconds": 0.013,
+      "samples": 1
+    },
+    "tests/test_daemon_integration.py": {
+      "seconds": 3.044,
+      "samples": 1
+    },
+    "tests/test_daemon_lifecycle.py": {
+      "seconds": 0.081,
+      "samples": 1
+    },
+    "tests/test_daemon_server.py": {
+      "seconds": 0.015,
+      "samples": 1
+    },
+    "tests/test_daemon_server_coverage.py": {
+      "seconds": 30.11,
+      "samples": 1
+    },
+    "tests/test_daemon_startup_states.py": {
+      "seconds": 0.529,
+      "samples": 1
+    },
+    "tests/test_default_action_deep_coverage.py": {
+      "seconds": 1.625,
+      "samples": 1
+    },
+    "tests/test_default_action_watchdog_coverage.py": {
+      "seconds": 5.285,
+      "samples": 1
+    },
+    "tests/test_dom_clickable_elements_coverage.py": {
+      "seconds": 0.003,
+      "samples": 1
+    },
+    "tests/test_dom_deep_coverage.py": {
+      "seconds": 12.089,
+      "samples": 1
+    },
+    "tests/test_dom_eval_serializer_coverage.py": {
+      "seconds": 0.004,
+      "samples": 1
+    },
+    "tests/test_dom_mcp_tools_utils_gaps.py": {
+      "seconds": 4.684,
+      "samples": 1
+    },
+    "tests/test_dom_paint_order_coverage.py": {
+      "seconds": 0.0,
+      "samples": 1
+    },
+    "tests/test_dom_serializer_coverage.py": {
+      "seconds": 0.001,
+      "samples": 1
+    },
+    "tests/test_dom_service_coverage.py": {
+      "seconds": 0.012,
+      "samples": 1
+    },
+    "tests/test_dom_utils_coverage.py": {
+      "seconds": 0.0,
+      "samples": 1
+    },
+    "tests/test_dom_views.py": {
+      "seconds": 0.0,
+      "samples": 1
+    },
+    "tests/test_dom_views_coverage.py": {
+      "seconds": 0.0,
+      "samples": 1
+    },
+    "tests/test_download_lifecycle.py": {
+      "seconds": 1.184,
+      "samples": 1
+    },
+    "tests/test_download_terminal_lifecycle.py": {
+      "seconds": 1.093,
+      "samples": 1
+    },
+    "tests/test_downloads_deep_coverage.py": {
+      "seconds": 1.842,
+      "samples": 1
+    },
+    "tests/test_downloads_mcp_dom_gaps.py": {
+      "seconds": 22.25,
+      "samples": 1
+    },
+    "tests/test_downloads_watchdog.py": {
+      "seconds": 2.061,
+      "samples": 1
+    },
+    "tests/test_events.py": {
+      "seconds": 0.0,
+      "samples": 1
+    },
+    "tests/test_executor.py": {
+      "seconds": 0.009,
+      "samples": 1
+    },
+    "tests/test_executor_depth.py": {
+      "seconds": 0.035,
+      "samples": 1
+    },
+    "tests/test_filesystem.py": {
+      "seconds": 0.064,
+      "samples": 1
+    },
+    "tests/test_filesystem_coverage.py": {
+      "seconds": 0.059,
+      "samples": 1
+    },
+    "tests/test_final_gaps_code_mcp_dom.py": {
+      "seconds": 0.031,
+      "samples": 1
+    },
+    "tests/test_final_gaps_remaining.py": {
+      "seconds": 0.012,
+      "samples": 1
+    },
+    "tests/test_final_gaps_session_profile.py": {
+      "seconds": 0.919,
+      "samples": 1
+    },
+    "tests/test_init.py": {
+      "seconds": 0.003,
+      "samples": 1
+    },
+    "tests/test_lifecycle.py": {
+      "seconds": 0.0,
+      "samples": 1
+    },
+    "tests/test_llm_anthropic_coverage.py": {
+      "seconds": 0.021,
+      "samples": 1
+    },
+    "tests/test_llm_aws_coverage.py": {
+      "seconds": 0.182,
+      "samples": 1
+    },
+    "tests/test_llm_google_coverage.py": {
+      "seconds": 0.031,
+      "samples": 1
+    },
+    "tests/test_llm_groq_coverage.py": {
+      "seconds": 0.039,
+      "samples": 1
+    },
+    "tests/test_llm_messages.py": {
+      "seconds": 0.0,
+      "samples": 1
+    },
+    "tests/test_llm_oci_raw_coverage.py": {
+      "seconds": 0.026,
+      "samples": 1
+    },
+    "tests/test_llm_openai_coverage.py": {
+      "seconds": 0.021,
+      "samples": 1
+    },
+    "tests/test_llm_providers.py": {
+      "seconds": 0.026,
+      "samples": 1
+    },
+    "tests/test_llm_remaining_coverage.py": {
+      "seconds": 0.058,
+      "samples": 1
+    },
+    "tests/test_local_browser_watchdog.py": {
+      "seconds": 2.132,
+      "samples": 1
+    },
+    "tests/test_logging_config.py": {
+      "seconds": 0.02,
+      "samples": 1
+    },
+    "tests/test_mcp_cancellation_provenance.py": {
+      "seconds": 3.209,
+      "samples": 1
+    },
+    "tests/test_mcp_context_registry.py": {
+      "seconds": 2.528,
+      "samples": 1
+    },
+    "tests/test_mcp_dependency_compatibility.py": {
+      "seconds": 0.03,
+      "samples": 1
+    },
+    "tests/test_mcp_helpers.py": {
+      "seconds": 0.193,
+      "samples": 1
+    },
+    "tests/test_mcp_lifecycle.py": {
+      "seconds": 1.335,
+      "samples": 1
+    },
+    "tests/test_mcp_profile_isolation.py": {
+      "seconds": 2.382,
+      "samples": 1
+    },
+    "tests/test_mcp_protocol.py": {
+      "seconds": 58.521,
+      "samples": 1
+    },
+    "tests/test_mcp_server.py": {
+      "seconds": 2.34,
+      "samples": 1
+    },
+    "tests/test_mcp_server_coverage.py": {
+      "seconds": 1.876,
+      "samples": 1
+    },
+    "tests/test_mcp_server_deep_coverage.py": {
+      "seconds": 1.897,
+      "samples": 1
+    },
+    "tests/test_misc_coverage.py": {
+      "seconds": 0.002,
+      "samples": 1
+    },
+    "tests/test_namespace.py": {
+      "seconds": 0.003,
+      "samples": 1
+    },
+    "tests/test_namespace_transfer.py": {
+      "seconds": 0.001,
+      "samples": 1
+    },
+    "tests/test_navigation.py": {
+      "seconds": 18.02,
+      "samples": 1
+    },
+    "tests/test_navigation_benchmark.py": {
+      "seconds": 0.563,
+      "samples": 1
+    },
+    "tests/test_new_features.py": {
+      "seconds": 0.001,
+      "samples": 1
+    },
+    "tests/test_notebook_export.py": {
+      "seconds": 0.009,
+      "samples": 1
+    },
+    "tests/test_notebook_export_coverage.py": {
+      "seconds": 0.023,
+      "samples": 1
+    },
+    "tests/test_observability.py": {
+      "seconds": 0.003,
+      "samples": 1
+    },
+    "tests/test_policy_lifecycle.py": {
+      "seconds": 0.357,
+      "samples": 1
+    },
+    "tests/test_popups_watchdog_coverage.py": {
+      "seconds": 0.662,
+      "samples": 1
+    },
+    "tests/test_profile_lease.py": {
+      "seconds": 0.013,
+      "samples": 1
+    },
+    "tests/test_profile_namespace_watchdog_gaps.py": {
+      "seconds": 2.033,
+      "samples": 1
+    },
+    "tests/test_profile_registry_misc_gaps.py": {
+      "seconds": 1.073,
+      "samples": 1
+    },
+    "tests/test_python_highlights_coverage.py": {
+      "seconds": 1.101,
+      "samples": 1
+    },
+    "tests/test_recording_watchdog_coverage.py": {
+      "seconds": 1.471,
+      "samples": 1
+    },
+    "tests/test_registry_type_validator.py": {
+      "seconds": 0.002,
+      "samples": 1
+    },
+    "tests/test_remaining_coverage.py": {
+      "seconds": 0.015,
+      "samples": 1
+    },
+    "tests/test_remaining_deep_coverage.py": {
+      "seconds": 3.5,
+      "samples": 1
+    },
+    "tests/test_remaining_gaps_coverage.py": {
+      "seconds": 7.938,
+      "samples": 1
+    },
+    "tests/test_remaining_small_gaps.py": {
+      "seconds": 0.079,
+      "samples": 1
+    },
+    "tests/test_screenshots_coverage.py": {
+      "seconds": 0.012,
+      "samples": 1
+    },
+    "tests/test_session_manager.py": {
+      "seconds": 0.233,
+      "samples": 1
+    },
+    "tests/test_session_part1.py": {
+      "seconds": 0.168,
+      "samples": 1
+    },
+    "tests/test_session_part2.py": {
+      "seconds": 0.412,
+      "samples": 1
+    },
+    "tests/test_session_part3.py": {
+      "seconds": 0.128,
+      "samples": 1
+    },
+    "tests/test_signal_handler_coverage.py": {
+      "seconds": 0.053,
+      "samples": 1
+    },
+    "tests/test_storage_state_lifecycle.py": {
+      "seconds": 1.038,
+      "samples": 1
+    },
+    "tests/test_storage_state_watchdog_coverage.py": {
+      "seconds": 2.032,
+      "samples": 1
+    },
+    "tests/test_tabs.py": {
+      "seconds": 0.0,
+      "samples": 1
+    },
+    "tests/test_task_terminal.py": {
+      "seconds": 0.0,
+      "samples": 1
+    },
+    "tests/test_telemetry.py": {
+      "seconds": 0.004,
+      "samples": 1
+    },
+    "tests/test_tokens.py": {
+      "seconds": 0.001,
+      "samples": 1
+    },
+    "tests/test_tokens_deep_coverage.py": {
+      "seconds": 0.029,
+      "samples": 1
+    },
+    "tests/test_tokens_service.py": {
+      "seconds": 0.006,
+      "samples": 1
+    },
+    "tests/test_tools_registry.py": {
+      "seconds": 0.009,
+      "samples": 1
+    },
+    "tests/test_tools_registry_coverage.py": {
+      "seconds": 0.016,
+      "samples": 1
+    },
+    "tests/test_tools_service.py": {
+      "seconds": 1.039,
+      "samples": 1
+    },
+    "tests/test_tools_service_coverage.py": {
+      "seconds": 2.963,
+      "samples": 1
+    },
+    "tests/test_tools_service_deep_coverage.py": {
+      "seconds": 0.147,
+      "samples": 1
+    },
+    "tests/test_tools_utils.py": {
+      "seconds": 0.0,
+      "samples": 1
+    },
+    "tests/test_utils.py": {
+      "seconds": 0.003,
+      "samples": 1
+    },
+    "tests/test_utils_coverage.py": {
+      "seconds": 2.442,
+      "samples": 1
+    },
+    "tests/test_utils_deep_coverage.py": {
+      "seconds": 1.23,
+      "samples": 1
+    },
+    "tests/test_utils_init_coverage.py": {
+      "seconds": 0.0,
+      "samples": 1
+    },
+    "tests/test_video_recorder_coverage.py": {
+      "seconds": 0.025,
+      "samples": 1
+    },
+    "tests/test_watchdog_base.py": {
+      "seconds": 0.009,
+      "samples": 1
+    },
+    "tests/test_watchdog_remaining_coverage.py": {
+      "seconds": 3.799,
+      "samples": 1
+    },
+    "tests/test_watchdogs.py": {
+      "seconds": 2.423,
+      "samples": 1
+    },
+    "tests/test_xy_actions.py": {
+      "seconds": 0.035,
+      "samples": 1
+    }
+  }
+}
