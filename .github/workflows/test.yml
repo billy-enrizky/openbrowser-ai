@@ -1,154 +1,294 @@
-# GitHub Actions Workflow for Running Tests
+# Fast, honest CI.
 #
-# This workflow runs the openbrowser-ai test suite on push and pull requests.
-# It tests against multiple Python versions and operating systems.
+# - PRs run the tests the diff can reach, on Ubuntu, in four measured shards.
+# - The merge queue runs the full non-integration suite on Ubuntu and macOS.
+# - Lint, format, and type check are a ratchet: existing findings are visible,
+#   new findings fail the job.
+# - No retries, no widened timeouts, no skipped test selection.
 #
-# Tests are run using pytest with coverage reporting.
-# The workflow uses uv for fast dependency installation.
+# The full suite means `pytest -m "not integration"`. Integration tests need a
+# real browser and remain a separate lane; this workflow does not claim they ran.
 
 name: Tests
 
 on:
-  push:
-    branches: [main, develop]
-    paths:
-      - 'src/**'
-      - 'tests/**'
-      - 'pyproject.toml'
-      - 'uv.lock'
-      - '.github/workflows/test.yml'
   pull_request:
     branches: [main, develop]
-    paths:
-      - 'src/**'
-      - 'tests/**'
-      - 'pyproject.toml'
-      - 'uv.lock'
-      - '.github/workflows/test.yml'
+  merge_group:
+  push:
+    branches: [main, develop]
+  schedule:
+    - cron: "0 7 * * *"
   workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: tests-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 permissions:
   contents: read
-  pull-requests: write
+
+env:
+  PYTHON_VERSION: "3.12"
+  UV_VERSION: "0.9.15"
+  SHARDS: "4"
 
 jobs:
+  selection-guard:
+    name: selection-guard
+    runs-on: ${{ vars.CI_UBUNTU_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          filter: blob:none
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - run: uv sync --locked --all-extras
+      - name: Select tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            uv run --locked python scripts/ci/select_tests.py \
+              --base "${{ github.event.pull_request.base.sha }}" \
+              --output selection.json --summary
+          else
+            uv run --locked python scripts/ci/select_tests.py --force-all \
+              --output selection.json --summary
+          fi
+      - name: Verify shard coverage and balance
+        shell: bash
+        run: |
+          set -euo pipefail
+          uv run --locked python scripts/ci/shard_tests.py \
+            --selection selection.json \
+            --timings tests/ci/test_timings.json \
+            --shards "$SHARDS" --verify-all
+      - name: Run selector and sharder tests
+        run: |
+          uv run --locked pytest tests/ci/test_select_tests.py \
+            tests/ci/test_shard_tests.py tests/ci/test_check_baseline.py \
+            tests/ci/test_audit_runs.py -q --tb=short
+      - name: Prove selection catches a planted break
+        run: uv run --locked python scripts/ci/prove_selection.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: selection
+          path: selection.json
+          retention-days: 1
+
+  static:
+    name: static
+    runs-on: ${{ vars.CI_UBUNTU_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          filter: blob:none
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - run: uv sync --locked --all-extras
+      - name: Run Ruff, format, Pyright, and backend compile
+        run: uv run --locked python scripts/ci/budget.py --name static -- ./scripts/ci/run_static.sh .
+
   test:
-    name: Test Python ${{ matrix.python-version }} on ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
+    name: Test ${{ matrix.os }} shard ${{ matrix.shard }}/4
+    runs-on: ${{ matrix.os == 'ubuntu-latest' && (vars.CI_UBUNTU_RUNNER || 'ubuntu-latest') || (vars.CI_MACOS_RUNNER || 'macos-latest') }}
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
-        python-version: ["3.12"]
-
+        os: ${{ fromJSON(github.event_name == 'pull_request' && '["ubuntu-latest"]' || '["ubuntu-latest","macos-latest"]') }}
+        shard: [1, 2, 3, 4]
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@v4
         with:
-          version: "latest"
-
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
+          fetch-depth: 0
+          filter: blob:none
+      - uses: astral-sh/setup-uv@v5
         with:
-          python-version: ${{ matrix.python-version }}
-
-      - name: Install locked dependencies
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Restore recorded test timings
+        uses: actions/cache/restore@v4
+        with:
+          path: tests/ci/test_timings.json
+          key: test-timings-${{ github.run_id }}
+          restore-keys: test-timings-
+          fail-on-cache-miss: false
+      - run: uv sync --locked --all-extras
+      - name: Select and shard tests
+        id: select
+        shell: bash
         run: |
-          uv sync --locked --all-extras
-
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            uv run --locked python scripts/ci/select_tests.py \
+              --base "${{ github.event.pull_request.base.sha }}" \
+              --output selection.json --summary
+          else
+            uv run --locked python scripts/ci/select_tests.py --force-all \
+              --output selection.json --summary
+          fi
+          uv run --locked python scripts/ci/shard_tests.py \
+            --selection selection.json \
+            --timings tests/ci/test_timings.json \
+            --shards "$SHARDS" --shard "${{ matrix.shard }}" --output shard.txt
+          echo "needs_mcp1=$(jq -r '.needs_mcp1' selection.json)" >> "$GITHUB_OUTPUT"
+          echo "count=$(jq -r '.files | length' selection.json)" >> "$GITHUB_OUTPUT"
       - name: Prepare isolated MCP 1.x compatibility client
+        if: steps.select.outputs.needs_mcp1 == 'true'
+        shell: bash
         run: |
-          uv venv --python "${{ matrix.python-version }}" "$RUNNER_TEMP/mcp1-client"
+          set -euo pipefail
+          uv venv --python "$PYTHON_VERSION" "$RUNNER_TEMP/mcp1-client"
           uv pip install --python "$RUNNER_TEMP/mcp1-client/bin/python" "mcp==1.26.0"
-          "$RUNNER_TEMP/mcp1-client/bin/python" -c 'from importlib.metadata import version; assert version("mcp") == "1.26.0"'
+          "$RUNNER_TEMP/mcp1-client/bin/python" -c \
+            'from importlib.metadata import version; assert version("mcp") == "1.26.0"'
           echo "OPENBROWSER_TEST_MCP1_PYTHON=$RUNNER_TEMP/mcp1-client/bin/python" >> "$GITHUB_ENV"
-
-      - name: Run tests with coverage
+      - name: Run selected tests
+        shell: bash
         run: |
-          uv run --locked pytest tests/ -v --tb=short -m "not integration" --cov=src/openbrowser --cov-branch --cov-report=xml --cov-report=term-missing
-        env:
-          PYTHONPATH: ${{ github.workspace }}
+          set -euo pipefail
+          if [ ! -s shard.txt ]; then
+            echo "no selected tests for shard ${{ matrix.shard }}"
+            exit 0
+          fi
+          files=()
+          while IFS= read -r file; do
+            if [ -n "$file" ]; then
+              files+=("$file")
+            fi
+          done < shard.txt
+          uv run --locked python scripts/ci/budget.py --name test-shard -- \
+            uv run --locked pytest "${files[@]}" -q -m "not integration" \
+            -n auto --dist load --tb=short --junitxml=junit.xml
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: junit-${{ matrix.os }}-${{ matrix.shard }}
+          path: junit.xml
+          if-no-files-found: ignore
+          retention-days: 7
 
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v5
-        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
+  backend-smoke:
+    name: backend-smoke
+    runs-on: ${{ vars.CI_UBUNTU_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+      - name: Build and import the app once
+        working-directory: backend
+        shell: bash
+        run: |
+          set -euo pipefail
+          uv sync --locked
+          uv run --locked python -c \
+            'import app.main; from fastapi import FastAPI; assert isinstance(app.main.app, FastAPI); import app.main as again; assert again.app is app.main.app'
+
+  record-timings:
+    name: record-timings
+    needs: [test]
+    if: github.event_name == 'push' || github.event_name == 'schedule'
+    runs-on: ${{ vars.CI_UBUNTU_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: junit-ubuntu-latest-*
+          path: junit
+          merge-multiple: true
+      - run: uv sync --locked --all-extras
+      - name: Record Ubuntu file times
+        run: |
+          uv run --locked python scripts/ci/record_timings.py \
+            --junit junit/*.xml --output tests/ci/test_timings.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: test-timings
+          path: tests/ci/test_timings.json
+          retention-days: 7
+      - uses: actions/cache/save@v4
+        with:
+          path: tests/ci/test_timings.json
+          key: test-timings-${{ github.run_id }}
+
+  coverage:
+    name: coverage
+    if: github.event_name == 'push' || github.event_name == 'schedule'
+    runs-on: ${{ vars.CI_UBUNTU_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          filter: blob:none
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - run: uv sync --locked --all-extras
+      - name: Run the full suite with coverage
+        run: |
+          uv run --locked python scripts/ci/budget.py --name coverage -- \
+            uv run --locked pytest tests/ -q -m "not integration" \
+            --cov=src/openbrowser --cov-branch --cov-report=xml --cov-report=term-missing
+      - uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ./coverage.xml
           fail_ci_if_error: false
           verbose: true
 
-      - name: Add coverage PR comment
-        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12' && github.event_name == 'pull_request'
-        uses: MishaKav/pytest-coverage-comment@main
-        with:
-          pytest-xml-coverage-path: ./coverage.xml
-          title: Test Coverage Report
-          report-only-changed-files: true
-          remove-links-to-files: true
-          remove-links-to-lines: true
-
-  lint:
-    name: Lint
-    runs-on: ubuntu-latest
+  ci-gate:
+    name: ci-gate
+    if: always()
+    needs: [selection-guard, static, test, backend-smoke]
+    runs-on: ${{ vars.CI_UBUNTU_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 5
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v5
-        with:
-          version: "latest"
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install dependencies
+      - name: Require every gate job to pass
+        shell: bash
+        env:
+          SELECTION: ${{ needs.selection-guard.result }}
+          STATIC: ${{ needs.static.result }}
+          TEST: ${{ needs.test.result }}
+          BACKEND: ${{ needs.backend-smoke.result }}
         run: |
-          uv pip install --system ruff
-
-      - name: Run Ruff linter
-        run: |
-          ruff check src/ tests/ --output-format=github
-        continue-on-error: true
-
-      - name: Run Ruff formatter check
-        run: |
-          ruff format --check src/ tests/
-        continue-on-error: true
-
-  type-check:
-    name: Type Check
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v5
-        with:
-          version: "latest"
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install dependencies
-        run: |
-          uv pip install --system -e ".[all]"
-          uv pip install --system pyright
-
-      - name: Run Pyright type checker
-        run: |
-          pyright src/openbrowser
-        continue-on-error: true
+          set -euo pipefail
+          echo "selection-guard=$SELECTION static=$STATIC test=$TEST backend-smoke=$BACKEND"
+          for result in "$SELECTION" "$STATIC" "$TEST" "$BACKEND"; do
+            if [ "$result" != "success" ]; then
+              echo "ci-gate failed: a required job did not succeed" >&2
+              exit 1
+            fi
+          done
