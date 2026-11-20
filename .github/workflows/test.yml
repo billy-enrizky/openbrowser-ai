@@ -142,14 +142,14 @@ jobs:
               --output "$RUNNER_TEMP/selection.json" --summary
           else
             uv run --locked python scripts/ci/select_tests.py --force-all \
-              --output selection.json --summary
+              --output "$RUNNER_TEMP/selection.json" --summary
           fi
           uv run --locked python scripts/ci/shard_tests.py \
-            --selection selection.json \
+            --selection "$RUNNER_TEMP/selection.json" \
             --timings tests/ci/test_timings.json \
             --shards "$SHARDS" --shard "${{ matrix.shard }}" --output shard.txt
-          echo "needs_mcp1=$(jq -r '.needs_mcp1' selection.json)" >> "$GITHUB_OUTPUT"
-          echo "count=$(jq -r '.files | length' selection.json)" >> "$GITHUB_OUTPUT"
+          echo "needs_mcp1=$(jq -r '.needs_mcp1' "$RUNNER_TEMP/selection.json")" >> "$GITHUB_OUTPUT"
+          echo "count=$(jq -r '.files | length' "$RUNNER_TEMP/selection.json")" >> "$GITHUB_OUTPUT"
       - name: Prepare isolated MCP 1.x compatibility client
         if: steps.select.outputs.needs_mcp1 == 'true'
         shell: bash
