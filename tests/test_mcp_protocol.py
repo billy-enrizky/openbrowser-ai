@@ -769,7 +769,8 @@ async def test_owned_cleanup_cancellation_preserves_real_stdio_usability(
         )
         text = following["content"][0]["text"]
         assert str(blocked_owner + 1) in text
-        assert ("42" if mode == "reset" else "missing") in text
+        # A failed replacement still keeps scalar user values for the next start.
+        assert ("42" if mode in ("reset", "replacement-failure") else "missing") in text
         status = await c.request(5, "tools/call", {"name": "get_status"}, modern=modern)
         assert json.loads(status["content"][0]["text"])["browser"]["phase"] == "ready"
         reset = await c.request(

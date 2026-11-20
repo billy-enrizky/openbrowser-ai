@@ -424,6 +424,10 @@ from openbrowser.code_use.descriptions import (
 from openbrowser.code_use.descriptions import (
 	EXECUTE_CODE_DESCRIPTION_COMPACT as _EXECUTE_CODE_DESCRIPTION_COMPACT,
 )
+from openbrowser.code_use.namespace_transfer import (
+	NamespaceTransfer,
+	transfer_namespace,
+)
 
 
 class _BrowserOwner:
@@ -446,6 +450,7 @@ class _BrowserOwner:
 		self._browser_lifecycle = LifecycleMachine(f'mcp_browser:{owner_id}')
 		self._browser_generation = 0
 		self._pending_variables: dict[str, Any] = {}
+		self._last_namespace_transfer: dict[str, object] = {}
 		self._profile_summary: dict[str, Any] | None = None
 		self._managed_profile_dir: Path | None = None
 		self._managed_storage_state: Path | None = None
@@ -465,6 +470,27 @@ class _BrowserOwner:
 		self._lifecycle_lock = asyncio.Lock()
 		self._execution_lock = asyncio.Lock()
 		self._execution_task: asyncio.Task[Any] | None = None
+
+	def _carry_namespace(
+		self,
+		old_namespace: dict[str, Any] | None,
+		old_session: Any,
+	) -> NamespaceTransfer:
+		"""Classify the old namespace before rebuilding the browser."""
+		transfer = transfer_namespace(old_namespace or {}, old_browser_session=old_session)
+		if transfer.warnings:
+			logger.warning('Namespace transfer: %s', '; '.join(transfer.warnings))
+		self._last_namespace_transfer = transfer.to_dict()
+		return transfer
+
+	def _merge_pending_variables(self, transfer: NamespaceTransfer) -> None:
+		"""Merge carried values into the pending set, dropping internal names."""
+		merged = {**self._pending_variables, **transfer.variables}
+		self._pending_variables = {
+			key: value
+			for key, value in merged.items()
+			if isinstance(key, str) and not key.startswith('_')
+		}
 
 	def _server(self) -> Any:
 		"""Return the adapter that owns server-wide state, or this legacy owner."""
@@ -722,10 +748,7 @@ class _BrowserOwner:
 					self._browser_lifecycle.fail('Unable to safely close the old browser session during recovery', reason='browser recovery cleanup failed')
 				if cleanup.caller_cancellation is not None:
 					if cleanup.succeeded:
-						merged = {**self._pending_variables, **old_ns}
-						self._pending_variables = {
-							key: value for key, value in merged.items() if not key.startswith('__')
-						}
+						self._merge_pending_variables(self._carry_namespace(old_ns, old_session))
 						try:
 							self._browser_lifecycle.transition(
 								LifecyclePhase.STOPPED,
@@ -741,10 +764,7 @@ class _BrowserOwner:
 				self._namespace = None
 
 			if deadline is not None and time.monotonic() >= deadline:
-				merged = {**self._pending_variables, **old_ns}
-				self._pending_variables = {
-					key: value for key, value in merged.items() if not key.startswith('__')
-				}
+				self._merge_pending_variables(self._carry_namespace(old_ns, old_session))
 				self._browser_generation += 1
 				try:
 					self._browser_lifecycle.transition(
@@ -764,6 +784,7 @@ class _BrowserOwner:
 			except BaseException:
 				self.browser_session = None
 				self._namespace = None
+				self._merge_pending_variables(self._carry_namespace(old_ns, old_session))
 				raise
 
 			self.browser_session = session
@@ -784,10 +805,11 @@ class _BrowserOwner:
 					tools=self._tools,
 					file_system=self._create_owner_file_system(),
 				)
-				# Copy user-defined variables from old namespace
-				for key, val in old_ns.items():
-					if not key.startswith('__') and key not in self._namespace:
-						self._namespace[key] = val
+				# Carry only scalars and scalar containers from the old namespace.
+				transfer = self._carry_namespace(old_ns, old_session)
+				for key, value in transfer.variables.items():
+					if key not in self._namespace:
+						self._namespace[key] = value
 
 				self._executor.set_namespace(self._namespace)
 				self._browser_lifecycle.transition(
@@ -803,6 +825,9 @@ class _BrowserOwner:
 				if cleanup.succeeded and self.browser_session is session:
 					self.browser_session = None
 				self._namespace = None
+				# The next start must not lose ordinary user values because this
+				# recovery failed after the old session was torn down.
+				self._merge_pending_variables(self._carry_namespace(old_ns, old_session))
 				if cleanup.caller_cancellation is not None and not isinstance(error, asyncio.CancelledError):
 					raise cleanup.caller_cancellation
 				raise
@@ -989,6 +1014,7 @@ class _BrowserOwner:
 			'context_id': getattr(self, 'context_id', None),
 			'namespace_variables': namespace_variables,
 			'pending_variables': len(self._pending_variables),
+			'namespace_transfer': self._last_namespace_transfer,
 			'session_timeout_minutes': self.session_timeout_minutes,
 			'exec_timeout': _exec_timeout_seconds(),
 			'uptime_seconds': max(0.0, time.time() - self._server()._start_time),
@@ -1027,9 +1053,9 @@ class _BrowserOwner:
 				self._namespace = None
 				if clear_variables:
 					self._pending_variables.clear()
+					self._last_namespace_transfer = NamespaceTransfer().to_dict()
 				else:
-					merged = {**self._pending_variables, **old_namespace}
-					self._pending_variables = {key: value for key, value in merged.items() if not key.startswith('__')}
+					self._merge_pending_variables(self._carry_namespace(old_namespace, session))
 				self._browser_generation += 1
 				try:
 					self._browser_lifecycle.transition(
@@ -1047,6 +1073,7 @@ class _BrowserOwner:
 						'ok': True,
 						'message': 'Browser reset',
 						'preserved_variables': len(self._pending_variables),
+						'namespace_transfer': self._last_namespace_transfer,
 						'browser': self._status_payload()['browser'],
 					},
 					indent=2,
@@ -1155,11 +1182,7 @@ class _BrowserOwner:
 					if cleanup.succeeded and self.browser_session is session:
 						self.browser_session = None
 						self._namespace = None
-						self._pending_variables = {
-							key: value
-							for key, value in old_namespace.items()
-							if not key.startswith('__')
-						}
+						self._merge_pending_variables(self._carry_namespace(old_namespace, session))
 						self._browser_generation += 1
 						try:
 							self._browser_lifecycle.transition(
