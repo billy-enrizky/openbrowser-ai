@@ -76,8 +76,7 @@ jobs:
             uv run --locked pytest tests/ci/test_select_tests.py \
             tests/ci/test_shard_tests.py tests/ci/test_split_shard.py \
             tests/ci/test_check_baseline.py tests/ci/test_audit_runs.py \
-            tests/ci/test_default_file_system_isolation.py -q --tb=short \
-            -p no:cacheprovider
+            tests/ci/test_record_timings.py -q --tb=short -p no:cacheprovider
       - name: Prove selection catches a planted break
         if: github.event_name != 'pull_request'
         run: |
@@ -174,25 +173,6 @@ jobs:
             echo "no selected tests for shard ${{ matrix.shard }}"
             exit 0
           fi
-          files=()
-          while IFS= read -r file; do
-            if [ -n "$file" ]; then
-              files+=("$file")
-            fi
-          done < shard.txt
-          set +e
-          uv run --locked pytest "${files[@]}" -q -m "not integration" \
-            --collect-only > /tmp/collect.txt 2>&1
-          collect_status=$?
-          set -e
-          if [ "$collect_status" -eq 5 ]; then
-            echo "no non-integration tests in shard ${{ matrix.shard }}"
-            exit 0
-          fi
-          if [ "$collect_status" -ne 0 ]; then
-            cat /tmp/collect.txt
-            exit "$collect_status"
-          fi
           uv run --locked python scripts/ci/split_shard.py \
             --input shard.txt \
             --serial-file tests/test_navigation.py \
@@ -210,6 +190,17 @@ jobs:
             if [ ${#group[@]} -eq 0 ]; then
               return 0
             fi
+            local collect_status
+            uv run --locked pytest "${group[@]}" -q -m "not integration" \
+              --collect-only > "/tmp/collect-${name}.txt" 2>&1
+            collect_status=$?
+            if [ "$collect_status" -eq 5 ]; then
+              return 0
+            fi
+            if [ "$collect_status" -ne 0 ]; then
+              cat "/tmp/collect-${name}.txt"
+              return "$collect_status"
+            fi
             if [ "$workers" = "0" ]; then
               uv run --locked python scripts/ci/budget.py --name "$name" -- \
                 uv run --locked pytest "${group[@]}" -q -m "not integration" \
@@ -221,10 +212,18 @@ jobs:
             fi
           }
 
+          set +e
           run_group test-parallel parallel.txt 4 \
             "junit-${{ matrix.os }}-${{ matrix.shard }}-parallel.xml"
+          parallel_status=$?
           run_group test-serial serial.txt 0 \
             "junit-${{ matrix.os }}-${{ matrix.shard }}-serial.xml"
+          serial_status=$?
+          set -e
+          if [ "$parallel_status" -ne 0 ] || [ "$serial_status" -ne 0 ]; then
+            echo "test groups failed: parallel=$parallel_status serial=$serial_status" >&2
+            exit 1
+          fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:

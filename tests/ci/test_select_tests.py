@@ -60,6 +60,13 @@ def test_untested_module_selects_all(tmp_path: Path) -> None:
     assert result.mode == "all"
 
 
+def test_one_untested_module_selects_all_even_when_another_is_tested(tmp_path: Path) -> None:
+    root = make_repo(tmp_path)
+    write(root, "src/openbrowser/unused.py", "VALUE = 2\n")
+    result = select(root, ["src/openbrowser/a.py", "src/openbrowser/unused.py"])
+    assert result.mode == "all"
+
+
 def test_changed_test_selects_itself(tmp_path: Path) -> None:
     root = make_repo(tmp_path)
     result = select(root, ["tests/test_other.py"])
@@ -218,6 +225,20 @@ def test_docs_only_change_selects_nothing(tmp_path: Path) -> None:
     assert result.files == []
 
 
+def test_docs_read_by_tests_select_all(tmp_path: Path) -> None:
+    root = make_repo(tmp_path)
+    write(root, "docs/comparison.mdx", "claims\n")
+    result = select(root, ["docs/comparison.mdx"])
+    assert result.mode == "all"
+
+
+def test_nested_conftest_selects_all(tmp_path: Path) -> None:
+    root = make_repo(tmp_path)
+    write(root, "tests/unit/conftest.py", "")
+    result = select(root, ["tests/unit/conftest.py"])
+    assert result.mode == "all"
+
+
 def test_frontend_change_selects_nothing(tmp_path: Path) -> None:
     root = make_repo(tmp_path)
     write(root, "frontend/src/app/page.tsx", "export default 1\n")
@@ -230,6 +251,13 @@ def test_unknown_python_path_selects_all(tmp_path: Path) -> None:
     root = make_repo(tmp_path)
     write(root, "tools/new_tool.py", "VALUE = 1\n")
     result = select(root, ["tools/new_tool.py"])
+    assert result.mode == "all"
+
+
+def test_unclassified_python_still_selects_all_with_a_tested_source(tmp_path: Path) -> None:
+    root = make_repo(tmp_path)
+    write(root, "tools/new_tool.py", "VALUE = 1\n")
+    result = select(root, ["src/openbrowser/a.py", "tools/new_tool.py"])
     assert result.mode == "all"
 
 

@@ -36,9 +36,8 @@ def test_identical_diagnostic_sets_are_not_a_regression() -> None:
 
 
 def test_message_hash_ignores_line_numbers() -> None:
-    message = "Line too long (124 > 120)"
-    assert message_hash(message) == message_hash(message)
-    assert message_hash(message) != message_hash("Line too long (125 > 120)")
+    assert message_hash("from line 7") == message_hash("from line 8")
+    assert message_hash("Line too long (124 > 120)") != message_hash("Line too long (125 > 120)")
 
 
 def test_increased_count_is_a_regression() -> None:

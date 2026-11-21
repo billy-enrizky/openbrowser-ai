@@ -87,7 +87,7 @@ def merge(existing: dict[str, object], observed: dict[str, float]) -> dict[str, 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", default=".", help="repository root")
-    parser.add_argument("--junit", action="append", required=True, help="JUnit XML path")
+    parser.add_argument("--junit", action="extend", nargs="+", required=True, help="JUnit XML path")
     parser.add_argument("--output", default="tests/ci/test_timings.json")
     parser.add_argument("--replace", action="store_true", help="ignore existing timings")
     args = parser.parse_args(argv)

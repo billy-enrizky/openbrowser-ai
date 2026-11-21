@@ -4173,14 +4173,6 @@
       }
     }
   },
-  "tests/conftest.py": {
-    "I001": {
-      "2ae03c24054492f4": {
-        "count": 1,
-        "message": "Import block is un-sorted or un-formatted"
-      }
-    }
-  },
   "tests/profiling.py": {
     "B007": {
       "28168c0e7f2e3049": {
@@ -4643,9 +4635,9 @@
       }
     },
     "F811": {
-      "793a41b4295f8de8": {
+      "695f224352079100": {
         "count": 1,
-        "message": "Redefinition of unused `MagicMock` from line 7: `MagicMock` redefined here"
+        "message": "Redefinition of unused `MagicMock` from line <n>: `MagicMock` redefined here"
       }
     },
     "SIM210": {
@@ -5573,9 +5565,9 @@
       }
     },
     "F811": {
-      "3a00ea35c7fe8946": {
+      "69c996cbf655db74": {
         "count": 1,
-        "message": "Redefinition of unused `asyncio` from line 3: `asyncio` redefined here"
+        "message": "Redefinition of unused `asyncio` from line <n>: `asyncio` redefined here"
       }
     },
     "F841": {
@@ -7360,10 +7352,6 @@
       "d06cd8cc2d0f5834": {
         "count": 1,
         "message": "Line too long (124 > 120)"
-      },
-      "d875ce19917f7e54": {
-        "count": 1,
-        "message": "Line too long (138 > 120)"
       },
       "ef05b552ff38981d": {
         "count": 1,

@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts.ci.shard_tests import allocate, load_timings, shard_totals
+from scripts.ci.shard_tests import allocate, fill_missing, load_timings, shard_totals
 
 
 def test_union_equals_selection_for_every_supported_shard_count() -> None:
@@ -27,12 +27,14 @@ def test_missing_timing_uses_the_median_not_zero() -> None:
     bins = allocate(files, timings, 2)
     totals = shard_totals(bins, timings)
     assert sum(totals) == pytest.approx(18.0)
+    weights = fill_missing(files, timings)
+    assert weights["c.py"] == 6.0
 
 
 def test_allocation_is_deterministic() -> None:
     files = ["a.py", "b.py", "c.py", "d.py"]
     timings = {"a.py": 4.0, "b.py": 3.0, "c.py": 2.0, "d.py": 1.0}
-    assert allocate(files, timings, 2) == allocate(files, timings, 2)
+    assert allocate(files, timings, 2) == allocate(list(reversed(files)), timings, 2)
 
 
 def test_duplicate_selection_is_rejected() -> None:

@@ -18,13 +18,12 @@ def kill_tree(process: subprocess.Popen[bytes]) -> None:
     if os.name == "posix":
         with contextlib.suppress(ProcessLookupError):
             os.killpg(process.pid, signal.SIGTERM)
-        try:
+        with contextlib.suppress(subprocess.TimeoutExpired):
             process.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            with contextlib.suppress(ProcessLookupError):
-                os.killpg(process.pid, signal.SIGKILL)
-            with contextlib.suppress(subprocess.TimeoutExpired):
-                process.wait(timeout=5)
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(process.pid, signal.SIGKILL)
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            process.wait(timeout=5)
         return
     if process.poll() is None:
         process.terminate()

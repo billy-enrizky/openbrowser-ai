@@ -33,7 +33,11 @@ def _run_cli(*args: str, env: dict | None = None) -> subprocess.CompletedProcess
 def short_socket_env():
     root = '/tmp' if os.name != 'nt' else None
     with tempfile.TemporaryDirectory(prefix='ob_', dir=root) as tmp:
-        yield {'OPENBROWSER_SOCKET': str(Path(tmp) / 'd.sock')}
+        env = {'OPENBROWSER_SOCKET': str(Path(tmp) / 'd.sock')}
+        try:
+            yield env
+        finally:
+            _run_cli('daemon', 'force-stop', env=env)
 
 
 class TestCliCHelp:

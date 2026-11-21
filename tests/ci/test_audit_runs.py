@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from scripts.ci.audit_runs import normalize_job, percentile, summary
+from scripts.ci.audit_runs import fetch_jobs, normalize_job, percentile, summary
 
 
 def records() -> list[dict[str, object]]:
@@ -41,9 +41,63 @@ def test_main_step_ignores_dependency_sync() -> None:
 
     job = {
         "steps": [
-            {"name": "Run uv sync --locked --all-extras"},
-            {"name": "Run selected tests"},
-            {"name": "Post Run astral-sh/setup-uv@v5"},
+            {
+                "name": "Run uv sync --locked --all-extras",
+                "conclusion": "success",
+                "started_at": "2026-01-01T00:00:00Z",
+                "completed_at": "2026-01-01T00:00:01Z",
+            },
+            {
+                "name": "Run selected tests",
+                "conclusion": "success",
+                "started_at": "2026-01-01T00:00:01Z",
+                "completed_at": "2026-01-01T00:00:06Z",
+            },
+            {
+                "name": "Post Run astral-sh/setup-uv@v5",
+                "conclusion": "success",
+                "started_at": "2026-01-01T00:00:06Z",
+                "completed_at": "2026-01-01T00:00:07Z",
+            },
         ]
     }
     assert main_step(job)["name"] == "Run selected tests"
+
+
+def test_main_step_skips_a_skipped_candidate() -> None:
+    from scripts.ci.audit_runs import main_step
+
+    job = {
+        "steps": [
+            {
+                "name": "Run selector and sharder tests",
+                "conclusion": "success",
+                "started_at": "2026-01-01T00:00:00Z",
+                "completed_at": "2026-01-01T00:00:05Z",
+            },
+            {
+                "name": "Prove selection catches a planted break",
+                "conclusion": "skipped",
+                "started_at": "2026-01-01T00:00:05Z",
+                "completed_at": "2026-01-01T00:00:05Z",
+            },
+        ]
+    }
+    assert main_step(job)["name"] == "Run selector and sharder tests"
+
+
+def test_fetch_jobs_uses_the_run_attempt_and_paginates(monkeypatch) -> None:
+    paths: list[str] = []
+
+    def fake_api_get(path: str, auth: str):
+        paths.append(path)
+        page = int(path.rsplit("page=", 1)[1])
+        count = 100 if page == 1 else (1 if page == 2 else 0)
+        return {"jobs": [{"id": page * 1000 + index} for index in range(count)]}
+
+    monkeypatch.setattr("scripts.ci.audit_runs.api_get", fake_api_get)
+    jobs = fetch_jobs("owner/repo", 42, 3, "token")
+
+    assert len(jobs) == 101
+    assert all("/attempts/3/jobs" in path for path in paths)
+    assert len(paths) == 2

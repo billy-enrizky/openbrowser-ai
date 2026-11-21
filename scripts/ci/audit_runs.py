@@ -90,11 +90,23 @@ def normalize_job(name: str) -> str:
 def main_step(job: dict[str, Any]) -> dict[str, Any] | None:
     steps = job.get("steps") or []
     candidates = [
-        step for step in steps if any(marker in (step.get("name") or "").lower() for marker in MAIN_STEP_MARKERS)
+        step
+        for step in steps
+        if step.get("conclusion") != "skipped"
+        and step.get("started_at")
+        and step.get("completed_at")
+        and any(marker in (step.get("name") or "").lower() for marker in MAIN_STEP_MARKERS)
     ]
     if candidates:
         return candidates[-1]
-    runs = [step for step in steps if (step.get("name") or "").lower().startswith("run ")]
+    runs = [
+        step
+        for step in steps
+        if step.get("conclusion") != "skipped"
+        and step.get("started_at")
+        and step.get("completed_at")
+        and (step.get("name") or "").lower().startswith("run ")
+    ]
     return runs[-1] if runs else None
 
 
@@ -111,16 +123,31 @@ def fetch_runs(repo: str, limit: int, auth: str) -> list[dict[str, Any]]:
     return runs[:limit]
 
 
-def fetch_jobs(repo: str, run_id: int, auth: str) -> list[dict[str, Any]]:
-    payload = api_get(f"/repos/{repo}/actions/runs/{run_id}/jobs?per_page=100", auth)
-    return payload.get("jobs", [])
+def fetch_jobs(repo: str, run_id: int, run_attempt: int, auth: str) -> list[dict[str, Any]]:
+    jobs: list[dict[str, Any]] = []
+    page = 1
+    while True:
+        payload = api_get(
+            f"/repos/{repo}/actions/runs/{run_id}/attempts/{run_attempt}/jobs?per_page=100&page={page}",
+            auth,
+        )
+        batch = payload.get("jobs", [])
+        if not batch:
+            return jobs
+        jobs.extend(batch)
+        if len(batch) < 100:
+            return jobs
+        page += 1
 
 
 def build_records(repo: str, runs: list[dict[str, Any]], auth: str, workers: int) -> list[dict[str, Any]]:
     completed = [run for run in runs if run.get("status") == "completed"]
     jobs_by_run: dict[int, list[dict[str, Any]]] = {}
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
-        futures = {pool.submit(fetch_jobs, repo, run["id"], auth): run["id"] for run in completed}
+        futures = {
+            pool.submit(fetch_jobs, repo, run["id"], int(run.get("run_attempt") or 1), auth): run["id"]
+            for run in completed
+        }
         for index, future in enumerate(concurrent.futures.as_completed(futures), start=1):
             run_id = futures[future]
             jobs_by_run[run_id] = future.result()

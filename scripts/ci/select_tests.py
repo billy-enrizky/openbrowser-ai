@@ -47,6 +47,8 @@ SHARED_EXACT = {
     "backend/app/main.py",
     "backend/pyproject.toml",
     "backend/uv.lock",
+    "docs/comparison.mdx",
+    "docs/cli-comparison.mdx",
 }
 SHARED_PREFIXES = (
     "tests/support/",
@@ -303,6 +305,7 @@ def _test_imports(root: Path, tests: Iterable[str]) -> tuple[dict[str, set[str]]
 def _is_shared(path: str) -> bool:
     return (
         path.endswith("/__init__.py")
+        or path.endswith("/conftest.py")
         or path in SHARED_EXACT
         or any(path.startswith(prefix) for prefix in SHARED_PREFIXES)
     )
@@ -404,6 +407,15 @@ def select(
         reasons.append(f"non-Python source input changed: {', '.join(non_python_source)}")
         return Selection(tests, "all", reasons, normalized)
 
+    unclassified_python = [
+        path
+        for path in normalized
+        if path.endswith(".py") and not _is_source(path) and not path.startswith(TEST_PREFIX + "/")
+    ]
+    if unclassified_python:
+        reasons.append(f"unclassified Python path changed: {', '.join(unclassified_python)}")
+        return Selection(tests, "all", reasons, normalized)
+
     deleted_sources = [path for path in source_paths if _is_deleted(root, path, base_ref)]
     if deleted_sources:
         reasons.append(f"source file deleted: {', '.join(deleted_sources)}")
@@ -438,11 +450,16 @@ def select(
             reasons.append(f"source parse failed: {', '.join(failed_sources)}")
             return Selection(tests, "all", reasons, normalized)
         reverse = _reverse_graph(graph)
-        affected = _affected_modules(changed_modules, reverse, modules)
-        reached = {test for test, names in imports.items() if names & affected}
-        if not reached:
-            reasons.append("no test imports an affected source module")
-            return Selection(tests, "all", reasons, normalized)
+        affected: set[str] = set()
+        reached: set[str] = set()
+        for module in sorted(changed_modules):
+            module_affected = _affected_modules({module}, reverse, modules)
+            module_reached = {test for test, names in imports.items() if names & module_affected}
+            if not module_reached:
+                reasons.append(f"no test imports affected source module: {module}")
+                return Selection(tests, "all", reasons, normalized)
+            affected |= module_affected
+            reached |= module_reached
         selected_tests |= reached
         reasons.append(f"{len(changed_modules)} source modules affected {len(affected)} modules")
 
