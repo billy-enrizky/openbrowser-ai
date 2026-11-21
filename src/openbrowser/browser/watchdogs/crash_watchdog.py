@@ -55,7 +55,9 @@ class CrashWatchdog(BaseWatchdog):
 	_monitoring_task: asyncio.Task | None = PrivateAttr(default=None)
 	_last_responsive_checks: dict[str, float] = PrivateAttr(default_factory=dict)  # target_url -> timestamp
 	_cdp_event_tasks: set[asyncio.Task] = PrivateAttr(default_factory=set)  # Track CDP event handler tasks
-	_targets_with_listeners: set[str] = PrivateAttr(default_factory=set)  # Track targets that already have event listeners
+	_targets_with_listeners: set[str] = PrivateAttr(
+		default_factory=set
+	)  # Track targets that already have event listeners
 
 	async def on_BrowserConnectedEvent(self, event: BrowserConnectedEvent) -> None:
 		"""Start monitoring when browser is connected."""
@@ -71,8 +73,7 @@ class CrashWatchdog(BaseWatchdog):
 
 	async def on_TabCreatedEvent(self, event: TabCreatedEvent) -> None:
 		"""Attach to new tab."""
-		assert self.browser_session.agent_focus is not None, 'No current target ID'
-		await self.attach_to_target(self.browser_session.agent_focus.target_id)
+		await self.attach_to_target(event.target_id)
 
 	async def on_TabClosedEvent(self, event: TabClosedEvent) -> None:
 		"""Clean up tracking when tab closes."""
@@ -188,7 +189,9 @@ class CrashWatchdog(BaseWatchdog):
 
 	async def _start_monitoring(self) -> None:
 		"""Start the monitoring loop."""
-		assert self.browser_session.cdp_client is not None, 'Root CDP client not initialized - browser may not be connected yet'
+		assert self.browser_session.cdp_client is not None, (
+			'Root CDP client not initialized - browser may not be connected yet'
+		)
 
 		if self._monitoring_task and not self._monitoring_task.done():
 			# logger.info('[CrashWatchdog] Monitoring already running')
@@ -295,12 +298,18 @@ class CrashWatchdog(BaseWatchdog):
 						)
 
 			# Quick ping to check if session is alive
-			self.logger.debug(f'[CrashWatchdog] Attempting to run simple JS test expression in session {cdp_session} 1+1')
+			self.logger.debug(
+				f'[CrashWatchdog] Attempting to run simple JS test expression in session {cdp_session} 1+1'
+			)
 			await asyncio.wait_for(
-				cdp_session.cdp_client.send.Runtime.evaluate(params={'expression': '1+1'}, session_id=cdp_session.session_id),
+				cdp_session.cdp_client.send.Runtime.evaluate(
+					params={'expression': '1+1'}, session_id=cdp_session.session_id
+				),
 				timeout=1.0,
 			)
-			self.logger.debug(f'[CrashWatchdog] Browser health check passed for target {self.browser_session.agent_focus}')
+			self.logger.debug(
+				f'[CrashWatchdog] Browser health check passed for target {self.browser_session.agent_focus}'
+			)
 		except Exception as e:
 			self.logger.error(
 				f'[CrashWatchdog] ❌ Crashed/unresponsive session detected for target {self.browser_session.agent_focus} '
@@ -308,7 +317,9 @@ class CrashWatchdog(BaseWatchdog):
 			)
 
 		# Check browser process if we have PID
-		if self.browser_session._local_browser_watchdog and (proc := self.browser_session._local_browser_watchdog._subprocess):
+		if self.browser_session._local_browser_watchdog and (
+			proc := self.browser_session._local_browser_watchdog._subprocess
+		):
 			try:
 				if proc.status() in (psutil.STATUS_ZOMBIE, psutil.STATUS_DEAD):
 					self.logger.error(f'[CrashWatchdog] Browser process {proc.pid} has crashed')

@@ -100,7 +100,9 @@ class AboutBlankWatchdog(BaseWatchdog):
 		if self.browser_session._cdp_client_root is not None:
 			target_id = await self.browser_session._cdp_create_new_page('about:blank')
 			self.event_bus.dispatch(TabCreatedEvent(target_id=target_id, url='about:blank'))
-			await self.event_bus.dispatch(SwitchTabEvent(target_id=target_id))
+			switch_event = self.event_bus.dispatch(SwitchTabEvent(target_id=target_id))
+			await switch_event
+			await switch_event.event_result(raise_if_any=True, raise_if_none=False)
 			return
 		navigate_event = self.event_bus.dispatch(NavigateToUrlEvent(url='about:blank', new_tab=True))
 		await navigate_event
@@ -142,7 +144,9 @@ class AboutBlankWatchdog(BaseWatchdog):
 		except Exception as e:
 			self.logger.error(f'[AboutBlankWatchdog] Error showing DVD screensaver: {e}')
 
-	async def _show_dvd_screensaver_loading_animation_cdp(self, target_id: TargetID, browser_session_label: str) -> None:
+	async def _show_dvd_screensaver_loading_animation_cdp(
+		self, target_id: TargetID, browser_session_label: str
+	) -> None:
 		"""
 		Injects a DVD screensaver-style bouncing text animation overlay into the target using CDP.
 		This is used to visually indicate that the browser is setting up or waiting.
@@ -261,7 +265,9 @@ class AboutBlankWatchdog(BaseWatchdog):
 				}})('{browser_session_label}');
 			"""
 
-			await temp_session.cdp_client.send.Runtime.evaluate(params={'expression': script}, session_id=temp_session.session_id)
+			await temp_session.cdp_client.send.Runtime.evaluate(
+				params={'expression': script}, session_id=temp_session.session_id
+			)
 
 			# No need to detach - session is cached
 
