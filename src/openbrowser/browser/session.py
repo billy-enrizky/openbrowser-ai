@@ -5200,12 +5200,17 @@ class BrowserSession(BaseModel):
 		# Reconcile against every page target, then use the filtered page query
 		# for display. A chrome-error:// or chrome:// tab is still live even
 		# when it is not shown as an actionable tab.
+		registry_revisions = self._tab_registry.state_revisions()
 		authoritative_pages = await self._cdp_get_all_pages(
 			include_chrome=True,
 			include_chrome_extensions=True,
 			include_chrome_error=True,
 		)
-		self._tab_registry.sync_from_pages(authoritative_pages, allow_reopen=True)
+		self._tab_registry.sync_from_pages(
+			authoritative_pages,
+			allow_reopen=True,
+			state_revisions=registry_revisions,
+		)
 		pages = await self._cdp_get_all_pages()
 
 		for i, page_target in enumerate(pages):
@@ -5399,9 +5404,14 @@ class BrowserSession(BaseModel):
 			)
 
 		if self._cdp_client_root is not None:
+			registry_revisions = self._tab_registry.state_revisions()
 			targets = await self.cdp_client.send.Target.getTargets()
 			pages = [target for target in targets.get('targetInfos', []) if target.get('type') in ('page', 'tab')]
-			self._tab_registry.sync_from_pages(pages, allow_reopen=True)
+			self._tab_registry.sync_from_pages(
+				pages,
+				allow_reopen=True,
+				state_revisions=registry_revisions,
+			)
 
 		return self._tab_registry.resolve(tab_id)
 

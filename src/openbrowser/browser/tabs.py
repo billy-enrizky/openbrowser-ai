@@ -51,6 +51,7 @@ class TabRecord:
 	parent_target_id: str | None = None
 	error: str | None = None
 	close_attempt: int = 0
+	state_revision: int = 0
 
 	def touch(self, *, now: float | None = None) -> None:
 		self.updated_at = time.time() if now is None else now
@@ -129,14 +130,19 @@ class TabRegistry:
 			record.title = title
 		if parent_target_id is not None:
 			record.parent_target_id = parent_target_id
-		if _can_transition(record.state, state, allow_reopen=False):
+		if _can_transition(record.state, state, allow_reopen=False) and record.state is not state:
 			record.state = state
+			record.state_revision += 1
 		record.touch(now=now)
 		return record
 
 	def get(self, target_id: str) -> TabRecord | None:
 		"""Return one tab record by full target ID."""
 		return self._tabs.get(target_id)
+
+	def state_revisions(self) -> dict[str, int]:
+		"""Return a stable snapshot of per-tab lifecycle revisions."""
+		return {target_id: record.state_revision for target_id, record in self._tabs.items()}
 
 	def update(
 		self,
@@ -159,7 +165,9 @@ class TabRegistry:
 			if record.state in _PROTECTED_STATES and state in {TabState.OPEN, TabState.OPENING}:
 				record.created_at = now
 				record.error = None
-			record.state = state
+			if record.state is not state:
+				record.state = state
+				record.state_revision += 1
 		record.touch(now=now)
 		return record
 
@@ -183,6 +191,7 @@ class TabRegistry:
 		*,
 		allow_reopen: bool = False,
 		complete: bool = True,
+		state_revisions: dict[str, int] | None = None,
 	) -> None:
 		"""Update the registry from a CDP page target list.
 
@@ -202,7 +211,9 @@ class TabRegistry:
 			created = record is None
 			if record is None:
 				self.register(target_id, url=url, title=title, state=TabState.OPEN)
-			elif record.state in (TabState.CLOSING, TabState.CRASHED):
+			elif record.state in (TabState.CLOSING, TabState.CRASHED) or (
+				state_revisions is not None and record.state_revision != state_revisions.get(target_id)
+			):
 				self.update(target_id, url=url, title=title)
 			else:
 				self.update(target_id, url=url, title=title, state=TabState.OPEN, allow_reopen=allow_reopen)
@@ -215,6 +226,7 @@ class TabRegistry:
 			for target_id, record in self._tabs.items():
 				if target_id not in seen and record.state is not TabState.CLOSED:
 					record.state = TabState.CLOSED
+					record.state_revision += 1
 					record.touch(now=now)
 
 	def live_page_candidates(
@@ -320,6 +332,7 @@ class TabRegistry:
 				'parent_target_id': record.parent_target_id,
 				'error': record.error,
 				'close_attempt': record.close_attempt,
+				'state_revision': record.state_revision,
 				'created_at': record.created_at,
 				'updated_at': record.updated_at,
 			}

@@ -337,3 +337,25 @@ def test_authoritative_sync_reopens_closed_but_preserves_protected_states():
 	assert registry.get(closed).state is TabState.OPEN
 	assert registry.get(closing).state is TabState.CLOSING
 	assert registry.get(crashed).state is TabState.CRASHED
+
+
+def test_stale_page_enumeration_cannot_reopen_a_newer_closed_state():
+	registry = TabRegistry()
+	target = 'AAAABBBBCCCCDDDD111122223333DDDD'
+	registry.register(target, state=TabState.OPEN)
+	stale_revisions = registry.state_revisions()
+	registry.mark_closed(target)
+
+	registry.sync_from_pages(
+		[{'targetId': target, 'type': 'page'}],
+		allow_reopen=True,
+		state_revisions=stale_revisions,
+	)
+	assert registry.get(target).state is TabState.CLOSED
+
+	registry.sync_from_pages(
+		[{'targetId': target, 'type': 'page'}],
+		allow_reopen=True,
+		state_revisions=registry.state_revisions(),
+	)
+	assert registry.get(target).state is TabState.OPEN
