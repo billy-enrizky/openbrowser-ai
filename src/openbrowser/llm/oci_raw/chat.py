@@ -441,3 +441,5 @@ IMPORTANT:
 				status_code=500,
 				model=self.name,
 			) from e
+
+# CI selected-path measurement marker: run 1
