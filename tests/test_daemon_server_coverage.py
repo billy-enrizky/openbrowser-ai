@@ -213,6 +213,7 @@ class TestDaemonServerHandleRequest:
         session.kill.assert_awaited_once()
         assert daemon_server._executor is None
         assert daemon_server._session is None
+        assert daemon_server._tools is None
 
     @pytest.mark.asyncio
     async def test_ensure_executor_cleanup_timeout_force_stops_stuck_session(self, daemon_server):
@@ -297,6 +298,170 @@ class TestDaemonServerHandleRequest:
         result = await daemon_server._handle_request({"action": "status", "id": 1})
         assert result["success"] is True
         assert "pid" in result["output"]
+        payload = json.loads(result["output"])
+        assert payload["tools"]["phase"] == "not_initialized"
+
+    @pytest.mark.asyncio
+    async def test_status_reports_initialized_tools(self, daemon_server):
+        """Status reports the retained registry without starting a browser."""
+        from openbrowser.tools.service import CodeAgentTools
+
+        daemon_server._tools = CodeAgentTools()
+        daemon_server._profile_summary = {
+            "user_data_dir": "/tmp/profile",
+            "headless": True,
+            "storage_state": None,
+        }
+
+        payload = daemon_server._status_payload()
+
+        assert payload["tools"]["phase"] == "ready"
+        assert payload["tools"]["available_count"] > 0
+        assert "screenshot" in payload["tools"]["excluded"]
+
+    @pytest.mark.asyncio
+    async def test_recovery_replaces_tools_and_failed_recovery_clears_them(self, daemon_server):
+        """Recovery must retain only the current generation's tools registry."""
+        from openbrowser.code_use.namespace_transfer import NamespaceTransfer
+        from openbrowser.tools.service import CodeAgentTools
+
+        old_tools = CodeAgentTools()
+        new_tools = CodeAgentTools()
+        daemon_server._tools = old_tools
+        daemon_server._session = None
+        daemon_server._executor = MagicMock()
+        daemon_server._executor.namespace = {"value": 1}
+
+        replacement = MagicMock()
+        replacement.start = AsyncMock()
+        replacement.seed_generation = MagicMock()
+
+        with (
+            patch("openbrowser.browser.BrowserSession", return_value=replacement),
+            patch("openbrowser.tools.service.CodeAgentTools", return_value=new_tools),
+            patch("openbrowser.code_use.namespace.create_namespace", return_value={}),
+            patch.object(daemon_server, "_build_browser_profile", return_value=MagicMock()),
+            patch("openbrowser.daemon.server.transfer_namespace", return_value=NamespaceTransfer()),
+        ):
+            await daemon_server._recover_browser_session()
+
+        assert daemon_server._tools is new_tools
+
+        failed = MagicMock()
+        failed.start = AsyncMock(side_effect=RuntimeError("replacement failed"))
+        failed.kill = AsyncMock()
+        daemon_server._tools = old_tools
+        daemon_server._session = None
+        with (
+            patch("openbrowser.browser.BrowserSession", return_value=failed),
+            patch("openbrowser.daemon.server.transfer_namespace", return_value=NamespaceTransfer()),
+            patch.object(daemon_server, "_build_browser_profile", return_value=MagicMock()),
+            pytest.raises(RuntimeError, match="replacement failed"),
+        ):
+            await daemon_server._recover_browser_session()
+
+        assert daemon_server._tools is None
+
+    @pytest.mark.asyncio
+    async def test_recovery_setup_failures_clear_the_old_tools(self, daemon_server):
+        """Profile and constructor failures must not leave a stale generation."""
+        from openbrowser.code_use.namespace_transfer import NamespaceTransfer
+        from openbrowser.tools.service import CodeAgentTools
+
+        daemon_server._session = None
+        daemon_server._tools = CodeAgentTools()
+
+        with (
+            patch("openbrowser.daemon.server.transfer_namespace", return_value=NamespaceTransfer()),
+            patch.object(
+                daemon_server,
+                "_build_browser_profile",
+                side_effect=RuntimeError("profile failed"),
+            ),
+            pytest.raises(RuntimeError, match="profile failed"),
+        ):
+            await daemon_server._recover_browser_session()
+
+        assert daemon_server._tools is None
+
+        daemon_server._tools = CodeAgentTools()
+        with (
+            patch("openbrowser.daemon.server.transfer_namespace", return_value=NamespaceTransfer()),
+            patch.object(daemon_server, "_build_browser_profile", return_value=MagicMock()),
+            patch("openbrowser.browser.BrowserSession", side_effect=RuntimeError("constructor failed")),
+            pytest.raises(RuntimeError, match="constructor failed"),
+        ):
+            await daemon_server._recover_browser_session()
+
+        assert daemon_server._tools is None
+
+    @pytest.mark.asyncio
+    async def test_failed_old_session_close_clears_tools(self, daemon_server):
+        """A recovery that cannot retire the old session must not report its tools."""
+        from openbrowser.code_use.namespace_transfer import NamespaceTransfer
+        from openbrowser.tools.service import CodeAgentTools
+
+        daemon_server._session = MagicMock()
+        daemon_server._tools = CodeAgentTools()
+        daemon_server._profile_summary = {
+            "user_data_dir": "/tmp/profile",
+            "headless": True,
+            "storage_state": None,
+        }
+
+        with (
+            patch("openbrowser.daemon.server.transfer_namespace", return_value=NamespaceTransfer()),
+            patch.object(
+                daemon_server,
+                "_close_session_bounded",
+                new_callable=AsyncMock,
+                return_value=False,
+            ),
+            pytest.raises(RuntimeError, match="Unable to close the old browser session"),
+        ):
+            await daemon_server._recover_browser_session()
+
+        assert daemon_server._tools is None
+        assert daemon_server._status_payload()["tools"]["phase"] == "not_initialized"
+
+    @pytest.mark.asyncio
+    async def test_status_reports_filtered_tools_for_the_active_tab(self, daemon_server):
+        """Status exposes domain-filtered actions with an origin-only page URL."""
+        from openbrowser.tools.service import CodeAgentTools
+
+        daemon_server._tools = CodeAgentTools()
+
+        @daemon_server._tools.registry.action("Google", domains=["*.google.com"])
+        async def google_action():
+            return "ok"
+
+        daemon_server._profile_summary = {
+            "user_data_dir": "/tmp/profile",
+            "headless": True,
+            "storage_state": None,
+        }
+        daemon_server._session = MagicMock()
+        daemon_server._session.lifecycle_snapshot.return_value = {
+            "phase": "ready",
+            "active_target_id": "tab-1",
+            "tabs": [
+                {
+                    "target_id": "tab-1",
+                    "url": "https://user:pass@example.com:8443/private?token=secret#frag",
+                }
+            ],
+        }
+        daemon_server._session.download_outcomes.return_value = []
+        daemon_server._session.download_outcomes_error = None
+
+        payload = daemon_server._status_payload()
+
+        assert payload["tools"]["phase"] == "page_filtered"
+        assert payload["tools"]["page_url"] == "https://example.com:8443"
+        assert payload["tools"]["filtered_count"] == 1
+        assert payload["tools"]["filtered"][0]["name"] == "google_action"
+        assert payload["tools"]["filtered"][0]["reason"] == "domain_filtered"
+        assert "secret" not in json.dumps(payload["tools"])
 
     @pytest.mark.asyncio
     async def test_stop(self, daemon_server):
@@ -308,14 +473,18 @@ class TestDaemonServerHandleRequest:
     @pytest.mark.asyncio
     async def test_reset(self, daemon_server):
         """Test reset action."""
+        from openbrowser.tools.service import CodeAgentTools
+
         daemon_server._session = MagicMock()
         daemon_server._session.kill = AsyncMock()
         daemon_server._executor = MagicMock()
+        daemon_server._tools = CodeAgentTools()
 
         result = await daemon_server._handle_request({"action": "reset", "id": 1})
         assert result["success"] is True
         assert daemon_server._executor is None
         assert daemon_server._session is None
+        assert daemon_server._tools is None
 
     @pytest.mark.asyncio
     async def test_reset_with_kill_error(self, daemon_server):

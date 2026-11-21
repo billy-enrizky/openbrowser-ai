@@ -20,7 +20,62 @@ async def test_get_status_does_not_start_browser(mcp_server):
 	assert payload['browser']['phase'] == 'stopped'
 	assert payload['namespace_variables'] == 0
 	assert payload['profile'] is None
+	assert payload['tools']['phase'] == 'not_initialized'
 	assert payload['downloads']['pdf_detection']['phase'] == 'idle'
+
+
+@pytest.mark.asyncio
+async def test_get_status_reports_initialized_tool_availability(mcp_server):
+	from openbrowser.tools.service import CodeAgentTools
+
+	mcp_server._tools = CodeAgentTools()
+
+	payload = json.loads(await mcp_server._handle_tool('get_status', {}))
+
+	assert payload['tools']['phase'] == 'ready'
+	assert payload['tools']['available_count'] > 0
+	assert 'screenshot' in payload['tools']['excluded']
+	assert payload['tools']['page_url'] is None
+
+
+@pytest.mark.asyncio
+async def test_get_status_reports_filtered_tools_for_the_active_tab(mcp_server):
+	from openbrowser.tools.service import CodeAgentTools
+
+	mcp_server._tools = CodeAgentTools()
+
+	@mcp_server._tools.registry.action("Google", domains=["*.google.com"])
+	async def google_action():
+		return "ok"
+
+	mcp_server._profile_summary = {
+		"user_data_dir": "/tmp/profile",
+		"headless": True,
+		"storage_state": None,
+	}
+	browser = MagicMock()
+	browser.lifecycle_snapshot.return_value = {
+		"phase": "ready",
+		"active_target_id": "tab-1",
+		"tabs": [
+			{
+				"target_id": "tab-1",
+				"url": "https://user:pass@example.com:8443/private?token=secret#frag",
+			}
+		],
+	}
+	browser.download_outcomes.return_value = []
+	browser.download_outcomes_error = None
+	mcp_server.browser_session = browser
+
+	payload = json.loads(await mcp_server._handle_tool('get_status', {}))
+
+	assert payload['tools']['phase'] == 'page_filtered'
+	assert payload['tools']['page_url'] == 'https://example.com:8443'
+	assert payload['tools']['filtered_count'] == 1
+	assert payload['tools']['filtered'][0]['name'] == 'google_action'
+	assert payload['tools']['filtered'][0]['reason'] == 'domain_filtered'
+	assert 'secret' not in json.dumps(payload['tools'])
 
 
 @pytest.mark.asyncio
@@ -120,6 +175,9 @@ async def test_reset_browser_preserves_user_variables(mcp_server):
 	async def navigate():
 		return None
 
+	from openbrowser.tools.service import CodeAgentTools
+
+	mcp_server._tools = CodeAgentTools()
 	mcp_server._namespace = {
 		'user_value': 42,
 		'browser': object(),
@@ -140,6 +198,7 @@ async def test_reset_browser_preserves_user_variables(mcp_server):
 	assert 'browser' in payload['namespace_transfer']['framework']
 	assert 'navigate' in payload['namespace_transfer']['framework']
 	assert payload['browser']['phase'] == 'stopped'
+	assert mcp_server._status_payload()['tools']['phase'] == 'ready'
 
 
 @pytest.mark.asyncio

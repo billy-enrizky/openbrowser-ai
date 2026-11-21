@@ -1031,6 +1031,8 @@ class _BrowserOwner:
 
 	def _status_payload(self) -> dict[str, Any]:
 		"""Build a JSON-safe status snapshot without starting the browser."""
+		from openbrowser.tools.action_availability import tool_availability_payload
+
 		browser = self._browser_lifecycle.snapshot().to_dict()
 		if self.browser_session is not None and hasattr(self.browser_session, 'lifecycle_snapshot'):
 			try:
@@ -1062,6 +1064,8 @@ class _BrowserOwner:
 		except Exception:
 			version = None
 
+		tools_snapshot = tool_availability_payload(self._tools, browser)
+
 		return {
 			'server': self._server()._lifecycle.snapshot().to_dict(),
 			'browser': browser,
@@ -1075,6 +1079,7 @@ class _BrowserOwner:
 			'exec_timeout': _exec_timeout_seconds(),
 			'uptime_seconds': max(0.0, time.time() - self._server()._start_time),
 			'version': version,
+			'tools': tools_snapshot,
 			'downloads': self._downloads_snapshot(),
 			'storage_state': storage_state,
 			'storage_state_save': storage_state_save,

@@ -14,6 +14,7 @@ class ActionResult(BaseModel):
 
 	# Error handling - always include in long term memory
 	error: str | None = None
+	error_code: str | None = None
 
 	# Files
 	attachments: list[str] | None = None  # Files to display in the done message

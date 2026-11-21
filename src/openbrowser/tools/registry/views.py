@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict
 from openbrowser.browser import BrowserSession
 from openbrowser.filesystem.file_system import FileSystem
 from openbrowser.llm.base import BaseChatModel
+from openbrowser.tools.action_availability import normalize_page_url
 
 if TYPE_CHECKING:
 	pass
@@ -17,6 +18,7 @@ class RegisteredAction(BaseModel):
 	name: str
 	description: str
 	function: Callable
+	normalized_function: Callable | None = None
 	param_model: type[BaseModel]
 
 	# filters: provide specific domains to determine whether the action should be available on the given URL or not
@@ -102,8 +104,11 @@ class ActionRegistry(BaseModel):
 			True if the URL's domain matches the pattern, False otherwise
 		"""
 
-		if domains is None or not url:
+		if domains is None:
 			return True
+		normalized = normalize_page_url(url)
+		if not normalized or not domains:
+			return False
 
 		# Use the centralized URL matching logic from utils
 		from openbrowser.utils import match_url_with_domain_pattern
@@ -124,6 +129,7 @@ class ActionRegistry(BaseModel):
 			- If page is None: return only actions with no page_filter and no domains (for system prompt)
 			- If page is provided: return only filtered actions that match the current page (excluding unfiltered actions)
 		"""
+		page_url = normalize_page_url(page_url)
 		if page_url is None:
 			# For system prompt (no URL provided), include only actions with no filters
 			return '\n'.join(action.prompt_description() for action in self.actions.values() if action.domains is None)
