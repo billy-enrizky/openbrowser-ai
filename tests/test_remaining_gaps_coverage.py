@@ -49,8 +49,9 @@ from openbrowser.dom.views import (
 )
 
 
-def _dom_make_snapshot(bounds=None, computed_styles=None, scroll_rects=None,
-                       client_rects=None, is_clickable=None, paint_order=None):
+def _dom_make_snapshot(
+    bounds=None, computed_styles=None, scroll_rects=None, client_rects=None, is_clickable=None, paint_order=None
+):
     return EnhancedSnapshotNode(
         is_clickable=is_clickable,
         cursor_style=None,
@@ -67,10 +68,19 @@ _dom_id_counter = 0
 
 
 def _dom_make_node(
-    tag="div", node_type=NodeType.ELEMENT_NODE, node_value="",
-    attributes=None, children=None, is_visible=True, snapshot=None,
-    content_document=None, frame_id=None, node_name=None,
-    shadow_roots=None, shadow_root_type=None, parent_node=None,
+    tag="div",
+    node_type=NodeType.ELEMENT_NODE,
+    node_value="",
+    attributes=None,
+    children=None,
+    is_visible=True,
+    snapshot=None,
+    content_document=None,
+    frame_id=None,
+    node_name=None,
+    shadow_roots=None,
+    shadow_root_type=None,
+    parent_node=None,
 ):
     global _dom_id_counter
     _dom_id_counter += 1
@@ -161,21 +171,13 @@ class TestDomServiceGetAllTreesPendingRetry:
         mock_cdp_session.cdp_client.send.Page.getLayoutMetrics = AsyncMock(
             return_value={"visualViewport": {}, "cssVisualViewport": {}, "cssLayoutViewport": {}}
         )
-        mock_cdp_session.cdp_client.send.Runtime.evaluate = AsyncMock(
-            return_value={"result": {"value": {}}}
-        )
-        mock_cdp_session.cdp_client.send.DOMSnapshot.captureSnapshot = AsyncMock(
-            return_value=fake_snapshot
-        )
-        mock_cdp_session.cdp_client.send.DOM.getDocument = AsyncMock(
-            return_value=fake_dom_tree
-        )
+        mock_cdp_session.cdp_client.send.Runtime.evaluate = AsyncMock(return_value={"result": {"value": {}}})
+        mock_cdp_session.cdp_client.send.DOMSnapshot.captureSnapshot = AsyncMock(return_value=fake_snapshot)
+        mock_cdp_session.cdp_client.send.DOM.getDocument = AsyncMock(return_value=fake_dom_tree)
         mock_cdp_session.cdp_client.send.Page.getFrameTree = AsyncMock(
             return_value={"frameTree": {"frame": {"id": "frame-1"}}}
         )
-        mock_cdp_session.cdp_client.send.Accessibility.getFullAXTree = AsyncMock(
-            return_value=fake_ax_tree
-        )
+        mock_cdp_session.cdp_client.send.Accessibility.getFullAXTree = AsyncMock(return_value=fake_ax_tree)
 
         # Simulate timeout on first wait, success on second
         original_wait = asyncio.wait
@@ -209,25 +211,17 @@ class TestDomServiceGetAllTreesTimedOutFailed:
         mock_cdp_session.cdp_client = MagicMock()
         session.get_or_create_cdp_session.return_value = mock_cdp_session
 
-        mock_cdp_session.cdp_client.send.Runtime.evaluate = AsyncMock(
-            return_value={"result": {"value": {}}}
-        )
+        mock_cdp_session.cdp_client.send.Runtime.evaluate = AsyncMock(return_value={"result": {"value": {}}})
 
         # All tasks will never complete (cancelled)
         never_done = asyncio.Future()
 
-        mock_cdp_session.cdp_client.send.DOMSnapshot.captureSnapshot = AsyncMock(
-            return_value=never_done
-        )
-        mock_cdp_session.cdp_client.send.DOM.getDocument = AsyncMock(
-            return_value=never_done
-        )
+        mock_cdp_session.cdp_client.send.DOMSnapshot.captureSnapshot = AsyncMock(return_value=never_done)
+        mock_cdp_session.cdp_client.send.DOM.getDocument = AsyncMock(return_value=never_done)
         mock_cdp_session.cdp_client.send.Page.getFrameTree = AsyncMock(
             return_value={"frameTree": {"frame": {"id": "f1"}}}
         )
-        mock_cdp_session.cdp_client.send.Accessibility.getFullAXTree = AsyncMock(
-            return_value={"nodes": []}
-        )
+        mock_cdp_session.cdp_client.send.Accessibility.getFullAXTree = AsyncMock(return_value={"nodes": []})
         mock_cdp_session.cdp_client.send.Page.getLayoutMetrics = AsyncMock(
             return_value={"visualViewport": {}, "cssVisualViewport": {}, "cssLayoutViewport": {}}
         )
@@ -286,9 +280,7 @@ class TestDomServiceIframeContentDocumentPath:
 
     def test_iframe_bounds_adjustment_in_visibility_check(self):
         """Lines 592-596 are tested via is_element_visible_according_to_all_parents."""
-        iframe_snap = _dom_make_snapshot(
-            bounds=DOMRect(x=100, y=200, width=800, height=600)
-        )
+        iframe_snap = _dom_make_snapshot(bounds=DOMRect(x=100, y=200, width=800, height=600))
         iframe_node = _dom_make_node(
             tag="IFRAME",
             node_type=NodeType.ELEMENT_NODE,
@@ -302,9 +294,7 @@ class TestDomServiceIframeContentDocumentPath:
         )
         child_node = _dom_make_node(tag="div", snapshot=child_snap)
 
-        result = DomService.is_element_visible_according_to_all_parents(
-            child_node, [iframe_node]
-        )
+        result = DomService.is_element_visible_according_to_all_parents(child_node, [iframe_node])
         assert result is True
 
 
@@ -384,17 +374,13 @@ class TestDomServiceCrossOriginIframePath:
         # Verify should_process_iframe logic:
         # iframe visible + bounds >= 50x50 => should_process = True
         snap = _dom_make_snapshot(bounds=DOMRect(x=0, y=0, width=100, height=100))
-        iframe = _dom_make_node(
-            tag="IFRAME", snapshot=snap, is_visible=True
-        )
+        iframe = _dom_make_node(tag="IFRAME", snapshot=snap, is_visible=True)
         assert iframe.snapshot_node.bounds.width >= 50
         assert iframe.snapshot_node.bounds.height >= 50
 
         # Small iframe => should_process = False
         small_snap = _dom_make_snapshot(bounds=DOMRect(x=0, y=0, width=30, height=30))
-        small_iframe = _dom_make_node(
-            tag="IFRAME", snapshot=small_snap, is_visible=True
-        )
+        small_iframe = _dom_make_node(tag="IFRAME", snapshot=small_snap, is_visible=True)
         assert small_iframe.snapshot_node.bounds.width < 50
 
 
@@ -409,6 +395,7 @@ from tests.conftest import DummyServer, DummyTypes
 def mcp_mod():
     """Return the mcp server module."""
     from openbrowser.mcp import server as mod
+
     return mod
 
 
@@ -488,9 +475,7 @@ class TestMcpServerCleanupExpired:
         """When dispatch raises, cleanup fails and the session is retained for retry."""
         mock_session = MagicMock()
         mock_session.event_bus = MagicMock()
-        mock_session.event_bus.dispatch = MagicMock(
-            side_effect=Exception("dispatch error")
-        )
+        mock_session.event_bus.dispatch = MagicMock(side_effect=Exception("dispatch error"))
         gaps_server_instance.browser_session = mock_session
         gaps_server_instance._last_activity = time.time() - 9999
         gaps_server_instance.session_timeout_minutes = 1
@@ -515,6 +500,7 @@ class TestMcpServerMainLine553:
 
     def test_main_guard_exists(self, mcp_mod):
         import inspect
+
         source = inspect.getsource(mcp_mod)
         assert "if __name__" in source
         assert "asyncio.run(main())" in source
@@ -559,13 +545,19 @@ class TestMcpServerExecuteCodePreflightRecovery:
         mock_session = MagicMock()
         gaps_server_instance.browser_session = mock_session
 
-        with patch.object(
-            gaps_server_instance, "_is_cdp_alive",
-            new_callable=AsyncMock, return_value=False,
-        ), patch.object(
-            gaps_server_instance, "_recover_browser_session",
-            new_callable=AsyncMock,
-        ) as mock_recover:
+        with (
+            patch.object(
+                gaps_server_instance,
+                "_is_cdp_alive",
+                new_callable=AsyncMock,
+                return_value=False,
+            ),
+            patch.object(
+                gaps_server_instance,
+                "_recover_browser_session",
+                new_callable=AsyncMock,
+            ) as mock_recover,
+        ):
             result = await gaps_server_instance._execute_code("x = 1")
             mock_recover.assert_called_once()
             assert result == "ok"
@@ -586,12 +578,19 @@ class TestMcpServerExecuteCodePreflightRecovery:
         mock_session = MagicMock()
         gaps_server_instance.browser_session = mock_session
 
-        with patch.object(
-            gaps_server_instance, "_is_cdp_alive",
-            new_callable=AsyncMock, return_value=False,
-        ), patch.object(
-            gaps_server_instance, "_recover_browser_session",
-            new_callable=AsyncMock, side_effect=Exception("recovery fail"),
+        with (
+            patch.object(
+                gaps_server_instance,
+                "_is_cdp_alive",
+                new_callable=AsyncMock,
+                return_value=False,
+            ),
+            patch.object(
+                gaps_server_instance,
+                "_recover_browser_session",
+                new_callable=AsyncMock,
+                side_effect=Exception("recovery fail"),
+            ),
         ):
             result = await gaps_server_instance._execute_code("x = 1")
             assert "Browser connection lost and recovery failed" in result
@@ -611,8 +610,13 @@ from openbrowser.tokens.views import (
 )
 
 
-def _make_usage(prompt_tokens=100, completion_tokens=50, prompt_cached_tokens=0,
-                prompt_cache_creation_tokens=None, prompt_image_tokens=None):
+def _make_usage(
+    prompt_tokens=100,
+    completion_tokens=50,
+    prompt_cached_tokens=0,
+    prompt_cache_creation_tokens=None,
+    prompt_image_tokens=None,
+):
     return ChatInvokeUsage(
         prompt_tokens=prompt_tokens,
         completion_tokens=completion_tokens,
@@ -638,7 +642,10 @@ class TestTokensFindValidCacheCleanupErrorLine122_135:
             f.write_text("{}")
 
         with patch.object(
-            TokenCost, "_is_cache_valid", new_callable=AsyncMock, return_value=False,
+            TokenCost,
+            "_is_cache_valid",
+            new_callable=AsyncMock,
+            return_value=False,
         ):
             result = await tc._find_valid_cache()
             assert result is None
@@ -680,7 +687,9 @@ class TestTokensLoadFromCacheErrorLine159_162:
         cache_file.write_text("not valid json at all %%%")
 
         with patch.object(
-            TokenCost, "_fetch_and_cache_pricing_data", new_callable=AsyncMock,
+            TokenCost,
+            "_fetch_and_cache_pricing_data",
+            new_callable=AsyncMock,
         ) as mock_fetch:
             tc = TokenCost(include_cost=True)
             await tc._load_from_cache(cache_file)
@@ -717,7 +726,10 @@ class TestTokensLogUsageLine276_299:
             completion_cost=0.005,
         )
         with patch.object(
-            TokenCost, "calculate_cost", new_callable=AsyncMock, return_value=cost,
+            TokenCost,
+            "calculate_cost",
+            new_callable=AsyncMock,
+            return_value=cost,
         ):
             tc = TokenCost(include_cost=True)
             tc._initialized = True
@@ -761,13 +773,21 @@ class TestTokensLogUsageSummaryLine494:
         from openbrowser.tokens.views import UsageSummary
 
         empty = UsageSummary(
-            total_prompt_tokens=0, total_prompt_cost=0.0,
-            total_prompt_cached_tokens=0, total_prompt_cached_cost=0.0,
-            total_completion_tokens=0, total_completion_cost=0.0,
-            total_tokens=0, total_cost=0.0, entry_count=0,
+            total_prompt_tokens=0,
+            total_prompt_cost=0.0,
+            total_prompt_cached_tokens=0,
+            total_prompt_cached_cost=0.0,
+            total_completion_tokens=0,
+            total_completion_cost=0.0,
+            total_tokens=0,
+            total_cost=0.0,
+            entry_count=0,
         )
         with patch.object(
-            TokenCost, "get_usage_summary", new_callable=AsyncMock, return_value=empty,
+            TokenCost,
+            "get_usage_summary",
+            new_callable=AsyncMock,
+            return_value=empty,
         ):
             tc = TokenCost()
             tc.usage_history = [MagicMock()]  # non-empty to pass first guard
@@ -1012,11 +1032,13 @@ def _make_lbw_session():
     user_data_dir = tempfile.mkdtemp(prefix="openbrowser-test-")
     session.browser_profile.user_data_dir = user_data_dir
     session.browser_profile.profile_directory = None
-    session.browser_profile.get_args = MagicMock(return_value=[
-        "--no-first-run",
-        "--disable-default-apps",
-        f"--user-data-dir={user_data_dir}",
-    ])
+    session.browser_profile.get_args = MagicMock(
+        return_value=[
+            "--no-first-run",
+            "--disable-default-apps",
+            f"--user-data-dir={user_data_dir}",
+        ]
+    )
     return session
 
 
@@ -1041,6 +1063,7 @@ class TestLbwLaunchCleanupOnSuccessLine178_179:
             for temp_dir in watchdog._temp_dirs_to_cleanup:
                 try:
                     import shutil
+
                     shutil.rmtree(temp_dir, ignore_errors=True)
                 except Exception:
                     pass
@@ -1060,12 +1083,16 @@ class TestLbwLaunchRetryLine216_226:
         tmp_dir = Path(tempfile.mkdtemp(prefix="openbrowser-tmp-"))
         watchdog._temp_dirs_to_cleanup = [tmp_dir]
 
-        with patch.object(
-            LocalBrowserWatchdog, "_find_installed_browser_path",
-            return_value="/usr/bin/chrome",
-        ), patch(
-            "asyncio.create_subprocess_exec",
-            side_effect=RuntimeError("non-profile error: something else"),
+        with (
+            patch.object(
+                LocalBrowserWatchdog,
+                "_find_installed_browser_path",
+                return_value="/usr/bin/chrome",
+            ),
+            patch(
+                "asyncio.create_subprocess_exec",
+                side_effect=RuntimeError("non-profile error: something else"),
+            ),
         ):
             with pytest.raises(RuntimeError, match="non-profile error"):
                 await watchdog._launch_browser(max_retries=1)
@@ -1212,9 +1239,7 @@ class TestLbwGetBrowserPidViaCdp:
     async def test_get_pid_via_cdp_failure(self):
         """CDP failure returns None."""
         mock_browser = MagicMock()
-        mock_browser.new_browser_cdp_session = AsyncMock(
-            side_effect=Exception("no cdp")
-        )
+        mock_browser.new_browser_cdp_session = AsyncMock(side_effect=Exception("no cdp"))
         result = await LocalBrowserWatchdog.get_browser_pid_via_cdp(mock_browser)
         assert result is None
 
@@ -1286,9 +1311,7 @@ class TestSessionManagerAutoAttachFailureLine70_79:
         session = _make_sm_session()
         sm = SessionManager(session)
 
-        session._cdp_client_root.send.Target.setAutoAttach = AsyncMock(
-            side_effect=Exception("some random error")
-        )
+        session._cdp_client_root.send.Target.setAutoAttach = AsyncMock(side_effect=Exception("some random error"))
 
         await sm.start_monitoring()
 
@@ -1348,100 +1371,6 @@ class TestSessionManagerDetachTargetIdLookupLine360_361:
 
         event = {"sessionId": "completely-unknown-sess"}
         await sm._handle_target_detached(event)
-        # Should not raise
-
-
-class TestSessionManagerRecoverFallbackLine370_399:
-    """Lines 370-399: recovery fallback tab creation and complete failure."""
-
-    @pytest.mark.asyncio
-    async def test_recover_fallback_tab_when_session_not_found(self):
-        """Lines 370-391: session not found for new target triggers fallback."""
-        session = _make_sm_session()
-        session.agent_focus = None
-        session._cdp_get_all_pages.return_value = [{"targetId": "existing-target"}]
-
-        # Session pool never gets the new target
-        sm = SessionManager(session)
-
-        # Mock the fallback tab creation
-        fallback_session = MagicMock()
-        fallback_session.url = "about:blank"
-
-        async def delayed_pool_add(*args, **kwargs):
-            # After enough tries, add the fallback session to pool
-            await asyncio.sleep(0.05)
-            session._cdp_session_pool["fallback-tgt-id12345"] = fallback_session
-
-        session._cdp_create_new_page = AsyncMock(return_value="fallback-tgt-id12345")
-
-        # Start the delayed add in background
-        asyncio.get_event_loop().call_later(0.1, lambda: session._cdp_session_pool.update(
-            {"fallback-tgt-id12345": fallback_session}
-        ))
-
-        await sm._recover_agent_focus("crashed-target")
-        # It should eventually recover (via existing tab or fallback)
-
-    @pytest.mark.asyncio
-    async def test_recover_complete_failure(self):
-        """Lines 394-396: complete failure to recover logs critical."""
-        session = _make_sm_session()
-        session.agent_focus = None
-        session._cdp_get_all_pages.return_value = []
-        session._cdp_create_new_page = AsyncMock(return_value="new-tgt-id-12345678")
-        # Session pool never gets populated
-
-        sm = SessionManager(session)
-
-        # Should log critical but not raise
-        await sm._recover_agent_focus("crashed-target")
-
-    @pytest.mark.asyncio
-    async def test_recover_agent_focus_exception(self):
-        """Lines 398-399: exception during recovery is caught."""
-        session = _make_sm_session()
-        session.agent_focus = None
-        session._cdp_get_all_pages = AsyncMock(
-            side_effect=Exception("CDP error")
-        )
-
-        sm = SessionManager(session)
-        await sm._recover_agent_focus("crashed-target")
-        # Should not raise
-
-    @pytest.mark.asyncio
-    async def test_recover_activates_existing_tab(self):
-        """Lines 354-361: existing tab gets activated in browser UI."""
-        session = _make_sm_session()
-        session.agent_focus = None
-        session._cdp_get_all_pages.return_value = [{"targetId": "existing-tab1"}]
-
-        mock_cdp_session = MagicMock()
-        mock_cdp_session.url = "https://example.com"
-        session._cdp_session_pool["existing-tab1"] = mock_cdp_session
-
-        sm = SessionManager(session)
-        await sm._recover_agent_focus("crashed-target")
-
-        session._cdp_client_root.send.Target.activateTarget.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_recover_activate_tab_failure(self):
-        """Lines 360-361: activation failure is caught."""
-        session = _make_sm_session()
-        session.agent_focus = None
-        session._cdp_get_all_pages.return_value = [{"targetId": "existing-tab1"}]
-        session._cdp_client_root.send.Target.activateTarget = AsyncMock(
-            side_effect=Exception("activate failed")
-        )
-
-        mock_cdp_session = MagicMock()
-        mock_cdp_session.url = "https://example.com"
-        session._cdp_session_pool["existing-tab1"] = mock_cdp_session
-
-        sm = SessionManager(session)
-        await sm._recover_agent_focus("crashed-target")
         # Should not raise
 
 
@@ -1553,6 +1482,7 @@ class TestOpenBrowserFormatterLine164_165:
     def test_setup_logging_result_level_already_added(self):
         """Lines 164-165: _result_level_added flag prevents double add."""
         import openbrowser.logging_config as lc
+
         original = lc._result_level_added
         try:
             lc._result_level_added = True
@@ -1569,6 +1499,7 @@ class TestSetupLoggingCdpImportErrorLine248:
     def test_cdp_logging_import_error_fallback(self):
         """Lines 253-259: ImportError falls back to manual CDP logger config."""
         import builtins
+
         original_import = builtins.__import__
 
         def mock_import(name, *args, **kwargs):
@@ -1593,8 +1524,13 @@ class TestFIFOHandlerLine309_318:
         handler.fd = 999  # fake fd
 
         record = logging.LogRecord(
-            name="test", level=logging.INFO, pathname="", lineno=0,
-            msg="test", args=(), exc_info=None,
+            name="test",
+            level=logging.INFO,
+            pathname="",
+            lineno=0,
+            msg="test",
+            args=(),
+            exc_info=None,
         )
 
         with patch("os.write", side_effect=BrokenPipeError("broken")):
@@ -1609,8 +1545,13 @@ class TestFIFOHandlerLine309_318:
         assert handler.fd is None
 
         record = logging.LogRecord(
-            name="test", level=logging.INFO, pathname="", lineno=0,
-            msg="test", args=(), exc_info=None,
+            name="test",
+            level=logging.INFO,
+            pathname="",
+            lineno=0,
+            msg="test",
+            args=(),
+            exc_info=None,
         )
 
         with patch("os.open", side_effect=OSError("no reader")):
@@ -1648,6 +1589,7 @@ class TestFIFOHandlerLine309_318:
 # ============================================================================
 # 8. utils/__init__.py -- remaining uncovered lines
 # ============================================================================
+
 
 class TestUtilsInitFallbackLines44_59:
     """Lines 44-59: fallback definitions when _parent_utils is None."""
@@ -1699,9 +1641,7 @@ class TestUtilsInitFallbackLines44_59:
 
     def test_fallback_is_new_tab_page(self):
         """Line 51: fallback checks known new tab URLs."""
-        fn = lambda url: url in (
-            "about:blank", "chrome://new-tab-page/", "chrome://newtab/"
-        )
+        fn = lambda url: url in ("about:blank", "chrome://new-tab-page/", "chrome://newtab/")
         assert fn("about:blank") is True
         assert fn("https://example.com") is False
         assert fn("chrome://newtab/") is True
@@ -1763,13 +1703,24 @@ class TestUtilsInitFallbackLines44_59:
         from openbrowser import utils
 
         expected_exports = [
-            "SignalHandler", "AsyncSignalHandler", "_log_pretty_path",
-            "_log_pretty_url", "logger", "time_execution_sync",
-            "time_execution_async", "get_openbrowser_version",
-            "match_url_with_domain_pattern", "is_new_tab_page",
-            "singleton", "check_env_variables", "merge_dicts",
-            "check_latest_openbrowser_version", "get_git_info",
-            "is_unsafe_pattern", "URL_PATTERN", "_IS_WINDOWS",
+            "SignalHandler",
+            "AsyncSignalHandler",
+            "_log_pretty_path",
+            "_log_pretty_url",
+            "logger",
+            "time_execution_sync",
+            "time_execution_async",
+            "get_openbrowser_version",
+            "match_url_with_domain_pattern",
+            "is_new_tab_page",
+            "singleton",
+            "check_env_variables",
+            "merge_dicts",
+            "check_latest_openbrowser_version",
+            "get_git_info",
+            "is_unsafe_pattern",
+            "URL_PATTERN",
+            "_IS_WINDOWS",
         ]
         for name in expected_exports:
             assert hasattr(utils, name), f"Missing export: {name}"

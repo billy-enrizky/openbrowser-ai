@@ -81,12 +81,8 @@ def _setup_cdp_client_mock(client):
     client.send.DOM.enable = AsyncMock()
     client.send.DOM.getDocument = AsyncMock(return_value={"root": {"nodeId": 1}})
     client.send.DOM.querySelector = AsyncMock(return_value={"nodeId": 42})
-    client.send.DOM.getBoxModel = AsyncMock(
-        return_value={"model": {"content": [10, 20, 110, 20, 110, 70, 10, 70]}}
-    )
-    client.send.DOM.getContentQuads = AsyncMock(
-        return_value={"quads": [[10, 20, 110, 20, 110, 70, 10, 70]]}
-    )
+    client.send.DOM.getBoxModel = AsyncMock(return_value={"model": {"content": [10, 20, 110, 20, 110, 70, 10, 70]}})
+    client.send.DOM.getContentQuads = AsyncMock(return_value={"quads": [[10, 20, 110, 20, 110, 70, 10, 70]]})
     client.send.DOM.resolveNode = AsyncMock(return_value={"object": {"objectId": "obj-1"}})
     client.send.DOM.getFrameOwner = AsyncMock(return_value={"backendNodeId": 99, "nodeId": 42})
     client.send.DOM.scrollIntoViewIfNeeded = AsyncMock()
@@ -143,9 +139,7 @@ def _make_mock_cdp_session(
     session.url = url
     session.title = title
     session.cdp_client = _make_mock_cdp_client()
-    session.get_target_info = AsyncMock(
-        return_value={"targetId": target_id, "url": url, "title": title}
-    )
+    session.get_target_info = AsyncMock(return_value={"targetId": target_id, "url": url, "title": title})
     session.get_tab_info = AsyncMock()
     session.attach = AsyncMock(return_value=session)
     session.disconnect = AsyncMock()
@@ -154,6 +148,7 @@ def _make_mock_cdp_session(
 
 class _FakeEventBus:
     """Lightweight stub that replaces bubus.EventBus for unit tests."""
+
     def __init__(self, **kwargs):
         self.handlers = {}
         self.name = "fake_bus"
@@ -172,6 +167,7 @@ class _FakeEventBus:
 
 class _AwaitableNone:
     """Object that can be awaited and returns None."""
+
     def __await__(self):
         return asyncio.sleep(0).__await__()
 
@@ -210,16 +206,23 @@ class TestSessionCloseTabCleanupError:
     @pytest.mark.asyncio
     async def test_close_tab_outer_exception(self):
         from openbrowser.browser.events import CloseTabEvent
+        from openbrowser.browser.tabs import TabState
 
         session = _make_browser_session()
-        # Make event_bus.dispatch raise when awaited -> hits outer except (line 777-778)
+        target = "target-001"
+        session._tab_registry.register(target, state=TabState.OPEN)
+        session._cdp_client_root = MagicMock()
+        session._cdp_client_root.send.Target.closeTarget = AsyncMock(return_value={})
+        # TabClosingEvent observers are best-effort. The close still completes.
         mock_bus = MagicMock()
-        mock_bus.dispatch = AsyncMock(side_effect=RuntimeError("dispatch failed"))
-        _setattr(session, 'event_bus', mock_bus)
+        mock_bus.dispatch = MagicMock(
+            side_effect=[RuntimeError("dispatch failed"), _AwaitableNone()]
+        )
+        _setattr(session, "event_bus", mock_bus)
 
-        event = CloseTabEvent(target_id="target-001")
-        # Should not raise -- the error is caught on line 777
-        await session.on_CloseTabEvent(event)
+        await session.on_CloseTabEvent(CloseTabEvent(target_id=target))
+
+        assert session._tab_registry.get(target).state is TabState.CLOSED
 
 
 # ---------------------------------------------------------------------------
@@ -229,36 +232,22 @@ class TestSessionCloseTabCleanupError:
 
 class TestSessionAgentFocusChangedBadEval:
     @pytest.mark.asyncio
-    async def test_bad_eval_result_raises(self):
+    async def test_bad_eval_result_raises_typed_failure(self):
         from openbrowser.browser.events import AgentFocusChangedEvent
-        from openbrowser.browser.session import BrowserSession
+        from openbrowser.browser.focus import FocusTargetCode, FocusTargetError
 
         session = _make_browser_session()
         mock_cdp_session = _make_mock_cdp_session()
-        # Return value that is NOT 2 -> hits line 849
-        mock_cdp_session.cdp_client.send.Runtime.evaluate = AsyncMock(
-            return_value={"result": {"value": 999}}
-        )
-        _setattr(session, 'agent_focus', mock_cdp_session)
-        _setattr(session, '_dom_watchdog', None)
-        _setattr(session, '_cached_browser_state_summary', None)
-        _setattr(session, '_cached_selector_map', {})
-
-        # We need assignment to agent_focus to work without Pydantic validation
-        original_setattr = BrowserSession.__setattr__
-
-        def bypass_setattr(self_inner, name, value):
-            if name == 'agent_focus':
-                object.__setattr__(self_inner, name, value)
-            else:
-                original_setattr(self_inner, name, value)
+        mock_cdp_session.cdp_client.send.Runtime.evaluate = AsyncMock(return_value={"result": {"value": 999}})
+        _setattr(session, "_cdp_client_root", mock_cdp_session.cdp_client)
+        manager = MagicMock()
+        manager.get_live_session_for_target = AsyncMock(return_value=mock_cdp_session)
+        _setattr(session, "_session_manager", manager)
 
         event = AgentFocusChangedEvent(target_id="target-001", url="https://example.com")
-        with patch.object(BrowserSession, "__setattr__", bypass_setattr):
-            with patch.object(BrowserSession, "get_or_create_cdp_session", new_callable=AsyncMock, return_value=mock_cdp_session):
-                with patch.object(BrowserSession, "_cdp_get_all_pages", new_callable=AsyncMock, return_value=[{"targetId": "target-002", "url": "https://example.com", "type": "page"}]):
-                    with pytest.raises(Exception, match="Failed to execute test JS expression"):
-                        await session.on_AgentFocusChangedEvent(event)
+        with pytest.raises(FocusTargetError) as error:
+            await session.on_AgentFocusChangedEvent(event)
+        assert error.value.code is FocusTargetCode.UNRESPONSIVE
 
 
 # ---------------------------------------------------------------------------
@@ -309,8 +298,8 @@ class TestSessionProxyAuth:
         session.browser_profile.proxy = proxy
 
         mock_root = _make_mock_cdp_client()
-        _setattr(session, '_cdp_client_root', mock_root)
-        _setattr(session, 'agent_focus', _make_mock_cdp_session())
+        _setattr(session, "_cdp_client_root", mock_root)
+        _setattr(session, "agent_focus", _make_mock_cdp_session())
 
         await session._setup_proxy_auth()
 
@@ -329,8 +318,8 @@ class TestSessionProxyAuth:
         session.browser_profile.proxy = proxy
 
         mock_root = _make_mock_cdp_client()
-        _setattr(session, '_cdp_client_root', mock_root)
-        _setattr(session, 'agent_focus', _make_mock_cdp_session())
+        _setattr(session, "_cdp_client_root", mock_root)
+        _setattr(session, "agent_focus", _make_mock_cdp_session())
 
         await session._setup_proxy_auth()
 
@@ -350,8 +339,8 @@ class TestSessionProxyAuth:
         session.browser_profile.proxy = proxy
 
         mock_root = _make_mock_cdp_client()
-        _setattr(session, '_cdp_client_root', mock_root)
-        _setattr(session, 'agent_focus', _make_mock_cdp_session())
+        _setattr(session, "_cdp_client_root", mock_root)
+        _setattr(session, "agent_focus", _make_mock_cdp_session())
 
         await session._setup_proxy_auth()
 
@@ -370,8 +359,8 @@ class TestSessionProxyAuth:
         session.browser_profile.proxy = proxy
 
         mock_root = _make_mock_cdp_client()
-        _setattr(session, '_cdp_client_root', mock_root)
-        _setattr(session, 'agent_focus', _make_mock_cdp_session())
+        _setattr(session, "_cdp_client_root", mock_root)
+        _setattr(session, "agent_focus", _make_mock_cdp_session())
 
         await session._setup_proxy_auth()
 
@@ -388,8 +377,8 @@ class TestSessionProxyAuth:
         session.browser_profile.proxy = proxy
 
         mock_root = _make_mock_cdp_client()
-        _setattr(session, '_cdp_client_root', mock_root)
-        _setattr(session, 'agent_focus', _make_mock_cdp_session())
+        _setattr(session, "_cdp_client_root", mock_root)
+        _setattr(session, "agent_focus", _make_mock_cdp_session())
 
         await session._setup_proxy_auth()
 
@@ -411,8 +400,8 @@ class TestSessionProxyAuth:
 
         mock_root = _make_mock_cdp_client()
         mock_root.register.Fetch.authRequired = MagicMock(side_effect=RuntimeError("reg fail"))
-        _setattr(session, '_cdp_client_root', mock_root)
-        _setattr(session, 'agent_focus', _make_mock_cdp_session())
+        _setattr(session, "_cdp_client_root", mock_root)
+        _setattr(session, "agent_focus", _make_mock_cdp_session())
 
         await session._setup_proxy_auth()  # should not raise
 
@@ -426,8 +415,8 @@ class TestSessionProxyAuth:
         session.browser_profile.proxy = proxy
 
         mock_root = _make_mock_cdp_client()
-        _setattr(session, '_cdp_client_root', mock_root)
-        _setattr(session, 'agent_focus', _make_mock_cdp_session())
+        _setattr(session, "_cdp_client_root", mock_root)
+        _setattr(session, "agent_focus", _make_mock_cdp_session())
 
         await session._setup_proxy_auth()
 
@@ -448,11 +437,9 @@ class TestSessionProxyAuth:
         session.browser_profile.proxy = proxy
 
         mock_root = _make_mock_cdp_client()
-        mock_root.register.Target.attachedToTarget = MagicMock(
-            side_effect=RuntimeError("attach reg fail")
-        )
-        _setattr(session, '_cdp_client_root', mock_root)
-        _setattr(session, 'agent_focus', _make_mock_cdp_session())
+        mock_root.register.Target.attachedToTarget = MagicMock(side_effect=RuntimeError("attach reg fail"))
+        _setattr(session, "_cdp_client_root", mock_root)
+        _setattr(session, "agent_focus", _make_mock_cdp_session())
 
         await session._setup_proxy_auth()  # should not raise
 
@@ -467,8 +454,8 @@ class TestSessionPdfTitle:
     async def test_pdf_title_from_url(self):
         session = _make_browser_session()
         mock_root = _make_mock_cdp_client()
-        _setattr(session, '_cdp_client_root', mock_root)
-        _setattr(session, 'agent_focus', _make_mock_cdp_session())
+        _setattr(session, "_cdp_client_root", mock_root)
+        _setattr(session, "agent_focus", _make_mock_cdp_session())
 
         mock_root.send.Target.getTargetInfo = AsyncMock(
             return_value={
@@ -493,9 +480,7 @@ class TestSessionPdfTitle:
             }
         )
 
-        with patch.object(
-            type(session), "cdp_client", new_callable=PropertyMock, return_value=mock_root
-        ):
+        with patch.object(type(session), "cdp_client", new_callable=PropertyMock, return_value=mock_root):
             tabs = await session.get_tabs()
 
         assert any(t.title == "doc.pdf" for t in tabs)
@@ -513,10 +498,10 @@ class TestSessionCrossOriginFrameSkip:
 
         session = _make_browser_session()
         mock_root = _make_mock_cdp_client()
-        _setattr(session, '_cdp_client_root', mock_root)
+        _setattr(session, "_cdp_client_root", mock_root)
 
         mock_focus = _make_mock_cdp_session()
-        _setattr(session, 'agent_focus', mock_focus)
+        _setattr(session, "agent_focus", mock_focus)
 
         # Make getFrameTree return frame with crossOriginIsolatedContextType set
         mock_focus.cdp_client.send.Page.getFrameTree = AsyncMock(
@@ -533,10 +518,17 @@ class TestSessionCrossOriginFrameSkip:
         )
 
         session.browser_profile.cross_origin_iframes = False
-        with patch.object(BrowserSession, "_cdp_get_all_pages", new_callable=AsyncMock, return_value=[
-            {"targetId": "target-main", "url": "https://example.com", "type": "page"},
-        ]):
-            with patch.object(BrowserSession, "get_or_create_cdp_session", new_callable=AsyncMock, return_value=mock_focus):
+        with patch.object(
+            BrowserSession,
+            "_cdp_get_all_pages",
+            new_callable=AsyncMock,
+            return_value=[
+                {"targetId": "target-main", "url": "https://example.com", "type": "page"},
+            ],
+        ):
+            with patch.object(
+                BrowserSession, "get_or_create_cdp_session", new_callable=AsyncMock, return_value=mock_focus
+            ):
                 try:
                     result = await session.get_all_frames()
                 except Exception:
@@ -553,7 +545,7 @@ class TestSessionCdpClientForNodeException:
     async def test_cdp_client_for_node_session_id_exception(self):
         session = _make_browser_session()
         mock_focus = _make_mock_cdp_session()
-        _setattr(session, 'agent_focus', mock_focus)
+        _setattr(session, "agent_focus", mock_focus)
 
         mock_node = MagicMock()
         mock_node.session_id = "bad-session-id"
@@ -566,7 +558,7 @@ class TestSessionCdpClientForNodeException:
             def values(self):
                 raise RuntimeError("pool explosion")
 
-        _setattr(session, '_cdp_session_pool', ExplodingDict())
+        _setattr(session, "_cdp_session_pool", ExplodingDict())
 
         result = await session.cdp_client_for_node(mock_node)
         assert result == mock_focus
@@ -953,12 +945,12 @@ class TestDefaultActionWatchdog:
         mock_cdp_session = _make_mock_cdp_session()
         _setattr(session, "agent_focus", mock_cdp_session)
 
-        mock_cdp_session.cdp_client.send.Input.dispatchKeyEvent = AsyncMock(
-            side_effect=RuntimeError("key fail")
-        )
+        mock_cdp_session.cdp_client.send.Input.dispatchKeyEvent = AsyncMock(side_effect=RuntimeError("key fail"))
 
         event = SendKeysEvent(keys="Enter")
-        with patch.object(BrowserSession, "get_or_create_cdp_session", new_callable=AsyncMock, return_value=mock_cdp_session):
+        with patch.object(
+            BrowserSession, "get_or_create_cdp_session", new_callable=AsyncMock, return_value=mock_cdp_session
+        ):
             with pytest.raises(RuntimeError, match="key fail"):
                 await wd.on_SendKeysEvent(event)
 
@@ -1175,7 +1167,9 @@ class TestDOMWatchdog:
         from openbrowser.browser.session import BrowserSession
 
         session = _make_browser_session()
-        with patch.object(BrowserSession, "add_highlights", new_callable=AsyncMock, side_effect=RuntimeError("highlight fail")):
+        with patch.object(
+            BrowserSession, "add_highlights", new_callable=AsyncMock, side_effect=RuntimeError("highlight fail")
+        ):
             caught = False
             try:
                 await session.add_highlights({})
@@ -1348,16 +1342,16 @@ class TestPopupsWatchdog:
             object.__setattr__(wd, "_dialog_listeners_registered", set())
 
         event = TabCreatedEvent(target_id="target-001", url="https://example.com")
-        with patch.object(BrowserSession, "get_or_create_cdp_session", new_callable=AsyncMock, return_value=mock_cdp_session):
+        with patch.object(
+            BrowserSession, "get_or_create_cdp_session", new_callable=AsyncMock, return_value=mock_cdp_session
+        ):
             await wd.on_TabCreatedEvent(event)
 
         # Get the registered handle_dialog callback
         handler = mock_cdp_session.cdp_client.register.Page.javascriptDialogOpening.call_args[0][0]
 
         # Make both approaches fail with a critical error -> triggers outer except (lines 120-121)
-        mock_root_client.send.Page.handleJavaScriptDialog = AsyncMock(
-            side_effect=RuntimeError("critical failure")
-        )
+        mock_root_client.send.Page.handleJavaScriptDialog = AsyncMock(side_effect=RuntimeError("critical failure"))
 
         event_data = {"type": "alert", "message": "test popup"}
         await handler(event_data, "sess-abc123")

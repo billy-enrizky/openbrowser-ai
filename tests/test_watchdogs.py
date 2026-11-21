@@ -334,25 +334,39 @@ class TestAboutBlankWatchdog:
 
     @pytest.mark.asyncio
     async def test_tab_closed_last_tab_creates_new(self):
+        from openbrowser.browser.events import SwitchTabEvent, TabClosingEvent, TabCreatedEvent
         from openbrowser.browser.watchdogs.aboutblank_watchdog import AboutBlankWatchdog
 
         session = _make_mock_browser_session()
         session._cdp_get_all_pages.return_value = [{'targetId': 'target-1', 'url': 'about:blank'}]
         session._cdp_create_new_page = AsyncMock(return_value='new-target')
 
-        event_bus = EventBus()
-        dispatch_result = asyncio.get_running_loop().create_future()
-        dispatch_result.set_result(None)
-        event_bus.dispatch = MagicMock(return_value=dispatch_result)
+        event_bus = EventBus(name='aboutblank_last_tab')
+        switch_entered = asyncio.Event()
+
+        async def on_TabCreatedEvent(event: TabCreatedEvent) -> None:
+            return None
+
+        async def on_SwitchTabEvent(event: SwitchTabEvent) -> None:
+            switch_entered.set()
+            raise RuntimeError('switch handler failed')
 
         watchdog = AboutBlankWatchdog(event_bus=event_bus, browser_session=session)
-
-        event = MagicMock()
-        # Patch _show_dvd_screensaver to avoid complex CDP setup
         watchdog._show_dvd_screensaver_on_about_blank_tabs = AsyncMock()
-        await watchdog.on_TabClosingEvent(event)
+        event_bus.on(TabCreatedEvent, on_TabCreatedEvent)
+        event_bus.on(SwitchTabEvent, on_SwitchTabEvent)
+        event_bus.on(TabClosingEvent, watchdog.on_TabClosingEvent)
+        try:
+            parent = event_bus.dispatch(TabClosingEvent(target_id='target-1'))
+            with pytest.raises(RuntimeError, match='switch handler failed'):
+                await asyncio.wait_for(
+                    parent.event_result(timeout=1.0, raise_if_any=True, raise_if_none=False),
+                    timeout=1.0,
+                )
+        finally:
+            await event_bus.stop(clear=True, timeout=0.2)
 
-        event_bus.dispatch.assert_called()
+        assert switch_entered.is_set()
         session._cdp_create_new_page.assert_awaited_once_with('about:blank')
 
     @pytest.mark.asyncio
@@ -561,6 +575,7 @@ class TestSecurityWatchdog:
 
         await watchdog.on_NavigationCompleteEvent(event)
 
+        session.get_or_create_cdp_session.assert_awaited_once_with(target_id='target-1', focus=False)
         mock_cdp.cdp_client.send.Page.navigate.assert_called_once()
 
     @pytest.mark.asyncio

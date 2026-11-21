@@ -3,20 +3,15 @@
 Covers CDPSession and BrowserSession event handlers and public methods.
 """
 
-import asyncio
 import logging
-from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
+from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
-from bubus import EventBus
 from cdp_use import CDPClient
 
 from openbrowser.browser.events import (
     AgentFocusChangedEvent,
-    BrowserConnectedEvent,
     BrowserErrorEvent,
-    BrowserLaunchEvent,
-    BrowserLaunchResult,
     BrowserStartEvent,
     BrowserStopEvent,
     BrowserStoppedEvent,
@@ -25,13 +20,14 @@ from openbrowser.browser.events import (
     NavigateToUrlEvent,
     NavigationCompleteEvent,
     NavigationFinishedEvent,
-    NavigationStartedEvent,
     SwitchTabEvent,
     TabClosedEvent,
     TabCreatedEvent,
 )
+from openbrowser.browser.focus import FocusChangeReason, FocusPhase, FocusSnapshot, FocusTargetCode, FocusTargetError
 from openbrowser.browser.profile import BrowserProfile, ViewportSize
-from openbrowser.browser.session import CDPSession, BrowserSession, _LOGGED_UNIQUE_SESSION_IDS
+from openbrowser.browser.session import _LOGGED_UNIQUE_SESSION_IDS, BrowserSession, CDPSession
+from openbrowser.browser.tabs import TabState
 from openbrowser.browser.views import TabInfo
 
 logger = logging.getLogger(__name__)
@@ -91,11 +87,13 @@ def _make_mock_cdp_client():
     frame = {"id": "main-frame", "loaderId": "old-loader", "url": "about:blank"}
     client.send.Page.getFrameTree = AsyncMock(side_effect=lambda **kw: {"frameTree": {"frame": dict(frame)}})
     client.send.Page.setLifecycleEventsEnabled = AsyncMock()
+
     async def navigate(*args, **kwargs):
         frame.update(loaderId="next-loader", url=kwargs["params"]["url"])
         callback = client.register.Page.lifecycleEvent.call_args.args[0]
         callback({"frameId": "main-frame", "loaderId": "next-loader", "name": "load"}, kwargs["session_id"])
         return {"frameId": "main-frame", "loaderId": "next-loader"}
+
     client.send.Page.navigate = AsyncMock(side_effect=navigate)
 
     # Runtime evaluate
@@ -108,8 +106,13 @@ def _make_mock_cdp_client():
     return client
 
 
-def _make_cdp_session(client=None, target_id="AAAA1111BBBB2222CCCC3333DDDD4444", session_id="session-focus",
-                      url="https://example.com", title="Example"):
+def _make_cdp_session(
+    client=None,
+    target_id="AAAA1111BBBB2222CCCC3333DDDD4444",
+    session_id="session-focus",
+    url="https://example.com",
+    title="Example",
+):
     """Create a CDPSession via model_construct to bypass Pydantic validation."""
     if client is None:
         client = _make_mock_cdp_client()
@@ -141,20 +144,21 @@ class _AwaitableMock:
         yield
         return self
 
-    async def event_result(self, raise_if_any=False, raise_if_none=False):
+    async def event_result(self, **kwargs):
         return None
 
     @property
     def call_args_list(self):
         """Compatibility with assertion patterns that inspect call_args_list."""
         from unittest.mock import call
+
         return [call(e) for e in self.calls]
 
 
 class _DispatchResult:
     """Awaitable result from dispatch, also supports event_result()."""
 
-    async def event_result(self, raise_if_any=False, raise_if_none=False):
+    async def event_result(self, **kwargs):
         return None
 
     def __await__(self):
@@ -199,13 +203,43 @@ def _setup_session_with_cdp(session, cdp_client=None):
     client = cdp_client or _make_mock_cdp_client()
     session._cdp_client_root = client
 
+    async def target_info(**kwargs):
+        requested = kwargs["params"]["targetId"]
+        return {
+            "targetInfo": {
+                "targetId": requested,
+                "type": "page",
+                "url": "about:blank",
+                "title": "",
+            }
+        }
+
+    client.send.Target.getTargetInfo = AsyncMock(side_effect=target_info)
     focus = _make_cdp_session(client=client)
+    client.send.Target.getTargets = AsyncMock(
+        return_value={
+            "targetInfos": [{"targetId": focus.target_id, "type": "page", "url": focus.url, "title": focus.title}]
+        }
+    )
     session.agent_focus = focus
+    session._focus_state = FocusSnapshot(
+        phase=FocusPhase.FOCUSED,
+        target_id=focus.target_id,
+        session_id=focus.session_id,
+        previous_target_id=None,
+        generation=1,
+        reason=FocusChangeReason.INITIAL,
+        last_error=None,
+        updated_at=0.0,
+    )
 
     sm = MagicMock()
     sm.get_session_for_target = AsyncMock(return_value=focus)
+    sm.get_live_session_for_target = AsyncMock(return_value=focus)
+    sm.active_session_ids = AsyncMock(return_value=(focus.session_id,))
     sm.validate_session = AsyncMock(return_value=True)
     sm.clear = AsyncMock()
+    sm.cancel_pending = MagicMock()
     session._session_manager = sm
 
     return client, focus, sm
@@ -583,7 +617,9 @@ class TestOnBrowserStartEvent:
         session._cdp_client_root = None
 
         with patch.object(BrowserSession, "attach_all_watchdogs", new_callable=AsyncMock):
-            with patch.object(BrowserSession, "connect", new_callable=AsyncMock, side_effect=ConnectionError("refused")):
+            with patch.object(
+                BrowserSession, "connect", new_callable=AsyncMock, side_effect=ConnectionError("refused")
+            ):
                 with pytest.raises(ConnectionError):
                     await session.on_BrowserStartEvent(BrowserStartEvent())
 
@@ -610,7 +646,9 @@ class TestOnNavigateToUrlEvent:
         client, focus, sm = _setup_session_with_cdp(session)
         event = NavigateToUrlEvent(url="https://example.com", new_tab=True)
 
-        with patch.object(BrowserSession, "get_current_page_url", new_callable=AsyncMock, return_value="chrome://newtab/"):
+        with patch.object(
+            BrowserSession, "get_current_page_url", new_callable=AsyncMock, return_value="chrome://newtab/"
+        ):
             with patch.object(BrowserSession, "_cdp_get_all_pages", new_callable=AsyncMock, return_value=[]):
                 with patch.object(BrowserSession, "_close_extension_options_pages", new_callable=AsyncMock):
                     with patch("asyncio.sleep", new_callable=AsyncMock):
@@ -633,7 +671,9 @@ class TestOnNavigateToUrlEvent:
 
         session.event_bus.dispatch = _make_dispatch_mock(extra_side_effect=on_dispatch)
 
-        with patch.object(BrowserSession, "get_current_page_url", new_callable=AsyncMock, side_effect=Exception("no page")):
+        with patch.object(
+            BrowserSession, "get_current_page_url", new_callable=AsyncMock, side_effect=Exception("no page")
+        ):
             with patch.object(
                 BrowserSession,
                 "_cdp_get_all_pages",
@@ -665,7 +705,9 @@ class TestOnNavigateToUrlEvent:
 
         session.event_bus.dispatch = _make_dispatch_mock(extra_side_effect=on_dispatch)
 
-        with patch.object(BrowserSession, "get_current_page_url", new_callable=AsyncMock, return_value="https://current.com"):
+        with patch.object(
+            BrowserSession, "get_current_page_url", new_callable=AsyncMock, return_value="https://current.com"
+        ):
             with patch.object(BrowserSession, "_cdp_get_all_pages", new_callable=AsyncMock, return_value=pages):
                 with patch.object(BrowserSession, "_close_extension_options_pages", new_callable=AsyncMock):
                     with patch("asyncio.sleep", new_callable=AsyncMock):
@@ -698,7 +740,9 @@ class TestOnNavigateToUrlEvent:
 
         session.event_bus.dispatch = _make_dispatch_mock(extra_side_effect=on_dispatch)
 
-        with patch.object(BrowserSession, "get_current_page_url", new_callable=AsyncMock, return_value="https://current.com"):
+        with patch.object(
+            BrowserSession, "get_current_page_url", new_callable=AsyncMock, return_value="https://current.com"
+        ):
             with patch.object(BrowserSession, "_cdp_get_all_pages", side_effect=mock_get_all_pages):
                 with patch.object(BrowserSession, "_cdp_create_new_page", new_callable=AsyncMock, return_value=new_tid):
                     with patch.object(BrowserSession, "_close_extension_options_pages", new_callable=AsyncMock):
@@ -713,9 +757,16 @@ class TestOnNavigateToUrlEvent:
         pages = [{"targetId": focus.target_id, "url": "https://current.com"}]
         event = NavigateToUrlEvent(url="https://example.com", new_tab=True)
 
-        with patch.object(BrowserSession, "get_current_page_url", new_callable=AsyncMock, return_value="https://current.com"):
+        with patch.object(
+            BrowserSession, "get_current_page_url", new_callable=AsyncMock, return_value="https://current.com"
+        ):
             with patch.object(BrowserSession, "_cdp_get_all_pages", new_callable=AsyncMock, return_value=pages):
-                with patch.object(BrowserSession, "_cdp_create_new_page", new_callable=AsyncMock, side_effect=Exception("creation failed")):
+                with patch.object(
+                    BrowserSession,
+                    "_cdp_create_new_page",
+                    new_callable=AsyncMock,
+                    side_effect=Exception("creation failed"),
+                ):
                     with patch.object(BrowserSession, "_close_extension_options_pages", new_callable=AsyncMock):
                         with patch("asyncio.sleep", new_callable=AsyncMock):
                             await session.on_NavigateToUrlEvent(event)
@@ -739,7 +790,9 @@ class TestOnNavigateToUrlEvent:
 
         session.event_bus.dispatch = _make_dispatch_mock(extra_side_effect=on_dispatch)
 
-        with patch.object(BrowserSession, "get_current_page_url", new_callable=AsyncMock, return_value="https://current.com"):
+        with patch.object(
+            BrowserSession, "get_current_page_url", new_callable=AsyncMock, return_value="https://current.com"
+        ):
             with patch.object(BrowserSession, "_cdp_get_all_pages", new_callable=AsyncMock, return_value=pages):
                 with patch.object(BrowserSession, "_close_extension_options_pages", new_callable=AsyncMock):
                     with patch("asyncio.sleep", new_callable=AsyncMock):
@@ -759,8 +812,8 @@ class TestOnNavigateToUrlEvent:
         dispatch_calls = session.event_bus.dispatch.call_args_list
         finished = [c[0][0] for c in dispatch_calls if isinstance(c[0][0], NavigationFinishedEvent)]
         assert len(finished) == 1
-        assert finished[0].outcome == 'failed'
-        assert 'nav failed' in finished[0].error_text
+        assert finished[0].outcome == "failed"
+        assert "nav failed" in finished[0].error_text
         assert not any(isinstance(c[0][0], AgentFocusChangedEvent) for c in dispatch_calls)
 
 
@@ -768,46 +821,49 @@ class TestOnNavigateToUrlEvent:
 class TestOnSwitchTabEvent:
     """Tests for on_SwitchTabEvent (lines 727-763)."""
 
-    async def test_switch_tab_no_focus_raises(self):
+    async def test_switch_tab_without_cdp_raises_typed_error(self):
         session = _make_browser_session()
         session.agent_focus = None
-        with pytest.raises(RuntimeError, match="Cannot switch tabs"):
+        with pytest.raises(FocusTargetError) as error:
             await session.on_SwitchTabEvent(SwitchTabEvent(target_id="t1"))
+        assert error.value.code is FocusTargetCode.TARGET_MISSING
 
     async def test_switch_tab_with_target_id(self):
         """Switch to specific target (lines 748-763)."""
         session = _make_browser_session()
-        client, focus, sm = _setup_session_with_cdp(session)
+        client, _focus, sm = _setup_session_with_cdp(session)
         new_tid = "NEW-TARGET-0000ABCD"
 
         new_focus = _make_cdp_session(client=client, target_id=new_tid, url="https://switched.com")
 
-        pages = [{"targetId": new_tid, "url": "https://switched.com"}]
+        pages = [{"targetId": new_tid, "url": "https://switched.com", "type": "page"}]
+        sm.get_live_session_for_target = AsyncMock(return_value=new_focus)
 
         with patch.object(BrowserSession, "_cdp_get_all_pages", new_callable=AsyncMock, return_value=pages):
-            with patch.object(BrowserSession, "get_or_create_cdp_session", new_callable=AsyncMock, return_value=new_focus):
-                result = await session.on_SwitchTabEvent(SwitchTabEvent(target_id=new_tid))
+            result = await session.on_SwitchTabEvent(SwitchTabEvent(target_id=new_tid))
 
         assert result == new_tid
+        assert session.focus_snapshot().target_id == new_tid
 
     async def test_switch_tab_none_uses_last_page(self):
         """target_id=None switches to most recently opened (lines 733-737)."""
         session = _make_browser_session()
-        client, focus, sm = _setup_session_with_cdp(session)
+        client, _focus, sm = _setup_session_with_cdp(session)
         last_tid = "LAST-TARGET-00000000"
 
         new_focus = _make_cdp_session(client=client, target_id=last_tid, url="https://last.com")
 
         pages = [
-            {"targetId": "first-target-00000000", "url": "https://first.com"},
-            {"targetId": last_tid, "url": "https://last.com"},
+            {"targetId": "first-target-00000000", "url": "https://first.com", "type": "page"},
+            {"targetId": last_tid, "url": "https://last.com", "type": "page"},
         ]
+        sm.get_live_session_for_target = AsyncMock(return_value=new_focus)
 
         with patch.object(BrowserSession, "_cdp_get_all_pages", new_callable=AsyncMock, return_value=pages):
-            with patch.object(BrowserSession, "get_or_create_cdp_session", new_callable=AsyncMock, return_value=new_focus):
-                result = await session.on_SwitchTabEvent(SwitchTabEvent(target_id=None))
+            result = await session.on_SwitchTabEvent(SwitchTabEvent(target_id=None))
 
         assert result == last_tid
+        assert session.focus_snapshot().target_id == last_tid
 
     async def test_switch_tab_none_no_pages_creates_new(self):
         """target_id=None with no pages creates new tab (lines 739-746)."""
@@ -816,6 +872,8 @@ class TestOnSwitchTabEvent:
         session._cdp_client_root = client
         new_tid = "CREATED-TARGET-0000"
         client.send.Target.createTarget = AsyncMock(return_value={"targetId": new_tid})
+        created_focus = _make_cdp_session(client=client, target_id=new_tid, url="about:blank")
+        sm.get_live_session_for_target = AsyncMock(return_value=created_focus)
 
         with patch.object(BrowserSession, "_cdp_get_all_pages", new_callable=AsyncMock, return_value=[]):
             result = await session.on_SwitchTabEvent(SwitchTabEvent(target_id=None))
@@ -826,6 +884,7 @@ class TestOnSwitchTabEvent:
         focus_changed = [c for c in dispatch_calls if isinstance(c[0][0], AgentFocusChangedEvent)]
         assert len(tab_created) >= 1
         assert len(focus_changed) >= 1
+        assert session.focus_snapshot().target_id == new_tid
 
 
 @pytest.mark.asyncio
@@ -874,7 +933,10 @@ class TestOnTabCreatedEvent:
 
     async def test_tab_created_no_viewport_skips(self):
         profile = BrowserProfile(
-            cdp_url="ws://localhost:9222", is_local=False, headless=False, no_viewport=True,
+            cdp_url="ws://localhost:9222",
+            is_local=False,
+            headless=False,
+            no_viewport=True,
         )
         session = BrowserSession(browser_profile=profile)
         session.event_bus.dispatch = _make_dispatch_mock()
@@ -894,7 +956,9 @@ class TestOnTabCreatedEvent:
         session = BrowserSession(browser_profile=profile)
         session.event_bus.dispatch = MagicMock()
 
-        with patch.object(BrowserSession, "_cdp_set_viewport", new_callable=AsyncMock, side_effect=Exception("viewport fail")):
+        with patch.object(
+            BrowserSession, "_cdp_set_viewport", new_callable=AsyncMock, side_effect=Exception("viewport fail")
+        ):
             await session.on_TabCreatedEvent(TabCreatedEvent(target_id="t1", url="about:blank"))
 
 
@@ -902,17 +966,18 @@ class TestOnTabCreatedEvent:
 class TestOnTabClosedEvent:
     """Tests for on_TabClosedEvent (lines 799-809)."""
 
-    async def test_tab_closed_switches_if_was_current(self):
+    async def test_tab_closed_repairs_focus_directly(self):
         session = _make_browser_session()
-        _setup_session_with_cdp(session)
-        current_tid = session.agent_focus.target_id
+        client, focus, sm = _setup_session_with_cdp(session)
+        current_tid = focus.target_id
+        session._tab_registry.register(current_tid, url=focus.url, state=TabState.OPEN)
+        fallback = _make_cdp_session(client=client, target_id="target-2", url="https://b.com")
+        sm.get_live_session_for_target = AsyncMock(return_value=fallback)
 
         await session.on_TabClosedEvent(TabClosedEvent(target_id=current_tid))
 
-        dispatch_calls = session.event_bus.dispatch.call_args_list
-        switch_events = [c for c in dispatch_calls if isinstance(c[0][0], SwitchTabEvent)]
-        assert len(switch_events) >= 1
-        assert switch_events[0][0][0].target_id is None
+        assert session.focus_snapshot().target_id == "target-2"
+        assert session.focus_snapshot().reason is FocusChangeReason.CLOSE_REPAIR
 
     async def test_tab_closed_other_tab_no_switch(self):
         session = _make_browser_session()
@@ -941,25 +1006,24 @@ class TestOnAgentFocusChangedEvent:
 
         new_focus = _make_cdp_session(client=client, target_id=new_tid, url="https://new.com")
 
+        sm.get_live_session_for_target = AsyncMock(return_value=new_focus)
         with patch.object(BrowserSession, "_cdp_get_all_pages", new_callable=AsyncMock, return_value=[]):
-            with patch.object(BrowserSession, "get_or_create_cdp_session", new_callable=AsyncMock, return_value=new_focus):
-                await session.on_AgentFocusChangedEvent(
-                    AgentFocusChangedEvent(target_id=new_tid, url="https://new.com")
-                )
+            await session.on_AgentFocusChangedEvent(AgentFocusChangedEvent(target_id=new_tid, url="https://new.com"))
 
         assert session.agent_focus is new_focus
 
     async def test_focus_changed_clears_cache(self):
         session = _make_browser_session()
         client, focus, sm = _setup_session_with_cdp(session)
+        new_focus = _make_cdp_session(client=client, target_id="CACHE-TARGET-0000", url="https://new.example")
+        sm.get_live_session_for_target = AsyncMock(return_value=new_focus)
         session._cached_browser_state_summary = "something"
         session._cached_selector_map = {1: MagicMock()}
 
         with patch.object(BrowserSession, "_cdp_get_all_pages", new_callable=AsyncMock, return_value=[]):
-            with patch.object(BrowserSession, "get_or_create_cdp_session", new_callable=AsyncMock, return_value=focus):
-                await session.on_AgentFocusChangedEvent(
-                    AgentFocusChangedEvent(target_id=focus.target_id, url="https://example.com")
-                )
+            await session.on_AgentFocusChangedEvent(
+                AgentFocusChangedEvent(target_id=new_focus.target_id, url="https://new.example")
+            )
 
         assert session._cached_browser_state_summary is None
         assert len(session._cached_selector_map) == 0
@@ -967,14 +1031,15 @@ class TestOnAgentFocusChangedEvent:
     async def test_focus_changed_clears_dom_watchdog_cache(self):
         session = _make_browser_session()
         client, focus, sm = _setup_session_with_cdp(session)
+        new_focus = _make_cdp_session(client=client, target_id="DOM-TARGET-000000", url="https://new.example")
+        sm.get_live_session_for_target = AsyncMock(return_value=new_focus)
         dom_wd = MagicMock()
         session._dom_watchdog = dom_wd
 
         with patch.object(BrowserSession, "_cdp_get_all_pages", new_callable=AsyncMock, return_value=[]):
-            with patch.object(BrowserSession, "get_or_create_cdp_session", new_callable=AsyncMock, return_value=focus):
-                await session.on_AgentFocusChangedEvent(
-                    AgentFocusChangedEvent(target_id=focus.target_id, url="https://example.com")
-                )
+            await session.on_AgentFocusChangedEvent(
+                AgentFocusChangedEvent(target_id=new_focus.target_id, url="https://new.example")
+            )
 
         dom_wd.clear_cache.assert_called_once()
 
@@ -985,40 +1050,29 @@ class TestOnAgentFocusChangedEvent:
 
         with patch.object(BrowserSession, "_cdp_get_all_pages", new_callable=AsyncMock, return_value=[]):
             with patch.object(BrowserSession, "get_or_create_cdp_session", new_callable=AsyncMock, return_value=focus):
-                with pytest.raises(RuntimeError, match="no target_id"):
+                with pytest.raises(FocusTargetError) as error:
                     await session.on_AgentFocusChangedEvent(
                         AgentFocusChangedEvent(target_id="", url="https://example.com")
                     )
+                assert error.value.code is FocusTargetCode.TARGET_MISSING
 
-    async def test_focus_changed_tab_unresponsive_falls_back(self):
-        """Unresponsive tab should fall back to last page (lines 849-857)."""
+    async def test_focus_changed_tab_unresponsive_restores_prior_focus(self):
         session = _make_browser_session()
         client, focus, sm = _setup_session_with_cdp(session)
         tid = "RESPONSIVE-TARGET-00"
-
         responsive_focus = _make_cdp_session(client=client, target_id=tid, url="https://resp.com")
-
-        # Runtime.evaluate will raise -> triggers fallback
+        sm.get_live_session_for_target = AsyncMock(return_value=responsive_focus)
         client.send.Runtime.evaluate = AsyncMock(side_effect=Exception("tab crashed"))
+        before = session.agent_focus
+        generation = session.focus_snapshot().generation
 
-        fallback_focus = _make_cdp_session(client=client, target_id="FALLBACK-TARGET-0000", url="https://fallback.com")
+        with patch.object(BrowserSession, "_cdp_get_all_pages", new_callable=AsyncMock, return_value=[]):
+            with pytest.raises(FocusTargetError) as error:
+                await session.on_AgentFocusChangedEvent(AgentFocusChangedEvent(target_id=tid, url="https://resp.com"))
 
-        call_count = [0]
-
-        async def mock_get_or_create(target_id=None, focus=True):
-            call_count[0] += 1
-            if call_count[0] == 1:
-                return responsive_focus
-            return fallback_focus
-
-        fallback_pages = [{"targetId": "FALLBACK-TARGET-0000", "url": "https://fallback.com"}]
-
-        with patch.object(BrowserSession, "_cdp_get_all_pages", new_callable=AsyncMock, return_value=fallback_pages):
-            with patch.object(BrowserSession, "get_or_create_cdp_session", side_effect=mock_get_or_create):
-                with pytest.raises(Exception, match="tab crashed"):
-                    await session.on_AgentFocusChangedEvent(
-                        AgentFocusChangedEvent(target_id=tid, url="https://resp.com")
-                    )
+        assert error.value.code is FocusTargetCode.UNRESPONSIVE
+        assert session.agent_focus is before
+        assert session.focus_snapshot().generation == generation
 
     async def test_focus_changed_dispatches_navigation_complete(self):
         """Should dispatch NavigationCompleteEvent when target_id and url provided."""
@@ -1122,7 +1176,9 @@ class TestNewPage:
         session = _make_browser_session()
         client, focus, sm = _setup_session_with_cdp(session)
 
-        with patch("openbrowser.browser.session.BrowserSession.cdp_client", new_callable=PropertyMock, return_value=client):
+        with patch(
+            "openbrowser.browser.session.BrowserSession.cdp_client", new_callable=PropertyMock, return_value=client
+        ):
             page = await session.new_page("https://example.com")
         assert page is not None
         client.send.Target.createTarget.assert_awaited_once()
@@ -1131,7 +1187,9 @@ class TestNewPage:
         session = _make_browser_session()
         client, focus, sm = _setup_session_with_cdp(session)
 
-        with patch("openbrowser.browser.session.BrowserSession.cdp_client", new_callable=PropertyMock, return_value=client):
+        with patch(
+            "openbrowser.browser.session.BrowserSession.cdp_client", new_callable=PropertyMock, return_value=client
+        ):
             page = await session.new_page()
         call_args = client.send.Target.createTarget.call_args
         assert call_args[0][0]["url"] == "about:blank"
@@ -1145,7 +1203,12 @@ class TestGetCurrentPage:
         session = _make_browser_session()
         client, focus, sm = _setup_session_with_cdp(session)
 
-        with patch.object(BrowserSession, "get_current_target_info", new_callable=AsyncMock, return_value={"targetId": "t1", "url": "https://a.com", "title": "A"}):
+        with patch.object(
+            BrowserSession,
+            "get_current_target_info",
+            new_callable=AsyncMock,
+            return_value={"targetId": "t1", "url": "https://a.com", "title": "A"},
+        ):
             page = await session.get_current_page()
         assert page is not None
 
@@ -1192,7 +1255,9 @@ class TestGetPages:
             }
         )
 
-        with patch("openbrowser.browser.session.BrowserSession.cdp_client", new_callable=PropertyMock, return_value=client):
+        with patch(
+            "openbrowser.browser.session.BrowserSession.cdp_client", new_callable=PropertyMock, return_value=client
+        ):
             pages = await session.get_pages()
         assert len(pages) == 2
 
@@ -1201,7 +1266,9 @@ class TestGetPages:
         client, focus, sm = _setup_session_with_cdp(session)
         client.send.Target.getTargets = AsyncMock(return_value={"targetInfos": []})
 
-        with patch("openbrowser.browser.session.BrowserSession.cdp_client", new_callable=PropertyMock, return_value=client):
+        with patch(
+            "openbrowser.browser.session.BrowserSession.cdp_client", new_callable=PropertyMock, return_value=client
+        ):
             pages = await session.get_pages()
         assert pages == []
 
@@ -1214,7 +1281,9 @@ class TestClosePage:
         session = _make_browser_session()
         client, focus, sm = _setup_session_with_cdp(session)
 
-        with patch("openbrowser.browser.session.BrowserSession.cdp_client", new_callable=PropertyMock, return_value=client):
+        with patch(
+            "openbrowser.browser.session.BrowserSession.cdp_client", new_callable=PropertyMock, return_value=client
+        ):
             await session.close_page("target-to-close")
         client.send.Target.closeTarget.assert_awaited_once()
 
@@ -1223,10 +1292,13 @@ class TestClosePage:
         client, focus, sm = _setup_session_with_cdp(session)
 
         from openbrowser.actor.page import Page
+
         mock_page = MagicMock(spec=Page)
         mock_page._target_id = "page-target-id"
 
-        with patch("openbrowser.browser.session.BrowserSession.cdp_client", new_callable=PropertyMock, return_value=client):
+        with patch(
+            "openbrowser.browser.session.BrowserSession.cdp_client", new_callable=PropertyMock, return_value=client
+        ):
             await session.close_page(mock_page)
         call_args = client.send.Target.closeTarget.call_args
         assert call_args[0][0]["targetId"] == "page-target-id"
@@ -1240,7 +1312,9 @@ class TestCookies:
         session = _make_browser_session()
         client, focus, sm = _setup_session_with_cdp(session)
 
-        with patch("openbrowser.browser.session.BrowserSession.cdp_client", new_callable=PropertyMock, return_value=client):
+        with patch(
+            "openbrowser.browser.session.BrowserSession.cdp_client", new_callable=PropertyMock, return_value=client
+        ):
             result = await session.cookies()
         assert result == []
 
@@ -1248,7 +1322,9 @@ class TestCookies:
         session = _make_browser_session()
         client, focus, sm = _setup_session_with_cdp(session)
 
-        with patch("openbrowser.browser.session.BrowserSession.cdp_client", new_callable=PropertyMock, return_value=client):
+        with patch(
+            "openbrowser.browser.session.BrowserSession.cdp_client", new_callable=PropertyMock, return_value=client
+        ):
             await session.cookies(urls=["https://example.com"])
         call_args = client.send.Network.getCookies.call_args
         assert call_args[0][0]["urls"] == ["https://example.com"]
@@ -1257,7 +1333,9 @@ class TestCookies:
         session = _make_browser_session()
         client, focus, sm = _setup_session_with_cdp(session)
 
-        with patch("openbrowser.browser.session.BrowserSession.cdp_client", new_callable=PropertyMock, return_value=client):
+        with patch(
+            "openbrowser.browser.session.BrowserSession.cdp_client", new_callable=PropertyMock, return_value=client
+        ):
             await session.clear_cookies()
         client.send.Network.clearBrowserCookies.assert_awaited_once()
 

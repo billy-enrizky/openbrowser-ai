@@ -6,7 +6,17 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from openbrowser.browser import BrowserProfile, BrowserSession
+from openbrowser.browser.focus import (
+	FocusChangeReason,
+	FocusPhase,
+	FocusSnapshot,
+	FocusTargetCode,
+	FocusTargetError,
+)
 from openbrowser.browser.lifecycle import LifecyclePhase
+from openbrowser.browser.session import CDPSession
+from openbrowser.browser.tabs import TabState
 from openbrowser.config import CONFIG
 from openbrowser.mcp.server import _CleanupOutcome
 
@@ -51,23 +61,23 @@ async def test_get_status_reports_filtered_tools_for_the_active_tab(mcp_server):
 	mcp_server._tools_generation = mcp_server._browser_generation
 	mcp_server._namespace = {}
 
-	@mcp_server._tools.registry.action("Google", domains=["*.google.com"])
+	@mcp_server._tools.registry.action('Google', domains=['*.google.com'])
 	async def google_action():
-		return "ok"
+		return 'ok'
 
 	mcp_server._profile_summary = {
-		"user_data_dir": "/tmp/profile",
-		"headless": True,
-		"storage_state": None,
+		'user_data_dir': '/tmp/profile',
+		'headless': True,
+		'storage_state': None,
 	}
 	browser = MagicMock()
 	browser.lifecycle_snapshot.return_value = {
-		"phase": "ready",
-		"active_target_id": "tab-1",
-		"tabs": [
+		'phase': 'ready',
+		'active_target_id': 'tab-1',
+		'tabs': [
 			{
-				"target_id": "tab-1",
-				"url": "https://user:pass@example.com:8443/private?token=secret#frag",
+				'target_id': 'tab-1',
+				'url': 'https://user:pass@example.com:8443/private?token=secret#frag',
 			}
 		],
 	}
@@ -148,9 +158,7 @@ async def test_get_status_reports_invalid_storage_state_as_failed(mcp_server):
 
 @pytest.mark.asyncio
 async def test_get_status_reports_dict_storage_state_as_skipped(mcp_server):
-	mcp_server.config = {
-		'browser_profile': {'storage_state': {'cookies': [], 'origins': []}}
-	}
+	mcp_server.config = {'browser_profile': {'storage_state': {'cookies': [], 'origins': []}}}
 	mcp_server._profile_summary = None
 
 	payload = json.loads(await mcp_server._handle_tool('get_status', {}))
@@ -179,6 +187,7 @@ async def test_reset_browser_preserves_user_variables(mcp_server):
 	session = MagicMock()
 	session.kill = AsyncMock()
 	mcp_server.browser_session = session
+
 	async def navigate():
 		return None
 
@@ -267,7 +276,12 @@ async def test_reset_browser_finishes_state_changes_before_cancellation(mcp_serv
 	mcp_server.browser_session = session
 	mcp_server._namespace = {'user_value': 42}
 
-	with patch.object(mcp_server, '_kill_session_safely', new_callable=AsyncMock, return_value=_CleanupOutcome(True, asyncio.CancelledError())):
+	with patch.object(
+		mcp_server,
+		'_kill_session_safely',
+		new_callable=AsyncMock,
+		return_value=_CleanupOutcome(True, asyncio.CancelledError()),
+	):
 		with pytest.raises(asyncio.CancelledError):
 			await mcp_server._handle_tool('reset_browser', {})
 
@@ -489,3 +503,90 @@ async def test_reset_browser_clear_variables_resets_transfer_summary(mcp_server)
 	assert payload['namespace_transfer']['preserved_count'] == 0
 	assert payload['namespace_transfer']['dropped_count'] == 0
 	assert mcp_server._pending_variables == {}
+
+
+@pytest.mark.asyncio
+async def test_get_status_reports_uninitialized_focus_without_browser(mcp_server):
+	payload = json.loads(await mcp_server._handle_tool('get_status', {}))
+
+	assert payload['browser']['focus']['phase'] == 'uninitialized'
+	assert payload['browser']['focus']['target_id'] is None
+	assert payload['browser']['focus']['generation'] == 0
+
+
+@pytest.mark.asyncio
+async def test_get_status_inherits_focused_browser_snapshot(mcp_server):
+	browser = BrowserSession(browser_profile=BrowserProfile(headless=True))
+	browser._focus_state = FocusSnapshot(
+		phase=FocusPhase.FOCUSED,
+		target_id='tab-1',
+		session_id='session-1',
+		previous_target_id=None,
+		generation=2,
+		reason=FocusChangeReason.SWITCH,
+		last_error=None,
+		updated_at=1.0,
+	)
+	focus_session = CDPSession.model_construct(
+		cdp_client=MagicMock(),
+		target_id='tab-1',
+		session_id='session-1',
+	)
+	browser.agent_focus = focus_session
+	browser._tab_registry.register('tab-1', url='https://example.com', state=TabState.OPEN, title='Example')
+	mcp_server.browser_session = browser
+
+	payload = json.loads(await mcp_server._handle_tool('get_status', {}))
+
+	assert payload['browser']['active_target_id'] == 'tab-1'
+	assert payload['browser']['tabs'][0]['target_id'] == 'tab-1'
+	assert payload['browser']['focus']['phase'] == 'focused'
+	assert payload['browser']['focus']['target_id'] == 'tab-1'
+	assert payload['browser']['focus']['generation'] == 2
+
+
+@pytest.mark.asyncio
+async def test_get_status_inherits_lost_browser_snapshot(mcp_server):
+	browser = BrowserSession(browser_profile=BrowserProfile(headless=True))
+	browser._focus_lost_locked(
+		FocusTargetError(
+			'No live page target was available.',
+			code=FocusTargetCode.RECOVERY_FAILED,
+			phase=FocusPhase.LOST,
+			target_id='tab-1',
+			target_type='page',
+		),
+		FocusChangeReason.CRASH_RECOVERY,
+		previous_target_id='tab-1',
+	)
+	mcp_server.browser_session = browser
+
+	payload = json.loads(await mcp_server._handle_tool('get_status', {}))
+
+	assert payload['browser']['focus']['phase'] == 'lost'
+	assert payload['browser']['focus']['previous_target_id'] == 'tab-1'
+	assert payload['browser']['focus']['last_error']['code'] == 'recovery_failed'
+	assert payload['browser']['focus']['last_error']['phase'] == 'lost'
+
+
+@pytest.mark.asyncio
+async def test_get_status_recovers_focus_when_lifecycle_snapshot_fails(mcp_server):
+	browser = BrowserSession(browser_profile=BrowserProfile(headless=True))
+	browser._focus_lost_locked(
+		FocusTargetError(
+			'No live page target was available.',
+			code=FocusTargetCode.RECOVERY_FAILED,
+			phase=FocusPhase.LOST,
+			target_id='tab-1',
+			target_type='page',
+		),
+		FocusChangeReason.DETACH_RECOVERY,
+		previous_target_id='tab-1',
+	)
+	mcp_server.browser_session = browser
+
+	with patch.object(BrowserSession, 'lifecycle_snapshot', side_effect=RuntimeError('status unavailable')):
+		payload = json.loads(await mcp_server._handle_tool('get_status', {}))
+
+	assert payload['browser']['focus']['phase'] == 'lost'
+	assert payload['browser']['focus']['previous_target_id'] == 'tab-1'

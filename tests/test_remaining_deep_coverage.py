@@ -337,9 +337,7 @@ def _make_watchdog():
     )
 
     session = _make_mock_browser_session()
-    watchdog = DefaultActionWatchdog(
-        event_bus=EventBus(), browser_session=session
-    )
+    watchdog = DefaultActionWatchdog(event_bus=EventBus(), browser_session=session)
     watchdog.event_bus = MagicMock()
     return watchdog
 
@@ -349,51 +347,37 @@ class TestRequiresDirectValueAssignment:
 
     def test_date_input(self):
         wd = _make_watchdog()
-        node = _make_element_node(
-            tag_name="input", attributes={"type": "date"}
-        )
+        node = _make_element_node(tag_name="input", attributes={"type": "date"})
         assert wd._requires_direct_value_assignment(node) is True
 
     def test_time_input(self):
         wd = _make_watchdog()
-        node = _make_element_node(
-            tag_name="input", attributes={"type": "time"}
-        )
+        node = _make_element_node(tag_name="input", attributes={"type": "time"})
         assert wd._requires_direct_value_assignment(node) is True
 
     def test_datetime_local_input(self):
         wd = _make_watchdog()
-        node = _make_element_node(
-            tag_name="input", attributes={"type": "datetime-local"}
-        )
+        node = _make_element_node(tag_name="input", attributes={"type": "datetime-local"})
         assert wd._requires_direct_value_assignment(node) is True
 
     def test_month_input(self):
         wd = _make_watchdog()
-        node = _make_element_node(
-            tag_name="input", attributes={"type": "month"}
-        )
+        node = _make_element_node(tag_name="input", attributes={"type": "month"})
         assert wd._requires_direct_value_assignment(node) is True
 
     def test_week_input(self):
         wd = _make_watchdog()
-        node = _make_element_node(
-            tag_name="input", attributes={"type": "week"}
-        )
+        node = _make_element_node(tag_name="input", attributes={"type": "week"})
         assert wd._requires_direct_value_assignment(node) is True
 
     def test_color_input(self):
         wd = _make_watchdog()
-        node = _make_element_node(
-            tag_name="input", attributes={"type": "color"}
-        )
+        node = _make_element_node(tag_name="input", attributes={"type": "color"})
         assert wd._requires_direct_value_assignment(node) is True
 
     def test_range_input(self):
         wd = _make_watchdog()
-        node = _make_element_node(
-            tag_name="input", attributes={"type": "range"}
-        )
+        node = _make_element_node(tag_name="input", attributes={"type": "range"})
         assert wd._requires_direct_value_assignment(node) is True
 
     def test_text_input_with_datepicker_class(self):
@@ -430,9 +414,7 @@ class TestRequiresDirectValueAssignment:
 
     def test_regular_text_input(self):
         wd = _make_watchdog()
-        node = _make_element_node(
-            tag_name="input", attributes={"type": "text"}
-        )
+        node = _make_element_node(tag_name="input", attributes={"type": "text"})
         assert wd._requires_direct_value_assignment(node) is False
 
     def test_no_tag_name(self):
@@ -510,7 +492,7 @@ class TestGetCharModifiersAndVk:
 
     def test_all_shift_chars(self):
         wd = _make_watchdog()
-        shift_chars = "!@#$%^&*()_+{}|:\"<>?~"
+        shift_chars = '!@#$%^&*()_+{}|:"<>?~'
         for ch in shift_chars:
             modifiers, _, _ = wd._get_char_modifiers_and_vk(ch)
             assert modifiers == 8, f"Expected Shift for '{ch}'"
@@ -579,9 +561,7 @@ class TestOnScrollEvent:
 
         event = ScrollEvent(direction="down", amount=300, node=None)
 
-        with patch.object(
-            wd, "_scroll_with_cdp_gesture", new_callable=AsyncMock, return_value=True
-        ):
+        with patch.object(wd, "_scroll_with_cdp_gesture", new_callable=AsyncMock, return_value=True):
             result = await wd.on_ScrollEvent(event)
             assert result is None
 
@@ -594,9 +574,7 @@ class TestOnScrollEvent:
 
         event = ScrollEvent(direction="up", amount=200, node=None)
 
-        with patch.object(
-            wd, "_scroll_with_cdp_gesture", new_callable=AsyncMock, return_value=True
-        ):
+        with patch.object(wd, "_scroll_with_cdp_gesture", new_callable=AsyncMock, return_value=True):
             result = await wd.on_ScrollEvent(event)
             assert result is None
 
@@ -678,9 +656,7 @@ class TestTypeToPage:
         mock_cdp_session = MagicMock()
         mock_cdp_session.cdp_client.send.Input.dispatchKeyEvent = AsyncMock()
         mock_cdp_session.session_id = "sess-1"
-        wd.browser_session.get_or_create_cdp_session = AsyncMock(
-            return_value=mock_cdp_session
-        )
+        wd.browser_session.get_or_create_cdp_session = AsyncMock(return_value=mock_cdp_session)
 
         await wd._type_to_page("ab")
         # 3 events per char (keyDown, char, keyUp) * 2 chars = 6
@@ -694,9 +670,7 @@ class TestTypeToPage:
         mock_cdp_session = MagicMock()
         mock_cdp_session.cdp_client.send.Input.dispatchKeyEvent = AsyncMock()
         mock_cdp_session.session_id = "sess-1"
-        wd.browser_session.get_or_create_cdp_session = AsyncMock(
-            return_value=mock_cdp_session
-        )
+        wd.browser_session.get_or_create_cdp_session = AsyncMock(return_value=mock_cdp_session)
 
         await wd._type_to_page("\n")
         # 3 events for newline (keyDown, char, keyUp)
@@ -707,9 +681,7 @@ class TestTypeToPage:
         """Lines 788-789: exception during typing."""
         wd = _make_watchdog()
 
-        wd.browser_session.get_or_create_cdp_session = AsyncMock(
-            side_effect=Exception("no session")
-        )
+        wd.browser_session.get_or_create_cdp_session = AsyncMock(side_effect=Exception("no session"))
 
         with pytest.raises(Exception, match="Failed to type to page"):
             await wd._type_to_page("abc")
@@ -725,11 +697,7 @@ class TestSetValueDirectly:
         node = _make_element_node(tag_name="input", attributes={"type": "date"})
 
         mock_cdp = MagicMock()
-        mock_cdp.cdp_client.send.Runtime.callFunctionOn = AsyncMock(
-            return_value={
-                "result": {"value": "2025-01-01"}
-            }
-        )
+        mock_cdp.cdp_client.send.Runtime.callFunctionOn = AsyncMock(return_value={"result": {"value": "2025-01-01"}})
         mock_cdp.session_id = "sess-1"
 
         await wd._set_value_directly(node, "2025-01-01", "obj-1", mock_cdp)
@@ -741,9 +709,7 @@ class TestSetValueDirectly:
         node = _make_element_node(tag_name="input", attributes={"type": "date"})
 
         mock_cdp = MagicMock()
-        mock_cdp.cdp_client.send.Runtime.callFunctionOn = AsyncMock(
-            return_value={}
-        )
+        mock_cdp.cdp_client.send.Runtime.callFunctionOn = AsyncMock(return_value={})
         mock_cdp.session_id = "sess-1"
 
         await wd._set_value_directly(node, "2025-01-01", "obj-1", mock_cdp)
@@ -755,9 +721,7 @@ class TestSetValueDirectly:
         node = _make_element_node(tag_name="input", attributes={"type": "date"})
 
         mock_cdp = MagicMock()
-        mock_cdp.cdp_client.send.Runtime.callFunctionOn = AsyncMock(
-            side_effect=RuntimeError("js failed")
-        )
+        mock_cdp.cdp_client.send.Runtime.callFunctionOn = AsyncMock(side_effect=RuntimeError("js failed"))
         mock_cdp.session_id = "sess-1"
 
         with pytest.raises(RuntimeError, match="js failed"):
@@ -773,9 +737,7 @@ class TestTriggerFrameworkEvents:
         wd = _make_watchdog()
 
         mock_cdp = MagicMock()
-        mock_cdp.cdp_client.send.Runtime.callFunctionOn = AsyncMock(
-            return_value={"result": {"value": True}}
-        )
+        mock_cdp.cdp_client.send.Runtime.callFunctionOn = AsyncMock(return_value={"result": {"value": True}})
         mock_cdp.session_id = "sess-1"
 
         await wd._trigger_framework_events("obj-1", mock_cdp)
@@ -786,9 +748,7 @@ class TestTriggerFrameworkEvents:
         wd = _make_watchdog()
 
         mock_cdp = MagicMock()
-        mock_cdp.cdp_client.send.Runtime.callFunctionOn = AsyncMock(
-            side_effect=Exception("js error")
-        )
+        mock_cdp.cdp_client.send.Runtime.callFunctionOn = AsyncMock(side_effect=Exception("js error"))
         mock_cdp.session_id = "sess-1"
 
         # Should not raise
@@ -804,9 +764,7 @@ class TestScrollWithCDPGesture:
         wd = _make_watchdog()
         mock_cdp = MagicMock()
         mock_cdp.send.Page.getLayoutMetrics = AsyncMock(
-            return_value={
-                "layoutViewport": {"clientWidth": 1920, "clientHeight": 1080}
-            }
+            return_value={"layoutViewport": {"clientWidth": 1920, "clientHeight": 1080}}
         )
         mock_cdp.send.Input.dispatchMouseEvent = AsyncMock()
         wd.browser_session.agent_focus.cdp_client = mock_cdp
@@ -819,9 +777,7 @@ class TestScrollWithCDPGesture:
     async def test_scroll_exception(self):
         """Lines 1665-1667: scroll fails."""
         wd = _make_watchdog()
-        wd.browser_session.agent_focus.cdp_client.send.Page.getLayoutMetrics = (
-            AsyncMock(side_effect=Exception("error"))
-        )
+        wd.browser_session.agent_focus.cdp_client.send.Page.getLayoutMetrics = AsyncMock(side_effect=Exception("error"))
 
         result = await wd._scroll_with_cdp_gesture(300)
         assert result is False
@@ -855,9 +811,7 @@ class TestCheckElementOcclusion:
         """Lines 401-405: element is clickable (not occluded)."""
         wd = _make_watchdog()
         mock_cdp = MagicMock()
-        mock_cdp.cdp_client.send.DOM.resolveNode = AsyncMock(
-            return_value={"object": {"objectId": "obj-1"}}
-        )
+        mock_cdp.cdp_client.send.DOM.resolveNode = AsyncMock(return_value={"object": {"objectId": "obj-1"}})
         mock_cdp.cdp_client.send.Runtime.callFunctionOn = AsyncMock(
             return_value={
                 "result": {
@@ -878,9 +832,7 @@ class TestCheckElementOcclusion:
         """Lines 406-415: element is occluded."""
         wd = _make_watchdog()
         mock_cdp = MagicMock()
-        mock_cdp.cdp_client.send.DOM.resolveNode = AsyncMock(
-            return_value={"object": {"objectId": "obj-1"}}
-        )
+        mock_cdp.cdp_client.send.DOM.resolveNode = AsyncMock(return_value={"object": {"objectId": "obj-1"}})
         mock_cdp.cdp_client.send.Runtime.callFunctionOn = AsyncMock(
             return_value={
                 "result": {
@@ -902,9 +854,7 @@ class TestCheckElementOcclusion:
         """Lines 417-419: exception during occlusion check."""
         wd = _make_watchdog()
         mock_cdp = MagicMock()
-        mock_cdp.cdp_client.send.DOM.resolveNode = AsyncMock(
-            side_effect=Exception("error")
-        )
+        mock_cdp.cdp_client.send.DOM.resolveNode = AsyncMock(side_effect=Exception("error"))
         mock_cdp.session_id = "sess-1"
 
         result = await wd._check_element_occlusion(123, 100, 100, mock_cdp)
@@ -915,12 +865,8 @@ class TestCheckElementOcclusion:
         """Lines 396-398: callFunctionOn returns no result."""
         wd = _make_watchdog()
         mock_cdp = MagicMock()
-        mock_cdp.cdp_client.send.DOM.resolveNode = AsyncMock(
-            return_value={"object": {"objectId": "obj-1"}}
-        )
-        mock_cdp.cdp_client.send.Runtime.callFunctionOn = AsyncMock(
-            return_value={}
-        )
+        mock_cdp.cdp_client.send.DOM.resolveNode = AsyncMock(return_value={"object": {"objectId": "obj-1"}})
+        mock_cdp.cdp_client.send.Runtime.callFunctionOn = AsyncMock(return_value={})
         mock_cdp.session_id = "sess-1"
 
         result = await wd._check_element_occlusion(123, 100, 100, mock_cdp)
@@ -944,9 +890,7 @@ class TestClickElementNodeImplEdges:
     async def test_file_input_returns_validation_error(self):
         """Lines 439-442: file input returns validation error."""
         wd = _make_watchdog()
-        node = _make_element_node(
-            tag_name="input", attributes={"type": "file"}
-        )
+        node = _make_element_node(tag_name="input", attributes={"type": "file"})
 
         result = await wd._click_element_node_impl(node)
         assert result is not None
@@ -1040,9 +984,7 @@ class TestOnTypeTextEventEdges:
                 "_click_element_node_impl",
                 new_callable=AsyncMock,
             ):
-                with patch.object(
-                    wd, "_type_to_page", new_callable=AsyncMock
-                ):
+                with patch.object(wd, "_type_to_page", new_callable=AsyncMock):
                     result = await wd.on_TypeTextEvent(event)
                     assert result is None
 
@@ -1121,9 +1063,7 @@ class TestOnTypeTextEventEdges:
                 "_click_element_node_impl",
                 new_callable=AsyncMock,
             ):
-                with patch.object(
-                    wd, "_type_to_page", new_callable=AsyncMock
-                ):
+                with patch.object(wd, "_type_to_page", new_callable=AsyncMock):
                     result = await wd.on_TypeTextEvent(event)
                     assert result is None
 
@@ -1154,9 +1094,7 @@ class TestOnTypeTextEventEdges:
                 "_click_element_node_impl",
                 new_callable=AsyncMock,
             ):
-                with patch.object(
-                    wd, "_type_to_page", new_callable=AsyncMock
-                ):
+                with patch.object(wd, "_type_to_page", new_callable=AsyncMock):
                     result = await wd.on_TypeTextEvent(event)
                     assert result is None
 
@@ -1169,9 +1107,7 @@ class TestFocusElementSimple:
         """Lines 1125-1166: CDP focus fails, no coordinates provided."""
         wd = _make_watchdog()
         mock_cdp = MagicMock()
-        mock_cdp.cdp_client.send.DOM.focus = AsyncMock(
-            side_effect=Exception("focus failed")
-        )
+        mock_cdp.cdp_client.send.DOM.focus = AsyncMock(side_effect=Exception("focus failed"))
         mock_cdp.session_id = "sess-1"
 
         result = await wd._focus_element_simple(123, "obj-1", mock_cdp, None)
@@ -1182,15 +1118,11 @@ class TestFocusElementSimple:
         """Lines 1129-1159: CDP focus fails, click focus succeeds."""
         wd = _make_watchdog()
         mock_cdp = MagicMock()
-        mock_cdp.cdp_client.send.DOM.focus = AsyncMock(
-            side_effect=Exception("focus failed")
-        )
+        mock_cdp.cdp_client.send.DOM.focus = AsyncMock(side_effect=Exception("focus failed"))
         mock_cdp.cdp_client.send.Input.dispatchMouseEvent = AsyncMock()
         mock_cdp.session_id = "sess-1"
 
-        result = await wd._focus_element_simple(
-            123, "obj-1", mock_cdp, {"input_x": 100.0, "input_y": 200.0}
-        )
+        result = await wd._focus_element_simple(123, "obj-1", mock_cdp, {"input_x": 100.0, "input_y": 200.0})
         assert result is True
 
     @pytest.mark.asyncio
@@ -1198,17 +1130,11 @@ class TestFocusElementSimple:
         """Lines 1161-1162: both CDP and click focus fail."""
         wd = _make_watchdog()
         mock_cdp = MagicMock()
-        mock_cdp.cdp_client.send.DOM.focus = AsyncMock(
-            side_effect=Exception("focus failed")
-        )
-        mock_cdp.cdp_client.send.Input.dispatchMouseEvent = AsyncMock(
-            side_effect=Exception("click failed")
-        )
+        mock_cdp.cdp_client.send.DOM.focus = AsyncMock(side_effect=Exception("focus failed"))
+        mock_cdp.cdp_client.send.Input.dispatchMouseEvent = AsyncMock(side_effect=Exception("click failed"))
         mock_cdp.session_id = "sess-1"
 
-        result = await wd._focus_element_simple(
-            123, "obj-1", mock_cdp, {"input_x": 100.0, "input_y": 200.0}
-        )
+        result = await wd._focus_element_simple(123, "obj-1", mock_cdp, {"input_x": 100.0, "input_y": 200.0})
         assert result is False
 
 
@@ -1238,14 +1164,10 @@ class TestGetSessionIdForElement:
                 }
             ]
         }
-        wd.browser_session.cdp_client.send.Target.getTargets = AsyncMock(
-            return_value=mock_targets
-        )
+        wd.browser_session.cdp_client.send.Target.getTargets = AsyncMock(return_value=mock_targets)
         mock_session = MagicMock()
         mock_session.session_id = "iframe-session-1"
-        wd.browser_session.get_or_create_cdp_session = AsyncMock(
-            return_value=mock_session
-        )
+        wd.browser_session.get_or_create_cdp_session = AsyncMock(return_value=mock_session)
 
         result = await wd._get_session_id_for_element(node)
         assert result == "iframe-session-1"
@@ -1264,9 +1186,7 @@ class TestGetSessionIdForElement:
                 }
             ]
         }
-        wd.browser_session.cdp_client.send.Target.getTargets = AsyncMock(
-            return_value=mock_targets
-        )
+        wd.browser_session.cdp_client.send.Target.getTargets = AsyncMock(return_value=mock_targets)
 
         result = await wd._get_session_id_for_element(node)
         assert result == wd.browser_session.agent_focus.session_id
@@ -1277,9 +1197,7 @@ class TestGetSessionIdForElement:
         wd = _make_watchdog()
 
         node = _make_element_node(frame_id="frame-123")
-        wd.browser_session.cdp_client.send.Target.getTargets = AsyncMock(
-            side_effect=Exception("network error")
-        )
+        wd.browser_session.cdp_client.send.Target.getTargets = AsyncMock(side_effect=Exception("network error"))
 
         result = await wd._get_session_id_for_element(node)
         assert result == wd.browser_session.agent_focus.session_id
@@ -1503,22 +1421,18 @@ class TestBrowserSessionOnTabClosedEvent:
         # No error
 
     @pytest.mark.asyncio
-    async def test_current_tab_closed_switches(self):
-        """Lines 808-809: closed tab was current, triggers switch."""
+    async def test_current_tab_closed_runs_focus_repair(self):
         session = BrowserSession()
         mock_bus = MagicMock()
         mock_bus.dispatch = AsyncMock()
         object.__setattr__(session, "event_bus", mock_bus)
-        # Use object.__setattr__ to bypass Pydantic validation for agent_focus
-        mock_focus = MagicMock()
-        mock_focus.target_id = "target-1"
-        object.__setattr__(session, "agent_focus", mock_focus)
-
         from openbrowser.browser.events import TabClosedEvent
 
-        event = TabClosedEvent(target_id="target-1")
-        await session.on_TabClosedEvent(event)
-        mock_bus.dispatch.assert_called()
+        with patch.object(session, "_repair_focus_after_closed_tab", new_callable=AsyncMock) as repair:
+            event = TabClosedEvent(target_id="target-1")
+            await session.on_TabClosedEvent(event)
+        repair.assert_awaited_once()
+        assert repair.await_args.args[0] == "target-1"
 
     @pytest.mark.asyncio
     async def test_other_tab_closed_no_switch(self):

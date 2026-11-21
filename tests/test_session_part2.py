@@ -17,6 +17,14 @@ from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
 
+from openbrowser.browser.focus import (
+    FocusChangeReason,
+    FocusPhase,
+    FocusSnapshot,
+    FocusTargetCode,
+    FocusTargetError,
+    FocusTransitionResult,
+)
 from openbrowser.browser.session import BrowserSession, CDPSession
 
 logger = logging.getLogger(__name__)
@@ -25,6 +33,16 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+class _DispatchResult:
+    def __await__(self):
+        yield from asyncio.sleep(0).__await__()
+        return self
+
+    async def event_result(self, **_kwargs):
+        return None
+
 
 def _make_session_with_mocks(**overrides):
     """Create a BrowserSession with mocked internals.
@@ -35,7 +53,7 @@ def _make_session_with_mocks(**overrides):
     session = BrowserSession(cdp_url="ws://127.0.0.1:9222")
 
     # Replace EventBus.dispatch so no real events fire
-    session.event_bus.dispatch = MagicMock()
+    session.event_bus.dispatch = MagicMock(return_value=_DispatchResult())
 
     # Build mock CDP root client
     cdp_root = MagicMock()
@@ -46,7 +64,9 @@ def _make_session_with_mocks(**overrides):
     # Target methods
     cdp_root.send.Target.getTargets = AsyncMock(return_value={"targetInfos": []})
     cdp_root.send.Target.getTargetInfo = AsyncMock(
-        return_value={"targetInfo": {"targetId": "t1", "url": "https://example.com", "title": "Example", "type": "page"}}
+        return_value={
+            "targetInfo": {"targetId": "t1", "url": "https://example.com", "title": "Example", "type": "page"}
+        }
     )
     cdp_root.send.Target.attachToTarget = AsyncMock(return_value={"sessionId": "s1"})
     cdp_root.send.Target.setAutoAttach = AsyncMock()
@@ -68,7 +88,7 @@ def _make_session_with_mocks(**overrides):
 
     # Runtime methods
     cdp_root.send.Runtime.runIfWaitingForDebugger = AsyncMock()
-    cdp_root.send.Runtime.evaluate = AsyncMock(return_value={"result": {"value": {"removed": 0}}})
+    cdp_root.send.Runtime.evaluate = AsyncMock(return_value={"result": {"value": 2}})
     cdp_root.send.Runtime.callFunctionOn = AsyncMock(
         return_value={"result": {"value": {"x": 10, "y": 20, "width": 100, "height": 50}}}
     )
@@ -94,13 +114,30 @@ def _make_session_with_mocks(**overrides):
     mock_cdp_session.title = "Example"
     mock_cdp_session.url = "https://example.com"
     session.agent_focus = mock_cdp_session
+    session._focus_state = FocusSnapshot(
+        phase=FocusPhase.FOCUSED,
+        target_id=mock_cdp_session.target_id,
+        session_id=mock_cdp_session.session_id,
+        previous_target_id=None,
+        generation=1,
+        reason=FocusChangeReason.INITIAL,
+        last_error=None,
+        updated_at=0.0,
+    )
 
     # Session manager
     mock_sm = MagicMock()
     mock_sm.get_session_for_target = AsyncMock(return_value=mock_cdp_session)
+
+    async def _live(target_id, *, budget=None):
+        return await mock_sm.get_session_for_target(target_id)
+
+    mock_sm.get_live_session_for_target = AsyncMock(side_effect=_live)
+    mock_sm.active_session_ids = AsyncMock(return_value=(mock_cdp_session.session_id,))
     mock_sm.validate_session = AsyncMock(return_value=True)
     mock_sm.start_monitoring = AsyncMock()
     mock_sm.clear = AsyncMock()
+    mock_sm.cancel_pending = MagicMock()
     session._session_manager = mock_sm
 
     # Apply overrides
@@ -150,15 +187,16 @@ class TestExportStorageState:
 
     async def test_export_writes_to_file(self, tmp_path):
         session, mocks = _make_session_with_mocks()
-        session._cdp_get_cookies = AsyncMock(return_value=[
-            {"name": "a", "value": "1", "domain": ".d.com", "path": "/"}
-        ])
+        session._cdp_get_cookies = AsyncMock(
+            return_value=[{"name": "a", "value": "1", "domain": ".d.com", "path": "/"}]
+        )
 
         output_file = tmp_path / "state.json"
         result = await session.export_storage_state(output_path=str(output_file))
 
         assert output_file.exists()
         import json
+
         saved = json.loads(output_file.read_text())
         assert saved["cookies"][0]["name"] == "a"
         # Defaults for missing keys
@@ -228,14 +266,14 @@ class TestGetOrCreateCdpSession:
         mocks["session_manager"].get_session_for_target = AsyncMock(return_value=None)
 
         with patch("asyncio.sleep", new_callable=AsyncMock):
-            with pytest.raises(ValueError, match="not found"):
+            with pytest.raises(ValueError, match="no target information"):
                 await session.get_or_create_cdp_session(target_id="missing-target")
 
     async def test_raises_when_session_invalid(self):
         session, mocks = _make_session_with_mocks()
-        mocks["session_manager"].validate_session = AsyncMock(return_value=False)
+        mocks["session_manager"].get_session_for_target = AsyncMock(return_value=None)
 
-        with pytest.raises(ValueError, match="has detached"):
+        with pytest.raises(ValueError, match="no target information"):
             await session.get_or_create_cdp_session()
 
     async def test_switches_focus_for_page_target(self):
@@ -246,14 +284,16 @@ class TestGetOrCreateCdpSession:
         new_session.cdp_client = mocks["cdp_root"]
 
         mocks["session_manager"].get_session_for_target = AsyncMock(return_value=new_session)
-        mocks["cdp_root"].send.Target.getTargets = AsyncMock(return_value={
-            "targetInfos": [{"targetId": "new-page-target-1234567890", "type": "page"}]
-        })
+        mocks["cdp_root"].send.Target.getTargets = AsyncMock(
+            return_value={"targetInfos": [{"targetId": "new-page-target-1234567890", "type": "page"}]}
+        )
 
         result = await session.get_or_create_cdp_session(target_id="new-page-target-1234567890", focus=True)
         assert session.agent_focus is new_session
 
-    async def test_ignores_focus_for_iframe_target(self):
+    async def test_rejects_focus_for_iframe_target(self):
+        from openbrowser.browser.focus import FocusTargetCode, FocusTargetError
+
         session, mocks = _make_session_with_mocks()
         iframe_session = MagicMock(spec=CDPSession)
         iframe_session.target_id = "iframe-target-id-1234567890"
@@ -261,13 +301,14 @@ class TestGetOrCreateCdpSession:
         iframe_session.cdp_client = mocks["cdp_root"]
 
         mocks["session_manager"].get_session_for_target = AsyncMock(return_value=iframe_session)
-        mocks["cdp_root"].send.Target.getTargets = AsyncMock(return_value={
-            "targetInfos": [{"targetId": "iframe-target-id-1234567890", "type": "iframe"}]
-        })
+        mocks["cdp_root"].send.Target.getTargets = AsyncMock(
+            return_value={"targetInfos": [{"targetId": "iframe-target-id-1234567890", "type": "iframe"}]}
+        )
 
         original_focus = session.agent_focus
-        await session.get_or_create_cdp_session(target_id="iframe-target-id-1234567890", focus=True)
-        # Focus should NOT change for iframe
+        with pytest.raises(FocusTargetError) as error:
+            await session.get_or_create_cdp_session(target_id="iframe-target-id-1234567890", focus=True)
+        assert error.value.code is FocusTargetCode.NOT_A_PAGE
         assert session.agent_focus is original_focus
 
     async def test_runtime_run_if_waiting_exception_swallowed(self):
@@ -311,7 +352,6 @@ class TestCurrentProperties:
 
 @pytest.mark.asyncio
 class TestGetBrowserStateSummary:
-
     async def test_uses_cache_when_valid(self):
         session, mocks = _make_session_with_mocks()
 
@@ -379,7 +419,6 @@ class TestGetBrowserStateSummary:
 
 @pytest.mark.asyncio
 class TestGetStateAsText:
-
     async def test_returns_llm_representation(self):
         session, mocks = _make_session_with_mocks()
 
@@ -389,7 +428,9 @@ class TestGetStateAsText:
         mock_summary = MagicMock()
         mock_summary.dom_state = mock_dom_state
 
-        with patch.object(BrowserSession, "get_browser_state_summary", new_callable=AsyncMock, return_value=mock_summary):
+        with patch.object(
+            BrowserSession, "get_browser_state_summary", new_callable=AsyncMock, return_value=mock_summary
+        ):
             result = await session.get_state_as_text()
 
         assert result == "[0] <button>Click me</button>"
@@ -402,7 +443,6 @@ class TestGetStateAsText:
 
 @pytest.mark.asyncio
 class TestAttachAllWatchdogs:
-
     async def test_skips_duplicate_attachment(self):
         session, mocks = _make_session_with_mocks()
         session._watchdogs_attached = True
@@ -455,8 +495,8 @@ class TestAttachAllWatchdogs:
     async def test_storage_state_watchdog_disabled_without_config(self):
         session, mocks = _make_session_with_mocks()
         # Force both to None to trigger the disabled code path (line 1236)
-        session.browser_profile.__dict__['storage_state'] = None
-        session.browser_profile.__dict__['user_data_dir'] = None
+        session.browser_profile.__dict__["storage_state"] = None
+        session.browser_profile.__dict__["user_data_dir"] = None
 
         watchdog_patches = [
             "openbrowser.browser.watchdogs.aboutblank_watchdog.AboutBlankWatchdog",
@@ -497,7 +537,6 @@ class TestAttachAllWatchdogs:
 
 @pytest.mark.asyncio
 class TestConnect:
-
     async def test_connect_raises_without_cdp_url(self):
         session = BrowserSession()
         session.event_bus.dispatch = MagicMock()
@@ -529,20 +568,20 @@ class TestConnect:
 
         mocks["cdp_root"].start = AsyncMock()
 
-        with patch("httpx.AsyncClient", return_value=mock_client), \
-             patch("openbrowser.browser.session.CDPClient", return_value=mocks["cdp_root"]), \
-             patch("openbrowser.browser.session_manager.SessionManager") as MockSM, \
-             patch("asyncio.sleep", new_callable=AsyncMock), \
-             patch.object(BrowserSession, "_setup_proxy_auth", new_callable=AsyncMock):
-
+        with (
+            patch("httpx.AsyncClient", return_value=mock_client),
+            patch("openbrowser.browser.session.CDPClient", return_value=mocks["cdp_root"]),
+            patch("openbrowser.browser.session_manager.SessionManager") as MockSM,
+            patch("asyncio.sleep", new_callable=AsyncMock),
+            patch.object(BrowserSession, "_setup_proxy_auth", new_callable=AsyncMock),
+        ):
             mock_sm_instance = MagicMock()
             mock_sm_instance.start_monitoring = AsyncMock()
             mock_sm_instance.get_session_for_target = AsyncMock(return_value=mocks["cdp_session"])
+            mock_sm_instance.get_live_session_for_target = AsyncMock(return_value=mocks["cdp_session"])
             MockSM.return_value = mock_sm_instance
 
-            mocks["cdp_root"].send.Target.getTargets = AsyncMock(return_value={
-                "targetInfos": [page_target]
-            })
+            mocks["cdp_root"].send.Target.getTargets = AsyncMock(return_value={"targetInfos": [page_target]})
 
             result = await session.connect()
             assert result is session
@@ -564,9 +603,11 @@ class TestConnect:
         fake_loop = MagicMock()
         fake_loop.time = MagicMock(side_effect=[0.0, 31.0])
 
-        with patch("httpx.AsyncClient", return_value=mock_client), \
-             patch("asyncio.get_event_loop", return_value=fake_loop), \
-             patch("asyncio.sleep", new_callable=AsyncMock):
+        with (
+            patch("httpx.AsyncClient", return_value=mock_client),
+            patch("asyncio.get_event_loop", return_value=fake_loop),
+            patch("asyncio.sleep", new_callable=AsyncMock),
+        ):
             with pytest.raises(TimeoutError, match="did not respond"):
                 await session.connect()
 
@@ -574,20 +615,27 @@ class TestConnect:
         """When no page targets exist, connect should create about:blank."""
         session, mocks = _make_session_with_mocks()
 
-        with patch("openbrowser.browser.session.CDPClient", return_value=mocks["cdp_root"]), \
-             patch("openbrowser.browser.session_manager.SessionManager") as MockSM, \
-             patch("asyncio.sleep", new_callable=AsyncMock), \
-             patch.object(BrowserSession, "_setup_proxy_auth", new_callable=AsyncMock), \
-             patch.object(BrowserSession, "_is_valid_target", return_value=False):
-
+        with (
+            patch("openbrowser.browser.session.CDPClient", return_value=mocks["cdp_root"]),
+            patch("openbrowser.browser.session_manager.SessionManager") as MockSM,
+            patch("asyncio.sleep", new_callable=AsyncMock),
+            patch.object(BrowserSession, "_setup_proxy_auth", new_callable=AsyncMock),
+            patch.object(BrowserSession, "_is_valid_target", return_value=False),
+        ):
             mock_sm_instance = MagicMock()
             mock_sm_instance.start_monitoring = AsyncMock()
             mock_sm_instance.get_session_for_target = AsyncMock(return_value=mocks["cdp_session"])
+            mock_sm_instance.get_live_session_for_target = AsyncMock(return_value=mocks["cdp_session"])
             MockSM.return_value = mock_sm_instance
 
             mocks["cdp_root"].send.Target.getTargets = AsyncMock(return_value={"targetInfos": []})
             mocks["cdp_root"].start = AsyncMock()
             mocks["cdp_root"].send.Target.createTarget = AsyncMock(return_value={"targetId": "new-blank"})
+            mocks["cdp_root"].send.Target.getTargetInfo = AsyncMock(
+                return_value={
+                    "targetInfo": {"targetId": "new-blank", "type": "page", "url": "about:blank", "title": ""}
+                }
+            )
 
             result = await session.connect()
             assert result is session
@@ -615,14 +663,16 @@ class TestConnect:
             {"targetId": "fail-target", "type": "page", "url": "https://example.com"},
         ]
 
-        with patch("openbrowser.browser.session.CDPClient", return_value=mocks["cdp_root"]), \
-             patch("openbrowser.browser.session_manager.SessionManager") as MockSM, \
-             patch("asyncio.sleep", new_callable=AsyncMock), \
-             patch.object(BrowserSession, "_setup_proxy_auth", new_callable=AsyncMock):
-
+        with (
+            patch("openbrowser.browser.session.CDPClient", return_value=mocks["cdp_root"]),
+            patch("openbrowser.browser.session_manager.SessionManager") as MockSM,
+            patch("asyncio.sleep", new_callable=AsyncMock),
+            patch.object(BrowserSession, "_setup_proxy_auth", new_callable=AsyncMock),
+        ):
             mock_sm_instance = MagicMock()
             mock_sm_instance.start_monitoring = AsyncMock()
             mock_sm_instance.get_session_for_target = AsyncMock(return_value=mocks["cdp_session"])
+            mock_sm_instance.get_live_session_for_target = AsyncMock(return_value=mocks["cdp_session"])
             MockSM.return_value = mock_sm_instance
 
             mocks["cdp_root"].send.Target.getTargets = AsyncMock(return_value={"targetInfos": targets})
@@ -638,14 +688,16 @@ class TestConnect:
 
         page_target = {"targetId": "page-target-1", "type": "page", "url": "about:blank"}
 
-        with patch("openbrowser.browser.session.CDPClient", return_value=mocks["cdp_root"]), \
-             patch("openbrowser.browser.session_manager.SessionManager") as MockSM, \
-             patch("asyncio.sleep", new_callable=AsyncMock), \
-             patch.object(BrowserSession, "_setup_proxy_auth", new_callable=AsyncMock):
-
+        with (
+            patch("openbrowser.browser.session.CDPClient", return_value=mocks["cdp_root"]),
+            patch("openbrowser.browser.session_manager.SessionManager") as MockSM,
+            patch("asyncio.sleep", new_callable=AsyncMock),
+            patch.object(BrowserSession, "_setup_proxy_auth", new_callable=AsyncMock),
+        ):
             mock_sm_instance = MagicMock()
             mock_sm_instance.start_monitoring = AsyncMock()
             mock_sm_instance.get_session_for_target = AsyncMock(return_value=None)
+            mock_sm_instance.get_live_session_for_target = AsyncMock(return_value=None)
             MockSM.return_value = mock_sm_instance
 
             mocks["cdp_root"].send.Target.getTargets = AsyncMock(return_value={"targetInfos": [page_target]})
@@ -656,6 +708,61 @@ class TestConnect:
 
             with pytest.raises(RuntimeError, match="Failed to"):
                 await session.connect()
+
+    async def test_connect_treats_post_commit_observation_timeout_as_nonfatal(self):
+        session, mocks = _make_session_with_mocks()
+        session.agent_focus = None
+        session._focus_state = FocusSnapshot.uninitialized()
+        page_target = {"targetId": "page-target-1", "type": "page", "url": "about:blank"}
+        snapshot = FocusSnapshot(
+            phase=FocusPhase.FOCUSED,
+            target_id=mocks["cdp_session"].target_id,
+            session_id=mocks["cdp_session"].session_id,
+            previous_target_id=None,
+            generation=1,
+            reason=FocusChangeReason.INITIAL,
+            last_error=None,
+            updated_at=0.0,
+        )
+        transition = FocusTransitionResult(session=mocks["cdp_session"], snapshot=snapshot)
+
+        async def commit_transition(*args, **kwargs):
+            session.agent_focus = mocks["cdp_session"]
+            session._focus_state = snapshot
+            return transition
+
+        notifier = AsyncMock(
+            side_effect=FocusTargetError(
+                "Focus observation timed out.",
+                code=FocusTargetCode.TIMEOUT,
+                phase=FocusPhase.FOCUSED,
+                target_id=mocks["cdp_session"].target_id,
+            )
+        )
+        with (
+            patch("openbrowser.browser.session.CDPClient", return_value=mocks["cdp_root"]),
+            patch("openbrowser.browser.session_manager.SessionManager") as MockSM,
+            patch("asyncio.sleep", new_callable=AsyncMock),
+            patch.object(BrowserSession, "_setup_proxy_auth", new_callable=AsyncMock),
+            patch.object(BrowserSession, "_focus_transition_to_target", side_effect=commit_transition),
+            patch.object(BrowserSession, "_notify_focus_changed", notifier),
+        ):
+            mock_sm_instance = MagicMock()
+            mock_sm_instance.start_monitoring = AsyncMock()
+            mock_sm_instance.get_session_for_target = AsyncMock(return_value=mocks["cdp_session"])
+            mock_sm_instance.get_live_session_for_target = AsyncMock(return_value=mocks["cdp_session"])
+            MockSM.return_value = mock_sm_instance
+            mocks["cdp_root"].send.Target.getTargets = AsyncMock(return_value={"targetInfos": [page_target]})
+            mocks["cdp_root"].start = AsyncMock()
+
+            connected = await asyncio.wait_for(session.connect(), timeout=1.0)
+
+        assert connected is session
+        assert session.agent_focus is mocks["cdp_session"]
+        assert session.focus_snapshot() == snapshot
+        assert session.focus_snapshot().phase is FocusPhase.FOCUSED
+        notifier.assert_awaited_once()
+        assert session._cdp_client_root is mocks["cdp_root"]
 
     async def test_connect_unknown_title_warning(self):
         """Session with 'Unknown title' should log warning but not fail."""
@@ -668,14 +775,16 @@ class TestConnect:
         unknown_session.cdp_client = mocks["cdp_root"]
         unknown_session.title = "Unknown title"
 
-        with patch("openbrowser.browser.session.CDPClient", return_value=mocks["cdp_root"]), \
-             patch("openbrowser.browser.session_manager.SessionManager") as MockSM, \
-             patch("asyncio.sleep", new_callable=AsyncMock), \
-             patch.object(BrowserSession, "_setup_proxy_auth", new_callable=AsyncMock):
-
+        with (
+            patch("openbrowser.browser.session.CDPClient", return_value=mocks["cdp_root"]),
+            patch("openbrowser.browser.session_manager.SessionManager") as MockSM,
+            patch("asyncio.sleep", new_callable=AsyncMock),
+            patch.object(BrowserSession, "_setup_proxy_auth", new_callable=AsyncMock),
+        ):
             mock_sm_instance = MagicMock()
             mock_sm_instance.start_monitoring = AsyncMock()
             mock_sm_instance.get_session_for_target = AsyncMock(return_value=unknown_session)
+            mock_sm_instance.get_live_session_for_target = AsyncMock(return_value=unknown_session)
             MockSM.return_value = mock_sm_instance
 
             mocks["cdp_root"].send.Target.getTargets = AsyncMock(return_value={"targetInfos": [page_target]})
@@ -692,7 +801,6 @@ class TestConnect:
 
 @pytest.mark.asyncio
 class TestSetupProxyAuth:
-
     async def test_skips_when_no_credentials(self):
         session, mocks = _make_session_with_mocks()
         session.browser_profile.proxy = None
@@ -702,15 +810,15 @@ class TestSetupProxyAuth:
     async def test_skips_when_proxy_no_username(self):
         session, mocks = _make_session_with_mocks()
         from openbrowser.browser.profile import ProxySettings
+
         session.browser_profile.proxy = ProxySettings(server="http://proxy:8080")
         await session._setup_proxy_auth()
 
     async def test_enables_fetch_with_credentials(self):
         session, mocks = _make_session_with_mocks()
         from openbrowser.browser.profile import ProxySettings
-        session.browser_profile.proxy = ProxySettings(
-            server="http://proxy:8080", username="user", password="pass"
-        )
+
+        session.browser_profile.proxy = ProxySettings(server="http://proxy:8080", username="user", password="pass")
 
         await session._setup_proxy_auth()
         mocks["cdp_root"].send.Fetch.enable.assert_called()
@@ -720,9 +828,8 @@ class TestSetupProxyAuth:
     async def test_fetch_enable_failure_swallowed(self):
         session, mocks = _make_session_with_mocks()
         from openbrowser.browser.profile import ProxySettings
-        session.browser_profile.proxy = ProxySettings(
-            server="http://proxy:8080", username="user", password="pass"
-        )
+
+        session.browser_profile.proxy = ProxySettings(server="http://proxy:8080", username="user", password="pass")
         mocks["cdp_root"].send.Fetch.enable = AsyncMock(side_effect=Exception("Fetch not supported"))
 
         # Should not raise
@@ -735,7 +842,7 @@ class TestSetupProxyAuth:
         # The outer try/except (line 1626) should catch and log
         mock_profile = MagicMock()
         type(mock_profile).proxy = PropertyMock(side_effect=Exception("kaboom"))
-        session.__dict__['browser_profile'] = mock_profile
+        session.__dict__["browser_profile"] = mock_profile
 
         # Should not raise
         await session._setup_proxy_auth()
@@ -748,7 +855,6 @@ class TestSetupProxyAuth:
 
 @pytest.mark.asyncio
 class TestGetTabs:
-
     async def test_returns_empty_when_not_connected(self):
         session, _ = _make_session_with_mocks()
         session._cdp_client_root = None
@@ -757,12 +863,14 @@ class TestGetTabs:
 
     async def test_returns_tabs_with_title(self):
         session, mocks = _make_session_with_mocks()
-        session._cdp_get_all_pages = AsyncMock(return_value=[
-            {"targetId": "t1", "url": "https://example.com", "type": "page"},
-        ])
-        mocks["cdp_root"].send.Target.getTargetInfo = AsyncMock(return_value={
-            "targetInfo": {"targetId": "t1", "url": "https://example.com", "title": "Example"}
-        })
+        session._cdp_get_all_pages = AsyncMock(
+            return_value=[
+                {"targetId": "t1", "url": "https://example.com", "type": "page"},
+            ]
+        )
+        mocks["cdp_root"].send.Target.getTargetInfo = AsyncMock(
+            return_value={"targetInfo": {"targetId": "t1", "url": "https://example.com", "title": "Example"}}
+        )
 
         tabs = await session.get_tabs()
         assert len(tabs) == 1
@@ -770,45 +878,53 @@ class TestGetTabs:
 
     async def test_new_tab_page_gets_empty_title(self):
         session, mocks = _make_session_with_mocks()
-        session._cdp_get_all_pages = AsyncMock(return_value=[
-            {"targetId": "t2", "url": "chrome://newtab/", "type": "page"},
-        ])
-        mocks["cdp_root"].send.Target.getTargetInfo = AsyncMock(return_value={
-            "targetInfo": {"targetId": "t2", "url": "chrome://newtab/", "title": "New Tab"}
-        })
+        session._cdp_get_all_pages = AsyncMock(
+            return_value=[
+                {"targetId": "t2", "url": "chrome://newtab/", "type": "page"},
+            ]
+        )
+        mocks["cdp_root"].send.Target.getTargetInfo = AsyncMock(
+            return_value={"targetInfo": {"targetId": "t2", "url": "chrome://newtab/", "title": "New Tab"}}
+        )
 
         tabs = await session.get_tabs()
         assert tabs[0].title == ""
 
     async def test_chrome_page_uses_url_as_title(self):
         session, mocks = _make_session_with_mocks()
-        session._cdp_get_all_pages = AsyncMock(return_value=[
-            {"targetId": "t3", "url": "chrome://settings", "type": "page"},
-        ])
-        mocks["cdp_root"].send.Target.getTargetInfo = AsyncMock(return_value={
-            "targetInfo": {"targetId": "t3", "url": "chrome://settings", "title": ""}
-        })
+        session._cdp_get_all_pages = AsyncMock(
+            return_value=[
+                {"targetId": "t3", "url": "chrome://settings", "type": "page"},
+            ]
+        )
+        mocks["cdp_root"].send.Target.getTargetInfo = AsyncMock(
+            return_value={"targetInfo": {"targetId": "t3", "url": "chrome://settings", "title": ""}}
+        )
 
         tabs = await session.get_tabs()
         assert tabs[0].title == "chrome://settings"
 
     async def test_pdf_page_uses_filename(self):
         session, mocks = _make_session_with_mocks()
-        session._cdp_get_all_pages = AsyncMock(return_value=[
-            {"targetId": "t4", "url": "https://example.com/docs/report.pdf", "type": "page"},
-        ])
-        mocks["cdp_root"].send.Target.getTargetInfo = AsyncMock(return_value={
-            "targetInfo": {"targetId": "t4", "url": "https://example.com/docs/report.pdf", "title": ""}
-        })
+        session._cdp_get_all_pages = AsyncMock(
+            return_value=[
+                {"targetId": "t4", "url": "https://example.com/docs/report.pdf", "type": "page"},
+            ]
+        )
+        mocks["cdp_root"].send.Target.getTargetInfo = AsyncMock(
+            return_value={"targetInfo": {"targetId": "t4", "url": "https://example.com/docs/report.pdf", "title": ""}}
+        )
 
         tabs = await session.get_tabs()
         assert tabs[0].title == "report.pdf"
 
     async def test_target_info_exception_fallback(self):
         session, mocks = _make_session_with_mocks()
-        session._cdp_get_all_pages = AsyncMock(return_value=[
-            {"targetId": "t5", "url": "https://example.com", "type": "page"},
-        ])
+        session._cdp_get_all_pages = AsyncMock(
+            return_value=[
+                {"targetId": "t5", "url": "https://example.com", "type": "page"},
+            ]
+        )
         mocks["cdp_root"].send.Target.getTargetInfo = AsyncMock(side_effect=Exception("CDP error"))
 
         tabs = await session.get_tabs()
@@ -817,9 +933,11 @@ class TestGetTabs:
 
     async def test_target_info_exception_newtab_fallback(self):
         session, mocks = _make_session_with_mocks()
-        session._cdp_get_all_pages = AsyncMock(return_value=[
-            {"targetId": "t6", "url": "about:blank", "type": "page"},
-        ])
+        session._cdp_get_all_pages = AsyncMock(
+            return_value=[
+                {"targetId": "t6", "url": "about:blank", "type": "page"},
+            ]
+        )
         mocks["cdp_root"].send.Target.getTargetInfo = AsyncMock(side_effect=Exception("CDP error"))
 
         tabs = await session.get_tabs()
@@ -827,9 +945,11 @@ class TestGetTabs:
 
     async def test_target_info_exception_chrome_fallback(self):
         session, mocks = _make_session_with_mocks()
-        session._cdp_get_all_pages = AsyncMock(return_value=[
-            {"targetId": "t7", "url": "chrome://extensions", "type": "page"},
-        ])
+        session._cdp_get_all_pages = AsyncMock(
+            return_value=[
+                {"targetId": "t7", "url": "chrome://extensions", "type": "page"},
+            ]
+        )
         mocks["cdp_root"].send.Target.getTargetInfo = AsyncMock(side_effect=Exception("CDP error"))
 
         tabs = await session.get_tabs()
@@ -843,7 +963,6 @@ class TestGetTabs:
 
 @pytest.mark.asyncio
 class TestGetCurrentTargetInfo:
-
     async def test_returns_none_without_focus(self):
         session, _ = _make_session_with_mocks()
         session.agent_focus = None
@@ -853,12 +972,14 @@ class TestGetCurrentTargetInfo:
     async def test_returns_matching_target(self):
         session, mocks = _make_session_with_mocks()
         tid = mocks["cdp_session"].target_id
-        mocks["cdp_root"].send.Target.getTargets = AsyncMock(return_value={
-            "targetInfos": [
-                {"targetId": tid, "url": "https://example.com", "type": "page"},
-                {"targetId": "other", "url": "https://other.com", "type": "page"},
-            ]
-        })
+        mocks["cdp_root"].send.Target.getTargets = AsyncMock(
+            return_value={
+                "targetInfos": [
+                    {"targetId": tid, "url": "https://example.com", "type": "page"},
+                    {"targetId": "other", "url": "https://other.com", "type": "page"},
+                ]
+            }
+        )
         result = await session.get_current_target_info()
         assert result["targetId"] == tid
 
@@ -876,11 +997,14 @@ class TestGetCurrentTargetInfo:
 
 @pytest.mark.asyncio
 class TestGetCurrentPageUrlTitle:
-
     async def test_url_returns_target_url(self):
         session, _ = _make_session_with_mocks()
-        with patch.object(BrowserSession, "get_current_target_info", new_callable=AsyncMock,
-                          return_value={"url": "https://test.com", "title": "Test"}):
+        with patch.object(
+            BrowserSession,
+            "get_current_target_info",
+            new_callable=AsyncMock,
+            return_value={"url": "https://test.com", "title": "Test"},
+        ):
             url = await session.get_current_page_url()
         assert url == "https://test.com"
 
@@ -892,8 +1016,12 @@ class TestGetCurrentPageUrlTitle:
 
     async def test_title_returns_target_title(self):
         session, _ = _make_session_with_mocks()
-        with patch.object(BrowserSession, "get_current_target_info", new_callable=AsyncMock,
-                          return_value={"title": "My Page", "url": "https://test.com"}):
+        with patch.object(
+            BrowserSession,
+            "get_current_target_info",
+            new_callable=AsyncMock,
+            return_value={"title": "My Page", "url": "https://test.com"},
+        ):
             title = await session.get_current_page_title()
         assert title == "My Page"
 
@@ -911,7 +1039,6 @@ class TestGetCurrentPageUrlTitle:
 
 
 class TestUpdateCachedSelectorMap:
-
     def test_update_cached_selector_map(self):
         session, _ = _make_session_with_mocks()
         new_map = {0: MagicMock(), 1: MagicMock()}
@@ -921,7 +1048,6 @@ class TestUpdateCachedSelectorMap:
 
 @pytest.mark.asyncio
 class TestDomElementByIndex:
-
     async def test_returns_cached_element(self):
         session, _ = _make_session_with_mocks()
         mock_node = MagicMock()
@@ -960,7 +1086,6 @@ class TestDomElementByIndex:
 
 @pytest.mark.asyncio
 class TestGetTargetIdFromTabId:
-
     async def test_finds_target_in_session_pool(self):
         session, mocks = _make_session_with_mocks()
         full_id = "abcdef1234567890abcdef12345678aa"
@@ -977,20 +1102,22 @@ class TestGetTargetIdFromTabId:
 
         # Target is stale in pool, but found in live targets
         with patch.object(BrowserSession, "_is_target_valid", new_callable=AsyncMock, return_value=False):
-            mocks["cdp_root"].send.Target.getTargets = AsyncMock(return_value={
-                "targetInfos": [{"targetId": "fresh1234567890abcdef12345678bb", "type": "page"}]
-            })
+            mocks["cdp_root"].send.Target.getTargets = AsyncMock(
+                return_value={"targetInfos": [{"targetId": "fresh1234567890abcdef12345678bb", "type": "page"}]}
+            )
             result = await session.get_target_id_from_tab_id("78bb")
         assert result == "fresh1234567890abcdef12345678bb"
 
     async def test_falls_back_to_cdp_targets(self):
         session, mocks = _make_session_with_mocks()
         session._cdp_session_pool = {}
-        mocks["cdp_root"].send.Target.getTargets = AsyncMock(return_value={
-            "targetInfos": [
-                {"targetId": "target-xxxxx-abcd", "type": "page"},
-            ]
-        })
+        mocks["cdp_root"].send.Target.getTargets = AsyncMock(
+            return_value={
+                "targetInfos": [
+                    {"targetId": "target-xxxxx-abcd", "type": "page"},
+                ]
+            }
+        )
 
         result = await session.get_target_id_from_tab_id("abcd")
         assert result == "target-xxxxx-abcd"
@@ -1011,12 +1138,9 @@ class TestGetTargetIdFromTabId:
 
 @pytest.mark.asyncio
 class TestIsTargetValid:
-
     async def test_valid_target(self):
         session, mocks = _make_session_with_mocks()
-        mocks["cdp_root"].send.Target.getTargetInfo = AsyncMock(return_value={
-            "targetInfo": {"targetId": "t1"}
-        })
+        mocks["cdp_root"].send.Target.getTargetInfo = AsyncMock(return_value={"targetInfo": {"targetId": "t1"}})
         result = await session._is_target_valid("t1")
         assert result is True
 
@@ -1034,24 +1158,27 @@ class TestIsTargetValid:
 
 @pytest.mark.asyncio
 class TestGetTargetIdFromUrl:
-
     async def test_exact_match(self):
         session, mocks = _make_session_with_mocks()
-        mocks["cdp_root"].send.Target.getTargets = AsyncMock(return_value={
-            "targetInfos": [
-                {"targetId": "t1", "url": "https://example.com", "type": "page"},
-            ]
-        })
+        mocks["cdp_root"].send.Target.getTargets = AsyncMock(
+            return_value={
+                "targetInfos": [
+                    {"targetId": "t1", "url": "https://example.com", "type": "page"},
+                ]
+            }
+        )
         result = await session.get_target_id_from_url("https://example.com")
         assert result == "t1"
 
     async def test_substring_match(self):
         session, mocks = _make_session_with_mocks()
-        mocks["cdp_root"].send.Target.getTargets = AsyncMock(return_value={
-            "targetInfos": [
-                {"targetId": "t2", "url": "https://example.com/path/page?q=1", "type": "page"},
-            ]
-        })
+        mocks["cdp_root"].send.Target.getTargets = AsyncMock(
+            return_value={
+                "targetInfos": [
+                    {"targetId": "t2", "url": "https://example.com/path/page?q=1", "type": "page"},
+                ]
+            }
+        )
         result = await session.get_target_id_from_url("example.com/path")
         assert result == "t2"
 
@@ -1070,13 +1197,14 @@ class TestGetTargetIdFromUrl:
 
 @pytest.mark.asyncio
 class TestGetMostRecentlyOpenedTargetId:
-
     async def test_returns_last_page(self):
         session, mocks = _make_session_with_mocks()
-        session._cdp_get_all_pages = AsyncMock(return_value=[
-            {"targetId": "first", "url": "https://a.com", "type": "page"},
-            {"targetId": "last", "url": "https://b.com", "type": "page"},
-        ])
+        session._cdp_get_all_pages = AsyncMock(
+            return_value=[
+                {"targetId": "first", "url": "https://a.com", "type": "page"},
+                {"targetId": "last", "url": "https://b.com", "type": "page"},
+            ]
+        )
         result = await session.get_most_recently_opened_target_id()
         assert result == "last"
 
@@ -1087,7 +1215,6 @@ class TestGetMostRecentlyOpenedTargetId:
 
 
 class TestIsFileInput:
-
     def test_delegates_to_dom_watchdog(self):
         session, _ = _make_session_with_mocks()
         mock_wd = MagicMock()
@@ -1133,7 +1260,6 @@ class TestIsFileInput:
 
 @pytest.mark.asyncio
 class TestGetSelectorMap:
-
     async def test_returns_cached_map(self):
         session, _ = _make_session_with_mocks()
         mock_map = {0: MagicMock()}
@@ -1170,7 +1296,6 @@ class TestGetSelectorMap:
 
 @pytest.mark.asyncio
 class TestGetIndexById:
-
     async def test_finds_element_by_id(self):
         session, _ = _make_session_with_mocks()
         elem = MagicMock()
@@ -1197,7 +1322,6 @@ class TestGetIndexById:
 
 @pytest.mark.asyncio
 class TestGetIndexByClass:
-
     async def test_finds_element_by_class(self):
         session, _ = _make_session_with_mocks()
         elem = MagicMock()
@@ -1233,7 +1357,6 @@ class TestGetIndexByClass:
 
 @pytest.mark.asyncio
 class TestRemoveHighlights:
-
     async def test_skips_when_highlights_disabled(self):
         session, mocks = _make_session_with_mocks()
         session.browser_profile.highlight_elements = False
@@ -1246,9 +1369,7 @@ class TestRemoveHighlights:
         session, mocks = _make_session_with_mocks()
         session.browser_profile.highlight_elements = True
 
-        mocks["cdp_root"].send.Runtime.evaluate = AsyncMock(return_value={
-            "result": {"value": {"removed": 3}}
-        })
+        mocks["cdp_root"].send.Runtime.evaluate = AsyncMock(return_value={"result": {"value": {"removed": 3}}})
 
         await session.remove_highlights()
 
@@ -1257,8 +1378,9 @@ class TestRemoveHighlights:
         session.browser_profile.highlight_elements = True
 
         # Make get_or_create_cdp_session raise
-        with patch.object(BrowserSession, "get_or_create_cdp_session", new_callable=AsyncMock,
-                          side_effect=Exception("CDP error")):
+        with patch.object(
+            BrowserSession, "get_or_create_cdp_session", new_callable=AsyncMock, side_effect=Exception("CDP error")
+        ):
             # Should not raise
             await session.remove_highlights()
 
@@ -1266,9 +1388,7 @@ class TestRemoveHighlights:
         session, mocks = _make_session_with_mocks()
         session.browser_profile.highlight_elements = True
 
-        mocks["cdp_root"].send.Runtime.evaluate = AsyncMock(return_value={
-            "result": {}
-        })
+        mocks["cdp_root"].send.Runtime.evaluate = AsyncMock(return_value={"result": {}})
 
         # Should not raise, hits the else branch
         await session.remove_highlights()
@@ -1281,15 +1401,14 @@ class TestRemoveHighlights:
 
 @pytest.mark.asyncio
 class TestGetElementCoordinates:
-
     async def test_method1_content_quads(self):
         """Uses DOM.getContentQuads when quads are available."""
         session, mocks = _make_session_with_mocks()
         cdp_sess = mocks["cdp_session"]
 
-        cdp_sess.cdp_client.send.DOM.getContentQuads = AsyncMock(return_value={
-            "quads": [[10, 20, 110, 20, 110, 70, 10, 70]]
-        })
+        cdp_sess.cdp_client.send.DOM.getContentQuads = AsyncMock(
+            return_value={"quads": [[10, 20, 110, 20, 110, 70, 10, 70]]}
+        )
 
         result = await session.get_element_coordinates(123, cdp_sess)
         assert result is not None
@@ -1304,9 +1423,9 @@ class TestGetElementCoordinates:
         cdp_sess = mocks["cdp_session"]
 
         cdp_sess.cdp_client.send.DOM.getContentQuads = AsyncMock(return_value={"quads": []})
-        cdp_sess.cdp_client.send.DOM.getBoxModel = AsyncMock(return_value={
-            "model": {"content": [0, 0, 200, 0, 200, 100, 0, 100]}
-        })
+        cdp_sess.cdp_client.send.DOM.getBoxModel = AsyncMock(
+            return_value={"model": {"content": [0, 0, 200, 0, 200, 100, 0, 100]}}
+        )
 
         result = await session.get_element_coordinates(123, cdp_sess)
         assert result is not None
@@ -1320,12 +1439,10 @@ class TestGetElementCoordinates:
 
         cdp_sess.cdp_client.send.DOM.getContentQuads = AsyncMock(side_effect=Exception("failed"))
         cdp_sess.cdp_client.send.DOM.getBoxModel = AsyncMock(side_effect=Exception("failed"))
-        cdp_sess.cdp_client.send.DOM.resolveNode = AsyncMock(return_value={
-            "object": {"objectId": "obj-1"}
-        })
-        cdp_sess.cdp_client.send.Runtime.callFunctionOn = AsyncMock(return_value={
-            "result": {"value": {"x": 5, "y": 10, "width": 50, "height": 30}}
-        })
+        cdp_sess.cdp_client.send.DOM.resolveNode = AsyncMock(return_value={"object": {"objectId": "obj-1"}})
+        cdp_sess.cdp_client.send.Runtime.callFunctionOn = AsyncMock(
+            return_value={"result": {"value": {"x": 5, "y": 10, "width": 50, "height": 30}}}
+        )
 
         result = await session.get_element_coordinates(123, cdp_sess)
         assert result is not None
@@ -1348,9 +1465,11 @@ class TestGetElementCoordinates:
         session, mocks = _make_session_with_mocks()
         cdp_sess = mocks["cdp_session"]
 
-        cdp_sess.cdp_client.send.DOM.getContentQuads = AsyncMock(return_value={
-            "quads": [[10, 20, 10, 20, 10, 20, 10, 20]]  # Zero-size
-        })
+        cdp_sess.cdp_client.send.DOM.getContentQuads = AsyncMock(
+            return_value={
+                "quads": [[10, 20, 10, 20, 10, 20, 10, 20]]  # Zero-size
+            }
+        )
 
         result = await session.get_element_coordinates(123, cdp_sess)
         assert result is None
@@ -1362,12 +1481,10 @@ class TestGetElementCoordinates:
 
         cdp_sess.cdp_client.send.DOM.getContentQuads = AsyncMock(return_value={"quads": []})
         cdp_sess.cdp_client.send.DOM.getBoxModel = AsyncMock(return_value={})
-        cdp_sess.cdp_client.send.DOM.resolveNode = AsyncMock(return_value={
-            "object": {"objectId": "obj-1"}
-        })
-        cdp_sess.cdp_client.send.Runtime.callFunctionOn = AsyncMock(return_value={
-            "result": {"value": {"x": 0, "y": 0, "width": 0, "height": 0}}
-        })
+        cdp_sess.cdp_client.send.DOM.resolveNode = AsyncMock(return_value={"object": {"objectId": "obj-1"}})
+        cdp_sess.cdp_client.send.Runtime.callFunctionOn = AsyncMock(
+            return_value={"result": {"value": {"x": 0, "y": 0, "width": 0, "height": 0}}}
+        )
 
         result = await session.get_element_coordinates(123, cdp_sess)
         assert result is None
@@ -1390,9 +1507,11 @@ class TestGetElementCoordinates:
         cdp_sess = mocks["cdp_session"]
 
         cdp_sess.cdp_client.send.DOM.getContentQuads = AsyncMock(return_value={"quads": []})
-        cdp_sess.cdp_client.send.DOM.getBoxModel = AsyncMock(return_value={
-            "model": {"content": [0, 0, 50, 0]}  # Only 4 values
-        })
+        cdp_sess.cdp_client.send.DOM.getBoxModel = AsyncMock(
+            return_value={
+                "model": {"content": [0, 0, 50, 0]}  # Only 4 values
+            }
+        )
         cdp_sess.cdp_client.send.DOM.resolveNode = AsyncMock(side_effect=Exception("no"))
 
         result = await session.get_element_coordinates(123, cdp_sess)
@@ -1406,7 +1525,6 @@ class TestGetElementCoordinates:
 
 @pytest.mark.asyncio
 class TestNavigateTo:
-
     async def test_dispatches_navigate_event(self):
         session, mocks = _make_session_with_mocks()
 

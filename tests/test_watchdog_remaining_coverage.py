@@ -50,6 +50,7 @@ PDF_BYTES = (
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_mock_browser_session():
     session = create_autospec(BrowserSession, instance=True)
     session.logger = logging.getLogger("test_remaining_watchdog")
@@ -117,11 +118,13 @@ def _make_watchdog(watchdog_class, session=None, event_bus=None):
 # AboutBlankWatchdog Tests
 # ===========================================================================
 
+
 class TestAboutBlankWatchdog:
     """Cover lines 91-106, 123-124, 252-253 in aboutblank_watchdog.py."""
 
     def _make_watchdog(self, session=None):
         from openbrowser.browser.watchdogs.aboutblank_watchdog import AboutBlankWatchdog
+
         return _make_watchdog(AboutBlankWatchdog, session=session)
 
     @pytest.mark.asyncio
@@ -129,9 +132,17 @@ class TestAboutBlankWatchdog:
         """Lines 91-102: No tabs exist, create new about:blank tab."""
         session = _make_mock_browser_session()
         session._cdp_get_all_pages = AsyncMock(return_value=[])
-        mock_dispatch_result = AsyncMock()
+
+        class DispatchResult:
+            def __await__(self):
+                yield
+                return self
+
+            async def event_result(self, **kwargs):
+                return None
+
         session.event_bus = MagicMock()
-        session.event_bus.dispatch = MagicMock(return_value=mock_dispatch_result())
+        session.event_bus.dispatch = MagicMock(return_value=DispatchResult())
 
         watchdog = self._make_watchdog(session=session)
         await watchdog._check_and_ensure_about_blank_tab()
@@ -142,9 +153,7 @@ class TestAboutBlankWatchdog:
     async def test_check_and_ensure_about_blank_tab_has_tabs(self):
         """Lines 91-106: Tabs exist, no new tab created."""
         session = _make_mock_browser_session()
-        session._cdp_get_all_pages = AsyncMock(return_value=[
-            {"targetId": "t1", "url": "https://example.com"}
-        ])
+        session._cdp_get_all_pages = AsyncMock(return_value=[{"targetId": "t1", "url": "https://example.com"}])
         watchdog = self._make_watchdog(session=session)
         await watchdog._check_and_ensure_about_blank_tab()
         # No dispatch needed since tabs exist
@@ -180,10 +189,12 @@ class TestAboutBlankWatchdog:
     async def test_show_dvd_screensaver_on_about_blank_pages(self):
         """Lines 108-124: Iterate pages and show screensaver on about:blank."""
         session = _make_mock_browser_session()
-        session._cdp_get_all_pages = AsyncMock(return_value=[
-            {"targetId": "t1", "url": "about:blank"},
-            {"targetId": "t2", "url": "https://example.com"},
-        ])
+        session._cdp_get_all_pages = AsyncMock(
+            return_value=[
+                {"targetId": "t1", "url": "about:blank"},
+                {"targetId": "t2", "url": "https://example.com"},
+            ]
+        )
         session.id = "test-session-abcd"
         temp_session = MagicMock()
         temp_session.cdp_client = MagicMock()
@@ -203,11 +214,13 @@ class TestAboutBlankWatchdog:
 # DOMWatchdog Tests
 # ===========================================================================
 
+
 class TestDOMWatchdog:
     """Cover many lines in dom_watchdog.py."""
 
     def _make_watchdog(self, session=None):
         from openbrowser.browser.watchdogs.dom_watchdog import DOMWatchdog
+
         return _make_watchdog(DOMWatchdog, session=session)
 
     # -- _get_recent_events_str --
@@ -270,24 +283,31 @@ class TestDOMWatchdog:
         cdp_session.cdp_client = MagicMock()
         cdp_session.cdp_client.send = MagicMock()
         cdp_session.cdp_client.send.Runtime = MagicMock()
-        cdp_session.cdp_client.send.Runtime.evaluate = AsyncMock(return_value={
-            "result": {
-                "type": "object",
-                "value": {
-                    "pending_requests": [
-                        {"url": "https://api.example.com/data", "method": "GET", "loading_duration_ms": 500, "resource_type": "xhr"},
-                    ],
-                    "document_loading": False,
-                    "document_ready_state": "complete",
-                    "debug": {
-                        "total_resources": 10,
-                        "with_response_end_zero": 1,
-                        "after_all_filters": 1,
-                        "all_domains": ["api.example.com", "cdn.example.com", "a.com", "b.com", "c.com", "d.com"],
+        cdp_session.cdp_client.send.Runtime.evaluate = AsyncMock(
+            return_value={
+                "result": {
+                    "type": "object",
+                    "value": {
+                        "pending_requests": [
+                            {
+                                "url": "https://api.example.com/data",
+                                "method": "GET",
+                                "loading_duration_ms": 500,
+                                "resource_type": "xhr",
+                            },
+                        ],
+                        "document_loading": False,
+                        "document_ready_state": "complete",
+                        "debug": {
+                            "total_resources": 10,
+                            "with_response_end_zero": 1,
+                            "after_all_filters": 1,
+                            "all_domains": ["api.example.com", "cdn.example.com", "a.com", "b.com", "c.com", "d.com"],
+                        },
                     },
-                },
+                }
             }
-        })
+        )
         cdp_session.session_id = "sess-1"
         session.get_or_create_cdp_session = AsyncMock(return_value=cdp_session)
 
@@ -345,12 +365,18 @@ class TestDOMWatchdog:
 
         with patch.object(watchdog, "_get_page_info", new_callable=AsyncMock) as mock_page_info:
             from openbrowser.browser.views import PageInfo
+
             mock_page_info.return_value = PageInfo(
-                viewport_width=1280, viewport_height=720,
-                page_width=1280, page_height=720,
-                scroll_x=0, scroll_y=0,
-                pixels_above=0, pixels_below=0,
-                pixels_left=0, pixels_right=0,
+                viewport_width=1280,
+                viewport_height=720,
+                page_width=1280,
+                page_height=720,
+                scroll_x=0,
+                scroll_y=0,
+                pixels_above=0,
+                pixels_below=0,
+                pixels_left=0,
+                pixels_right=0,
             )
             result = await watchdog.on_BrowserStateRequestEvent(event)
 
@@ -381,6 +407,7 @@ class TestDOMWatchdog:
     async def test_browser_state_request_with_pending_requests(self):
         """Lines 276-278, 285-288: Pending requests before wait, stability sleep."""
         from openbrowser.browser.views import NetworkRequest
+
         session = _make_mock_browser_session()
         session.get_current_page_url = AsyncMock(return_value="https://example.com")
         session.get_tabs = AsyncMock(return_value=[])
@@ -395,15 +422,23 @@ class TestDOMWatchdog:
 
         mock_request = NetworkRequest(url="https://api.example.com/data", method="GET", loading_duration_ms=500)
 
-        with patch.object(watchdog, "_get_pending_network_requests", new_callable=AsyncMock, return_value=[mock_request]):
+        with patch.object(
+            watchdog, "_get_pending_network_requests", new_callable=AsyncMock, return_value=[mock_request]
+        ):
             with patch.object(watchdog, "_get_page_info", new_callable=AsyncMock) as mock_pi:
                 from openbrowser.browser.views import PageInfo
+
                 mock_pi.return_value = PageInfo(
-                    viewport_width=1280, viewport_height=720,
-                    page_width=1280, page_height=720,
-                    scroll_x=0, scroll_y=0,
-                    pixels_above=0, pixels_below=0,
-                    pixels_left=0, pixels_right=0,
+                    viewport_width=1280,
+                    viewport_height=720,
+                    page_width=1280,
+                    page_height=720,
+                    scroll_x=0,
+                    scroll_y=0,
+                    pixels_above=0,
+                    pixels_below=0,
+                    pixels_left=0,
+                    pixels_right=0,
                 )
                 with patch("asyncio.sleep", new_callable=AsyncMock):
                     result = await watchdog.on_BrowserStateRequestEvent(event)
@@ -425,15 +460,26 @@ class TestDOMWatchdog:
         event.include_recent_events = False
 
         with patch.object(watchdog, "_get_pending_network_requests", new_callable=AsyncMock, return_value=[]):
-            with patch.object(watchdog, "_build_dom_tree_without_highlights", new_callable=AsyncMock, side_effect=RuntimeError("DOM fail")):
+            with patch.object(
+                watchdog,
+                "_build_dom_tree_without_highlights",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("DOM fail"),
+            ):
                 with patch.object(watchdog, "_get_page_info", new_callable=AsyncMock) as mock_pi:
                     from openbrowser.browser.views import PageInfo
+
                     mock_pi.return_value = PageInfo(
-                        viewport_width=1280, viewport_height=720,
-                        page_width=1280, page_height=720,
-                        scroll_x=0, scroll_y=0,
-                        pixels_above=0, pixels_below=0,
-                        pixels_left=0, pixels_right=0,
+                        viewport_width=1280,
+                        viewport_height=720,
+                        page_width=1280,
+                        page_height=720,
+                        scroll_x=0,
+                        scroll_y=0,
+                        pixels_above=0,
+                        pixels_below=0,
+                        pixels_left=0,
+                        pixels_right=0,
                     )
                     result = await watchdog.on_BrowserStateRequestEvent(event)
 
@@ -454,15 +500,26 @@ class TestDOMWatchdog:
         event.include_recent_events = False
 
         with patch.object(watchdog, "_get_pending_network_requests", new_callable=AsyncMock, return_value=[]):
-            with patch.object(watchdog, "_capture_clean_screenshot", new_callable=AsyncMock, side_effect=RuntimeError("screenshot fail")):
+            with patch.object(
+                watchdog,
+                "_capture_clean_screenshot",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("screenshot fail"),
+            ):
                 with patch.object(watchdog, "_get_page_info", new_callable=AsyncMock) as mock_pi:
                     from openbrowser.browser.views import PageInfo
+
                     mock_pi.return_value = PageInfo(
-                        viewport_width=1280, viewport_height=720,
-                        page_width=1280, page_height=720,
-                        scroll_x=0, scroll_y=0,
-                        pixels_above=0, pixels_below=0,
-                        pixels_left=0, pixels_right=0,
+                        viewport_width=1280,
+                        viewport_height=720,
+                        page_width=1280,
+                        page_height=720,
+                        scroll_x=0,
+                        scroll_y=0,
+                        pixels_above=0,
+                        pixels_below=0,
+                        pixels_left=0,
+                        pixels_right=0,
                     )
                     result = await watchdog.on_BrowserStateRequestEvent(event)
 
@@ -473,6 +530,7 @@ class TestDOMWatchdog:
     async def test_browser_state_request_highlight_and_title_fails(self):
         """Lines 428-435, 448-450, 457-463: Browser highlighting fails, title/page_info fallback."""
         from openbrowser.dom.views import SerializedDOMState, EnhancedDOMTreeNode
+
         session = _make_mock_browser_session()
         session.get_current_page_url = AsyncMock(return_value="https://example.com")
         session.get_tabs = AsyncMock(return_value=[])
@@ -490,8 +548,12 @@ class TestDOMWatchdog:
         mock_dom_state = SerializedDOMState(_root=None, selector_map={1: mock_node})
 
         with patch.object(watchdog, "_get_pending_network_requests", new_callable=AsyncMock, return_value=[]):
-            with patch.object(watchdog, "_build_dom_tree_without_highlights", new_callable=AsyncMock, return_value=mock_dom_state):
-                with patch.object(watchdog, "_get_page_info", new_callable=AsyncMock, side_effect=RuntimeError("page info fail")):
+            with patch.object(
+                watchdog, "_build_dom_tree_without_highlights", new_callable=AsyncMock, return_value=mock_dom_state
+            ):
+                with patch.object(
+                    watchdog, "_get_page_info", new_callable=AsyncMock, side_effect=RuntimeError("page info fail")
+                ):
                     with patch.object(watchdog, "_detect_pagination_buttons", return_value=[]):
                         result = await watchdog.on_BrowserStateRequestEvent(event)
 
@@ -515,12 +577,18 @@ class TestDOMWatchdog:
         with patch.object(watchdog, "_get_pending_network_requests", new_callable=AsyncMock, return_value=[]):
             with patch.object(watchdog, "_get_page_info", new_callable=AsyncMock) as mock_pi:
                 from openbrowser.browser.views import PageInfo
+
                 mock_pi.return_value = PageInfo(
-                    viewport_width=1280, viewport_height=720,
-                    page_width=1280, page_height=720,
-                    scroll_x=0, scroll_y=0,
-                    pixels_above=0, pixels_below=0,
-                    pixels_left=0, pixels_right=0,
+                    viewport_width=1280,
+                    viewport_height=720,
+                    page_width=1280,
+                    page_height=720,
+                    scroll_x=0,
+                    scroll_y=0,
+                    pixels_above=0,
+                    pixels_below=0,
+                    pixels_left=0,
+                    pixels_right=0,
                 )
                 result = await watchdog.on_BrowserStateRequestEvent(event)
 
@@ -548,12 +616,18 @@ class TestDOMWatchdog:
         with patch.object(watchdog, "_get_pending_network_requests", new_callable=AsyncMock, return_value=[]):
             with patch.object(watchdog, "_get_page_info", new_callable=AsyncMock) as mock_pi:
                 from openbrowser.browser.views import PageInfo
+
                 mock_pi.return_value = PageInfo(
-                    viewport_width=1280, viewport_height=720,
-                    page_width=1280, page_height=720,
-                    scroll_x=0, scroll_y=0,
-                    pixels_above=0, pixels_below=0,
-                    pixels_left=0, pixels_right=0,
+                    viewport_width=1280,
+                    viewport_height=720,
+                    page_width=1280,
+                    page_height=720,
+                    scroll_x=0,
+                    scroll_y=0,
+                    pixels_above=0,
+                    pixels_below=0,
+                    pixels_left=0,
+                    pixels_right=0,
                 )
                 result = await watchdog.on_BrowserStateRequestEvent(event)
 
@@ -595,6 +669,7 @@ class TestDOMWatchdog:
         class AwaitableMockEvent:
             def __await__(self):
                 return iter([])  # immediately resolves
+
             async def event_result(self, raise_if_any=False, raise_if_none=False):
                 raise TimeoutError("timeout")
 
@@ -629,6 +704,7 @@ class TestDOMWatchdog:
         class AwaitableMockEvent:
             def __await__(self):
                 return iter([])
+
             async def event_result(self, raise_if_any=False, raise_if_none=False):
                 raise RuntimeError("Screenshot handler returned None")
 
@@ -656,15 +732,25 @@ class TestDOMWatchdog:
     def test_detect_pagination_buttons_found(self):
         """Lines 689-693: Pagination buttons found."""
         from openbrowser.dom.views import EnhancedDOMTreeNode
+
         session = _make_mock_browser_session()
         watchdog = self._make_watchdog(session=session)
 
         mock_node = MagicMock(spec=EnhancedDOMTreeNode)
         selector_map = {1: mock_node}
 
-        with patch("openbrowser.browser.watchdogs.dom_watchdog.DomService.detect_pagination_buttons", return_value=[
-            {"button_type": "next", "backend_node_id": 123, "text": "Next", "selector": "a.next", "is_disabled": False},
-        ]):
+        with patch(
+            "openbrowser.browser.watchdogs.dom_watchdog.DomService.detect_pagination_buttons",
+            return_value=[
+                {
+                    "button_type": "next",
+                    "backend_node_id": 123,
+                    "text": "Next",
+                    "selector": "a.next",
+                    "is_disabled": False,
+                },
+            ],
+        ):
             result = watchdog._detect_pagination_buttons(selector_map)
 
         assert len(result) == 1
@@ -675,7 +761,10 @@ class TestDOMWatchdog:
         session = _make_mock_browser_session()
         watchdog = self._make_watchdog(session=session)
 
-        with patch("openbrowser.browser.watchdogs.dom_watchdog.DomService.detect_pagination_buttons", side_effect=RuntimeError("detection fail")):
+        with patch(
+            "openbrowser.browser.watchdogs.dom_watchdog.DomService.detect_pagination_buttons",
+            side_effect=RuntimeError("detection fail"),
+        ):
             result = watchdog._detect_pagination_buttons({1: MagicMock()})
 
         assert result == []
@@ -720,12 +809,18 @@ class TestDOMWatchdog:
         with patch.object(watchdog, "_get_pending_network_requests", new_callable=AsyncMock, return_value=[]):
             with patch.object(watchdog, "_get_page_info", new_callable=AsyncMock) as mock_pi:
                 from openbrowser.browser.views import PageInfo
+
                 mock_pi.return_value = PageInfo(
-                    viewport_width=1280, viewport_height=720,
-                    page_width=1280, page_height=720,
-                    scroll_x=0, scroll_y=0,
-                    pixels_above=0, pixels_below=0,
-                    pixels_left=0, pixels_right=0,
+                    viewport_width=1280,
+                    viewport_height=720,
+                    page_width=1280,
+                    page_height=720,
+                    scroll_x=0,
+                    scroll_y=0,
+                    pixels_above=0,
+                    pixels_below=0,
+                    pixels_left=0,
+                    pixels_right=0,
                 )
                 result = await watchdog.on_BrowserStateRequestEvent(event)
 
@@ -736,11 +831,13 @@ class TestDOMWatchdog:
 # DownloadsWatchdog Tests
 # ===========================================================================
 
+
 class TestDownloadsWatchdog:
     """Cover lines 636-936, 1077-1263 in downloads_watchdog.py."""
 
     def _make_watchdog(self, session=None):
         from openbrowser.browser.watchdogs.downloads_watchdog import DownloadsWatchdog
+
         wd = _make_watchdog(DownloadsWatchdog, session=session)
         wd._sessions_with_listeners = set()
         wd._active_downloads = {}
@@ -807,22 +904,29 @@ class TestDownloadsWatchdog:
             cdp_frame_session.cdp_client = MagicMock()
             cdp_frame_session.cdp_client.send = MagicMock()
             cdp_frame_session.cdp_client.send.Runtime = MagicMock()
-            cdp_frame_session.cdp_client.send.Runtime.evaluate = AsyncMock(return_value={
-                "result": {
-                    "value": {
-                        "data": [72, 101, 108, 108, 111],
-                        "size": 5,
-                        "contentType": "text/plain",
+            cdp_frame_session.cdp_client.send.Runtime.evaluate = AsyncMock(
+                return_value={
+                    "result": {
+                        "value": {
+                            "data": [72, 101, 108, 108, 111],
+                            "size": 5,
+                            "contentType": "text/plain",
+                        }
                     }
                 }
-            })
+            )
             cdp_frame_session.session_id = "frame-sess"
             session.cdp_client_for_frame = AsyncMock(return_value=cdp_frame_session)
 
             watchdog = self._make_watchdog(session=session)
             watchdog._use_js_fetch_for_local = True
 
-            event = {"url": "https://example.com/hello.txt", "suggestedFilename": "hello.txt", "guid": "g3", "frameId": "f1"}
+            event = {
+                "url": "https://example.com/hello.txt",
+                "suggestedFilename": "hello.txt",
+                "guid": "g3",
+                "frameId": "f1",
+            }
 
             await watchdog._handle_cdp_download(event, "t1", "s1")
 
@@ -842,16 +946,19 @@ class TestDownloadsWatchdog:
             cdp_frame_session.cdp_client = MagicMock()
             cdp_frame_session.cdp_client.send = MagicMock()
             cdp_frame_session.cdp_client.send.Runtime = MagicMock()
-            cdp_frame_session.cdp_client.send.Runtime.evaluate = AsyncMock(return_value={
-                "result": {"value": None}
-            })
+            cdp_frame_session.cdp_client.send.Runtime.evaluate = AsyncMock(return_value={"result": {"value": None}})
             cdp_frame_session.session_id = "frame-sess"
             session.cdp_client_for_frame = AsyncMock(return_value=cdp_frame_session)
 
             watchdog = self._make_watchdog(session=session)
             watchdog._use_js_fetch_for_local = True
 
-            event = {"url": "https://example.com/file.bin", "suggestedFilename": "file.bin", "guid": "g4", "frameId": "f1"}
+            event = {
+                "url": "https://example.com/file.bin",
+                "suggestedFilename": "file.bin",
+                "guid": "g4",
+                "frameId": "f1",
+            }
 
             with patch("asyncio.get_event_loop") as mock_loop:
                 mock_time = MagicMock()
@@ -872,7 +979,12 @@ class TestDownloadsWatchdog:
             watchdog = self._make_watchdog(session=session)
             watchdog._use_js_fetch_for_local = True
 
-            event = {"url": "https://example.com/err.bin", "suggestedFilename": "err.bin", "guid": "g5", "frameId": "f1"}
+            event = {
+                "url": "https://example.com/err.bin",
+                "suggestedFilename": "err.bin",
+                "guid": "g5",
+                "frameId": "f1",
+            }
 
             with patch("asyncio.get_event_loop") as mock_loop:
                 mock_time = MagicMock()
@@ -917,6 +1029,7 @@ class TestDownloadsWatchdog:
             event = {"url": "https://example.com/data.csv", "suggestedFilename": "data.csv", "guid": "g-poll"}
 
             call_count = [0]
+
             async def fake_sleep(duration):
                 call_count[0] += 1
                 if call_count[0] == 1:
@@ -947,6 +1060,7 @@ class TestDownloadsWatchdog:
             event = {"url": "https://example.com/handled.csv", "suggestedFilename": "handled.csv", "guid": "g-handled"}
 
             call_count = [0]
+
             async def fake_sleep(duration):
                 call_count[0] += 1
                 if call_count[0] == 1:
@@ -1057,9 +1171,7 @@ class TestDownloadsWatchdog:
         cdp_session.cdp_client = MagicMock()
         cdp_session.cdp_client.send = MagicMock()
         cdp_session.cdp_client.send.Runtime = MagicMock()
-        cdp_session.cdp_client.send.Runtime.evaluate = AsyncMock(return_value={
-            "result": {"value": {"url": ""}}
-        })
+        cdp_session.cdp_client.send.Runtime.evaluate = AsyncMock(return_value={"result": {"value": {"url": ""}}})
         cdp_session.session_id = "sess-pdf"
         session.get_or_create_cdp_session = AsyncMock(return_value=cdp_session)
 
@@ -1080,9 +1192,9 @@ class TestDownloadsWatchdog:
             cdp_session.cdp_client = MagicMock()
             cdp_session.cdp_client.send = MagicMock()
             cdp_session.cdp_client.send.Runtime = MagicMock()
-            cdp_session.cdp_client.send.Runtime.evaluate = AsyncMock(return_value={
-                "result": {"value": {"url": "https://example.com/doc.pdf"}}
-            })
+            cdp_session.cdp_client.send.Runtime.evaluate = AsyncMock(
+                return_value={"result": {"value": {"url": "https://example.com/doc.pdf"}}}
+            )
             cdp_session.session_id = "sess-pdf2"
             session.get_or_create_cdp_session = AsyncMock(return_value=cdp_session)
 
@@ -1107,16 +1219,22 @@ class TestDownloadsWatchdog:
 
             # First call: get PDF URL
             # Second call: download PDF data
-            cdp_session.cdp_client.send.Runtime.evaluate = AsyncMock(side_effect=[
-                {"result": {"value": {"url": "https://example.com/report.pdf"}}},
-                {"result": {"value": {
-                    "data": list(PDF_BYTES),
-                    "fromCache": True,
-                    "responseSize": len(PDF_BYTES),
-                    "transferSize": str(len(PDF_BYTES)),
-                    "contentType": "application/pdf",
-                }}},
-            ])
+            cdp_session.cdp_client.send.Runtime.evaluate = AsyncMock(
+                side_effect=[
+                    {"result": {"value": {"url": "https://example.com/report.pdf"}}},
+                    {
+                        "result": {
+                            "value": {
+                                "data": list(PDF_BYTES),
+                                "fromCache": True,
+                                "responseSize": len(PDF_BYTES),
+                                "transferSize": str(len(PDF_BYTES)),
+                                "contentType": "application/pdf",
+                            }
+                        }
+                    },
+                ]
+            )
             cdp_session.session_id = "sess-pdf3"
             session.get_or_create_cdp_session = AsyncMock(return_value=cdp_session)
 
@@ -1142,15 +1260,21 @@ class TestDownloadsWatchdog:
             cdp_session.cdp_client = MagicMock()
             cdp_session.cdp_client.send = MagicMock()
             cdp_session.cdp_client.send.Runtime = MagicMock()
-            cdp_session.cdp_client.send.Runtime.evaluate = AsyncMock(side_effect=[
-                {"result": {"value": {"url": "https://example.com/report.pdf"}}},
-                {"result": {"value": {
-                    "data": list(PDF_BYTES),
-                    "fromCache": False,
-                    "responseSize": len(PDF_BYTES),
-                    "contentType": "application/pdf",
-                }}},
-            ])
+            cdp_session.cdp_client.send.Runtime.evaluate = AsyncMock(
+                side_effect=[
+                    {"result": {"value": {"url": "https://example.com/report.pdf"}}},
+                    {
+                        "result": {
+                            "value": {
+                                "data": list(PDF_BYTES),
+                                "fromCache": False,
+                                "responseSize": len(PDF_BYTES),
+                                "contentType": "application/pdf",
+                            }
+                        }
+                    },
+                ]
+            )
             cdp_session.session_id = "sess-pdf4"
             session.get_or_create_cdp_session = AsyncMock(return_value=cdp_session)
 
@@ -1171,10 +1295,12 @@ class TestDownloadsWatchdog:
             cdp_session.cdp_client = MagicMock()
             cdp_session.cdp_client.send = MagicMock()
             cdp_session.cdp_client.send.Runtime = MagicMock()
-            cdp_session.cdp_client.send.Runtime.evaluate = AsyncMock(side_effect=[
-                {"result": {"value": {"url": "https://example.com/empty.pdf"}}},
-                {"result": {"value": {"data": [], "fromCache": False, "responseSize": 0}}},
-            ])
+            cdp_session.cdp_client.send.Runtime.evaluate = AsyncMock(
+                side_effect=[
+                    {"result": {"value": {"url": "https://example.com/empty.pdf"}}},
+                    {"result": {"value": {"data": [], "fromCache": False, "responseSize": 0}}},
+                ]
+            )
             cdp_session.session_id = "sess-pdf5"
             session.get_or_create_cdp_session = AsyncMock(return_value=cdp_session)
 
@@ -1193,10 +1319,12 @@ class TestDownloadsWatchdog:
             cdp_session.cdp_client = MagicMock()
             cdp_session.cdp_client.send = MagicMock()
             cdp_session.cdp_client.send.Runtime = MagicMock()
-            cdp_session.cdp_client.send.Runtime.evaluate = AsyncMock(side_effect=[
-                {"result": {"value": {"url": "https://example.com/fail.pdf"}}},
-                RuntimeError("fetch failed"),
-            ])
+            cdp_session.cdp_client.send.Runtime.evaluate = AsyncMock(
+                side_effect=[
+                    {"result": {"value": {"url": "https://example.com/fail.pdf"}}},
+                    RuntimeError("fetch failed"),
+                ]
+            )
             cdp_session.session_id = "sess-pdf6"
             session.get_or_create_cdp_session = AsyncMock(return_value=cdp_session)
 
@@ -1237,15 +1365,21 @@ class TestDownloadsWatchdog:
             cdp_session.cdp_client = MagicMock()
             cdp_session.cdp_client.send = MagicMock()
             cdp_session.cdp_client.send.Runtime = MagicMock()
-            cdp_session.cdp_client.send.Runtime.evaluate = AsyncMock(side_effect=[
-                {"result": {"value": {"url": "https://example.com/viewer?doc=123"}}},
-                {"result": {"value": {
-                    "data": list(PDF_BYTES),
-                    "fromCache": False,
-                    "responseSize": len(PDF_BYTES),
-                    "contentType": "application/pdf",
-                }}},
-            ])
+            cdp_session.cdp_client.send.Runtime.evaluate = AsyncMock(
+                side_effect=[
+                    {"result": {"value": {"url": "https://example.com/viewer?doc=123"}}},
+                    {
+                        "result": {
+                            "value": {
+                                "data": list(PDF_BYTES),
+                                "fromCache": False,
+                                "responseSize": len(PDF_BYTES),
+                                "contentType": "application/pdf",
+                            }
+                        }
+                    },
+                ]
+            )
             cdp_session.session_id = "sess-pdf7"
             session.get_or_create_cdp_session = AsyncMock(return_value=cdp_session)
 
@@ -1267,22 +1401,31 @@ class TestDownloadsWatchdog:
             cdp_session.cdp_client = MagicMock()
             cdp_session.cdp_client.send = MagicMock()
             cdp_session.cdp_client.send.Runtime = MagicMock()
-            cdp_session.cdp_client.send.Runtime.evaluate = AsyncMock(side_effect=[
-                {"result": {"value": {"url": "https://example.com/doc.pdf"}}},
-                {"result": {"value": {
-                    "data": list(PDF_BYTES),
-                    "fromCache": False,
-                    "responseSize": len(PDF_BYTES),
-                    "contentType": "application/pdf",
-                }}},
-            ])
+            cdp_session.cdp_client.send.Runtime.evaluate = AsyncMock(
+                side_effect=[
+                    {"result": {"value": {"url": "https://example.com/doc.pdf"}}},
+                    {
+                        "result": {
+                            "value": {
+                                "data": list(PDF_BYTES),
+                                "fromCache": False,
+                                "responseSize": len(PDF_BYTES),
+                                "contentType": "application/pdf",
+                            }
+                        }
+                    },
+                ]
+            )
             cdp_session.session_id = "sess-pdf8"
             session.get_or_create_cdp_session = AsyncMock(return_value=cdp_session)
 
             watchdog = self._make_watchdog(session=session)
 
             # Mock anyio.open_file to simulate write failure
-            with patch("openbrowser.browser.watchdogs.downloads_watchdog.anyio.open_file", side_effect=RuntimeError("write fail")):
+            with patch(
+                "openbrowser.browser.watchdogs.downloads_watchdog.anyio.open_file",
+                side_effect=RuntimeError("write fail"),
+            ):
                 result = await watchdog.trigger_pdf_download("t1")
             assert result is None
 
@@ -1291,11 +1434,13 @@ class TestDownloadsWatchdog:
 # LocalBrowserWatchdog Tests
 # ===========================================================================
 
+
 class TestLocalBrowserWatchdog:
     """Cover lines in local_browser_watchdog.py."""
 
     def _make_watchdog(self, session=None):
         from openbrowser.browser.watchdogs.local_browser_watchdog import LocalBrowserWatchdog
+
         wd = _make_watchdog(LocalBrowserWatchdog, session=session)
         wd._subprocess = None
         wd._owns_browser_resources = True
@@ -1309,7 +1454,7 @@ class TestLocalBrowserWatchdog:
     async def test_launch_browser_killed_stale(self, tmp_path):
         """Line 115: Stale chrome killed log."""
         session = _make_mock_browser_session()
-        profile_dir = tmp_path / 'profile'
+        profile_dir = tmp_path / "profile"
         session.browser_profile.user_data_dir = str(profile_dir)
         session.browser_profile.executable_path = "/usr/bin/fake-chrome"
         session.browser_profile.get_args = MagicMock(return_value=["--headless", f"--user-data-dir={profile_dir}"])
@@ -1326,7 +1471,9 @@ class TestLocalBrowserWatchdog:
                     with patch("psutil.Process") as MockProcess:
                         MockProcess.return_value = MagicMock()
 
-                        with patch.object(watchdog, "_wait_for_cdp_url", new_callable=AsyncMock, return_value="http://localhost:9222/"):
+                        with patch.object(
+                            watchdog, "_wait_for_cdp_url", new_callable=AsyncMock, return_value="http://localhost:9222/"
+                        ):
                             try:
                                 process, cdp_url = await watchdog._launch_browser()
                                 assert cdp_url == "http://localhost:9222/"
@@ -1337,7 +1484,7 @@ class TestLocalBrowserWatchdog:
     async def test_launch_browser_no_executable_no_installed(self, tmp_path):
         """Lines 143-147: No executable path, no installed browser, uses playwright."""
         session = _make_mock_browser_session()
-        profile_dir = tmp_path / 'profile'
+        profile_dir = tmp_path / "profile"
         session.browser_profile.user_data_dir = str(profile_dir)
         session.browser_profile.executable_path = None
         session.browser_profile.get_args = MagicMock(return_value=["--headless", f"--user-data-dir={profile_dir}"])
@@ -1347,14 +1494,24 @@ class TestLocalBrowserWatchdog:
         with patch.object(watchdog, "_kill_stale_chrome_for_profile", new_callable=AsyncMock, return_value=True):
             with patch.object(watchdog, "_find_free_port", return_value=9222):
                 with patch.object(watchdog, "_find_installed_browser_path", return_value=None):
-                    with patch.object(watchdog, "_install_browser_with_playwright", new_callable=AsyncMock, return_value="/usr/bin/chrome"):
+                    with patch.object(
+                        watchdog,
+                        "_install_browser_with_playwright",
+                        new_callable=AsyncMock,
+                        return_value="/usr/bin/chrome",
+                    ):
                         with patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_exec:
                             mock_proc = MagicMock()
                             mock_proc.pid = 5678
                             mock_exec.return_value = mock_proc
                             with patch("psutil.Process") as MockProcess:
                                 MockProcess.return_value = MagicMock()
-                                with patch.object(watchdog, "_wait_for_cdp_url", new_callable=AsyncMock, return_value="http://localhost:9222/"):
+                                with patch.object(
+                                    watchdog,
+                                    "_wait_for_cdp_url",
+                                    new_callable=AsyncMock,
+                                    return_value="http://localhost:9222/",
+                                ):
                                     try:
                                         process, url = await watchdog._launch_browser()
                                         assert url == "http://localhost:9222/"
@@ -1365,7 +1522,7 @@ class TestLocalBrowserWatchdog:
     async def test_launch_browser_no_browser_found(self, tmp_path):
         """Lines 150-151: No browser path found at all."""
         session = _make_mock_browser_session()
-        profile_dir = tmp_path / 'profile'
+        profile_dir = tmp_path / "profile"
         session.browser_profile.user_data_dir = str(profile_dir)
         session.browser_profile.executable_path = None
         session.browser_profile.get_args = MagicMock(return_value=["--headless", f"--user-data-dir={profile_dir}"])
@@ -1375,7 +1532,9 @@ class TestLocalBrowserWatchdog:
         with patch.object(watchdog, "_kill_stale_chrome_for_profile", new_callable=AsyncMock, return_value=True):
             with patch.object(watchdog, "_find_free_port", return_value=9222):
                 with patch.object(watchdog, "_find_installed_browser_path", return_value=None):
-                    with patch.object(watchdog, "_install_browser_with_playwright", new_callable=AsyncMock, return_value=None):
+                    with patch.object(
+                        watchdog, "_install_browser_with_playwright", new_callable=AsyncMock, return_value=None
+                    ):
                         try:
                             with pytest.raises(RuntimeError, match="No local Chrome"):
                                 await watchdog._launch_browser()
@@ -1386,7 +1545,7 @@ class TestLocalBrowserWatchdog:
     async def test_launch_browser_profile_error_retry(self, tmp_path):
         """Lines 216-219, 224-226: Profile error triggers retry with temp dir."""
         session = _make_mock_browser_session()
-        profile_dir = tmp_path / 'profile'
+        profile_dir = tmp_path / "profile"
         session.browser_profile.user_data_dir = str(profile_dir)
         session.browser_profile.executable_path = "/usr/bin/chrome"
         session.browser_profile.get_args = MagicMock(return_value=["--headless", f"--user-data-dir={profile_dir}"])
@@ -1407,7 +1566,9 @@ class TestLocalBrowserWatchdog:
                 with patch("asyncio.create_subprocess_exec", side_effect=fake_subprocess):
                     with patch("psutil.Process") as MockProcess:
                         MockProcess.return_value = MagicMock()
-                        with patch.object(watchdog, "_wait_for_cdp_url", new_callable=AsyncMock, return_value="http://localhost:9222/"):
+                        with patch.object(
+                            watchdog, "_wait_for_cdp_url", new_callable=AsyncMock, return_value="http://localhost:9222/"
+                        ):
                             with patch("asyncio.sleep", new_callable=AsyncMock):
                                 try:
                                     process, url = await watchdog._launch_browser(max_retries=3)
@@ -1419,7 +1580,7 @@ class TestLocalBrowserWatchdog:
     async def test_launch_browser_non_recoverable_error(self, tmp_path):
         """Lines 281-284, 308-315: Non-recoverable error restores user_data_dir."""
         session = _make_mock_browser_session()
-        profile_dir = tmp_path / 'profile'
+        profile_dir = tmp_path / "profile"
         session.browser_profile.user_data_dir = str(profile_dir)
         session.browser_profile.executable_path = "/usr/bin/chrome"
         session.browser_profile.get_args = MagicMock(return_value=["--headless", f"--user-data-dir={profile_dir}"])
@@ -1428,7 +1589,11 @@ class TestLocalBrowserWatchdog:
 
         with patch.object(watchdog, "_kill_stale_chrome_for_profile", new_callable=AsyncMock, return_value=True):
             with patch.object(watchdog, "_find_free_port", return_value=9222):
-                with patch("asyncio.create_subprocess_exec", new_callable=AsyncMock, side_effect=RuntimeError("unexpected error")):
+                with patch(
+                    "asyncio.create_subprocess_exec",
+                    new_callable=AsyncMock,
+                    side_effect=RuntimeError("unexpected error"),
+                ):
                     try:
                         with pytest.raises(RuntimeError, match="unexpected error"):
                             await watchdog._launch_browser(max_retries=1)
@@ -1441,6 +1606,7 @@ class TestLocalBrowserWatchdog:
     async def test_cleanup_process_none(self):
         """Line 414: Process is None."""
         from openbrowser.browser.watchdogs.local_browser_watchdog import LocalBrowserWatchdog
+
         await LocalBrowserWatchdog._cleanup_process(None)
 
     @pytest.mark.asyncio
@@ -1451,6 +1617,7 @@ class TestLocalBrowserWatchdog:
         mock_process.terminate = MagicMock()
 
         from openbrowser.browser.watchdogs.local_browser_watchdog import LocalBrowserWatchdog
+
         await LocalBrowserWatchdog._cleanup_process(mock_process, require_identity=False)
         mock_process.terminate.assert_called_once()
 
@@ -1463,6 +1630,7 @@ class TestLocalBrowserWatchdog:
         mock_process.kill = MagicMock()
 
         from openbrowser.browser.watchdogs.local_browser_watchdog import LocalBrowserWatchdog
+
         with patch("asyncio.sleep", new_callable=AsyncMock):
             await LocalBrowserWatchdog._cleanup_process(mock_process, require_identity=False)
         mock_process.kill.assert_called()
@@ -1471,10 +1639,12 @@ class TestLocalBrowserWatchdog:
     async def test_cleanup_process_no_such_process(self):
         """Lines 433-435: psutil.NoSuchProcess."""
         import psutil
+
         mock_process = MagicMock()
         mock_process.terminate.side_effect = psutil.NoSuchProcess(pid=1234)
 
         from openbrowser.browser.watchdogs.local_browser_watchdog import LocalBrowserWatchdog
+
         await LocalBrowserWatchdog._cleanup_process(mock_process, require_identity=False)
 
     @pytest.mark.asyncio
@@ -1484,6 +1654,7 @@ class TestLocalBrowserWatchdog:
         mock_process.terminate.side_effect = RuntimeError("cleanup fail")
 
         from openbrowser.browser.watchdogs.local_browser_watchdog import LocalBrowserWatchdog
+
         await LocalBrowserWatchdog._cleanup_process(mock_process, require_identity=False)
 
     # -- _cleanup_temp_dir --
@@ -1521,15 +1692,15 @@ class TestLocalBrowserWatchdog:
         mock_proc = MagicMock()
         mock_proc.info = {"pid": 1, "name": "safari", "cmdline": []}
         metadata = {
-            'profile_dir': str(Path('/tmp/profile').resolve()),
-            'instance_id': 'stale-instance',
-            'owner_pid': 1,
-            'owner_start_time': 1.0,
-            'browser': None,
+            "profile_dir": str(Path("/tmp/profile").resolve()),
+            "instance_id": "stale-instance",
+            "owner_pid": 1,
+            "owner_start_time": 1.0,
+            "browser": None,
         }
 
         with (
-            patch.object(ProfileLease, 'process_identity_status', return_value='missing'),
+            patch.object(ProfileLease, "process_identity_status", return_value="missing"),
             patch("psutil.process_iter", return_value=[mock_proc]),
         ):
             result = await LocalBrowserWatchdog._kill_stale_chrome_for_profile("/tmp/profile", metadata=metadata)
@@ -1566,14 +1737,14 @@ class TestLocalBrowserWatchdog:
         type(mock_proc).info = PropertyMock(side_effect=psutil.AccessDenied(pid=1))
 
         metadata = {
-            'profile_dir': str(Path('/tmp/profile').resolve()),
-            'instance_id': 'stale-instance',
-            'owner_pid': 1,
-            'owner_start_time': 1.0,
-            'browser': None,
+            "profile_dir": str(Path("/tmp/profile").resolve()),
+            "instance_id": "stale-instance",
+            "owner_pid": 1,
+            "owner_start_time": 1.0,
+            "browser": None,
         }
         with (
-            patch.object(ProfileLease, 'process_identity_status', return_value='missing'),
+            patch.object(ProfileLease, "process_identity_status", return_value="missing"),
             patch("psutil.process_iter", return_value=[mock_proc]),
         ):
             result = await LocalBrowserWatchdog._kill_stale_chrome_for_profile("/tmp/profile", metadata=metadata)
@@ -1652,11 +1823,13 @@ class TestLocalBrowserWatchdog:
 # SecurityWatchdog Tests
 # ===========================================================================
 
+
 class TestSecurityWatchdog:
     """Cover lines 70-72, 92-93, 156-157, 178-180, 233, 261-265 in security_watchdog.py."""
 
     def _make_watchdog(self, session=None):
         from openbrowser.browser.watchdogs.security_watchdog import SecurityWatchdog
+
         return _make_watchdog(SecurityWatchdog, session=session)
 
     @pytest.mark.asyncio
@@ -1788,11 +1961,13 @@ class TestSecurityWatchdog:
 # ScreenshotWatchdog Tests
 # ===========================================================================
 
+
 class TestScreenshotWatchdog:
     """Cover lines 61-62 in screenshot_watchdog.py."""
 
     def _make_watchdog(self, session=None):
         from openbrowser.browser.watchdogs.screenshot_watchdog import ScreenshotWatchdog
+
         return _make_watchdog(ScreenshotWatchdog, session=session)
 
     @pytest.mark.asyncio
@@ -1829,11 +2004,13 @@ class TestScreenshotWatchdog:
 # BaseWatchdog Tests
 # ===========================================================================
 
+
 class TestBaseWatchdog:
     """Cover lines 111, 124-162, 255-260 in watchdog_base.py."""
 
     def _make_watchdog(self, session=None):
         from openbrowser.browser.watchdog_base import BaseWatchdog
+
         return _make_watchdog(BaseWatchdog, session=session)
 
     def test_unique_handler_result_is_exception(self):
