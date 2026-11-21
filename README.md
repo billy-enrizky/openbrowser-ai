@@ -180,6 +180,10 @@ async def main():
 asyncio.run(main())
 ```
 
+By default, CodeAgent keeps generated files under a unique temporary agent
+directory. Pass `file_system=FileSystem(base_dir=...)` when a stable path is
+required.
+
 ### With Different LLM Providers
 
 ```python

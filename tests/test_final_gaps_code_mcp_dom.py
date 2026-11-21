@@ -160,9 +160,14 @@ class TestCodeAgentServiceGaps:
         mock_llm.provider = "test-provider"
         mock_llm.max_tokens = 4096
 
+        real_exists = Path.exists
+
+        def repo_exists(path):
+            return path.name in {".git", "README.md", "docs", "examples"} or real_exists(path)
+
         with patch("openbrowser.code_use.service.get_openbrowser_version", return_value="0.1.0"), \
              patch("openbrowser.code_use.service.ProductTelemetry", return_value=MagicMock()), \
-             patch("pathlib.Path.exists", return_value=True):
+             patch("pathlib.Path.exists", repo_exists):
             from openbrowser.code_use.service import CodeAgent
 
             agent = CodeAgent(task="test", llm=mock_llm, browser_session=MagicMock())
