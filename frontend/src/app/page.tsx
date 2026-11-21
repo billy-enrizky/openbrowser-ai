@@ -131,6 +131,7 @@ export default function Home() {
     clearLogs,
     showLogs,
     setShowLogs,
+    vncInfo,
     setVncInfo,
     setBrowserViewerOpen,
     browserViewerOpen,
@@ -721,7 +722,7 @@ export default function Home() {
         </div>
 
         {/* Browser Viewer Panel */}
-        {browserViewerOpen && <BrowserViewer />}
+        {browserViewerOpen && <BrowserViewer key={vncInfo?.vnc_url ?? "no-vnc"} />}
       </main>
     </div>
   );

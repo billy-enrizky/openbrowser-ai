@@ -47,7 +47,9 @@ export function BrowserViewer({ className }: BrowserViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const vncContainerRef = useRef<HTMLDivElement>(null);
   const isMountedRef = useRef(true);
-  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("disconnected");
+  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>(
+    vncInfo ? "connecting" : "disconnected"
+  );
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [key, setKey] = useState(0); // Used to force reconnection
@@ -223,22 +225,6 @@ export function BrowserViewer({ className }: BrowserViewerProps) {
       }
     }, 100);
   }, []);
-
-  // Set connecting status when VNC info changes
-  useEffect(() => {
-    if (vncInfo && browserViewerOpen) {
-      setConnectionStatus("connecting");
-    }
-  }, [vncInfo, browserViewerOpen]);
-
-  // Reset state when viewer closes
-  useEffect(() => {
-    if (!browserViewerOpen) {
-      setConnectionStatus("disconnected");
-      setErrorMessage(null);
-      setIsInteractive(false);
-    }
-  }, [browserViewerOpen]);
 
   if (!browserViewerOpen) {
     return null;
