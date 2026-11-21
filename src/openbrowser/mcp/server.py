@@ -704,6 +704,8 @@ class _BrowserOwner:
 						self.browser_session = None
 					if cleanup.succeeded:
 						self._namespace = None
+						self._tools = None
+						self._tools_generation = None
 					if cleanup.caller_cancellation is not None and not isinstance(error, asyncio.CancelledError):
 						raise cleanup.caller_cancellation
 				raise
@@ -1071,7 +1073,12 @@ class _BrowserOwner:
 
 		tools_for_status = (
 			self._tools
-			if self._tools is not None and self._tools_generation == self._browser_generation
+			if (
+				self._tools is not None
+				and self._tools_generation == self._browser_generation
+				and self._namespace is not None
+				and self.browser_session is not None
+			)
 			else None
 		)
 		tools_snapshot = tool_availability_payload(tools_for_status, browser)
@@ -1124,6 +1131,8 @@ class _BrowserOwner:
 						self.browser_session = None
 
 				self._namespace = None
+				self._tools = None
+				self._tools_generation = None
 				if clear_variables:
 					self._pending_variables.clear()
 					self._last_namespace_transfer = NamespaceTransfer().to_dict()
@@ -1204,6 +1213,8 @@ class _BrowserOwner:
 				session = self.browser_session
 				if not session:
 					self._namespace = None
+					self._tools = None
+					self._tools_generation = None
 					try:
 						self._browser_lifecycle.transition(
 							LifecyclePhase.STOPPED,
@@ -1218,6 +1229,8 @@ class _BrowserOwner:
 				if cleanup.succeeded and self.browser_session is session:
 					self.browser_session = None
 					self._namespace = None
+					self._tools = None
+					self._tools_generation = None
 					try:
 						self._browser_lifecycle.transition(
 							LifecyclePhase.STOPPED,
@@ -1255,6 +1268,8 @@ class _BrowserOwner:
 					if cleanup.succeeded and self.browser_session is session:
 						self.browser_session = None
 						self._namespace = None
+						self._tools = None
+						self._tools_generation = None
 						self._merge_pending_variables(self._carry_namespace(old_namespace, session))
 						self._browser_generation += 1
 						try:

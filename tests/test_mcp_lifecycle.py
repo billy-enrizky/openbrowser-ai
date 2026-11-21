@@ -30,6 +30,10 @@ async def test_get_status_reports_initialized_tool_availability(mcp_server):
 
 	mcp_server._tools = CodeAgentTools()
 	mcp_server._tools_generation = mcp_server._browser_generation
+	mcp_server._namespace = {}
+	mcp_server.browser_session = MagicMock()
+	mcp_server.browser_session.download_outcomes.return_value = []
+	mcp_server.browser_session.download_outcomes_error = None
 
 	payload = json.loads(await mcp_server._handle_tool('get_status', {}))
 
@@ -45,6 +49,7 @@ async def test_get_status_reports_filtered_tools_for_the_active_tab(mcp_server):
 
 	mcp_server._tools = CodeAgentTools()
 	mcp_server._tools_generation = mcp_server._browser_generation
+	mcp_server._namespace = {}
 
 	@mcp_server._tools.registry.action("Google", domains=["*.google.com"])
 	async def google_action():

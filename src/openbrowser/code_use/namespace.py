@@ -373,6 +373,13 @@ def create_namespace(
 	async def evaluate_wrapper(
 		code: str | None = None, variables: dict[str, Any] | None = None, *_args: Any, **kwargs: Any
 	) -> Any:
+		resolver = getattr(tools.registry, 'resolve_availability_page_url', None)
+		if iscoroutinefunction(resolver):
+			page_url = await resolver('evaluate', browser_session, None)
+			checker = getattr(tools.registry, 'check_action_available', None)
+			if callable(checker):
+				checker('evaluate', page_url=page_url, display_name='evaluate')
+
 		# Handle both positional and keyword argument styles
 		if code is None:
 			# Check if code was passed as keyword arg

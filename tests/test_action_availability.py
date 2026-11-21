@@ -678,3 +678,19 @@ def test_action_result_error_code_is_typed():
     result = ActionResult(error_code="domain_filtered")
 
     assert result.error_code is ActionAvailabilityCode.DOMAIN_FILTERED
+
+
+@pytest.mark.asyncio
+async def test_domain_restricted_evaluate_is_gated_in_the_namespace():
+    tools = Tools()
+
+    @tools.registry.action("Google evaluate", domains=["*.google.com"])
+    async def evaluate(code: str):
+        return code
+
+    namespace = create_namespace(_session_on("https://example.com"), tools=tools)
+
+    with pytest.raises(ActionAvailabilityError) as exc_info:
+        await namespace["evaluate"]("document.title")
+
+    assert exc_info.value.code is ActionAvailabilityCode.DOMAIN_FILTERED
