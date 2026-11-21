@@ -7,7 +7,17 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from openbrowser.browser import BrowserProfile, BrowserSession
+from openbrowser.browser.focus import (
+	FocusChangeReason,
+	FocusPhase,
+	FocusSnapshot,
+	FocusTargetCode,
+	FocusTargetError,
+)
 from openbrowser.browser.lifecycle import LifecyclePhase
+from openbrowser.browser.session import CDPSession
+from openbrowser.browser.tabs import TabState
 from openbrowser.daemon.server import DaemonServer
 
 
@@ -22,6 +32,7 @@ def test_status_before_browser_start(daemon_server):
 	assert result['state'] == 'stopped'
 	assert result['initialized'] is False
 	assert result['browser']['phase'] == 'stopped'
+	assert result['browser']['focus']['phase'] == 'uninitialized'
 	assert 'socket' in result
 	assert 'idle_timeout' in result
 
@@ -47,20 +58,82 @@ def test_status_includes_browser_tabs(daemon_server):
 	daemon_server._lifecycle.transition(LifecyclePhase.STARTING)
 	daemon_server._lifecycle.transition(LifecyclePhase.READY)
 	daemon_server._executor = MagicMock()
-	session = MagicMock()
-	session.lifecycle_snapshot.return_value = {
-		'phase': 'ready',
-		'generation': 3,
-		'tabs': [{'target_id': 'abc', 'state': 'open'}],
-	}
+	session = BrowserSession(browser_profile=BrowserProfile(headless=True))
+	session._focus_state = FocusSnapshot(
+		phase=FocusPhase.FOCUSED,
+		target_id='abc',
+		session_id='session-1',
+		previous_target_id=None,
+		generation=2,
+		reason=FocusChangeReason.SWITCH,
+		last_error=None,
+		updated_at=1.0,
+	)
+	focus_session = CDPSession.model_construct(
+		cdp_client=MagicMock(),
+		target_id='abc',
+		session_id='session-1',
+	)
+	session.agent_focus = focus_session
+	session._tab_registry.register('abc', url='https://example.com', state=TabState.OPEN, title='Example')
+	session._lifecycle.transition(LifecyclePhase.STARTING)
+	session._lifecycle.transition(LifecyclePhase.READY, increment_generation=True)
 	daemon_server._session = session
 
 	result = daemon_server._status_payload()
 
 	assert result['state'] == 'ready'
 	assert result['initialized'] is True
-	assert result['browser']['generation'] == 3
+	assert result['browser']['generation'] == 1
+	assert result['browser']['active_target_id'] == 'abc'
 	assert result['browser']['tabs'][0]['target_id'] == 'abc'
+	assert result['browser']['focus']['phase'] == 'focused'
+	assert result['browser']['focus']['target_id'] == 'abc'
+	assert result['browser']['focus']['generation'] == 2
+
+
+def test_status_includes_lost_browser_focus(daemon_server):
+	session = BrowserSession(browser_profile=BrowserProfile(headless=True))
+	session._focus_lost_locked(
+		FocusTargetError(
+			'No live page target was available.',
+			code=FocusTargetCode.RECOVERY_FAILED,
+			phase=FocusPhase.LOST,
+			target_id='tab-1',
+			target_type='page',
+		),
+		FocusChangeReason.CRASH_RECOVERY,
+		previous_target_id='tab-1',
+	)
+	daemon_server._session = session
+
+	result = daemon_server._status_payload()
+
+	assert result['browser']['focus']['phase'] == 'lost'
+	assert result['browser']['focus']['previous_target_id'] == 'tab-1'
+	assert result['browser']['focus']['last_error']['code'] == 'recovery_failed'
+
+
+def test_status_recovers_focus_when_lifecycle_snapshot_fails(daemon_server):
+	session = BrowserSession(browser_profile=BrowserProfile(headless=True))
+	session._focus_lost_locked(
+		FocusTargetError(
+			'No live page target was available.',
+			code=FocusTargetCode.RECOVERY_FAILED,
+			phase=FocusPhase.LOST,
+			target_id='tab-1',
+			target_type='page',
+		),
+		FocusChangeReason.DETACH_RECOVERY,
+		previous_target_id='tab-1',
+	)
+	daemon_server._session = session
+
+	with patch.object(BrowserSession, 'lifecycle_snapshot', side_effect=RuntimeError('status unavailable')):
+		result = daemon_server._status_payload()
+
+	assert result['browser']['focus']['phase'] == 'lost'
+	assert result['browser']['focus']['previous_target_id'] == 'tab-1'
 
 
 def test_default_profile_for_default_socket(daemon_server, tmp_path, monkeypatch):

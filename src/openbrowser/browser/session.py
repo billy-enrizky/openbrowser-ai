@@ -6,6 +6,7 @@ import inspect
 import logging
 import math
 import os
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from functools import cached_property
@@ -52,11 +53,30 @@ from openbrowser.browser.lifecycle import (
 	LifecycleSnapshot,
 	LifecycleTransitionError,
 )
+from openbrowser.browser.focus import (
+	CLOSE_RECONCILIATION_SECONDS,
+	FOCUS_NAVIGATION_OBSERVER_SECONDS,
+	FocusChangeReason,
+	FocusPhase,
+	FocusSnapshot,
+	FocusTargetCode,
+	FocusTargetError,
+	FocusTransitionBudget,
+	FocusTransitionResult,
+)
 from openbrowser.browser.profile import BrowserProfile, ProxySettings
 from openbrowser.browser.navigation import (
-	ContainmentAttempt, ContainmentPhase, NavigationCommit,
-	NavigationBlockedError, NavigationBusyError, NavigationError, NavigationMonitor,
-	NavigationOperation, NavigationPhase, NavigationTimeoutError, WaitUntil,
+	ContainmentAttempt,
+	ContainmentPhase,
+	NavigationCommit,
+	NavigationBlockedError,
+	NavigationBusyError,
+	NavigationError,
+	NavigationMonitor,
+	NavigationOperation,
+	NavigationPhase,
+	NavigationTimeoutError,
+	WaitUntil,
 )
 from openbrowser.browser.tabs import TabError, TabRegistry, TabState
 from openbrowser.browser.views import BrowserStateSummary, TabInfo
@@ -71,13 +91,13 @@ if TYPE_CHECKING:
 DEFAULT_BROWSER_PROFILE = BrowserProfile()
 NAVIGATION_CONTAINMENT_GRACE = 1.0
 _POLICY_RETIREMENT_HINT = 'Runtime retained. Close the actual browser, then create a new BrowserSession; kill() can verify a managed local browser exit.'
-_CONTAIN_DOCUMENT = '''function(expectedUrl) {
+_CONTAIN_DOCUMENT = """function(expectedUrl) {
 	const active = this.defaultView && this.defaultView.document;
 	if (this.nodeType !== 9 || this !== document || this !== active ||
 		this.URL !== expectedUrl || active.URL !== expectedUrl) return {initiated:false};
 	this.location.replace('about:blank');
 	return {initiated:true};
-}'''
+}"""
 
 
 def _shutdown_timeout() -> float:
@@ -86,6 +106,7 @@ def _shutdown_timeout() -> float:
 		return max(1.0, float(raw)) if raw else 20.0
 	except ValueError:
 		return 20.0
+
 
 _LOGGED_UNIQUE_SESSION_IDS = set()  # track unique session IDs that have been logged to make sure we always assign a unique enough id to new sessions and avoid ambiguity in logs
 red = '\033[91m'
@@ -117,9 +138,9 @@ class CDPSession(BaseModel):
 		"""Create a CDP session for a target using the shared WebSocket.
 
 		Args:
-			cdp_client: The shared CDP client (root WebSocket connection)
-			target_id: Target ID to attach to
-			domains: List of CDP domains to enable. If None, enables default domains.
+                cdp_client: The shared CDP client (root WebSocket connection)
+                target_id: Target ID to attach to
+                domains: List of CDP domains to enable. If None, enables default domains.
 		"""
 		# Always use shared CDP client (event-driven approach)
 		cdp_session = cls(
@@ -190,6 +211,14 @@ class CDPSession(BaseModel):
 	async def get_target_info(self) -> TargetInfo:
 		result = await self.cdp_client.send.Target.getTargetInfo(params={'targetId': self.target_id})
 		return result['targetInfo']
+
+
+@dataclass(frozen=True)
+class _FocusCheckpoint:
+	"""Focus state captured before one serialized transition."""
+
+	snapshot: FocusSnapshot
+	session: CDPSession | None
 
 
 @dataclass(frozen=True)
@@ -425,6 +454,10 @@ class BrowserSession(BaseModel):
 	_lifecycle_lock: asyncio.Lock = PrivateAttr(default_factory=asyncio.Lock)
 	_navigation_monitor: NavigationMonitor = PrivateAttr(default_factory=NavigationMonitor)
 	_navigation_lock: asyncio.Lock = PrivateAttr(default_factory=asyncio.Lock)
+	_focus_state: FocusSnapshot = PrivateAttr(default_factory=FocusSnapshot.uninitialized)
+	_focus_lock: asyncio.Lock = PrivateAttr(default_factory=asyncio.Lock)
+	_focus_epoch: int = PrivateAttr(default=0)
+	_focus_observer_tasks: set[asyncio.Task[Any]] = PrivateAttr(default_factory=set)
 	_navigation_task: asyncio.Task | None = PrivateAttr(default=None)
 	_navigation_task_operation: NavigationOperation | None = PrivateAttr(default=None)
 	_navigation_event_pumps: dict[asyncio.Task, EventBus] = PrivateAttr(default_factory=dict)
@@ -442,7 +475,9 @@ class BrowserSession(BaseModel):
 	_downloaded_files: list[str] = PrivateAttr(default_factory=list)  # Track files downloaded during this session
 	_download_history: list[dict[str, object]] = PrivateAttr(default_factory=list)  # Last outcomes, kept after reset
 	_download_outcomes_error: str | None = PrivateAttr(default=None)  # Last reader failure, surfaced in status
-	_closed_popup_messages: list[str] = PrivateAttr(default_factory=list)  # Store messages from auto-closed JavaScript dialogs
+	_closed_popup_messages: list[str] = PrivateAttr(
+		default_factory=list
+	)  # Store messages from auto-closed JavaScript dialogs
 	_storage_state_warnings: list[str] = PrivateAttr(default_factory=list)
 
 	# Watchdogs
@@ -471,7 +506,9 @@ class BrowserSession(BaseModel):
 	@cached_property
 	def _id_for_logs(self) -> str:
 		"""Get human-friendly semi-unique identifier for differentiating different BrowserSession instances in logs"""
-		str_id = self.id[-4:]  # default to last 4 chars of truly random uuid, less helpful than cdp port but always unique enough
+		str_id = self.id[
+			-4:
+		]  # default to last 4 chars of truly random uuid, less helpful than cdp port but always unique enough
 		port_number = (self.cdp_url or 'no-cdp').rsplit(':', 1)[-1].split('/', 1)[0].strip()
 		port_is_random = not port_number.startswith('922')
 		port_is_unique_enough = port_number not in _LOGGED_UNIQUE_SESSION_IDS
@@ -508,6 +545,7 @@ class BrowserSession(BaseModel):
 		snapshot['active_target_id'] = self.agent_focus.target_id if self.agent_focus else None
 		snapshot['tabs'] = self.tab_snapshot()
 		snapshot['navigation'] = self._navigation_monitor.snapshot()
+		snapshot['focus'] = self.focus_snapshot().to_dict()
 		snapshot['warnings'] = list(self._storage_state_warnings)
 		configured = self.browser_profile.storage_state if self.browser_profile else None
 		storage_state = None
@@ -532,6 +570,1361 @@ class BrowserSession(BaseModel):
 		"""Return the registry view of all known tabs."""
 		active_target_id = self.agent_focus.target_id if self.agent_focus else None
 		return self._tab_registry.snapshot(active_target_id=active_target_id)
+
+	def focus_snapshot(self) -> FocusSnapshot:
+		"""Return the current focus state machine snapshot."""
+		return self._focus_state
+
+	def _focus_checkpoint_locked(self) -> _FocusCheckpoint:
+		return _FocusCheckpoint(snapshot=self._focus_state, session=self.agent_focus)
+
+	def _begin_focus_change_locked(
+		self,
+		reason: FocusChangeReason,
+		target_id: str | None,
+		phase: FocusPhase,
+	) -> None:
+		current = self._focus_state
+		previous_target_id = current.target_id or current.previous_target_id
+		self._focus_state = FocusSnapshot(
+			phase=phase,
+			target_id=target_id if phase is FocusPhase.SWITCHING else None,
+			session_id=None,
+			previous_target_id=previous_target_id,
+			generation=current.generation,
+			reason=reason,
+			last_error=None,
+			updated_at=time.time(),
+		)
+		if phase is FocusPhase.RECOVERING:
+			self.agent_focus = None
+
+	def _restore_focus_locked(self, checkpoint: _FocusCheckpoint) -> None:
+		self._focus_state = checkpoint.snapshot
+		self.agent_focus = checkpoint.session
+
+	def _focus_lost_locked(
+		self,
+		error: FocusTargetError,
+		reason: FocusChangeReason,
+		previous_target_id: str | None = None,
+	) -> FocusSnapshot:
+		current = self._focus_state
+		prior_target = previous_target_id or current.target_id or current.previous_target_id
+		generation = current.generation
+		if current.phase not in (FocusPhase.LOST, FocusPhase.UNINITIALIZED):
+			generation += 1
+		self._clear_focus_caches_locked()
+		self.agent_focus = None
+		self._focus_state = FocusSnapshot(
+			phase=FocusPhase.LOST,
+			target_id=None,
+			session_id=None,
+			previous_target_id=prior_target,
+			generation=generation,
+			reason=reason,
+			last_error=error.to_snapshot(),
+			updated_at=time.time(),
+		)
+		return self._focus_state
+
+	def _clear_focus_caches_locked(self) -> None:
+		clear_cache = getattr(self._dom_watchdog, 'clear_cache', None)
+		if callable(clear_cache):
+			clear_cache()
+		self._cached_browser_state_summary = None
+		self._cached_selector_map.clear()
+
+	async def _target_liveness(self, target_id: str, budget: FocusTransitionBudget) -> bool | None:
+		"""Return target existence, or None when the browser cannot prove it."""
+		root = self._cdp_client_root
+		if root is None:
+			return None
+		try:
+			result = await self._await_focus_operation(
+				root.send.Target.getTargets(),
+				budget,
+				target_id=target_id,
+				phase=self._focus_state.phase,
+			)
+		except Exception:
+			return None
+		if not isinstance(result, dict):
+			return None
+		target_infos = result.get('targetInfos')
+		if not isinstance(target_infos, list):
+			return None
+		return any(isinstance(target, dict) and target.get('targetId') == target_id for target in target_infos)
+
+	def _set_agent_focus_locked(
+		self,
+		session: CDPSession,
+		reason: FocusChangeReason,
+		*,
+		previous_snapshot: FocusSnapshot | None = None,
+	) -> FocusSnapshot:
+		"""Commit one validated page session.
+
+		The caller holds `_focus_lock`. The comparison snapshot is the state
+		before the transaction began, not the temporary `switching` snapshot.
+		"""
+		comparison = previous_snapshot or self._focus_state
+		record = self._tab_registry.get(session.target_id)
+		if record is not None and record.state in (TabState.CLOSING, TabState.CLOSED, TabState.CRASHED):
+			raise FocusTargetError(
+				f'Target {session.target_id[-8:]} is {record.state.value} and cannot receive focus.',
+				code=FocusTargetCode.TAB_NOT_LIVE,
+				phase=self._focus_state.phase,
+				target_id=session.target_id,
+				target_type='page',
+			)
+		if comparison.phase is FocusPhase.FOCUSED and comparison.is_exact_pair(session.target_id, session.session_id):
+			self._focus_state = comparison
+			self.agent_focus = session
+			return comparison
+
+		self._clear_focus_caches_locked()
+		session_url = getattr(session, 'url', 'about:blank')
+		session_title = getattr(session, 'title', '')
+		if record is None:
+			self._tab_registry.register(
+				session.target_id,
+				url=session_url,
+				title=session_title,
+				state=TabState.OPEN,
+			)
+		elif record.state is TabState.OPENING:
+			self._tab_registry.update(
+				session.target_id,
+				url=session_url,
+				title=session_title,
+				state=TabState.OPEN,
+			)
+		else:
+			self._tab_registry.update(session.target_id, url=session_url, title=session_title)
+		previous_target_id = comparison.target_id or comparison.previous_target_id
+		self.agent_focus = session
+		self._focus_state = FocusSnapshot(
+			phase=FocusPhase.FOCUSED,
+			target_id=session.target_id,
+			session_id=session.session_id,
+			previous_target_id=previous_target_id,
+			generation=comparison.generation + 1,
+			reason=reason,
+			last_error=None,
+			updated_at=time.time(),
+		)
+		return self._focus_state
+
+	@staticmethod
+	def _focus_timeout_error(
+		target_id: str | None,
+		phase: FocusPhase,
+		*,
+		target_type: str | None = None,
+		message: str = 'Focus transition timed out.',
+		created_target_id: str | None = None,
+	) -> FocusTargetError:
+		return FocusTargetError(
+			message,
+			code=FocusTargetCode.TIMEOUT,
+			phase=phase,
+			target_id=target_id,
+			target_type=target_type,
+			created_target_id=created_target_id,
+		)
+
+	async def _await_focus_operation(
+		self,
+		awaitable: Awaitable[Any],
+		budget: FocusTransitionBudget,
+		*,
+		target_id: str | None,
+		phase: FocusPhase,
+		target_type: str | None = None,
+		created_target_id: str | None = None,
+	) -> Any:
+		remaining = budget.remaining()
+		if remaining <= 0:
+			if inspect.iscoroutine(awaitable):
+				awaitable.close()
+			raise self._focus_timeout_error(
+				target_id,
+				phase,
+				target_type=target_type,
+				created_target_id=created_target_id,
+			)
+		try:
+			return await asyncio.wait_for(awaitable, timeout=remaining)
+		except TimeoutError as error:
+			raise self._focus_timeout_error(
+				target_id,
+				phase,
+				target_type=target_type,
+				created_target_id=created_target_id,
+			) from error
+
+	async def _validate_focus_target_locked(
+		self,
+		target_id: str,
+		budget: FocusTransitionBudget,
+		*,
+		created_target_id: str | None = None,
+	) -> dict[str, Any]:
+		root = self._cdp_client_root
+		if root is None:
+			raise FocusTargetError(
+				'CDP client is not initialized.',
+				code=FocusTargetCode.TARGET_MISSING,
+				phase=self._focus_state.phase,
+				target_id=target_id,
+				created_target_id=created_target_id,
+			)
+		try:
+			result = await self._await_focus_operation(
+				root.send.Target.getTargetInfo(params={'targetId': target_id}),
+				budget,
+				target_id=target_id,
+				phase=self._focus_state.phase,
+				created_target_id=created_target_id,
+			)
+		except FocusTargetError:
+			raise
+		except Exception as error:
+			raise FocusTargetError(
+				f'Target {target_id[-8:]} is not available: {type(error).__name__}: {error}',
+				code=FocusTargetCode.TARGET_MISSING,
+				phase=self._focus_state.phase,
+				target_id=target_id,
+				created_target_id=created_target_id,
+			) from error
+		target_info = result.get('targetInfo') if isinstance(result, dict) else None
+		if isinstance(target_info, dict) and target_info.get('targetId') not in (None, target_id):
+			targets = await self._await_focus_operation(
+				root.send.Target.getTargets(),
+				budget,
+				target_id=target_id,
+				phase=self._focus_state.phase,
+				created_target_id=created_target_id,
+			)
+			target_info = next(
+				(item for item in targets.get('targetInfos', []) if item.get('targetId') == target_id),
+				None,
+			)
+		if not isinstance(target_info, dict):
+			raise FocusTargetError(
+				f'Target {target_id[-8:]} returned no target information.',
+				code=FocusTargetCode.TARGET_MISSING,
+				phase=self._focus_state.phase,
+				target_id=target_id,
+			)
+		target_type = str(target_info.get('type') or 'unknown')
+		if target_type != 'page':
+			raise FocusTargetError(
+				f'Target {target_id[-8:]} is a {target_type}, not a page.',
+				code=FocusTargetCode.NOT_A_PAGE,
+				phase=self._focus_state.phase,
+				target_id=target_id,
+				target_type=target_type,
+			)
+		record = self._tab_registry.get(target_id)
+		if record is not None and record.state in (TabState.CLOSING, TabState.CLOSED, TabState.CRASHED):
+			raise FocusTargetError(
+				f'Target {target_id[-8:]} is {record.state.value}.',
+				code=FocusTargetCode.TAB_NOT_LIVE,
+				phase=self._focus_state.phase,
+				target_id=target_id,
+				target_type=target_type,
+			)
+		return target_info
+
+	async def _get_focus_session_locked(
+		self,
+		target_id: str,
+		budget: FocusTransitionBudget,
+		*,
+		created_target_id: str | None = None,
+	) -> CDPSession:
+		manager = self._session_manager
+		if manager is None:
+			raise FocusTargetError(
+				'CDP session manager is not initialized.',
+				code=FocusTargetCode.TARGET_MISSING,
+				phase=self._focus_state.phase,
+				target_id=target_id,
+				created_target_id=created_target_id,
+			)
+		wait_deadline = min(budget.deadline, asyncio.get_running_loop().time() + 2.0)
+		for _attempt in range(20):
+			try:
+				session = await manager.get_live_session_for_target(target_id, budget=budget)
+			except TimeoutError as error:
+				raise FocusTargetError(
+					f'Focus session lookup timed out for target {target_id[-8:]}.',
+					code=FocusTargetCode.TIMEOUT,
+					phase=self._focus_state.phase,
+					target_id=target_id,
+					created_target_id=created_target_id,
+				) from error
+			if session is not None:
+				return session
+			remaining = wait_deadline - asyncio.get_running_loop().time()
+			if remaining <= 0:
+				raise FocusTargetError(
+					f'No live session is available for target {target_id[-8:]}.',
+					code=FocusTargetCode.TARGET_MISSING,
+					phase=self._focus_state.phase,
+					target_id=target_id,
+					created_target_id=created_target_id,
+				)
+			await asyncio.sleep(min(0.1, remaining))
+		raise FocusTargetError(
+			f'No live session is available for target {target_id[-8:]}.',
+			code=FocusTargetCode.TARGET_MISSING,
+			phase=self._focus_state.phase,
+			target_id=target_id,
+			created_target_id=created_target_id,
+		)
+
+	@staticmethod
+	def _is_missing_cdp_session_error(error: Exception) -> bool:
+		"""Return True for a stale or detached exact CDP session."""
+		text = str(error).lower()
+		return any(
+			marker in text
+			for marker in (
+				'session with given id not found',
+				'session not found',
+				'no session with given id',
+				'target closed',
+				'detached from target',
+				'-32001',
+			)
+		)
+
+	async def _focus_exact_session_is_live(
+		self,
+		target_id: str | None,
+		session_id: str | None,
+		budget: FocusTransitionBudget,
+		*,
+		phase: FocusPhase,
+		use_active_ids: bool = False,
+	) -> bool:
+		"""Return True only when the exact committed session is still active."""
+		if target_id is None or session_id is None:
+			return False
+		record = self._tab_registry.get(target_id)
+		if record is not None and record.state in (TabState.CLOSING, TabState.CLOSED, TabState.CRASHED):
+			return False
+		manager = self._session_manager
+		if manager is None:
+			return False
+		try:
+			if use_active_ids:
+				active_ids = await self._await_focus_operation(
+					manager.active_session_ids(target_id, budget=budget),
+					budget,
+					target_id=target_id,
+					phase=phase,
+					target_type='page',
+				)
+				return session_id in active_ids
+			live = await self._await_focus_operation(
+				manager.get_live_session_for_target(target_id, budget=budget),
+				budget,
+				target_id=target_id,
+				phase=phase,
+				target_type='page',
+			)
+		except FocusTargetError:
+			raise
+		except Exception:
+			return False
+		return live is not None and live.target_id == target_id and live.session_id == session_id
+
+	async def _focus_checkpoint_liveness(
+		self,
+		checkpoint: _FocusCheckpoint,
+		budget: FocusTransitionBudget,
+	) -> bool | None:
+		"""Return live, dead, or unknown for a prior focus checkpoint."""
+		snapshot = checkpoint.snapshot
+		if snapshot.phase is not FocusPhase.FOCUSED:
+			return True
+		if snapshot.target_id is None or snapshot.session_id is None:
+			return False
+		record = self._tab_registry.get(snapshot.target_id)
+		if record is not None and record.state in (TabState.CLOSING, TabState.CLOSED, TabState.CRASHED):
+			return False
+		manager = self._session_manager
+		if manager is None:
+			return None
+		try:
+			active_ids = await self._await_focus_operation(
+				manager.active_session_ids(snapshot.target_id, budget=budget),
+				budget,
+				target_id=snapshot.target_id,
+				phase=snapshot.phase,
+				target_type='page',
+			)
+		except Exception:
+			return None
+		return snapshot.session_id in active_ids
+
+	async def _restore_or_lose_focus_locked(
+		self,
+		checkpoint: _FocusCheckpoint,
+		budget: FocusTransitionBudget,
+	) -> FocusChangeReason | None:
+		"""Restore a still-live prior focus, or publish loss and request recovery."""
+		rollback_budget = budget if budget.remaining() > 0 else FocusTransitionBudget.start(CLOSE_RECONCILIATION_SECONDS)
+		checkpoint_liveness = await self._focus_checkpoint_liveness(checkpoint, rollback_budget)
+		previous_target_id = checkpoint.snapshot.target_id
+		if checkpoint_liveness is True:
+			self._restore_focus_locked(checkpoint)
+			return None
+		if checkpoint_liveness is None:
+			self._focus_lost_locked(
+				FocusTargetError(
+					'The previous focus target liveness could not be verified.',
+					code=FocusTargetCode.TARGET_LIVENESS_UNKNOWN,
+					phase=self._focus_state.phase,
+					target_id=previous_target_id,
+					target_type='page',
+				),
+				FocusChangeReason.LIVENESS_RECOVERY,
+				previous_target_id=previous_target_id,
+			)
+			return None
+		reason = (
+			self._focus_reason_for_detach(previous_target_id)
+			if previous_target_id
+			else FocusChangeReason.DETACH_RECOVERY
+		)
+		self._focus_lost_locked(
+			FocusTargetError(
+				'The previous focus target is no longer live.',
+				code=FocusTargetCode.TARGET_DETACHED,
+				phase=self._focus_state.phase,
+				target_id=previous_target_id,
+				target_type='page',
+			),
+			reason,
+			previous_target_id=previous_target_id,
+		)
+		return reason
+
+	async def _select_focus_target_locked(
+		self,
+		budget: FocusTransitionBudget,
+		*,
+		excluded_target_id: str | None,
+		create_if_missing: bool,
+	) -> tuple[str, str | None]:
+		try:
+			pages = await self._await_focus_operation(
+				self._cdp_get_all_pages(),
+				budget,
+				target_id=excluded_target_id,
+				phase=self._focus_state.phase,
+			)
+		except FocusTargetError:
+			raise
+		except Exception as error:
+			raise FocusTargetError(
+				f'Could not list browser pages: {type(error).__name__}: {error}',
+				code=FocusTargetCode.NO_PAGE_AVAILABLE,
+				phase=self._focus_state.phase,
+				target_id=excluded_target_id,
+			) from error
+		candidates = self._tab_registry.live_page_candidates(
+			pages,
+			exclude_target_id=excluded_target_id,
+		)
+		if candidates:
+			return candidates[-1].target_id, None
+		if not create_if_missing:
+			raise FocusTargetError(
+				'No live page target is available.',
+				code=FocusTargetCode.NO_PAGE_AVAILABLE,
+				phase=self._focus_state.phase,
+				target_id=excluded_target_id,
+			)
+		try:
+			target_id = await self._await_focus_operation(
+				self._cdp_create_new_page('about:blank'),
+				budget,
+				target_id=excluded_target_id,
+				phase=self._focus_state.phase,
+			)
+		except FocusTargetError:
+			raise
+		except Exception as error:
+			raise FocusTargetError(
+				f'Could not create a recovery page: {type(error).__name__}: {error}',
+				code=FocusTargetCode.NO_PAGE_AVAILABLE,
+				phase=self._focus_state.phase,
+				target_id=excluded_target_id,
+			) from error
+		self._tab_registry.register(target_id, url='about:blank', state=TabState.OPEN)
+		return target_id, target_id
+
+	async def _activate_focus_locked(self, session: CDPSession, budget: FocusTransitionBudget) -> None:
+		root = self._cdp_client_root
+		if root is None:
+			raise FocusTargetError(
+				'CDP client is not initialized.',
+				code=FocusTargetCode.ACTIVATION_FAILED,
+				phase=self._focus_state.phase,
+				target_id=session.target_id,
+				target_type='page',
+			)
+		try:
+			await self._await_focus_operation(
+				root.send.Target.activateTarget(params={'targetId': session.target_id}),
+				budget,
+				target_id=session.target_id,
+				phase=self._focus_state.phase,
+				target_type='page',
+			)
+		except FocusTargetError:
+			raise
+		except Exception as error:
+			raise FocusTargetError(
+				f'Could not activate target {session.target_id[-8:]}: {type(error).__name__}: {error}',
+				code=FocusTargetCode.ACTIVATION_FAILED,
+				phase=self._focus_state.phase,
+				target_id=session.target_id,
+				target_type='page',
+			) from error
+
+	async def _probe_focus_locked(self, session: CDPSession, budget: FocusTransitionBudget) -> None:
+		try:
+			result = await self._await_focus_operation(
+				session.cdp_client.send.Runtime.evaluate(
+					params={'expression': '1 + 1', 'returnByValue': True},
+					session_id=session.session_id,
+				),
+				budget,
+				target_id=session.target_id,
+				phase=self._focus_state.phase,
+				target_type='page',
+			)
+		except FocusTargetError:
+			raise
+		except Exception as error:
+			raise FocusTargetError(
+				f'Target {session.target_id[-8:]} is unresponsive: {type(error).__name__}: {error}',
+				code=FocusTargetCode.UNRESPONSIVE,
+				phase=self._focus_state.phase,
+				target_id=session.target_id,
+				target_type='page',
+			) from error
+		if not isinstance(result, dict) or result.get('result', {}).get('value') != 2:
+			raise FocusTargetError(
+				f'Target {session.target_id[-8:]} failed the focus responsiveness probe.',
+				code=FocusTargetCode.UNRESPONSIVE,
+				phase=self._focus_state.phase,
+				target_id=session.target_id,
+				target_type='page',
+			)
+
+	async def _focus_transition_to_target(
+		self,
+		target_id: str | None,
+		*,
+		reason: FocusChangeReason,
+		budget: FocusTransitionBudget,
+		excluded_target_id: str | None = None,
+		create_if_missing: bool = False,
+		activate: bool = True,
+		probe: bool = True,
+		failure_mode: Literal['restore', 'lost'] = 'restore',
+		phase: FocusPhase = FocusPhase.SWITCHING,
+		commit_guard: Callable[[], None] | None = None,
+		expected_generation: int | None = None,
+	) -> FocusTransitionResult:
+		"""Run one serialized focus transaction and commit at the end."""
+		remaining = budget.remaining()
+		if remaining <= 0:
+			raise self._focus_timeout_error(target_id, self._focus_state.phase)
+		try:
+			await asyncio.wait_for(self._focus_lock.acquire(), timeout=remaining)
+		except TimeoutError as error:
+			raise self._focus_timeout_error(target_id, self._focus_state.phase) from error
+
+		checkpoint = self._focus_checkpoint_locked()
+		if expected_generation is not None and checkpoint.snapshot.generation != expected_generation:
+			self._focus_lock.release()
+			raise FocusTargetError(
+				'Focus changed before the transition could start.',
+				code=FocusTargetCode.STALE_TRANSITION,
+				phase=checkpoint.snapshot.phase,
+				target_id=checkpoint.snapshot.target_id,
+			)
+		focus_epoch = self._focus_epoch
+		lifecycle_generation = self._lifecycle.generation
+		created_target_id: str | None = None
+		recovery_after_failure: tuple[str, FocusChangeReason] | None = None
+		try:
+			self._begin_focus_change_locked(reason, target_id, phase)
+			if target_id is None:
+				target_id, created_target_id = await self._select_focus_target_locked(
+					budget,
+					excluded_target_id=excluded_target_id,
+					create_if_missing=create_if_missing,
+				)
+				self._focus_state = FocusSnapshot(
+					phase=phase,
+					target_id=target_id if phase is FocusPhase.SWITCHING else None,
+					session_id=None,
+					previous_target_id=self._focus_state.previous_target_id,
+					generation=self._focus_state.generation,
+					reason=reason,
+					last_error=None,
+					updated_at=time.time(),
+				)
+			await self._validate_focus_target_locked(target_id, budget, created_target_id=created_target_id)
+			session = await self._get_focus_session_locked(target_id, budget, created_target_id=created_target_id)
+			if activate:
+				await self._activate_focus_locked(session, budget)
+			if probe:
+				await self._probe_focus_locked(session, budget)
+			record = self._tab_registry.get(target_id)
+			if record is not None and record.state in (TabState.CLOSING, TabState.CLOSED, TabState.CRASHED):
+				raise FocusTargetError(
+					f'Target {target_id[-8:]} is no longer live before the focus commit.',
+					code=FocusTargetCode.TAB_NOT_LIVE,
+					phase=self._focus_state.phase,
+					target_id=target_id,
+					target_type='page',
+					created_target_id=created_target_id,
+				)
+			if not await self._focus_exact_session_is_live(
+				session.target_id,
+				session.session_id,
+				budget,
+				phase=self._focus_state.phase,
+			):
+				raise FocusTargetError(
+					f'Target {target_id[-8:]} detached before the focus commit.',
+					code=FocusTargetCode.TARGET_DETACHED,
+					phase=self._focus_state.phase,
+					target_id=target_id,
+					target_type='page',
+					created_target_id=created_target_id,
+				)
+			if commit_guard is not None:
+				commit_guard()
+			if self._focus_epoch != focus_epoch or self._lifecycle.generation != lifecycle_generation:
+				raise FocusTargetError(
+					'Reset, stop, or browser replacement changed the focus state during the transition.',
+					code=FocusTargetCode.STALE_TRANSITION,
+					phase=self._focus_state.phase,
+					target_id=target_id,
+					target_type='page',
+					created_target_id=created_target_id,
+				)
+			snapshot = self._set_agent_focus_locked(
+				session,
+				reason,
+				previous_snapshot=checkpoint.snapshot,
+			)
+			return FocusTransitionResult(
+				session=session,
+				snapshot=snapshot,
+				created_target_id=created_target_id,
+			)
+		except asyncio.CancelledError:
+			if self._focus_epoch == focus_epoch and self._lifecycle.generation == lifecycle_generation:
+				if failure_mode == 'lost':
+					self._focus_lost_locked(
+						FocusTargetError(
+							'Focus transition was cancelled.',
+							code=FocusTargetCode.RECOVERY_FAILED,
+							phase=self._focus_state.phase,
+							target_id=target_id,
+							created_target_id=created_target_id,
+						),
+						reason,
+					)
+				else:
+					recovery_reason = await self._restore_or_lose_focus_locked(checkpoint, budget)
+					if recovery_reason is not None and checkpoint.snapshot.target_id is not None:
+						recovery_after_failure = (checkpoint.snapshot.target_id, recovery_reason)
+			raise
+		except FocusTargetError as error:
+			if created_target_id and error.created_target_id is None:
+				error.created_target_id = created_target_id
+			if self._focus_epoch != focus_epoch or self._lifecycle.generation != lifecycle_generation:
+				if error.code is FocusTargetCode.STALE_TRANSITION:
+					raise
+				raise FocusTargetError(
+					'Reset, stop, or browser replacement changed the focus state during the transition.',
+					code=FocusTargetCode.STALE_TRANSITION,
+					phase=self._focus_state.phase,
+					target_id=target_id,
+					target_type='page',
+					created_target_id=created_target_id,
+				) from error
+			if error.code is FocusTargetCode.STALE_TRANSITION:
+				raise
+			if failure_mode == 'lost':
+				self._focus_lost_locked(error, reason)
+			else:
+				recovery_reason = await self._restore_or_lose_focus_locked(checkpoint, budget)
+				if recovery_reason is not None and checkpoint.snapshot.target_id is not None:
+					recovery_after_failure = (checkpoint.snapshot.target_id, recovery_reason)
+			raise
+		except Exception as error:
+			focus_error = FocusTargetError(
+				f'Focus transition failed: {type(error).__name__}: {error}',
+				code=FocusTargetCode.RECOVERY_FAILED,
+				phase=self._focus_state.phase,
+				target_id=target_id,
+				created_target_id=created_target_id,
+			)
+			if self._focus_epoch != focus_epoch or self._lifecycle.generation != lifecycle_generation:
+				raise FocusTargetError(
+					'Reset, stop, or browser replacement changed the focus state during the transition.',
+					code=FocusTargetCode.STALE_TRANSITION,
+					phase=self._focus_state.phase,
+					target_id=target_id,
+					target_type='page',
+					created_target_id=created_target_id,
+				) from error
+			if failure_mode == 'lost':
+				self._focus_lost_locked(focus_error, reason)
+			else:
+				recovery_reason = await self._restore_or_lose_focus_locked(checkpoint, budget)
+				if recovery_reason is not None and checkpoint.snapshot.target_id is not None:
+					recovery_after_failure = (checkpoint.snapshot.target_id, recovery_reason)
+			raise focus_error from error
+		finally:
+			self._focus_lock.release()
+			if recovery_after_failure is not None:
+				self._schedule_focus_recovery(
+					*recovery_after_failure,
+					expected_generation=self._focus_state.generation,
+				)
+
+	async def _set_agent_focus(
+		self,
+		session: CDPSession,
+		reason: FocusChangeReason,
+		*,
+		expected_generation: int | None = None,
+	) -> FocusSnapshot:
+		"""Commit a live page session through the focus transaction."""
+		result = await self._focus_transition_to_target(
+			session.target_id,
+			reason=reason,
+			budget=FocusTransitionBudget.start(),
+			activate=False,
+			probe=False,
+			expected_generation=expected_generation,
+		)
+		return result.snapshot
+
+	def _focus_observer_done(self, task: asyncio.Task[Any]) -> None:
+		self._focus_observer_tasks.discard(task)
+		if task.cancelled():
+			return
+		try:
+			task.exception()
+		except asyncio.CancelledError:
+			return
+
+	def _cancel_focus_observers(self) -> None:
+		for task in list(self._focus_observer_tasks):
+			if not task.done():
+				task.cancel()
+		self._focus_observer_tasks.clear()
+
+	def _schedule_navigation_complete_observation(self, target_id: str, url: str) -> None:
+		# Dispatch from a clean context so the observation is not a child of
+		# the focus event and cannot delay focus completion.
+		event = contextvars.Context().run(
+			self.event_bus.dispatch,
+			NavigationCompleteEvent(target_id=target_id, url=url),
+		)
+
+		async def observe() -> None:
+			try:
+				await asyncio.wait_for(
+					event.event_result(
+						timeout=FOCUS_NAVIGATION_OBSERVER_SECONDS,
+						raise_if_any=False,
+						raise_if_none=False,
+					),
+					timeout=FOCUS_NAVIGATION_OBSERVER_SECONDS,
+				)
+			except (TimeoutError, asyncio.CancelledError):
+				return
+
+		task = asyncio.create_task(observe())
+		self._focus_observer_tasks.add(task)
+		task.add_done_callback(self._focus_observer_done)
+
+	@staticmethod
+	def _focus_event_timeout(event_type: type[Any], budget: FocusTransitionBudget) -> float:
+		remaining = budget.remaining()
+		default = getattr(event_type, 'model_fields', {}).get('event_timeout')
+		default_value = getattr(default, 'default', None) if default is not None else None
+		if isinstance(default_value, (int, float)):
+			return min(remaining, float(default_value))
+		return remaining
+
+	async def _await_event_result(
+		self,
+		event: Any,
+		budget: FocusTransitionBudget,
+		*,
+		raise_if_any: bool,
+		raise_if_none: bool,
+	) -> Any:
+		"""Await one child event without deadlocking the handler that queued it."""
+		await asyncio.wait_for(event, timeout=max(0.001, budget.remaining()))
+		return await event.event_result(
+			timeout=max(0.001, budget.remaining()),
+			raise_if_any=raise_if_any,
+			raise_if_none=raise_if_none,
+		)
+
+	async def _notify_focus_changed(
+		self,
+		target_id: str,
+		url: str,
+		reason: FocusChangeReason,
+		budget: FocusTransitionBudget,
+		snapshot: FocusSnapshot,
+	) -> None:
+		"""Dispatch and await one generation-stamped focus observation."""
+		remaining = budget.remaining()
+		if remaining <= 0:
+			raise self._focus_timeout_error(target_id, FocusPhase.FOCUSED)
+		event_timeout = self._focus_event_timeout(AgentFocusChangedEvent, budget)
+		event = self.event_bus.dispatch(
+			AgentFocusChangedEvent(
+				target_id=target_id,
+				url=url,
+				focus_generation=snapshot.generation,
+				focus_session_id=snapshot.session_id,
+				focus_reason=reason,
+				focus_budget_seconds=remaining,
+				focus_deadline_monotonic=budget.deadline,
+				event_timeout=max(0.001, event_timeout),
+			)
+		)
+		try:
+			await self._await_event_result(
+				event,
+				budget,
+				raise_if_any=True,
+				raise_if_none=False,
+			)
+		except asyncio.CancelledError:
+			raise
+		except Exception as error:
+			raise FocusTargetError(
+				f'Focus committed to target {target_id[-8:]}, but its observation failed: '
+				f'{type(error).__name__}: {error}',
+				code=FocusTargetCode.OBSERVATION_FAILED,
+				phase=FocusPhase.FOCUSED,
+				target_id=target_id,
+				target_type='page',
+			) from error
+
+	async def _initialize_focus_page(self, target_id: str, budget: FocusTransitionBudget) -> None:
+		"""Dispatch TabCreatedEvent for a page created by focus recovery."""
+		try:
+			event = self.event_bus.dispatch(TabCreatedEvent(target_id=target_id, url='about:blank'))
+			await self._await_event_result(
+				event,
+				budget,
+				raise_if_any=True,
+				raise_if_none=False,
+			)
+		except Exception as error:
+			self.logger.warning(
+				f'Focus recovery page {target_id[-8:]} was created, but TabCreatedEvent setup failed: '
+				f'{type(error).__name__}: {error}'
+			)
+
+	def _focus_reason_for_detach(self, target_id: str) -> FocusChangeReason:
+		record = self._tab_registry.get(target_id)
+		if record is not None and record.state is TabState.CRASHED:
+			return FocusChangeReason.CRASH_RECOVERY
+		if record is not None and record.state in (TabState.CLOSING, TabState.CLOSED):
+			return FocusChangeReason.CLOSE_REPAIR
+		return FocusChangeReason.DETACH_RECOVERY
+
+	async def _handle_attached_session(self, target_id: str, session: CDPSession) -> None:
+		"""Rebind focus when an attach changes its exact session pair."""
+		snapshot = self._focus_state
+		if (
+			snapshot.phase is FocusPhase.FOCUSED
+			and snapshot.target_id == target_id
+			and snapshot.session_id != session.session_id
+		):
+			await self._set_agent_focus(
+				session,
+				FocusChangeReason.SESSION_REBIND,
+				expected_generation=snapshot.generation,
+			)
+
+	async def _handle_detached_session(
+		self,
+		target_id: str,
+		session_id: str,
+		remaining_session_ids: tuple[str, ...],
+	) -> None:
+		"""Repair focus after one exact CDP session detaches."""
+		snapshot = self._focus_state
+		if (
+			snapshot.phase is not FocusPhase.FOCUSED
+			or snapshot.target_id != target_id
+			or snapshot.session_id != session_id
+		):
+			return
+		if remaining_session_ids:
+			manager = self._session_manager
+			if manager is not None:
+				session = await manager.get_live_session_for_target(target_id)
+				if session is not None and session.session_id != session_id:
+					await self._set_agent_focus(
+						session,
+						FocusChangeReason.SESSION_REBIND,
+						expected_generation=snapshot.generation,
+					)
+					return
+		reason = self._focus_reason_for_detach(target_id)
+		try:
+			await self._recover_agent_focus(
+				target_id,
+				reason=reason,
+				budget=FocusTransitionBudget.start(),
+				expected_generation=snapshot.generation,
+			)
+		except FocusTargetError as error:
+			self._report_focus_recovery_failure(target_id, error)
+
+	async def _recover_agent_focus(
+		self,
+		excluded_target_id: str | None,
+		*,
+		reason: FocusChangeReason,
+		budget: FocusTransitionBudget,
+		expected_generation: int | None = None,
+	) -> FocusSnapshot:
+		"""Select, validate, and commit one recovery page within one budget."""
+		created_target_ids: list[str] = []
+		starting_generation = expected_generation if expected_generation is not None else self._focus_state.generation
+		try:
+			result = await self._focus_transition_to_target(
+				None,
+				reason=reason,
+				budget=budget,
+				excluded_target_id=excluded_target_id,
+				create_if_missing=True,
+				activate=True,
+				probe=True,
+				failure_mode='lost',
+				phase=FocusPhase.RECOVERING,
+				expected_generation=starting_generation,
+			)
+		except FocusTargetError as error:
+			if error.code is FocusTargetCode.STALE_TRANSITION:
+				raise
+			if error.created_target_id:
+				created_target_ids.append(error.created_target_id)
+			if budget.expired():
+				for target_id in created_target_ids:
+					await self._initialize_focus_page(target_id, budget)
+				raise
+			recovery_root = self._cdp_client_root
+			recovery_epoch = self._focus_epoch
+			recovery_lifecycle_generation = self._lifecycle.generation
+			retry_focus_generation = self._focus_state.generation
+			try:
+				retry_target_id = await self._await_focus_operation(
+					self._cdp_create_new_page('about:blank'),
+					budget,
+					target_id=excluded_target_id,
+					phase=FocusPhase.RECOVERING,
+				)
+			except FocusTargetError as create_error:
+				create_error.created_target_id = created_target_ids[0] if created_target_ids else None
+				raise create_error from error
+			except asyncio.CancelledError:
+				raise
+			except Exception as create_error:
+				raise FocusTargetError(
+					f'Focus recovery could not create an emergency page: '
+					f'{type(create_error).__name__}: {create_error}',
+					code=FocusTargetCode.RECOVERY_FAILED,
+					phase=self._focus_state.phase,
+					target_id=excluded_target_id,
+					created_target_id=created_target_ids[0] if created_target_ids else None,
+				) from create_error
+			if (
+				self._cdp_client_root is not recovery_root
+				or self._focus_epoch != recovery_epoch
+				or self._lifecycle.generation != recovery_lifecycle_generation
+				or self._focus_state.generation != retry_focus_generation
+			):
+				raise FocusTargetError(
+					'Browser or focus state changed while the recovery page was being created.',
+					code=FocusTargetCode.STALE_TRANSITION,
+					phase=self._focus_state.phase,
+					target_id=excluded_target_id,
+					created_target_id=retry_target_id,
+				) from error
+			self._tab_registry.register(retry_target_id, url='about:blank', state=TabState.OPEN)
+			created_target_ids.append(retry_target_id)
+			if self._focus_state.phase is FocusPhase.FOCUSED:
+				raise FocusTargetError(
+					'Focus changed while the recovery page was being created.',
+					code=FocusTargetCode.STALE_TRANSITION,
+					phase=self._focus_state.phase,
+					target_id=self._focus_state.target_id,
+				) from error
+			retry_generation = self._focus_state.generation
+			try:
+				result = await self._focus_transition_to_target(
+					retry_target_id,
+					reason=reason,
+					budget=budget,
+					activate=True,
+					probe=True,
+					failure_mode='lost',
+					phase=FocusPhase.RECOVERING,
+					expected_generation=retry_generation,
+				)
+			except FocusTargetError as retry_error:
+				if retry_error.created_target_id and retry_error.created_target_id not in created_target_ids:
+					created_target_ids.append(retry_error.created_target_id)
+				for target_id in created_target_ids:
+					await self._initialize_focus_page(target_id, budget)
+				if retry_error.code is FocusTargetCode.RECOVERY_FAILED:
+					raise
+				raise FocusTargetError(
+					f'Focus recovery failed: {retry_error}',
+					code=FocusTargetCode.RECOVERY_FAILED,
+					phase=FocusPhase.LOST,
+					target_id=excluded_target_id,
+					created_target_id=retry_error.created_target_id,
+				) from retry_error
+		if result.created_target_id and result.created_target_id not in created_target_ids:
+			created_target_ids.append(result.created_target_id)
+		for target_id in created_target_ids:
+			await self._initialize_focus_page(target_id, budget)
+		try:
+			await self._notify_focus_changed(
+				result.session.target_id,
+				result.session.url or 'about:blank',
+				reason,
+				budget,
+				result.snapshot,
+			)
+		except FocusTargetError:
+			raise
+		return result.snapshot
+
+	def _report_focus_recovery_failure(self, target_id: str, error: FocusTargetError) -> None:
+		"""Publish one bounded browser error for a failed background recovery."""
+		self.logger.warning(f'Focus recovery failed for target {target_id[-8:]}: {error.code.value}: {error}')
+		try:
+			self.event_bus.dispatch(
+				BrowserErrorEvent(
+					error_type='FocusRecoveryError',
+					message=f'Focus recovery failed for target {target_id[-8:]}.',
+					details=error.to_snapshot().to_dict(),
+				)
+			)
+		except Exception:
+			pass
+
+	def _schedule_close_reconciliation(
+		self,
+		target_id: str,
+		*,
+		expected_generation: int | None = None,
+		expected_close_attempt: int | None = None,
+	) -> None:
+		"""Reconcile an uncertain close outside the action deadline."""
+		focus_generation = self._focus_state.generation if expected_generation is None else expected_generation
+		if expected_close_attempt is None:
+			record = self._tab_registry.get(target_id)
+			expected_close_attempt = record.close_attempt if record is not None else None
+
+		async def reconcile() -> None:
+			budget = FocusTransitionBudget.start(CLOSE_RECONCILIATION_SECONDS)
+			try:
+				await self._reconcile_uncertain_close(
+					target_id,
+					budget,
+					expected_generation=focus_generation,
+					expected_close_attempt=expected_close_attempt,
+				)
+			except asyncio.CancelledError:
+				raise
+			except Exception as error:
+				self.logger.warning(
+					f'Close reconciliation failed for target {target_id[-8:]}: '
+					f'{type(error).__name__}: {error}'
+				)
+
+		task = asyncio.create_task(reconcile())
+		self._focus_observer_tasks.add(task)
+		task.add_done_callback(self._focus_observer_done)
+
+	async def _reconcile_uncertain_close(
+		self,
+		target_id: str,
+		budget: FocusTransitionBudget,
+		*,
+		expected_generation: int,
+		expected_close_attempt: int | None,
+	) -> None:
+		"""Resolve CLOSING to OPEN or CLOSED without extending the close action."""
+		record = self._tab_registry.get(target_id)
+		if (
+			record is None
+			or record.state in (TabState.OPEN, TabState.OPENING)
+			or (expected_close_attempt is not None and record.close_attempt != expected_close_attempt)
+		):
+			return
+		if budget.remaining() <= 0:
+			return
+		liveness_seconds = max(0.001, budget.remaining() / 2)
+		liveness_budget = FocusTransitionBudget(
+			min(budget.deadline, asyncio.get_running_loop().time() + liveness_seconds)
+		)
+		try:
+			still_open = await asyncio.wait_for(
+				self._target_liveness(target_id, liveness_budget),
+				timeout=max(0.001, liveness_budget.remaining()),
+			)
+		except TimeoutError:
+			still_open = None
+		record = self._tab_registry.get(target_id)
+		if record is None:
+			return
+		if expected_close_attempt is not None and record.close_attempt != expected_close_attempt:
+			return
+		if still_open is True:
+			if record.state is TabState.CLOSING:
+				self._tab_registry.update(target_id, state=TabState.OPEN, allow_reopen=True)
+			await self._restore_focus_after_close_reopen(target_id, budget)
+			return
+		focus_loss_applied = await self._mark_focus_lost_for_uncertain_close(
+			target_id,
+			budget,
+			expected_generation=expected_generation,
+			expected_close_attempt=expected_close_attempt,
+		)
+		if not focus_loss_applied:
+			return
+		if still_open is False:
+			if record.state is TabState.CLOSING:
+				self._tab_registry.mark_closed(target_id)
+			try:
+				await self._repair_focus_after_closed_tab(target_id, budget)
+			except FocusTargetError as error:
+				self.logger.warning(
+					f'Focus repair after confirmed close absence failed: {error.code.value}: {error}'
+				)
+
+	async def _mark_focus_lost_for_uncertain_close(
+		self,
+		target_id: str,
+		budget: FocusTransitionBudget,
+		*,
+		expected_generation: int,
+		expected_close_attempt: int | None,
+	) -> bool:
+		"""Stop reporting focus on a target whose close outcome is unknown.
+
+		Returns False when the close attempt is no longer the current owner.
+		"""
+		remaining = budget.remaining()
+		if remaining <= 0:
+			return False
+		try:
+			await asyncio.wait_for(self._focus_lock.acquire(), timeout=remaining)
+		except TimeoutError:
+			return False
+		try:
+			record = self._tab_registry.get(target_id)
+			if (
+				record is None
+				or record.state in (TabState.OPEN, TabState.OPENING)
+				or (expected_close_attempt is not None and record.close_attempt != expected_close_attempt)
+			):
+				return False
+			snapshot = self._focus_state
+			if (
+				snapshot.phase is FocusPhase.FOCUSED
+				and snapshot.target_id == target_id
+				and snapshot.generation == expected_generation
+			):
+				self._focus_lost_locked(
+					FocusTargetError(
+						f'Close outcome for target {target_id[-8:]} is unknown.',
+						code=FocusTargetCode.TARGET_DETACHED,
+						phase=FocusPhase.FOCUSED,
+						target_id=target_id,
+						target_type='page',
+					),
+					FocusChangeReason.CLOSE_REPAIR,
+					previous_target_id=target_id,
+				)
+			return True
+		finally:
+			self._focus_lock.release()
+
+	async def _ensure_closed_target_focus_lost(
+		self,
+		target_id: str,
+		snapshot: FocusSnapshot,
+		error: FocusTargetError,
+	) -> None:
+		"""Publish lost immediately when close repair timed out before its lock."""
+		if self._focus_lock.locked():
+			self._schedule_close_reconciliation(target_id, expected_generation=snapshot.generation)
+			return
+		await self._focus_lock.acquire()
+		try:
+			current = self._focus_state
+			if (
+				current.phase is FocusPhase.FOCUSED
+				and current.target_id == target_id
+				and current.generation == snapshot.generation
+			):
+				self._focus_lost_locked(
+					error,
+					FocusChangeReason.CLOSE_REPAIR,
+					previous_target_id=target_id,
+				)
+		finally:
+			self._focus_lock.release()
+
+	def _schedule_reopened_focus_restore(self, target_id: str, *, expected_generation: int) -> None:
+		"""Retry one confirmed reopen on a separate bounded deadline."""
+
+		async def restore() -> None:
+			snapshot = self._focus_state
+			if (
+				snapshot.phase is not FocusPhase.LOST
+				or snapshot.previous_target_id != target_id
+				or snapshot.generation != expected_generation
+			):
+				return
+			budget = FocusTransitionBudget.start(CLOSE_RECONCILIATION_SECONDS)
+			await self._restore_focus_after_close_reopen(
+				target_id,
+				budget,
+				reschedule_on_timeout=False,
+			)
+
+		task = asyncio.create_task(restore())
+		self._focus_observer_tasks.add(task)
+		task.add_done_callback(self._focus_observer_done)
+
+	async def _restore_focus_after_close_reopen(
+		self,
+		target_id: str,
+		budget: FocusTransitionBudget,
+		*,
+		reschedule_on_timeout: bool = True,
+	) -> None:
+		"""Restore focus when a timed-out close proves the target is still open."""
+		snapshot = self._focus_state
+		if snapshot.phase is not FocusPhase.LOST or snapshot.previous_target_id != target_id:
+			return
+		try:
+			result = await self._focus_transition_to_target(
+				target_id,
+				reason=FocusChangeReason.CLOSE_REPAIR,
+				budget=budget,
+				activate=True,
+				probe=True,
+				failure_mode='lost',
+				phase=FocusPhase.RECOVERING,
+				expected_generation=snapshot.generation,
+			)
+			await self._notify_focus_changed(
+				result.session.target_id,
+				result.session.url or 'about:blank',
+				FocusChangeReason.CLOSE_REPAIR,
+				budget,
+				result.snapshot,
+			)
+		except FocusTargetError as error:
+			record = self._tab_registry.get(target_id)
+			current = self._focus_state
+			if (
+				reschedule_on_timeout
+				and error.code is FocusTargetCode.TIMEOUT
+				and record is not None
+				and record.state is TabState.OPEN
+				and current.phase is FocusPhase.LOST
+				and current.previous_target_id == target_id
+			):
+				self._schedule_reopened_focus_restore(
+					target_id,
+					expected_generation=current.generation,
+				)
+				return
+			self.logger.warning(
+				f'Could not restore focus after a reopened close: {error.code.value}: {error}'
+			)
+
+	def _schedule_focus_recovery(
+		self,
+		target_id: str,
+		reason: FocusChangeReason,
+		*,
+		expected_generation: int | None = None,
+	) -> None:
+		"""Run one recovery after the current focus lock holder exits."""
+
+		async def recover() -> None:
+			try:
+				await self._recover_agent_focus(
+					target_id,
+					reason=reason,
+					budget=FocusTransitionBudget.start(),
+					expected_generation=expected_generation,
+				)
+			except FocusTargetError as error:
+				self._report_focus_recovery_failure(target_id, error)
+
+		task = asyncio.create_task(recover())
+		self._focus_observer_tasks.add(task)
+		task.add_done_callback(self._focus_observer_done)
+
+	def _focus_lost_on_reset(self) -> None:
+		current = self._focus_state
+		if current.phase not in (FocusPhase.FOCUSED, FocusPhase.SWITCHING, FocusPhase.RECOVERING):
+			return
+		previous_target_id = (
+			current.previous_target_id
+			if current.phase is FocusPhase.SWITCHING
+			else current.target_id or current.previous_target_id
+		)
+		self._focus_lost_locked(
+			FocusTargetError(
+				'Browser focus was cleared by reset or stop.',
+				code=FocusTargetCode.TARGET_DETACHED,
+				phase=current.phase,
+				target_id=previous_target_id,
+			),
+			FocusChangeReason.RESET,
+			previous_target_id=previous_target_id,
+		)
 
 	def seed_generation(self, generation: int) -> None:
 		"""Keep the lifecycle generation monotonic across replacement sessions."""
@@ -567,9 +1960,8 @@ class BrowserSession(BaseModel):
 
 	async def reset(self, *, stop_event_bus: bool = True, wait_for_operations: bool = True) -> None:
 		"""Clear all cached CDP sessions with proper cleanup."""
-		if (
-			self._lifecycle.phase is LifecyclePhase.FAILED
-			and self._watchdog_has_live_resources(self._local_browser_watchdog)
+		if self._lifecycle.phase is LifecyclePhase.FAILED and self._watchdog_has_live_resources(
+			self._local_browser_watchdog
 		):
 			raise RuntimeError('Browser resources are still live; run kill() before reset()')
 		if wait_for_operations:
@@ -607,10 +1999,17 @@ class BrowserSession(BaseModel):
 		# await self.event_bus.wait_for_idle(timeout=5.0)
 		# await self.event_bus.clear()
 
+		# Invalidate in-flight focus work before manager cleanup can cancel it.
+		# A cancelled recovery must not publish its own failure reason after reset.
+		self._focus_epoch += 1
+		self._cancel_focus_observers()
+
 		# Clear session manager first (stops event monitoring)
 		if self._session_manager:
 			await self._session_manager.clear()
 			self._session_manager = None
+		async with self._focus_lock:
+			self._focus_lost_on_reset()
 
 		# Clear session pool (all sessions share the root WebSocket, so no disconnect needed)
 		self._cdp_session_pool.clear()
@@ -667,9 +2066,8 @@ class BrowserSession(BaseModel):
 		"""Start the browser session, waiting for an in-flight start when present."""
 		if self._lifecycle.phase is LifecyclePhase.READY:
 			return
-		if (
-			self._lifecycle.phase is LifecyclePhase.FAILED
-			and self._watchdog_has_live_resources(self._local_browser_watchdog)
+		if self._lifecycle.phase is LifecyclePhase.FAILED and self._watchdog_has_live_resources(
+			self._local_browser_watchdog
 		):
 			raise RuntimeError('Browser resources are still live; run kill() before start()')
 
@@ -741,9 +2139,7 @@ class BrowserSession(BaseModel):
 		"""Release resources that a cancelled start acquired before failing."""
 		if self._watchdog_has_live_resources(self._local_browser_watchdog):
 			try:
-				force_error = await asyncio.wait_for(
-					self._force_stop_retained_browser(), timeout=_shutdown_timeout()
-				)
+				force_error = await asyncio.wait_for(self._force_stop_retained_browser(), timeout=_shutdown_timeout())
 				if force_error is not None:
 					self._force_stop_resources()
 			except BaseException:
@@ -852,6 +2248,13 @@ class BrowserSession(BaseModel):
 			error = NavigationError('Event bus pumps have not retired; runtime is retained')
 			self._lifecycle.fail(error, reason='event bus retirement incomplete')
 			raise error
+		if self._session_manager is not None:
+			cancel_pending = getattr(self._session_manager, 'cancel_pending', None)
+			if callable(cancel_pending):
+				cancel_pending()
+		self._focus_epoch += 1
+		self._cancel_focus_observers()
+		self._focus_lost_on_reset()
 		self._session_manager = None
 		self._cdp_session_pool.clear()
 		self._cdp_client_root = None
@@ -890,7 +2293,7 @@ class BrowserSession(BaseModel):
 		if self._watchdog_has_live_resources(self._local_browser_watchdog):
 			force_error = await self._force_stop_retained_browser()
 			if force_error is not None:
-				raise force_error
+				raise force_error from None
 			if not self._watchdog_has_live_resources(self._local_browser_watchdog):
 				self._local_browser_watchdog = None
 
@@ -917,15 +2320,19 @@ class BrowserSession(BaseModel):
 		try:
 			await self._cancel_navigation()
 		except NavigationError:
-			if not force or not any(op.containment and op.containment.requires_retirement for op in self._navigation_policies.values()):
+			if not force or not any(
+				op.containment and op.containment.requires_retirement for op in self._navigation_policies.values()
+			):
 				raise
 			force_error = await self._force_stop_retained_browser()
 			if force_error is not None:
-				raise force_error
+				raise force_error from None
 			self._revoke_exited_policy_authorities()
 			await self._cancel_navigation()
 			if self._lifecycle.phase is LifecyclePhase.FAILED:
-				self._lifecycle.transition(LifecyclePhase.STOPPING, reason='owned browser exit retired policy authority')
+				self._lifecycle.transition(
+					LifecyclePhase.STOPPING, reason='owned browser exit retired policy authority'
+				)
 		shutdown_generation = self._lifecycle.generation
 		event_bus = self.event_bus
 		await self._cancel_owned_start()
@@ -1067,7 +2474,7 @@ class BrowserSession(BaseModel):
 		"""Handle browser start request.
 
 		Returns:
-			Dict with 'cdp_url' key containing the CDP URL
+                Dict with 'cdp_url' key containing the CDP URL
 		"""
 
 		# await self.reset()
@@ -1137,18 +2544,28 @@ class BrowserSession(BaseModel):
 			return
 		operation.publication_attempted = True
 		try:
-			contextvars.Context().run(event_bus.dispatch, NavigationFinishedEvent(
-				navigation_id=operation.navigation_id, generation=operation.generation,
-				target_id=operation.target_id, requested_url=operation.requested_url,
-				observed_url=operation.observed_url, outcome=operation.phase.value,
-				error_text=operation.last_error,
-			))
+			contextvars.Context().run(
+				event_bus.dispatch,
+				NavigationFinishedEvent(
+					navigation_id=operation.navigation_id,
+					generation=operation.generation,
+					target_id=operation.target_id,
+					requested_url=operation.requested_url,
+					observed_url=operation.observed_url,
+					outcome=operation.phase.value,
+					error_text=operation.last_error,
+				),
+			)
 		except Exception as error:
 			self.logger.debug('Could not enqueue navigation terminal status: %s', error)
 
 	def _retire_navigation(self, operation: NavigationOperation) -> None:
-		if (operation.terminal and not operation.child_tasks and not operation.policy_pending
-			and self._navigation_task_operation is not operation):
+		if (
+			operation.terminal
+			and not operation.child_tasks
+			and not operation.policy_pending
+			and self._navigation_task_operation is not operation
+		):
 			self._navigation_monitor.complete(operation)
 
 	def _cancel_navigation_tasks(self, operation: NavigationOperation) -> set[asyncio.Task]:
@@ -1168,8 +2585,11 @@ class BrowserSession(BaseModel):
 		tasks = set()
 		if operation is not None:
 			operation.close_policy_capture()
-			if (operation.policy_task is not None and not operation.policy_task.done()
-				and not (operation.containment and operation.containment.requires_retirement)):
+			if (
+				operation.policy_task is not None
+				and not operation.policy_task.done()
+				and not (operation.containment and operation.containment.requires_retirement)
+			):
 				operation.policy_task.cancel()
 			operation.finish(NavigationPhase.CANCELLED, 'Browser session reset')
 			tasks = self._cancel_navigation_tasks(operation)
@@ -1184,29 +2604,43 @@ class BrowserSession(BaseModel):
 			await asyncio.wait(tasks, timeout=1.0)
 		await self._drain_navigation_policies()
 
-	def _check_navigation_owner(self, operation: NavigationOperation, root: CDPClient, session: CDPSession | None = None) -> None:
+	def _check_navigation_owner(
+		self, operation: NavigationOperation, root: CDPClient, session: CDPSession | None = None
+	) -> None:
 		if operation.deadline is not None and asyncio.get_running_loop().time() >= operation.deadline:
 			raise NavigationTimeoutError('Navigation deadline expired')
-		if (self._navigation_monitor.active is not operation or operation.terminal
-			or self._lifecycle.generation != operation.generation or self._cdp_client_root is not root):
+		if (
+			self._navigation_monitor.active is not operation
+			or operation.terminal
+			or self._lifecycle.generation != operation.generation
+			or self._cdp_client_root is not root
+		):
 			raise NavigationError('Navigation ownership or browser binding changed')
-		if session is not None and (session.cdp_client is not root or session.session_id != operation.session_id
-			or session.target_id != operation.target_id):
+		if session is not None and (
+			session.cdp_client is not root
+			or session.session_id != operation.session_id
+			or session.target_id != operation.target_id
+		):
 			raise NavigationError('Navigation CDP session binding changed')
 
 	def _marked_navigation(self, event: Any, root: CDPClient) -> NavigationOperation:
 		operation = self._navigation_monitor.active
-		if (operation is None or event.navigation_id != operation.navigation_id
-			or event.navigation_generation != operation.generation):
+		if (
+			operation is None
+			or event.navigation_id != operation.navigation_id
+			or event.navigation_generation != operation.generation
+		):
 			raise NavigationError('Stale navigation child event')
 		self._check_navigation_owner(operation, root)
 		return operation
 
 	async def _await_navigation_event(self, event_bus: EventBus, event: Any) -> None:
 		dispatched = event_bus.dispatch(event)
+
 		async def pump() -> None:
 			await dispatched
 			await dispatched.event_result(raise_if_any=True, raise_if_none=False)
+
 		task = asyncio.create_task(pump())
 		self._navigation_event_pumps[task] = event_bus
 		task.add_done_callback(self._navigation_event_pump_done)
@@ -1269,19 +2703,28 @@ class BrowserSession(BaseModel):
 		return operation.deadline
 
 	def _policy_owned(self, operation: NavigationOperation, root: CDPClient, session: CDPSession) -> bool:
-		return (self._navigation_monitor.active is operation and self._cdp_client_root is root
-			and self._lifecycle.generation == operation.generation and session.cdp_client is root
-			and session.target_id == operation.target_id and session.session_id == operation.session_id
-			and (operation.containment is None or operation.containment.phase is not ContainmentPhase.REVOKED))
+		return (
+			self._navigation_monitor.active is operation
+			and self._cdp_client_root is root
+			and self._lifecycle.generation == operation.generation
+			and session.cdp_client is root
+			and session.target_id == operation.target_id
+			and session.session_id == operation.session_id
+			and (operation.containment is None or operation.containment.phase is not ContainmentPhase.REVOKED)
+		)
 
 	def _require_policy_owner(self, operation: NavigationOperation, root: CDPClient, session: CDPSession) -> None:
 		if not self._policy_owned(operation, root, session):
 			raise NavigationError('Policy document authority changed')
 
-	def _start_navigation_policy(self, operation: NavigationOperation, root: CDPClient, session: CDPSession, policy: Any, event_bus: EventBus) -> None:
+	def _start_navigation_policy(
+		self, operation: NavigationOperation, root: CDPClient, session: CDPSession, policy: Any, event_bus: EventBus
+	) -> None:
 		operation.arm_policy()
 		self._navigation_policies[operation.navigation_id] = operation
-		operation.policy_task = asyncio.create_task(self._run_navigation_policy(operation, root, session, policy, event_bus))
+		operation.policy_task = asyncio.create_task(
+			self._run_navigation_policy(operation, root, session, policy, event_bus)
+		)
 		operation.policy_task.add_done_callback(lambda task: self._navigation_policy_done(operation, task))
 
 	def _navigation_policy_done(self, operation: NavigationOperation, task: asyncio.Task) -> None:
@@ -1292,51 +2735,74 @@ class BrowserSession(BaseModel):
 		self._reconcile_policy_retention()
 		self._retire_navigation(operation)
 
-	def _fail_policy_retirement(self, operation: NavigationOperation, error: BaseException | str, *, reason: str) -> None:
+	def _fail_policy_retirement(
+		self, operation: NavigationOperation, error: BaseException | str, *, reason: str
+	) -> None:
 		snapshot = self._lifecycle.snapshot()
 		retained = self._policy_retention_failure
 		root = self._cdp_client_root
-		owns_failure = (retained is not None and retained.operation is operation and retained.root is root
-			and retained.failure == snapshot and retained.revision == self._lifecycle.revision
-			and operation.generation == snapshot.generation)
+		owns_failure = (
+			retained is not None
+			and retained.operation is operation
+			and retained.root is root
+			and retained.failure == snapshot
+			and retained.revision == self._lifecycle.revision
+			and operation.generation == snapshot.generation
+		)
 		if snapshot.phase is LifecyclePhase.FAILED and not owns_failure:
 			self._policy_retention_failure = None
 			return
 		can_recover = owns_failure or snapshot.phase in {LifecyclePhase.READY, LifecyclePhase.DEGRADED}
 		failure = self._lifecycle.fail(error, reason=reason)
-		self._policy_retention_failure = _PolicyRetentionFailure(operation, root, failure, self._lifecycle.revision) if (
-			can_recover and root is not None and operation.generation == failure.generation) else None
+		self._policy_retention_failure = (
+			_PolicyRetentionFailure(operation, root, failure, self._lifecycle.revision)
+			if (can_recover and root is not None and operation.generation == failure.generation)
+			else None
+		)
 
 	def _reconcile_policy_retention(self) -> None:
 		retained = self._policy_retention_failure
 		if retained is None:
 			return
 		operation = retained.operation
-		if (retained.failure != self._lifecycle.snapshot() or retained.root is not self._cdp_client_root
+		if (
+			retained.failure != self._lifecycle.snapshot()
+			or retained.root is not self._cdp_client_root
 			or retained.revision != self._lifecycle.revision
 			or operation.generation != self._lifecycle.generation
-			or (self._stop_task is not None and not self._stop_task.done())):
+			or (self._stop_task is not None and not self._stop_task.done())
+		):
 			self._policy_retention_failure = None
 			return
 		task = operation.policy_task
 		if task is None or not task.done():
 			return
-		if (task.cancelled() or task.exception() is not None or operation.containment is None
-			or operation.containment.phase not in {ContainmentPhase.CONTAINED, ContainmentPhase.SKIPPED}):
+		if (
+			task.cancelled()
+			or task.exception() is not None
+			or operation.containment is None
+			or operation.containment.phase not in {ContainmentPhase.CONTAINED, ContainmentPhase.SKIPPED}
+		):
 			self._policy_retention_failure = None
 			return
-		if (any(op.policy_pending for op in self._navigation_policies.values())
-			or self._live_navigation_event_pumps(self.event_bus)):
+		if any(op.policy_pending for op in self._navigation_policies.values()) or self._live_navigation_event_pumps(
+			self.event_bus
+		):
 			return
 		self._policy_retention_failure = None
 		self._lifecycle.transition(LifecyclePhase.RECOVERING, reason='policy authority retired')
-		self._lifecycle.transition(LifecyclePhase.DEGRADED, reason='policy authority retired; explicit recovery is available')
+		self._lifecycle.transition(
+			LifecyclePhase.DEGRADED, reason='policy authority retired; explicit recovery is available'
+		)
 
-	async def _owned_policy_browser(self, operation: NavigationOperation, root: CDPClient) -> tuple[int, float, str, str] | None:
+	async def _owned_policy_browser(
+		self, operation: NavigationOperation, root: CDPClient
+	) -> tuple[int, float, str, str] | None:
 		import ipaddress
 		import psutil
 		import socket
 		from openbrowser.browser.watchdogs.profile_lease import ProfileLease
+
 		watchdog = self._local_browser_watchdog
 		if not self.is_local or watchdog is None or getattr(watchdog, '_owns_browser_resources', False) is not True:
 			return None
@@ -1352,37 +2818,75 @@ class BrowserSession(BaseModel):
 			family = connection_socket.family
 			if family not in {socket.AF_INET, socket.AF_INET6}:
 				return None
+
 			def endpoint(value: Any) -> tuple[Any, int] | None:
 				if not isinstance(value, tuple) or len(value) < 2 or not isinstance(value[1], int) or any(value[2:]):
 					return None
 				address = ipaddress.ip_address(value[0])
-				if address.version != (4 if family == socket.AF_INET else 6) or getattr(address, 'scope_id', None) is not None:
+				if (
+					address.version != (4 if family == socket.AF_INET else 6)
+					or getattr(address, 'scope_id', None) is not None
+				):
 					return None
 				return address, value[1]
+
 			peer = endpoint(connection_socket.getpeername())
 			local = endpoint(connection_socket.getsockname())
 			profile = str(Path(self.browser_profile.user_data_dir).expanduser().resolve())
-			if (peer is None or local is None or not peer[0].is_loopback or not local[0].is_loopback or peer[1] != record['cdp_port']
-				or profile != record['profile_dir'] or str(lease.profile_dir) != profile
-				or lease.instance_id != record['instance_id'] or watchdog._instance_id != record['instance_id']
-				or not ProfileLease.process_matches_browser(process, record)):
+			if (
+				peer is None
+				or local is None
+				or not peer[0].is_loopback
+				or not local[0].is_loopback
+				or peer[1] != record['cdp_port']
+				or profile != record['profile_dir']
+				or str(lease.profile_dir) != profile
+				or lease.instance_id != record['instance_id']
+				or watchdog._instance_id != record['instance_id']
+				or not ProfileLease.process_matches_browser(process, record)
+			):
 				return None
+
 			def endpoint_owned() -> bool:
-				if (root.ws is not ws or ws.transport is not transport or connection_socket.family != family
-					or endpoint(connection_socket.getpeername()) != peer or endpoint(connection_socket.getsockname()) != local):
+				if (
+					root.ws is not ws
+					or ws.transport is not transport
+					or connection_socket.family != family
+					or endpoint(connection_socket.getpeername()) != peer
+					or endpoint(connection_socket.getsockname()) != local
+				):
 					return False
-				connections = [connection for connection in process.net_connections(kind='tcp') if connection.family == family]
-				listeners = [endpoint(connection.laddr) for connection in connections if connection.status == psutil.CONN_LISTEN]
-				covers_peer = any(listener is not None and listener[1] == peer[1]
-					and (listener[0] == peer[0] or listener[0].is_unspecified) for listener in listeners)
-				accepted_peer = any(connection.status == psutil.CONN_ESTABLISHED and endpoint(connection.laddr) == peer
-					and endpoint(connection.raddr) == local for connection in connections)
+				connections = [
+					connection for connection in process.net_connections(kind='tcp') if connection.family == family
+				]
+				listeners = [
+					endpoint(connection.laddr) for connection in connections if connection.status == psutil.CONN_LISTEN
+				]
+				covers_peer = any(
+					listener is not None
+					and listener[1] == peer[1]
+					and (listener[0] == peer[0] or listener[0].is_unspecified)
+					for listener in listeners
+				)
+				accepted_peer = any(
+					connection.status == psutil.CONN_ESTABLISHED
+					and endpoint(connection.laddr) == peer
+					and endpoint(connection.raddr) == local
+					for connection in connections
+				)
 				return covers_peer and accepted_peer
+
 			if not endpoint_owned():
 				return None
 			info = await self._policy_read(operation, root.send.SystemInfo.getProcessInfo())
-			if (not any(entry.get('type') == 'browser' and entry.get('id') == record['pid'] for entry in info.get('processInfo', []))
-				or not ProfileLease.process_matches_browser(process, record) or not endpoint_owned()):
+			if (
+				not any(
+					entry.get('type') == 'browser' and entry.get('id') == record['pid']
+					for entry in info.get('processInfo', [])
+				)
+				or not ProfileLease.process_matches_browser(process, record)
+				or not endpoint_owned()
+			):
 				return None
 			return (int(record['pid']), float(record['start_time']), profile, str(record['instance_id']))
 		except Exception:
@@ -1392,6 +2896,7 @@ class BrowserSession(BaseModel):
 		if not self._navigation_policies:
 			return
 		from openbrowser.browser.watchdogs.profile_lease import ProfileLease
+
 		for operation in list(self._navigation_policies.values()):
 			attempt = operation.containment
 			if attempt is None or attempt.owned_browser is None or not attempt.requires_retirement:
@@ -1408,19 +2913,33 @@ class BrowserSession(BaseModel):
 					self._navigation_policy_done(operation, operation.policy_task)
 			self._retire_navigation(operation)
 
-	async def _run_navigation_policy(self, operation: NavigationOperation, root: CDPClient, session: CDPSession, policy: Any, event_bus: EventBus) -> None:
+	async def _run_navigation_policy(
+		self, operation: NavigationOperation, root: CDPClient, session: CDPSession, policy: Any, event_bus: EventBus
+	) -> None:
 		seen = None
 		while True:
 			commit = operation.policy_commit
 			if commit is not None and commit != seen:
 				seen = commit
 				if not policy._is_url_allowed(commit.url):
-					attempt = ContainmentAttempt(commit, world_name=f'openbrowser-policy-{uuid7str()}',
-						deadline=asyncio.get_running_loop().time() + NAVIGATION_CONTAINMENT_GRACE)
+					attempt = ContainmentAttempt(
+						commit,
+						world_name=f'openbrowser-policy-{uuid7str()}',
+						deadline=asyncio.get_running_loop().time() + NAVIGATION_CONTAINMENT_GRACE,
+					)
 					operation.containment = attempt
-					contextvars.Context().run(event_bus.dispatch, BrowserErrorEvent(error_type='NavigationBlocked',
-						message=f'Navigation blocked to {commit.url}', details={'url': commit.url,
-						'target_id': operation.target_id, 'navigation_id': operation.navigation_id}))
+					contextvars.Context().run(
+						event_bus.dispatch,
+						BrowserErrorEvent(
+							error_type='NavigationBlocked',
+							message=f'Navigation blocked to {commit.url}',
+							details={
+								'url': commit.url,
+								'target_id': operation.target_id,
+								'navigation_id': operation.navigation_id,
+							},
+						),
+					)
 					await self._contain_navigation_document(operation, root, session)
 					return
 			if not operation.policy_open:
@@ -1432,11 +2951,15 @@ class BrowserSession(BaseModel):
 		attempt = operation.containment
 		assert attempt is not None and attempt.deadline is not None
 		remaining = attempt.deadline - asyncio.get_running_loop().time()
-		return await asyncio.wait_for(awaitable, timeout=max(.001, remaining) if not verification else NAVIGATION_CONTAINMENT_GRACE)
+		return await asyncio.wait_for(
+			awaitable, timeout=max(0.001, remaining) if not verification else NAVIGATION_CONTAINMENT_GRACE
+		)
 
 	@staticmethod
 	def _frame_commit(frame: dict[str, Any]) -> NavigationCommit:
-		return NavigationCommit(frame['id'], frame.get('loaderId', ''), frame.get('url', '') + frame.get('urlFragment', ''))
+		return NavigationCommit(
+			frame['id'], frame.get('loaderId', ''), frame.get('url', '') + frame.get('urlFragment', '')
+		)
 
 	def _observe_contained_document(self, operation: NavigationOperation, root: CDPClient, session: CDPSession) -> None:
 		self._require_policy_owner(operation, root, session)
@@ -1445,15 +2968,21 @@ class BrowserSession(BaseModel):
 		if record is not None and record.state is not TabState.CLOSED:
 			self._tab_registry.update(operation.target_id, url='about:blank', title='')
 		focus = self.agent_focus
-		if (focus is not None and focus.cdp_client is root and focus.target_id == operation.target_id
-			and focus.session_id == operation.session_id):
+		if (
+			focus is not None
+			and focus.cdp_client is root
+			and focus.target_id == operation.target_id
+			and focus.session_id == operation.session_id
+		):
 			focus.url, focus.title = 'about:blank', ''
 			self._cached_browser_state_summary = None
 			self._cached_selector_map.clear()
 			if self._dom_watchdog:
 				self._dom_watchdog.clear_cache()
 
-	async def _resolve_policy_protocol_error(self, error: BaseException, operation: NavigationOperation, root: CDPClient, session: CDPSession) -> bool:
+	async def _resolve_policy_protocol_error(
+		self, error: BaseException, operation: NavigationOperation, root: CDPClient, session: CDPSession
+	) -> bool:
 		details = error.args[0] if isinstance(error, RuntimeError) and error.args else None
 		if not isinstance(details, dict) or not isinstance(details.get('code'), int):
 			return False
@@ -1461,7 +2990,11 @@ class BrowserSession(BaseModel):
 		assert attempt is not None
 		try:
 			self._require_policy_owner(operation, root, session)
-			frame = (await self._policy_read(operation, root.send.Page.getFrameTree(session_id=operation.session_id), verification=True))['frameTree']['frame']
+			frame = (
+				await self._policy_read(
+					operation, root.send.Page.getFrameTree(session_id=operation.session_id), verification=True
+				)
+			)['frameTree']['frame']
 			self._require_policy_owner(operation, root, session)
 			current = self._frame_commit(frame)
 			if current.url == 'about:blank':
@@ -1469,7 +3002,8 @@ class BrowserSession(BaseModel):
 				attempt.phase = ContainmentPhase.CONTAINED
 				return True
 			if details.get('code') == -32000 and details.get('message') in {
-				'Cannot find context with specified id', 'Could not find object with given id',
+				'Cannot find context with specified id',
+				'Could not find object with given id',
 			}:
 				attempt.phase = ContainmentPhase.SKIPPED if current != attempt.commit else ContainmentPhase.FAILED
 				return True
@@ -1477,38 +3011,64 @@ class BrowserSession(BaseModel):
 			pass
 		return False
 
-	async def _contain_navigation_document(self, operation: NavigationOperation, root: CDPClient, session: CDPSession) -> None:
+	async def _contain_navigation_document(
+		self, operation: NavigationOperation, root: CDPClient, session: CDPSession
+	) -> None:
 		attempt = operation.containment
 		assert attempt is not None
 		try:
 			self._require_policy_owner(operation, root, session)
 			attempt.owned_browser = await self._owned_policy_browser(operation, root)
 			self._require_policy_owner(operation, root, session)
-			frame = (await self._policy_read(operation, root.send.Page.getFrameTree(session_id=operation.session_id)))['frameTree']['frame']
+			frame = (await self._policy_read(operation, root.send.Page.getFrameTree(session_id=operation.session_id)))[
+				'frameTree'
+			]['frame']
 			self._require_policy_owner(operation, root, session)
 			if self._frame_commit(frame) != attempt.commit:
 				attempt.phase = ContainmentPhase.SKIPPED
 				return
 			await self._policy_read(operation, root.send.Runtime.enable(session_id=operation.session_id))
 			self._require_policy_owner(operation, root, session)
-			world = await self._policy_read(operation, root.send.Page.createIsolatedWorld(params={
-				'frameId': attempt.commit.frame_id, 'worldName': attempt.world_name, 'grantUniveralAccess': False,
-			}, session_id=operation.session_id))
+			world = await self._policy_read(
+				operation,
+				root.send.Page.createIsolatedWorld(
+					params={
+						'frameId': attempt.commit.frame_id,
+						'worldName': attempt.world_name,
+						'grantUniveralAccess': False,
+					},
+					session_id=operation.session_id,
+				),
+			)
 			self._require_policy_owner(operation, root, session)
 			while attempt.context is None or attempt.context[0] != world['executionContextId']:
 				operation.policy_changed.clear()
 				await self._policy_read(operation, operation.policy_changed.wait())
 				self._require_policy_owner(operation, root, session)
-			result = await self._policy_read(operation, root.send.Runtime.evaluate(params={
-				'expression': 'document', 'uniqueContextId': attempt.context[1], 'returnByValue': False,
-				'objectGroup': attempt.world_name,
-			}, session_id=operation.session_id))
+			result = await self._policy_read(
+				operation,
+				root.send.Runtime.evaluate(
+					params={
+						'expression': 'document',
+						'uniqueContextId': attempt.context[1],
+						'returnByValue': False,
+						'objectGroup': attempt.world_name,
+					},
+					session_id=operation.session_id,
+				),
+			)
 			self._require_policy_owner(operation, root, session)
 			document = result.get('result', {})
-			if result.get('exceptionDetails') or document.get('subtype') != 'node' or not isinstance(document.get('objectId'), str):
+			if (
+				result.get('exceptionDetails')
+				or document.get('subtype') != 'node'
+				or not isinstance(document.get('objectId'), str)
+			):
 				raise NavigationError('Could not acquire the policy Document object')
 			attempt.object_id = document['objectId']
-			frame = (await self._policy_read(operation, root.send.Page.getFrameTree(session_id=operation.session_id)))['frameTree']['frame']
+			frame = (await self._policy_read(operation, root.send.Page.getFrameTree(session_id=operation.session_id)))[
+				'frameTree'
+			]['frame']
 			self._require_policy_owner(operation, root, session)
 			if self._frame_commit(frame) != attempt.commit:
 				attempt.phase = ContainmentPhase.SKIPPED
@@ -1516,12 +3076,23 @@ class BrowserSession(BaseModel):
 			if asyncio.get_running_loop().time() >= attempt.deadline:
 				raise TimeoutError('Policy preparation exceeded its containment grace')
 			attempt.phase = ContainmentPhase.ACTION_IN_FLIGHT
-			result = await root.send.Runtime.callFunctionOn(params={'objectId': attempt.object_id,
-				'functionDeclaration': _CONTAIN_DOCUMENT, 'arguments': [{'value': attempt.commit.url}],
-				'returnByValue': True, 'awaitPromise': False}, session_id=operation.session_id)
+			result = await root.send.Runtime.callFunctionOn(
+				params={
+					'objectId': attempt.object_id,
+					'functionDeclaration': _CONTAIN_DOCUMENT,
+					'arguments': [{'value': attempt.commit.url}],
+					'returnByValue': True,
+					'awaitPromise': False,
+				},
+				session_id=operation.session_id,
+			)
 			self._require_policy_owner(operation, root, session)
 			value = result.get('result', {}).get('value', {})
-			if result.get('exceptionDetails') or not isinstance(value, dict) or not isinstance(value.get('initiated'), bool):
+			if (
+				result.get('exceptionDetails')
+				or not isinstance(value, dict)
+				or not isinstance(value.get('initiated'), bool)
+			):
 				raise NavigationError('Policy action returned no conclusive result')
 			if not value['initiated']:
 				attempt.phase = ContainmentPhase.SKIPPED
@@ -1529,7 +3100,11 @@ class BrowserSession(BaseModel):
 			attempt.phase = ContainmentPhase.VERIFYING
 			verify_deadline = asyncio.get_running_loop().time() + NAVIGATION_CONTAINMENT_GRACE
 			while True:
-				frame = (await self._policy_read(operation, root.send.Page.getFrameTree(session_id=operation.session_id), verification=True))['frameTree']['frame']
+				frame = (
+					await self._policy_read(
+						operation, root.send.Page.getFrameTree(session_id=operation.session_id), verification=True
+					)
+				)['frameTree']['frame']
 				self._require_policy_owner(operation, root, session)
 				current = self._frame_commit(frame)
 				if current.url == 'about:blank':
@@ -1541,7 +3116,7 @@ class BrowserSession(BaseModel):
 					raise TimeoutError('Policy replacement was not observed')
 				operation.policy_changed.clear()
 				try:
-					await asyncio.wait_for(operation.policy_changed.wait(), timeout=min(.05, remaining))
+					await asyncio.wait_for(operation.policy_changed.wait(), timeout=min(0.05, remaining))
 				except TimeoutError:
 					pass
 		except BaseException as error:
@@ -1552,31 +3127,51 @@ class BrowserSession(BaseModel):
 				if await self._resolve_policy_protocol_error(error, operation, root, session):
 					return
 				attempt.phase = ContainmentPhase.UNCONFIRMED
-				self._fail_policy_retirement(operation, attempt.error, reason='policy action is unconfirmed; close the owned browser or retain this remote runtime')
+				self._fail_policy_retirement(
+					operation,
+					attempt.error,
+					reason='policy action is unconfirmed; close the owned browser or retain this remote runtime',
+				)
 			else:
-				attempt.phase = ContainmentPhase.FAILED if self._policy_owned(operation, root, session) else ContainmentPhase.SKIPPED
+				attempt.phase = (
+					ContainmentPhase.FAILED
+					if self._policy_owned(operation, root, session)
+					else ContainmentPhase.SKIPPED
+				)
 		finally:
 			if attempt.object_id is not None:
 				try:
-					await asyncio.wait_for(root.send.Runtime.releaseObject(params={'objectId': attempt.object_id}, session_id=operation.session_id), timeout=.2)
+					await asyncio.wait_for(
+						root.send.Runtime.releaseObject(
+							params={'objectId': attempt.object_id}, session_id=operation.session_id
+						),
+						timeout=0.2,
+					)
 				except BaseException:
 					pass
 
-	async def _join_navigation_policy(self, operation: NavigationOperation, *, close: bool = True, retirement: bool = False) -> None:
+	async def _join_navigation_policy(
+		self, operation: NavigationOperation, *, close: bool = True, retirement: bool = False
+	) -> None:
 		if close:
 			operation.close_policy_capture()
 		task = operation.policy_task
 		if task is not None and task is not asyncio.current_task() and not task.done():
 			attempt = operation.containment
-			budget = NAVIGATION_CONTAINMENT_GRACE if retirement or attempt is None or attempt.deadline is None else max(
-				0.0, attempt.deadline - asyncio.get_running_loop().time())
+			budget = (
+				NAVIGATION_CONTAINMENT_GRACE
+				if retirement or attempt is None or attempt.deadline is None
+				else max(0.0, attempt.deadline - asyncio.get_running_loop().time())
+			)
 			await asyncio.wait({task}, timeout=budget)
 		if task is not None and task.done() and not task.cancelled():
 			task.result()
 		if operation.policy_pending:
 			if operation.containment and operation.containment.requires_retirement:
 				operation.containment.phase = ContainmentPhase.UNCONFIRMED
-			self._fail_policy_retirement(operation, 'Policy cleanup has not retired', reason='policy retirement incomplete')
+			self._fail_policy_retirement(
+				operation, 'Policy cleanup has not retired', reason='policy retirement incomplete'
+			)
 			raise NavigationError(f'Policy cleanup has not retired. {_POLICY_RETIREMENT_HINT}')
 
 	async def _drain_navigation_policies(self) -> None:
@@ -1584,7 +3179,11 @@ class BrowserSession(BaseModel):
 		operations = list(self._navigation_policies.values())
 		for operation in operations:
 			operation.close_policy_capture()
-			if operation.policy_task and not operation.policy_task.done() and not (operation.containment and operation.containment.requires_retirement):
+			if (
+				operation.policy_task
+				and not operation.policy_task.done()
+				and not (operation.containment and operation.containment.requires_retirement)
+			):
 				operation.policy_task.cancel()
 		for operation in operations:
 			await self._join_navigation_policy(operation, retirement=True)
@@ -1600,7 +3199,9 @@ class BrowserSession(BaseModel):
 					policy_task.result()
 				if operation.containment is not None:
 					await self._join_navigation_policy(operation, close=False)
-					raise NavigationBlockedError(f'Navigation to {operation.containment.commit.url} blocked by security policy')
+					raise NavigationBlockedError(
+						f'Navigation to {operation.containment.commit.url} blocked by security policy'
+					)
 			return await task
 		finally:
 			if not task.done():
@@ -1631,6 +3232,7 @@ class BrowserSession(BaseModel):
 					raise NavigationError('Cannot navigate: browser not connected')
 				self._check_navigation_owner(operation, root)
 				from openbrowser.browser.watchdogs.security_watchdog import SecurityWatchdog
+
 				policy = self._security_watchdog or SecurityWatchdog(event_bus=event_bus, browser_session=self)
 				if not policy._is_url_allowed(event.url):
 					raise NavigationBlockedError(f'Navigation to {event.url} blocked by security policy')
@@ -1650,7 +3252,11 @@ class BrowserSession(BaseModel):
 				targets = await self._cdp_get_all_pages()
 				self._check_navigation_owner(operation, root)
 				for target in targets:
-					if target.get('url') == event.url and target['targetId'] != self.agent_focus.target_id and not event.new_tab:
+					if (
+						target.get('url') == event.url
+						and target['targetId'] != self.agent_focus.target_id
+						and not event.new_tab
+					):
 						target_id = target['targetId']
 						event.new_tab = False
 				if event.new_tab:
@@ -1671,32 +3277,59 @@ class BrowserSession(BaseModel):
 							target_id = self.agent_focus.target_id
 						else:
 							self._check_navigation_owner(operation, root)
-							await self._await_navigation_event(event_bus, TabCreatedEvent(target_id=target_id, url='about:blank',
-								navigation_id=operation.navigation_id, navigation_generation=operation.generation))
+							await self._await_navigation_event(
+								event_bus,
+								TabCreatedEvent(
+									target_id=target_id,
+									url='about:blank',
+									navigation_id=operation.navigation_id,
+									navigation_generation=operation.generation,
+								),
+							)
 							self._check_navigation_owner(operation, root)
 				else:
 					target_id = target_id or self.agent_focus.target_id
 				if self.agent_focus.target_id != target_id:
-					await self._await_navigation_event(event_bus, SwitchTabEvent(
-						target_id=target_id, navigation_id=operation.navigation_id, navigation_generation=operation.generation))
+					await self._await_navigation_event(
+						event_bus,
+						SwitchTabEvent(
+							target_id=target_id,
+							navigation_id=operation.navigation_id,
+							navigation_generation=operation.generation,
+						),
+					)
 					self._check_navigation_owner(operation, root)
 				if self.agent_focus is None or self.agent_focus.target_id != target_id:
 					raise NavigationError('Navigation target did not acquire focus')
 				session = self.agent_focus
 				operation.select_target(target_id, str(session.session_id))
 				self._check_navigation_owner(operation, root, session)
-				await self._await_navigation_event(event_bus, NavigationStartedEvent(
-					target_id=target_id, url=event.url, navigation_id=operation.navigation_id, navigation_generation=operation.generation))
+				await self._await_navigation_event(
+					event_bus,
+					NavigationStartedEvent(
+						target_id=target_id,
+						url=event.url,
+						navigation_id=operation.navigation_id,
+						navigation_generation=operation.generation,
+					),
+				)
 				self._check_navigation_owner(operation, root, session)
 				self._navigation_monitor.bind(root)
 				tree = await root.send.Page.getFrameTree(session_id=operation.session_id)
 				self._check_navigation_owner(operation, root, session)
 				operation.capture_document(tree['frameTree']['frame'])
-				await root.send.Page.setLifecycleEventsEnabled(params={'enabled': True}, session_id=operation.session_id)
+				await root.send.Page.setLifecycleEventsEnabled(
+					params={'enabled': True}, session_id=operation.session_id
+				)
 				self._check_navigation_owner(operation, root, session)
 				operation.transition(NavigationPhase.NAVIGATING)
 				self._start_navigation_policy(operation, root, session, policy, event_bus)
-				response = await self._navigation_step(operation, root.send.Page.navigate(params={'url': event.url, 'transitionType': 'address_bar'}, session_id=operation.session_id))
+				response = await self._navigation_step(
+					operation,
+					root.send.Page.navigate(
+						params={'url': event.url, 'transitionType': 'address_bar'}, session_id=operation.session_id
+					),
+				)
 				self._check_navigation_owner(operation, root, session)
 				operation.accept_response(response)
 				if not operation.is_download:
@@ -1706,7 +3339,9 @@ class BrowserSession(BaseModel):
 				tree = await root.send.Page.getFrameTree(session_id=operation.session_id)
 				self._check_navigation_owner(operation, root, session)
 				frame = tree['frameTree']['frame']
-				if not operation.is_download and (frame.get('id') != operation.frame_id or frame.get('loaderId') != operation.loader_id):
+				if not operation.is_download and (
+					frame.get('id') != operation.frame_id or frame.get('loaderId') != operation.loader_id
+				):
 					raise NavigationError('Navigation live document binding changed')
 				operation.observed_url = frame.get('url', '') + frame.get('urlFragment', '')
 				if not policy._is_url_allowed(operation.observed_url):
@@ -1715,20 +3350,39 @@ class BrowserSession(BaseModel):
 					raise NavigationBlockedError(f'Navigation to {operation.observed_url} blocked by security policy')
 				await self._close_extension_options_pages()
 				self._check_navigation_owner(operation, root, session)
-				await self._await_navigation_event(event_bus, NavigationCompleteEvent(target_id=target_id, url=operation.observed_url,
-					navigation_id=operation.navigation_id, navigation_generation=operation.generation))
+				await self._await_navigation_event(
+					event_bus,
+					NavigationCompleteEvent(
+						target_id=target_id,
+						url=operation.observed_url,
+						navigation_id=operation.navigation_id,
+						navigation_generation=operation.generation,
+					),
+				)
 				self._check_navigation_owner(operation, root, session)
-				await self._await_navigation_event(event_bus, AgentFocusChangedEvent(
-					target_id=target_id, url=operation.observed_url, navigation_id=operation.navigation_id,
-					navigation_generation=operation.generation, navigation_session_id=operation.session_id))
+				await self._await_navigation_event(
+					event_bus,
+					AgentFocusChangedEvent(
+						target_id=target_id,
+						url=operation.observed_url,
+						navigation_id=operation.navigation_id,
+						navigation_generation=operation.generation,
+						navigation_session_id=operation.session_id,
+					),
+				)
 				self._check_navigation_owner(operation, root, session)
 				await self._join_navigation_policy(operation)
 				self._check_navigation_owner(operation, root, session)
 				if operation.containment is not None:
-					raise NavigationBlockedError(f'Navigation to {operation.containment.commit.url} blocked by security policy')
+					raise NavigationBlockedError(
+						f'Navigation to {operation.containment.commit.url} blocked by security policy'
+					)
 				operation.finish(NavigationPhase.DOWNLOAD if operation.is_download else NavigationPhase.SUCCEEDED)
 		except asyncio.CancelledError:
-			operation.finish(NavigationPhase.TIMED_OUT if loop.time() >= deadline else NavigationPhase.CANCELLED, 'Navigation cancelled')
+			operation.finish(
+				NavigationPhase.TIMED_OUT if loop.time() >= deadline else NavigationPhase.CANCELLED,
+				'Navigation cancelled',
+			)
 			raise
 		except TimeoutError as error:
 			if loop.time() >= deadline:
@@ -1813,7 +3467,11 @@ class BrowserSession(BaseModel):
 				if not policy._is_url_allowed(requested_url):
 					raise NavigationBlockedError(f'Navigation to {requested_url} blocked by security policy')
 				operation = NavigationOperation(
-					navigation_id or uuid7str(), self._lifecycle.generation, requested_url, wait_until, deadline=deadline
+					navigation_id or uuid7str(),
+					self._lifecycle.generation,
+					requested_url,
+					wait_until,
+					deadline=deadline,
 				)
 				self._reserve_navigation(operation)
 				self._navigation_task, self._navigation_task_operation = task, operation
@@ -1832,7 +3490,9 @@ class BrowserSession(BaseModel):
 				tree = await root.send.Page.getFrameTree(session_id=operation.session_id)
 				operation.capture_document(tree['frameTree']['frame'])
 				self._check_navigation_owner(operation, root, focus)
-				await root.send.Page.setLifecycleEventsEnabled(params={'enabled': True}, session_id=operation.session_id)
+				await root.send.Page.setLifecycleEventsEnabled(
+					params={'enabled': True}, session_id=operation.session_id
+				)
 				self._check_navigation_owner(operation, root, focus)
 				operation.transition(NavigationPhase.NAVIGATING)
 				operation.begin_trigger()
@@ -1847,7 +3507,10 @@ class BrowserSession(BaseModel):
 				tree = await root.send.Page.getFrameTree(session_id=operation.session_id)
 				self._check_navigation_owner(operation, root, focus)
 				committed_frame = tree['frameTree']['frame']
-				if committed_frame.get('id') != operation.frame_id or committed_frame.get('loaderId') != operation.loader_id:
+				if (
+					committed_frame.get('id') != operation.frame_id
+					or committed_frame.get('loaderId') != operation.loader_id
+				):
 					raise NavigationError('Navigation live document binding changed after commit')
 				operation.observed_url = committed_frame.get('url', '') + committed_frame.get('urlFragment', '')
 				committed_url = operation.observed_url or requested_url
@@ -1940,7 +3603,10 @@ class BrowserSession(BaseModel):
 			raise NavigationError(str(error)) from error
 		finally:
 			try:
-				if operation is not None and operation.phase not in (NavigationPhase.SUCCEEDED, NavigationPhase.DOWNLOAD):
+				if operation is not None and operation.phase not in (
+					NavigationPhase.SUCCEEDED,
+					NavigationPhase.DOWNLOAD,
+				):
 					tasks = self._cancel_navigation_tasks(operation)
 					if tasks:
 						await asyncio.wait(tasks, timeout=1.0)
@@ -2043,128 +3709,201 @@ class BrowserSession(BaseModel):
 		)
 
 	async def on_SwitchTabEvent(self, event: SwitchTabEvent) -> TargetID:
-		"""Handle tab switching - core browser functionality."""
+		"""Switch focus to a live page through the serialized focus transaction."""
+		budget = FocusTransitionBudget.from_event(
+			deadline_monotonic=event.focus_deadline_monotonic,
+			budget_seconds=None,
+		)
 		if event.navigation_id is not None:
-			return await self._switch_navigation_target(event)
-		if not self.agent_focus:
-			raise RuntimeError('Cannot switch tabs - browser not connected')
-
-		all_pages = await self._cdp_get_all_pages()
-		if event.target_id is None:
-			# most recently opened page
-			if all_pages:
-				# update the target id to be the id of the most recently opened page, then proceed to switch to it
-				event.target_id = all_pages[-1]['targetId']
-			else:
-				# no pages open at all, create a new one (handles switching to it automatically)
-				assert self._cdp_client_root is not None, 'CDP client root not initialized - browser may not be connected yet'
-				new_target = await self._cdp_client_root.send.Target.createTarget(params={'url': 'about:blank'})
-				target_id = new_target['targetId']
-				# do not await! these may circularly trigger SwitchTabEvent and could deadlock, dispatch to enqueue and return
-				self.event_bus.dispatch(TabCreatedEvent(url='about:blank', target_id=target_id))
-				self.event_bus.dispatch(AgentFocusChangedEvent(target_id=target_id, url='about:blank'))
-				return target_id
-
-		# switch to the target
-		self.agent_focus = await self.get_or_create_cdp_session(target_id=event.target_id, focus=True)
-		self._tab_registry.register(
-			self.agent_focus.target_id,
-			url=self.agent_focus.url,
-			title=self.agent_focus.title if hasattr(self.agent_focus, 'title') else '',
-			state=TabState.OPEN,
+			return await self._switch_navigation_target(event, budget)
+		result = await self._focus_transition_to_target(
+			event.target_id,
+			reason=FocusChangeReason.SWITCH,
+			budget=budget,
+			excluded_target_id=None,
+			create_if_missing=True,
+			activate=True,
+			probe=True,
 		)
-
-		# Visually switch to the tab in the browser
-		# The Force Background Tab extension prevents Chrome from auto-switching when links create new tabs,
-		# but we still want the agent to be able to explicitly switch tabs when needed
-		await self.agent_focus.cdp_client.send.Target.activateTarget(params={'targetId': event.target_id})
-
-		# dispatch focus changed event
-		await self.event_bus.dispatch(
-			AgentFocusChangedEvent(
-				target_id=self.agent_focus.target_id,
-				url=self.agent_focus.url,
-			)
+		event.target_id = result.session.target_id
+		if result.created_target_id:
+			await self._initialize_focus_page(result.created_target_id, budget)
+		await self._notify_focus_changed(
+			result.session.target_id,
+			result.session.url or 'about:blank',
+			FocusChangeReason.SWITCH,
+			budget,
+			result.snapshot,
 		)
-		return self.agent_focus.target_id
+		return result.session.target_id
 
-	async def _switch_navigation_target(self, event: SwitchTabEvent) -> TargetID:
+	async def _switch_navigation_target(
+		self,
+		event: SwitchTabEvent,
+		budget: FocusTransitionBudget | None = None,
+	) -> TargetID:
 		root = self._cdp_client_root
 		operation = self._marked_navigation(event, root)
 		if not event.target_id:
 			raise NavigationError('Navigation switch requires an explicit target')
-		session = await self.get_or_create_cdp_session(target_id=event.target_id, focus=False)
-		self._check_navigation_owner(operation, root)
+		transition_budget = budget or FocusTransitionBudget.start()
+		try:
+			result = await self._focus_transition_to_target(
+				event.target_id,
+				reason=FocusChangeReason.NAVIGATION,
+				budget=transition_budget,
+				activate=True,
+				probe=True,
+				commit_guard=lambda: self._check_navigation_owner(operation, root),
+			)
+		except FocusTargetError as error:
+			if isinstance(error.__cause__, NavigationError):
+				raise error.__cause__ from error
+			raise NavigationError(str(error)) from error
+		session = result.session
 		if session.cdp_client is not root:
 			raise NavigationError('Navigation target root binding changed')
-		session_id = str(session.session_id)
-		await root.send.Target.activateTarget(params={'targetId': event.target_id})
-		self._check_navigation_owner(operation, root)
-		if session.session_id != session_id:
-			raise NavigationError('Navigation target session binding changed')
-		self.agent_focus = session
-		self._tab_registry.register(session.target_id, url=session.url, title=session.title, state=TabState.OPEN)
-		await self._await_navigation_event(self.event_bus, AgentFocusChangedEvent(
-			target_id=session.target_id, url=session.url, navigation_id=operation.navigation_id,
-			navigation_generation=operation.generation, navigation_session_id=session_id))
+		await self._await_navigation_event(
+			self.event_bus,
+			AgentFocusChangedEvent(
+				target_id=session.target_id,
+				url=session.url,
+				navigation_id=operation.navigation_id,
+				navigation_generation=operation.generation,
+				navigation_session_id=session.session_id,
+				focus_generation=result.snapshot.generation,
+				focus_session_id=result.snapshot.session_id,
+				focus_reason=FocusChangeReason.NAVIGATION,
+				focus_budget_seconds=transition_budget.remaining(),
+				focus_deadline_monotonic=transition_budget.deadline,
+				event_timeout=max(0.001, transition_budget.remaining()),
+			),
+		)
 		self._check_navigation_owner(operation, root)
 		return session.target_id
 
 	async def on_CloseTabEvent(self, event: CloseTabEvent) -> None:
-		"""Handle tab closure - update focus if needed."""
+		"""Close one tab and run the owned focus repair within the same budget."""
+		budget = FocusTransitionBudget.from_event(
+			deadline_monotonic=event.focus_deadline_monotonic,
+			budget_seconds=None,
+		)
+		focus_snapshot_before_close = self._focus_state
 		record = self._tab_registry.get(event.target_id)
 		if record is not None and record.state is TabState.CLOSED:
-			await self._repair_focus_after_closed_tab(event.target_id)
+			await self._repair_focus_after_closed_tab(event.target_id, budget)
 			return
-		# CLOSING is retryable: a previous close may have been cancelled after
-		# setting the state but before the target detached.
+
 		self._tab_registry.mark_closing(event.target_id)
 		closed = False
 		try:
 			try:
-				await self.event_bus.dispatch(TabClosingEvent(target_id=event.target_id))
+				closing_event = self.event_bus.dispatch(TabClosingEvent(target_id=event.target_id))
+				await self._await_event_result(
+					closing_event,
+					budget,
+					raise_if_any=False,
+					raise_if_none=False,
+				)
 			except Exception as error:
 				self.logger.warning(f'Tab closing observer failed: {type(error).__name__}: {error}')
 			try:
-				await self.cdp_client.send.Target.closeTarget(params={'targetId': event.target_id})
+				close_result = await self._await_focus_operation(
+					self.cdp_client.send.Target.closeTarget(params={'targetId': event.target_id}),
+					budget,
+					target_id=event.target_id,
+					phase=self._focus_state.phase,
+				)
+				if isinstance(close_result, dict) and close_result.get('success') is False:
+					raise RuntimeError('Target.closeTarget returned success=false')
+			except FocusTargetError:
+				raise
 			except Exception as error:
 				error_text = str(error).lower()
 				already_closed = any(
 					marker in error_text
 					for marker in ('already closed', 'no target', 'target closed', 'not found', '-32001')
 				)
-				try:
-					still_open = False if already_closed else await self._is_target_valid(event.target_id)
-				except Exception:
-					still_open = False
-				if still_open:
-					self._tab_registry.update(event.target_id, state=TabState.OPEN)
+				still_open = False if already_closed else await self._target_liveness(event.target_id, budget)
+				if still_open is True:
+					self._tab_registry.update(event.target_id, state=TabState.OPEN, allow_reopen=True)
 					raise
-				closed = True
-				self.logger.debug(f'Target was already closed: {error}')
+				if still_open is False:
+					closed = True
+					self.logger.debug(f'Target was already closed: {error}')
+				else:
+					raise RuntimeError('Close target liveness is unknown') from error
 			else:
 				closed = True
+		except asyncio.CancelledError:
+			if not closed:
+				record = self._tab_registry.get(event.target_id)
+				if record is not None and record.state is TabState.CLOSING:
+					self._schedule_close_reconciliation(event.target_id)
+			raise
 		except BaseException:
 			if not closed:
 				record = self._tab_registry.get(event.target_id)
 				if record is not None and record.state is TabState.CLOSING:
-					self._tab_registry.update(event.target_id, state=TabState.OPEN)
+					if budget.remaining() <= 0:
+						self._schedule_close_reconciliation(event.target_id)
+					else:
+						try:
+							still_open = await self._target_liveness(event.target_id, budget)
+						except asyncio.CancelledError:
+							self._schedule_close_reconciliation(event.target_id)
+							raise
+						except Exception:
+							still_open = None
+						record = self._tab_registry.get(event.target_id)
+						if record is not None and record.state is TabState.CLOSING:
+							if still_open is True:
+								self._tab_registry.update(
+									event.target_id,
+									state=TabState.OPEN,
+									allow_reopen=True,
+								)
+							elif still_open is False:
+								self._tab_registry.mark_closed(event.target_id)
+								self._schedule_close_reconciliation(event.target_id)
+							else:
+								self._schedule_close_reconciliation(event.target_id)
 			raise
-		finally:
-			record = self._tab_registry.get(event.target_id)
-			if closed and (record is None or record.state is not TabState.CLOSED):
-				try:
-					await self.event_bus.dispatch(TabClosedEvent(target_id=event.target_id))
-				except Exception as error:
-					self.logger.warning(f'Tab closed but focus update failed: {type(error).__name__}: {error}')
-				except BaseException:
-					self._tab_registry.mark_closed(event.target_id)
-					raise
-				finally:
-					record = self._tab_registry.get(event.target_id)
-					if record is not None and record.state is TabState.CLOSING:
-						self._tab_registry.mark_closed(event.target_id)
-				await self._repair_focus_after_closed_tab(event.target_id)
+
+		self._tab_registry.mark_closed(event.target_id)
+		event_timeout = self._focus_event_timeout(TabClosedEvent, budget)
+		closed_event = self.event_bus.dispatch(
+			TabClosedEvent(
+				target_id=event.target_id,
+				focus_deadline_monotonic=budget.deadline,
+				event_timeout=max(0.001, event_timeout),
+			)
+		)
+		try:
+			await self._await_event_result(
+				closed_event,
+				budget,
+				raise_if_any=True,
+				raise_if_none=False,
+			)
+		except asyncio.CancelledError:
+			self._schedule_close_reconciliation(event.target_id)
+			raise
+		except BaseException as error:
+			post_close_error = FocusTargetError(
+				f'Tab {event.target_id[-4:]} is closed, but post-close handling failed: '
+				f'{type(error).__name__}: {error}',
+				code=FocusTargetCode.RECOVERY_FAILED,
+				phase=self._focus_state.phase,
+				target_id=event.target_id,
+				target_type='page',
+			)
+			await self._ensure_closed_target_focus_lost(
+				event.target_id,
+				focus_snapshot_before_close,
+				post_close_error,
+			)
+			raise
 
 	async def on_TabCreatedEvent(self, event: TabCreatedEvent) -> None:
 		"""Handle tab creation - apply viewport settings to new tab."""
@@ -2188,7 +3927,9 @@ class BrowserSession(BaseModel):
 				device_scale_factor = self.browser_profile.device_scale_factor or 1.0
 
 				# Use the helper method with the new tab's target_id
-				await self._cdp_set_viewport(viewport_width, viewport_height, device_scale_factor, target_id=event.target_id)
+				await self._cdp_set_viewport(
+					viewport_width, viewport_height, device_scale_factor, target_id=event.target_id
+				)
 
 				self.logger.debug(f'Applied viewport {viewport_width}x{viewport_height} to tab {event.target_id[-8:]}')
 			except Exception as e:
@@ -2203,126 +3944,195 @@ class BrowserSession(BaseModel):
 			if session.cdp_client is not root:
 				raise NavigationError('Navigation new-tab root binding changed')
 			session_id = str(session.session_id)
-			await root.send.Emulation.setDeviceMetricsOverride(params={
-				'width': self.browser_profile.viewport.width, 'height': self.browser_profile.viewport.height,
-				'deviceScaleFactor': self.browser_profile.device_scale_factor or 1.0, 'mobile': False,
-			}, session_id=session_id)
+			await root.send.Emulation.setDeviceMetricsOverride(
+				params={
+					'width': self.browser_profile.viewport.width,
+					'height': self.browser_profile.viewport.height,
+					'deviceScaleFactor': self.browser_profile.device_scale_factor or 1.0,
+					'mobile': False,
+				},
+				session_id=session_id,
+			)
 			self._check_navigation_owner(operation, root)
 			if session.session_id != session_id:
 				raise NavigationError('Navigation new-tab session binding changed')
 		self._tab_registry.register(event.target_id, url=event.url, state=TabState.OPENING)
 
 	async def on_TabClosedEvent(self, event: TabClosedEvent) -> None:
-		"""Handle tab closure - update focus if needed."""
+		"""Record one closed tab and repair focus if it pointed there."""
 		self._tab_registry.mark_closed(event.target_id)
-		await self._repair_focus_after_closed_tab(event.target_id)
+		budget = FocusTransitionBudget.from_event(
+			deadline_monotonic=event.focus_deadline_monotonic,
+			budget_seconds=None,
+		)
+		await self._repair_focus_after_closed_tab(event.target_id, budget)
 
-	async def _repair_focus_after_closed_tab(self, target_id: str) -> None:
-		"""Move agent focus away from a tab that is known to be closed."""
-		if not self.agent_focus:
-			return
-		if self.agent_focus.target_id == target_id or self.agent_focus.target_id.endswith(target_id):
-			await self.event_bus.dispatch(SwitchTabEvent(target_id=None))
+	async def _repair_focus_after_closed_tab(
+		self,
+		target_id: str,
+		budget: FocusTransitionBudget,
+	) -> FocusSnapshot:
+		"""Move focus away from one closed target or raise a typed failure."""
+		snapshot = self._focus_state
+		if snapshot.phase is FocusPhase.FOCUSED and snapshot.target_id != target_id:
+			return snapshot
+		if snapshot.phase is FocusPhase.LOST and snapshot.previous_target_id != target_id:
+			return snapshot
+		if snapshot.phase not in (FocusPhase.FOCUSED, FocusPhase.LOST):
+			return snapshot
+		created_target_id: str | None = None
+		try:
+			result = await self._focus_transition_to_target(
+				None,
+				reason=FocusChangeReason.CLOSE_REPAIR,
+				budget=budget,
+				excluded_target_id=target_id,
+				create_if_missing=True,
+				activate=True,
+				probe=True,
+				failure_mode='lost',
+				phase=FocusPhase.RECOVERING,
+				expected_generation=snapshot.generation,
+			)
+			created_target_id = result.created_target_id
+			if created_target_id:
+				await self._initialize_focus_page(created_target_id, budget)
+			await self._notify_focus_changed(
+				result.session.target_id,
+				result.session.url or 'about:blank',
+				FocusChangeReason.CLOSE_REPAIR,
+				budget,
+				result.snapshot,
+			)
+			return result.snapshot
+		except FocusTargetError as error:
+			created_target_id = created_target_id or error.created_target_id
+			if created_target_id:
+				await self._initialize_focus_page(created_target_id, budget)
+			if error.code is FocusTargetCode.STALE_TRANSITION:
+				current = self._focus_state
+				if current.phase is FocusPhase.FOCUSED and current.target_id != target_id:
+					return current
+			if error.code is FocusTargetCode.OBSERVATION_FAILED:
+				raise
+			inner_message = error.to_snapshot().message
+			repair_error = FocusTargetError(
+				f'Tab {target_id[-4:]} is closed, but focus repair failed: {inner_message}',
+				code=FocusTargetCode.RECOVERY_FAILED,
+				phase=FocusPhase.LOST,
+				target_id=target_id,
+			)
+			await self._ensure_closed_target_focus_lost(target_id, snapshot, repair_error)
+			raise repair_error from error
 
 	async def on_AgentFocusChangedEvent(self, event: AgentFocusChangedEvent) -> None:
-		"""Handle agent focus change - update focus and clear cache."""
+		"""Validate one focus observation without clearing caches twice."""
+		budget = FocusTransitionBudget.from_event(
+			deadline_monotonic=event.focus_deadline_monotonic,
+			budget_seconds=event.focus_budget_seconds,
+		)
 		if event.navigation_id is not None:
-			await self._refresh_navigation_focus(event)
+			await self._refresh_navigation_focus(event, budget)
 			return
-		self.logger.debug(f'🔄 AgentFocusChangedEvent received: target_id=...{event.target_id[-4:]} url={event.url}')
+		if not event.target_id:
+			raise FocusTargetError(
+				'AgentFocusChangedEvent has no target ID.',
+				code=FocusTargetCode.TARGET_MISSING,
+				phase=self._focus_state.phase,
+			)
 
-		# Clear cached DOM state since focus changed
-		# self.logger.debug('🔄 Clearing DOM cache...')
-		if self._dom_watchdog:
-			self._dom_watchdog.clear_cache()
-			# self.logger.debug('🔄 Cleared DOM cache after focus change')
-
-		# Clear cached browser state
-		# self.logger.debug('🔄 Clearing cached browser state...')
-		self._cached_browser_state_summary = None
-		self._cached_selector_map.clear()
-		self.logger.debug('🔄 Cached browser state cleared')
-		all_targets = await self._cdp_get_all_pages(include_chrome=True)
-
-		# Update agent focus if a specific target_id is provided
-		if event.target_id:
-			self.agent_focus = await self.get_or_create_cdp_session(target_id=event.target_id, focus=True)
-			self._tab_registry.register(
+		snapshot = self._focus_state
+		if event.focus_generation is not None:
+			if snapshot.generation != event.focus_generation:
+				return
+			if snapshot.target_id != event.target_id or snapshot.session_id != event.focus_session_id:
+				return
+			if self.agent_focus is None or not snapshot.is_exact_pair(
 				self.agent_focus.target_id,
-				url=event.url or self.agent_focus.url,
-				title=self.agent_focus.title if hasattr(self.agent_focus, 'title') else '',
-				state=TabState.OPEN,
-			)
-			self.logger.debug(f'🔄 Updated agent focus to tab target_id=...{event.target_id[-4:]}')
-		else:
-			raise RuntimeError('AgentFocusChangedEvent received with no target_id for newly focused tab')
+				self.agent_focus.session_id,
+			):
+				return
+			if event.url:
+				self._schedule_navigation_complete_observation(event.target_id, event.url)
+			return
 
-		# Test that the browser is responsive by evaluating a simple expression
-		if self.agent_focus:
-			self.logger.debug('🔄 Testing tab responsiveness...')
-			try:
-				test_result = await asyncio.wait_for(
-					self.agent_focus.cdp_client.send.Runtime.evaluate(
-						params={'expression': '1 + 1', 'returnByValue': True}, session_id=self.agent_focus.session_id
-					),
-					timeout=2.0,
-				)
-				if test_result.get('result', {}).get('value') == 2:
-					# self.logger.debug('🔄 ✅ Browser is responsive after focus change')
-					pass
-				else:
-					raise Exception('❌ Failed to execute test JS expression with Page.evaluate')
-			except Exception as e:
-				fallback_target_id = all_targets[0].get('targetId') if all_targets else 'no remaining targets'
-				self.logger.error(
-					f'🔄 ❌ Target {self.agent_focus.target_id} seems closed/crashed, switching to fallback page {fallback_target_id}: {type(e).__name__}: {e}'
-				)
-				all_pages = await self._cdp_get_all_pages()
-				last_target_id = all_pages[-1]['targetId'] if all_pages else None
-				self.agent_focus = await self.get_or_create_cdp_session(target_id=last_target_id, focus=True)
-				raise
+		result = await self._focus_transition_to_target(
+			event.target_id,
+			reason=event.focus_reason or FocusChangeReason.INITIAL,
+			budget=budget,
+			activate=False,
+			probe=True,
+			failure_mode='lost' if snapshot.phase is FocusPhase.UNINITIALIZED else 'restore',
+		)
+		if result.created_target_id:
+			await self._initialize_focus_page(result.created_target_id, budget)
+		if event.url:
+			self._schedule_navigation_complete_observation(event.target_id, event.url)
 
-		# Dispatch NavigationCompleteEvent when tab focus changes
-		# This ensures PDF detection and downloads work when switching tabs
-		if event.target_id and event.url:
-			self.logger.debug(f'🔄 Dispatching NavigationCompleteEvent for tab switch to {event.url[:50]}...')
-			await self.event_bus.dispatch(
-				NavigationCompleteEvent(
-					target_id=event.target_id,
-					url=event.url,
-				)
-			)
-
-		# self.logger.debug('🔄 AgentFocusChangedEvent handler completed successfully')
-
-	async def _refresh_navigation_focus(self, event: AgentFocusChangedEvent) -> None:
+	async def _refresh_navigation_focus(
+		self,
+		event: AgentFocusChangedEvent,
+		budget: FocusTransitionBudget,
+	) -> None:
 		root = self._cdp_client_root
 		operation = self._marked_navigation(event, root)
+
 		def check() -> bool:
 			self._check_navigation_owner(operation, root)
-			return (self.agent_focus is not None and self.agent_focus.target_id == event.target_id
-				and self.agent_focus.session_id == event.navigation_session_id)
+			return (
+				self.agent_focus is not None
+				and self.agent_focus.target_id == event.target_id
+				and self.agent_focus.session_id == event.navigation_session_id
+			)
+
 		if not check():
 			return
-		session = await self.get_or_create_cdp_session(target_id=event.target_id, focus=False)
+		session = await self.get_or_create_cdp_session(
+			target_id=event.target_id,
+			focus=False,
+			budget=budget,
+		)
 		if not check():
 			return
 		if session.cdp_client is not root or session.session_id != event.navigation_session_id:
 			raise NavigationError('Navigation focus session binding changed')
-		result = await asyncio.wait_for(root.send.Runtime.evaluate(
-			params={'expression': '1 + 1', 'returnByValue': True}, session_id=event.navigation_session_id), timeout=2.0)
+		try:
+			result = await self._await_focus_operation(
+				root.send.Runtime.evaluate(
+					params={'expression': '1 + 1', 'returnByValue': True},
+					session_id=event.navigation_session_id,
+				),
+				budget,
+				target_id=event.target_id,
+				phase=FocusPhase.FOCUSED,
+				target_type='page',
+			)
+		except FocusTargetError as error:
+			raise NavigationError(str(error)) from error
 		if not check():
 			return
 		if result.get('result', {}).get('value') != 2:
 			raise NavigationError('Navigation focus did not respond to JavaScript')
-		if self._dom_watchdog:
-			self._dom_watchdog.clear_cache()
-		self._cached_browser_state_summary = None
-		self._cached_selector_map.clear()
-		self._tab_registry.register(session.target_id, url=event.url or session.url, title=session.title, state=TabState.OPEN)
+		self._tab_registry.update(session.target_id, url=event.url or session.url, title=session.title)
 		if event.url:
-			await self._await_navigation_event(self.event_bus, NavigationCompleteEvent(target_id=event.target_id, url=event.url,
-				navigation_id=operation.navigation_id, navigation_generation=operation.generation))
+			try:
+				await self._await_focus_operation(
+					self._await_navigation_event(
+						self.event_bus,
+						NavigationCompleteEvent(
+							target_id=event.target_id,
+							url=event.url,
+							navigation_id=operation.navigation_id,
+							navigation_generation=operation.generation,
+						),
+					),
+					budget,
+					target_id=event.target_id,
+					phase=FocusPhase.FOCUSED,
+					target_type='page',
+				)
+			except FocusTargetError as error:
+				raise NavigationError(str(error)) from error
 			check()
 
 	async def on_FileDownloadedEvent(self, event: FileDownloadedEvent) -> None:
@@ -2330,7 +4140,9 @@ class BrowserSession(BaseModel):
 		self.logger.debug(f'FileDownloadedEvent received: {event.file_name} at {event.path}')
 		if event.path and event.path not in self._downloaded_files:
 			self._downloaded_files.append(event.path)
-			self.logger.info(f'📁 Tracked download: {event.file_name} ({len(self._downloaded_files)} total downloads in session)')
+			self.logger.info(
+				f'📁 Tracked download: {event.file_name} ({len(self._downloaded_files)} total downloads in session)'
+			)
 		else:
 			if not event.path:
 				self.logger.warning(f'FileDownloadedEvent has no path: {event}')
@@ -2556,10 +4368,10 @@ class BrowserSession(BaseModel):
 		Extracts decrypted cookies via CDP, bypassing keychain encryption.
 
 		Args:
-			output_path: Optional path to save storage_state.json. If None, returns dict only.
+                output_path: Optional path to save storage_state.json. If None, returns dict only.
 
 		Returns:
-			Storage state dict with cookies in Playwright format.
+                Storage state dict with cookies in Playwright format.
 
 		"""
 		from pathlib import Path
@@ -2595,80 +4407,243 @@ class BrowserSession(BaseModel):
 
 		return storage_state
 
-	async def get_or_create_cdp_session(self, target_id: TargetID | None = None, focus: bool = True) -> CDPSession:
-		"""Get CDP session for a target from the event-driven pool.
+	def _ensure_session_returnable(
+		self,
+		session: CDPSession,
+		*,
+		implicit_snapshot: FocusSnapshot | None = None,
+	) -> None:
+		"""Reject a stale or closed binding before returning it to a caller."""
+		record = self._tab_registry.get(session.target_id)
+		if record is not None and record.state in (TabState.CLOSING, TabState.CLOSED, TabState.CRASHED):
+			raise FocusTargetError(
+				f'Target {session.target_id[-8:]} is {record.state.value} and cannot return a session.',
+				code=FocusTargetCode.TAB_NOT_LIVE,
+				phase=self._focus_state.phase,
+				target_id=session.target_id,
+				target_type='page',
+			)
+		if implicit_snapshot is None:
+			return
+		current = self._focus_state
+		if (
+			current.generation != implicit_snapshot.generation
+			or not current.is_exact_pair(session.target_id, session.session_id)
+		):
+			raise FocusTargetError(
+				'Focus changed while resolving the implicit browser session.',
+				code=FocusTargetCode.STALE_TRANSITION,
+				phase=current.phase,
+				target_id=current.target_id or session.target_id,
+				target_type='page',
+			)
 
-		With autoAttach=True, sessions are created automatically by Chrome and added
-		to the pool via Target.attachedToTarget events. This method retrieves them.
+	async def get_or_create_cdp_session(
+		self,
+		target_id: TargetID | None = None,
+		focus: bool = True,
+		*,
+		focus_reason: FocusChangeReason = FocusChangeReason.SWITCH,
+		budget: FocusTransitionBudget | None = None,
+	) -> CDPSession:
+		"""Get a CDP session for a target from the event-driven pool.
 
 		Args:
-			target_id: Target ID to get session for. If None, uses current agent focus.
-			focus: If True, switches agent focus to this target.
+                target_id: Target ID to get session for. If None, uses current agent focus.
+                focus: If True, commits focus after page validation, activation, and probe.
+                focus_reason: Reason recorded for a focus commit.
+                budget: Optional shared focus deadline.
 
 		Returns:
-			CDPSession for the specified target.
+                CDPSession for the specified target.
 
 		Raises:
-			ValueError: If target doesn't exist or session is not available.
+                FocusTargetError: If the target is not a live page or has no exact session.
 		"""
 		assert self._cdp_client_root is not None, 'Root CDP client not initialized'
-		assert self.agent_focus is not None, 'CDP session not initialized'
 		assert self._session_manager is not None, 'SessionManager not initialized'
 
-		# If no target_id specified, use current agent focus
+		transition_budget = budget or FocusTransitionBudget.start()
+		snapshot = self._focus_state
+		implicit_target = target_id is None
 		if target_id is None:
-			target_id = self.agent_focus.target_id
-
-		# Get session from event-driven pool
-		session = await self._session_manager.get_session_for_target(target_id)
-
-		if not session:
-			# Session not in pool yet - wait for attach event
-			self.logger.debug(f'[SessionManager] Waiting for target {target_id[:8]}... to attach...')
-
-			# Wait up to 2 seconds for the attach event
-			for attempt in range(20):
-				await asyncio.sleep(0.1)
-				session = await self._session_manager.get_session_for_target(target_id)
-				if session:
-					self.logger.debug(f'[SessionManager] Target appeared after {attempt * 100}ms')
-					break
-
-			if not session:
-				# Timeout - target doesn't exist
-				raise ValueError(f'Target {target_id} not found - may have detached or never existed')
-
-		# Validate session is still active
-		is_valid = await self._session_manager.validate_session(target_id)
-		if not is_valid:
-			raise ValueError(f'Target {target_id} has detached - no active sessions')
-
-		# Update focus if requested
-		# CRITICAL: Only allow focus change to 'page' type targets, not iframes/workers
-		if focus and self.agent_focus.target_id != target_id:
-			# Check target type before allowing focus change
-			targets = await self._cdp_client_root.send.Target.getTargets()
-			target_info = next((t for t in targets['targetInfos'] if t['targetId'] == target_id), None)
-			target_type = target_info.get('type') if target_info else 'unknown'
-
-			if target_type == 'page':
-				self.logger.debug(f'[SessionManager] Switching focus: {self.agent_focus.target_id[:8]}... → {target_id[:8]}...')
-				self.agent_focus = session
+			if snapshot.phase is FocusPhase.FOCUSED and snapshot.target_id:
+				target_id = snapshot.target_id
+			elif self.agent_focus is not None:
+				target_id = self.agent_focus.target_id
 			else:
-				# Ignore focus request for non-page targets (iframes, workers, etc.)
-				# These can detach at any time, causing agent_focus to point to dead target
-				self.logger.debug(
-					f'[SessionManager] Ignoring focus request for {target_type} target {target_id[:8]}... '
-					f'(agent_focus stays on {self.agent_focus.target_id[:8]}...)'
+				raise FocusTargetError(
+					'No browser page is focused.',
+					code=FocusTargetCode.NO_PAGE_AVAILABLE,
+					phase=snapshot.phase,
 				)
 
-		# Resume if waiting for debugger
+		expected_generation = snapshot.generation if implicit_target else None
 		if focus:
+			if snapshot.phase is FocusPhase.FOCUSED and snapshot.target_id == target_id:
+				session = await self._await_focus_operation(
+					self._session_manager.get_live_session_for_target(
+						target_id,
+						budget=transition_budget,
+					),
+					transition_budget,
+					target_id=target_id,
+					phase=snapshot.phase,
+					target_type='page',
+				)
+				if session is not None and session.session_id == snapshot.session_id:
+					try:
+						await self._await_focus_operation(
+							session.cdp_client.send.Runtime.runIfWaitingForDebugger(session_id=session.session_id),
+							transition_budget,
+							target_id=target_id,
+							phase=FocusPhase.FOCUSED,
+							target_type='page',
+						)
+					except FocusTargetError:
+						raise
+					except Exception as error:
+						missing_session = self._is_missing_cdp_session_error(error)
+						still_live = False
+						if not missing_session:
+							still_live = await self._focus_exact_session_is_live(
+								target_id,
+								snapshot.session_id,
+								transition_budget,
+								phase=FocusPhase.FOCUSED,
+								use_active_ids=True,
+							)
+						if not missing_session and still_live:
+							self._ensure_session_returnable(
+								session,
+								implicit_snapshot=snapshot if implicit_target else None,
+							)
+							return session
+						remaining_session_ids: tuple[str, ...] = ()
+						try:
+							active_ids = await self._session_manager.active_session_ids(
+								target_id,
+								budget=transition_budget,
+							)
+							remaining_session_ids = tuple(
+								session_id for session_id in active_ids if session_id != snapshot.session_id
+							)
+						except Exception:
+							remaining_session_ids = ()
+						await self._handle_detached_session(
+							target_id,
+							session.session_id,
+							remaining_session_ids,
+						)
+						if implicit_target and self._focus_state.phase is FocusPhase.FOCUSED:
+							replacement = self.agent_focus
+							if replacement is not None and replacement.target_id == target_id:
+								self._ensure_session_returnable(
+									replacement,
+									implicit_snapshot=self._focus_state,
+								)
+								return replacement
+							raise FocusTargetError(
+								'Focus changed to a different target while resolving the implicit browser session.',
+								code=FocusTargetCode.STALE_TRANSITION,
+								phase=self._focus_state.phase,
+								target_id=self._focus_state.target_id,
+								target_type='page',
+							) from error
+						raise FocusTargetError(
+							f'Focus session for target {target_id[-8:]} is no longer live.',
+							code=FocusTargetCode.TARGET_DETACHED,
+							phase=self._focus_state.phase,
+							target_id=target_id,
+							target_type='page',
+						) from error
+					self._ensure_session_returnable(
+						session,
+						implicit_snapshot=snapshot if implicit_target else None,
+					)
+					return session
+				if session is not None:
+					result = await self._focus_transition_to_target(
+						target_id,
+						reason=FocusChangeReason.SESSION_REBIND,
+						budget=transition_budget,
+						activate=False,
+						probe=False,
+						expected_generation=snapshot.generation,
+					)
+					self._ensure_session_returnable(
+						result.session,
+						implicit_snapshot=result.snapshot if implicit_target else None,
+					)
+					return result.session
+			result = await self._focus_transition_to_target(
+				target_id,
+				reason=focus_reason,
+				budget=transition_budget,
+				activate=True,
+				probe=True,
+				expected_generation=expected_generation,
+			)
 			try:
-				await session.cdp_client.send.Runtime.runIfWaitingForDebugger(session_id=session.session_id)
-			except Exception:
-				pass  # May fail if not waiting
+				await self._await_focus_operation(
+					result.session.cdp_client.send.Runtime.runIfWaitingForDebugger(
+						session_id=result.session.session_id
+					),
+					transition_budget,
+					target_id=result.session.target_id,
+					phase=FocusPhase.FOCUSED,
+					target_type='page',
+				)
+			except FocusTargetError:
+				raise
+			except Exception as error:
+				if self._is_missing_cdp_session_error(error):
+					remaining_session_ids: tuple[str, ...] = ()
+					try:
+						active_ids = await self._session_manager.active_session_ids(
+							target_id,
+							budget=transition_budget,
+						)
+						remaining_session_ids = tuple(
+							session_id for session_id in active_ids if session_id != result.session.session_id
+						)
+					except Exception:
+						remaining_session_ids = ()
+					if remaining_session_ids:
+						replacement = await self._session_manager.get_live_session_for_target(
+							target_id,
+							budget=transition_budget,
+						)
+						if replacement is not None and replacement.session_id != result.session.session_id:
+							await self._set_agent_focus(
+								replacement,
+								FocusChangeReason.SESSION_REBIND,
+								expected_generation=result.snapshot.generation,
+							)
+							self._ensure_session_returnable(
+								replacement,
+								implicit_snapshot=self._focus_state if implicit_target else None,
+							)
+							return replacement
+					await self._handle_detached_session(target_id, result.session.session_id, ())
+					raise FocusTargetError(
+						f'Focus session for target {target_id[-8:]} detached before it could be returned.',
+						code=FocusTargetCode.TARGET_DETACHED,
+						phase=self._focus_state.phase,
+						target_id=target_id,
+						target_type='page',
+					) from error
+			self._ensure_session_returnable(
+				result.session,
+				implicit_snapshot=result.snapshot if implicit_target else None,
+			)
+			return result.session
 
+		session = await self._get_focus_session_locked(target_id, transition_budget)
+		self._ensure_session_returnable(
+			session,
+			implicit_snapshot=snapshot if implicit_target else None,
+		)
 		return session
 
 	@property
@@ -2898,13 +4873,15 @@ class BrowserSession(BaseModel):
 						if elapsed >= max_wait:
 							raise TimeoutError(
 								f'Browser CDP endpoint {url} did not respond within {max_wait}s'
-							)
+							) from None
 						await asyncio.sleep(0.3)
 
 		assert self.cdp_url is not None
 
 		browser_location = 'local browser' if self.is_local else 'remote browser'
-		self.logger.debug(f'🌎 Connecting to existing chromium-based browser via CDP: {self.cdp_url} -> ({browser_location})')
+		self.logger.debug(
+			f'🌎 Connecting to existing chromium-based browser via CDP: {self.cdp_url} -> ({browser_location})'
+		)
 		self._check_failed_runtime_retirement()
 		try:
 			# Create and store the CDP client for direct CDP communication
@@ -2944,21 +4921,29 @@ class BrowserSession(BaseModel):
 
 					# Enable auto-attach for this target's children
 					await self._cdp_client_root.send.Target.setAutoAttach(
-						params={'autoAttach': True, 'waitForDebuggerOnStart': False, 'flatten': True}, session_id=session_id
+						params={'autoAttach': True, 'waitForDebuggerOnStart': False, 'flatten': True},
+						session_id=session_id,
 					)
 
 					self.logger.debug(
 						f'Attached to existing target: {target_id[:8]}... (type={target_type}, session={session_id[:8]}...)'
 					)
 				except Exception as e:
-					self.logger.debug(f'Failed to attach to existing target {target_id[:8]}... (type={target_type}): {e}')
+					self.logger.debug(
+						f'Failed to attach to existing target {target_id[:8]}... (type={target_type}): {e}'
+					)
 
 			# Find main browser pages (avoiding iframes, workers, extensions, etc.)
 			page_targets: list[TargetInfo] = [
 				t
 				for t in targets['targetInfos']
 				if self._is_valid_target(
-					t, include_http=True, include_about=True, include_pages=True, include_iframes=False, include_workers=False
+					t,
+					include_http=True,
+					include_about=True,
+					include_pages=True,
+					include_iframes=False,
+					include_workers=False,
 				)
 			]
 
@@ -2991,44 +4976,66 @@ class BrowserSession(BaseModel):
 				target_id = [page for page in page_targets if page.get('type') == 'page'][0]['targetId']
 				self.logger.debug(f'📄 Using existing page: {target_id}')
 
-			# Wait for SessionManager to receive the attach event for this target
-			# (Chrome will fire Target.attachedToTarget event which SessionManager handles)
-			for _ in range(20):  # Wait up to 2 seconds
-				await asyncio.sleep(0.1)
-				session = await self._session_manager.get_session_for_target(target_id)
-				if session:
-					self.agent_focus = session
-					# SessionManager already added it to pool - no need to do it manually
-					self.logger.debug(f'📄 Agent focus set to {target_id[:8]}...')
-					break
-
-			if not self.agent_focus:
-				raise RuntimeError(f'Failed to get session for initial target {target_id}')
+			budget = FocusTransitionBudget.start()
+			result = await self._focus_transition_to_target(
+				target_id,
+				reason=FocusChangeReason.INITIAL,
+				budget=budget,
+				activate=False,
+				probe=True,
+			)
+			self.logger.debug(f'📄 Agent focus set to {result.session.target_id[:8]}...')
 
 			# Enable proxy authentication handling if configured
 			await self._setup_proxy_auth()
 
 			# Verify the session is working
-			if self.agent_focus.title == 'Unknown title':
+			if result.session.title == 'Unknown title':
 				self.logger.warning('Session created but title is unknown (may be normal for about:blank)')
 
 			# Dispatch TabCreatedEvent for all initial tabs (so watchdogs can initialize)
-			for idx, target in enumerate(page_targets):
+			initial_pages = page_targets or [
+				{
+					'targetId': result.session.target_id,
+					'url': getattr(result.session, 'url', 'about:blank') or 'about:blank',
+				}
+			]
+			for idx, target in enumerate(initial_pages):
 				target_url = target.get('url', '')
 				self.logger.debug(f'Dispatching TabCreatedEvent for initial tab {idx}: {target_url}')
 				self.event_bus.dispatch(TabCreatedEvent(url=target_url, target_id=target['targetId']))
 
-			# Dispatch initial focus event
-			if page_targets:
-				initial_url = page_targets[0].get('url', '')
-				self.event_bus.dispatch(AgentFocusChangedEvent(target_id=page_targets[0]['targetId'], url=initial_url))
-				self.logger.debug(f'Initial agent focus set to tab 0: {initial_url}')
+			try:
+				await self._notify_focus_changed(
+					result.session.target_id,
+					getattr(result.session, 'url', 'about:blank') or 'about:blank',
+					FocusChangeReason.INITIAL,
+					budget,
+					result.snapshot,
+				)
+			except FocusTargetError as error:
+				if error.code not in (FocusTargetCode.OBSERVATION_FAILED, FocusTargetCode.TIMEOUT):
+					raise
+				self.logger.warning(f'Initial focus observation failed after commit: {error}')
+			self.logger.debug(f'Initial agent focus set to tab 0: {getattr(result.session, "url", "about:blank")}')
 
 		except Exception as e:
 			# Fatal error - browser is not usable without CDP connection
 			self.logger.error(f'❌ FATAL: Failed to setup CDP connection: {e}')
 			self.logger.error('❌ Browser cannot continue without CDP connection')
-			# Clean up any partial state
+			# Clean up any partial state and publish a typed focus failure.
+			self._focus_epoch += 1
+			self._cancel_focus_observers()
+			self._focus_lost_locked(
+				FocusTargetError(
+					f'CDP connection failed: {type(e).__name__}: {e}',
+					code=FocusTargetCode.RECOVERY_FAILED,
+					phase=self._focus_state.phase,
+					target_id=self._focus_state.target_id or self._focus_state.previous_target_id,
+				),
+				FocusChangeReason.INITIAL,
+				previous_target_id=self._focus_state.target_id or self._focus_state.previous_target_id,
+			)
 			self._cdp_client_root = None
 			self.agent_focus = None
 			# Re-raise as a fatal error
@@ -3193,12 +5200,17 @@ class BrowserSession(BaseModel):
 		# Reconcile against every page target, then use the filtered page query
 		# for display. A chrome-error:// or chrome:// tab is still live even
 		# when it is not shown as an actionable tab.
+		registry_revisions = self._tab_registry.state_revisions()
 		authoritative_pages = await self._cdp_get_all_pages(
 			include_chrome=True,
 			include_chrome_extensions=True,
 			include_chrome_error=True,
 		)
-		self._tab_registry.sync_from_pages(authoritative_pages)
+		self._tab_registry.sync_from_pages(
+			authoritative_pages,
+			allow_reopen=True,
+			state_revisions=registry_revisions,
+		)
 		pages = await self._cdp_get_all_pages()
 
 		for i, page_target in enumerate(pages):
@@ -3235,7 +5247,9 @@ class BrowserSession(BaseModel):
 
 			except Exception as e:
 				# Fallback to basic title handling
-				self.logger.debug(f'⚠️ Failed to get target info for tab #{i}: {_log_pretty_url(url)} - {type(e).__name__}')
+				self.logger.debug(
+					f'⚠️ Failed to get target info for tab #{i}: {_log_pretty_url(url)} - {type(e).__name__}'
+				)
 
 				if is_new_tab_page(url):
 					title = ''
@@ -3284,12 +5298,14 @@ class BrowserSession(BaseModel):
 			return target_info.get('title', 'Unknown page title')
 		return 'Unknown page title'
 
-	async def navigate_to(self, url: str, new_tab: bool = False, *, wait_until: WaitUntil = 'load', timeout_ms: int | None = None) -> None:
+	async def navigate_to(
+		self, url: str, new_tab: bool = False, *, wait_until: WaitUntil = 'load', timeout_ms: int | None = None
+	) -> None:
 		"""Navigate to a URL using the standard event system.
 
 		Args:
-			url: URL to navigate to
-			new_tab: Whether to open in a new tab
+                url: URL to navigate to
+                new_tab: Whether to open in a new tab
 		"""
 		event = NavigateToUrlEvent(url=url, new_tab=new_tab, wait_until=wait_until, timeout_ms=timeout_ms)
 		operation = event.get_navigation_operation(self._lifecycle.generation)
@@ -3301,7 +5317,13 @@ class BrowserSession(BaseModel):
 				await self._await_navigation_event(event_bus, event)
 		except (asyncio.CancelledError, TimeoutError) as error:
 			expired = asyncio.get_running_loop().time() >= deadline
-			phase = NavigationPhase.TIMED_OUT if expired else NavigationPhase.CANCELLED if isinstance(error, asyncio.CancelledError) else NavigationPhase.FAILED
+			phase = (
+				NavigationPhase.TIMED_OUT
+				if expired
+				else NavigationPhase.CANCELLED
+				if isinstance(error, asyncio.CancelledError)
+				else NavigationPhase.FAILED
+			)
 			operation.finish(phase, 'Navigation deadline expired' if expired else error)
 			tasks = self._cancel_navigation_tasks(operation)
 			if tasks:
@@ -3327,10 +5349,10 @@ class BrowserSession(BaseModel):
 		Get element from cached selector map.
 
 		Args:
-			index: The element index from the serialized DOM
+                index: The element index from the serialized DOM
 
 		Returns:
-			EnhancedDOMTreeNode or None if index not found
+                EnhancedDOMTreeNode or None if index not found
 		"""
 		#  Check cached selector map
 		if self._cached_selector_map and index in self._cached_selector_map:
@@ -3344,7 +5366,7 @@ class BrowserSession(BaseModel):
 		This should be called by the DOM watchdog after rebuilding the DOM.
 
 		Args:
-			selector_map: The new selector map from DOM serialization
+                selector_map: The new selector map from DOM serialization
 		"""
 		self._cached_selector_map = selector_map
 
@@ -3362,9 +5384,7 @@ class BrowserSession(BaseModel):
 				raise
 
 		cached_candidates = [
-			full_target_id
-			for full_target_id in self._cdp_session_pool
-			if full_target_id.endswith(tab_id)
+			full_target_id for full_target_id in self._cdp_session_pool if full_target_id.endswith(tab_id)
 		]
 		live_cached: list[str] = []
 		for full_target_id in cached_candidates:
@@ -3384,13 +5404,14 @@ class BrowserSession(BaseModel):
 			)
 
 		if self._cdp_client_root is not None:
+			registry_revisions = self._tab_registry.state_revisions()
 			targets = await self.cdp_client.send.Target.getTargets()
-			pages = [
-				target
-				for target in targets.get('targetInfos', [])
-				if target.get('type') in ('page', 'tab')
-			]
-			self._tab_registry.sync_from_pages(pages)
+			pages = [target for target in targets.get('targetInfos', []) if target.get('type') in ('page', 'tab')]
+			self._tab_registry.sync_from_pages(
+				pages,
+				allow_reopen=True,
+				state_revisions=registry_revisions,
+			)
 
 		return self._tab_registry.resolve(tab_id)
 
@@ -3425,10 +5446,10 @@ class BrowserSession(BaseModel):
 		"""Check if element is a file input.
 
 		Args:
-			element: The DOM element to check
+                element: The DOM element to check
 
 		Returns:
-			True if element is a file input, False otherwise
+                True if element is a file input, False otherwise
 		"""
 		if self._dom_watchdog:
 			return self._dom_watchdog.is_file_input(element)
@@ -3444,7 +5465,7 @@ class BrowserSession(BaseModel):
 		"""Get the current selector map from cached state or DOM watchdog.
 
 		Returns:
-			Dictionary mapping element indices to EnhancedDOMTreeNode objects
+                Dictionary mapping element indices to EnhancedDOMTreeNode objects
 		"""
 		# First try cached selector map
 		if self._cached_selector_map:
@@ -3461,10 +5482,10 @@ class BrowserSession(BaseModel):
 		"""Find element index by its id attribute.
 
 		Args:
-			element_id: The id attribute value to search for
+                element_id: The id attribute value to search for
 
 		Returns:
-			Index of the element, or None if not found
+                Index of the element, or None if not found
 		"""
 		selector_map = await self.get_selector_map()
 		for idx, element in selector_map.items():
@@ -3476,10 +5497,10 @@ class BrowserSession(BaseModel):
 		"""Find element index by its class attribute (matches if class contains the given name).
 
 		Args:
-			class_name: The class name to search for
+                class_name: The class name to search for
 
 		Returns:
-			Index of the first matching element, or None if not found
+                Index of the first matching element, or None if not found
 		"""
 		selector_map = await self.get_selector_map()
 		for idx, element in selector_map.items():
@@ -3542,11 +5563,11 @@ class BrowserSession(BaseModel):
 		and finally uses JavaScript getBoundingClientRect as a last resort.
 
 		Args:
-			backend_node_id: The backend node ID to get coordinates for
-			cdp_session: The CDP session to use
+                backend_node_id: The backend node ID to get coordinates for
+                cdp_session: The CDP session to use
 
 		Returns:
-			DOMRect with coordinates or None if element not found/no bounds
+                DOMRect with coordinates or None if element not found/no bounds
 		"""
 		session_id = cdp_session.session_id
 		quads = []
@@ -3655,7 +5676,7 @@ class BrowserSession(BaseModel):
 		is being interacted with. The highlight automatically fades after the configured duration.
 
 		Args:
-			node: The DOM node to highlight with backend_node_id for coordinate lookup
+                node: The DOM node to highlight with backend_node_id for coordinate lookup
 		"""
 		if not self.browser_profile.highlight_elements:
 			return
@@ -4003,7 +6024,7 @@ class BrowserSession(BaseModel):
 		"""Get list of files downloaded during this browser session.
 
 		Returns:
-			list[str]: List of absolute file paths to downloaded files in this session
+                list[str]: List of absolute file paths to downloaded files in this session
 		"""
 		return self._downloaded_files.copy()
 
@@ -4044,7 +6065,9 @@ class BrowserSession(BaseModel):
 			)
 		]
 
-	async def _cdp_create_new_page(self, url: str = 'about:blank', background: bool = False, new_window: bool = False) -> str:
+	async def _cdp_create_new_page(
+		self, url: str = 'about:blank', background: bool = False, new_window: bool = False
+	) -> str:
 		"""Create a new page/tab using CDP Target.createTarget. Returns target ID."""
 		# Use the root CDP client to create tabs at the browser level
 		if self._cdp_client_root:
@@ -4133,16 +6156,21 @@ class BrowserSession(BaseModel):
 		)
 
 	async def _cdp_set_viewport(
-		self, width: int, height: int, device_scale_factor: float = 1.0, mobile: bool = False, target_id: str | None = None
+		self,
+		width: int,
+		height: int,
+		device_scale_factor: float = 1.0,
+		mobile: bool = False,
+		target_id: str | None = None,
 	) -> None:
 		"""Set viewport using CDP Emulation.setDeviceMetricsOverride.
 
 		Args:
-			width: Viewport width
-			height: Viewport height
-			device_scale_factor: Device scale factor (default 1.0)
-			mobile: Whether to emulate mobile device (default False)
-			target_id: Optional target ID to set viewport for. If not provided, uses agent_focus.
+                width: Viewport width
+                height: Viewport height
+                device_scale_factor: Device scale factor (default 1.0)
+                mobile: Whether to emulate mobile device (default False)
+                target_id: Optional target ID to set viewport for. If not provided, uses agent_focus.
 		"""
 		if target_id:
 			# Set viewport for specific target
@@ -4254,10 +6282,13 @@ class BrowserSession(BaseModel):
 		assert self._cdp_client_root is not None, 'CDP client not initialized - browser may not be connected yet'
 		assert self.agent_focus is not None, 'CDP session not initialized - browser may not be connected yet'
 
-		self.agent_focus = await self.get_or_create_cdp_session(target_id or self.agent_focus.target_id, focus=True)
+		session = await self.get_or_create_cdp_session(
+			target_id or self.agent_focus.target_id,
+			focus=True,
+		)
 
 		# Use helper to navigate on the target
-		await self.agent_focus.cdp_client.send.Page.navigate(params={'url': url}, session_id=self.agent_focus.session_id)
+		await session.cdp_client.send.Page.navigate(params={'url': url}, session_id=session.session_id)
 
 	@staticmethod
 	def _is_valid_target(
@@ -4274,10 +6305,10 @@ class BrowserSession(BaseModel):
 		"""Check if a target should be processed.
 
 		Args:
-			target_info: Target info dict from CDP
+                target_info: Target info dict from CDP
 
 		Returns:
-			True if target should be processed, False if it should be skipped
+                True if target should be processed, False if it should be skipped
 		"""
 		target_type = target_info.get('type', '')
 		url = target_info.get('url', '')
@@ -4331,9 +6362,9 @@ class BrowserSession(BaseModel):
 		because its frame can belong to a tab that is not focused.
 
 		Returns:
-			Tuple of (all_frames, target_sessions) where:
-			- all_frames: dict mapping frame_id -> frame info dict with all metadata
-			- target_sessions: dict mapping target_id -> session_id for active sessions
+                Tuple of (all_frames, target_sessions) where:
+                - all_frames: dict mapping frame_id -> frame info dict with all metadata
+                - target_sessions: dict mapping target_id -> session_id for active sessions
 		"""
 		all_frames = {}  # frame_id -> FrameInfo dict
 		target_sessions = {}  # target_id -> session_id (keep sessions alive during collection)
@@ -4387,7 +6418,9 @@ class BrowserSession(BaseModel):
 
 				try:
 					# Try to get frame tree (not all target types support this)
-					frame_tree_result = await cdp_session.cdp_client.send.Page.getFrameTree(session_id=cdp_session.session_id)
+					frame_tree_result = await cdp_session.cdp_client.send.Page.getFrameTree(
+						session_id=cdp_session.session_id
+					)
 
 					# Process the frame tree recursively
 					def process_frame_tree(node, parent_frame_id=None):
@@ -4475,8 +6508,8 @@ class BrowserSession(BaseModel):
 		"""Populate additional frame metadata like backend node IDs and parent target IDs.
 
 		Args:
-			all_frames: Frame hierarchy dict to populate
-			target_sessions: Active target sessions
+                all_frames: Frame hierarchy dict to populate
+                target_sessions: Active target sessions
 		"""
 		for frame_id_iter, frame_info in all_frames.items():
 			parent_frame_id = frame_info.get('parentFrameId')
@@ -4513,11 +6546,11 @@ class BrowserSession(BaseModel):
 		"""Find the frame info for a specific frame ID.
 
 		Args:
-			frame_id: The frame ID to search for
-			all_frames: Optional pre-built frame hierarchy. If None, will call get_all_frames()
+                frame_id: The frame ID to search for
+                all_frames: Optional pre-built frame hierarchy. If None, will call get_all_frames()
 
 		Returns:
-			Frame info dict if found, None otherwise
+                Frame info dict if found, None otherwise
 		"""
 		if all_frames is None:
 			all_frames, _ = await self.get_all_frames()
@@ -4531,10 +6564,10 @@ class BrowserSession(BaseModel):
 		"""Look up target_id from a CDP session_id.
 
 		Args:
-			session_id: The CDP session ID to look up
+                session_id: The CDP session ID to look up
 
 		Returns:
-			The target_id for this session, or None if not found
+                The target_id for this session, or None if not found
 		"""
 		if not session_id:
 			return None
@@ -4550,13 +6583,13 @@ class BrowserSession(BaseModel):
 		for any frame, including OOPIFs (Out-of-Process iframes).
 
 		Args:
-			frame_id: The frame ID to search for
+                frame_id: The frame ID to search for
 
 		Returns:
-			Tuple of (cdp_cdp_session, target_id) for the target containing the frame
+                Tuple of (cdp_cdp_session, target_id) for the target containing the frame
 
 		Raises:
-			ValueError: If the frame is not found in any target
+                ValueError: If the frame is not found in any target
 		"""
 		# If cross-origin iframes are disabled, just use the main session
 		if not self.browser_profile.cross_origin_iframes:
@@ -4605,7 +6638,9 @@ class BrowserSession(BaseModel):
 		if node.frame_id:
 			try:
 				cdp_session = await self.cdp_client_for_frame(node.frame_id)
-				self.logger.debug(f'✅ Using session from node.frame_id for node {node.backend_node_id}: {cdp_session.url}')
+				self.logger.debug(
+					f'✅ Using session from node.frame_id for node {node.backend_node_id}: {cdp_session.url}'
+				)
 				return cdp_session
 			except Exception as e:
 				self.logger.debug(f'Failed to get session for frame {node.frame_id}: {e}')
@@ -4614,7 +6649,9 @@ class BrowserSession(BaseModel):
 		if node.target_id:
 			try:
 				cdp_session = await self.get_or_create_cdp_session(target_id=node.target_id, focus=False)
-				self.logger.debug(f'✅ Using session from node.target_id for node {node.backend_node_id}: {cdp_session.url}')
+				self.logger.debug(
+					f'✅ Using session from node.target_id for node {node.backend_node_id}: {cdp_session.url}'
+				)
 				return cdp_session
 			except Exception as e:
 				self.logger.debug(f'Failed to get session for target {node.target_id}: {e}')
@@ -4628,7 +6665,9 @@ class BrowserSession(BaseModel):
 			return self.agent_focus
 
 		# Last resort: use main session
-		self.logger.error(f'❌ No session info for node {node.backend_node_id} and no agent_focus available. Using main session.')
+		self.logger.error(
+			f'❌ No session info for node {node.backend_node_id} and no agent_focus available. Using main session.'
+		)
 		return await self.get_or_create_cdp_session()
 
 	@observe_debug(ignore_input=True, ignore_output=True, name='take_screenshot')
@@ -4643,14 +6682,14 @@ class BrowserSession(BaseModel):
 		"""Take a screenshot using CDP.
 
 		Args:
-			path: Optional file path to save screenshot
-			full_page: Capture entire scrollable page beyond viewport
-			format: Image format ('png', 'jpeg', 'webp')
-			quality: Quality 0-100 for JPEG format
-			clip: Region to capture {'x': int, 'y': int, 'width': int, 'height': int}
+                path: Optional file path to save screenshot
+                full_page: Capture entire scrollable page beyond viewport
+                format: Image format ('png', 'jpeg', 'webp')
+                quality: Quality 0-100 for JPEG format
+                clip: Region to capture {'x': int, 'y': int, 'width': int, 'height': int}
 
 		Returns:
-			Screenshot data as bytes
+                Screenshot data as bytes
 		"""
 		import base64
 
@@ -4678,7 +6717,9 @@ class BrowserSession(BaseModel):
 
 		params = CaptureScreenshotParameters(**params)
 
-		result = await cdp_session.cdp_client.send.Page.captureScreenshot(params=params, session_id=cdp_session.session_id)
+		result = await cdp_session.cdp_client.send.Page.captureScreenshot(
+			params=params, session_id=cdp_session.session_id
+		)
 
 		if not result or 'data' not in result:
 			raise Exception('Screenshot failed - no data returned')
@@ -4700,13 +6741,13 @@ class BrowserSession(BaseModel):
 		"""Take a screenshot of a specific element.
 
 		Args:
-			selector: CSS selector for the element
-			path: Optional file path to save screenshot
-			format: Image format ('png', 'jpeg', 'webp')
-			quality: Quality 0-100 for JPEG format
+                selector: CSS selector for the element
+                path: Optional file path to save screenshot
+                format: Image format ('png', 'jpeg', 'webp')
+                quality: Quality 0-100 for JPEG format
 
 		Returns:
-			Screenshot data as bytes
+                Screenshot data as bytes
 		"""
 
 		bounds = await self._get_element_bounds(selector)
@@ -4750,6 +6791,8 @@ class BrowserSession(BaseModel):
 		return {
 			'x': min(content[0], content[2], content[4], content[6]),
 			'y': min(content[1], content[3], content[5], content[7]),
-			'width': max(content[0], content[2], content[4], content[6]) - min(content[0], content[2], content[4], content[6]),
-			'height': max(content[1], content[3], content[5], content[7]) - min(content[1], content[3], content[5], content[7]),
+			'width': max(content[0], content[2], content[4], content[6])
+			- min(content[0], content[2], content[4], content[6]),
+			'height': max(content[1], content[3], content[5], content[7])
+			- min(content[1], content[3], content[5], content[7]),
 		}

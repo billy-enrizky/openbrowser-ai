@@ -28,6 +28,7 @@ os.environ['OPENBROWSER_LOGGING_LEVEL'] = 'critical'
 os.environ['OPENBROWSER_SETUP_LOGGING'] = 'false'
 
 import asyncio
+import contextlib
 import inspect
 import json
 import logging
@@ -130,9 +131,7 @@ _MCP_WORKSPACE_DIR = (
 _CDP_HEALTH_CHECK_TIMEOUT_SECONDS = 2.0
 
 MODERN_PROTOCOL_VERSION = '2026-07-28'
-LEGACY_PROTOCOL_VERSIONS = frozenset(
-	{'2024-11-05', '2025-03-26', '2025-06-18', '2025-11-25'}
-)
+LEGACY_PROTOCOL_VERSIONS = frozenset({'2024-11-05', '2025-03-26', '2025-06-18', '2025-11-25'})
 _DEFAULT_MAX_CONTEXTS = 16
 
 
@@ -488,9 +487,7 @@ class _BrowserOwner:
 		"""Merge carried values into the pending set, dropping internal names."""
 		merged = {**self._pending_variables, **transfer.variables}
 		self._pending_variables = {
-			key: value
-			for key, value in merged.items()
-			if isinstance(key, str) and not key.startswith('_')
+			key: value for key, value in merged.items() if isinstance(key, str) and not key.startswith('_')
 		}
 
 	def _server(self) -> Any:
@@ -635,7 +632,9 @@ class _BrowserOwner:
 			self._managed_storage_state = destination
 			return
 
-		source_path = Path(source).expanduser() if source else CONFIG.OPENBROWSER_PROFILES_DIR / 'default' / 'storage_state.json'
+		source_path = (
+			Path(source).expanduser() if source else CONFIG.OPENBROWSER_PROFILES_DIR / 'default' / 'storage_state.json'
+		)
 		if source_path.is_file():
 			destination.parent.mkdir(parents=True, exist_ok=True)
 			shutil.copy2(source_path, destination)
@@ -731,6 +730,7 @@ class _BrowserOwner:
 
 	async def _kill_session_safely(self, session: BrowserSession) -> _CleanupOutcome:
 		"""Complete owned cleanup without confusing worker and caller cancellation."""
+
 		async def owned_cleanup() -> bool:
 			try:
 				timeout = _shutdown_timeout_seconds()
@@ -739,6 +739,7 @@ class _BrowserOwner:
 					await asyncio.wait_for(result, timeout=timeout)
 				else:
 					from openbrowser.browser.events import BrowserStopEvent
+
 					event = session.event_bus.dispatch(BrowserStopEvent(force=True))
 					if inspect.isawaitable(event):
 						await asyncio.wait_for(event, timeout=timeout)
@@ -794,7 +795,10 @@ class _BrowserOwner:
 				if cleanup.succeeded:
 					self._namespace = None
 				if not cleanup.succeeded:
-					self._browser_lifecycle.fail('Unable to safely close the old browser session during recovery', reason='browser recovery cleanup failed')
+					self._browser_lifecycle.fail(
+						'Unable to safely close the old browser session during recovery',
+						reason='browser recovery cleanup failed',
+					)
 				if cleanup.caller_cancellation is not None:
 					if cleanup.succeeded:
 						self._merge_pending_variables(self._carry_namespace(old_ns, old_session))
@@ -940,22 +944,12 @@ class _BrowserOwner:
 		"""Execute Python code in the persistent namespace."""
 		now = time.monotonic()
 		if deadline is not None and now >= deadline:
-			return (
-				'Error: Execution timed out before browser startup. '
-				'Run get_status before retrying.'
-			)
-		start_timeout = (
-			min(_start_timeout_seconds(), deadline - now)
-			if deadline is not None
-			else None
-		)
+			return 'Error: Execution timed out before browser startup. Run get_status before retrying.'
+		start_timeout = min(_start_timeout_seconds(), deadline - now) if deadline is not None else None
 		try:
 			await self._ensure_namespace(start_timeout=start_timeout)
 		except TimeoutError:
-			return (
-				'Error: Browser startup timed out before the code could run. '
-				'Run get_status before retrying.'
-			)
+			return 'Error: Browser startup timed out before the code could run. Run get_status before retrying.'
 		assert self._namespace is not None
 
 		# Keep executor in sync (namespace may be set externally, e.g. tests)
@@ -970,10 +964,7 @@ class _BrowserOwner:
 		# or the code doesn't need a browser -- skip recovery to avoid hanging.
 		if self.browser_session and not await self._is_cdp_alive(deadline=deadline):
 			if deadline is not None and time.monotonic() >= deadline:
-				return (
-					'Error: Execution timed out during the browser health check. '
-					'Run get_status before retrying.'
-				)
+				return 'Error: Execution timed out during the browser health check. Run get_status before retrying.'
 			try:
 				await self._recover_browser_session(deadline=deadline)
 			except Exception as recovery_err:
@@ -983,24 +974,14 @@ class _BrowserOwner:
 					'Run get_status, then reset_browser before retrying.'
 				)
 		if deadline is not None and time.monotonic() >= deadline:
-			return (
-				'Error: Execution timed out after browser recovery. '
-				'Run get_status before retrying.'
-			)
+			return 'Error: Execution timed out after browser recovery. Run get_status before retrying.'
 
 		# Execute via shared CodeExecutor with a bound that leaves room for the
 		# calling agent to receive the timeout message before its own timeout.
 		try:
-			remaining = (
-				deadline - time.monotonic()
-				if deadline is not None
-				else _exec_timeout_seconds()
-			)
+			remaining = deadline - time.monotonic() if deadline is not None else _exec_timeout_seconds()
 			if remaining <= 0:
-				return (
-					'Error: Execution timed out before user code could run. '
-					'Run get_status before retrying.'
-				)
+				return 'Error: Execution timed out before user code could run. Run get_status before retrying.'
 			result = await asyncio.wait_for(
 				self._executor.execute(code),
 				timeout=remaining,
@@ -1047,7 +1028,17 @@ class _BrowserOwner:
 				if isinstance(snapshot, dict):
 					browser = snapshot
 			except Exception:
-				pass
+				focus_snapshot = getattr(self.browser_session, 'focus_snapshot', None)
+				if callable(focus_snapshot):
+					with contextlib.suppress(Exception):
+						focus_value = focus_snapshot()
+						to_dict = getattr(focus_value, 'to_dict', None)
+						if callable(to_dict):
+							browser['focus'] = to_dict()
+		if 'focus' not in browser:
+			from openbrowser.browser.focus import FocusSnapshot
+
+			browser['focus'] = FocusSnapshot.uninitialized().to_dict()
 
 		namespace_variables = 0
 		if self._namespace is not None:
@@ -1163,6 +1154,7 @@ class _BrowserOwner:
 
 	async def _shutdown(self) -> None:
 		"""Release ownership, separating the shutdown worker from its caller."""
+
 		async def owned_shutdown() -> BaseException | None:
 			try:
 				await self._shutdown_locked()
@@ -1281,7 +1273,9 @@ class _BrowserOwner:
 						except LifecycleTransitionError:
 							pass
 					elif not cleanup.succeeded:
-						self._browser_lifecycle.fail('Unable to close the idle browser session', reason='idle cleanup failed')
+						self._browser_lifecycle.fail(
+							'Unable to close the idle browser session', reason='idle cleanup failed'
+						)
 						logger.error('Error closing idle session: cleanup failed')
 					if cleanup.caller_cancellation is not None:
 						raise cleanup.caller_cancellation
@@ -1498,10 +1492,14 @@ class ContextRegistry:
 			result = CloseResult(context_id=entry.context_id, status='closed', error_code=None, retryable=False)
 		except asyncio.CancelledError:
 			logger.error('Context cleanup was cancelled by its own worker: %s', entry.context_id)
-			result = CloseResult(context_id=entry.context_id, status='close_failed', error_code='cleanup_cancelled', retryable=True)
+			result = CloseResult(
+				context_id=entry.context_id, status='close_failed', error_code='cleanup_cancelled', retryable=True
+			)
 		except Exception as error:
 			logger.error('Context cleanup failed for %s: %s', entry.context_id, error, exc_info=True)
-			result = CloseResult(context_id=entry.context_id, status='close_failed', error_code='cleanup_failed', retryable=True)
+			result = CloseResult(
+				context_id=entry.context_id, status='close_failed', error_code='cleanup_failed', retryable=True
+			)
 		async with self._lock:
 			if result.status == 'closed':
 				entry.phase = ContextPhase.CLOSED
@@ -1593,12 +1591,8 @@ class OpenBrowserServer(_BrowserOwner):
 		self._modern_tools = _tool_catalog(description, modern=True)
 		self._legacy_by_name = {tool.name: tool for tool in self._legacy_tools}
 		self._modern_by_name = {tool.name: tool for tool in self._modern_tools}
-		self._legacy_validators = {
-			tool.name: Draft202012Validator(tool.input_schema) for tool in self._legacy_tools
-		}
-		self._modern_validators = {
-			tool.name: Draft202012Validator(tool.input_schema) for tool in self._modern_tools
-		}
+		self._legacy_validators = {tool.name: Draft202012Validator(tool.input_schema) for tool in self._legacy_tools}
+		self._modern_validators = {tool.name: Draft202012Validator(tool.input_schema) for tool in self._modern_tools}
 		for tool in (*self._legacy_tools, *self._modern_tools):
 			Draft202012Validator.check_schema(tool.input_schema)
 			if tool.output_schema is not None:
@@ -1651,14 +1645,10 @@ class OpenBrowserServer(_BrowserOwner):
 					# The validator message can contain a repr of user data.
 					# Keep it client-facing, never in outbound telemetry.
 					telemetry_error = 'invalid_tool_arguments'
-					return types.CallToolResult(
-						content=[types.TextContent(type='text', text=error_msg)], is_error=True
-					)
+					return types.CallToolResult(content=[types.TextContent(type='text', text=error_msg)], is_error=True)
 				if params.name == 'execute_code' and not arguments['code'].strip():
 					error_msg = 'Error: No code provided'
-					return types.CallToolResult(
-						content=[types.TextContent(type='text', text=error_msg)], is_error=True
-					)
+					return types.CallToolResult(content=[types.TextContent(type='text', text=error_msg)], is_error=True)
 
 				if era == 'modern':
 					if params.name == 'create_context':
@@ -1707,9 +1697,7 @@ class OpenBrowserServer(_BrowserOwner):
 						text, is_error = await self._run_owned_tool(self, params.name, arguments)
 					finally:
 						self._contexts.release(lease.entry)
-				return types.CallToolResult(
-					content=[types.TextContent(type='text', text=text)], is_error=is_error
-				)
+				return types.CallToolResult(content=[types.TextContent(type='text', text=text)], is_error=is_error)
 			except asyncio.CancelledError as error:
 				error_msg = f'{type(error).__name__}: {error}'
 				raise
@@ -1769,9 +1757,7 @@ class OpenBrowserServer(_BrowserOwner):
 
 		operation = asyncio.create_task(owned_call())
 		completion = asyncio.gather(operation, return_exceptions=True)
-		caller_cancellation = await _drain_owned_completion(
-			completion, on_first_cancellation=operation.cancel
-		)
+		caller_cancellation = await _drain_owned_completion(completion, on_first_cancellation=operation.cancel)
 		result = completion.result()[0]
 		if caller_cancellation is not None:
 			raise caller_cancellation

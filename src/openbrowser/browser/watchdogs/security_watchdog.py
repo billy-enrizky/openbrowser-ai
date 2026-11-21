@@ -65,8 +65,10 @@ class SecurityWatchdog(BaseWatchdog):
 			# Navigate to about:blank to keep session alive
 			# Agent will see the error and can continue with other tasks
 			try:
-				session = await self.browser_session.get_or_create_cdp_session(target_id=event.target_id)
-				await session.cdp_client.send.Page.navigate(params={'url': 'about:blank'}, session_id=session.session_id)
+				session = await self.browser_session.get_or_create_cdp_session(target_id=event.target_id, focus=False)
+				await session.cdp_client.send.Page.navigate(
+					params={'url': 'about:blank'}, session_id=session.session_id
+				)
 				self.logger.info(f'⛔️ Navigated to about:blank after blocked URL: {event.url}')
 			except Exception as e:
 				pass
