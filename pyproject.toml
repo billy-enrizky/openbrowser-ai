@@ -36,6 +36,7 @@ dependencies = [
     "modal>=1.4.2",
     "mcp>=2.3.0,<3.0.0",
     "jsonschema>=4.20.0",
+    "filelock>=3.20.1",
 ]
 
 [project.optional-dependencies]

@@ -617,7 +617,7 @@ class TestLoadStorageState:
                 assert "x" * 100 in combined
 
     @pytest.mark.asyncio
-    async def test_an_oversized_single_entry_is_kept_and_warned(self):
+    async def test_an_oversized_single_entry_is_skipped_and_warned(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             state_path = os.path.join(tmpdir, "state.json")
             items = [{"name": "huge", "value": "x" * 500}]
@@ -633,11 +633,13 @@ class TestLoadStorageState:
 
             await watchdog._load_storage_state(path=state_path)
 
-            session._cdp_add_init_script.assert_awaited_once()
-            script = session._cdp_add_init_script.await_args.args[0]
-            assert 'huge' in script
-            assert 'x' * 500 in script
-            assert any('exceeds max_script_bytes_per_origin' in warning for warning in session._storage_state_warnings)
+            session._cdp_add_init_script.assert_not_awaited()
+            snapshot = watchdog.storage_state_snapshot()
+            assert snapshot.skipped_items == 1
+            assert any(
+                'huge' in warning and 'exceeding max_script_bytes_per_origin=300' in warning
+                for warning in session._storage_state_warnings
+            )
 
     @pytest.mark.asyncio
     async def test_load_exception(self):
