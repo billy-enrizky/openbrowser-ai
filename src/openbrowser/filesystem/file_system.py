@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import os
 import re
 import shutil
@@ -189,8 +190,9 @@ class FileSystem:
 
 		# Create and use a dedicated subfolder for all operations
 		self.data_dir = self.base_dir / DEFAULT_FILE_SYSTEM_PATH
-		if self.data_dir.exists():
-			# clean the data directory
+		# Clean the data directory if it exists. Avoid an exists() pre-check,
+		# which can race with another process and is not reliable under mocks.
+		with contextlib.suppress(FileNotFoundError):
 			shutil.rmtree(self.data_dir)
 		self.data_dir.mkdir(exist_ok=True)
 
