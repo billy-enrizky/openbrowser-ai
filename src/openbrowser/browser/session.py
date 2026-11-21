@@ -937,6 +937,8 @@ class BrowserSession(BaseModel):
 				phase=phase,
 				target_type='page',
 			)
+		except FocusTargetError:
+			raise
 		except Exception:
 			return False
 		return live is not None and live.target_id == target_id and live.session_id == session_id
@@ -1717,12 +1719,14 @@ class BrowserSession(BaseModel):
 				self._tab_registry.update(target_id, state=TabState.OPEN, allow_reopen=True)
 			await self._restore_focus_after_close_reopen(target_id, budget)
 			return
-		await self._mark_focus_lost_for_uncertain_close(
+		focus_loss_applied = await self._mark_focus_lost_for_uncertain_close(
 			target_id,
 			budget,
 			expected_generation=expected_generation,
 			expected_close_attempt=expected_close_attempt,
 		)
+		if not focus_loss_applied:
+			return
 		if still_open is False:
 			if record.state is TabState.CLOSING:
 				self._tab_registry.mark_closed(target_id)
@@ -1740,15 +1744,18 @@ class BrowserSession(BaseModel):
 		*,
 		expected_generation: int,
 		expected_close_attempt: int | None,
-	) -> None:
-		"""Stop reporting focus on a target whose close outcome is unknown."""
+	) -> bool:
+		"""Stop reporting focus on a target whose close outcome is unknown.
+
+		Returns False when the close attempt is no longer the current owner.
+		"""
 		remaining = budget.remaining()
 		if remaining <= 0:
-			return
+			return False
 		try:
 			await asyncio.wait_for(self._focus_lock.acquire(), timeout=remaining)
 		except TimeoutError:
-			return
+			return False
 		try:
 			record = self._tab_registry.get(target_id)
 			if (
@@ -1756,7 +1763,7 @@ class BrowserSession(BaseModel):
 				or record.state in (TabState.OPEN, TabState.OPENING)
 				or (expected_close_attempt is not None and record.close_attempt != expected_close_attempt)
 			):
-				return
+				return False
 			snapshot = self._focus_state
 			if (
 				snapshot.phase is FocusPhase.FOCUSED
@@ -1774,6 +1781,7 @@ class BrowserSession(BaseModel):
 					FocusChangeReason.CLOSE_REPAIR,
 					previous_target_id=target_id,
 				)
+			return True
 		finally:
 			self._focus_lock.release()
 
@@ -4588,8 +4596,43 @@ class BrowserSession(BaseModel):
 				)
 			except FocusTargetError:
 				raise
-			except Exception:
-				pass
+			except Exception as error:
+				if self._is_missing_cdp_session_error(error):
+					remaining_session_ids: tuple[str, ...] = ()
+					try:
+						active_ids = await self._session_manager.active_session_ids(
+							target_id,
+							budget=transition_budget,
+						)
+						remaining_session_ids = tuple(
+							session_id for session_id in active_ids if session_id != result.session.session_id
+						)
+					except Exception:
+						remaining_session_ids = ()
+					if remaining_session_ids:
+						replacement = await self._session_manager.get_live_session_for_target(
+							target_id,
+							budget=transition_budget,
+						)
+						if replacement is not None and replacement.session_id != result.session.session_id:
+							await self._set_agent_focus(
+								replacement,
+								FocusChangeReason.SESSION_REBIND,
+								expected_generation=result.snapshot.generation,
+							)
+							self._ensure_session_returnable(
+								replacement,
+								implicit_snapshot=self._focus_state if implicit_target else None,
+							)
+							return replacement
+					await self._handle_detached_session(target_id, result.session.session_id, ())
+					raise FocusTargetError(
+						f'Focus session for target {target_id[-8:]} detached before it could be returned.',
+						code=FocusTargetCode.TARGET_DETACHED,
+						phase=self._focus_state.phase,
+						target_id=target_id,
+						target_type='page',
+					) from error
 			self._ensure_session_returnable(
 				result.session,
 				implicit_snapshot=result.snapshot if implicit_target else None,
@@ -4597,7 +4640,10 @@ class BrowserSession(BaseModel):
 			return result.session
 
 		session = await self._get_focus_session_locked(target_id, transition_budget)
-		self._ensure_session_returnable(session)
+		self._ensure_session_returnable(
+			session,
+			implicit_snapshot=snapshot if implicit_target else None,
+		)
 		return session
 
 	@property
