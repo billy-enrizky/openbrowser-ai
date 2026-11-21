@@ -16,6 +16,8 @@ import pytest
 from openbrowser.browser import BrowserProfile, BrowserSession
 from openbrowser.browser.download_state import PdfDetectionPhase
 
+pytest.importorskip("pypdf")
+
 pytestmark = pytest.mark.integration
 
 MINIMAL_PDF = (

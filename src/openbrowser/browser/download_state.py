@@ -710,6 +710,28 @@ _PDF_DETECTION_FIELDS = (
 )
 
 
+def redacted_pdf_detection_snapshot(snapshot: PdfDetectionSnapshot) -> PdfDetectionSnapshot:
+	"""Return a typed snapshot with URLs and free text passed through redaction."""
+	payload = snapshot.to_dict()
+	phase_value = payload.get('phase')
+	try:
+		phase = PdfDetectionPhase(str(phase_value))
+	except ValueError:
+		phase = PdfDetectionPhase.IDLE
+	return PdfDetectionSnapshot(
+		phase=phase,
+		url=str(payload['url']) if isinstance(payload.get('url'), str) else None,
+		resource_url=(
+			str(payload['resource_url']) if isinstance(payload.get('resource_url'), str) else None
+		),
+		error=str(payload['error']) if isinstance(payload.get('error'), str) else None,
+		detail=str(payload['detail']) if isinstance(payload.get('detail'), str) else None,
+		started_at=snapshot.started_at,
+		finished_at=snapshot.finished_at,
+		duration_ms=snapshot.duration_ms,
+	)
+
+
 def _redacted_pdf_snapshot(value: object, default: dict[str, object]) -> dict[str, object]:
 	"""Normalize a PDF snapshot so every field passes the status redaction contract."""
 	if isinstance(value, PdfDetectionSnapshot):

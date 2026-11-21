@@ -224,6 +224,7 @@ async def test_a_late_failure_cannot_overwrite_completed():
 
 @pytest.mark.asyncio
 async def test_a_late_native_completion_upgrades_a_poll_failure(tmp_path):
+	pytest.importorskip('pypdf')
 	watchdog, _ = _make_watchdog(str(tmp_path))
 	path = tmp_path / 'late.pdf'
 	path.write_bytes(VALID_PDF_BYTES)

@@ -84,7 +84,8 @@ EXECUTE_CODE_DESCRIPTION = """Execute Python code in a persistent namespace with
 - `await wait_for_download(timeout: float = 30.0, url: str | None = None, lookback: float = 0.0,
   download_ref: str | None = None)` -- Wait for one download to reach a terminal phase. Start the wait
   before the click so a fast download cannot finish first. Returns a dict with `phase` (`completed`,
-  `failed`, or `cancelled`), `path`, `file_size`, `file_type`, `stage`, and `error`. To wait for a
+  `failed`, or `cancelled`), `path`, `file_size`, `file_type`, `stage`, `error`, and `download_ref`.
+  To wait for a
   specific prior outcome, pass its `download_ref`. A reference resolves only in the attached session's
   live download registry; after the session stops or is replaced, read the completed history instead of
   waiting on that reference. Raises TimeoutError with the last observed phase when nothing finishes in

@@ -23,10 +23,13 @@ from openbrowser.browser.download_state import (
     downloads_summary,
     pdf_validation_error,
     redacted_outcome,
+    redacted_pdf_detection_snapshot,
     redacted_text,
 )
 from openbrowser.browser.session import BrowserSession
 from openbrowser.browser.watchdogs.downloads_watchdog import DownloadsWatchdog
+
+pytest.importorskip("pypdf")
 
 MINIMAL_PDF = (
     b"%PDF-1.0\n"
@@ -43,6 +46,16 @@ MINIMAL_PDF = (
 )
 
 
+_TEMP_DIRS: list[tempfile.TemporaryDirectory] = []
+
+
+@pytest.fixture(autouse=True)
+def _cleanup_pdf_test_dirs():
+    yield
+    while _TEMP_DIRS:
+        _TEMP_DIRS.pop().cleanup()
+
+
 def _make_watchdog(downloads_path: str | None = None):
     session = create_autospec(BrowserSession, instance=True)
     session.logger = logging.getLogger("test-pdf-detection")
@@ -56,7 +69,11 @@ def _make_watchdog(downloads_path: str | None = None):
     session.id = "test-session-1234"
     session.is_local = True
     session.browser_profile = MagicMock()
-    session.browser_profile.downloads_path = downloads_path or tempfile.mkdtemp(prefix="pdf-test-")
+    if downloads_path is None:
+        temp_dir = tempfile.TemporaryDirectory(prefix="pdf-test-", ignore_cleanup_errors=True)
+        _TEMP_DIRS.append(temp_dir)
+        downloads_path = temp_dir.name
+    session.browser_profile.downloads_path = downloads_path
     session.browser_profile.auto_download_pdfs = True
     bus = EventBus()
     watchdog = DownloadsWatchdog(event_bus=bus, browser_session=session)
@@ -2193,3 +2210,25 @@ async def test_cdp_fallback_does_not_cache_after_invalidation(tmp_path):
     )
 
     assert url not in watchdog._session_pdf_urls
+
+
+def test_redacted_pdf_detection_snapshot_hides_url_credentials_and_tokens():
+    raw = PdfDetectionSnapshot(
+        phase=PdfDetectionPhase.PDF,
+        url="https://user:pass@example.com/doc.pdf?token=secret",
+        resource_url="https://example.com/doc.pdf?sig=secret",
+        error="https://user:pass@example.com/doc.pdf?token=secret",
+        detail="failed at https://user:pass@example.com/doc.pdf?token=secret",
+        started_at=1.0,
+        finished_at=2.0,
+        duration_ms=1000.0,
+    )
+
+    redacted = redacted_pdf_detection_snapshot(raw)
+
+    assert redacted.url == "https://example.com/doc.pdf?redacted"
+    assert redacted.resource_url == "https://example.com/doc.pdf?redacted"
+    assert redacted.error is not None and "secret" not in redacted.error
+    assert redacted.detail is not None and "secret" not in redacted.detail
+    assert redacted.started_at == 1.0
+    assert redacted.finished_at == 2.0

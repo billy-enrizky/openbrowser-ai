@@ -208,7 +208,7 @@ class DownloadsWatchdog(BaseWatchdog):
 			self.logger.warning(
 				f'[DownloadsWatchdog] PDF check failed for {self._safe_log_url(event.url)}; '
 				'retry on next navigation: '
-				f'{detection.error or detection.detail or "unknown error"}'
+				f'{redacted_text(detection.error or detection.detail or "unknown error")}'
 			)
 
 	def _is_auto_download_enabled(self) -> bool:

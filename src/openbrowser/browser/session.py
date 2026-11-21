@@ -2398,14 +2398,18 @@ class BrowserSession(BaseModel):
 		A reader failure propagates so ``downloads_summary`` can report it as
 		``pdf_detection_error`` in the same response.
 		"""
-		from openbrowser.browser.download_state import PdfDetectionPhase, PdfDetectionSnapshot
+		from openbrowser.browser.download_state import (
+			PdfDetectionPhase,
+			PdfDetectionSnapshot,
+			redacted_pdf_detection_snapshot,
+		)
 
 		watchdog = self._downloads_watchdog
 		reader = getattr(watchdog, 'pdf_detection_snapshot', None)
 		if callable(reader):
 			value = reader()
 			if isinstance(value, PdfDetectionSnapshot):
-				return value
+				return redacted_pdf_detection_snapshot(value)
 		return PdfDetectionSnapshot(phase=PdfDetectionPhase.IDLE)
 
 	async def wait_for_download(
