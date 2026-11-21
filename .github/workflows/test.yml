@@ -133,8 +133,8 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: tests/ci/test_timings.json
-          key: test-timings-${{ env.TIMINGS_KEY }}
-          restore-keys: test-timings-
+          key: test-timings-${{ env.TIMINGS_KEY }}-${{ github.run_id }}
+          restore-keys: test-timings-${{ env.TIMINGS_KEY }}-
           fail-on-cache-miss: false
       - run: uv sync --locked --all-extras
       - name: Select and shard tests
@@ -286,7 +286,7 @@ jobs:
       - uses: actions/cache/save@v4
         with:
           path: tests/ci/test_timings.json
-          key: test-timings-${{ env.TIMINGS_KEY }}
+          key: test-timings-${{ env.TIMINGS_KEY }}-${{ github.run_id }}
 
   coverage:
     name: coverage
