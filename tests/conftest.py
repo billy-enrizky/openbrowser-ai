@@ -19,7 +19,6 @@ Path Setup:
     ``from openbrowser.browser.session import BrowserSession``
 """
 
-import itertools
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -99,29 +98,6 @@ def mcp_server(monkeypatch):
     monkeypatch.setattr(mcp_server_module, "Server", DummyServer)
     monkeypatch.setattr(mcp_server_module, "types", DummyTypes)
     return mcp_server_module.OpenBrowserServer()
-
-
-@pytest.fixture(autouse=True)
-def isolate_default_code_agent_file_system(monkeypatch, tmp_path):
-    """Keep the CodeAgent default file system out of the repository root.
-
-    CodeAgent defaults to ``./``, and FileSystem clears its data directory on
-    construction. Parallel tests that construct agents would otherwise delete
-    the same ``openbrowser_agent_data`` directory. Tests that pass an explicit
-    directory keep it.
-    """
-    from openbrowser.filesystem.file_system import DEFAULT_FILE_SYSTEM_PATH, FileSystem
-
-    original_init = FileSystem.__init__
-    counter = itertools.count()
-
-    def isolated_init(self, base_dir, create_default_files=True):
-        if str(base_dir) in {".", "./"}:
-            base_dir = tmp_path / f"openbrowser_agent_data_{next(counter)}"
-            (base_dir / DEFAULT_FILE_SYSTEM_PATH).mkdir(parents=True, exist_ok=True)
-        original_init(self, base_dir, create_default_files=create_default_files)
-
-    monkeypatch.setattr(FileSystem, "__init__", isolated_init)
 
 
 @pytest.fixture(scope="module")

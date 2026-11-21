@@ -4,6 +4,7 @@ import asyncio
 import datetime
 import logging
 import re
+import tempfile
 import time
 import traceback
 from asyncio import CancelledError
@@ -166,7 +167,11 @@ class CodeAgent:
 		self.browser_session = browser_session
 		self.tools = tools or CodeAgentTools()
 		self.page_extraction_llm = page_extraction_llm
-		self.file_system = file_system if file_system is not None else FileSystem(base_dir='./')
+		self.id = uuid7str()
+		timestamp = int(time.time())
+		base_tmp = Path(tempfile.gettempdir())
+		self.agent_directory = base_tmp / f'openbrowser_code_agent_{self.id}_{timestamp}'
+		self.file_system = file_system if file_system is not None else FileSystem(base_dir=self.agent_directory)
 		self.available_file_paths = available_file_paths or []
 		self.sensitive_data = sensitive_data
 		self.max_steps = max_steps
@@ -189,10 +194,6 @@ class CodeAgent:
 		self.usage_summary: UsageSummary | None = None  # Track usage summary across run for history property
 
 		# Initialize screenshot service for eval tracking
-		self.id = uuid7str()
-		timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-		base_tmp = Path('/tmp')
-		self.agent_directory = base_tmp / f'openbrowser_code_agent_{self.id}_{timestamp}'
 		self.screenshot_service = ScreenshotService(agent_directory=self.agent_directory)
 
 		# Initialize token cost service for usage tracking
