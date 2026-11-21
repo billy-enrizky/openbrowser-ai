@@ -37,7 +37,7 @@ const FILE_ICONS: Record<FileType, LucideIcon> = {
 };
 
 function FileIcon({ type, className }: { type: FileType; className?: string }) {
-  const Icon = FILE_ICONS[type];
+  const Icon = FILE_ICONS[type] ?? File;
   return <Icon className={className} aria-hidden="true" />;
 }
 
