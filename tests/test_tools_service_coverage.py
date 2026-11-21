@@ -7,12 +7,11 @@ _validate_and_fix_javascript, _register_done_action, act(), __getattr__, CodeAge
 """
 
 import asyncio
-import enum
 import json
 import logging
 import os
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from pydantic import BaseModel
@@ -22,10 +21,7 @@ from openbrowser.models import ActionResult
 from openbrowser.tools.registry.views import ActionModel
 from openbrowser.tools.service import (
     CodeAgentTools,
-    Controller,
     Tools,
-    _detect_sensitive_key_name,
-    handle_browser_error,
 )
 
 logger = logging.getLogger(__name__)
@@ -43,6 +39,10 @@ def _make_mock_browser_session():
     session.current_target_id = "target123456789012345678901234"
     session.downloaded_files = []
     session.logger = MagicMock()
+    session.agent_focus = None
+    from openbrowser.browser.focus import FocusSnapshot
+
+    session.focus_snapshot = MagicMock(return_value=FocusSnapshot.uninitialized())
 
     # Event bus mock
     mock_event = MagicMock()
@@ -57,12 +57,8 @@ def _make_mock_browser_session():
     session.event_bus.dispatch = MagicMock(return_value=mock_event)
     # Readiness reads the selector map; keep both lookups on one source.
     session._selector_nodes = {}
-    session.get_element_by_index = AsyncMock(
-        side_effect=lambda index: session._selector_nodes.get(index)
-    )
-    session.get_selector_map = AsyncMock(
-        side_effect=lambda: dict(session._selector_nodes)
-    )
+    session.get_element_by_index = AsyncMock(side_effect=lambda index: session._selector_nodes.get(index))
+    session.get_selector_map = AsyncMock(side_effect=lambda: dict(session._selector_nodes))
     session.get_target_id_from_tab_id = AsyncMock(return_value="full_target_id_1234")
     session.highlight_interaction_element = AsyncMock()
     session.is_file_input = MagicMock(return_value=False)
@@ -71,9 +67,7 @@ def _make_mock_browser_session():
 
     # CDP session mock
     cdp_session = AsyncMock()
-    cdp_session.cdp_client.send.Runtime.evaluate = AsyncMock(
-        return_value={"result": {"value": "test_result"}}
-    )
+    cdp_session.cdp_client.send.Runtime.evaluate = AsyncMock(return_value={"result": {"value": "test_result"}})
     cdp_session.cdp_client.send.Page.getLayoutMetrics = AsyncMock(
         return_value={
             "cssVisualViewport": {"clientHeight": 800},
@@ -273,9 +267,7 @@ class TestNavigateAction:
     async def test_navigate_cdp_client_not_initialized(self):
         tools = Tools()
         session = _make_mock_browser_session()
-        event = _make_awaitable_event(
-            side_effect=RuntimeError("CDP client not initialized")
-        )
+        event = _make_awaitable_event(side_effect=RuntimeError("CDP client not initialized"))
         session.event_bus.dispatch = MagicMock(return_value=event)
         session.navigate_to.side_effect = RuntimeError("CDP client not initialized")
 
@@ -291,9 +283,7 @@ class TestNavigateAction:
     async def test_navigate_network_error(self):
         tools = Tools()
         session = _make_mock_browser_session()
-        event = _make_awaitable_event(
-            side_effect=RuntimeError("net::ERR_NAME_NOT_RESOLVED")
-        )
+        event = _make_awaitable_event(side_effect=RuntimeError("net::ERR_NAME_NOT_RESOLVED"))
         session.event_bus.dispatch = MagicMock(return_value=event)
         session.navigate_to.side_effect = RuntimeError("net::ERR_NAME_NOT_RESOLVED")
 
@@ -362,9 +352,7 @@ class TestGoBackAction:
         tools = Tools()
         session = _make_mock_browser_session()
         # go_back dispatches an event and awaits it; the error path catches exceptions
-        session.event_bus.dispatch = MagicMock(
-            side_effect=RuntimeError("go back failed")
-        )
+        session.event_bus.dispatch = MagicMock(side_effect=RuntimeError("go back failed"))
 
         result = await tools.registry.execute_action(
             "go_back",
@@ -418,9 +406,7 @@ class TestClickAction:
         session = _make_mock_browser_session()
         node = _make_mock_node("select")
         session._selector_nodes[5] = node
-        event = _make_awaitable_event(
-            result={"validation_error": "Cannot click on <select> elements."}
-        )
+        event = _make_awaitable_event(result={"validation_error": "Cannot click on <select> elements."})
         session.event_bus.dispatch = MagicMock(return_value=event)
 
         # Need to mock dropdown_options call that happens as a shortcut
@@ -439,9 +425,7 @@ class TestClickAction:
         session = _make_mock_browser_session()
         node = _make_mock_node("input")
         session._selector_nodes[5] = node
-        event = _make_awaitable_event(
-            result={"validation_error": "Cannot click on file input elements."}
-        )
+        event = _make_awaitable_event(result={"validation_error": "Cannot click on file input elements."})
         session.event_bus.dispatch = MagicMock(return_value=event)
 
         result = await tools.registry.execute_action(
@@ -651,12 +635,12 @@ class TestSwitchTabAction:
 
         tools = Tools()
         session = _make_mock_browser_session()
-        full_target = 'AAAABBBBCCCCDDDD111122223333AB12'
+        full_target = "AAAABBBBCCCCDDDD111122223333AB12"
         session.get_target_id_from_tab_id = AsyncMock(return_value=full_target)
         event = _make_awaitable_event(result=full_target)
         session.event_bus.dispatch = MagicMock(return_value=event)
 
-        await tools.registry.execute_action('switch', {'tab_id': 'AB12'}, browser_session=session)
+        await tools.registry.execute_action("switch", {"tab_id": "AB12"}, browser_session=session)
 
         dispatched = session.event_bus.dispatch.call_args.args[0]
         assert isinstance(dispatched, SwitchTabEvent)
@@ -690,7 +674,6 @@ class TestSwitchTabAction:
         assert result.success is False
         assert "Failed to switch" in (result.error or "")
 
-
     @pytest.mark.asyncio
     async def test_switch_ambiguous_id_returns_candidates_and_hint(self):
         from openbrowser.browser.tabs import TabError
@@ -699,19 +682,19 @@ class TestSwitchTabAction:
         session = _make_mock_browser_session()
         session.get_target_id_from_tab_id = AsyncMock(
             side_effect=TabError(
-                'Tab ID ab12 is ambiguous.',
-                tab_id='ab12',
-                candidates=['AAAAab12', 'BBBBab12'],
-                hint='Pass the full CDP target_id.',
+                "Tab ID ab12 is ambiguous.",
+                tab_id="ab12",
+                candidates=["AAAAab12", "BBBBab12"],
+                hint="Pass the full CDP target_id.",
             )
         )
 
-        result = await tools.registry.execute_action('switch', {'tab_id': 'ab12'}, browser_session=session)
+        result = await tools.registry.execute_action("switch", {"tab_id": "ab12"}, browser_session=session)
 
         assert result.success is False
-        assert 'AAAAab12' in result.error
-        assert 'BBBBab12' in result.error
-        assert 'Pass the full CDP target_id' in result.error
+        assert "AAAAab12" in result.error
+        assert "BBBBab12" in result.error
+        assert "Pass the full CDP target_id" in result.error
         session.event_bus.dispatch.assert_not_called()
 
 
@@ -738,7 +721,6 @@ class TestCloseTabAction:
 
     @pytest.mark.asyncio
     async def test_close_tab_already_closed(self):
-        from openbrowser.browser.events import TabClosedEvent
         from openbrowser.browser.tabs import TabError
 
         tools = Tools()
@@ -754,11 +736,9 @@ class TestCloseTabAction:
             {"tab_id": "cd34"},
             browser_session=session,
         )
-        assert "closed" in result.extracted_content.lower()
-        assert session.event_bus.dispatch.call_count == 1
-        dispatched = session.event_bus.dispatch.call_args.args[0]
-        assert isinstance(dispatched, TabClosedEvent)
-        assert dispatched.target_id == 'cd34'
+        assert result.success is False
+        assert "already closed" in (result.error or "").lower()
+        session.event_bus.dispatch.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_close_known_closed_suffix_is_idempotent_without_focus(self):
@@ -768,20 +748,20 @@ class TestCloseTabAction:
         tools = Tools()
         session = _make_mock_browser_session()
         registry = TabRegistry()
-        full_target = 'AAAABBBBCCCCDDDD111122223333FF34'
+        full_target = "AAAABBBBCCCCDDDD111122223333FF34"
         registry.register(full_target, state=TabState.CLOSED)
         session._tab_registry = registry
         session.agent_focus = None
         session.get_target_id_from_tab_id = AsyncMock(
-            side_effect=TabError('No live tab matches tab_id FF34.', tab_id='FF34')
+            side_effect=TabError("No live tab matches tab_id FF34.", tab_id="FF34")
         )
         event = _make_awaitable_event()
         session.event_bus.dispatch = MagicMock(return_value=event)
 
-        result = await tools.registry.execute_action('close', {'tab_id': 'FF34'}, browser_session=session)
+        result = await tools.registry.execute_action("close", {"tab_id": "FF34"}, browser_session=session)
 
         assert result.success is not False
-        assert 'already closed' in result.extracted_content.lower()
+        assert "already closed" in result.extracted_content.lower()
         dispatched = session.event_bus.dispatch.call_args.args[0]
         assert isinstance(dispatched, TabClosedEvent)
         assert dispatched.target_id == full_target
@@ -794,23 +774,23 @@ class TestCloseTabAction:
         tools = Tools()
         session = _make_mock_browser_session()
         session.get_target_id_from_tab_id = AsyncMock(
-            side_effect=TabError('No live tab matches tab_id cd34.', tab_id='cd34')
+            side_effect=TabError("No live tab matches tab_id cd34.", tab_id="cd34")
         )
-        session.agent_focus = MagicMock(target_id='AAAABBBBCCCCDDDD11112222333cd34')
+        session.agent_focus = MagicMock(target_id="AAAABBBBCCCCDDDD11112222333cd34")
         event = _make_awaitable_event()
         session.event_bus.dispatch = MagicMock(return_value=event)
 
         result = await tools.registry.execute_action(
-            'close',
-            {'tab_id': 'cd34'},
+            "close",
+            {"tab_id": "cd34"},
             browser_session=session,
         )
 
-        assert 'closed' in result.extracted_content.lower()
+        assert "closed" in result.extracted_content.lower()
         assert session.event_bus.dispatch.call_count == 1
         dispatched = session.event_bus.dispatch.call_args.args[0]
         assert isinstance(dispatched, TabClosedEvent)
-        assert dispatched.target_id == 'cd34'
+        assert dispatched.target_id == "AAAABBBBCCCCDDDD11112222333cd34"
 
     @pytest.mark.asyncio
     async def test_close_ambiguous_id_does_not_emit_a_closed_event(self):
@@ -820,20 +800,20 @@ class TestCloseTabAction:
 
         session.get_target_id_from_tab_id = AsyncMock(
             side_effect=TabError(
-                'Tab ID cd34 is ambiguous.',
-                tab_id='cd34',
-                candidates=['AAAAcd34', 'BBBBcd34'],
-                hint='Pass the full CDP target_id.',
+                "Tab ID cd34 is ambiguous.",
+                tab_id="cd34",
+                candidates=["AAAAcd34", "BBBBcd34"],
+                hint="Pass the full CDP target_id.",
             )
         )
-        session.agent_focus = MagicMock(target_id='AAAAcd34')
+        session.agent_focus = MagicMock(target_id="AAAAcd34")
 
-        result = await tools.registry.execute_action('close', {'tab_id': 'cd34'}, browser_session=session)
+        result = await tools.registry.execute_action("close", {"tab_id": "cd34"}, browser_session=session)
 
         assert result.success is False
-        assert 'AAAAcd34' in result.error
-        assert 'BBBBcd34' in result.error
-        assert 'Pass the full CDP target_id' in result.error
+        assert "AAAAcd34" in result.error
+        assert "BBBBcd34" in result.error
+        assert "Pass the full CDP target_id" in result.error
         session.event_bus.dispatch.assert_not_called()
 
 
@@ -935,9 +915,7 @@ class TestScrollAction:
         tools = Tools()
         session = _make_mock_browser_session()
         cdp_session = await session.get_or_create_cdp_session()
-        cdp_session.cdp_client.send.Page.getLayoutMetrics = AsyncMock(
-            side_effect=RuntimeError("no metrics")
-        )
+        cdp_session.cdp_client.send.Page.getLayoutMetrics = AsyncMock(side_effect=RuntimeError("no metrics"))
         event = _make_awaitable_event()
         session.event_bus.dispatch = MagicMock(return_value=event)
 
@@ -1117,9 +1095,7 @@ class TestDropdownActions:
         session = _make_mock_browser_session()
         node = _make_mock_node("select")
         session._selector_nodes[5] = node
-        event = _make_awaitable_event(
-            result={"success": "true", "message": "Selected: Option A"}
-        )
+        event = _make_awaitable_event(result={"success": "true", "message": "Selected: Option A"})
         session.event_bus.dispatch = MagicMock(return_value=event)
 
         result = await tools.registry.execute_action(
@@ -1171,9 +1147,7 @@ class TestDropdownActions:
         session = _make_mock_browser_session()
         node = _make_mock_node("select")
         session._selector_nodes[5] = node
-        event = _make_awaitable_event(
-            result={"success": "false", "error": "No such option"}
-        )
+        event = _make_awaitable_event(result={"success": "false", "error": "No such option"})
         session.event_bus.dispatch = MagicMock(return_value=event)
 
         result = await tools.registry.execute_action(
@@ -1196,9 +1170,7 @@ class TestExtractAction:
         session = _make_mock_browser_session()
         fs = _make_mock_file_system()
         mock_llm = MagicMock()
-        mock_llm.ainvoke = AsyncMock(
-            return_value=MagicMock(completion="Extracted: product list")
-        )
+        mock_llm.ainvoke = AsyncMock(return_value=MagicMock(completion="Extracted: product list"))
         session.get_current_page_url = AsyncMock(return_value="https://example.com")
 
         with patch(
@@ -1214,7 +1186,6 @@ class TestExtractAction:
                 },
             ),
         ):
-            from openbrowser.tools.views import ExtractAction
             result = await tools.registry.execute_action(
                 "extract",
                 {"params": {"query": "products", "extract_links": False, "start_from_char": 0}},
@@ -1231,9 +1202,7 @@ class TestExtractAction:
         session = _make_mock_browser_session()
         fs = _make_mock_file_system()
         mock_llm = MagicMock()
-        mock_llm.ainvoke = AsyncMock(
-            return_value=MagicMock(completion="X" * 2000)
-        )
+        mock_llm.ainvoke = AsyncMock(return_value=MagicMock(completion="X" * 2000))
         session.get_current_page_url = AsyncMock(return_value="https://example.com")
 
         with patch(
@@ -1264,9 +1233,7 @@ class TestExtractAction:
         session = _make_mock_browser_session()
         fs = _make_mock_file_system()
         mock_llm = MagicMock()
-        mock_llm.ainvoke = AsyncMock(
-            return_value=MagicMock(completion="continued data")
-        )
+        mock_llm.ainvoke = AsyncMock(return_value=MagicMock(completion="continued data"))
         session.get_current_page_url = AsyncMock(return_value="https://example.com")
 
         content = "A" * 500
@@ -1475,9 +1442,7 @@ class TestEvaluateJSAction:
         tools = Tools()
         session = _make_mock_browser_session()
         cdp = await session.get_or_create_cdp_session()
-        cdp.cdp_client.send.Runtime.evaluate = AsyncMock(
-            return_value={"result": {"wasThrown": True}}
-        )
+        cdp.cdp_client.send.Runtime.evaluate = AsyncMock(return_value={"result": {"wasThrown": True}})
 
         result = await tools.registry.execute_action(
             "evaluate",
@@ -1492,9 +1457,7 @@ class TestEvaluateJSAction:
         tools = Tools()
         session = _make_mock_browser_session()
         cdp = await session.get_or_create_cdp_session()
-        cdp.cdp_client.send.Runtime.evaluate = AsyncMock(
-            return_value={"result": {"value": None}}
-        )
+        cdp.cdp_client.send.Runtime.evaluate = AsyncMock(return_value={"result": {"value": None}})
 
         result = await tools.registry.execute_action(
             "evaluate",
@@ -1508,9 +1471,7 @@ class TestEvaluateJSAction:
         tools = Tools()
         session = _make_mock_browser_session()
         cdp = await session.get_or_create_cdp_session()
-        cdp.cdp_client.send.Runtime.evaluate = AsyncMock(
-            return_value={"result": {}}
-        )
+        cdp.cdp_client.send.Runtime.evaluate = AsyncMock(return_value={"result": {}})
 
         result = await tools.registry.execute_action(
             "evaluate",
@@ -1524,9 +1485,7 @@ class TestEvaluateJSAction:
         tools = Tools()
         session = _make_mock_browser_session()
         cdp = await session.get_or_create_cdp_session()
-        cdp.cdp_client.send.Runtime.evaluate = AsyncMock(
-            return_value={"result": {"value": {"key": "val"}}}
-        )
+        cdp.cdp_client.send.Runtime.evaluate = AsyncMock(return_value={"result": {"value": {"key": "val"}}})
 
         result = await tools.registry.execute_action(
             "evaluate",
@@ -1541,9 +1500,7 @@ class TestEvaluateJSAction:
         tools = Tools()
         session = _make_mock_browser_session()
         cdp = await session.get_or_create_cdp_session()
-        cdp.cdp_client.send.Runtime.evaluate = AsyncMock(
-            return_value={"result": {"value": [1, 2, 3]}}
-        )
+        cdp.cdp_client.send.Runtime.evaluate = AsyncMock(return_value={"result": {"value": [1, 2, 3]}})
 
         result = await tools.registry.execute_action(
             "evaluate",
@@ -1559,9 +1516,7 @@ class TestEvaluateJSAction:
         session = _make_mock_browser_session()
         cdp = await session.get_or_create_cdp_session()
         img_data = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUg"
-        cdp.cdp_client.send.Runtime.evaluate = AsyncMock(
-            return_value={"result": {"value": f"Result with {img_data}"}}
-        )
+        cdp.cdp_client.send.Runtime.evaluate = AsyncMock(return_value={"result": {"value": f"Result with {img_data}"}})
 
         result = await tools.registry.execute_action(
             "evaluate",
@@ -1576,9 +1531,7 @@ class TestEvaluateJSAction:
         tools = Tools()
         session = _make_mock_browser_session()
         cdp = await session.get_or_create_cdp_session()
-        cdp.cdp_client.send.Runtime.evaluate = AsyncMock(
-            return_value={"result": {"value": "X" * 25000}}
-        )
+        cdp.cdp_client.send.Runtime.evaluate = AsyncMock(return_value={"result": {"value": "X" * 25000}})
 
         result = await tools.registry.execute_action(
             "evaluate",
@@ -1592,9 +1545,7 @@ class TestEvaluateJSAction:
         tools = Tools()
         session = _make_mock_browser_session()
         cdp = await session.get_or_create_cdp_session()
-        cdp.cdp_client.send.Runtime.evaluate = AsyncMock(
-            side_effect=ConnectionError("CDP disconnected")
-        )
+        cdp.cdp_client.send.Runtime.evaluate = AsyncMock(side_effect=ConnectionError("CDP disconnected"))
 
         result = await tools.registry.execute_action(
             "evaluate",
@@ -1614,9 +1565,7 @@ class TestEvaluateJSAction:
         class BadObj:
             pass
 
-        cdp.cdp_client.send.Runtime.evaluate = AsyncMock(
-            return_value={"result": {"value": {"key": BadObj()}}}
-        )
+        cdp.cdp_client.send.Runtime.evaluate = AsyncMock(return_value={"result": {"value": {"key": BadObj()}}})
 
         result = await tools.registry.execute_action(
             "evaluate",
@@ -1712,6 +1661,7 @@ class TestActMethod:
         fs = _make_mock_file_system()
 
         from pydantic import create_model
+
         from openbrowser.tools.views import DoneAction
 
         DynamicModel = create_model(

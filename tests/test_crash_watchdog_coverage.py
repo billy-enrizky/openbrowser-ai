@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_mock_browser_session():
     """Create a mock BrowserSession for CrashWatchdog tests."""
     session = create_autospec(BrowserSession, instance=True)
@@ -58,6 +59,7 @@ def _make_crash_watchdog(session=None, event_bus=None):
 # NetworkRequestTracker
 # ---------------------------------------------------------------------------
 
+
 class TestNetworkRequestTracker:
     def test_init(self):
         from openbrowser.browser.watchdogs.crash_watchdog import NetworkRequestTracker
@@ -90,6 +92,7 @@ class TestNetworkRequestTracker:
 # CrashWatchdog class-level attributes
 # ---------------------------------------------------------------------------
 
+
 class TestCrashWatchdogClassAttrs:
     def test_listens_to_events(self):
         from openbrowser.browser.watchdogs.crash_watchdog import CrashWatchdog
@@ -106,6 +109,7 @@ class TestCrashWatchdogClassAttrs:
 # ---------------------------------------------------------------------------
 # on_BrowserConnectedEvent
 # ---------------------------------------------------------------------------
+
 
 class TestOnBrowserConnectedEvent:
     @pytest.mark.asyncio
@@ -130,6 +134,7 @@ class TestOnBrowserConnectedEvent:
 # on_BrowserStoppedEvent
 # ---------------------------------------------------------------------------
 
+
 class TestOnBrowserStoppedEvent:
     @pytest.mark.asyncio
     async def test_stops_monitoring(self):
@@ -153,32 +158,42 @@ class TestOnBrowserStoppedEvent:
 # on_TabCreatedEvent
 # ---------------------------------------------------------------------------
 
+
 class TestOnTabCreatedEvent:
     @pytest.mark.asyncio
-    async def test_attaches_to_target(self):
+    async def test_attaches_to_event_target(self):
         from openbrowser.browser.watchdogs.crash_watchdog import CrashWatchdog
+
         session = _make_mock_browser_session()
         watchdog = _make_crash_watchdog(session=session)
 
         event = MagicMock()
+        event.target_id = "event-target"
         with patch.object(CrashWatchdog, "attach_to_target", new_callable=AsyncMock) as mock_attach:
             await watchdog.on_TabCreatedEvent(event)
-            mock_attach.assert_awaited_once_with(session.agent_focus.target_id)
+            mock_attach.assert_awaited_once_with("event-target")
 
     @pytest.mark.asyncio
-    async def test_asserts_agent_focus(self):
+    async def test_does_not_require_agent_focus(self):
         session = _make_mock_browser_session()
         session.agent_focus = None
         watchdog = _make_crash_watchdog(session=session)
 
         event = MagicMock()
-        with pytest.raises(AssertionError):
+        event.target_id = "event-target"
+        with patch.object(
+            __import__("openbrowser.browser.watchdogs.crash_watchdog", fromlist=["CrashWatchdog"]).CrashWatchdog,
+            "attach_to_target",
+            new_callable=AsyncMock,
+        ) as mock_attach:
             await watchdog.on_TabCreatedEvent(event)
+        mock_attach.assert_awaited_once_with("event-target")
 
 
 # ---------------------------------------------------------------------------
 # on_TabClosedEvent
 # ---------------------------------------------------------------------------
+
 
 class TestOnTabClosedEvent:
     @pytest.mark.asyncio
@@ -206,6 +221,7 @@ class TestOnTabClosedEvent:
 # attach_to_target
 # ---------------------------------------------------------------------------
 
+
 class TestAttachToTarget:
     @pytest.mark.asyncio
     async def test_skips_already_registered(self):
@@ -226,11 +242,7 @@ class TestAttachToTarget:
         cdp_session_mock.cdp_client.send = MagicMock()
         cdp_session_mock.cdp_client.send.Target = MagicMock()
         cdp_session_mock.cdp_client.send.Target.getTargets = AsyncMock(
-            return_value={
-                "targetInfos": [
-                    {"targetId": "target123456", "url": "https://example.com", "type": "page"}
-                ]
-            }
+            return_value={"targetInfos": [{"targetId": "target123456", "url": "https://example.com", "type": "page"}]}
         )
         session.get_or_create_cdp_session = AsyncMock(return_value=cdp_session_mock)
 
@@ -260,9 +272,7 @@ class TestAttachToTarget:
         cdp_session_mock.cdp_client.register.Target.targetCrashed = MagicMock()
         cdp_session_mock.cdp_client.send = MagicMock()
         cdp_session_mock.cdp_client.send.Target = MagicMock()
-        cdp_session_mock.cdp_client.send.Target.getTargets = AsyncMock(
-            return_value={"targetInfos": []}
-        )
+        cdp_session_mock.cdp_client.send.Target.getTargets = AsyncMock(return_value={"targetInfos": []})
         session.get_or_create_cdp_session = AsyncMock(return_value=cdp_session_mock)
 
         watchdog = _make_crash_watchdog(session=session)
@@ -273,6 +283,7 @@ class TestAttachToTarget:
 # ---------------------------------------------------------------------------
 # CDP event handlers (_on_request_cdp, _on_response_cdp, etc.)
 # ---------------------------------------------------------------------------
+
 
 class TestCDPRequestTracking:
     @pytest.mark.asyncio
@@ -352,15 +363,14 @@ class TestCDPRequestTracking:
 # _on_target_crash_cdp
 # ---------------------------------------------------------------------------
 
+
 class TestOnTargetCrashCDP:
     @pytest.mark.asyncio
     async def test_crash_agent_focus(self):
         session = _make_mock_browser_session()
         target_id = "target-crashed1"
         session.cdp_client.send.Target.getTargets = AsyncMock(
-            return_value={
-                "targetInfos": [{"targetId": target_id, "url": "https://crashed.com"}]
-            }
+            return_value={"targetInfos": [{"targetId": target_id, "url": "https://crashed.com"}]}
         )
         session.agent_focus.target_id = target_id
         event_bus = MagicMock()
@@ -376,9 +386,7 @@ class TestOnTargetCrashCDP:
         session = _make_mock_browser_session()
         target_id = "target-crashed2"
         session.cdp_client.send.Target.getTargets = AsyncMock(
-            return_value={
-                "targetInfos": [{"targetId": target_id, "url": "https://other.com"}]
-            }
+            return_value={"targetInfos": [{"targetId": target_id, "url": "https://other.com"}]}
         )
         session.agent_focus.target_id = "different-target"
         event_bus = MagicMock()
@@ -390,9 +398,7 @@ class TestOnTargetCrashCDP:
     @pytest.mark.asyncio
     async def test_crash_no_target_info(self):
         session = _make_mock_browser_session()
-        session.cdp_client.send.Target.getTargets = AsyncMock(
-            return_value={"targetInfos": []}
-        )
+        session.cdp_client.send.Target.getTargets = AsyncMock(return_value={"targetInfos": []})
         event_bus = MagicMock()
         watchdog = _make_crash_watchdog(session=session, event_bus=event_bus)
 
@@ -403,6 +409,7 @@ class TestOnTargetCrashCDP:
 # ---------------------------------------------------------------------------
 # _start_monitoring / _stop_monitoring
 # ---------------------------------------------------------------------------
+
 
 class TestMonitoringLifecycle:
     @pytest.mark.asyncio
@@ -491,13 +498,16 @@ class TestMonitoringLifecycle:
 # _monitoring_loop
 # ---------------------------------------------------------------------------
 
+
 class TestMonitoringLoop:
     @pytest.mark.asyncio
     async def test_loop_catches_cancelled(self):
         watchdog = _make_crash_watchdog()
 
-        with patch.object(watchdog, "_check_network_timeouts", new_callable=AsyncMock) as mock_net, \
-             patch.object(watchdog, "_check_browser_health", new_callable=AsyncMock) as mock_health:
+        with (
+            patch.object(watchdog, "_check_network_timeouts", new_callable=AsyncMock) as mock_net,
+            patch.object(watchdog, "_check_browser_health", new_callable=AsyncMock) as mock_health,
+        ):
             # Immediately cancel after first sleep
             call_count = 0
 
@@ -538,6 +548,7 @@ class TestMonitoringLoop:
 # ---------------------------------------------------------------------------
 # _check_network_timeouts
 # ---------------------------------------------------------------------------
+
 
 class TestCheckNetworkTimeouts:
     @pytest.mark.asyncio
@@ -589,6 +600,7 @@ class TestCheckNetworkTimeouts:
 # _check_browser_health
 # ---------------------------------------------------------------------------
 
+
 class TestCheckBrowserHealth:
     @pytest.mark.asyncio
     async def test_health_check_passes(self):
@@ -602,9 +614,7 @@ class TestCheckBrowserHealth:
         cdp_session_mock.cdp_client.send.Page.navigate = AsyncMock()
         cdp_session_mock.session_id = "session-123"
         session.get_or_create_cdp_session = AsyncMock(return_value=cdp_session_mock)
-        session.cdp_client.send.Target.getTargets = AsyncMock(
-            return_value={"targetInfos": []}
-        )
+        session.cdp_client.send.Target.getTargets = AsyncMock(return_value={"targetInfos": []})
         session._local_browser_watchdog = None
 
         watchdog = _make_crash_watchdog(session=session)
@@ -614,9 +624,7 @@ class TestCheckBrowserHealth:
     async def test_health_check_exception(self):
         session = _make_mock_browser_session()
         session.get_or_create_cdp_session = AsyncMock(side_effect=RuntimeError("connection lost"))
-        session.cdp_client.send.Target.getTargets = AsyncMock(
-            return_value={"targetInfos": []}
-        )
+        session.cdp_client.send.Target.getTargets = AsyncMock(return_value={"targetInfos": []})
         session._local_browser_watchdog = None
 
         watchdog = _make_crash_watchdog(session=session)
@@ -637,11 +645,7 @@ class TestCheckBrowserHealth:
 
         session.get_or_create_cdp_session = AsyncMock(return_value=cdp_session_mock)
         session.cdp_client.send.Target.getTargets = AsyncMock(
-            return_value={
-                "targetInfos": [
-                    {"targetId": "tid1", "type": "page", "url": "chrome://new-tab-page/"}
-                ]
-            }
+            return_value={"targetInfos": [{"targetId": "tid1", "type": "page", "url": "chrome://new-tab-page/"}]}
         )
         session._local_browser_watchdog = None
 
@@ -734,6 +738,7 @@ class TestCheckBrowserHealth:
 # ---------------------------------------------------------------------------
 # _is_new_tab_page (static)
 # ---------------------------------------------------------------------------
+
 
 class TestIsNewTabPage:
     def test_about_blank(self):

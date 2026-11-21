@@ -7,7 +7,14 @@ import pytest
 from bubus import EventBus
 
 from openbrowser.browser import BrowserProfile, BrowserSession
-from openbrowser.browser.events import BrowserStartEvent, BrowserStopEvent, CloseTabEvent, SwitchTabEvent, TabClosedEvent, TabCreatedEvent
+from openbrowser.browser.events import (
+	BrowserStartEvent,
+	BrowserStopEvent,
+	CloseTabEvent,
+	TabClosedEvent,
+	TabCreatedEvent,
+)
+from openbrowser.browser.focus import FocusTargetError
 from openbrowser.browser.lifecycle import LifecyclePhase
 from openbrowser.browser.tabs import TabError, TabState
 
@@ -20,6 +27,18 @@ def _ready_awaitable():
 	future = asyncio.get_running_loop().create_future()
 	future.set_result(None)
 	return future
+
+
+def _dispatch_result():
+	class DispatchResult:
+		def __await__(self):
+			yield from asyncio.sleep(0).__await__()
+			return self
+
+		async def event_result(self, **_kwargs):
+			return None
+
+	return DispatchResult()
 
 
 @pytest.mark.asyncio
@@ -132,7 +151,7 @@ async def test_tab_registry_tracks_created_and_closed_events():
 	assert record.state is TabState.OPENING
 
 	session._tab_registry.update(target, state=TabState.OPEN)
-	await session.on_TabClosedEvent(type('Event', (), {'target_id': target})())
+	await session.on_TabClosedEvent(TabClosedEvent(target_id=target))
 	record = session._tab_registry.get(target)
 	assert record is not None
 	assert record.state is TabState.CLOSED
@@ -201,7 +220,7 @@ async def test_close_tab_reaches_a_terminal_state_when_the_target_disappears():
 	session._tab_registry.register(target, state=TabState.OPEN)
 	session._cdp_client_root = MagicMock()
 	session._cdp_client_root.send.Target.closeTarget = AsyncMock(side_effect=Exception('already closed'))
-	dispatch = MagicMock(side_effect=lambda event: _ready_awaitable())
+	dispatch = MagicMock(side_effect=lambda event: _dispatch_result())
 	session.event_bus.dispatch = dispatch
 
 	await session.on_CloseTabEvent(CloseTabEvent(target_id=target))
@@ -236,28 +255,23 @@ async def test_close_of_an_already_closed_focused_tab_repairs_focus():
 	session = _make_session()
 	target = 'AAAABBBBCCCCDDDD1111222233334444'
 	session._tab_registry.register(target, state=TabState.CLOSED)
-	session.__dict__['agent_focus'] = MagicMock(target_id=target)
-	dispatch = MagicMock(side_effect=lambda event: _ready_awaitable())
-	session.event_bus.dispatch = dispatch
 
-	await session.on_CloseTabEvent(CloseTabEvent(target_id=target))
+	with patch.object(session, '_repair_focus_after_closed_tab', new_callable=AsyncMock) as repair:
+		await session.on_CloseTabEvent(CloseTabEvent(target_id=target))
 
-	dispatched = [call.args[0] for call in dispatch.call_args_list]
-	assert any(isinstance(event, SwitchTabEvent) for event in dispatched)
+	repair.assert_awaited_once()
+	assert repair.await_args.args[0] == target
 
 
 @pytest.mark.asyncio
-async def test_terminal_event_with_short_id_repairs_focus():
+async def test_terminal_event_with_short_id_runs_focus_repair():
 	session = _make_session()
-	target = 'AAAABBBBCCCCDDDD1111222233334444'
-	session.__dict__['agent_focus'] = MagicMock(target_id=target)
-	dispatch = MagicMock(side_effect=lambda event: _ready_awaitable())
-	session.event_bus.dispatch = dispatch
 
-	await session.on_TabClosedEvent(type('Event', (), {'target_id': '4444'})())
+	with patch.object(session, '_repair_focus_after_closed_tab', new_callable=AsyncMock) as repair:
+		await session.on_TabClosedEvent(TabClosedEvent(target_id='4444'))
 
-	dispatched = [call.args[0] for call in dispatch.call_args_list]
-	assert any(isinstance(event, SwitchTabEvent) for event in dispatched)
+	repair.assert_awaited_once()
+	assert repair.await_args.args[0] == '4444'
 
 
 @pytest.mark.asyncio
@@ -269,14 +283,120 @@ async def test_cancelled_close_restores_an_retryable_tab_state():
 	session._cdp_client_root = MagicMock()
 	session._cdp_client_root.send.Target.closeTarget = AsyncMock(side_effect=asyncio.CancelledError)
 
-	with pytest.raises(asyncio.CancelledError):
+	with patch.object(session, '_target_liveness', AsyncMock(return_value=True)):
+		try:
+			await session.on_CloseTabEvent(CloseTabEvent(target_id=target))
+		except asyncio.CancelledError:
+			pass
+		else:
+			raise AssertionError('Close cancellation did not propagate')
+		await asyncio.wait_for(
+			asyncio.gather(*list(session._focus_observer_tasks), return_exceptions=True),
+			timeout=1.0,
+		)
+
+	assert session._tab_registry.get(target).state is TabState.OPEN
+
+
+@pytest.mark.asyncio
+async def test_cancelled_close_marks_a_dead_target_closed():
+	session = _make_session()
+	target = 'AAAABBBBCCCCDDDD1111222233334444'
+	session._tab_registry.register(target, state=TabState.OPEN)
+	session.event_bus.dispatch = MagicMock(side_effect=lambda event: _ready_awaitable())
+	session._cdp_client_root = MagicMock()
+	session._cdp_client_root.send.Target.closeTarget = AsyncMock(side_effect=asyncio.CancelledError)
+
+	with patch.object(session, '_target_liveness', AsyncMock(return_value=False)):
+		try:
+			await session.on_CloseTabEvent(CloseTabEvent(target_id=target))
+		except asyncio.CancelledError:
+			pass
+		else:
+			raise AssertionError('Close cancellation did not propagate')
+		await asyncio.wait_for(
+			asyncio.gather(*list(session._focus_observer_tasks), return_exceptions=True),
+			timeout=1.0,
+		)
+
+	assert session._tab_registry.get(target).state is TabState.CLOSED
+
+
+@pytest.mark.asyncio
+async def test_timed_out_close_marks_a_dead_target_closed():
+	session = _make_session()
+	target = 'AAAABBBBCCCCDDDD1111222233334444'
+	session._tab_registry.register(target, state=TabState.OPEN)
+	session.event_bus.dispatch = MagicMock(side_effect=lambda event: _ready_awaitable())
+	session._cdp_client_root = MagicMock()
+	session._cdp_client_root.send.Target.closeTarget = AsyncMock(side_effect=TimeoutError)
+
+	with (
+		patch.object(session, '_target_liveness', AsyncMock(return_value=False)),
+		pytest.raises(FocusTargetError),
+	):
+		await session.on_CloseTabEvent(CloseTabEvent(target_id=target))
+
+	assert session._tab_registry.get(target).state is TabState.CLOSED
+
+
+@pytest.mark.asyncio
+async def test_timed_out_close_keeps_a_live_target_open():
+	session = _make_session()
+	target = 'AAAABBBBCCCCDDDD1111222233334444'
+	session._tab_registry.register(target, state=TabState.OPEN)
+	session.event_bus.dispatch = MagicMock(side_effect=lambda event: _ready_awaitable())
+	session._cdp_client_root = MagicMock()
+	session._cdp_client_root.send.Target.closeTarget = AsyncMock(side_effect=TimeoutError)
+
+	with (
+		patch.object(session, '_target_liveness', AsyncMock(return_value=True)),
+		pytest.raises(FocusTargetError),
+	):
 		await session.on_CloseTabEvent(CloseTabEvent(target_id=target))
 
 	assert session._tab_registry.get(target).state is TabState.OPEN
 
 
 @pytest.mark.asyncio
-async def test_terminal_event_failure_still_leaves_the_tab_closed():
+async def test_close_result_success_false_keeps_a_live_target_open():
+	session = _make_session()
+	target = 'AAAABBBBCCCCDDDD1111222233334444'
+	session._tab_registry.register(target, state=TabState.OPEN)
+	dispatch = MagicMock(side_effect=lambda event: _dispatch_result())
+	session.event_bus.dispatch = dispatch
+	session._cdp_client_root = MagicMock()
+	session._cdp_client_root.send.Target.closeTarget = AsyncMock(return_value={'success': False})
+
+	with (
+		patch.object(session, '_target_liveness', AsyncMock(return_value=True)),
+		pytest.raises(RuntimeError, match='success=false'),
+	):
+		await session.on_CloseTabEvent(CloseTabEvent(target_id=target))
+
+	assert session._tab_registry.get(target).state is TabState.OPEN
+
+
+@pytest.mark.asyncio
+async def test_close_result_with_unknown_liveness_stays_closing():
+	session = _make_session()
+	target = 'AAAABBBBCCCCDDDD1111222233334444'
+	session._tab_registry.register(target, state=TabState.OPEN)
+	session.event_bus.dispatch = MagicMock(side_effect=lambda event: _dispatch_result())
+	session._cdp_client_root = MagicMock()
+	session._cdp_client_root.send.Target.closeTarget = AsyncMock(return_value={'success': False})
+
+	with (
+		patch.object(session, '_target_liveness', AsyncMock(return_value=None)),
+		pytest.raises(RuntimeError, match='liveness is unknown'),
+	):
+		await session.on_CloseTabEvent(CloseTabEvent(target_id=target))
+
+	assert session._tab_registry.get(target).state is TabState.CLOSING
+
+
+@pytest.mark.asyncio
+async def test_terminal_event_failure_propagates_and_leaves_the_tab_closed():
 	session = _make_session()
 	target = 'AAAABBBBCCCCDDDD1111222233334444'
 	session._tab_registry.register(target, state=TabState.OPEN)
@@ -284,7 +404,8 @@ async def test_terminal_event_failure_still_leaves_the_tab_closed():
 	session._cdp_client_root = MagicMock()
 	session._cdp_client_root.send.Target.closeTarget = AsyncMock()
 
-	await session.on_CloseTabEvent(CloseTabEvent(target_id=target))
+	with pytest.raises(RuntimeError, match='event bus unavailable'):
+		await session.on_CloseTabEvent(CloseTabEvent(target_id=target))
 
 	assert session._tab_registry.get(target).state is TabState.CLOSED
 
@@ -332,9 +453,7 @@ async def test_kill_escalates_after_joining_a_graceful_shutdown():
 	session._stop_task = asyncio.create_task(graceful_shutdown())
 	kill_task = asyncio.create_task(session.kill())
 	await asyncio.sleep(0.05)
-	with patch.object(
-		session, '_force_stop_retained_browser', new_callable=AsyncMock, return_value=None
-	) as force_stop:
+	with patch.object(session, '_force_stop_retained_browser', new_callable=AsyncMock, return_value=None) as force_stop:
 		release.set()
 		await kill_task
 
@@ -410,15 +529,11 @@ async def test_start_waits_for_an_in_flight_shutdown():
 
 
 def test_force_reset_clears_a_local_cdp_url_but_keeps_a_remote_one():
-	local = BrowserSession(
-		browser_profile=BrowserProfile(is_local=True, cdp_url='http://127.0.0.1:9222')
-	)
+	local = BrowserSession(browser_profile=BrowserProfile(is_local=True, cdp_url='http://127.0.0.1:9222'))
 	local._force_reset_runtime_state()
 	assert local.cdp_url is None
 
-	remote = BrowserSession(
-		browser_profile=BrowserProfile(is_local=False, cdp_url='http://remote.example:9222')
-	)
+	remote = BrowserSession(browser_profile=BrowserProfile(is_local=False, cdp_url='http://remote.example:9222'))
 	remote._force_reset_runtime_state()
 	assert remote.cdp_url == 'http://remote.example:9222'
 
@@ -649,9 +764,7 @@ async def test_bounded_cleanup_force_releases_a_stuck_task():
 def test_lifecycle_snapshot_includes_storage_state_previews(tmp_path):
 	state_path = tmp_path / 'state.json'
 	state_path.write_text('{"cookies": [], "origins": []}')
-	session = BrowserSession(
-		browser_profile=BrowserProfile(headless=True, storage_state=str(state_path))
-	)
+	session = BrowserSession(browser_profile=BrowserProfile(headless=True, storage_state=str(state_path)))
 
 	snapshot = session.lifecycle_snapshot()
 

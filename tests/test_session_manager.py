@@ -5,7 +5,15 @@ import logging
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from test_session_part1 import _make_mock_cdp_client
 
+from openbrowser.browser.focus import (
+    FocusChangeReason,
+    FocusPhase,
+    FocusSnapshot,
+    FocusTargetCode,
+    FocusTargetError,
+)
 from openbrowser.browser.session_manager import SessionManager
 from openbrowser.browser.tabs import TabRegistry, TabState
 
@@ -18,17 +26,19 @@ def _make_mock_browser_session():
     session.logger = logging.getLogger('test_session_manager')
 
     # CDP client root
-    cdp_client_root = MagicMock()
-    cdp_client_root.send.Target.setAutoAttach = AsyncMock()
-    cdp_client_root.send.Runtime.runIfWaitingForDebugger = AsyncMock()
-    cdp_client_root.send.Target.activateTarget = AsyncMock()
+    cdp_client_root = _make_mock_cdp_client()
     cdp_client_root.register.Target.attachedToTarget = MagicMock()
     cdp_client_root.register.Target.detachedFromTarget = MagicMock()
+    cdp_client_root.register.Target.targetCrashed = MagicMock()
 
     session._cdp_client_root = cdp_client_root
     session._cdp_session_pool = {}
     session._tab_registry = TabRegistry()
     session.agent_focus = None
+    session.focus_snapshot = MagicMock(return_value=FocusSnapshot.uninitialized())
+    session._handle_attached_session = AsyncMock()
+    session._handle_detached_session = AsyncMock()
+    session._recover_agent_focus = AsyncMock()
     session.event_bus = MagicMock()
     session.event_bus.dispatch = MagicMock()
     session._cdp_get_all_pages = AsyncMock(return_value=[])
@@ -61,6 +71,7 @@ class TestSessionManagerStartMonitoring:
 
         session._cdp_client_root.register.Target.attachedToTarget.assert_called_once()
         session._cdp_client_root.register.Target.detachedFromTarget.assert_called_once()
+        session._cdp_client_root.register.Target.targetCrashed.assert_called_once()
 
     async def test_start_monitoring_raises_when_no_client(self):
         session = _make_mock_browser_session()
@@ -69,6 +80,56 @@ class TestSessionManagerStartMonitoring:
 
         with pytest.raises(RuntimeError, match='CDP client not initialized'):
             await sm.start_monitoring()
+
+
+@pytest.mark.asyncio
+class TestSessionManagerCallbackRetirement:
+    async def test_registered_crash_callback_routes_payload(self):
+        session = _make_mock_browser_session()
+        sm = SessionManager(session)
+        sm._handle_target_crashed = AsyncMock()
+        await sm.start_monitoring()
+        callback = session._cdp_client_root.register.Target.targetCrashed.call_args.args[0]
+
+        callback({'targetId': 'target-1', 'status': 'crashed', 'errorCode': -1})
+        await asyncio.gather(*list(sm._event_tasks), return_exceptions=True)
+
+        sm._handle_target_crashed.assert_awaited_once_with(
+            'target-1',
+            status='crashed',
+            error_code=-1,
+        )
+
+    async def test_clear_cancels_inflight_callback_and_rejects_late_work(self):
+        session = _make_mock_browser_session()
+        sm = SessionManager(session)
+        entered, release = asyncio.Event(), asyncio.Event()
+        cancelled, late_mutation = asyncio.Event(), asyncio.Event()
+
+        async def blocked(*args, **kwargs):
+            entered.set()
+            try:
+                await release.wait()
+            except asyncio.CancelledError:
+                cancelled.set()
+                raise
+            late_mutation.set()
+
+        sm._handle_target_crashed = AsyncMock(side_effect=blocked)
+        await sm.start_monitoring()
+        callback = session._cdp_client_root.register.Target.targetCrashed.call_args.args[0]
+        callback({'targetId': 'target-1', 'status': 'crashed', 'errorCode': -1})
+        await asyncio.wait_for(entered.wait(), timeout=1.0)
+
+        await asyncio.wait_for(sm.clear(), timeout=1.0)
+        release.set()
+        await asyncio.sleep(0)
+        assert sm._closed is True
+        assert sm._event_tasks == set()
+        assert cancelled.is_set()
+        assert late_mutation.is_set() is False
+        with pytest.raises(RuntimeError, match='closed'):
+            callback({'targetId': 'target-1', 'status': 'crashed', 'errorCode': -1})
 
 
 @pytest.mark.asyncio
@@ -219,8 +280,11 @@ class TestSessionManagerHandleTargetAttached:
         await sm._handle_target_attached(event)
 
         assert 'new-session' in sm._target_sessions['target-1']
-        assert existing_cdp.session_id == 'new-session'
-        assert existing_cdp.title == 'Updated Title'
+        replacement = session._cdp_session_pool['target-1']
+        assert replacement is not existing_cdp
+        assert replacement.session_id == 'new-session'
+        assert replacement.title == 'Updated Title'
+        session._handle_attached_session.assert_awaited_once_with('target-1', replacement)
 
     async def test_resumes_waiting_for_debugger(self):
         session = _make_mock_browser_session()
@@ -240,9 +304,7 @@ class TestSessionManagerHandleTargetAttached:
         with patch('openbrowser.browser.session.CDPSession'):
             await sm._handle_target_attached(event)
 
-        session._cdp_client_root.send.Runtime.runIfWaitingForDebugger.assert_called_once_with(
-            session_id='session-1'
-        )
+        session._cdp_client_root.send.Runtime.runIfWaitingForDebugger.assert_called_once_with(session_id='session-1')
 
 
 @pytest.mark.asyncio
@@ -284,6 +346,7 @@ class TestSessionManagerHandleTargetDetached:
 
     async def test_dispatches_tab_closed_event_for_page(self):
         session = _make_mock_browser_session()
+        session._cdp_client_root.send.Target.getTargets = AsyncMock(return_value={'targetInfos': []})
         session._cdp_session_pool['target-1'] = MagicMock()
         sm = SessionManager(session)
         sm._target_sessions['target-1'] = {'session-1'}
@@ -299,6 +362,36 @@ class TestSessionManagerHandleTargetDetached:
         dispatched_event = session.event_bus.dispatch.call_args[0][0]
         assert hasattr(dispatched_event, '__class__')
         assert 'TabClosed' in type(dispatched_event).__name__ or dispatched_event is not None
+
+    async def test_keeps_a_live_target_open_after_its_last_session_detaches(self):
+        session = _make_mock_browser_session()
+        session._cdp_client_root.send.Target.getTargets = AsyncMock(
+            return_value={'targetInfos': [{'targetId': 'target-1', 'type': 'page', 'url': 'https://live.example'}]}
+        )
+        session._cdp_session_pool['target-1'] = MagicMock()
+        sm = SessionManager(session)
+        sm._target_sessions['target-1'] = {'session-1'}
+        sm._session_to_target['session-1'] = 'target-1'
+        sm._target_types['target-1'] = 'page'
+
+        await sm._handle_target_detached({'sessionId': 'session-1', 'targetId': 'target-1'})
+
+        for call in session.event_bus.dispatch.call_args_list:
+            assert 'TabClosed' not in type(call.args[0]).__name__
+
+    async def test_does_not_guess_when_target_absence_is_unknown(self):
+        session = _make_mock_browser_session()
+        session._cdp_client_root.send.Target.getTargets = AsyncMock(side_effect=RuntimeError('cdp unavailable'))
+        session._cdp_session_pool['target-1'] = MagicMock()
+        sm = SessionManager(session)
+        sm._target_sessions['target-1'] = {'session-1'}
+        sm._session_to_target['session-1'] = 'target-1'
+        sm._target_types['target-1'] = 'page'
+
+        await sm._handle_target_detached({'sessionId': 'session-1', 'targetId': 'target-1'})
+
+        for call in session.event_bus.dispatch.call_args_list:
+            assert 'TabClosed' not in type(call.args[0]).__name__
 
     async def test_no_tab_closed_event_for_non_page(self):
         session = _make_mock_browser_session()
@@ -356,55 +449,123 @@ class TestSessionManagerHandleTargetDetached:
 
         event = {'sessionId': 'session-1', 'targetId': 'target-1'}
 
-        with patch.object(sm, '_recover_agent_focus', new_callable=AsyncMock) as mock_recover:
-            await sm._handle_target_detached(event)
-            mock_recover.assert_called_once_with('target-1')
+        await sm._handle_target_detached(event)
+        session._handle_detached_session.assert_awaited_once_with('target-1', 'session-1', ())
 
 
 @pytest.mark.asyncio
-class TestSessionManagerRecoverAgentFocus:
-    """Tests for SessionManager._recover_agent_focus."""
+class TestSessionManagerExactSessions:
+    """Tests for exact session resolution."""
 
-    async def test_recovers_to_existing_tab(self):
+    async def test_active_session_ids_are_sorted(self):
         session = _make_mock_browser_session()
-        session.agent_focus = None  # Already cleared
-        session._cdp_get_all_pages.return_value = [{'targetId': 'existing-tab'}]
+        sm = SessionManager(session)
+        sm._target_sessions['target-1'] = {'session-b', 'session-a'}
 
-        mock_cdp_session = MagicMock()
-        mock_cdp_session.url = 'https://example.com'
-        session._cdp_session_pool['existing-tab'] = mock_cdp_session
+        assert await sm.active_session_ids('target-1') == ('session-a', 'session-b')
 
+    async def test_live_session_replaces_stale_wrapper(self):
+        session = _make_mock_browser_session()
+        sm = SessionManager(session)
+        stale = MagicMock()
+        stale.session_id = 'old-session'
+        stale.title = 'Old'
+        stale.url = 'https://old.example'
+        session._cdp_session_pool['target-1'] = stale
+        sm._target_sessions['target-1'] = {'session-b', 'session-a'}
+
+        replacement = await sm.get_live_session_for_target('target-1')
+
+        assert replacement is not stale
+        assert replacement.session_id == 'session-a'
+        assert replacement.url == 'https://old.example'
+        assert stale.session_id == 'old-session'
+        assert session._cdp_session_pool['target-1'] is replacement
+
+    async def test_live_session_rejects_unknown_target(self):
+        session = _make_mock_browser_session()
         sm = SessionManager(session)
 
-        await sm._recover_agent_focus('crashed-target')
+        assert await sm.get_live_session_for_target('missing') is None
 
-        assert session.agent_focus is mock_cdp_session
 
-    async def test_creates_new_tab_when_no_pages(self):
+@pytest.mark.asyncio
+class TestSessionManagerCrash:
+    """Tests for the root target crash callback."""
+
+    async def test_focused_page_crash_marks_tab_and_recovers(self):
         session = _make_mock_browser_session()
-        session.agent_focus = None
-        session._cdp_get_all_pages.return_value = []
-        session._cdp_create_new_page.return_value = 'new-target'
-
-        mock_cdp_session = MagicMock()
-        mock_cdp_session.url = 'about:blank'
-        session._cdp_session_pool['new-target'] = mock_cdp_session
-
         sm = SessionManager(session)
+        sm._target_types['target-1'] = 'page'
+        session._tab_registry.register('target-1', url='https://example.com', state=TabState.OPEN)
+        session.focus_snapshot.return_value = FocusSnapshot(
+            phase=FocusPhase.FOCUSED,
+            target_id='target-1',
+            session_id='session-1',
+            previous_target_id=None,
+            generation=1,
+            reason=FocusChangeReason.INITIAL,
+            last_error=None,
+            updated_at=0.0,
+        )
 
-        await sm._recover_agent_focus('crashed-target')
+        await sm._handle_target_crashed('target-1', status='crashed', error_code=-1)
 
-        session._cdp_create_new_page.assert_called_once_with('about:blank')
+        record = session._tab_registry.get('target-1')
+        assert record is not None
+        assert record.state is TabState.CRASHED
+        assert record.error is not None
+        session._recover_agent_focus.assert_awaited_once()
+        assert session._recover_agent_focus.await_args.args == ('target-1',)
+        assert session._recover_agent_focus.await_args.kwargs['reason'] is FocusChangeReason.CRASH_RECOVERY
 
-    async def test_skips_if_already_recovered(self):
+    async def test_non_focused_crash_does_not_recover(self):
         session = _make_mock_browser_session()
-        agent_focus = MagicMock()
-        agent_focus.target_id = 'other-target'
-        session.agent_focus = agent_focus
-
         sm = SessionManager(session)
+        sm._target_types['target-1'] = 'page'
+        session._tab_registry.register('target-1', url='https://example.com', state=TabState.OPEN)
+        session.focus_snapshot.return_value = FocusSnapshot(
+            phase=FocusPhase.FOCUSED,
+            target_id='target-2',
+            session_id='session-2',
+            previous_target_id=None,
+            generation=1,
+            reason=FocusChangeReason.INITIAL,
+            last_error=None,
+            updated_at=0.0,
+        )
 
-        await sm._recover_agent_focus('crashed-target')
+        await sm._handle_target_crashed('target-1', status='crashed', error_code=-1)
 
-        # Should not try to recover since agent_focus points to a different target
-        session._cdp_get_all_pages.assert_not_called()
+        session._recover_agent_focus.assert_not_awaited()
+        record = session._tab_registry.get('target-1')
+        assert record is not None and record.state is TabState.CRASHED
+
+    async def test_failed_crash_recovery_is_reported(self):
+        session = _make_mock_browser_session()
+        sm = SessionManager(session)
+        sm._target_types['target-1'] = 'page'
+        session._tab_registry.register('target-1', url='https://example.com', state=TabState.OPEN)
+        session.focus_snapshot.return_value = FocusSnapshot(
+            phase=FocusPhase.FOCUSED,
+            target_id='target-1',
+            session_id='session-1',
+            previous_target_id=None,
+            generation=1,
+            reason=FocusChangeReason.INITIAL,
+            last_error=None,
+            updated_at=0.0,
+        )
+        error = FocusTargetError(
+            'No live page target was available.',
+            code=FocusTargetCode.RECOVERY_FAILED,
+            phase=FocusPhase.LOST,
+            target_id='target-1',
+            target_type='page',
+        )
+        session._recover_agent_focus = AsyncMock(side_effect=error)
+        session._report_focus_recovery_failure = MagicMock()
+
+        await sm._handle_target_crashed('target-1', status='crashed', error_code=-1)
+
+        session._report_focus_recovery_failure.assert_called_once_with('target-1', error)

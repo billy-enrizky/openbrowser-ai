@@ -9,6 +9,7 @@ from bubus.models import T_EventResultType
 from cdp_use.cdp.target import TargetID
 from pydantic import BaseModel, Field, PrivateAttr, field_validator, model_validator
 
+from openbrowser.browser.focus import FocusChangeReason
 from openbrowser.browser.navigation import NavigationOperation
 from openbrowser.browser.views import BrowserStateSummary
 from openbrowser.dom.views import EnhancedDOMTreeNode
@@ -115,7 +116,8 @@ class NavigateToUrlEvent(BaseEvent[None]):
 	wait_until: Literal['load', 'domcontentloaded', 'networkidle', 'commit'] = 'load'
 	timeout_ms: int | None = Field(default=None, gt=0)
 	new_tab: bool = Field(
-		default=False, description='Set True to leave the current tab alone and open a new tab in the foreground for the new URL'
+		default=False,
+		description='Set True to leave the current tab alone and open a new tab in the foreground for the new URL',
 	)
 	# existing_tab: PageHandle | None = None  # TODO
 
@@ -174,6 +176,7 @@ class SwitchTabEvent(BaseEvent[TargetID]):
 	target_id: TargetID | None = Field(default=None, description='None means switch to the most recently opened tab')
 	navigation_id: str | None = None
 	navigation_generation: int | None = None
+	focus_deadline_monotonic: float | None = Field(default=None, exclude=True, allow_inf_nan=False)
 
 	event_timeout: float | None = _get_timeout('TIMEOUT_SwitchTabEvent', 10.0)  # seconds
 
@@ -182,6 +185,7 @@ class CloseTabEvent(BaseEvent[None]):
 	"""Close a tab."""
 
 	target_id: TargetID
+	focus_deadline_monotonic: float | None = Field(default=None, exclude=True, allow_inf_nan=False)
 
 	event_timeout: float | None = _get_timeout('TIMEOUT_CloseTabEvent', 10.0)  # seconds
 
@@ -408,6 +412,7 @@ class TabClosedEvent(BaseEvent):
 	"""A tab was closed."""
 
 	target_id: TargetID
+	focus_deadline_monotonic: float | None = Field(default=None, exclude=True, allow_inf_nan=False)
 
 	# TODO:
 	# new_focus_target_id: int | None = None
@@ -440,6 +445,11 @@ class AgentFocusChangedEvent(BaseEvent):
 	navigation_id: str | None = None
 	navigation_generation: int | None = None
 	navigation_session_id: str | None = None
+	focus_generation: int | None = Field(default=None, ge=0)
+	focus_session_id: str | None = None
+	focus_reason: FocusChangeReason | None = None
+	focus_budget_seconds: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+	focus_deadline_monotonic: float | None = Field(default=None, exclude=True, allow_inf_nan=False)
 
 	event_timeout: float | None = _get_timeout('TIMEOUT_AgentFocusChangedEvent', 10.0)  # seconds
 

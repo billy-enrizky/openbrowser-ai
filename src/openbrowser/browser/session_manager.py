@@ -5,10 +5,13 @@ events, ensuring the session pool always reflects the current browser state.
 """
 
 import asyncio
-from typing import TYPE_CHECKING
+import inspect
+from typing import TYPE_CHECKING, Any
 
 from cdp_use.cdp.target import AttachedToTargetEvent, DetachedFromTargetEvent, SessionID, TargetID
+from cdp_use.cdp.target.events import TargetCrashedEvent
 
+from openbrowser.browser.focus import FocusChangeReason, FocusPhase, FocusTransitionBudget
 from openbrowser.browser.tabs import TabState
 
 if TYPE_CHECKING:
@@ -43,8 +46,10 @@ class SessionManager:
 		# Lock for thread-safe access
 		self._lock = asyncio.Lock()
 
-		# Lock for recovery to prevent concurrent recovery attempts
-		self._recovery_lock = asyncio.Lock()
+		# Track callbacks so reset can retire them before dropping the client.
+		self._event_tasks: set[asyncio.Task[Any]] = set()
+		self._closed = False
+		self._crash_listener_registered = False
 
 	async def start_monitoring(self) -> None:
 		"""Start monitoring Target attach/detach events.
@@ -54,6 +59,7 @@ class SessionManager:
 		if not self.browser_session._cdp_client_root:
 			raise RuntimeError('CDP client not initialized')
 
+		self._closed = False
 		# Capture cdp_client_root in closure to avoid type errors
 		cdp_client = self.browser_session._cdp_client_root
 
@@ -66,9 +72,12 @@ class SessionManager:
 			async def _enable_auto_attach():
 				try:
 					await cdp_client.send.Target.setAutoAttach(
-						params={'autoAttach': True, 'waitForDebuggerOnStart': False, 'flatten': True}, session_id=event_session_id
+						params={'autoAttach': True, 'waitForDebuggerOnStart': False, 'flatten': True},
+						session_id=event_session_id,
 					)
-					self.logger.debug(f'[SessionManager] Auto-attach enabled for {target_type} session {event_session_id[:8]}...')
+					self.logger.debug(
+						f'[SessionManager] Auto-attach enabled for {target_type} session {event_session_id[:8]}...'
+					)
 				except Exception as e:
 					error_str = str(e)
 					# Expected for short-lived targets (workers, temp iframes) that detach before task executes
@@ -81,37 +90,132 @@ class SessionManager:
 						self.logger.debug(f'[SessionManager] Auto-attach failed for {target_type}: {e}')
 
 			# Schedule auto-attach and pool management
-			asyncio.create_task(_enable_auto_attach())
-			asyncio.create_task(self._handle_target_attached(event))
+			self._schedule_task(_enable_auto_attach())
+			self._schedule_task(self._handle_target_attached(event))
 
 		def on_detached(event: DetachedFromTargetEvent, session_id: SessionID | None = None):
-			asyncio.create_task(self._handle_target_detached(event))
+			self._schedule_task(self._handle_target_detached(event))
+
+		def on_crashed(event: TargetCrashedEvent, session_id: SessionID | None = None):
+			target_id = str(event.get('targetId') or '')
+			if not target_id:
+				return
+			status = str(event.get('status') or 'crashed')
+			error_code = event.get('errorCode')
+			self._schedule_task(self._handle_target_crashed(target_id, status=status, error_code=error_code))
 
 		self.browser_session._cdp_client_root.register.Target.attachedToTarget(on_attached)
 		self.browser_session._cdp_client_root.register.Target.detachedFromTarget(on_detached)
+		if not self._crash_listener_registered:
+			self.browser_session._cdp_client_root.register.Target.targetCrashed(on_crashed)
+			self._crash_listener_registered = True
 
 		self.logger.debug('[SessionManager] Event monitoring started')
+
+	def _schedule_task(self, coroutine: Any) -> asyncio.Task[Any]:
+		"""Track one CDP callback task so reset can retire it."""
+		if self._closed:
+			if inspect.iscoroutine(coroutine):
+				coroutine.close()
+			raise RuntimeError('SessionManager is closed')
+		task = asyncio.create_task(coroutine)
+		self._event_tasks.add(task)
+		task.add_done_callback(self._event_task_done)
+		return task
+
+	def _event_task_done(self, task: asyncio.Task[Any]) -> None:
+		self._event_tasks.discard(task)
+		if task.cancelled():
+			return
+		try:
+			error = task.exception()
+		except asyncio.CancelledError:
+			return
+		if error is not None:
+			self.logger.warning(f'[SessionManager] Event task failed: {type(error).__name__}: {error}')
 
 	async def get_session_for_target(self, target_id: TargetID) -> 'CDPSession | None':
 		"""Get the current valid session for a target.
 
 		Args:
-			target_id: Target ID to get session for
+                target_id: Target ID to get session for
 
 		Returns:
-			CDPSession if exists, None if target has detached
+                CDPSession if exists, None if target has detached
 		"""
 		async with self._lock:
 			return self.browser_session._cdp_session_pool.get(target_id)
+
+	async def active_session_ids(
+		self,
+		target_id: TargetID,
+		*,
+		budget: FocusTransitionBudget | None = None,
+	) -> tuple[SessionID, ...]:
+		"""Return one target's active session IDs in deterministic order."""
+		acquired = False
+		try:
+			if budget is None:
+				await self._lock.acquire()
+			else:
+				await asyncio.wait_for(self._lock.acquire(), timeout=max(0.001, budget.remaining()))
+			acquired = True
+			return tuple(sorted(self._target_sessions.get(target_id, set())))
+		finally:
+			if acquired:
+				self._lock.release()
+
+	async def get_live_session_for_target(
+		self,
+		target_id: TargetID,
+		*,
+		budget: FocusTransitionBudget | None = None,
+	) -> 'CDPSession | None':
+		"""Return a wrapper only when its exact session ID is active.
+
+		A stale pooled wrapper is replaced with a new wrapper for the lowest
+		active session ID. The focused wrapper object is never mutated here.
+		"""
+		acquired = False
+		try:
+			if budget is None:
+				await self._lock.acquire()
+			else:
+				await asyncio.wait_for(self._lock.acquire(), timeout=max(0.001, budget.remaining()))
+			acquired = True
+			active_ids = tuple(sorted(self._target_sessions.get(target_id, set())))
+			if not active_ids:
+				return None
+			wrapper = self.browser_session._cdp_session_pool.get(target_id)
+			if wrapper is not None and wrapper.session_id in active_ids:
+				return wrapper
+
+			from openbrowser.browser.session import CDPSession
+
+			root = self.browser_session._cdp_client_root
+			if root is None:
+				return None
+			replacement = CDPSession(
+				cdp_client=root,
+				target_id=target_id,
+				session_id=active_ids[0],
+				title=getattr(wrapper, 'title', 'Unknown title') if wrapper is not None else 'Unknown title',
+				url=getattr(wrapper, 'url', 'about:blank') if wrapper is not None else 'about:blank',
+			)
+			self.browser_session._cdp_session_pool[target_id] = replacement
+			return replacement
+		finally:
+			if acquired:
+				self._lock.release()
 
 	async def validate_session(self, target_id: TargetID) -> bool:
 		"""Check if a target still has active sessions.
 
 		Args:
-			target_id: Target ID to validate
+                target_id: Target ID to validate
 
 		Returns:
-			True if target has active sessions, False if it should be removed
+                True if target has active sessions, False if it should be removed
 		"""
 		async with self._lock:
 			if target_id not in self._target_sessions:
@@ -119,8 +223,26 @@ class SessionManager:
 
 			return len(self._target_sessions[target_id]) > 0
 
+	def cancel_pending(self) -> None:
+		"""Cancel callback tasks without awaiting, for forced runtime reset."""
+		self._closed = True
+		current = asyncio.current_task()
+		for task in list(self._event_tasks):
+			if task is not current and not task.done():
+				task.cancel()
+		self._event_tasks.clear()
+
 	async def clear(self) -> None:
-		"""Clear all session tracking for cleanup."""
+		"""Clear all session tracking and retire tracked callbacks."""
+		self._closed = True
+		current = asyncio.current_task()
+		tasks = {task for task in self._event_tasks if task is not current and not task.done()}
+		for task in tasks:
+			task.cancel()
+		if tasks:
+			await asyncio.gather(*tasks, return_exceptions=True)
+		self._event_tasks.clear()
+
 		async with self._lock:
 			self._target_sessions.clear()
 			self._session_to_target.clear()
@@ -132,10 +254,10 @@ class SessionManager:
 		"""Check if a target is still valid and has active sessions.
 
 		Args:
-			target_id: Target ID to validate
+                target_id: Target ID to validate
 
 		Returns:
-			True if target is valid and has active sessions, False otherwise
+                True if target is valid and has active sessions, False otherwise
 		"""
 		async with self._lock:
 			if target_id not in self._target_sessions:
@@ -158,7 +280,10 @@ class SessionManager:
 			f'type={target_type}, waitingForDebugger={waiting_for_debugger})'
 		)
 
+		rebound_session = None
 		async with self._lock:
+			if self._closed:
+				return
 			# Track this session for the target
 			if target_id not in self._target_sessions:
 				self._target_sessions[target_id] = set()
@@ -170,32 +295,31 @@ class SessionManager:
 			if target_id not in self._target_types:
 				self._target_types[target_id] = target_type
 
-			# Create CDPSession wrapper and add to pool
-			if target_id not in self.browser_session._cdp_session_pool:
-				from openbrowser.browser.session import CDPSession
+			# Create or replace the CDPSession wrapper. Never mutate a wrapper
+			# that a committed focus snapshot may still reference.
+			from openbrowser.browser.session import CDPSession
 
-				assert self.browser_session._cdp_client_root is not None, 'Root CDP client required'
+			assert self.browser_session._cdp_client_root is not None, 'Root CDP client required'
+			existing = self.browser_session._cdp_session_pool.get(target_id)
+			rebound_session = CDPSession(
+				cdp_client=self.browser_session._cdp_client_root,
+				target_id=target_id,
+				session_id=session_id,
+				title=event['targetInfo'].get('title', getattr(existing, 'title', 'Unknown title')),
+				url=event['targetInfo'].get('url', getattr(existing, 'url', 'about:blank')),
+			)
+			self.browser_session._cdp_session_pool[target_id] = rebound_session
 
-				cdp_session = CDPSession(
-					cdp_client=self.browser_session._cdp_client_root,
-					target_id=target_id,
-					session_id=session_id,
-					title=event['targetInfo'].get('title', 'Unknown title'),
-					url=event['targetInfo'].get('url', 'about:blank'),
-				)
-
-				self.browser_session._cdp_session_pool[target_id] = cdp_session
-
+			if existing is None:
 				self.logger.debug(
 					f'[SessionManager] Created session for target {target_id[:8]}... '
 					f'(pool size: {len(self.browser_session._cdp_session_pool)})'
 				)
 			else:
-				# Update existing session with new session_id
-				existing = self.browser_session._cdp_session_pool[target_id]
-				existing.session_id = session_id
-				existing.title = event['targetInfo'].get('title', existing.title)
-				existing.url = event['targetInfo'].get('url', existing.url)
+				self.logger.debug(
+					f'[SessionManager] Replaced session wrapper for target {target_id[:8]}... '
+					f'(session={session_id[:8]}...)'
+				)
 
 			if target_type == 'page':
 				tab_url = event['targetInfo'].get('url')
@@ -213,6 +337,19 @@ class SessionManager:
 						url=tab_url,
 						title=tab_title,
 						state=TabState.OPEN,
+					)
+
+		if rebound_session is not None:
+			handler = getattr(self.browser_session, '_handle_attached_session', None)
+			if callable(handler):
+				try:
+					result = handler(target_id, rebound_session)
+					if inspect.isawaitable(result):
+						await result
+				except Exception as error:
+					self.logger.warning(
+						f'[SessionManager] Focus rebind failed for target {target_id[:8]}...: '
+						f'{type(error).__name__}: {error}'
 					)
 
 		# Resume execution if waiting for debugger
@@ -242,16 +379,19 @@ class SessionManager:
 			self.logger.warning(f'[SessionManager] Session detached but target unknown (session={session_id[:8]}...)')
 			return
 
-		agent_focus_lost = False
 		target_fully_removed = False
 		target_type = None
+		remaining_session_ids: tuple[SessionID, ...] = ()
 
 		async with self._lock:
+			if self._closed:
+				return
 			# Remove this session from target's session set
 			if target_id in self._target_sessions:
 				self._target_sessions[target_id].discard(session_id)
 
 				remaining_sessions = len(self._target_sessions[target_id])
+				remaining_session_ids = tuple(sorted(self._target_sessions[target_id]))
 
 				self.logger.debug(
 					f'[SessionManager] Session detached: target={target_id[:8]}... '
@@ -260,14 +400,11 @@ class SessionManager:
 
 				# Only remove target when NO sessions remain
 				if remaining_sessions == 0:
-					self.logger.debug(f'[SessionManager] No sessions remain for target {target_id[:8]}..., removing from pool')
+					self.logger.debug(
+						f'[SessionManager] No sessions remain for target {target_id[:8]}..., removing from pool'
+					)
 
 					target_fully_removed = True
-
-					# Check if agent_focus points to this target
-					agent_focus_lost = (
-						self.browser_session.agent_focus and self.browser_session.agent_focus.target_id == target_id
-					)
 
 					# Remove from pool
 					if target_id in self.browser_session._cdp_session_pool:
@@ -297,123 +434,105 @@ class SessionManager:
 			if session_id in self._session_to_target:
 				del self._session_to_target[session_id]
 
-		# Dispatch TabClosedEvent only for page/tab targets that are fully removed (not iframes/workers or partial detaches)
+		target_exists = await self._target_exists(target_id) if target_fully_removed else None
+
+		# Detaching the last CDP session does not destroy the target. Dispatch a
+		# terminal event only when the authoritative target list omits it.
 		if target_fully_removed:
 			if target_type in ('page', 'tab'):
-				from openbrowser.browser.events import TabClosedEvent
+				if target_exists is False:
+					from openbrowser.browser.events import TabClosedEvent
 
-				self.browser_session.event_bus.dispatch(TabClosedEvent(target_id=target_id))
-				self.logger.debug(f'[SessionManager] Dispatched TabClosedEvent for page target {target_id[:8]}...')
+					self.browser_session.event_bus.dispatch(TabClosedEvent(target_id=target_id))
+					self.logger.debug(f'[SessionManager] Dispatched TabClosedEvent for page target {target_id[:8]}...')
+				elif target_exists is True:
+					self.logger.debug(
+						f'[SessionManager] Last session detached from live target {target_id[:8]}...; '
+						'not dispatching TabClosedEvent'
+					)
+				else:
+					self.logger.debug(
+						f'[SessionManager] Target absence is unconfirmed for {target_id[:8]}...; '
+						'not dispatching TabClosedEvent'
+					)
 			elif target_type:
 				self.logger.debug(
 					f'[SessionManager] Target {target_id[:8]}... fully removed (type={target_type}) - not dispatching TabClosedEvent'
 				)
 
-		# Auto-recover agent_focus outside the lock to avoid blocking other operations
-		if agent_focus_lost:
-			await self._recover_agent_focus(target_id)
-
-	async def _recover_agent_focus(self, crashed_target_id: TargetID) -> None:
-		"""Auto-recover agent_focus when the focused target crashes/detaches.
-
-		Uses recovery lock to prevent concurrent recovery attempts from creating multiple emergency tabs.
-
-		Args:
-			crashed_target_id: The target ID that was lost
-		"""
-		# Prevent concurrent recovery attempts
-		async with self._recovery_lock:
-			# Check if another recovery already fixed agent_focus
-			if self.browser_session.agent_focus and self.browser_session.agent_focus.target_id != crashed_target_id:
-				self.logger.debug(
-					f'[SessionManager] Agent focus already recovered by concurrent operation '
-					f'(now: {self.browser_session.agent_focus.target_id[:8]}...), skipping recovery'
+		# Resolve exact focused-session loss outside the manager lock.
+		handler = getattr(self.browser_session, '_handle_detached_session', None)
+		if callable(handler):
+			try:
+				result = handler(target_id, session_id, remaining_session_ids)
+				if inspect.isawaitable(result):
+					await result
+			except Exception as error:
+				self.logger.warning(
+					f'[SessionManager] Focus detach repair failed for target {target_id[:8]}...: '
+					f'{type(error).__name__}: {error}'
 				)
-				return
 
-			self.logger.warning(
-				f'[SessionManager] Agent focus target {crashed_target_id[:8]}... detached! '
-				f'Auto-recovering by switching to another target...'
-			)
-
+	async def _target_exists(self, target_id: TargetID) -> bool | None:
+		"""Return the authoritative target-list verdict, or None when unknown."""
+		root = self.browser_session._cdp_client_root
+		if root is None:
+			return None
 		try:
-			# Try to find another valid page target
-			all_pages = await self.browser_session._cdp_get_all_pages()
+			result = await asyncio.wait_for(root.send.Target.getTargets(), timeout=2.0)
+		except Exception:
+			return None
+		if not isinstance(result, dict):
+			return None
+		target_infos = result.get('targetInfos')
+		if not isinstance(target_infos, list):
+			return None
+		return any(isinstance(target, dict) and target.get('targetId') == target_id for target in target_infos)
 
-			new_target_id = None
-			is_existing_tab = False
+	async def _handle_target_crashed(
+		self,
+		target_id: TargetID,
+		*,
+		status: str,
+		error_code: Any = None,
+	) -> None:
+		"""Mark a page crash and start focused recovery."""
+		if self._closed:
+			return
+		target_type = self._target_types.get(target_id)
+		if target_type != 'page':
+			return
+		message = f'Target crashed: status={status}, errorCode={error_code}'
+		self.browser_session._tab_registry.mark_crashed(target_id, message)
+		from openbrowser.browser.events import BrowserErrorEvent
 
-			if all_pages:
-				# Switch to most recent page that's not the crashed one
-				new_target_id = all_pages[-1]['targetId']
-				is_existing_tab = True
-				self.logger.info(f'[SessionManager] Switching agent_focus to existing tab {new_target_id[:8]}...')
+		self.browser_session.event_bus.dispatch(
+			BrowserErrorEvent(
+				error_type='TargetCrash',
+				message=f'Target {target_id[-8:]} crashed',
+				details={
+					'target_id': target_id,
+					'status': status,
+					'error_code': error_code,
+				},
+			)
+		)
+		snapshot = self.browser_session.focus_snapshot()
+		if snapshot.phase is not FocusPhase.FOCUSED or snapshot.target_id != target_id:
+			return
+		try:
+			await self.browser_session._recover_agent_focus(
+				target_id,
+				reason=FocusChangeReason.CRASH_RECOVERY,
+				budget=FocusTransitionBudget.start(),
+				expected_generation=snapshot.generation,
+			)
+		except Exception as error:
+			report = getattr(self.browser_session, '_report_focus_recovery_failure', None)
+			if callable(report):
+				report(target_id, error)
 			else:
-				# No pages exist - create a new one
-				self.logger.warning('[SessionManager] No tabs remain! Creating new tab for agent...')
-				new_target_id = await self.browser_session._cdp_create_new_page('about:blank')
-				self.logger.info(f'[SessionManager] Created new tab {new_target_id[:8]}... for agent')
-
-				# Dispatch TabCreatedEvent so watchdogs can initialize
-				from openbrowser.browser.events import TabCreatedEvent
-
-				self.browser_session.event_bus.dispatch(TabCreatedEvent(url='about:blank', target_id=new_target_id))
-
-			# Wait for attach event to create session, then update agent_focus
-			new_session = None
-			for attempt in range(20):  # Wait up to 2 seconds
-				await asyncio.sleep(0.1)
-				new_session = await self.get_session_for_target(new_target_id)
-				if new_session:
-					break
-
-			if new_session:
-				self.browser_session.agent_focus = new_session
-				self.logger.info(f'[SessionManager] ✅ Agent focus recovered: {new_target_id[:8]}...')
-
-				# Visually activate the tab in browser (only for existing tabs)
-				if is_existing_tab:
-					try:
-						assert self.browser_session._cdp_client_root is not None
-						await self.browser_session._cdp_client_root.send.Target.activateTarget(params={'targetId': new_target_id})
-						self.logger.debug(f'[SessionManager] Activated tab {new_target_id[:8]}... in browser UI')
-					except Exception as e:
-						self.logger.debug(f'[SessionManager] Failed to activate tab visually: {e}')
-
-				# Dispatch focus changed event
-				from openbrowser.browser.events import AgentFocusChangedEvent
-
-				self.browser_session.event_bus.dispatch(AgentFocusChangedEvent(target_id=new_target_id, url=new_session.url))
-				return
-
-			# Recovery failed - create emergency fallback tab
-			self.logger.error(
-				f'[SessionManager] ❌ Failed to get session for {new_target_id[:8]}... after 2s, creating emergency fallback tab'
-			)
-
-			fallback_target_id = await self.browser_session._cdp_create_new_page('about:blank')
-			self.logger.warning(f'[SessionManager] Created emergency fallback tab {fallback_target_id[:8]}...')
-
-			# Try one more time with fallback
-			for _ in range(20):
-				await asyncio.sleep(0.1)
-				fallback_session = await self.get_session_for_target(fallback_target_id)
-				if fallback_session:
-					self.browser_session.agent_focus = fallback_session
-					self.logger.warning(f'[SessionManager] ⚠️ Agent focus set to emergency fallback: {fallback_target_id[:8]}...')
-
-					from openbrowser.browser.events import AgentFocusChangedEvent, TabCreatedEvent
-
-					self.browser_session.event_bus.dispatch(TabCreatedEvent(url='about:blank', target_id=fallback_target_id))
-					self.browser_session.event_bus.dispatch(
-						AgentFocusChangedEvent(target_id=fallback_target_id, url='about:blank')
-					)
-					return
-
-			# Complete failure - this should never happen
-			self.logger.critical(
-				'[SessionManager] 🚨 CRITICAL: Failed to recover agent_focus even with fallback! Agent may be in broken state.'
-			)
-
-		except Exception as e:
-			self.logger.error(f'[SessionManager] ❌ Error during agent_focus recovery: {type(e).__name__}: {e}')
+				self.logger.warning(
+					f'[SessionManager] Focus recovery after crash failed for target {target_id[:8]}...: '
+					f'{type(error).__name__}: {error}'
+				)

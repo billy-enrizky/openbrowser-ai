@@ -10,6 +10,7 @@ from bubus import BaseEvent, EventBus
 from pydantic import BaseModel, ConfigDict, Field
 
 from openbrowser.browser.session import BrowserSession
+from openbrowser.browser.focus import FocusChangeReason, FocusTargetError, FocusTransitionBudget
 from openbrowser.browser.navigation import NavigationError
 
 
@@ -54,7 +55,9 @@ class BaseWatchdog(BaseModel):
 		return self.browser_session.logger
 
 	@staticmethod
-	def attach_handler_to_session(browser_session: 'BrowserSession', event_class: type[BaseEvent[Any]], handler) -> None:
+	def attach_handler_to_session(
+		browser_session: 'BrowserSession', event_class: type[BaseEvent[Any]], handler
+	) -> None:
 		"""Attach a single event handler to a browser session.
 
 		Args:
@@ -103,14 +106,19 @@ class BaseWatchdog(BaseModel):
 				event_str = f'#{event.event_id[-4:]}'
 				time_start = time.time()
 				watchdog_and_handler_str = f'[{watchdog_class_name}.{actual_handler.__name__}({event_str})]'.ljust(54)
-				browser_session.logger.debug(f'🚌 {watchdog_and_handler_str} ⏳ Starting...       {parent} {grandparent}')
+				browser_session.logger.debug(
+					f'🚌 {watchdog_and_handler_str} ⏳ Starting...       {parent} {grandparent}'
+				)
 
 				from openbrowser.browser.events import NavigateToUrlEvent, NavigationFinishedEvent
+
 				operation = None
 				root = browser_session._cdp_client_root
 				task = asyncio.current_task()
 				try:
-					if getattr(event, 'navigation_id', None) is not None and not isinstance(event, NavigationFinishedEvent):
+					if getattr(event, 'navigation_id', None) is not None and not isinstance(
+						event, NavigationFinishedEvent
+					):
 						operation = browser_session._marked_navigation(event, root)
 						operation.child_tasks.add(task)
 					# **EXECUTE THE EVENT HANDLER FUNCTION**
@@ -138,7 +146,10 @@ class BaseWatchdog(BaseModel):
 						raise NavigationError('Navigation handler cancelled') from error
 					raise
 				except Exception as e:
-					if isinstance(e, NavigationError) or getattr(event, 'navigation_id', None) is not None:
+					if (
+						isinstance(e, (FocusTargetError, NavigationError))
+						or getattr(event, 'navigation_id', None) is not None
+					):
 						raise
 					time_end = time.time()
 					time_elapsed = time_end - time_start
@@ -159,8 +170,11 @@ class BaseWatchdog(BaseModel):
 
 							# Wait for new attach event to restore the session
 							# This will raise ValueError if target doesn't re-attach
-							browser_session.agent_focus = await browser_session.get_or_create_cdp_session(
-								target_id=target_id_to_restore, focus=True
+							await browser_session.get_or_create_cdp_session(
+								target_id=target_id_to_restore,
+								focus=True,
+								focus_reason=FocusChangeReason.RESPONSIVENESS_RECOVERY,
+								budget=FocusTransitionBudget.start(),
 							)
 						else:
 							# Try to get any available session
@@ -268,7 +282,11 @@ class BaseWatchdog(BaseModel):
 						pass  # Ignore errors during cleanup
 
 				# e.g. _cdp_download_tasks = WeakSet[asyncio.Task] or list[asyncio.Task]
-				if attr_name.startswith('_') and attr_name.endswith('_tasks') and isinstance(getattr(self, attr_name), Iterable):
+				if (
+					attr_name.startswith('_')
+					and attr_name.endswith('_tasks')
+					and isinstance(getattr(self, attr_name), Iterable)
+				):
 					for task in getattr(self, attr_name):
 						try:
 							if hasattr(task, 'cancel') and callable(task.cancel) and not task.done():
@@ -279,4 +297,6 @@ class BaseWatchdog(BaseModel):
 		except Exception as e:
 			from openbrowser.utils import logger
 
-			logger.error(f'⚠️ Error during BrowserSession {self.__class__.__name__} garbage collection __del__(): {type(e)}: {e}')
+			logger.error(
+				f'⚠️ Error during BrowserSession {self.__class__.__name__} garbage collection __del__(): {type(e)}: {e}'
+			)
