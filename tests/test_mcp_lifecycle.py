@@ -29,6 +29,7 @@ async def test_get_status_reports_initialized_tool_availability(mcp_server):
 	from openbrowser.tools.service import CodeAgentTools
 
 	mcp_server._tools = CodeAgentTools()
+	mcp_server._tools_generation = mcp_server._browser_generation
 
 	payload = json.loads(await mcp_server._handle_tool('get_status', {}))
 
@@ -43,6 +44,7 @@ async def test_get_status_reports_filtered_tools_for_the_active_tab(mcp_server):
 	from openbrowser.tools.service import CodeAgentTools
 
 	mcp_server._tools = CodeAgentTools()
+	mcp_server._tools_generation = mcp_server._browser_generation
 
 	@mcp_server._tools.registry.action("Google", domains=["*.google.com"])
 	async def google_action():
@@ -178,6 +180,7 @@ async def test_reset_browser_preserves_user_variables(mcp_server):
 	from openbrowser.tools.service import CodeAgentTools
 
 	mcp_server._tools = CodeAgentTools()
+	mcp_server._tools_generation = mcp_server._browser_generation
 	mcp_server._namespace = {
 		'user_value': 42,
 		'browser': object(),
@@ -198,7 +201,7 @@ async def test_reset_browser_preserves_user_variables(mcp_server):
 	assert 'browser' in payload['namespace_transfer']['framework']
 	assert 'navigate' in payload['namespace_transfer']['framework']
 	assert payload['browser']['phase'] == 'stopped'
-	assert mcp_server._status_payload()['tools']['phase'] == 'ready'
+	assert mcp_server._status_payload()['tools']['phase'] == 'not_initialized'
 
 
 @pytest.mark.asyncio

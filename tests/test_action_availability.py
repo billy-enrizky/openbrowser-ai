@@ -332,6 +332,7 @@ def test_availability_error_is_bounded_and_origin_only():
     assert "/private" not in text
     assert "#frag" not in text
     assert "https://example.com:8443" in text
+    assert "Use an action available" in text
     assert error.truncated is True
 
 
@@ -619,3 +620,61 @@ def test_error_hint_truncation_sets_the_flag():
 
     assert error.truncated is True
     assert len(error.hint) <= 300
+
+
+@pytest.mark.asyncio
+async def test_excluded_evaluate_is_not_available_in_the_namespace():
+    tools = Tools(exclude_actions=["evaluate"])
+    namespace = create_namespace(_session_on("https://example.com"), tools=tools)
+
+    with pytest.raises(ActionAvailabilityError) as exc_info:
+        await namespace["evaluate"]("document.title")
+
+    assert exc_info.value.code is ActionAvailabilityCode.ACTION_EXCLUDED
+
+
+@pytest.mark.asyncio
+async def test_excluded_tools_attribute_raises_typed_error():
+    tools = Tools(exclude_actions=["screenshot"])
+
+    with pytest.raises(ActionAvailabilityError) as exc_info:
+        await tools.screenshot(browser_session=_session_on("https://example.com"))
+
+    assert exc_info.value.code is ActionAvailabilityCode.ACTION_EXCLUDED
+
+
+def test_invalid_page_prompt_does_not_inject_unfiltered_actions():
+    registry, _ = _make_registry()
+
+    assert registry.get_prompt_description(page_url="about:blank") == ""
+    assert "open_action" in registry.get_prompt_description(page_url=None)
+
+
+@pytest.mark.asyncio
+async def test_backslash_url_is_page_unknown():
+    registry, _ = _make_registry()
+
+    with pytest.raises(ActionAvailabilityError) as exc_info:
+        registry.check_action_available(
+            "google_action",
+            page_url="https://evil.com\\@good.com",
+        )
+
+    assert exc_info.value.code is ActionAvailabilityCode.PAGE_UNKNOWN
+
+
+@pytest.mark.asyncio
+async def test_direct_call_preserves_default_when_supplied_url_is_invalid():
+    registry = Registry()
+
+    @registry.action("Fallback")
+    async def fallback(page_url: str = "fallback"):
+        return page_url
+
+    assert await fallback(page_url="about:blank") == "fallback"
+
+
+def test_action_result_error_code_is_typed():
+    result = ActionResult(error_code="domain_filtered")
+
+    assert result.error_code is ActionAvailabilityCode.DOMAIN_FILTERED

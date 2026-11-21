@@ -196,6 +196,9 @@ class TestDaemonServerHandleRequest:
     @pytest.mark.asyncio
     async def test_ensure_executor_timeout_cleans_up_session(self, daemon_server):
         """Browser startup timeout must not leave a live session or pending request."""
+        from openbrowser.tools.service import CodeAgentTools
+
+        daemon_server._tools = CodeAgentTools()
         session = MagicMock()
 
         async def hanging_start():

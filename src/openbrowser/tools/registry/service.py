@@ -463,8 +463,10 @@ class Registry(Generic[Context]):
 					kwargs.get('page_url'),
 				)
 				self.check_action_available(action_name, page_url=page_url)
-				if 'page_url' in kwargs or page_url is not None:
+				if page_url is not None:
 					kwargs['page_url'] = page_url
+				else:
+					kwargs.pop('page_url', None)
 				return await normalized_func(*args, **kwargs)
 
 			gated_action.__signature__ = getattr(  # type: ignore[attr-defined]
@@ -765,4 +767,4 @@ class Registry(Generic[Context]):
 		If page_url is provided, only include actions that are available for that URL
 		based on their domain filters
 		"""
-		return self.registry.get_prompt_description(page_url=normalize_page_url(page_url))
+		return self.registry.get_prompt_description(page_url=page_url)

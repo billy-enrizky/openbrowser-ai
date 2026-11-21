@@ -35,6 +35,7 @@ from openbrowser.llm.messages import SystemMessage, UserMessage
 from openbrowser.models import ActionResult
 from openbrowser.observability import observe_debug
 from openbrowser.tools.action_availability import (
+	ActionAvailabilityCode,
 	ActionAvailabilityError,
 	ToolAvailabilitySnapshot,
 )
@@ -1410,7 +1411,7 @@ Validated Code (after quote fixing):
 						)
 					except ActionAvailabilityError as e:
 						logger.warning(f'Action {action_name} is unavailable: {e}')
-						result = ActionResult(error=str(e), error_code=e.code.value)
+						result = ActionResult(error=str(e), error_code=e.code)
 					except BrowserError as e:
 						logger.error(f'❌ Action {action_name} failed with BrowserError: {str(e)}')
 						result = handle_browser_error(e)
@@ -1440,6 +1441,15 @@ Validated Code (after quote fixing):
 		Enable direct action calls like tools.navigate(url=..., browser_session=...).
 		This provides a simpler API for tests and direct usage while maintaining backward compatibility.
 		"""
+		if name in self.registry.exclude_actions:
+			async def excluded_action(**_kwargs):
+				raise ActionAvailabilityError(
+					ActionAvailabilityCode.ACTION_EXCLUDED,
+					action=name,
+				)
+
+			return excluded_action
+
 		# Check if this is a registered action
 		if name in self.registry.registry.actions:
 			from typing import Union

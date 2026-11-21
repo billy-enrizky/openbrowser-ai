@@ -463,6 +463,7 @@ class _BrowserOwner:
 			max_output = 0
 		self._executor = CodeExecutor(max_output_chars=max_output if max_output > 0 else DEFAULT_MAX_OUTPUT_CHARS)
 		self._tools: CodeAgentTools | None = None
+		self._tools_generation: int | None = None
 
 		# Session management
 		self.session_timeout_minutes = session_timeout_minutes
@@ -648,6 +649,8 @@ class _BrowserOwner:
 		async with self._lifecycle_lock:
 			if self._namespace is not None:
 				return
+			self._tools = None
+			self._tools_generation = None
 			if self.browser_session is not None:
 				raise RuntimeError('A previous browser session still owns resources after cleanup failed')
 
@@ -678,6 +681,7 @@ class _BrowserOwner:
 
 				# Create CodeAgent tools and namespace
 				self._tools = CodeAgentTools()
+				self._tools_generation = self._browser_generation
 				self._namespace = create_namespace(
 					browser_session=self.browser_session,
 					tools=self._tools,
@@ -843,6 +847,7 @@ class _BrowserOwner:
 
 				# 3. Rebuild namespace with the new session (preserving user variables)
 				self._tools = CodeAgentTools()
+				self._tools_generation = self._browser_generation
 				self._namespace = create_namespace(
 					browser_session=self.browser_session,
 					tools=self._tools,
@@ -1064,7 +1069,12 @@ class _BrowserOwner:
 		except Exception:
 			version = None
 
-		tools_snapshot = tool_availability_payload(self._tools, browser)
+		tools_for_status = (
+			self._tools
+			if self._tools is not None and self._tools_generation == self._browser_generation
+			else None
+		)
+		tools_snapshot = tool_availability_payload(tools_for_status, browser)
 
 		return {
 			'server': self._server()._lifecycle.snapshot().to_dict(),

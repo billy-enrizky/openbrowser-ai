@@ -129,8 +129,11 @@ class ActionRegistry(BaseModel):
 			- If page is None: return only actions with no page_filter and no domains (for system prompt)
 			- If page is provided: return only filtered actions that match the current page (excluding unfiltered actions)
 		"""
+		provided_page_url = page_url is not None
 		page_url = normalize_page_url(page_url)
 		if page_url is None:
+			if provided_page_url:
+				return ''
 			# For system prompt (no URL provided), include only actions with no filters
 			return '\n'.join(action.prompt_description() for action in self.actions.values() if action.domains is None)
 

@@ -27,6 +27,7 @@ try:
 except ImportError:
 	FileSystem = None  # type: ignore[assignment,misc]
 from openbrowser.llm.base import BaseChatModel
+from openbrowser.tools.action_availability import ActionAvailabilityCode, ActionAvailabilityError
 from openbrowser.tools.action_readiness import (
 	readiness_error_from_validation_error,
 	validate_index_value,
@@ -467,7 +468,17 @@ def create_namespace(
 			namespace['_evaluate_failures'].append({'error': str(e), 'type': 'exception'})
 			raise
 
-	namespace['evaluate'] = evaluate_wrapper
+	excluded_actions = getattr(tools.registry, 'exclude_actions', None)
+	if isinstance(excluded_actions, (list, tuple, set, frozenset)) and 'evaluate' in excluded_actions:
+		async def excluded_evaluate_wrapper(*_args: Any, **_kwargs: Any) -> Any:
+			raise ActionAvailabilityError(
+				ActionAvailabilityCode.ACTION_EXCLUDED,
+				action='evaluate',
+			)
+
+		namespace['evaluate'] = excluded_evaluate_wrapper
+	else:
+		namespace['evaluate'] = evaluate_wrapper
 
 	# Add get_selector_from_index helper for code_use mode
 	async def get_selector_from_index_wrapper(index: int) -> str:

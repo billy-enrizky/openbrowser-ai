@@ -9,6 +9,7 @@ status.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import StrEnum
@@ -23,6 +24,7 @@ MAX_DOMAIN_CHARS = 80
 MAX_PAGE_ORIGIN_CHARS = 120
 MAX_ERROR_CHARS = 800
 ERROR_AVAILABLE_SAMPLE = 10
+logger = logging.getLogger(__name__)
 
 
 class ActionAvailabilityCode(StrEnum):
@@ -54,7 +56,7 @@ def normalize_page_url(url: str | None) -> str | None:
     if not isinstance(url, str):
         return None
     value = url.strip()
-    if not value or any(character.isspace() for character in value):
+    if not value or "\\" in value or any(character.isspace() for character in value):
         return None
     try:
         parsed = urlsplit(value)
@@ -120,6 +122,7 @@ def tool_availability_payload(tools: object | None, browser: object) -> dict[str
         try:
             snapshot = reader(active_page_url_from_snapshot(browser))
         except Exception:
+            logger.warning("Tool availability snapshot failed", exc_info=True)
             snapshot = None
         if isinstance(snapshot, ToolAvailabilitySnapshot):
             return snapshot.to_dict()
@@ -189,7 +192,6 @@ class ToolAvailabilitySnapshot:
         )
 
     def to_dict(self) -> dict[str, object]:
-        _, registered_truncated = _bounded_names(self.registered)
         available, available_truncated = _bounded_names(self.available)
         excluded, excluded_truncated = _bounded_names(self.excluded, MAX_EXCLUDED_ACTIONS)
         filtered = self.filtered[:MAX_FILTERED_ACTIONS]
@@ -215,7 +217,6 @@ class ToolAvailabilitySnapshot:
             "excluded": list(excluded),
             "truncated": (
                 self.truncated
-                or registered_truncated
                 or available_truncated
                 or excluded_truncated
                 or filtered_truncated
@@ -293,8 +294,12 @@ class ActionAvailabilityError(ValueError):
             parts.append(f"Allowed domains: {', '.join(self.domains)}.")
         if self.available:
             parts.append(f"Available now: {', '.join(self.available)}.")
-        parts.append(self.hint)
-        return " ".join(parts)
+        body = " ".join(parts)
+        max_body = max(0, MAX_ERROR_CHARS - len(self.hint) - 1)
+        if len(body) > max_body:
+            body = _clip(body, max_body)
+            self.truncated = True
+        return f"{body} {self.hint}".strip()
 
     def with_action(self, action: str, *, display_name: str | None = None) -> ActionAvailabilityError:
         """Return the same failure named by the public callable."""
