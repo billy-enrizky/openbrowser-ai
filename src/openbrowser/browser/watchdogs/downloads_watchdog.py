@@ -9,6 +9,7 @@ import re
 import tempfile
 import time
 from collections import OrderedDict
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 from urllib.parse import parse_qsl, urlparse, urlsplit
@@ -70,6 +71,8 @@ class DownloadsWatchdog(BaseWatchdog):
 	_active_downloads: dict[str, Any] = PrivateAttr(default_factory=dict)
 	_pdf_document_mime: OrderedDict[tuple[str, str], str] = PrivateAttr(default_factory=OrderedDict)
 	_pdf_url_epoch: OrderedDict[str, int] = PrivateAttr(default_factory=OrderedDict)
+	_pdf_epoch_counter: int = PrivateAttr(default=0)
+	_pdf_validation_executor: ThreadPoolExecutor | None = PrivateAttr(default=None)
 	_pdf_detection_phase: PdfDetectionPhase = PrivateAttr(default=PdfDetectionPhase.IDLE)
 	_pdf_detection_url: str | None = PrivateAttr(default=None)
 	_pdf_detection_resource_url: str | None = PrivateAttr(default=None)
@@ -492,9 +495,9 @@ class DownloadsWatchdog(BaseWatchdog):
 
 						response_type = str(event.get('type') or '').lower()
 						# Chrome may classify a PDF navigation as "Other" rather than
-						# "Document". Record PDF MIME regardless of the response type;
-						# the page URL lookup keeps subresource evidence isolated.
-						if content_type and (response_type == 'document' or 'application/pdf' in content_type):
+						# "Document". Do not let an XHR, fetch, or other subresource
+						# response for the page URL replace the main-document evidence.
+						if self._should_record_document_mime(response_type, content_type):
 							self._note_document_mime(event_target_id, url, content_type)
 
 						# Check if it's a PDF
@@ -657,7 +660,7 @@ class DownloadsWatchdog(BaseWatchdog):
 			Path to downloaded file, or None if download failed
 		"""
 		download_id = f'url:{url}:{time.time_ns()}'
-		url_epoch = self._pdf_url_epoch.get(url, 0)
+		url_epoch = self._begin_pdf_epoch(url)
 		try:
 			async with self._js_fetch_lock:
 				return await self._download_file_from_url_unlocked(
@@ -718,17 +721,27 @@ class DownloadsWatchdog(BaseWatchdog):
 					existing_path = None
 					cache_error = 'Cached download path is not a file'
 			if existing_path is not None:
-				self._download_registry.complete(
-					download_id,
-					path=existing_path,
-					file_size=await asyncio.to_thread(os.path.getsize, existing_path),
-					file_name=Path(existing_path).name,
-					from_cache=True,
-					source='session_cache',
-					detail='already downloaded in this session',
-				)
-				self.logger.debug(f'[DownloadsWatchdog] File already downloaded in session: {existing_path}')
-				return existing_path
+				try:
+					existing_size = await asyncio.to_thread(os.path.getsize, existing_path)
+				except OSError as size_error:
+					if self._session_pdf_urls.get(url) == existing_path:
+						self._session_pdf_urls.pop(url, None)
+					cache_error = f'Cached download path disappeared: {type(size_error).__name__}'
+					existing_path = None
+				else:
+					self._download_registry.complete(
+						download_id,
+						path=existing_path,
+						file_size=existing_size,
+						file_name=Path(existing_path).name,
+						from_cache=True,
+						source='session_cache',
+						detail='already downloaded in this session',
+					)
+					self.logger.debug(
+						f'[DownloadsWatchdog] File already downloaded in session: {existing_path}'
+					)
+					return existing_path
 			if cache_error is not None:
 				self.logger.warning(
 					f'[DownloadsWatchdog] Cached download failed validation; refetching: {cache_error}'
@@ -825,7 +838,7 @@ class DownloadsWatchdog(BaseWatchdog):
 						)
 						self.logger.warning(
 							f'[DownloadsWatchdog] Refusing non-PDF content from {self._safe_log_url(url)}: '
-							f'{validation_error}'
+							f'{redacted_text(validation_error)}'
 						)
 						return None
 				download_path = os.path.join(downloads_dir, final_filename)
@@ -851,7 +864,7 @@ class DownloadsWatchdog(BaseWatchdog):
 				mime_type = content_type or f'application/{file_ext}'
 
 				# Store URL->path mapping for this session
-				if self._pdf_url_epoch.get(url, 0) == url_epoch:
+				if self._pdf_epoch_is_current(url, url_epoch):
 					self._session_pdf_urls[url] = download_path
 				else:
 					self.logger.debug(
@@ -970,7 +983,9 @@ class DownloadsWatchdog(BaseWatchdog):
 				return str(target_id)
 		if frame_id:
 			try:
-				all_frames, _target_sessions = await self.browser_session.get_all_frames()
+				all_frames, _target_sessions = await self.browser_session.get_all_frames(
+					include_background_targets=True
+				)
 				frame_info = await self.browser_session.find_frame_target(frame_id, all_frames)
 			except Exception:
 				return None
@@ -1007,6 +1022,7 @@ class DownloadsWatchdog(BaseWatchdog):
 		expected_path = None
 		download_result = None
 		download_url = event.get('url', '')
+		url_epoch = self._begin_pdf_epoch(download_url)
 		suggested_filename = self._safe_filename(event.get('suggestedFilename'), fallback='download')
 		guid = event.get('guid', '')
 		if download_id is None:
@@ -1119,7 +1135,11 @@ class DownloadsWatchdog(BaseWatchdog):
 
 						self.logger.debug(f'[DownloadsWatchdog] ✅ Downloaded and saved file: {final_path} ({file_size} bytes)')
 						expected_path = final_path
-						if self._is_pdf_file_candidate(download_url, str(final_path), content_type):
+						if self._is_pdf_file_candidate(
+							download_url,
+							str(final_path),
+							content_type,
+						) and self._pdf_epoch_is_current(download_url, url_epoch):
 							self._session_pdf_urls[download_url] = str(final_path)
 						# Emit download event immediately
 						file_ext = expected_path.suffix.lower().lstrip('.')
@@ -1198,7 +1218,7 @@ class DownloadsWatchdog(BaseWatchdog):
 	) -> None:
 		"""Poll for a name-matched file and complete this attempt at most once."""
 		family = self._download_family(suggested_filename)
-		url_epoch = self._pdf_url_epoch.get(download_url, 0)
+		url_epoch = self._begin_pdf_epoch(download_url)
 		self._polling_names[family] = self._polling_names.get(family, 0) + 1
 		try:
 			initial_files = set()
@@ -1262,7 +1282,10 @@ class DownloadsWatchdog(BaseWatchdog):
 										target_id=target_id,
 									):
 										return
-									self._download_registry.complete(
+									existing = self._download_registry.get(download_id)
+									if existing is not None and existing.terminal:
+										return
+									completed = self._download_registry.complete(
 										download_id,
 										path=str(file_path),
 										file_size=file_size,
@@ -1272,12 +1295,17 @@ class DownloadsWatchdog(BaseWatchdog):
 										url=download_url,
 									)
 									if (
+										completed.phase is not DownloadPhase.COMPLETED
+										or completed.path != str(file_path)
+									):
+										return
+									if (
 										self._is_pdf_file_candidate(
 											download_url,
 											str(file_path),
 											target_id=target_id,
 										)
-										and self._pdf_url_epoch.get(download_url, 0) == url_epoch
+										and self._pdf_epoch_is_current(download_url, url_epoch)
 									):
 										self._session_pdf_urls[download_url] = str(file_path)
 									info = self._cdp_downloads_info.get(guid, {})
@@ -1304,6 +1332,11 @@ class DownloadsWatchdog(BaseWatchdog):
 									f'{self._safe_log_error(e)}'
 								)
 
+			if download_id in self._native_completion_pending:
+				self.logger.debug(
+					'[DownloadsWatchdog] Poll ended while native completion validation still owns the result'
+				)
+				return
 			self._download_registry.fail(
 				download_id,
 				stage='native_poll',
@@ -1346,6 +1379,7 @@ class DownloadsWatchdog(BaseWatchdog):
 			current_step = 'getting_download_info'
 			# Get download info immediately
 			url = download.url
+			url_epoch = self._begin_pdf_epoch(url)
 			suggested_filename = self._safe_filename(download.suggested_filename)
 
 			current_step = 'determining_download_directory'
@@ -1356,45 +1390,36 @@ class DownloadsWatchdog(BaseWatchdog):
 			else:
 				downloads_dir = str(downloads_dir)  # Ensure it's a string
 
-			# Check if Playwright already auto-downloaded the file (due to CDP setup)
-			original_path = Path(downloads_dir) / suggested_filename
-			if original_path.exists() and original_path.stat().st_size > 0:
-				self.logger.debug(
-					f'[DownloadsWatchdog] File already downloaded by Playwright: {original_path} ({original_path.stat().st_size} bytes)'
+			# Always save this attempt to a fresh path. A same-name file may
+			# belong to an earlier download or an unrelated user file, and
+			# validation must never unlink content this attempt does not own.
+			current_step = 'generating_unique_filename'
+			unique_filename = await self._get_unique_filename(downloads_dir, suggested_filename)
+			download_path = Path(downloads_dir) / unique_filename
+
+			self.logger.debug(
+				f'[DownloadsWatchdog] Download started: {unique_filename} from '
+				f'{self._safe_log_url(url)}'
+			)
+
+			current_step = 'calling_save_as'
+			self.logger.debug(f'[DownloadsWatchdog] Saving download to: {download_path}')
+			self.logger.debug(f'[DownloadsWatchdog] Download path exists: {download_path.parent.exists()}')
+			self.logger.debug(f'[DownloadsWatchdog] Download path writable: {os.access(download_path.parent, os.W_OK)}')
+
+			try:
+				self.logger.debug('[DownloadsWatchdog] About to call download.save_as()...')
+				await download.save_as(str(download_path))
+				self.logger.debug(f'[DownloadsWatchdog] Successfully saved download to: {download_path}')
+				current_step = 'save_as_completed'
+			except Exception as save_error:
+				self.logger.error(
+					f'[DownloadsWatchdog] save_as() failed: {self._safe_log_error(save_error)}'
 				)
+				raise
 
-				# Use the existing file instead of creating a duplicate
-				download_path = original_path
-				file_size = original_path.stat().st_size
-				unique_filename = suggested_filename
-			else:
-				current_step = 'generating_unique_filename'
-				# Ensure unique filename
-				unique_filename = await self._get_unique_filename(downloads_dir, suggested_filename)
-				download_path = Path(downloads_dir) / unique_filename
-
-				self.logger.debug(
-					f'[DownloadsWatchdog] Download started: {unique_filename} from '
-					f'{self._safe_log_url(url)}'
-				)
-
-				current_step = 'calling_save_as'
-				# Save the download using Playwright's save_as method
-				self.logger.debug(f'[DownloadsWatchdog] Saving download to: {download_path}')
-				self.logger.debug(f'[DownloadsWatchdog] Download path exists: {download_path.parent.exists()}')
-				self.logger.debug(f'[DownloadsWatchdog] Download path writable: {os.access(download_path.parent, os.W_OK)}')
-
-				try:
-					self.logger.debug('[DownloadsWatchdog] About to call download.save_as()...')
-					await download.save_as(str(download_path))
-					self.logger.debug(f'[DownloadsWatchdog] Successfully saved download to: {download_path}')
-					current_step = 'save_as_completed'
-				except Exception as save_error:
-					self.logger.error(f'[DownloadsWatchdog] save_as() failed with error: {save_error}')
-					raise save_error
-
-				# Get file info
-				file_size = download_path.stat().st_size if download_path.exists() else 0
+			# Get file info
+			file_size = download_path.stat().st_size if download_path.exists() else 0
 
 			# Determine file type from extension
 			file_ext = download_path.suffix.lower().lstrip('.')
@@ -1406,7 +1431,9 @@ class DownloadsWatchdog(BaseWatchdog):
 				source='playwright',
 			):
 				return
-			if self._is_pdf_file_candidate(url, str(download_path)):
+			if self._is_pdf_file_candidate(url, str(download_path)) and self._pdf_epoch_is_current(
+				url, url_epoch
+			):
 				self._session_pdf_urls[url] = str(download_path)
 
 			# Try to get MIME type from response headers if available
@@ -1488,7 +1515,7 @@ class DownloadsWatchdog(BaseWatchdog):
 	) -> None:
 		"""Validate a finished native download before publishing completion."""
 		self._native_completion_pending.add(download_id)
-		url_epoch = self._pdf_url_epoch.get(url, 0)
+		url_epoch = self._begin_pdf_epoch(url)
 		try:
 			if target_id is None:
 				target_id = await self._resolve_download_target_id(session_id, frame_id)
@@ -1531,7 +1558,7 @@ class DownloadsWatchdog(BaseWatchdog):
 			)
 			if (
 				self._is_pdf_file_candidate(url, file_path, target_id=target_id)
-				and self._pdf_url_epoch.get(url, 0) == url_epoch
+				and self._pdf_epoch_is_current(url, url_epoch)
 			):
 				self._session_pdf_urls[url] = str(file_path)
 			if guid:
@@ -1594,8 +1621,8 @@ class DownloadsWatchdog(BaseWatchdog):
 			phase=phase,
 			url=url,
 			resource_url=resource_url,
-			error=error,
-			detail=detail,
+			error=str(redacted_text(error)) if error is not None else None,
+			detail=str(redacted_text(detail)) if detail is not None else None,
 			started_at=started_at,
 			finished_at=finished_at,
 			duration_ms=duration_ms,
@@ -1625,6 +1652,20 @@ class DownloadsWatchdog(BaseWatchdog):
 		)
 		return serial, started_at
 
+	@staticmethod
+	def _should_record_document_mime(response_type: str, mime_type: str) -> bool:
+		"""Return whether a response is main-document evidence.
+
+		Chrome reports a direct PDF navigation as ``Document`` or ``Other``.
+		XHR, fetch, and other subresource responses can share the page URL and
+		must not replace the document MIME.
+		"""
+		if not mime_type:
+			return False
+		if response_type == 'document':
+			return True
+		return response_type in {'', 'other'} and 'application/pdf' in mime_type.lower()
+
 	def _note_document_mime(self, target_id: str, url: str, mime_type: str) -> None:
 		"""Record observed response MIME for one target and URL."""
 		if not target_id or not url or not mime_type:
@@ -1635,27 +1676,72 @@ class DownloadsWatchdog(BaseWatchdog):
 		while len(self._pdf_document_mime) > 200:
 			self._pdf_document_mime.popitem(last=False)
 		if 'application/pdf' not in mime_type.lower():
-			self._pdf_url_epoch[url] = self._pdf_url_epoch.get(url, 0) + 1
-			self._pdf_url_epoch.move_to_end(url)
-			while len(self._pdf_url_epoch) > 200:
-				self._pdf_url_epoch.popitem(last=False)
+			self._invalidate_pdf_epoch(url)
 			if self._session_pdf_urls.pop(url, None) is not None:
+				self._detected_downloads.discard(url)
 				self.logger.debug(
 					f'[DownloadsWatchdog] Non-PDF response invalidated the PDF cache: '
 					f'{self._safe_log_url(url)}'
 				)
 
+	def _next_pdf_epoch(self) -> int:
+		self._pdf_epoch_counter += 1
+		return self._pdf_epoch_counter
+
+	def _begin_pdf_epoch(self, url: str) -> int:
+		"""Return a token that changes if this URL is later invalidated.
+
+		The entry is inserted even when the URL has no prior epoch. If the
+		bounded map evicts it while a producer is in flight, the token no
+		longer compares equal and the producer skips caching.
+		"""
+		if url not in self._pdf_url_epoch:
+			self._pdf_url_epoch[url] = self._next_pdf_epoch()
+		self._pdf_url_epoch.move_to_end(url)
+		while len(self._pdf_url_epoch) > 200:
+			self._pdf_url_epoch.popitem(last=False)
+		return self._pdf_url_epoch.get(url, -1)
+
+	def _pdf_epoch_is_current(self, url: str, epoch: int | None) -> bool:
+		return epoch is not None and self._pdf_url_epoch.get(url) == epoch
+
+	def _invalidate_pdf_epoch(self, url: str) -> None:
+		self._pdf_url_epoch[url] = self._next_pdf_epoch()
+		self._pdf_url_epoch.move_to_end(url)
+		while len(self._pdf_url_epoch) > 200:
+			self._pdf_url_epoch.popitem(last=False)
+
+	def _get_pdf_validation_executor(self) -> ThreadPoolExecutor:
+		"""Return the bounded executor reserved for PDF parsing.
+
+		pypdf can block in native code and a timed-out thread cannot be killed.
+		Keeping those threads on a dedicated two-worker pool prevents a slow
+		parser from occupying every default-executor worker used by file stat,
+		read, and hash work.
+		"""
+		if self._pdf_validation_executor is None:
+			self._pdf_validation_executor = ThreadPoolExecutor(
+				max_workers=2,
+				thread_name_prefix='openbrowser-pdf',
+			)
+		return self._pdf_validation_executor
+
 	async def _pdf_validation_error_async(self, data: bytes) -> str | None:
 		"""Run PDF validation off the event loop with a bounded timeout."""
+		loop = asyncio.get_running_loop()
 		try:
 			return await asyncio.wait_for(
-				asyncio.to_thread(pdf_validation_error, data),
+				loop.run_in_executor(self._get_pdf_validation_executor(), pdf_validation_error, data),
 				timeout=PDF_VALIDATION_TIMEOUT_SECONDS,
 			)
 		except TimeoutError:
 			return f'PDF validation timed out after {PDF_VALIDATION_TIMEOUT_SECONDS:g} seconds'
 		except Exception as validation_error:
-			return f'PDF validation failed: {type(validation_error).__name__}: {validation_error}'
+			return str(
+				redacted_text(
+					f'PDF validation failed: {type(validation_error).__name__}: {validation_error}'
+				)
+			)
 
 	async def _validated_pdf_cache_entry(self, url: str) -> tuple[str | None, str | None]:
 		"""Return a validated cached PDF path, dropping an invalid entry."""
@@ -1671,7 +1757,7 @@ class DownloadsWatchdog(BaseWatchdog):
 		except OSError as read_error:
 			if self._session_pdf_urls.get(url) == existing_path:
 				self._session_pdf_urls.pop(url, None)
-			return None, f'{type(read_error).__name__}: {read_error}'
+			return None, str(redacted_text(f'{type(read_error).__name__}: {read_error}'))
 		validation_error = await self._pdf_validation_error_async(cached_bytes)
 		if validation_error is not None:
 			if self._session_pdf_urls.get(url) == existing_path:
@@ -1751,7 +1837,7 @@ class DownloadsWatchdog(BaseWatchdog):
 		)
 		self.logger.warning(
 			f'[DownloadsWatchdog] Refusing non-PDF native download from '
-			f'{self._safe_log_url(url)}: {validation_error}'
+			f'{self._safe_log_url(url)}: {redacted_text(validation_error)}'
 		)
 		return False
 
@@ -1836,17 +1922,19 @@ class DownloadsWatchdog(BaseWatchdog):
 				self._publish_pdf_detection(snapshot, serial)
 				return snapshot
 
-			history_result = await self._check_network_headers_for_pdf(target_id)
+			history_result, history_url = await self._check_network_headers_for_pdf(target_id)
 			if history_result is True:
+				matched_url = history_url or page_url
 				self.logger.debug(
-					f'[DownloadsWatchdog] PDF detected via navigation history: {self._safe_log_url(page_url)}'
+					f'[DownloadsWatchdog] PDF detected via navigation history: '
+					f'{self._safe_log_url(matched_url)}'
 				)
 				snapshot = self._pdf_snapshot(
 					PdfDetectionPhase.PDF,
-					url=page_url,
+					url=matched_url,
 					started_at=started_at,
 					finished_at=time.time(),
-					resource_url=page_url,
+					resource_url=matched_url,
 					detail='navigation history URL',
 				)
 				self._publish_pdf_detection(snapshot, serial)
@@ -1952,8 +2040,13 @@ class DownloadsWatchdog(BaseWatchdog):
 			return True
 		return scheme == 'chrome' and host == 'pdf-viewer'
 
-	async def _check_network_headers_for_pdf(self, target_id: TargetID) -> bool | None:
-		"""Infer PDF from navigation history; return None when the check is unavailable."""
+	async def _check_network_headers_for_pdf(self, target_id: TargetID) -> tuple[bool | None, str | None]:
+		"""Infer PDF from navigation history and return the matched URL.
+
+		The URL from ``getTargets()`` can be older than the committed history
+		entry. Returning the history URL prevents the caller from fetching a
+		stale resource that the history check did not match.
+		"""
 		try:
 			temp_session = await self.browser_session.get_or_create_cdp_session(target_id, focus=False)
 			history = await asyncio.wait_for(
@@ -1961,19 +2054,19 @@ class DownloadsWatchdog(BaseWatchdog):
 			)
 			entries = history.get('entries', [])
 			if not entries:
-				return None
+				return None, None
 			current_index = history.get('currentIndex', 0)
 			if not 0 <= current_index < len(entries):
-				return None
+				return None, None
 			current_url = entries[current_index].get('url', '')
 			if not current_url:
-				return None
-			return self._check_url_for_pdf(current_url)
+				return None, None
+			return self._check_url_for_pdf(current_url), current_url
 		except Exception as e:
 			self.logger.debug(
 				f'[DownloadsWatchdog] Navigation history PDF check failed: {self._safe_log_error(e)}'
 			)
-			return None
+			return None, None
 
 	async def trigger_pdf_download(
 		self,
@@ -1986,9 +2079,7 @@ class DownloadsWatchdog(BaseWatchdog):
 		Returns the download path if successful, None otherwise.
 		"""
 		attempt_id = f'pdf:{target_id}:{time.time_ns()}'
-		queued_url_epoch = (
-			self._pdf_url_epoch.get(resource_url, 0) if resource_url is not None else None
-		)
+		queued_url_epoch = self._begin_pdf_epoch(resource_url) if resource_url is not None else None
 		try:
 			async with self._js_fetch_lock:
 				return await self._trigger_pdf_download_unlocked(
@@ -2048,7 +2139,8 @@ class DownloadsWatchdog(BaseWatchdog):
 						return {
 							embed: embedElement && embedElement.src ? embedElement.src : null,
 							file: params.get('file'),
-							src: params.get('src')
+							src: params.get('src'),
+							href: window.location.href
 						};
 					})()
 					""",
@@ -2072,6 +2164,15 @@ class DownloadsWatchdog(BaseWatchdog):
 						if candidate_scheme in {'http', 'https', 'data'}:
 							pdf_url = candidate
 							break
+					if not pdf_url:
+						href = str(pdf_info.get('href') or '')
+						if href and not self._is_chrome_pdf_viewer_url(href) and not href.startswith('about:'):
+							try:
+								href_scheme = urlsplit(href).scheme.lower()
+							except ValueError:
+								href_scheme = ''
+							if href_scheme in {'http', 'https', 'data'}:
+								pdf_url = href
 
 			if not pdf_url or self._is_chrome_pdf_viewer_url(pdf_url) or pdf_url.startswith('about:'):
 				self.logger.warning(f'[DownloadsWatchdog] ❌ Could not resolve the PDF resource for {target_id}')
@@ -2125,20 +2226,29 @@ class DownloadsWatchdog(BaseWatchdog):
 			self.logger.debug(f'[DownloadsWatchdog] PDF_URL: {self._safe_log_url(pdf_url)}')
 			existing_path, cache_error = await self._validated_pdf_cache_entry(pdf_url)
 			if existing_path is not None:
-				existing_size = os.path.getsize(existing_path)
-				self._download_registry.complete(
-					attempt_id,
-					path=existing_path,
-					file_size=existing_size,
-					file_name=Path(existing_path).name,
-					file_type='pdf',
-					mime_type='application/pdf',
-					from_cache=True,
-					source='session_cache',
-					detail='already downloaded in this session',
-				)
-				self.logger.debug(f'[DownloadsWatchdog] PDF already downloaded in session: {existing_path}')
-				return existing_path
+				try:
+					existing_size = await asyncio.to_thread(os.path.getsize, existing_path)
+				except OSError as size_error:
+					if self._session_pdf_urls.get(pdf_url) == existing_path:
+						self._session_pdf_urls.pop(pdf_url, None)
+					cache_error = f'Cached PDF path disappeared: {type(size_error).__name__}'
+					existing_path = None
+				else:
+					self._download_registry.complete(
+						attempt_id,
+						path=existing_path,
+						file_size=existing_size,
+						file_name=Path(existing_path).name,
+						file_type='pdf',
+						mime_type='application/pdf',
+						from_cache=True,
+						source='session_cache',
+						detail='already downloaded in this session',
+					)
+					self.logger.debug(
+						f'[DownloadsWatchdog] PDF already downloaded in session: {existing_path}'
+					)
+					return existing_path
 			if cache_error is not None:
 				self.logger.warning(
 					f'[DownloadsWatchdog] Cached PDF failed validation; refetching: {cache_error}'
@@ -2159,7 +2269,7 @@ class DownloadsWatchdog(BaseWatchdog):
 				self.logger.debug(f'[DownloadsWatchdog] File exists, using: {final_filename}')
 
 			if url_epoch is None:
-				url_epoch = self._pdf_url_epoch.get(pdf_url, 0)
+				url_epoch = self._begin_pdf_epoch(pdf_url)
 			self.logger.debug(f'[DownloadsWatchdog] Starting PDF download from: {self._safe_log_url(pdf_url)}')
 
 			# Download using JavaScript fetch to leverage browser cache
@@ -2224,7 +2334,7 @@ class DownloadsWatchdog(BaseWatchdog):
 						)
 						self.logger.warning(
 							f'[DownloadsWatchdog] ❌ Refusing non-PDF content from '
-							f'{self._safe_log_url(pdf_url)}: {validation_error}'
+							f'{self._safe_log_url(pdf_url)}: {redacted_text(validation_error)}'
 						)
 						return None
 					# Ensure downloads directory exists
@@ -2258,7 +2368,7 @@ class DownloadsWatchdog(BaseWatchdog):
 					)
 
 					# Store URL->path mapping for this session
-					if self._pdf_url_epoch.get(pdf_url, 0) == url_epoch:
+					if self._pdf_epoch_is_current(pdf_url, url_epoch):
 						self._session_pdf_urls[pdf_url] = download_path
 					else:
 						self.logger.debug(
@@ -2473,6 +2583,9 @@ class DownloadsWatchdog(BaseWatchdog):
 	async def shutdown(self) -> list[dict[str, object]]:
 		"""Cancel and drain in-flight download tasks, then return final history."""
 		self._downloads_admission = False
+		if self._pdf_validation_executor is not None:
+			self._pdf_validation_executor.shutdown(wait=False, cancel_futures=True)
+			self._pdf_validation_executor = None
 		for task in list(self._cdp_event_tasks):
 			if not task.done():
 				task.cancel()

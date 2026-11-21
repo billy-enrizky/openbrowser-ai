@@ -129,6 +129,25 @@ class PdfDetectionSnapshot:
 
 
 _PDF_INSTALL_HINT = "pypdf is not installed. Install it with: pip install 'openbrowser-ai[pdf]'"
+PDF_VALIDATION_MAX_BYTES = 200 * 1024 * 1024
+
+_DATA_URL_MEDIA_TYPES = frozenset(
+	{
+		'application/json',
+		'application/octet-stream',
+		'application/pdf',
+		'application/zip',
+		'audio/mpeg',
+		'font/woff2',
+		'image/gif',
+		'image/jpeg',
+		'image/png',
+		'image/webp',
+		'text/html',
+		'text/plain',
+		'video/mp4',
+	}
+)
 
 
 def _load_pdf_reader():
@@ -143,6 +162,11 @@ def pdf_validation_error(data: bytes) -> str | None:
 	"""Validate PDF structure and parser acceptance, or return a failure reason."""
 	if not data:
 		return 'PDF payload is empty'
+	if len(data) > PDF_VALIDATION_MAX_BYTES:
+		return (
+			f'PDF payload is {len(data)} bytes, above the '
+			f'{PDF_VALIDATION_MAX_BYTES} byte validation limit'
+		)
 	if b'%PDF-' not in data[:1024]:
 		return 'PDF header %PDF- is missing from the first 1024 bytes'
 	if b'startxref' not in data[-4096:]:
@@ -634,8 +658,16 @@ def redacted_outcome(payload: dict[str, object], *, max_text: int = 300) -> dict
 		except ValueError:
 			return '<invalid-url>'
 		if parsed.scheme.lower() == 'data':
-			media_type = parsed.path.split(',', 1)[0]
-			return f'data:{media_type},<redacted>'
+			header, separator, _payload = value.partition(',')
+			if not separator:
+				return 'data:<redacted>'
+			metadata = header[5:]
+			parts = [part.strip().lower() for part in metadata.split(';')]
+			media_type = parts[0] if parts else ''
+			if media_type not in _DATA_URL_MEDIA_TYPES:
+				media_type = 'application/octet-stream'
+			encoding = ';base64' if 'base64' in parts[1:] else ''
+			return f'data:{media_type}{encoding},<redacted>'
 		# Drop userinfo (user:password@host) and the query for every URL form,
 		# including file: and bare paths.
 		host = parsed.netloc.rsplit('@', 1)[-1]
@@ -664,6 +696,36 @@ def redacted_text(value: object, *, max_length: int = 300) -> object:
 	"""Scrub URL credentials and queries and cap free text for status."""
 	payload = redacted_outcome({'detail': value}, max_text=max_length)
 	return payload.get('detail')
+
+
+_PDF_DETECTION_FIELDS = (
+	'phase',
+	'url',
+	'resource_url',
+	'error',
+	'detail',
+	'started_at',
+	'finished_at',
+	'duration_ms',
+)
+
+
+def _redacted_pdf_snapshot(value: object, default: dict[str, object]) -> dict[str, object]:
+	"""Normalize a PDF snapshot so every field passes the status redaction contract."""
+	if isinstance(value, PdfDetectionSnapshot):
+		return value.to_dict()
+	if isinstance(value, dict):
+		payload = dict(default)
+		for key in _PDF_DETECTION_FIELDS:
+			if key in value:
+				payload[key] = value[key]
+		phase = payload.get('phase')
+		if isinstance(phase, PdfDetectionPhase):
+			payload['phase'] = phase.value
+		if not isinstance(payload.get('phase'), str) or not payload['phase']:
+			payload['phase'] = PdfDetectionPhase.IDLE.value
+		return redacted_outcome(payload)
+	return dict(default)
 
 
 def downloads_summary(owner: object) -> dict[str, object]:
@@ -701,9 +763,7 @@ def downloads_summary(owner: object) -> dict[str, object]:
 				f'{type(pdf_error).__name__}: {pdf_error}'
 			)
 		else:
-			if isinstance(pdf_value, PdfDetectionSnapshot):
-				pdf_value = pdf_value.to_dict()
-			snapshot['pdf_detection'] = pdf_value if isinstance(pdf_value, dict) else default_pdf
+			snapshot['pdf_detection'] = _redacted_pdf_snapshot(pdf_value, default_pdf)
 	else:
 		snapshot['pdf_detection'] = default_pdf
 	return snapshot

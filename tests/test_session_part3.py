@@ -939,6 +939,53 @@ class TestGetAllFrames:
             all_frames, target_sessions = await session.get_all_frames()
             assert "f1" in all_frames
 
+    async def test_background_targets_included_on_request(self):
+        session = _make_browser_session()
+        session.browser_profile.cross_origin_iframes = False
+
+        mock_focus = _make_cdp_session(target_id="focused-target")
+        mock_focus.cdp_client.send.Page.getFrameTree = AsyncMock(
+            return_value={
+                "frameTree": {
+                    "frame": {"id": "focused-frame", "url": "https://example.com"},
+                    "childFrames": [],
+                }
+            }
+        )
+        mock_background = _make_cdp_session(target_id="background-target")
+        mock_background.cdp_client.send.Page.getFrameTree = AsyncMock(
+            return_value={
+                "frameTree": {
+                    "frame": {"id": "background-frame", "url": "https://example.com/report.pdf"},
+                    "childFrames": [],
+                }
+            }
+        )
+        session.agent_focus = mock_focus
+
+        targets = [
+            {"type": "page", "url": "https://example.com", "targetId": "focused-target"},
+            {"type": "page", "url": "https://example.com/report.pdf", "targetId": "background-target"},
+        ]
+
+        async def mock_get_session(target_id, focus=False):
+            return mock_background if target_id == "background-target" else mock_focus
+
+        with (
+            patch.object(BrowserSession, "_cdp_get_all_pages", new_callable=AsyncMock, return_value=targets),
+            patch.object(
+                BrowserSession,
+                "get_or_create_cdp_session",
+                new_callable=AsyncMock,
+                side_effect=mock_get_session,
+            ),
+            patch.object(BrowserSession, "_populate_frame_metadata", new_callable=AsyncMock),
+        ):
+            all_frames, _ = await session.get_all_frames(include_background_targets=True)
+
+        assert "background-frame" in all_frames
+        assert all_frames["background-frame"]["frameTargetId"] == "background-target"
+
     async def test_cross_origin_iframes_enabled(self):
         session = _make_browser_session()
         session.browser_profile.cross_origin_iframes = True

@@ -537,7 +537,7 @@ class TestCheckForPdfViewerDeep:
             DownloadsWatchdog,
             "_check_network_headers_for_pdf",
             new_callable=AsyncMock,
-            return_value=True,
+            return_value=(True, "https://example.com/viewer"),
         ):
             result = await wd.check_for_pdf_viewer("t1")
 
@@ -563,7 +563,7 @@ class TestCheckForPdfViewerDeep:
             DownloadsWatchdog,
             "_check_network_headers_for_pdf",
             new_callable=AsyncMock,
-            return_value=False,
+            return_value=(False, "https://example.com/viewer"),
         ):
             result = await wd.check_for_pdf_viewer("t1")
 
@@ -584,7 +584,7 @@ class TestCheckForPdfViewerDeep:
             DownloadsWatchdog,
             "_check_network_headers_for_pdf",
             new_callable=AsyncMock,
-            return_value=False,
+            return_value=(False, "https://example.com/viewer"),
         ):
             result = await wd.check_for_pdf_viewer("t1")
 
@@ -698,8 +698,9 @@ class TestCheckNetworkHeadersForPdf:
         )
         session.get_or_create_cdp_session.return_value = mock_cdp
 
-        result = await wd._check_network_headers_for_pdf("target-1")
-        assert result is True
+        matched, matched_url = await wd._check_network_headers_for_pdf("target-1")
+        assert matched is True
+        assert matched_url == "https://example.com/document.pdf"
 
     async def test_no_entries(self):
         """No entries in history -> unavailable, not a definitive miss."""
@@ -711,16 +712,18 @@ class TestCheckNetworkHeadersForPdf:
         )
         session.get_or_create_cdp_session.return_value = mock_cdp
 
-        result = await wd._check_network_headers_for_pdf("target-1")
-        assert result is None
+        matched, matched_url = await wd._check_network_headers_for_pdf("target-1")
+        assert matched is None
+        assert matched_url is None
 
     async def test_exception_returns_none(self):
         """A transient history failure is unavailable, not a definitive miss."""
         wd, session = _make_watchdog()
         session.get_or_create_cdp_session.side_effect = RuntimeError("gone")
 
-        result = await wd._check_network_headers_for_pdf("target-1")
-        assert result is None
+        matched, matched_url = await wd._check_network_headers_for_pdf("target-1")
+        assert matched is None
+        assert matched_url is None
 
 
 # ---------------------------------------------------------------------------

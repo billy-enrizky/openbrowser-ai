@@ -2393,20 +2393,19 @@ class BrowserSession(BaseModel):
 		return dict(self._download_history[-1]) if self._download_history else None
 
 	def pdf_detection_snapshot(self) -> 'PdfDetectionSnapshot':
-		"""Return the latest PDF detection snapshot, or an idle default."""
+		"""Return the latest PDF detection snapshot, or an idle default.
+
+		A reader failure propagates so ``downloads_summary`` can report it as
+		``pdf_detection_error`` in the same response.
+		"""
 		from openbrowser.browser.download_state import PdfDetectionPhase, PdfDetectionSnapshot
 
 		watchdog = self._downloads_watchdog
 		reader = getattr(watchdog, 'pdf_detection_snapshot', None)
 		if callable(reader):
-			try:
-				value = reader()
-			except Exception as error:
-				self._download_outcomes_error = f'{type(error).__name__}: {error}'
-				self.logger.warning('Could not read the PDF detection snapshot', exc_info=True)
-			else:
-				if isinstance(value, PdfDetectionSnapshot):
-					return value
+			value = reader()
+			if isinstance(value, PdfDetectionSnapshot):
+				return value
 		return PdfDetectionSnapshot(phase=PdfDetectionPhase.IDLE)
 
 	async def wait_for_download(
@@ -4315,8 +4314,17 @@ class BrowserSession(BaseModel):
 
 		return url_allowed and type_allowed
 
-	async def get_all_frames(self) -> tuple[dict[str, dict], dict[str, str]]:
+	async def get_all_frames(
+		self,
+		*,
+		include_background_targets: bool = False,
+	) -> tuple[dict[str, dict], dict[str, str]]:
 		"""Get a complete frame hierarchy from all browser targets.
+
+		When ``cross_origin_iframes`` is disabled, only the focused target is
+		inspected by default. Background tabs are included when
+		``include_background_targets`` is true, which download completion needs
+		because its frame can belong to a tab that is not focused.
 
 		Returns:
 			Tuple of (all_frames, target_sessions) where:
@@ -4350,15 +4358,14 @@ class BrowserSession(BaseModel):
 			if not include_cross_origin and target.get('type') == 'iframe':
 				continue
 
-			# When cross-origin support is disabled, only process the current target
-			if not include_cross_origin:
-				# Only process the current focus target
+			# Without cross-origin support, the default path is focus-only. A
+			# download completion may still name a frame in a background tab.
+			if not include_cross_origin and not include_background_targets:
 				if self.agent_focus and target_id != self.agent_focus.target_id:
 					continue
-				# Use the existing agent_focus session
 				cdp_session = self.agent_focus
 			else:
-				# Get cached session for this target (don't change focus - iterating frames)
+				# Get cached session for this target without changing focus.
 				cdp_session = await self.get_or_create_cdp_session(target_id, focus=False)
 
 			if cdp_session:

@@ -962,15 +962,15 @@ class TestDownloadsWatchdog:
     # -- _handle_download --
 
     @pytest.mark.asyncio
-    async def test_handle_download_file_already_exists(self):
-        """Lines 856-866: File already downloaded by Playwright."""
+    async def test_handle_download_preserves_an_existing_same_name_file(self):
+        """A same-name file belongs to its owner, not to this download."""
         with tempfile.TemporaryDirectory() as tmpdir:
             session = _make_mock_browser_session()
             session.browser_profile.downloads_path = tmpdir
 
-            # Create existing file
             existing = Path(tmpdir) / "test.pdf"
-            existing.write_bytes(PDF_BYTES)
+            existing.write_bytes(b"user-owned bytes")
+            saved_paths: list[str] = []
 
             watchdog = self._make_watchdog(session=session)
 
@@ -979,7 +979,18 @@ class TestDownloadsWatchdog:
             mock_download.suggested_filename = "test.pdf"
             mock_download.failure = AsyncMock(return_value=None)
 
+            async def fake_save_as(path):
+                saved_paths.append(path)
+                await asyncio.to_thread(Path(path).write_bytes, PDF_BYTES)
+
+            mock_download.save_as = fake_save_as
+
             await watchdog._handle_download(mock_download)
+
+            assert len(saved_paths) == 1
+            assert saved_paths[0] != str(existing)
+            assert await asyncio.to_thread(Path(saved_paths[0]).read_bytes) == PDF_BYTES
+            assert await asyncio.to_thread(existing.read_bytes) == b"user-owned bytes"
             session.event_bus.dispatch.assert_called()
 
     @pytest.mark.asyncio

@@ -85,9 +85,11 @@ EXECUTE_CODE_DESCRIPTION = """Execute Python code in a persistent namespace with
   download_ref: str | None = None)` -- Wait for one download to reach a terminal phase. Start the wait
   before the click so a fast download cannot finish first. Returns a dict with `phase` (`completed`,
   `failed`, or `cancelled`), `path`, `file_size`, `file_type`, `stage`, and `error`. To wait for a
-  specific prior outcome, pass its `download_ref`. Raises TimeoutError with the last observed phase when
-  nothing finishes in time. If the download may already have finished, pass `lookback=5` to accept a
-  terminal outcome from the last five seconds.
+  specific prior outcome, pass its `download_ref`. A reference resolves only in the attached session's
+  live download registry; after the session stops or is replaced, read the completed history instead of
+  waiting on that reference. Raises TimeoutError with the last observed phase when nothing finishes in
+  time. If the download may already have finished, pass `lookback=5` to accept a terminal outcome from
+  the last five seconds.
   Example: `waiter = asyncio.create_task(wait_for_download(timeout=30)); await click(12); outcome = await waiter; print(outcome['phase'], outcome['path'])`
   If it failed, `outcome['stage']` names where it stopped and `outcome['error']` says why.
 - `download_outcomes()` -- Synchronous. Return recent download attempts, oldest first, with their last phase and terminal detail.
