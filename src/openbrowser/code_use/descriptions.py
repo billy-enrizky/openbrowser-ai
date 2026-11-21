@@ -23,7 +23,9 @@ EXECUTE_CODE_DESCRIPTION_COMPACT = """Execute Python code with browser automatio
 - `await done(text, success=True)` -- Signal task complete
 
 ## Downloads
-- `waiter = asyncio.create_task(wait_for_download(timeout=30))` then click, then `await waiter` -- returns phase, path, error
+- `waiter = asyncio.create_task(wait_for_download(timeout=30))` then click, then `await waiter`
+  -- returns phase, path, file_size, file_type, stage, error, download_ref
+- To wait for a prior outcome, pass its `download_ref`; it resolves only in the attached session's live registry
 - `download_outcomes()` / `download_failures()` -- Synchronous recent attempts and failures
 
 ## State
