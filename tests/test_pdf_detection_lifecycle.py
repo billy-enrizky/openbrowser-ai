@@ -2321,3 +2321,29 @@ async def test_history_match_respects_recorded_non_pdf_mime():
         snapshot = await watchdog._detect_pdf("t1", url="https://example.com/stale-viewer")
 
     assert snapshot.phase is PdfDetectionPhase.NOT_PDF
+
+
+@pytest.mark.asyncio
+async def test_native_completion_with_stale_epoch_completes_without_caching(tmp_path):
+    watchdog, _ = _make_watchdog(str(tmp_path))
+    url = "https://example.com/report.pdf"
+    stale_epoch = watchdog._begin_pdf_epoch(url)
+    watchdog._note_document_mime("t1", url, "text/html")
+    path = tmp_path / "late.pdf"
+    path.write_bytes(MINIMAL_PDF)
+    watchdog._download_registry.start("native-stale", url=url, file_name=path.name, source="cdp")
+
+    await watchdog._complete_native_download(
+        download_id="native-stale",
+        file_path=str(path),
+        url=url,
+        total_bytes=len(MINIMAL_PDF),
+        source="cdp",
+        target_id="t1",
+        url_epoch=stale_epoch,
+    )
+
+    outcome = watchdog._download_registry.get("native-stale")
+    assert outcome is not None
+    assert outcome.phase is DownloadPhase.COMPLETED
+    assert url not in watchdog._session_pdf_urls
