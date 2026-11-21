@@ -1120,13 +1120,15 @@ class TestDownloadsWatchdogCDPDownload:
         """Lines 478-481: URL already downloaded in session."""
         with tempfile.TemporaryDirectory() as tmpdir:
             watchdog, session = _make_downloads_watchdog(downloads_path=tmpdir)
-            watchdog._session_pdf_urls["https://example.com/test.pdf"] = "/path/to/test.pdf"
+            cached = Path(tmpdir) / "test.bin"
+            cached.write_bytes(b"cached")
+            watchdog._session_pdf_urls["https://example.com/test.bin"] = str(cached)
 
             result = await watchdog.download_file_from_url(
-                url="https://example.com/test.pdf",
+                url="https://example.com/test.bin",
                 target_id="target-1",
             )
-            assert result == "/path/to/test.pdf"
+            assert result == str(cached)
 
     async def test_download_file_from_url_filename_fallback(self):
         """Lines 498, 511: various filename fallback paths."""

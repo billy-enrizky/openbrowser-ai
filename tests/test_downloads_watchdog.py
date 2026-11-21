@@ -5,13 +5,29 @@ import logging
 import os
 import tempfile
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch, create_autospec
+from unittest.mock import AsyncMock, MagicMock, create_autospec, patch
 
 import pytest
 from bubus import EventBus
+
+from openbrowser.browser.download_state import PdfDetectionPhase, PdfDetectionSnapshot
 from openbrowser.browser.session import BrowserSession
 
 logger = logging.getLogger(__name__)
+
+MINIMAL_PDF = (
+    b'%PDF-1.0\n'
+    b'1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n'
+    b'2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n'
+    b'3 0 obj<</Type/Page/MediaBox[0 0 612 792]/Parent 2 0 R/Resources<<>>>>endobj\n'
+    b'xref\n0 4\n'
+    b'0000000000 65535 f \n'
+    b'0000000009 00000 n \n'
+    b'0000000058 00000 n \n'
+    b'0000000115 00000 n \n'
+    b'trailer<</Size 4/Root 1 0 R>>\n'
+    b'startxref\n212\n%%EOF\n'
+)
 
 
 def _make_mock_browser_session(downloads_path=None):
@@ -133,7 +149,7 @@ class TestOnBrowserStoppedEvent:
         watchdog._active_downloads = {'d1': {}}
         watchdog._download_cdp_session_setup = True
         watchdog._download_cdp_session = MagicMock()
-        watchdog._pdf_viewer_cache = {'url1': True}
+        watchdog._pdf_document_mime[('target-1', 'https://example.com/viewer')] = 'text/html'
         watchdog._session_pdf_urls = {'url1': '/path'}
         watchdog._network_monitored_targets = {'t1'}
         watchdog._detected_downloads = {'url1'}
@@ -154,7 +170,7 @@ class TestOnBrowserStoppedEvent:
         assert watchdog._active_downloads == {}
         assert watchdog._download_cdp_session_setup is False
         assert watchdog._download_cdp_session is None
-        assert watchdog._pdf_viewer_cache == {}
+        assert not watchdog._pdf_document_mime
         assert watchdog._session_pdf_urls == {}
         assert watchdog._network_monitored_targets == set()
         assert watchdog._detected_downloads == set()
@@ -206,17 +222,29 @@ class TestOnBrowserStateRequestEvent:
 class TestOnNavigationCompleteEvent:
     """Tests for on_NavigationCompleteEvent."""
 
-    async def test_clears_pdf_cache(self):
+    async def test_rechecks_pdf_on_same_url_navigation(self):
+        from openbrowser.browser.watchdogs.downloads_watchdog import DownloadsWatchdog
+
         watchdog, _ = _make_watchdog()
-        watchdog._pdf_viewer_cache = {'https://example.com/doc.pdf': True}
+        watchdog.browser_session.browser_profile.auto_download_pdfs = True
+        watchdog._pdf_document_mime[('target-1', 'https://example.com/viewer')] = 'text/html'
 
         event = MagicMock()
-        event.url = 'https://example.com/doc.pdf'
+        event.url = 'https://example.com/viewer'
         event.target_id = 'target-1'
 
-        await watchdog.on_NavigationCompleteEvent(event)
+        with patch.object(
+            DownloadsWatchdog,
+            '_detect_pdf',
+            new_callable=AsyncMock,
+            return_value=PdfDetectionSnapshot(
+                phase=PdfDetectionPhase.NOT_PDF,
+                url='https://example.com/viewer',
+            ),
+        ) as check:
+            await watchdog.on_NavigationCompleteEvent(event)
 
-        assert 'https://example.com/doc.pdf' not in watchdog._pdf_viewer_cache
+        check.assert_awaited_once_with('target-1', url='https://example.com/viewer')
 
     async def test_auto_download_disabled_returns_early(self):
         watchdog, session = _make_watchdog()
@@ -359,12 +387,14 @@ class TestDownloadFileFromUrl:
         result = await watchdog.download_file_from_url('https://example.com/file.pdf', 'target-1')
         assert result is None
 
-    async def test_already_downloaded_returns_cached(self):
+    async def test_already_downloaded_returns_cached(self, tmp_path):
         watchdog, _ = _make_watchdog()
-        watchdog._session_pdf_urls['https://example.com/file.pdf'] = '/cached/path.pdf'
+        cached = tmp_path / 'file.bin'
+        cached.write_bytes(b'cached')
+        watchdog._session_pdf_urls['https://example.com/file.bin'] = str(cached)
 
-        result = await watchdog.download_file_from_url('https://example.com/file.pdf', 'target-1')
-        assert result == '/cached/path.pdf'
+        result = await watchdog.download_file_from_url('https://example.com/file.bin', 'target-1')
+        assert result == str(cached)
 
     async def test_successful_download(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -374,7 +404,7 @@ class TestDownloadFileFromUrl:
             mock_cdp = MagicMock()
             mock_cdp.session_id = 'sid-123'
             mock_cdp.cdp_client.send.Runtime.evaluate = AsyncMock(return_value={
-                'result': {'value': {'data': list(b'PDF content here'), 'responseSize': 16}}
+                'result': {'value': {'data': list(MINIMAL_PDF), 'responseSize': len(MINIMAL_PDF)}}
             })
             session.get_or_create_cdp_session.return_value = mock_cdp
 
@@ -421,7 +451,7 @@ class TestDownloadFileFromUrl:
             mock_cdp = MagicMock()
             mock_cdp.session_id = 'sid-123'
             mock_cdp.cdp_client.send.Runtime.evaluate = AsyncMock(return_value={
-                'result': {'value': {'data': list(b'test'), 'responseSize': 4}}
+                'result': {'value': {'data': list(MINIMAL_PDF), 'responseSize': len(MINIMAL_PDF)}}
             })
             session.get_or_create_cdp_session.return_value = mock_cdp
 
@@ -441,7 +471,7 @@ class TestDownloadFileFromUrl:
             mock_cdp = MagicMock()
             mock_cdp.session_id = 'sid-123'
             mock_cdp.cdp_client.send.Runtime.evaluate = AsyncMock(return_value={
-                'result': {'value': {'data': list(b'test'), 'responseSize': 4}}
+                'result': {'value': {'data': list(MINIMAL_PDF), 'responseSize': len(MINIMAL_PDF)}}
             })
             session.get_or_create_cdp_session.return_value = mock_cdp
 
@@ -465,7 +495,7 @@ class TestDownloadFileFromUrl:
             mock_cdp = MagicMock()
             mock_cdp.session_id = 'sid-123'
             mock_cdp.cdp_client.send.Runtime.evaluate = AsyncMock(return_value={
-                'result': {'value': {'data': list(b'test'), 'responseSize': 4}}
+                'result': {'value': {'data': list(MINIMAL_PDF), 'responseSize': len(MINIMAL_PDF)}}
             })
             session.get_or_create_cdp_session.return_value = mock_cdp
 

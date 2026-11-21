@@ -31,6 +31,21 @@ from openbrowser.browser.watchdogs.profile_lease import ProfileLease
 logger = logging.getLogger(__name__)
 
 
+PDF_BYTES = (
+    b"%PDF-1.0\n"
+    b"1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n"
+    b"2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n"
+    b"3 0 obj<</Type/Page/MediaBox[0 0 612 792]/Parent 2 0 R/Resources<<>>>>endobj\n"
+    b"xref\n0 4\n"
+    b"0000000000 65535 f \n"
+    b"0000000009 00000 n \n"
+    b"0000000058 00000 n \n"
+    b"0000000115 00000 n \n"
+    b"trailer<</Size 4/Root 1 0 R>>\n"
+    b"startxref\n212\n%%EOF\n"
+)
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -729,7 +744,6 @@ class TestDownloadsWatchdog:
         wd = _make_watchdog(DownloadsWatchdog, session=session)
         wd._sessions_with_listeners = set()
         wd._active_downloads = {}
-        wd._pdf_viewer_cache = {}
         wd._download_cdp_session_setup = False
         wd._download_cdp_session = None
         wd._cdp_event_tasks = set()
@@ -956,7 +970,7 @@ class TestDownloadsWatchdog:
 
             # Create existing file
             existing = Path(tmpdir) / "test.pdf"
-            existing.write_bytes(b"PDF content here")
+            existing.write_bytes(PDF_BYTES)
 
             watchdog = self._make_watchdog(session=session)
 
@@ -983,7 +997,7 @@ class TestDownloadsWatchdog:
             mock_download.failure = AsyncMock(return_value=None)
 
             async def fake_save_as(path):
-                Path(path).write_bytes(b"saved content")
+                Path(path).write_bytes(PDF_BYTES)
 
             mock_download.save_as = fake_save_as
 
@@ -1045,24 +1059,28 @@ class TestDownloadsWatchdog:
     @pytest.mark.asyncio
     async def test_trigger_pdf_download_already_downloaded(self):
         """Lines 1136-1139: PDF already downloaded in session."""
-        session = _make_mock_browser_session()
-        session.browser_profile.downloads_path = "/tmp/downloads"
+        with tempfile.TemporaryDirectory() as tmpdir:
+            session = _make_mock_browser_session()
+            session.browser_profile.downloads_path = tmpdir
+            cached_path = Path(tmpdir) / "doc.pdf"
+            cached_path.write_bytes(PDF_BYTES)
 
-        cdp_session = MagicMock()
-        cdp_session.cdp_client = MagicMock()
-        cdp_session.cdp_client.send = MagicMock()
-        cdp_session.cdp_client.send.Runtime = MagicMock()
-        cdp_session.cdp_client.send.Runtime.evaluate = AsyncMock(return_value={
-            "result": {"value": {"url": "https://example.com/doc.pdf"}}
-        })
-        cdp_session.session_id = "sess-pdf2"
-        session.get_or_create_cdp_session = AsyncMock(return_value=cdp_session)
+            cdp_session = MagicMock()
+            cdp_session.cdp_client = MagicMock()
+            cdp_session.cdp_client.send = MagicMock()
+            cdp_session.cdp_client.send.Runtime = MagicMock()
+            cdp_session.cdp_client.send.Runtime.evaluate = AsyncMock(return_value={
+                "result": {"value": {"url": "https://example.com/doc.pdf"}}
+            })
+            cdp_session.session_id = "sess-pdf2"
+            session.get_or_create_cdp_session = AsyncMock(return_value=cdp_session)
 
-        watchdog = self._make_watchdog(session=session)
-        watchdog._session_pdf_urls = {"https://example.com/doc.pdf": "/tmp/downloads/doc.pdf"}
+            watchdog = self._make_watchdog(session=session)
+            watchdog._session_pdf_urls = {"https://example.com/doc.pdf": str(cached_path)}
 
-        result = await watchdog.trigger_pdf_download("t1")
-        assert result == "/tmp/downloads/doc.pdf"
+            result = await watchdog.trigger_pdf_download("t1")
+            assert result == str(cached_path)
+            assert cdp_session.cdp_client.send.Runtime.evaluate.await_count == 1
 
     @pytest.mark.asyncio
     async def test_trigger_pdf_download_success(self):
@@ -1080,7 +1098,13 @@ class TestDownloadsWatchdog:
             # Second call: download PDF data
             cdp_session.cdp_client.send.Runtime.evaluate = AsyncMock(side_effect=[
                 {"result": {"value": {"url": "https://example.com/report.pdf"}}},
-                {"result": {"value": {"data": list(b"%PDF-1.4 test content"), "fromCache": True, "responseSize": 20, "transferSize": "20"}}},
+                {"result": {"value": {
+                    "data": list(PDF_BYTES),
+                    "fromCache": True,
+                    "responseSize": len(PDF_BYTES),
+                    "transferSize": str(len(PDF_BYTES)),
+                    "contentType": "application/pdf",
+                }}},
             ])
             cdp_session.session_id = "sess-pdf3"
             session.get_or_create_cdp_session = AsyncMock(return_value=cdp_session)
@@ -1091,6 +1115,7 @@ class TestDownloadsWatchdog:
             assert result is not None
             assert "report.pdf" in result
             assert Path(result).exists()
+            assert await asyncio.to_thread(Path(result).read_bytes) == PDF_BYTES
 
     @pytest.mark.asyncio
     async def test_trigger_pdf_download_duplicate_filename(self):
@@ -1108,7 +1133,12 @@ class TestDownloadsWatchdog:
             cdp_session.cdp_client.send.Runtime = MagicMock()
             cdp_session.cdp_client.send.Runtime.evaluate = AsyncMock(side_effect=[
                 {"result": {"value": {"url": "https://example.com/report.pdf"}}},
-                {"result": {"value": {"data": list(b"%PDF new"), "fromCache": False, "responseSize": 8}}},
+                {"result": {"value": {
+                    "data": list(PDF_BYTES),
+                    "fromCache": False,
+                    "responseSize": len(PDF_BYTES),
+                    "contentType": "application/pdf",
+                }}},
             ])
             cdp_session.session_id = "sess-pdf4"
             session.get_or_create_cdp_session = AsyncMock(return_value=cdp_session)
@@ -1198,7 +1228,12 @@ class TestDownloadsWatchdog:
             cdp_session.cdp_client.send.Runtime = MagicMock()
             cdp_session.cdp_client.send.Runtime.evaluate = AsyncMock(side_effect=[
                 {"result": {"value": {"url": "https://example.com/viewer?doc=123"}}},
-                {"result": {"value": {"data": list(b"%PDF"), "fromCache": False, "responseSize": 4}}},
+                {"result": {"value": {
+                    "data": list(PDF_BYTES),
+                    "fromCache": False,
+                    "responseSize": len(PDF_BYTES),
+                    "contentType": "application/pdf",
+                }}},
             ])
             cdp_session.session_id = "sess-pdf7"
             session.get_or_create_cdp_session = AsyncMock(return_value=cdp_session)
@@ -1223,7 +1258,12 @@ class TestDownloadsWatchdog:
             cdp_session.cdp_client.send.Runtime = MagicMock()
             cdp_session.cdp_client.send.Runtime.evaluate = AsyncMock(side_effect=[
                 {"result": {"value": {"url": "https://example.com/doc.pdf"}}},
-                {"result": {"value": {"data": list(b"%PDF"), "fromCache": False, "responseSize": 4}}},
+                {"result": {"value": {
+                    "data": list(PDF_BYTES),
+                    "fromCache": False,
+                    "responseSize": len(PDF_BYTES),
+                    "contentType": "application/pdf",
+                }}},
             ])
             cdp_session.session_id = "sess-pdf8"
             session.get_or_create_cdp_session = AsyncMock(return_value=cdp_session)

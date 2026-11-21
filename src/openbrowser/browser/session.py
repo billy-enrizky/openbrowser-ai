@@ -66,6 +66,7 @@ from openbrowser.utils import _log_pretty_url, is_new_tab_page
 
 if TYPE_CHECKING:
 	from openbrowser.actor.page import Page
+	from openbrowser.browser.download_state import PdfDetectionSnapshot
 
 DEFAULT_BROWSER_PROFILE = BrowserProfile()
 NAVIGATION_CONTAINMENT_GRACE = 1.0
@@ -2391,12 +2392,30 @@ class BrowserSession(BaseModel):
 				self.logger.warning('Could not read the latest download outcome', exc_info=True)
 		return dict(self._download_history[-1]) if self._download_history else None
 
+	def pdf_detection_snapshot(self) -> 'PdfDetectionSnapshot':
+		"""Return the latest PDF detection snapshot, or an idle default."""
+		from openbrowser.browser.download_state import PdfDetectionPhase, PdfDetectionSnapshot
+
+		watchdog = self._downloads_watchdog
+		reader = getattr(watchdog, 'pdf_detection_snapshot', None)
+		if callable(reader):
+			try:
+				value = reader()
+			except Exception as error:
+				self._download_outcomes_error = f'{type(error).__name__}: {error}'
+				self.logger.warning('Could not read the PDF detection snapshot', exc_info=True)
+			else:
+				if isinstance(value, PdfDetectionSnapshot):
+					return value
+		return PdfDetectionSnapshot(phase=PdfDetectionPhase.IDLE)
+
 	async def wait_for_download(
 		self,
 		*,
 		timeout: float = 30.0,
 		url: str | None = None,
 		download_id: str | None = None,
+		download_ref: str | None = None,
 		lookback: float = 0.0,
 	) -> dict[str, object]:
 		"""Wait for one terminal download outcome recorded by the watchdog."""
@@ -2408,6 +2427,7 @@ class BrowserSession(BaseModel):
 			timeout=timeout,
 			url=url,
 			download_id=download_id,
+			download_ref=download_ref,
 			lookback=lookback,
 		)
 

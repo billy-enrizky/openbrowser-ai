@@ -885,6 +885,7 @@ async def test_real_daemon_process_reports_status_and_cleans_up(daemon_paths, mo
         assert payload['startup']['phase'] == 'listening'
         assert payload['startup']['owner_state'] == 'active'
         assert payload['storage_state']['phase'] == 'not_configured'
+        assert payload['downloads']['pdf_detection']['phase'] == 'idle'
         assert pid_path.read_text() == str(process.pid)
 
         stopped = await client.stop()

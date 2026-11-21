@@ -7,7 +7,6 @@ Targets uncovered lines: 156-159, 170-187, 191-231, 257-258, 321, 325, 334,
 1060, 1068-1070, 1151, 1220-1221, 1272-1273.
 """
 
-import asyncio
 import logging
 import os
 import tempfile
@@ -17,6 +16,7 @@ from unittest.mock import AsyncMock, MagicMock, create_autospec, patch
 import pytest
 from bubus import EventBus
 
+from openbrowser.browser.download_state import PdfDetectionPhase, PdfDetectionSnapshot
 from openbrowser.browser.session import BrowserSession
 
 logger = logging.getLogger(__name__)
@@ -86,9 +86,13 @@ class TestNavigationCompleteAutoDownload:
 
         with patch.object(
             DownloadsWatchdog,
-            "check_for_pdf_viewer",
+            "_detect_pdf",
             new_callable=AsyncMock,
-            return_value=True,
+            return_value=PdfDetectionSnapshot(
+                phase=PdfDetectionPhase.PDF,
+                url=event.url,
+                resource_url=event.url,
+            ),
         ), patch.object(
             DownloadsWatchdog,
             "trigger_pdf_download",
@@ -110,9 +114,12 @@ class TestNavigationCompleteAutoDownload:
 
         with patch.object(
             DownloadsWatchdog,
-            "check_for_pdf_viewer",
+            "_detect_pdf",
             new_callable=AsyncMock,
-            return_value=False,
+            return_value=PdfDetectionSnapshot(
+                phase=PdfDetectionPhase.NOT_PDF,
+                url=event.url,
+            ),
         ):
             await wd.on_NavigationCompleteEvent(event)
 
@@ -486,18 +493,19 @@ class TestCheckForPdfViewerDeep:
         result = await wd.check_for_pdf_viewer("nonexistent-target")
         assert result is False
 
-    async def test_cached_result_true(self):
-        """Lines 958-960: cached result is True."""
+    async def test_document_mime_result_true(self):
+        """A main-document application/pdf response detects a PDF."""
         wd, session = _make_watchdog()
         session.cdp_client.send.Target.getTargets = AsyncMock(
             return_value={
-                "targetInfos": [{"targetId": "t1", "url": "https://example.com/doc.pdf"}]
+                "targetInfos": [{"targetId": "t1", "url": "https://example.com/export"}]
             }
         )
-        wd._pdf_viewer_cache["https://example.com/doc.pdf"] = True
+        wd._note_document_mime("t1", "https://example.com/export", "application/pdf")
 
         result = await wd.check_for_pdf_viewer("t1")
         assert result is True
+        assert wd.pdf_detection_snapshot().phase.value == "pdf"
 
     async def test_url_is_pdf(self):
         """Lines 966-968: URL pattern matches PDF."""
@@ -510,7 +518,9 @@ class TestCheckForPdfViewerDeep:
 
         result = await wd.check_for_pdf_viewer("t1")
         assert result is True
-        assert wd._pdf_viewer_cache["https://example.com/doc.pdf"] is True
+        snapshot = wd.pdf_detection_snapshot()
+        assert snapshot.phase.value == "pdf"
+        assert snapshot.resource_url == "https://example.com/doc.pdf"
 
     async def test_network_headers_pdf(self):
         """Lines 973-975: network headers detect PDF."""
@@ -579,7 +589,7 @@ class TestCheckForPdfViewerDeep:
             result = await wd.check_for_pdf_viewer("t1")
 
         assert result is False
-        assert wd._pdf_viewer_cache["https://example.com/page.html"] is False
+        assert wd.pdf_detection_snapshot().phase.value == "not_pdf"
 
     async def test_exception_during_check(self):
         """Lines 988-991: exception during PDF check."""
@@ -600,7 +610,7 @@ class TestCheckForPdfViewerDeep:
             result = await wd.check_for_pdf_viewer("t1")
 
         assert result is False
-        assert wd._pdf_viewer_cache["https://example.com/maybe.pdf"] is False
+        assert wd.pdf_detection_snapshot().phase.value == "check_failed"
 
 
 # ---------------------------------------------------------------------------
@@ -692,7 +702,7 @@ class TestCheckNetworkHeadersForPdf:
         assert result is True
 
     async def test_no_entries(self):
-        """No entries in history -> False."""
+        """No entries in history -> unavailable, not a definitive miss."""
         wd, session = _make_watchdog()
         mock_cdp = MagicMock()
         mock_cdp.session_id = "sid-1"
@@ -702,15 +712,15 @@ class TestCheckNetworkHeadersForPdf:
         session.get_or_create_cdp_session.return_value = mock_cdp
 
         result = await wd._check_network_headers_for_pdf("target-1")
-        assert result is False
+        assert result is None
 
-    async def test_exception_returns_false(self):
-        """Lines 1068-1070: exception returns False."""
+    async def test_exception_returns_none(self):
+        """A transient history failure is unavailable, not a definitive miss."""
         wd, session = _make_watchdog()
         session.get_or_create_cdp_session.side_effect = RuntimeError("gone")
 
         result = await wd._check_network_headers_for_pdf("target-1")
-        assert result is False
+        assert result is None
 
 
 # ---------------------------------------------------------------------------

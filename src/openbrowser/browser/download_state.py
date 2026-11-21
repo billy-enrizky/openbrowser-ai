@@ -9,10 +9,11 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import io
 import re
 import time
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import Enum, StrEnum
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
@@ -88,12 +89,83 @@ class DownloadOutcome:
 		}
 
 
+class PdfDetectionPhase(StrEnum):
+	"""Lifecycle of one PDF detection attempt."""
+
+	IDLE = 'idle'
+	CHECKING = 'checking'
+	PDF = 'pdf'
+	NOT_PDF = 'not_pdf'
+	CHECK_FAILED = 'check_failed'
+	CANCELLED = 'cancelled'
+
+
+@dataclass(frozen=True)
+class PdfDetectionSnapshot:
+	"""JSON-safe view of the latest PDF detection attempt."""
+
+	phase: PdfDetectionPhase
+	url: str | None = None
+	resource_url: str | None = None
+	error: str | None = None
+	detail: str | None = None
+	started_at: float | None = None
+	finished_at: float | None = None
+	duration_ms: float | None = None
+
+	def to_dict(self) -> dict[str, object]:
+		return redacted_outcome(
+			{
+				'phase': self.phase.value,
+				'url': self.url,
+				'resource_url': self.resource_url,
+				'error': self.error,
+				'detail': self.detail,
+				'started_at': self.started_at,
+				'finished_at': self.finished_at,
+				'duration_ms': self.duration_ms,
+			}
+		)
+
+
+_PDF_INSTALL_HINT = "pypdf is not installed. Install it with: pip install 'openbrowser-ai[pdf]'"
+
+
+def _load_pdf_reader():
+	try:
+		from pypdf import PdfReader
+	except ImportError:
+		return None
+	return PdfReader
+
+
+def pdf_validation_error(data: bytes) -> str | None:
+	"""Validate PDF structure and parser acceptance, or return a failure reason."""
+	if not data:
+		return 'PDF payload is empty'
+	if b'%PDF-' not in data[:1024]:
+		return 'PDF header %PDF- is missing from the first 1024 bytes'
+	if b'startxref' not in data[-4096:]:
+		return 'PDF startxref is missing from the last 4096 bytes'
+	if b'%%EOF' not in data[-2048:]:
+		return 'PDF %%EOF is missing from the last 2048 bytes'
+	reader_class = _load_pdf_reader()
+	if reader_class is None:
+		return _PDF_INSTALL_HINT
+	try:
+		reader = reader_class(io.BytesIO(data))
+		_ = len(reader.pages)
+	except Exception as error:
+		return f'pypdf rejected PDF content: {type(error).__name__}: {error}'
+	return None
+
+
 class DownloadTimeoutError(TimeoutError):
 	"""No terminal download outcome appeared within the wait budget."""
 
 	def __init__(self, message: str, outcome: DownloadOutcome | None = None):
 		super().__init__(message)
-		self.outcome = outcome.to_dict() if outcome is not None else None
+		self.outcome = redacted_outcome(outcome.to_dict()) if outcome is not None else None
 
 
 class DownloadRegistry:
@@ -282,10 +354,18 @@ class DownloadRegistry:
 		self._trim()
 		return outcome
 
-	def cancel(self, download_id: str, *, detail: str | None = None) -> DownloadOutcome:
-		outcome = self._get_or_create(download_id, url='', source='unknown')
+	def cancel(
+		self,
+		download_id: str,
+		*,
+		detail: str | None = None,
+		url: str | None = None,
+		source: str | None = None,
+	) -> DownloadOutcome:
+		outcome = self._get_or_create(download_id, url=url or '', source=source or 'unknown')
 		if outcome.terminal:
 			return outcome
+		self._update_metadata(outcome, url=url, source=source)
 		if detail is not None:
 			outcome.detail = detail
 		self._advance(outcome, DownloadPhase.CANCELLED)
@@ -534,9 +614,17 @@ def redacted_outcome(payload: dict[str, object], *, max_text: int = 300) -> dict
 			return value
 		# Scrub any embedded URL, including signed query strings.
 		scrubbed = re.sub(r'[a-zA-Z][a-zA-Z0-9+.-]*://[^\s\"\'<>]+', lambda m: str(_redact_url(m.group(0))), value)
+		scrubbed = re.sub(
+			r'data:[^\s\"\'<>]+',
+			lambda m: str(_redact_url(m.group(0))),
+			scrubbed,
+			flags=re.IGNORECASE,
+		)
 		return _truncate(scrubbed)
 
 	def _redact_url(value: object) -> object:
+		if value is None:
+			return None
 		if not isinstance(value, str):
 			return '<redacted>'
 		if not value:
@@ -545,6 +633,9 @@ def redacted_outcome(payload: dict[str, object], *, max_text: int = 300) -> dict
 			parsed = urlsplit(value)
 		except ValueError:
 			return '<invalid-url>'
+		if parsed.scheme.lower() == 'data':
+			media_type = parsed.path.split(',', 1)[0]
+			return f'data:{media_type},<redacted>'
 		# Drop userinfo (user:password@host) and the query for every URL form,
 		# including file: and bare paths.
 		host = parsed.netloc.rsplit('@', 1)[-1]
@@ -563,8 +654,9 @@ def redacted_outcome(payload: dict[str, object], *, max_text: int = 300) -> dict
 	internal_id = redacted.pop('download_id', None)
 	if isinstance(internal_id, str):
 		redacted['download_ref'] = hashlib.sha256(internal_id.encode('utf-8')).hexdigest()[:12]
-	if 'url' in redacted:
-		redacted['url'] = _redact_url(redacted['url'])
+	for key in ('url', 'resource_url'):
+		if key in redacted:
+			redacted[key] = _redact_url(redacted[key])
 	return redacted
 
 
@@ -575,15 +667,22 @@ def redacted_text(value: object, *, max_length: int = 300) -> object:
 
 
 def downloads_summary(owner: object) -> dict[str, object]:
-	"""Return a bounded, redacted download summary for any status owner."""
+	"""Return a bounded, redacted download and PDF-detection summary."""
+	default_pdf = PdfDetectionSnapshot(phase=PdfDetectionPhase.IDLE).to_dict()
 	reader = getattr(owner, 'download_outcomes', None)
 	if not callable(reader):
-		return {'count': 0, 'pending': 0, 'recent': []}
+		return {'count': 0, 'pending': 0, 'recent': [], 'pdf_detection': default_pdf}
 	reader_fn: Any = reader
 	try:
 		outcomes = list(reader_fn())
 	except Exception:
-		return {'count': 0, 'pending': 0, 'recent': [], 'error': 'download outcomes unavailable'}
+		return {
+			'count': 0,
+			'pending': 0,
+			'recent': [],
+			'pdf_detection': default_pdf,
+			'error': 'download outcomes unavailable',
+		}
 	snapshot: dict[str, object] = {
 		'count': len(outcomes),
 		'pending': sum(1 for outcome in outcomes if not outcome.get('terminal')),
@@ -592,4 +691,19 @@ def downloads_summary(owner: object) -> dict[str, object]:
 	error = getattr(owner, 'download_outcomes_error', None)
 	if isinstance(error, str):
 		snapshot['error'] = redacted_text(error)
+	pdf_reader = getattr(owner, 'pdf_detection_snapshot', None)
+	if callable(pdf_reader):
+		try:
+			pdf_value = pdf_reader()
+		except Exception as pdf_error:
+			snapshot['pdf_detection'] = default_pdf
+			snapshot['pdf_detection_error'] = redacted_text(
+				f'{type(pdf_error).__name__}: {pdf_error}'
+			)
+		else:
+			if isinstance(pdf_value, PdfDetectionSnapshot):
+				pdf_value = pdf_value.to_dict()
+			snapshot['pdf_detection'] = pdf_value if isinstance(pdf_value, dict) else default_pdf
+	else:
+		snapshot['pdf_detection'] = default_pdf
 	return snapshot
