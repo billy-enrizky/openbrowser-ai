@@ -463,6 +463,7 @@ class _BrowserOwner:
 			max_output = 0
 		self._executor = CodeExecutor(max_output_chars=max_output if max_output > 0 else DEFAULT_MAX_OUTPUT_CHARS)
 		self._tools: CodeAgentTools | None = None
+		self._tools_generation: int | None = None
 
 		# Session management
 		self.session_timeout_minutes = session_timeout_minutes
@@ -648,6 +649,8 @@ class _BrowserOwner:
 		async with self._lifecycle_lock:
 			if self._namespace is not None:
 				return
+			self._tools = None
+			self._tools_generation = None
 			if self.browser_session is not None:
 				raise RuntimeError('A previous browser session still owns resources after cleanup failed')
 
@@ -678,6 +681,7 @@ class _BrowserOwner:
 
 				# Create CodeAgent tools and namespace
 				self._tools = CodeAgentTools()
+				self._tools_generation = self._browser_generation
 				self._namespace = create_namespace(
 					browser_session=self.browser_session,
 					tools=self._tools,
@@ -700,6 +704,8 @@ class _BrowserOwner:
 						self.browser_session = None
 					if cleanup.succeeded:
 						self._namespace = None
+						self._tools = None
+						self._tools_generation = None
 					if cleanup.caller_cancellation is not None and not isinstance(error, asyncio.CancelledError):
 						raise cleanup.caller_cancellation
 				raise
@@ -843,6 +849,7 @@ class _BrowserOwner:
 
 				# 3. Rebuild namespace with the new session (preserving user variables)
 				self._tools = CodeAgentTools()
+				self._tools_generation = self._browser_generation
 				self._namespace = create_namespace(
 					browser_session=self.browser_session,
 					tools=self._tools,
@@ -1031,6 +1038,8 @@ class _BrowserOwner:
 
 	def _status_payload(self) -> dict[str, Any]:
 		"""Build a JSON-safe status snapshot without starting the browser."""
+		from openbrowser.tools.action_availability import tool_availability_payload
+
 		browser = self._browser_lifecycle.snapshot().to_dict()
 		if self.browser_session is not None and hasattr(self.browser_session, 'lifecycle_snapshot'):
 			try:
@@ -1062,6 +1071,18 @@ class _BrowserOwner:
 		except Exception:
 			version = None
 
+		tools_for_status = (
+			self._tools
+			if (
+				self._tools is not None
+				and self._tools_generation == self._browser_generation
+				and self._namespace is not None
+				and self.browser_session is not None
+			)
+			else None
+		)
+		tools_snapshot = tool_availability_payload(tools_for_status, browser)
+
 		return {
 			'server': self._server()._lifecycle.snapshot().to_dict(),
 			'browser': browser,
@@ -1075,6 +1096,7 @@ class _BrowserOwner:
 			'exec_timeout': _exec_timeout_seconds(),
 			'uptime_seconds': max(0.0, time.time() - self._server()._start_time),
 			'version': version,
+			'tools': tools_snapshot,
 			'downloads': self._downloads_snapshot(),
 			'storage_state': storage_state,
 			'storage_state_save': storage_state_save,
@@ -1109,6 +1131,8 @@ class _BrowserOwner:
 						self.browser_session = None
 
 				self._namespace = None
+				self._tools = None
+				self._tools_generation = None
 				if clear_variables:
 					self._pending_variables.clear()
 					self._last_namespace_transfer = NamespaceTransfer().to_dict()
@@ -1189,6 +1213,8 @@ class _BrowserOwner:
 				session = self.browser_session
 				if not session:
 					self._namespace = None
+					self._tools = None
+					self._tools_generation = None
 					try:
 						self._browser_lifecycle.transition(
 							LifecyclePhase.STOPPED,
@@ -1203,6 +1229,8 @@ class _BrowserOwner:
 				if cleanup.succeeded and self.browser_session is session:
 					self.browser_session = None
 					self._namespace = None
+					self._tools = None
+					self._tools_generation = None
 					try:
 						self._browser_lifecycle.transition(
 							LifecyclePhase.STOPPED,
@@ -1240,6 +1268,8 @@ class _BrowserOwner:
 					if cleanup.succeeded and self.browser_session is session:
 						self.browser_session = None
 						self._namespace = None
+						self._tools = None
+						self._tools_generation = None
 						self._merge_pending_variables(self._carry_namespace(old_namespace, session))
 						self._browser_generation += 1
 						try:

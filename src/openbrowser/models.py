@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel, model_validator
 
+from openbrowser.tools.action_availability import ActionAvailabilityCode
+
 
 class ActionResult(BaseModel):
 	"""Result of executing an action"""
@@ -14,6 +16,7 @@ class ActionResult(BaseModel):
 
 	# Error handling - always include in long term memory
 	error: str | None = None
+	error_code: ActionAvailabilityCode | None = None
 
 	# Files
 	attachments: list[str] | None = None  # Files to display in the done message

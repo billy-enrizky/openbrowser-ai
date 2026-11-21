@@ -15,6 +15,14 @@ from openbrowser.filesystem.file_system import FileSystem
 from openbrowser.llm.base import BaseChatModel
 from openbrowser.observability import observe_debug
 from openbrowser.telemetry.service import ProductTelemetry
+from openbrowser.tools.action_availability import (
+	ActionAvailabilityCode,
+	ActionAvailabilityError,
+	FilteredAction,
+	ToolAvailabilityPhase,
+	ToolAvailabilitySnapshot,
+	normalize_page_url,
+)
 from openbrowser.tools.action_readiness import (
 	ActionReadinessError,
 	readiness_error_from_validation_error,
@@ -39,6 +47,151 @@ class Registry(Generic[Context]):
 		self.registry = ActionRegistry()
 		self.telemetry = ProductTelemetry()
 		self.exclude_actions = exclude_actions if exclude_actions is not None else []
+
+	def availability_snapshot(self, page_url: str | None = None) -> ToolAvailabilitySnapshot:
+		"""Return the explicit availability state for one page context."""
+		normalized_page = normalize_page_url(page_url)
+		registered = tuple(sorted(self.registry.actions))
+		excluded = tuple(sorted(set(self.exclude_actions)))
+		available: list[str] = []
+		filtered: list[FilteredAction] = []
+
+		for name, action in sorted(self.registry.actions.items()):
+			if action.domains is None:
+				available.append(name)
+				continue
+			if not action.domains:
+				filtered.append(
+					FilteredAction(
+						name=name,
+						domains=(),
+						reason=ActionAvailabilityCode.EMPTY_DOMAINS,
+					)
+				)
+				continue
+			if normalized_page is None:
+				filtered.append(
+					FilteredAction(
+						name=name,
+						domains=tuple(sorted(action.domains)),
+						reason=ActionAvailabilityCode.PAGE_UNKNOWN,
+					)
+				)
+				continue
+			if self.registry._match_domains(action.domains, normalized_page):
+				available.append(name)
+			else:
+				filtered.append(
+					FilteredAction(
+						name=name,
+						domains=tuple(sorted(action.domains)),
+						reason=ActionAvailabilityCode.DOMAIN_FILTERED,
+					)
+				)
+
+		if filtered:
+			phase = (
+				ToolAvailabilityPhase.PAGE_FILTERED
+				if normalized_page is not None
+				else ToolAvailabilityPhase.PAGE_UNKNOWN
+			)
+		else:
+			phase = ToolAvailabilityPhase.READY
+
+		return ToolAvailabilitySnapshot(
+			phase=phase,
+			page_url=normalized_page,
+			registered=registered,
+			available=tuple(sorted(available)),
+			filtered=tuple(filtered),
+			excluded=excluded,
+		)
+
+	def _availability_error(
+		self,
+		code: ActionAvailabilityCode,
+		action_name: str,
+		*,
+		display_name: str | None = None,
+		page_url: str | None = None,
+		domains: tuple[str, ...] = (),
+	) -> ActionAvailabilityError:
+		snapshot = self.availability_snapshot(page_url)
+		return ActionAvailabilityError(
+			code,
+			action=action_name,
+			display_name=display_name or action_name,
+			page_url=page_url,
+			domains=domains,
+			available=snapshot.available,
+		)
+
+	def check_action_available(
+		self,
+		action_name: str,
+		*,
+		page_url: str | None = None,
+		display_name: str | None = None,
+	) -> RegisteredAction:
+		"""Return the action when it is available, or raise a typed error."""
+		action = self.registry.actions.get(action_name)
+		if action is None:
+			if action_name in self.exclude_actions:
+				raise self._availability_error(
+					ActionAvailabilityCode.ACTION_EXCLUDED,
+					action_name,
+					display_name=display_name,
+					page_url=page_url,
+				)
+			raise self._availability_error(
+				ActionAvailabilityCode.ACTION_UNKNOWN,
+				action_name,
+				display_name=display_name,
+				page_url=page_url,
+			)
+		if action.domains == []:
+			raise self._availability_error(
+				ActionAvailabilityCode.EMPTY_DOMAINS,
+				action_name,
+				display_name=display_name,
+				page_url=page_url,
+			)
+		if action.domains is not None:
+			normalized_page = normalize_page_url(page_url)
+			if normalized_page is None:
+				raise self._availability_error(
+					ActionAvailabilityCode.PAGE_UNKNOWN,
+					action_name,
+					display_name=display_name,
+					page_url=page_url,
+					domains=tuple(sorted(action.domains)),
+				)
+			if not self.registry._match_domains(action.domains, normalized_page):
+				raise self._availability_error(
+					ActionAvailabilityCode.DOMAIN_FILTERED,
+					action_name,
+					display_name=display_name,
+					page_url=normalized_page,
+					domains=tuple(sorted(action.domains)),
+				)
+		return action
+
+	async def resolve_availability_page_url(
+		self,
+		action_name: str,
+		browser_session: BrowserSession | None,
+		supplied_page_url: str | None = None,
+	) -> str | None:
+		"""Resolve the page context, making a live browser session authoritative."""
+		action = self.registry.actions.get(action_name)
+		has_domains = action is not None and action.domains is not None and action.domains != []
+		resolved = supplied_page_url
+		if browser_session is not None and (has_domains or supplied_page_url is not None):
+			try:
+				resolved = await browser_session.get_current_page_url()
+			except Exception:
+				return None
+		return normalize_page_url(resolved)
 
 	def _get_special_param_types(self) -> dict[str, type | UnionType | None]:
 		"""Get the expected types for special parameters from SpecialActionParameters"""
@@ -288,24 +441,51 @@ class Registry(Generic[Context]):
 		final_domains = allowed_domains if allowed_domains is not None else domains
 
 		def decorator(func: Callable):
-			# Skip registration if action is in exclude_actions
-			if func.__name__ in self.exclude_actions:
-				return func
+			action_name = func.__name__
+			if action_name in self.exclude_actions:
+				@functools.wraps(func)
+				async def excluded_action(*args, **kwargs):
+					raise self._availability_error(
+						ActionAvailabilityCode.ACTION_EXCLUDED,
+						action_name,
+						page_url=kwargs.get('page_url'),
+					)
 
-			# Normalize the function signature
+				return excluded_action
+
 			normalized_func, actual_param_model = self._normalize_action_function_signature(func, description, param_model)
 
+			@functools.wraps(normalized_func)
+			async def gated_action(*args, **kwargs):
+				page_url = await self.resolve_availability_page_url(
+					action_name,
+					kwargs.get('browser_session'),
+					kwargs.get('page_url'),
+				)
+				self.check_action_available(action_name, page_url=page_url)
+				if page_url is not None:
+					kwargs['page_url'] = page_url
+				else:
+					kwargs.pop('page_url', None)
+				return await normalized_func(*args, **kwargs)
+
+			gated_action.__signature__ = getattr(  # type: ignore[attr-defined]
+				normalized_func,
+				'__signature__',
+				signature(normalized_func),
+			)
+
 			action = RegisteredAction(
-				name=func.__name__,
+				name=action_name,
 				description=description,
-				function=normalized_func,
+				function=gated_action,
+				normalized_function=normalized_func,
 				param_model=actual_param_model,
 				domains=final_domains,
 			)
-			self.registry.actions[func.__name__] = action
+			self.registry.actions[action_name] = action
 
-			# Return the normalized function so it can be called with kwargs
-			return normalized_func
+			return gated_action
 
 		return decorator
 
@@ -320,12 +500,11 @@ class Registry(Generic[Context]):
 		file_system: FileSystem | None = None,
 		sensitive_data: dict[str, str | dict[str, str]] | None = None,
 		available_file_paths: list[str] | None = None,
+		page_url: str | None = None,
 	) -> Any:
 		"""Execute a registered action with simplified parameter handling"""
-		if action_name not in self.registry.actions:
-			raise ValueError(f'Action {action_name} not found')
-
-		action = self.registry.actions[action_name]
+		page_url = await self.resolve_availability_page_url(action_name, browser_session, page_url)
+		action = self.check_action_available(action_name, page_url=page_url)
 		try:
 			# Create the validated Pydantic model
 			try:
@@ -367,24 +546,29 @@ class Registry(Generic[Context]):
 			if action_name == 'input':
 				special_context['sensitive_data'] = sensitive_data
 
-			# Add CDP-related parameters if browser_session is available
+			# Add CDP-related parameters if browser_session is available.
 			if browser_session:
-				# Add page_url
-				try:
-					special_context['page_url'] = await browser_session.get_current_page_url()
-				except Exception:
-					special_context['page_url'] = None
-
-				# Add cdp_client
+				if page_url is None:
+					try:
+						page_url = normalize_page_url(await browser_session.get_current_page_url())
+					except Exception:
+						page_url = None
 				special_context['cdp_client'] = browser_session.cdp_client
+			if page_url is not None:
+				special_context['page_url'] = page_url
 
-			# All functions are now normalized to accept kwargs only
-			# Call with params and unpacked special context
+			# This path already checked availability. Use the normalized
+			# callable so the public gated wrapper is not entered twice.
 			try:
-				return await action.function(params=validated_params, **special_context)
-			except Exception as e:
+				return await (action.normalized_function or action.function)(
+					params=validated_params,
+					**special_context,
+				)
+			except Exception:
 				raise
 
+		except ActionAvailabilityError:
+			raise
 		except ActionReadinessError:
 			# Keep the typed readiness message and refresh hint intact.
 			raise
@@ -501,6 +685,7 @@ class Registry(Generic[Context]):
 		#   if page_url is None, only include actions with no filters
 		#   if page_url is provided, only include actions that match the URL
 
+		page_url = normalize_page_url(page_url)
 		available_actions: dict[str, RegisteredAction] = {}
 		for name, action in self.registry.actions.items():
 			if include_actions is not None and name not in include_actions:

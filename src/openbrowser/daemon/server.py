@@ -49,6 +49,7 @@ from openbrowser.daemon.ownership import (
     owner_lock_path_for_pid_file,
     socket_entry_identity,
 )
+from openbrowser.tools.action_availability import tool_availability_payload
 
 logger = logging.getLogger(__name__)
 
@@ -477,6 +478,7 @@ class DaemonServer:
         self._started_at = time.time()
         self._executor = None  # lazy
         self._session = None
+        self._tools = None
         self._running = False
         self._server = None
         self._stop_event = asyncio.Event()
@@ -728,12 +730,14 @@ class DaemonServer:
                 executor.set_namespace(namespace)
                 self._executor = executor
                 self._session = session
+                self._tools = tools
                 self._browser_error = None
                 self._needs_browser_recovery = False
             except BaseException as error:
                 # Kill the browser if startup or namespace setup fails. Bound
                 # cleanup too, so a broken browser cannot block the client.
                 self._browser_error = f'{type(error).__name__}: {error}'
+                self._tools = None
                 await self._cleanup_failed_session(session)
                 raise
 
@@ -803,6 +807,7 @@ class DaemonServer:
 
             logger.info('CDP connection lost -- recovering browser session')
             self._needs_browser_recovery = True
+            self._tools = None
             old_namespace = getattr(self._executor, 'namespace', None) if self._executor else {}
             if not isinstance(old_namespace, dict):
                 old_namespace = {}
@@ -815,6 +820,7 @@ class DaemonServer:
                 if not closed:
                     raise RuntimeError('Unable to close the old browser session before recovery')
                 self._session = None
+                self._tools = None
                 self._last_closed_session = session_to_close
                 self._needs_browser_recovery = True
 
@@ -822,9 +828,10 @@ class DaemonServer:
             from openbrowser.code_use.namespace import create_namespace
             from openbrowser.tools.service import CodeAgentTools
 
-            profile = self._build_browser_profile()
-            session = BrowserSession(browser_profile=profile)
+            session = None
             try:
+                profile = self._build_browser_profile()
+                session = BrowserSession(browser_profile=profile)
                 await asyncio.wait_for(session.start(), timeout=getattr(self, '_init_timeout', _init_timeout()))
                 self._browser_generation = getattr(self, '_browser_generation', 0) + 1
                 seeded: Any = session.seed_generation(self._browser_generation)
@@ -842,15 +849,18 @@ class DaemonServer:
                     raise RuntimeError('Cannot recover a browser without an executor')
                 executor.set_namespace(namespace)
                 self._session = session
+                self._tools = tools
                 self._browser_error = None
                 self._needs_browser_recovery = False
                 self._last_closed_session = None
             except BaseException as error:
                 self._browser_error = f'{type(error).__name__}: {error}'
-                try:
-                    await self._cleanup_failed_session(session)
-                except BaseException:
-                    logger.warning('Failed to clean up replacement browser session', exc_info=True)
+                self._tools = None
+                if session is not None:
+                    try:
+                        await self._cleanup_failed_session(session)
+                    except BaseException:
+                        logger.warning('Failed to clean up replacement browser session', exc_info=True)
                 if self._session is session:
                     self._session = None
                 if self._executor is not None:
@@ -890,6 +900,7 @@ class DaemonServer:
         snapshot = self._lifecycle.snapshot()
         storage_state = self._storage_state_snapshot()
         downloads = self._downloads_snapshot()
+        tools_snapshot = tool_availability_payload(self._tools, browser)
         return {
             'pid': os.getpid(),
             'state': snapshot.phase.value,
@@ -917,6 +928,7 @@ class DaemonServer:
             'storage_state': storage_state.to_dict(),
             'storage_state_save': self._storage_state_save_snapshot().to_dict(),
             'namespace_transfer': self._last_namespace_transfer,
+            'tools': tools_snapshot,
             'downloads': downloads,
         }
 
@@ -1091,6 +1103,7 @@ class DaemonServer:
                             )
                     self._executor = None
                     self._session = None
+                    self._tools = None
                     self._browser_error = None
                     self._needs_browser_recovery = False
                     self._browser_generation += 1

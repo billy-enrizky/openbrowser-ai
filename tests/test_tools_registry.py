@@ -132,8 +132,11 @@ class TestActionRegistry:
     def test_match_domains_none_returns_true(self):
         assert ActionRegistry._match_domains(None, "https://example.com") is True
 
-    def test_match_domains_empty_url_returns_true(self):
-        assert ActionRegistry._match_domains(["*.example.com"], "") is True
+    def test_match_domains_empty_url_returns_false(self):
+        assert ActionRegistry._match_domains(["*.example.com"], "") is False
+
+    def test_match_domains_empty_list_returns_false(self):
+        assert ActionRegistry._match_domains([], "https://example.com") is False
 
     def test_match_domains_matching(self):
         result = ActionRegistry._match_domains(
@@ -333,7 +336,7 @@ class TestRegistryExecuteAction:
 
     @pytest.mark.asyncio
     async def test_execute_unknown_action_raises(self, registry_with_action):
-        with pytest.raises(ValueError, match="not found"):
+        with pytest.raises(ValueError, match="not registered"):
             await registry_with_action.execute_action("nonexistent", {})
 
     @pytest.mark.asyncio
@@ -377,7 +380,7 @@ class TestRegistryExecuteAction:
         # Patch time_execution_async to not interfere
         with pytest.raises(RuntimeError, match="timeout"):
             # We simulate timeout by making the function raise TimeoutError
-            registry.registry.actions["slow"].function = AsyncMock(
+            registry.registry.actions["slow"].normalized_function = AsyncMock(
                 side_effect=TimeoutError("timed out")
             )
             await registry.execute_action("slow", {})

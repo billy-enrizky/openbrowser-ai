@@ -12,6 +12,7 @@ import json
 import logging
 import re
 import time
+from inspect import iscoroutinefunction
 from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import unquote, urlparse
@@ -26,10 +27,12 @@ try:
 except ImportError:
 	FileSystem = None  # type: ignore[assignment,misc]
 from openbrowser.llm.base import BaseChatModel
+from openbrowser.tools.action_availability import ActionAvailabilityCode, ActionAvailabilityError
 from openbrowser.tools.action_readiness import (
 	readiness_error_from_validation_error,
 	validate_index_value,
 )
+from openbrowser.tools.registry.views import RegisteredAction
 from openbrowser.tools.service import CodeAgentTools, Tools
 from openbrowser.tools.views import IndexedAction
 
@@ -370,6 +373,13 @@ def create_namespace(
 	async def evaluate_wrapper(
 		code: str | None = None, variables: dict[str, Any] | None = None, *_args: Any, **kwargs: Any
 	) -> Any:
+		resolver = getattr(tools.registry, 'resolve_availability_page_url', None)
+		if iscoroutinefunction(resolver):
+			page_url = await resolver('evaluate', browser_session, None)
+			checker = getattr(tools.registry, 'check_action_available', None)
+			if callable(checker):
+				checker('evaluate', page_url=page_url, display_name='evaluate')
+
 		# Handle both positional and keyword argument styles
 		if code is None:
 			# Check if code was passed as keyword arg
@@ -465,7 +475,17 @@ def create_namespace(
 			namespace['_evaluate_failures'].append({'error': str(e), 'type': 'exception'})
 			raise
 
-	namespace['evaluate'] = evaluate_wrapper
+	excluded_actions = getattr(tools.registry, 'exclude_actions', None)
+	if isinstance(excluded_actions, (list, tuple, set, frozenset)) and 'evaluate' in excluded_actions:
+		async def excluded_evaluate_wrapper(*_args: Any, **_kwargs: Any) -> Any:
+			raise ActionAvailabilityError(
+				ActionAvailabilityCode.ACTION_EXCLUDED,
+				action='evaluate',
+			)
+
+		namespace['evaluate'] = excluded_evaluate_wrapper
+	else:
+		namespace['evaluate'] = evaluate_wrapper
 
 	# Add get_selector_from_index helper for code_use mode
 	async def get_selector_from_index_wrapper(index: int) -> str:
@@ -825,10 +845,15 @@ def create_namespace(
 		if action_name == 'evaluate':
 			continue  # Skip - use custom evaluate that returns Python objects directly
 		param_model = action.param_model
-		action_function = action.function
+		action_function = (
+			action.normalized_function
+			if isinstance(action, RegisteredAction) and action.normalized_function
+			else action.function
+		)
+		namespace_action_name = 'input_text' if action_name == 'input' else action_name
 
-		# Create a closure to capture the current action_name, param_model, and action_function
-		def make_action_wrapper(act_name, par_model, act_func):
+		# Create a closure to capture the registry key, public alias, param model, and action function.
+		def make_action_wrapper(registry_name, public_name, par_model, act_func):
 			async def action_wrapper(*args, **kwargs):
 				# Convert positional args to kwargs based on param model fields
 				if args:
@@ -838,16 +863,35 @@ def create_namespace(
 						if i < len(field_names):
 							kwargs[field_names[i]] = arg
 
+				# Availability is checked before parameter validation so a stale
+				# or hidden action cannot report a misleading schema error.
+				supplied_page_url = kwargs.pop('page_url', None)
+				page_url = supplied_page_url
+				resolver = getattr(tools.registry, 'resolve_availability_page_url', None)
+				if iscoroutinefunction(resolver):
+					page_url = await resolver(
+						registry_name,
+						browser_session,
+						supplied_page_url,
+					)
+					checker = getattr(tools.registry, 'check_action_available', None)
+					if callable(checker):
+						checker(
+							registry_name,
+							page_url=page_url,
+							display_name=public_name,
+						)
+
 				# Readiness guard: indexed actions fail with a typed error and a
 				# refresh hint before Pydantic produces a raw schema error.
 				if 'index' in kwargs:
 					if isinstance(par_model, type) and issubclass(par_model, IndexedAction):
-						kwargs['index'] = validate_index_value(kwargs['index'], action=act_name)
+						kwargs['index'] = validate_index_value(kwargs['index'], action=public_name)
 					elif kwargs['index'] is None:
 						field_info = par_model.model_fields.get('index')
 						if field_info and field_info.is_required():
 							raise ValueError(
-								f'{act_name}() requires a valid element index, got index=None. '
+								f'{public_name}() requires a valid element index, got index=None. '
 								f'Read the current browser state and use an [i_N] index from the DOM tree.'
 							)
 
@@ -857,13 +901,13 @@ def create_namespace(
 				except ValidationError as e:
 					readiness = readiness_error_from_validation_error(e)
 					if readiness is not None:
-						raise readiness.with_action(act_name) from e
-					raise ValueError(f'Invalid parameters for {act_name}: {e}') from e
+						raise readiness.with_action(public_name) from e
+					raise ValueError(f'Invalid parameters for {public_name}: {e}') from e
 				except Exception as e:
-					raise ValueError(f'Invalid parameters for {act_name}: {e}') from e
+					raise ValueError(f'Invalid parameters for {public_name}: {e}') from e
 
 				# Special validation for done() - enforce minimal code cell
-				if act_name == 'done':
+				if public_name == 'done':
 					consecutive_failures = namespace.get('_consecutive_errors')
 					if consecutive_failures and consecutive_failures > 3:
 						pass
@@ -921,7 +965,10 @@ def create_namespace(
 					'file_system': file_system,
 				}
 
-				# Execute the action
+				# Execute the action. Omit page_url when no value was supplied or
+				# resolved so an action's own default remains effective.
+				if page_url is not None:
+					special_context['page_url'] = page_url
 				result = await act_func(params=params, **special_context)
 
 				# For code-use mode, we want to return the result directly
@@ -929,7 +976,7 @@ def create_namespace(
 				if hasattr(result, 'extracted_content'):
 					# Special handling for done action - mark task as complete
 					if (
-						act_name == 'done'
+						public_name == 'done'
 						and hasattr(result, 'is_done')
 						and result.is_done
 						and not getattr(result, 'error', None)
@@ -960,11 +1007,13 @@ def create_namespace(
 
 			return action_wrapper
 
-		# Rename 'input' to 'input_text' to avoid shadowing Python's built-in input()
-		namespace_action_name = 'input_text' if action_name == 'input' else action_name
-
-		# Add the wrapper to the namespace
-		namespace[namespace_action_name] = make_action_wrapper(namespace_action_name, param_model, action_function)
+		# Add the wrapper under its public alias while retaining the registry key.
+		namespace[namespace_action_name] = make_action_wrapper(
+			action_name,
+			namespace_action_name,
+			param_model,
+			action_function,
+		)
 
 	return namespace
 

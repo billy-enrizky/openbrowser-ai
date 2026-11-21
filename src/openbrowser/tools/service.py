@@ -4,7 +4,7 @@ import json
 import logging
 import math
 import os
-from typing import Generic, TypeVar
+from typing import Generic, TypeVar, cast
 
 try:
 	from lmnr import Laminar  # type: ignore
@@ -34,6 +34,11 @@ from openbrowser.llm.base import BaseChatModel
 from openbrowser.llm.messages import SystemMessage, UserMessage
 from openbrowser.models import ActionResult
 from openbrowser.observability import observe_debug
+from openbrowser.tools.action_availability import (
+	ActionAvailabilityCode,
+	ActionAvailabilityError,
+	ToolAvailabilitySnapshot,
+)
 from openbrowser.tools.action_readiness import (
 	ActionReadinessError,
 	require_element_index,
@@ -1354,6 +1359,10 @@ Validated Code (after quote fixing):
 		"""
 		return self.registry.action(description, **kwargs)
 
+	def availability_snapshot(self, page_url: str | None = None) -> ToolAvailabilitySnapshot:
+		"""Return the explicit action availability state for one page."""
+		return self.registry.availability_snapshot(page_url)
+
 	# Act --------------------------------------------------------------------
 	@observe_debug(ignore_input=True, ignore_output=True, name='act')
 	@time_execution_sync('--act')
@@ -1366,6 +1375,7 @@ Validated Code (after quote fixing):
 		sensitive_data: dict[str, str | dict[str, str]] | None = None,
 		available_file_paths: list[str] | None = None,
 		file_system: FileSystem | None = None,
+		page_url: str | None = None,
 	) -> ActionResult:
 		"""Execute an action"""
 
@@ -1397,7 +1407,11 @@ Validated Code (after quote fixing):
 							file_system=file_system,
 							sensitive_data=sensitive_data,
 							available_file_paths=available_file_paths,
+							page_url=page_url,
 						)
+					except ActionAvailabilityError as e:
+						logger.warning(f'Action {action_name} is unavailable: {e}')
+						result = ActionResult(error=str(e), error_code=e.code)
 					except BrowserError as e:
 						logger.error(f'❌ Action {action_name} failed with BrowserError: {str(e)}')
 						result = handle_browser_error(e)
@@ -1427,6 +1441,15 @@ Validated Code (after quote fixing):
 		Enable direct action calls like tools.navigate(url=..., browser_session=...).
 		This provides a simpler API for tests and direct usage while maintaining backward compatibility.
 		"""
+		if name in self.registry.exclude_actions:
+			async def excluded_action(**_kwargs):
+				raise ActionAvailabilityError(
+					ActionAvailabilityCode.ACTION_EXCLUDED,
+					action=name,
+				)
+
+			return excluded_action
+
 		# Check if this is a registered action
 		if name in self.registry.registry.actions:
 			from typing import Union
@@ -1438,7 +1461,7 @@ Validated Code (after quote fixing):
 			# Create a wrapper that calls act() to ensure consistent error handling and result normalization
 			async def action_wrapper(**kwargs):
 				# Extract browser_session (required positional argument for act())
-				browser_session = kwargs.get('browser_session')
+				browser_session = cast(BrowserSession, kwargs.get('browser_session'))
 
 				# Separate action params from special params (injected dependencies)
 				special_param_names = {
@@ -1447,13 +1470,25 @@ Validated Code (after quote fixing):
 					'file_system',
 					'available_file_paths',
 					'sensitive_data',
+					'page_url',
 				}
 
 				# Extract action params (params for the action itself)
 				action_params = {k: v for k, v in kwargs.items() if k not in special_param_names}
 
 				# Extract special params (injected dependencies) - exclude browser_session as it's positional
-				special_kwargs = {k: v for k, v in kwargs.items() if k in special_param_names and k != 'browser_session'}
+				special_kwargs = {
+					k: v
+					for k, v in kwargs.items()
+					if k in special_param_names and k not in {'browser_session', 'page_url'}
+				}
+
+				page_url = await self.registry.resolve_availability_page_url(
+					name,
+					browser_session,
+					kwargs.get('page_url'),
+				)
+				self.registry.check_action_available(name, page_url=page_url)
 
 				# Create the param instance
 				params_instance = action.param_model(**action_params)
@@ -1471,7 +1506,12 @@ Validated Code (after quote fixing):
 
 				# Call act() which has all the error handling, result normalization, and observability
 				# browser_session is passed as positional argument (required by act())
-				return await self.act(action=action_model, browser_session=browser_session, **special_kwargs)  # type: ignore
+				return await self.act(
+					action=action_model,
+					browser_session=browser_session,
+					page_url=page_url,
+					**special_kwargs,
+				)  # type: ignore
 
 			return action_wrapper
 
