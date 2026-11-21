@@ -305,6 +305,15 @@ jobs:
           enable-cache: true
           cache-dependency-glob: uv.lock
       - run: uv sync --locked --all-extras
+      - name: Prepare isolated MCP 1.x compatibility client
+        shell: bash
+        run: |
+          set -euo pipefail
+          uv venv --python "$PYTHON_VERSION" "$RUNNER_TEMP/mcp1-client"
+          uv pip install --python "$RUNNER_TEMP/mcp1-client/bin/python" "mcp==1.26.0"
+          "$RUNNER_TEMP/mcp1-client/bin/python" -c \
+            'from importlib.metadata import version; assert version("mcp") == "1.26.0"'
+          echo "OPENBROWSER_TEST_MCP1_PYTHON=$RUNNER_TEMP/mcp1-client/bin/python" >> "$GITHUB_ENV"
       - name: Run the full suite with coverage
         run: |
           uv run --locked python scripts/ci/budget.py --name coverage -- \
