@@ -54,9 +54,9 @@ def test_balance_is_reasonable_on_recorded_data() -> None:
     shards = 4
     totals = shard_totals(allocate(files, timings, shards), timings)
     weights = fill_missing(files, timings)
-    lower_bound = max(max(weights.values()), sum(weights.values()) / shards)
-    lpt_bound = (4 / 3 - 1 / (3 * shards)) * lower_bound
-    assert max(totals) <= lpt_bound + 1e-6
+    # Any greedy list schedule satisfies max_load <= total/m + max_item.
+    bound = sum(weights.values()) / shards + max(weights.values())
+    assert max(totals) <= bound + 1e-6
 
 
 def test_empty_selection_produces_empty_shards() -> None:
