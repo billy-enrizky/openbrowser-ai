@@ -33,20 +33,23 @@ function getFileType(backendType?: string, filename?: string): FileAttachment["t
 // Helper function to parse file attachments from backend data
 function parseAttachments(data: Record<string, unknown>): FileAttachment[] {
   const attachments: FileAttachment[] = [];
-  
+
   // Handle different attachment formats from backend
   if (data.attachments) {
-    const rawAttachments = data.attachments as Array<{
-      name?: string;
-      filename?: string;
-      content?: string;
-      data?: string;
-      url?: string;
-      type?: string;
-      mime_type?: string;
-      size?: number;
-    } | string>;
-    
+    const rawAttachments = data.attachments as Array<
+      | {
+          name?: string;
+          filename?: string;
+          content?: string;
+          data?: string;
+          url?: string;
+          type?: string;
+          mime_type?: string;
+          size?: number;
+        }
+      | string
+    >;
+
     for (const attachment of rawAttachments) {
       if (typeof attachment === "string") {
         // Legacy format: just a filename or path
@@ -76,7 +79,7 @@ function parseAttachments(data: Record<string, unknown>): FileAttachment[] {
       }
     }
   }
-  
+
   // Handle files array (alternative format)
   if (data.files) {
     const rawFiles = data.files as Array<{
@@ -89,7 +92,7 @@ function parseAttachments(data: Record<string, unknown>): FileAttachment[] {
       mime_type?: string;
       size?: number;
     }>;
-    
+
     for (const file of rawFiles) {
       const filename = file.name || file.filename || "file";
       // Use backend-provided type if available, otherwise derive from filename
@@ -106,13 +109,13 @@ function parseAttachments(data: Record<string, unknown>): FileAttachment[] {
       });
     }
   }
-  
+
   return attachments;
 }
 
 export default function Home() {
   const router = useRouter();
-  const { authEnabled, isLoading: authLoading, isAuthenticated, idToken, getValidIdToken } = useAuth();
+  const { authEnabled, isLoading: authLoading, isAuthenticated, getValidIdToken } = useAuth();
   const {
     sidebarOpen,
     messages,
@@ -163,24 +166,22 @@ export default function Home() {
 
       setModelsLoading(true);
       setModelsError(null);
-      
+
       try {
         const token = await getValidIdToken();
-        const headers: HeadersInit = token
-          ? { Authorization: `Bearer ${token}` }
-          : {};
+        const headers: HeadersInit = token ? { Authorization: `Bearer ${token}` } : {};
 
         const response = await fetch(`${API_BASE_URL}/api/v1/models`, { headers });
         if (!response.ok) {
           throw new Error("Failed to fetch models");
         }
-        
+
         const data: AvailableModelsResponse = await response.json();
         setAvailableModels(data.models);
         setAvailableProviders(data.providers);
-        
+
         // Set default model if none selected or if selected model is no longer available
-        if (!selectedModel || !data.models.find(m => m.id === selectedModel)) {
+        if (!selectedModel || !data.models.find((m) => m.id === selectedModel)) {
           if (data.default_model) {
             setSelectedModel(data.default_model);
           } else if (data.models.length > 0) {
@@ -193,7 +194,7 @@ export default function Home() {
         setModelsLoading(false);
       }
     }
-    
+
     if (!authLoading) {
       fetchModels();
     }
@@ -226,13 +227,16 @@ export default function Home() {
     }
   }, [authEnabled, getValidIdToken, isAuthenticated, setActiveConversationId, setConversations]);
 
-  const loadConversation = useCallback(async (conversationId: string) => {
-    const token = await getValidIdToken();
-    const detail = await fetchConversationDetail(token, conversationId);
-    setMessages(detail.messages);
-    setActiveConversationId(detail.conversation.id);
-    upsertConversation(detail.conversation);
-  }, [getValidIdToken, setMessages, setActiveConversationId, upsertConversation]);
+  const loadConversation = useCallback(
+    async (conversationId: string) => {
+      const token = await getValidIdToken();
+      const detail = await fetchConversationDetail(token, conversationId);
+      setMessages(detail.messages);
+      setActiveConversationId(detail.conversation.id);
+      upsertConversation(detail.conversation);
+    },
+    [getValidIdToken, setMessages, setActiveConversationId, upsertConversation],
+  );
 
   useEffect(() => {
     if (authLoading) {
@@ -277,16 +281,19 @@ export default function Home() {
     upsertConversation,
   ]);
 
-  const handleSelectConversation = useCallback(async (conversationId: string) => {
-    setChatError(null);
-    try {
-      await loadConversation(conversationId);
-      const token = await getValidIdToken();
-      await setActiveConversation(token, conversationId);
-    } catch (error) {
-      setChatError(error instanceof Error ? error.message : "Failed to open conversation");
-    }
-  }, [getValidIdToken, loadConversation]);
+  const handleSelectConversation = useCallback(
+    async (conversationId: string) => {
+      setChatError(null);
+      try {
+        await loadConversation(conversationId);
+        const token = await getValidIdToken();
+        await setActiveConversation(token, conversationId);
+      } catch (error) {
+        setChatError(error instanceof Error ? error.message : "Failed to open conversation");
+      }
+    },
+    [getValidIdToken, loadConversation],
+  );
 
   const handleNewChat = useCallback(async () => {
     setMessages([]);
@@ -302,222 +309,241 @@ export default function Home() {
     }
   }, [getValidIdToken, setActiveConversationId, setMessages, setVncInfo]);
 
-  const handleDeleteConversation = useCallback(async (conversationId: string) => {
-    setChatError(null);
-    try {
-      const token = await getValidIdToken();
-      await deleteConversation(token, conversationId);
-      removeConversation(conversationId);
-      // If the deleted conversation was active, clear the view
-      if (conversationId === activeConversationId) {
-        setMessages([]);
-        setActiveConversationId(null);
-        setCurrentTaskId(null);
-        setVncInfo(null);
-        await setActiveConversation(token, null);
+  const handleDeleteConversation = useCallback(
+    async (conversationId: string) => {
+      setChatError(null);
+      try {
+        const token = await getValidIdToken();
+        await deleteConversation(token, conversationId);
+        removeConversation(conversationId);
+        // If the deleted conversation was active, clear the view
+        if (conversationId === activeConversationId) {
+          setMessages([]);
+          setActiveConversationId(null);
+          setCurrentTaskId(null);
+          setVncInfo(null);
+          await setActiveConversation(token, null);
+        }
+      } catch (error) {
+        setChatError(error instanceof Error ? error.message : "Failed to delete conversation");
       }
-    } catch (error) {
-      setChatError(error instanceof Error ? error.message : "Failed to delete conversation");
-    }
-  }, [activeConversationId, getValidIdToken, removeConversation, setActiveConversationId, setMessages, setVncInfo]);
+    },
+    [activeConversationId, getValidIdToken, removeConversation, setActiveConversationId, setMessages, setVncInfo],
+  );
 
   // Handle incoming WebSocket messages
-  const handleWSMessage = useCallback((wsMessage: WSMessage) => {
-    const { type, task_id, data } = wsMessage;
+  const handleWSMessage = useCallback(
+    (wsMessage: WSMessage) => {
+      const { type, task_id, data } = wsMessage;
 
-    switch (type) {
-      case "task_started":
-        setCurrentTaskId(task_id || null);
-        if (typeof data.conversation_id === "string") {
-          setActiveConversationId(data.conversation_id);
-        }
-        // Clear logs and screenshots when a new task starts
-        clearLogs();
-        setLatestScreenshot(null);
-        void refreshChatList();
-        break;
+      switch (type) {
+        case "task_started":
+          setCurrentTaskId(task_id || null);
+          if (typeof data.conversation_id === "string") {
+            setActiveConversationId(data.conversation_id);
+          }
+          // Clear logs and screenshots when a new task starts
+          clearLogs();
+          setLatestScreenshot(null);
+          void refreshChatList();
+          break;
 
-      case "vnc_info": {
-        // Handle VNC connection info and auto-open browser viewer
-        const vncInfo: VncInfo = {
-          vnc_url: data.vnc_url as string,
-          password: data.password as string,
-          width: data.width as number || 1280,
-          height: data.height as number || 1024,
-          display: data.display as string | undefined,
-        };
-        setVncInfo(vncInfo);
-        setBrowserViewerOpen(true);
-        break;
-      }
-
-      case "log": {
-        // Handle backend log messages
-        const logEntry: LogEntry = {
-          id: crypto.randomUUID(),
-          level: (data.level as "info" | "warning" | "error" | "debug") || "info",
-          message: data.message as string,
-          source: data.source as string | undefined,
-          stepNumber: data.step_number as number | undefined,
-          timestamp: new Date(),
-        };
-        addLog(logEntry);
-        break;
-      }
-
-      case "step_update": {
-        // Route step details to backend logs panel only (not chat)
-        // The backend also emits a "log" event with a summary, but
-        // step_update carries the full code which we add here.
-        const code = data.code as string | undefined;
-        if (code) {
-          const firstLine = code.split("\n").find(l => l.trim() && !l.trim().startsWith("#"))?.trim() || "";
-          const preview = firstLine.length > 100 ? firstLine.slice(0, 100) + "..." : firstLine;
-          addLog({
-            id: crypto.randomUUID(),
-            level: "info",
-            message: preview ? `Executing: ${preview}` : "Executing step...",
-            source: "code",
-            stepNumber: data.step_number as number,
-            timestamp: new Date(),
-          });
-        }
-        break;
-      }
-
-      case "output": {
-        // Route output to backend logs panel only (not chat)
-        // Final outputs will be included in task_completed message
-        if (data.is_final) break;
-        const outputContent = (data.content as string) || "";
-        if (outputContent) {
-          const truncated = outputContent.length > 200
-            ? outputContent.slice(0, 200) + "..."
-            : outputContent;
-          addLog({
-            id: crypto.randomUUID(),
-            level: "info",
-            message: `Output: ${truncated}`,
-            source: "output",
-            stepNumber: data.step_number as number,
-            timestamp: new Date(),
-          });
-        }
-        break;
-      }
-
-      case "screenshot":
-        // Store latest screenshot for the browser viewer panel
-        setLatestScreenshot(data.base64 as string);
-        // Auto-open browser viewer on first screenshot if not already open
-        if (!browserViewerOpen) {
+        case "vnc_info": {
+          // Handle VNC connection info and auto-open browser viewer
+          const vncInfo: VncInfo = {
+            vnc_url: data.vnc_url as string,
+            password: data.password as string,
+            width: (data.width as number) || 1280,
+            height: (data.height as number) || 1024,
+            display: data.display as string | undefined,
+          };
+          setVncInfo(vncInfo);
           setBrowserViewerOpen(true);
+          break;
         }
-        break;
 
-      case "task_completed": {
-        setIsLoading(false);
-        // Clear VNC info when task completes (keep latestScreenshot for review)
-        setVncInfo(null);
-        const attachments = parseAttachments(data);
-        addMessage({
-          id: crypto.randomUUID(),
-          role: "assistant",
-          content: data.result as string || "Task completed successfully.",
-          timestamp: new Date(),
-          taskId: task_id,
-          metadata: {
-            attachments: attachments.length > 0 ? attachments : undefined,
-          },
-        });
-        void refreshChatList();
-        break;
+        case "log": {
+          // Handle backend log messages
+          const logEntry: LogEntry = {
+            id: crypto.randomUUID(),
+            level: (data.level as "info" | "warning" | "error" | "debug") || "info",
+            message: data.message as string,
+            source: data.source as string | undefined,
+            stepNumber: data.step_number as number | undefined,
+            timestamp: new Date(),
+          };
+          addLog(logEntry);
+          break;
+        }
+
+        case "step_update": {
+          // Route step details to backend logs panel only (not chat)
+          // The backend also emits a "log" event with a summary, but
+          // step_update carries the full code which we add here.
+          const code = data.code as string | undefined;
+          if (code) {
+            const firstLine =
+              code
+                .split("\n")
+                .find((l) => l.trim() && !l.trim().startsWith("#"))
+                ?.trim() || "";
+            const preview = firstLine.length > 100 ? firstLine.slice(0, 100) + "..." : firstLine;
+            addLog({
+              id: crypto.randomUUID(),
+              level: "info",
+              message: preview ? `Executing: ${preview}` : "Executing step...",
+              source: "code",
+              stepNumber: data.step_number as number,
+              timestamp: new Date(),
+            });
+          }
+          break;
+        }
+
+        case "output": {
+          // Route output to backend logs panel only (not chat)
+          // Final outputs will be included in task_completed message
+          if (data.is_final) break;
+          const outputContent = (data.content as string) || "";
+          if (outputContent) {
+            const truncated = outputContent.length > 200 ? outputContent.slice(0, 200) + "..." : outputContent;
+            addLog({
+              id: crypto.randomUUID(),
+              level: "info",
+              message: `Output: ${truncated}`,
+              source: "output",
+              stepNumber: data.step_number as number,
+              timestamp: new Date(),
+            });
+          }
+          break;
+        }
+
+        case "screenshot":
+          // Store latest screenshot for the browser viewer panel
+          setLatestScreenshot(data.base64 as string);
+          // Auto-open browser viewer on first screenshot if not already open
+          if (!browserViewerOpen) {
+            setBrowserViewerOpen(true);
+          }
+          break;
+
+        case "task_completed": {
+          setIsLoading(false);
+          // Clear VNC info when task completes (keep latestScreenshot for review)
+          setVncInfo(null);
+          const attachments = parseAttachments(data);
+          addMessage({
+            id: crypto.randomUUID(),
+            role: "assistant",
+            content: (data.result as string) || "Task completed successfully.",
+            timestamp: new Date(),
+            taskId: task_id,
+            metadata: {
+              attachments: attachments.length > 0 ? attachments : undefined,
+            },
+          });
+          void refreshChatList();
+          break;
+        }
+
+        case "task_failed":
+        case "error":
+          setIsLoading(false);
+          setVncInfo(null);
+          addMessage({
+            id: crypto.randomUUID(),
+            role: "assistant",
+            content: `Error: ${data.error}`,
+            timestamp: new Date(),
+            taskId: task_id,
+            metadata: {
+              isError: true,
+            },
+          });
+          void refreshChatList();
+          break;
+
+        case "task_cancelled": {
+          setIsLoading(false);
+          setVncInfo(null);
+          const cancelReason = typeof data.reason === "string" ? data.reason.trim() : "";
+          const cancelContent =
+            cancelReason && cancelReason !== "Task was cancelled" && cancelReason !== "Cancelled by user"
+              ? `Task was cancelled. ${cancelReason}`
+              : "Task was cancelled";
+          addMessage({
+            id: crypto.randomUUID(),
+            role: "assistant",
+            content: cancelContent,
+            timestamp: new Date(),
+            taskId: task_id,
+          });
+          void refreshChatList();
+          break;
+        }
+
+        case "extension_status": {
+          break;
+        }
       }
+    },
+    [
+      addMessage,
+      addLog,
+      clearLogs,
+      refreshChatList,
+      setActiveConversationId,
+      setVncInfo,
+      setBrowserViewerOpen,
+      setLatestScreenshot,
+      browserViewerOpen,
+    ],
+  );
 
-      case "task_failed":
-      case "error":
-        setIsLoading(false);
-        setVncInfo(null);
-        addMessage({
-          id: crypto.randomUUID(),
-          role: "assistant",
-          content: `Error: ${data.error}`,
-          timestamp: new Date(),
-          taskId: task_id,
-          metadata: {
-            isError: true,
-          },
-        });
-        void refreshChatList();
-        break;
-
-      case "task_cancelled": {
-        setIsLoading(false);
-        setVncInfo(null);
-        const cancelReason = typeof data.reason === "string" ? data.reason.trim() : "";
-        const cancelContent =
-          cancelReason &&
-          cancelReason !== "Task was cancelled" &&
-          cancelReason !== "Cancelled by user"
-            ? `Task was cancelled. ${cancelReason}`
-            : "Task was cancelled";
-        addMessage({
-          id: crypto.randomUUID(),
-          role: "assistant",
-          content: cancelContent,
-          timestamp: new Date(),
-          taskId: task_id,
-        });
-        void refreshChatList();
-        break;
-      }
-
-      case "extension_status": {
-        break;
-      }
-    }
-  }, [addMessage, addLog, clearLogs, refreshChatList, setActiveConversationId, setVncInfo, setBrowserViewerOpen, setLatestScreenshot, browserViewerOpen]);
-
-  const { isConnected, startTask, cancelTask } = useTaskStream({
+  const { isConnected, startTask } = useTaskStream({
     onMessage: handleWSMessage,
     onConnect: () => setIsLoading(true),
     getToken: authEnabled ? getValidIdToken : undefined,
   });
 
-  const handleSendMessage = useCallback(async (content: string) => {
-    setChatError(null);
-    // Add user message
-    addMessage({
-      id: crypto.randomUUID(),
-      role: "user",
-      content,
-      timestamp: new Date(),
-      taskId: currentTaskId || undefined,
-    });
-
-    // Start task via REST + SSE
-    setIsLoading(true);
-    const taskId = await startTask({
-      task: content,
-      agent_type: agentType,
-      max_steps: maxSteps,
-      use_vision: useVision,
-      llm_model: selectedModel,
-      use_current_browser: false,
-      conversation_id: activeConversationId,
-    });
-
-    if (!taskId) {
-      setIsLoading(false);
+  const handleSendMessage = useCallback(
+    async (content: string) => {
+      setChatError(null);
+      // Add user message
       addMessage({
         id: crypto.randomUUID(),
-        role: "assistant",
-        content: "Failed to connect to the server. Please try again.",
+        role: "user",
+        content,
         timestamp: new Date(),
-        metadata: { isError: true },
+        taskId: currentTaskId || undefined,
       });
-    }
-  }, [activeConversationId, addMessage, startTask, agentType, currentTaskId, maxSteps, useVision, selectedModel]);
+
+      // Start task via REST + SSE
+      setIsLoading(true);
+      const taskId = await startTask({
+        task: content,
+        agent_type: agentType,
+        max_steps: maxSteps,
+        use_vision: useVision,
+        llm_model: selectedModel,
+        use_current_browser: false,
+        conversation_id: activeConversationId,
+      });
+
+      if (!taskId) {
+        setIsLoading(false);
+        addMessage({
+          id: crypto.randomUUID(),
+          role: "assistant",
+          content: "Failed to connect to the server. Please try again.",
+          timestamp: new Date(),
+          metadata: { isError: true },
+        });
+      }
+    },
+    [activeConversationId, addMessage, startTask, agentType, currentTaskId, maxSteps, useVision, selectedModel],
+  );
 
   const hasMessages = messages.length > 0;
 
@@ -543,12 +569,7 @@ export default function Home() {
       />
 
       {/* Main Content */}
-      <main
-        className={cn(
-          "flex-1 flex min-w-0 transition-all duration-200",
-          sidebarOpen ? "ml-[280px]" : "ml-16"
-        )}
-      >
+      <main className={cn("flex-1 flex min-w-0 transition-all duration-200", sidebarOpen ? "ml-[280px]" : "ml-16")}>
         {/* Chat Area */}
         <div className="flex-1 flex flex-col min-w-0 min-h-0">
           {/* Header */}
@@ -569,12 +590,7 @@ export default function Home() {
                 </div>
 
                 {/* Log Panel - fixed height when open */}
-                <LogPanel
-                  logs={logs}
-                  isOpen={showLogs}
-                  onToggle={() => setShowLogs(!showLogs)}
-                  onClear={clearLogs}
-                />
+                <LogPanel logs={logs} isOpen={showLogs} onToggle={() => setShowLogs(!showLogs)} onClear={clearLogs} />
 
                 {/* Input at bottom - fixed */}
                 <div className="shrink-0 border-t border-zinc-800/50 bg-zinc-900/50 backdrop-blur-xl p-4">
@@ -618,10 +634,7 @@ export default function Home() {
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: 0.2 }}
                   >
-                    <ChatInput
-                      onSend={handleSendMessage}
-                      isLoading={isLoading}
-                    />
+                    <ChatInput onSend={handleSendMessage} isLoading={isLoading} />
                   </motion.div>
 
                   {/* Connection status */}
@@ -634,12 +647,10 @@ export default function Home() {
                     <div
                       className={cn(
                         "w-2 h-2 rounded-full",
-                        isConnected ? "bg-green-500 animate-pulse" : "bg-green-500"
+                        isConnected ? "bg-green-500 animate-pulse" : "bg-green-500",
                       )}
                     />
-                    <span className="text-sm text-zinc-500">
-                      {isConnected ? "Task streaming..." : "Ready"}
-                    </span>
+                    <span className="text-sm text-zinc-500">{isConnected ? "Task streaming..." : "Ready"}</span>
                   </motion.div>
 
                   {/* Framework Documentation Card */}
@@ -658,57 +669,87 @@ export default function Home() {
                       <div className="relative overflow-hidden rounded-2xl border border-cyan-500/20 bg-gradient-to-br from-zinc-900/80 via-zinc-900/60 to-cyan-950/30 p-8 transition-all duration-500 hover:border-cyan-400/40 hover:shadow-[0_0_60px_-12px_rgba(6,182,212,0.3)] hover:scale-[1.02]">
                         {/* Animated background grid */}
                         <div className="absolute inset-0 opacity-20 group-hover:opacity-30 transition-opacity duration-500">
-                          <div className="absolute inset-0" style={{
-                            backgroundImage: `linear-gradient(rgba(6,182,212,0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(6,182,212,0.1) 1px, transparent 1px)`,
-                            backgroundSize: '32px 32px'
-                          }} />
+                          <div
+                            className="absolute inset-0"
+                            style={{
+                              backgroundImage: `linear-gradient(rgba(6,182,212,0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(6,182,212,0.1) 1px, transparent 1px)`,
+                              backgroundSize: "32px 32px",
+                            }}
+                          />
                         </div>
-                        
+
                         {/* Glow orbs */}
                         <div className="absolute -top-20 -right-20 w-40 h-40 bg-cyan-500/20 rounded-full blur-3xl group-hover:bg-cyan-400/30 transition-all duration-700" />
                         <div className="absolute -bottom-20 -left-20 w-40 h-40 bg-blue-500/10 rounded-full blur-3xl group-hover:bg-blue-400/20 transition-all duration-700" />
-                        
+
                         <div className="relative z-10 flex items-center justify-between gap-6">
                           <div className="flex-1">
                             {/* Badge */}
                             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-cyan-500/10 border border-cyan-500/20 mb-4">
                               <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
-                              <span className="text-xs font-medium text-cyan-400 uppercase tracking-wider">Documentation</span>
+                              <span className="text-xs font-medium text-cyan-400 uppercase tracking-wider">
+                                Documentation
+                              </span>
                             </div>
-                            
+
                             <h3 className="text-2xl font-bold text-zinc-100 mb-2 group-hover:text-white transition-colors">
                               Explore the OpenBrowser Framework
                             </h3>
                             <p className="text-zinc-400 group-hover:text-zinc-300 transition-colors leading-relaxed">
-                              Automate browser tasks with AI. Dive into our comprehensive docs to build powerful AI-native web automation.
+                              Automate browser tasks with AI. Dive into our comprehensive docs to build powerful
+                              AI-native web automation.
                             </p>
-                            
+
                             {/* Link indicator */}
                             <div className="mt-4 inline-flex items-center gap-2 text-cyan-400 font-medium group-hover:gap-3 transition-all duration-300">
                               <span>Read the docs</span>
-                              <svg className="w-5 h-5 group-hover:translate-x-1 transition-transform duration-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
+                              <svg
+                                className="w-5 h-5 group-hover:translate-x-1 transition-transform duration-300"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                              >
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  strokeWidth={2}
+                                  d="M17 8l4 4m0 0l-4 4m4-4H3"
+                                />
                               </svg>
                             </div>
                           </div>
-                          
+
                           {/* Icon/Logo area */}
                           <div className="shrink-0 w-28 h-28 rounded-2xl bg-gradient-to-br from-cyan-500/20 via-cyan-600/10 to-blue-600/20 border border-cyan-500/20 flex items-center justify-center group-hover:scale-110 group-hover:rotate-3 transition-all duration-500 shadow-lg shadow-cyan-500/10">
                             <div className="relative">
                               {/* Browser icon */}
-                              <svg className="w-12 h-12 text-cyan-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" />
+                              <svg
+                                className="w-12 h-12 text-cyan-400"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                              >
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  strokeWidth={1.5}
+                                  d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"
+                                />
                               </svg>
                               {/* AI sparkle */}
                               <div className="absolute -top-1 -right-1 w-4 h-4">
-                                <svg className="w-full h-full text-cyan-300 animate-pulse" fill="currentColor" viewBox="0 0 24 24">
+                                <svg
+                                  className="w-full h-full text-cyan-300 animate-pulse"
+                                  fill="currentColor"
+                                  viewBox="0 0 24 24"
+                                >
                                   <path d="M12 2L13.09 8.26L18 6L14.74 10.91L21 12L14.74 13.09L18 18L13.09 15.74L12 22L10.91 15.74L6 18L9.26 13.09L3 12L9.26 10.91L6 6L10.91 8.26L12 2Z" />
                                 </svg>
                               </div>
                             </div>
                           </div>
                         </div>
-                        
+
                         {/* Bottom gradient line */}
                         <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-cyan-500/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
                       </div>

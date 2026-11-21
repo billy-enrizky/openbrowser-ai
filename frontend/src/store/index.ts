@@ -2,7 +2,18 @@
 
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { Task, Project, Message, AgentType, LogEntry, VncInfo, BrowserViewerMode, LLMModel, ChatConversation, UserInfo } from "@/types";
+import type {
+  Task,
+  Project,
+  Message,
+  AgentType,
+  LogEntry,
+  VncInfo,
+  BrowserViewerMode,
+  LLMModel,
+  ChatConversation,
+  UserInfo,
+} from "@/types";
 
 interface AppState {
   // Sidebar
@@ -101,20 +112,15 @@ export const useAppStore = create<AppState>()(
       setUserInfo: (info) => set({ userInfo: info }),
       updateCredits: (credits, used) =>
         set((state) => ({
-          userInfo: state.userInfo
-            ? { ...state.userInfo, credits, creditsUsed: used }
-            : null,
+          userInfo: state.userInfo ? { ...state.userInfo, credits, creditsUsed: used } : null,
         })),
 
       // Tasks
       tasks: [],
-      addTask: (task) =>
-        set((state) => ({ tasks: [task, ...state.tasks] })),
+      addTask: (task) => set((state) => ({ tasks: [task, ...state.tasks] })),
       updateTask: (id, updates) =>
         set((state) => ({
-          tasks: state.tasks.map((t) =>
-            t.id === id ? { ...t, ...updates } : t
-          ),
+          tasks: state.tasks.map((t) => (t.id === id ? { ...t, ...updates } : t)),
         })),
       removeTask: (id) =>
         set((state) => ({
@@ -125,13 +131,10 @@ export const useAppStore = create<AppState>()(
       projects: [],
       currentProjectId: null,
       setCurrentProjectId: (id) => set({ currentProjectId: id }),
-      addProject: (project) =>
-        set((state) => ({ projects: [project, ...state.projects] })),
+      addProject: (project) => set((state) => ({ projects: [project, ...state.projects] })),
       updateProject: (id, updates) =>
         set((state) => ({
-          projects: state.projects.map((p) =>
-            p.id === id ? { ...p, ...updates } : p
-          ),
+          projects: state.projects.map((p) => (p.id === id ? { ...p, ...updates } : p)),
         })),
       removeProject: (id) =>
         set((state) => ({
@@ -140,8 +143,7 @@ export const useAppStore = create<AppState>()(
 
       // Messages
       messages: [],
-      addMessage: (message) =>
-        set((state) => ({ messages: [...state.messages, message] })),
+      addMessage: (message) => set((state) => ({ messages: [...state.messages, message] })),
       setMessages: (messages) => set({ messages }),
       clearMessages: () => set({ messages: [] }),
       conversations: [],
@@ -166,8 +168,7 @@ export const useAppStore = create<AppState>()(
 
       // Backend logs
       logs: [],
-      addLog: (log) =>
-        set((state) => ({ logs: [...state.logs.slice(-200), log] })), // Keep last 200 logs
+      addLog: (log) => set((state) => ({ logs: [...state.logs.slice(-200), log] })), // Keep last 200 logs
       clearLogs: () => set({ logs: [] }),
       showLogs: false,
       setShowLogs: (show) => set({ showLogs: show }),
@@ -226,6 +227,6 @@ export const useAppStore = create<AppState>()(
         browserViewerMode: state.browserViewerMode,
         selectedModel: state.selectedModel, // Persist selected model
       }),
-    }
-  )
+    },
+  ),
 );

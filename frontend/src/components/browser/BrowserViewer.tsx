@@ -21,10 +21,7 @@ import { API_BASE_URL, BROWSER_VIEWER_DEFAULT_WIDTH, BROWSER_VIEWER_MIN_WIDTH } 
 import dynamic from "next/dynamic";
 
 // Dynamically import VncScreen to avoid SSR issues
-const VncScreen = dynamic(
-  () => import("react-vnc").then((mod) => mod.VncScreen),
-  { ssr: false }
-);
+const VncScreen = dynamic(() => import("react-vnc").then((mod) => mod.VncScreen), { ssr: false });
 
 interface BrowserViewerProps {
   className?: string;
@@ -33,25 +30,15 @@ interface BrowserViewerProps {
 type ConnectionStatus = "disconnected" | "connecting" | "connected" | "error";
 
 export function BrowserViewer({ className }: BrowserViewerProps) {
-  const {
-    vncInfo,
-    browserViewerOpen,
-    setBrowserViewerOpen,
-    browserViewerMode,
-    setBrowserViewerMode,
-    latestScreenshot,
-  } = useAppStore();
+  const { vncInfo, browserViewerOpen, setBrowserViewerOpen, setBrowserViewerMode, latestScreenshot } = useAppStore();
 
   const { authEnabled, getValidIdToken } = useAuth();
 
   const containerRef = useRef<HTMLDivElement>(null);
   const vncContainerRef = useRef<HTMLDivElement>(null);
   const isMountedRef = useRef(true);
-  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>(
-    vncInfo ? "connecting" : "disconnected"
-  );
+  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>(vncInfo ? "connecting" : "disconnected");
   const [connectedVncUrl, setConnectedVncUrl] = useState<string | null>(null);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [key, setKey] = useState(0); // Used to force reconnection
   const [panelWidth, setPanelWidth] = useState(BROWSER_VIEWER_DEFAULT_WIDTH);
@@ -94,7 +81,9 @@ export function BrowserViewer({ className }: BrowserViewerProps) {
       setResolvedVncUrl(`${wsBase}${rawUrl}${tokenParam}`);
     }
     buildUrl();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [vncInfo, key, authEnabled, getValidIdToken]);
 
   // Track mounted state
@@ -110,7 +99,6 @@ export function BrowserViewer({ className }: BrowserViewerProps) {
     if (isMountedRef.current) {
       setConnectedVncUrl(resolvedVncUrl);
       setConnectionStatus("connected");
-      setErrorMessage(null);
       setIsReconnecting(false);
     }
   }, [resolvedVncUrl]);
@@ -121,10 +109,9 @@ export function BrowserViewer({ className }: BrowserViewerProps) {
     }
   }, [isReconnecting]);
 
-  const handleSecurityFailure = useCallback((e: CustomEvent<{ status: number; reason?: string }>) => {
+  const handleSecurityFailure = useCallback(() => {
     if (isMountedRef.current) {
       setConnectionStatus("error");
-      setErrorMessage(`Security error: ${e.detail.reason || "Unknown"}`);
       setIsReconnecting(false);
     }
   }, []);
@@ -132,33 +119,35 @@ export function BrowserViewer({ className }: BrowserViewerProps) {
   // Force reconnection
   const reconnect = useCallback(() => {
     setConnectionStatus("connecting");
-    setErrorMessage(null);
     setKey((prev) => prev + 1);
   }, []);
 
   // Handle panel resize
-  const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    setIsResizing(true);
-    
-    const startX = e.clientX;
-    const startWidth = panelWidth;
-    
-    const handleMouseMove = (e: MouseEvent) => {
-      const delta = startX - e.clientX;
-      const newWidth = Math.max(BROWSER_VIEWER_MIN_WIDTH, Math.min(startWidth + delta, window.innerWidth * 0.8));
-      setPanelWidth(newWidth);
-    };
-    
-    const handleMouseUp = () => {
-      setIsResizing(false);
-      document.removeEventListener("mousemove", handleMouseMove);
-      document.removeEventListener("mouseup", handleMouseUp);
-    };
-    
-    document.addEventListener("mousemove", handleMouseMove);
-    document.addEventListener("mouseup", handleMouseUp);
-  }, [panelWidth]);
+  const handleMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      setIsResizing(true);
+
+      const startX = e.clientX;
+      const startWidth = panelWidth;
+
+      const handleMouseMove = (e: MouseEvent) => {
+        const delta = startX - e.clientX;
+        const newWidth = Math.max(BROWSER_VIEWER_MIN_WIDTH, Math.min(startWidth + delta, window.innerWidth * 0.8));
+        setPanelWidth(newWidth);
+      };
+
+      const handleMouseUp = () => {
+        setIsResizing(false);
+        document.removeEventListener("mousemove", handleMouseMove);
+        document.removeEventListener("mouseup", handleMouseUp);
+      };
+
+      document.addEventListener("mousemove", handleMouseMove);
+      document.addEventListener("mouseup", handleMouseUp);
+    },
+    [panelWidth],
+  );
 
   // Handle opening in popup window
   const openInPopup = useCallback(() => {
@@ -172,7 +161,7 @@ export function BrowserViewer({ className }: BrowserViewerProps) {
     const popup = window.open(
       "",
       "BrowserViewer",
-      `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=no`
+      `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=no`,
     );
 
     if (popup) {
@@ -249,7 +238,7 @@ export function BrowserViewer({ className }: BrowserViewerProps) {
           "flex flex-col bg-zinc-900 border-l border-zinc-800/50",
           isFullscreen ? "fixed inset-0 z-50" : "relative",
           isResizing && "select-none",
-          className
+          className,
         )}
         style={!isFullscreen ? { width: panelWidth, minWidth: BROWSER_VIEWER_MIN_WIDTH } : undefined}
       >
@@ -281,9 +270,7 @@ export function BrowserViewer({ className }: BrowserViewerProps) {
               </span>
             )}
             {effectiveConnectionStatus === "error" && (
-              <span className="px-2 py-0.5 text-xs bg-red-500/20 text-red-400 rounded-full">
-                Error
-              </span>
+              <span className="px-2 py-0.5 text-xs bg-red-500/20 text-red-400 rounded-full">Error</span>
             )}
           </div>
 
@@ -298,13 +285,7 @@ export function BrowserViewer({ className }: BrowserViewerProps) {
             >
               <RefreshCw className={cn("w-4 h-4", effectiveConnectionStatus === "connecting" && "animate-spin")} />
             </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={openInPopup}
-              title="Open in new window"
-              className="w-7 h-7"
-            >
+            <Button variant="ghost" size="icon" onClick={openInPopup} title="Open in new window" className="w-7 h-7">
               <ExternalLink className="w-4 h-4" />
             </Button>
             <Button
@@ -314,11 +295,7 @@ export function BrowserViewer({ className }: BrowserViewerProps) {
               title={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
               className="w-7 h-7"
             >
-              {isFullscreen ? (
-                <Minimize2 className="w-4 h-4" />
-              ) : (
-                <Maximize2 className="w-4 h-4" />
-              )}
+              {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
             </Button>
             <Button
               variant="ghost"
@@ -390,10 +367,7 @@ export function BrowserViewer({ className }: BrowserViewerProps) {
               {/* Take control button overlay */}
               {effectiveConnectionStatus === "connected" && !isInteractive && (
                 <div className="absolute bottom-4 right-4 z-20">
-                  <Button
-                    onClick={toggleInteractive}
-                    className="bg-cyan-500 hover:bg-cyan-600 text-white shadow-lg"
-                  >
+                  <Button onClick={toggleInteractive} className="bg-cyan-500 hover:bg-cyan-600 text-white shadow-lg">
                     <Sparkles className="w-4 h-4 mr-2" />
                     Take control
                   </Button>

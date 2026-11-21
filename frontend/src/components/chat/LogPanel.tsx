@@ -2,7 +2,7 @@
 
 import React, { useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Terminal, X, ChevronDown, ChevronUp, AlertCircle, Info, AlertTriangle, Bug } from "lucide-react";
+import { Terminal, ChevronDown, ChevronUp, AlertCircle, Info, AlertTriangle, Bug } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { LogEntry } from "@/types";
 
@@ -68,9 +68,7 @@ export function LogPanel({ logs, isOpen, onToggle, onClear }: LogPanelProps) {
           <Terminal className="w-4 h-4 text-cyan-400" />
           <span className="text-sm font-medium text-zinc-300">Backend Logs</span>
           {logs.length > 0 && (
-            <span className="text-xs text-zinc-500 bg-zinc-800 px-2 py-0.5 rounded-full">
-              {logs.length}
-            </span>
+            <span className="text-xs text-zinc-500 bg-zinc-800 px-2 py-0.5 rounded-full">{logs.length}</span>
           )}
         </div>
         <div className="flex items-center gap-2">
@@ -86,11 +84,7 @@ export function LogPanel({ logs, isOpen, onToggle, onClear }: LogPanelProps) {
               Clear
             </button>
           )}
-          {isOpen ? (
-            <ChevronDown className="w-4 h-4 text-zinc-500" />
-          ) : (
-            <ChevronUp className="w-4 h-4 text-zinc-500" />
-          )}
+          {isOpen ? <ChevronDown className="w-4 h-4 text-zinc-500" /> : <ChevronUp className="w-4 h-4 text-zinc-500" />}
         </div>
       </div>
 
@@ -119,13 +113,11 @@ export function LogPanel({ logs, isOpen, onToggle, onClear }: LogPanelProps) {
                       key={log.id}
                       className={cn(
                         "flex items-start gap-2 py-0.5 px-2 rounded hover:bg-zinc-900/50",
-                        getLogColor(log.level)
+                        getLogColor(log.level),
                       )}
                     >
                       <span className="shrink-0 mt-0.5">{getLogIcon(log.level)}</span>
-                      <span className="text-zinc-600 shrink-0">
-                        {new Date(log.timestamp).toLocaleTimeString()}
-                      </span>
+                      <span className="text-zinc-600 shrink-0">{new Date(log.timestamp).toLocaleTimeString()}</span>
                       {log.stepNumber !== undefined && log.stepNumber !== null && (
                         <span className="text-cyan-600 shrink-0">[Step {log.stepNumber}]</span>
                       )}
@@ -146,4 +138,3 @@ export function LogPanel({ logs, isOpen, onToggle, onClear }: LogPanelProps) {
     </div>
   );
 }
-

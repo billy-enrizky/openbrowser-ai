@@ -1,18 +1,9 @@
 "use client";
 
 import React from "react";
-import Link from "next/link";
 import Image from "next/image";
 import { motion, AnimatePresence } from "framer-motion";
-import {
-  PenSquare,
-  FolderPlus,
-  MessageSquare,
-  ChevronLeft,
-  ChevronRight,
-  Loader2,
-  Trash2,
-} from "lucide-react";
+import { PenSquare, MessageSquare, ChevronLeft, ChevronRight, Loader2, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/store";
 import { Button } from "@/components/ui";
@@ -36,23 +27,14 @@ export function Sidebar({ onNewChat, onSelectConversation, onDeleteConversation,
       className={cn(
         "h-screen bg-zinc-900/95 border-r border-zinc-800/50",
         "flex flex-col backdrop-blur-xl",
-        "fixed left-0 top-0 z-40"
+        "fixed left-0 top-0 z-40",
       )}
     >
       {/* Header */}
       <div className="flex items-center justify-between p-4 border-b border-zinc-800/50">
         {/* Logo - always visible */}
-        <div className={cn(
-          "w-8 h-8 rounded-lg overflow-hidden shrink-0",
-          !sidebarOpen && "mx-auto"
-        )}>
-          <Image
-            src="/favicon.svg"
-            alt="OpenBrowser"
-            width={32}
-            height={32}
-            className="w-full h-full"
-          />
+        <div className={cn("w-8 h-8 rounded-lg overflow-hidden shrink-0", !sidebarOpen && "mx-auto")}>
+          <Image src="/favicon.svg" alt="OpenBrowser" width={32} height={32} className="w-full h-full" />
         </div>
         <AnimatePresence mode="wait">
           {sidebarOpen && (
@@ -67,12 +49,7 @@ export function Sidebar({ onNewChat, onSelectConversation, onDeleteConversation,
           )}
         </AnimatePresence>
         {sidebarOpen && (
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={toggleSidebar}
-            className="shrink-0"
-          >
+          <Button variant="ghost" size="icon" onClick={toggleSidebar} className="shrink-0">
             <ChevronLeft className="w-4 h-4" />
           </Button>
         )}
@@ -81,12 +58,7 @@ export function Sidebar({ onNewChat, onSelectConversation, onDeleteConversation,
       {/* Collapsed toggle button */}
       {!sidebarOpen && (
         <div className="p-2">
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={toggleSidebar}
-            className="w-full"
-          >
+          <Button variant="ghost" size="icon" onClick={toggleSidebar} className="w-full">
             <ChevronRight className="w-4 h-4" />
           </Button>
         </div>
@@ -103,7 +75,7 @@ export function Sidebar({ onNewChat, onSelectConversation, onDeleteConversation,
             className={cn(
               "w-full flex items-center gap-3 px-3 py-2.5 rounded-xl",
               "text-cyan-400 hover:text-cyan-300 hover:bg-zinc-800/50",
-              "transition-colors cursor-pointer bg-gradient-to-r from-cyan-500/10 to-blue-600/10"
+              "transition-colors cursor-pointer bg-gradient-to-r from-cyan-500/10 to-blue-600/10",
             )}
           >
             <PenSquare className="w-5 h-5 shrink-0" />
@@ -124,9 +96,7 @@ export function Sidebar({ onNewChat, onSelectConversation, onDeleteConversation,
 
         {/* Conversations */}
         <div className="mt-4">
-          <span className="px-3 text-xs font-semibold text-zinc-500 uppercase tracking-wider">
-            Chats
-          </span>
+          <span className="px-3 text-xs font-semibold text-zinc-500 uppercase tracking-wider">Chats</span>
           <div className="mt-2 space-y-1">
             {chatsLoading && (
               <div className="flex items-center gap-2 px-3 py-2 text-xs text-zinc-500">
@@ -144,7 +114,7 @@ export function Sidebar({ onNewChat, onSelectConversation, onDeleteConversation,
                   "group w-full flex items-center gap-1 px-3 py-2 rounded-xl transition-colors",
                   conversation.id === activeConversationId
                     ? "bg-cyan-500/10 text-cyan-300"
-                    : "text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/50"
+                    : "text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/50",
                 )}
               >
                 <button

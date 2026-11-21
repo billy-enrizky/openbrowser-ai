@@ -269,6 +269,12 @@ jobs:
       - name: Type check frontend
         working-directory: frontend
         run: bun check
+      - name: Lint frontend with Oxlint
+        working-directory: frontend
+        run: bun run lint:oxlint
+      - name: Check frontend formatting
+        working-directory: frontend
+        run: bun run fmt:check
       - name: Lint frontend
         working-directory: frontend
         run: bun run lint

@@ -15,7 +15,7 @@ interface UseWebSocketOptions {
 
 export function useWebSocket(options: UseWebSocketOptions = {}) {
   const { onMessage, onConnect, onDisconnect, onError, autoConnect = true, authToken = null } = options;
-  
+
   const wsRef = useRef<WebSocket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [clientId, setClientId] = useState<string | null>(null);
@@ -30,9 +30,7 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
       const id = crypto.randomUUID();
       setClientId(id);
 
-      const wsUrl = authToken
-        ? `${WS_BASE_URL}/${id}?token=${encodeURIComponent(authToken)}`
-        : `${WS_BASE_URL}/${id}`;
+      const wsUrl = authToken ? `${WS_BASE_URL}/${id}?token=${encodeURIComponent(authToken)}` : `${WS_BASE_URL}/${id}`;
 
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;

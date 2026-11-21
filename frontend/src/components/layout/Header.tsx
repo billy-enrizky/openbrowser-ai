@@ -25,19 +25,11 @@ export function Header() {
             whileTap={{ scale: 0.98 }}
             className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-zinc-800/50 text-zinc-300 hover:bg-zinc-700/50 transition-colors"
           >
-            <span className="text-sm font-medium">{appConfig.appName} {appConfig.version}</span>
-            <svg
-              className="w-4 h-4 text-zinc-500"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M19 9l-7 7-7-7"
-              />
+            <span className="text-sm font-medium">
+              {appConfig.appName} {appConfig.version}
+            </span>
+            <svg className="w-4 h-4 text-zinc-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
             </svg>
           </motion.button>
 
@@ -55,18 +47,15 @@ export function Header() {
                 ? "bg-cyan-500/20 text-cyan-300 border border-cyan-500/30"
                 : hasVncSession
                   ? "bg-zinc-800/50 text-zinc-300 hover:bg-cyan-500/10 hover:text-cyan-300 hover:border-cyan-500/20 border border-transparent"
-                  : "bg-zinc-800/50 text-zinc-400 hover:bg-zinc-700/50 border border-transparent"
+                  : "bg-zinc-800/50 text-zinc-400 hover:bg-zinc-700/50 border border-transparent",
             )}
           >
             <Monitor className={cn("w-4 h-4", hasVncSession && "text-cyan-400")} />
-            <span className="text-sm font-medium">
-              {browserViewerOpen ? "Hide Browser" : "View Browser"}
-            </span>
+            <span className="text-sm font-medium">{browserViewerOpen ? "Hide Browser" : "View Browser"}</span>
             {hasVncSession && (
-              <span className={cn(
-                "w-2 h-2 rounded-full",
-                browserViewerOpen ? "bg-cyan-400" : "bg-green-400 animate-pulse"
-              )} />
+              <span
+                className={cn("w-2 h-2 rounded-full", browserViewerOpen ? "bg-cyan-400" : "bg-green-400 animate-pulse")}
+              />
             )}
           </motion.button>
         </div>

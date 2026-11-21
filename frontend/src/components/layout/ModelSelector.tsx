@@ -17,15 +17,9 @@ const providerConfig: Record<string, { color: string; bgColor: string; label: st
 export function ModelSelector() {
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
-  
-  const {
-    availableModels,
-    availableProviders,
-    selectedModel,
-    setSelectedModel,
-    modelsLoading,
-    modelsError,
-  } = useAppStore();
+
+  const { availableModels, availableProviders, selectedModel, setSelectedModel, modelsLoading, modelsError } =
+    useAppStore();
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -43,13 +37,16 @@ export function ModelSelector() {
   const currentProvider = currentModel ? providerConfig[currentModel.provider] : null;
 
   // Group models by provider
-  const modelsByProvider = availableModels.reduce((acc: Record<string, LLMModel[]>, model: LLMModel) => {
-    if (!acc[model.provider]) {
-      acc[model.provider] = [];
-    }
-    acc[model.provider].push(model);
-    return acc;
-  }, {} as Record<string, LLMModel[]>);
+  const modelsByProvider = availableModels.reduce(
+    (acc: Record<string, LLMModel[]>, model: LLMModel) => {
+      if (!acc[model.provider]) {
+        acc[model.provider] = [];
+      }
+      acc[model.provider].push(model);
+      return acc;
+    },
+    {} as Record<string, LLMModel[]>,
+  );
 
   // Handle model selection
   const handleSelectModel = (modelId: string) => {
@@ -97,7 +94,7 @@ export function ModelSelector() {
         className={cn(
           "flex items-center gap-2 px-3 py-1.5 rounded-lg transition-all",
           "bg-zinc-800/50 hover:bg-zinc-700/50 border border-transparent",
-          isOpen && "border-cyan-500/30 bg-zinc-700/50"
+          isOpen && "border-cyan-500/30 bg-zinc-700/50",
         )}
       >
         {currentProvider && (
@@ -107,10 +104,7 @@ export function ModelSelector() {
         <span className="text-sm font-medium text-zinc-300 max-w-[150px] truncate">
           {currentModel?.name || "Select Model"}
         </span>
-        <ChevronDown className={cn(
-          "w-4 h-4 text-zinc-500 transition-transform",
-          isOpen && "rotate-180"
-        )} />
+        <ChevronDown className={cn("w-4 h-4 text-zinc-500 transition-transform", isOpen && "rotate-180")} />
       </motion.button>
 
       {/* Dropdown Menu */}
@@ -125,7 +119,7 @@ export function ModelSelector() {
               "absolute top-full left-0 mt-2 z-[9999]",
               "w-72 max-h-[400px] overflow-y-auto",
               "bg-zinc-900 border border-zinc-700/50 rounded-xl",
-              "shadow-2xl shadow-black/50"
+              "shadow-2xl shadow-black/50",
             )}
           >
             {/* Header */}
@@ -139,7 +133,11 @@ export function ModelSelector() {
             {/* Models grouped by provider */}
             <div className="py-2">
               {Object.entries(modelsByProvider).map(([provider, models]) => {
-                const config = providerConfig[provider] || { color: "text-zinc-400", bgColor: "bg-zinc-500/10", label: provider };
+                const config = providerConfig[provider] || {
+                  color: "text-zinc-400",
+                  bgColor: "bg-zinc-500/10",
+                  label: provider,
+                };
                 return (
                   <div key={provider} className="mb-2 last:mb-0">
                     {/* Provider Header */}
@@ -160,31 +158,23 @@ export function ModelSelector() {
                           className={cn(
                             "w-full px-4 py-2 flex items-center justify-between",
                             "hover:bg-zinc-800/50 transition-colors",
-                            isSelected && "bg-cyan-500/10"
+                            isSelected && "bg-cyan-500/10",
                           )}
                         >
                           <div className="flex items-center gap-3">
-                            <div className={cn(
-                              "w-8 h-8 rounded-lg flex items-center justify-center",
-                              config.bgColor
-                            )}>
+                            <div className={cn("w-8 h-8 rounded-lg flex items-center justify-center", config.bgColor)}>
                               <Cpu className={cn("w-4 h-4", config.color)} />
                             </div>
                             <div className="text-left">
-                              <div className={cn(
-                                "text-sm font-medium",
-                                isSelected ? "text-cyan-300" : "text-zinc-300"
-                              )}>
+                              <div
+                                className={cn("text-sm font-medium", isSelected ? "text-cyan-300" : "text-zinc-300")}
+                              >
                                 {model.name}
                               </div>
-                              <div className="text-xs text-zinc-500 font-mono">
-                                {model.id}
-                              </div>
+                              <div className="text-xs text-zinc-500 font-mono">{model.id}</div>
                             </div>
                           </div>
-                          {isSelected && (
-                            <Check className="w-4 h-4 text-cyan-400" />
-                          )}
+                          {isSelected && <Check className="w-4 h-4 text-cyan-400" />}
                         </button>
                       );
                     })}

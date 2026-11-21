@@ -94,7 +94,7 @@ function parseCSVLine(line: string): string[] {
   const result: string[] = [];
   let current = "";
   let inQuotes = false;
-  
+
   for (let i = 0; i < line.length; i++) {
     const char = line[i];
     if (char === '"') {
@@ -112,9 +112,9 @@ function parseCSVLine(line: string): string[] {
 
 // Parse CSV content into headers and rows
 function parseCSVContent(content: string): { headers: string[]; rows: string[][] } {
-  const lines = content.split("\n").filter(line => line.trim());
+  const lines = content.split("\n").filter((line) => line.trim());
   const headers = lines[0] ? parseCSVLine(lines[0]) : [];
-  const rows = lines.slice(1).map(line => parseCSVLine(line));
+  const rows = lines.slice(1).map((line) => parseCSVLine(line));
   return { headers, rows };
 }
 
@@ -128,12 +128,9 @@ function CSVPreview({ content }: { content: string }) {
   return (
     <div>
       {/* Scroll container */}
-      <div 
-        className="w-full overflow-x-auto"
-        style={{ overflowX: 'auto' }}
-      >
+      <div className="w-full overflow-x-auto" style={{ overflowX: "auto" }}>
         {/* Table with min-width to force horizontal scroll when needed */}
-        <table className="text-sm w-full" style={{ minWidth: 'max-content' }}>
+        <table className="text-sm w-full" style={{ minWidth: "max-content" }}>
           <thead>
             <tr className="border-b border-zinc-700/50">
               {headers.map((header, i) => (
@@ -148,16 +145,9 @@ function CSVPreview({ content }: { content: string }) {
           </thead>
           <tbody>
             {displayRows.map((row, rowIndex) => (
-              <tr
-                key={rowIndex}
-                className="border-b border-zinc-800/50 hover:bg-zinc-800/30"
-              >
+              <tr key={rowIndex} className="border-b border-zinc-800/50 hover:bg-zinc-800/30">
                 {row.map((cell, cellIndex) => (
-                  <td
-                    key={cellIndex}
-                    className="px-3 py-2 text-zinc-300 whitespace-nowrap"
-                    title={cell}
-                  >
+                  <td key={cellIndex} className="px-3 py-2 text-zinc-300 whitespace-nowrap" title={cell}>
                     {cell}
                   </td>
                 ))}
@@ -196,17 +186,17 @@ function CSVTable({ content, onDownload }: CSVTableProps) {
           Download CSV
         </button>
       </div>
-      
+
       {/* Scroll container - handles both horizontal and vertical scrolling */}
-      <div 
+      <div
         className="max-h-[400px] overflow-auto"
         style={{
-          overflowX: 'auto',
-          overflowY: 'auto',
+          overflowX: "auto",
+          overflowY: "auto",
         }}
       >
         {/* Table with min-width to force horizontal scroll when needed */}
-        <table className="w-full" style={{ minWidth: 'max-content' }}>
+        <table className="w-full" style={{ minWidth: "max-content" }}>
           <thead className="bg-zinc-800/80 sticky top-0 z-10">
             <tr>
               {headers.map((header, i) => (
@@ -221,10 +211,7 @@ function CSVTable({ content, onDownload }: CSVTableProps) {
           </thead>
           <tbody className="divide-y divide-zinc-800/50">
             {rows.map((row, rowIndex) => (
-              <tr 
-                key={rowIndex} 
-                className="hover:bg-zinc-800/30 transition-colors"
-              >
+              <tr key={rowIndex} className="hover:bg-zinc-800/30 transition-colors">
                 {headers.map((_, cellIndex) => (
                   <td
                     key={cellIndex}
@@ -277,7 +264,7 @@ function JSONPreview({ content }: { content: string }) {
 }
 
 // Code Preview Component
-function CodePreview({ content, filename }: { content: string; filename: string }) {
+function CodePreview({ content }: { content: string }) {
   const lines = content.split("\n");
   const maxLines = 30;
   const displayContent = lines.slice(0, maxLines).join("\n");
@@ -306,11 +293,7 @@ function TextPreview({ content }: { content: string }) {
   return (
     <div className="p-3 text-sm text-zinc-300 whitespace-pre-wrap break-words">
       {displayContent}
-      {hasMore && (
-        <span className="text-zinc-500">
-          ... and {content.length - maxChars} more characters
-        </span>
-      )}
+      {hasMore && <span className="text-zinc-500">... and {content.length - maxChars} more characters</span>}
     </div>
   );
 }
@@ -318,14 +301,10 @@ function TextPreview({ content }: { content: string }) {
 // Image Preview Component
 function ImagePreview({ content, name }: { content: string; name: string }) {
   const src = content.startsWith("data:") ? content : `data:image/png;base64,${content}`;
-  
+
   return (
     <div className="p-3 flex justify-center">
-      <img
-        src={src}
-        alt={name}
-        className="max-w-full max-h-[400px] rounded-lg object-contain"
-      />
+      <img src={src} alt={name} className="max-w-full max-h-[400px] rounded-lg object-contain" />
     </div>
   );
 }
@@ -341,7 +320,7 @@ export function FileAttachment({ file }: FileAttachmentProps) {
       // Create blob and download
       let blob: Blob;
       let mimeType = file.mimeType || "text/plain";
-      
+
       // Set appropriate MIME type based on file type
       if (file.type === "csv") {
         mimeType = "text/csv";
@@ -350,11 +329,7 @@ export function FileAttachment({ file }: FileAttachmentProps) {
       } else if (file.type === "image") {
         // Handle base64 image
         const byteCharacters = atob(file.content.replace(/^data:.*?;base64,/, ""));
-        const byteNumbers = new Array(byteCharacters.length);
-        for (let i = 0; i < byteCharacters.length; i++) {
-          byteNumbers[i] = byteCharacters.charCodeAt(i);
-        }
-        const byteArray = new Uint8Array(byteNumbers);
+        const byteArray = Uint8Array.from(byteCharacters, (char) => char.charCodeAt(0));
         blob = new Blob([byteArray], { type: mimeType || "application/octet-stream" });
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
@@ -366,7 +341,7 @@ export function FileAttachment({ file }: FileAttachmentProps) {
         URL.revokeObjectURL(url);
         return;
       }
-      
+
       blob = new Blob([file.content], { type: mimeType });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -378,7 +353,7 @@ export function FileAttachment({ file }: FileAttachmentProps) {
       URL.revokeObjectURL(url);
       return;
     }
-    
+
     // Fallback to URL if no content and URL is valid (not file://)
     if (file.url && !file.url.startsWith("file://")) {
       window.open(file.url, "_blank");
@@ -391,7 +366,7 @@ export function FileAttachment({ file }: FileAttachmentProps) {
       // Create blob URL and open
       let blob: Blob;
       let mimeType = file.mimeType || "text/plain";
-      
+
       if (file.type === "csv") {
         mimeType = "text/csv";
       } else if (file.type === "json") {
@@ -399,23 +374,19 @@ export function FileAttachment({ file }: FileAttachmentProps) {
       } else if (file.type === "image") {
         const base64Content = file.content.replace(/^data:.*?;base64,/, "");
         const byteCharacters = atob(base64Content);
-        const byteNumbers = new Array(byteCharacters.length);
-        for (let i = 0; i < byteCharacters.length; i++) {
-          byteNumbers[i] = byteCharacters.charCodeAt(i);
-        }
-        const byteArray = new Uint8Array(byteNumbers);
+        const byteArray = Uint8Array.from(byteCharacters, (char) => char.charCodeAt(0));
         blob = new Blob([byteArray], { type: mimeType });
         const url = URL.createObjectURL(blob);
         window.open(url, "_blank");
         return;
       }
-      
+
       blob = new Blob([file.content], { type: mimeType });
       const url = URL.createObjectURL(blob);
       window.open(url, "_blank");
       return;
     }
-    
+
     // Fallback to URL if no content and URL is valid (not file://)
     if (file.url && !file.url.startsWith("file://")) {
       window.open(file.url, "_blank");
@@ -447,9 +418,7 @@ export function FileAttachment({ file }: FileAttachmentProps) {
               <FileSpreadsheet className="w-5 h-5" />
             </div>
             <div className="min-w-0 text-left">
-              <div className="text-sm font-medium text-zinc-200 truncate">
-                {file.name}
-              </div>
+              <div className="text-sm font-medium text-zinc-200 truncate">{file.name}</div>
               <div className="text-xs text-zinc-500">
                 CSV - {rows.length} rows
                 {file.size && ` - ${formatFileSize(file.size)}`}
@@ -470,21 +439,15 @@ export function FileAttachment({ file }: FileAttachmentProps) {
               <Download size={14} />
               <span className="hidden sm:inline">Download</span>
             </button>
-            
+
             {/* Expand/Collapse button */}
             <button
               onClick={() => setIsExpanded(!isExpanded)}
               className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/50 transition-colors"
               title={isExpanded ? "Collapse" : "Expand to view"}
             >
-              <span className="text-xs hidden sm:inline">
-                {isExpanded ? "Collapse" : "Expand"}
-              </span>
-              {isExpanded ? (
-                <ChevronUp className="w-5 h-5" />
-              ) : (
-                <ChevronDown className="w-5 h-5" />
-              )}
+              <span className="text-xs hidden sm:inline">{isExpanded ? "Collapse" : "Expand"}</span>
+              {isExpanded ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
             </button>
           </div>
         </div>
@@ -497,12 +460,9 @@ export function FileAttachment({ file }: FileAttachmentProps) {
               animate={{ height: "auto", opacity: 1 }}
               exit={{ height: 0, opacity: 0 }}
               transition={{ duration: 0.2 }}
-              style={{ overflow: 'hidden' }}
+              style={{ overflow: "hidden" }}
             >
-              <CSVTable 
-                content={file.content} 
-                onDownload={handleDownload} 
-              />
+              <CSVTable content={file.content} onDownload={handleDownload} />
             </motion.div>
           )}
         </AnimatePresence>
@@ -515,21 +475,21 @@ export function FileAttachment({ file }: FileAttachmentProps) {
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 bg-zinc-800/50">
         <div className="flex items-center gap-3 min-w-0">
-          <div className={cn(
-            "w-10 h-10 rounded-lg flex items-center justify-center shrink-0",
-            file.type === "csv" && "bg-green-500/20 text-green-400",
-            file.type === "json" && "bg-yellow-500/20 text-yellow-400",
-            file.type === "code" && "bg-blue-500/20 text-blue-400",
-            file.type === "image" && "bg-purple-500/20 text-purple-400",
-            file.type === "text" && "bg-zinc-500/20 text-zinc-400",
-            file.type === "unknown" && "bg-zinc-500/20 text-zinc-400"
-          )}>
+          <div
+            className={cn(
+              "w-10 h-10 rounded-lg flex items-center justify-center shrink-0",
+              file.type === "csv" && "bg-green-500/20 text-green-400",
+              file.type === "json" && "bg-yellow-500/20 text-yellow-400",
+              file.type === "code" && "bg-blue-500/20 text-blue-400",
+              file.type === "image" && "bg-purple-500/20 text-purple-400",
+              file.type === "text" && "bg-zinc-500/20 text-zinc-400",
+              file.type === "unknown" && "bg-zinc-500/20 text-zinc-400",
+            )}
+          >
             <FileIcon type={file.type} className="w-5 h-5" />
           </div>
           <div className="min-w-0">
-            <div className="text-sm font-medium text-zinc-200 truncate">
-              {file.name}
-            </div>
+            <div className="text-sm font-medium text-zinc-200 truncate">{file.name}</div>
             <div className="text-xs text-zinc-500">
               {file.type.toUpperCase()}
               {file.size && ` - ${formatFileSize(file.size)}`}
@@ -586,7 +546,7 @@ export function FileAttachment({ file }: FileAttachmentProps) {
           >
             {file.type === "csv" && <CSVPreview content={file.content} />}
             {file.type === "json" && <JSONPreview content={file.content} />}
-            {file.type === "code" && <CodePreview content={file.content} filename={file.name} />}
+            {file.type === "code" && <CodePreview content={file.content} />}
             {file.type === "text" && <TextPreview content={file.content} />}
             {file.type === "image" && <ImagePreview content={file.content} name={file.name} />}
           </motion.div>
@@ -641,7 +601,7 @@ export function FilePreviewModal({ file, onClose }: FilePreviewModalProps) {
               <>
                 {file.type === "csv" && <CSVPreview content={file.content} />}
                 {file.type === "json" && <JSONPreview content={file.content} />}
-                {file.type === "code" && <CodePreview content={file.content} filename={file.name} />}
+                {file.type === "code" && <CodePreview content={file.content} />}
                 {file.type === "text" && <TextPreview content={file.content} />}
                 {file.type === "image" && <ImagePreview content={file.content} name={file.name} />}
               </>
@@ -652,4 +612,3 @@ export function FilePreviewModal({ file, onClose }: FilePreviewModalProps) {
     </AnimatePresence>
   );
 }
-

@@ -78,7 +78,7 @@ export function getUserFromIdToken(idToken: string): AuthUser {
 function validateCognitoClientConfig(): void {
   if (!COGNITO_DOMAIN || !COGNITO_CLIENT_ID) {
     throw new Error(
-      "Missing Cognito frontend config. Set NEXT_PUBLIC_COGNITO_DOMAIN and NEXT_PUBLIC_COGNITO_CLIENT_ID."
+      "Missing Cognito frontend config. Set NEXT_PUBLIC_COGNITO_DOMAIN and NEXT_PUBLIC_COGNITO_CLIENT_ID.",
     );
   }
 }
