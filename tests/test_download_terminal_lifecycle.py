@@ -1,6 +1,7 @@
 """Wiring tests for the explicit download terminal lifecycle."""
 
 import asyncio
+import hashlib
 import json
 import logging
 import tempfile
@@ -10,8 +11,27 @@ from unittest.mock import AsyncMock, MagicMock, create_autospec, patch
 import pytest
 from bubus import EventBus
 
-from openbrowser.browser.download_state import DownloadPhase, DownloadTimeoutError
+from openbrowser.browser.download_state import (
+	DownloadPhase,
+	DownloadTimeoutError,
+	redacted_outcome,
+)
 from openbrowser.browser.session import BrowserSession
+from openbrowser.browser.watchdogs.downloads_watchdog import DownloadsWatchdog
+
+VALID_PDF_BYTES = (
+	b'%PDF-1.0\n'
+	b'1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n'
+	b'2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n'
+	b'3 0 obj<</Type/Page/MediaBox[0 0 612 792]/Parent 2 0 R/Resources<<>>>>endobj\n'
+	b'xref\n0 4\n'
+	b'0000000000 65535 f \n'
+	b'0000000009 00000 n \n'
+	b'0000000058 00000 n \n'
+	b'0000000115 00000 n \n'
+	b'trailer<</Size 4/Root 1 0 R>>\n'
+	b'startxref\n212\n%%EOF\n'
+)
 
 
 def _make_session(downloads_path):
@@ -56,6 +76,11 @@ async def _registered_handlers(watchdog):
 	)
 
 
+async def _drain_event_tasks(watchdog):
+	while watchdog._cdp_event_tasks:
+		await asyncio.gather(*list(watchdog._cdp_event_tasks), return_exceptions=True)
+
+
 @pytest.mark.asyncio
 async def test_will_begin_records_a_started_outcome():
 	with tempfile.TemporaryDirectory() as tmpdir:
@@ -94,6 +119,7 @@ async def test_progress_completed_records_the_terminal_path():
 			},
 			'session-1',
 		)
+		await _drain_event_tasks(watchdog)
 
 		outcome = watchdog.latest_download_outcome()
 		assert outcome['phase'] == 'completed'
@@ -119,6 +145,64 @@ async def test_progress_canceled_is_a_terminal_failure():
 
 
 @pytest.mark.asyncio
+async def test_progress_completed_rejects_html_named_as_pdf():
+	with tempfile.TemporaryDirectory() as tmpdir:
+		watchdog, _ = _make_watchdog(tmpdir)
+		will_begin, progress = await _registered_handlers(watchdog)
+		will_begin(
+			{'guid': 'g-html', 'url': 'https://example.com/bad.pdf', 'suggestedFilename': 'bad.pdf'},
+			'session-1',
+		)
+		path = Path(tmpdir, 'bad.pdf')
+		await asyncio.to_thread(path.write_bytes, b'<html>not a PDF</html>')
+		progress(
+			{'guid': 'g-html', 'state': 'completed', 'filePath': str(path)},
+			'session-1',
+		)
+		await _drain_event_tasks(watchdog)
+
+		assert not await asyncio.to_thread(path.exists)
+		outcome = watchdog.latest_download_outcome()
+		assert outcome is not None
+		assert outcome['phase'] == 'failed'
+		assert outcome['stage'] == 'content_validation'
+
+
+@pytest.mark.asyncio
+async def test_progress_without_session_uses_frame_target_for_mime_validation():
+	with tempfile.TemporaryDirectory() as tmpdir:
+		watchdog, session = _make_watchdog(tmpdir)
+		session.get_all_frames = AsyncMock(return_value=({}, {}))
+		session.find_frame_target = AsyncMock(return_value={'frameTargetId': 'tab-two'})
+		will_begin, progress = await _registered_handlers(watchdog)
+		url = 'https://example.com/export?format=pdf'
+		path = Path(tmpdir, 'export.bin')
+		await asyncio.to_thread(path.write_bytes, b'<html>not a PDF</html>')
+		watchdog._note_document_mime('tab-two', url, 'application/pdf')
+
+		with patch.object(DownloadsWatchdog, '_handle_cdp_download', new_callable=AsyncMock):
+			will_begin(
+				{
+					'guid': 'g-frame',
+					'url': url,
+					'frameId': 'frame-two',
+				},
+				None,
+			)
+			progress(
+				{'guid': 'g-frame', 'state': 'completed', 'filePath': str(path)},
+				None,
+			)
+			await _drain_event_tasks(watchdog)
+
+		assert not await asyncio.to_thread(path.exists)
+		outcome = watchdog.latest_download_outcome()
+		assert outcome is not None
+		assert outcome['phase'] == 'failed'
+		assert outcome['stage'] == 'content_validation'
+
+
+@pytest.mark.asyncio
 async def test_a_late_failure_cannot_overwrite_completed():
 	with tempfile.TemporaryDirectory() as tmpdir:
 		watchdog, _ = _make_watchdog(tmpdir)
@@ -132,8 +216,76 @@ async def test_a_late_failure_cannot_overwrite_completed():
 			{'guid': 'g-4', 'state': 'completed', 'filePath': str(Path(tmpdir) / 'd.bin')},
 			'session-1',
 		)
+		await _drain_event_tasks(watchdog)
 		progress({'guid': 'g-4', 'state': 'canceled'}, 'session-1')
 
+		assert watchdog.latest_download_outcome()['phase'] == 'completed'
+
+
+@pytest.mark.asyncio
+async def test_a_late_native_completion_upgrades_a_poll_failure(tmp_path):
+	pytest.importorskip('pypdf')
+	watchdog, _ = _make_watchdog(str(tmp_path))
+	path = tmp_path / 'late.pdf'
+	path.write_bytes(VALID_PDF_BYTES)
+	watchdog._download_registry.start(
+		'late-native',
+		url='https://example.com/late.pdf',
+		file_name=path.name,
+		source='cdp',
+	)
+	watchdog._download_registry.fail('late-native', stage='native_poll', error='timed out')
+
+	await watchdog._complete_native_download(
+		download_id='late-native',
+		file_path=str(path),
+		url='https://example.com/late.pdf',
+		total_bytes=len(VALID_PDF_BYTES),
+		source='cdp',
+	)
+
+	outcome = watchdog._download_registry.latest()
+	assert outcome is not None
+	assert outcome.phase == DownloadPhase.COMPLETED
+	assert outcome.path == str(path)
+
+
+@pytest.mark.asyncio
+async def test_poll_returns_immediately_for_a_terminal_attempt(tmp_path):
+	watchdog, _ = _make_watchdog(str(tmp_path))
+	watchdog._download_registry.complete(
+		'poll-done',
+		path=str(tmp_path / 'done.bin'),
+		file_size=1,
+		source='cdp',
+	)
+
+	with patch('asyncio.sleep', side_effect=AssertionError('terminal poll should not sleep')):
+		await watchdog._poll_for_download_file(
+			download_id='poll-done',
+			download_url='https://example.com/done.bin',
+			downloads_dir=tmp_path,
+			suggested_filename='done.bin',
+			guid='g-poll-done',
+		)
+
+
+@pytest.mark.asyncio
+async def test_remote_completion_is_emitted_once():
+	with tempfile.TemporaryDirectory() as tmpdir:
+		watchdog, session = _make_watchdog(tmpdir)
+		session.is_local = False
+		will_begin, progress = await _registered_handlers(watchdog)
+		will_begin(
+			{'guid': 'g-remote', 'url': 'https://example.com/r.pdf', 'suggestedFilename': 'r.pdf'},
+			'session-1',
+		)
+		before = watchdog.event_bus.dispatch.call_count
+
+		progress({'guid': 'g-remote', 'state': 'completed'}, 'session-1')
+		progress({'guid': 'g-remote', 'state': 'completed'}, 'session-1')
+
+		assert watchdog.event_bus.dispatch.call_count == before + 1
 		assert watchdog.latest_download_outcome()['phase'] == 'completed'
 
 
@@ -187,7 +339,7 @@ async def test_pdf_download_records_a_probe_failure():
 		assert result is None
 		outcome = watchdog.latest_download_outcome()
 		assert outcome['phase'] == 'failed'
-		assert outcome['stage'] == 'pdf_probe'
+		assert outcome['stage'] == 'resolve_url'
 
 
 @pytest.mark.asyncio
@@ -207,6 +359,7 @@ async def test_wait_for_download_returns_the_terminal_outcome():
 				{'guid': 'g-6', 'state': 'completed', 'filePath': str(Path(tmpdir) / 'f.bin')},
 				'session-1',
 			)
+			await _drain_event_tasks(watchdog)
 
 		waiter = asyncio.create_task(watchdog.wait_for_download(timeout=2.0))
 		await finish_later()
@@ -244,7 +397,8 @@ async def test_outcomes_are_json_safe():
 
 		payload = json.dumps(watchdog.download_outcomes())
 
-		assert 'g-8' in payload
+		assert 'g-8' not in payload
+		assert 'download_ref' in payload
 
 
 def _fake_watchdog(registry):
@@ -252,19 +406,39 @@ def _fake_watchdog(registry):
 		_download_registry = registry
 
 		def download_outcomes(self):
-			return [outcome.to_dict() for outcome in registry.outcomes()]
+			return [redacted_outcome(outcome.to_dict()) for outcome in registry.outcomes()]
 
 		def latest_download_outcome(self):
 			outcome = registry.latest()
-			return outcome.to_dict() if outcome is not None else None
+			return redacted_outcome(outcome.to_dict()) if outcome is not None else None
 
 		async def shutdown(self):
 			registry.cancel_pending(detail='browser stopped')
-			return [outcome.to_dict() for outcome in registry.outcomes()]
+			return [redacted_outcome(outcome.to_dict()) for outcome in registry.outcomes()]
 
-		async def wait_for_download(self, *, timeout, url=None, download_id=None, lookback=0.0):
+		async def wait_for_download(
+			self,
+			*,
+			timeout,
+			url=None,
+			download_id=None,
+			download_ref=None,
+			lookback=0.0,
+		):
+			if download_ref is not None:
+				download_id = next(
+					(
+						outcome.download_id
+						for outcome in registry.outcomes()
+						if hashlib.sha256(outcome.download_id.encode('utf-8')).hexdigest()[:12]
+						== download_ref
+					),
+					None,
+				)
+				if download_id is None:
+					raise ValueError(f'Unknown download_ref: {download_ref}')
 			outcome = await registry.wait_for_terminal(timeout=timeout, url=url, download_id=download_id, lookback=lookback)
-			return outcome.to_dict()
+			return redacted_outcome(outcome.to_dict())
 
 	return FakeWatchdog()
 
@@ -281,10 +455,14 @@ async def test_session_exposes_download_outcomes_and_wait():
 
 	assert session.downloads_registry is registry
 	assert session.download_outcomes()[0]['phase'] == 'completed'
-	assert session.latest_download_outcome()['download_id'] == 'session-1'
+	latest = session.latest_download_outcome()
+	assert latest is not None and 'download_ref' in latest
+	assert 'download_id' not in latest
+	download_ref = session.download_outcomes()[0]['download_ref']
 
-	outcome = await session.wait_for_download(timeout=1.0, download_id='session-1')
+	outcome = await session.wait_for_download(timeout=1.0, download_ref=download_ref)
 	assert outcome['phase'] == 'completed'
+	assert outcome['download_ref'] == download_ref
 
 
 @pytest.mark.asyncio
@@ -295,7 +473,12 @@ async def test_namespace_exposes_download_helpers():
 
 	session = BrowserSession()
 	registry = DownloadRegistry()
-	registry.complete('ns-1', path='/tmp/n.bin', file_size=8)
+	registry.complete(
+		'ns-1',
+		path='/tmp/n.bin',
+		file_size=8,
+		url='https://example.com/ns.bin',
+	)
 	registry.fail('ns-2', stage='fetch', error='boom')
 	session._downloads_watchdog = _fake_watchdog(registry)
 
@@ -303,10 +486,13 @@ async def test_namespace_exposes_download_helpers():
 	tools.registry.registry.actions = {}
 	namespace = create_namespace(session, tools=tools)
 
-	assert len(namespace['download_outcomes']()) == 2
+	outcomes = namespace['download_outcomes']()
+	assert len(outcomes) == 2
 	failures = namespace['download_failures']()
 	assert len(failures) == 1
-	assert failures[0]['download_id'] == 'ns-2'
+	assert failures[0]['download_ref'] == outcomes[1]['download_ref']
+	positional = await namespace['wait_for_download'](1.0, 'https://example.com/ns.bin', 5.0)
+	assert positional['phase'] == 'completed'
 	assert failures[0]['stage'] == 'fetch'
 	assert len(namespace['download_outcomes']()) == 2
 
@@ -413,9 +599,15 @@ async def test_session_keeps_download_history_after_detaching_the_watchdog():
 	session._download_history = history
 
 	outcomes = session.download_outcomes()
-	assert [outcome['download_id'] for outcome in outcomes] == ['pending', 'done']
+	assert len(outcomes) == 2
+	assert [outcome['phase'] for outcome in outcomes] == ['cancelled', 'completed']
+	assert all('download_ref' in outcome for outcome in outcomes)
+	assert all('download_id' not in outcome for outcome in outcomes)
 	assert outcomes[0]['phase'] == 'cancelled'
-	assert session.latest_download_outcome()['download_id'] == 'done'
+	latest = session.latest_download_outcome()
+	assert latest is not None
+	assert latest['phase'] == 'completed'
+	assert latest['download_ref'] == outcomes[1]['download_ref']
 
 
 @pytest.mark.asyncio

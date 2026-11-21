@@ -20,6 +20,7 @@ async def test_get_status_does_not_start_browser(mcp_server):
 	assert payload['browser']['phase'] == 'stopped'
 	assert payload['namespace_variables'] == 0
 	assert payload['profile'] is None
+	assert payload['downloads']['pdf_detection']['phase'] == 'idle'
 
 
 @pytest.mark.asyncio

@@ -66,6 +66,7 @@ from openbrowser.utils import _log_pretty_url, is_new_tab_page
 
 if TYPE_CHECKING:
 	from openbrowser.actor.page import Page
+	from openbrowser.browser.download_state import PdfDetectionSnapshot
 
 DEFAULT_BROWSER_PROFILE = BrowserProfile()
 NAVIGATION_CONTAINMENT_GRACE = 1.0
@@ -2391,12 +2392,33 @@ class BrowserSession(BaseModel):
 				self.logger.warning('Could not read the latest download outcome', exc_info=True)
 		return dict(self._download_history[-1]) if self._download_history else None
 
+	def pdf_detection_snapshot(self) -> 'PdfDetectionSnapshot':
+		"""Return the latest PDF detection snapshot, or an idle default.
+
+		A reader failure propagates so ``downloads_summary`` can report it as
+		``pdf_detection_error`` in the same response.
+		"""
+		from openbrowser.browser.download_state import (
+			PdfDetectionPhase,
+			PdfDetectionSnapshot,
+			redacted_pdf_detection_snapshot,
+		)
+
+		watchdog = self._downloads_watchdog
+		reader = getattr(watchdog, 'pdf_detection_snapshot', None)
+		if callable(reader):
+			value = reader()
+			if isinstance(value, PdfDetectionSnapshot):
+				return redacted_pdf_detection_snapshot(value)
+		return PdfDetectionSnapshot(phase=PdfDetectionPhase.IDLE)
+
 	async def wait_for_download(
 		self,
 		*,
 		timeout: float = 30.0,
 		url: str | None = None,
 		download_id: str | None = None,
+		download_ref: str | None = None,
 		lookback: float = 0.0,
 	) -> dict[str, object]:
 		"""Wait for one terminal download outcome recorded by the watchdog."""
@@ -2408,6 +2430,7 @@ class BrowserSession(BaseModel):
 			timeout=timeout,
 			url=url,
 			download_id=download_id,
+			download_ref=download_ref,
 			lookback=lookback,
 		)
 
@@ -4295,8 +4318,17 @@ class BrowserSession(BaseModel):
 
 		return url_allowed and type_allowed
 
-	async def get_all_frames(self) -> tuple[dict[str, dict], dict[str, str]]:
+	async def get_all_frames(
+		self,
+		*,
+		include_background_targets: bool = False,
+	) -> tuple[dict[str, dict], dict[str, str]]:
 		"""Get a complete frame hierarchy from all browser targets.
+
+		When ``cross_origin_iframes`` is disabled, only the focused target is
+		inspected by default. Background tabs are included when
+		``include_background_targets`` is true, which download completion needs
+		because its frame can belong to a tab that is not focused.
 
 		Returns:
 			Tuple of (all_frames, target_sessions) where:
@@ -4330,16 +4362,25 @@ class BrowserSession(BaseModel):
 			if not include_cross_origin and target.get('type') == 'iframe':
 				continue
 
-			# When cross-origin support is disabled, only process the current target
-			if not include_cross_origin:
-				# Only process the current focus target
-				if self.agent_focus and target_id != self.agent_focus.target_id:
-					continue
-				# Use the existing agent_focus session
-				cdp_session = self.agent_focus
-			else:
-				# Get cached session for this target (don't change focus - iterating frames)
-				cdp_session = await self.get_or_create_cdp_session(target_id, focus=False)
+			# A target can detach between enumeration and session lookup. Keep
+			# that failure scoped to this target so another tab can still
+			# provide the frame that initiated a download.
+			try:
+				# Without cross-origin support, the default path is focus-only. A
+				# download completion may still name a frame in a background tab.
+				if not include_cross_origin and not include_background_targets:
+					if self.agent_focus and target_id != self.agent_focus.target_id:
+						continue
+					cdp_session = self.agent_focus
+				else:
+					# Get cached session for this target without changing focus.
+					cdp_session = await self.get_or_create_cdp_session(target_id, focus=False)
+			except Exception as session_error:
+				self.logger.debug(
+					f'Skipping frame scan for detached target {target_id}: '
+					f'{type(session_error).__name__}: {session_error}'
+				)
+				continue
 
 			if cdp_session:
 				target_sessions[target_id] = cdp_session.session_id

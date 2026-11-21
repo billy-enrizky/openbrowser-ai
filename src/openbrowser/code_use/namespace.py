@@ -785,6 +785,7 @@ def create_namespace(
 		timeout: float = 30.0,
 		url: str | None = None,
 		lookback: float = 0.0,
+		download_ref: str | None = None,
 	) -> dict[str, Any]:
 		"""Wait for the next download to reach a terminal phase.
 
@@ -794,10 +795,17 @@ def create_namespace(
 		If the download may already have finished, pass `lookback=5` to accept
 		a terminal outcome from the last five seconds. Returns the terminal
 		outcome, including `path`, `file_size`, `phase`, `stage`, and `error`.
+		If you have a prior outcome entry, pass its `download_ref` to wait for
+		that specific attempt without exposing the internal download id.
 		Raises TimeoutError with the last observed phase when no terminal
 		outcome appears in time.
 		"""
-		return await browser_session.wait_for_download(timeout=timeout, url=url, lookback=lookback)
+		return await browser_session.wait_for_download(
+			timeout=timeout,
+			url=url,
+			lookback=lookback,
+			download_ref=download_ref,
+		)
 
 	def download_outcomes() -> list[dict[str, Any]]:
 		"""Return recent download attempts, oldest first, with their last phase."""

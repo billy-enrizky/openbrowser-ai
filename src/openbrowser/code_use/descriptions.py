@@ -23,7 +23,9 @@ EXECUTE_CODE_DESCRIPTION_COMPACT = """Execute Python code with browser automatio
 - `await done(text, success=True)` -- Signal task complete
 
 ## Downloads
-- `waiter = asyncio.create_task(wait_for_download(timeout=30))` then click, then `await waiter` -- returns phase, path, error
+- `waiter = asyncio.create_task(wait_for_download(timeout=30))` then click, then `await waiter`
+  -- returns phase, path, file_size, file_type, stage, error, download_ref
+- To wait for a prior outcome, pass its `download_ref`; it resolves only in the attached session's live registry
 - `download_outcomes()` / `download_failures()` -- Synchronous recent attempts and failures
 
 ## State
@@ -81,7 +83,16 @@ EXECUTE_CODE_DESCRIPTION = """Execute Python code in a persistent namespace with
   Example: `path = await download_file('https://example.com/report.pdf')`
   Example: `path = await download_file('https://example.com/data', filename='export.csv')`
   After downloading, read PDFs with: `reader = PdfReader(path); text = reader.pages[0].extract_text()`
-- `await wait_for_download(timeout: float = 30.0, url: str | None = None, lookback: float = 0.0)` -- Wait for one download to reach a terminal phase. Start the wait before the click so a fast download cannot finish first. Returns a dict with `phase` (`completed`, `failed`, or `cancelled`), `path`, `file_size`, `file_type`, `stage`, and `error`. Raises TimeoutError with the last observed phase when nothing finishes in time. If the download may already have finished, pass `lookback=5` to accept a terminal outcome from the last five seconds.
+- `await wait_for_download(timeout: float = 30.0, url: str | None = None, lookback: float = 0.0,
+  download_ref: str | None = None)` -- Wait for one download to reach a terminal phase. Start the wait
+  before the click so a fast download cannot finish first. Returns a dict with `phase` (`completed`,
+  `failed`, or `cancelled`), `path`, `file_size`, `file_type`, `stage`, `error`, and `download_ref`.
+  To wait for a
+  specific prior outcome, pass its `download_ref`. A reference resolves only in the attached session's
+  live download registry; after the session stops or is replaced, read the completed history instead of
+  waiting on that reference. Raises TimeoutError with the last observed phase when nothing finishes in
+  time. If the download may already have finished, pass `lookback=5` to accept a terminal outcome from
+  the last five seconds.
   Example: `waiter = asyncio.create_task(wait_for_download(timeout=30)); await click(12); outcome = await waiter; print(outcome['phase'], outcome['path'])`
   If it failed, `outcome['stage']` names where it stopped and `outcome['error']` says why.
 - `download_outcomes()` -- Synchronous. Return recent download attempts, oldest first, with their last phase and terminal detail.

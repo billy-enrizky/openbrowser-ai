@@ -23,6 +23,20 @@ from openbrowser.browser.session import BrowserSession
 
 logger = logging.getLogger(__name__)
 
+VALID_PDF_BYTES = (
+    b"%PDF-1.0\n"
+    b"1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n"
+    b"2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n"
+    b"3 0 obj<</Type/Page/MediaBox[0 0 612 792]/Parent 2 0 R/Resources<<>>>>endobj\n"
+    b"xref\n0 4\n"
+    b"0000000000 65535 f \n"
+    b"0000000009 00000 n \n"
+    b"0000000058 00000 n \n"
+    b"0000000115 00000 n \n"
+    b"trailer<</Size 4/Root 1 0 R>>\n"
+    b"startxref\n212\n%%EOF\n"
+)
+
 
 # ---------------------------------------------------------------------------
 # Shared helpers
@@ -108,7 +122,7 @@ class TestDownloadWillBeginHandler:
         assert wd._cdp_downloads_info["guid-123"]["handled"] is False
 
     async def test_download_will_begin_missing_filename(self):
-        """Lines 181-182: AssertionError/KeyError branch when suggestedFilename missing."""
+        """A missing filename still retains metadata for later completion resolution."""
         wd, session = _make_watchdog()
         await wd.attach_to_target("target-abc2")
 
@@ -124,8 +138,8 @@ class TestDownloadWillBeginHandler:
         with patch("asyncio.create_task", return_value=mock_task):
             handler_fn(event, None)
 
-        # guid should NOT be in cache since suggestedFilename was missing
-        assert "guid-no-name" not in wd._cdp_downloads_info
+        assert wd._cdp_downloads_info["guid-no-name"]["suggested_filename"] is None
+        assert wd._cdp_downloads_info["guid-no-name"]["frame_id"] is None
 
 
 @pytest.mark.asyncio
@@ -141,7 +155,7 @@ class TestDownloadProgressHandler:
 
         # Create a real file for _track_download
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as f:
-            f.write(b"fake-pdf-data")
+            f.write(VALID_PDF_BYTES)
             tmp_path = f.name
 
         try:
@@ -163,6 +177,7 @@ class TestDownloadProgressHandler:
 
             with patch.object(DownloadsWatchdog, "_track_download") as mock_track:
                 handler_fn(event, None)
+                await asyncio.gather(*list(wd._cdp_event_tasks))
                 mock_track.assert_called_once_with(tmp_path)
 
             # Verify handled flag was set
@@ -420,16 +435,18 @@ class TestNetworkHandlerBackgroundDownloadErrors:
 class TestDownloadFileFromUrl:
     """Cover lines 489, 498, 511: download_file_from_url edge cases."""
 
-    async def test_already_downloaded_returns_cached_path(self):
+    async def test_already_downloaded_returns_cached_path(self, tmp_path):
         """Line 489: URL already in _session_pdf_urls."""
         wd, session = _make_watchdog()
-        wd._session_pdf_urls["https://cached.com/file.pdf"] = "/tmp/file.pdf"
+        cached = tmp_path / "file.bin"
+        cached.write_bytes(b"cached")
+        wd._session_pdf_urls["https://cached.com/file.bin"] = str(cached)
 
         result = await wd.download_file_from_url(
-            url="https://cached.com/file.pdf",
+            url="https://cached.com/file.bin",
             target_id="target-cached",
         )
-        assert result == "/tmp/file.pdf"
+        assert result == str(cached)
 
     async def test_filename_fallback_no_extension(self):
         """Line 498: URL without extension and no suggested filename, non-PDF content type."""
@@ -644,7 +661,7 @@ class TestHandleCdpDownloadPolling:
                 sleep_call_count += 1
                 if sleep_call_count == 1:
                     file_path = Path(tmpdir) / "doc.pdf"
-                    file_path.write_bytes(b"A" * 100)  # > 4 bytes
+                    file_path.write_bytes(VALID_PDF_BYTES)
 
             with patch("asyncio.sleep", side_effect=mock_sleep):
                 await wd._handle_cdp_download(event, "target-poll", None)
