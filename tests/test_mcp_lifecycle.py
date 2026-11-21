@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from openbrowser.browser.lifecycle import LifecyclePhase
+from openbrowser.config import CONFIG
 from openbrowser.mcp.server import _CleanupOutcome
 
 
@@ -19,6 +20,95 @@ async def test_get_status_does_not_start_browser(mcp_server):
 	assert payload['browser']['phase'] == 'stopped'
 	assert payload['namespace_variables'] == 0
 	assert payload['profile'] is None
+
+
+@pytest.mark.asyncio
+async def test_get_status_reports_storage_state_previews_without_browser(mcp_server, tmp_path):
+	state_path = tmp_path / 'state.json'
+	state_path.write_text('{"cookies": [], "origins": []}')
+	mcp_server._profile_summary = {'storage_state': str(state_path)}
+
+	payload = json.loads(await mcp_server._handle_tool('get_status', {}))
+
+	assert payload['storage_state']['phase'] == 'pending'
+	assert payload['storage_state']['path'] == str(state_path.resolve())
+	assert payload['storage_state_save']['phase'] == 'idle'
+	assert payload['storage_state_save']['path'] == str(state_path.resolve())
+
+
+@pytest.mark.asyncio
+async def test_get_status_uses_config_storage_state_before_browser(mcp_server, tmp_path):
+	state_path = tmp_path / 'config-state.json'
+	state_path.write_text('{"cookies": [], "origins": []}')
+	mcp_server.config = {
+		'browser_profile': {
+			'storage_state': str(state_path),
+			'user_data_dir': str(tmp_path / 'profile'),
+		}
+	}
+	mcp_server._profile_summary = None
+
+	payload = json.loads(await mcp_server._handle_tool('get_status', {}))
+
+	assert payload['storage_state']['phase'] == 'pending'
+	assert payload['storage_state']['path'] == str(state_path.resolve())
+	assert payload['storage_state_save']['phase'] == 'idle'
+	assert payload['storage_state_save']['path'] == str(state_path.resolve())
+
+
+@pytest.mark.asyncio
+async def test_get_status_reports_managed_copy_of_a_configured_source(mcp_server, tmp_path):
+	source = tmp_path / 'source-state.json'
+	source.write_text('{"cookies": [], "origins": []}')
+	mcp_server.config = {'browser_profile': {'storage_state': str(source)}}
+	mcp_server._profile_summary = None
+
+	payload = json.loads(await mcp_server._handle_tool('get_status', {}))
+
+	expected_suffix = f'mcp-{mcp_server.owner_id}/storage_state.json'
+	assert payload['storage_state_save']['phase'] == 'idle'
+	assert payload['storage_state_save']['path'].endswith(expected_suffix)
+	assert not payload['storage_state_save']['path'].endswith('source-state.json')
+
+
+@pytest.mark.asyncio
+async def test_get_status_reports_invalid_storage_state_as_failed(mcp_server):
+	mcp_server.config = {'browser_profile': {'storage_state': 123}}
+	mcp_server._profile_summary = None
+
+	payload = json.loads(await mcp_server._handle_tool('get_status', {}))
+
+	assert payload['storage_state']['phase'] == 'failed'
+	assert 'Unsupported storage-state source type' in (payload['storage_state']['error'] or '')
+	assert payload['storage_state_save']['phase'] == 'failed'
+
+
+@pytest.mark.asyncio
+async def test_get_status_reports_dict_storage_state_as_skipped(mcp_server):
+	mcp_server.config = {
+		'browser_profile': {'storage_state': {'cookies': [], 'origins': []}}
+	}
+	mcp_server._profile_summary = None
+
+	payload = json.loads(await mcp_server._handle_tool('get_status', {}))
+
+	assert payload['storage_state']['phase'] == 'skipped'
+	assert payload['storage_state_save']['phase'] == 'skipped'
+
+
+@pytest.mark.asyncio
+async def test_get_status_reports_managed_storage_state_path_before_browser(mcp_server):
+	mcp_server.config = {}
+	mcp_server._profile_summary = None
+
+	payload = json.loads(await mcp_server._handle_tool('get_status', {}))
+
+	expected_suffix = f'mcp-{mcp_server.owner_id}/storage_state.json'
+	managed_dir = CONFIG.XDG_CONFIG_HOME / 'openbrowser' / 'profiles' / f'mcp-{mcp_server.owner_id}'
+	assert not managed_dir.exists()
+	assert payload['storage_state_save']['phase'] == 'idle'
+	assert payload['storage_state_save']['path'].endswith(expected_suffix)
+	assert payload['storage_state']['phase'] == 'skipped'
 
 
 @pytest.mark.asyncio

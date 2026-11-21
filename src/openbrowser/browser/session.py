@@ -496,13 +496,35 @@ class BrowserSession(BaseModel):
 		return self._lifecycle.snapshot()
 
 	def lifecycle_snapshot(self) -> dict[str, Any]:
-		"""Return lifecycle, tab, and connection state in one JSON-safe shape."""
+		"""Return lifecycle, tab, connection, and storage-state state in one JSON-safe shape."""
+		from openbrowser.browser.storage_state import (
+			load_snapshot_for_configuration,
+			save_snapshot_for_configuration,
+		)
+
 		snapshot = self._lifecycle.snapshot().to_dict()
 		snapshot['cdp_connected'] = self._cdp_client_root is not None
 		snapshot['active_target_id'] = self.agent_focus.target_id if self.agent_focus else None
 		snapshot['tabs'] = self.tab_snapshot()
 		snapshot['navigation'] = self._navigation_monitor.snapshot()
 		snapshot['warnings'] = list(self._storage_state_warnings)
+		configured = self.browser_profile.storage_state if self.browser_profile else None
+		storage_state = None
+		storage_state_save = None
+		watchdog = getattr(self, '_storage_state_watchdog', None)
+		if watchdog is not None:
+			try:
+				storage_state = watchdog.storage_state_snapshot()
+				storage_state_save = watchdog.storage_state_save_snapshot()
+			except Exception:
+				storage_state = None
+				storage_state_save = None
+		if storage_state is None:
+			storage_state = load_snapshot_for_configuration(configured)
+		if storage_state_save is None:
+			storage_state_save = save_snapshot_for_configuration(configured)
+		snapshot['storage_state'] = storage_state.to_dict()
+		snapshot['storage_state_save'] = storage_state_save.to_dict()
 		return snapshot
 
 	def tab_snapshot(self) -> list[dict[str, Any]]:

@@ -14,7 +14,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from openbrowser.browser.lifecycle import LifecycleMachine, LifecyclePhase
-from openbrowser.browser.storage_state import StorageStatePhase, StorageStateSnapshot
+from openbrowser.browser.storage_state import (
+    StorageStatePhase,
+    StorageStateSavePhase,
+    StorageStateSaveSnapshot,
+    StorageStateSnapshot,
+)
 from openbrowser.daemon.server import (
     WINDOWS_PORT,
     DaemonServer,
@@ -673,6 +678,31 @@ async def test_socket_identity_change_is_refused_before_unlink(daemon_paths):
     assert socket_path.read_text() == 'replace me'
 
 
+def test_status_reports_dict_storage_state_as_skipped_for_load_and_save(tmp_path):
+    server = DaemonServer(idle_timeout=5, exec_timeout=2)
+    profile = MagicMock()
+    profile.user_data_dir = tmp_path / 'profile'
+    profile.headless = True
+    profile.storage_state = {'cookies': [], 'origins': []}
+
+    with (
+        patch('openbrowser.browser.BrowserProfile', return_value=profile),
+        patch('openbrowser.config.load_openbrowser_config', return_value={}),
+        patch(
+            'openbrowser.config.get_default_profile',
+            return_value={'storage_state': {'cookies': [], 'origins': []}},
+        ),
+        patch(
+            'openbrowser.config.apply_managed_browser_profile_defaults',
+            side_effect=lambda profile_data, default_user_data_dir=None: dict(profile_data),
+        ),
+    ):
+        status = server._status_payload()
+
+    assert status['storage_state']['phase'] == 'skipped'
+    assert status['storage_state_save']['phase'] == 'skipped'
+
+
 def test_status_reads_storage_state_from_the_watchdog():
     server = DaemonServer(idle_timeout=5, exec_timeout=2)
     server._profile_summary = {
@@ -690,6 +720,14 @@ def test_status_reads_storage_state_from_the_watchdog():
         origins_count=3,
         script_count=4,
     )
+    watchdog.storage_state_save_snapshot.return_value = StorageStateSaveSnapshot(
+        phase=StorageStateSavePhase.SAVED,
+        path='/tmp/state.json',
+        bytes=45_000_000,
+        save_ms=55.5,
+        cookies_count=2,
+        origins_count=3,
+    )
     server._session = MagicMock()
     server._session.lifecycle_snapshot.return_value = {'phase': 'ready'}
     server._session._storage_state_watchdog = watchdog
@@ -699,6 +737,8 @@ def test_status_reads_storage_state_from_the_watchdog():
     assert status['storage_state']['phase'] == 'loaded'
     assert status['storage_state']['bytes'] == 45_000_000
     assert status['storage_state']['script_count'] == 4
+    assert status['storage_state_save']['phase'] == 'saved'
+    assert status['storage_state_save']['save_ms'] == 55.5
 
 
 def test_status_reports_configured_storage_state_before_browser_start(tmp_path):
@@ -726,8 +766,10 @@ def test_status_reports_configured_storage_state_before_browser_start(tmp_path):
 
     assert server._session is None
     assert status['storage_state']['phase'] == 'pending'
-    assert status['storage_state']['path'] == str(state_path)
+    assert status['storage_state']['path'] == str(state_path.resolve())
     assert status['storage_state']['bytes'] == state_path.stat().st_size
+    assert status['storage_state_save']['phase'] == 'idle'
+    assert status['storage_state_save']['path'] == str(state_path.resolve())
 
 
 def test_status_reports_download_outcomes():

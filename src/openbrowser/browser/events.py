@@ -10,7 +10,6 @@ from cdp_use.cdp.target import TargetID
 from pydantic import BaseModel, Field, PrivateAttr, field_validator, model_validator
 
 from openbrowser.browser.navigation import NavigationOperation
-
 from openbrowser.browser.views import BrowserStateSummary
 from openbrowser.dom.views import EnhancedDOMTreeNode
 
@@ -526,8 +525,22 @@ class StorageStateSavedEvent(BaseEvent):
 	path: str
 	cookies_count: int
 	origins_count: int
+	bytes: int | None = None
+	save_ms: float | None = None
 
 	event_timeout: float | None = _get_timeout('TIMEOUT_StorageStateSavedEvent', 30.0)  # seconds
+
+
+class StorageStateFailedEvent(BaseEvent):
+	"""A storage-state load or save reached a failed terminal phase."""
+
+	operation: str
+	path: str | None = None
+	phase: str = 'failed'
+	error: str | None = None
+	detail: str | None = None
+
+	event_timeout: float | None = _get_timeout('TIMEOUT_StorageStateFailedEvent', 30.0)  # seconds
 
 
 class LoadStorageStateEvent(BaseEvent):
@@ -548,6 +561,11 @@ class StorageStateLoadedEvent(BaseEvent):
 	path: str
 	cookies_count: int
 	origins_count: int
+	bytes: int | None = None
+	load_ms: float | None = None
+	script_count: int = 0
+	skipped_items: int = 0
+	skipped_origins: int = 0
 
 	event_timeout: float | None = _get_timeout('TIMEOUT_StorageStateLoadedEvent', 30.0)  # seconds
 
