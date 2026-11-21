@@ -13,7 +13,7 @@ name: Tests
 
 on:
   pull_request:
-    branches: [main, develop]
+    branches: [main, develop, ci/measurement-base]
   merge_group:
   push:
     branches: [main, develop]
