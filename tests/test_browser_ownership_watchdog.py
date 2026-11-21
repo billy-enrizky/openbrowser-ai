@@ -359,7 +359,15 @@ async def test_posix_cleanup_stops_owned_browser_descendants(monkeypatch, tmp_pa
 	owned_child = MagicMock()
 	owned_child.pid = 124
 	owned_child.create_time.return_value = 21.0
-	owned_child.is_running.side_effect = [True, False]
+	owned_running = {'value': True}
+
+	def owned_is_running():
+		if owned_running['value']:
+			owned_running['value'] = False
+			return True
+		return False
+
+	owned_child.is_running.side_effect = owned_is_running
 	owned_child.cmdline.return_value = [
 		'chrome',
 		f'--user-data-dir={profile_dir.resolve()}',

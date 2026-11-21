@@ -55,6 +55,9 @@ dev = [
     "pytest>=9.0.2",
     "pytest-asyncio>=1.0.0",
     "pytest-cov>=6.0.0",
+    "pytest-xdist==3.8.0",
+    "ruff==0.17.6",
+    "pyright==1.1.414",
     "mcp>=2.3.0,<3.0.0",
 ]
 all = [
@@ -103,3 +106,15 @@ markers = [
     "asyncio: mark tests as async tests",
     "integration: integration tests requiring a real browser",
 ]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "ASYNC", "RUF"]
+
+[tool.pyright]
+include = ["src/openbrowser"]
+pythonVersion = "3.12"
+typeCheckingMode = "basic"

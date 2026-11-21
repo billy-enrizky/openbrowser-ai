@@ -1,5 +1,6 @@
 .venv
 __pycache__/
+.pytest_cache/
 __pycache__
 *.py[cod]
 *.pyc
@@ -102,3 +103,6 @@ benchmarks/plot_cli_benchmark.py
 # Local-only benchmark scripts and 3-way results
 benchmarks/e2e_mcp_vs_cli_benchmark.py
 benchmarks/e2e_mcp_vs_cli_results.json
+
+# Local hk overrides
+hk.local.pkl
