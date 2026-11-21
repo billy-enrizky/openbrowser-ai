@@ -26,6 +26,7 @@ from openbrowser.browser.events import (
 	TypeTextEvent,
 	UploadFileEvent,
 )
+from openbrowser.browser.focus import FocusTargetCode, FocusTargetError, FocusTransitionBudget
 from openbrowser.browser.tabs import TabError, TabRegistry
 from openbrowser.browser.views import BrowserError
 from openbrowser.dom.service import EnhancedDOMTreeNode
@@ -80,6 +81,7 @@ def _tab_error_text(action: str, tab_id: str, error: TabError) -> str:
 		detail = f'{detail} Hint: {error.hint}'
 	return detail
 
+
 # Import EnhancedDOMTreeNode and rebuild event models that have forward references to it
 # This must be done after all imports are complete
 ClickElementEvent.model_rebuild()
@@ -115,7 +117,9 @@ def handle_browser_error(e: BrowserError) -> ActionResult:
 	if e.long_term_memory is not None:
 		if e.short_term_memory is not None:
 			return ActionResult(
-				extracted_content=e.short_term_memory, error=e.long_term_memory, include_extracted_content_only_once=True
+				extracted_content=e.short_term_memory,
+				error=e.long_term_memory,
+				include_extracted_content_only_once=True,
 			)
 		else:
 			return ActionResult(error=e.long_term_memory)
@@ -159,7 +163,9 @@ class Tools(Generic[Context]):
 			}
 
 			if params.engine.lower() not in search_engines:
-				return ActionResult(error=f'Unsupported search engine: {params.engine}. Options: duckduckgo, google, bing')
+				return ActionResult(
+					error=f'Unsupported search engine: {params.engine}. Options: duckduckgo, google, bing'
+				)
 
 			search_url = search_engines[params.engine.lower()]
 
@@ -228,7 +234,9 @@ class Tools(Generic[Context]):
 				event = browser_session.event_bus.dispatch(GoBackEvent())
 				await event
 				final_url = await event.event_result(raise_if_any=True, raise_if_none=False)
-				memory = f'Navigated back to {final_url}' if isinstance(final_url, str) and final_url else 'Navigated back'
+				memory = (
+					f'Navigated back to {final_url}' if isinstance(final_url, str) and final_url else 'Navigated back'
+				)
 				msg = f'🔙  {memory}'
 				logger.info(msg)
 				return ActionResult(extracted_content=memory)
@@ -388,7 +396,10 @@ class Tools(Generic[Context]):
 			param_model=UploadFileAction,
 		)
 		async def upload_file(
-			params: UploadFileAction, browser_session: BrowserSession, available_file_paths: list[str], file_system: FileSystem | None = None
+			params: UploadFileAction,
+			browser_session: BrowserSession,
+			available_file_paths: list[str],
+			file_system: FileSystem | None = None,
 		):
 			# Check if file is in available_file_paths (user-provided or downloaded files)
 			# For remote browsers (is_local=False), we allow absolute remote paths even if not tracked locally
@@ -502,7 +513,8 @@ class Tools(Generic[Context]):
 				cdp_session = await browser_session.get_or_create_cdp_session()
 				try:
 					scroll_info = await cdp_session.cdp_client.send.Runtime.evaluate(
-						params={'expression': 'window.scrollY || window.pageYOffset || 0'}, session_id=cdp_session.session_id
+						params={'expression': 'window.scrollY || window.pageYOffset || 0'},
+						session_id=cdp_session.session_id,
 					)
 					current_scroll_y = scroll_info.get('result', {}).get('value', 0)
 				except Exception:
@@ -558,10 +570,21 @@ class Tools(Generic[Context]):
 			# Simple switch tab logic
 			try:
 				target_id = await browser_session.get_target_id_from_tab_id(params.tab_id)
-
-				event = browser_session.event_bus.dispatch(SwitchTabEvent(target_id=target_id))
-				await event
-				new_target_id = await event.event_result(raise_if_any=True, raise_if_none=False)
+				budget = FocusTransitionBudget.start()
+				switch_event = SwitchTabEvent(
+					target_id=target_id,
+					focus_deadline_monotonic=budget.deadline,
+				)
+				switch_event.event_timeout = max(
+					0.001,
+					min(switch_event.event_timeout or budget.remaining(), budget.remaining()),
+				)
+				event = browser_session.event_bus.dispatch(switch_event)
+				new_target_id = await event.event_result(
+					timeout=max(0.001, budget.remaining()),
+					raise_if_any=True,
+					raise_if_none=False,
+				)
 
 				if new_target_id:
 					memory = f'Switched to tab #{new_target_id[-4:]}'
@@ -574,13 +597,21 @@ class Tools(Generic[Context]):
 				error_msg = _tab_error_text('switch', params.tab_id, error)
 				logger.warning(error_msg)
 				return ActionResult(error=error_msg, success=False)
-			except Exception as e:
-				error_msg = f'Failed to switch to tab {params.tab_id}: {e}'
+			except TimeoutError:
+				error_msg = f'Switching to tab {params.tab_id} timed out. Check browser status, then retry.'
+				logger.warning(error_msg)
+				return ActionResult(error=error_msg, success=False)
+			except FocusTargetError as error:
+				logger.warning(str(error))
+				return ActionResult(error=str(error), success=False)
+			except Exception as error:
+				error_msg = f'Failed to switch to tab {params.tab_id}: {type(error).__name__}: {error}'
 				logger.warning(error_msg)
 				return ActionResult(error=error_msg, success=False)
 
 		@self.registry.action(
-			'Close a tab by tab_id. Pass the full target_id or its 4-character suffix from the browser state tabs list. An ambiguous suffix returns the matching full IDs. Closing an already closed tab is a no-op.',
+			'Close a tab by tab_id. Pass the full target_id or its 4-character suffix from the browser state tabs '
+			'list. An ambiguous suffix returns the matching full IDs. If focus repair fails, return an error.',
 			param_model=CloseTabAction,
 		)
 		async def close(params: CloseTabAction, browser_session: BrowserSession):
@@ -594,30 +625,126 @@ class Tools(Generic[Context]):
 					return ActionResult(error=error_msg, success=False)
 				registry = getattr(browser_session, '_tab_registry', None)
 				known_closed = registry.known_closed(params.tab_id) if isinstance(registry, TabRegistry) else None
-				focused_target = browser_session.agent_focus.target_id if browser_session.agent_focus else None
-				focus_matches_closed_id = bool(focused_target and focused_target.endswith(params.tab_id))
-				closed_target_id = known_closed or (params.tab_id if 'already closed' in str(error).lower() else None)
-				if closed_target_id is not None or focus_matches_closed_id:
+				focus_snapshot = browser_session.focus_snapshot()
+				focused_target = (
+					focus_snapshot.target_id
+					or focus_snapshot.previous_target_id
+					or (browser_session.agent_focus.target_id if browser_session.agent_focus else None)
+				)
+				closed_target_id = known_closed
+				if (
+					closed_target_id is None
+					and focused_target is not None
+					and (focused_target == params.tab_id or focused_target.endswith(params.tab_id))
+				):
+					closed_target_id = focused_target
+				if closed_target_id is not None:
+					budget = FocusTransitionBudget.start()
 					try:
-						await browser_session.event_bus.dispatch(TabClosedEvent(target_id=closed_target_id or params.tab_id))
+						closed_event = TabClosedEvent(
+							target_id=closed_target_id,
+							focus_deadline_monotonic=budget.deadline,
+						)
+						closed_event.event_timeout = max(
+							0.001,
+							min(closed_event.event_timeout or budget.remaining(), budget.remaining()),
+						)
+						event = browser_session.event_bus.dispatch(closed_event)
+						await event.event_result(
+							timeout=max(0.001, budget.remaining()),
+							raise_if_any=True,
+							raise_if_none=False,
+						)
+					except TimeoutError:
+						error_msg = (
+							f'Focus repair for already closed tab {params.tab_id} timed out. '
+							'Check browser status, then retry.'
+						)
+						logger.warning(error_msg)
+						return ActionResult(error=error_msg, success=False)
+					except FocusTargetError as focus_error:
+						if focus_error.code is FocusTargetCode.OBSERVATION_FAILED:
+							error_msg = (
+								f'Tab {params.tab_id} was already closed, but focus observation failed. {focus_error}'
+							)
+						else:
+							error_msg = str(focus_error)
+						logger.warning(error_msg)
+						return ActionResult(error=error_msg, success=False)
 					except Exception as focus_error:
-						logger.warning(f'Closed tab focus repair failed: {type(focus_error).__name__}: {focus_error}')
+						error_msg = (
+							f'Closed tab {params.tab_id} focus repair failed: '
+							f'{type(focus_error).__name__}: {focus_error}'
+						)
+						logger.warning(error_msg)
+						return ActionResult(error=error_msg, success=False)
 					memory = f'Tab #{params.tab_id} was already closed'
 					return ActionResult(extracted_content=memory, long_term_memory=memory)
 				error_msg = _tab_error_text('close', params.tab_id, error)
 				logger.warning(error_msg)
 				return ActionResult(error=error_msg, success=False)
 			except Exception as error:
-				error_msg = f'Failed to close tab {params.tab_id}: {error}'
+				error_msg = f'Failed to close tab {params.tab_id}: {type(error).__name__}: {error}'
 				logger.warning(error_msg)
 				return ActionResult(error=error_msg, success=False)
 
+			def _post_close_error(detail: str, *, unknown_detail: str) -> str:
+				try:
+					state = next(
+						(tab['state'] for tab in browser_session.tab_snapshot() if tab['target_id'] == target_id),
+						None,
+					)
+				except Exception:
+					state = None
+				if state == 'closed':
+					return f'Tab {params.tab_id} is closed, but {detail}. Check browser status before retrying.'
+				return unknown_detail
+
 			try:
-				event = browser_session.event_bus.dispatch(CloseTabEvent(target_id=target_id))
-				await event
-				await event.event_result(raise_if_any=True, raise_if_none=False)
+				budget = FocusTransitionBudget.start()
+				close_event = CloseTabEvent(
+					target_id=target_id,
+					focus_deadline_monotonic=budget.deadline,
+				)
+				close_event.event_timeout = max(
+					0.001,
+					min(close_event.event_timeout or budget.remaining(), budget.remaining()),
+				)
+				event = browser_session.event_bus.dispatch(close_event)
+				await event.event_result(
+					timeout=max(0.001, budget.remaining()),
+					raise_if_any=True,
+					raise_if_none=False,
+				)
+			except TimeoutError:
+				error_msg = _post_close_error(
+					'post-close handling timed out',
+					unknown_detail=(
+						f'Closing tab {params.tab_id} timed out. The tab may be closed. '
+						'Check browser status before retrying.'
+					),
+				)
+				logger.warning(error_msg)
+				return ActionResult(error=error_msg, success=False)
+			except FocusTargetError as error:
+				if error.code is FocusTargetCode.OBSERVATION_FAILED:
+					error_msg = f'Tab {params.tab_id} is closed, but focus observation failed. {error}'
+					logger.warning(error_msg)
+					return ActionResult(error=error_msg, success=False)
+				if error.code is FocusTargetCode.RECOVERY_FAILED:
+					logger.warning(str(error))
+					return ActionResult(error=str(error), success=False)
+				error_msg = _post_close_error(
+					f'post-close handling failed: {error}',
+					unknown_detail=f'Failed to close tab {params.tab_id}: {error}',
+				)
+				logger.warning(error_msg)
+				return ActionResult(error=error_msg, success=False)
 			except Exception as error:
-				error_msg = f'Failed to close tab {params.tab_id}: {error}'
+				error_msg = _post_close_error(
+					f'post-close handling failed: {type(error).__name__}: {error}',
+					unknown_detail=f'Failed to close tab {params.tab_id}: {type(error).__name__}: {error}',
+				)
 				logger.warning(error_msg)
 				return ActionResult(error=error_msg, success=False)
 
@@ -735,7 +862,9 @@ You will be given a query and the markdown of a webpage that has been filtered t
 
 				current_url = await browser_session.get_current_page_url()
 				extracted_content = (
-					f'<url>\n{current_url}\n</url>\n<query>\n{query}\n</query>\n<result>\n{response.completion}\n</result>'
+					f'<url>\n{current_url}\n</url>\n'
+					f'<query>\n{query}\n</query>\n'
+					f'<result>\n{response.completion}\n</result>'
 				)
 
 				# Simple memory handling
@@ -788,7 +917,9 @@ You will be given a query and the markdown of a webpage that has been filtered t
 					css_layout_viewport = metrics.get('cssLayoutViewport', {})
 
 					# Get viewport height, prioritizing cssVisualViewport
-					viewport_height = int(css_viewport.get('clientHeight') or css_layout_viewport.get('clientHeight', 1000))
+					viewport_height = int(
+						css_viewport.get('clientHeight') or css_layout_viewport.get('clientHeight', 1000)
+					)
 
 					logger.debug(f'Detected viewport height: {viewport_height}px')
 				except Exception as e:
@@ -845,7 +976,9 @@ You will be given a query and the markdown of a webpage that has been filtered t
 					if params.pages == 1.0:
 						long_term_memory = f'Scrolled {direction} {target} {viewport_height}px'.replace('  ', ' ')
 					else:
-						long_term_memory = f'Scrolled {direction} {target} {completed_scrolls:.1f} pages'.replace('  ', ' ')
+						long_term_memory = f'Scrolled {direction} {target} {completed_scrolls:.1f} pages'.replace(
+							'  ', ' '
+						)
 				else:
 					# For fractional pages <1.0, do single scroll
 					pixels = int(params.pages * viewport_height)
@@ -1442,6 +1575,7 @@ Validated Code (after quote fixing):
 		This provides a simpler API for tests and direct usage while maintaining backward compatibility.
 		"""
 		if name in self.registry.exclude_actions:
+
 			async def excluded_action(**_kwargs):
 				raise ActionAvailabilityError(
 					ActionAvailabilityCode.ACTION_EXCLUDED,
@@ -1607,7 +1741,7 @@ class CodeAgentTools(Tools[Context]):
 				logger.warning(f'[DEBUG] Looking for files to display: {params.files_to_display}')
 				logger.warning(f'[DEBUG] FileSystem directory: {fs_dir}')
 				logger.warning(f'[DEBUG] Current working directory: {os.getcwd()}')
-				
+
 				if self.display_files_in_done_text:
 					file_msg = ''
 					for file_name in params.files_to_display:
@@ -1628,9 +1762,9 @@ class CodeAgentTools(Tools[Context]):
 								paths_to_try.append(str(fs_dir / file_name))
 							# Check current working directory explicitly
 							paths_to_try.append(os.path.join(os.getcwd(), file_name))
-							
+
 							logger.warning(f'[DEBUG] File not in FileSystem, checking paths: {paths_to_try}')
-							
+
 							for path in paths_to_try:
 								exists = os.path.exists(path)
 								is_file = os.path.isfile(path) if exists else False
@@ -1646,10 +1780,10 @@ class CodeAgentTools(Tools[Context]):
 										break
 									except Exception as e:
 										logger.warning(f'Failed to read file {path}: {e}')
-							
+
 							if not file_found:
 								logger.warning(f'File not found in any location: {file_name}')
-								
+
 					if file_msg:
 						user_message += '\n\nAttachments:'
 						user_message += file_msg
@@ -1668,7 +1802,7 @@ class CodeAgentTools(Tools[Context]):
 							if fs_dir:
 								paths_to_try.append(str(fs_dir / file_name))
 							paths_to_try.append(os.path.join(os.getcwd(), file_name))
-							
+
 							for path in paths_to_try:
 								if os.path.exists(path) and os.path.isfile(path):
 									attachments.append(path)
@@ -1824,7 +1958,8 @@ class CodeAgentTools(Tools[Context]):
 				cdp_session = await browser_session.get_or_create_cdp_session()
 				try:
 					scroll_info = await cdp_session.cdp_client.send.Runtime.evaluate(
-						params={'expression': 'window.scrollY || window.pageYOffset || 0'}, session_id=cdp_session.session_id
+						params={'expression': 'window.scrollY || window.pageYOffset || 0'},
+						session_id=cdp_session.session_id,
 					)
 					current_scroll_y = scroll_info.get('result', {}).get('value', 0)
 				except Exception:

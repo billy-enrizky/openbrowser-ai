@@ -9,6 +9,7 @@ Usage:
 """
 
 import asyncio
+import contextlib
 import hashlib
 import inspect
 import json
@@ -457,9 +458,7 @@ _STARTUP_TRANSITIONS: dict[DaemonStartupPhase, frozenset[DaemonStartupPhase]] = 
     DaemonStartupPhase.CLEANING_STALE_LOCK: frozenset(
         {DaemonStartupPhase.ACQUIRING_OWNERSHIP, DaemonStartupPhase.FAILED}
     ),
-    DaemonStartupPhase.ACQUIRING_OWNERSHIP: frozenset(
-        {DaemonStartupPhase.BINDING_SOCKET, DaemonStartupPhase.FAILED}
-    ),
+    DaemonStartupPhase.ACQUIRING_OWNERSHIP: frozenset({DaemonStartupPhase.BINDING_SOCKET, DaemonStartupPhase.FAILED}),
     DaemonStartupPhase.BINDING_SOCKET: frozenset({DaemonStartupPhase.LISTENING, DaemonStartupPhase.FAILED}),
     DaemonStartupPhase.LISTENING: frozenset({DaemonStartupPhase.STOPPED, DaemonStartupPhase.FAILED}),
     DaemonStartupPhase.FAILED: frozenset(),
@@ -788,7 +787,9 @@ class DaemonServer:
             logger.warning('Detached daemon browser cleanup task failed', exc_info=True)
         else:
             if error is not None:
-                logger.warning('Detached daemon browser cleanup task failed', exc_info=(type(error), error, error.__traceback__))
+                logger.warning(
+                    'Detached daemon browser cleanup task failed', exc_info=(type(error), error, error.__traceback__)
+                )
 
     _CDP_ERROR_KEYWORDS = ('connectionclosederror', 'no close frame', 'websocket', 'connection closed')
 
@@ -883,12 +884,27 @@ class DaemonServer:
 
         browser: dict
         if self._session is not None and hasattr(self._session, 'lifecycle_snapshot'):
-            snapshot_value = self._session.lifecycle_snapshot()
-            browser = snapshot_value if isinstance(snapshot_value, dict) else {'phase': 'unknown'}
+            try:
+                snapshot_value = self._session.lifecycle_snapshot()
+            except Exception:
+                browser = {'phase': 'unknown'}
+                focus_snapshot = getattr(self._session, 'focus_snapshot', None)
+                if callable(focus_snapshot):
+                    with contextlib.suppress(Exception):
+                        focus_value = focus_snapshot()
+                        to_dict = getattr(focus_value, 'to_dict', None)
+                        if callable(to_dict):
+                            browser['focus'] = to_dict()
+            else:
+                browser = snapshot_value if isinstance(snapshot_value, dict) else {'phase': 'unknown'}
         elif self._session is not None:
             browser = {'phase': getattr(self._session, 'state', 'unknown')}
         else:
             browser = {'phase': 'stopped', 'last_error': self._browser_error}
+        if 'focus' not in browser:
+            from openbrowser.browser.focus import FocusSnapshot
+
+            browser['focus'] = FocusSnapshot.uninitialized().to_dict()
 
         try:
             from openbrowser.utils import get_openbrowser_version
@@ -1023,9 +1039,7 @@ class DaemonServer:
                             hint='Run `openbrowser-ai daemon reset` and retry.',
                         )
                     failed_session = self._session
-                    result = await asyncio.wait_for(
-                        executor.execute(code), timeout=self._exec_timeout
-                    )
+                    result = await asyncio.wait_for(executor.execute(code), timeout=self._exec_timeout)
 
                     # Recover while still holding the execution lock so the next
                     # request cannot run user code against the dead browser.
@@ -1253,9 +1267,7 @@ class DaemonServer:
                 # Windows: TCP on loopback only (no Unix sockets available).
                 # Any local process can connect; consider a shared-secret
                 # auth token if multi-user security is required.
-                self._server = await asyncio.start_server(
-                    self._handle_client, '127.0.0.1', WINDOWS_PORT
-                )
+                self._server = await asyncio.start_server(self._handle_client, '127.0.0.1', WINDOWS_PORT)
             else:
                 current_identity = _socket_path_identity(sock_path)
                 if socket_identity is None:
@@ -1273,9 +1285,7 @@ class DaemonServer:
                     # The PID file and owner lock prove this is the stale path.
                     sock_path.unlink(missing_ok=True)
                     self._startup_stale_socket_removed = True
-                self._server = await asyncio.start_unix_server(
-                    self._handle_client, path=str(sock_path)
-                )
+                self._server = await asyncio.start_unix_server(self._handle_client, path=str(sock_path))
                 bound_socket = True
                 # Captured immediately after the bind. On macOS a Unix socket
                 # fd reports the socket object, not the filesystem entry, so
