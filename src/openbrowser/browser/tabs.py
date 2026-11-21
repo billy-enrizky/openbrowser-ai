@@ -202,6 +202,8 @@ class TabRegistry:
 			created = record is None
 			if record is None:
 				self.register(target_id, url=url, title=title, state=TabState.OPEN)
+			elif record.state in (TabState.CLOSING, TabState.CRASHED):
+				self.update(target_id, url=url, title=title)
 			else:
 				self.update(target_id, url=url, title=title, state=TabState.OPEN, allow_reopen=allow_reopen)
 			record = self._tabs[target_id]

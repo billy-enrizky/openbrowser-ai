@@ -4,7 +4,7 @@ Covers CDPSession and BrowserSession event handlers and public methods.
 """
 
 import logging
-from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
 from cdp_use import CDPClient
@@ -972,11 +972,20 @@ class TestOnTabClosedEvent:
         current_tid = focus.target_id
         session._tab_registry.register(current_tid, url=focus.url, state=TabState.OPEN)
         fallback = _make_cdp_session(client=client, target_id="target-2", url="https://b.com")
+        client.send.Target.getTargets = AsyncMock(
+            return_value={
+                "targetInfos": [
+                    {"targetId": current_tid, "type": "page", "url": focus.url},
+                    {"targetId": fallback.target_id, "type": "page", "url": fallback.url},
+                ]
+            }
+        )
         sm.get_live_session_for_target = AsyncMock(return_value=fallback)
 
         await session.on_TabClosedEvent(TabClosedEvent(target_id=current_tid))
 
         assert session.focus_snapshot().target_id == "target-2"
+        sm.get_live_session_for_target.assert_awaited_with("target-2", budget=ANY)
         assert session.focus_snapshot().reason is FocusChangeReason.CLOSE_REPAIR
 
     async def test_tab_closed_other_tab_no_switch(self):

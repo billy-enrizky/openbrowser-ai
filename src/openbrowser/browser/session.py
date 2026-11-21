@@ -5159,7 +5159,7 @@ class BrowserSession(BaseModel):
 			include_chrome_extensions=True,
 			include_chrome_error=True,
 		)
-		self._tab_registry.sync_from_pages(authoritative_pages)
+		self._tab_registry.sync_from_pages(authoritative_pages, allow_reopen=True)
 		pages = await self._cdp_get_all_pages()
 
 		for i, page_target in enumerate(pages):
@@ -5355,7 +5355,7 @@ class BrowserSession(BaseModel):
 		if self._cdp_client_root is not None:
 			targets = await self.cdp_client.send.Target.getTargets()
 			pages = [target for target in targets.get('targetInfos', []) if target.get('type') in ('page', 'tab')]
-			self._tab_registry.sync_from_pages(pages)
+			self._tab_registry.sync_from_pages(pages, allow_reopen=True)
 
 		return self._tab_registry.resolve(tab_id)
 

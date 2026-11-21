@@ -76,12 +76,15 @@ def test_status_includes_browser_tabs(daemon_server):
 	)
 	session.agent_focus = focus_session
 	session._tab_registry.register('abc', url='https://example.com', state=TabState.OPEN, title='Example')
+	session._lifecycle.transition(LifecyclePhase.STARTING)
+	session._lifecycle.transition(LifecyclePhase.READY, increment_generation=True)
 	daemon_server._session = session
 
 	result = daemon_server._status_payload()
 
 	assert result['state'] == 'ready'
 	assert result['initialized'] is True
+	assert result['browser']['generation'] == 1
 	assert result['browser']['active_target_id'] == 'abc'
 	assert result['browser']['tabs'][0]['target_id'] == 'abc'
 	assert result['browser']['focus']['phase'] == 'focused'

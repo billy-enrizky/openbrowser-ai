@@ -311,3 +311,29 @@ def test_mark_closing_increments_the_close_attempt_token():
 	registry.mark_closing(target)
 
 	assert registry.get(target).close_attempt == first + 1
+
+
+def test_authoritative_sync_reopens_closed_but_preserves_protected_states():
+	registry = TabRegistry()
+	closed = 'AAAABBBBCCCCDDDD111122223333AAAA'
+	closing = 'AAAABBBBCCCCDDDD111122223333BBBB'
+	crashed = 'AAAABBBBCCCCDDDD111122223333CCCC'
+	registry.register(closed, state=TabState.OPEN)
+	registry.register(closing, state=TabState.OPEN)
+	registry.register(crashed, state=TabState.OPEN)
+	registry.mark_closed(closed)
+	registry.mark_closing(closing)
+	registry.mark_crashed(crashed, 'crashed')
+
+	registry.sync_from_pages(
+		[
+			{'targetId': closed, 'type': 'page'},
+			{'targetId': closing, 'type': 'page'},
+			{'targetId': crashed, 'type': 'page'},
+		],
+		allow_reopen=True,
+	)
+
+	assert registry.get(closed).state is TabState.OPEN
+	assert registry.get(closing).state is TabState.CLOSING
+	assert registry.get(crashed).state is TabState.CRASHED
