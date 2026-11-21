@@ -612,12 +612,6 @@
         "message": "Line too long (175 > 120)"
       }
     },
-    "I001": {
-      "2ae03c24054492f4": {
-        "count": 1,
-        "message": "Import block is un-sorted or un-formatted"
-      }
-    },
     "SIM118": {
       "12d3370facacd735": {
         "count": 1,
@@ -1154,6 +1148,10 @@
       "79d065ee83d76f0b": {
         "count": 1,
         "message": "Class StorageStatePhase inherits from both `str` and `enum.Enum`"
+      },
+      "7a345e5981a9568f": {
+        "count": 1,
+        "message": "Class StorageStateSavePhase inherits from both `str` and `enum.Enum`"
       }
     }
   },
@@ -1777,6 +1775,10 @@
       }
     },
     "E501": {
+      "13dd53ca618d29d3": {
+        "count": 1,
+        "message": "Line too long (121 > 120)"
+      },
       "263c14c12dac1866": {
         "count": 1,
         "message": "Line too long (128 > 120)"
@@ -1788,7 +1790,7 @@
     },
     "RUF019": {
       "1223691d83e42a33": {
-        "count": 2,
+        "count": 1,
         "message": "Unnecessary key check before dictionary access"
       }
     },
@@ -8372,6 +8374,34 @@
       "883776b155a8b142": {
         "count": 7,
         "message": "Use a single `with` statement with multiple contexts instead of nested `with` statements"
+      }
+    }
+  },
+  "tests/test_storage_state_lifecycle.py": {
+    "ASYNC220": {
+      "72a0a4ef23089e05": {
+        "count": 1,
+        "message": "Async functions should not create subprocesses with blocking methods"
+      }
+    },
+    "ASYNC240": {
+      "77a9dc073ad962f2": {
+        "count": 1,
+        "message": "Async functions should not perform blocking pathlib.Path operations"
+      }
+    },
+    "E501": {
+      "13dd53ca618d29d3": {
+        "count": 2,
+        "message": "Line too long (121 > 120)"
+      },
+      "4c340f748fa60c3c": {
+        "count": 1,
+        "message": "Line too long (125 > 120)"
+      },
+      "c244230907986d95": {
+        "count": 1,
+        "message": "Line too long (149 > 120)"
       }
     }
   },
