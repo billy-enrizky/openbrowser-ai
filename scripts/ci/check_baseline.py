@@ -22,7 +22,7 @@ from typing import Any
 RUFF_SELECT = "E,F,I,B,UP,SIM,ASYNC,RUF"
 LINE_LENGTH = 120
 MESSAGE_LIMIT = 160
-LINE_REFERENCE = re.compile(r"\bline \d+\b")
+LINE_REFERENCE = re.compile(r"\b(from|at) line \d+\b")
 
 
 def tool_path(name: str) -> str:
@@ -39,7 +39,7 @@ def relative(value: str, root: Path) -> str:
 
 
 def normalize_message(message: str) -> str:
-    return LINE_REFERENCE.sub("line <n>", " ".join(message.split()))
+    return LINE_REFERENCE.sub(r"\1 line <n>", " ".join(message.split()))
 
 
 def message_hash(message: str) -> str:

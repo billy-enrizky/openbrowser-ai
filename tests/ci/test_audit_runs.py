@@ -99,5 +99,5 @@ def test_fetch_jobs_uses_the_run_attempt_and_paginates(monkeypatch) -> None:
     jobs = fetch_jobs("owner/repo", 42, 3, "token")
 
     assert len(jobs) == 101
-    assert all("/attempts/3/jobs" in path for path in paths)
+    assert all("/runs/42/attempts/3/jobs" in path for path in paths)
     assert len(paths) == 2

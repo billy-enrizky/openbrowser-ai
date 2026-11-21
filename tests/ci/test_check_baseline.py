@@ -40,6 +40,10 @@ def test_message_hash_ignores_line_numbers() -> None:
     assert message_hash("Line too long (124 > 120)") != message_hash("Line too long (125 > 120)")
 
 
+def test_message_hash_keeps_literal_content_distinct() -> None:
+    assert message_hash("Literal['line 7']") != message_hash("Literal['line 8']")
+
+
 def test_increased_count_is_a_regression() -> None:
     current = {("a.py", "E501", "same"): entry(2, "line too long")}
     baseline = {("a.py", "E501", "same"): entry(1, "line too long")}
