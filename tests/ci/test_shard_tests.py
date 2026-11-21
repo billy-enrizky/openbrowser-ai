@@ -51,8 +51,12 @@ def test_balance_is_reasonable_on_recorded_data() -> None:
     root = Path(__file__).resolve().parents[2]
     files = sorted(str(path.relative_to(root)).replace("\\", "/") for path in (root / "tests").rglob("test_*.py"))
     timings = load_timings(root / "tests" / "ci" / "test_timings.json")
-    totals = shard_totals(allocate(files, timings, 4), timings)
-    assert max(totals) - min(totals) <= max(1.0, max(totals) * 0.15)
+    shards = 4
+    totals = shard_totals(allocate(files, timings, shards), timings)
+    weights = fill_missing(files, timings)
+    lower_bound = max(max(weights.values()), sum(weights.values()) / shards)
+    lpt_bound = (4 / 3 - 1 / (3 * shards)) * lower_bound
+    assert max(totals) <= lpt_bound + 1e-6
 
 
 def test_empty_selection_produces_empty_shards() -> None:
