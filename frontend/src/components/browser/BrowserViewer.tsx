@@ -47,7 +47,10 @@ export function BrowserViewer({ className }: BrowserViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const vncContainerRef = useRef<HTMLDivElement>(null);
   const isMountedRef = useRef(true);
-  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("disconnected");
+  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>(
+    vncInfo ? "connecting" : "disconnected"
+  );
+  const [connectedVncUrl, setConnectedVncUrl] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [key, setKey] = useState(0); // Used to force reconnection
@@ -105,11 +108,12 @@ export function BrowserViewer({ className }: BrowserViewerProps) {
   // Handle connection events - only update if mounted
   const handleConnect = useCallback(() => {
     if (isMountedRef.current) {
+      setConnectedVncUrl(resolvedVncUrl);
       setConnectionStatus("connected");
       setErrorMessage(null);
       setIsReconnecting(false);
     }
-  }, []);
+  }, [resolvedVncUrl]);
 
   const handleDisconnect = useCallback(() => {
     if (isMountedRef.current && !isReconnecting) {
@@ -224,25 +228,16 @@ export function BrowserViewer({ className }: BrowserViewerProps) {
     }, 100);
   }, []);
 
-  // Set connecting status when VNC info changes
-  useEffect(() => {
-    if (vncInfo && browserViewerOpen) {
-      setConnectionStatus("connecting");
-    }
-  }, [vncInfo, browserViewerOpen]);
-
-  // Reset state when viewer closes
-  useEffect(() => {
-    if (!browserViewerOpen) {
-      setConnectionStatus("disconnected");
-      setErrorMessage(null);
-      setIsInteractive(false);
-    }
-  }, [browserViewerOpen]);
-
   if (!browserViewerOpen) {
     return null;
   }
+
+  const effectiveConnectionStatus: ConnectionStatus =
+    connectionStatus === "error"
+      ? "error"
+      : resolvedVncUrl && connectedVncUrl !== resolvedVncUrl
+        ? "connecting"
+        : connectionStatus;
 
   return (
     <AnimatePresence>
@@ -273,19 +268,19 @@ export function BrowserViewer({ className }: BrowserViewerProps) {
           <div className="flex items-center gap-2">
             <Monitor className="w-4 h-4 text-cyan-400" />
             <span className="text-sm font-medium text-zinc-200">Live Browser</span>
-            {connectionStatus === "connected" && (
+            {effectiveConnectionStatus === "connected" && (
               <span className="flex items-center gap-1 px-2 py-0.5 text-xs bg-green-500/20 text-green-400 rounded-full">
                 <span className="w-1.5 h-1.5 bg-green-400 rounded-full animate-pulse" />
                 Connected
               </span>
             )}
-            {connectionStatus === "connecting" && (
+            {effectiveConnectionStatus === "connecting" && (
               <span className="flex items-center gap-1 px-2 py-0.5 text-xs bg-yellow-500/20 text-yellow-400 rounded-full">
                 <Loader2 className="w-3 h-3 animate-spin" />
                 Connecting
               </span>
             )}
-            {connectionStatus === "error" && (
+            {effectiveConnectionStatus === "error" && (
               <span className="px-2 py-0.5 text-xs bg-red-500/20 text-red-400 rounded-full">
                 Error
               </span>
@@ -297,11 +292,11 @@ export function BrowserViewer({ className }: BrowserViewerProps) {
               variant="ghost"
               size="icon"
               onClick={reconnect}
-              disabled={connectionStatus === "connecting"}
+              disabled={effectiveConnectionStatus === "connecting"}
               title="Reconnect"
               className="w-7 h-7"
             >
-              <RefreshCw className={cn("w-4 h-4", connectionStatus === "connecting" && "animate-spin")} />
+              <RefreshCw className={cn("w-4 h-4", effectiveConnectionStatus === "connecting" && "animate-spin")} />
             </Button>
             <Button
               variant="ghost"
@@ -339,7 +334,7 @@ export function BrowserViewer({ className }: BrowserViewerProps) {
 
         {/* Browser View Container - VNC takes priority, screenshot as fallback/overlay */}
         <div ref={containerRef} className="flex-1 relative bg-black overflow-hidden">
-          {vncInfo && resolvedVncUrl && connectionStatus !== "error" ? (
+          {vncInfo && resolvedVncUrl && effectiveConnectionStatus !== "error" ? (
             /* VNC connection -- always render when available */
             <div ref={vncContainerRef} className="absolute inset-0 flex items-center justify-center overflow-hidden">
               <div
@@ -379,7 +374,7 @@ export function BrowserViewer({ className }: BrowserViewerProps) {
               </div>
 
               {/* Screenshot overlay while VNC is still connecting */}
-              {connectionStatus !== "connected" && latestScreenshot && (
+              {effectiveConnectionStatus !== "connected" && latestScreenshot && (
                 <div className="absolute inset-0 flex items-center justify-center overflow-hidden z-10">
                   <img
                     src={`data:image/png;base64,${latestScreenshot}`}
@@ -393,7 +388,7 @@ export function BrowserViewer({ className }: BrowserViewerProps) {
               )}
 
               {/* Take control button overlay */}
-              {connectionStatus === "connected" && !isInteractive && (
+              {effectiveConnectionStatus === "connected" && !isInteractive && (
                 <div className="absolute bottom-4 right-4 z-20">
                   <Button
                     onClick={toggleInteractive}
@@ -428,7 +423,7 @@ export function BrowserViewer({ className }: BrowserViewerProps) {
         </div>
 
         {/* Footer with info */}
-        {vncInfo && connectionStatus === "connected" && (
+        {vncInfo && effectiveConnectionStatus === "connected" && (
           <div className="px-4 py-1.5 border-t border-zinc-800/50 bg-zinc-900/95 flex items-center justify-between">
             <p className="text-xs text-zinc-500">
               {vncInfo.width}x{vncInfo.height} - {isInteractive ? "Click and type to interact" : "View only mode"}

@@ -18,6 +18,7 @@ import {
   ChevronDown,
   ChevronUp,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { FileAttachment as FileAttachmentType, FileType } from "@/types";
 
@@ -25,22 +26,19 @@ interface FileAttachmentProps {
   file: FileAttachmentType;
 }
 
-// Get icon based on file type
-function getFileIcon(type: FileType) {
-  switch (type) {
-    case "csv":
-      return FileSpreadsheet;
-    case "json":
-      return FileJson;
-    case "code":
-      return FileCode;
-    case "image":
-      return FileImage;
-    case "text":
-      return FileText;
-    default:
-      return File;
-  }
+const FILE_ICONS: Record<FileType, LucideIcon> = {
+  csv: FileSpreadsheet,
+  json: FileJson,
+  text: FileText,
+  image: FileImage,
+  pdf: FileText,
+  code: FileCode,
+  unknown: File,
+};
+
+function FileIcon({ type, className }: { type: FileType; className?: string }) {
+  const Icon = FILE_ICONS[type] ?? File;
+  return <Icon className={className} aria-hidden="true" />;
 }
 
 // Get file type from filename
@@ -336,7 +334,6 @@ export function FileAttachment({ file }: FileAttachmentProps) {
   // All files are collapsed by default - user can expand them
   const [isExpanded, setIsExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
-  const Icon = getFileIcon(file.type);
 
   const handleDownload = useCallback(() => {
     // Prefer content-based download over URL (file:// URLs don't work in browser)
@@ -527,7 +524,7 @@ export function FileAttachment({ file }: FileAttachmentProps) {
             file.type === "text" && "bg-zinc-500/20 text-zinc-400",
             file.type === "unknown" && "bg-zinc-500/20 text-zinc-400"
           )}>
-            <Icon className="w-5 h-5" />
+            <FileIcon type={file.type} className="w-5 h-5" />
           </div>
           <div className="min-w-0">
             <div className="text-sm font-medium text-zinc-200 truncate">
@@ -608,8 +605,6 @@ interface FilePreviewModalProps {
 export function FilePreviewModal({ file, onClose }: FilePreviewModalProps) {
   if (!file) return null;
 
-  const Icon = getFileIcon(file.type);
-
   return (
     <AnimatePresence>
       <motion.div
@@ -629,7 +624,7 @@ export function FilePreviewModal({ file, onClose }: FilePreviewModalProps) {
           {/* Modal Header */}
           <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-700/50">
             <div className="flex items-center gap-3">
-              <Icon className="w-5 h-5 text-zinc-400" />
+              <FileIcon type={file.type} className="w-5 h-5 text-zinc-400" />
               <span className="font-medium text-zinc-200">{file.name}</span>
             </div>
             <button

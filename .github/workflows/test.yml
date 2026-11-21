@@ -254,6 +254,28 @@ jobs:
           uv run --locked python -c \
             'import app.main; from fastapi import FastAPI; assert isinstance(app.main.app, FastAPI); import app.main as again; assert again.app is app.main.app'
 
+  frontend-static:
+    name: frontend-static
+    runs-on: ${{ vars.CI_UBUNTU_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.4"
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: bun install --frozen-lockfile
+      - name: Type check frontend
+        working-directory: frontend
+        run: bun check
+      - name: Lint frontend
+        working-directory: frontend
+        run: bun run lint
+      - name: Build frontend
+        working-directory: frontend
+        run: bun run build
+
   record-timings:
     name: record-timings
     needs: [test]
@@ -329,7 +351,7 @@ jobs:
   ci-gate:
     name: ci-gate
     if: always()
-    needs: [selection-guard, static, test, backend-smoke]
+    needs: [selection-guard, static, test, backend-smoke, frontend-static]
     runs-on: ${{ vars.CI_UBUNTU_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 5
     steps:
@@ -340,10 +362,11 @@ jobs:
           STATIC: ${{ needs.static.result }}
           TEST: ${{ needs.test.result }}
           BACKEND: ${{ needs.backend-smoke.result }}
+          FRONTEND: ${{ needs.frontend-static.result }}
         run: |
           set -euo pipefail
-          echo "selection-guard=$SELECTION static=$STATIC test=$TEST backend-smoke=$BACKEND"
-          for result in "$SELECTION" "$STATIC" "$TEST" "$BACKEND"; do
+          echo "selection-guard=$SELECTION static=$STATIC test=$TEST backend-smoke=$BACKEND frontend-static=$FRONTEND"
+          for result in "$SELECTION" "$STATIC" "$TEST" "$BACKEND" "$FRONTEND"; do
             if [ "$result" != "success" ]; then
               echo "ci-gate failed: a required job did not succeed" >&2
               exit 1
