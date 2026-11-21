@@ -856,7 +856,16 @@ class BrowserSession(BaseModel):
 			)
 		wait_deadline = min(budget.deadline, asyncio.get_running_loop().time() + 2.0)
 		for _attempt in range(20):
-			session = await manager.get_live_session_for_target(target_id, budget=budget)
+			try:
+				session = await manager.get_live_session_for_target(target_id, budget=budget)
+			except TimeoutError as error:
+				raise FocusTargetError(
+					f'Focus session lookup timed out for target {target_id[-8:]}.',
+					code=FocusTargetCode.TIMEOUT,
+					phase=self._focus_state.phase,
+					target_id=target_id,
+					created_target_id=created_target_id,
+				) from error
 			if session is not None:
 				return session
 			remaining = wait_deadline - asyncio.get_running_loop().time()
@@ -932,21 +941,34 @@ class BrowserSession(BaseModel):
 			return False
 		return live is not None and live.target_id == target_id and live.session_id == session_id
 
-	async def _focus_checkpoint_is_live(
+	async def _focus_checkpoint_liveness(
 		self,
 		checkpoint: _FocusCheckpoint,
 		budget: FocusTransitionBudget,
-	) -> bool:
+	) -> bool | None:
+		"""Return live, dead, or unknown for a prior focus checkpoint."""
 		snapshot = checkpoint.snapshot
 		if snapshot.phase is not FocusPhase.FOCUSED:
 			return True
-		return await self._focus_exact_session_is_live(
-			snapshot.target_id,
-			snapshot.session_id,
-			budget,
-			phase=snapshot.phase,
-			use_active_ids=True,
-		)
+		if snapshot.target_id is None or snapshot.session_id is None:
+			return False
+		record = self._tab_registry.get(snapshot.target_id)
+		if record is not None and record.state in (TabState.CLOSING, TabState.CLOSED, TabState.CRASHED):
+			return False
+		manager = self._session_manager
+		if manager is None:
+			return None
+		try:
+			active_ids = await self._await_focus_operation(
+				manager.active_session_ids(snapshot.target_id, budget=budget),
+				budget,
+				target_id=snapshot.target_id,
+				phase=snapshot.phase,
+				target_type='page',
+			)
+		except Exception:
+			return None
+		return snapshot.session_id in active_ids
 
 	async def _restore_or_lose_focus_locked(
 		self,
@@ -954,10 +976,25 @@ class BrowserSession(BaseModel):
 		budget: FocusTransitionBudget,
 	) -> FocusChangeReason | None:
 		"""Restore a still-live prior focus, or publish loss and request recovery."""
-		if await self._focus_checkpoint_is_live(checkpoint, budget):
+		rollback_budget = budget if budget.remaining() > 0 else FocusTransitionBudget.start(CLOSE_RECONCILIATION_SECONDS)
+		checkpoint_liveness = await self._focus_checkpoint_liveness(checkpoint, rollback_budget)
+		previous_target_id = checkpoint.snapshot.target_id
+		if checkpoint_liveness is True:
 			self._restore_focus_locked(checkpoint)
 			return None
-		previous_target_id = checkpoint.snapshot.target_id
+		if checkpoint_liveness is None:
+			self._focus_lost_locked(
+				FocusTargetError(
+					'The previous focus target liveness could not be verified.',
+					code=FocusTargetCode.TARGET_LIVENESS_UNKNOWN,
+					phase=self._focus_state.phase,
+					target_id=previous_target_id,
+					target_type='page',
+				),
+				FocusChangeReason.LIVENESS_RECOVERY,
+				previous_target_id=previous_target_id,
+			)
+			return None
 		reason = (
 			self._focus_reason_for_detach(previous_target_id)
 			if previous_target_id
@@ -1504,6 +1541,10 @@ class BrowserSession(BaseModel):
 				for target_id in created_target_ids:
 					await self._initialize_focus_page(target_id, budget)
 				raise
+			recovery_root = self._cdp_client_root
+			recovery_epoch = self._focus_epoch
+			recovery_lifecycle_generation = self._lifecycle.generation
+			retry_focus_generation = self._focus_state.generation
 			try:
 				retry_target_id = await self._await_focus_operation(
 					self._cdp_create_new_page('about:blank'),
@@ -1514,6 +1555,30 @@ class BrowserSession(BaseModel):
 			except FocusTargetError as create_error:
 				create_error.created_target_id = created_target_ids[0] if created_target_ids else None
 				raise create_error from error
+			except asyncio.CancelledError:
+				raise
+			except Exception as create_error:
+				raise FocusTargetError(
+					f'Focus recovery could not create an emergency page: '
+					f'{type(create_error).__name__}: {create_error}',
+					code=FocusTargetCode.RECOVERY_FAILED,
+					phase=self._focus_state.phase,
+					target_id=excluded_target_id,
+					created_target_id=created_target_ids[0] if created_target_ids else None,
+				) from create_error
+			if (
+				self._cdp_client_root is not recovery_root
+				or self._focus_epoch != recovery_epoch
+				or self._lifecycle.generation != recovery_lifecycle_generation
+				or self._focus_state.generation != retry_focus_generation
+			):
+				raise FocusTargetError(
+					'Browser or focus state changed while the recovery page was being created.',
+					code=FocusTargetCode.STALE_TRANSITION,
+					phase=self._focus_state.phase,
+					target_id=excluded_target_id,
+					created_target_id=retry_target_id,
+				) from error
 			self._tab_registry.register(retry_target_id, url='about:blank', state=TabState.OPEN)
 			created_target_ids.append(retry_target_id)
 			if self._focus_state.phase is FocusPhase.FOCUSED:
@@ -1522,7 +1587,7 @@ class BrowserSession(BaseModel):
 					code=FocusTargetCode.STALE_TRANSITION,
 					phase=self._focus_state.phase,
 					target_id=self._focus_state.target_id,
-				)
+				) from error
 			retry_generation = self._focus_state.generation
 			try:
 				result = await self._focus_transition_to_target(
@@ -1584,9 +1649,13 @@ class BrowserSession(BaseModel):
 		target_id: str,
 		*,
 		expected_generation: int | None = None,
+		expected_close_attempt: int | None = None,
 	) -> None:
 		"""Reconcile an uncertain close outside the action deadline."""
 		focus_generation = self._focus_state.generation if expected_generation is None else expected_generation
+		if expected_close_attempt is None:
+			record = self._tab_registry.get(target_id)
+			expected_close_attempt = record.close_attempt if record is not None else None
 
 		async def reconcile() -> None:
 			budget = FocusTransitionBudget.start(CLOSE_RECONCILIATION_SECONDS)
@@ -1595,6 +1664,7 @@ class BrowserSession(BaseModel):
 					target_id,
 					budget,
 					expected_generation=focus_generation,
+					expected_close_attempt=expected_close_attempt,
 				)
 			except asyncio.CancelledError:
 				raise
@@ -1614,27 +1684,45 @@ class BrowserSession(BaseModel):
 		budget: FocusTransitionBudget,
 		*,
 		expected_generation: int,
+		expected_close_attempt: int | None,
 	) -> None:
 		"""Resolve CLOSING to OPEN or CLOSED without extending the close action."""
 		record = self._tab_registry.get(target_id)
-		if record is None or record.state in (TabState.OPEN, TabState.OPENING):
+		if (
+			record is None
+			or record.state in (TabState.OPEN, TabState.OPENING)
+			or (expected_close_attempt is not None and record.close_attempt != expected_close_attempt)
+		):
 			return
-		await self._mark_focus_lost_for_uncertain_close(
-			target_id,
-			budget,
-			expected_generation=expected_generation,
-		)
 		if budget.remaining() <= 0:
 			return
-		still_open = await self._target_liveness(target_id, budget)
+		liveness_seconds = max(0.001, budget.remaining() / 2)
+		liveness_budget = FocusTransitionBudget(
+			min(budget.deadline, asyncio.get_running_loop().time() + liveness_seconds)
+		)
+		try:
+			still_open = await asyncio.wait_for(
+				self._target_liveness(target_id, liveness_budget),
+				timeout=max(0.001, liveness_budget.remaining()),
+			)
+		except TimeoutError:
+			still_open = None
 		record = self._tab_registry.get(target_id)
 		if record is None:
+			return
+		if expected_close_attempt is not None and record.close_attempt != expected_close_attempt:
 			return
 		if still_open is True:
 			if record.state is TabState.CLOSING:
 				self._tab_registry.update(target_id, state=TabState.OPEN, allow_reopen=True)
 			await self._restore_focus_after_close_reopen(target_id, budget)
 			return
+		await self._mark_focus_lost_for_uncertain_close(
+			target_id,
+			budget,
+			expected_generation=expected_generation,
+			expected_close_attempt=expected_close_attempt,
+		)
 		if still_open is False:
 			if record.state is TabState.CLOSING:
 				self._tab_registry.mark_closed(target_id)
@@ -1651,6 +1739,7 @@ class BrowserSession(BaseModel):
 		budget: FocusTransitionBudget,
 		*,
 		expected_generation: int,
+		expected_close_attempt: int | None,
 	) -> None:
 		"""Stop reporting focus on a target whose close outcome is unknown."""
 		remaining = budget.remaining()
@@ -1662,7 +1751,11 @@ class BrowserSession(BaseModel):
 			return
 		try:
 			record = self._tab_registry.get(target_id)
-			if record is None or record.state in (TabState.OPEN, TabState.OPENING):
+			if (
+				record is None
+				or record.state in (TabState.OPEN, TabState.OPENING)
+				or (expected_close_attempt is not None and record.close_attempt != expected_close_attempt)
+			):
 				return
 			snapshot = self._focus_state
 			if (
@@ -1710,10 +1803,34 @@ class BrowserSession(BaseModel):
 		finally:
 			self._focus_lock.release()
 
+	def _schedule_reopened_focus_restore(self, target_id: str, *, expected_generation: int) -> None:
+		"""Retry one confirmed reopen on a separate bounded deadline."""
+
+		async def restore() -> None:
+			snapshot = self._focus_state
+			if (
+				snapshot.phase is not FocusPhase.LOST
+				or snapshot.previous_target_id != target_id
+				or snapshot.generation != expected_generation
+			):
+				return
+			budget = FocusTransitionBudget.start(CLOSE_RECONCILIATION_SECONDS)
+			await self._restore_focus_after_close_reopen(
+				target_id,
+				budget,
+				reschedule_on_timeout=False,
+			)
+
+		task = asyncio.create_task(restore())
+		self._focus_observer_tasks.add(task)
+		task.add_done_callback(self._focus_observer_done)
+
 	async def _restore_focus_after_close_reopen(
 		self,
 		target_id: str,
 		budget: FocusTransitionBudget,
+		*,
+		reschedule_on_timeout: bool = True,
 	) -> None:
 		"""Restore focus when a timed-out close proves the target is still open."""
 		snapshot = self._focus_state
@@ -1738,6 +1855,21 @@ class BrowserSession(BaseModel):
 				result.snapshot,
 			)
 		except FocusTargetError as error:
+			record = self._tab_registry.get(target_id)
+			current = self._focus_state
+			if (
+				reschedule_on_timeout
+				and error.code is FocusTargetCode.TIMEOUT
+				and record is not None
+				and record.state is TabState.OPEN
+				and current.phase is FocusPhase.LOST
+				and current.previous_target_id == target_id
+			):
+				self._schedule_reopened_focus_restore(
+					target_id,
+					expected_generation=current.generation,
+				)
+				return
 			self.logger.warning(
 				f'Could not restore focus after a reopened close: {error.code.value}: {error}'
 			)
@@ -3708,7 +3840,13 @@ class BrowserSession(BaseModel):
 					if budget.remaining() <= 0:
 						self._schedule_close_reconciliation(event.target_id)
 					else:
-						still_open = await self._target_liveness(event.target_id, budget)
+						try:
+							still_open = await self._target_liveness(event.target_id, budget)
+						except asyncio.CancelledError:
+							self._schedule_close_reconciliation(event.target_id)
+							raise
+						except Exception:
+							still_open = None
 						record = self._tab_registry.get(event.target_id)
 						if record is not None and record.state is TabState.CLOSING:
 							if still_open is True:
@@ -4261,6 +4399,37 @@ class BrowserSession(BaseModel):
 
 		return storage_state
 
+	def _ensure_session_returnable(
+		self,
+		session: CDPSession,
+		*,
+		implicit_snapshot: FocusSnapshot | None = None,
+	) -> None:
+		"""Reject a stale or closed binding before returning it to a caller."""
+		record = self._tab_registry.get(session.target_id)
+		if record is not None and record.state in (TabState.CLOSING, TabState.CLOSED, TabState.CRASHED):
+			raise FocusTargetError(
+				f'Target {session.target_id[-8:]} is {record.state.value} and cannot return a session.',
+				code=FocusTargetCode.TAB_NOT_LIVE,
+				phase=self._focus_state.phase,
+				target_id=session.target_id,
+				target_type='page',
+			)
+		if implicit_snapshot is None:
+			return
+		current = self._focus_state
+		if (
+			current.generation != implicit_snapshot.generation
+			or not current.is_exact_pair(session.target_id, session.session_id)
+		):
+			raise FocusTargetError(
+				'Focus changed while resolving the implicit browser session.',
+				code=FocusTargetCode.STALE_TRANSITION,
+				phase=current.phase,
+				target_id=current.target_id or session.target_id,
+				target_type='page',
+			)
+
 	async def get_or_create_cdp_session(
 		self,
 		target_id: TargetID | None = None,
@@ -4304,7 +4473,16 @@ class BrowserSession(BaseModel):
 		expected_generation = snapshot.generation if implicit_target else None
 		if focus:
 			if snapshot.phase is FocusPhase.FOCUSED and snapshot.target_id == target_id:
-				session = await self._session_manager.get_live_session_for_target(target_id)
+				session = await self._await_focus_operation(
+					self._session_manager.get_live_session_for_target(
+						target_id,
+						budget=transition_budget,
+					),
+					transition_budget,
+					target_id=target_id,
+					phase=snapshot.phase,
+					target_type='page',
+				)
 				if session is not None and session.session_id == snapshot.session_id:
 					try:
 						await self._await_focus_operation(
@@ -4328,6 +4506,10 @@ class BrowserSession(BaseModel):
 								use_active_ids=True,
 							)
 						if not missing_session and still_live:
+							self._ensure_session_returnable(
+								session,
+								implicit_snapshot=snapshot if implicit_target else None,
+							)
 							return session
 						remaining_session_ids: tuple[str, ...] = ()
 						try:
@@ -4347,8 +4529,19 @@ class BrowserSession(BaseModel):
 						)
 						if implicit_target and self._focus_state.phase is FocusPhase.FOCUSED:
 							replacement = self.agent_focus
-							if replacement is not None:
+							if replacement is not None and replacement.target_id == target_id:
+								self._ensure_session_returnable(
+									replacement,
+									implicit_snapshot=self._focus_state,
+								)
 								return replacement
+							raise FocusTargetError(
+								'Focus changed to a different target while resolving the implicit browser session.',
+								code=FocusTargetCode.STALE_TRANSITION,
+								phase=self._focus_state.phase,
+								target_id=self._focus_state.target_id,
+								target_type='page',
+							) from error
 						raise FocusTargetError(
 							f'Focus session for target {target_id[-8:]} is no longer live.',
 							code=FocusTargetCode.TARGET_DETACHED,
@@ -4356,6 +4549,10 @@ class BrowserSession(BaseModel):
 							target_id=target_id,
 							target_type='page',
 						) from error
+					self._ensure_session_returnable(
+						session,
+						implicit_snapshot=snapshot if implicit_target else None,
+					)
 					return session
 				if session is not None:
 					result = await self._focus_transition_to_target(
@@ -4365,6 +4562,10 @@ class BrowserSession(BaseModel):
 						activate=False,
 						probe=False,
 						expected_generation=snapshot.generation,
+					)
+					self._ensure_session_returnable(
+						result.session,
+						implicit_snapshot=result.snapshot if implicit_target else None,
 					)
 					return result.session
 			result = await self._focus_transition_to_target(
@@ -4389,9 +4590,14 @@ class BrowserSession(BaseModel):
 				raise
 			except Exception:
 				pass
+			self._ensure_session_returnable(
+				result.session,
+				implicit_snapshot=result.snapshot if implicit_target else None,
+			)
 			return result.session
 
 		session = await self._get_focus_session_locked(target_id, transition_budget)
+		self._ensure_session_returnable(session)
 		return session
 
 	@property

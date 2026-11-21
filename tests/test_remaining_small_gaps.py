@@ -1643,9 +1643,15 @@ class TestAboutBlankWatchdog:
         # Simulate no tabs scenario
         session._cdp_get_all_pages.return_value = []
 
-        # Create a mock event that dispatch returns
-        mock_awaitable = AsyncMock()
-        eb.dispatch.return_value = mock_awaitable()
+        class DispatchResult:
+            def __await__(self):
+                yield
+                return self
+
+            async def event_result(self, **kwargs):
+                return None
+
+        eb.dispatch.return_value = DispatchResult()
 
         await watchdog._check_and_ensure_about_blank_tab()
         watchdog._show_dvd_screensaver_on_about_blank_tabs.assert_awaited_once()

@@ -158,8 +158,12 @@ class SessionManager:
 			if budget is None:
 				await self._lock.acquire()
 			else:
+				if budget.remaining() <= 0:
+					raise TimeoutError('Focus budget expired before session lookup')
 				await asyncio.wait_for(self._lock.acquire(), timeout=max(0.001, budget.remaining()))
 			acquired = True
+			if budget is not None and budget.remaining() <= 0:
+				raise TimeoutError('Focus budget expired during session lookup')
 			return tuple(sorted(self._target_sessions.get(target_id, set())))
 		finally:
 			if acquired:
@@ -181,8 +185,12 @@ class SessionManager:
 			if budget is None:
 				await self._lock.acquire()
 			else:
+				if budget.remaining() <= 0:
+					raise TimeoutError('Focus budget expired before session lookup')
 				await asyncio.wait_for(self._lock.acquire(), timeout=max(0.001, budget.remaining()))
 			acquired = True
+			if budget is not None and budget.remaining() <= 0:
+				raise TimeoutError('Focus budget expired during session lookup')
 			active_ids = tuple(sorted(self._target_sessions.get(target_id, set())))
 			if not active_ids:
 				return None

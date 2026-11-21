@@ -194,6 +194,12 @@ def test_focus_event_fields_are_optional_and_deadlines_stay_in_process():
         AgentFocusChangedEvent(target_id="target", url="about:blank", focus_budget_seconds=float("nan"))
 
 
+async def test_explicit_zero_event_budget_is_expired():
+    budget = FocusTransitionBudget.from_event(deadline_monotonic=None, budget_seconds=0)
+    assert budget.remaining() == 0.0
+    assert budget.expired() is True
+
+
 def test_focus_transition_budget_uses_one_absolute_deadline(monkeypatch):
     from openbrowser.browser import focus as focus_module
 
@@ -548,17 +554,24 @@ async def test_delayed_partial_rebind_cannot_override_newer_focus():
     task = asyncio.create_task(
         session._handle_detached_session(focus.target_id, focus.session_id, (rebound.session_id,))
     )
-    await entered.wait()
-    await session._focus_transition_to_target(
-        replacement.target_id,
-        reason=FocusChangeReason.SWITCH,
-        budget=FocusTransitionBudget.start(),
-        activate=False,
-        probe=False,
-    )
-    release.set()
-    with pytest.raises(FocusTargetError) as error:
-        await task
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=1.0)
+        await session._focus_transition_to_target(
+            replacement.target_id,
+            reason=FocusChangeReason.SWITCH,
+            budget=FocusTransitionBudget.start(),
+            activate=False,
+            probe=False,
+        )
+    finally:
+        release.set()
+    try:
+        with pytest.raises(FocusTargetError) as error:
+            await asyncio.wait_for(task, timeout=1.0)
+    finally:
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
 
     assert error.value.code is FocusTargetCode.STALE_TRANSITION
     assert session.agent_focus is replacement
@@ -586,17 +599,24 @@ async def test_delayed_accessor_rebind_cannot_override_newer_focus():
 
     manager.get_live_session_for_target = AsyncMock(side_effect=live_session)
     task = asyncio.create_task(session.get_or_create_cdp_session(focus.target_id, focus=True))
-    await entered.wait()
-    await session._focus_transition_to_target(
-        replacement.target_id,
-        reason=FocusChangeReason.SWITCH,
-        budget=FocusTransitionBudget.start(),
-        activate=False,
-        probe=False,
-    )
-    release.set()
-    with pytest.raises(FocusTargetError) as error:
-        await task
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=1.0)
+        await session._focus_transition_to_target(
+            replacement.target_id,
+            reason=FocusChangeReason.SWITCH,
+            budget=FocusTransitionBudget.start(),
+            activate=False,
+            probe=False,
+        )
+    finally:
+        release.set()
+    try:
+        with pytest.raises(FocusTargetError) as error:
+            await asyncio.wait_for(task, timeout=1.0)
+    finally:
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
 
     assert error.value.code is FocusTargetCode.STALE_TRANSITION
     assert session.agent_focus is replacement
@@ -650,7 +670,23 @@ async def test_implicit_accessor_during_switch_cannot_restore_old_focus():
     assert session.focus_snapshot().target_id == replacement.target_id
 
 
-async def test_implicit_accessor_recovers_when_fast_path_session_is_gone():
+async def test_focused_session_fast_path_uses_the_shared_budget():
+    session, _client, focus, manager, _replacement = _focused_session("PAGE-TARGET-000000", "page-session")
+
+    async def slow_lookup(target_id, *, budget=None):
+        await asyncio.sleep(0.05)
+        return focus
+
+    manager.get_live_session_for_target = AsyncMock(side_effect=slow_lookup)
+    with pytest.raises(FocusTargetError) as error:
+        await session.get_or_create_cdp_session(
+            budget=FocusTransitionBudget.start(0.02),
+        )
+
+    assert error.value.code is FocusTargetCode.TIMEOUT
+
+
+async def test_implicit_accessor_rejects_a_replacement_target_after_missing_session():
     session, client, focus, manager, replacement = _focused_session("PAGE-TARGET-000000", "page-session")
     focus.cdp_client.send.Runtime.runIfWaitingForDebugger = AsyncMock(
         side_effect=RuntimeError("Session with given id not found")
@@ -668,12 +704,44 @@ async def test_implicit_accessor_recovers_when_fast_path_session_is_gone():
         return None
 
     manager.get_live_session_for_target = AsyncMock(side_effect=live_session)
-    result = await asyncio.wait_for(session.get_or_create_cdp_session(), timeout=1.0)
+    with pytest.raises(FocusTargetError) as error:
+        await asyncio.wait_for(session.get_or_create_cdp_session(), timeout=1.0)
 
-    assert result is replacement
+    assert error.value.code is FocusTargetCode.STALE_TRANSITION
     snapshot = session.focus_snapshot()
     assert snapshot.phase is FocusPhase.FOCUSED
     assert snapshot.target_id == replacement.target_id
+    assert session.agent_focus is replacement
+
+
+async def test_implicit_accessor_cannot_return_a_new_focus_after_a_blocked_missing_session():
+    session, _client, focus, manager, replacement = _focused_session("PAGE-TARGET-000000", "page-session")
+    manager.get_live_session_for_target = AsyncMock(
+        side_effect=lambda target_id, *, budget=None: focus if target_id == focus.target_id else replacement
+    )
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def slow_missing_resume(**kwargs):
+        entered.set()
+        await release.wait()
+        raise RuntimeError("Session with given id not found")
+
+    focus.cdp_client.send.Runtime.runIfWaitingForDebugger = AsyncMock(side_effect=slow_missing_resume)
+    task = asyncio.create_task(session.get_or_create_cdp_session())
+    await asyncio.wait_for(entered.wait(), timeout=1.0)
+    await session._focus_transition_to_target(
+        replacement.target_id,
+        reason=FocusChangeReason.SWITCH,
+        budget=FocusTransitionBudget.start(),
+        activate=False,
+        probe=False,
+    )
+    release.set()
+    with pytest.raises(FocusTargetError) as error:
+        await asyncio.wait_for(task, timeout=1.0)
+
+    assert error.value.code is FocusTargetCode.STALE_TRANSITION
+    assert session.focus_snapshot().target_id == replacement.target_id
     assert session.agent_focus is replacement
 
 
@@ -773,6 +841,229 @@ async def test_recovery_creates_one_page_and_reports_created_target():
     assert session.agent_focus is created
 
 
+async def test_expired_switch_budget_restores_a_live_prior_focus():
+    session, client, focus, manager, replacement = _focused_session("PAGE-TARGET-000000", "page-session")
+    manager.get_live_session_for_target = AsyncMock(
+        side_effect=lambda target_id, *, budget=None: replacement if target_id == replacement.target_id else focus
+    )
+    manager.active_session_ids = AsyncMock(return_value=(focus.session_id,))
+
+    async def slow_probe(**kwargs):
+        await asyncio.sleep(0.05)
+        return {"result": {"value": 2}}
+
+    client.send.Runtime.evaluate = AsyncMock(side_effect=slow_probe)
+    with pytest.raises(FocusTargetError) as error:
+        await session._focus_transition_to_target(
+            replacement.target_id,
+            reason=FocusChangeReason.SWITCH,
+            budget=FocusTransitionBudget.start(0.02),
+            activate=False,
+            probe=True,
+        )
+
+    assert error.value.code is FocusTargetCode.TIMEOUT
+    assert session.agent_focus is focus
+    assert session.focus_snapshot().target_id == focus.target_id
+
+
+async def test_unknown_rollback_liveness_restores_the_prior_focus_instead_of_losing_it():
+    session, client, focus, manager, replacement = _focused_session("PAGE-TARGET-000000", "page-session")
+    manager.get_live_session_for_target = AsyncMock(
+        side_effect=lambda target_id, *, budget=None: replacement if target_id == replacement.target_id else focus
+    )
+    manager.active_session_ids = AsyncMock(side_effect=RuntimeError("liveness unavailable"))
+
+    async def slow_probe(**kwargs):
+        await asyncio.sleep(0.05)
+        return {"result": {"value": 2}}
+
+    client.send.Runtime.evaluate = AsyncMock(side_effect=slow_probe)
+    with pytest.raises(FocusTargetError):
+        await session._focus_transition_to_target(
+            replacement.target_id,
+            reason=FocusChangeReason.SWITCH,
+            budget=FocusTransitionBudget.start(0.02),
+            activate=False,
+            probe=True,
+        )
+
+    snapshot = session.focus_snapshot()
+    assert session.agent_focus is None
+    assert snapshot.phase is FocusPhase.LOST
+    assert snapshot.previous_target_id == focus.target_id
+    assert snapshot.reason is FocusChangeReason.LIVENESS_RECOVERY
+    assert snapshot.last_error is not None
+    assert snapshot.last_error.code is FocusTargetCode.TARGET_LIVENESS_UNKNOWN
+
+
+async def test_focus_session_lookup_timeout_is_typed():
+    session, _client, focus, manager, _replacement = _focused_session("PAGE-TARGET-000000", "page-session")
+    manager.get_live_session_for_target = AsyncMock(side_effect=TimeoutError)
+
+    with pytest.raises(FocusTargetError) as error:
+        await session._get_focus_session_locked(
+            focus.target_id,
+            FocusTransitionBudget.start(1.0),
+        )
+
+    assert error.value.code is FocusTargetCode.TIMEOUT
+
+
+async def test_recovery_retry_create_failure_is_typed():
+    session, _client, _focus, _manager, _replacement = _focused_session("PAGE-TARGET-000000", "page-session")
+    recovery_error = FocusTargetError(
+        "No page available.",
+        code=FocusTargetCode.NO_PAGE_AVAILABLE,
+        phase=FocusPhase.RECOVERING,
+    )
+    with (
+        patch.object(session, "_focus_transition_to_target", AsyncMock(side_effect=recovery_error)),
+        patch.object(session, "_cdp_create_new_page", AsyncMock(side_effect=RuntimeError("create failed"))),
+        pytest.raises(FocusTargetError) as error,
+    ):
+        await session._recover_agent_focus(
+            "CRASHED-TARGET-0000",
+            reason=FocusChangeReason.CRASH_RECOVERY,
+            budget=FocusTransitionBudget.start(),
+        )
+
+    assert error.value.code is FocusTargetCode.RECOVERY_FAILED
+    assert "create failed" in str(error.value)
+    assert isinstance(error.value.__cause__, RuntimeError)
+
+
+async def test_recovery_retry_rejects_a_reset_after_page_creation():
+    session, _client, _focus, _manager, _replacement = _focused_session("PAGE-TARGET-000000", "page-session")
+    recovery_error = FocusTargetError(
+        "No page available.",
+        code=FocusTargetCode.NO_PAGE_AVAILABLE,
+        phase=FocusPhase.RECOVERING,
+    )
+
+    async def create_after_reset(*args, **kwargs):
+        session._focus_epoch += 1
+        return "RESET-TARGET-00000"
+
+    with (
+        patch.object(session, "_focus_transition_to_target", AsyncMock(side_effect=recovery_error)),
+        patch.object(session, "_cdp_create_new_page", AsyncMock(side_effect=create_after_reset)),
+        pytest.raises(FocusTargetError) as error,
+    ):
+        await session._recover_agent_focus(
+            "CRASHED-TARGET-0000",
+            reason=FocusChangeReason.CRASH_RECOVERY,
+            budget=FocusTransitionBudget.start(),
+        )
+
+    assert error.value.code is FocusTargetCode.STALE_TRANSITION
+    assert session._tab_registry.get("RESET-TARGET-00000") is None
+
+
+async def test_close_reconciliation_ignores_a_newer_close_attempt():
+    session, _client, focus, _manager, _replacement = _focused_session("PAGE-TARGET-000000", "page-session")
+    session._tab_registry.register(focus.target_id, state=TabState.OPEN)
+    session._tab_registry.mark_closing(focus.target_id)
+    first_attempt = session._tab_registry.get(focus.target_id).close_attempt
+    session._tab_registry.mark_closing(focus.target_id)
+
+    with patch.object(session, "_target_liveness", AsyncMock(return_value=True)):
+        await session._reconcile_uncertain_close(
+            focus.target_id,
+            FocusTransitionBudget.start(),
+            expected_generation=session.focus_snapshot().generation,
+            expected_close_attempt=first_attempt,
+        )
+
+    record = session._tab_registry.get(focus.target_id)
+    assert record is not None and record.state is TabState.CLOSING
+    assert session.focus_snapshot().phase is FocusPhase.FOCUSED
+
+
+async def test_reopen_restore_timeout_schedules_a_bounded_retry():
+    session, _client, focus, _manager, _replacement = _focused_session("PAGE-TARGET-000000", "page-session")
+    session._tab_registry.register(focus.target_id, state=TabState.OPEN)
+    session._focus_lost_locked(
+        FocusTargetError(
+            "Close outcome was unknown.",
+            code=FocusTargetCode.TARGET_DETACHED,
+            phase=FocusPhase.FOCUSED,
+            target_id=focus.target_id,
+        ),
+        FocusChangeReason.CLOSE_REPAIR,
+        previous_target_id=focus.target_id,
+    )
+    expected_generation = session.focus_snapshot().generation
+    timeout_error = FocusTargetError(
+        "Restore timed out.",
+        code=FocusTargetCode.TIMEOUT,
+        phase=FocusPhase.RECOVERING,
+        target_id=focus.target_id,
+    )
+
+    async def timeout_after_recovering(*args, **kwargs):
+        session._begin_focus_change_locked(
+            FocusChangeReason.CLOSE_REPAIR,
+            None,
+            FocusPhase.RECOVERING,
+        )
+        session._focus_lost_locked(
+            FocusTargetError(
+                "Restore timed out.",
+                code=FocusTargetCode.TIMEOUT,
+                phase=FocusPhase.RECOVERING,
+                target_id=focus.target_id,
+            ),
+            FocusChangeReason.CLOSE_REPAIR,
+            previous_target_id=focus.target_id,
+        )
+        raise timeout_error
+
+    with (
+        patch.object(session, "_focus_transition_to_target", side_effect=timeout_after_recovering),
+        patch.object(session, "_schedule_reopened_focus_restore") as schedule,
+    ):
+        await session._restore_focus_after_close_reopen(
+            focus.target_id,
+            FocusTransitionBudget.start(0.01),
+        )
+
+    schedule.assert_called_once_with(
+        focus.target_id,
+        expected_generation=session.focus_snapshot().generation,
+    )
+    assert session.focus_snapshot().generation > expected_generation
+
+
+async def test_implicit_session_return_rechecks_focus_after_resume():
+    session, _client, focus, manager, replacement = _focused_session("PAGE-TARGET-000000", "page-session")
+    manager.get_live_session_for_target = AsyncMock(
+        side_effect=lambda target_id, *, budget=None: focus if target_id == focus.target_id else replacement
+    )
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def slow_resume(**kwargs):
+        entered.set()
+        await release.wait()
+
+    focus.cdp_client.send.Runtime.runIfWaitingForDebugger = AsyncMock(side_effect=slow_resume)
+    task = asyncio.create_task(session.get_or_create_cdp_session())
+    await asyncio.wait_for(entered.wait(), timeout=1.0)
+    await session._focus_transition_to_target(
+        replacement.target_id,
+        reason=FocusChangeReason.SWITCH,
+        budget=FocusTransitionBudget.start(),
+        activate=False,
+        probe=False,
+    )
+    release.set()
+    with pytest.raises(FocusTargetError) as error:
+        await asyncio.wait_for(task, timeout=1.0)
+
+    assert error.value.code is FocusTargetCode.STALE_TRANSITION
+    assert session.focus_snapshot().target_id == replacement.target_id
+
+
 async def test_recovery_creates_an_emergency_page_after_attach_failure(monkeypatch):
     session, client, _focus, manager, _replacement = _focused_session("PAGE-TARGET-000000", "page-session")
     existing_target = "EXISTING-TARGET-000"
@@ -832,7 +1123,7 @@ async def test_reset_during_gated_recovery_cannot_restore_or_late_commit():
                 budget=FocusTransitionBudget.start(),
             )
         )
-        await entered.wait()
+        await asyncio.wait_for(entered.wait(), timeout=1.0)
         session._force_reset_runtime_state(replace_event_bus=False)
         release.set()
         with pytest.raises(FocusTargetError):
@@ -863,7 +1154,7 @@ async def test_reset_during_switch_reports_the_committed_prior_target():
             probe=True,
         )
     )
-    await entered.wait()
+    await asyncio.wait_for(entered.wait(), timeout=1.0)
     session._focus_epoch += 1
     session._focus_lost_on_reset()
     release.set()
@@ -900,7 +1191,7 @@ async def test_normal_reset_overrides_a_cancelled_recovery_reason():
             budget=FocusTransitionBudget.start(),
         )
     )
-    await entered.wait()
+    await asyncio.wait_for(entered.wait(), timeout=1.0)
 
     async def clear():
         task.cancel()
@@ -1117,7 +1408,7 @@ async def test_service_switch_times_out_behind_queue_and_cannot_commit_late(monk
         AsyncMock(return_value=replacement.target_id),
     )
     pending = session.event_bus.dispatch(Blocker())
-    await entered.wait()
+    await asyncio.wait_for(entered.wait(), timeout=1.0)
     try:
         result = await tools.registry.execute_action(
             "switch",
@@ -1370,17 +1661,18 @@ async def test_cleanup_rechecks_reopened_tab_after_waiting_for_focus_lock():
     session._tab_registry.register(focus.target_id, state=TabState.OPEN)
     session._tab_registry.mark_closing(focus.target_id)
     await session._focus_lock.acquire()
-    session._schedule_close_reconciliation(focus.target_id)
-    for _attempt in range(100):
-        if getattr(session._focus_lock, "_waiters", ()):
-            break
-        await asyncio.sleep(0)
-    else:
+    with patch.object(session, "_target_liveness", AsyncMock(return_value=None)):
+        session._schedule_close_reconciliation(focus.target_id)
+        for _attempt in range(100):
+            if getattr(session._focus_lock, "_waiters", ()):
+                break
+            await asyncio.sleep(0)
+        else:
+            session._focus_lock.release()
+            raise AssertionError("Cleanup never waited for the focus lock")
+        session._tab_registry.update(focus.target_id, state=TabState.OPEN, allow_reopen=True)
         session._focus_lock.release()
-        raise AssertionError("Cleanup never waited for the focus lock")
-    session._tab_registry.update(focus.target_id, state=TabState.OPEN, allow_reopen=True)
-    session._focus_lock.release()
-    await _drain_focus_tasks(session)
+        await _drain_focus_tasks(session)
 
     snapshot = session.focus_snapshot()
     assert snapshot.phase is FocusPhase.FOCUSED
@@ -1416,15 +1708,17 @@ async def test_cancelled_close_returns_before_cleanup_and_uses_a_separate_budget
     session._tab_registry.register(focus.target_id, state=TabState.OPEN)
     cleanup_budgets: list[FocusTransitionBudget] = []
     repair_called = asyncio.Event()
+    reconciliation_started = asyncio.Event()
+    release_reconciliation = asyncio.Event()
 
     async def liveness(target_id, budget):
-        await asyncio.sleep(0.15)
+        reconciliation_started.set()
+        await release_reconciliation.wait()
         cleanup_budgets.append(budget)
         return False
 
     async def slow_repair(target_id, budget):
         repair_called.set()
-        await asyncio.sleep(0.25)
         return session.focus_snapshot()
 
     client.send.Target.closeTarget = AsyncMock(side_effect=asyncio.CancelledError)
@@ -1432,7 +1726,6 @@ async def test_cancelled_close_returns_before_cleanup_and_uses_a_separate_budget
         target_id=focus.target_id,
         focus_deadline_monotonic=asyncio.get_running_loop().time() + 1.0,
     )
-    started = asyncio.get_running_loop().time()
     with (
         patch.object(session, "_target_liveness", side_effect=liveness),
         patch.object(session, "_repair_focus_after_closed_tab", side_effect=slow_repair),
@@ -1443,8 +1736,9 @@ async def test_cancelled_close_returns_before_cleanup_and_uses_a_separate_budget
             pass
         else:
             raise AssertionError("Close cancellation did not propagate")
-        elapsed = asyncio.get_running_loop().time() - started
-        assert elapsed < 0.1
+        await asyncio.wait_for(reconciliation_started.wait(), timeout=1.0)
+        assert release_reconciliation.is_set() is False
+        release_reconciliation.set()
         await _drain_focus_tasks(session)
     assert cleanup_budgets
     assert repair_called.is_set()
@@ -1452,6 +1746,29 @@ async def test_cancelled_close_returns_before_cleanup_and_uses_a_separate_budget
     assert session.focus_snapshot().phase is FocusPhase.LOST
     record = session._tab_registry.get(focus.target_id)
     assert record is not None and record.state is TabState.CLOSED
+
+
+async def test_action_tab_resolution_consumes_the_focus_budget(monkeypatch):
+    from openbrowser.browser import focus as focus_module
+
+    session, _client, _focus, _manager, _replacement = _focused_session("PAGE-TARGET-000000", "page-session")
+    monkeypatch.setattr(focus_module, "FOCUS_TRANSITION_BUDGET_SECONDS", 0.02)
+
+    async def slow_resolution(tab_id):
+        await asyncio.sleep(0.05)
+        return "PAGE-TARGET-000000"
+
+    object.__setattr__(session, "get_target_id_from_tab_id", AsyncMock(side_effect=slow_resolution))
+    tools = Tools()
+    tools.browser_session = session
+    for action in ("switch", "close"):
+        result = await tools.registry.execute_action(
+            action,
+            {"tab_id": "0000"},
+            browser_session=session,
+        )
+        assert result.success is False
+        assert "timed out" in (result.error or "").lower()
 
 
 async def test_close_action_reports_post_close_observer_failure_truthfully():

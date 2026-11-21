@@ -50,13 +50,13 @@ class TabRecord:
 	updated_at: float = 0.0
 	parent_target_id: str | None = None
 	error: str | None = None
+	close_attempt: int = 0
 
 	def touch(self, *, now: float | None = None) -> None:
 		self.updated_at = time.time() if now is None else now
 
 
 _PROTECTED_STATES = frozenset({TabState.CLOSING, TabState.CLOSED, TabState.CRASHED})
-_TERMINAL_STATES = frozenset({TabState.CLOSED, TabState.CRASHED})
 
 
 def _can_transition(current: TabState, requested: TabState, *, allow_reopen: bool) -> bool:
@@ -73,6 +73,8 @@ def _can_transition(current: TabState, requested: TabState, *, allow_reopen: boo
 	if current is TabState.CLOSED:
 		return allow_reopen and requested in {TabState.OPEN, TabState.OPENING}
 	if current is TabState.CRASHED:
+		if requested is TabState.CLOSED:
+			return True
 		return allow_reopen and requested in {TabState.OPEN, TabState.OPENING}
 	return False
 
@@ -156,12 +158,15 @@ class TabRegistry:
 		if state is not None and _can_transition(record.state, state, allow_reopen=allow_reopen):
 			if record.state in _PROTECTED_STATES and state in {TabState.OPEN, TabState.OPENING}:
 				record.created_at = now
+				record.error = None
 			record.state = state
 		record.touch(now=now)
 		return record
 
 	def mark_closing(self, target_id: str) -> None:
-		self.update(target_id, state=TabState.CLOSING)
+		record = self.update(target_id, state=TabState.CLOSING)
+		if record is not None:
+			record.close_attempt += 1
 
 	def mark_closed(self, target_id: str) -> None:
 		self.update(target_id, state=TabState.CLOSED)
@@ -172,8 +177,18 @@ class TabRegistry:
 			return
 		record.error = _bounded_text(error, limit=FOCUS_TEXT_LIMIT)
 
-	def sync_from_pages(self, pages: Iterable[dict[str, Any]], *, allow_reopen: bool = False) -> None:
-		"""Update the registry from an authoritative CDP page target list."""
+	def sync_from_pages(
+		self,
+		pages: Iterable[dict[str, Any]],
+		*,
+		allow_reopen: bool = False,
+		complete: bool = True,
+	) -> None:
+		"""Update the registry from a CDP page target list.
+
+		Set ``complete=False`` for URL-filtered eligibility lists, which must not
+		close registered tabs that are merely omitted from the filter.
+		"""
 		seen: set[str] = set()
 		now = time.time()
 		for page in pages:
@@ -194,10 +209,11 @@ class TabRegistry:
 				record.created_at = now
 			record.touch(now=now)
 
-		for target_id, record in self._tabs.items():
-			if target_id not in seen and record.state not in _TERMINAL_STATES:
-				record.state = TabState.CLOSED
-				record.touch(now=now)
+		if complete:
+			for target_id, record in self._tabs.items():
+				if target_id not in seen and record.state is not TabState.CLOSED:
+					record.state = TabState.CLOSED
+					record.touch(now=now)
 
 	def live_page_candidates(
 		self,
@@ -207,7 +223,7 @@ class TabRegistry:
 	) -> list[TabRecord]:
 		"""Return live page records in deterministic recency order."""
 		page_list = list(pages)
-		self.sync_from_pages(page_list)
+		self.sync_from_pages(page_list, complete=False)
 		live_ids = {
 			str(page.get('targetId') or page.get('target_id') or '')
 			for page in page_list
@@ -301,6 +317,7 @@ class TabRegistry:
 				'active': active_target_id == record.target_id,
 				'parent_target_id': record.parent_target_id,
 				'error': record.error,
+				'close_attempt': record.close_attempt,
 				'created_at': record.created_at,
 				'updated_at': record.updated_at,
 			}

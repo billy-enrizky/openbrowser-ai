@@ -13,6 +13,7 @@ from openbrowser.browser.focus import (
     FocusSnapshot,
     FocusTargetCode,
     FocusTargetError,
+    FocusTransitionBudget,
 )
 from openbrowser.browser.session_manager import SessionManager
 from openbrowser.browser.tabs import TabRegistry, TabState
@@ -348,6 +349,7 @@ class TestSessionManagerHandleTargetDetached:
         session = _make_mock_browser_session()
         session._cdp_client_root.send.Target.getTargets = AsyncMock(return_value={'targetInfos': []})
         session._cdp_session_pool['target-1'] = MagicMock()
+        session._tab_registry.register('target-1', url='https://live.example', state=TabState.OPEN)
         sm = SessionManager(session)
         sm._target_sessions['target-1'] = {'session-1'}
         sm._session_to_target['session-1'] = 'target-1'
@@ -369,6 +371,7 @@ class TestSessionManagerHandleTargetDetached:
             return_value={'targetInfos': [{'targetId': 'target-1', 'type': 'page', 'url': 'https://live.example'}]}
         )
         session._cdp_session_pool['target-1'] = MagicMock()
+        session._tab_registry.register('target-1', url='https://live.example', state=TabState.OPEN)
         sm = SessionManager(session)
         sm._target_sessions['target-1'] = {'session-1'}
         sm._session_to_target['session-1'] = 'target-1'
@@ -378,6 +381,8 @@ class TestSessionManagerHandleTargetDetached:
 
         for call in session.event_bus.dispatch.call_args_list:
             assert 'TabClosed' not in type(call.args[0]).__name__
+        record = session._tab_registry.get('target-1')
+        assert record is not None and record.state is TabState.OPEN
 
     async def test_does_not_guess_when_target_absence_is_unknown(self):
         session = _make_mock_browser_session()
@@ -487,6 +492,17 @@ class TestSessionManagerExactSessions:
         sm = SessionManager(session)
 
         assert await sm.get_live_session_for_target('missing') is None
+
+    async def test_budgeted_session_lookups_reject_expired_budget(self):
+        session = _make_mock_browser_session()
+        sm = SessionManager(session)
+        sm._target_sessions['target-1'] = {'session-1'}
+        expired = FocusTransitionBudget(asyncio.get_running_loop().time() - 1.0)
+
+        with pytest.raises(TimeoutError):
+            await sm.active_session_ids('target-1', budget=expired)
+        with pytest.raises(TimeoutError):
+            await sm.get_live_session_for_target('target-1', budget=expired)
 
 
 @pytest.mark.asyncio

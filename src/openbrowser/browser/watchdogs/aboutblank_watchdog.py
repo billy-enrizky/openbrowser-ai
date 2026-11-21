@@ -119,6 +119,7 @@ class AboutBlankWatchdog(BaseWatchdog):
 				self.logger.debug('[AboutBlankWatchdog] No tabs exist, creating new about:blank DVD screensaver tab')
 				navigate_event = self.event_bus.dispatch(NavigateToUrlEvent(url='about:blank', new_tab=True))
 				await navigate_event
+				await navigate_event.event_result(raise_if_any=True, raise_if_none=False)
 				# Show DVD screensaver on the new tab
 				await self._show_dvd_screensaver_on_about_blank_tabs()
 			# Otherwise there are tabs, don't create new ones to avoid interfering

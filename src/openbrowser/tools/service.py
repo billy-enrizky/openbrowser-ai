@@ -568,9 +568,12 @@ class Tools(Generic[Context]):
 		)
 		async def switch(params: SwitchTabAction, browser_session: BrowserSession):
 			# Simple switch tab logic
+			budget = FocusTransitionBudget.start()
 			try:
-				target_id = await browser_session.get_target_id_from_tab_id(params.tab_id)
-				budget = FocusTransitionBudget.start()
+				target_id = await asyncio.wait_for(
+					browser_session.get_target_id_from_tab_id(params.tab_id),
+					timeout=max(0.001, budget.remaining()),
+				)
 				switch_event = SwitchTabEvent(
 					target_id=target_id,
 					focus_deadline_monotonic=budget.deadline,
@@ -616,8 +619,16 @@ class Tools(Generic[Context]):
 		)
 		async def close(params: CloseTabAction, browser_session: BrowserSession):
 			# Simple close tab logic
+			budget = FocusTransitionBudget.start()
 			try:
-				target_id = await browser_session.get_target_id_from_tab_id(params.tab_id)
+				target_id = await asyncio.wait_for(
+					browser_session.get_target_id_from_tab_id(params.tab_id),
+					timeout=max(0.001, budget.remaining()),
+				)
+			except TimeoutError:
+				error_msg = f'Resolving tab {params.tab_id} timed out. Check browser status before retrying.'
+				logger.warning(error_msg)
+				return ActionResult(error=error_msg, success=False)
 			except TabError as error:
 				if error.candidates:
 					error_msg = _tab_error_text('close', params.tab_id, error)
@@ -639,7 +650,6 @@ class Tools(Generic[Context]):
 				):
 					closed_target_id = focused_target
 				if closed_target_id is not None:
-					budget = FocusTransitionBudget.start()
 					try:
 						closed_event = TabClosedEvent(
 							target_id=closed_target_id,
@@ -701,7 +711,6 @@ class Tools(Generic[Context]):
 				return unknown_detail
 
 			try:
-				budget = FocusTransitionBudget.start()
 				close_event = CloseTabEvent(
 					target_id=target_id,
 					focus_deadline_monotonic=budget.deadline,

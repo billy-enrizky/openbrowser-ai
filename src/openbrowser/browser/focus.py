@@ -41,6 +41,7 @@ class FocusChangeReason(StrEnum):
     DETACH_RECOVERY = "detach_recovery"
     CRASH_RECOVERY = "crash_recovery"
     RESPONSIVENESS_RECOVERY = "responsiveness_recovery"
+    LIVENESS_RECOVERY = "liveness_recovery"
     RESET = "reset"
 
 
@@ -58,6 +59,7 @@ class FocusTargetCode(StrEnum):
     OBSERVATION_FAILED = "observation_failed"
     STALE_TRANSITION = "stale_transition"
     TIMEOUT = "timeout"
+    TARGET_LIVENESS_UNKNOWN = "target_liveness_unknown"
 
 
 _DEFAULT_HINTS: dict[FocusTargetCode, str] = {
@@ -72,6 +74,7 @@ _DEFAULT_HINTS: dict[FocusTargetCode, str] = {
     FocusTargetCode.OBSERVATION_FAILED: "Focus changed. Check browser status before retrying a page-changing action.",
     FocusTargetCode.STALE_TRANSITION: "Check browser status. The browser or focus state changed during the operation.",
     FocusTargetCode.TIMEOUT: "Check browser status, then retry after the browser responds.",
+    FocusTargetCode.TARGET_LIVENESS_UNKNOWN: "Check browser status before retrying. The prior target may have closed.",
 }
 
 
@@ -123,6 +126,12 @@ class FocusTransitionBudget:
                 raise ValueError("Focus deadline must be finite")
             return cls(deadline)
         seconds = budget_seconds if budget_seconds is not None else default_seconds
+        if seconds is not None:
+            duration = float(seconds)
+            if not math.isfinite(duration):
+                raise ValueError("Focus transition budget must be finite")
+            if duration == 0:
+                return cls(asyncio.get_running_loop().time())
         return cls.start(seconds)
 
     def remaining(self) -> float:

@@ -122,10 +122,10 @@ def _make_watchdog(watchdog_class, session=None, event_bus=None):
 class TestAboutBlankWatchdog:
     """Cover lines 91-106, 123-124, 252-253 in aboutblank_watchdog.py."""
 
-    def _make_watchdog(self, session=None):
+    def _make_watchdog(self, session=None, event_bus=None):
         from openbrowser.browser.watchdogs.aboutblank_watchdog import AboutBlankWatchdog
 
-        return _make_watchdog(AboutBlankWatchdog, session=session)
+        return _make_watchdog(AboutBlankWatchdog, session=session, event_bus=event_bus)
 
     @pytest.mark.asyncio
     async def test_check_and_ensure_about_blank_tab_no_tabs(self):
@@ -134,20 +134,25 @@ class TestAboutBlankWatchdog:
         session._cdp_get_all_pages = AsyncMock(return_value=[])
 
         class DispatchResult:
+            def __init__(self):
+                self.event_result_called = False
+
             def __await__(self):
                 yield
                 return self
 
             async def event_result(self, **kwargs):
+                self.event_result_called = True
                 return None
 
+        result = DispatchResult()
         session.event_bus = MagicMock()
-        session.event_bus.dispatch = MagicMock(return_value=DispatchResult())
+        session.event_bus.dispatch = MagicMock(return_value=result)
 
-        watchdog = self._make_watchdog(session=session)
+        watchdog = self._make_watchdog(session=session, event_bus=session.event_bus)
         await watchdog._check_and_ensure_about_blank_tab()
-        # Should dispatch NavigateToUrlEvent for about:blank
         session.event_bus.dispatch.assert_called()
+        assert result.event_result_called is True
 
     @pytest.mark.asyncio
     async def test_check_and_ensure_about_blank_tab_has_tabs(self):

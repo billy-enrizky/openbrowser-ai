@@ -248,3 +248,66 @@ def test_cold_reconciliation_breaks_equal_timestamps_by_target_id():
 
 	assert [record.target_id for record in candidates] == [first, second]
 	assert registry.get(first).created_at == registry.get(second).created_at
+
+
+def test_mark_closed_retires_a_crashed_record():
+	registry = TabRegistry()
+	target = 'AAAABBBBCCCCDDDD1111222233335555'
+	registry.register(target, state=TabState.OPEN)
+	registry.mark_crashed(target, 'crashed')
+
+	registry.mark_closed(target)
+
+	record = registry.get(target)
+	assert record is not None and record.state is TabState.CLOSED
+
+
+def test_sync_from_pages_retires_missing_crashed_only_when_complete():
+	registry = TabRegistry()
+	target = 'AAAABBBBCCCCDDDD1111222233336666'
+	registry.register(target, state=TabState.OPEN)
+	registry.mark_crashed(target, 'crashed')
+
+	registry.sync_from_pages([], complete=False)
+	assert registry.get(target).state is TabState.CRASHED
+
+	registry.sync_from_pages([])
+	assert registry.get(target).state is TabState.CLOSED
+
+
+def test_reopen_clears_the_crash_error():
+	registry = TabRegistry()
+	target = 'AAAABBBBCCCCDDDD1111222233337777'
+	registry.register(target, state=TabState.OPEN)
+	registry.mark_crashed(target, 'crashed')
+
+	registry.update(target, state=TabState.OPEN, allow_reopen=True)
+
+	record = registry.get(target)
+	assert record is not None and record.state is TabState.OPEN
+	assert record.error is None
+
+
+def test_filtered_live_page_candidates_do_not_close_omitted_tabs():
+	registry = TabRegistry()
+	visible = 'AAAABBBBCCCCDDDD1111222233338888'
+	settings = 'AAAABBBBCCCCDDDD1111222233339999'
+	registry.register(visible, state=TabState.OPEN)
+	registry.register(settings, url='chrome://settings', state=TabState.OPEN)
+
+	candidates = registry.live_page_candidates([{'targetId': visible, 'type': 'page'}])
+
+	assert [record.target_id for record in candidates] == [visible]
+	assert registry.get(settings).state is TabState.OPEN
+
+
+def test_mark_closing_increments_the_close_attempt_token():
+	registry = TabRegistry()
+	target = 'AAAABBBBCCCCDDDD111122223333ABCD'
+	registry.register(target, state=TabState.OPEN)
+
+	registry.mark_closing(target)
+	first = registry.get(target).close_attempt
+	registry.mark_closing(target)
+
+	assert registry.get(target).close_attempt == first + 1
