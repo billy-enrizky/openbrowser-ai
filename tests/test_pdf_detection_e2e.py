@@ -146,6 +146,10 @@ async def test_real_pdf_navigation_detects_and_saves_validated_bytes(pdf_path):
             final_cached_path = watchdog._session_pdf_urls.get(cache_url)
             assert final_cached_path is not None
             assert download_path == final_cached_path
+            trigger_outcomes = [
+                outcome for outcome in browser.download_outcomes() if outcome.get("path") == download_path
+            ]
+            assert any(outcome.get("source") == "session_cache" for outcome in trigger_outcomes)
             saved = Path(download_path)
             assert saved.exists()
             assert saved.read_bytes().startswith(b"%PDF-")

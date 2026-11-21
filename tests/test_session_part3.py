@@ -986,6 +986,44 @@ class TestGetAllFrames:
         assert "background-frame" in all_frames
         assert all_frames["background-frame"]["frameTargetId"] == "background-target"
 
+    async def test_detached_target_does_not_abort_the_background_scan(self):
+        session = _make_browser_session()
+        session.browser_profile.cross_origin_iframes = True
+
+        live = _make_cdp_session(target_id="live-target")
+        live.cdp_client.send.Page.getFrameTree = AsyncMock(
+            return_value={
+                "frameTree": {
+                    "frame": {"id": "live-frame", "url": "https://example.com/report.pdf"},
+                    "childFrames": [],
+                }
+            }
+        )
+
+        targets = [
+            {"type": "page", "url": "https://example.com", "targetId": "detached-target"},
+            {"type": "page", "url": "https://example.com/report.pdf", "targetId": "live-target"},
+        ]
+
+        async def mock_get_session(target_id, focus=False):
+            if target_id == "detached-target":
+                raise RuntimeError("target detached")
+            return live
+
+        with (
+            patch.object(BrowserSession, "_cdp_get_all_pages", new_callable=AsyncMock, return_value=targets),
+            patch.object(
+                BrowserSession,
+                "get_or_create_cdp_session",
+                new_callable=AsyncMock,
+                side_effect=mock_get_session,
+            ),
+            patch.object(BrowserSession, "_populate_frame_metadata", new_callable=AsyncMock),
+        ):
+            all_frames, _ = await session.get_all_frames(include_background_targets=True)
+
+        assert "live-frame" in all_frames
+
     async def test_cross_origin_iframes_enabled(self):
         session = _make_browser_session()
         session.browser_profile.cross_origin_iframes = True

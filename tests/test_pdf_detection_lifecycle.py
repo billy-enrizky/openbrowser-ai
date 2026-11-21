@@ -1887,8 +1887,10 @@ async def test_pdf_validation_uses_the_dedicated_executor():
     ):
         error = await watchdog._pdf_validation_error_async(MINIMAL_PDF)
 
+    from openbrowser.browser.watchdogs.downloads_watchdog import _PDF_VALIDATION_EXECUTOR
+
     assert error is None
-    assert watchdog._pdf_validation_executor is not None
+    assert _PDF_VALIDATION_EXECUTOR._max_workers == 2
 
 
 def test_only_main_document_responses_become_document_mime_evidence():
@@ -2145,6 +2147,10 @@ async def test_playwright_invalidated_url_is_not_cached(tmp_path):
 
     await watchdog._handle_download(download)
 
+    outcome = watchdog.latest_download_outcome()
+    assert outcome is not None
+    assert outcome["phase"] == "completed"
+    assert Path(str(outcome["path"])).read_bytes() == MINIMAL_PDF
     assert url not in watchdog._session_pdf_urls
 
 
@@ -2170,6 +2176,7 @@ async def test_network_callback_does_not_let_a_fetch_pdf_replace_document_mime()
             {"type": "Fetch", "response": {"url": url, "mimeType": "application/pdf", "headers": {}}},
             "sid-fetch",
         )
+        await asyncio.gather(*watchdog._cdp_event_tasks, return_exceptions=True)
 
     assert watchdog._pdf_document_mime[("t1", url)] == "text/html"
 
@@ -2198,6 +2205,8 @@ async def test_cdp_fallback_does_not_cache_after_invalidation(tmp_path):
     mock_cdp.cdp_client.send.Runtime.evaluate = AsyncMock(side_effect=evaluate)
     session.cdp_client_for_frame = AsyncMock(return_value=mock_cdp)
 
+    download_id = "cdp-fallback"
+    watchdog._download_registry.start(download_id, url=url, source="cdp")
     await watchdog._handle_cdp_download(
         {
             "url": url,
@@ -2207,8 +2216,14 @@ async def test_cdp_fallback_does_not_cache_after_invalidation(tmp_path):
         },
         "t1",
         "sid-1",
+        download_id=download_id,
     )
 
+    outcome = watchdog._download_registry.get(download_id)
+    assert outcome is not None
+    assert outcome.phase is DownloadPhase.COMPLETED
+    assert outcome.path is not None
+    assert Path(outcome.path).read_bytes() == MINIMAL_PDF
     assert url not in watchdog._session_pdf_urls
 
 
@@ -2232,3 +2247,77 @@ def test_redacted_pdf_detection_snapshot_hides_url_credentials_and_tokens():
     assert redacted.detail is not None and "secret" not in redacted.detail
     assert redacted.started_at == 1.0
     assert redacted.finished_at == 2.0
+
+
+def test_non_pdf_response_clears_suppression_without_a_cache_entry():
+    watchdog, _ = _make_watchdog()
+    url = "https://example.com/report.pdf"
+    watchdog._detected_downloads.add(url)
+
+    watchdog._note_document_mime("t1", url, "text/html")
+
+    assert url not in watchdog._detected_downloads
+
+
+@pytest.mark.asyncio
+async def test_cache_invalidated_during_size_read_refetches(tmp_path):
+    watchdog, session = _make_watchdog(str(tmp_path))
+    resource = "https://example.com/report.pdf"
+    existing = tmp_path / "cached.pdf"
+    existing.write_bytes(MINIMAL_PDF)
+    watchdog._session_pdf_urls[resource] = str(existing)
+    mock_cdp = MagicMock()
+    mock_cdp.session_id = "sid-1"
+    mock_cdp.cdp_client.send.Runtime.evaluate = AsyncMock(
+        return_value={
+            "result": {
+                "value": {
+                    "data": list(MINIMAL_PDF),
+                    "fromCache": False,
+                    "responseSize": len(MINIMAL_PDF),
+                    "contentType": "application/pdf",
+                }
+            }
+        }
+    )
+    session.get_or_create_cdp_session.return_value = mock_cdp
+
+    real_getsize = os.path.getsize
+    invalidated = False
+
+    def getsize(path):
+        nonlocal invalidated
+        if not invalidated:
+            invalidated = True
+            watchdog._note_document_mime("t1", resource, "text/html")
+        return real_getsize(path)
+
+    with patch(
+        "openbrowser.browser.watchdogs.downloads_watchdog.os.path.getsize",
+        side_effect=getsize,
+    ):
+        result = await watchdog.download_file_from_url(resource, "t1", content_type="application/pdf")
+
+    assert result is not None
+    assert result != str(existing)
+    assert Path(result).read_bytes() == MINIMAL_PDF
+    assert watchdog._session_pdf_urls.get(resource) != str(existing)
+
+
+@pytest.mark.asyncio
+async def test_history_match_respects_recorded_non_pdf_mime():
+    watchdog, session = _make_watchdog()
+    session.cdp_client.send.Target.getTargets = AsyncMock(
+        return_value=_targets(("t1", "https://example.com/stale-viewer"))
+    )
+    watchdog._note_document_mime("t1", "https://example.com/late.pdf", "text/html")
+
+    with patch.object(
+        DownloadsWatchdog,
+        "_check_network_headers_for_pdf",
+        new_callable=AsyncMock,
+        return_value=(True, "https://example.com/late.pdf"),
+    ):
+        snapshot = await watchdog._detect_pdf("t1", url="https://example.com/stale-viewer")
+
+    assert snapshot.phase is PdfDetectionPhase.NOT_PDF
