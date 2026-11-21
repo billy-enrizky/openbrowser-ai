@@ -129,11 +129,7 @@ export function useTaskStream(options: UseTaskStreamOptions = {}) {
   // ------------------------------------------------------------------
   // Internal: poll GET /tasks/{id}/events?since=N every POLL_INTERVAL_MS.
   // ------------------------------------------------------------------
-  async function _pollEvents(
-    taskId: string,
-    signal: AbortSignal,
-    token: string | null,
-  ) {
+  async function _pollEvents(taskId: string, signal: AbortSignal, token: string | null) {
     let lastEventId = 0;
     let consecutiveErrors = 0;
     const maxErrors = 10;
@@ -184,10 +180,14 @@ export function useTaskStream(options: UseTaskStreamOptions = {}) {
           // Wait before next poll
           await new Promise<void>((resolve, reject) => {
             const timer = setTimeout(resolve, POLL_INTERVAL_MS);
-            signal.addEventListener("abort", () => {
-              clearTimeout(timer);
-              reject(new DOMException("Aborted", "AbortError"));
-            }, { once: true });
+            signal.addEventListener(
+              "abort",
+              () => {
+                clearTimeout(timer);
+                reject(new DOMException("Aborted", "AbortError"));
+              },
+              { once: true },
+            );
           });
         } catch (err: unknown) {
           if (signal.aborted) break;

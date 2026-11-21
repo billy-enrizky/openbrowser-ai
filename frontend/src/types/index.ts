@@ -16,8 +16,8 @@ export type WSMessageType =
   | "task_failed"
   | "task_cancelled"
   | "log"
-  | "vnc_info"  // VNC connection information
-  | "extension_status";  // Extension connected/disconnected
+  | "vnc_info" // VNC connection information
+  | "extension_status"; // Extension connected/disconnected
 
 export interface WSMessage {
   type: WSMessageType;
@@ -111,8 +111,8 @@ export interface FileAttachment {
   type: FileType;
   mimeType?: string;
   size?: number;
-  url?: string;           // URL to download/view the file
-  content?: string;       // Base64 or text content for preview
+  url?: string; // URL to download/view the file
+  content?: string; // Base64 or text content for preview
   previewContent?: string; // Truncated content for preview
 }
 
@@ -155,13 +155,15 @@ export interface BackendChatMessage {
   role: "user" | "assistant" | "system";
   content: string;
   task_id?: string | null;
-  metadata?: {
-    step_number?: number;
-    is_thinking?: boolean;
-    is_error?: boolean;
-    screenshot?: string;
-    attachments?: FileAttachment[];
-  } | Record<string, unknown>;
+  metadata?:
+    | {
+        step_number?: number;
+        is_thinking?: boolean;
+        is_error?: boolean;
+        screenshot?: string;
+        attachments?: FileAttachment[];
+      }
+    | Record<string, unknown>;
   created_at: string;
 }
 

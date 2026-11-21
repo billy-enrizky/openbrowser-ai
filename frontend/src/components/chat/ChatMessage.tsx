@@ -20,10 +20,7 @@ export function ChatMessage({ message }: ChatMessageProps) {
     <motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      className={cn(
-        "flex gap-4 px-4 py-6",
-        isUser ? "bg-transparent" : "bg-zinc-800/20"
-      )}
+      className={cn("flex gap-4 px-4 py-6", isUser ? "bg-transparent" : "bg-zinc-800/20")}
     >
       {/* Avatar */}
       <div
@@ -32,8 +29,8 @@ export function ChatMessage({ message }: ChatMessageProps) {
           isUser
             ? "bg-gradient-to-br from-cyan-500 to-blue-600"
             : isError
-            ? "bg-red-500/20 text-red-400"
-            : "bg-zinc-700/50 text-zinc-400"
+              ? "bg-red-500/20 text-red-400"
+              : "bg-zinc-700/50 text-zinc-400",
         )}
       >
         {isUser ? (
@@ -51,10 +48,7 @@ export function ChatMessage({ message }: ChatMessageProps) {
       <div className="flex-1 min-w-0">
         {/* Header */}
         <div className="flex items-center gap-2 mb-2">
-          <span className={cn(
-            "text-sm font-medium",
-            isUser ? "text-cyan-400" : "text-zinc-400"
-          )}>
+          <span className={cn("text-sm font-medium", isUser ? "text-cyan-400" : "text-zinc-400")}>
             {isUser ? "You" : "OpenBrowser"}
           </span>
           {message.metadata?.stepNumber && (
@@ -62,9 +56,7 @@ export function ChatMessage({ message }: ChatMessageProps) {
               Step {message.metadata.stepNumber}
             </span>
           )}
-          <span className="text-xs text-zinc-600">
-            {new Date(message.timestamp).toLocaleTimeString()}
-          </span>
+          <span className="text-xs text-zinc-600">{new Date(message.timestamp).toLocaleTimeString()}</span>
         </div>
 
         {/* Message Content */}
@@ -72,7 +64,7 @@ export function ChatMessage({ message }: ChatMessageProps) {
           className={cn(
             "prose prose-invert prose-sm max-w-none",
             "text-zinc-300 leading-relaxed",
-            isError && "text-red-400"
+            isError && "text-red-400",
           )}
         >
           {isThinking ? (
@@ -80,14 +72,21 @@ export function ChatMessage({ message }: ChatMessageProps) {
               <div className="flex items-center gap-2 text-zinc-500 mb-2">
                 <span>Executing</span>
                 <span className="flex gap-1">
-                  <span className="w-1.5 h-1.5 bg-zinc-500 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
-                  <span className="w-1.5 h-1.5 bg-zinc-500 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
-                  <span className="w-1.5 h-1.5 bg-zinc-500 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
+                  <span
+                    className="w-1.5 h-1.5 bg-zinc-500 rounded-full animate-bounce"
+                    style={{ animationDelay: "0ms" }}
+                  />
+                  <span
+                    className="w-1.5 h-1.5 bg-zinc-500 rounded-full animate-bounce"
+                    style={{ animationDelay: "150ms" }}
+                  />
+                  <span
+                    className="w-1.5 h-1.5 bg-zinc-500 rounded-full animate-bounce"
+                    style={{ animationDelay: "300ms" }}
+                  />
                 </span>
               </div>
-              {message.content && (
-                <MessageContent content={message.content} />
-              )}
+              {message.content && <MessageContent content={message.content} />}
             </div>
           ) : (
             <MessageContent content={message.content} />
@@ -96,11 +95,7 @@ export function ChatMessage({ message }: ChatMessageProps) {
 
         {/* Screenshot */}
         {message.metadata?.screenshot && (
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="mt-4"
-          >
+          <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="mt-4">
             <div className="relative rounded-xl overflow-hidden border border-zinc-700/50 bg-zinc-800/50">
               <div className="absolute top-2 left-2 flex items-center gap-1.5 px-2 py-1 bg-zinc-900/80 rounded-lg backdrop-blur-sm">
                 <ImageIcon className="w-3 h-3 text-zinc-500" />
@@ -147,30 +142,25 @@ function MessageContent({ content }: { content: string }) {
                 <CopyButton text={codeContent || lang} />
               </div>
               <pre className="p-4 bg-zinc-900/50 rounded-b-lg border border-zinc-700/50 overflow-x-auto">
-                <code className="text-sm text-cyan-300 font-mono">
-                  {codeContent || lang}
-                </code>
+                <code className="text-sm text-cyan-300 font-mono">{codeContent || lang}</code>
               </pre>
             </div>
           );
         }
 
         // Check if this part contains a markdown table (lines starting with |)
-        const lines = part.split('\n');
-        const hasTable = lines.some(line => line.trim().startsWith('|') && line.trim().endsWith('|'));
-        
+        const lines = part.split("\n");
+        const hasTable = lines.some((line) => line.trim().startsWith("|") && line.trim().endsWith("|"));
+
         if (hasTable) {
           // Render with horizontal scroll for tables
           return (
-            <div 
-              key={index} 
-              className="my-2 rounded-lg border border-zinc-700/50 bg-zinc-900/30"
-            >
-              <div 
+            <div key={index} className="my-2 rounded-lg border border-zinc-700/50 bg-zinc-900/30">
+              <div
                 className="overflow-x-auto"
-                style={{ 
-                  maxWidth: '100%',
-                  overflowX: 'auto',
+                style={{
+                  maxWidth: "100%",
+                  overflowX: "auto",
                 }}
               >
                 <div className="inline-block min-w-full">
@@ -203,16 +193,13 @@ function MessageContent({ content }: { content: string }) {
 
         // Handle inline code for non-table content
         const inlineCodeParts = part.split(/(`[^`]+`)/g);
-        
+
         return (
           <p key={index} className="whitespace-pre-wrap">
             {inlineCodeParts.map((segment, segIndex) => {
               if (segment.startsWith("`") && segment.endsWith("`")) {
                 return (
-                  <code
-                    key={segIndex}
-                    className="px-1.5 py-0.5 bg-zinc-800 rounded text-cyan-300 text-sm font-mono"
-                  >
+                  <code key={segIndex} className="px-1.5 py-0.5 bg-zinc-800 rounded text-cyan-300 text-sm font-mono">
                     {segment.slice(1, -1)}
                   </code>
                 );
@@ -237,10 +224,7 @@ function CopyButton({ text }: { text: string }) {
   };
 
   return (
-    <button
-      onClick={handleCopy}
-      className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
-    >
+    <button onClick={handleCopy} className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors">
       {copied ? "Copied!" : "Copy"}
     </button>
   );

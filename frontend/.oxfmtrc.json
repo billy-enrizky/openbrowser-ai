@@ -1,0 +1,4 @@
+{
+  "printWidth": 120,
+  "ignorePatterns": [".github/**", "README.md", "UI_CONFIG.md"]
+}

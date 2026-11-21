@@ -2,12 +2,12 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { AuthProvider } from "@/components/auth";
 
-const EXTENSION_WS_URL = (process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8000/ws")
-  .replace(/\/ws$/, "/ws/extension");
+const EXTENSION_WS_URL = (process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8000/ws").replace(/\/ws$/, "/ws/extension");
 
 export const metadata: Metadata = {
   title: "OpenBrowser - AI Browser Automation",
-  description: "Control your browser with natural language. OpenBrowser is an open-source AI browser automation framework.",
+  description:
+    "Control your browser with natural language. OpenBrowser is an open-source AI browser automation framework.",
   keywords: ["AI", "browser automation", "web scraping", "AI agent", "OpenBrowser"],
   authors: [{ name: "Billy Enrizky" }],
   openGraph: {

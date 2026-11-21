@@ -2,13 +2,9 @@
 
 import React, { useState, useRef, useEffect } from "react";
 import { motion } from "framer-motion";
-import {
-  Send,
-  Mic,
-} from "lucide-react";
+import { Send, Mic } from "lucide-react";
 import { Button } from "@/components/ui";
 import { cn } from "@/lib/utils";
-import { useAppStore } from "@/store";
 
 interface ChatInputProps {
   onSend: (message: string) => void;
@@ -19,7 +15,6 @@ interface ChatInputProps {
 export function ChatInput({ onSend, isLoading = false, placeholder }: ChatInputProps) {
   const [message, setMessage] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const { agentType, setAgentType } = useAppStore();
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -55,7 +50,7 @@ export function ChatInput({ onSend, isLoading = false, placeholder }: ChatInputP
           "relative bg-zinc-800/30 border border-zinc-700/50 rounded-2xl",
           "backdrop-blur-xl shadow-2xl shadow-black/20",
           "focus-within:border-cyan-500/50 focus-within:ring-2 focus-within:ring-cyan-500/20",
-          "transition-all duration-300"
+          "transition-all duration-300",
         )}
       >
         {/* Textarea */}
@@ -72,18 +67,14 @@ export function ChatInput({ onSend, isLoading = false, placeholder }: ChatInputP
             "px-5 pt-4 pb-14 resize-none",
             "focus:outline-none",
             "text-base leading-relaxed",
-            "min-h-[60px] max-h-[200px]"
+            "min-h-[60px] max-h-[200px]",
           )}
         />
 
         {/* Bottom Actions Bar */}
         <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <Button
-              variant="ghost"
-              size="icon"
-              className="w-8 h-8 text-zinc-500 hover:text-zinc-300"
-            >
+            <Button variant="ghost" size="icon" className="w-8 h-8 text-zinc-500 hover:text-zinc-300">
               <Mic className="w-4 h-4" />
             </Button>
           </div>
@@ -99,7 +90,7 @@ export function ChatInput({ onSend, isLoading = false, placeholder }: ChatInputP
                 "transition-all duration-200",
                 message.trim() && !isLoading
                   ? "bg-gradient-to-r from-cyan-500 to-blue-600 text-white shadow-lg shadow-cyan-500/25"
-                  : "bg-zinc-700/50 text-zinc-500"
+                  : "bg-zinc-700/50 text-zinc-500",
               )}
             >
               {isLoading ? (

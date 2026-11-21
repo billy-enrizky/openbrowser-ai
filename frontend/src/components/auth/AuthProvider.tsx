@@ -151,11 +151,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const newTokens = await exchangeCodeForTokens(code, state);
       applyTokens(newTokens);
     },
-    [applyTokens]
+    [applyTokens],
   );
 
   const contextValue = useMemo<AuthContextValue>(() => {
-    const derived = AUTH_ENABLED ? toAuthState(tokens) : { user: null, idToken: null, accessToken: null, isAuthenticated: true };
+    const derived = AUTH_ENABLED
+      ? toAuthState(tokens)
+      : { user: null, idToken: null, accessToken: null, isAuthenticated: true };
     return {
       isLoading,
       isAuthenticated: derived.isAuthenticated,

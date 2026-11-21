@@ -39,15 +39,9 @@ function mapMessage(message: BackendChatMessage): Message {
       }))
     : undefined;
   const metadata = {
-    stepNumber:
-      (rawMetadata.stepNumber as number | undefined) ??
-      (rawMetadata.step_number as number | undefined),
-    isThinking:
-      (rawMetadata.isThinking as boolean | undefined) ??
-      (rawMetadata.is_thinking as boolean | undefined),
-    isError:
-      (rawMetadata.isError as boolean | undefined) ??
-      (rawMetadata.is_error as boolean | undefined),
+    stepNumber: (rawMetadata.stepNumber as number | undefined) ?? (rawMetadata.step_number as number | undefined),
+    isThinking: (rawMetadata.isThinking as boolean | undefined) ?? (rawMetadata.is_thinking as boolean | undefined),
+    isError: (rawMetadata.isError as boolean | undefined) ?? (rawMetadata.is_error as boolean | undefined),
     screenshot: rawMetadata.screenshot as string | undefined,
     attachments,
   };

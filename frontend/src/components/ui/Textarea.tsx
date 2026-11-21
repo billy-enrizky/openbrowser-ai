@@ -28,12 +28,12 @@ export const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
           "transition-all duration-200 resize-none",
           "px-4 py-3",
           autoResize && "overflow-hidden",
-          className
+          className,
         )}
         {...props}
       />
     );
-  }
+  },
 );
 
 Textarea.displayName = "Textarea";

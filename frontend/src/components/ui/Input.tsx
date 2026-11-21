@@ -13,9 +13,7 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
     return (
       <div className="relative">
         {icon && iconPosition === "left" && (
-          <div className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500">
-            {icon}
-          </div>
+          <div className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500">{icon}</div>
         )}
         <input
           ref={ref}
@@ -28,18 +26,16 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
             icon && iconPosition === "right" && "pr-10",
             !icon && "px-4",
             "py-3",
-            className
+            className,
           )}
           {...props}
         />
         {icon && iconPosition === "right" && (
-          <div className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500">
-            {icon}
-          </div>
+          <div className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500">{icon}</div>
         )}
       </div>
     );
-  }
+  },
 );
 
 Input.displayName = "Input";
