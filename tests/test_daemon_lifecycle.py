@@ -1,6 +1,7 @@
 """Tests for daemon lifecycle, profile isolation, and recovery."""
 
 import asyncio
+import json
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -581,6 +582,44 @@ async def test_status_does_not_start_browser_and_preserves_existing_keys(isolate
 	assert status['config']['startup']['phase'] == 'invalid'
 	assert status['config']['current']['phase'] == 'invalid'
 	assert status['config']['restart_required'] is True
+
+
+def test_status_reports_dom_cache_without_starting_browser(isolated_config_path, monkeypatch):
+	monkeypatch.setenv('OPENBROWSER_CONFIG_PATH', str(isolated_config_path))
+	_write_valid_config(isolated_config_path)
+	daemon = DaemonServer()
+	daemon._session = BrowserSession()
+
+	with patch('openbrowser.browser.BrowserSession.start') as start:
+		status = daemon._status_payload()
+
+	assert start.called is False
+	assert status['browser']['dom_cache']['phase'] == 'empty'
+	assert status['browser']['dom_cache']['selector_count'] == 0
+
+
+def test_status_reports_a_ready_dom_cache_without_page_content(isolated_config_path, monkeypatch):
+	monkeypatch.setenv('OPENBROWSER_CONFIG_PATH', str(isolated_config_path))
+	_write_valid_config(isolated_config_path)
+	daemon = DaemonServer()
+	session = BrowserSession()
+	session.agent_focus = CDPSession.model_construct(
+		cdp_client=MagicMock(),
+		target_id='tab-a',
+		session_id='sess-a',
+		url='https://secret.test/',
+		title='Secret',
+	)
+	assert session.update_cached_selector_map({1: object()}) is True
+	daemon._session = session
+
+	with patch('openbrowser.browser.BrowserSession.start') as start:
+		status = daemon._status_payload()
+
+	assert start.called is False
+	assert status['browser']['dom_cache']['phase'] == 'ready'
+	assert status['browser']['dom_cache']['selector_count'] == 1
+	assert 'secret.test' not in json.dumps(status)
 
 
 @pytest.mark.asyncio

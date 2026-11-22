@@ -417,6 +417,7 @@ class SessionManager:
 					# Remove from pool
 					if target_id in self.browser_session._cdp_session_pool:
 						self.browser_session._cdp_session_pool.pop(target_id)
+						self.browser_session.forget_dom_cache(target_id)
 						self.logger.debug(
 							f'[SessionManager] Removed target {target_id[:8]}... from pool '
 							f'(pool size: {len(self.browser_session._cdp_session_pool)})'

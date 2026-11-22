@@ -37,6 +37,41 @@ async def test_get_status_does_not_start_browser(mcp_server):
 
 
 @pytest.mark.asyncio
+async def test_get_status_reports_dom_cache_without_starting_browser(mcp_server):
+	mcp_server.browser_session = BrowserSession()
+
+	with patch.object(BrowserSession, 'start') as start:
+		payload = json.loads(await mcp_server._handle_tool('get_status', {}))
+
+	assert start.called is False
+	assert payload['browser']['dom_cache']['phase'] == 'empty'
+	assert payload['browser']['dom_cache']['selector_count'] == 0
+	assert 'url' not in payload['browser']['dom_cache']
+
+
+@pytest.mark.asyncio
+async def test_get_status_reports_a_ready_dom_cache_without_page_content(mcp_server):
+	session = BrowserSession()
+	session.agent_focus = CDPSession.model_construct(
+		cdp_client=MagicMock(),
+		target_id='tab-a',
+		session_id='sess-a',
+		url='https://secret.test/',
+		title='Secret',
+	)
+	assert session.update_cached_selector_map({1: object()}) is True
+	mcp_server.browser_session = session
+
+	with patch.object(BrowserSession, 'start') as start:
+		payload = json.loads(await mcp_server._handle_tool('get_status', {}))
+
+	assert start.called is False
+	assert payload['browser']['dom_cache']['phase'] == 'ready'
+	assert payload['browser']['dom_cache']['selector_count'] == 1
+	assert 'secret.test' not in json.dumps(payload)
+
+
+@pytest.mark.asyncio
 async def test_get_status_reports_initialized_tool_availability(mcp_server):
 	from openbrowser.tools.service import CodeAgentTools
 

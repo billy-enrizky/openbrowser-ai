@@ -2278,14 +2278,17 @@ async def test_verified_containment_invalidates_only_its_current_focus_cache(unr
         assert focus.url == 'about:blank'
         if unrelated_focus:
             assert session.agent_focus is other
-            assert session._cached_selector_map[5] is cached_node
-            assert session._cached_browser_state_summary == 'old-summary'
-            dom.clear_cache.assert_not_called()
+            # The navigation request already cleared the request target cache.
+            # The later focus switch must not add a second containment clear.
+            assert not session._cached_selector_map
+            assert session._cached_browser_state_summary is None
+            assert dom.clear_cache.call_count == 1
         else:
             assert session.agent_focus is focus
             assert not session._cached_selector_map
             assert session._cached_browser_state_summary is None
-            dom.clear_cache.assert_called_once()
+            # One clear at request admission and one at containment.
+            assert dom.clear_cache.call_count == 2
     finally:
         await session.event_bus.stop(clear=True, timeout=0.1)
         await session._drain_navigation_event_pumps(session.event_bus)

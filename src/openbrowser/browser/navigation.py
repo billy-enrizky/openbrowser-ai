@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Mapping
+import logging
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, ClassVar, Literal
 from urllib.parse import urlsplit
 
 WaitUntil = Literal['load', 'domcontentloaded', 'networkidle', 'commit']
+
+logger = logging.getLogger(__name__)
 
 
 class NavigationError(RuntimeError):
@@ -406,6 +409,7 @@ class NavigationMonitor:
 		self.active: NavigationOperation | None = None
 		self._last: dict[str, Any] | None = None
 		self._root: Any = None
+		self._observer: Callable[[str, dict[str, Any], str | None], None] | None = None
 
 	def reserve(self, operation: NavigationOperation) -> None:
 		if self.active is not None and self.active is not operation:
@@ -423,12 +427,30 @@ class NavigationMonitor:
 	def invalidate(self) -> None:
 		self._root = None
 
-	def bind(self, root: Any) -> None:
+	def bind(
+		self,
+		root: Any,
+		observer: Callable[[str, dict[str, Any], str | None], None] | None = None,
+	) -> None:
+		"""Bind one callback set per root and keep one document observer.
+
+		The observer runs for every event, including when no request is active,
+		so page-initiated document changes can invalidate caches. It is a
+		best-effort early signal; read-time revalidation is the fence.
+		"""
+		if observer is not None:
+			self._observer = observer
 		if root is self._root:
 			return
 		self._root = root
 		for method, kind in (('frameNavigated', 'frame'), ('lifecycleEvent', 'lifecycle'), ('navigatedWithinDocument', 'within')):
 			def callback(event: dict[str, Any], session_id: str | None = None, *, _kind: str = kind) -> None:
+				observer = self._observer
+				if observer is not None:
+					try:
+						observer(_kind, event, session_id)
+					except Exception:
+						logger.exception('Document observer failed for %s', _kind)
 				operation = self.active
 				if self._root is root and operation is not None and operation.session_id == session_id:
 					operation.observe(_kind, event)

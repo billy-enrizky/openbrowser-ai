@@ -93,6 +93,15 @@ def _make_session_with_mocks(**overrides):
         return_value={"result": {"value": {"x": 10, "y": 20, "width": 100, "height": 50}}}
     )
 
+    # Page methods
+    cdp_root.send.Page.getFrameTree = AsyncMock(
+        return_value={
+            "frameTree": {
+                "frame": {"id": "frame-1", "loaderId": "loader-1", "url": "https://example.com"}
+            }
+        }
+    )
+
     # DOM methods
     cdp_root.send.DOM.getContentQuads = AsyncMock(return_value={"quads": []})
     cdp_root.send.DOM.getBoxModel = AsyncMock(return_value={})
@@ -1268,7 +1277,7 @@ class TestGetSelectorMap:
         result = await session.get_selector_map()
         assert result is mock_map
 
-    async def test_falls_back_to_dom_watchdog(self):
+    async def test_does_not_fall_back_to_dom_watchdog(self):
         session, _ = _make_session_with_mocks()
         session._cached_selector_map = {}
 
@@ -1278,7 +1287,7 @@ class TestGetSelectorMap:
         session._dom_watchdog = mock_wd
 
         result = await session.get_selector_map()
-        assert result is wd_map
+        assert result == {}
 
     async def test_returns_empty_dict_when_nothing_available(self):
         session, _ = _make_session_with_mocks()

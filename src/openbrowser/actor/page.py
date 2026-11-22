@@ -86,9 +86,16 @@ class Page:
 			self._mouse = Mouse(self._browser_session, session_id, self._target_id)
 		return self._mouse
 
+	def _invalidate_document_cache(self, reason: str) -> None:
+		"""Fence the session cache before a document-changing command."""
+		invalidate = getattr(self._browser_session, 'invalidate_dom_cache', None)
+		if callable(invalidate):
+			invalidate(target_id=self._target_id, reason=reason)
+
 	async def reload(self) -> None:
 		"""Reload the target."""
 		session_id = await self._ensure_session()
+		self._invalidate_document_cache('page_actor_navigation')
 		await self._client.send.Page.reload(session_id=session_id)
 
 	async def get_element(self, backend_node_id: int) -> 'Element':
@@ -97,7 +104,7 @@ class Page:
 
 		from .element import Element as Element_
 
-		return Element_(self._browser_session, backend_node_id, session_id)
+		return Element_(self._browser_session, backend_node_id, session_id, target_id=self._target_id)
 
 	async def evaluate(self, page_function: str, *args) -> str:
 		"""Execute JavaScript in the target.
@@ -111,6 +118,9 @@ class Page:
 			Objects and arrays are JSON-stringified.
 		"""
 		session_id = await self._ensure_session()
+		mark = getattr(self._browser_session, 'mark_dom_cache_provisional', None)
+		if callable(mark):
+			mark(target_id=self._target_id, reason='page_actor_evaluate')
 
 		# Clean and fix common JavaScript string parsing issues
 		page_function = self._fix_javascript_string(page_function)
@@ -312,6 +322,7 @@ class Page:
 		session_id = await self._ensure_session()
 
 		params: 'NavigateParameters' = {'url': url}
+		self._invalidate_document_cache('page_actor_navigation')
 		await self._client.send.Page.navigate(params, session_id=session_id)
 
 	async def navigate(self, url: str) -> None:
@@ -335,6 +346,7 @@ class Page:
 			# Navigate to the previous entry
 			previous_entry_id = entries[current_index - 1]['id']
 			params: 'NavigateToHistoryEntryParameters' = {'entryId': previous_entry_id}
+			self._invalidate_document_cache('page_actor_navigation')
 			await self._client.send.Page.navigateToHistoryEntry(params, session_id=session_id)
 
 		except Exception as e:
@@ -357,6 +369,7 @@ class Page:
 			# Navigate to the next entry
 			next_entry_id = entries[current_index + 1]['id']
 			params: 'NavigateToHistoryEntryParameters' = {'entryId': next_entry_id}
+			self._invalidate_document_cache('page_actor_navigation')
 			await self._client.send.Page.navigateToHistoryEntry(params, session_id=session_id)
 
 		except Exception as e:

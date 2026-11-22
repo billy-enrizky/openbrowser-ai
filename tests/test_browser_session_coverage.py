@@ -110,6 +110,16 @@ def _make_mock_cdp_client():
     return _setup_cdp_client_mock(client)
 
 
+def _attach_live_document(session, *, loader_id="loader-1", url="https://example.com"):
+    """Give a session a fake root whose live frame identity stays stable."""
+    client = _make_mock_cdp_client()
+    client.send.Page.getFrameTree = AsyncMock(
+        return_value={"frameTree": {"frame": {"id": "frame-1", "loaderId": loader_id, "url": url}}}
+    )
+    session._cdp_client_root = client
+    return session
+
+
 def _make_mock_cdp_session(
     target_id="target-001", session_id="sess-abc123", url="https://example.com", title="Example"
 ):
@@ -1198,8 +1208,9 @@ class TestDOMHelperMethods:
 
     def test_update_cached_selector_map(self):
         session = _make_browser_session()
+        session.agent_focus = _make_mock_cdp_session()
         new_map = {1: MagicMock(), 2: MagicMock()}
-        session.update_cached_selector_map(new_map)
+        assert session.update_cached_selector_map(new_map) is True
         assert session._cached_selector_map == new_map
 
     async def test_get_element_by_index_alias(self):
@@ -1310,17 +1321,20 @@ class TestDOMHelperMethods:
 
     async def test_get_selector_map_cached(self):
         session = _make_browser_session()
+        session.agent_focus = _make_mock_cdp_session()
+        _attach_live_document(session)
         session._cached_selector_map = {1: MagicMock()}
         result = await session.get_selector_map()
         assert len(result) == 1
 
-    async def test_get_selector_map_from_watchdog(self):
+    async def test_get_selector_map_ignores_watchdog(self):
         session = _make_browser_session()
+        session.agent_focus = _make_mock_cdp_session()
         session._cached_selector_map = {}
         session._dom_watchdog = MagicMock()
         session._dom_watchdog.selector_map = {2: MagicMock()}
         result = await session.get_selector_map()
-        assert len(result) == 1
+        assert result == {}
 
     async def test_get_selector_map_empty(self):
         session = _make_browser_session()
@@ -1331,6 +1345,8 @@ class TestDOMHelperMethods:
 
     async def test_get_index_by_id(self):
         session = _make_browser_session()
+        session.agent_focus = _make_mock_cdp_session()
+        _attach_live_document(session)
         mock_node = MagicMock()
         mock_node.attributes = {"id": "search-box"}
         session._cached_selector_map = {5: mock_node}
@@ -1345,6 +1361,8 @@ class TestDOMHelperMethods:
 
     async def test_get_index_by_class(self):
         session = _make_browser_session()
+        session.agent_focus = _make_mock_cdp_session()
+        _attach_live_document(session)
         mock_node = MagicMock()
         mock_node.attributes = {"class": "btn primary"}
         session._cached_selector_map = {3: mock_node}
