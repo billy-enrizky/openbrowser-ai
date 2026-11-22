@@ -1,0 +1,40 @@
+name: Merge Queue
+
+on:
+  pull_request:
+    types: [labeled]
+  workflow_dispatch:
+
+concurrency:
+  group: merge-queue-main
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+  checks: write
+
+jobs:
+  drain:
+    if: github.event_name == 'workflow_dispatch' || github.event.label.name == 'merge-queue'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.9.15"
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.4"
+      - name: Drain labeled pull requests
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: uv run --locked python scripts/ci/merge_queue_runner.py --repo "${{ github.repository }}"
