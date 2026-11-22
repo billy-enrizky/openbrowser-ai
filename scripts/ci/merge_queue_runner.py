@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -263,6 +264,11 @@ def process(repo: str, root: Path, number: int, checks_script: Path) -> None:
         if merge_result.returncode != 0:
             reject(repo, number, head_sha, "GitHub rejected the merge after checks passed")
             return
+        merged_main = base_sha(repo)
+        output_path = os.environ.get("GITHUB_OUTPUT")
+        if output_path:
+            with open(output_path, "a", encoding="utf-8") as output:
+                output.write(f"main_sha={merged_main}\n")
         set_label(repo, number, RUNNING_LABEL, False)
         set_label(repo, number, FAILED_LABEL, False)
         print(f"merged #{number} through the custom queue")
