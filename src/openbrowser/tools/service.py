@@ -1540,6 +1540,11 @@ Validated Code (after quote fixing):
 					span_context = nullcontext()
 
 				with span_context:
+					# Any action may change the document. Mark the published DOM view
+					# provisional before it runs, so the next index read revalidates.
+					mark_provisional = getattr(browser_session, 'mark_dom_cache_provisional', None)
+					if callable(mark_provisional):
+						mark_provisional(reason=action_name)
 					try:
 						result = await self.registry.execute_action(
 							action_name=action_name,

@@ -59,6 +59,11 @@ def _make_browser_session(**overrides):
     session._cdp_client_root = root_client  # type: ignore[attr-defined]
     session._cdp_session_pool = {}  # type: ignore[attr-defined]
     session._downloaded_files = []  # type: ignore[attr-defined]
+    from openbrowser.browser.dom_cache import DomCacheMachine
+
+    session._dom_cache = DomCacheMachine()  # type: ignore[attr-defined]
+    session._cached_selector_map = {}  # type: ignore[attr-defined]
+    session._cached_browser_state_summary = None  # type: ignore[attr-defined]
 
     # Mock agent_focus
     agent_focus = _make_cdp_session()

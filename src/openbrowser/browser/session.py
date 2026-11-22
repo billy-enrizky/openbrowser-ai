@@ -7,7 +7,7 @@ import logging
 import math
 import os
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from functools import cached_property
 from pathlib import Path
@@ -65,6 +65,7 @@ from openbrowser.browser.focus import (
 	FocusTransitionResult,
 )
 from openbrowser.browser.profile import BrowserProfile, ProxySettings
+from openbrowser.browser.dom_cache import DocumentIdentity, DomCacheMachine
 from openbrowser.browser.navigation import (
 	ContainmentAttempt,
 	ContainmentPhase,
@@ -472,6 +473,7 @@ class BrowserSession(BaseModel):
 	_core_handlers_attached: bool = PrivateAttr(default=False)
 	_cached_browser_state_summary: Any = PrivateAttr(default=None)
 	_cached_selector_map: dict[int, EnhancedDOMTreeNode] = PrivateAttr(default_factory=dict)
+	_dom_cache: DomCacheMachine = PrivateAttr(default_factory=DomCacheMachine)
 	_downloaded_files: list[str] = PrivateAttr(default_factory=list)  # Track files downloaded during this session
 	_download_history: list[dict[str, object]] = PrivateAttr(default_factory=list)  # Last outcomes, kept after reset
 	_download_outcomes_error: str | None = PrivateAttr(default=None)  # Last reader failure, surfaced in status
@@ -546,6 +548,7 @@ class BrowserSession(BaseModel):
 		snapshot['tabs'] = self.tab_snapshot()
 		snapshot['navigation'] = self._navigation_monitor.snapshot()
 		snapshot['focus'] = self.focus_snapshot().to_dict()
+		snapshot['dom_cache'] = self.dom_cache_snapshot()
 		snapshot['warnings'] = list(self._storage_state_warnings)
 		configured = self.browser_profile.storage_state if self.browser_profile else None
 		storage_state = None
@@ -629,11 +632,7 @@ class BrowserSession(BaseModel):
 		return self._focus_state
 
 	def _clear_focus_caches_locked(self) -> None:
-		clear_cache = getattr(self._dom_watchdog, 'clear_cache', None)
-		if callable(clear_cache):
-			clear_cache()
-		self._cached_browser_state_summary = None
-		self._cached_selector_map.clear()
+		self.reset_dom_cache(reason='focus_change')
 
 	async def _target_liveness(self, target_id: str, budget: FocusTransitionBudget) -> bool | None:
 		"""Return target existence, or None when the browser cannot prove it."""
@@ -2017,8 +2016,7 @@ class BrowserSession(BaseModel):
 		self._watchdogs_attached = False
 
 		self._cdp_client_root = None  # type: ignore
-		self._cached_browser_state_summary = None
-		self._cached_selector_map.clear()
+		self.reset_dom_cache(reason='reset', purge_metadata=True)
 		self._downloaded_files.clear()
 		self._download_history = await self._capture_download_history()
 		self._storage_state_warnings.clear()
@@ -2260,8 +2258,7 @@ class BrowserSession(BaseModel):
 		self._cdp_client_root = None
 		self._tab_registry.clear()
 		self._watchdogs_attached = False
-		self._cached_browser_state_summary = None
-		self._cached_selector_map.clear()
+		self.reset_dom_cache(reason='shutdown', purge_metadata=True)
 		self._storage_state_warnings.clear()
 		self.agent_focus = None
 		if self.is_local:
@@ -2967,6 +2964,7 @@ class BrowserSession(BaseModel):
 		record = self._tab_registry.get(operation.target_id)
 		if record is not None and record.state is not TabState.CLOSED:
 			self._tab_registry.update(operation.target_id, url='about:blank', title='')
+		self.invalidate_dom_cache(target_id=operation.target_id, reason='policy_containment')
 		focus = self.agent_focus
 		if (
 			focus is not None
@@ -2975,10 +2973,6 @@ class BrowserSession(BaseModel):
 			and focus.session_id == operation.session_id
 		):
 			focus.url, focus.title = 'about:blank', ''
-			self._cached_browser_state_summary = None
-			self._cached_selector_map.clear()
-			if self._dom_watchdog:
-				self._dom_watchdog.clear_cache()
 
 	async def _resolve_policy_protocol_error(
 		self, error: BaseException, operation: NavigationOperation, root: CDPClient, session: CDPSession
@@ -3304,6 +3298,7 @@ class BrowserSession(BaseModel):
 				session = self.agent_focus
 				operation.select_target(target_id, str(session.session_id))
 				self._check_navigation_owner(operation, root, session)
+				self.invalidate_dom_cache(target_id=target_id, reason='navigation_request')
 				await self._await_navigation_event(
 					event_bus,
 					NavigationStartedEvent(
@@ -3332,6 +3327,7 @@ class BrowserSession(BaseModel):
 				)
 				self._check_navigation_owner(operation, root, session)
 				operation.accept_response(response)
+				self.invalidate_dom_cache(target_id=operation.target_id, reason='navigation_accepted')
 				if not operation.is_download:
 					await self._navigation_step(operation, operation.wait_ready())
 					self._check_navigation_owner(operation, root, session)
@@ -3339,6 +3335,7 @@ class BrowserSession(BaseModel):
 				tree = await root.send.Page.getFrameTree(session_id=operation.session_id)
 				self._check_navigation_owner(operation, root, session)
 				frame = tree['frameTree']['frame']
+				self._record_committed_document(operation.target_id, frame)
 				if not operation.is_download and (
 					frame.get('id') != operation.frame_id or frame.get('loaderId') != operation.loader_id
 				):
@@ -3476,6 +3473,7 @@ class BrowserSession(BaseModel):
 				self._reserve_navigation(operation)
 				self._navigation_task, self._navigation_task_operation = task, operation
 				operation.select_target(focus.target_id, focus.session_id)
+				self.invalidate_dom_cache(target_id=focus.target_id, reason='navigation_request')
 				await self._await_navigation_event(
 					event_bus,
 					NavigationStartedEvent(
@@ -3507,6 +3505,7 @@ class BrowserSession(BaseModel):
 				tree = await root.send.Page.getFrameTree(session_id=operation.session_id)
 				self._check_navigation_owner(operation, root, focus)
 				committed_frame = tree['frameTree']['frame']
+				self._record_committed_document(operation.target_id, committed_frame)
 				if (
 					committed_frame.get('id') != operation.frame_id
 					or committed_frame.get('loaderId') != operation.loader_id
@@ -4664,20 +4663,45 @@ class BrowserSession(BaseModel):
 		cached: bool = False,
 		include_recent_events: bool = False,
 	) -> BrowserStateSummary:
-		if cached and self._cached_browser_state_summary is not None and self._cached_browser_state_summary.dom_state:
-			# Don't use cached state if it has 0 interactive elements
-			selector_map = self._cached_browser_state_summary.dom_state.selector_map
-
-			# Don't use cached state if we need a screenshot but the cached state doesn't have one
-			if include_screenshot and not self._cached_browser_state_summary.screenshot:
-				self.logger.debug('⚠️ Cached browser state has no screenshot, fetching fresh state with screenshot')
-				# Fall through to fetch fresh state with screenshot
-			elif selector_map and len(selector_map) > 0:
-				self.logger.debug('🔄 Using pre-cached browser state summary for open tab')
-				return self._cached_browser_state_summary
-			else:
-				self.logger.debug('⚠️ Cached browser state has 0 interactive elements, fetching fresh state')
-				# Fall through to fetch fresh state
+		cached_summary = self._cached_browser_state_summary
+		cached_target_id = self.current_target_id
+		if (
+			cached
+			and cached_summary is not None
+			and getattr(cached_summary, 'dom_state', None)
+			and cached_target_id is not None
+		):
+			selector_map = cached_summary.dom_state.selector_map
+			if not self._dom_cache.has_entry(cached_target_id):
+				identity = await self._read_document_identity(cached_target_id)
+				if identity is None or not self._dom_cache.adopt(
+					cached_target_id,
+					selector_count=len(selector_map),
+					has_summary=True,
+					identity=identity,
+				):
+					self._cached_browser_state_summary = None
+					cached_summary = None
+			if cached_summary is not None and (
+				not self._dom_cache.summary_is_current(cached_target_id)
+				or not await self._validate_dom_cache_identity(cached_target_id)
+				or self._cached_browser_state_summary is not cached_summary
+			):
+				self.logger.debug('⚠️ Cached browser state belongs to an older document, fetching fresh state')
+				self._cached_browser_state_summary = None
+				cached_summary = None
+			if cached_summary is not None:
+				# Don't use cached state if it has 0 interactive elements
+				# Don't use cached state if we need a screenshot but the cached state doesn't have one
+				if include_screenshot and not cached_summary.screenshot:
+					self.logger.debug('⚠️ Cached browser state has no screenshot, fetching fresh state with screenshot')
+					# Fall through to fetch fresh state with screenshot
+				elif selector_map and len(selector_map) > 0:
+					self.logger.debug('🔄 Using pre-cached browser state summary for open tab')
+					return cached_summary
+				else:
+					self.logger.debug('⚠️ Cached browser state has 0 interactive elements, fetching fresh state')
+					# Fall through to fetch fresh state
 
 		# Dispatch the event and wait for result
 		event: BrowserStateRequestEvent = cast(
@@ -4894,6 +4918,7 @@ class BrowserSession(BaseModel):
 
 			self._session_manager = SessionManager(self)
 			await self._session_manager.start_monitoring()
+			self._navigation_monitor.bind(self._cdp_client_root, observer=self.observe_document_event)
 			self.logger.debug('Event-driven session manager started')
 
 			# Enable auto-attach so Chrome automatically notifies us when NEW targets attach/detach
@@ -4985,6 +5010,11 @@ class BrowserSession(BaseModel):
 				probe=True,
 			)
 			self.logger.debug(f'📄 Agent focus set to {result.session.target_id[:8]}...')
+
+			# Learn the initial document identity so the first DOM build is stamped.
+			initial_identity = await self._read_document_identity(result.session.target_id)
+			if initial_identity is not None:
+				self._dom_cache.note_identity(result.session.target_id, initial_identity)
 
 			# Enable proxy authentication handling if configured
 			await self._setup_proxy_auth()
@@ -5360,15 +5390,199 @@ class BrowserSession(BaseModel):
 
 		return None
 
-	def update_cached_selector_map(self, selector_map: dict[int, EnhancedDOMTreeNode]) -> None:
-		"""Update the cached selector map with new DOM state.
+	def update_cached_selector_map(
+		self,
+		selector_map: dict[int, EnhancedDOMTreeNode],
+		*,
+		target_id: str | None = None,
+		loader_id: str | None = None,
+		epoch: tuple[int, int] | None = None,
+		sequence: int | None = None,
+		identity: DocumentIdentity | None = None,
+	) -> bool:
+		"""Publish one selector map for the current document view.
 
-		This should be called by the DOM watchdog after rebuilding the DOM.
-
-		Args:
-                selector_map: The new selector map from DOM serialization
+		Returns False and leaves the cache untouched when the document changed
+		while the map was being built.
 		"""
+		target = target_id or self.current_target_id
+		if target is None or target != self.current_target_id:
+			return False
+		captured = epoch if epoch is not None else self._dom_cache.epoch(target)
+		if captured is None:
+			return False
+		resolved = identity or self._dom_cache.known_identity(target)
+		if resolved is None:
+			return False
+		published = self._dom_cache.publish(
+			target,
+			epoch=captured,
+			loader_id=loader_id or resolved.loader_id,
+			url=resolved.url,
+			selector_count=len(selector_map),
+			sequence=sequence,
+		)
+		if not published:
+			return False
 		self._cached_selector_map = selector_map
+		return True
+
+	def dom_cache_epoch(self, target_id: str | None = None) -> tuple[int, int] | None:
+		"""Return the generation a DOM build must publish against."""
+		target = target_id or self.current_target_id
+		if target is None:
+			return None
+		return self._dom_cache.epoch(target)
+
+	def dom_cache_build_token(self) -> int:
+		"""Return a monotonic token for one DOM build."""
+		return self._dom_cache.begin_build()
+
+	def publish_browser_state_summary(
+		self,
+		summary: Any,
+		*,
+		target_id: str | None = None,
+		epoch: tuple[int, int] | None = None,
+		sequence: int | None = None,
+	) -> bool:
+		"""Cache a browser state summary for the document it was built from."""
+		target = target_id or self.current_target_id
+		if target is None or target != self.current_target_id:
+			return False
+		captured = epoch if epoch is not None else self._dom_cache.epoch(target)
+		if captured is None:
+			return False
+		if not self._dom_cache.mark_summary(target, epoch=captured, sequence=sequence):
+			return False
+		self._cached_browser_state_summary = summary
+		return True
+
+	def invalidate_dom_cache(self, target_id: str | None = None, *, reason: str) -> None:
+		"""Invalidate the cache for one target, or for the focused target."""
+		target = target_id or self.current_target_id
+		if target is None:
+			self.reset_dom_cache(reason=reason)
+			return
+		self._dom_cache.invalidate(target, reason)
+		focus = self.agent_focus
+		if focus is not None and focus.target_id == target:
+			self._cached_selector_map.clear()
+			self._cached_browser_state_summary = None
+			self._clear_watchdog_dom_cache()
+
+	def reset_dom_cache(self, *, reason: str, purge_metadata: bool = False) -> None:
+		"""Clear all cached DOM state for focus change, reset, or shutdown."""
+		self._dom_cache.clear(reason, purge_metadata=purge_metadata)
+		self._cached_selector_map.clear()
+		self._cached_browser_state_summary = None
+		self._clear_watchdog_dom_cache()
+
+	def forget_dom_cache(self, target_id: str) -> None:
+		"""Drop all cache state for a target that is gone.
+
+		The storage is cleared synchronously so a concurrent read cannot adopt
+		the detached target's map before focus recovery runs.
+		"""
+		self._dom_cache.forget(target_id)
+		focus = self.agent_focus
+		if focus is not None and focus.target_id == target_id:
+			self._cached_selector_map.clear()
+			self._cached_browser_state_summary = None
+			self._clear_watchdog_dom_cache()
+
+	def mark_dom_cache_provisional(self, target_id: str | None = None, *, reason: str = 'action') -> None:
+		"""Mark a published view as possibly stale after an action."""
+		target = target_id or self.current_target_id
+		if target is None:
+			return
+		self._dom_cache.mark_provisional(target, reason)
+
+	def dom_cache_snapshot(self) -> dict[str, Any]:
+		"""Return the DOM cache state machine without page content."""
+		return self._dom_cache.snapshot(self.current_target_id)
+
+	def observe_document_event(self, kind: str, event: dict[str, Any], session_id: str | None) -> None:
+		"""Apply a CDP document event to the cache machine.
+
+		This is a best-effort early signal. Read-time revalidation remains the
+		correctness fence when an event is missing.
+		"""
+		if kind not in ('frame', 'within'):
+			return
+		target_id = self._target_id_for_session(session_id)
+		if target_id is None:
+			return
+		if kind == 'frame':
+			frame = event.get('frame')
+			if not isinstance(frame, dict) or frame.get('parentId'):
+				return
+			self._record_committed_document(target_id, frame)
+			return
+		main_frame = self._dom_cache.main_frame(target_id)
+		if main_frame is None or event.get('frameId') != main_frame:
+			return
+		known = self._dom_cache.known_identity(target_id)
+		self.invalidate_dom_cache(target_id=target_id, reason='same_document_navigation')
+		new_url = event.get('url')
+		if known is not None and isinstance(new_url, str) and new_url:
+			self._dom_cache.note_identity(target_id, DocumentIdentity(known.loader_id, new_url))
+
+	def target_id_for_session(self, session_id: str | None) -> str | None:
+		"""Resolve a CDP session id to its target without changing focus."""
+		return self._target_id_for_session(session_id)
+
+	def _target_id_for_session(self, session_id: str | None) -> str | None:
+		if not session_id:
+			return None
+		focus = self.agent_focus
+		if focus is not None and focus.session_id == session_id:
+			return focus.target_id
+		for target_id, session in self._cdp_session_pool.items():
+			if getattr(session, 'session_id', None) == session_id:
+				return target_id
+		return None
+
+	def _record_committed_document(self, target_id: str | None, frame: Mapping[str, Any]) -> None:
+		if target_id is None:
+			return
+		frame_id = frame.get('id')
+		if isinstance(frame_id, str) and frame_id:
+			self._dom_cache.note_main_frame(target_id, frame_id)
+		loader_id = frame.get('loaderId')
+		url = str(frame.get('url') or '') + str(frame.get('urlFragment') or '')
+		self.invalidate_dom_cache(target_id=target_id, reason='document_commit')
+		if isinstance(loader_id, str) and loader_id:
+			self._dom_cache.note_identity(target_id, DocumentIdentity(loader_id, url))
+
+	def _clear_watchdog_dom_cache(self) -> None:
+		try:
+			watchdog = self._dom_watchdog
+		except (AttributeError, KeyError, TypeError):
+			return
+		clear_cache = getattr(watchdog, 'clear_cache', None)
+		if callable(clear_cache):
+			clear_cache()
+
+	async def _read_document_identity(self, target_id: str) -> DocumentIdentity | None:
+		root = self._cdp_client_root
+		focus = self.agent_focus
+		if root is None or focus is None or focus.target_id != target_id:
+			return None
+		try:
+			tree = await root.send.Page.getFrameTree(session_id=focus.session_id)
+		except Exception as error:
+			self.logger.debug('DOM cache revalidation could not read the document identity: %s', error)
+			return None
+		frame = ((tree or {}).get('frameTree') or {}).get('frame')
+		if not isinstance(frame, dict):
+			return None
+		frame_id = frame.get('id')
+		if isinstance(frame_id, str) and frame_id:
+			self._dom_cache.note_main_frame(target_id, frame_id)
+		loader_id = frame.get('loaderId')
+		url = str(frame.get('url') or '') + str(frame.get('urlFragment') or '')
+		return DocumentIdentity(loader_id if isinstance(loader_id, str) and loader_id else None, url)
 
 	# Alias for backwards compatibility
 	async def get_element_by_index(self, index: int) -> EnhancedDOMTreeNode | None:
@@ -5462,21 +5676,65 @@ class BrowserSession(BaseModel):
 		)
 
 	async def get_selector_map(self) -> dict[int, EnhancedDOMTreeNode]:
-		"""Get the current selector map from cached state or DOM watchdog.
+		"""Return the selector map only while it belongs to the live document.
 
-		Returns:
-                Dictionary mapping element indices to EnhancedDOMTreeNode objects
+		The watchdog is never a read source. It publishes through the session,
+		so a cleared cache cannot be resurrected from its private copy.
 		"""
-		# First try cached selector map
-		if self._cached_selector_map:
-			return self._cached_selector_map
+		target_id = self.current_target_id
+		if target_id is None or not self._cached_selector_map:
+			return {}
+		if not self._dom_cache.has_entry(target_id):
+			# Adopt state written outside the session for backward compatibility.
+			identity = await self._read_document_identity(target_id)
+			if identity is None or not self._dom_cache.adopt(
+				target_id,
+				selector_count=len(self._cached_selector_map),
+				has_summary=self._cached_browser_state_summary is not None,
+				identity=identity,
+			):
+				self._cached_selector_map.clear()
+				self._cached_browser_state_summary = None
+				return {}
+		if not self._dom_cache.is_current(target_id):
+			self._cached_selector_map.clear()
+			self._cached_browser_state_summary = None
+			return {}
+		if not await self._validate_dom_cache_identity(target_id):
+			return {}
+		return self._cached_selector_map
 
-		# Try to get from DOM watchdog
-		if self._dom_watchdog and hasattr(self._dom_watchdog, 'selector_map'):
-			return self._dom_watchdog.selector_map or {}
+	async def _validate_dom_cache_identity(self, target_id: str) -> bool:
+		"""Compare the published document identity with the live one.
 
-		# Return empty dict if nothing available
-		return {}
+		Every selector read goes through this check. A page-initiated or timer
+		navigation that no observer saw is still refused here. The entry token
+		prevents a slow read from invalidating a newer entry that replaced the
+		one it checked.
+		"""
+		before = self._dom_cache.entry_token(target_id)
+		identity = await self._read_document_identity(target_id)
+		if self._dom_cache.entry_token(target_id) != before:
+			return False
+		if identity is None:
+			self.invalidate_dom_cache(target_id=target_id, reason='document_identity_unavailable')
+			return False
+		if not self._dom_cache.confirm(target_id, identity):
+			self.invalidate_dom_cache(target_id=target_id, reason='document_changed')
+			return False
+		return True
+
+	async def dom_cache_capture_identity(
+		self, target_id: str | None = None
+	) -> DocumentIdentity | None:
+		"""Read and record the live document identity for a build."""
+		target = target_id or self.current_target_id
+		if target is None:
+			return None
+		identity = await self._read_document_identity(target)
+		if identity is not None:
+			self._dom_cache.note_identity(target, identity)
+		return identity
 
 	async def get_index_by_id(self, element_id: str) -> int | None:
 		"""Find element index by its id attribute.
@@ -6287,7 +6545,9 @@ class BrowserSession(BaseModel):
 			focus=True,
 		)
 
-		# Use helper to navigate on the target
+		# A raw Page.navigate bypasses the navigation machine. Fence the cache
+		# before the command so no pre-navigation index survives.
+		self.invalidate_dom_cache(target_id=session.target_id, reason='cdp_navigate')
 		await session.cdp_client.send.Page.navigate(params={'url': url}, session_id=session.session_id)
 
 	@staticmethod

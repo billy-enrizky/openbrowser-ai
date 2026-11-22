@@ -93,6 +93,15 @@ def _make_session_with_mocks(**overrides):
         return_value={"result": {"value": {"x": 10, "y": 20, "width": 100, "height": 50}}}
     )
 
+    # Page methods
+    cdp_root.send.Page.getFrameTree = AsyncMock(
+        return_value={
+            "frameTree": {
+                "frame": {"id": "frame-1", "loaderId": "loader-1", "url": "https://example.com"}
+            }
+        }
+    )
+
     # DOM methods
     cdp_root.send.DOM.getContentQuads = AsyncMock(return_value={"quads": []})
     cdp_root.send.DOM.getBoxModel = AsyncMock(return_value={})
@@ -1040,9 +1049,16 @@ class TestGetCurrentPageUrlTitle:
 
 class TestUpdateCachedSelectorMap:
     def test_update_cached_selector_map(self):
+        from openbrowser.browser.dom_cache import DocumentIdentity
+
         session, _ = _make_session_with_mocks()
         new_map = {0: MagicMock(), 1: MagicMock()}
-        session.update_cached_selector_map(new_map)
+        assert (
+            session.update_cached_selector_map(
+                new_map, identity=DocumentIdentity("loader-1", "https://example.com")
+            )
+            is True
+        )
         assert session._cached_selector_map is new_map
 
 
@@ -1268,7 +1284,7 @@ class TestGetSelectorMap:
         result = await session.get_selector_map()
         assert result is mock_map
 
-    async def test_falls_back_to_dom_watchdog(self):
+    async def test_does_not_fall_back_to_dom_watchdog(self):
         session, _ = _make_session_with_mocks()
         session._cached_selector_map = {}
 
@@ -1278,7 +1294,7 @@ class TestGetSelectorMap:
         session._dom_watchdog = mock_wd
 
         result = await session.get_selector_map()
-        assert result is wd_map
+        assert result == {}
 
     async def test_returns_empty_dict_when_nothing_available(self):
         session, _ = _make_session_with_mocks()

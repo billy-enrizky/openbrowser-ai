@@ -2,6 +2,7 @@
 
 import asyncio
 import time
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from openbrowser.browser.events import (
@@ -365,8 +366,14 @@ class DOMWatchdog(BaseWatchdog):
 					if self.browser_session._cached_browser_state_summary
 					else None
 				)
+				dom_epoch = self.browser_session.dom_cache_epoch()
+				dom_sequence = self.browser_session.dom_cache_build_token()
 
-				dom_task = asyncio.create_task(self._build_dom_tree_without_highlights(previous_state))
+				dom_task = asyncio.create_task(
+					self._build_dom_tree_without_highlights(
+						previous_state, epoch=dom_epoch, sequence=dom_sequence
+					)
+				)
 
 			# Start clean screenshot task if requested (without JS highlights)
 			if event.include_screenshot:
@@ -508,8 +515,17 @@ class DOMWatchdog(BaseWatchdog):
 				closed_popup_messages=self.browser_session._closed_popup_messages.copy(),
 			)
 
-			# Cache the state
-			self.browser_session._cached_browser_state_summary = browser_state
+			# Cache the state only for the document it was built from.
+			if event.include_dom and dom_epoch is not None:
+				cached = self.browser_session.publish_browser_state_summary(
+					browser_state, epoch=dom_epoch, sequence=dom_sequence
+				)
+				if not cached:
+					# Never hand out indexes from a document the cache rejected.
+					browser_state = replace(
+						browser_state,
+						dom_state=SerializedDOMState(_root=None, selector_map={}),
+					)
 
 			self.logger.debug('🔍 DOMWatchdog.on_BrowserStateRequestEvent: ✅ COMPLETED - Returning browser state')
 			return browser_state
@@ -550,9 +566,19 @@ class DOMWatchdog(BaseWatchdog):
 
 	@time_execution_async('build_dom_tree_without_highlights')
 	@observe_debug(ignore_input=True, ignore_output=True, name='build_dom_tree_without_highlights')
-	async def _build_dom_tree_without_highlights(self, previous_state: SerializedDOMState | None = None) -> SerializedDOMState:
+	async def _build_dom_tree_without_highlights(
+		self,
+		previous_state: SerializedDOMState | None = None,
+		*,
+		epoch: tuple[int, int] | None = None,
+		sequence: int | None = None,
+	) -> SerializedDOMState:
 		"""Build DOM tree without injecting JavaScript highlights (for parallel execution)."""
 		try:
+			captured = epoch if epoch is not None else self.browser_session.dom_cache_epoch()
+			if sequence is None:
+				sequence = self.browser_session.dom_cache_build_token()
+			identity = await self.browser_session.dom_cache_capture_identity()
 			self.logger.debug('🔍 DOMWatchdog._build_dom_tree_without_highlights: STARTING DOM tree build')
 
 			# Create or reuse DOM service
@@ -583,9 +609,17 @@ class DOMWatchdog(BaseWatchdog):
 			# Update selector map for other watchdogs
 			self.logger.debug('🔍 DOMWatchdog._build_dom_tree_without_highlights: Updating selector maps...')
 			self.selector_map = self.current_dom_state.selector_map
-			# Update BrowserSession's cached selector map
+			published = True
 			if self.browser_session:
-				self.browser_session.update_cached_selector_map(self.selector_map)
+				published = self.browser_session.update_cached_selector_map(
+					self.selector_map, epoch=captured, sequence=sequence, identity=identity
+				)
+			if not published:
+				self.logger.warning(
+					'🔍 DOMWatchdog: the document changed during the DOM build; discarding the stale tree'
+				)
+				self.clear_cache()
+				return SerializedDOMState(_root=None, selector_map={})
 			self.logger.debug(
 				f'🔍 DOMWatchdog._build_dom_tree_without_highlights: ✅ Selector maps updated, {len(self.selector_map)} elements'
 			)

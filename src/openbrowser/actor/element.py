@@ -75,18 +75,32 @@ class Element:
 	- Uses module-level modifier map constant
 	"""
 	
-	__slots__ = ('_browser_session', '_client', '_backend_node_id', '_session_id')
+	__slots__ = ('_browser_session', '_client', '_backend_node_id', '_session_id', '_target_id')
 
 	def __init__(
 		self,
 		browser_session: 'BrowserSession',
 		backend_node_id: int,
 		session_id: str | None = None,
+		target_id: str | None = None,
 	):
 		self._browser_session = browser_session
 		self._client = browser_session.cdp_client
 		self._backend_node_id = backend_node_id
 		self._session_id = session_id
+		self._target_id = target_id
+
+	def _mark_dom_provisional(self, reason: str) -> None:
+		"""Mark the session DOM cache as possibly stale after an action."""
+		mark = getattr(self._browser_session, 'mark_dom_cache_provisional', None)
+		if not callable(mark):
+			return
+		target_id = self._target_id
+		if target_id is None:
+			resolve = getattr(self._browser_session, 'target_id_for_session', None)
+			if callable(resolve):
+				target_id = resolve(self._session_id)
+		mark(target_id=target_id, reason=reason)
 
 	async def _get_node_id(self) -> int:
 		"""Get DOM node ID from backend node ID."""
@@ -112,7 +126,7 @@ class Element:
 		modifiers: list[ModifierType] | None = None,
 	) -> None:
 		"""Click the element using the advanced watchdog implementation."""
-
+		self._mark_dom_provisional('element_click')
 		try:
 			# Get viewport dimensions for visibility checks
 			layout_metrics = await self._client.send.Page.getLayoutMetrics(session_id=self._session_id)
@@ -366,6 +380,7 @@ class Element:
 
 	async def fill(self, value: str, clear: bool = True) -> None:
 		"""Fill the input element using proper CDP methods with improved focus handling."""
+		self._mark_dom_provisional('element_fill')
 		try:
 			# Use the existing CDP client and session
 			cdp_client = self._client
@@ -522,6 +537,7 @@ class Element:
 
 	async def hover(self) -> None:
 		"""Hover over the element."""
+		self._mark_dom_provisional('element_hover')
 		box = await self.get_bounding_box()
 		if not box:
 			raise RuntimeError('Element is not visible or has no bounding box')
@@ -534,6 +550,7 @@ class Element:
 
 	async def focus(self) -> None:
 		"""Focus the element."""
+		self._mark_dom_provisional('element_focus')
 		node_id = await self._get_node_id()
 		params: 'FocusParameters' = {'nodeId': node_id}
 		await self._client.send.DOM.focus(params, session_id=self._session_id)
@@ -544,6 +561,7 @@ class Element:
 
 	async def select_option(self, values: str | list[str]) -> None:
 		"""Select option(s) in a select element."""
+		self._mark_dom_provisional('element_select')
 		if isinstance(values, str):
 			values = [values]
 
@@ -606,6 +624,7 @@ class Element:
 		target_position: Position | None = None,
 	) -> None:
 		"""Drag this element to another element or position."""
+		self._mark_dom_provisional('element_drag')
 		# Get source coordinates
 		if source_position:
 			source_x = source_position['x']
@@ -749,6 +768,7 @@ class Element:
 			# Async operations
 			result = await element.evaluate("async () => { await new Promise(r => setTimeout(r, 100)); return this.id; }")
 		"""
+		self._mark_dom_provisional('element_evaluate')
 		# Get remote object ID for this element
 		object_id = await self._get_remote_object_id()
 		if not object_id:

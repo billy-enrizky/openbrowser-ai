@@ -58,7 +58,7 @@ class TestElementInit:
 
     def test_has_slots(self):
         assert '__slots__' in dir(Element)
-        expected = ('_browser_session', '_client', '_backend_node_id', '_session_id')
+        expected = ('_browser_session', '_client', '_backend_node_id', '_session_id', '_target_id')
         assert Element.__slots__ == expected
 
 
