@@ -563,22 +563,52 @@ class _BrowserOwner:
 
 	def _build_browser_profile(self):
 		"""Build a BrowserProfile from config with MCP defaults."""
+		from openbrowser.browser.profile_provenance import ProfileProvenance, ProfileValueSource
+
 		profile_config = dict(get_default_profile(self.config))
 		explicit_user_data_dir = profile_config.get('user_data_dir')
-		profile_data = {
+		defaults = {
 			'downloads_path': str(self._downloads_dir),
 			'wait_between_actions': 0.5,
 			'keep_alive': True,
 			'device_scale_factor': 1.0,
 			'disable_security': False,
 			'headless': True,
-			**profile_config,
 		}
+		provenance = ProfileProvenance()
+		provenance.record_mapping(defaults, ProfileValueSource.DEFAULT)
+		provenance.record_mapping(profile_config, ProfileValueSource.CONFIG)
+		provenance.record_defaults(
+			{'channel': None, 'executable_path': None, 'args': [], 'proxy': None}
+		)
+		env_user_data = os.environ.get('OPENBROWSER_USER_DATA_DIR')
+		if env_user_data and str(profile_config.get('user_data_dir') or '') == env_user_data:
+			provenance.record(
+				'user_data_dir', profile_config.get('user_data_dir'), ProfileValueSource.ENVIRONMENT
+			)
+		env_storage = os.environ.get('OPENBROWSER_STORAGE_STATE')
+		if env_storage and str(profile_config.get('storage_state') or '') == env_storage:
+			provenance.record(
+				'storage_state', profile_config.get('storage_state'), ProfileValueSource.ENVIRONMENT
+			)
+		if isinstance(profile_config.get('proxy'), dict) and any(
+			os.environ.get(name)
+			for name in (
+				'OPENBROWSER_PROXY_URL',
+				'OPENBROWSER_NO_PROXY',
+				'OPENBROWSER_PROXY_USERNAME',
+				'OPENBROWSER_PROXY_PASSWORD',
+			)
+		):
+			provenance.record('proxy', profile_config.get('proxy'), ProfileValueSource.ENVIRONMENT)
+		profile_data = {**defaults, **profile_config}
 		env_headless = os.environ.get('OPENBROWSER_HEADLESS', '').lower()
 		if env_headless in ('true', '1', 'yes'):
 			profile_data['headless'] = True
+			provenance.record('headless', True, ProfileValueSource.ENVIRONMENT)
 		elif env_headless in ('false', '0', 'no'):
 			profile_data['headless'] = False
+			provenance.record('headless', False, ProfileValueSource.ENVIRONMENT)
 
 		if explicit_user_data_dir:
 			# Explicit paths are intentionally shared and protected by the
@@ -587,23 +617,36 @@ class _BrowserOwner:
 		else:
 			managed_default_dir = self._get_managed_profile_dir()
 			profile_data['user_data_dir'] = str(managed_default_dir)
+			provenance.record('user_data_dir', profile_data['user_data_dir'], ProfileValueSource.MANAGED)
 			configured_storage_state = profile_data.get('storage_state')
 			if configured_storage_state is None or isinstance(configured_storage_state, (str, Path)):
 				storage_state_path = managed_default_dir / 'storage_state.json'
 				self._seed_managed_storage_state(storage_state_path, source=configured_storage_state)
 				profile_data['storage_state'] = str(storage_state_path)
+				provenance.record(
+					'storage_state', profile_data['storage_state'], ProfileValueSource.MANAGED
+				)
 			else:
 				# In-memory Playwright storage state is already isolated per profile
 				# object. Do not coerce it into a shared filesystem path.
 				profile_data['storage_state'] = deepcopy(configured_storage_state)
+				provenance.record(
+					'storage_state', profile_data['storage_state'], ProfileValueSource.CONFIG
+				)
 
+		before_managed = dict(profile_data)
 		profile_data = apply_managed_browser_profile_defaults(profile_data, managed_default_dir)
+		provenance.record_changes(before_managed, profile_data, ProfileValueSource.MANAGED)
+		if profile_data.get('storage_state') is None:
+			provenance.record_defaults({'storage_state': None})
 		args = list(profile_data.get('args') or [])
 		ownership_marker = f'--openbrowser-instance-id={self.owner_id}'
 		if not any(argument.startswith('--openbrowser-instance-id=') for argument in args):
 			args.append(ownership_marker)
+			provenance.record('args', args, ProfileValueSource.MANAGED)
 		profile_data['args'] = args
 		profile = BrowserProfile(**profile_data)
+		provenance.refresh_from_profile(profile)
 		storage_state = profile.storage_state
 		if isinstance(storage_state, (str, Path)):
 			storage_state_mode = 'file'
@@ -620,6 +663,7 @@ class _BrowserOwner:
 			'storage_state': storage_state_summary,
 			'storage_state_mode': storage_state_mode,
 			'instance_id': self.owner_id,
+			'resolution': provenance.to_dict(),
 		}
 		return profile
 

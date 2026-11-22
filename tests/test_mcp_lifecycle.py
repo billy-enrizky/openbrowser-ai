@@ -833,3 +833,238 @@ async def test_mcp_blocked_recovery_preserves_partial_output_and_warning(isolate
 	assert 'partial user output' in str(error.value)
 	assert 'config_restart_required' in str(error.value)
 	assert 'may have partially run' in error.value.hint
+
+
+@pytest.mark.asyncio
+async def test_get_status_reports_profile_resolution_sources(mcp_server, tmp_path):
+	mcp_server.config = {
+		'browser_profile': {
+			'user_data_dir': str(tmp_path / 'explicit-profile'),
+			'headless': False,
+		}
+	}
+	mcp_server._profile_summary = None
+
+	with patch.object(BrowserSession, 'start') as start:
+		mcp_server._build_browser_profile()
+		payload = json.loads(await mcp_server._handle_tool('get_status', {}))
+
+	assert start.called is False
+	resolution = payload['profile']['resolution']
+	assert resolution['user_data_dir'] == {
+		'value': str(tmp_path / 'explicit-profile'),
+		'source': 'config',
+	}
+	assert resolution['headless'] == {'value': False, 'source': 'config'}
+	assert resolution['storage_state'] == {'mode': 'none', 'source': 'default'}
+	assert payload['profile']['user_data_dir'] == str(tmp_path / 'explicit-profile')
+	assert payload['profile']['headless'] is False
+	assert payload['profile']['storage_state'] is None
+
+
+@pytest.mark.asyncio
+async def test_get_status_reports_managed_profile_and_storage(mcp_server):
+	mcp_server.config = {'browser_profile': {}}
+	mcp_server._profile_summary = None
+	mcp_server._managed_profile_dir = None
+
+	with patch.object(BrowserSession, 'start') as start:
+		mcp_server._build_browser_profile()
+		payload = json.loads(await mcp_server._handle_tool('get_status', {}))
+
+	assert start.called is False
+	resolution = payload['profile']['resolution']
+	assert resolution['user_data_dir']['source'] == 'managed'
+	assert resolution['storage_state'] == {'mode': 'file', 'source': 'managed'}
+	assert resolution['args'] == {'mode': 'configured', 'source': 'managed', 'count': 1}
+	assert payload['profile']['headless'] is True
+	assert payload['profile']['storage_state'].endswith('/storage_state.json')
+	assert payload['profile']['instance_id'] == mcp_server.owner_id
+
+
+@pytest.mark.asyncio
+async def test_get_status_reports_environment_headless(mcp_server, monkeypatch):
+	mcp_server.config = {'browser_profile': {'headless': True}}
+	mcp_server._profile_summary = None
+	monkeypatch.setenv('OPENBROWSER_HEADLESS', 'false')
+
+	with patch.object(BrowserSession, 'start') as start:
+		mcp_server._build_browser_profile()
+		payload = json.loads(await mcp_server._handle_tool('get_status', {}))
+
+	assert start.called is False
+	assert payload['profile']['resolution']['headless'] == {
+		'value': False,
+		'source': 'environment',
+	}
+
+
+@pytest.mark.asyncio
+async def test_get_status_reports_in_memory_storage_state_provenance(mcp_server):
+	mcp_server.config = {
+		'browser_profile': {
+			'storage_state': {
+				'cookies': [{'name': 'session', 'value': 'secret-cookie-value'}],
+				'origins': [],
+			}
+		}
+	}
+	mcp_server._profile_summary = None
+	mcp_server._managed_profile_dir = None
+
+	with patch.object(BrowserSession, 'start') as start:
+		mcp_server._build_browser_profile()
+		payload = json.loads(await mcp_server._handle_tool('get_status', {}))
+
+	assert start.called is False
+	assert payload['profile']['resolution']['storage_state'] == {
+		'mode': 'memory',
+		'source': 'config',
+	}
+	assert payload['profile']['storage_state'] is None
+	assert payload['profile']['storage_state_mode'] == 'memory'
+	assert 'secret-cookie-value' not in json.dumps(payload)
+
+
+@pytest.mark.asyncio
+async def test_get_status_reports_environment_paths(
+	mcp_server, monkeypatch, tmp_path, isolated_config_path
+):
+	from openbrowser.config import CONFIG
+
+	_write_valid_mcp_config(isolated_config_path)
+	configured_profile = tmp_path / 'configured-profile'
+	configured_state = tmp_path / 'configured-state.json'
+	configured_state.write_text('{"cookies": [], "origins": []}')
+	config = json.loads(isolated_config_path.read_text())
+	config['browser_profile']['profile-a'].update(
+		{
+			'user_data_dir': str(configured_profile),
+			'storage_state': str(configured_state),
+			'proxy': {'server': 'http://configured-proxy.test:8080'},
+		}
+	)
+	isolated_config_path.write_text(json.dumps(config))
+	env_profile = tmp_path / 'environment-profile'
+	env_state = tmp_path / 'environment-state.json'
+	env_state.write_text('{"cookies": [], "origins": []}')
+	monkeypatch.setenv('OPENBROWSER_USER_DATA_DIR', str(env_profile))
+	monkeypatch.setenv('OPENBROWSER_STORAGE_STATE', str(env_state))
+	monkeypatch.setenv('OPENBROWSER_PROXY_URL', 'http://user:secret-password@proxy.test:8080')
+	CONFIG._env_config = None
+	mcp_server.config = CONFIG.config_dict_from_result(CONFIG.load_result())
+	mcp_server._profile_summary = None
+	mcp_server._managed_profile_dir = None
+
+	with patch.object(BrowserSession, 'start') as start:
+		mcp_server._build_browser_profile()
+		payload = json.loads(await mcp_server._handle_tool('get_status', {}))
+
+	assert start.called is False
+	resolution = payload['profile']['resolution']
+	assert resolution['user_data_dir'] == {
+		'value': str(env_profile.resolve()),
+		'source': 'environment',
+	}
+	assert resolution['storage_state'] == {'mode': 'file', 'source': 'environment'}
+	assert resolution['proxy'] == {'mode': 'configured', 'source': 'environment'}
+	assert payload['profile']['user_data_dir'] == str(env_profile.resolve())
+	assert payload['profile']['storage_state'] == str(env_state)
+	assert 'secret-password' not in json.dumps(payload)
+
+
+@pytest.mark.asyncio
+async def test_get_status_reports_validated_effective_values(mcp_server, tmp_path):
+	mcp_server.config = {
+		'browser_profile': {
+			'user_data_dir': str(tmp_path / 'validated-profile'),
+			'keep_alive': 'false',
+			'disable_security': 1,
+			'wait_between_actions': '0.25',
+			'device_scale_factor': '1.5',
+			'proxy': {},
+		}
+	}
+	mcp_server._profile_summary = None
+
+	with patch.object(BrowserSession, 'start') as start:
+		mcp_server._build_browser_profile()
+		payload = json.loads(await mcp_server._handle_tool('get_status', {}))
+
+	assert start.called is False
+	resolution = payload['profile']['resolution']
+	assert resolution['keep_alive'] == {'value': False, 'source': 'config'}
+	assert resolution['disable_security'] == {'value': True, 'source': 'config'}
+	assert resolution['wait_between_actions'] == {'value': 0.25, 'source': 'config'}
+	assert resolution['device_scale_factor'] == {'value': 1.5, 'source': 'config'}
+	assert resolution['proxy'] == {'mode': 'none', 'source': 'config'}
+
+
+@pytest.mark.asyncio
+async def test_get_status_reports_configured_storage_state(mcp_server, tmp_path):
+	state_path = tmp_path / 'configured-state.json'
+	state_path.write_text('{"cookies": [], "origins": []}')
+	mcp_server.config = {
+		'browser_profile': {
+			'user_data_dir': str(tmp_path / 'configured-profile'),
+			'storage_state': str(state_path),
+		}
+	}
+	mcp_server._profile_summary = None
+
+	with patch.object(BrowserSession, 'start') as start:
+		mcp_server._build_browser_profile()
+		payload = json.loads(await mcp_server._handle_tool('get_status', {}))
+
+	assert start.called is False
+	assert payload['profile']['resolution']['storage_state'] == {
+		'mode': 'file',
+		'source': 'config',
+	}
+	assert payload['profile']['storage_state'] == str(state_path)
+	assert payload['profile']['storage_state_mode'] == 'file'
+
+
+@pytest.mark.asyncio
+async def test_get_status_preserves_explicit_config_none_storage_state(mcp_server, tmp_path):
+	mcp_server.config = {
+		'browser_profile': {
+			'user_data_dir': str(tmp_path / 'configured-profile'),
+			'storage_state': None,
+		}
+	}
+	mcp_server._profile_summary = None
+
+	with patch.object(BrowserSession, 'start') as start:
+		mcp_server._build_browser_profile()
+		payload = json.loads(await mcp_server._handle_tool('get_status', {}))
+
+	assert start.called is False
+	assert payload['profile']['resolution']['storage_state'] == {
+		'mode': 'none',
+		'source': 'config',
+	}
+
+
+@pytest.mark.asyncio
+async def test_get_status_reports_configured_storage_state_copied_to_managed_path(
+	mcp_server, tmp_path
+):
+	source = tmp_path / 'source-state.json'
+	source.write_text('{"cookies": [], "origins": []}')
+	mcp_server.config = {'browser_profile': {'storage_state': str(source)}}
+	mcp_server._profile_summary = None
+	mcp_server._managed_profile_dir = None
+
+	with patch.object(BrowserSession, 'start') as start:
+		mcp_server._build_browser_profile()
+		payload = json.loads(await mcp_server._handle_tool('get_status', {}))
+
+	assert start.called is False
+	assert payload['profile']['resolution']['storage_state'] == {
+		'mode': 'file',
+		'source': 'managed',
+	}
+	managed_path = payload['profile']['storage_state']
+	assert managed_path.endswith(f'mcp-{mcp_server.owner_id}/storage_state.json')
+	assert managed_path != str(source)

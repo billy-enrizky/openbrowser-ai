@@ -633,28 +633,59 @@ class DaemonServer:
     def _build_browser_profile(self):
         """Build a BrowserProfile from the frozen startup config."""
         from openbrowser.browser import BrowserProfile
+        from openbrowser.browser.profile_provenance import ProfileProvenance, ProfileValueSource
 
         assert self._startup_config is not None
         profile_config = dict(get_default_profile(self._startup_config))
         default_profile_dir = self._default_profile_dir()
-        profile_data = {
+        defaults = {
             'downloads_path': str(Path.home() / 'Downloads' / 'openbrowser-daemon'),
             'wait_between_actions': 0.5,
             'keep_alive': True,
             'device_scale_factor': 1.0,
             'disable_security': False,
             'headless': True,
-            **profile_config,
         }
+        provenance = ProfileProvenance()
+        provenance.record_mapping(defaults, ProfileValueSource.DEFAULT)
+        provenance.record_mapping(profile_config, ProfileValueSource.CONFIG)
+        provenance.record_defaults(
+            {'channel': None, 'executable_path': None, 'args': [], 'proxy': None}
+        )
+        env_user_data = os.environ.get('OPENBROWSER_USER_DATA_DIR')
+        if env_user_data and str(profile_config.get('user_data_dir') or '') == env_user_data:
+            provenance.record(
+                'user_data_dir', profile_config.get('user_data_dir'), ProfileValueSource.ENVIRONMENT
+            )
+        env_storage = os.environ.get('OPENBROWSER_STORAGE_STATE')
+        if env_storage and str(profile_config.get('storage_state') or '') == env_storage:
+            provenance.record(
+                'storage_state', profile_config.get('storage_state'), ProfileValueSource.ENVIRONMENT
+            )
+        if isinstance(profile_config.get('proxy'), dict) and any(
+            os.environ.get(name)
+            for name in (
+                'OPENBROWSER_PROXY_URL',
+                'OPENBROWSER_NO_PROXY',
+                'OPENBROWSER_PROXY_USERNAME',
+                'OPENBROWSER_PROXY_PASSWORD',
+            )
+        ):
+            provenance.record('proxy', profile_config.get('proxy'), ProfileValueSource.ENVIRONMENT)
+        profile_data = {**defaults, **profile_config}
         isolate = os.environ.get('OPENBROWSER_DAEMON_PROFILE_ISOLATION', '').lower() in ('true', '1', 'yes')
         daemon_profile_override = bool(os.environ.get('OPENBROWSER_DAEMON_PROFILE_DIR')) or (
             bool(os.environ.get('OPENBROWSER_SOCKET')) and isolate
         )
         if daemon_profile_override and not os.environ.get('OPENBROWSER_USER_DATA_DIR'):
             profile_data['user_data_dir'] = str(default_profile_dir)
+            provenance.record('user_data_dir', profile_data['user_data_dir'], ProfileValueSource.MANAGED)
         elif not profile_data.get('user_data_dir'):
             profile_data['user_data_dir'] = str(default_profile_dir)
+            provenance.record('user_data_dir', profile_data['user_data_dir'], ProfileValueSource.MANAGED)
+        before_managed = dict(profile_data)
         profile_data = apply_managed_browser_profile_defaults(profile_data, default_profile_dir)
+        provenance.record_changes(before_managed, profile_data, ProfileValueSource.MANAGED)
         # The daemon already persists cookies and storage in its Chrome
         # user-data directory. Replaying a second snapshot on every startup
         # can be enormous and blocks the first request while CDP applies it.
@@ -662,6 +693,7 @@ class DaemonServer:
         # a snapshot path.
         if not profile_config.get('storage_state'):
             profile_data.pop('storage_state', None)
+            provenance.record('storage_state', None, ProfileValueSource.DEFAULT)
 
         # Stored config (profile_config) may have headless=False from a previous
         # non-headless session, overriding the daemon default above. Apply the env
@@ -670,16 +702,21 @@ class DaemonServer:
         env_headless = os.environ.get('OPENBROWSER_HEADLESS', '').lower()
         if env_headless in ('true', '1', 'yes'):
             profile_data['headless'] = True
+            provenance.record('headless', True, ProfileValueSource.ENVIRONMENT)
         elif env_headless in ('false', '0', 'no'):
             profile_data['headless'] = False
+            provenance.record('headless', False, ProfileValueSource.ENVIRONMENT)
         else:
             profile_data['headless'] = True  # daemon default: always headless
+            provenance.record('headless', True, ProfileValueSource.DEFAULT)
         profile = BrowserProfile(**profile_data)
+        provenance.refresh_from_profile(profile)
         storage_state = profile.storage_state
         self._profile_summary = {
             'user_data_dir': str(profile.user_data_dir) if profile.user_data_dir else None,
             'headless': profile.headless,
             'storage_state': str(storage_state) if isinstance(storage_state, (str, Path)) else None,
+            'resolution': provenance.to_dict(),
         }
         self._record_storage_state(storage_state)
         return profile
