@@ -2016,7 +2016,7 @@ class BrowserSession(BaseModel):
 		self._watchdogs_attached = False
 
 		self._cdp_client_root = None  # type: ignore
-		self.reset_dom_cache(reason='reset')
+		self.reset_dom_cache(reason='reset', purge_metadata=True)
 		self._downloaded_files.clear()
 		self._download_history = await self._capture_download_history()
 		self._storage_state_warnings.clear()
@@ -2258,7 +2258,7 @@ class BrowserSession(BaseModel):
 		self._cdp_client_root = None
 		self._tab_registry.clear()
 		self._watchdogs_attached = False
-		self.reset_dom_cache(reason='shutdown')
+		self.reset_dom_cache(reason='shutdown', purge_metadata=True)
 		self._storage_state_warnings.clear()
 		self.agent_focus = None
 		if self.is_local:
@@ -4673,14 +4673,20 @@ class BrowserSession(BaseModel):
 		):
 			selector_map = cached_summary.dom_state.selector_map
 			if not self._dom_cache.has_entry(cached_target_id):
-				self._dom_cache.adopt(
+				identity = await self._read_document_identity(cached_target_id)
+				if identity is None or not self._dom_cache.adopt(
 					cached_target_id,
 					selector_count=len(selector_map),
 					has_summary=True,
-				)
-			if not self._dom_cache.summary_is_current(
-				cached_target_id
-			) or not await self._validate_dom_cache_identity(cached_target_id):
+					identity=identity,
+				):
+					self._cached_browser_state_summary = None
+					cached_summary = None
+			if cached_summary is not None and (
+				not self._dom_cache.summary_is_current(cached_target_id)
+				or not await self._validate_dom_cache_identity(cached_target_id)
+				or self._cached_browser_state_summary is not cached_summary
+			):
 				self.logger.debug('⚠️ Cached browser state belongs to an older document, fetching fresh state')
 				self._cached_browser_state_summary = None
 				cached_summary = None
@@ -5392,6 +5398,7 @@ class BrowserSession(BaseModel):
 		loader_id: str | None = None,
 		epoch: tuple[int, int] | None = None,
 		sequence: int | None = None,
+		identity: DocumentIdentity | None = None,
 	) -> bool:
 		"""Publish one selector map for the current document view.
 
@@ -5399,17 +5406,19 @@ class BrowserSession(BaseModel):
 		while the map was being built.
 		"""
 		target = target_id or self.current_target_id
-		if target is None:
+		if target is None or target != self.current_target_id:
 			return False
 		captured = epoch if epoch is not None else self._dom_cache.epoch(target)
 		if captured is None:
 			return False
-		identity = self._dom_cache.known_identity(target)
+		resolved = identity or self._dom_cache.known_identity(target)
+		if resolved is None:
+			return False
 		published = self._dom_cache.publish(
 			target,
 			epoch=captured,
-			loader_id=loader_id or (identity.loader_id if identity else None),
-			url=identity.url if identity else None,
+			loader_id=loader_id or resolved.loader_id,
+			url=resolved.url,
 			selector_count=len(selector_map),
 			sequence=sequence,
 		)
@@ -5439,7 +5448,7 @@ class BrowserSession(BaseModel):
 	) -> bool:
 		"""Cache a browser state summary for the document it was built from."""
 		target = target_id or self.current_target_id
-		if target is None:
+		if target is None or target != self.current_target_id:
 			return False
 		captured = epoch if epoch is not None else self._dom_cache.epoch(target)
 		if captured is None:
@@ -5462,9 +5471,9 @@ class BrowserSession(BaseModel):
 			self._cached_browser_state_summary = None
 			self._clear_watchdog_dom_cache()
 
-	def reset_dom_cache(self, *, reason: str) -> None:
+	def reset_dom_cache(self, *, reason: str, purge_metadata: bool = False) -> None:
 		"""Clear all cached DOM state for focus change, reset, or shutdown."""
-		self._dom_cache.clear(reason)
+		self._dom_cache.clear(reason, purge_metadata=purge_metadata)
 		self._cached_selector_map.clear()
 		self._cached_browser_state_summary = None
 		self._clear_watchdog_dom_cache()
@@ -5513,7 +5522,11 @@ class BrowserSession(BaseModel):
 		main_frame = self._dom_cache.main_frame(target_id)
 		if main_frame is None or event.get('frameId') != main_frame:
 			return
+		known = self._dom_cache.known_identity(target_id)
 		self.invalidate_dom_cache(target_id=target_id, reason='same_document_navigation')
+		new_url = event.get('url')
+		if known is not None and isinstance(new_url, str) and new_url:
+			self._dom_cache.note_identity(target_id, DocumentIdentity(known.loader_id, new_url))
 
 	def target_id_for_session(self, session_id: str | None) -> str | None:
 		"""Resolve a CDP session id to its target without changing focus."""
@@ -5673,11 +5686,16 @@ class BrowserSession(BaseModel):
 			return {}
 		if not self._dom_cache.has_entry(target_id):
 			# Adopt state written outside the session for backward compatibility.
-			self._dom_cache.adopt(
+			identity = await self._read_document_identity(target_id)
+			if identity is None or not self._dom_cache.adopt(
 				target_id,
 				selector_count=len(self._cached_selector_map),
 				has_summary=self._cached_browser_state_summary is not None,
-			)
+				identity=identity,
+			):
+				self._cached_selector_map.clear()
+				self._cached_browser_state_summary = None
+				return {}
 		if not self._dom_cache.is_current(target_id):
 			self._cached_selector_map.clear()
 			self._cached_browser_state_summary = None
@@ -5690,9 +5708,14 @@ class BrowserSession(BaseModel):
 		"""Compare the published document identity with the live one.
 
 		Every selector read goes through this check. A page-initiated or timer
-		navigation that no observer saw is still refused here.
+		navigation that no observer saw is still refused here. The entry token
+		prevents a slow read from invalidating a newer entry that replaced the
+		one it checked.
 		"""
+		before = self._dom_cache.entry_token(target_id)
 		identity = await self._read_document_identity(target_id)
+		if self._dom_cache.entry_token(target_id) != before:
+			return False
 		if identity is None:
 			self.invalidate_dom_cache(target_id=target_id, reason='document_identity_unavailable')
 			return False
@@ -5700,6 +5723,18 @@ class BrowserSession(BaseModel):
 			self.invalidate_dom_cache(target_id=target_id, reason='document_changed')
 			return False
 		return True
+
+	async def dom_cache_capture_identity(
+		self, target_id: str | None = None
+	) -> DocumentIdentity | None:
+		"""Read and record the live document identity for a build."""
+		target = target_id or self.current_target_id
+		if target is None:
+			return None
+		identity = await self._read_document_identity(target)
+		if identity is not None:
+			self._dom_cache.note_identity(target, identity)
+		return identity
 
 	async def get_index_by_id(self, element_id: str) -> int | None:
 		"""Find element index by its id attribute.

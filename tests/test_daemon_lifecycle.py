@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from openbrowser.browser import BrowserProfile, BrowserSession
+from openbrowser.browser.dom_cache import DocumentIdentity
 from openbrowser.browser.focus import (
 	FocusChangeReason,
 	FocusPhase,
@@ -610,7 +611,13 @@ def test_status_reports_a_ready_dom_cache_without_page_content(isolated_config_p
 		url='https://secret.test/',
 		title='Secret',
 	)
-	assert session.update_cached_selector_map({1: object()}) is True
+	assert (
+		session.update_cached_selector_map(
+			{1: object()},
+			identity=DocumentIdentity('loader-1', 'https://secret.test/'),
+		)
+		is True
+	)
 	daemon._session = session
 
 	with patch('openbrowser.browser.BrowserSession.start') as start:

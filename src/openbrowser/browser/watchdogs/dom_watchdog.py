@@ -2,6 +2,7 @@
 
 import asyncio
 import time
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from openbrowser.browser.events import (
@@ -516,9 +517,15 @@ class DOMWatchdog(BaseWatchdog):
 
 			# Cache the state only for the document it was built from.
 			if event.include_dom and dom_epoch is not None:
-				self.browser_session.publish_browser_state_summary(
+				cached = self.browser_session.publish_browser_state_summary(
 					browser_state, epoch=dom_epoch, sequence=dom_sequence
 				)
+				if not cached:
+					# Never hand out indexes from a document the cache rejected.
+					browser_state = replace(
+						browser_state,
+						dom_state=SerializedDOMState(_root=None, selector_map={}),
+					)
 
 			self.logger.debug('🔍 DOMWatchdog.on_BrowserStateRequestEvent: ✅ COMPLETED - Returning browser state')
 			return browser_state
@@ -571,6 +578,7 @@ class DOMWatchdog(BaseWatchdog):
 			captured = epoch if epoch is not None else self.browser_session.dom_cache_epoch()
 			if sequence is None:
 				sequence = self.browser_session.dom_cache_build_token()
+			identity = await self.browser_session.dom_cache_capture_identity()
 			self.logger.debug('🔍 DOMWatchdog._build_dom_tree_without_highlights: STARTING DOM tree build')
 
 			# Create or reuse DOM service
@@ -604,7 +612,7 @@ class DOMWatchdog(BaseWatchdog):
 			published = True
 			if self.browser_session:
 				published = self.browser_session.update_cached_selector_map(
-					self.selector_map, epoch=captured, sequence=sequence
+					self.selector_map, epoch=captured, sequence=sequence, identity=identity
 				)
 			if not published:
 				self.logger.warning(

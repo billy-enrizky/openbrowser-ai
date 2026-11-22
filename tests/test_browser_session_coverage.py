@@ -1207,10 +1207,17 @@ class TestDOMHelperMethods:
         assert result is None
 
     def test_update_cached_selector_map(self):
+        from openbrowser.browser.dom_cache import DocumentIdentity
+
         session = _make_browser_session()
         session.agent_focus = _make_mock_cdp_session()
         new_map = {1: MagicMock(), 2: MagicMock()}
-        assert session.update_cached_selector_map(new_map) is True
+        assert (
+            session.update_cached_selector_map(
+                new_map, identity=DocumentIdentity("loader-1", "https://example.com")
+            )
+            is True
+        )
         assert session._cached_selector_map == new_map
 
     async def test_get_element_by_index_alias(self):

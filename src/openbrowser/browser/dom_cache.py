@@ -139,8 +139,10 @@ class DomCacheMachine:
         has_summary: bool = False,
         sequence: int | None = None,
     ) -> bool:
-        """Publish one view, or refuse it when its generation is stale."""
+        """Publish one view, or refuse it when its generation or identity is incomplete."""
         if epoch != self.epoch(target_id):
+            return False
+        if loader_id is None or not url:
             return False
         if (
             sequence is not None
@@ -165,14 +167,24 @@ class DomCacheMachine:
         self._cleared = False
         return True
 
-    def adopt(self, target_id: str, *, selector_count: int, has_summary: bool) -> None:
-        """Treat state written outside the machine as current for compatibility."""
-        identity = self._known_identities.get(target_id)
-        self.publish(
+    def adopt(
+        self,
+        target_id: str,
+        *,
+        selector_count: int,
+        has_summary: bool,
+        identity: DocumentIdentity | None = None,
+    ) -> bool:
+        """Treat state written outside the machine as current for compatibility.
+
+        The caller must supply the live identity when the machine has none.
+        """
+        resolved = identity or self._known_identities.get(target_id)
+        return self.publish(
             target_id,
             epoch=self.epoch(target_id),
-            loader_id=identity.loader_id if identity else None,
-            url=identity.url if identity else None,
+            loader_id=resolved.loader_id if resolved else None,
+            url=resolved.url if resolved else None,
             selector_count=selector_count,
             has_summary=has_summary,
         )
@@ -217,18 +229,31 @@ class DomCacheMachine:
         self._record(reason)
         return discarded
 
-    def clear(self, reason: str) -> None:
-        """Drop all state for session teardown and report an empty cache."""
+    def clear(self, reason: str, *, purge_metadata: bool = False) -> None:
+        """Drop all state for session teardown and report an empty cache.
+
+        A focus change keeps per-target identities so the newly focused tab can
+        reuse what the session already learned. Reset and shutdown purge them
+        because the next connection is a different browser runtime.
+        """
         self._global_generation += 1
         self._entry = None
         self._invalidated = False
         self._cleared = True
         self._invalidated_target = None
+        if purge_metadata:
+            self._target_generations.clear()
+            self._known_identities.clear()
+            self._main_frames.clear()
         self._record(reason)
 
     def forget(self, target_id: str) -> None:
-        """Drop per-target metadata after the target is gone."""
-        self._target_generations.pop(target_id, None)
+        """Drop per-target metadata after the target is gone.
+
+        The generation advances so a build captured before the detach cannot
+        publish after it.
+        """
+        self._target_generations[target_id] = self._target_generations.get(target_id, 0) + 1
         self._known_identities.pop(target_id, None)
         self._main_frames.pop(target_id, None)
         if self.has_entry(target_id):
@@ -253,27 +278,38 @@ class DomCacheMachine:
     def needs_revalidation(self, target_id: str) -> bool:
         return self.is_current(target_id) and bool(self._entry and self._entry.provisional)
 
+    def entry_token(self, target_id: str) -> tuple[Any, ...] | None:
+        """Return a token that changes when the stored view is replaced."""
+        entry = self._entry
+        if entry is None or entry.target_id != target_id:
+            return None
+        return (
+            entry.target_id,
+            entry.global_generation,
+            entry.target_generation,
+            entry.publish_sequence,
+            entry.loader_id,
+            entry.url,
+        )
+
     def confirm(self, target_id: str, identity: DocumentIdentity) -> bool:
         """Compare a live identity with the published one.
 
-        An entry published without an identity adopts the first live identity.
-        Any later mismatch is a failure.
+        An entry without a complete identity is never readable. It is not
+        adopted from a later read, because that read can belong to a document
+        the entry was not built from.
         """
         entry = self._entry
         if entry is None or entry.target_id != target_id:
             return False
+        if entry.loader_id is None or not entry.url:
+            return False
+        if identity.loader_id is None or identity.loader_id != entry.loader_id:
+            return False
+        if not identity.url or identity.url != entry.url:
+            return False
         self._known_identities[target_id] = identity
-        if entry.loader_id is not None and (identity.loader_id is None or identity.loader_id != entry.loader_id):
-            return False
-        if entry.url is not None and (not identity.url or identity.url != entry.url):
-            return False
-        self._entry = replace(
-            entry,
-            loader_id=entry.loader_id or identity.loader_id,
-            url=entry.url or identity.url,
-            provisional=False,
-            provisional_reason=None,
-        )
+        self._entry = replace(entry, provisional=False, provisional_reason=None)
         return True
 
     # ------------------------------------------------------------------

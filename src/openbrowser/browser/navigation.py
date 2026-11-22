@@ -445,6 +445,8 @@ class NavigationMonitor:
 		self._root = root
 		for method, kind in (('frameNavigated', 'frame'), ('lifecycleEvent', 'lifecycle'), ('navigatedWithinDocument', 'within')):
 			def callback(event: dict[str, Any], session_id: str | None = None, *, _kind: str = kind) -> None:
+				if self._root is not root:
+					return
 				observer = self._observer
 				if observer is not None:
 					try:
@@ -452,7 +454,7 @@ class NavigationMonitor:
 					except Exception:
 						logger.exception('Document observer failed for %s', _kind)
 				operation = self.active
-				if self._root is root and operation is not None and operation.session_id == session_id:
+				if operation is not None and operation.session_id == session_id:
 					operation.observe(_kind, event)
 			getattr(root.register.Page, method)(callback)
 		def context_callback(event: dict[str, Any], session_id: str | None = None) -> None:

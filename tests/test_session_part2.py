@@ -1049,9 +1049,16 @@ class TestGetCurrentPageUrlTitle:
 
 class TestUpdateCachedSelectorMap:
     def test_update_cached_selector_map(self):
+        from openbrowser.browser.dom_cache import DocumentIdentity
+
         session, _ = _make_session_with_mocks()
         new_map = {0: MagicMock(), 1: MagicMock()}
-        session.update_cached_selector_map(new_map)
+        assert (
+            session.update_cached_selector_map(
+                new_map, identity=DocumentIdentity("loader-1", "https://example.com")
+            )
+            is True
+        )
         assert session._cached_selector_map is new_map
 
 

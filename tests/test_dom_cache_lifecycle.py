@@ -15,6 +15,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from openbrowser.browser.dom_cache import DocumentIdentity
 from openbrowser.browser.session import BrowserSession, CDPSession
 from openbrowser.tools.action_readiness import (
     ActionReadinessCode,
@@ -65,9 +66,14 @@ def add_background_tab(harness, *, target_id: str = "tab-b", session_id: str = "
     return other
 
 
-def publish(harness, selector_map=None, *, loader_id: str | None = None):
+def publish(harness, selector_map=None, *, loader_id=None, url=None, identity=None):
     selector_map = selector_map if selector_map is not None else {1: object()}
-    published = harness.session.update_cached_selector_map(selector_map, loader_id=loader_id)
+    if identity is None:
+        identity = DocumentIdentity(
+            loader_id or harness.frame["loaderId"],
+            url or harness.frame["url"],
+        )
+    published = harness.session.update_cached_selector_map(selector_map, identity=identity)
     assert published is True
     return selector_map
 
@@ -346,7 +352,11 @@ def test_publish_from_an_old_epoch_is_refused():
     captured = harness.session.dom_cache_epoch()
     harness.session.invalidate_dom_cache(reason="document_commit")
 
-    published = harness.session.update_cached_selector_map({1: object()}, epoch=captured)
+    published = harness.session.update_cached_selector_map(
+        {1: object()},
+        epoch=captured,
+        identity=DocumentIdentity("loader-a", "https://a.test/"),
+    )
 
     assert published is False
     assert harness.session._cached_selector_map == {}
@@ -401,7 +411,7 @@ async def test_failed_navigation_leaves_the_cache_invalid():
     from openbrowser.browser.navigation import NavigationError
 
     session, client, _focus, _frame, patches = handler_fixture()
-    session.update_cached_selector_map({1: object()}, loader_id="old")
+    session.update_cached_selector_map({1: object()}, identity=DocumentIdentity("old", "about:blank"))
     client.send.Page.navigate = AsyncMock(return_value={"frameId": "frame", "errorText": "net::ERR_CONNECTION_REFUSED"})
 
     with patches[0], patches[1], pytest.raises(NavigationError, match="ERR_CONNECTION_REFUSED"):
@@ -418,7 +428,7 @@ async def test_successful_navigation_invalidates_at_request_and_at_commit():
 
     session, client, focus, frame, patches = handler_fixture()
     cached = {1: object()}
-    session.update_cached_selector_map(cached, loader_id="old")
+    session.update_cached_selector_map(cached, identity=DocumentIdentity("old", "about:blank"))
     seen_at_command = {}
 
     async def navigate(**kwargs):
@@ -482,8 +492,15 @@ def test_an_older_build_cannot_overwrite_a_newer_publish():
     second = harness.session.dom_cache_build_token()
     epoch = harness.session.dom_cache_epoch()
 
-    assert harness.session.update_cached_selector_map({2: object()}, epoch=epoch, sequence=second) is True
-    assert harness.session.update_cached_selector_map({1: object()}, epoch=epoch, sequence=first) is False
+    identity = DocumentIdentity("loader-a", "https://a.test/")
+    assert (
+        harness.session.update_cached_selector_map({2: object()}, epoch=epoch, sequence=second, identity=identity)
+        is True
+    )
+    assert (
+        harness.session.update_cached_selector_map({1: object()}, epoch=epoch, sequence=first, identity=identity)
+        is False
+    )
     assert set(harness.session._cached_selector_map) == {2}
 
 
@@ -571,3 +588,114 @@ async def test_page_history_navigation_invalidates_before_the_command(direction)
     await (page.go_back() if direction == "back" else page.go_forward())
 
     assert seen["map"] == {}
+
+
+# ---------------------------------------------------------------------------
+# Review follow-ups: identity completeness, metadata purge, focus-only storage
+# ---------------------------------------------------------------------------
+
+
+def test_publish_without_an_identity_is_refused():
+    harness = make_session()
+
+    assert harness.session.update_cached_selector_map({1: object()}) is False
+    assert harness.session._cached_selector_map == {}
+
+
+def test_forget_advances_the_generation_so_a_pending_build_cannot_publish():
+    harness = make_session()
+    commit(harness, loader_id="loader-a", url="https://a.test/")
+    epoch = harness.session.dom_cache_epoch()
+    identity = DocumentIdentity("loader-a", "https://a.test/")
+
+    harness.session.forget_dom_cache("tab-a")
+
+    assert harness.session.update_cached_selector_map({1: object()}, epoch=epoch, identity=identity) is False
+
+
+async def test_a_background_publish_is_refused():
+    harness = make_session()
+    cached = publish(harness)
+    add_background_tab(harness)
+
+    published = harness.session.update_cached_selector_map(
+        {2: object()},
+        target_id="tab-b",
+        identity=DocumentIdentity("loader-b", "https://b.test/"),
+    )
+
+    assert published is False
+    assert await harness.session.get_selector_map() is cached
+
+
+async def test_reset_purges_the_known_identity():
+    harness = make_session()
+    commit(harness, loader_id="loader-a", url="https://a.test/")
+    assert harness.session._dom_cache.known_identity("tab-a") is not None
+
+    await harness.session.reset(stop_event_bus=False)
+
+    assert harness.session._dom_cache.known_identity("tab-a") is None
+
+
+async def test_same_document_navigation_updates_the_known_url():
+    harness = make_session()
+    commit(harness, loader_id="loader-a", url="https://a.test/list")
+    publish(harness, loader_id="loader-a")
+
+    harness.session.observe_document_event(
+        "within",
+        {"frameId": "frame-a", "url": "https://a.test/details"},
+        harness.focus.session_id,
+    )
+
+    identity = harness.session._dom_cache.known_identity("tab-a")
+    assert identity == DocumentIdentity("loader-a", "https://a.test/details")
+    harness.frame.update(url="https://a.test/details")
+    updated = {9: object()}
+    assert publish(harness, updated, loader_id="loader-a") is updated
+
+
+def test_summary_publish_is_refused_after_the_epoch_changes():
+    harness = make_session()
+    publish(harness, identity=DocumentIdentity("loader-a", "https://a.test/"))
+    epoch = harness.session.dom_cache_epoch()
+    harness.session.invalidate_dom_cache(reason="document_commit")
+    summary = SimpleNamespace(dom_state=SimpleNamespace(selector_map={1: object()}))
+
+    assert harness.session.publish_browser_state_summary(summary, epoch=epoch) is False
+    assert harness.session._cached_browser_state_summary is None
+
+
+async def test_a_slow_validation_does_not_invalidate_a_newer_entry():
+    import asyncio
+
+    harness = make_session()
+    publish(harness, {1: object()}, identity=DocumentIdentity("loader-a", "https://a.test/"))
+    gate = asyncio.Event()
+
+    async def slow(**kwargs):
+        await gate.wait()
+        return {
+            "frameTree": {
+                "frame": {
+                    "id": "frame-a",
+                    "loaderId": "loader-old",
+                    "url": "https://old.test/",
+                }
+            }
+        }
+
+    harness.client.send.Page.getFrameTree = AsyncMock(side_effect=slow)
+    read = asyncio.create_task(harness.session.get_selector_map())
+    await asyncio.sleep(0)
+
+    newer = {2: object()}
+    assert (
+        harness.session.update_cached_selector_map(newer, identity=DocumentIdentity("loader-a", "https://a.test/"))
+        is True
+    )
+    gate.set()
+
+    assert await read == {}
+    assert harness.session._cached_selector_map is newer
