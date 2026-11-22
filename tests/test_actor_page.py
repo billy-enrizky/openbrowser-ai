@@ -141,6 +141,16 @@ class TestPageReload:
                 },
                 {
                     'frameTree': {
+                        'frame': {'id': 'frame-1', 'loaderId': 'loader-old', 'url': 'https://example.com'}
+                    }
+                },
+                {
+                    'frameTree': {
+                        'frame': {'id': 'frame-1', 'loaderId': 'loader-new', 'url': 'https://example.com'}
+                    }
+                },
+                {
+                    'frameTree': {
                         'frame': {'id': 'frame-1', 'loaderId': 'loader-new', 'url': 'https://example.com'}
                     }
                 },
@@ -457,6 +467,16 @@ class TestPageNavigation:
                 },
                 {
                     'frameTree': {
+                        'frame': {'id': 'frame-1', 'loaderId': 'loader-old', 'url': 'https://b.com'}
+                    }
+                },
+                {
+                    'frameTree': {
+                        'frame': {'id': 'frame-1', 'loaderId': 'loader-new', 'url': 'https://a.com'}
+                    }
+                },
+                {
+                    'frameTree': {
                         'frame': {'id': 'frame-1', 'loaderId': 'loader-new', 'url': 'https://a.com'}
                     }
                 },
@@ -494,6 +514,16 @@ class TestPageNavigation:
                 {
                     'frameTree': {
                         'frame': {'id': 'frame-1', 'loaderId': 'loader-old', 'url': 'https://a.com'}
+                    }
+                },
+                {
+                    'frameTree': {
+                        'frame': {'id': 'frame-1', 'loaderId': 'loader-old', 'url': 'https://a.com'}
+                    }
+                },
+                {
+                    'frameTree': {
+                        'frame': {'id': 'frame-1', 'loaderId': 'loader-new', 'url': 'https://b.com'}
                     }
                 },
                 {

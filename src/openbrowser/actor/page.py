@@ -158,11 +158,11 @@ class Page:
 	) -> DocumentSnapshot | None:
 		if not isinstance(response, dict):
 			raise NavigationError('Page.navigate returned a malformed response')
+		if response.get('isDownload') is True:
+			return None
 		error_text = response.get('errorText')
 		if error_text:
 			raise NavigationError(str(error_text))
-		if response.get('isDownload') is True:
-			return None
 		raw_loader = response.get('loaderId')
 		expected_loader = raw_loader if isinstance(raw_loader, str) and raw_loader else None
 		return await await_document_ready(
@@ -187,6 +187,11 @@ class Page:
 			async with asyncio.timeout(max(0.01, timeout_seconds)):
 				session_id = await self._ensure_session()
 				baseline = await self._read_document_baseline(session_id, deadline=deadline)
+				if baseline is None:
+					raise NavigationError(
+						'Cannot establish the current document before reload; '
+						'Page.getFrameTree did not answer'
+					)
 				self._invalidate_document_cache('page_actor_navigation')
 
 				async def run() -> DocumentSnapshot:
@@ -503,6 +508,11 @@ class Page:
 				previous_entry_id = entries[current_index - 1]['id']
 				target_url = entries[current_index - 1].get('url')
 				baseline = await self._read_document_baseline(session_id, deadline=deadline)
+				if baseline is None:
+					raise NavigationError(
+						'Cannot establish the current document before history navigation; '
+						'Page.getFrameTree did not answer'
+					)
 				params: 'NavigateToHistoryEntryParameters' = {'entryId': previous_entry_id}
 				self._invalidate_document_cache('page_actor_navigation')
 				requested_url = target_url if isinstance(target_url, str) else None
@@ -560,6 +570,11 @@ class Page:
 				next_entry_id = entries[current_index + 1]['id']
 				target_url = entries[current_index + 1].get('url')
 				baseline = await self._read_document_baseline(session_id, deadline=deadline)
+				if baseline is None:
+					raise NavigationError(
+						'Cannot establish the current document before history navigation; '
+						'Page.getFrameTree did not answer'
+					)
 				params: 'NavigateToHistoryEntryParameters' = {'entryId': next_entry_id}
 				self._invalidate_document_cache('page_actor_navigation')
 				requested_url = target_url if isinstance(target_url, str) else None

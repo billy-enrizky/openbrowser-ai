@@ -44,9 +44,16 @@ def _sequence(values):
     return call
 
 
+def _doubled(values):
+    expanded = []
+    for value in values:
+        expanded.extend([value, value])
+    return _sequence(expanded)
+
+
 def make_page(*, frames, states, navigate_response):
     client = MagicMock()
-    client.send.Page.getFrameTree = AsyncMock(side_effect=_sequence(frames))
+    client.send.Page.getFrameTree = AsyncMock(side_effect=_doubled(frames))
     client.send.Runtime.evaluate = AsyncMock(side_effect=_sequence([{"result": {"value": state}} for state in states]))
     client.send.Page.navigate = AsyncMock(return_value=navigate_response)
     client.register.Page = MagicMock()
@@ -104,7 +111,7 @@ async def test_goto_raises_on_a_navigation_error_response():
     with pytest.raises(NavigationError, match="ERR_NAME_NOT_RESOLVED"):
         await page.goto("https://missing.test")
 
-    assert client.send.Page.getFrameTree.await_count == 1
+    assert client.send.Page.getFrameTree.await_count == 2
 
 
 async def test_goto_download_returns_without_waiting_for_a_document():
@@ -150,7 +157,7 @@ async def test_goto_to_the_same_url_waits_for_the_new_loader():
 
     assert snapshot is not None
     assert snapshot.loader_id == "loader-new"
-    assert client.send.Page.getFrameTree.await_count == 3
+    assert client.send.Page.getFrameTree.await_count == 6
 
 
 async def test_goto_redirect_commits_on_a_changed_loader():
@@ -280,7 +287,7 @@ async def test_history_with_the_same_url_waits_for_the_new_loader():
 
     assert snapshot is not None
     assert snapshot.loader_id == "loader-new"
-    assert client.send.Page.getFrameTree.await_count == 3
+    assert client.send.Page.getFrameTree.await_count == 6
 
 
 async def test_history_lookup_is_bounded_by_timeout_seconds():
@@ -500,7 +507,7 @@ async def test_goto_without_a_baseline_requires_the_new_loader():
 
     assert snapshot is not None
     assert snapshot.loader_id == "loader-new"
-    assert calls == 3
+    assert calls == 5
 
 
 async def test_actor_barrier_does_not_change_focus():
@@ -526,3 +533,110 @@ async def test_actor_barrier_does_not_change_focus():
     await page.goto("https://example.com", wait_until="commit")
 
     assert session.agent_focus is focus
+
+
+async def test_goto_classifies_a_download_before_error_text():
+    page, _, _ = make_page(
+        frames=[frame("loader-old", "about:blank")],
+        states=["complete"],
+        navigate_response={"isDownload": True, "errorText": "net::ERR_ABORTED"},
+    )
+
+    assert await page.goto("https://example.com/report.pdf") is None
+
+
+async def test_cdp_navigate_classifies_a_download_before_error_text():
+    from openbrowser.browser.session import BrowserSession, CDPSession
+
+    session = BrowserSession(cdp_url="ws://127.0.0.1:9222")
+    client = MagicMock()
+    client.send.Page.getFrameTree = AsyncMock(return_value=frame("loader-old", "about:blank"))
+    client.send.Page.navigate = AsyncMock(return_value={"isDownload": True, "errorText": "net::ERR_ABORTED"})
+    session._cdp_client_root = client
+    focus = CDPSession.model_construct(
+        cdp_client=client,
+        target_id="tab-a",
+        session_id="sess-a",
+        url="about:blank",
+        title="Tab A",
+    )
+    session.agent_focus = focus
+
+    with patch.object(
+        BrowserSession,
+        "get_or_create_cdp_session",
+        AsyncMock(return_value=focus),
+    ):
+        await session._cdp_navigate("https://example.com/report.pdf")
+
+
+async def test_reload_without_a_baseline_fails_before_the_command():
+    page, client, _ = make_page(
+        frames=[frame("loader-old", "about:blank")],
+        states=["complete"],
+        navigate_response={"frameId": "frame-1", "loaderId": "loader-new"},
+    )
+    client.send.Page.getFrameTree = AsyncMock(side_effect=RuntimeError("no frame"))
+    client.send.Page.reload = AsyncMock(return_value={})
+
+    with pytest.raises(NavigationError, match="Cannot establish the current document before reload"):
+        await page.reload()
+
+    client.send.Page.reload.assert_not_called()
+
+
+async def test_history_without_a_baseline_fails_before_the_command():
+    page, client, _ = make_page(
+        frames=[frame("loader-old", "about:blank")],
+        states=["complete"],
+        navigate_response={"frameId": "frame-1", "loaderId": "loader-new"},
+    )
+    client.send.Page.getNavigationHistory = AsyncMock(
+        return_value={
+            "currentIndex": 1,
+            "entries": [
+                {"id": 1, "url": "https://a.test/"},
+                {"id": 2, "url": "https://b.test/"},
+            ],
+        }
+    )
+    client.send.Page.getFrameTree = AsyncMock(side_effect=RuntimeError("no frame"))
+    client.send.Page.navigateToHistoryEntry = AsyncMock(return_value={})
+
+    with pytest.raises(NavigationError, match="Cannot establish the current document before history"):
+        await page.go_back()
+
+    client.send.Page.navigateToHistoryEntry.assert_not_called()
+
+
+async def test_goto_fails_fast_when_the_ready_state_read_loses_the_session():
+    client = MagicMock()
+    client.send.Page.getFrameTree = AsyncMock(return_value=frame("loader-new", "https://example.com"))
+    client.send.Runtime.evaluate = AsyncMock(side_effect=RuntimeError("-32001 Session with given id not found"))
+    client.send.Page.navigate = AsyncMock(return_value={"frameId": "frame-1", "loaderId": "loader-new"})
+    session = SimpleNamespace(cdp_client=client, invalidate_dom_cache=MagicMock())
+    page = Page(session, target_id="tab-a", session_id="sess-a")
+
+    with pytest.raises(NavigationError, match="lost its CDP session"):
+        await page.goto("https://example.com", wait_until="commit")
+
+
+async def test_snapshot_discards_a_read_that_straddles_a_document_replacement():
+    from openbrowser.browser.navigation import read_document_snapshot
+
+    client = MagicMock()
+    client.send.Page.getFrameTree = AsyncMock(
+        side_effect=_sequence(
+            [
+                frame("loader-old", "https://example.com/old"),
+                frame("loader-new", "https://example.com/new"),
+            ]
+        )
+    )
+    client.send.Runtime.evaluate = AsyncMock(return_value={"result": {"value": "complete"}})
+
+    snapshot = await read_document_snapshot(client, "sess-a")
+
+    assert snapshot.loader_id == "loader-new"
+    assert snapshot.url == "https://example.com/new"
+    assert snapshot.ready_state is None

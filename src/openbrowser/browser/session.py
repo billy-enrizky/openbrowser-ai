@@ -6581,11 +6581,11 @@ class BrowserSession(BaseModel):
 					)
 					if not isinstance(response, dict):
 						raise NavigationError('Page.navigate returned a malformed response')
+					if response.get('isDownload') is True:
+						return
 					error_text = response.get('errorText')
 					if error_text:
 						raise NavigationError(str(error_text))
-					if response.get('isDownload') is True:
-						return
 					raw_loader = response.get('loaderId')
 					await await_document_ready(
 						session.cdp_client,

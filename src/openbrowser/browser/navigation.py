@@ -486,8 +486,7 @@ class DocumentSnapshot:
 	ready_state: str | None
 
 
-async def read_document_snapshot(client: Any, session_id: str) -> DocumentSnapshot:
-	"""Read the main frame and its ready state without registering events."""
+async def _read_frame(client: Any, session_id: str) -> DocumentSnapshot:
 	tree = await client.send.Page.getFrameTree(session_id=session_id)
 	frame = ((tree or {}).get('frameTree') or {}).get('frame')
 	if not isinstance(frame, dict):
@@ -496,21 +495,41 @@ async def read_document_snapshot(client: Any, session_id: str) -> DocumentSnapsh
 	raw_loader = frame.get('loaderId')
 	loader_id = raw_loader if isinstance(raw_loader, str) and raw_loader else None
 	url = str(frame.get('url') or '') + str(frame.get('urlFragment') or '')
+	return DocumentSnapshot(frame_id=frame_id, loader_id=loader_id, url=url, ready_state=None)
+
+
+async def read_document_snapshot(client: Any, session_id: str) -> DocumentSnapshot:
+	"""Read the main frame and its ready state without registering events.
+
+	The frame is read before and after the ready-state evaluation. If the
+	loader or URL changed, the read straddled a document replacement and the
+	returned snapshot carries no ready state, so it cannot satisfy a milestone.
+	"""
+	first = await _read_frame(client, session_id)
 	ready_state = None
 	try:
 		result = await client.send.Runtime.evaluate(
 			params={'expression': 'document.readyState', 'returnByValue': True},
 			session_id=session_id,
 		)
-	except Exception:
+	except Exception as error:
+		if _fatal_cdp_error(error):
+			raise
 		# A navigating document destroys its execution context. Retry.
 		ready_state = None
 	else:
 		value = ((result or {}).get('result') or {}).get('value')
 		if isinstance(value, str):
 			ready_state = value
-	return DocumentSnapshot(frame_id=frame_id, loader_id=loader_id, url=url, ready_state=ready_state)
-
+	second = await _read_frame(client, session_id)
+	if second.loader_id != first.loader_id or second.url != first.url:
+		return second
+	return DocumentSnapshot(
+		frame_id=second.frame_id,
+		loader_id=second.loader_id,
+		url=second.url,
+		ready_state=ready_state,
+	)
 
 def _document_committed(
 	snapshot: DocumentSnapshot,
