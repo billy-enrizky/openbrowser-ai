@@ -1708,7 +1708,7 @@ async def test_close_timeout_reconciles_with_a_separate_cleanup_budget():
 
     async def delayed_close(**kwargs):
         close_entered.set()
-        await asyncio.sleep(0.05)
+        await asyncio.sleep(0.15)
         raise TimeoutError
 
     async def record_liveness(target_id, budget):
@@ -1718,7 +1718,7 @@ async def test_close_timeout_reconciles_with_a_separate_cleanup_budget():
     client.send.Target.closeTarget = AsyncMock(side_effect=delayed_close)
     event = CloseTabEvent(
         target_id=focus.target_id,
-        focus_deadline_monotonic=asyncio.get_running_loop().time() + 0.02,
+        focus_deadline_monotonic=asyncio.get_running_loop().time() + 0.1,
     )
     with patch.object(session, "_target_liveness", side_effect=record_liveness):
         with pytest.raises(FocusTargetError):
