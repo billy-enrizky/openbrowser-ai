@@ -825,6 +825,7 @@ Contributions are welcome! Please:
 3. Commit your changes (`git commit -m 'Add amazing feature'`)
 4. Push to the branch (`git push origin feature/amazing-feature`)
 5. Open a Pull Request
+6. After CI passes, add the `merge-queue` label. The queue tests the merge tree with the full non-integration suite and all static, frontend, and backend checks, then merges it. Direct merges to `main` are blocked.
 
 ## License
 
