@@ -691,3 +691,156 @@ async def test_recovery_gate_rejects_deleted_config_before_cleanup(isolated_conf
 	assert error.value.code == 'config_restart_required'
 	old_session.kill.assert_not_awaited()
 	assert daemon._session is old_session
+
+
+def test_profile_resolution_reports_config_and_environment_sources(isolated_config_path, monkeypatch):
+	monkeypatch.setenv('OPENBROWSER_CONFIG_PATH', str(isolated_config_path))
+	_write_valid_config(isolated_config_path)
+	monkeypatch.setenv('OPENBROWSER_HEADLESS', 'false')
+	daemon = DaemonServer()
+
+	with patch('openbrowser.browser.BrowserSession.start') as start:
+		status = daemon._status_payload()
+
+	assert start.called is False
+	assert status['profile']['headless'] is False
+	assert status['profile']['storage_state'] is None
+	resolution = status['profile']['resolution']
+	assert resolution['user_data_dir']['source'] == 'config'
+	assert resolution['user_data_dir']['value'].endswith('/openbrowser-daemon-test-profile')
+	assert resolution['headless'] == {'value': False, 'source': 'environment'}
+	assert resolution['storage_state'] == {'mode': 'none', 'source': 'default'}
+	assert resolution['downloads_path']['source'] == 'default'
+
+
+def test_profile_resolution_reports_a_managed_path(isolated_config_path, monkeypatch):
+	monkeypatch.setenv('OPENBROWSER_CONFIG_PATH', str(isolated_config_path))
+	_write_valid_config(isolated_config_path)
+	monkeypatch.delenv('OPENBROWSER_HEADLESS', raising=False)
+	daemon = DaemonServer()
+	daemon._startup_config['browser_profile'].pop('user_data_dir', None)
+	daemon._profile_summary = None
+
+	with patch('openbrowser.browser.BrowserSession.start') as start:
+		status = daemon._status_payload()
+
+	assert start.called is False
+	resolution = status['profile']['resolution']
+	assert resolution['user_data_dir']['source'] == 'managed'
+	assert resolution['headless'] == {'value': True, 'source': 'default'}
+
+
+def test_profile_resolution_attributes_environment_paths(isolated_config_path, monkeypatch, tmp_path):
+	from openbrowser.config import CONFIG
+
+	monkeypatch.setenv('OPENBROWSER_CONFIG_PATH', str(isolated_config_path))
+	_write_valid_config(isolated_config_path)
+	env_profile = tmp_path / 'environment-profile'
+	env_state = tmp_path / 'environment-state.json'
+	env_state.write_text('{"cookies": [], "origins": []}')
+	monkeypatch.setenv('OPENBROWSER_USER_DATA_DIR', str(env_profile))
+	monkeypatch.setenv('OPENBROWSER_STORAGE_STATE', str(env_state))
+	CONFIG._env_config = None
+	daemon = DaemonServer()
+
+	with patch('openbrowser.browser.BrowserSession.start') as start:
+		status = daemon._status_payload()
+
+	assert start.called is False
+	resolution = status['profile']['resolution']
+	assert resolution['user_data_dir'] == {
+		'value': str(env_profile.resolve()),
+		'source': 'environment',
+	}
+	assert resolution['storage_state'] == {'mode': 'file', 'source': 'environment'}
+
+
+def test_profile_resolution_reports_validated_effective_values(isolated_config_path, monkeypatch):
+	monkeypatch.setenv('OPENBROWSER_CONFIG_PATH', str(isolated_config_path))
+	_write_valid_config(isolated_config_path)
+	config = json.loads(isolated_config_path.read_text())
+	config['browser_profile']['profile-a'].update(
+		{
+			'keep_alive': 'false',
+			'disable_security': 1,
+			'wait_between_actions': '0.25',
+			'device_scale_factor': '1.5',
+		}
+	)
+	isolated_config_path.write_text(json.dumps(config))
+	daemon = DaemonServer()
+
+	status = daemon._status_payload()
+
+	resolution = status['profile']['resolution']
+	assert resolution['keep_alive'] == {'value': False, 'source': 'config'}
+	assert resolution['disable_security'] == {'value': True, 'source': 'config'}
+	assert resolution['wait_between_actions'] == {'value': 0.25, 'source': 'config'}
+	assert resolution['device_scale_factor'] == {'value': 1.5, 'source': 'config'}
+
+
+def test_profile_resolution_reports_default_headless_over_config(isolated_config_path, monkeypatch):
+	monkeypatch.setenv('OPENBROWSER_CONFIG_PATH', str(isolated_config_path))
+	_write_valid_config(isolated_config_path, headless=False)
+	daemon = DaemonServer()
+
+	status = daemon._status_payload()
+
+	assert status['profile']['headless'] is True
+	assert status['profile']['resolution']['headless'] == {'value': True, 'source': 'default'}
+
+
+def test_profile_resolution_reports_profile_dir_override_as_managed(
+	isolated_config_path, monkeypatch, tmp_path
+):
+	monkeypatch.setenv('OPENBROWSER_CONFIG_PATH', str(isolated_config_path))
+	_write_valid_config(isolated_config_path)
+	override = tmp_path / 'daemon-profile-override'
+	monkeypatch.setenv('OPENBROWSER_DAEMON_PROFILE_DIR', str(override))
+	daemon = DaemonServer()
+
+	status = daemon._status_payload()
+
+	assert status['profile']['resolution']['user_data_dir'] == {
+		'value': str(override.resolve()),
+		'source': 'managed',
+	}
+
+
+def test_profile_resolution_reports_environment_proxy_without_credentials(isolated_config_path, monkeypatch):
+	from openbrowser.config import CONFIG
+
+	monkeypatch.setenv('OPENBROWSER_CONFIG_PATH', str(isolated_config_path))
+	_write_valid_config(isolated_config_path)
+	monkeypatch.setenv('OPENBROWSER_PROXY_URL', 'http://user:secret-password@proxy.test:8080')
+	CONFIG._env_config = None
+	daemon = DaemonServer()
+
+	status = daemon._status_payload()
+
+	assert status['profile']['resolution']['proxy'] == {
+		'mode': 'configured',
+		'source': 'environment',
+	}
+	assert 'secret-password' not in json.dumps(status)
+
+
+def test_profile_resolution_reports_configured_storage_state(
+	isolated_config_path, monkeypatch, tmp_path
+):
+	monkeypatch.setenv('OPENBROWSER_CONFIG_PATH', str(isolated_config_path))
+	_write_valid_config(isolated_config_path)
+	state_path = tmp_path / 'configured-state.json'
+	state_path.write_text('{"cookies": [], "origins": []}')
+	config = json.loads(isolated_config_path.read_text())
+	config['browser_profile']['profile-a']['storage_state'] = str(state_path)
+	isolated_config_path.write_text(json.dumps(config))
+	daemon = DaemonServer()
+
+	status = daemon._status_payload()
+
+	assert status['profile']['storage_state'] == str(state_path)
+	assert status['profile']['resolution']['storage_state'] == {
+		'mode': 'file',
+		'source': 'config',
+	}

@@ -245,6 +245,8 @@ uvx openbrowser-ai config status
 
 `daemon status` and MCP `get_status` include an additive `config` block with the startup snapshot, current snapshot, and `restart_required`. A long-lived daemon or MCP process does not hot reload config.
 
+When a profile is present, both status surfaces include `profile.resolution`. Daemon status resolves the profile before the first browser start. MCP `get_status` includes it after the context has resolved its profile. The block records the source of each effective profile value as `default`, `config`, `environment`, `managed`, or `cli`. Paths, booleans, channel, executable, download path, action delay, scale factor, and security mode report a value. Storage state, proxy, and launch arguments report only a mode and source, with an argument count for `args`, so cookies, proxy credentials, and argument values stay out of status.
+
 ### Environment Variables
 
 ```bash
