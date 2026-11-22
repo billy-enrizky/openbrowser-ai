@@ -148,7 +148,7 @@ def set_label(repo: str, number: int, label: str, present: bool) -> None:
             capture_output=True,
             check=False,
         )
-    if result.returncode != 0 and "Not Found" not in result.stderr:
+    if result.returncode != 0 and not any(phrase in result.stderr for phrase in ("Not Found", "does not exist")):
         print(f"label update failed for {label}: {result.stderr.strip()}", file=sys.stderr)
 
 
