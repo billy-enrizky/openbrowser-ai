@@ -638,7 +638,7 @@ class _BrowserOwner:
 		profile_data = apply_managed_browser_profile_defaults(profile_data, managed_default_dir)
 		provenance.record_changes(before_managed, profile_data, ProfileValueSource.MANAGED)
 		if profile_data.get('storage_state') is None:
-			provenance.record('storage_state', None, ProfileValueSource.DEFAULT)
+			provenance.record_defaults({'storage_state': None})
 		args = list(profile_data.get('args') or [])
 		ownership_marker = f'--openbrowser-instance-id={self.owner_id}'
 		if not any(argument.startswith('--openbrowser-instance-id=') for argument in args):

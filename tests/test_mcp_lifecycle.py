@@ -1026,6 +1026,27 @@ async def test_get_status_reports_configured_storage_state(mcp_server, tmp_path)
 
 
 @pytest.mark.asyncio
+async def test_get_status_preserves_explicit_config_none_storage_state(mcp_server, tmp_path):
+	mcp_server.config = {
+		'browser_profile': {
+			'user_data_dir': str(tmp_path / 'configured-profile'),
+			'storage_state': None,
+		}
+	}
+	mcp_server._profile_summary = None
+
+	with patch.object(BrowserSession, 'start') as start:
+		mcp_server._build_browser_profile()
+		payload = json.loads(await mcp_server._handle_tool('get_status', {}))
+
+	assert start.called is False
+	assert payload['profile']['resolution']['storage_state'] == {
+		'mode': 'none',
+		'source': 'config',
+	}
+
+
+@pytest.mark.asyncio
 async def test_get_status_reports_configured_storage_state_copied_to_managed_path(
 	mcp_server, tmp_path
 ):
