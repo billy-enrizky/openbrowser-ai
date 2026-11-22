@@ -4,7 +4,7 @@ import asyncio
 import logging
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import Enum, StrEnum
 from typing import Any, ClassVar, Literal
 from urllib.parse import urlsplit
 
@@ -462,3 +462,191 @@ class NavigationMonitor:
 			if self._root is root and operation is not None and operation.session_id == session_id:
 				operation.record_policy_context(event)
 		root.register.Runtime.executionContextCreated(context_callback)
+
+
+class DocumentReadinessPhase(StrEnum):
+	"""Progress and terminal phase of one actor navigation barrier.
+
+	A success returns a ready snapshot. A CDP or navigation failure raises
+	NavigationError. The enum records the phases that can appear in a timeout.
+	"""
+
+	REQUESTED = 'requested'
+	COMMITTED = 'committed'
+	TIMED_OUT = 'timed_out'
+
+
+@dataclass(frozen=True)
+class DocumentSnapshot:
+	"""The main document a target currently shows."""
+
+	frame_id: str | None
+	loader_id: str | None
+	url: str
+	ready_state: str | None
+
+
+async def _read_frame(client: Any, session_id: str) -> DocumentSnapshot:
+	tree = await client.send.Page.getFrameTree(session_id=session_id)
+	frame = ((tree or {}).get('frameTree') or {}).get('frame')
+	if not isinstance(frame, dict):
+		raise NavigationError('Page.getFrameTree returned no main frame')
+	frame_id = frame.get('id') if isinstance(frame.get('id'), str) else None
+	raw_loader = frame.get('loaderId')
+	loader_id = raw_loader if isinstance(raw_loader, str) and raw_loader else None
+	url = str(frame.get('url') or '') + str(frame.get('urlFragment') or '')
+	return DocumentSnapshot(frame_id=frame_id, loader_id=loader_id, url=url, ready_state=None)
+
+
+async def read_document_snapshot(client: Any, session_id: str) -> DocumentSnapshot:
+	"""Read the main frame and its ready state without registering events.
+
+	The frame is read before and after the ready-state evaluation. If the
+	loader or URL changed, the read straddled a document replacement and the
+	returned snapshot carries no ready state, so it cannot satisfy a milestone.
+	"""
+	first = await _read_frame(client, session_id)
+	ready_state = None
+	try:
+		result = await client.send.Runtime.evaluate(
+			params={'expression': 'document.readyState', 'returnByValue': True},
+			session_id=session_id,
+		)
+	except Exception as error:
+		if _fatal_cdp_error(error):
+			raise
+		# A navigating document destroys its execution context. Retry.
+		ready_state = None
+	else:
+		value = ((result or {}).get('result') or {}).get('value')
+		if isinstance(value, str):
+			ready_state = value
+	second = await _read_frame(client, session_id)
+	if second.loader_id != first.loader_id or second.url != first.url:
+		return second
+	return DocumentSnapshot(
+		frame_id=second.frame_id,
+		loader_id=second.loader_id,
+		url=second.url,
+		ready_state=ready_state,
+	)
+
+def _document_committed(
+	snapshot: DocumentSnapshot,
+	baseline: DocumentSnapshot | None,
+	requested_url: str | None,
+	expected_loader: str | None,
+	require_document_change: bool = False,
+) -> bool:
+	if expected_loader and snapshot.loader_id == expected_loader:
+		return True
+	if baseline is not None:
+		if baseline.loader_id is not None and snapshot.loader_id != baseline.loader_id:
+			return True
+		if baseline.loader_id is None and snapshot.loader_id is not None:
+			return True
+		if (
+			expected_loader is None
+			and requested_url
+			and snapshot.url
+			and (not require_document_change or snapshot.url != baseline.url)
+			and _same_history_url(snapshot.url, requested_url)
+		):
+			return snapshot.ready_state is not None
+		return bool(requested_url and snapshot.url and snapshot.url != baseline.url)
+	if expected_loader or require_document_change:
+		return False
+	return bool(requested_url) and snapshot.ready_state is not None and _same_history_url(
+		snapshot.url, requested_url or ''
+	)
+
+
+def _milestone_met(snapshot: DocumentSnapshot, wait_until: WaitUntil) -> bool:
+	if wait_until == 'commit':
+		return True
+	if wait_until == 'domcontentloaded':
+		return snapshot.ready_state in ('interactive', 'complete')
+	return snapshot.ready_state == 'complete'
+
+
+ACTOR_WAIT_UNTIL = frozenset({'commit', 'domcontentloaded', 'load'})
+_FATAL_SESSION_MARKERS = ('-32001', 'Session with given id not found')
+
+
+def _fatal_cdp_error(error: BaseException) -> bool:
+	text = str(error)
+	return any(marker in text for marker in _FATAL_SESSION_MARKERS)
+
+
+def validate_actor_wait_until(wait_until: WaitUntil) -> None:
+	"""Reject an actor milestone the barrier cannot prove."""
+	if wait_until not in ACTOR_WAIT_UNTIL:
+		raise NavigationError(
+			f'Actor navigation does not support wait_until={wait_until!r}; '
+			'use commit, domcontentloaded, or load, or use session.navigate_to for networkidle'
+		)
+
+
+async def await_document_ready(
+	client: Any,
+	session_id: str,
+	*,
+	target_id: str,
+	baseline: DocumentSnapshot | None,
+	requested_url: str | None,
+	expected_loader: str | None = None,
+	wait_until: WaitUntil = 'commit',
+	timeout_seconds: float = 30.0,
+	poll_interval: float = 0.05,
+	require_document_change: bool = False,
+) -> DocumentSnapshot:
+	"""Wait for one actor navigation to reach the requested milestone.
+
+	This is a target-scoped barrier, not a second navigation operation. It
+	registers no events and never changes focus. The session navigation
+	machine remains the authority for policy, request correlation, and
+	network-idle readiness.
+	"""
+	validate_actor_wait_until(wait_until)
+	loop = asyncio.get_running_loop()
+	deadline = loop.time() + max(0.01, timeout_seconds)
+	interval = max(0.01, poll_interval)
+	last_error: BaseException | None = None
+	last_snapshot: DocumentSnapshot | None = None
+	committed = False
+	while True:
+		remaining = deadline - loop.time()
+		if remaining <= 0:
+			break
+		try:
+			async with asyncio.timeout(remaining):
+				snapshot = await read_document_snapshot(client, session_id)
+		except TimeoutError:
+			break
+		except Exception as error:
+			if _fatal_cdp_error(error):
+				raise NavigationError(f'Actor navigation lost its CDP session: {error}') from error
+			last_error = error
+		else:
+			last_snapshot = snapshot
+			committed = committed or _document_committed(
+				snapshot, baseline, requested_url, expected_loader, require_document_change
+			)
+			if committed and _milestone_met(snapshot, wait_until):
+				return snapshot
+		remaining = deadline - loop.time()
+		if remaining <= 0:
+			break
+		await asyncio.sleep(min(interval, remaining))
+	last_phase = DocumentReadinessPhase.COMMITTED if committed else DocumentReadinessPhase.REQUESTED
+	loader = last_snapshot.loader_id if last_snapshot else None
+	detail = (
+		f'Actor navigation on target {target_id} to {requested_url or "the current entry"} '
+		f'did not reach {wait_until} within {timeout_seconds:g}s '
+		f'(phase {DocumentReadinessPhase.TIMED_OUT.value}, last observed {last_phase.value}, '
+		f'loader {loader or "unknown"}). The page may still be loading.'
+	)
+	error = NavigationTimeoutError(detail)
+	if last_error is not None:
+		raise error from last_error
+	raise error

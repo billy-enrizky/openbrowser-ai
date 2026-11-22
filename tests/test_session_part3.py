@@ -765,7 +765,16 @@ class TestCdpNavigate:
     async def test_navigates_to_url(self):
         session = _make_browser_session()
         mock_cdp = _make_cdp_session()
-        mock_cdp.cdp_client.send.Page.navigate = AsyncMock()
+        mock_cdp.cdp_client.send.Page.navigate = AsyncMock(
+            return_value={"frameId": "frame-1", "loaderId": "loader-new"}
+        )
+        mock_cdp.cdp_client.send.Page.getFrameTree = AsyncMock(
+            return_value={
+                "frameTree": {
+                    "frame": {"id": "frame-1", "loaderId": "loader-new", "url": "https://test.com"}
+                }
+            }
+        )
 
         with patch.object(BrowserSession, "get_or_create_cdp_session", new_callable=AsyncMock, return_value=mock_cdp):
             await session._cdp_navigate("https://test.com")
@@ -786,7 +795,16 @@ class TestCdpNavigate:
     async def test_navigate_with_specific_target_id(self):
         session = _make_browser_session()
         mock_cdp = _make_cdp_session()
-        mock_cdp.cdp_client.send.Page.navigate = AsyncMock()
+        mock_cdp.cdp_client.send.Page.navigate = AsyncMock(
+            return_value={"frameId": "frame-1", "loaderId": "loader-new"}
+        )
+        mock_cdp.cdp_client.send.Page.getFrameTree = AsyncMock(
+            return_value={
+                "frameTree": {
+                    "frame": {"id": "frame-1", "loaderId": "loader-new", "url": "https://test.com"}
+                }
+            }
+        )
 
         with patch.object(BrowserSession, "get_or_create_cdp_session", new_callable=AsyncMock, return_value=mock_cdp):
             await session._cdp_navigate("https://test.com", target_id="specific-target")

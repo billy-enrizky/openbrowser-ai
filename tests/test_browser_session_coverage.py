@@ -1601,6 +1601,16 @@ class TestCDPHelperMethods:
     async def test_cdp_navigate(self):
         session = _make_browser_session()
         real_cdp = _make_cdp_session_instance(target_id="t-1", session_id="s-1")
+        real_cdp.cdp_client.send.Page.navigate = AsyncMock(
+            return_value={"frameId": "frame-1", "loaderId": "loader-new"}
+        )
+        real_cdp.cdp_client.send.Page.getFrameTree = AsyncMock(
+            return_value={
+                "frameTree": {
+                    "frame": {"id": "frame-1", "loaderId": "loader-new", "url": "https://example.com"}
+                }
+            }
+        )
         session.__dict__["agent_focus"] = real_cdp
         session._cdp_client_root = _make_mock_cdp_client()
         _setattr(session, "get_or_create_cdp_session", AsyncMock(return_value=real_cdp))

@@ -1,10 +1,21 @@
 """Page class for page-level operations."""
 
-from typing import TYPE_CHECKING, TypeVar
+import asyncio
+from collections.abc import Awaitable
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from pydantic import BaseModel
 
 from openbrowser.actor.utils import get_key_info
+from openbrowser.browser.navigation import (
+    DocumentSnapshot,
+    NavigationError,
+    NavigationTimeoutError,
+    WaitUntil,
+    await_document_ready,
+    read_document_snapshot,
+    validate_actor_wait_until,
+)
 from openbrowser.dom.serializer.serializer import DOMTreeSerializer
 from openbrowser.dom.service import DomService
 from openbrowser.llm.messages import SystemMessage, UserMessage
@@ -92,11 +103,119 @@ class Page:
 		if callable(invalidate):
 			invalidate(target_id=self._target_id, reason=reason)
 
-	async def reload(self) -> None:
-		"""Reload the target."""
-		session_id = await self._ensure_session()
-		self._invalidate_document_cache('page_actor_navigation')
-		await self._client.send.Page.reload(session_id=session_id)
+	async def _read_document_baseline(
+		self, session_id: str, *, deadline: float
+	) -> DocumentSnapshot | None:
+		remaining = deadline - asyncio.get_running_loop().time()
+		if remaining <= 0:
+			return None
+		try:
+			return await asyncio.wait_for(
+				read_document_snapshot(self._client, session_id),
+				timeout=min(2.0, remaining),
+			)
+		except Exception:
+			return None
+
+	def _navigation_timeout(
+		self, requested_url: str | None, timeout_seconds: float
+	) -> NavigationTimeoutError:
+		return NavigationTimeoutError(
+			f'Actor navigation on target {self._target_id} to '
+			f'{requested_url or "the current entry"} did not complete within '
+			f'{timeout_seconds:g}s (command or document did not answer).'
+		)
+
+	async def _run_bounded(
+		self,
+		awaitable: Awaitable[DocumentSnapshot | None],
+		*,
+		requested_url: str | None,
+		timeout_seconds: float,
+		deadline: float,
+	) -> DocumentSnapshot | None:
+		"""Bound the command and the document wait by one deadline."""
+		remaining = deadline - asyncio.get_running_loop().time()
+		if remaining <= 0:
+			raise self._navigation_timeout(requested_url, timeout_seconds)
+		try:
+			async with asyncio.timeout(remaining):
+				return await awaitable
+		except NavigationTimeoutError:
+			raise
+		except TimeoutError as error:
+			raise self._navigation_timeout(requested_url, timeout_seconds) from error
+
+	async def _await_navigation(
+		self,
+		response: Any,
+		session_id: str,
+		*,
+		requested_url: str | None,
+		baseline: DocumentSnapshot | None,
+		wait_until: WaitUntil,
+		timeout_seconds: float,
+	) -> DocumentSnapshot | None:
+		if not isinstance(response, dict):
+			raise NavigationError('Page.navigate returned a malformed response')
+		if response.get('isDownload') is True:
+			return None
+		error_text = response.get('errorText')
+		if error_text:
+			raise NavigationError(str(error_text))
+		raw_loader = response.get('loaderId')
+		expected_loader = raw_loader if isinstance(raw_loader, str) and raw_loader else None
+		return await await_document_ready(
+			self._client,
+			session_id,
+			target_id=self._target_id,
+			baseline=baseline,
+			requested_url=requested_url,
+			expected_loader=expected_loader,
+			wait_until=wait_until,
+			timeout_seconds=timeout_seconds,
+		)
+
+	async def reload(
+		self, *, wait_until: WaitUntil = 'load', timeout_seconds: float = 30.0
+	) -> DocumentSnapshot | None:
+		"""Reload and wait for wait_until (default load) within timeout_seconds (default 30)."""
+		validate_actor_wait_until(wait_until)
+		loop = asyncio.get_running_loop()
+		deadline = loop.time() + max(0.01, timeout_seconds)
+		try:
+			async with asyncio.timeout(max(0.01, timeout_seconds)):
+				session_id = await self._ensure_session()
+				baseline = await self._read_document_baseline(session_id, deadline=deadline)
+				if baseline is None:
+					raise NavigationError(
+						'Cannot establish the current document before reload; '
+						'Page.getFrameTree did not answer'
+					)
+				self._invalidate_document_cache('page_actor_navigation')
+
+				async def run() -> DocumentSnapshot:
+					await self._client.send.Page.reload(session_id=session_id)
+					return await await_document_ready(
+						self._client,
+						session_id,
+						target_id=self._target_id,
+						baseline=baseline,
+						requested_url=None,
+						wait_until=wait_until,
+						timeout_seconds=max(0.01, deadline - loop.time() - 0.01),
+					)
+
+				return await self._run_bounded(
+					run(),
+					requested_url=None,
+					timeout_seconds=timeout_seconds,
+					deadline=deadline,
+				)
+		except NavigationTimeoutError:
+			raise
+		except TimeoutError as error:
+			raise self._navigation_timeout(None, timeout_seconds) from error
 
 	async def get_element(self, backend_node_id: int) -> 'Element':
 		"""Get an element by its backend node ID."""
@@ -317,64 +436,177 @@ class Page:
 		info = await self.get_target_info()
 		return info.get('title', '')
 
-	async def goto(self, url: str) -> None:
-		"""Navigate this target to a URL."""
-		session_id = await self._ensure_session()
+	async def goto(
+		self, url: str, *, wait_until: WaitUntil = 'load', timeout_seconds: float = 30.0
+	) -> DocumentSnapshot | None:
+		"""Navigate and wait for wait_until (default load) within timeout_seconds (default 30).
 
-		params: 'NavigateParameters' = {'url': url}
-		self._invalidate_document_cache('page_actor_navigation')
-		await self._client.send.Page.navigate(params, session_id=session_id)
+		Returns None when the navigation is handled as a download.
+		"""
+		validate_actor_wait_until(wait_until)
+		loop = asyncio.get_running_loop()
+		deadline = loop.time() + max(0.01, timeout_seconds)
+		try:
+			async with asyncio.timeout(max(0.01, timeout_seconds)):
+				session_id = await self._ensure_session()
+				baseline = await self._read_document_baseline(session_id, deadline=deadline)
 
-	async def navigate(self, url: str) -> None:
-		"""Alias for goto."""
-		await self.goto(url)
+				params: 'NavigateParameters' = {'url': url}
+				self._invalidate_document_cache('page_actor_navigation')
 
-	async def go_back(self) -> None:
-		"""Navigate back in history."""
-		session_id = await self._ensure_session()
+				async def run() -> DocumentSnapshot | None:
+					response = await self._client.send.Page.navigate(
+						params, session_id=session_id
+					)
+					return await self._await_navigation(
+						response,
+						session_id,
+						requested_url=url,
+						baseline=baseline,
+						wait_until=wait_until,
+						timeout_seconds=max(0.01, deadline - loop.time() - 0.01),
+					)
+
+				return await self._run_bounded(
+					run(),
+					requested_url=url,
+					timeout_seconds=timeout_seconds,
+					deadline=deadline,
+				)
+		except NavigationTimeoutError:
+			raise
+		except TimeoutError as error:
+			raise self._navigation_timeout(url, timeout_seconds) from error
+
+	async def navigate(
+		self, url: str, *, wait_until: WaitUntil = 'load', timeout_seconds: float = 30.0
+	) -> DocumentSnapshot | None:
+		"""Alias for goto. Returns the document snapshot, or None for a download."""
+		return await self.goto(url, wait_until=wait_until, timeout_seconds=timeout_seconds)
+
+	async def go_back(
+		self, *, wait_until: WaitUntil = 'load', timeout_seconds: float = 30.0
+	) -> DocumentSnapshot | None:
+		"""Navigate back and wait for wait_until (default load) within timeout_seconds (default 30)."""
+		validate_actor_wait_until(wait_until)
+		loop = asyncio.get_running_loop()
+		deadline = loop.time() + max(0.01, timeout_seconds)
+		requested_url: str | None = None
 
 		try:
-			# Get navigation history
-			history = await self._client.send.Page.getNavigationHistory(session_id=session_id)
-			current_index = history['currentIndex']
-			entries = history['entries']
+			async with asyncio.timeout(max(0.01, timeout_seconds)):
+				session_id = await self._ensure_session()
+				history = await self._client.send.Page.getNavigationHistory(
+					session_id=session_id
+				)
+				current_index = history['currentIndex']
+				entries = history['entries']
 
-			# Check if we can go back
-			if current_index <= 0:
-				raise RuntimeError('Cannot go back - no previous entry in history')
+				if current_index <= 0:
+					raise RuntimeError('Cannot go back - no previous entry in history')
 
-			# Navigate to the previous entry
-			previous_entry_id = entries[current_index - 1]['id']
-			params: 'NavigateToHistoryEntryParameters' = {'entryId': previous_entry_id}
-			self._invalidate_document_cache('page_actor_navigation')
-			await self._client.send.Page.navigateToHistoryEntry(params, session_id=session_id)
+				previous_entry_id = entries[current_index - 1]['id']
+				target_url = entries[current_index - 1].get('url')
+				baseline = await self._read_document_baseline(session_id, deadline=deadline)
+				if baseline is None:
+					raise NavigationError(
+						'Cannot establish the current document before history navigation; '
+						'Page.getFrameTree did not answer'
+					)
+				params: 'NavigateToHistoryEntryParameters' = {'entryId': previous_entry_id}
+				self._invalidate_document_cache('page_actor_navigation')
+				requested_url = target_url if isinstance(target_url, str) else None
 
+				async def run() -> DocumentSnapshot:
+					await self._client.send.Page.navigateToHistoryEntry(
+						params, session_id=session_id
+					)
+					return await await_document_ready(
+						self._client,
+						session_id,
+						target_id=self._target_id,
+						baseline=baseline,
+						requested_url=requested_url,
+						wait_until=wait_until,
+						timeout_seconds=max(0.01, deadline - loop.time() - 0.01),
+						require_document_change=True,
+					)
+
+				return await self._run_bounded(
+					run(),
+					requested_url=requested_url,
+					timeout_seconds=timeout_seconds,
+					deadline=deadline,
+				)
+
+		except (NavigationError, NavigationTimeoutError):
+			raise
+		except TimeoutError as error:
+			raise self._navigation_timeout(requested_url, timeout_seconds) from error
 		except Exception as e:
 			raise RuntimeError(f'Failed to navigate back: {e}')
 
-	async def go_forward(self) -> None:
-		"""Navigate forward in history."""
-		session_id = await self._ensure_session()
+	async def go_forward(
+		self, *, wait_until: WaitUntil = 'load', timeout_seconds: float = 30.0
+	) -> DocumentSnapshot | None:
+		"""Navigate forward and wait for wait_until (default load) within timeout_seconds (default 30)."""
+		validate_actor_wait_until(wait_until)
+		loop = asyncio.get_running_loop()
+		deadline = loop.time() + max(0.01, timeout_seconds)
+		requested_url: str | None = None
 
 		try:
-			# Get navigation history
-			history = await self._client.send.Page.getNavigationHistory(session_id=session_id)
-			current_index = history['currentIndex']
-			entries = history['entries']
+			async with asyncio.timeout(max(0.01, timeout_seconds)):
+				session_id = await self._ensure_session()
+				history = await self._client.send.Page.getNavigationHistory(
+					session_id=session_id
+				)
+				current_index = history['currentIndex']
+				entries = history['entries']
 
-			# Check if we can go forward
-			if current_index >= len(entries) - 1:
-				raise RuntimeError('Cannot go forward - no next entry in history')
+				if current_index >= len(entries) - 1:
+					raise RuntimeError('Cannot go forward - no next entry in history')
 
-			# Navigate to the next entry
-			next_entry_id = entries[current_index + 1]['id']
-			params: 'NavigateToHistoryEntryParameters' = {'entryId': next_entry_id}
-			self._invalidate_document_cache('page_actor_navigation')
-			await self._client.send.Page.navigateToHistoryEntry(params, session_id=session_id)
+				next_entry_id = entries[current_index + 1]['id']
+				target_url = entries[current_index + 1].get('url')
+				baseline = await self._read_document_baseline(session_id, deadline=deadline)
+				if baseline is None:
+					raise NavigationError(
+						'Cannot establish the current document before history navigation; '
+						'Page.getFrameTree did not answer'
+					)
+				params: 'NavigateToHistoryEntryParameters' = {'entryId': next_entry_id}
+				self._invalidate_document_cache('page_actor_navigation')
+				requested_url = target_url if isinstance(target_url, str) else None
 
+				async def run() -> DocumentSnapshot:
+					await self._client.send.Page.navigateToHistoryEntry(
+						params, session_id=session_id
+					)
+					return await await_document_ready(
+						self._client,
+						session_id,
+						target_id=self._target_id,
+						baseline=baseline,
+						requested_url=requested_url,
+						wait_until=wait_until,
+						timeout_seconds=max(0.01, deadline - loop.time() - 0.01),
+						require_document_change=True,
+					)
+
+				return await self._run_bounded(
+					run(),
+					requested_url=requested_url,
+					timeout_seconds=timeout_seconds,
+					deadline=deadline,
+				)
+
+		except (NavigationError, NavigationTimeoutError):
+			raise
+		except TimeoutError as error:
+			raise self._navigation_timeout(requested_url, timeout_seconds) from error
 		except Exception as e:
 			raise RuntimeError(f'Failed to navigate forward: {e}')
-
 	# Element finding methods (these would need to be implemented based on DOM queries)
 	async def get_elements_by_css_selector(self, selector: str) -> list['Element']:
 		"""Get elements by CSS selector."""
