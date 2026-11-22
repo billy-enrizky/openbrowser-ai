@@ -78,6 +78,9 @@ from openbrowser.browser.navigation import (
 	NavigationPhase,
 	NavigationTimeoutError,
 	WaitUntil,
+	await_document_ready,
+	read_document_snapshot,
+	validate_actor_wait_until,
 )
 from openbrowser.browser.tabs import TabError, TabRegistry, TabState
 from openbrowser.browser.views import BrowserStateSummary, TabInfo
@@ -6533,23 +6536,78 @@ class BrowserSession(BaseModel):
 			'origins': origins,
 		}
 
-	async def _cdp_navigate(self, url: str, target_id: TargetID | None = None) -> None:
-		"""Navigate to URL using CDP Page.navigate."""
+	async def _cdp_navigate(
+		self,
+		url: str,
+		target_id: TargetID | None = None,
+		*,
+		wait_until: WaitUntil = 'commit',
+		timeout_seconds: float = 30.0,
+	) -> None:
+		"""Navigate to URL using CDP Page.navigate and wait for the target document.
+
+		This is a target-scoped actor barrier, not the full navigation machine.
+		It does not emit navigation events, own policy, or wait for network idle.
+		"""
 		# Use provided target_id or fall back to current_target_id
+		validate_actor_wait_until(wait_until)
+		loop = asyncio.get_running_loop()
+		deadline = loop.time() + max(0.01, timeout_seconds)
 
 		assert self._cdp_client_root is not None, 'CDP client not initialized - browser may not be connected yet'
 		assert self.agent_focus is not None, 'CDP session not initialized - browser may not be connected yet'
+		target_label = target_id or self.agent_focus.target_id
 
-		session = await self.get_or_create_cdp_session(
-			target_id or self.agent_focus.target_id,
-			focus=True,
-		)
+		try:
+			async with asyncio.timeout(max(0.01, timeout_seconds)):
+				session = await self.get_or_create_cdp_session(target_label, focus=True)
 
-		# A raw Page.navigate bypasses the navigation machine. Fence the cache
-		# before the command so no pre-navigation index survives.
-		self.invalidate_dom_cache(target_id=session.target_id, reason='cdp_navigate')
-		await session.cdp_client.send.Page.navigate(params={'url': url}, session_id=session.session_id)
+				baseline_remaining = deadline - loop.time()
+				try:
+					baseline = await asyncio.wait_for(
+						read_document_snapshot(session.cdp_client, session.session_id),
+						timeout=min(2.0, max(0.01, baseline_remaining)),
+					)
+				except Exception:
+					baseline = None
 
+				# A raw Page.navigate bypasses the navigation machine. Fence the
+				# cache before the command so no pre-navigation index survives.
+				self.invalidate_dom_cache(target_id=session.target_id, reason='cdp_navigate')
+
+				async def run() -> None:
+					response = await session.cdp_client.send.Page.navigate(
+						params={'url': url}, session_id=session.session_id
+					)
+					if not isinstance(response, dict):
+						raise NavigationError('Page.navigate returned a malformed response')
+					error_text = response.get('errorText')
+					if error_text:
+						raise NavigationError(str(error_text))
+					if response.get('isDownload') is True:
+						return
+					raw_loader = response.get('loaderId')
+					await await_document_ready(
+						session.cdp_client,
+						session.session_id,
+						target_id=session.target_id,
+						baseline=baseline,
+						requested_url=url,
+						expected_loader=raw_loader
+						if isinstance(raw_loader, str) and raw_loader
+						else None,
+						wait_until=wait_until,
+						timeout_seconds=max(0.01, deadline - loop.time() - 0.01),
+					)
+
+				await run()
+		except NavigationTimeoutError:
+			raise
+		except TimeoutError as error:
+			raise NavigationTimeoutError(
+				f'Actor navigation on target {target_label} to {url} did not complete '
+				f'within {timeout_seconds:g}s (command or document did not answer).'
+			) from error
 	@staticmethod
 	def _is_valid_target(
 		target_info: TargetInfo,

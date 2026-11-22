@@ -284,7 +284,8 @@ async def test_cdp_navigate_invalidates_before_the_command():
 
     async def navigate(params, session_id=None):
         seen["map"] = dict(harness.session._cached_selector_map)
-        return {}
+        harness.frame.update(loaderId="loader-b", url=params["url"])
+        return {"frameId": "frame-a", "loaderId": "loader-b"}
 
     harness.client.send.Page.navigate = AsyncMock(side_effect=navigate)
 
@@ -309,12 +310,13 @@ async def test_page_reload_invalidates_before_the_command():
 
     async def reload(session_id=None):
         seen["map"] = dict(harness.session._cached_selector_map)
+        harness.frame.update(loaderId="loader-b")
         return {}
 
     harness.client.send.Page.reload = AsyncMock(side_effect=reload)
     page = Page(harness.session, target_id="tab-a", session_id="sess-a")
 
-    await page.reload()
+    await page.reload(wait_until="commit")
 
     assert seen["map"] == {}
     assert await harness.session.get_selector_map() == {}
@@ -330,12 +332,13 @@ async def test_page_goto_invalidates_before_the_command():
 
     async def navigate(params, session_id=None):
         seen["map"] = dict(harness.session._cached_selector_map)
-        return {}
+        harness.frame.update(loaderId="loader-b", url=params["url"])
+        return {"frameId": "frame-a", "loaderId": "loader-b"}
 
     harness.client.send.Page.navigate = AsyncMock(side_effect=navigate)
     page = Page(harness.session, target_id="tab-a", session_id="sess-a")
 
-    await page.goto("https://b.test/")
+    await page.goto("https://b.test/", wait_until="commit")
 
     assert seen["map"] == {}
     assert await harness.session.get_selector_map() == {}
@@ -574,18 +577,26 @@ async def test_page_history_navigation_invalidates_before_the_command(direction)
     publish(harness, loader_id="loader-a")
     current_index = 1 if direction == "back" else 0
     harness.client.send.Page.getNavigationHistory = AsyncMock(
-        return_value={"currentIndex": current_index, "entries": [{"id": 1}, {"id": 2}]}
+        return_value={
+            "currentIndex": current_index,
+            "entries": [
+                {"id": 1, "url": "https://a.test/"},
+                {"id": 2, "url": "https://b.test/"},
+            ],
+        }
     )
     seen = {}
 
     async def navigate_to_history(params, session_id=None):
         seen["map"] = dict(harness.session._cached_selector_map)
+        target_url = "https://a.test/" if direction == "back" else "https://b.test/"
+        harness.frame.update(loaderId="loader-b", url=target_url)
         return {}
 
     harness.client.send.Page.navigateToHistoryEntry = AsyncMock(side_effect=navigate_to_history)
     page = Page(harness.session, target_id="tab-a", session_id="sess-a")
 
-    await (page.go_back() if direction == "back" else page.go_forward())
+    await (page.go_back(wait_until="commit") if direction == "back" else page.go_forward(wait_until="commit"))
 
     assert seen["map"] == {}
 

@@ -20,16 +20,29 @@ def _make_mock_browser_session():
     client.send.Target.getTargetInfo = AsyncMock()
     client.send.Page.enable = AsyncMock()
     client.send.Page.reload = AsyncMock()
-    client.send.Page.navigate = AsyncMock()
+    client.send.Page.navigate = AsyncMock(
+        return_value={'frameId': 'frame-1', 'loaderId': 'loader-new'}
+    )
     client.send.Page.navigateToHistoryEntry = AsyncMock()
     client.send.Page.getNavigationHistory = AsyncMock()
+    client.send.Page.getFrameTree = AsyncMock(
+        return_value={
+            'frameTree': {
+                'frame': {
+                    'id': 'frame-1',
+                    'loaderId': 'loader-new',
+                    'url': 'https://example.com',
+                }
+            }
+        }
+    )
     client.send.Page.captureScreenshot = AsyncMock()
     client.send.DOM.enable = AsyncMock()
     client.send.DOM.getDocument = AsyncMock()
     client.send.DOM.querySelectorAll = AsyncMock()
     client.send.DOM.describeNode = AsyncMock()
     client.send.Runtime.enable = AsyncMock()
-    client.send.Runtime.evaluate = AsyncMock()
+    client.send.Runtime.evaluate = AsyncMock(return_value={'result': {'value': 'complete'}})
     client.send.Network.enable = AsyncMock()
     client.send.Input.dispatchKeyEvent = AsyncMock()
     client.send.Emulation.setDeviceMetricsOverride = AsyncMock()
@@ -119,9 +132,25 @@ class TestPageReload:
 
     async def test_reload(self):
         session, client = _make_mock_browser_session()
+        client.send.Page.getFrameTree = AsyncMock(
+            side_effect=[
+                {
+                    'frameTree': {
+                        'frame': {'id': 'frame-1', 'loaderId': 'loader-old', 'url': 'https://example.com'}
+                    }
+                },
+                {
+                    'frameTree': {
+                        'frame': {'id': 'frame-1', 'loaderId': 'loader-new', 'url': 'https://example.com'}
+                    }
+                },
+            ]
+        )
         page = Page(session, target_id='tid-123', session_id='sid-abc')
 
-        await page.reload()
+        snapshot = await page.reload()
+
+        assert snapshot is not None and snapshot.loader_id == 'loader-new'
         client.send.Page.reload.assert_called_once_with(session_id='sid-abc')
 
 
@@ -403,7 +432,11 @@ class TestPageNavigation:
         session, client = _make_mock_browser_session()
         page = Page(session, target_id='tid-123', session_id='sid-abc')
 
-        await page.navigate('https://example.com')
+        snapshot = await page.navigate(
+            'https://example.com', wait_until='commit', timeout_seconds=5.0
+        )
+
+        assert snapshot is not None and snapshot.loader_id == 'loader-new'
         client.send.Page.navigate.assert_called_once()
 
     async def test_go_back(self):
@@ -415,9 +448,25 @@ class TestPageNavigation:
                 {'id': 1, 'url': 'https://b.com'},
             ]
         }
+        client.send.Page.getFrameTree = AsyncMock(
+            side_effect=[
+                {
+                    'frameTree': {
+                        'frame': {'id': 'frame-1', 'loaderId': 'loader-old', 'url': 'https://b.com'}
+                    }
+                },
+                {
+                    'frameTree': {
+                        'frame': {'id': 'frame-1', 'loaderId': 'loader-new', 'url': 'https://a.com'}
+                    }
+                },
+            ]
+        )
         page = Page(session, target_id='tid-123', session_id='sid-abc')
 
-        await page.go_back()
+        snapshot = await page.go_back()
+
+        assert snapshot is not None and snapshot.url == 'https://a.com'
         client.send.Page.navigateToHistoryEntry.assert_called_once()
 
     async def test_go_back_at_start_raises(self):
@@ -440,9 +489,25 @@ class TestPageNavigation:
                 {'id': 1, 'url': 'https://b.com'},
             ]
         }
+        client.send.Page.getFrameTree = AsyncMock(
+            side_effect=[
+                {
+                    'frameTree': {
+                        'frame': {'id': 'frame-1', 'loaderId': 'loader-old', 'url': 'https://a.com'}
+                    }
+                },
+                {
+                    'frameTree': {
+                        'frame': {'id': 'frame-1', 'loaderId': 'loader-new', 'url': 'https://b.com'}
+                    }
+                },
+            ]
+        )
         page = Page(session, target_id='tid-123', session_id='sid-abc')
 
-        await page.go_forward()
+        snapshot = await page.go_forward()
+
+        assert snapshot is not None and snapshot.url == 'https://b.com'
         client.send.Page.navigateToHistoryEntry.assert_called_once()
 
     async def test_go_forward_at_end_raises(self):
