@@ -384,29 +384,22 @@ class TestConfig:
             _config_cache.pop(str(config_path), None)
 
     def test_load_and_migrate_config_write_error(self):
-        """Lines 382-383: write failure on fresh config creation."""
-        from openbrowser.config import _config_cache, load_and_migrate_config
+        """A real temp-file creation failure returns write_failed and leaves no file."""
+        from openbrowser.config import _config_cache, load_and_migrate_config_result
+        from openbrowser.config_lifecycle import ConfigFilePhase
 
         with tempfile.TemporaryDirectory() as tmp:
             config_path = Path(tmp) / "config.json"
-            # Write bad content to trigger load error
-            config_path.write_text("not json{{{bad")
 
-            # Patch open to fail on write attempt
-            original_open = open
-            call_count = [0]
+            with patch(
+                "openbrowser.config.tempfile.NamedTemporaryFile",
+                side_effect=PermissionError("Cannot write"),
+            ):
+                result = load_and_migrate_config_result(config_path)
 
-            def failing_open(path, *args, **kwargs):
-                if 'w' in str(args) and str(config_path) in str(path):
-                    call_count[0] += 1
-                    if call_count[0] <= 1:
-                        raise PermissionError("Cannot write")
-                return original_open(path, *args, **kwargs)
-
-            with patch("builtins.open", side_effect=failing_open):
-                result = load_and_migrate_config(config_path)
-
-            assert result is not None
+            assert result.snapshot.phase is ConfigFilePhase.WRITE_FAILED
+            assert result.snapshot.error_code == "config_write_failed"
+            assert not config_path.exists()
             _config_cache.pop(str(config_path), None)
 
     def test_config_getattr_ensure_dirs(self):
@@ -453,6 +446,7 @@ class TestDaemonServer:
         daemon._init_lock = asyncio.Lock()
         daemon._executor = None
         daemon._session = None
+        daemon._startup_config_result = MagicMock()
 
         mock_session = AsyncMock()
         mock_session.start = AsyncMock()
@@ -464,6 +458,7 @@ class TestDaemonServer:
              patch("openbrowser.tools.service.CodeAgentTools", side_effect=Exception("setup failed")), \
              patch("openbrowser.code_use.namespace.create_namespace"), \
              patch.object(DaemonServer, "_build_browser_profile", return_value=MagicMock()), \
+             patch("openbrowser.config.Config.require_browser_start_allowed", return_value=MagicMock()), \
              patch.dict(os.environ, {}, clear=False):
             with pytest.raises(Exception, match="setup failed"):
                 await daemon._ensure_executor()
@@ -480,6 +475,7 @@ class TestDaemonServer:
         daemon._session = AsyncMock()
         daemon._session.kill = AsyncMock()
         daemon._executor = MagicMock()
+        daemon._startup_config_result = MagicMock()
 
         new_session = AsyncMock()
         new_session.start = AsyncMock()
@@ -488,7 +484,8 @@ class TestDaemonServer:
         with patch("openbrowser.browser.BrowserSession", return_value=new_session), \
              patch("openbrowser.tools.service.CodeAgentTools", side_effect=Exception("namespace failed")), \
              patch("openbrowser.code_use.namespace.create_namespace"), \
-             patch.object(DaemonServer, "_build_browser_profile", return_value=MagicMock()):
+             patch.object(DaemonServer, "_build_browser_profile", return_value=MagicMock()), \
+             patch("openbrowser.config.Config.require_browser_start_allowed", return_value=MagicMock()):
             with pytest.raises(Exception, match="namespace failed"):
                 await daemon._recover_browser_session()
 

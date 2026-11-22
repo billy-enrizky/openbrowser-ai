@@ -20,6 +20,7 @@ import pytest
 from bubus import EventBus
 
 from openbrowser.browser.session import BrowserSession
+from tests.support.config_lifecycle import startup_config
 
 logger = logging.getLogger(__name__)
 
@@ -770,8 +771,7 @@ class TestMCPServerHandlers:
         """Lines 236-239, 264, 268, 272: Handlers registered during __init__."""
         from openbrowser.mcp import server as mcp_server
 
-        with patch.object(mcp_server, "load_openbrowser_config", return_value={}), \
-             patch.object(mcp_server, "get_default_profile", return_value={}):
+        with startup_config({}):
             srv = mcp_server.OpenBrowserServer(session_timeout_minutes=5)
             assert srv.server is not None
             assert srv.session_timeout_minutes == 5
@@ -786,8 +786,7 @@ class TestMCPServerCallTool:
         from openbrowser.mcp import server as mcp_server
         from openbrowser.code_use.executor import CodeExecutor
 
-        with patch.object(mcp_server, "load_openbrowser_config", return_value={}), \
-             patch.object(mcp_server, "get_default_profile", return_value={}):
+        with startup_config({}):
             srv = mcp_server.OpenBrowserServer(session_timeout_minutes=5)
 
         # Mock namespace so _execute_code doesn't try to start a browser
@@ -808,8 +807,7 @@ class TestMCPServerCallTool:
         from openbrowser.mcp import server as mcp_server
         from openbrowser.code_use.executor import CodeExecutor
 
-        with patch.object(mcp_server, "load_openbrowser_config", return_value={}), \
-             patch.object(mcp_server, "get_default_profile", return_value={}):
+        with startup_config({}):
             srv = mcp_server.OpenBrowserServer(session_timeout_minutes=5)
 
         # Set up namespace directly
@@ -834,8 +832,7 @@ class TestMCPServerCleanup:
         """Line 495: No browser session to clean up."""
         from openbrowser.mcp import server as mcp_server
 
-        with patch.object(mcp_server, "load_openbrowser_config", return_value={}), \
-             patch.object(mcp_server, "get_default_profile", return_value={}):
+        with startup_config({}):
             srv = mcp_server.OpenBrowserServer(session_timeout_minutes=5)
 
         srv.browser_session = None
@@ -846,8 +843,7 @@ class TestMCPServerCleanup:
         """Lines 495: Session exists and has timed out."""
         from openbrowser.mcp import server as mcp_server
 
-        with patch.object(mcp_server, "load_openbrowser_config", return_value={}), \
-             patch.object(mcp_server, "get_default_profile", return_value={}):
+        with startup_config({}):
             srv = mcp_server.OpenBrowserServer(session_timeout_minutes=0)
 
         mock_session = MagicMock()
@@ -866,8 +862,7 @@ class TestMCPServerCleanup:
         """Test _is_connection_error detection."""
         from openbrowser.mcp import server as mcp_server
 
-        with patch.object(mcp_server, "load_openbrowser_config", return_value={}), \
-             patch.object(mcp_server, "get_default_profile", return_value={}):
+        with startup_config({}):
             srv = mcp_server.OpenBrowserServer()
 
         assert srv._is_connection_error("ConnectionClosedError: gone") is True
@@ -880,8 +875,7 @@ class TestMCPServerCleanup:
         from openbrowser.mcp import server as mcp_server
         from openbrowser.code_use.executor import CodeExecutor
 
-        with patch.object(mcp_server, "load_openbrowser_config", return_value={}), \
-             patch.object(mcp_server, "get_default_profile", return_value={}):
+        with startup_config({}):
             srv = mcp_server.OpenBrowserServer()
 
         srv._namespace = {"x": 1}
@@ -1445,8 +1439,7 @@ class TestMCPServerStartCleanup:
         """Line 495: Start cleanup task creates background task."""
         from openbrowser.mcp import server as mcp_server
 
-        with patch.object(mcp_server, "load_openbrowser_config", return_value={}), \
-             patch.object(mcp_server, "get_default_profile", return_value={}):
+        with startup_config({}):
             srv = mcp_server.OpenBrowserServer()
 
         await srv._start_cleanup_task()
@@ -1462,8 +1455,7 @@ class TestMCPServerStartCleanup:
         """Lines 495-498: cleanup_loop catches exceptions and continues."""
         from openbrowser.mcp import server as mcp_server
 
-        with patch.object(mcp_server, "load_openbrowser_config", return_value={}), \
-             patch.object(mcp_server, "get_default_profile", return_value={}):
+        with startup_config({}):
             srv = mcp_server.OpenBrowserServer()
 
         # Track how many times cleanup was called
@@ -1508,8 +1500,7 @@ class TestMCPServerCDPAlive:
         """_is_cdp_alive returns False when no browser session."""
         from openbrowser.mcp import server as mcp_server
 
-        with patch.object(mcp_server, "load_openbrowser_config", return_value={}), \
-             patch.object(mcp_server, "get_default_profile", return_value={}):
+        with startup_config({}):
             srv = mcp_server.OpenBrowserServer()
 
         srv.browser_session = None
@@ -1520,8 +1511,7 @@ class TestMCPServerCDPAlive:
         """_is_cdp_alive returns False when no _cdp_client_root."""
         from openbrowser.mcp import server as mcp_server
 
-        with patch.object(mcp_server, "load_openbrowser_config", return_value={}), \
-             patch.object(mcp_server, "get_default_profile", return_value={}):
+        with startup_config({}):
             srv = mcp_server.OpenBrowserServer()
 
         srv.browser_session = MagicMock()
@@ -1533,8 +1523,7 @@ class TestMCPServerCDPAlive:
         """_is_cdp_alive returns False when getVersion raises."""
         from openbrowser.mcp import server as mcp_server
 
-        with patch.object(mcp_server, "load_openbrowser_config", return_value={}), \
-             patch.object(mcp_server, "get_default_profile", return_value={}):
+        with startup_config({}):
             srv = mcp_server.OpenBrowserServer()
 
         srv.browser_session = MagicMock()

@@ -230,6 +230,21 @@ When CodeAgent extracts an initial URL from its task, it awaits the registered `
 
 ## Configuration
 
+### Config file lifecycle
+
+OpenBrowser reads `config.json` from `OPENBROWSER_CONFIG_PATH`, then `OPENBROWSER_CONFIG_DIR/config.json`, then `XDG_CONFIG_HOME/openbrowser/config.json`. Run `uvx openbrowser-ai config status` to inspect the selected path and its state as JSON. If the selected file does not exist, the status check creates the default once.
+
+A missing file is created once with defaults. A legacy, invalid, or unreadable file is never rewritten automatically. Browser startup is blocked with a stable `config_*` error code and a repair hint. If you can fix the file in place, do that and restart any running daemon or MCP server. If you want a fresh default, move the file to a unique backup name first. Moving it aside creates a new default on the next start and does not migrate the old settings. Keep the backup because it may contain proxy credentials or API keys.
+
+```bash
+uvx openbrowser-ai config status
+# Move the exact "path" value reported by the command. Do not assume the default path.
+mv <path-from-status> <path-from-status>.invalid.$(date +%Y%m%d%H%M%S)
+uvx openbrowser-ai config status
+```
+
+`daemon status` and MCP `get_status` include an additive `config` block with the startup snapshot, current snapshot, and `restart_required`. A long-lived daemon or MCP process does not hot reload config.
+
 ### Environment Variables
 
 ```bash

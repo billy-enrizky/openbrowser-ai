@@ -10,6 +10,7 @@ class CliMode(str, Enum):
 
 	MCP = 'mcp'
 	EXECUTE_CODE = 'execute_code'
+	CONFIG = 'config'
 	DAEMON = 'daemon'
 	INSTALL = 'install'
 	INIT = 'init'
@@ -38,6 +39,8 @@ def select_cli_mode(args: list[str]) -> CliMode | None:
 		# Prompt mode owns its value. "openbrowser-ai -p init" and
 		# "openbrowser-ai -p --mcp" are prompts, not modes.
 		return None
+	if args and args[0] == 'config':
+		return CliMode.CONFIG
 	if args and args[0] == 'daemon':
 		return CliMode.DAEMON
 	if args and args[0] == 'install':
@@ -166,6 +169,28 @@ if _mode is CliMode.EXECUTE_CODE:
 			print(f'Hint: {result.hint}', file=sys.stderr)
 		sys.exit(1)
 	sys.exit(0)
+
+# Check for config subcommand early
+if _mode is CliMode.CONFIG:
+	import json
+	import os
+
+	os.environ['OPENBROWSER_SETUP_LOGGING'] = 'false'
+	try:
+		from dotenv import load_dotenv
+		load_dotenv()
+	except ImportError:
+		pass
+
+	from openbrowser.config import CONFIG
+
+	sub = sys.argv[2] if len(sys.argv) > 2 else 'status'
+	if sub == 'status':
+		result = CONFIG.load_result()
+		print(json.dumps(result.snapshot.to_dict(), indent=2))
+		sys.exit(0)
+	print('Usage: openbrowser-ai config status', file=sys.stderr)
+	sys.exit(2)
 
 # Check for daemon subcommand early
 if _mode is CliMode.DAEMON:
@@ -590,7 +615,7 @@ import click
 
 os.environ['OPENBROWSER_LOGGING_LEVEL'] = 'result'
 
-from openbrowser.config import CONFIG, apply_managed_browser_profile_defaults
+from openbrowser.config import CONFIG, ConfigLoadResult, ConfigStartupError, apply_managed_browser_profile_defaults
 
 # Set USER_DATA_DIR now that CONFIG is imported
 USER_DATA_DIR = CONFIG.OPENBROWSER_PROFILES_DIR / 'cli'
@@ -603,10 +628,10 @@ USER_DATA_DIR.mkdir(parents=True, exist_ok=True)
 MAX_HISTORY_LENGTH = 100
 
 
-def get_default_config() -> dict[str, Any]:
+def get_default_config(config_result: ConfigLoadResult | None = None) -> dict[str, Any]:
 	"""Return default configuration dictionary using the new config system."""
-	# Load config from the new config system
-	config_data = CONFIG.load_config()
+	# Use the exact load result when a start gate already approved it.
+	config_data = CONFIG.config_dict_from_result(config_result) if config_result is not None else CONFIG.load_config()
 
 	# Extract browser profile, llm, and agent configs
 	browser_profile = config_data.get('browser_profile', {})
@@ -642,10 +667,10 @@ def get_default_config() -> dict[str, Any]:
 	}
 
 
-def load_user_config() -> dict[str, Any]:
+def load_user_config(config_result: ConfigLoadResult | None = None) -> dict[str, Any]:
 	"""Load user configuration using the new config system."""
 	# Just get the default config which already loads from the new system
-	config = get_default_config()
+	config = get_default_config(config_result)
 
 	# Load command history from a separate file if it exists
 	history_file = CONFIG.OPENBROWSER_CONFIG_DIR / 'command_history.json'
@@ -798,8 +823,9 @@ async def run_prompt_mode(prompt: str, ctx: click.Context, debug: bool = False):
 	error_msg = None
 
 	try:
-		# Load config
-		config = load_user_config()
+		# Freeze one config result for the gate and for the browser settings.
+		config_result = CONFIG.require_browser_start_allowed()
+		config = load_user_config(config_result)
 		config = update_config_with_click_args(config, ctx)
 
 		# Get LLM
@@ -862,6 +888,23 @@ async def run_prompt_mode(prompt: str, ctx: click.Context, debug: bool = False):
 				duration_seconds=time.time() - start_time,
 			)
 		)
+
+	except ConfigStartupError as error:
+		error_msg = error.code
+		telemetry.capture(
+			CLITelemetryEvent(
+				version=get_openbrowser_version(),
+				action='error',
+				mode='oneshot',
+				model=None,
+				model_provider=None,
+				duration_seconds=time.time() - start_time,
+				error_message=error_msg,
+			)
+		)
+		print(f'Config error [{error.code}]: {error.path}', file=sys.stderr)
+		print(error.hint, file=sys.stderr)
+		sys.exit(1)
 
 	except Exception as e:
 		error_msg = str(e)

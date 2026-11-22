@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -18,7 +19,8 @@ from openbrowser.browser.lifecycle import LifecyclePhase
 from openbrowser.browser.session import CDPSession
 from openbrowser.browser.tabs import TabState
 from openbrowser.config import CONFIG
-from openbrowser.mcp.server import _CleanupOutcome
+from openbrowser.config_lifecycle import ConfigStartupError
+from openbrowser.mcp.server import OpenBrowserContext, OpenBrowserServer, _CleanupOutcome
 
 
 @pytest.mark.asyncio
@@ -590,3 +592,202 @@ async def test_get_status_recovers_focus_when_lifecycle_snapshot_fails(mcp_serve
 
 	assert payload['browser']['focus']['phase'] == 'lost'
 	assert payload['browser']['focus']['previous_target_id'] == 'tab-1'
+
+
+def _write_valid_mcp_config(path, *, headless=True, model='gpt-5-mini'):
+	path.write_text(
+		json.dumps(
+			{
+				'browser_profile': {
+					'profile-a': {
+						'id': 'profile-a',
+						'default': True,
+						'headless': headless,
+						'user_data_dir': '/tmp/openbrowser-mcp-test-profile',
+					}
+				},
+				'llm': {'llm-a': {'id': 'llm-a', 'default': True, 'model': model}},
+				'agent': {'agent-a': {'id': 'agent-a', 'default': True}},
+			}
+		)
+	)
+
+
+@pytest.mark.asyncio
+async def test_blocked_config_prevents_mcp_namespace_start_and_reports_status(isolated_config_path, monkeypatch):
+	monkeypatch.setenv('OPENBROWSER_CONFIG_PATH', str(isolated_config_path))
+	isolated_config_path.write_text('NOT JSON {{{')
+	server = OpenBrowserServer()
+
+	with patch('openbrowser.browser.BrowserSession.start') as start, pytest.raises(ConfigStartupError) as error:
+			await server._ensure_namespace()
+
+	assert error.value.code == 'config_restart_required'
+	assert start.called is False
+
+	payload = server._status_payload()
+	assert payload['config']['startup']['phase'] == 'invalid'
+	assert payload['config']['startup']['error_code'] == 'config_invalid_json'
+	assert payload['config']['current']['phase'] == 'invalid'
+	assert payload['config']['restart_required'] is True
+	assert payload['browser']['phase'] == 'stopped'
+	assert payload['downloads']['pdf_detection']['phase'] == 'idle'
+
+
+@pytest.mark.asyncio
+async def test_modern_context_uses_server_startup_snapshot(isolated_config_path, monkeypatch):
+	monkeypatch.setenv('OPENBROWSER_CONFIG_PATH', str(isolated_config_path))
+	isolated_config_path.write_text('NOT JSON {{{')
+	server = OpenBrowserServer()
+	owner = OpenBrowserContext(server, 'ctx-test')
+
+	with patch('openbrowser.browser.BrowserSession.start') as start, pytest.raises(ConfigStartupError) as error:
+		await owner._ensure_namespace()
+
+	assert error.value.code == 'config_restart_required'
+	assert start.called is False
+
+
+@pytest.mark.asyncio
+async def test_mcp_valid_to_valid_config_change_requires_restart(isolated_config_path, monkeypatch):
+	monkeypatch.setenv('OPENBROWSER_CONFIG_PATH', str(isolated_config_path))
+	_write_valid_mcp_config(isolated_config_path, headless=True)
+	server = OpenBrowserServer()
+	_write_valid_mcp_config(isolated_config_path, headless=False, model='gpt-5-mini-extra')
+
+	with patch('openbrowser.browser.BrowserSession.start') as start, pytest.raises(ConfigStartupError) as error:
+		await server._ensure_namespace()
+
+	assert error.value.code == 'config_restart_required'
+	assert start.called is False
+	payload = server._status_payload()
+	assert payload['config']['startup']['phase'] == 'ready'
+	assert payload['config']['current']['phase'] == 'ready'
+	assert payload['config']['restart_required'] is True
+
+
+@pytest.mark.asyncio
+async def test_mcp_owned_tool_raises_blocked_config_before_browser_start(isolated_config_path, monkeypatch):
+	monkeypatch.setenv('OPENBROWSER_CONFIG_PATH', str(isolated_config_path))
+	isolated_config_path.write_text('NOT JSON {{{')
+	server = OpenBrowserServer()
+
+	with patch('openbrowser.browser.BrowserSession.start') as start, pytest.raises(ConfigStartupError) as error:
+		await server._run_owned_tool(server, 'execute_code', {'code': 'print(1)'})
+
+	assert error.value.code == 'config_restart_required'
+	assert start.called is False
+
+
+@pytest.mark.asyncio
+async def test_mcp_status_does_not_start_browser_and_preserves_existing_keys(isolated_config_path, monkeypatch):
+	monkeypatch.setenv('OPENBROWSER_CONFIG_PATH', str(isolated_config_path))
+	isolated_config_path.write_text('NOT JSON {{{')
+	server = OpenBrowserServer()
+
+	with patch('openbrowser.browser.BrowserSession.start') as start:
+		payload = server._status_payload()
+
+	assert start.called is False
+	assert {
+		'server',
+		'browser',
+		'profile',
+		'instance_id',
+		'context_id',
+		'namespace_variables',
+		'pending_variables',
+		'namespace_transfer',
+		'session_timeout_minutes',
+		'exec_timeout',
+		'uptime_seconds',
+		'version',
+		'tools',
+		'downloads',
+		'storage_state',
+		'storage_state_save',
+	} <= payload.keys()
+	assert payload['config']['startup']['phase'] == 'invalid'
+	assert payload['config']['current']['phase'] == 'invalid'
+	assert payload['config']['restart_required'] is True
+
+
+@pytest.mark.asyncio
+async def test_mcp_repair_after_construction_still_requires_restart(isolated_config_path, monkeypatch):
+	monkeypatch.setenv('OPENBROWSER_CONFIG_PATH', str(isolated_config_path))
+	isolated_config_path.write_text('NOT JSON {{{')
+	server = OpenBrowserServer()
+	_write_valid_mcp_config(isolated_config_path)
+
+	with patch('openbrowser.browser.BrowserSession.start') as start, pytest.raises(ConfigStartupError) as error:
+		await server._ensure_namespace()
+
+	assert error.value.code == 'config_restart_required'
+	assert start.called is False
+	payload = server._status_payload()
+	assert payload['config']['startup']['phase'] == 'invalid'
+	assert payload['config']['current']['phase'] == 'ready'
+	assert payload['config']['restart_required'] is True
+
+
+
+@pytest.mark.asyncio
+async def test_mcp_recovery_gate_rejects_blocked_config_before_cleanup(isolated_config_path, monkeypatch):
+	monkeypatch.setenv('OPENBROWSER_CONFIG_PATH', str(isolated_config_path))
+	_write_valid_mcp_config(isolated_config_path)
+	server = OpenBrowserServer()
+	old_session = MagicMock()
+	old_session.kill = AsyncMock()
+	server.browser_session = old_session
+	server._executor = MagicMock()
+	isolated_config_path.write_text('NOT JSON {{{')
+
+	with (
+		patch.object(server, '_is_cdp_alive', AsyncMock(return_value=False)),
+		patch('openbrowser.browser.BrowserSession.start') as start,
+		pytest.raises(ConfigStartupError) as error,
+	):
+		await server._recover_browser_session()
+
+	assert error.value.code == 'config_restart_required'
+	old_session.kill.assert_not_awaited()
+	assert server.browser_session is old_session
+	assert start.called is False
+	payload = server._status_payload()
+	assert payload['config']['startup']['phase'] == 'ready'
+	assert payload['config']['restart_required'] is True
+
+
+@pytest.mark.asyncio
+async def test_mcp_blocked_recovery_preserves_partial_output_and_warning(isolated_config_path, monkeypatch):
+	monkeypatch.setenv('OPENBROWSER_CONFIG_PATH', str(isolated_config_path))
+	_write_valid_mcp_config(isolated_config_path)
+	server = OpenBrowserServer()
+	server._executor = MagicMock()
+	server._executor.initialized = True
+	server._namespace = {'__builtins__': __builtins__}
+	server.browser_session = MagicMock()
+	server._executor.execute = AsyncMock(
+		return_value=SimpleNamespace(
+			success=False,
+			output='partial user output',
+			error='websocket connection closed',
+		)
+	)
+	server._recover_browser_session = AsyncMock(
+		side_effect=ConfigStartupError(
+			server._startup_config_result.snapshot,
+			code='config_restart_required',
+			hint='Fix the config, then restart the daemon or MCP server.',
+		)
+	)
+
+	with (
+		patch.object(server, '_is_cdp_alive', AsyncMock(return_value=True)),
+		pytest.raises(ConfigStartupError) as error,
+	):
+		await server._execute_code_locked('print(1)')
+
+	assert 'partial user output' in str(error.value)
+	assert 'config_restart_required' in str(error.value)
+	assert 'may have partially run' in error.value.hint

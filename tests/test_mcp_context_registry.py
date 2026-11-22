@@ -10,6 +10,7 @@ import pytest
 
 from openbrowser.browser.lifecycle import LifecyclePhase
 from openbrowser.mcp import server as module
+from tests.support.config_lifecycle import startup_config
 
 
 async def _event(event: asyncio.Event, label: str) -> None:
@@ -28,7 +29,7 @@ async def _settle(task: asyncio.Task[object], label: str):
 
 
 @pytest.fixture()
-def registry(monkeypatch, tmp_path):
+def registry(monkeypatch, tmp_path, isolated_config_path):
     monkeypatch.setattr(module, "TELEMETRY_AVAILABLE", False)
     monkeypatch.setattr(module, "_MCP_WORKSPACE_DIR", tmp_path / "workspace")
     server = module.OpenBrowserServer()
@@ -428,20 +429,16 @@ async def test_explicit_profile_path_is_shared_by_explicit_opt_in(
 ):
     shared = tmp_path / "shared-profile"
     monkeypatch.setattr(module, "TELEMETRY_AVAILABLE", False)
-    monkeypatch.setattr(
-        module,
-        "load_openbrowser_config",
-        lambda: {"browser_profile": {"user_data_dir": str(shared)}},
-    )
-    server = module.OpenBrowserServer()
-    first_id = await server._contexts.create()
-    second_id = await server._contexts.create()
-    first = server._contexts._entries[first_id].owner
-    second = server._contexts._entries[second_id].owner
-    first_profile = first._build_browser_profile()
-    second_profile = second._build_browser_profile()
-    assert Path(first_profile.user_data_dir).resolve() == shared.resolve()
-    assert Path(second_profile.user_data_dir).resolve() == shared.resolve()
+    with startup_config({"browser_profile": {"user_data_dir": str(shared)}}):
+        server = module.OpenBrowserServer()
+        first_id = await server._contexts.create()
+        second_id = await server._contexts.create()
+        first = server._contexts._entries[first_id].owner
+        second = server._contexts._entries[second_id].owner
+        first_profile = first._build_browser_profile()
+        second_profile = second._build_browser_profile()
+        assert Path(first_profile.user_data_dir).resolve() == shared.resolve()
+        assert Path(second_profile.user_data_dir).resolve() == shared.resolve()
 
 
 @pytest.mark.asyncio

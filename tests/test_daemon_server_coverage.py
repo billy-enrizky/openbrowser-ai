@@ -19,8 +19,8 @@ logger = logging.getLogger(__name__)
 
 
 @pytest.fixture
-def daemon_server():
-    """Create a DaemonServer instance."""
+def daemon_server(isolated_config_path):
+    """Create a DaemonServer instance with an isolated config."""
     from openbrowser.daemon.server import DaemonServer
 
     return DaemonServer(idle_timeout=5, exec_timeout=2)
@@ -124,17 +124,12 @@ class TestDaemonServerBuildProfile:
         mock_profile_class = MagicMock(return_value=mock_profile)
 
         with patch("openbrowser.browser.BrowserProfile", mock_profile_class):
-            with patch(
-                "openbrowser.config.load_openbrowser_config", return_value={}
-            ):
-                with patch(
-                    "openbrowser.config.get_default_profile", return_value={}
-                ):
-                    result = daemon_server._build_browser_profile()
-                    assert result is mock_profile
-                    mock_profile_class.assert_called_once()
-                    _, kwargs = mock_profile_class.call_args
-                    assert kwargs.get("storage_state") is None
+            with patch("openbrowser.daemon.server.get_default_profile", return_value={}):
+                result = daemon_server._build_browser_profile()
+                assert result is mock_profile
+                mock_profile_class.assert_called_once()
+                _, kwargs = mock_profile_class.call_args
+                assert kwargs.get("storage_state") is None
 
     def test_build_browser_profile_preserves_explicit_storage_state(self, daemon_server):
         """An explicitly configured storage state remains available to the daemon."""
@@ -144,16 +139,13 @@ class TestDaemonServerBuildProfile:
 
         with patch("openbrowser.browser.BrowserProfile", mock_profile_class):
             with patch(
-                "openbrowser.config.load_openbrowser_config", return_value={}
+                "openbrowser.daemon.server.get_default_profile",
+                return_value={"storage_state": configured_state},
             ):
-                with patch(
-                    "openbrowser.config.get_default_profile",
-                    return_value={"storage_state": configured_state},
-                ):
-                    result = daemon_server._build_browser_profile()
-                    assert result is mock_profile
-                    _, kwargs = mock_profile_class.call_args
-                    assert kwargs["storage_state"] == configured_state
+                result = daemon_server._build_browser_profile()
+                assert result is mock_profile
+                _, kwargs = mock_profile_class.call_args
+                assert kwargs["storage_state"] == configured_state
 
 
 class TestDaemonServerIsConnectionError:

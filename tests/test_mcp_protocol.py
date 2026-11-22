@@ -1384,3 +1384,81 @@ async def test_context_errors_do_not_leak_handles_to_telemetry(monkeypatch):
     assert len(events) == 1
     assert events[0].error_message == "context_not_found"
     assert "secret-handle" not in str(events[0])
+
+
+@pytest.mark.asyncio
+async def test_real_stdio_invalid_config_reports_tool_error(tmp_path):
+    config_path = tmp_path / "config.json"
+    config_path.write_text("NOT JSON {{{")
+    async with wire(
+        tmp_path,
+        extra_env={"OPENBROWSER_CONFIG_PATH": str(config_path)},
+    ) as c:
+        created = await c.request(
+            1,
+            "tools/call",
+            {"name": "create_context", "arguments": {}},
+        )
+        context_id = created["structuredContent"]["context_id"]
+        status = await c.request(
+            2,
+            "tools/call",
+            {"name": "get_status", "arguments": {"context_id": context_id}},
+        )
+        payload = json.loads(status["content"][0]["text"])
+        assert payload["config"]["startup"]["phase"] == "invalid"
+        assert payload["config"]["current"]["phase"] == "invalid"
+        assert payload["config"]["restart_required"] is True
+
+        failure = await c.request(
+            3,
+            "tools/call",
+            {
+                "name": "execute_code",
+                "arguments": {"context_id": context_id, "code": "print(1)"},
+            },
+        )
+        assert failure["isError"] is True
+        text = failure["content"][0]["text"]
+        assert "config_restart_required" in text
+        assert str(config_path) in text
+        assert config_path.read_text() == "NOT JSON {{{"
+        await c.finish()
+
+
+@pytest.mark.asyncio
+async def test_config_errors_do_not_leak_paths_to_telemetry(
+    isolated_config_path, monkeypatch
+):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from openbrowser.config_lifecycle import ConfigStartupError
+
+    monkeypatch.setattr(module, "TELEMETRY_AVAILABLE", True)
+    server = module.OpenBrowserServer()
+    events = []
+    server._telemetry = SimpleNamespace(capture=events.append)
+    context_id = await server._contexts.create()
+    owner = server._contexts._entries[context_id].owner
+    owner._ensure_namespace = AsyncMock(
+        side_effect=ConfigStartupError(
+            server._startup_config_result.snapshot,
+            code="config_restart_required",
+            hint="Fix the config, then restart the daemon or MCP server.",
+        )
+    )
+    handler = server.server.get_request_handler("tools/call").handler
+    result = await handler(
+        SimpleNamespace(protocol_version="2026-07-28"),
+        module.types.CallToolRequestParams(
+            name="execute_code",
+            arguments={"context_id": context_id, "code": "print(1)"},
+        ),
+    )
+
+    assert result.is_error
+    assert len(events) == 1
+    assert events[0].error_message == "config_restart_required"
+    assert str(isolated_config_path) not in str(events[0])
+    await server._contexts.close(context_id)

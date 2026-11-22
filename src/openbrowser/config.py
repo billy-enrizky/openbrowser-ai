@@ -7,9 +7,11 @@ Performance optimizations:
 - Reduced redundant Path operations
 """
 
+import hashlib
 import json
 import logging
 import os
+import tempfile
 from datetime import datetime
 from functools import cache, lru_cache
 from pathlib import Path
@@ -17,8 +19,17 @@ from typing import Any
 from uuid import uuid4
 
 import psutil
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from openbrowser.config_lifecycle import (
+	ConfigFilePhase,
+	ConfigFileSnapshot,
+	ConfigLoadResult,
+	ConfigStartupError,
+	restart_required,
+	start_allowed,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -315,75 +326,312 @@ def create_default_config() -> DBStyleConfigJSON:
 	return new_config
 
 
-# Cache for loaded config files (keyed by path)
-_config_cache: dict[str, tuple[float, DBStyleConfigJSON]] = {}
+# Cache for loaded config files (keyed by the user path)
+FileIdentity = tuple[int, int, int, int, int]
+_config_cache: dict[str, tuple[FileIdentity, ConfigLoadResult]] = {}
+
+
+def _file_identity(path: Path) -> FileIdentity:
+	stat = path.stat()
+	return (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
+
+
+def _content_version(raw: bytes | None) -> str | None:
+	if raw is None:
+		return None
+	return hashlib.sha256(raw).hexdigest()[:16]
+
+
+def _config_hint(path: Path, phase: ConfigFilePhase) -> str | None:
+	display_path = str(path)
+	if phase is ConfigFilePhase.READ_FAILED:
+		return (
+			f'Fix the file permissions, or move {display_path} to a unique backup name and restart. '
+			'Moving it aside creates a new default and does not migrate old settings.'
+		)
+	if phase in (ConfigFilePhase.INVALID, ConfigFilePhase.LEGACY_FORMAT):
+		return (
+			f'Inspect {display_path}, or move it to a unique backup name and restart. '
+			'Moving it aside creates a new default and does not migrate old settings.'
+		)
+	if phase is ConfigFilePhase.WRITE_FAILED:
+		return (
+			f'Check the config directory permissions for {display_path}. '
+			'The file may have been created; run `openbrowser-ai config status` before retrying.'
+		)
+	return None
+
+
+def _snapshot(
+	path: Path,
+	resolved_path: Path,
+	phase: ConfigFilePhase,
+	*,
+	file_version: str | None = None,
+	error_code: str | None = None,
+	hint: str | None = None,
+) -> ConfigFileSnapshot:
+	return ConfigFileSnapshot(
+		path=str(path),
+		resolved_path=str(resolved_path),
+		phase=phase,
+		error_code=error_code,
+		hint=hint if hint is not None else _config_hint(path, phase),
+		browser_start_allowed=phase in (ConfigFilePhase.READY, ConfigFilePhase.CREATED),
+		file_version=file_version,
+	)
+
+
+def _blocked_result(path: Path, resolved_path: Path, phase: ConfigFilePhase, error_code: str) -> ConfigLoadResult:
+	return ConfigLoadResult(
+		config=create_default_config(),
+		snapshot=_snapshot(path, resolved_path, phase, error_code=error_code),
+	)
+
+
+def _fsync_directory(path: Path) -> None:
+	if os.name == 'nt':
+		# Windows has no portable directory-fsync operation. The temporary
+		# file's fsync is the available durability boundary before linking.
+		return
+	descriptor = os.open(path, os.O_RDONLY)
+	try:
+		os.fsync(descriptor)
+	finally:
+		os.close(descriptor)
+
+
+def _publish_default(path: Path, resolved_path: Path) -> ConfigLoadResult:
+	"""Create a missing config without exposing partial bytes or overwriting a winner."""
+	try:
+		resolved_path.parent.mkdir(parents=True, exist_ok=True)
+	except OSError:
+		return _blocked_result(path, resolved_path, ConfigFilePhase.WRITE_FAILED, 'config_write_failed')
+
+	new_config = create_default_config()
+	payload = json.dumps(new_config.model_dump(), indent=2).encode('utf-8')
+	temp_name: str | None = None
+	try:
+		with tempfile.NamedTemporaryFile(
+			prefix=f'.{resolved_path.name}.',
+			suffix='.tmp',
+			dir=resolved_path.parent,
+			delete=False,
+		) as handle:
+			temp_name = handle.name
+			handle.write(payload)
+			handle.flush()
+			os.fsync(handle.fileno())
+	except OSError:
+		if temp_name is not None:
+			Path(temp_name).unlink(missing_ok=True)
+		return _blocked_result(path, resolved_path, ConfigFilePhase.WRITE_FAILED, 'config_write_failed')
+
+	assert temp_name is not None
+	try:
+		try:
+			os.link(temp_name, resolved_path)
+		except FileExistsError:
+			winner, _ = _load_existing(path, resolved_path)
+			return winner
+		except OSError:
+			return _blocked_result(path, resolved_path, ConfigFilePhase.WRITE_FAILED, 'config_write_failed')
+		try:
+			_fsync_directory(resolved_path.parent)
+		except OSError:
+			return _blocked_result(path, resolved_path, ConfigFilePhase.WRITE_FAILED, 'config_write_failed')
+		return ConfigLoadResult(
+			config=new_config,
+			snapshot=_snapshot(
+				path,
+				resolved_path,
+				ConfigFilePhase.CREATED,
+				file_version=_content_version(payload),
+			),
+		)
+	finally:
+		Path(temp_name).unlink(missing_ok=True)
+
+
+@cache
+def _known_browser_profile_fields() -> frozenset[str]:
+	"""Return the BrowserProfile fields that identify the old flat config shape."""
+	try:
+		from openbrowser.browser.profile import BrowserProfile
+	except ImportError:
+		return frozenset(BrowserProfileEntry.model_fields)
+	return frozenset(BrowserProfile.model_fields)
+
+
+def _legacy_browser_profile(data: dict[str, Any]) -> bool:
+	browser_profile = data.get('browser_profile')
+	if not isinstance(browser_profile, dict) or not browser_profile:
+		return False
+	if any(isinstance(value, dict) for value in browser_profile.values()):
+		return False
+	return any(key in _known_browser_profile_fields() for key in browser_profile)
+
+
+def _parse_existing(
+	path: Path,
+	resolved_path: Path,
+	raw: bytes,
+) -> ConfigLoadResult:
+	try:
+		decoded = raw.decode('utf-8')
+		data = json.loads(decoded)
+	except (UnicodeDecodeError, json.JSONDecodeError):
+		return ConfigLoadResult(
+			config=create_default_config(),
+			snapshot=_snapshot(
+				path,
+				resolved_path,
+				ConfigFilePhase.INVALID,
+				file_version=_content_version(raw),
+				error_code='config_invalid_json',
+			),
+		)
+
+	if not isinstance(data, dict):
+		return ConfigLoadResult(
+			config=create_default_config(),
+			snapshot=_snapshot(
+				path,
+				resolved_path,
+				ConfigFilePhase.INVALID,
+				file_version=_content_version(raw),
+				error_code='config_invalid_schema',
+			),
+		)
+
+	known_keys = ('browser_profile', 'llm', 'agent')
+	has_db_wrapper = all(key in data and isinstance(data[key], dict) for key in known_keys)
+	if has_db_wrapper:
+		browser_profile = data.get('browser_profile')
+		if not isinstance(browser_profile, dict) or not browser_profile:
+			return ConfigLoadResult(
+				config=create_default_config(),
+				snapshot=_snapshot(
+					path,
+					resolved_path,
+					ConfigFilePhase.INVALID,
+					file_version=_content_version(raw),
+					error_code='config_invalid_schema',
+				),
+			)
+		if not all(isinstance(value, dict) for value in browser_profile.values()):
+			phase = ConfigFilePhase.LEGACY_FORMAT if _legacy_browser_profile(data) else ConfigFilePhase.INVALID
+			return ConfigLoadResult(
+				config=create_default_config(),
+				snapshot=_snapshot(
+					path,
+					resolved_path,
+					phase,
+					file_version=_content_version(raw),
+					error_code=(
+						'config_legacy_format'
+						if phase is ConfigFilePhase.LEGACY_FORMAT
+						else 'config_invalid_schema'
+					),
+				),
+			)
+		try:
+			config = DBStyleConfigJSON.model_validate(data)
+		except ValidationError:
+			return ConfigLoadResult(
+				config=create_default_config(),
+				snapshot=_snapshot(
+					path,
+					resolved_path,
+					ConfigFilePhase.INVALID,
+					file_version=_content_version(raw),
+					error_code='config_invalid_schema',
+				),
+			)
+		return ConfigLoadResult(
+			config=config,
+			snapshot=_snapshot(path, resolved_path, ConfigFilePhase.READY, file_version=_content_version(raw)),
+		)
+
+	return ConfigLoadResult(
+		config=create_default_config(),
+		snapshot=_snapshot(
+			path,
+			resolved_path,
+			ConfigFilePhase.INVALID,
+			file_version=_content_version(raw),
+			error_code='config_invalid_schema',
+		),
+	)
+
+
+def _load_existing(path: Path, resolved_path: Path) -> tuple[ConfigLoadResult, FileIdentity | None]:
+	if not resolved_path.is_file():
+		return _blocked_result(path, resolved_path, ConfigFilePhase.READ_FAILED, 'config_read_failed'), None
+
+	for _ in range(2):
+		try:
+			before = _file_identity(resolved_path)
+		except FileNotFoundError:
+			return _publish_default(path, resolved_path), None
+		except (OSError, RuntimeError):
+			return _blocked_result(path, resolved_path, ConfigFilePhase.READ_FAILED, 'config_read_failed'), None
+		try:
+			raw = resolved_path.read_bytes()
+		except FileNotFoundError:
+			continue
+		except OSError:
+			return _blocked_result(path, resolved_path, ConfigFilePhase.READ_FAILED, 'config_read_failed'), None
+		try:
+			after = _file_identity(resolved_path)
+		except FileNotFoundError:
+			continue
+		except (OSError, RuntimeError):
+			return _blocked_result(path, resolved_path, ConfigFilePhase.READ_FAILED, 'config_read_failed'), None
+		if before == after:
+			return _parse_existing(path, resolved_path, raw), after
+	return _blocked_result(path, resolved_path, ConfigFilePhase.READ_FAILED, 'config_read_failed'), None
+
+
+def load_and_migrate_config_result(config_path: Path) -> ConfigLoadResult:
+	"""Load config without ever rewriting an existing file."""
+	user_path = config_path.expanduser()
+	try:
+		resolved_path = user_path.resolve(strict=False)
+	except (OSError, RuntimeError):
+		return _blocked_result(user_path, user_path, ConfigFilePhase.READ_FAILED, 'config_read_failed')
+	cache_key = str(user_path)
+	for _ in range(2):
+		try:
+			identity = _file_identity(resolved_path)
+		except FileNotFoundError:
+			return _publish_default(user_path, resolved_path)
+		except (OSError, RuntimeError):
+			return _blocked_result(user_path, resolved_path, ConfigFilePhase.READ_FAILED, 'config_read_failed')
+		cached = _config_cache.get(cache_key)
+		if cached is not None and cached[0] == identity:
+			return cached[1]
+
+		result, read_identity = _load_existing(user_path, resolved_path)
+		if read_identity is None:
+			return result
+		try:
+			current_identity = _file_identity(resolved_path)
+		except FileNotFoundError:
+			continue
+		except (OSError, RuntimeError):
+			return _blocked_result(user_path, resolved_path, ConfigFilePhase.READ_FAILED, 'config_read_failed')
+		if current_identity != read_identity:
+			continue
+		if result.snapshot.phase in (ConfigFilePhase.READY, ConfigFilePhase.LEGACY_FORMAT, ConfigFilePhase.INVALID):
+			_config_cache[cache_key] = (read_identity, result)
+		return result
+	return _blocked_result(user_path, resolved_path, ConfigFilePhase.READ_FAILED, 'config_read_failed')
 
 
 def load_and_migrate_config(config_path: Path) -> DBStyleConfigJSON:
-	"""Load config.json or create fresh one if old format detected.
-	
-	Uses caching to avoid repeated file reads.
-	"""
-	config_path_str = str(config_path)
-	
-	# Check cache first
-	if config_path_str in _config_cache:
-		cached_mtime, cached_config = _config_cache[config_path_str]
-		try:
-			current_mtime = config_path.stat().st_mtime
-			if current_mtime == cached_mtime:
-				return cached_config
-		except FileNotFoundError:
-			pass  # File was deleted, recreate it
-	
-	if not config_path.exists():
-		# Create fresh config with defaults
-		config_path.parent.mkdir(parents=True, exist_ok=True)
-		new_config = create_default_config()
-		with open(config_path, 'w') as f:
-			json.dump(new_config.model_dump(), f, indent=2)
-		# Cache the new config
-		_config_cache[config_path_str] = (config_path.stat().st_mtime, new_config)
-		return new_config
-
-	try:
-		with open(config_path) as f:
-			data = json.load(f)
-
-		# Check if it's already in DB-style format
-		if all(key in data for key in ['browser_profile', 'llm', 'agent']) and all(
-			isinstance(data.get(key, {}), dict) for key in ['browser_profile', 'llm', 'agent']
-		):
-			# Check if the values are DB-style entries (have UUIDs as keys)
-			if data.get('browser_profile') and all(isinstance(v, dict) and 'id' in v for v in data['browser_profile'].values()):
-				# Already in new format
-				config = DBStyleConfigJSON(**data)
-				_config_cache[config_path_str] = (config_path.stat().st_mtime, config)
-				return config
-
-		# Old format detected - delete it and create fresh config
-		logger.debug(f'Old config format detected at {config_path}, creating fresh config')
-		new_config = create_default_config()
-
-		# Overwrite with new config
-		with open(config_path, 'w') as f:
-			json.dump(new_config.model_dump(), f, indent=2)
-
-		logger.debug(f'Created fresh config.json at {config_path}')
-		_config_cache[config_path_str] = (config_path.stat().st_mtime, new_config)
-		return new_config
-
-	except Exception as e:
-		logger.error(f'Failed to load config from {config_path}: {e}, creating fresh config')
-		# On any error, create fresh config
-		new_config = create_default_config()
-		try:
-			with open(config_path, 'w') as f:
-				json.dump(new_config.model_dump(), f, indent=2)
-			_config_cache[config_path_str] = (config_path.stat().st_mtime, new_config)
-		except Exception as write_error:
-			logger.error(f'Failed to write fresh config: {write_error}')
-		return new_config
+	"""Return the parsed config, using an in-memory default for a blocked file."""
+	return load_and_migrate_config_result(config_path).config
 
 
 class Config:
@@ -456,14 +704,17 @@ class Config:
 			xdg_config = Path(env_config.XDG_CONFIG_HOME).expanduser()
 			return xdg_config / 'openbrowser' / 'config.json'
 
-	def _get_db_config(self) -> DBStyleConfigJSON:
-		"""Load and migrate config.json."""
-		config_path = self._get_config_path()
-		return load_and_migrate_config(config_path)
+	def load_result(self) -> ConfigLoadResult:
+		"""Load the config file once and return its lifecycle snapshot."""
+		return load_and_migrate_config_result(self._get_config_path())
 
-	def _get_default_profile(self) -> dict[str, Any]:
+	def _get_db_config(self) -> DBStyleConfigJSON:
+		"""Return the parsed config, using an in-memory default for a blocked file."""
+		return self.load_result().config
+
+	def _get_default_profile(self, db_config: DBStyleConfigJSON | None = None) -> dict[str, Any]:
 		"""Get the default browser profile configuration."""
-		db_config = self._get_db_config()
+		db_config = db_config or self._get_db_config()
 		for profile in db_config.browser_profile.values():
 			if profile.default:
 				return profile.model_dump(exclude_none=True)
@@ -474,9 +725,9 @@ class Config:
 
 		return {}
 
-	def _get_default_llm(self) -> dict[str, Any]:
+	def _get_default_llm(self, db_config: DBStyleConfigJSON | None = None) -> dict[str, Any]:
 		"""Get the default LLM configuration."""
-		db_config = self._get_db_config()
+		db_config = db_config or self._get_db_config()
 		for llm in db_config.llm.values():
 			if llm.default:
 				return llm.model_dump(exclude_none=True)
@@ -487,9 +738,9 @@ class Config:
 
 		return {}
 
-	def _get_default_agent(self) -> dict[str, Any]:
+	def _get_default_agent(self, db_config: DBStyleConfigJSON | None = None) -> dict[str, Any]:
 		"""Get the default agent configuration."""
-		db_config = self._get_db_config()
+		db_config = db_config or self._get_db_config()
 		for agent in db_config.agent.values():
 			if agent.default:
 				return agent.model_dump(exclude_none=True)
@@ -500,18 +751,23 @@ class Config:
 
 		return {}
 
+	def config_dict_from_result(self, result: ConfigLoadResult) -> dict[str, Any]:
+		"""Convert one frozen load result into the legacy config dictionary."""
+		config = {
+			'browser_profile': self._get_default_profile(result.config),
+			'llm': self._get_default_llm(result.config),
+			'agent': self._get_default_agent(result.config),
+		}
+		return self._apply_env_overrides(config)
+
 	def _load_config(self) -> dict[str, Any]:
 		"""Load configuration with env var overrides for MCP components."""
-		config = {
-			'browser_profile': self._get_default_profile(),
-			'llm': self._get_default_llm(),
-			'agent': self._get_default_agent(),
-		}
+		return self.config_dict_from_result(self.load_result())
 
-		# Use cached env config for overrides
+	def _apply_env_overrides(self, config: dict[str, Any]) -> dict[str, Any]:
+		"""Apply process environment overrides to one already-selected config."""
 		env_config = self._get_env_config()
 
-		# Apply MCP-specific env var overrides
 		if env_config.OPENBROWSER_HEADLESS is not None:
 			config['browser_profile']['headless'] = env_config.OPENBROWSER_HEADLESS
 
@@ -537,7 +793,6 @@ class Config:
 		if env_config.OPENBROWSER_PROXY_PASSWORD:
 			proxy_dict['password'] = env_config.OPENBROWSER_PROXY_PASSWORD
 		if proxy_dict:
-			# ensure section exists
 			config.setdefault('browser_profile', {})
 			config['browser_profile']['proxy'] = proxy_dict
 
@@ -548,6 +803,29 @@ class Config:
 			config['llm']['model'] = env_config.OPENBROWSER_LLM_MODEL
 
 		return config
+
+	def require_browser_start_allowed(self, startup_result: ConfigLoadResult | None = None) -> ConfigLoadResult:
+		"""Return the frozen config result or raise a typed startup error."""
+		if startup_result is not None:
+			if not start_allowed(startup_result.snapshot):
+				raise ConfigStartupError(
+					startup_result.snapshot,
+					code='config_restart_required',
+					hint='Fix the config, then restart the daemon or MCP server.',
+				)
+			current = self.load_result()
+			if restart_required(startup_result.snapshot, current.snapshot):
+				raise ConfigStartupError(
+					startup_result.snapshot,
+					code='config_restart_required',
+					hint='The config changed or became unavailable. Restart the daemon or MCP server.',
+				)
+			return startup_result
+
+		result = self.load_result()
+		if not start_allowed(result.snapshot):
+			raise ConfigStartupError(result.snapshot)
+		return result
 
 
 # Create singleton instance

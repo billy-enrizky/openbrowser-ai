@@ -93,11 +93,13 @@ Modern 2026-07-28 clients see five tools. Older clients see the original three.
 |---|---|
 | `create_context` | Create an isolated browser and Python namespace. Returns `context_id` in text and `structuredContent`. Does not start a browser until the first stateful call. |
 | `execute_code` | Run Python in one context's persistent namespace with browser automation functions. Modern calls require `context_id`; functions are async unless noted. |
-| `get_status` | Read the server, context, browser, profile, and tab state as JSON. It does not start or mutate a browser. |
+| `get_status` | Read the server, context, browser, profile, tab, and config lifecycle state as JSON. It does not start or mutate a browser. |
 | `reset_browser` | Close a stuck browser and release its profile. User variables are preserved unless `clear_variables` is true. |
 | `close_context` | Close one context and release its browser and profile. A successful close invalidates the handle. |
 
-If a browser connection fails, call `get_status` before retrying. A page-changing action may have partially run, so do not replay it blindly.
+If a browser connection fails, call `get_status` before retrying. A page-changing action may have partially run, so do not replay it blindly. `get_status` includes `config.startup`, `config.current`, and `config.restart_required`.
+
+A legacy, invalid, or unreadable config file blocks browser startup and is never rewritten automatically. Execute calls return a `config_*` error with a repair hint. Run `uvx openbrowser-ai config status` to inspect the selected path. Repair the file in place when possible, or move it to a unique backup name before restarting the MCP server. Moving it aside creates a new default and does not migrate old settings. A running MCP server does not hot reload config.
 
 When a browser session exists, `get_status` also includes `browser.navigation`, the active or last navigation transaction. It distinguishes the requested URL from the observed document URL and reports its generation, phase, and error. Navigation waits for the declared document milestone rather than a fixed delay. A `download` outcome is a handoff, not confirmation that a file finished downloading. A document milestone does not establish application hydration.
 
