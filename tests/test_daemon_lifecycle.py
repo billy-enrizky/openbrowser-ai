@@ -18,11 +18,12 @@ from openbrowser.browser.focus import (
 from openbrowser.browser.lifecycle import LifecyclePhase
 from openbrowser.browser.session import CDPSession
 from openbrowser.browser.tabs import TabState
+from openbrowser.config_lifecycle import ConfigStartupError
 from openbrowser.daemon.server import DaemonServer
 
 
 @pytest.fixture
-def daemon_server():
+def daemon_server(isolated_config_path):
 	return DaemonServer()
 
 
@@ -187,12 +188,12 @@ def test_daemon_profile_env_wins_over_saved_config(daemon_server, tmp_path, monk
 	monkeypatch.delenv('OPENBROWSER_SOCKET', raising=False)
 	saved_profile = {'user_data_dir': str(tmp_path / 'saved'), 'headless': False}
 
+	daemon_server._startup_config = {'browser_profile': saved_profile}
 	with (
 		patch('openbrowser.config.CONFIG', new=SimpleNamespace(OPENBROWSER_PROFILES_DIR=tmp_path / 'profiles')),
-		patch('openbrowser.config.load_openbrowser_config', return_value={'browser_profile': saved_profile}),
-		patch('openbrowser.config.get_default_profile', return_value=saved_profile),
+		patch('openbrowser.daemon.server.get_default_profile', return_value=saved_profile),
 		patch(
-			'openbrowser.config.apply_managed_browser_profile_defaults',
+			'openbrowser.daemon.server.apply_managed_browser_profile_defaults',
 			side_effect=lambda profile_data, default_user_data_dir=None: dict(profile_data),
 		),
 	):
@@ -209,13 +210,13 @@ def test_opted_in_isolation_wins_over_saved_config(daemon_server, tmp_path, monk
 	monkeypatch.delenv('OPENBROWSER_USER_DATA_DIR', raising=False)
 	saved_profile = {'user_data_dir': str(tmp_path / 'saved'), 'headless': False}
 
+	daemon_server._startup_config = {'browser_profile': saved_profile}
 	with (
 		patch('openbrowser.config.CONFIG', new=SimpleNamespace(OPENBROWSER_PROFILES_DIR=tmp_path / 'profiles')),
-		patch('openbrowser.config.load_openbrowser_config', return_value={'browser_profile': saved_profile}),
-		patch('openbrowser.config.get_default_profile', return_value=saved_profile),
+		patch('openbrowser.daemon.server.get_default_profile', return_value=saved_profile),
 		patch('openbrowser.daemon.server.get_socket_path', return_value=custom_socket),
 		patch(
-			'openbrowser.config.apply_managed_browser_profile_defaults',
+			'openbrowser.daemon.server.apply_managed_browser_profile_defaults',
 			side_effect=lambda profile_data, default_user_data_dir=None: dict(profile_data),
 		),
 	):
@@ -458,3 +459,189 @@ async def test_failed_recovery_keeps_only_scalars_in_the_live_namespace(daemon_s
 	assert daemon_server._session is None
 	assert 'stale' in daemon_server._last_namespace_transfer['dropped']
 	assert 'previous browser session' in daemon_server._last_namespace_transfer['dropped']['stale']
+
+
+def _write_valid_config(path: Path, *, headless: bool = True, model: str = 'gpt-5-mini') -> None:
+	import json
+
+	path.write_text(
+		json.dumps(
+			{
+				'browser_profile': {
+					'profile-a': {
+						'id': 'profile-a',
+						'default': True,
+						'headless': headless,
+						'user_data_dir': '/tmp/openbrowser-daemon-test-profile',
+					}
+				},
+				'llm': {'llm-a': {'id': 'llm-a', 'default': True, 'model': model}},
+				'agent': {'agent-a': {'id': 'agent-a', 'default': True}},
+			}
+		)
+	)
+
+
+@pytest.mark.asyncio
+async def test_blocked_config_prevents_browser_start_and_reports_status(isolated_config_path, monkeypatch):
+	monkeypatch.setenv('OPENBROWSER_CONFIG_PATH', str(isolated_config_path))
+	isolated_config_path.write_text('NOT JSON {{{')
+	daemon = DaemonServer()
+
+	with patch('openbrowser.browser.BrowserSession.start') as start:
+		response = await daemon._handle_request({'action': 'execute', 'code': 'print(1)', 'id': 1})
+
+	assert response['success'] is False
+	assert response['error_code'] == 'config_restart_required'
+	assert response['hint'] == 'Fix the config, then restart the daemon or MCP server.'
+	assert start.called is False
+
+	status = daemon._status_payload()
+	assert status['config']['startup']['phase'] == 'invalid'
+	assert status['config']['startup']['error_code'] == 'config_invalid_json'
+	assert status['config']['current']['phase'] == 'invalid'
+	assert status['config']['restart_required'] is True
+	assert status['state'] == 'stopped'
+
+
+@pytest.mark.asyncio
+async def test_valid_to_valid_config_change_requires_restart(isolated_config_path, monkeypatch):
+	monkeypatch.setenv('OPENBROWSER_CONFIG_PATH', str(isolated_config_path))
+	_write_valid_config(isolated_config_path, headless=True)
+	daemon = DaemonServer()
+
+	_write_valid_config(isolated_config_path, headless=False, model='gpt-5-mini-extra')
+
+	with patch('openbrowser.browser.BrowserSession.start') as start, pytest.raises(ConfigStartupError) as error:
+		await daemon._ensure_executor()
+
+	assert error.value.code == 'config_restart_required'
+	assert start.called is False
+	status = daemon._status_payload()
+	assert status['config']['startup']['phase'] == 'ready'
+	assert status['config']['current']['phase'] == 'ready'
+	assert status['config']['restart_required'] is True
+
+
+@pytest.mark.asyncio
+async def test_recovery_gate_rejects_changed_config_before_cleanup(isolated_config_path, monkeypatch):
+	monkeypatch.setenv('OPENBROWSER_CONFIG_PATH', str(isolated_config_path))
+	_write_valid_config(isolated_config_path, headless=True)
+	daemon = DaemonServer()
+	old_session = MagicMock()
+	old_session.kill = AsyncMock()
+	daemon._session = old_session
+	daemon._executor = MagicMock()
+
+	_write_valid_config(isolated_config_path, headless=False, model='gpt-5-mini-extra')
+
+	with pytest.raises(ConfigStartupError) as error:
+		await daemon._recover_browser_session(expected_session=old_session)
+
+	assert error.value.code == 'config_restart_required'
+	old_session.kill.assert_not_awaited()
+	assert daemon._session is old_session
+	status = daemon._status_payload()
+	assert status['config']['startup']['phase'] == 'ready'
+	assert status['config']['restart_required'] is True
+
+
+@pytest.mark.asyncio
+async def test_status_does_not_start_browser_and_preserves_existing_keys(isolated_config_path, monkeypatch):
+	monkeypatch.setenv('OPENBROWSER_CONFIG_PATH', str(isolated_config_path))
+	isolated_config_path.write_text('NOT JSON {{{')
+	daemon = DaemonServer()
+
+	with patch('openbrowser.browser.BrowserSession.start') as start:
+		status = daemon._status_payload()
+
+	assert start.called is False
+	assert {
+		'pid',
+		'state',
+		'initialized',
+		'needs_browser_recovery',
+		'socket',
+		'profile',
+		'idle_timeout',
+		'init_timeout',
+		'exec_timeout',
+		'last_error',
+		'generation',
+		'uptime_seconds',
+		'version',
+		'browser',
+		'startup',
+		'storage_state',
+		'storage_state_save',
+		'namespace_transfer',
+		'tools',
+		'downloads',
+	} <= status.keys()
+	assert status['config']['startup']['phase'] == 'invalid'
+	assert status['config']['current']['phase'] == 'invalid'
+	assert status['config']['restart_required'] is True
+
+
+@pytest.mark.asyncio
+async def test_repair_after_daemon_construction_still_requires_restart(isolated_config_path, monkeypatch):
+	monkeypatch.setenv('OPENBROWSER_CONFIG_PATH', str(isolated_config_path))
+	isolated_config_path.write_text('NOT JSON {{{')
+	daemon = DaemonServer()
+	_write_valid_config(isolated_config_path)
+
+	with patch('openbrowser.browser.BrowserSession.start') as start:
+		response = await daemon._handle_request({'action': 'execute', 'code': 'print(1)', 'id': 2})
+
+	assert start.called is False
+	assert response['error_code'] == 'config_restart_required'
+	status = daemon._status_payload()
+	assert status['config']['startup']['phase'] == 'invalid'
+	assert status['config']['current']['phase'] == 'ready'
+	assert status['config']['restart_required'] is True
+
+
+@pytest.mark.asyncio
+async def test_connection_error_recovery_preserves_config_error_code(isolated_config_path, monkeypatch):
+	monkeypatch.setenv('OPENBROWSER_CONFIG_PATH', str(isolated_config_path))
+	_write_valid_config(isolated_config_path)
+	daemon = DaemonServer()
+	daemon._executor = MagicMock()
+	daemon._executor.execute = AsyncMock(
+		return_value=SimpleNamespace(success=False, output='', error='websocket connection closed')
+	)
+	daemon._session = MagicMock()
+	daemon._recover_browser_session = AsyncMock(
+		side_effect=ConfigStartupError(
+			daemon._startup_config_result.snapshot,
+			code='config_restart_required',
+			hint='Fix the config, then restart the daemon or MCP server.',
+		)
+	)
+
+	response = await daemon._handle_request({'action': 'execute', 'code': 'print(1)', 'id': 3})
+
+	assert response['success'] is False
+	assert response['error_code'] == 'config_restart_required'
+	assert 'websocket connection closed' in response['error']
+	assert 'config_restart_required' in response['error']
+	assert 'may have partially run' in response['hint']
+
+
+@pytest.mark.asyncio
+async def test_recovery_gate_rejects_deleted_config_before_cleanup(isolated_config_path, monkeypatch):
+	monkeypatch.setenv('OPENBROWSER_CONFIG_PATH', str(isolated_config_path))
+	_write_valid_config(isolated_config_path)
+	daemon = DaemonServer()
+	old_session = MagicMock()
+	old_session.kill = AsyncMock()
+	daemon._session = old_session
+	daemon._executor = MagicMock()
+	isolated_config_path.unlink()
+
+	with pytest.raises(ConfigStartupError) as error:
+		await daemon._recover_browser_session(expected_session=old_session)
+
+	assert error.value.code == 'config_restart_required'
+	old_session.kill.assert_not_awaited()
+	assert daemon._session is old_session

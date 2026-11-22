@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from tests.conftest import DummyServer
+from tests.support.config_lifecycle import startup_config
 
 
 @pytest.fixture
@@ -24,7 +25,6 @@ def isolated_mcp(monkeypatch, tmp_path):
 
     monkeypatch.setattr(mcp_mod, 'Server', DummyServer)
     monkeypatch.setattr(mcp_mod, 'TELEMETRY_AVAILABLE', False)
-    monkeypatch.setattr(mcp_mod, 'load_openbrowser_config', lambda: {'browser_profile': {}})
     import openbrowser.config as config_mod
     config_mod.CONFIG._old_config = None
     config_mod.CONFIG._env_config = None
@@ -65,11 +65,7 @@ def test_configured_storage_state_is_copied_per_instance(isolated_mcp, tmp_path)
     mcp_mod, profiles_dir, _ = isolated_mcp
     configured_state = tmp_path / 'configured-storage-state.json'
     configured_state.write_text(json.dumps({'cookies': [{'name': 'configured'}]}), encoding='utf-8')
-    with patch.object(
-        mcp_mod,
-        'load_openbrowser_config',
-        return_value={'browser_profile': {'storage_state': str(configured_state)}},
-    ):
+    with startup_config({'browser_profile': {'storage_state': str(configured_state)}}):
         first = mcp_mod.OpenBrowserServer()
         second = mcp_mod.OpenBrowserServer()
 
@@ -87,11 +83,7 @@ def test_configured_storage_state_is_copied_per_instance(isolated_mcp, tmp_path)
 def test_in_memory_storage_state_is_preserved_per_instance(isolated_mcp):
     mcp_mod, _, _ = isolated_mcp
     state = {'cookies': [{'name': 'in-memory'}], 'origins': []}
-    with patch.object(
-        mcp_mod,
-        'load_openbrowser_config',
-        return_value={'browser_profile': {'storage_state': state}},
-    ):
+    with startup_config({'browser_profile': {'storage_state': state}}):
         first = mcp_mod.OpenBrowserServer()
         second = mcp_mod.OpenBrowserServer()
 
@@ -105,13 +97,12 @@ def test_in_memory_storage_state_is_preserved_per_instance(isolated_mcp):
     assert first_profile.storage_state is not second_profile.storage_state
 
 
-def test_explicit_profile_path_is_preserved(isolated_mcp, tmp_path, monkeypatch):
+def test_explicit_profile_path_is_preserved(isolated_mcp, tmp_path):
     mcp_mod, _, _ = isolated_mcp
     shared_profile = tmp_path / 'shared'
-    monkeypatch.setattr(mcp_mod, 'load_openbrowser_config', lambda: {'browser_profile': {'user_data_dir': str(shared_profile)}})
-    server = mcp_mod.OpenBrowserServer()
-
-    profile = server._build_browser_profile()
+    with startup_config({'browser_profile': {'user_data_dir': str(shared_profile)}}):
+        server = mcp_mod.OpenBrowserServer()
+        profile = server._build_browser_profile()
 
     assert Path(profile.user_data_dir).resolve() == shared_profile.resolve()
 

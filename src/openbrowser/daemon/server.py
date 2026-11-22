@@ -37,6 +37,8 @@ from openbrowser.browser.storage_state import (
     StorageStateSnapshot,
 )
 from openbrowser.code_use.namespace_transfer import transfer_namespace
+from openbrowser.config import CONFIG, ConfigStartupError, apply_managed_browser_profile_defaults, get_default_profile
+from openbrowser.config_lifecycle import ConfigLoadResult, restart_required
 from openbrowser.daemon import (
     EXIT_OWNER_BUSY,
     IS_WINDOWS,
@@ -501,6 +503,8 @@ class DaemonServer:
         self._bound_socket_identity: SocketPathIdentity | None = None
         self._storage_state_preload = StorageStateSnapshot(phase=StorageStatePhase.NOT_CONFIGURED)
         self._storage_state_save_preload = StorageStateSaveSnapshot(phase=StorageStateSavePhase.NOT_CONFIGURED)
+        self._startup_config_result: ConfigLoadResult = CONFIG.load_result()
+        self._startup_config: dict[str, Any] = CONFIG.config_dict_from_result(self._startup_config_result)
 
     def _set_startup(self, phase: DaemonStartupPhase, detail: str | None = None) -> None:
         """Move the startup machine through an explicitly allowed transition."""
@@ -627,16 +631,11 @@ class DaemonServer:
         return CONFIG.OPENBROWSER_PROFILES_DIR / 'daemon'
 
     def _build_browser_profile(self):
-        """Build a BrowserProfile from config with daemon defaults."""
+        """Build a BrowserProfile from the frozen startup config."""
         from openbrowser.browser import BrowserProfile
-        from openbrowser.config import (
-            apply_managed_browser_profile_defaults,
-            get_default_profile,
-            load_openbrowser_config,
-        )
 
-        config = load_openbrowser_config()
-        profile_config = dict(get_default_profile(config))
+        assert self._startup_config is not None
+        profile_config = dict(get_default_profile(self._startup_config))
         default_profile_dir = self._default_profile_dir()
         profile_data = {
             'downloads_path': str(Path.home() / 'Downloads' / 'openbrowser-daemon'),
@@ -706,6 +705,7 @@ class DaemonServer:
             from openbrowser.code_use.namespace import create_namespace
             from openbrowser.tools.service import CodeAgentTools
 
+            CONFIG.require_browser_start_allowed(self._startup_config_result)
             profile = self._build_browser_profile()
             session = BrowserSession(browser_profile=profile)
             try:
@@ -806,6 +806,7 @@ class DaemonServer:
                 self._needs_browser_recovery = False
                 return
 
+            CONFIG.require_browser_start_allowed(self._startup_config_result)
             logger.info('CDP connection lost -- recovering browser session')
             self._needs_browser_recovery = True
             self._tools = None
@@ -917,6 +918,13 @@ class DaemonServer:
         storage_state = self._storage_state_snapshot()
         downloads = self._downloads_snapshot()
         tools_snapshot = tool_availability_payload(self._tools, browser)
+        startup_config = self._startup_config_result.snapshot
+        try:
+            current_config = CONFIG.load_result().snapshot
+            needs_restart = restart_required(startup_config, current_config)
+        except Exception:
+            current_config = startup_config
+            needs_restart = True
         return {
             'pid': os.getpid(),
             'state': snapshot.phase.value,
@@ -946,6 +954,11 @@ class DaemonServer:
             'namespace_transfer': self._last_namespace_transfer,
             'tools': tools_snapshot,
             'downloads': downloads,
+            'config': {
+                'startup': startup_config.to_dict(),
+                'current': current_config.to_dict(),
+                'restart_required': needs_restart,
+            },
         }
 
     def _error_response(
@@ -1013,6 +1026,8 @@ class DaemonServer:
                 async with self._exec_lock:
                     try:
                         await self._ensure_executor()
+                    except ConfigStartupError as error:
+                        return self._error_response(req_id, str(error), code=error.code, hint=error.hint)
                     except Exception as error:
                         return self._error_response(
                             req_id,
@@ -1023,6 +1038,8 @@ class DaemonServer:
                     if self._needs_browser_recovery:
                         try:
                             await self._recover_browser_session()
+                        except ConfigStartupError as error:
+                            return self._error_response(req_id, str(error), code=error.code, hint=error.hint)
                         except Exception as recovery_error:
                             return self._error_response(
                                 req_id,
@@ -1047,6 +1064,14 @@ class DaemonServer:
                     if not result.success and self._is_connection_error(error_text):
                         try:
                             await self._recover_browser_session(expected_session=failed_session)
+                        except ConfigStartupError as error:
+                            partial_message = result.error or result.output or 'Browser connection lost'
+                            return self._error_response(
+                                req_id,
+                                f'{partial_message}\n{error}',
+                                code=error.code,
+                                hint=f'{error.hint} The code may have partially run; verify the page before retrying.',
+                            )
                         except Exception as recovery_err:
                             logger.error('CDP recovery failed: %s', recovery_err)
                             return self._error_response(

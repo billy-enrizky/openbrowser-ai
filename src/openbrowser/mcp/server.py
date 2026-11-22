@@ -103,9 +103,9 @@ from openbrowser.code_use.executor import DEFAULT_MAX_OUTPUT_CHARS, CodeExecutor
 from openbrowser.code_use.namespace import create_namespace
 from openbrowser.config import (
 	CONFIG,
+	ConfigStartupError,
 	apply_managed_browser_profile_defaults,
 	get_default_profile,
-	load_openbrowser_config,
 )
 from openbrowser.tools.service import CodeAgentTools
 
@@ -494,6 +494,10 @@ class _BrowserOwner:
 		"""Return the adapter that owns server-wide state, or this legacy owner."""
 		return self._adapter if self._adapter is not None else self
 
+	def _startup_config(self) -> Any:
+		"""Return the server-level frozen config result."""
+		return self._server()._startup_config_result
+
 	@property
 	def _namespace(self) -> dict[str, Any] | None:
 		"""Compatibility view of the executor's single active namespace."""
@@ -653,6 +657,7 @@ class _BrowserOwner:
 			if self.browser_session is not None:
 				raise RuntimeError('A previous browser session still owns resources after cleanup failed')
 
+			CONFIG.require_browser_start_allowed(self._startup_config())
 			_ensure_all_loggers_use_stderr()
 			if self._browser_lifecycle.phase not in (LifecyclePhase.STOPPED, LifecyclePhase.FAILED):
 				try:
@@ -779,6 +784,7 @@ class _BrowserOwner:
 			if self.browser_session and await self._is_cdp_alive(deadline=deadline):
 				return
 
+			CONFIG.require_browser_start_allowed(self._startup_config())
 			logger.info('CDP connection lost, recovering browser session')
 			try:
 				self._browser_lifecycle.transition(LifecyclePhase.RECOVERING, reason='cdp connection lost')
@@ -967,6 +973,8 @@ class _BrowserOwner:
 				return 'Error: Execution timed out during the browser health check. Run get_status before retrying.'
 			try:
 				await self._recover_browser_session(deadline=deadline)
+			except ConfigStartupError:
+				raise
 			except Exception as recovery_err:
 				logger.error('Pre-flight CDP recovery failed: %s', recovery_err)
 				return (
@@ -1000,6 +1008,13 @@ class _BrowserOwner:
 			logger.info('CDP connection error during execution, recovering')
 			try:
 				await self._recover_browser_session()
+			except ConfigStartupError as error:
+				raise ConfigStartupError(
+					error.snapshot,
+					code=error.code,
+					hint=f'{error.hint} The code may have partially run; run get_status before retrying.',
+					detail=result.output or None,
+				) from error
 			except Exception as recovery_err:
 				logger.error('CDP recovery failed: %s', recovery_err)
 				return (
@@ -1019,6 +1034,7 @@ class _BrowserOwner:
 
 	def _status_payload(self) -> dict[str, Any]:
 		"""Build a JSON-safe status snapshot without starting the browser."""
+		from openbrowser.config_lifecycle import restart_required
 		from openbrowser.tools.action_availability import tool_availability_payload
 
 		browser = self._browser_lifecycle.snapshot().to_dict()
@@ -1073,6 +1089,13 @@ class _BrowserOwner:
 			else None
 		)
 		tools_snapshot = tool_availability_payload(tools_for_status, browser)
+		startup_config = self._startup_config().snapshot
+		try:
+			current_config = CONFIG.load_result().snapshot
+			needs_restart = restart_required(startup_config, current_config)
+		except Exception:
+			current_config = startup_config
+			needs_restart = True
 
 		return {
 			'server': self._server()._lifecycle.snapshot().to_dict(),
@@ -1091,6 +1114,11 @@ class _BrowserOwner:
 			'downloads': self._downloads_snapshot(),
 			'storage_state': storage_state,
 			'storage_state_save': storage_state_save,
+			'config': {
+				'startup': startup_config.to_dict(),
+				'current': current_config.to_dict(),
+				'restart_required': needs_restart,
+			},
 		}
 
 	async def _reset_browser(self, *, clear_variables: bool = False) -> str:
@@ -1555,7 +1583,8 @@ class OpenBrowserServer(_BrowserOwner):
 	def __init__(self, session_timeout_minutes: int = 10):
 		_ensure_all_loggers_use_stderr()
 
-		config = load_openbrowser_config()
+		self._startup_config_result = CONFIG.load_result()
+		config = CONFIG.config_dict_from_result(self._startup_config_result)
 		self._instance_id = uuid.uuid4().hex
 		self._lifecycle = LifecycleMachine('mcp_server')
 		self._telemetry = ProductTelemetry() if TELEMETRY_AVAILABLE else None
@@ -1704,6 +1733,13 @@ class OpenBrowserServer(_BrowserOwner):
 			except MCPError as error:
 				error_msg = str(error)
 				raise
+			except ConfigStartupError as error:
+				telemetry_error = error.code
+				error_msg = f'Error: {error}'
+				logger.error('Tool execution blocked by config: %s', error, exc_info=True)
+				return types.CallToolResult(
+					content=[types.TextContent(type='text', text=error_msg)], is_error=True
+				)
 			except Exception as error:
 				error_msg = str(error)
 				logger.error('Tool execution failed: %s', error, exc_info=True)

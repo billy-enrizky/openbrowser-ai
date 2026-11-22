@@ -38,6 +38,11 @@ from openbrowser.daemon.server import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _isolated_config(isolated_config_path):
+    return isolated_config_path
+
+
 @pytest.fixture
 def daemon_paths():
     shortest_directory = None if os.name == 'nt' else '/tmp'
@@ -687,13 +692,12 @@ def test_status_reports_dict_storage_state_as_skipped_for_load_and_save(tmp_path
 
     with (
         patch('openbrowser.browser.BrowserProfile', return_value=profile),
-        patch('openbrowser.config.load_openbrowser_config', return_value={}),
         patch(
-            'openbrowser.config.get_default_profile',
+            'openbrowser.daemon.server.get_default_profile',
             return_value={'storage_state': {'cookies': [], 'origins': []}},
         ),
         patch(
-            'openbrowser.config.apply_managed_browser_profile_defaults',
+            'openbrowser.daemon.server.apply_managed_browser_profile_defaults',
             side_effect=lambda profile_data, default_user_data_dir=None: dict(profile_data),
         ),
     ):
@@ -752,13 +756,12 @@ def test_status_reports_configured_storage_state_before_browser_start(tmp_path):
 
     with (
         patch('openbrowser.browser.BrowserProfile', return_value=profile),
-        patch('openbrowser.config.load_openbrowser_config', return_value={}),
         patch(
-            'openbrowser.config.get_default_profile',
+            'openbrowser.daemon.server.get_default_profile',
             return_value={'storage_state': str(state_path)},
         ),
         patch(
-            'openbrowser.config.apply_managed_browser_profile_defaults',
+            'openbrowser.daemon.server.apply_managed_browser_profile_defaults',
             side_effect=lambda profile_data, default_user_data_dir=None: dict(profile_data),
         ),
     ):

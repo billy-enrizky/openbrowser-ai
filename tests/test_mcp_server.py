@@ -222,9 +222,7 @@ class TestEnsureNamespace:
         with patch.object(mcp_server_module, "BrowserSession", return_value=mock_session), \
              patch.object(mcp_server_module, "BrowserProfile"), \
              patch.object(mcp_server_module, "create_namespace", return_value={"navigate": "func"}) as mock_ns, \
-             patch.object(mcp_server_module, "CodeAgentTools") as mock_tools_cls, \
-             patch.object(mcp_server_module, "get_default_profile", return_value={}), \
-             patch.object(mcp_server_module, "load_openbrowser_config", return_value={}):
+             patch.object(mcp_server_module, "CodeAgentTools") as mock_tools_cls:
 
             asyncio.run(mcp_server._ensure_namespace())
 
@@ -242,9 +240,7 @@ class TestEnsureNamespace:
         mock_session.event_bus = mock_event_bus
 
         with patch.object(mcp_server_module, "BrowserSession", return_value=mock_session), \
-             patch.object(mcp_server_module, "BrowserProfile"), \
-             patch.object(mcp_server_module, "get_default_profile", return_value={}), \
-             patch.object(mcp_server_module, "load_openbrowser_config", return_value={}):
+             patch.object(mcp_server_module, "BrowserProfile"):
 
             with pytest.raises(RuntimeError, match="Chrome not found"):
                 asyncio.run(mcp_server._ensure_namespace())

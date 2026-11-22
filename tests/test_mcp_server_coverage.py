@@ -23,7 +23,7 @@ from tests.conftest import DummyServer, DummyTypes
 
 
 @pytest.fixture
-def mcp_server_instance(monkeypatch):
+def mcp_server_instance(monkeypatch, isolated_config_path):
     """Create an OpenBrowserServer with dummy MCP SDK stubs."""
     from openbrowser.mcp import server as mcp_server_module
 
