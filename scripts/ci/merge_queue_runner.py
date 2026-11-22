@@ -94,6 +94,14 @@ def ensure_labels(repo: str) -> None:
         (RUNNING_LABEL, "fbca04", "The serialized merge queue is testing this pull request"),
         (FAILED_LABEL, "d73a4a", "The merge queue rejected this pull request"),
     ):
+        existing = subprocess.run(
+            ["gh", "api", f"/repos/{repo}/labels/{name}"],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if existing.returncode == 0:
+            continue
         result = subprocess.run(
             [
                 "gh",
@@ -112,19 +120,34 @@ def ensure_labels(repo: str) -> None:
             capture_output=True,
             check=False,
         )
-        if result.returncode != 0 and "already_exists" not in result.stderr:
+        if result.returncode != 0:
             print(result.stderr, file=sys.stderr)
 
 
 def set_label(repo: str, number: int, label: str, present: bool) -> None:
-    method = "POST" if present else "DELETE"
-    path = f"/repos/{repo}/issues/{number}/labels/{label}"
-    result = subprocess.run(
-        ["gh", "api", "--method", method, path],
-        text=True,
-        capture_output=True,
-        check=False,
-    )
+    if present:
+        result = subprocess.run(
+            [
+                "gh",
+                "api",
+                "--method",
+                "POST",
+                f"/repos/{repo}/issues/{number}/labels",
+                "--input",
+                "-",
+            ],
+            input=json.dumps({"labels": [label]}),
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+    else:
+        result = subprocess.run(
+            ["gh", "api", "--method", "DELETE", f"/repos/{repo}/issues/{number}/labels/{label}"],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
     if result.returncode != 0 and "Not Found" not in result.stderr:
         print(f"label update failed for {label}: {result.stderr.strip()}", file=sys.stderr)
 
@@ -258,6 +281,11 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     root = Path(args.root).resolve()
+    command(["git", "config", "user.name", "github-actions[bot]"], root)
+    command(
+        ["git", "config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com"],
+        root,
+    )
     ensure_labels(args.repo)
     checks_source = root / QUEUE_CHECKS
     with tempfile.TemporaryDirectory(prefix="merge-queue-checks-") as tmp:
