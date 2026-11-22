@@ -15,8 +15,6 @@ from enum import Enum, StrEnum
 from pathlib import Path
 from typing import Any
 
-MAX_TEXT = 300
-
 VALUE_FIELDS = (
     "user_data_dir",
     "headless",
@@ -53,6 +51,7 @@ class ProfileField:
 
 
 def _bounded_value(value: Any) -> Any:
+    max_chars = 300
     if isinstance(value, Enum):
         value = value.value
     if value is None or isinstance(value, (bool, int)):
@@ -62,7 +61,7 @@ def _bounded_value(value: Any) -> Any:
     if isinstance(value, Path):
         value = str(value)
     if isinstance(value, str):
-        return value if len(value) <= MAX_TEXT else value[:MAX_TEXT] + "..."
+        return value if len(value) <= max_chars else value[:max_chars] + "..."
     if isinstance(value, dict):
         return f"<dict len={len(value)}>"
     if isinstance(value, (list, tuple, set, frozenset)):
