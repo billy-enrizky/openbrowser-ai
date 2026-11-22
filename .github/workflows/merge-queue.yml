@@ -35,6 +35,13 @@ jobs:
         with:
           bun-version: "1.4.4"
       - name: Drain labeled pull requests
+        id: drain
         env:
           GH_TOKEN: ${{ github.token }}
         run: uv run --locked python scripts/ci/merge_queue_runner.py --repo "${{ github.repository }}"
+      - name: Save timing snapshot for the merged main SHA
+        if: steps.drain.outputs.main_sha != ''
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/merge-queue-timings.json
+          key: test-timings-${{ steps.drain.outputs.main_sha }}-${{ github.run_id }}
