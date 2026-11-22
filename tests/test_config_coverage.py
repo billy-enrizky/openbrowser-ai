@@ -250,16 +250,15 @@ class TestLoadAndMigrateConfig:
     """Test load_and_migrate_config function."""
 
     def test_cached_config(self):
-        """Lines 334-335: config cache hit."""
+        """Created results are read back, then ready results are cached."""
         from openbrowser.config import load_and_migrate_config, _config_cache
 
         with tempfile.TemporaryDirectory() as tmpdir:
             config_path = Path(tmpdir) / "config.json"
-            config1 = load_and_migrate_config(config_path)
-            # Second call should hit cache
+            load_and_migrate_config(config_path)
             config2 = load_and_migrate_config(config_path)
-            assert config1 is config2
-            # Clear cache
+            config3 = load_and_migrate_config(config_path)
+            assert config2 is config3
             _config_cache.clear()
 
     def test_new_config_created(self):
@@ -273,13 +272,12 @@ class TestLoadAndMigrateConfig:
             assert len(config.browser_profile) > 0
             _config_cache.clear()
 
-    def test_old_format_migration(self):
-        """Lines 363-384: old format config gets replaced."""
-        from openbrowser.config import load_and_migrate_config, _config_cache
+    def test_old_format_is_not_rewritten(self):
+        """Old flat config is preserved and reported as blocked."""
+        from openbrowser.config import load_and_migrate_config_result, _config_cache
 
         with tempfile.TemporaryDirectory() as tmpdir:
             config_path = Path(tmpdir) / "config.json"
-            # Write old format config
             old_config = {
                 "browser_profile": {"headless": False},
                 "llm": {"model": "gpt-4"},
@@ -287,10 +285,13 @@ class TestLoadAndMigrateConfig:
             }
             with open(config_path, "w") as f:
                 json.dump(old_config, f)
+            before = config_path.read_bytes()
 
-            config = load_and_migrate_config(config_path)
-            # Should have created new DB-style config
-            assert len(config.browser_profile) > 0
+            result = load_and_migrate_config_result(config_path)
+
+            assert result.snapshot.phase.value == "legacy_format"
+            assert result.snapshot.browser_start_allowed is False
+            assert config_path.read_bytes() == before
             _config_cache.clear()
 
     def test_valid_db_style_config(self):
@@ -311,17 +312,20 @@ class TestLoadAndMigrateConfig:
             assert len(config.browser_profile) > 0
             _config_cache.clear()
 
-    def test_corrupt_config_recovery(self):
-        """Lines 374-384: corrupt config triggers fresh creation."""
-        from openbrowser.config import load_and_migrate_config, _config_cache
+    def test_corrupt_config_is_not_rewritten(self):
+        """Corrupt config is preserved and reported as invalid."""
+        from openbrowser.config import load_and_migrate_config_result, _config_cache
 
         with tempfile.TemporaryDirectory() as tmpdir:
             config_path = Path(tmpdir) / "config.json"
-            # Write invalid JSON
             config_path.write_text("NOT VALID JSON {{{")
+            before = config_path.read_bytes()
 
-            config = load_and_migrate_config(config_path)
-            assert len(config.browser_profile) > 0
+            result = load_and_migrate_config_result(config_path)
+
+            assert result.snapshot.phase.value == "invalid"
+            assert result.snapshot.error_code == "config_invalid_json"
+            assert config_path.read_bytes() == before
             _config_cache.clear()
 
 
@@ -507,12 +511,15 @@ class TestConfigClass:
             result = config._get_default_agent()
             assert result == {}
 
-    def test_load_config_with_overrides(self):
+    def test_load_config_with_overrides(self, tmp_path):
         """Lines 514-540: _load_config with env var overrides."""
         from openbrowser.config import Config
 
         config = Config()
         mock_env = MagicMock()
+        mock_env.OPENBROWSER_CONFIG_PATH = str(tmp_path / "config.json")
+        mock_env.OPENBROWSER_CONFIG_DIR = None
+        mock_env.XDG_CONFIG_HOME = str(tmp_path / "xdg")
         mock_env.OPENBROWSER_HEADLESS = True
         mock_env.OPENBROWSER_ALLOWED_DOMAINS = "example.com, test.com"
         mock_env.OPENBROWSER_LLM_MODEL = "gpt-4"

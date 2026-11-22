@@ -92,7 +92,50 @@ def make_mock_browser_state(url="https://example.com", title="Example", tabs=Non
 
 
 @pytest.fixture()
-def mcp_server(monkeypatch):
+def isolated_config_path(tmp_path, monkeypatch):
+    """Isolate the config file, Config caches, and supported env overrides."""
+    from openbrowser.config import (
+        CONFIG,
+        OldConfig,
+        _config_cache,
+        _get_env_bool_cached,
+        _get_env_cached,
+        _get_path_cached,
+    )
+
+    config_path = tmp_path / "config.json"
+    monkeypatch.setenv("OPENBROWSER_CONFIG_PATH", str(config_path))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    monkeypatch.delenv("OPENBROWSER_CONFIG_DIR", raising=False)
+    for name in (
+        "OPENBROWSER_HEADLESS",
+        "OPENBROWSER_ALLOWED_DOMAINS",
+        "OPENBROWSER_USER_DATA_DIR",
+        "OPENBROWSER_STORAGE_STATE",
+        "OPENBROWSER_PROXY_URL",
+        "OPENBROWSER_NO_PROXY",
+        "OPENBROWSER_PROXY_USERNAME",
+        "OPENBROWSER_PROXY_PASSWORD",
+        "OPENBROWSER_LLM_MODEL",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    def reset():
+        _config_cache.clear()
+        CONFIG._old_config = None
+        CONFIG._env_config = None
+        OldConfig._dirs_created = False
+        _get_env_cached.cache_clear()
+        _get_env_bool_cached.cache_clear()
+        _get_path_cached.cache_clear()
+
+    reset()
+    yield config_path
+    reset()
+
+
+@pytest.fixture()
+def mcp_server(monkeypatch, isolated_config_path):
     """Create an application owner without serving streams; use real SDK models."""
     monkeypatch.setattr(mcp_server_module, "MCP_AVAILABLE", True)
     monkeypatch.setattr(mcp_server_module, "Server", DummyServer)
