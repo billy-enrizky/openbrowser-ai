@@ -28,3 +28,6 @@ def test_check_payload_is_named_and_completed() -> None:
     assert payload["head_sha"] == "abc"
     assert payload["status"] == "completed"
     assert payload["conclusion"] == "success"
+
+
+# Queue smoke test: this comment exercises the custom merge queue.
