@@ -1703,12 +1703,13 @@ async def test_close_timeout_reconciles_with_a_separate_cleanup_budget():
         }
     )
     close_entered = asyncio.Event()
+    close_release = asyncio.Event()
     liveness_budgets: list[FocusTransitionBudget] = []
     actual_liveness = session._target_liveness
 
     async def delayed_close(**kwargs):
         close_entered.set()
-        await asyncio.sleep(0.15)
+        await close_release.wait()
         raise TimeoutError
 
     async def record_liveness(target_id, budget):
@@ -1716,13 +1717,20 @@ async def test_close_timeout_reconciles_with_a_separate_cleanup_budget():
         return await actual_liveness(target_id, budget)
 
     client.send.Target.closeTarget = AsyncMock(side_effect=delayed_close)
+    loop = asyncio.get_running_loop()
     event = CloseTabEvent(
         target_id=focus.target_id,
-        focus_deadline_monotonic=asyncio.get_running_loop().time() + 0.1,
+        focus_deadline_monotonic=loop.time() + 0.5,
     )
     with patch.object(session, "_target_liveness", side_effect=record_liveness):
+        close_task = asyncio.create_task(session.on_CloseTabEvent(event))
+        await asyncio.wait_for(close_entered.wait(), timeout=2.0)
+        remaining = event.focus_deadline_monotonic - loop.time()
+        if remaining > 0:
+            await asyncio.sleep(remaining + 0.05)
+        close_release.set()
         with pytest.raises(FocusTargetError):
-            await session.on_CloseTabEvent(event)
+            await close_task
         await _drain_focus_tasks(session)
 
     assert close_entered.is_set()
