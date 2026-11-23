@@ -2613,6 +2613,8 @@ class BrowserSession(BaseModel):
 	@observe_debug(ignore_input=True, ignore_output=True, name='browser_session_start')
 	async def start(self) -> None:
 		"""Run one start while direct connect calls are excluded."""
+		if self._event_bus_retirement_pending is not None:
+			raise RuntimeError('Event bus retirement is still pending; run reset() or kill() before start()')
 		if self._has_cleanup_in_flight():
 			raise RuntimeError('Browser cleanup is still running; retry after it finishes')
 		if self._cdp_health.cleanup_pending:
@@ -2662,6 +2664,8 @@ class BrowserSession(BaseModel):
 
 	async def _start_admitted(self) -> None:
 		"""Start the browser session while holding connection admission."""
+		if self._event_bus_retirement_pending is not None:
+			raise RuntimeError('Event bus retirement is still pending; run reset() or kill() before start()')
 		if self._has_cleanup_in_flight():
 			raise RuntimeError('Browser cleanup is still running; retry after it finishes')
 		if self._cdp_health.cleanup_pending:
