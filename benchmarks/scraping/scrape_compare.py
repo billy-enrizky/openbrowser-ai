@@ -5,6 +5,8 @@ Arms:
   - openbrowser-lightweight
   - openbrowser-no-render
   - http (httpx plus markdownify, no browser)
+  - firecrawl-local (Firecrawl Local, native per-task wait)
+  - firecrawl-local-auto (Firecrawl Local, no waitFor override)
 
 Tasks:
   - static_article
@@ -23,8 +25,14 @@ import argparse
 import asyncio
 import contextlib
 import json
+import os
+import platform
 import re
+import shutil
+import socket
 import statistics
+import subprocess
+import tempfile
 import threading
 import time
 from dataclasses import dataclass, field
@@ -259,10 +267,11 @@ class TaskResult:
 
 
 class BrowserArm:
-    def __init__(self, name: str, render_mode: str, engine: str = "auto"):
+    def __init__(self, name: str, render_mode: str, engine: str = "auto", chrome_path: str | None = None):
         self.name = name
         self.render_mode = render_mode
         self.engine = engine
+        self.chrome_path = chrome_path
         self.session = None
         self.namespace = None
         self.last_engine = ""
@@ -272,13 +281,16 @@ class BrowserArm:
         from openbrowser.code_use.namespace import create_namespace
         from openbrowser.tools.service import CodeAgentTools
 
-        self.session = BrowserSession(
-            browser_profile=BrowserProfile(
-                headless=True,
-                render_mode=self.render_mode,
-                enable_default_extensions=False,
-            )
-        )
+        profile_kwargs: dict = {
+            "headless": True,
+            "render_mode": self.render_mode,
+            "enable_default_extensions": False,
+            # Never touch the macOS login keychain from a headless run.
+            "args": ["--use-mock-keychain"],
+        }
+        if self.chrome_path:
+            profile_kwargs["executable_path"] = self.chrome_path
+        self.session = BrowserSession(browser_profile=BrowserProfile(**profile_kwargs))
         await self.session.start()
         self.namespace = create_namespace(browser_session=self.session, tools=CodeAgentTools())
 
@@ -393,6 +405,208 @@ class HttpArm:
         return ok, text, "no JavaScript execution"
 
 
+# Firecrawl Local arms. Firecrawl Local serves the Firecrawl v2 API on loopback
+# and runs the same cleaning code as the hosted API, so the adapter posts the
+# same request body a Firecrawl SDK would.
+FIRECRAWL_ASSET_WAIT_MS = 1
+
+
+def _pipe_rows(markdown: str) -> list[list[str]]:
+    """Return pipe-table rows, keeping the header and dropping separator rows."""
+    rows: list[list[str]] = []
+    for line in markdown.splitlines():
+        line = line.strip()
+        if len(line) < 2 or not line.startswith("|") or not line.endswith("|"):
+            continue
+        cells = [cell.strip() for cell in line[1:-1].split("|")]
+        if cells and all(cell and set(cell) <= {"-", ":", " "} for cell in cells):
+            continue
+        rows.append(cells)
+    return rows
+
+
+class FirecrawlServer:
+    """Run or attach to a Firecrawl Local server.
+
+    A managed server always starts with ``--allow-private`` because the fixture
+    runs on loopback, and with ``FIRECRAWL_CLOUD=off`` so no page leaves the
+    machine. Both are Firecrawl Local requirements for a local-only run.
+    """
+
+    def __init__(self, binary: str | None = None, url: str | None = None, chrome_path: str | None = None):
+        self.binary = binary
+        self.chrome_path = chrome_path
+        self.external_url = url
+        self.process: subprocess.Popen | None = None
+        self.log_path: Path | None = None
+        self.version = ""
+        self._url = url.rstrip("/") if url else ""
+
+    @property
+    def url(self) -> str:
+        if not self._url:
+            raise RuntimeError("firecrawl server is not running")
+        return self._url
+
+    @staticmethod
+    def _free_port() -> int:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.bind(("127.0.0.1", 0))
+            return int(sock.getsockname()[1])
+
+    def _health(self) -> dict:
+        response = httpx.get(f"{self._url}/health", timeout=2.0)
+        response.raise_for_status()
+        return response.json()
+
+    def start(self) -> None:
+        if self.external_url:
+            payload = self._health()
+            self.version = str(payload.get("version") or "")
+            return
+        if not self.binary:
+            raise SystemExit("no firecrawl-local binary configured")
+        port = self._free_port()
+        self._url = f"http://127.0.0.1:{port}"
+        env = dict(os.environ)
+        env["FIRECRAWL_CLOUD"] = "off"
+        env["FIRECRAWL_LOCAL_BROWSER"] = "auto"
+        if self.chrome_path:
+            env["FIRECRAWL_CHROME_PATH"] = self.chrome_path
+        fd, log_name = tempfile.mkstemp(prefix="firecrawl-serve-", suffix=".log")
+        self.log_path = Path(log_name)
+        with os.fdopen(fd, "wb") as log:
+            self.process = subprocess.Popen(
+                [self.binary, "serve", "--port", str(port), "--allow-private", "--browser", "auto"],
+                env=env,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+            )
+        deadline = time.monotonic() + 40.0
+        last_error = ""
+        while time.monotonic() < deadline:
+            if self.process.poll() is not None:
+                tail = self.log_path.read_text(errors="replace")[-2000:] if self.log_path.exists() else ""
+                raise SystemExit(f"firecrawl-local serve exited with {self.process.returncode}: {tail}")
+            try:
+                payload = self._health()
+                self.version = str(payload.get("version") or "")
+                return
+            except Exception as exc:
+                last_error = f"{type(exc).__name__}: {exc}"
+                time.sleep(0.1)
+        raise SystemExit(f"firecrawl-local serve did not become healthy: {last_error}")
+
+    def stop(self) -> None:
+        if self.process is None:
+            return
+        self.process.terminate()
+        try:
+            self.process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.wait(timeout=10)
+        self.process = None
+        if self.log_path is not None and self.log_path.exists():
+            self.log_path.unlink()
+
+
+class FirecrawlArm:
+    """Scrape through Firecrawl Local with the documented v2 request body.
+
+    Firecrawl Local skips the ``json`` format and ignores ``actions``, so every
+    task scrapes markdown and the oracle is expressed on markdown output.
+    ``waitFor`` is the only request-level way to force the local browser: one
+    millisecond is enough to move the asset page off the static fetch path and
+    adds no measurable sleep.
+    """
+
+    def __init__(self, name: str, server: FirecrawlServer, wait_overrides: dict[str, int] | None = None):
+        self.name = name
+        self.server = server
+        self.wait_overrides = dict(wait_overrides or {})
+        self.last_engine = ""
+        self.client = httpx.Client(timeout=180.0)
+
+    async def start(self) -> None:
+        return
+
+    async def stop(self) -> None:
+        self.client.close()
+
+    def _scrape(self, url: str, wait_ms: int | None = None) -> tuple[str, str]:
+        payload: dict = {"url": url, "formats": ["markdown"], "maxAge": 0, "storeInCache": False}
+        if wait_ms is not None:
+            payload["waitFor"] = wait_ms
+        response = self.client.post(f"{self.server.url}/v2/scrape", json=payload)
+        response.raise_for_status()
+        body = response.json()
+        if not body.get("success"):
+            raise RuntimeError(f"firecrawl scrape failed: {str(body)[:300]}")
+        data = body.get("data") or {}
+        engine = str((data.get("metadata") or {}).get("engine") or "")
+        return data.get("markdown") or "", engine
+
+    async def run_static(self, base: str):
+        content, engine = self._scrape(f"{base}/static")
+        self.last_engine = engine
+        ok = "Static Bench" in content and "Item 49" in content and "DO NOT INCLUDE" not in content
+        return ok, content, ""
+
+    async def run_js_list(self, base: str):
+        content, engine = self._scrape(f"{base}/js-list")
+        self.last_engine = engine
+        # Firecrawl markdown drops data-sku, so the exact oracle is the ordered
+        # name plus price sequence rendered by the same 30 cards.
+        expected = [f"Product {index}{index * 10}" for index in range(JS_ITEMS)]
+        cursor = 0
+        ordered = True
+        for token in expected:
+            found = content.find(token, cursor)
+            if found < 0:
+                ordered = False
+                break
+            cursor = found + len(token)
+        ok = ordered and content.count("Product") == JS_ITEMS
+        return ok, content, ""
+
+    async def run_pagination(self, base: str):
+        names: list[int] = []
+        pages: list[str] = []
+        engines: set[str] = set()
+        for page in range(1, PAGE_COUNT + 1):
+            content, engine = self._scrape(f"{base}/pagination?page={page}")
+            pages.append(content)
+            engines.add(engine)
+            for row in _pipe_rows(content)[1:]:
+                if len(row) < 2:
+                    continue
+                match = re.fullmatch(r"Name (\d+)", row[1])
+                if match:
+                    names.append(int(match.group(1)))
+        self.last_engine = "local-browser" if "local-browser" in engines else (sorted(engines)[0] if engines else "")
+        ok = names == list(range(PAGE_COUNT * PAGE_SIZE))
+        return ok, "\n".join(pages), ""
+
+    async def run_table(self, base: str):
+        content, engine = self._scrape(f"{base}/table")
+        self.last_engine = engine
+        rows = _pipe_rows(content)[1:]
+        expected = [
+            [str(index)] + [f"cell-{index}-{column}" for column in range(1, TABLE_COLS)] for index in range(TABLE_ROWS)
+        ]
+        ok = rows == expected
+        return ok, content, ""
+
+    async def run_assets(self, base: str):
+        content, engine = self._scrape(f"{base}/assets", self.wait_overrides.get("asset_heavy"))
+        self.last_engine = engine
+        headlines = [int(value) for value in re.findall(r"Headline (\d+)", content)]
+        ok = len(headlines) == ASSET_COUNT and sorted(set(headlines)) == list(range(1, ASSET_COUNT + 1))
+        return ok, content, ""
+
+
 TASKS = {
     "static_article": "run_static",
     "js_list": "run_js_list",
@@ -439,6 +653,57 @@ def _summary(values: list[float]) -> dict:
     }
 
 
+def _resolve_firecrawl_binary(explicit: str | None) -> str | None:
+    candidate = explicit or os.environ.get("FIRECRAWL_LOCAL_BIN")
+    if candidate:
+        return candidate
+    return shutil.which("firecrawl-local")
+
+
+def _chrome_version(path: str | None) -> str:
+    if not path:
+        return ""
+    try:
+        completed = subprocess.run([path, "--version"], capture_output=True, text=True, timeout=10, check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    return (completed.stdout or completed.stderr).strip()
+
+
+def _environment(
+    firecrawl_server: FirecrawlServer | None,
+    firecrawl_waits: dict[str, dict[str, int]],
+    chrome_path: str | None = None,
+) -> dict:
+    try:
+        from openbrowser.utils import get_openbrowser_version
+
+        openbrowser_version = get_openbrowser_version()
+    except Exception:
+        openbrowser_version = ""
+    environment: dict = {
+        "platform": platform.platform(),
+        "machine": platform.machine(),
+        "python": platform.python_version(),
+        "openbrowser": openbrowser_version,
+        "chrome_path": chrome_path,
+        "chrome_version": _chrome_version(chrome_path),
+        "firecrawl": None,
+    }
+    if firecrawl_server is not None:
+        environment["firecrawl"] = {
+            "version": firecrawl_server.version,
+            "url": firecrawl_server.url,
+            "binary": firecrawl_server.binary,
+            "managed_process": firecrawl_server.process is not None,
+            "cloud": "off",
+            "serve_flags": "--allow-private --browser auto",
+            "chrome_path": firecrawl_server.chrome_path,
+            "wait_ms_by_arm": firecrawl_waits,
+        }
+    return environment
+
+
 async def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--samples", type=int, default=3)
@@ -446,6 +711,21 @@ async def main() -> int:
     parser.add_argument("--tasks", nargs="+", choices=sorted(TASKS), default=sorted(TASKS))
     default_arms = ["openbrowser-full", "openbrowser-lightweight", "openbrowser-no-render", "http"]
     parser.add_argument("--arms", nargs="+", default=default_arms)
+    parser.add_argument(
+        "--firecrawl-url",
+        default=None,
+        help="Attach to a running firecrawl-local serve endpoint, for example http://127.0.0.1:3002.",
+    )
+    parser.add_argument(
+        "--firecrawl-bin",
+        default=None,
+        help="Path to the firecrawl-local binary. Starts a managed server on a free loopback port.",
+    )
+    parser.add_argument(
+        "--chrome",
+        default=None,
+        help="Chrome or Chromium binary used by both arms: BrowserProfile.executable_path and FIRECRAWL_CHROME_PATH.",
+    )
     parser.add_argument("--output", type=Path, default=Path("benchmarks/scraping/results.json"))
     args = parser.parse_args()
 
@@ -453,19 +733,44 @@ async def main() -> int:
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     base = server.base_url
+
+    firecrawl_server: FirecrawlServer | None = None
+    firecrawl_waits: dict[str, dict[str, int]] = {}
+    if any(name.startswith("firecrawl") for name in args.arms):
+        if args.firecrawl_url:
+            firecrawl_server = FirecrawlServer(url=args.firecrawl_url, chrome_path=args.chrome)
+        else:
+            binary = _resolve_firecrawl_binary(args.firecrawl_bin)
+            if not binary:
+                raise SystemExit(
+                    "Firecrawl arms need firecrawl-local. Install it with "
+                    "`cargo install firecrawl-local --version 0.1.1 --root <tools-dir>`, "
+                    "pass --firecrawl-bin, set FIRECRAWL_LOCAL_BIN, or attach with --firecrawl-url."
+                )
+            firecrawl_server = FirecrawlServer(binary=binary, chrome_path=args.chrome)
+        firecrawl_server.start()
+        print(f"firecrawl-local {firecrawl_server.version} at {firecrawl_server.url}")
+
     arms = []
     for name in args.arms:
         if name == "http":
             arms.append(HttpArm())
         elif name == "openbrowser-full":
-            arms.append(BrowserArm(name, "full"))
+            arms.append(BrowserArm(name, "full", chrome_path=args.chrome))
         elif name == "openbrowser-lightweight":
-            arms.append(BrowserArm(name, "lightweight"))
+            arms.append(BrowserArm(name, "lightweight", chrome_path=args.chrome))
         elif name == "openbrowser-no-render":
-            arms.append(BrowserArm(name, "no-render"))
+            arms.append(BrowserArm(name, "no-render", chrome_path=args.chrome))
+        elif name == "firecrawl-local":
+            firecrawl_waits[name] = {"asset_heavy": FIRECRAWL_ASSET_WAIT_MS}
+            arms.append(FirecrawlArm(name, firecrawl_server, firecrawl_waits[name]))
+        elif name == "firecrawl-local-auto":
+            firecrawl_waits[name] = {}
+            arms.append(FirecrawlArm(name, firecrawl_server, firecrawl_waits[name]))
         else:
             raise SystemExit(f"unknown arm: {name}")
 
+    environment = _environment(firecrawl_server, firecrawl_waits, args.chrome)
     results: list[TaskResult] = []
     try:
         for arm in arms:
@@ -479,6 +784,8 @@ async def main() -> int:
             await arm.stop()
     finally:
         await asyncio.gather(*(arm.stop() for arm in arms), return_exceptions=True)
+        if firecrawl_server is not None:
+            firecrawl_server.stop()
         server.shutdown()
         server.server_close()
 
@@ -486,8 +793,15 @@ async def main() -> int:
     for result in results:
         grouped.setdefault((result.task, result.arm), []).append(result)
 
-    report = {"samples": args.samples, "warmups": args.warmups, "arms": args.arms, "tasks": args.tasks, "groups": []}
-    print(f"{'task':18} {'arm':24} {'ok':>3} {'p50 ms':>8} {'p95 ms':>8} {'bytes':>8} {'req':>4}")
+    report = {
+        "samples": args.samples,
+        "warmups": args.warmups,
+        "arms": args.arms,
+        "tasks": args.tasks,
+        "environment": environment,
+        "groups": [],
+    }
+    print(f"{'task':18} {'arm':24} {'ok':>4} {'p50 ms':>8} {'p95 ms':>8} {'bytes':>8} {'req':>4} {'engine':<12}")
     for (task, arm_name), group in sorted(grouped.items()):
         ok_count = sum(1 for item in group if item.ok)
         latency = [item.latency_ms for item in group if item.ok]
@@ -506,10 +820,11 @@ async def main() -> int:
             "errors": sorted({item.detail for item in group if item.detail}),
         }
         report["groups"].append(entry)
+        engine = ",".join(entry["engines"])
         print(
             f"{task:18} {arm_name:24} {ok_count}/{len(group):<2} "
             f"{summary.get('p50_ms', 0):8.1f} {summary.get('p95_ms', 0):8.1f} "
-            f"{entry['mean_output_bytes']:8.0f} {entry['mean_requests']:4.1f}"
+            f"{entry['mean_output_bytes']:8.0f} {entry['mean_requests']:4.1f} {engine:<12}"
         )
 
     args.output.parent.mkdir(parents=True, exist_ok=True)

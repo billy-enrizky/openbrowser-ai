@@ -1,0 +1,635 @@
+{
+  "samples": 3,
+  "warmups": 1,
+  "arms": [
+    "openbrowser-full",
+    "openbrowser-lightweight",
+    "openbrowser-no-render",
+    "http",
+    "firecrawl-local",
+    "firecrawl-local-auto"
+  ],
+  "tasks": [
+    "asset_heavy",
+    "js_list",
+    "pagination",
+    "static_article",
+    "table"
+  ],
+  "environment": {
+    "platform": "macOS-26.6-arm64-arm-64bit",
+    "machine": "arm64",
+    "python": "3.12.12",
+    "openbrowser": "0.1.58.dev4+g36ccf113b",
+    "chrome_path": "$HOME/Library/Caches/ms-playwright/chromium-1255/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
+    "chrome_version": "Google Chrome for Testing 159.0.8154.6",
+    "firecrawl": {
+      "version": "0.1.1",
+      "url": "http://127.0.0.1:63114",
+      "binary": "$HOME/.local/firecrawl-tools/bin/firecrawl-local",
+      "managed_process": true,
+      "cloud": "off",
+      "serve_flags": "--allow-private --browser auto",
+      "chrome_path": "$HOME/Library/Caches/ms-playwright/chromium-1255/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
+      "wait_ms_by_arm": {
+        "firecrawl-local": {
+          "asset_heavy": 1
+        },
+        "firecrawl-local-auto": {}
+      }
+    }
+  },
+  "groups": [
+    {
+      "task": "asset_heavy",
+      "arm": "firecrawl-local",
+      "successes": 3,
+      "runs": 3,
+      "ok": true,
+      "latency": {
+        "count": 3,
+        "p50_ms": 574.24,
+        "p95_ms": 580.263,
+        "mean_ms": 575.299
+      },
+      "mean_output_bytes": 1226.0,
+      "mean_requests": 24.0,
+      "mean_response_bytes": 2899.0,
+      "engines": [
+        "local-browser"
+      ],
+      "errors": []
+    },
+    {
+      "task": "asset_heavy",
+      "arm": "firecrawl-local-auto",
+      "successes": 0,
+      "runs": 3,
+      "ok": false,
+      "latency": {
+        "count": 0
+      },
+      "mean_output_bytes": 915.0,
+      "mean_requests": 1.0,
+      "mean_response_bytes": 1165.0,
+      "engines": [
+        "local-fetch"
+      ],
+      "errors": []
+    },
+    {
+      "task": "asset_heavy",
+      "arm": "http",
+      "successes": 0,
+      "runs": 3,
+      "ok": false,
+      "latency": {
+        "count": 0
+      },
+      "mean_output_bytes": 1165.0,
+      "mean_requests": 1.0,
+      "mean_response_bytes": 1165.0,
+      "engines": [
+        "http"
+      ],
+      "errors": []
+    },
+    {
+      "task": "asset_heavy",
+      "arm": "openbrowser-full",
+      "successes": 3,
+      "runs": 3,
+      "ok": true,
+      "latency": {
+        "count": 3,
+        "p50_ms": 66.447,
+        "p95_ms": 74.501,
+        "mean_ms": 68.312
+      },
+      "mean_output_bytes": 242.0,
+      "mean_requests": 25.0,
+      "mean_response_bytes": 4064.0,
+      "engines": [
+        "browser"
+      ],
+      "errors": []
+    },
+    {
+      "task": "asset_heavy",
+      "arm": "openbrowser-lightweight",
+      "successes": 3,
+      "runs": 3,
+      "ok": true,
+      "latency": {
+        "count": 3,
+        "p50_ms": 32.108,
+        "p95_ms": 34.929,
+        "mean_ms": 32.837
+      },
+      "mean_output_bytes": 242.0,
+      "mean_requests": 4.0,
+      "mean_response_bytes": 2492.0,
+      "engines": [
+        "browser"
+      ],
+      "errors": []
+    },
+    {
+      "task": "asset_heavy",
+      "arm": "openbrowser-no-render",
+      "successes": 3,
+      "runs": 3,
+      "ok": true,
+      "latency": {
+        "count": 3,
+        "p50_ms": 24.972,
+        "p95_ms": 25.329,
+        "mean_ms": 23.919
+      },
+      "mean_output_bytes": 242.0,
+      "mean_requests": 4.0,
+      "mean_response_bytes": 2492.0,
+      "engines": [
+        "browser"
+      ],
+      "errors": []
+    },
+    {
+      "task": "js_list",
+      "arm": "firecrawl-local",
+      "successes": 3,
+      "runs": 3,
+      "ok": true,
+      "latency": {
+        "count": 3,
+        "p50_ms": 598.281,
+        "p95_ms": 621.452,
+        "mean_ms": 603.59
+      },
+      "mean_output_bytes": 438.0,
+      "mean_requests": 3.0,
+      "mean_response_bytes": 2523.0,
+      "engines": [
+        "local-browser"
+      ],
+      "errors": []
+    },
+    {
+      "task": "js_list",
+      "arm": "firecrawl-local-auto",
+      "successes": 3,
+      "runs": 3,
+      "ok": true,
+      "latency": {
+        "count": 3,
+        "p50_ms": 605.482,
+        "p95_ms": 615.89,
+        "mean_ms": 604.935
+      },
+      "mean_output_bytes": 438.0,
+      "mean_requests": 3.0,
+      "mean_response_bytes": 2523.0,
+      "engines": [
+        "local-browser"
+      ],
+      "errors": []
+    },
+    {
+      "task": "js_list",
+      "arm": "http",
+      "successes": 0,
+      "runs": 3,
+      "ok": false,
+      "latency": {
+        "count": 0
+      },
+      "mean_output_bytes": 432.0,
+      "mean_requests": 1.0,
+      "mean_response_bytes": 432.0,
+      "engines": [
+        "http"
+      ],
+      "errors": []
+    },
+    {
+      "task": "js_list",
+      "arm": "openbrowser-full",
+      "successes": 3,
+      "runs": 3,
+      "ok": true,
+      "latency": {
+        "count": 3,
+        "p50_ms": 113.163,
+        "p95_ms": 113.393,
+        "mean_ms": 85.198
+      },
+      "mean_output_bytes": 330.0,
+      "mean_requests": 3.0,
+      "mean_response_bytes": 2523.0,
+      "engines": [
+        "browser"
+      ],
+      "errors": []
+    },
+    {
+      "task": "js_list",
+      "arm": "openbrowser-lightweight",
+      "successes": 3,
+      "runs": 3,
+      "ok": true,
+      "latency": {
+        "count": 3,
+        "p50_ms": 25.506,
+        "p95_ms": 28.205,
+        "mean_ms": 26.281
+      },
+      "mean_output_bytes": 330.0,
+      "mean_requests": 3.0,
+      "mean_response_bytes": 2523.0,
+      "engines": [
+        "browser"
+      ],
+      "errors": []
+    },
+    {
+      "task": "js_list",
+      "arm": "openbrowser-no-render",
+      "successes": 3,
+      "runs": 3,
+      "ok": true,
+      "latency": {
+        "count": 3,
+        "p50_ms": 25.426,
+        "p95_ms": 28.904,
+        "mean_ms": 25.807
+      },
+      "mean_output_bytes": 330.0,
+      "mean_requests": 3.0,
+      "mean_response_bytes": 2523.0,
+      "engines": [
+        "browser"
+      ],
+      "errors": []
+    },
+    {
+      "task": "pagination",
+      "arm": "firecrawl-local",
+      "successes": 3,
+      "runs": 3,
+      "ok": true,
+      "latency": {
+        "count": 3,
+        "p50_ms": 6.444,
+        "p95_ms": 8.318,
+        "mean_ms": 6.96
+      },
+      "mean_output_bytes": 2064.0,
+      "mean_requests": 5.0,
+      "mean_response_bytes": 6923.0,
+      "engines": [
+        "local-fetch"
+      ],
+      "errors": []
+    },
+    {
+      "task": "pagination",
+      "arm": "firecrawl-local-auto",
+      "successes": 3,
+      "runs": 3,
+      "ok": true,
+      "latency": {
+        "count": 3,
+        "p50_ms": 5.961,
+        "p95_ms": 6.978,
+        "mean_ms": 6.203
+      },
+      "mean_output_bytes": 2064.0,
+      "mean_requests": 5.0,
+      "mean_response_bytes": 6923.0,
+      "engines": [
+        "local-fetch"
+      ],
+      "errors": []
+    },
+    {
+      "task": "pagination",
+      "arm": "http",
+      "successes": 3,
+      "runs": 3,
+      "ok": true,
+      "latency": {
+        "count": 3,
+        "p50_ms": 3.009,
+        "p95_ms": 3.026,
+        "mean_ms": 2.924
+      },
+      "mean_output_bytes": 1650.0,
+      "mean_requests": 5.0,
+      "mean_response_bytes": 6923.0,
+      "engines": [
+        "http"
+      ],
+      "errors": []
+    },
+    {
+      "task": "pagination",
+      "arm": "openbrowser-full",
+      "successes": 3,
+      "runs": 3,
+      "ok": true,
+      "latency": {
+        "count": 3,
+        "p50_ms": 34.455,
+        "p95_ms": 34.901,
+        "mean_ms": 33.351
+      },
+      "mean_output_bytes": 1650.0,
+      "mean_requests": 5.0,
+      "mean_response_bytes": 6923.0,
+      "engines": [
+        "http"
+      ],
+      "errors": []
+    },
+    {
+      "task": "pagination",
+      "arm": "openbrowser-lightweight",
+      "successes": 3,
+      "runs": 3,
+      "ok": true,
+      "latency": {
+        "count": 3,
+        "p50_ms": 34.022,
+        "p95_ms": 34.281,
+        "mean_ms": 33.533
+      },
+      "mean_output_bytes": 1650.0,
+      "mean_requests": 5.0,
+      "mean_response_bytes": 6923.0,
+      "engines": [
+        "http"
+      ],
+      "errors": []
+    },
+    {
+      "task": "pagination",
+      "arm": "openbrowser-no-render",
+      "successes": 3,
+      "runs": 3,
+      "ok": true,
+      "latency": {
+        "count": 3,
+        "p50_ms": 29.882,
+        "p95_ms": 34.592,
+        "mean_ms": 31.382
+      },
+      "mean_output_bytes": 1650.0,
+      "mean_requests": 5.0,
+      "mean_response_bytes": 6923.0,
+      "engines": [
+        "http"
+      ],
+      "errors": []
+    },
+    {
+      "task": "static_article",
+      "arm": "firecrawl-local",
+      "successes": 3,
+      "runs": 3,
+      "ok": true,
+      "latency": {
+        "count": 3,
+        "p50_ms": 1.464,
+        "p95_ms": 1.473,
+        "mean_ms": 1.437
+      },
+      "mean_output_bytes": 1137.0,
+      "mean_requests": 1.0,
+      "mean_response_bytes": 3631.0,
+      "engines": [
+        "local-fetch"
+      ],
+      "errors": []
+    },
+    {
+      "task": "static_article",
+      "arm": "firecrawl-local-auto",
+      "successes": 3,
+      "runs": 3,
+      "ok": true,
+      "latency": {
+        "count": 3,
+        "p50_ms": 1.554,
+        "p95_ms": 1.636,
+        "mean_ms": 1.525
+      },
+      "mean_output_bytes": 1137.0,
+      "mean_requests": 1.0,
+      "mean_response_bytes": 3631.0,
+      "engines": [
+        "local-fetch"
+      ],
+      "errors": []
+    },
+    {
+      "task": "static_article",
+      "arm": "http",
+      "successes": 3,
+      "runs": 3,
+      "ok": true,
+      "latency": {
+        "count": 3,
+        "p50_ms": 4.125,
+        "p95_ms": 4.493,
+        "mean_ms": 4.141
+      },
+      "mean_output_bytes": 1182.0,
+      "mean_requests": 1.0,
+      "mean_response_bytes": 3631.0,
+      "engines": [
+        "http"
+      ],
+      "errors": []
+    },
+    {
+      "task": "static_article",
+      "arm": "openbrowser-full",
+      "successes": 3,
+      "runs": 3,
+      "ok": true,
+      "latency": {
+        "count": 3,
+        "p50_ms": 10.384,
+        "p95_ms": 13.821,
+        "mean_ms": 11.212
+      },
+      "mean_output_bytes": 1182.0,
+      "mean_requests": 1.0,
+      "mean_response_bytes": 3631.0,
+      "engines": [
+        "http"
+      ],
+      "errors": []
+    },
+    {
+      "task": "static_article",
+      "arm": "openbrowser-lightweight",
+      "successes": 3,
+      "runs": 3,
+      "ok": true,
+      "latency": {
+        "count": 3,
+        "p50_ms": 10.347,
+        "p95_ms": 11.469,
+        "mean_ms": 10.637
+      },
+      "mean_output_bytes": 1182.0,
+      "mean_requests": 1.0,
+      "mean_response_bytes": 3631.0,
+      "engines": [
+        "http"
+      ],
+      "errors": []
+    },
+    {
+      "task": "static_article",
+      "arm": "openbrowser-no-render",
+      "successes": 3,
+      "runs": 3,
+      "ok": true,
+      "latency": {
+        "count": 3,
+        "p50_ms": 8.396,
+        "p95_ms": 9.669,
+        "mean_ms": 8.786
+      },
+      "mean_output_bytes": 1182.0,
+      "mean_requests": 1.0,
+      "mean_response_bytes": 3631.0,
+      "engines": [
+        "http"
+      ],
+      "errors": []
+    },
+    {
+      "task": "table",
+      "arm": "firecrawl-local",
+      "successes": 3,
+      "runs": 3,
+      "ok": true,
+      "latency": {
+        "count": 3,
+        "p50_ms": 3.436,
+        "p95_ms": 3.658,
+        "mean_ms": 3.455
+      },
+      "mean_output_bytes": 6736.0,
+      "mean_requests": 1.0,
+      "mean_response_bytes": 13067.0,
+      "engines": [
+        "local-fetch"
+      ],
+      "errors": []
+    },
+    {
+      "task": "table",
+      "arm": "firecrawl-local-auto",
+      "successes": 3,
+      "runs": 3,
+      "ok": true,
+      "latency": {
+        "count": 3,
+        "p50_ms": 3.553,
+        "p95_ms": 3.837,
+        "mean_ms": 3.628
+      },
+      "mean_output_bytes": 6736.0,
+      "mean_requests": 1.0,
+      "mean_response_bytes": 13067.0,
+      "engines": [
+        "local-fetch"
+      ],
+      "errors": []
+    },
+    {
+      "task": "table",
+      "arm": "http",
+      "successes": 3,
+      "runs": 3,
+      "ok": true,
+      "latency": {
+        "count": 3,
+        "p50_ms": 0.829,
+        "p95_ms": 0.831,
+        "mean_ms": 0.815
+      },
+      "mean_output_bytes": 13067.0,
+      "mean_requests": 1.0,
+      "mean_response_bytes": 13067.0,
+      "engines": [
+        "http"
+      ],
+      "errors": []
+    },
+    {
+      "task": "table",
+      "arm": "openbrowser-full",
+      "successes": 3,
+      "runs": 3,
+      "ok": true,
+      "latency": {
+        "count": 3,
+        "p50_ms": 13.663,
+        "p95_ms": 13.739,
+        "mean_ms": 13.539
+      },
+      "mean_output_bytes": 2490.0,
+      "mean_requests": 1.0,
+      "mean_response_bytes": 13067.0,
+      "engines": [
+        "http"
+      ],
+      "errors": []
+    },
+    {
+      "task": "table",
+      "arm": "openbrowser-lightweight",
+      "successes": 3,
+      "runs": 3,
+      "ok": true,
+      "latency": {
+        "count": 3,
+        "p50_ms": 15.629,
+        "p95_ms": 65.191,
+        "mean_ms": 31.644
+      },
+      "mean_output_bytes": 2490.0,
+      "mean_requests": 1.0,
+      "mean_response_bytes": 13067.0,
+      "engines": [
+        "http"
+      ],
+      "errors": []
+    },
+    {
+      "task": "table",
+      "arm": "openbrowser-no-render",
+      "successes": 3,
+      "runs": 3,
+      "ok": true,
+      "latency": {
+        "count": 3,
+        "p50_ms": 13.293,
+        "p95_ms": 13.475,
+        "mean_ms": 13.143
+      },
+      "mean_output_bytes": 2490.0,
+      "mean_requests": 1.0,
+      "mean_response_bytes": 13067.0,
+      "engines": [
+        "http"
+      ],
+      "errors": []
+    }
+  ]
+}
