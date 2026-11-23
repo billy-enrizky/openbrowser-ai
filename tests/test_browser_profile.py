@@ -333,6 +333,16 @@ class TestBrowserProfile:
         args = profile.get_args()
         assert any("--headless" in arg for arg in args)
 
+    def test_macos_adds_mock_keychain(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("openbrowser.browser.profile.sys.platform", "darwin")
+        profile = BrowserProfile(user_data_dir=str(tmp_path / "data"), enable_default_extensions=False)
+        assert "--use-mock-keychain" in profile.get_args()
+
+    def test_non_macos_omits_mock_keychain(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("openbrowser.browser.profile.sys.platform", "linux")
+        profile = BrowserProfile(user_data_dir=str(tmp_path / "data"), enable_default_extensions=False)
+        assert "--use-mock-keychain" not in profile.get_args()
+
     def test_custom_window_size(self, tmp_path):
         profile = BrowserProfile(window_size=ViewportSize(width=1920, height=1080), headless=False, enable_default_extensions=False, user_data_dir=str(tmp_path / "data"))
         args = profile.get_args()

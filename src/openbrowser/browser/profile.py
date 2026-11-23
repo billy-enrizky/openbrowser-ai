@@ -69,6 +69,13 @@ CHROME_HEADLESS_ARGS = [
 	'--headless=new',
 ]
 
+CHROME_MACOS_ARGS = [
+	# Prevent Chrome from reading or writing the macOS login Keychain when it
+	# runs against a temporary or isolated profile. Without this, Chrome can
+	# show a system "Keychain Not Found" dialog during automated runs.
+	'--use-mock-keychain',
+]
+
 CHROME_DOCKER_ARGS = [
 	# '--disable-gpu',    # GPU is actually supported in headless docker mode now, but sometimes useful to test without it
 	'--no-sandbox',
@@ -831,6 +838,7 @@ class BrowserProfile(BrowserConnectArgs, BrowserLaunchPersistentContextArgs, Bro
 			f'--profile-directory={self.profile_directory}',
 			*(CHROME_DOCKER_ARGS if (CONFIG.IN_DOCKER or not self.chromium_sandbox) else []),
 			*(CHROME_HEADLESS_ARGS if self.headless else []),
+			*(CHROME_MACOS_ARGS if sys.platform == 'darwin' else []),
 			*(CHROME_DISABLE_SECURITY_ARGS if self.disable_security else []),
 			*(CHROME_DETERMINISTIC_RENDERING_ARGS if self.deterministic_rendering else []),
 			*(CHROME_LIGHTWEIGHT_ARGS if self.effective_render_mode is not RenderMode.FULL else []),
