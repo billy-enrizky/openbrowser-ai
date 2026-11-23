@@ -44,7 +44,7 @@ class TestPidFunctions:
         from openbrowser.daemon.server import _read_pid
 
         # Use /tmp directly: macOS CI tmpdir paths can exceed the 104-char AF_UNIX limit
-        sock_path = Path(tempfile.mktemp(suffix='.sock', dir='/tmp'))
+        sock_path = Path(tempfile.mktemp(suffix=".sock", dir="/tmp"))
         mock_path = MagicMock()
         mock_path.exists.return_value = True
         mock_path.read_bytes.return_value = str(os.getpid()).encode()
@@ -53,8 +53,10 @@ class TestPidFunctions:
         server_sock.bind(str(sock_path))
         server_sock.listen(1)
         try:
-            with patch("openbrowser.daemon.server.get_pid_path", return_value=mock_path), \
-                 patch("openbrowser.daemon.server.get_socket_path", return_value=sock_path):
+            with (
+                patch("openbrowser.daemon.server.get_pid_path", return_value=mock_path),
+                patch("openbrowser.daemon.server.get_socket_path", return_value=sock_path),
+            ):
                 result = _read_pid()
                 assert result == os.getpid()
         finally:
@@ -115,6 +117,26 @@ class TestPidFunctions:
         assert socket_path.read_text() == "not a socket"
 
 
+@pytest.mark.parametrize(
+    "detail",
+    [
+        "Authorization: Bearer startup-detail-secret",
+        "Cookie: session=startup-cookie-secret; theme=dark",
+    ],
+)
+def test_status_payload_sanitizes_startup_detail(daemon_server, detail):
+    daemon_server._fail_startup(detail, RuntimeError(detail))
+
+    payload = daemon_server._status_payload()
+    rendered = json.dumps(payload)
+    startup_detail = payload["startup"]["detail"]
+
+    assert "startup-detail-secret" not in rendered
+    assert "startup-cookie-secret" not in rendered
+    assert "<redacted>" in startup_detail
+    assert len(startup_detail) <= 500
+
+
 class TestDaemonServerBuildProfile:
     """Test _build_browser_profile."""
 
@@ -166,9 +188,7 @@ class TestDaemonServerHandleRequest:
     @pytest.mark.asyncio
     async def test_execute_empty_code(self, daemon_server):
         """Line 173: execute with empty code."""
-        result = await daemon_server._handle_request(
-            {"action": "execute", "code": "", "id": 1}
-        )
+        result = await daemon_server._handle_request({"action": "execute", "code": "", "id": 1})
         assert result["success"] is False
         assert "No code" in result["error"]
 
@@ -179,9 +199,7 @@ class TestDaemonServerHandleRequest:
         mock_executor.execute = AsyncMock(side_effect=asyncio.TimeoutError())
         daemon_server._executor = mock_executor
 
-        result = await daemon_server._handle_request(
-            {"action": "execute", "code": "x = 1", "id": 1}
-        )
+        result = await daemon_server._handle_request({"action": "execute", "code": "x = 1", "id": 1})
         assert result["success"] is False
         assert "timed out" in result["error"]
 
@@ -201,7 +219,7 @@ class TestDaemonServerHandleRequest:
 
         with patch("openbrowser.browser.BrowserSession", return_value=session):
             with patch.object(daemon_server, "_build_browser_profile", return_value=MagicMock()):
-                with patch("openbrowser.daemon.server.DAEMON_INIT_TIMEOUT", 0.01):
+                with patch.object(daemon_server, "_init_timeout", 0.01):
                     with pytest.raises(TimeoutError, match="Browser initialization timed out"):
                         await daemon_server._ensure_executor()
 
@@ -211,7 +229,7 @@ class TestDaemonServerHandleRequest:
         assert daemon_server._tools is None
 
     @pytest.mark.asyncio
-    async def test_ensure_executor_cleanup_timeout_force_stops_stuck_session(self, daemon_server):
+    async def test_ensure_executor_cleanup_timeout_retains_session_without_force_stop(self, daemon_server):
         """A cleanup that swallows cancellation must not hold startup indefinitely."""
         session = MagicMock()
         cleanup_released = asyncio.Event()
@@ -223,7 +241,7 @@ class TestDaemonServerHandleRequest:
             try:
                 await asyncio.sleep(60)
             except asyncio.CancelledError:
-                await cleanup_released.wait()
+                await asyncio.wait_for(cleanup_released.wait(), timeout=5.0)
 
         session.start = AsyncMock(side_effect=hanging_start)
         session.kill = AsyncMock(side_effect=stubborn_kill)
@@ -242,11 +260,15 @@ class TestDaemonServerHandleRequest:
                         finally:
                             cleanup_released.set()
                             if not ensure_task.done():
-                                await ensure_task
+                                ensure_task.cancel()
+                                await asyncio.wait_for(
+                                    asyncio.gather(ensure_task, return_exceptions=True),
+                                    timeout=1.0,
+                                )
 
         await asyncio.sleep(0)
-        session.event_bus.dispatch.assert_called_once()
-        assert session.event_bus.dispatch.call_args.args[0].force is True
+        session.event_bus.dispatch.assert_not_called()
+        assert daemon_server._session is session
 
     @pytest.mark.asyncio
     async def test_execute_success(self, daemon_server):
@@ -260,9 +282,7 @@ class TestDaemonServerHandleRequest:
         mock_executor.execute = AsyncMock(return_value=mock_result)
         daemon_server._executor = mock_executor
 
-        result = await daemon_server._handle_request(
-            {"action": "execute", "code": "x = 1", "id": 1}
-        )
+        result = await daemon_server._handle_request({"action": "execute", "code": "x = 1", "id": 1})
         assert result["success"] is True
 
     @pytest.mark.asyncio
@@ -277,12 +297,8 @@ class TestDaemonServerHandleRequest:
         mock_executor.execute = AsyncMock(return_value=mock_result_fail)
         daemon_server._executor = mock_executor
 
-        with patch.object(
-            daemon_server, "_recover_browser_session", new_callable=AsyncMock
-        ):
-            result = await daemon_server._handle_request(
-                {"action": "execute", "code": "x = 1", "id": 1}
-            )
+        with patch.object(daemon_server, "_recover_browser_session", new_callable=AsyncMock):
+            result = await daemon_server._handle_request({"action": "execute", "code": "x = 1", "id": 1})
             assert result["success"] is False
             assert result["error_code"] == "cdp_connection_lost"
             assert mock_executor.execute.await_count == 1
@@ -295,6 +311,25 @@ class TestDaemonServerHandleRequest:
         assert "pid" in result["output"]
         payload = json.loads(result["output"])
         assert payload["tools"]["phase"] == "not_initialized"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "detail,secret",
+        [
+            ("Authorization: Bearer status-wire-secret", "status-wire-secret"),
+            ("Cookie: session=status-cookie-secret; theme=dark", "status-cookie-secret"),
+        ],
+    )
+    async def test_status_action_sanitizes_startup_detail(self, daemon_server, detail, secret):
+        daemon_server._fail_startup(detail, RuntimeError(detail))
+
+        response = await daemon_server._handle_request({"action": "status", "id": 7})
+
+        assert response["success"] is True
+        assert secret not in response["output"]
+        payload = json.loads(response["output"])
+        assert secret not in payload["startup"]["detail"]
+        assert "<redacted>" in payload["startup"]["detail"]
 
     @pytest.mark.asyncio
     async def test_status_reports_initialized_tools(self, daemon_server):
@@ -508,6 +543,7 @@ class TestDaemonServerHandleClient:
         """Lines 241-248: handle client successfully."""
         reader = AsyncMock()
         writer = AsyncMock()
+        writer.write = MagicMock()
 
         request = {"action": "status", "id": 1}
         reader.readline = AsyncMock(return_value=json.dumps(request).encode() + b"\n")
@@ -517,12 +553,15 @@ class TestDaemonServerHandleClient:
 
         await daemon_server._handle_client(reader, writer)
         writer.write.assert_called_once()
+        payload = json.loads(writer.write.call_args.args[0].decode())
+        assert payload["success"] is True
 
     @pytest.mark.asyncio
     async def test_handle_client_empty_data(self, daemon_server):
         """Line 241: handle client with empty data."""
         reader = AsyncMock()
         writer = AsyncMock()
+        writer.write = MagicMock()
 
         reader.readline = AsyncMock(return_value=b"")
         writer.close = MagicMock()
@@ -535,6 +574,7 @@ class TestDaemonServerHandleClient:
         """Lines 248-249: handle client timeout."""
         reader = AsyncMock()
         writer = AsyncMock()
+        writer.write = MagicMock()
 
         reader.readline = AsyncMock(side_effect=asyncio.TimeoutError())
         writer.close = MagicMock()
@@ -547,6 +587,7 @@ class TestDaemonServerHandleClient:
         """Lines 248-256: handle client with invalid JSON."""
         reader = AsyncMock()
         writer = AsyncMock()
+        writer.write = MagicMock()
 
         reader.readline = AsyncMock(return_value=b"not json\n")
         writer.drain = AsyncMock()
@@ -554,14 +595,16 @@ class TestDaemonServerHandleClient:
         writer.wait_closed = AsyncMock()
 
         await daemon_server._handle_client(reader, writer)
-        # Should have written an error response
         writer.write.assert_called_once()
+        payload = json.loads(writer.write.call_args.args[0].decode())
+        assert payload["success"] is False
 
     @pytest.mark.asyncio
     async def test_handle_client_non_dict_json(self, daemon_server):
         """Line 244: handle client with non-dict JSON."""
         reader = AsyncMock()
         writer = AsyncMock()
+        writer.write = MagicMock()
 
         reader.readline = AsyncMock(return_value=b'"just a string"\n')
         writer.drain = AsyncMock()
@@ -570,12 +613,35 @@ class TestDaemonServerHandleClient:
 
         await daemon_server._handle_client(reader, writer)
         writer.write.assert_called_once()
+        payload = json.loads(writer.write.call_args.args[0].decode())
+        assert payload["success"] is False
 
     @pytest.mark.asyncio
+    async def test_handle_client_unexpected_exception_is_sanitized(self, daemon_server):
+        reader = AsyncMock()
+        writer = AsyncMock()
+        writer.write = MagicMock()
+        reader.readline = AsyncMock(return_value=b'{"action": "status", "id": 1}\n')
+        writer.drain = AsyncMock()
+        writer.close = MagicMock()
+        writer.wait_closed = AsyncMock()
+
+        with patch.object(
+            daemon_server,
+            "_handle_request",
+            AsyncMock(side_effect=RuntimeError("Authorization: Bearer socket-secret")),
+        ):
+            await daemon_server._handle_client(reader, writer)
+
+        payload = json.loads(writer.write.call_args.args[0].decode())
+        assert "socket-secret" not in json.dumps(payload)
+        assert "authorization=<redacted>" in payload["error"].lower()
+
     async def test_handle_client_write_error(self, daemon_server):
         """Lines 261-262: handle client with write error in error handler."""
         reader = AsyncMock()
         writer = AsyncMock()
+        writer.write = MagicMock()
 
         reader.readline = AsyncMock(return_value=b"not json\n")
         writer.drain = AsyncMock(side_effect=Exception("write error"))
@@ -667,8 +733,10 @@ class TestDaemonServerRun:
                             "openbrowser.daemon.server._probe_socket",
                             return_value=SocketProbeState.ABSENT,
                         ):
-                            with patch("openbrowser.daemon.server._socket_path_identity", return_value=None), \
-                                 patch("openbrowser.daemon.server._cleanup_pid"):
+                            with (
+                                patch("openbrowser.daemon.server._socket_path_identity", return_value=None),
+                                patch("openbrowser.daemon.server._cleanup_pid"),
+                            ):
                                 with patch("openbrowser.daemon.server.IS_WINDOWS", False):
                                     with patch(
                                         "asyncio.start_unix_server",
@@ -713,8 +781,10 @@ class TestDaemonServerRun:
                             "openbrowser.daemon.server._probe_socket",
                             return_value=SocketProbeState.ABSENT,
                         ):
-                            with patch("openbrowser.daemon.server._socket_path_identity", return_value=None), \
-                                 patch("openbrowser.daemon.server._cleanup_pid"):
+                            with (
+                                patch("openbrowser.daemon.server._socket_path_identity", return_value=None),
+                                patch("openbrowser.daemon.server._cleanup_pid"),
+                            ):
                                 with patch("openbrowser.daemon.server.IS_WINDOWS", False):
                                     with patch(
                                         "asyncio.start_unix_server",

@@ -153,5 +153,15 @@ EXECUTE_CODE_DESCRIPTION = """Execute Python code in a persistent namespace with
 
 ## Recovery
 
-If a call fails with a browser connection error, do not replay a page-changing action blindly. Check `browser.lifecycle_snapshot()` for the current state. Through MCP, call `get_status`, then `reset_browser` before retrying. Through the CLI, run `openbrowser-ai daemon status` or `openbrowser-ai daemon reset`.
+If a call fails with a browser connection error, do not replay a page-changing action blindly.
+Check `browser.lifecycle_snapshot()` for the current state.
+Read the `cdp` key from that snapshot, for example `cdp = browser.lifecycle_snapshot().get('cdp') or {}`.
+Read `cdp.get('healthy')`, `cdp.get('phase')`, and `cdp.get('last_error_code')` when present.
+`healthy` is the last accepted connect or probe observation while the lifecycle preserves an active health claim.
+An inactive snapshot can report `null` and keeps the history fields.
+`last_probe_at` tells you whether a probe ran.
+`cdp_connected` is only pointer presence.
+Root CDP health does not prove a target session, tab, or page can accept commands.
+Through MCP, call `get_status`, then `reset_browser` before retrying.
+Through the CLI, run `openbrowser-ai daemon status` or `openbrowser-ai daemon reset`.
 """

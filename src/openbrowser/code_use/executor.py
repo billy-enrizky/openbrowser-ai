@@ -18,6 +18,14 @@ logger = logging.getLogger(__name__)
 DEFAULT_MAX_OUTPUT_CHARS = 10_000
 
 
+def output_limit_for_executor(executor: Any) -> int:
+    """Return the executor's positive output cap or the default cap."""
+    limit = getattr(executor, 'max_output_chars', None)
+    if isinstance(limit, bool) or not isinstance(limit, int) or limit <= 0:
+        return DEFAULT_MAX_OUTPUT_CHARS
+    return limit
+
+
 @dataclass
 class ExecutionResult:
     """Result of a code execution."""
@@ -38,6 +46,11 @@ class CodeExecutor:
         self._namespace: dict[str, Any] | None = None
         self._max_output_chars = max_output_chars
         self._lock = asyncio.Lock()
+
+    @property
+    def max_output_chars(self) -> int:
+        """Return the configured output cap used for retained diagnostics."""
+        return self._max_output_chars
 
     @property
     def initialized(self) -> bool:

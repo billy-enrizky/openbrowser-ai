@@ -11,6 +11,7 @@ import sys
 from contextlib import asynccontextmanager
 from importlib.metadata import version
 from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from mcp import Client, StdioServerParameters
@@ -120,11 +121,7 @@ class Wire:
 
 @asynccontextmanager
 async def wire(home: Path, *, browser_fixture=False, fixture=None, extra_env=None):
-    args = (
-        [str(fixture or FIXTURE)]
-        if browser_fixture or fixture
-        else ["-m", "openbrowser.mcp"]
-    )
+    args = [str(fixture or FIXTURE)] if browser_fixture or fixture else ["-m", "openbrowser.mcp"]
     environment = child_env(home)
     environment.update(extra_env or {})
     process = await asyncio.create_subprocess_exec(
@@ -210,9 +207,7 @@ async def test_latest_sdk_real_stdio_discovery_and_direct_calls(tmp_path, mode):
 @pytest.mark.asyncio
 async def test_modern_first_call_and_catalog_cache_metadata(tmp_path):
     async with wire(tmp_path) as c:
-        status = await c.request(
-            1, "tools/call", {"name": "get_status", "arguments": {}}
-        )
+        status = await c.request(1, "tools/call", {"name": "get_status", "arguments": {}})
         assert json.loads(status["content"][0]["text"])["browser"]["phase"] == "stopped"
         for ident, method, key in [
             (2, "resources/list", "resources"),
@@ -246,17 +241,11 @@ async def test_modern_first_call_and_catalog_cache_metadata(tmp_path):
         ("reset_browser", {"extra": True}),
     ],
 )
-async def test_schema_failures_are_tool_errors_before_browser_effects(
-    tmp_path, name, arguments
-):
+async def test_schema_failures_are_tool_errors_before_browser_effects(tmp_path, name, arguments):
     async with wire(tmp_path) as c:
-        result = await c.request(
-            1, "tools/call", {"name": name, "arguments": arguments}
-        )
+        result = await c.request(1, "tools/call", {"name": name, "arguments": arguments})
         assert result["isError"] is True
-        status = await c.request(
-            2, "tools/call", {"name": "get_status", "arguments": {}}
-        )
+        status = await c.request(2, "tools/call", {"name": "get_status", "arguments": {}})
         payload = json.loads(status["content"][0]["text"])
         assert payload["browser"]["phase"] == "stopped"
         assert payload["namespace_variables"] == 0
@@ -313,9 +302,7 @@ async def test_legacy_2024_raw_stdio_preserves_catalog_and_status(tmp_path):
         catalog = await c.request(2, "tools/list", modern=False)
         assert len(catalog["tools"]) == 3
         assert not {"ttlMs", "cacheScope", "resultType"} & catalog.keys()
-        status = await c.request(
-            3, "tools/call", {"name": "get_status", "arguments": {}}, modern=False
-        )
+        status = await c.request(3, "tools/call", {"name": "get_status", "arguments": {}}, modern=False)
         assert json.loads(status["content"][0]["text"])["browser"]["phase"] == "stopped"
         await c.finish()
 
@@ -445,17 +432,11 @@ async def test_catalog_is_snapshot_and_cannot_mutate_validation(monkeypatch):
         monkeypatch.delenv("OPENBROWSER_COMPACT_DESCRIPTION")
         fresh = await client.list_tools(cache_mode="refresh")
         fresh_execute = next(tool for tool in fresh.tools if tool.name == "execute_code")
-        assert (
-            fresh_execute.description
-            == original
-            == module._EXECUTE_CODE_DESCRIPTION_COMPACT
-        )
+        assert fresh_execute.description == original == module._EXECUTE_CODE_DESCRIPTION_COMPACT
         assert fresh_execute.input_schema["properties"]["code"]["type"] == "string"
         created = await client.call_tool("create_context", {})
         context_id = created.structured_content["context_id"]
-        result = await client.call_tool(
-            "execute_code", {"context_id": context_id, "code": 5}
-        )
+        result = await client.call_tool("execute_code", {"context_id": context_id, "code": 5})
         assert result.is_error
         assert "$.code" in result.content[0].text
         assert "not of type" in result.content[0].text
@@ -469,9 +450,7 @@ async def test_actual_sdk_126_client_uses_app_legacy_stdio(tmp_path):
     legacy_python = os.environ.get("OPENBROWSER_TEST_MCP1_PYTHON")
     if not legacy_python:
         if os.environ.get("CI"):
-            pytest.fail(
-                "CI must configure the isolated mcp==1.26.0 compatibility interpreter"
-            )
+            pytest.fail("CI must configure the isolated mcp==1.26.0 compatibility interpreter")
         pytest.skip(
             "Set OPENBROWSER_TEST_MCP1_PYTHON to an isolated mcp==1.26.0 interpreter for cross-version acceptance"
         )
@@ -509,11 +488,224 @@ async def test_dispatch_exception_is_explicit_tool_error(monkeypatch):
 
     monkeypatch.setattr(server, "_handle_tool", fail)
     handler = server.server.get_request_handler("tools/call").handler
-    result = await handler(
-        None, module.types.CallToolRequestParams(name="get_status", arguments={})
-    )
+    result = await handler(None, module.types.CallToolRequestParams(name="get_status", arguments={}))
     assert result.is_error
     assert result.content[0].text == "Error: dispatcher failed"
+
+
+@pytest.mark.asyncio
+async def test_tool_error_sanitizes_credentials(monkeypatch):
+    monkeypatch.setattr(module, "TELEMETRY_AVAILABLE", False)
+    server = module.OpenBrowserServer()
+
+    async def fail(name, arguments):
+        raise RuntimeError("Authorization: Bearer mcp-response-secret")
+
+    monkeypatch.setattr(server, "_handle_tool", fail)
+    handler = server.server.get_request_handler("tools/call").handler
+    result = await handler(None, module.types.CallToolRequestParams(name="get_status", arguments={}))
+
+    assert result.is_error
+    text = result.content[0].text
+    assert "mcp-response-secret" not in text
+    assert "authorization=<redacted>" in text.lower()
+
+
+@pytest.mark.asyncio
+async def test_typed_recovery_keeps_long_detail_and_guidance_at_tool_boundary(monkeypatch):
+    from types import SimpleNamespace
+
+    from openbrowser.config_lifecycle import ConfigStartupError
+
+    monkeypatch.setattr(module, "TELEMETRY_AVAILABLE", False)
+    server = module.OpenBrowserServer()
+    server._executor = MagicMock()
+    server._executor.initialized = True
+    server._executor.max_output_chars = 12_000
+    server._namespace = {"__builtins__": __builtins__}
+    server.browser_session = MagicMock()
+    server._executor.execute = AsyncMock(
+        return_value=SimpleNamespace(
+            success=False,
+            output=(
+                "websocket connection closed\nAuthorization: Bearer typed-output-secret\n" + "partial-output-" * 1000
+            ),
+            error=None,
+        )
+    )
+    long_hint = "Fix the config, then restart the MCP server. " + "Follow the config guide. " * 20
+    recovery_error = ConfigStartupError(
+        SimpleNamespace(
+            path="config.toml",
+            error_code="config_restart_required",
+            hint=long_hint,
+        ),
+        code="config_restart_required",
+        hint=long_hint,
+        detail="recovery-specific diagnostic detail",
+    )
+    server._recover_browser_session = AsyncMock(side_effect=recovery_error)
+
+    handler = server.server.get_request_handler("tools/call").handler
+    with patch.object(server, "_is_cdp_alive", AsyncMock(return_value=True)):
+        result = await handler(
+            None,
+            module.types.CallToolRequestParams(
+                name="execute_code",
+                arguments={"code": "print(1)"},
+            ),
+        )
+
+    assert result.is_error
+    text = result.content[0].text
+    assert len(text) > 240
+    assert "partial-output-" in text
+    assert "recovery-specific diagnostic detail" in text
+    assert "config_restart_required" in text
+    assert "Fix the config, then restart the MCP server." in text
+    assert "The code may have partially run" in text
+    assert "get_status before retrying" in text
+    assert "typed-output-secret" not in text
+    assert "authorization=<redacted>" in text.lower()
+
+
+@pytest.mark.asyncio
+async def test_typed_recovery_tool_boundary_respects_a_64_char_cap(monkeypatch):
+    from types import SimpleNamespace
+
+    from openbrowser.config_lifecycle import ConfigStartupError
+
+    monkeypatch.setattr(module, "TELEMETRY_AVAILABLE", False)
+    server = module.OpenBrowserServer()
+    server._executor = MagicMock()
+    server._executor.initialized = True
+    server._executor.max_output_chars = 64
+    server._namespace = {"__builtins__": __builtins__}
+    server.browser_session = MagicMock()
+    server._executor.execute = AsyncMock(
+        return_value=SimpleNamespace(
+            success=False,
+            output="partial-output Authorization: Bearer typed-output-secret",
+            error="websocket connection closed",
+        )
+    )
+    long_hint = "Fix the config. Authorization: Bearer typed-output-secret " + "Follow the guide. " * 30
+    recovery_error = ConfigStartupError(
+        SimpleNamespace(
+            path="config.toml",
+            error_code="config_restart_required",
+            hint=long_hint,
+        ),
+        code="config_restart_required",
+        hint=long_hint,
+        detail="recovery-specific diagnostic detail",
+    )
+    server._recover_browser_session = AsyncMock(side_effect=recovery_error)
+
+    handler = server.server.get_request_handler("tools/call").handler
+    with patch.object(server, "_is_cdp_alive", AsyncMock(return_value=True)):
+        result = await handler(
+            None,
+            module.types.CallToolRequestParams(
+                name="execute_code",
+                arguments={"code": "print(1)"},
+            ),
+        )
+
+    assert result.is_error
+    text = result.content[0].text
+    body = text.removeprefix("Error: ")
+    detail, separator, message = body.partition("\nconfig_restart_required:")
+    assert separator
+    assert len(detail) <= 64
+    assert "partial-output" in detail
+    assert "recovery-spec" in detail
+    assert "Fix the config." in message
+    assert "config_restart_required" in text
+    assert "The code may have partially run" in text
+    assert "get_status before retrying" in text
+    assert "typed-output-secret" not in text
+    assert "authorization=<redacted>" in text.lower()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("output_cap", [1, 2, 3, 64])
+async def test_typed_recovery_detail_stays_within_small_output_caps(monkeypatch, output_cap):
+    from types import SimpleNamespace
+
+    from openbrowser.browser.cdp_connection import MAX_ERROR_CHARS
+    from openbrowser.config_lifecycle import ConfigStartupError
+
+    server = module.OpenBrowserServer()
+    server.browser_session = None
+    server._executor = MagicMock()
+    server._executor.initialized = True
+    server._executor.max_output_chars = output_cap
+    server._namespace = {"__builtins__": __builtins__}
+    server._executor.execute = AsyncMock(
+        return_value=SimpleNamespace(
+            success=False,
+            output="partial-output",
+            error="websocket connection closed",
+        )
+    )
+    recovery_error = ConfigStartupError(
+        SimpleNamespace(
+            path="config.toml",
+            error_code="config_restart_required",
+            hint="Fix the config, then restart the MCP server.",
+        ),
+        code="config_restart_required",
+        hint="Fix the config, then restart the MCP server.",
+        detail="recovery-detail",
+    )
+    server._recover_browser_session = AsyncMock(side_effect=recovery_error)
+
+    with pytest.raises(ConfigStartupError) as raised:
+        await server._execute_code_locked("print(1)")
+
+    detail = raised.value.detail or ""
+    assert len(detail) <= output_cap
+    if output_cap in (1, 2):
+        assert detail == "r"
+    elif output_cap == 3:
+        assert detail == "p\nr"
+    else:
+        assert "partial-output" in detail
+        assert "recovery-detail" in detail
+    assert raised.value.code == "config_restart_required"
+    assert "The code may have partially run" in raised.value.hint
+    assert len(raised.value.hint) <= MAX_ERROR_CHARS
+
+
+@pytest.mark.asyncio
+async def test_typed_config_error_sanitizes_credentials(monkeypatch):
+    from types import SimpleNamespace
+
+    from openbrowser.config_lifecycle import ConfigStartupError
+
+    monkeypatch.setattr(module, "TELEMETRY_AVAILABLE", False)
+    server = module.OpenBrowserServer()
+    error = ConfigStartupError(
+        SimpleNamespace(
+            path="config.toml",
+            error_code="config_invalid",
+            hint="Authorization: Bearer mcp-typed-hint",
+        ),
+        hint="Authorization: Bearer mcp-typed-hint",
+        detail="Authorization: Bearer mcp-typed-detail",
+    )
+
+    async def fail(name, arguments):
+        raise error
+
+    monkeypatch.setattr(server, "_handle_tool", fail)
+    handler = server.server.get_request_handler("tools/call").handler
+    result = await handler(None, module.types.CallToolRequestParams(name="get_status", arguments={}))
+
+    text = result.content[0].text
+    assert "mcp-typed" not in text
+    assert "authorization=<redacted>" in text.lower()
 
 
 @pytest.mark.asyncio
@@ -565,6 +757,18 @@ async def test_exact_catalog_input_contracts_and_annotations(monkeypatch):
         "required": ["context_id"],
         "additionalProperties": False,
     }
+    legacy_status = server._legacy_by_name["get_status"]
+    for status_tool in (status, legacy_status):
+        assert "does not start a browser or probe CDP health" in status_tool.description
+        assert "last accepted connect or probe observation" in status_tool.description
+        assert "cdp.healthy" in status_tool.description
+        assert "cdp.phase" in status_tool.description
+        assert "disconnected" in status_tool.description
+        assert "cdp.last_error_code" in status_tool.description
+        assert "session_not_found" in status_tool.description
+        assert "cdp.last_probe_at" in status_tool.description
+        assert "cdp_connected only means a client object is present" in status_tool.description
+        assert "does not prove a target session, tab, or page can accept commands" in status_tool.description
     assert reset.input_schema == {
         "type": "object",
         "properties": {
@@ -595,10 +799,7 @@ async def test_exact_catalog_input_contracts_and_annotations(monkeypatch):
         "required": ["context_id", "status", "retryable"],
         "additionalProperties": False,
     }
-    assert [
-        tool.annotations.model_dump(by_alias=True, exclude_none=True)
-        for tool in catalog.tools
-    ] == [
+    assert [tool.annotations.model_dump(by_alias=True, exclude_none=True) for tool in catalog.tools] == [
         {
             "readOnlyHint": False,
             "destructiveHint": False,
@@ -693,12 +894,8 @@ async def wait_for_barrier(path):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("modern", [True, False], ids=["modern", "legacy"])
-@pytest.mark.parametrize(
-    "mode", ["reset", "cancel-start", "start-failure", "replacement-failure"]
-)
-async def test_owned_cleanup_cancellation_preserves_real_stdio_usability(
-    tmp_path, modern, mode
-):
+@pytest.mark.parametrize("mode", ["reset", "cancel-start", "start-failure", "replacement-failure"])
+async def test_owned_cleanup_cancellation_preserves_real_stdio_usability(tmp_path, modern, mode):
     barriers = tmp_path / "barriers"
     barriers.mkdir()
     fixture = ROOT / "tests/support/mcp_owned_browser_server.py"
@@ -739,15 +936,11 @@ async def test_owned_cleanup_cancellation_preserves_real_stdio_usability(
         await c.send_tool(2, operation["name"], operation.get("arguments"), modern=modern)
         if mode == "cancel-start":
             await wait_for_barrier(barriers / "start-1")
-            await c.send(
-                None, "notifications/cancelled", {"requestId": 2}, modern=modern
-            )
+            await c.send(None, "notifications/cancelled", {"requestId": 2}, modern=modern)
         blocked_owner = 2 if mode == "replacement-failure" else 1
         await wait_for_barrier(barriers / f"kill-{blocked_owner}")
         if mode != "cancel-start":
-            await c.send(
-                None, "notifications/cancelled", {"requestId": 2}, modern=modern
-            )
+            await c.send(None, "notifications/cancelled", {"requestId": 2}, modern=modern)
         # The response proves the dispatcher consumed the cancellation before kill can complete.
         during = await c.request(3, "tools/call", {"name": "get_status"}, modern=modern)
         assert json.loads(during["content"][0]["text"])["browser"]["phase"] in (
@@ -761,9 +954,7 @@ async def test_owned_cleanup_cancellation_preserves_real_stdio_usability(
             "tools/call",
             {
                 "name": "execute_code",
-                "arguments": {
-                    "code": "print(browser.ident)\nprint(globals().get('answer', 'missing'))"
-                },
+                "arguments": {"code": "print(browser.ident)\nprint(globals().get('answer', 'missing'))"},
             },
             modern=modern,
         )
@@ -782,9 +973,7 @@ async def test_owned_cleanup_cancellation_preserves_real_stdio_usability(
         assert json.loads(reset["content"][0]["text"])["ok"] is True
         stderr = await c.finish()
         final = next(
-            line.removeprefix("OWNED_FINAL ")
-            for line in stderr.splitlines()
-            if line.startswith("OWNED_FINAL ")
+            line.removeprefix("OWNED_FINAL ") for line in stderr.splitlines() if line.startswith("OWNED_FINAL ")
         )
         state = json.loads(final)
         assert state["owner"] is None
@@ -821,9 +1010,7 @@ async def test_eof_during_owned_cleanup_finishes_bounded_and_releases_owner(tmp_
         (barriers / "release-1").touch()
         stderr = await c.finish(pending_ids=(2,))
         final = next(
-            line.removeprefix("OWNED_FINAL ")
-            for line in stderr.splitlines()
-            if line.startswith("OWNED_FINAL ")
+            line.removeprefix("OWNED_FINAL ") for line in stderr.splitlines() if line.startswith("OWNED_FINAL ")
         )
         assert json.loads(final) == {
             "owner": None,
@@ -835,12 +1022,8 @@ async def test_eof_during_owned_cleanup_finishes_bounded_and_releases_owner(tmp_
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("modern", [True, False], ids=["modern", "legacy"])
-@pytest.mark.parametrize(
-    "mode", ["reset-failure", "reset-child-cancel", "reset-both-cancel"]
-)
-async def test_failed_owned_cleanup_retains_owner_and_cancellation_keeps_transport_usable(
-    tmp_path, modern, mode
-):
+@pytest.mark.parametrize("mode", ["reset-failure", "reset-child-cancel", "reset-both-cancel"])
+async def test_failed_owned_cleanup_retains_owner_and_cancellation_keeps_transport_usable(tmp_path, modern, mode):
     barriers = tmp_path / "barriers"
     barriers.mkdir()
     async with wire(
@@ -872,9 +1055,7 @@ async def test_failed_owned_cleanup_retains_owner_and_cancellation_keeps_transpo
         await c.send_tool(2, "reset_browser", modern=modern)
         await wait_for_barrier(barriers / "kill-1")
         if mode != "reset-child-cancel":
-            await c.send(
-                None, "notifications/cancelled", {"requestId": 2}, modern=modern
-            )
+            await c.send(None, "notifications/cancelled", {"requestId": 2}, modern=modern)
         await c.request(3, "tools/call", {"name": "get_status"}, modern=modern)
         (barriers / "release-1").touch()
         if mode == "reset-child-cancel":
@@ -894,9 +1075,7 @@ async def test_failed_owned_cleanup_retains_owner_and_cancellation_keeps_transpo
         status = await c.request(5, "tools/call", {"name": "get_status"}, modern=modern)
         browser = json.loads(status["content"][0]["text"])["browser"]
         assert browser["phase"] == "failed" and browser["last_error"]
-        reset = await c.request(
-            6, "tools/call", {"name": "reset_browser"}, modern=modern
-        )
+        reset = await c.request(6, "tools/call", {"name": "reset_browser"}, modern=modern)
         assert json.loads(reset["content"][0]["text"])["ok"]
         fresh = await c.request(
             7,
@@ -916,9 +1095,7 @@ async def test_failed_owned_cleanup_retains_owner_and_cancellation_keeps_transpo
         )
         stderr = await c.finish()
         final = next(
-            line.removeprefix("OWNED_FINAL ")
-            for line in stderr.splitlines()
-            if line.startswith("OWNED_FINAL ")
+            line.removeprefix("OWNED_FINAL ") for line in stderr.splitlines() if line.startswith("OWNED_FINAL ")
         )
         assert json.loads(final) == {
             "owner": None,
@@ -936,12 +1113,8 @@ async def test_failed_owned_cleanup_retains_owner_and_cancellation_keeps_transpo
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("modern", [True, False], ids=["modern", "legacy"])
-@pytest.mark.parametrize(
-    "stage", ["initial-start", "replacement-start", "health", "executor"]
-)
-async def test_owned_tool_self_cancellation_is_error_without_losing_request_transport(
-    tmp_path, modern, stage
-):
+@pytest.mark.parametrize("stage", ["initial-start", "replacement-start", "health", "executor"])
+async def test_owned_tool_self_cancellation_is_error_without_losing_request_transport(tmp_path, modern, stage):
     barriers = tmp_path / "barriers"
     barriers.mkdir()
     (barriers / "release-1").touch()
@@ -992,9 +1165,7 @@ async def test_owned_tool_self_cancellation_is_error_without_losing_request_tran
         (barriers / "recover").unlink(missing_ok=True)
         status = await c.request(3, "tools/call", {"name": "get_status"}, modern=modern)
         state = json.loads(status["content"][0]["text"])
-        assert state["browser"]["phase"] == (
-            "failed" if stage in ("initial-start", "replacement-start") else "ready"
-        )
+        assert state["browser"]["phase"] == ("failed" if stage in ("initial-start", "replacement-start") else "ready")
         inspect = "print(globals().get('answer', 'missing'))\nprint(globals().get('partial', 'missing'))\nprint('should_not_run' in globals())"
         following = await c.request(
             4,
@@ -1018,9 +1189,7 @@ async def test_owned_tool_self_cancellation_is_error_without_losing_request_tran
             "tools/call",
             {
                 "name": "execute_code",
-                "arguments": {
-                    "code": "print('answer' in globals())\nprint('partial' in globals())"
-                },
+                "arguments": {"code": "print('answer' in globals())\nprint('partial' in globals())"},
             },
             modern=modern,
         )
@@ -1033,9 +1202,7 @@ async def test_owned_tool_self_cancellation_is_error_without_losing_request_tran
         )
         stderr = await c.finish()
         final = next(
-            line.removeprefix("OWNED_FINAL ")
-            for line in stderr.splitlines()
-            if line.startswith("OWNED_FINAL ")
+            line.removeprefix("OWNED_FINAL ") for line in stderr.splitlines() if line.startswith("OWNED_FINAL ")
         )
         final_state = json.loads(final)
         assert final_state["owner"] is None
@@ -1051,12 +1218,8 @@ async def test_owned_tool_self_cancellation_is_error_without_losing_request_tran
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("modern", [True, False], ids=["modern", "legacy"])
-async def test_executor_timeout_keeps_existing_partial_state_and_transport_usable(
-    tmp_path, modern
-):
-    async with wire(
-        tmp_path, browser_fixture=True, extra_env={"OPENBROWSER_MCP_EXEC_TIMEOUT": "1"}
-    ) as c:
+async def test_executor_timeout_keeps_existing_partial_state_and_transport_usable(tmp_path, modern):
+    async with wire(tmp_path, browser_fixture=True, extra_env={"OPENBROWSER_MCP_EXEC_TIMEOUT": "1"}) as c:
         if not modern:
             await c.request(
                 90,
@@ -1108,12 +1271,8 @@ async def test_executor_timeout_keeps_existing_partial_state_and_transport_usabl
 @pytest.mark.asyncio
 async def test_two_modern_contexts_are_isolated_and_close_invalidates_handle(tmp_path):
     async with wire(tmp_path, browser_fixture=True) as c:
-        first = await c._raw_request(
-            "ctx-a", "tools/call", {"name": "create_context", "arguments": {}}
-        )
-        second = await c._raw_request(
-            "ctx-b", "tools/call", {"name": "create_context", "arguments": {}}
-        )
+        first = await c._raw_request("ctx-a", "tools/call", {"name": "create_context", "arguments": {}})
+        second = await c._raw_request("ctx-b", "tools/call", {"name": "create_context", "arguments": {}})
         first_id = first["structuredContent"]["context_id"]
         second_id = second["structuredContent"]["context_id"]
         assert first_id != second_id
@@ -1201,15 +1360,9 @@ async def test_modern_context_capacity_returns_before_allocation(tmp_path):
         browser_fixture=True,
         extra_env={"OPENBROWSER_MCP_MAX_CONTEXTS": "2"},
     ) as c:
-        first = await c._raw_request(
-            "ctx-a", "tools/call", {"name": "create_context", "arguments": {}}
-        )
-        await c._raw_request(
-            "ctx-b", "tools/call", {"name": "create_context", "arguments": {}}
-        )
-        limited = await c._raw_request(
-            "ctx-c", "tools/call", {"name": "create_context", "arguments": {}}
-        )
+        first = await c._raw_request("ctx-a", "tools/call", {"name": "create_context", "arguments": {}})
+        await c._raw_request("ctx-b", "tools/call", {"name": "create_context", "arguments": {}})
+        limited = await c._raw_request("ctx-c", "tools/call", {"name": "create_context", "arguments": {}})
         assert limited["isError"] is True
         assert "context_limit_reached" in limited["content"][0]["text"]
         first_id = first["structuredContent"]["context_id"]
@@ -1218,17 +1371,13 @@ async def test_modern_context_capacity_returns_before_allocation(tmp_path):
             "tools/call",
             {"name": "close_context", "arguments": {"context_id": first_id}},
         )
-        replacement = await c._raw_request(
-            "ctx-d", "tools/call", {"name": "create_context", "arguments": {}}
-        )
+        replacement = await c._raw_request("ctx-d", "tools/call", {"name": "create_context", "arguments": {}})
         assert replacement["isError"] is False
         await c.finish()
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "version", ["2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25"]
-)
+@pytest.mark.parametrize("version", ["2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25"])
 async def test_all_allowlisted_legacy_versions_keep_three_tools(tmp_path, version):
     async with wire(tmp_path, browser_fixture=True) as c:
         init = await c.request(
@@ -1249,9 +1398,17 @@ async def test_all_allowlisted_legacy_versions_keep_three_tools(tmp_path, versio
             "get_status",
             "reset_browser",
         ]
-        status = await c.request(
-            3, "tools/call", {"name": "get_status", "arguments": {}}, modern=False
-        )
+        status_tool = next(tool for tool in catalog["tools"] if tool["name"] == "get_status")
+        assert "does not start a browser or probe CDP health" in status_tool["description"]
+        assert "last accepted connect or probe observation" in status_tool["description"]
+        assert "cdp.phase" in status_tool["description"]
+        assert "disconnected" in status_tool["description"]
+        assert "cdp.last_error_code" in status_tool["description"]
+        assert "session_not_found" in status_tool["description"]
+        assert "cdp.last_probe_at" in status_tool["description"]
+        assert "cdp_connected only means a client object is present" in status_tool["description"]
+        assert "does not prove a target session, tab, or page can accept commands" in status_tool["description"]
+        status = await c.request(3, "tools/call", {"name": "get_status", "arguments": {}}, modern=False)
         assert json.loads(status["content"][0]["text"])["browser"]["phase"] == "stopped"
         await c.finish()
 
@@ -1288,9 +1445,7 @@ async def test_modern_stateful_calls_without_handle_are_rejected_before_effect(t
             )
             assert result["isError"] is True
             assert "context_id" in result["content"][0]["text"]
-        created = await c._raw_request(
-            "ctx", "tools/call", {"name": "create_context", "arguments": {}}
-        )
+        created = await c._raw_request("ctx", "tools/call", {"name": "create_context", "arguments": {}})
         context_id = created["structuredContent"]["context_id"]
         status = await c._raw_request(
             "status",
@@ -1313,9 +1468,7 @@ async def test_close_failure_is_explicit_and_retryable_over_stdio(tmp_path):
             "OPENBROWSER_TEST_OWNED_MODE": "reset-failure",
         },
     ) as c:
-        created = await c._raw_request(
-            "ctx", "tools/call", {"name": "create_context", "arguments": {}}
-        )
+        created = await c._raw_request("ctx", "tools/call", {"name": "create_context", "arguments": {}})
         context_id = created["structuredContent"]["context_id"]
         await c._raw_request(
             "exec",
@@ -1376,14 +1529,38 @@ async def test_context_errors_do_not_leak_handles_to_telemetry(monkeypatch):
     handler = server.server.get_request_handler("tools/call").handler
     result = await handler(
         SimpleNamespace(protocol_version="2026-07-28"),
-        module.types.CallToolRequestParams(
-            name="get_status", arguments={"context_id": "secret-handle"}
-        ),
+        module.types.CallToolRequestParams(name="get_status", arguments={"context_id": "secret-handle"}),
     )
     assert result.is_error
     assert len(events) == 1
     assert events[0].error_message == "context_not_found"
     assert "secret-handle" not in str(events[0])
+
+
+@pytest.mark.asyncio
+async def test_unknown_tool_telemetry_redacts_caller_name(monkeypatch):
+    from types import SimpleNamespace
+
+    from mcp import MCPError
+
+    monkeypatch.setattr(module, "TELEMETRY_AVAILABLE", True)
+    server = module.OpenBrowserServer()
+    events = []
+    server._telemetry = SimpleNamespace(capture=events.append)
+    handler = server.server.get_request_handler("tools/call").handler
+    bad_name = "Authorization: Bearer telemetry-secret"
+
+    with pytest.raises(MCPError):
+        await handler(
+            SimpleNamespace(protocol_version="2026-07-28"),
+            module.types.CallToolRequestParams(name=bad_name, arguments={}),
+        )
+
+    assert len(events) == 1
+    event = events[0]
+    assert event.error_message == "unknown_tool"
+    assert event.tool_name == "unknown_tool"
+    assert "telemetry-secret" not in str(event)
 
 
 @pytest.mark.asyncio
@@ -1427,9 +1604,7 @@ async def test_real_stdio_invalid_config_reports_tool_error(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_config_errors_do_not_leak_paths_to_telemetry(
-    isolated_config_path, monkeypatch
-):
+async def test_config_errors_do_not_leak_paths_to_telemetry(isolated_config_path, monkeypatch):
     from types import SimpleNamespace
     from unittest.mock import AsyncMock
 

@@ -43,6 +43,7 @@ VALID_PDF_BYTES = (
 # Shared helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_mock_browser_session(downloads_path=None):
     """Create a mock BrowserSession for watchdog/service tests."""
     session = create_autospec(BrowserSession, instance=True)
@@ -66,9 +67,7 @@ def _make_mock_browser_session(downloads_path=None):
     session.get_all_frames = AsyncMock(return_value=({}, []))
 
     session.browser_profile = MagicMock()
-    session.browser_profile.downloads_path = downloads_path or tempfile.mkdtemp(
-        prefix="openbrowser-test-"
-    )
+    session.browser_profile.downloads_path = downloads_path or tempfile.mkdtemp(prefix="openbrowser-test-")
     session.browser_profile.auto_download_pdfs = False
     return session
 
@@ -87,6 +86,7 @@ def _make_watchdog(downloads_path=None):
 # ===========================================================================
 # DOWNLOADS_WATCHDOG.PY TESTS
 # ===========================================================================
+
 
 @pytest.mark.asyncio
 class TestDownloadWillBeginHandler:
@@ -374,9 +374,7 @@ class TestNetworkHandlerBackgroundDownloadErrors:
         }
 
         # Let create_task actually create the real task so download_in_background runs
-        with patch.object(
-            DownloadsWatchdog, "download_file_from_url", new_callable=AsyncMock, return_value=None
-        ):
+        with patch.object(DownloadsWatchdog, "download_file_from_url", new_callable=AsyncMock, return_value=None):
             handler_fn(event, "session-6")
             # Let the background task run
             await asyncio.sleep(0.05)
@@ -457,9 +455,7 @@ class TestDownloadFileFromUrl:
         mock_cdp_session = MagicMock()
         mock_cdp_session.session_id = "sess-1"
         mock_cdp_session.cdp_client = MagicMock()
-        mock_cdp_session.cdp_client.send.Runtime.evaluate = AsyncMock(
-            side_effect=RuntimeError("eval failed")
-        )
+        mock_cdp_session.cdp_client.send.Runtime.evaluate = AsyncMock(side_effect=RuntimeError("eval failed"))
         session.get_or_create_cdp_session.return_value = mock_cdp_session
 
         result = await wd.download_file_from_url(
@@ -483,9 +479,7 @@ class TestDownloadFileFromUrl:
             mock_cdp_session = MagicMock()
             mock_cdp_session.session_id = "sess-2"
             mock_cdp_session.cdp_client = MagicMock()
-            mock_cdp_session.cdp_client.send.Runtime.evaluate = AsyncMock(
-                side_effect=RuntimeError("eval failed")
-            )
+            mock_cdp_session.cdp_client.send.Runtime.evaluate = AsyncMock(side_effect=RuntimeError("eval failed"))
             session.get_or_create_cdp_session.return_value = mock_cdp_session
 
             result = await wd.download_file_from_url(
@@ -723,9 +717,7 @@ class TestFilenameCounterInPdfDownload:
             mock_cdp_session = MagicMock()
             mock_cdp_session.session_id = "sess-pdf"
             mock_cdp_session.cdp_client = MagicMock()
-            mock_cdp_session.cdp_client.send.Runtime.evaluate = AsyncMock(
-                side_effect=RuntimeError("eval failed")
-            )
+            mock_cdp_session.cdp_client.send.Runtime.evaluate = AsyncMock(side_effect=RuntimeError("eval failed"))
             session.get_or_create_cdp_session.return_value = mock_cdp_session
 
             # Call trigger_pdf_download which hits the counter logic
@@ -737,6 +729,7 @@ class TestFilenameCounterInPdfDownload:
 # MCP/SERVER.PY TESTS
 # ===========================================================================
 
+
 class TestMCPServerImports:
     """Cover lines 43-44, 49, 92-95, 148-151, 157-158: Import-time branches."""
 
@@ -744,23 +737,27 @@ class TestMCPServerImports:
         """Lines 43-44: PSUTIL_AVAILABLE = False when import fails."""
         # Just verify the module-level flag exists
         from openbrowser.mcp import server as mcp_server
+
         # PSUTIL_AVAILABLE is set at module load -- we test both paths
         assert hasattr(mcp_server, "PSUTIL_AVAILABLE")
 
     def test_filesystem_import_branches(self):
         """Lines 92-95: FILESYSTEM_AVAILABLE import error handling."""
         from openbrowser.mcp import server as mcp_server
+
         assert hasattr(mcp_server, "FILESYSTEM_AVAILABLE")
 
     def test_mcp_available_flag(self):
         """Lines 148-151: MCP_AVAILABLE flag."""
         from openbrowser.mcp import server as mcp_server
+
         # If we got this far, MCP_AVAILABLE should be True
         assert mcp_server.MCP_AVAILABLE is True
 
     def test_telemetry_available_flag(self):
         """Lines 157-158: TELEMETRY_AVAILABLE flag."""
         from openbrowser.mcp import server as mcp_server
+
         assert hasattr(mcp_server, "TELEMETRY_AVAILABLE")
 
 
@@ -896,8 +893,10 @@ class TestMCPServerCleanup:
         srv._executor.initialized = True
         srv._executor.execute = AsyncMock(side_effect=[fail_result, success_result])
 
-        with patch.object(srv, "_is_cdp_alive", new_callable=AsyncMock, return_value=True), \
-             patch.object(srv, "_recover_browser_session", new_callable=AsyncMock):
+        with (
+            patch.object(srv, "_is_cdp_alive", new_callable=AsyncMock, return_value=True),
+            patch.object(srv, "_recover_browser_session", new_callable=AsyncMock),
+        ):
             result = await srv._execute_code("x")
             assert "may have partially run" in result
             assert srv._executor.execute.await_count == 1
@@ -932,6 +931,7 @@ class TestGetParentProcessCmdline:
 # ===========================================================================
 # DOM/SERVICE.PY TESTS
 # ===========================================================================
+
 
 @pytest.mark.asyncio
 class TestDomServiceShadowRootValueError:
@@ -1053,26 +1053,35 @@ class TestDomServiceCrossOriginIframes:
         mock_trees.dom_tree = {"root": root_node}
         mock_trees.ax_tree = {"nodes": []}
         mock_trees.snapshot = {
-            "documents": [{
-                "nodes": {
-                    "backendNodeId": [], "parentIndex": [],
-                    "nodeType": [], "nodeName": [], "attributes": [],
-                },
-                "layout": {
-                    "nodeIndex": [], "bounds": [],
-                    "text": [], "styles": [],
-                },
-                "textValue": {"index": [], "value": []},
-                "inputValue": {"index": [], "value": []},
-                "inputChecked": {"index": []},
-                "optionSelected": {"index": []},
-                "scrollOffsetX": [],
-                "scrollOffsetY": [],
-            }],
+            "documents": [
+                {
+                    "nodes": {
+                        "backendNodeId": [],
+                        "parentIndex": [],
+                        "nodeType": [],
+                        "nodeName": [],
+                        "attributes": [],
+                    },
+                    "layout": {
+                        "nodeIndex": [],
+                        "bounds": [],
+                        "text": [],
+                        "styles": [],
+                    },
+                    "textValue": {"index": [], "value": []},
+                    "inputValue": {"index": [], "value": []},
+                    "inputChecked": {"index": []},
+                    "optionSelected": {"index": []},
+                    "scrollOffsetX": [],
+                    "scrollOffsetY": [],
+                }
+            ],
         }
 
-        with patch.object(dom_service, "_get_all_trees", new_callable=AsyncMock, return_value=mock_trees), \
-             patch("openbrowser.dom.service.build_snapshot_lookup", return_value={}):
+        with (
+            patch.object(dom_service, "_get_all_trees", new_callable=AsyncMock, return_value=mock_trees),
+            patch("openbrowser.dom.service.build_snapshot_lookup", return_value={}),
+        ):
             # This will exercise the cross-origin iframe code paths
             # where contentDocument is None. But we need is_element_visible to return values.
             with patch.object(dom_service, "is_element_visible_according_to_all_parents", return_value=False):
@@ -1085,6 +1094,7 @@ class TestDomServiceCrossOriginIframes:
 # ===========================================================================
 # CODE_USE/SERVICE.PY TESTS
 # ===========================================================================
+
 
 class TestCodeAgentInit:
     """Cover lines 117, 195: CodeAgent __init__ edge cases."""
@@ -1099,10 +1109,12 @@ class TestCodeAgentInit:
         mock_session = MagicMock(spec=BrowserSession)
         mock_session.event_bus = MagicMock()
 
-        with patch("openbrowser.code_use.service.FileSystem"), \
-             patch("openbrowser.code_use.service.ProductTelemetry"), \
-             patch("openbrowser.code_use.service.TokenCost"), \
-             patch("openbrowser.code_use.service.get_openbrowser_version", return_value="0.1.0"):
+        with (
+            patch("openbrowser.code_use.service.FileSystem"),
+            patch("openbrowser.code_use.service.ProductTelemetry"),
+            patch("openbrowser.code_use.service.TokenCost"),
+            patch("openbrowser.code_use.service.get_openbrowser_version", return_value="0.1.0"),
+        ):
             agent = CodeAgent(
                 task="test task",
                 llm=mock_llm,
@@ -1117,10 +1129,12 @@ class TestCodeAgentInit:
         mock_llm = MagicMock()
         mock_llm.__class__.__name__ = "MockLLM"
 
-        with patch("openbrowser.code_use.service.FileSystem"), \
-             patch("openbrowser.code_use.service.ProductTelemetry"), \
-             patch("openbrowser.code_use.service.TokenCost"), \
-             patch("openbrowser.code_use.service.get_openbrowser_version", return_value="0.1.0"):
+        with (
+            patch("openbrowser.code_use.service.FileSystem"),
+            patch("openbrowser.code_use.service.ProductTelemetry"),
+            patch("openbrowser.code_use.service.TokenCost"),
+            patch("openbrowser.code_use.service.get_openbrowser_version", return_value="0.1.0"),
+        ):
             agent = CodeAgent(
                 task="test task",
                 llm=mock_llm,
@@ -1138,7 +1152,7 @@ class TestCodeAgentSyntaxErrorHints:
         error_msg = "unterminated string literal"
         has_fstring = bool(re.search(r'\bf["\']', code))
         has_json_pattern = bool(re.search(r'json\.dumps|"[^"]*\{[^"]*\}[^"]*"|\'[^\']*\{[^\']*\}[^\']*\'', code))
-        has_js_pattern = bool(re.search(r'evaluate\(|await evaluate', code))
+        has_js_pattern = bool(re.search(r"evaluate\(|await evaluate", code))
         assert has_fstring is True
         assert has_json_pattern is True
 
@@ -1146,38 +1160,38 @@ class TestCodeAgentSyntaxErrorHints:
         """Lines 1019: f-string with evaluate() pattern."""
         code = '''f"await evaluate('code')"'''
         has_fstring = bool(re.search(r'\bf["\']', code))
-        has_js_pattern = bool(re.search(r'evaluate\(|await evaluate', code))
+        has_js_pattern = bool(re.search(r"evaluate\(|await evaluate", code))
         assert has_fstring is True
         assert has_js_pattern is True
 
     def test_string_prefix_detection_fstring_raw(self):
         """Lines 1033-1034: rf/fr prefix detection."""
         msg_lower = "unterminated f-string raw literal"
-        is_fstring_raw = 'f-string' in msg_lower and 'raw' in msg_lower
+        is_fstring_raw = "f-string" in msg_lower and "raw" in msg_lower
         assert is_fstring_raw is True
 
     def test_string_prefix_detection_fstring(self):
         """Lines 1036-1037: f prefix detection."""
         msg_lower = "unterminated f-string literal"
-        is_fstring = 'f-string' in msg_lower
-        is_raw = 'raw' in msg_lower
+        is_fstring = "f-string" in msg_lower
+        is_raw = "raw" in msg_lower
         assert is_fstring is True
         assert is_raw is False
 
     def test_string_prefix_detection_raw_bytes(self):
         """Lines 1039-1040: rb/br prefix detection."""
         msg_lower = "unterminated raw bytes literal"
-        is_raw = 'raw' in msg_lower
-        is_bytes = 'bytes' in msg_lower
+        is_raw = "raw" in msg_lower
+        is_bytes = "bytes" in msg_lower
         assert is_raw is True
         assert is_bytes is True
 
     def test_string_prefix_detection_raw(self):
         """Lines 1042-1043: r prefix detection."""
         msg_lower = "unterminated raw string literal"
-        is_raw = 'raw' in msg_lower
-        is_bytes = 'bytes' in msg_lower
-        is_fstring = 'f-string' in msg_lower
+        is_raw = "raw" in msg_lower
+        is_bytes = "bytes" in msg_lower
+        is_fstring = "f-string" in msg_lower
         assert is_raw is True
         assert is_bytes is False
         assert is_fstring is False
@@ -1185,28 +1199,28 @@ class TestCodeAgentSyntaxErrorHints:
     def test_string_prefix_detection_bytes(self):
         """Lines 1045-1046: b prefix detection."""
         msg_lower = "unterminated bytes literal"
-        is_bytes = 'bytes' in msg_lower
-        is_raw = 'raw' in msg_lower
+        is_bytes = "bytes" in msg_lower
+        is_raw = "raw" in msg_lower
         assert is_bytes is True
         assert is_raw is False
 
     def test_triple_quoted_hint_with_prefix(self):
         """Lines 1054: Triple-quoted with prefix."""
         error_msg = "unterminated triple-quoted string literal"
-        is_triple = 'triple-quoted' in error_msg.lower()
+        is_triple = "triple-quoted" in error_msg.lower()
         assert is_triple is True
 
     def test_single_quoted_hint_with_prefix(self):
         """Lines 1060: Single-quoted with prefix."""
         error_msg = "unterminated string literal"
-        is_triple = 'triple-quoted' in error_msg.lower()
+        is_triple = "triple-quoted" in error_msg.lower()
         assert is_triple is False
 
     def test_syntax_error_text_fallback(self):
         """Lines 1068-1072: When e.text is empty, extract line from code."""
         code = "x = 1\ny = 'unterminated"
         lineno = 2
-        lines = code.split('\n')
+        lines = code.split("\n")
         if 0 < lineno <= len(lines):
             extracted = lines[lineno - 1]
         assert extracted == "y = 'unterminated"
@@ -1226,10 +1240,10 @@ class TestCodeAgentStepLimit:
         }
         data_vars = []
         for var_name in sorted(namespace.keys()):
-            if not var_name.startswith('_') and var_name not in {'json', 'asyncio', 'csv', 're', 'datetime', 'Path'}:
+            if not var_name.startswith("_") and var_name not in {"json", "asyncio", "csv", "re", "datetime", "Path"}:
                 var_value = namespace[var_name]
                 if isinstance(var_value, (list, dict)) and var_value:
-                    data_vars.append(f'  - {var_name}: {type(var_value).__name__} with {len(var_value)} items')
+                    data_vars.append(f"  - {var_name}: {type(var_value).__name__} with {len(var_value)} items")
 
         assert len(data_vars) == 2
         assert "results" in data_vars[1]
@@ -1261,13 +1275,13 @@ class TestCodeAgentCodeBlocks:
     def test_no_code_blocks_returns_empty(self):
         """Line 775: No python block in code_blocks."""
         code_blocks = {"javascript": "console.log('hi')"}
-        python_blocks = [k for k in sorted(code_blocks.keys()) if k.startswith('python')]
-        code = ''
-        if 'python' in code_blocks:
-            code = code_blocks['python']
+        python_blocks = [k for k in sorted(code_blocks.keys()) if k.startswith("python")]
+        code = ""
+        if "python" in code_blocks:
+            code = code_blocks["python"]
         elif code_blocks:
-            code = ''
-        assert code == ''
+            code = ""
+        assert code == ""
         assert len(python_blocks) == 0
 
 
@@ -1277,7 +1291,7 @@ class TestCodeAgentExecuteCodeNamespace:
     def test_ast_global_detection(self):
         """Lines 908-909: Detect ast.Global nodes and pre-define vars."""
         code = "global my_var\nmy_var = 42"
-        tree = ast.parse(code, mode='exec')
+        tree = ast.parse(code, mode="exec")
         user_global_names = set()
         for node in ast.walk(tree):
             if isinstance(node, ast.Global):
@@ -1305,10 +1319,11 @@ class TestCodeAgentScreenshotPath:
             if not path.exists():
                 result = None
             else:
-                with open(path, 'rb') as f:
+                with open(path, "rb") as f:
                     data = f.read()
                 import base64
-                result = base64.b64encode(data).decode('utf-8')
+
+                result = base64.b64encode(data).decode("utf-8")
         except Exception:
             result = None
         assert result is None
@@ -1325,7 +1340,7 @@ class TestCodeAgentMultipleBlocks:
         try:
             raise RuntimeError("CDP disconnected")
         except Exception as e:
-            logger.warning(f'Failed to get new browser state: {e}')
+            logger.warning(f"Failed to get new browser state: {e}")
         assert browser_state_text is None
 
 
@@ -1345,6 +1360,7 @@ class TestCodeAgentNavError:
 # UTILS/__INIT__.PY TESTS
 # ===========================================================================
 
+
 class TestUtilsFallbackPath:
     """Cover lines 44-59: Fallback when _parent_utils is None."""
 
@@ -1352,27 +1368,27 @@ class TestUtilsFallbackPath:
         """Lines 44-59: Exercise the fallback path."""
         # The fallback is used when utils.py doesn't exist.
         # We can test the fallback functions directly.
-        fallback_logger = logging.getLogger('openbrowser')
+        fallback_logger = logging.getLogger("openbrowser")
         assert fallback_logger is not None
 
         # Test fallback lambda functions
-        _log_pretty_path = lambda x: str(x) if x else ''
+        _log_pretty_path = lambda x: str(x) if x else ""
         assert _log_pretty_path("/tmp/test") == "/tmp/test"
-        assert _log_pretty_path(None) == ''
+        assert _log_pretty_path(None) == ""
 
-        _log_pretty_url = lambda s, max_len=22: s[:max_len] + '...' if len(s) > max_len else s
+        _log_pretty_url = lambda s, max_len=22: s[:max_len] + "..." if len(s) > max_len else s
         assert _log_pretty_url("https://example.com") == "https://example.com"
         assert _log_pretty_url("https://very-long-url.example.com/path") == "https://very-long-url...."
 
-        get_openbrowser_version = lambda: 'unknown'
-        assert get_openbrowser_version() == 'unknown'
+        get_openbrowser_version = lambda: "unknown"
+        assert get_openbrowser_version() == "unknown"
 
         match_url_with_domain_pattern = lambda url, pattern, log_warnings=False: False
         assert match_url_with_domain_pattern("http://x.com", "*.com") is False
 
-        is_new_tab_page = lambda url: url in ('about:blank', 'chrome://new-tab-page/', 'chrome://newtab/')
-        assert is_new_tab_page('about:blank') is True
-        assert is_new_tab_page('https://google.com') is False
+        is_new_tab_page = lambda url: url in ("about:blank", "chrome://new-tab-page/", "chrome://newtab/")
+        assert is_new_tab_page("about:blank") is True
+        assert is_new_tab_page("https://google.com") is False
 
         singleton = lambda cls: cls
         assert singleton(int) is int
@@ -1402,6 +1418,7 @@ class TestUtilsFallbackPath:
             get_openbrowser_version,
             is_new_tab_page,
         )
+
         # These should be callable regardless of path
         assert callable(_log_pretty_path)
         assert callable(_log_pretty_url)
@@ -1411,18 +1428,21 @@ class TestUtilsFallbackPath:
     def test_utils_all_exports(self):
         """Verify __all__ exports are accessible."""
         import openbrowser.utils as utils_pkg
+
         for name in utils_pkg.__all__:
             assert hasattr(utils_pkg, name), f"Missing export: {name}"
 
     def test_windows_flag(self):
         """Line 59: _IS_WINDOWS fallback."""
         from openbrowser.utils import _IS_WINDOWS
+
         # On macOS/Linux this should be False
         assert isinstance(_IS_WINDOWS, bool)
 
     def test_url_pattern_exists(self):
         """Line 58: URL_PATTERN fallback."""
         from openbrowser.utils import URL_PATTERN
+
         # Should be a compiled pattern or None
         assert URL_PATTERN is not None or URL_PATTERN is None  # exists either way
 
@@ -1430,6 +1450,7 @@ class TestUtilsFallbackPath:
 # ===========================================================================
 # Additional edge case tests for remaining uncovered lines
 # ===========================================================================
+
 
 @pytest.mark.asyncio
 class TestMCPServerStartCleanup:
@@ -1508,30 +1529,57 @@ class TestMCPServerCDPAlive:
         assert result is False
 
     async def test_is_cdp_alive_no_root(self):
-        """_is_cdp_alive returns False when no _cdp_client_root."""
+        """A probe with no root returns a disconnected health snapshot."""
+        from types import SimpleNamespace
+
         from openbrowser.mcp import server as mcp_server
+
+        async def probe(*, timeout_seconds):
+            return SimpleNamespace(client_present=False, healthy=False)
 
         with startup_config({}):
             srv = mcp_server.OpenBrowserServer()
 
         srv.browser_session = MagicMock()
-        srv.browser_session._cdp_client_root = None
+        srv.browser_session.probe_cdp_connection = probe
         result = await srv._is_cdp_alive()
         assert result is False
 
     async def test_is_cdp_alive_exception(self):
-        """_is_cdp_alive returns False when getVersion raises."""
+        """A probe failure returns False."""
         from openbrowser.mcp import server as mcp_server
+
+        async def probe(*, timeout_seconds):
+            raise RuntimeError("dead")
 
         with startup_config({}):
             srv = mcp_server.OpenBrowserServer()
 
         srv.browser_session = MagicMock()
-        root = MagicMock()
-        root.send.Browser.getVersion = AsyncMock(side_effect=RuntimeError("dead"))
-        srv.browser_session._cdp_client_root = root
+        srv.browser_session.probe_cdp_connection = probe
         result = await srv._is_cdp_alive()
         assert result is False
+
+    async def test_is_cdp_alive_without_health_api_does_not_use_root(self):
+        """A legacy session without the health API cannot become healthy via a root command."""
+        from openbrowser.mcp import server as mcp_server
+
+        class LegacySession:
+            def __init__(self, root):
+                self._cdp_client_root = root
+
+        with startup_config({}):
+            srv = mcp_server.OpenBrowserServer()
+
+        root = MagicMock()
+        root.send.Browser.getVersion = AsyncMock(return_value={})
+        srv.browser_session = LegacySession(root)
+
+        assert not hasattr(srv.browser_session, 'probe_cdp_connection')
+        result = await srv._is_cdp_alive()
+
+        assert result is False
+        root.send.Browser.getVersion.assert_not_awaited()
 
 
 @pytest.mark.asyncio

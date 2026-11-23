@@ -99,7 +99,7 @@ from openbrowser.browser.lifecycle import (
 	LifecyclePhase,
 	LifecycleTransitionError,
 )
-from openbrowser.code_use.executor import DEFAULT_MAX_OUTPUT_CHARS, CodeExecutor
+from openbrowser.code_use.executor import DEFAULT_MAX_OUTPUT_CHARS, CodeExecutor, output_limit_for_executor
 from openbrowser.code_use.namespace import create_namespace
 from openbrowser.config import (
 	CONFIG,
@@ -123,6 +123,8 @@ logger = logging.getLogger(__name__)
 from openbrowser.mcp.cancellation import _CleanupOutcome, _drain_owned_completion
 
 _MCP_WORKSPACE_ROOT = os.environ.get('OPENBROWSER_MCP_WORKSPACE_DIR', '').strip()
+
+_PARTIAL_RUN_WARNING = 'The code may have partially run; run get_status before retrying.'
 _MCP_WORKSPACE_DIR = (
 	Path(_MCP_WORKSPACE_ROOT).expanduser()
 	if _MCP_WORKSPACE_ROOT
@@ -250,7 +252,18 @@ def _tool_catalog(description: str, *, modern: bool) -> tuple[types.Tool, ...]:
 		name='get_status',
 		description=(
 			'Return OpenBrowser server, browser, profile, and tab state as JSON. '
-			'Read-only and does not start a browser. Use this before retrying a failed task.'
+			'Read-only and does not start a browser or probe CDP health. Use this before retrying a failed task. '
+			'When browser.cdp is present, cdp.healthy is the last accepted connect or probe observation '
+			'while the lifecycle preserves an active claim; inactive snapshots can report null '
+			'and keep the history fields. '
+			'Use cdp.phase and cdp.last_error_code before retrying. '
+			'cdp.phase is one of disconnected, resolving, connecting, connected, degraded, failed. '
+			'cdp.last_error_code is null or not_connected, timeout, connection_closed, '
+			'session_not_found, probe_failed, connect_failed, cancelled. '
+			'session_not_found can come from target attachment during connect setup. '
+			'Use cdp.last_probe_at to tell whether a probe ran. '
+			'cdp_connected only means a client object is present. '
+			'Root CDP health does not prove a target session, tab, or page can accept commands.'
 			+ (' Requires context_id from create_context.' if modern else '')
 		),
 		input_schema=status_schema,
@@ -741,7 +754,9 @@ class _BrowserOwner:
 				self._pending_variables.clear()
 				self._browser_lifecycle.transition(LifecyclePhase.READY, reason='browser ready')
 			except BaseException as error:
-				message = f'{type(error).__name__}: {error}'
+				from openbrowser.browser.cdp_connection import sanitize_error_detail
+
+				message = f'{type(error).__name__}: {sanitize_error_detail(error) or type(error).__name__}'
 				self._browser_lifecycle.fail(message, reason='browser start failed')
 				logger.error('Failed to initialize browser session: %s', error)
 				if session is not None:
@@ -762,20 +777,22 @@ class _BrowserOwner:
 		"""Check if the browser session's CDP WebSocket is still connected."""
 		if not self.browser_session:
 			return False
-		root = getattr(self.browser_session, '_cdp_client_root', None)
-		if root is None:
-			return False
 		timeout = _CDP_HEALTH_CHECK_TIMEOUT_SECONDS
 		if deadline is not None:
 			remaining = deadline - time.monotonic()
 			if remaining <= 0:
 				return False
 			timeout = min(timeout, remaining)
+		probe = getattr(self.browser_session, 'probe_cdp_connection', None)
+		if not inspect.iscoroutinefunction(probe):
+			return False
 		try:
-			await asyncio.wait_for(root.send.Browser.getVersion(), timeout=timeout)
-			return True
+			health = await probe(timeout_seconds=timeout)
+		except asyncio.CancelledError:
+			raise
 		except Exception:
 			return False
+		return getattr(health, 'client_present', False) is True and getattr(health, 'healthy', False) is True
 
 	async def _kill_session_safely(self, session: BrowserSession) -> _CleanupOutcome:
 		"""Complete owned cleanup without confusing worker and caller cancellation."""
@@ -884,7 +901,11 @@ class _BrowserOwner:
 			try:
 				profile = self._build_browser_profile()
 				session = BrowserSession(browser_profile=profile)
-			except BaseException:
+			except BaseException as error:
+				from openbrowser.browser.cdp_connection import sanitize_error_detail
+
+				safe_error = f'{type(error).__name__}: {sanitize_error_detail(error) or type(error).__name__}'
+				self._browser_lifecycle.fail(safe_error, reason='browser recovery failed')
 				self.browser_session = None
 				self._namespace = None
 				self._merge_pending_variables(self._carry_namespace(old_ns, old_session))
@@ -922,7 +943,10 @@ class _BrowserOwner:
 					increment_generation=True,
 				)
 			except BaseException as error:
-				self._browser_lifecycle.fail(error, reason='browser recovery failed')
+				from openbrowser.browser.cdp_connection import sanitize_error_detail
+
+				safe_error = f'{type(error).__name__}: {sanitize_error_detail(error) or type(error).__name__}'
+				self._browser_lifecycle.fail(safe_error, reason='browser recovery failed')
 				cleanup = await self._kill_session_safely(session)
 				if not cleanup.succeeded:
 					logger.error('Failed to clean up replacement browser session')
@@ -1020,9 +1044,13 @@ class _BrowserOwner:
 			except ConfigStartupError:
 				raise
 			except Exception as recovery_err:
+				from openbrowser.browser.cdp_connection import sanitize_error_detail
+
 				logger.error('Pre-flight CDP recovery failed: %s', recovery_err)
+				safe_error = sanitize_error_detail(recovery_err) or type(recovery_err).__name__
 				return (
-					f'Error: Browser connection lost and recovery failed: {type(recovery_err).__name__}: {recovery_err}\n\n'
+					'Error: Browser connection lost and recovery failed: '
+					f'{type(recovery_err).__name__}: {safe_error}\n\n'
 					'Run get_status, then reset_browser before retrying.'
 				)
 		if deadline is not None and time.monotonic() >= deadline:
@@ -1048,29 +1076,80 @@ class _BrowserOwner:
 		# but do not run the code again. The first attempt may have changed
 		# the page before the connection failed.
 		error_text = result.error or result.output
+		if not result.success:
+			from openbrowser.browser.cdp_connection import sanitize_error_detail
+
+			output_limit = output_limit_for_executor(self._executor)
+			safe_output = sanitize_error_detail(
+				result.output, max_chars=output_limit, preserve_lines=True
+			)
+			safe_error = sanitize_error_detail(
+				result.error, max_chars=output_limit, preserve_lines=True
+			)
+			safe_output = safe_output or safe_error or 'Execution failed without diagnostic text'
+		else:
+			safe_output = result.output
 		if not result.success and self._is_connection_error(error_text):
 			logger.info('CDP connection error during execution, recovering')
 			try:
 				await self._recover_browser_session()
 			except ConfigStartupError as error:
+				from openbrowser.browser.cdp_connection import (
+					MAX_ERROR_CHARS,
+					bound_text_with_suffix,
+					sanitize_error_detail,
+				)
+
+				recovery_budget = max(1, output_limit // 4)
+				recovery_detail = sanitize_error_detail(
+					error.detail, max_chars=recovery_budget, preserve_lines=True
+				)
+				if recovery_detail:
+					partial_budget = max(0, output_limit - len(recovery_detail) - 1)
+					partial_detail = (
+						sanitize_error_detail(
+							result.output or result.error,
+							max_chars=partial_budget,
+							preserve_lines=True,
+						)
+						if partial_budget > 0
+						else None
+					)
+					combined_detail = (
+						f'{partial_detail}\n{recovery_detail}' if partial_detail else recovery_detail
+					)
+				else:
+					combined_detail = sanitize_error_detail(
+						result.output or result.error,
+						max_chars=output_limit,
+						preserve_lines=True,
+					) or 'Execution failed without diagnostic text'
+				safe_hint = bound_text_with_suffix(
+					error.hint,
+					_PARTIAL_RUN_WARNING,
+					max_chars=MAX_ERROR_CHARS,
+				)
 				raise ConfigStartupError(
 					error.snapshot,
 					code=error.code,
-					hint=f'{error.hint} The code may have partially run; run get_status before retrying.',
-					detail=result.output or None,
+					hint=safe_hint or error.code,
+					detail=combined_detail or None,
 				) from error
 			except Exception as recovery_err:
+				from openbrowser.browser.cdp_connection import sanitize_error_detail
+
 				logger.error('CDP recovery failed: %s', recovery_err)
+				safe_error = sanitize_error_detail(recovery_err) or type(recovery_err).__name__
 				return (
-					f'{result.output}\n\n[openbrowser] Browser recovery failed: '
-					f'{type(recovery_err).__name__}: {recovery_err}. Run get_status before retrying.'
+					f'{safe_output}\n\n[openbrowser] Browser recovery failed: '
+					f'{type(recovery_err).__name__}: {safe_error}. {_PARTIAL_RUN_WARNING}'
 				)
 			return (
-				f'{result.output}\n\n[openbrowser] Browser was recovered. '
+				f'{safe_output}\n\n[openbrowser] Browser was recovered. '
 				'The code may have partially run. Run get_status before retrying.'
 			)
 
-		return result.output
+		return safe_output
 
 	def _downloads_snapshot(self) -> dict[str, Any]:
 		"""Return a bounded download outcome summary without starting the browser."""
@@ -1088,6 +1167,14 @@ class _BrowserOwner:
 				if isinstance(snapshot, dict):
 					browser = snapshot
 			except Exception:
+				health_snapshot = getattr(self.browser_session, 'cdp_connection_health', None)
+				if callable(health_snapshot):
+					with contextlib.suppress(Exception):
+						health_value = health_snapshot()
+						to_dict = getattr(health_value, 'to_dict', None)
+						if callable(to_dict):
+							browser['cdp'] = to_dict()
+							browser['cdp_connected'] = bool(getattr(health_value, 'client_present', False))
 				focus_snapshot = getattr(self.browser_session, 'focus_snapshot', None)
 				if callable(focus_snapshot):
 					with contextlib.suppress(Exception):
@@ -1699,13 +1786,16 @@ class OpenBrowserServer(_BrowserOwner):
 			start_time = time.time()
 			error_msg = None
 			telemetry_error = None
+			telemetry_tool_name = 'unknown_tool'
 			try:
 				era = self._protocol_era(getattr(ctx, 'protocol_version', None))
 				catalog = self._modern_tools if era == 'modern' else self._legacy_tools
 				by_name = self._modern_by_name if era == 'modern' else self._legacy_by_name
 				validators = self._modern_validators if era == 'modern' else self._legacy_validators
 				if params.name not in by_name:
+					telemetry_error = 'unknown_tool'
 					raise MCPError(code=-32602, message=f'Unknown tool: {params.name}')
+				telemetry_tool_name = params.name
 				arguments = dict(params.arguments or {})
 				validation_error = next(validators[params.name].iter_errors(arguments), None)
 				if validation_error is not None:
@@ -1720,6 +1810,7 @@ class OpenBrowserServer(_BrowserOwner):
 					telemetry_error = 'invalid_tool_arguments'
 					return types.CallToolResult(content=[types.TextContent(type='text', text=error_msg)], is_error=True)
 				if params.name == 'execute_code' and not arguments['code'].strip():
+					telemetry_error = 'empty_code'
 					error_msg = 'Error: No code provided'
 					return types.CallToolResult(content=[types.TextContent(type='text', text=error_msg)], is_error=True)
 
@@ -1757,6 +1848,7 @@ class OpenBrowserServer(_BrowserOwner):
 						self._contexts.release(lease.entry)
 				else:
 					if params.name in ('create_context', 'close_context'):
+						telemetry_error = 'unknown_tool'
 						raise MCPError(code=-32602, message=f'Unknown tool: {params.name}')
 					try:
 						lease = await self._contexts.acquire_legacy()
@@ -1772,25 +1864,48 @@ class OpenBrowserServer(_BrowserOwner):
 						self._contexts.release(lease.entry)
 				return types.CallToolResult(content=[types.TextContent(type='text', text=text)], is_error=is_error)
 			except asyncio.CancelledError as error:
+				telemetry_error = 'cancelled'
 				error_msg = f'{type(error).__name__}: {error}'
 				raise
 			except MCPError as error:
+				if telemetry_error is None:
+					telemetry_error = 'mcp_error'
 				error_msg = str(error)
 				raise
 			except ConfigStartupError as error:
+				from openbrowser.browser.cdp_connection import MAX_ERROR_CHARS, sanitize_error_detail
+
 				telemetry_error = error.code
-				error_msg = f'Error: {error}'
+				output_limit = output_limit_for_executor(self._executor)
+				safe_detail = sanitize_error_detail(
+					error.detail, max_chars=output_limit, preserve_lines=True
+				)
+				safe_path = sanitize_error_detail(str(error.path), max_chars=MAX_ERROR_CHARS) or str(error.path)
+				raw_hint = error.hint or error.code
+				if _PARTIAL_RUN_WARNING in raw_hint:
+					base_hint = raw_hint.replace(_PARTIAL_RUN_WARNING, '').strip()
+					base_budget = MAX_ERROR_CHARS - len(_PARTIAL_RUN_WARNING) - 1
+					safe_base = sanitize_error_detail(base_hint, max_chars=base_budget) or error.code
+					safe_hint = f'{safe_base} {_PARTIAL_RUN_WARNING}'
+				else:
+					safe_hint = sanitize_error_detail(raw_hint, max_chars=MAX_ERROR_CHARS) or error.code
+				message = f'{error.code}: {safe_path}. {safe_hint}'
+				error_msg = f'Error: {safe_detail}\n{message}' if safe_detail else f'Error: {message}'
 				logger.error('Tool execution blocked by config: %s', error, exc_info=True)
 				return types.CallToolResult(
 					content=[types.TextContent(type='text', text=error_msg)], is_error=True
 				)
 			except Exception as error:
-				error_msg = str(error)
+				from openbrowser.browser.cdp_connection import sanitize_error_detail
+
+				telemetry_error = 'tool_error'
+				error_msg = sanitize_error_detail(error) or type(error).__name__
 				logger.error('Tool execution failed: %s', error, exc_info=True)
 				return types.CallToolResult(
-					content=[types.TextContent(type='text', text=f'Error: {error}')], is_error=True
+					content=[types.TextContent(type='text', text=f'Error: {error_msg}')], is_error=True
 				)
 			except BaseException as error:
+				telemetry_error = 'internal_error'
 				error_msg = f'{type(error).__name__}: {error}'
 				raise
 			finally:
@@ -1799,7 +1914,7 @@ class OpenBrowserServer(_BrowserOwner):
 						MCPServerTelemetryEvent(
 							version=get_openbrowser_version(),
 							action='tool_call',
-							tool_name=params.name,
+							tool_name=telemetry_tool_name,
 							duration_seconds=time.time() - start_time,
 							error_message=telemetry_error if telemetry_error is not None else error_msg,
 						)

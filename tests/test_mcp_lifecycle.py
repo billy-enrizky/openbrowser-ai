@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -31,6 +32,7 @@ async def test_get_status_does_not_start_browser(mcp_server):
 
 	assert mcp_server.browser_session is None
 	assert payload['browser']['phase'] == 'stopped'
+	assert 'cdp' not in payload['browser']
 	assert payload['namespace_variables'] == 0
 	assert payload['profile'] is None
 	assert payload['tools']['phase'] == 'not_initialized'
@@ -375,6 +377,48 @@ async def test_namespace_start_timeout_cleans_up(mcp_server):
 
 
 @pytest.mark.asyncio
+async def test_namespace_start_failure_sanitizes_browser_status(mcp_server):
+	from openbrowser.mcp import server as mcp_mod
+
+	session = MagicMock()
+	session.start = AsyncMock(side_effect=RuntimeError('Authorization: Bearer mcp-lifecycle-secret'))
+	mcp_server.browser_session = None
+
+	with (
+		patch.object(mcp_mod, 'BrowserSession', return_value=session),
+		patch.object(mcp_server, '_kill_session_safely', new_callable=AsyncMock, return_value=_CleanupOutcome(True)),
+		pytest.raises(RuntimeError, match='mcp-lifecycle-secret'),
+	):
+		await mcp_server._ensure_namespace()
+
+	status = mcp_server._status_payload()
+	assert 'mcp-lifecycle-secret' not in str(status)
+	assert 'authorization=<redacted>' in (status['browser']['last_error'] or '').lower()
+
+
+@pytest.mark.asyncio
+async def test_profile_failure_during_recovery_marks_browser_failed(mcp_server):
+	old_session = MagicMock()
+	old_session.kill = AsyncMock()
+	mcp_server.browser_session = old_session
+	mcp_server._build_browser_profile = MagicMock(
+		side_effect=RuntimeError('Authorization: Bearer recovery-lifecycle-secret')
+	)
+
+	with (
+		patch.object(mcp_server, '_is_cdp_alive', AsyncMock(return_value=False)),
+		patch.object(mcp_server, '_kill_session_safely', AsyncMock(return_value=_CleanupOutcome(True))),
+		pytest.raises(RuntimeError, match='recovery-lifecycle-secret'),
+	):
+		await mcp_server._recover_browser_session()
+
+	status = mcp_server._status_payload()
+	assert status['browser']['phase'] == 'failed'
+	assert 'recovery-lifecycle-secret' not in str(status)
+	assert 'authorization=<redacted>' in (status['browser']['last_error'] or '').lower()
+
+
+@pytest.mark.asyncio
 async def test_profile_failure_marks_browser_lifecycle_failed(mcp_server):
 	mcp_server._build_browser_profile = MagicMock(side_effect=RuntimeError('profile failed'))
 
@@ -662,7 +706,7 @@ async def test_blocked_config_prevents_mcp_namespace_start_and_reports_status(is
 	server = OpenBrowserServer()
 
 	with patch('openbrowser.browser.BrowserSession.start') as start, pytest.raises(ConfigStartupError) as error:
-			await server._ensure_namespace()
+		await server._ensure_namespace()
 
 	assert error.value.code == 'config_restart_required'
 	assert start.called is False
@@ -772,7 +816,6 @@ async def test_mcp_repair_after_construction_still_requires_restart(isolated_con
 	assert payload['config']['restart_required'] is True
 
 
-
 @pytest.mark.asyncio
 async def test_mcp_recovery_gate_rejects_blocked_config_before_cleanup(isolated_config_path, monkeypatch):
 	monkeypatch.setenv('OPENBROWSER_CONFIG_PATH', str(isolated_config_path))
@@ -833,6 +876,139 @@ async def test_mcp_blocked_recovery_preserves_partial_output_and_warning(isolate
 	assert 'partial user output' in str(error.value)
 	assert 'config_restart_required' in str(error.value)
 	assert 'may have partially run' in error.value.hint
+
+
+@pytest.mark.asyncio
+async def test_mcp_failed_execution_sanitizes_executor_result():
+	from openbrowser.mcp.server import OpenBrowserServer
+
+	server = OpenBrowserServer()
+	server._executor = MagicMock()
+	server._executor.initialized = True
+	server._executor.max_output_chars = 12_000
+	server._namespace = {'__builtins__': __builtins__}
+	server.browser_session = None
+	server._executor.execute = AsyncMock(
+		return_value=SimpleNamespace(
+			success=False,
+			output='retained-context-' + 'x' * 10_500 + ' Authorization: Bearer mcp-executor-output-secret',
+			error='RuntimeError: Authorization: Bearer mcp-executor-error-secret',
+		)
+	)
+
+	result = await server._execute_code_locked('raise RuntimeError()')
+
+	assert len(result) > 10_000
+	assert 'retained-context-' in result
+	assert 'mcp-executor-output-secret' not in result
+	assert 'mcp-executor-error-secret' not in result
+	assert 'authorization=<redacted>' in result.lower()
+
+
+@pytest.mark.asyncio
+async def test_mcp_real_executor_failure_preserves_traceback_after_redaction():
+	from openbrowser.code_use.executor import CodeExecutor
+	from openbrowser.mcp.server import OpenBrowserServer
+
+	server = OpenBrowserServer()
+	executor = CodeExecutor()
+	namespace = {'__builtins__': __builtins__}
+	executor.set_namespace(namespace)
+	server._executor = executor
+	server._namespace = namespace
+	server.browser_session = None
+
+	result = await server._execute_code_locked(
+		"print('Authorization:')\n"
+		"print('  Bearer real-mcp-executor-secret second-token')\n"
+		"print('Proxy-Authorization: Bearer')\n"
+		"print('  q7')\n"
+		"print('  request_id=123')\n"
+		"print('Cookie: session=')\n"
+		"print('  c9')\n"
+		"print('  a=b')\n"
+		"print('  csrf=xyz')\n"
+		"print('  captured diagnostic = expected')\n"
+		"raise RuntimeError('boom')\n"
+	)
+
+	assert 'Traceback (most recent call last):' in result
+	assert '  File "<execute_code>"' in result
+	assert '  captured diagnostic = expected' in result
+	assert '  request_id=123' in result
+	assert 'real-mcp-executor-secret' not in result
+	assert 'second-token' not in result
+	assert 'q7' not in result
+	assert 'c9' not in result
+	assert 'a=b' not in result
+	assert 'csrf=xyz' not in result
+	assert 'authorization=<redacted>' in result.lower()
+
+
+@pytest.mark.asyncio
+async def test_mcp_failed_execution_respects_small_output_cap():
+	from openbrowser.mcp.server import OpenBrowserServer
+
+	server = OpenBrowserServer()
+	server._executor = MagicMock()
+	server._executor.initialized = True
+	server._executor.max_output_chars = 2
+	server._namespace = {'__builtins__': __builtins__}
+	server.browser_session = None
+	server._executor.execute = AsyncMock(return_value=SimpleNamespace(success=False, output='x' * 1000, error=None))
+
+	result = await server._execute_code_locked('raise RuntimeError()')
+
+	assert len(result) <= 2
+
+
+@pytest.mark.asyncio
+async def test_mcp_recovery_failure_returns_sanitized_error():
+	from openbrowser.mcp.server import OpenBrowserServer
+
+	server = OpenBrowserServer()
+	server._executor = MagicMock()
+	server._executor.initialized = True
+	server._namespace = {'__builtins__': __builtins__}
+	server.browser_session = MagicMock()
+	server._executor.execute = AsyncMock(
+		return_value=SimpleNamespace(
+			success=False,
+			output='websocket connection closed\nAuthorization: Bearer mcp-partial-secret',
+			error=None,
+		)
+	)
+	server._recover_browser_session = AsyncMock(side_effect=RuntimeError('Authorization: Bearer mcp-recovery-secret'))
+
+	with patch.object(server, '_is_cdp_alive', AsyncMock(return_value=True)):
+		result = await server._execute_code_locked('print(1)')
+
+	assert 'mcp-recovery-secret' not in result
+	server._recover_browser_session.assert_awaited_once()
+	assert 'mcp-partial-secret' not in result
+	assert 'authorization=<redacted>' in result.lower()
+	assert 'websocket connection closed' in result.lower()
+	assert 'The code may have partially run' in result
+	assert 'run get_status before retrying' in result.lower()
+
+
+@pytest.mark.asyncio
+async def test_get_status_falls_back_to_cdp_health_when_snapshot_fails(mcp_server):
+	session = BrowserSession()
+	root = MagicMock()
+	root.send.Browser.getVersion = AsyncMock(return_value={})
+	session._cdp_client_root = root
+	session._cdp_health.mark_cleanup_failure(RuntimeError('retained cleanup'))
+	mcp_server.browser_session = session
+
+	with patch.object(BrowserSession, 'lifecycle_snapshot', side_effect=RuntimeError('snapshot failed')):
+		payload = mcp_server._status_payload()
+
+	assert payload['browser']['cdp']['phase'] == 'disconnected'
+	assert payload['browser']['cdp']['healthy'] is None
+	assert payload['browser']['cdp']['cleanup_pending'] is True
+	assert payload['browser']['cdp_connected'] is True
+	root.send.Browser.getVersion.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -927,9 +1103,7 @@ async def test_get_status_reports_in_memory_storage_state_provenance(mcp_server)
 
 
 @pytest.mark.asyncio
-async def test_get_status_reports_environment_paths(
-	mcp_server, monkeypatch, tmp_path, isolated_config_path
-):
+async def test_get_status_reports_environment_paths(mcp_server, monkeypatch, tmp_path, isolated_config_path):
 	from openbrowser.config import CONFIG
 
 	_write_valid_mcp_config(isolated_config_path)
@@ -1047,9 +1221,7 @@ async def test_get_status_preserves_explicit_config_none_storage_state(mcp_serve
 
 
 @pytest.mark.asyncio
-async def test_get_status_reports_configured_storage_state_copied_to_managed_path(
-	mcp_server, tmp_path
-):
+async def test_get_status_reports_configured_storage_state_copied_to_managed_path(mcp_server, tmp_path):
 	source = tmp_path / 'source-state.json'
 	source.write_text('{"cookies": [], "origins": []}')
 	mcp_server.config = {'browser_profile': {'storage_state': str(source)}}
@@ -1068,3 +1240,130 @@ async def test_get_status_reports_configured_storage_state_copied_to_managed_pat
 	managed_path = payload['profile']['storage_state']
 	assert managed_path.endswith(f'mcp-{mcp_server.owner_id}/storage_state.json')
 	assert managed_path != str(source)
+
+
+@pytest.mark.asyncio
+async def test_get_status_reports_cdp_health_without_probing(mcp_server):
+	class _NoProbeSession(BrowserSession):
+		async def probe_cdp_connection(self, *, timeout_seconds=2.0):
+			raise AssertionError('get_status must not probe CDP health')
+
+	mcp_server.browser_session = _NoProbeSession()
+
+	payload = json.loads(await mcp_server._handle_tool('get_status', {}))
+
+	assert payload['browser']['cdp_connected'] is False
+	assert payload['browser']['cdp']['phase'] == 'disconnected'
+	assert payload['browser']['cdp']['healthy'] is None
+
+
+@pytest.mark.asyncio
+async def test_is_cdp_alive_delegates_to_the_session_probe(mcp_server):
+	session = BrowserSession()
+	root = MagicMock()
+	root.send = MagicMock()
+	root.send.Browser = MagicMock()
+	root.send.Browser.getVersion = AsyncMock(return_value={'product': 'Chrome'})
+	session._cdp_client_root = root
+	session._lifecycle.transition(LifecyclePhase.STARTING)
+	session._lifecycle.transition(LifecyclePhase.READY)
+	mcp_server.browser_session = session
+
+	alive = await mcp_server._is_cdp_alive()
+	health = session.lifecycle_snapshot()['cdp']
+
+	assert alive is True
+	assert health['probe_attempts'] == 1
+	assert health['healthy'] is True
+
+
+@pytest.mark.asyncio
+async def test_get_status_exposes_the_last_mcp_probe(mcp_server):
+	session = BrowserSession()
+	root = MagicMock()
+	root.send = MagicMock()
+	root.send.Browser = MagicMock()
+	root.send.Browser.getVersion = AsyncMock(side_effect=TimeoutError('timed out'))
+	session._cdp_client_root = root
+	session._lifecycle.transition(LifecyclePhase.STARTING)
+	session._lifecycle.transition(LifecyclePhase.READY)
+	mcp_server.browser_session = session
+
+	assert await mcp_server._is_cdp_alive() is False
+	payload = json.loads(await mcp_server._handle_tool('get_status', {}))
+
+	assert payload['browser']['cdp_connected'] is True
+	assert payload['browser']['cdp']['phase'] == 'degraded'
+	assert payload['browser']['cdp']['healthy'] is False
+	assert payload['browser']['cdp']['last_error_code'] == 'timeout'
+
+
+@pytest.mark.asyncio
+async def test_is_cdp_alive_requires_client_presence_and_health(mcp_server):
+	class _ProbeSession:
+		def __init__(self, *, client_present, healthy):
+			self.client_present = client_present
+			self.healthy = healthy
+			self.timeouts = []
+
+		async def probe_cdp_connection(self, *, timeout_seconds):
+			self.timeouts.append(timeout_seconds)
+			return SimpleNamespace(client_present=self.client_present, healthy=self.healthy)
+
+	not_connected = _ProbeSession(client_present=False, healthy=True)
+	mcp_server.browser_session = not_connected
+	assert await mcp_server._is_cdp_alive() is False
+
+	unhealthy = _ProbeSession(client_present=True, healthy=False)
+	mcp_server.browser_session = unhealthy
+	assert await mcp_server._is_cdp_alive() is False
+
+	healthy = _ProbeSession(client_present=True, healthy=True)
+	mcp_server.browser_session = healthy
+	assert await mcp_server._is_cdp_alive(deadline=time.monotonic() + 0.25) is True
+	assert 0 < healthy.timeouts[0] <= 0.25
+
+
+@pytest.mark.asyncio
+async def test_is_cdp_alive_skips_an_expired_deadline(mcp_server):
+	class _ProbeSession:
+		def __init__(self):
+			self.calls = 0
+
+		async def probe_cdp_connection(self, *, timeout_seconds):
+			self.calls += 1
+			return SimpleNamespace(client_present=True, healthy=True)
+
+	session = _ProbeSession()
+	mcp_server.browser_session = session
+
+	assert await mcp_server._is_cdp_alive(deadline=time.monotonic() - 1) is False
+	assert session.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_is_cdp_alive_passes_two_second_default_timeout_to_session_probe(mcp_server):
+	class _ProbeSession:
+		def __init__(self):
+			self.timeouts = []
+
+		async def probe_cdp_connection(self, *, timeout_seconds):
+			self.timeouts.append(timeout_seconds)
+			return SimpleNamespace(client_present=True, healthy=True)
+
+	session = _ProbeSession()
+	mcp_server.browser_session = session
+
+	assert await mcp_server._is_cdp_alive() is True
+	assert session.timeouts == [2.0]
+
+
+@pytest.mark.asyncio
+async def test_is_cdp_alive_returns_false_when_the_session_probe_raises(mcp_server):
+	class _ProbeSession:
+		async def probe_cdp_connection(self, *, timeout_seconds):
+			raise RuntimeError('probe failed')
+
+	mcp_server.browser_session = _ProbeSession()
+
+	assert await mcp_server._is_cdp_alive() is False
