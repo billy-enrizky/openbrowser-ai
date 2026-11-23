@@ -24,7 +24,7 @@ import asyncio
 import json as _json
 
 async def find(role=None, name=None, element_id=None, tag=None):
-    summary = await browser.get_browser_state_summary()
+    summary = await browser.get_browser_state_summary(include_screenshot=False)
     for idx, node in summary.dom_state.selector_map.items():
         ax = node.ax_node
         if element_id and node.attributes.get('id') == element_id:
@@ -44,7 +44,7 @@ async def wait_js(expression, timeout=15.0):
     raise RuntimeError('timeout waiting for: ' + expression)
 
 async def current_tabs():
-    summary = await browser.get_browser_state_summary()
+    summary = await browser.get_browser_state_summary(include_screenshot=False)
     return [(tab.target_id, tab.url, tab.title) for tab in summary.tabs]
 '''
 
@@ -149,7 +149,7 @@ print(_json.dumps({{"secret": await evaluate("document.getElementById('secret').
 '''
 
 
-def _write_config(ctx: RunContext) -> None:
+def _write_config(ctx: RunContext, *, extensions: bool) -> None:
     config = {
         "browser_profile": {
             "bench": {
@@ -161,6 +161,7 @@ def _write_config(ctx: RunContext) -> None:
                 "downloads_path": str(ctx.downloads),
                 "wait_between_actions": 0.0,
                 "args": ["--use-mock-keychain"],
+                "enable_default_extensions": extensions,
             }
         },
         "llm": {"bench": {"id": "bench", "default": True}},
@@ -179,6 +180,7 @@ def _env(ctx: RunContext) -> dict[str, str]:
     env.update(
         {
             "OPENBROWSER_CONFIG_DIR": str(ctx.config),
+            "OPENBROWSER_SOCKET": str(ctx.home / ".openbrowser" / "daemon.sock"),
             "OPENBROWSER_LOGGING_LEVEL": "result",
             "OPENBROWSER_SETUP_LOGGING": "false",
             "OPENBROWSER_HEADLESS": "true",
@@ -190,8 +192,9 @@ def _env(ctx: RunContext) -> dict[str, str]:
 class OpenBrowserArm:
     name = "openbrowser"
 
-    def __init__(self, binary: str | None = None) -> None:
+    def __init__(self, binary: str | None = None, *, extensions: bool = False) -> None:
         self.binary = binary or os.environ.get("OPENBROWSER_BIN") or _default_binary()
+        self.extensions = extensions
         self._result = ArmResult(ok=False)
 
     def _invoke(self, ctx: RunContext, code: str, timeout: float) -> tuple[int, str, str]:
@@ -219,7 +222,7 @@ class OpenBrowserArm:
         return {}
 
     def run(self, ctx: RunContext) -> ArmResult:
-        _write_config(ctx)
+        _write_config(ctx, extensions=self.extensions)
         url = ctx.base_url
         try:
             if ctx.task == "wizard":

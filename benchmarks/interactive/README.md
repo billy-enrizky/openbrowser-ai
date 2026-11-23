@@ -8,7 +8,7 @@ server-side oracle, not by the adapter's self-report.
 
 | Arm | Version | Native scripted surface | Browser |
 | --- | --- | --- | --- |
-| `openbrowser` | OpenBrowser CLI `0.1.58.dev4+g36ccf113b` | One `openbrowser-ai -c` Python cell per task | System Chrome 158.0.8127.36 through `channel=chrome` |
+| `openbrowser` | OpenBrowser CLI `0.1.58.dev12+gc421f7eac` | One `openbrowser-ai -c` Python cell per task | System Chrome 158.0.8127.36 through `channel=chrome` |
 | `chrome-devtools-mcp` | `chrome-devtools-mcp` 1.13.0 | MCP stdio, 33 tools, `pageId` routing | System Chrome 158.0.8127.36 |
 | `agent-browser` | `agent-browser` 0.43.0 | CLI commands, one process per command | System Chrome 158.0.8127.36 |
 | `browser-use` | `browser-use` 1.0.8 (`browser-harness` 0.1.13) | Piped Python in one CLI process | Dedicated system Chrome 158.0.8127.36 |
@@ -30,8 +30,9 @@ missing.
 
 Per-run reset: each run starts a new `ThreadingHTTPServer` on an ephemeral
 loopback port with new state, a new profile, a new download directory, and a
-new `HOME` and `TMPDIR`. The OpenBrowser daemon is stopped and removed before
-every run. `agent-browser` sessions are closed with `close --all`.
+new `HOME`, `TMPDIR`, and `OPENBROWSER_SOCKET`. The OpenBrowser daemon is
+stopped and removed before every run. `agent-browser` sessions are closed with
+`close --all`.
 `chrome-devtools-mcp` servers are terminated and their Chrome processes are
 killed by profile path. `browser-use` daemons and dedicated Chrome processes
 are killed after every run.
@@ -71,73 +72,117 @@ are killed after every run.
   output is larger by design.
 - `requests` and `request bytes`: fixture request count and response bytes.
 
-## Results, 2026-11-23
+## OpenBrowser lean profile
+
+The OpenBrowser arm uses the lean automation profile:
+
+- `enable_default_extensions: false`
+- index lookup uses `get_browser_state_summary(include_screenshot=False)`
+- `OPENBROWSER_SOCKET` is pinned to the run home so a global daemon cannot
+  intercept a run
+
+The one-shot `openbrowser-ai scrape` command already disables default
+extensions. The local fixtures cannot use ad blocking, cookie handling, or URL
+cleaning, so loading those extensions measures setup cost without task value.
+Screenshots are not needed to resolve interactive indexes. The
+`--openbrowser-extensions` flag reruns the arm with the default extension
+bundle for comparison.
+
+Validating this isolation exposed a daemon diagnostics bug. When another
+daemon's environment was unreadable, the diagnostics layer attributed the
+caller's default socket to that process. It now treats an empty or unreadable
+environment as unknown. When the environment is readable and has no explicit
+`OPENBROWSER_SOCKET`, it derives the default socket from that daemon's own
+`HOME`. The caller's default socket is never reused for another process.
+
+## Results, 2026-11-23, lean profile
 
 macOS arm64, Chrome `158.0.8127.36`, 3 measured samples per arm and task, no
 warmups. 60 of 60 runs passed their oracle. All 60 runs reported
-`keychain_verified: true`.
+`keychain_verified: true`. All 15 OpenBrowser runs recorded
+`openbrowser_extensions: false`.
 
 | Task | Arm | OK | p50 ms | p95 ms | Tool calls | Process starts | Output bytes |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| wizard | openbrowser | 3/3 | 6054 | 6428 | 1 | 1 | 18 |
-| wizard | chrome-devtools-mcp | 3/3 | 4459 | 4582 | 22 | 1 | 2865 |
-| wizard | agent-browser | 3/3 | 1759 | 1795 | 17 | 17 | 5607 |
-| wizard | browser-use | 3/3 | 1506 | 1521 | 15 | 1 | 48 |
-| modal | openbrowser | 3/3 | 4872 | 4935 | 1 | 1 | 31 |
-| modal | chrome-devtools-mcp | 3/3 | 3683 | 3772 | 17 | 1 | 1512 |
-| modal | agent-browser | 3/3 | 2473 | 2496 | 13 | 13 | 5024 |
-| modal | browser-use | 3/3 | 2265 | 2359 | 11 | 1 | 61 |
-| download | openbrowser | 3/3 | 4657 | 4951 | 1 | 1 | 552 |
-| download | chrome-devtools-mcp | 3/3 | 1763 | 2087 | 5 | 1 | 490 |
-| download | agent-browser | 3/3 | 1812 | 1857 | 3 | 3 | 1155 |
-| download | browser-use | 3/3 | 1509 | 1605 | 4 | 1 | 54 |
-| tabs | openbrowser | 3/3 | 9141 | 9272 | 1 | 1 | 59 |
-| tabs | chrome-devtools-mcp | 3/3 | 2466 | 2506 | 12 | 1 | 1077 |
-| tabs | agent-browser | 3/3 | 1663 | 1713 | 13 | 13 | 5110 |
-| tabs | browser-use | 3/3 | 1089 | 1404 | 12 | 1 | 102 |
-| auth | openbrowser | 3/3 | 5916 | 5985 | 2 | 2 | 66 |
-| auth | chrome-devtools-mcp | 3/3 | 3927 | 4152 | 14 | 2 | 1064 |
-| auth | agent-browser | 3/3 | 2720 | 2811 | 10 | 11 | 3866 |
-| auth | browser-use | 3/3 | 2943 | 2968 | 8 | 2 | 124 |
+| wizard | openbrowser | 3/3 | 4837 | 4855 | 1 | 1 | 18 |
+| wizard | chrome-devtools-mcp | 3/3 | 4570 | 4633 | 22 | 1 | 2865 |
+| wizard | agent-browser | 3/3 | 1789 | 1946 | 17 | 17 | 5607 |
+| wizard | browser-use | 3/3 | 1499 | 1567 | 15 | 1 | 48 |
+| modal | openbrowser | 3/3 | 3509 | 3744 | 1 | 1 | 31 |
+| modal | chrome-devtools-mcp | 3/3 | 3805 | 3955 | 17 | 1 | 1512 |
+| modal | agent-browser | 3/3 | 2468 | 2559 | 13 | 13 | 5024 |
+| modal | browser-use | 3/3 | 1811 | 2282 | 11 | 1 | 61 |
+| download | openbrowser | 3/3 | 3492 | 3619 | 1 | 1 | 550 |
+| download | chrome-devtools-mcp | 3/3 | 2054 | 2375 | 5 | 1 | 490 |
+| download | agent-browser | 3/3 | 1710 | 1813 | 3 | 3 | 1155 |
+| download | browser-use | 3/3 | 1451 | 1542 | 4 | 1 | 54 |
+| tabs | openbrowser | 3/3 | 7792 | 7946 | 1 | 1 | 59 |
+| tabs | chrome-devtools-mcp | 3/3 | 2426 | 2508 | 12 | 1 | 1077 |
+| tabs | agent-browser | 3/3 | 1638 | 1869 | 13 | 13 | 5097 |
+| tabs | browser-use | 3/3 | 1111 | 1153 | 12 | 1 | 102 |
+| auth | openbrowser | 3/3 | 5110 | 5263 | 2 | 2 | 66 |
+| auth | chrome-devtools-mcp | 3/3 | 3963 | 4157 | 14 | 2 | 1064 |
+| auth | agent-browser | 3/3 | 2709 | 2777 | 10 | 11 | 3856 |
+| auth | browser-use | 3/3 | 3150 | 3300 | 8 | 2 | 124 |
 
-Raw evidence: `results/results-2026-11-23.jsonl`.
+Raw evidence: `results/results-2026-11-23-lean.jsonl`.
+
+The original default-extension run remains at
+`results/results-2026-11-23.jsonl`.
+
+## OpenBrowser extension A/B, 2026-11-23
+
+The A/B uses one binary, the same screenshot setting, and 3 samples per task.
+Only `enable_default_extensions` changes. The default bundle adds 12.9 to 21.8
+percent to the measured p50.
+
+| Task | Default extensions p50 ms | Lean p50 ms | Lean improvement |
+| --- | ---: | ---: | ---: |
+| wizard | 5683 | 4837 | 14.9% lower |
+| modal | 4490 | 3509 | 21.8% lower |
+| download | 4081 | 3492 | 14.4% lower |
+| tabs | 8947 | 7792 | 12.9% lower |
+| auth | 6273 | 5110 | 18.5% lower |
+
+Raw evidence: `results/results-2026-11-23-extensions.jsonl`.
 
 ## What the results show
 
 Capability: all four arms completed all five tasks. That includes the custom
 ARIA combobox, the click-triggered download, the multi-tab opener flow, and
-the profile restart. This is a correctness result, not a speed result.
+the profile restart. This is a correctness result, not a universal speed win.
 
-OpenBrowser strengths in this smoke run:
+OpenBrowser results after the lean profile change:
 
-- One control-plane call per task. The whole wizard, modal, tabs, and auth
-  flow runs inside one `-c` cell, so the agent does not pay a round trip per
-  action.
-- Smallest output on four of five tasks. The final JSON line is 18 to 552
-  bytes. That is the useful part for an agent, even though it moves work into
-  the Python cell.
-- Download and auth passed without additional tools. Chrome-devtools-mcp
-  needed Chrome download preferences; agent-browser and browser-use passed
-  through their own native download and profile mechanisms.
+- It beats chrome-devtools-mcp on `modal`, at p50 `3509` ms against `3805`
+  ms.
+- It is within 5.8 percent of chrome-devtools-mcp on `wizard`, at `4837` ms
+  against `4570` ms.
+- It remains slower than chrome-devtools-mcp on `download`, `tabs`, and
+  `auth`, and slower than agent-browser and browser-use on every task.
+- It keeps the smallest output on four of five tasks, 18 to 550 bytes.
+- It uses one control-plane call per task, but `tabs` still takes `7792` ms
+  because tab discovery, focus switching, and per-action overhead dominate.
+
+The lean profile cuts OpenBrowser p50 by 12.9 to 21.8 percent compared with
+the same binary using the default extension bundle. That is a real efficiency
+gain, but it does not close the gap with the native command and Python arms.
 
 ## Top three OpenBrowser product gaps exposed
 
-1. Cold-start latency is the largest gap. OpenBrowser is the slowest arm on
-   all five tasks: p50 `6054` ms on wizard, `4872` ms on modal, `4657` ms on
-   download, `9141` ms on tabs, and `5916` ms on auth. Browser-use is
-   `1089` ms on tabs and agent-browser is `1663` ms. The harness uses a fresh
-   daemon and a fresh Chrome profile per run, so the number includes the full
-   Python daemon boot and Chrome start. A thin client path, lazy daemon boot,
-   or a prewarmed daemon would close part of this gap without changing task
-   logic.
+1. Cold start and per-action latency remain the largest gap. OpenBrowser p50
+   is `4837` ms on wizard, `3509` ms on modal, `3492` ms on download, `7792`
+   ms on tabs, and `5110` ms on auth. Browser-use is `1111` ms on tabs and
+   agent-browser is `1638` ms. The harness uses a fresh daemon and a fresh
+   Chrome profile per run. A thin client path, lazy daemon boot, or a
+   prewarmed daemon would reduce part of this gap.
 
 2. There is no first-class interactive CLI. Every OpenBrowser task is a
    Python `-c` cell that scans `browser.get_browser_state_summary()` for
    indexes. Agent-browser exposes `open`, `fill`, `click`, `check`, `select`,
    `tab`, `download`, `state`, and `get`. Chrome-devtools-mcp exposes typed
-   MCP tools. The gap is developer and agent ergonomics: OpenBrowser scripts
-   are longer, harder to compose, and harder for a coding agent to verify than
-   a sequence of typed commands.
+   MCP tools. OpenBrowser scripts are longer and harder for a coding agent to
+   compose and verify than a sequence of typed commands.
 
 3. Session and profile lifecycle is not a first-class surface. Auth reuse
    required `await browser.export_storage_state(...)`, a daemon stop, a wait
@@ -198,7 +243,7 @@ install to remove network and npx startup jitter from the measurement.
 ```sh
 uv run --no-project python -m benchmarks.interactive.run_benchmark \
   --samples 3 \
-  --output benchmarks/interactive/results/results-2026-11-23.jsonl
+  --output benchmarks/interactive/results/results-2026-11-23-lean.jsonl
 ```
 
 A focused task:
@@ -215,6 +260,7 @@ Useful flags:
 - `--samples N`
 - `--warmups N`
 - `--keep-runs` to keep temp profiles under `/tmp/obib-runs`
+- `--openbrowser-extensions` to measure the default OpenBrowser extension bundle
 - `--output PATH`
 
 The default temp root is `/tmp/obib-runs`. It is outside the repository so the

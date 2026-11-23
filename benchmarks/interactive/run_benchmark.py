@@ -36,9 +36,9 @@ DEFAULT_OUTPUT = HERE / "results" / "results-smoke.jsonl"
 DEFAULT_WORKDIR = Path("/tmp/obib-runs")
 
 
-def make_arm(name: str):
+def make_arm(name: str, *, openbrowser_extensions: bool = False):
     if name == "openbrowser":
-        return OpenBrowserArm()
+        return OpenBrowserArm(extensions=openbrowser_extensions)
     if name == "chrome-devtools-mcp":
         return ChromeDevToolsArm()
     if name == "agent-browser":
@@ -91,13 +91,21 @@ def make_context(task: str, arm: str, sample: int, base_url: str, workdir: Path)
     )
 
 
-def run_one(task: str, arm_name: str, sample: int, workdir: Path, keep: bool) -> dict:
+def run_one(
+    task: str,
+    arm_name: str,
+    sample: int,
+    workdir: Path,
+    keep: bool,
+    *,
+    openbrowser_extensions: bool = False,
+) -> dict:
     server, thread = start_fixture()
     ctx = make_context(task, arm_name, sample, server.base_url, workdir)
     arm = None
     started = time.monotonic()
     try:
-        arm = make_arm(arm_name)
+        arm = make_arm(arm_name, openbrowser_extensions=openbrowser_extensions)
         result = arm.run(ctx)
     except FileNotFoundError as exc:
         result = None
@@ -140,6 +148,7 @@ def run_one(task: str, arm_name: str, sample: int, workdir: Path, keep: bool) ->
             "request_bytes": state.get("request_bytes", 0),
             "keychain_flag": "--use-mock-keychain",
             "keychain_verified": None,
+            "openbrowser_extensions": openbrowser_extensions if arm_name == "openbrowser" else None,
         }
     else:
         oracle = ORACLES[task](state, result.reported, ctx.downloads)
@@ -166,6 +175,7 @@ def run_one(task: str, arm_name: str, sample: int, workdir: Path, keep: bool) ->
             "request_bytes": state.get("request_bytes", 0),
             "keychain_flag": "--use-mock-keychain",
             "keychain_verified": result.keychain_verified,
+            "openbrowser_extensions": openbrowser_extensions if arm_name == "openbrowser" else None,
         }
     if not keep:
         shutil.rmtree(ctx.root, ignore_errors=True)
@@ -243,6 +253,11 @@ def main() -> int:
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--workdir", type=Path, default=DEFAULT_WORKDIR)
     parser.add_argument("--keep-runs", action="store_true")
+    parser.add_argument(
+        "--openbrowser-extensions",
+        action="store_true",
+        help="Measure the OpenBrowser default extension bundle instead of the lean automation profile.",
+    )
     args = parser.parse_args()
 
     unknown_tasks = [task for task in args.tasks if task not in TASKS]
@@ -259,7 +274,14 @@ def main() -> int:
             for arm in args.arms:
                 counter += 1
                 print(f"[{counter}/{total}] {task} {arm} sample {sample}", flush=True)
-                record = run_one(task, arm, sample, args.workdir, args.keep_runs)
+                record = run_one(
+                    task,
+                    arm,
+                    sample,
+                    args.workdir,
+                    args.keep_runs,
+                    openbrowser_extensions=args.openbrowser_extensions,
+                )
                 records.append(record)
                 status = "ok" if record["ok"] else ("unavailable" if record["unavailable"] else "fail")
                 print(
@@ -274,7 +296,14 @@ def main() -> int:
         for task in args.tasks:
             for arm in args.arms:
                 print(f"[warmup {warmup + 1}] {task} {arm}", flush=True)
-                run_one(task, arm, 1000 + warmup, args.workdir, False)
+                run_one(
+                    task,
+                    arm,
+                    1000 + warmup,
+                    args.workdir,
+                    False,
+                    openbrowser_extensions=args.openbrowser_extensions,
+                )
 
     with args.output.open("w", encoding="utf-8") as handle:
         for record in records:
