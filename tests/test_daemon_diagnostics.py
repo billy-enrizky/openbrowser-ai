@@ -34,7 +34,11 @@ def test_daemon_processes_filters_commands_and_users(tmp_path):
 	current.username.return_value = 'me'
 	daemon = MagicMock()
 	daemon.pid = 123
-	daemon.info = {'pid': 123, 'create_time': time.time() - 60, 'cmdline': ['python', '-m', 'openbrowser.daemon.server']}
+	daemon.info = {
+		'pid': 123,
+		'create_time': time.time() - 60,
+		'cmdline': ['python', '-m', 'openbrowser.daemon.server'],
+	}
 	daemon.username.return_value = 'me'
 	daemon.environ.return_value = {'OPENBROWSER_SOCKET': str(tmp_path / 'daemon.sock')}
 	other_user = MagicMock()
@@ -89,24 +93,52 @@ def test_daemon_processes_ignores_a_lookalike_module(tmp_path):
 	assert rows == []
 
 
-def test_daemon_processes_uses_default_socket_when_env_is_missing(tmp_path):
+def test_daemon_processes_treats_missing_environment_as_unknown(tmp_path):
 	current = MagicMock()
 	current.username.return_value = 'me'
 	daemon = MagicMock()
 	daemon.pid = 123
-	daemon.info = {'pid': 123, 'create_time': time.time() - 60, 'cmdline': ['python', '-m', 'openbrowser.daemon.server']}
+	daemon.info = {
+		'pid': 123,
+		'create_time': time.time() - 60,
+		'cmdline': ['python', '-m', 'openbrowser.daemon.server'],
+	}
 	daemon.username.return_value = 'me'
 	daemon.environ.return_value = {}
-	default_socket = tmp_path / 'default.sock'
+	caller_socket = tmp_path / 'caller.sock'
 
 	with (
-		patch.object(diagnostics, 'SOCKET_PATH', default_socket),
+		patch.object(diagnostics, 'SOCKET_PATH', caller_socket),
 		patch.object(diagnostics.psutil, 'Process', return_value=current),
 		patch.object(diagnostics.psutil, 'process_iter', return_value=[daemon]),
 	):
 		rows = diagnostics.daemon_processes()
 
-	assert rows[0]['socket'] == str(default_socket)
+	assert rows[0]['socket'] is None
+	assert rows[0]['socket_known'] is False
+	assert rows[0]['socket_live'] is True
+
+
+def test_daemon_processes_derives_socket_from_daemon_home(tmp_path):
+	current = MagicMock()
+	current.username.return_value = 'me'
+	daemon = MagicMock()
+	daemon.pid = 123
+	daemon.info = {
+		'pid': 123,
+		'create_time': time.time() - 60,
+		'cmdline': ['python', '-m', 'openbrowser.daemon.server'],
+	}
+	daemon.username.return_value = 'me'
+	daemon.environ.return_value = {'HOME': str(tmp_path)}
+
+	with (
+		patch.object(diagnostics.psutil, 'Process', return_value=current),
+		patch.object(diagnostics.psutil, 'process_iter', return_value=[daemon]),
+	):
+		rows = diagnostics.daemon_processes()
+
+	assert rows[0]['socket'] == str(tmp_path / '.openbrowser' / 'daemon.sock')
 	assert rows[0]['socket_known'] is True
 
 
@@ -118,7 +150,11 @@ def test_daemon_processes_expands_tilde_socket_paths(tmp_path, monkeypatch):
 	current = MagicMock(username=MagicMock(return_value='me'))
 	daemon = MagicMock()
 	daemon.pid = 123
-	daemon.info = {'pid': 123, 'create_time': time.time() - 60, 'cmdline': ['python', '-m', 'openbrowser.daemon.server']}
+	daemon.info = {
+		'pid': 123,
+		'create_time': time.time() - 60,
+		'cmdline': ['python', '-m', 'openbrowser.daemon.server'],
+	}
 	daemon.username.return_value = 'me'
 	daemon.environ.return_value = {'OPENBROWSER_SOCKET': '~/.openbrowser/daemon.sock'}
 
@@ -137,7 +173,11 @@ def test_daemon_processes_treats_relative_socket_paths_as_unknown(monkeypatch):
 	current = MagicMock(username=MagicMock(return_value='me'))
 	daemon = MagicMock()
 	daemon.pid = 123
-	daemon.info = {'pid': 123, 'create_time': time.time() - 60, 'cmdline': ['python', '-m', 'openbrowser.daemon.server']}
+	daemon.info = {
+		'pid': 123,
+		'create_time': time.time() - 60,
+		'cmdline': ['python', '-m', 'openbrowser.daemon.server'],
+	}
 	daemon.username.return_value = 'me'
 	daemon.environ.return_value = {'OPENBROWSER_SOCKET': 'relative.sock'}
 
@@ -156,7 +196,11 @@ def test_reap_orphan_processes_kills_old_orphan(tmp_path):
 	missing_socket = Path(tempfile.mktemp(suffix='.sock', dir='/tmp'))
 	orphan = MagicMock()
 	orphan.pid = 123
-	orphan.info = {'pid': 123, 'create_time': time.time() - 100, 'cmdline': ['python', '-m', 'openbrowser.daemon.server']}
+	orphan.info = {
+		'pid': 123,
+		'create_time': time.time() - 100,
+		'cmdline': ['python', '-m', 'openbrowser.daemon.server'],
+	}
 	orphan.username.return_value = 'me'
 	orphan.environ.return_value = {'OPENBROWSER_SOCKET': str(missing_socket)}
 	process = MagicMock()
@@ -182,7 +226,11 @@ def test_reap_skips_live_socket(tmp_path):
 	listener.listen(1)
 	live = MagicMock()
 	live.pid = 123
-	live.info = {'pid': 123, 'create_time': time.time() - 100, 'cmdline': ['python', '-m', 'openbrowser.daemon.server']}
+	live.info = {
+		'pid': 123,
+		'create_time': time.time() - 100,
+		'cmdline': ['python', '-m', 'openbrowser.daemon.server'],
+	}
 	live.username.return_value = 'me'
 	live.environ.return_value = {'OPENBROWSER_SOCKET': str(socket_path)}
 
@@ -200,36 +248,36 @@ def test_reap_skips_live_socket(tmp_path):
 	assert results[0]['reason'] == 'socket is live or unknown'
 
 
-def test_reap_skips_live_default_socket_without_env():
-	socket_path = Path(tempfile.mktemp(suffix='.sock', dir='/tmp'))
-	listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-	listener.bind(str(socket_path))
-	listener.listen(1)
+def test_reap_skips_process_with_missing_environment():
 	live = MagicMock()
 	live.pid = 123
-	live.info = {'pid': 123, 'create_time': time.time() - 100, 'cmdline': ['python', '-m', 'openbrowser.daemon.server']}
+	live.info = {
+		'pid': 123,
+		'create_time': time.time() - 100,
+		'cmdline': ['python', '-m', 'openbrowser.daemon.server'],
+	}
 	live.username.return_value = 'me'
 	live.environ.return_value = {}
 
-	try:
-		with (
-			patch.object(diagnostics, 'SOCKET_PATH', socket_path),
-			patch.object(diagnostics.psutil, 'Process', return_value=MagicMock(username=MagicMock(return_value='me'))),
-			patch.object(diagnostics.psutil, 'process_iter', return_value=[live]),
-		):
-			results = diagnostics.reap_orphan_processes(min_age_seconds=30, timeout=0.1)
-	finally:
-		listener.close()
-		socket_path.unlink(missing_ok=True)
+	with (
+		patch.object(diagnostics.psutil, 'Process', return_value=MagicMock(username=MagicMock(return_value='me'))),
+		patch.object(diagnostics.psutil, 'process_iter', return_value=[live]),
+	):
+		results = diagnostics.reap_orphan_processes(min_age_seconds=30, timeout=0.1)
 
 	assert results[0]['reaped'] is False
+	assert results[0]['socket_known'] is False
 	assert results[0]['reason'] == 'socket is live or unknown'
 
 
 def test_reap_skips_process_when_environment_is_unreadable(tmp_path):
 	opaque = MagicMock()
 	opaque.pid = 123
-	opaque.info = {'pid': 123, 'create_time': time.time() - 100, 'cmdline': ['python', '-m', 'openbrowser.daemon.server']}
+	opaque.info = {
+		'pid': 123,
+		'create_time': time.time() - 100,
+		'cmdline': ['python', '-m', 'openbrowser.daemon.server'],
+	}
 	opaque.username.return_value = 'me'
 	opaque.environ.side_effect = psutil.AccessDenied(pid=123)
 
@@ -263,7 +311,11 @@ def test_reap_skips_young_process(tmp_path):
 def test_reap_skips_a_reused_pid(tmp_path):
 	orphan = MagicMock()
 	orphan.pid = 123
-	orphan.info = {'pid': 123, 'create_time': time.time() - 100, 'cmdline': ['python', '-m', 'openbrowser.daemon.server']}
+	orphan.info = {
+		'pid': 123,
+		'create_time': time.time() - 100,
+		'cmdline': ['python', '-m', 'openbrowser.daemon.server'],
+	}
 	orphan.username.return_value = 'me'
 	orphan.environ.return_value = {'OPENBROWSER_SOCKET': str(tmp_path / 'missing.sock')}
 	reused = MagicMock()
