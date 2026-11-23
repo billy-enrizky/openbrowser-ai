@@ -108,8 +108,10 @@ class Cars(BaseModel):
 @tools.action(description='Save cars to file')
 def save_cars(cars: list[Cars]) -> str:
     with open('cars.json', 'w') as f:
-        json.dump([car.model_dump() for car in cars], f)
+        json.dump(cars, f)
     return f'Saved {len(cars)} cars to file'
+
+# The tool wrapper validates Cars and passes dictionaries to the function.
 
 task = "find cars and save them to file"
 ```

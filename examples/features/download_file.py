@@ -15,7 +15,7 @@ api_key = os.getenv('GOOGLE_API_KEY')
 if not api_key:
 	raise ValueError('GOOGLE_API_KEY is not set')
 
-llm = ChatGoogle(model='gemini-2.5-flash', api_key=api_key)
+llm = ChatGoogle(model='gemini-3-flash', api_key=api_key)
 
 
 browser = Browser(downloads_path='~/Downloads/tmp')

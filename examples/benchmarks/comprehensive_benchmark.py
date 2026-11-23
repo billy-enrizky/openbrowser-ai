@@ -103,7 +103,7 @@ async def run_agent_task(task_name: str, instruction: str) -> dict:
     
     browser = None
     try:
-        llm = ChatGoogle(model='gemini-2.5-flash', temperature=0, api_key=GEMINI_API_KEY)
+        llm = ChatGoogle(model='gemini-3-flash', temperature=0, api_key=GEMINI_API_KEY)
         browser_profile = BrowserProfile(headless=True)
         browser = Browser(browser_profile=browser_profile)
         
@@ -157,7 +157,7 @@ async def run_code_agent_task(task_name: str, instruction: str) -> dict:
     
     browser_session = None
     try:
-        llm = ChatGoogle(model='gemini-2.5-flash', temperature=0, api_key=GEMINI_API_KEY)
+        llm = ChatGoogle(model='gemini-3-flash', temperature=0, api_key=GEMINI_API_KEY)
         browser_profile = BrowserProfile(headless=True)
         browser_session = BrowserSession(browser_profile=browser_profile)
         await browser_session.start()

@@ -67,19 +67,6 @@ python scheduler.py --debug
 python scheduler.py --auto
 ```
 
-## Programmatic Usage
-
-```python
-import asyncio
-from scheduler import parse_messages, send_message
-
-async def main():
-    for item in await parse_messages():
-        await send_message(item["contact"], item["message"])
-
-asyncio.run(main())
-```
-
 ## Output
 
 Example scheduling output:

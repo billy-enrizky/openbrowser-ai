@@ -17,8 +17,8 @@ Use this skill once per machine or project. It installs the CLI and browser, con
 - Never print API keys, cookies, proxy credentials, or storage-state contents. Report only whether a key is set.
 - Prefer `uv`, then `pipx`, then `pip`.
 - Python 3.12 or newer is required.
-- Use `openbrowser-ai -c` for CLI verification and `uvx openbrowser-ai --mcp` as the portable MCP command.
-- A daemon started by this skill must be stopped at the end. Do not stop a daemon that was already running.
+- Use `openbrowser-ai -c` for CLI verification and `openbrowser-ai --mcp` for the installed MCP server.
+- Verify with a temporary socket and profile. Never stop a user daemon that this setup did not start.
 - Do not install optional provider packages unless the user wants that provider.
 
 ## Step 1 -- Inspect the machine
@@ -30,7 +30,7 @@ command -v pipx || true
 python3 --version || python --version
 ```
 
-If `openbrowser-ai --version` reports 0.1.57 or newer, skip Step 2. If Python is below 3.12, install a supported Python first and repeat this step.
+If `openbrowser-ai --version` reports 0.1.57 or newer, skip only the CLI install commands in Step 2. Still run `openbrowser-ai install` to repair Chromium. If Python is below 3.12, install a supported Python first and repeat this step.
 
 ## Step 2 -- Install or upgrade OpenBrowser
 
@@ -49,7 +49,7 @@ uv tool install --upgrade "openbrowser-ai[all]"
 Fallbacks:
 
 ```bash
-pipx install --upgrade openbrowser-ai
+pipx install openbrowser-ai || pipx upgrade openbrowser-ai
 python3 -m pip install --user --upgrade openbrowser-ai
 ```
 
@@ -70,6 +70,8 @@ Install or repair Chromium:
 ```bash
 openbrowser-ai install
 ```
+
+`openbrowser-ai install` uses `uvx playwright install chromium`. If `uvx` is unavailable, install uv first or run `python -m playwright install chromium` with the interpreter that owns the OpenBrowser install. The MCP command also uses `openbrowser-ai --mcp`, so it does not require uvx at runtime.
 
 ## Step 3 -- Inspect and repair config
 
@@ -103,8 +105,8 @@ Claude Code project `.mcp.json`:
 {
   "mcpServers": {
     "openbrowser": {
-      "command": "uvx",
-      "args": ["openbrowser-ai", "--mcp"]
+      "command": "openbrowser-ai",
+      "args": ["--mcp"]
     }
   }
 }
@@ -114,11 +116,28 @@ Codex `~/.codex/config.toml`:
 
 ```toml
 [mcp_servers.openbrowser]
-command = "uvx"
-args = ["openbrowser-ai", "--mcp"]
+command = "openbrowser-ai"
+args = ["--mcp"]
 ```
 
-Claude Desktop uses `claude_desktop_config.json` with the same `mcpServers` object. OpenCode can use the plugin or the same `.mcp.json` object.
+Claude Desktop uses `claude_desktop_config.json` with the same `mcpServers` object.
+
+OpenCode `opencode.json`:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "openbrowser": {
+      "type": "local",
+      "command": ["openbrowser-ai", "--mcp"],
+      "enabled": true
+    }
+  }
+}
+```
+
+If `openbrowser-ai` is not on the agent's PATH, replace it with the absolute path to the installed executable or `uvx openbrowser-ai --mcp`.
 
 Useful MCP environment variables:
 
@@ -168,29 +187,28 @@ Codex manual installation is documented at `https://github.com/billy-enrizky/ope
 - Set `OPENBROWSER_USER_DATA_DIR` for a shared profile. The profile lease rejects concurrent owners.
 - Set `OPENBROWSER_DAEMON_PROFILE_ISOLATION=true` or `OPENBROWSER_DAEMON_PROFILE_DIR` for isolated daemons.
 
-## Step 7 -- Verify a real browser
+## Step 7 -- Verify with an isolated daemon
 
-Check ownership before starting:
-
-```bash
-openbrowser-ai daemon status
-```
-
-If the status reports `daemon_not_running`, this setup owns the daemon and must stop it at the end. If a daemon is already running, reuse it and leave it running.
-
-Run the browser check:
+Use a temporary socket and profile so setup never reuses or stops a user daemon:
 
 ```bash
+SETUP_SOCKET="${TMPDIR:-/tmp}/openbrowser-setup-$$.sock"
+SETUP_PROFILE="${TMPDIR:-/tmp}/openbrowser-setup-profile-$$"
+export OPENBROWSER_SOCKET="$SETUP_SOCKET"
+export OPENBROWSER_DAEMON_PROFILE_DIR="$SETUP_PROFILE"
+export OPENBROWSER_DAEMON_PROFILE_ISOLATION=true
+
+cleanup_setup() {
+  openbrowser-ai daemon force-stop >/dev/null 2>&1 || true
+  rm -rf "$SETUP_PROFILE" "$SETUP_SOCKET" "${SETUP_SOCKET%.sock}.log" "${SETUP_SOCKET%.sock}.pid" 2>/dev/null || true
+}
+trap cleanup_setup EXIT
+
 openbrowser-ai -c "await navigate('https://example.com'); print(await evaluate('document.title'))"
-```
-
-Then inspect:
-
-```bash
 openbrowser-ai daemon status
 ```
 
-Read `state`, `browser.health.phase`, and `browser.cdp.phase`. A printed title and a healthy/ready status verify the install. A document title does not prove application hydration.
+Read `state`, `browser.health.phase`, and `browser.cdp.phase`. A printed title and a healthy/ready status verify the install. A document title does not prove application hydration. The `trap` force-stops and removes only this temporary daemon and profile.
 
 Optional MCP smoke test:
 
@@ -199,7 +217,7 @@ import asyncio
 from mcp import Client, StdioServerParameters
 
 async def main():
-    async with Client(StdioServerParameters(command="uvx", args=["openbrowser-ai", "--mcp"])) as client:
+    async with Client(StdioServerParameters(command="openbrowser-ai", args=["--mcp"])) as client:
         created = await client.call_tool("create_context", {})
         context_id = created.structured_content["context_id"]
         try:
@@ -213,19 +231,7 @@ async def main():
 asyncio.run(main())
 ```
 
-## Step 8 -- Clean up only what this setup started
-
-If this setup started the daemon:
-
-```bash
-openbrowser-ai daemon stop
-```
-
-Poll `openbrowser-ai daemon status` until it reports `daemon_not_running`, up to about 30 seconds. If the daemon does not exit, run `openbrowser-ai daemon force-stop`, which waits and verifies listener, owner, and browser cleanup.
-
-Do not stop a daemon that was already running. Profiles, cookies, workspaces, and downloaded files survive cleanup.
-
-## Step 9 -- Report
+## Step 8 -- Report
 
 Print a short setup report:
 
@@ -237,5 +243,6 @@ Print a short setup report:
 - Profile and download paths
 - Verification result
 - Optional providers skipped
+- Confirmation that the isolated verification daemon and profile were removed
 
 Do not print secrets. Do not claim a page is ready beyond the document milestone that was observed.

@@ -122,7 +122,7 @@ async def run_agent_task(task_name: str, instruction: str) -> TaskResult:
     browser = None
     try:
         llm = ChatGoogle(
-            model='gemini-2.5-flash',
+            model='gemini-3-flash',
             temperature=0,
             api_key=GEMINI_API_KEY,
         )
@@ -216,7 +216,7 @@ async def run_code_agent_task(task_name: str, instruction: str) -> TaskResult:
     browser_session = None
     try:
         llm = ChatGoogle(
-            model='gemini-2.5-flash',
+            model='gemini-3-flash',
             temperature=0,
             api_key=GEMINI_API_KEY,
         )

@@ -36,7 +36,7 @@ Laminar.initialize(project_api_key="...", disabled_instruments={Instruments.OPEN
 async def main():
     agent = Agent(
         task="open google, search Laminar AI",
-        llm=ChatGoogle(model="gemini-2.5-flash"),
+        llm=ChatGoogle(model="gemini-3-flash"),
     )
     await agent.run()
 

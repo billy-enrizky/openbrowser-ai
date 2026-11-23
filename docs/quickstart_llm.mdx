@@ -42,7 +42,7 @@ from openbrowser import Agent, Browser, ChatGoogle
 
 agent = Agent(
     task="Your task here",
-    llm=ChatGoogle(model="gemini-2.5-flash"),  # or ChatOpenAI(model="gpt-4.1-mini"), ChatAnthropic(model="claude-sonnet-4-0")
+    llm=ChatGoogle(model="gemini-3-flash"),  # or ChatOpenAI(model="gpt-4.1-mini"), ChatAnthropic(model="claude-sonnet-4-0")
 )
 await agent.run()
 
