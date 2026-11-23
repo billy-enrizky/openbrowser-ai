@@ -540,6 +540,21 @@ class TestSecurityWatchdog:
             await watchdog.on_NavigateToUrlEvent(event)
 
     @pytest.mark.asyncio
+    async def test_file_navigation_error_suggests_loopback_http(self):
+        from openbrowser.browser.navigation import NavigationBlockedError
+        from openbrowser.browser.watchdogs.security_watchdog import SecurityWatchdog
+
+        session = _make_mock_browser_session()
+        event_bus = EventBus()
+        watchdog = SecurityWatchdog(event_bus=event_bus, browser_session=session)
+        watchdog.event_bus = MagicMock()
+        event = MagicMock()
+        event.url = 'file:///tmp/page.html'
+
+        with pytest.raises(NavigationBlockedError, match=r'http://127\.0\.0\.1:8000/'):
+            await watchdog.on_NavigateToUrlEvent(event)
+
+    @pytest.mark.asyncio
     async def test_navigate_event_allows_permitted(self):
         from openbrowser.browser.watchdogs.security_watchdog import SecurityWatchdog
 

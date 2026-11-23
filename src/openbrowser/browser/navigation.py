@@ -25,6 +25,17 @@ class NavigationBlockedError(NavigationError, ValueError):
 	"""A URL was refused by the configured policy."""
 
 
+def security_policy_blocked_message(url: str) -> str:
+	"""Return a policy refusal with an actionable local-file fallback."""
+	message = f'Navigation to {url} blocked by security policy'
+	if urlsplit(url).scheme == 'file':
+		return (
+			f'{message}. Local file URLs are not allowed; serve the directory over a loopback '
+			'HTTP URL such as http://127.0.0.1:8000/ and navigate there instead.'
+		)
+	return message
+
+
 class NavigationTimeoutError(NavigationError, TimeoutError):
 	"""The request's single deadline expired."""
 
