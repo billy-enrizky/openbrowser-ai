@@ -7,8 +7,9 @@ import inspect
 import logging
 import math
 import os
+import re
 import time
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Coroutine, Mapping
 from dataclasses import dataclass, field
 from functools import cached_property
 from pathlib import Path
@@ -109,6 +110,25 @@ if TYPE_CHECKING:
 DEFAULT_BROWSER_PROFILE = BrowserProfile()
 NAVIGATION_CONTAINMENT_GRACE = 1.0
 MAX_RETAINED_PROBES = 8
+MAX_RETAINED_FETCH_DECISIONS = 4096
+
+# Resource types the render policy keeps off the network. Stylesheet is only
+# blocked for no-render; lightweight keeps CSS so layout and visibility match.
+LIGHTWEIGHT_BLOCKED_RESOURCE_TYPES: tuple[str, ...] = ('Image', 'Font', 'Media', 'TextTrack')
+NO_RENDER_BLOCKED_RESOURCE_TYPES: tuple[str, ...] = (*LIGHTWEIGHT_BLOCKED_RESOURCE_TYPES, 'Stylesheet')
+
+
+def blocked_resource_types_for_render_mode(mode: RenderMode | str | None) -> tuple[str, ...]:
+	"""Return the CDP resource types a render mode must not fetch."""
+	try:
+		resolved = RenderMode(mode) if mode is not None else RenderMode.FULL
+	except ValueError:
+		resolved = RenderMode.FULL
+	if resolved is RenderMode.NO_RENDER:
+		return NO_RENDER_BLOCKED_RESOURCE_TYPES
+	if resolved is RenderMode.LIGHTWEIGHT:
+		return LIGHTWEIGHT_BLOCKED_RESOURCE_TYPES
+	return ()
 
 
 class _ProbeLifecycleClosed(RuntimeError):
@@ -532,6 +552,8 @@ class BrowserSession(BaseModel):
 		default_factory=list
 	)  # Store messages from auto-closed JavaScript dialogs
 	_storage_state_warnings: list[str] = PrivateAttr(default_factory=list)
+	_fetch_handled_requests: dict[tuple[str | None, str], None] = PrivateAttr(default_factory=dict)
+	_fetch_interceptor_tasks: set[asyncio.Task[Any]] = PrivateAttr(default_factory=set)
 
 	# Watchdogs
 	_crash_watchdog: Any | None = PrivateAttr(default=None)
@@ -6367,39 +6389,66 @@ class BrowserSession(BaseModel):
 		return cleanup_error
 
 	async def _setup_proxy_auth(self) -> None:
-		"""Enable CDP Fetch auth handling for authenticated proxy, if credentials provided.
+		"""Install the CDP Fetch interceptor for render policy and proxy auth.
 
-		Handles HTTP proxy authentication challenges (Basic/Proxy) by providing
-		configured credentials from BrowserProfile.
+		The render resource policy blocks optional asset types before they leave
+		the browser. Proxy authentication reuses the same Fetch domain so exactly
+		one requestPaused handler decides each paused request.
 		"""
+		await self._setup_fetch_interception()
 
+	async def _setup_fetch_interception(self) -> None:
+		"""Install a single Fetch.requestPaused handler for render and proxy policy.
+
+		`lightweight` blocks Image, Font, Media, and TextTrack resources.
+		`no-render` also blocks Stylesheet resources. Blocked requests fail with
+		BlockedByClient before reaching the network. When proxy credentials are
+		configured every request is paused so auth challenges can be answered,
+		and the same handler continues the non-blocked requests.
+		"""
 		assert self._cdp_client_root
 
 		try:
 			proxy_cfg = self.browser_profile.proxy
-			username = proxy_cfg.username if proxy_cfg else None
-			password = proxy_cfg.password if proxy_cfg else None
-			if not username or not password:
-				self.logger.debug('Proxy credentials not provided; skipping proxy auth setup')
+			username = (proxy_cfg.username if proxy_cfg else None) or ''
+			password = (proxy_cfg.password if proxy_cfg else None) or ''
+			handle_auth = bool(username and password)
+			blocked_types = blocked_resource_types_for_render_mode(self.browser_profile.effective_render_mode)
+			blocked_set = frozenset(blocked_types)
+			if not handle_auth and not blocked_set:
+				self.logger.debug('Fetch interception skipped: full render mode and no proxy credentials')
 				return
 
-			# Enable Fetch domain with auth handling (do not pause all requests)
-			try:
-				await self._cdp_client_root.send.Fetch.enable(params={'handleAuthRequests': True})
-				self.logger.debug('Fetch.enable(handleAuthRequests=True) enabled on root client')
-			except Exception as e:
-				self.logger.debug(f'Fetch.enable on root failed: {type(e).__name__}: {e}')
+			root = self._cdp_client_root
+			effective_types = list(blocked_types)
 
-			# Also enable on the focused session if available to ensure events are delivered
-			try:
-				if self.agent_focus:
-					await self.agent_focus.cdp_client.send.Fetch.enable(
-						params={'handleAuthRequests': True},
-						session_id=self.agent_focus.session_id,
-					)
-					self.logger.debug('Fetch.enable(handleAuthRequests=True) enabled on focused session')
-			except Exception as e:
-				self.logger.debug(f'Fetch.enable on focused session failed: {type(e).__name__}: {e}')
+			def _fetch_patterns() -> list[dict[str, str]]:
+				if handle_auth:
+					# Pause every request so proxy challenges on documents and
+					# subresources are answered through Fetch.authRequired.
+					return [{'urlPattern': '*', 'requestStage': 'Request'}]
+				return [
+					{'urlPattern': '*', 'resourceType': resource_type, 'requestStage': 'Request'}
+					for resource_type in effective_types
+				]
+
+			handled = self._fetch_handled_requests
+			handled.clear()
+
+			def _spawn(coro: Coroutine[Any, Any, Any]) -> None:
+				task = asyncio.create_task(coro)
+				self._fetch_interceptor_tasks.add(task)
+				task.add_done_callback(self._fetch_interceptor_tasks.discard)
+
+			def _claim_request(request_id: str, event_session_id: SessionID | None) -> bool:
+				"""Return True once per delivered requestId, even across duplicate events."""
+				key = (event_session_id, request_id)
+				if key in handled:
+					return False
+				handled[key] = None
+				while len(handled) > MAX_RETAINED_FETCH_DECISIONS:
+					handled.pop(next(iter(handled)))
+				return True
 
 			def _on_auth_required(event: AuthRequiredEvent, session_id: SessionID | None = None):
 				# event keys may be snake_case or camelCase depending on generator; handle both
@@ -6413,9 +6462,8 @@ class BrowserSession(BaseModel):
 				if source == 'proxy' and request_id:
 
 					async def _respond():
-						assert self._cdp_client_root
 						try:
-							await self._cdp_client_root.send.Fetch.continueWithAuth(
+							await root.send.Fetch.continueWithAuth(
 								params={
 									'requestId': request_id,
 									'authChallengeResponse': {
@@ -6430,13 +6478,12 @@ class BrowserSession(BaseModel):
 							self.logger.debug(f'Proxy auth respond failed: {type(e).__name__}: {e}')
 
 					# schedule
-					asyncio.create_task(_respond())
+					_spawn(_respond())
 				else:
 					# Default behaviour for non-proxy challenges: let browser handle
 					async def _default():
-						assert self._cdp_client_root
 						try:
-							await self._cdp_client_root.send.Fetch.continueWithAuth(
+							await root.send.Fetch.continueWithAuth(
 								params={'requestId': request_id, 'authChallengeResponse': {'response': 'Default'}},
 								session_id=session_id,
 							)
@@ -6444,73 +6491,116 @@ class BrowserSession(BaseModel):
 							self.logger.debug(f'Default auth respond failed: {type(e).__name__}: {e}')
 
 					if request_id:
-						asyncio.create_task(_default())
+						_spawn(_default())
 
 			def _on_request_paused(event: RequestPausedEvent, session_id: SessionID | None = None):
-				# Continue all paused requests to avoid stalling the network
+				# Single decision point for every paused request. Blocked resource
+				# types fail before network; everything else continues untouched.
 				request_id = event.get('requestId') or event.get('request_id')
 				if not request_id:
 					return
+				if not _claim_request(request_id, session_id):
+					return
+
+				resource_type = str(event.get('resourceType') or event.get('resource_type') or '')
+				if resource_type in blocked_set:
+
+					async def _block():
+						try:
+							await root.send.Fetch.failRequest(
+								params={'requestId': request_id, 'errorReason': 'BlockedByClient'},
+								session_id=session_id,
+							)
+							self.logger.debug(f'Blocked {resource_type} request {request_id} ({sorted(blocked_set)})')
+						except Exception as e:
+							self.logger.debug(f'Fetch.failRequest failed for {request_id}: {type(e).__name__}: {e}')
+							try:
+								await root.send.Fetch.continueRequest(
+									params={'requestId': request_id},
+									session_id=session_id,
+								)
+							except Exception:
+								pass
+
+					_spawn(_block())
+					return
 
 				async def _continue():
-					assert self._cdp_client_root
 					try:
-						await self._cdp_client_root.send.Fetch.continueRequest(
+						await root.send.Fetch.continueRequest(
 							params={'requestId': request_id},
 							session_id=session_id,
 						)
 					except Exception:
 						pass
 
-				asyncio.create_task(_continue())
+				_spawn(_continue())
 
-			# Register event handler on root client
 			try:
-				self._cdp_client_root.register.Fetch.authRequired(_on_auth_required)
-				self._cdp_client_root.register.Fetch.requestPaused(_on_request_paused)
-				if self.agent_focus:
-					self.agent_focus.cdp_client.register.Fetch.authRequired(_on_auth_required)
-					self.agent_focus.cdp_client.register.Fetch.requestPaused(_on_request_paused)
-				self.logger.debug('Registered Fetch.authRequired handlers')
+				root.register.Fetch.requestPaused(_on_request_paused)
+				focused_client = None
+				if self.agent_focus is not None:
+					focused_client = self.agent_focus.cdp_client
+					if focused_client is not root:
+						focused_client.register.Fetch.requestPaused(_on_request_paused)
+				if handle_auth:
+					root.register.Fetch.authRequired(_on_auth_required)
+					if focused_client is not None and focused_client is not root:
+						focused_client.register.Fetch.authRequired(_on_auth_required)
+				self.logger.debug(
+					f'Registered Fetch interception handlers (blocked={sorted(blocked_set)}, auth={handle_auth})'
+				)
 			except Exception as e:
-				self.logger.debug(f'Failed to register authRequired handlers: {type(e).__name__}: {e}')
+				self.logger.debug(f'Failed to register Fetch handlers: {type(e).__name__}: {e}')
 
-			# Auto-enable Fetch on every newly attached target to ensure auth callbacks fire
-			def _on_attached(event: AttachedToTargetEvent, session_id: SessionID | None = None):
-				sid = event.get('sessionId') or event.get('session_id') or session_id
-				if not sid:
-					return
-
-				async def _enable():
-					assert self._cdp_client_root
+			async def _enable(target_session_id: SessionID | None) -> None:
+				# Older Chromium builds reject unknown Fetch resource filters as a whole.
+				# Retry without the unsupported type instead of losing the policy.
+				while True:
+					params: Any = {'handleAuthRequests': handle_auth, 'patterns': _fetch_patterns()}
 					try:
-						await self._cdp_client_root.send.Fetch.enable(
-							params={'handleAuthRequests': True},
-							session_id=sid,
+						await root.send.Fetch.enable(params=params, session_id=target_session_id)
+						self.logger.debug(
+							f'Fetch.enable applied to session {target_session_id} (blocked={sorted(effective_types)})'
 						)
-						self.logger.debug(f'Fetch.enable(handleAuthRequests=True) enabled on attached session {sid}')
+						return
 					except Exception as e:
-						self.logger.debug(f'Fetch.enable on attached session failed: {type(e).__name__}: {e}')
+						match = re.search(r"Unknown resource type in fetch filter: '([^']+)'", str(e), re.IGNORECASE)
+						unsupported = match.group(1) if match else None
+						if unsupported and unsupported in effective_types:
+							effective_types.remove(unsupported)
+							self.logger.warning(
+								f'Chromium does not support the Fetch {unsupported!r} resource filter; '
+								'that type is not blocked by this policy'
+							)
+							if not effective_types and not handle_auth:
+								self.logger.warning('No supported Fetch resource filters remain; interception disabled')
+								return
+							continue
+						self.logger.debug(
+							f'Fetch.enable failed for session {target_session_id}: {type(e).__name__}: {e}'
+						)
+						return
 
-				asyncio.create_task(_enable())
+			# Enable Fetch on the root client and the focused page before any navigation.
+			await _enable(None)
+			if self.agent_focus is not None:
+				await _enable(self.agent_focus.session_id)
+
+			# Reapply the same policy to every newly attached target.
+			def _on_attached(event: AttachedToTargetEvent, session_id: SessionID | None = None):
+				attached_session_id = event.get('sessionId') or event.get('session_id') or session_id
+				if not attached_session_id:
+					return
+				_spawn(_enable(attached_session_id))
 
 			try:
-				self._cdp_client_root.register.Target.attachedToTarget(_on_attached)
+				root.register.Target.attachedToTarget(_on_attached)
 				self.logger.debug('Registered Target.attachedToTarget handler for Fetch.enable')
 			except Exception as e:
 				self.logger.debug(f'Failed to register attachedToTarget handler: {type(e).__name__}: {e}')
-
-			# Ensure Fetch is enabled for the current focused session, too
-			try:
-				if self.agent_focus:
-					await self.agent_focus.cdp_client.send.Fetch.enable(
-						params={'handleAuthRequests': True, 'patterns': [{'urlPattern': '*'}]},
-						session_id=self.agent_focus.session_id,
-					)
-			except Exception as e:
-				self.logger.debug(f'Fetch.enable on focused session failed: {type(e).__name__}: {e}')
 		except Exception as e:
-			self.logger.debug(f'Skipping proxy auth setup: {type(e).__name__}: {e}')
+			self.logger.debug(f'Skipping Fetch interception setup: {type(e).__name__}: {e}')
 
 	async def get_tabs(self) -> list[TabInfo]:
 		"""Get information about all open tabs using CDP Target.getTargetInfo for speed."""
