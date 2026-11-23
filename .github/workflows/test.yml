@@ -109,6 +109,8 @@ jobs:
       - run: uv sync --locked --all-extras
       - name: Run Ruff, format, Pyright, and backend compile
         run: uv run --locked python scripts/ci/budget.py --name static -- ./scripts/ci/run_static.sh .
+      - name: Validate skills.sh manifest
+        run: uv run --locked python scripts/ci/validate_skills_manifest.py
 
   test:
     name: Test ${{ matrix.os }} shard ${{ matrix.shard }}/6
