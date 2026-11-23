@@ -268,6 +268,7 @@ def _tool_catalog(description: str, *, modern: bool) -> tuple[types.Tool, ...]:
 			'health is the last event-driven crash or setup observation plus a status-time local process check, '
 			'not a live page probe. '
 			'Use last_focus_recovery_outcome, target_crash_count, and process_present before retrying. '
+			'Wait while recovery is pending. Reset only when no usable target exists. '
 			'process_present is null when the published root is not bound to the recorded local owner. '
 			'That includes remote or stopped sessions. '
 			'A missing health block means no browser session exists.'

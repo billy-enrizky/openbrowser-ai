@@ -473,7 +473,7 @@ A context is process-local. It lives until `close_context` or server exit, and a
 
 If a browser connection fails, call `get_status` before retrying. Do not replay a page-changing action blindly because the first attempt may have partially run.
 
-Read `browser.health` after a crash or connection failure. `phase=crashed` means the local process bound to the current root is missing or no longer matches its recorded identity. `phase=degraded` records a page-target crash and reports recovery as `not_attempted`, `pending`, `succeeded`, or `failed`. Use `focus` and `tabs` for target-specific state. A missing `health` block means no context has a browser session.
+Read `browser.health` after a crash or connection failure. `phase=crashed` means the local process bound to the current root is missing or no longer matches its recorded identity. `phase=degraded` records a page-target crash and reports recovery as `not_attempted`, `pending`, `succeeded`, or `failed`. Wait while recovery is pending. After a failed recovery, inspect `focus.last_error` and reset only when no usable target exists. Use `focus` and `tabs` for target-specific state. A missing `health` block means no context has a browser session.
 
 **Available functions** (use `await` unless noted):
 
@@ -607,7 +607,7 @@ uvx openbrowser-ai --mcp
 
 The `-c` flag connects to a persistent browser daemon over a Unix socket (localhost TCP on Windows). Variables persist across calls while the daemon is running. The daemon starts automatically on first use and shuts down after 10 minutes of inactivity.
 
-After a browser failure, run `openbrowser-ai daemon status` before retrying because the first call may have partially run. Read `browser.health` for the last crash, focus-recovery, and local process observation. `health` is not a live page-readiness probe. Use `openbrowser-ai daemon reset` when the existing session is not usable.
+After a browser failure, run `openbrowser-ai daemon status` before retrying because the first call may have partially run. Read `browser.health` for the last crash, focus-recovery, and local process observation. `health` is not a live page-readiness probe. Wait while recovery is pending. After a failed recovery, use `openbrowser-ai daemon reset` only when no usable target exists.
 
 The CLI daemon stores its browser profile in `~/.config/openbrowser/profiles/daemon`, so cookies and login sessions survive daemon restarts through Chrome's user-data directory. An explicit `storage_state` path is still loaded when configured. Custom sockets share the default profile by default to preserve existing logins. Set `OPENBROWSER_DAEMON_PROFILE_ISOLATION=true` or `OPENBROWSER_DAEMON_PROFILE_DIR` when several daemons must run with separate profiles. `OPENBROWSER_USER_DATA_DIR` takes precedence over both and always selects that explicit profile. One-shot `-p` runs use `~/.config/openbrowser/profiles/cli`. Managed profiles automatically clear disposable browser caches on startup and shutdown while keeping auth state.
 

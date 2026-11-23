@@ -171,6 +171,8 @@ An inactive snapshot can report `null` and keeps the history fields.
 `last_probe_at` tells you whether a probe ran.
 `cdp_connected` is only pointer presence.
 Root CDP health does not prove a target session, tab, or page can accept commands.
-Through MCP, call `get_status`, then `reset_browser` before retrying.
-Through the CLI, run `openbrowser-ai daemon status` or `openbrowser-ai daemon reset`.
+If crash recovery is `pending`, wait for it before starting another recovery.
+If recovery `failed`, inspect `focus.last_error` and reset only when no usable target exists.
+If `health.phase` is `crashed` or `failed`, use `reset_browser` through MCP.
+Through the CLI, use `openbrowser-ai daemon reset` before retrying.
 """
