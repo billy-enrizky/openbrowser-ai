@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from test_session_part1 import _make_mock_cdp_client
 
+from openbrowser.browser.cdp_connection import CdpConnectionHealthTracker
 from openbrowser.browser.focus import (
     FocusChangeReason,
     FocusPhase,
@@ -15,6 +16,7 @@ from openbrowser.browser.focus import (
     FocusTargetError,
     FocusTransitionBudget,
 )
+from openbrowser.browser.health import BrowserHealthMachine, BrowserHealthReason
 from openbrowser.browser.session_manager import SessionManager
 from openbrowser.browser.tabs import TabRegistry, TabState
 
@@ -33,6 +35,11 @@ def _make_mock_browser_session():
     cdp_client_root.register.Target.targetCrashed = MagicMock()
 
     session._cdp_client_root = cdp_client_root
+    session._cdp_health = CdpConnectionHealthTracker()
+    generation = session._cdp_health.begin_connect()
+    session._cdp_health.mark_connected(generation)
+    session._health = BrowserHealthMachine()
+    session._health.record_connected(generation)
     session._cdp_session_pool = {}
     session._tab_registry = TabRegistry()
     session.agent_focus = None
@@ -524,6 +531,16 @@ class TestSessionManagerCrash:
             last_error=None,
             updated_at=0.0,
         )
+        session._recover_agent_focus.return_value = FocusSnapshot(
+            phase=FocusPhase.FOCUSED,
+            target_id='target-2',
+            session_id='session-2',
+            previous_target_id='target-1',
+            generation=2,
+            reason=FocusChangeReason.CRASH_RECOVERY,
+            last_error=None,
+            updated_at=0.0,
+        )
 
         await sm._handle_target_crashed('target-1', status='crashed', error_code=-1)
 
@@ -534,6 +551,10 @@ class TestSessionManagerCrash:
         session._recover_agent_focus.assert_awaited_once()
         assert session._recover_agent_focus.await_args.args == ('target-1',)
         assert session._recover_agent_focus.await_args.kwargs['reason'] is FocusChangeReason.CRASH_RECOVERY
+        health = session._health.snapshot()
+        assert health.phase.value == 'healthy'
+        assert health.last_focus_recovery_outcome.value == 'succeeded'
+        assert health.last_focus_recovery_target_id == 'target-2'
 
     async def test_non_focused_crash_does_not_recover(self):
         session = _make_mock_browser_session()
@@ -585,3 +606,329 @@ class TestSessionManagerCrash:
         await sm._handle_target_crashed('target-1', status='crashed', error_code=-1)
 
         session._report_focus_recovery_failure.assert_called_once_with('target-1', error)
+
+    async def test_repeated_crash_is_fully_deduplicated(self):
+        session = _make_mock_browser_session()
+        sm = SessionManager(session)
+        sm._target_types['target-1'] = 'page'
+        session.focus_snapshot.return_value = FocusSnapshot(
+            phase=FocusPhase.FOCUSED,
+            target_id='target-2',
+            session_id='session-2',
+            previous_target_id=None,
+            generation=1,
+            reason=FocusChangeReason.INITIAL,
+            last_error=None,
+            updated_at=0.0,
+        )
+        session._tab_registry.register('target-1', url='https://example.com', state=TabState.OPEN)
+        session.event_bus.dispatch.reset_mock()
+
+        await sm._handle_target_crashed('target-1', status='crashed', error_code=-1)
+        await sm._handle_target_crashed('target-1', status='crashed', error_code=-1)
+
+        health = session._health.snapshot()
+        assert health.target_crash_count == 1
+        assert health.phase.value == 'degraded'
+        assert session._tab_registry.get('target-1').state is TabState.CRASHED
+        assert session.event_bus.dispatch.call_count == 1
+        session._recover_agent_focus.assert_not_awaited()
+
+    async def test_new_root_and_generation_are_fenced_before_any_mutation(self):
+        session = _make_mock_browser_session()
+        sm = SessionManager(session)
+        sm._target_types['target-1'] = 'page'
+        session.event_bus.dispatch.reset_mock()
+        session._cdp_health.begin_connect()
+
+        await sm._handle_target_crashed('target-1', status='crashed', error_code=-1)
+
+        assert session._tab_registry.get('target-1') is None
+        assert session.event_bus.dispatch.call_count == 0
+        assert session._health.snapshot().target_crash_count == 0
+        session._recover_agent_focus.assert_not_awaited()
+
+        generation = session._cdp_health.begin_connect()
+        session._cdp_health.mark_connected(generation)
+        sm._monitored_connection_generation = generation
+        session._cdp_client_root = MagicMock()
+        await sm._handle_target_crashed('target-1', status='crashed', error_code=-1)
+
+        assert session._tab_registry.get('target-1') is None
+        assert session.event_bus.dispatch.call_count == 0
+
+    async def test_pending_recovery_is_visible_before_success(self):
+        session = _make_mock_browser_session()
+        sm = SessionManager(session)
+        sm._target_types['target-1'] = 'page'
+        session._tab_registry.register('target-1', url='https://example.com', state=TabState.OPEN)
+        session.focus_snapshot.return_value = FocusSnapshot(
+            phase=FocusPhase.FOCUSED,
+            target_id='target-1',
+            session_id='session-1',
+            previous_target_id=None,
+            generation=1,
+            reason=FocusChangeReason.INITIAL,
+            last_error=None,
+            updated_at=0.0,
+        )
+        entered, release = asyncio.Event(), asyncio.Event()
+
+        async def recover(*args, **kwargs):
+            entered.set()
+            await asyncio.wait_for(release.wait(), timeout=2.0)
+            return FocusSnapshot(
+                phase=FocusPhase.FOCUSED,
+                target_id='target-2',
+                session_id='session-2',
+                previous_target_id='target-1',
+                generation=2,
+                reason=FocusChangeReason.CRASH_RECOVERY,
+                last_error=None,
+                updated_at=0.0,
+            )
+
+        session._recover_agent_focus = AsyncMock(side_effect=recover)
+        task = asyncio.create_task(sm._handle_target_crashed('target-1', status='crashed', error_code=-1))
+        try:
+            await asyncio.wait_for(entered.wait(), timeout=2.0)
+            pending = session._health.snapshot()
+            assert pending.phase.value == 'degraded'
+            assert pending.last_focus_recovery_outcome.value == 'pending'
+            release.set()
+            await asyncio.wait_for(task, timeout=2.0)
+        finally:
+            release.set()
+            if not task.done():
+                task.cancel()
+                await asyncio.wait_for(asyncio.gather(task, return_exceptions=True), timeout=2.0)
+
+        recovered = session._health.snapshot()
+        assert recovered.phase.value == 'healthy'
+        assert recovered.last_focus_recovery_outcome.value == 'succeeded'
+        assert recovered.last_focus_recovery_target_id == 'target-2'
+
+    async def test_newer_crash_discards_older_success(self):
+        session = _make_mock_browser_session()
+        sm = SessionManager(session)
+        sm._target_types['target-1'] = 'page'
+        sm._target_types['target-2'] = 'page'
+        session._tab_registry.register('target-1', url='https://example.com/one', state=TabState.OPEN)
+        session._tab_registry.register('target-2', url='https://example.com/two', state=TabState.OPEN)
+        focused = FocusSnapshot(
+            phase=FocusPhase.FOCUSED,
+            target_id='target-1',
+            session_id='session-1',
+            previous_target_id=None,
+            generation=1,
+            reason=FocusChangeReason.INITIAL,
+            last_error=None,
+            updated_at=0.0,
+        )
+        session.focus_snapshot.return_value = focused
+        entered, release = asyncio.Event(), asyncio.Event()
+
+        async def recover(*args, **kwargs):
+            entered.set()
+            await asyncio.wait_for(release.wait(), timeout=2.0)
+            return FocusSnapshot(
+                phase=FocusPhase.FOCUSED,
+                target_id='replacement-a',
+                session_id='replacement-session',
+                previous_target_id='target-1',
+                generation=2,
+                reason=FocusChangeReason.CRASH_RECOVERY,
+                last_error=None,
+                updated_at=0.0,
+            )
+
+        session._recover_agent_focus = AsyncMock(side_effect=recover)
+        task = asyncio.create_task(sm._handle_target_crashed('target-1', status='crashed', error_code=-1))
+        try:
+            await asyncio.wait_for(entered.wait(), timeout=2.0)
+            session.focus_snapshot.return_value = FocusSnapshot(
+                phase=FocusPhase.FOCUSED,
+                target_id='target-3',
+                session_id='session-3',
+                previous_target_id=None,
+                generation=3,
+                reason=FocusChangeReason.INITIAL,
+                last_error=None,
+                updated_at=0.0,
+            )
+            await sm._handle_target_crashed('target-2', status='crashed', error_code=-1)
+            release.set()
+            await asyncio.wait_for(task, timeout=2.0)
+        finally:
+            release.set()
+            if not task.done():
+                task.cancel()
+                await asyncio.wait_for(asyncio.gather(task, return_exceptions=True), timeout=2.0)
+
+        health = session._health.snapshot()
+        assert health.target_crash_count == 2
+        assert health.last_target_crash_target_id == 'target-2'
+        assert health.phase.value == 'degraded'
+        assert health.last_focus_recovery_outcome.value == 'not_attempted'
+
+    async def test_newer_crash_discards_older_failure_report(self):
+        session = _make_mock_browser_session()
+        sm = SessionManager(session)
+        sm._target_types['target-1'] = 'page'
+        sm._target_types['target-2'] = 'page'
+        session._tab_registry.register('target-1', url='https://example.com/one', state=TabState.OPEN)
+        session._tab_registry.register('target-2', url='https://example.com/two', state=TabState.OPEN)
+        session.focus_snapshot.return_value = FocusSnapshot(
+            phase=FocusPhase.FOCUSED,
+            target_id='target-1',
+            session_id='session-1',
+            previous_target_id=None,
+            generation=1,
+            reason=FocusChangeReason.INITIAL,
+            last_error=None,
+            updated_at=0.0,
+        )
+        entered, release = asyncio.Event(), asyncio.Event()
+        error = FocusTargetError(
+            'No live page target was available.',
+            code=FocusTargetCode.RECOVERY_FAILED,
+            phase=FocusPhase.LOST,
+            target_id='target-1',
+            target_type='page',
+        )
+
+        async def recover(*args, **kwargs):
+            entered.set()
+            await asyncio.wait_for(release.wait(), timeout=2.0)
+            raise error
+
+        session._recover_agent_focus = AsyncMock(side_effect=recover)
+        session._report_focus_recovery_failure = MagicMock()
+        task = asyncio.create_task(sm._handle_target_crashed('target-1', status='crashed', error_code=-1))
+        try:
+            await asyncio.wait_for(entered.wait(), timeout=2.0)
+            session.focus_snapshot.return_value = FocusSnapshot(
+                phase=FocusPhase.FOCUSED,
+                target_id='target-3',
+                session_id='session-3',
+                previous_target_id=None,
+                generation=3,
+                reason=FocusChangeReason.INITIAL,
+                last_error=None,
+                updated_at=0.0,
+            )
+            await sm._handle_target_crashed('target-2', status='crashed', error_code=-1)
+            release.set()
+            await asyncio.wait_for(task, timeout=2.0)
+        finally:
+            release.set()
+            if not task.done():
+                task.cancel()
+                await asyncio.wait_for(asyncio.gather(task, return_exceptions=True), timeout=2.0)
+
+        session._report_focus_recovery_failure.assert_not_called()
+        health = session._health.snapshot()
+        assert health.phase.value == 'degraded'
+        assert health.last_target_crash_target_id == 'target-2'
+        assert health.last_focus_recovery_outcome.value == 'not_attempted'
+
+    async def test_aba_creates_a_new_observation_when_latest_differs(self):
+        session = _make_mock_browser_session()
+        sm = SessionManager(session)
+        sm._target_types.update({'target-a': 'page', 'target-b': 'page'})
+        session.focus_snapshot.return_value = FocusSnapshot(
+            phase=FocusPhase.FOCUSED,
+            target_id='target-other',
+            session_id='session-other',
+            previous_target_id=None,
+            generation=1,
+            reason=FocusChangeReason.INITIAL,
+            last_error=None,
+            updated_at=0.0,
+        )
+
+        await sm._handle_target_crashed('target-a', status='crashed', error_code=-1)
+        await sm._handle_target_crashed('target-b', status='crashed', error_code=-1)
+        await sm._handle_target_crashed('target-a', status='crashed', error_code=-1)
+
+        assert session._health.snapshot().target_crash_count == 3
+
+    async def test_non_page_crash_does_not_change_health(self):
+        session = _make_mock_browser_session()
+        sm = SessionManager(session)
+        sm._target_types['iframe-1'] = 'iframe'
+
+        await sm._handle_target_crashed('iframe-1', status='crashed', error_code=-1)
+
+        assert session._health.snapshot().target_crash_count == 0
+        assert session._health.snapshot().phase.value == 'healthy'
+
+    @pytest.mark.parametrize('operation', ['reset', 'reconnect'])
+    async def test_reset_or_reconnect_discards_blocked_recovery_without_rollback(self, operation):
+        session = _make_mock_browser_session()
+        sm = SessionManager(session)
+        sm._target_types['target-1'] = 'page'
+        session._tab_registry.register('target-1', url='https://example.com', state=TabState.OPEN)
+        session.focus_snapshot.return_value = FocusSnapshot(
+            phase=FocusPhase.FOCUSED,
+            target_id='target-1',
+            session_id='session-1',
+            previous_target_id=None,
+            generation=1,
+            reason=FocusChangeReason.INITIAL,
+            last_error=None,
+            updated_at=0.0,
+        )
+        entered, release = asyncio.Event(), asyncio.Event()
+
+        async def recover(*args, **kwargs):
+            entered.set()
+            session.agent_focus = MagicMock(target_id='committed-replacement')
+            await asyncio.wait_for(release.wait(), timeout=2.0)
+            return FocusSnapshot(
+                phase=FocusPhase.FOCUSED,
+                target_id='committed-replacement',
+                session_id='replacement-session',
+                previous_target_id='target-1',
+                generation=2,
+                reason=FocusChangeReason.CRASH_RECOVERY,
+                last_error=None,
+                updated_at=0.0,
+            )
+
+        session._recover_agent_focus = AsyncMock(side_effect=recover)
+        task = asyncio.create_task(sm._handle_target_crashed('target-1', status='crashed', error_code=-1))
+        try:
+            await asyncio.wait_for(entered.wait(), timeout=2.0)
+            if operation == 'reset':
+                session._cdp_client_root = None
+                session._health.record_stopped(
+                    BrowserHealthReason.RESET,
+                    sm._monitored_connection_generation or 0,
+                )
+            else:
+                new_root = MagicMock()
+                session._cdp_client_root = new_root
+                generation = session._cdp_health.begin_connect()
+                session._cdp_health.mark_connected(generation)
+                session._health.record_connected(generation)
+                sm._monitored_root = new_root
+                sm._monitored_connection_generation = generation
+            release.set()
+            await asyncio.wait_for(task, timeout=2.0)
+        finally:
+            release.set()
+            if not task.done():
+                task.cancel()
+                await asyncio.wait_for(asyncio.gather(task, return_exceptions=True), timeout=2.0)
+
+        health = session._health.snapshot()
+        if operation == 'reset':
+            assert health.phase.value == 'stopped'
+            assert health.reason.value == 'reset'
+        else:
+            assert health.phase.value == 'healthy'
+            assert health.reason.value == 'connected'
+            assert health.connection_generation == 2
+        assert health.last_focus_recovery_outcome.value == 'not_attempted'
+        assert session.agent_focus.target_id == 'committed-replacement'

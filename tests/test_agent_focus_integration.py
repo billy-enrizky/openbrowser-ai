@@ -83,6 +83,11 @@ async def test_switch_rebind_and_close_repair_with_real_chrome(focus_site, tmp_p
         await asyncio.wait_for(browser.start(), timeout=60)
         assert initial_observer_failed
         assert browser.focus_snapshot().phase is FocusPhase.FOCUSED
+        health = browser.browser_health_snapshot()
+        assert health["phase"] == "healthy"
+        assert health["reason"] == "connected"
+        assert health["process_present"] is True
+        assert health["process_pid"] is not None
         await asyncio.wait_for(browser.navigate_to(f"{focus_site}/first?nonce=first"), timeout=30)
         first = browser.focus_snapshot()
         assert first.phase is FocusPhase.FOCUSED

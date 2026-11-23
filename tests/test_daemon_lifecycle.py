@@ -37,6 +37,7 @@ def test_status_before_browser_start(daemon_server):
 	assert result['browser']['phase'] == 'stopped'
 	assert result['browser']['focus']['phase'] == 'uninitialized'
 	assert 'cdp' not in result['browser']
+	assert 'health' not in result['browser']
 	assert 'socket' in result
 	assert 'idle_timeout' in result
 
@@ -75,6 +76,8 @@ def test_status_falls_back_to_cdp_health_when_snapshot_fails(daemon_server):
 	assert result['browser']['cdp']['healthy'] is None
 	assert result['browser']['cdp']['cleanup_pending'] is True
 	assert result['browser']['cdp_connected'] is True
+	assert result['browser']['health']['phase'] == 'unknown'
+	assert result['browser']['health']['reason'] == 'initial'
 	root.send.Browser.getVersion.assert_not_awaited()
 
 

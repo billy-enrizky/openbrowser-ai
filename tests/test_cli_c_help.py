@@ -87,6 +87,9 @@ class TestCliCHelp:
             assert result.returncode == 0
             # Compact description has '## Core Functions' but NOT '## Navigation'
             assert '## Core Functions' in result.stdout
+            assert 'get_status' in result.stdout
+            assert 'openbrowser-ai daemon status' in result.stdout
+            assert '`health` is not page readiness' in result.stdout
         finally:
             _run_cli('daemon', 'stop', env=env)
 

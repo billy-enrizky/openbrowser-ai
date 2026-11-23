@@ -50,6 +50,32 @@ class SessionManager:
 		self._event_tasks: set[asyncio.Task[Any]] = set()
 		self._closed = False
 		self._crash_listener_registered = False
+		self._monitored_root = getattr(browser_session, '_cdp_client_root', None)
+		self._monitored_connection_generation = self._session_connection_generation()
+
+	def _session_connection_generation(self) -> int | None:
+		"""Return the CDP connection generation when the session exposes one."""
+		health = getattr(self.browser_session, '_cdp_health', None)
+		generation = getattr(health, 'connection_generation', None)
+		return generation if isinstance(generation, int) else None
+
+	def _crash_context_is_current(self) -> bool:
+		"""Return True while the monitored root and connection generation still own crashes."""
+		if self._closed:
+			return False
+		root = self.browser_session._cdp_client_root
+		if root is None or root is not self._monitored_root:
+			return False
+		if self._monitored_connection_generation is None:
+			return True
+		return self._session_connection_generation() == self._monitored_connection_generation
+
+	def _health_machine(self) -> Any | None:
+		"""Return the session health tracker when it is the real explicit model."""
+		from openbrowser.browser.health import BrowserHealthMachine
+
+		health = getattr(self.browser_session, '_health', None)
+		return health if isinstance(health, BrowserHealthMachine) else None
 
 	async def start_monitoring(self) -> None:
 		"""Start monitoring Target attach/detach events.
@@ -62,6 +88,8 @@ class SessionManager:
 		self._closed = False
 		# Capture cdp_client_root in closure to avoid type errors
 		cdp_client = self.browser_session._cdp_client_root
+		self._monitored_root = cdp_client
+		self._monitored_connection_generation = self._session_connection_generation()
 
 		# Register synchronous event handlers (CDP requirement)
 		def on_attached(event: AttachedToTargetEvent, session_id: SessionID | None = None):
@@ -506,12 +534,19 @@ class SessionManager:
 		error_code: Any = None,
 	) -> None:
 		"""Mark a page crash and start focused recovery."""
-		if self._closed:
+		if not self._crash_context_is_current():
 			return
 		target_type = self._target_types.get(target_id)
 		if target_type != 'page':
 			return
 		message = f'Target crashed: status={status}, errorCode={error_code}'
+		health = self._health_machine()
+		generation = self._monitored_connection_generation or 0
+		token = None
+		if health is not None:
+			token = health.record_target_crash(generation, target_id, message)
+			if token is None:
+				return
 		self.browser_session._tab_registry.mark_crashed(target_id, message)
 		from openbrowser.browser.events import BrowserErrorEvent
 
@@ -529,14 +564,30 @@ class SessionManager:
 		snapshot = self.browser_session.focus_snapshot()
 		if snapshot.phase is not FocusPhase.FOCUSED or snapshot.target_id != target_id:
 			return
+		if (
+			health is not None
+			and token is not None
+			and not health.record_focus_recovery_started(token, generation)
+		):
+			return
 		try:
-			await self.browser_session._recover_agent_focus(
+			recovered = await self.browser_session._recover_agent_focus(
 				target_id,
 				reason=FocusChangeReason.CRASH_RECOVERY,
 				budget=FocusTransitionBudget.start(),
 				expected_generation=snapshot.generation,
 			)
+		except asyncio.CancelledError:
+			raise
 		except Exception as error:
+			if not self._crash_context_is_current():
+				return
+			if (
+				health is not None
+				and token is not None
+				and not health.record_focus_recovery_failure(token, generation)
+			):
+				return
 			report = getattr(self.browser_session, '_report_focus_recovery_failure', None)
 			if callable(report):
 				report(target_id, error)
@@ -544,4 +595,13 @@ class SessionManager:
 				self.logger.warning(
 					f'[SessionManager] Focus recovery after crash failed for target {target_id[:8]}...: '
 					f'{type(error).__name__}: {error}'
+				)
+		else:
+			if not self._crash_context_is_current():
+				return
+			if health is not None and token is not None and recovered.target_id is not None:
+				health.record_focus_recovery_success(
+					token,
+					generation,
+					recovered.target_id,
 				)
