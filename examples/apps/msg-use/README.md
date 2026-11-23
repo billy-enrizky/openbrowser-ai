@@ -2,8 +2,8 @@
 
 AI-powered message scheduler using browser agents and Gemini. Schedule personalized messages in natural language and let AI compose them intelligently.
 
-[!WARNING]
-This demo requires openbrowser v0.7.7+.
+> [!WARNING]
+> This demo requires openbrowser v0.1.57+.
 
 ## Features
 
@@ -11,7 +11,7 @@ This demo requires openbrowser v0.7.7+.
 2. Parses natural language scheduling instructions
 3. Composes personalized messages using AI
 4. Schedules messages for future delivery or sends immediately
-5. Persistent session (no repeated QR scanning)
+5. Reuses the saved browser profile when WhatsApp keeps the session valid
 
 ## Setup
 
@@ -28,25 +28,27 @@ export GOOGLE_API_KEY='your-gemini-api-key-here'
 Clone the repo and cd into the app folder
 ```bash
 git clone https://github.com/billy-enrizky/openbrowser-ai.git
-cd openbrowser/examples/apps/msg-use
+cd openbrowser-ai/examples/apps/msg-use
 ```
 
 ## Initial Login
 
-First-time setup requires QR code scanning:
+WhatsApp Web may require a QR scan on first use or when the saved session expires:
 ```bash
 python login.py
 ```
-- Scan QR code when browser opens
-- Session will be saved for future use
+- Scan the QR code when the browser opens
+- The browser profile is reused on later runs when WhatsApp keeps the session valid
 
 ## Normal Usage
 
-1. **Edit your schedule** in `messages.txt`:
-```
+1. **Create `messages.txt`** in the app directory:
+```bash
+cat > messages.txt <<'EOF'
 - Send "Hi" to Magnus on the 09.09 at 18:15
-- Tell hinge date (Camila) at 20:00 that I miss her
+- Tell Camila at 20:00 that I miss her
 - Remind mom to pick up the car next tuesday
+EOF
 ```
 
 2. **Test mode** - See what will be sent:
@@ -63,22 +65,6 @@ python scheduler.py --debug
 
 # Auto Mode - Respond to unread messages every ~30 minutes
 python scheduler.py --auto
-```
-
-## Programmatic Usage
-
-```python
-import asyncio
-from scheduler import schedule_messages
-
-async def main():
-    messages = [
-        "Send hello to John at 15:30",
-        "Remind Sarah about meeting tomorrow at 9am"
-    ]
-    await schedule_messages(messages, debug=False)
-
-asyncio.run(main())
 ```
 
 ## Output

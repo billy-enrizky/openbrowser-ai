@@ -32,7 +32,7 @@ from openbrowser import Browser, Agent
 from openbrowser.llm.openai import ChatOpenAI
 
 async def main():
-    llm = ChatOpenAI(api_key="your-api-key")
+    llm = ChatOpenAI(model="gpt-4.1-mini", api_key="your-api-key")
     browser = Browser()
     await browser.start()
 
@@ -42,8 +42,12 @@ async def main():
     await email_input.fill("your-username")
 
     # 2. Agent: AI-driven complex tasks
-    agent = Agent(browser=browser, llm=llm)
-    await agent.run("Complete login and navigate to my repositories")
+    agent = Agent(
+        task="Complete login and navigate to my repositories",
+        browser=browser,
+        llm=llm,
+    )
+    await agent.run()
 
     await browser.stop()
 ```

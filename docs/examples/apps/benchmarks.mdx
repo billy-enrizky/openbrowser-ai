@@ -65,7 +65,7 @@ from openbrowser.code_use import CodeAgent
 
 async def run_agent_task(instruction: str):
     """Run task with standard Agent."""
-    llm = ChatGoogle(model='gemini-2.5-flash', temperature=0)
+    llm = ChatGoogle(model='gemini-3-flash-preview', temperature=0)
     browser = Browser(browser_profile=BrowserProfile(headless=True))
     
     agent = Agent(
@@ -79,12 +79,12 @@ async def run_agent_task(instruction: str):
     result = await agent.run()
     elapsed = time.time() - start
     
-    await browser.close()
+    await browser.stop()
     return {"time": elapsed, "steps": len(result.history), "success": result.is_done()}
 
 async def run_code_agent_task(instruction: str):
     """Run task with CodeAgent."""
-    llm = ChatGoogle(model='gemini-2.5-flash', temperature=0)
+    llm = ChatGoogle(model='gemini-3-flash-preview', temperature=0)
     browser_session = BrowserSession(browser_profile=BrowserProfile(headless=True))
     await browser_session.start()
     
@@ -99,8 +99,8 @@ async def run_code_agent_task(instruction: str):
     result = await agent.run()
     elapsed = time.time() - start
     
-    await browser_session.close()
-    return {"time": elapsed, "steps": len(agent.complete_history), "success": result is not None}
+    await browser_session.stop()
+    return {"time": elapsed, "steps": len(agent.complete_history), "success": agent.status.success is True}
 
 async def main():
     task = """

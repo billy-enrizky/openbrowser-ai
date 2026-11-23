@@ -3,7 +3,7 @@
 Automatically monitor news websites and extract the latest articles with sentiment analysis using browser agents and Google Gemini.
 
 > [!IMPORTANT]
-> This demo requires openbrowser v0.7.7+.
+> This demo requires openbrowser v0.1.57+.
 
 https://github.com/user-attachments/assets/698757ca-8827-41f3-98e5-c235d6eef69f
 
@@ -24,13 +24,13 @@ pip install -U openbrowser-ai
 
 Export your Gemini API key, get it from: [Google AI Studio](https://makersuite.google.com/app/apikey) 
 ```
-export GEMINI_API_KEY='your-google-api-key-here'
+export GOOGLE_API_KEY='your-google-api-key-here'
 ```
 
 Clone the repo and cd into the app folder
 ```bash
 git clone https://github.com/billy-enrizky/openbrowser-ai.git
-cd openbrowser/examples/apps/news-use
+cd openbrowser-ai/examples/apps/news-use
 ```
 
 ## Usage

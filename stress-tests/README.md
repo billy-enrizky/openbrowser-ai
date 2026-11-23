@@ -48,7 +48,14 @@ Each form includes:
 
 ## Usage
 
-Visit https://billy-enrizky.github.io/openbrowser-ai/ or run locally.
+Visit https://billy-enrizky.github.io/openbrowser-ai/ or serve the directory locally so relative iframe and asset paths work:
+
+```bash
+cd stress-tests
+python -m http.server 8000
+```
+
+Then open http://127.0.0.1:8000/.
 
 ## License
 

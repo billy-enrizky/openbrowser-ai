@@ -45,7 +45,7 @@ GEMINI_API_KEY = os.getenv('GOOGLE_API_KEY') or 'xxxx'
 if GEMINI_API_KEY == 'xxxx':
 	print('⚠️  WARNING: Please set GOOGLE_API_KEY environment variable')
 	print('   You can get an API key at: https://makersuite.google.com/app/apikey')
-	print("   Then run: export GEMINI_API_KEY='your-api-key-here'")
+	print("   Then run: export GOOGLE_API_KEY='your-api-key-here'")
 	print()
 
 

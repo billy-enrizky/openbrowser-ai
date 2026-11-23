@@ -7,6 +7,15 @@
 - Chrome or Chromium installed
 - Python 3.12+ with [uv](https://docs.astral.sh/uv/)
 
+## Quick install with skills.sh
+
+```bash
+npx skills add billy-enrizky/openbrowser-ai --skill setup -a opencode
+npx skills add billy-enrizky/openbrowser-ai -a opencode
+```
+
+The first command installs only the setup skill. The second installs all eight OpenBrowser skills. The `setup` skill installs the CLI and Chromium, configures MCP, and verifies a real browser session.
+
 ## Installation
 
 ### macOS / Linux
@@ -61,6 +70,7 @@ Both should show symlinks pointing to the openbrowser directories.
 
 | Skill | Description |
 |-------|-------------|
+| `setup` | Install the CLI and Chromium, configure MCP and profiles, and verify a real browser session |
 | `deep-research` | Conduct cited, multi-source web research and produce markdown and JSON reports |
 | `web-scraping` | Extract structured data from websites, handle pagination |
 | `form-filling` | Fill forms, login flows, multi-step wizards |

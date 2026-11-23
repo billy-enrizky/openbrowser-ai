@@ -7,7 +7,7 @@ mode: "wide"
 
 ### Connect via CDP URL
 
-Connect to any remote browser using Chrome DevTools Protocol (CDP):
+Connect to any remote browser using Chrome DevTools Protocol (CDP). Remote launch settings such as `headless`, `proxy.server`, and `proxy.bypass` do not affect an already-running remote browser.
 
 ```python
 from openbrowser import Agent, Browser, ChatGoogle
@@ -19,7 +19,7 @@ browser = Browser(
 
 agent = Agent(
     task="Your task here",
-    llm=ChatGoogle(),
+    llm=ChatGoogle(model="gemini-3-flash-preview"),
     browser=browser,
 )
 ```
@@ -50,23 +50,24 @@ You can use any cloud browser service that provides a CDP URL:
 
 ### Proxy Connection
 
+The remote Chrome instance must be started with the proxy server. `proxy.server` and `proxy.bypass` are local launch settings and do not affect an already-running remote browser. Only the username and password are used for CDP proxy-auth challenges.
+
+
 ```python
 from openbrowser import Agent, Browser, ChatGoogle
 from openbrowser.browser import ProxySettings
 
 browser = Browser(
-    headless=False,
+    cdp_url="http://remote-server:9222",
     proxy=ProxySettings(
-        server="http://proxy-server:8080",
         username="proxy-user",
-        password="proxy-pass"
+        password="proxy-pass",
     ),
-    cdp_url="http://remote-server:9222"
 )
 
 agent = Agent(
     task="Your task here",
-    llm=ChatGoogle(),
+    llm=ChatGoogle(model="gemini-3-flash-preview"),
     browser=browser,
 )
 ```

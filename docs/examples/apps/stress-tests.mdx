@@ -64,7 +64,7 @@ from openbrowser import Agent, ChatGoogle
 async def run_stress_test():
     agent = Agent(
         task="Go to https://billy-enrizky.github.io/openbrowser-ai/challenges/react-native-web-form.html and fill out the form with test data",
-        llm=ChatGoogle(),
+        llm=ChatGoogle(model="gemini-3-flash-preview"),
     )
     await agent.run()
 

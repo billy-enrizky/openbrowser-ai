@@ -45,15 +45,17 @@ To get started with OpenBrowser you need to install the package and set up an AP
     pip install openbrowser-ai
     ```
 
-    With LLM agent support:
+    Agent and CodeAgent are included in the base package. Add optional providers:
 
     ```bash
-    pip install "openbrowser-ai[agent]"
+    pip install "openbrowser-ai[all]"
     ```
   </Tab>
   <Tab title="uv (recommended)">
+    Install the CLI globally:
+
     ```bash
-    uv pip install "openbrowser-ai[agent]"
+    uv tool install openbrowser-ai
     ```
 
     Or create an isolated environment first:
@@ -61,8 +63,10 @@ To get started with OpenBrowser you need to install the package and set up an AP
     ```bash
     uv venv --python 3.12
     source .venv/bin/activate
-    uv pip install "openbrowser-ai[agent]"
+    uv pip install openbrowser-ai
     ```
+
+    Add optional providers with `"openbrowser-ai[all]"`.
   </Tab>
   <Tab title="uvx (zero install)">
     Run directly without installing -- `uvx` downloads and caches the package automatically:
@@ -88,7 +92,9 @@ To get started with OpenBrowser you need to install the package and set up an AP
     ```bash
     git clone https://github.com/billy-enrizky/openbrowser-ai.git
     cd openbrowser-ai
-    uv pip install -e ".[agent]"
+    uv venv --python 3.12
+    source .venv/bin/activate
+    uv pip install -e ".[all]"
     ```
   </Tab>
 </Tabs>
@@ -181,6 +187,28 @@ if __name__ == "__main__":
 
 <Note> Custom browsers can be configured in one line. Check out <a href = "customize/browser/basics">browsers</a> for more. </Note>
 
-## 4. Going to Production
+## 4. Set up for your coding agent
+
+The `setup` skill installs the CLI and Chromium, configures MCP and profiles, installs the plugin skills, and verifies a real browser session.
+
+```bash
+npx skills add billy-enrizky/openbrowser-ai --skill setup -a codex
+npx skills add billy-enrizky/openbrowser-ai -a codex
+```
+
+Replace `codex` with `claude-code`, `opencode`, or another supported agent name. The first command installs only the setup skill. The second installs all eight OpenBrowser skills. Claude Code can also use the plugin marketplace:
+
+```bash
+claude plugin marketplace add billy-enrizky/openbrowser-ai
+claude plugin install openbrowser@openbrowser-ai
+```
+
+The portable MCP server command is:
+
+```bash
+uvx openbrowser-ai --mcp
+```
+
+## 5. Going to Production
 
 For production deployments, see [Going to Production](/production) for best practices on running OpenBrowser in production environments.

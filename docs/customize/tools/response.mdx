@@ -54,7 +54,7 @@ return ActionResult(
     long_term_memory="Found 50 products"        # Only this in future steps
 )
 ```
-We save the full `extracted_content` to files which the LLM can read in future steps.
+The built-in `extract` action saves large output to a file for later steps. A custom `ActionResult` does not save a file automatically; write the content yourself if you need a durable artifact.
 
 ### 3. Dont show long content, remember subset in context
 ```python

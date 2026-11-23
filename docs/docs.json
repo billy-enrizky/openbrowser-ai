@@ -130,6 +130,10 @@
     {
       "source": "/customize/examples/prompting-guide",
       "destination": "/customize/agent/prompting-guide"
+    },
+    {
+      "source": "/customize/integrations/docs-mcp",
+      "destination": "/customize/integrations/mcp-server"
     }
   ],
   "navigation": {
@@ -209,7 +213,6 @@
             "icon": "plug",
             "isDefaultOpen": false,
             "pages": [
-              "customize/integrations/docs-mcp",
               "customize/integrations/mcp-server",
               "customize/integrations/cli-daemon",
               "development/n8n-integration"

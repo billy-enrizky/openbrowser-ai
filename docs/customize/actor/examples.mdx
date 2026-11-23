@@ -51,7 +51,7 @@ screenshot = await page.screenshot()
 from openbrowser.llm.openai import ChatOpenAI
 from pydantic import BaseModel
 
-llm = ChatOpenAI(api_key="your-api-key")
+llm = ChatOpenAI(model="gpt-4.1-mini", api_key="your-api-key")
 
 # Find elements using natural language
 button = await page.get_element_by_prompt("login button", llm=llm)

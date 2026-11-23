@@ -21,14 +21,14 @@ Examples:
 Simply add `@tools.action(...)` to your function.
 
 ```python
-from openbrowser import Tools, Agent
+from openbrowser import Tools, Agent, ActionResult
 
 tools = Tools()
 
 @tools.action(description='Ask human for help with a question')
 def ask_human(question: str) -> ActionResult:
     answer = input(f'{question} > ')
-    return f'The human responded with: {answer}'
+    return ActionResult(extracted_content=f'The human responded with: {answer}')
 ```
 
 ```python
@@ -50,7 +50,7 @@ Your function has access to these objects:
 - **`page_extraction_llm: BaseChatModel`** - The LLM you pass into agent. This can be used to do a custom llm call here.
 - **`file_system: FileSystem`** - File system access
 - **`available_file_paths: list[str]`** - Available files for upload/processing
-- **`has_sensitive_data: bool`** - Whether action contains sensitive data
+- **`has_sensitive_data: bool`** - True only for the built-in `input` action when sensitive data is configured
 
 
 ## Browser Interaction Examples
@@ -87,8 +87,9 @@ Available methods on `Page`:
 
 Available methods on `Element`:
 - `click()` - Click the element
-- `type(text: str)` - Type text into the element
-- `get_text()` - Get element text content
+- `fill(value: str, clear: bool = True)` - Fill an input
+- `get_attribute(name: str)` - Read an attribute
+- `evaluate(page_function: str, *args)` - Read text or other values with an arrow function
 - See `openbrowser/actor/element.py` for more methods
 
 ## Pydantic Input
@@ -96,7 +97,9 @@ Available methods on `Element`:
 You can use Pydantic for the tool parameters:
 
 ```python
-from pydantic import BaseModel
+import json
+
+from pydantic import BaseModel, Field
 
 class Cars(BaseModel):
     name: str = Field(description='The name of the car, e.g. "Toyota Camry"')
@@ -107,6 +110,8 @@ def save_cars(cars: list[Cars]) -> str:
     with open('cars.json', 'w') as f:
         json.dump(cars, f)
     return f'Saved {len(cars)} cars to file'
+
+# The tool wrapper validates Cars and passes dictionaries to the function.
 
 task = "find cars and save them to file"
 ```

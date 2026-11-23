@@ -1,5 +1,11 @@
 # **User Interfaces of OpenBrowser**
 
+Install the optional UI dependencies first:
+
+```bash
+pip install gradio streamlit
+```
+
 | **File Name**          | **User Interface** | **Description**                           | **Example Usage**                         |
 |------------------------|-------------------|-------------------------------------------|-------------------------------------------|
 | `command_line.py`      | **Terminal**      | Parses arguments for command-line execution. | `python command_line.py`                  |

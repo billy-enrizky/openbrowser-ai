@@ -22,7 +22,7 @@ claude plugin marketplace add billy-enrizky/openbrowser-ai
 claude plugin install openbrowser@openbrowser-ai
 ```
 
-This installs the MCP server, 7 skills, and auto-enables the plugin. Restart Claude Code to activate.
+This installs the MCP server, 8 skills, and auto-enables the plugin. Restart Claude Code to activate.
 
 ### Local development
 
@@ -44,6 +44,20 @@ openbrowser-ai -c "print(await evaluate('document.title'))"
 The daemon starts automatically on first use and persists variables across calls.
 
 For OpenClaw plugin documentation, see [docs.openclaw.ai/tools/plugin](https://docs.openclaw.ai/tools/plugin).
+
+### skills.sh
+
+Install the same skill pack with the skills.sh CLI:
+
+```bash
+npx skills add billy-enrizky/openbrowser-ai
+```
+
+Install only the setup skill:
+
+```bash
+npx skills add billy-enrizky/openbrowser-ai --skill setup -a codex
+```
 
 ### Standalone MCP server (without plugin)
 
@@ -187,10 +201,11 @@ Set these in your `.mcp.json`:
 
 ## Skills
 
-The plugin includes 7 built-in skills that provide guided workflows for common browser automation tasks. All skills use the CLI-first approach via `openbrowser-ai -c` for direct code execution. Each skill is triggered automatically when the user's request matches its description.
+The plugin includes 8 built-in skills that provide guided workflows for common browser automation tasks. All skills use the CLI-first approach via `openbrowser-ai -c` for direct code execution. Each skill is triggered automatically when the user's request matches its description.
 
 | Skill | Directory | Description |
 |-------|-----------|-------------|
+| `setup` | `skills/setup/` | Install the CLI and Chromium, configure MCP and profiles, install skills, and verify a real browser session |
 | `deep-research` | `skills/deep-research/` | Conduct deep, cited web research across multiple sources and produce markdown and JSON reports |
 | `web-scraping` | `skills/web-scraping/` | Extract structured data from websites, handle pagination, and multi-tab scraping |
 | `form-filling` | `skills/form-filling/` | Fill out web forms, handle login/registration flows, and multi-step wizards |

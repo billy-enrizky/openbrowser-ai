@@ -23,7 +23,7 @@ load_dotenv()
 async def main():
     task = "Extract all products from example.com and save to products.csv"
 
-    agent = CodeAgent(task=task, llm=ChatGoogle())
+    agent = CodeAgent(task=task, llm=ChatGoogle(model="gemini-3-flash-preview"))
     await agent.run()
 
 asyncio.run(main())

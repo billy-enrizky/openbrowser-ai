@@ -48,7 +48,7 @@ New York (NYC),London (LON),2026-02-15
 ### 3. Run the App
 
 ```bash
-uv run chainlit run instruction_app.py
+uv run --with chainlit chainlit run examples/ui/instruction_app.py
 ```
 
 ## Instruction Format
@@ -158,150 +158,15 @@ Product Configurator,"### **Work Instruction: Configure Product**
 
 ## Code
 
-### Full Implementation
+The complete implementation lives in [`examples/ui/instruction_app.py`](https://github.com/billy-enrizky/openbrowser-ai/blob/main/examples/ui/instruction_app.py). It includes the CSV loaders, spec interpolation, the orchestration loop, the `on_message` handler, and the `ask_to_execute` confirmation flow.
 
-```python
-import asyncio
-import csv
-import io
-import logging
-import os
-import re
-import time
-from typing import Any, Dict, List, Optional
+Run it from the repository root:
 
-import chainlit as cl
-from dotenv import load_dotenv
-
-from openbrowser import Agent, Browser, BrowserProfile, ChatGoogle
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-load_dotenv(override=True)
-
-INSTRUCTIONS_CSV = "openbrowser_instructions.csv"
-
-
-def get_instructions_from_csv() -> List[Dict[str, str]]:
-    """Read instructions from CSV file."""
-    instructions = []
-    if not os.path.isfile(INSTRUCTIONS_CSV):
-        return instructions
-    
-    with open(INSTRUCTIONS_CSV, 'r', encoding='utf-8') as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            name = row.get("instruction_name", "").strip()
-            instruction = row.get("general_instruction", "").strip()
-            if name and instruction:
-                instructions.append({
-                    "instruction_name": name,
-                    "general_instruction": instruction
-                })
-    return instructions
-
-
-def extract_placeholders(instruction: str) -> List[str]:
-    """Extract $PLACEHOLDER$ variables from instruction."""
-    placeholders = re.findall(r'\$([A-Z_]+)\$', instruction)
-    return list(set(placeholders))
-
-
-def configure_instruction(template: str, specs: str) -> str:
-    """Replace placeholders with user values."""
-    configured = template
-    for line in specs.strip().split("\n"):
-        if ":" in line:
-            key, value = line.split(":", 1)
-            key = key.strip().upper().replace(" ", "_")
-            value = value.strip()
-            configured = configured.replace(f"${key}$", value)
-    return configured
-
-
-async def execute_browser_automation(instruction: str) -> Dict[str, Any]:
-    """Execute browser automation with the configured instruction."""
-    GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-    
-    if not GEMINI_API_KEY:
-        return {"status": "error", "message": "API key not set"}
-    
-    llm = ChatGoogle(
-        model='gemini-3-flash-preview',
-        temperature=0,
-        api_key=GEMINI_API_KEY,
-    )
-    
-    browser_profile = BrowserProfile(
-        headless=False,
-        auto_split_screen=False,
-    )
-    browser = Browser(browser_profile=browser_profile)
-    
-    agent = Agent(
-        task=instruction,
-        llm=llm,
-        browser=browser,
-        max_failures=6,
-        max_actions_per_step=50,
-    )
-    
-    start_time = time.time()
-    result = await agent.run()
-    execution_time = time.time() - start_time
-    
-    return {
-        "status": "success",
-        "message": f"Completed in {execution_time:.2f}s",
-        "execution_time": execution_time,
-    }
-
-
-@cl.on_chat_start
-async def on_chat_start():
-    """Handle chat session start."""
-    cl.user_session.set("awaiting_specifications", False)
-    
-    await cl.Message(content="Welcome to OpenBrowser Instruction Executor!").send()
-    
-    instructions = get_instructions_from_csv()
-    if not instructions:
-        await cl.Message(content="No instructions found in CSV.").send()
-        return
-    
-    # Create action buttons
-    actions = [
-        cl.Action(
-            name=f"select_{i}",
-            payload={"name": inst["instruction_name"]},
-            label=inst["instruction_name"]
-        )
-        for i, inst in enumerate(instructions)
-    ]
-    
-    res = await cl.AskActionMessage(
-        content="Select an instruction:",
-        actions=actions,
-        timeout=60000
-    ).send()
-    
-    if res:
-        selected = res.get("payload", {}).get("name")
-        # Continue with instruction setup...
-
-
-@cl.on_message
-async def on_message(message: cl.Message):
-    """Handle incoming messages."""
-    if cl.user_session.get("awaiting_specifications"):
-        # Process user specifications
-        pass
-
-
-if __name__ == "__main__":
-    logger.info("OpenBrowser Instruction App loaded")
+```bash
+uv run --with chainlit chainlit run examples/ui/instruction_app.py
 ```
+
+`chainlit` is an example-only dependency, which is why the command uses `uv run --with chainlit`.
 
 ## Specification Files
 

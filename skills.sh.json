@@ -1,7 +1,17 @@
 {
   "$schema": "https://skills.sh/schemas/skills.sh.schema.json",
   "notGrouped": "bottom",
+  "paths": [
+    "./plugin/skills"
+  ],
   "groupings": [
+    {
+      "title": "Setup",
+      "description": "First-time installation, MCP and CLI configuration, browser profiles, and verification.",
+      "skills": [
+        "setup"
+      ]
+    },
     {
       "title": "Research",
       "description": "Skills for conducting deep, cited web research using a real browser.",

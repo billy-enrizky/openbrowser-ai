@@ -47,6 +47,7 @@ OpenBrowser is a framework for intelligent browser automation. It combines direc
 - [Configuration](#configuration)
 - [Supported LLM Providers](#supported-llm-providers)
 - [Claude Code Plugin](#claude-code-plugin)
+- [skills.sh](#skillssh)
 - [Codex](#codex)
 - [OpenCode](#opencode)
 - [OpenClaw](#openclaw)
@@ -77,7 +78,7 @@ OpenBrowser is a framework for intelligent browser automation. It combines direc
 - **Workflow Recording** - Record, replay, and export browser sessions to Jupyter notebooks or API crawler code
 - **Video Recording** - Record browser sessions as video files with ffmpeg
 - **Cloud Platform** - Full-stack web UI with real-time VNC streaming, saved logins (KMS-encrypted), scheduled workflows (EventBridge + SQS), and email notifications (SES)
-- **Plugin System** - Claude Code plugin with 7 guided skills (deep research, web scraping, form filling, e2e testing, page analysis, accessibility audit, file download)
+- **Plugin System** - Claude Code plugin and skills.sh pack with 8 guided skills (setup, deep research, web scraping, form filling, e2e testing, page analysis, accessibility audit, file download)
 
 ## Installation
 
@@ -117,7 +118,7 @@ pip install openbrowser-ai
 ### uv (recommended)
 
 ```bash
-uv pip install openbrowser-ai
+uv tool install openbrowser-ai
 ```
 
 ### uvx (zero install)
@@ -143,14 +144,16 @@ pipx install openbrowser-ai
 ```bash
 git clone https://github.com/billy-enrizky/openbrowser-ai.git
 cd openbrowser-ai
-uv pip install -e ".[agent]"
+uv venv --python 3.12
+source .venv/bin/activate
+uv pip install -e ".[all]"
 ```
 
 ### Optional Dependencies
 
 ```bash
-pip install openbrowser-ai[agent]      # LLM agent support (langgraph, langchain, litellm)
-pip install openbrowser-ai[all]        # All LLM providers
+pip install openbrowser-ai             # CLI, MCP, Agent, and CodeAgent (base package)
+pip install openbrowser-ai[all]        # Optional providers plus the interactive CLI
 pip install openbrowser-ai[anthropic]  # Anthropic Claude
 pip install openbrowser-ai[groq]       # Groq
 pip install openbrowser-ai[ollama]     # Ollama (local models)
@@ -172,7 +175,7 @@ from openbrowser import CodeAgent, ChatGoogle
 async def main():
     agent = CodeAgent(
         task="Go to google.com and search for 'Python tutorials'",
-        llm=ChatGoogle(model="gemini-3-flash"),
+        llm=ChatGoogle(model="gemini-3-flash-preview"),
     )
 
     session = await agent.run()
@@ -199,7 +202,7 @@ agent = CodeAgent(task="...", llm=ChatOpenAI(model="gpt-5.2"))
 agent = CodeAgent(task="...", llm=ChatAnthropic(model="claude-sonnet-4-6"))
 
 # Google Gemini
-agent = CodeAgent(task="...", llm=ChatGoogle(model="gemini-3-flash"))
+agent = CodeAgent(task="...", llm=ChatGoogle(model="gemini-3-flash-preview"))
 ```
 
 ### Using Browser Session Directly
@@ -302,7 +305,7 @@ profile = BrowserProfile(
 
 | Provider | Class | Models |
 |----------|-------|--------|
-| **Google** | `ChatGoogle` | gemini-3-flash, gemini-3-pro |
+| **Google** | `ChatGoogle` | gemini-3-flash-preview, gemini-3-pro |
 | **OpenAI** | `ChatOpenAI` | gpt-5.2, o4-mini, o3 |
 | **Anthropic** | `ChatAnthropic` | claude-sonnet-4-6, claude-opus-4-6 |
 | **Groq** | `ChatGroq` | llama-4-scout, qwen3-32b |
@@ -328,10 +331,11 @@ claude plugin marketplace add billy-enrizky/openbrowser-ai
 claude plugin install openbrowser@openbrowser-ai
 ```
 
-This installs the MCP server and 7 built-in skills:
+This installs the MCP server and 8 built-in skills:
 
 | Skill | Description |
 |-------|-------------|
+| `setup` | Install the CLI and browser, configure MCP and profiles, and verify a real session |
 | `deep-research` | Conduct cited, multi-source web research and produce markdown and JSON reports |
 | `web-scraping` | Extract structured data, handle pagination |
 | `form-filling` | Fill forms, login flows, multi-step wizards |
@@ -341,6 +345,22 @@ This installs the MCP server and 7 built-in skills:
 | `file-download` | Download files (PDFs, CSVs) using browser session |
 
 See [plugin/README.md](plugin/README.md) for detailed tool parameter documentation.
+
+## skills.sh
+
+Install the OpenBrowser skill pack with the [skills.sh](https://skills.sh) CLI:
+
+```bash
+npx skills add billy-enrizky/openbrowser-ai
+```
+
+Install only the first-time setup skill:
+
+```bash
+npx skills add billy-enrizky/openbrowser-ai --skill setup -a codex
+```
+
+The pack includes `setup`, `deep-research`, `web-scraping`, `form-filling`, `e2e-testing`, `page-analysis`, `accessibility-audit`, and `file-download`. The `setup` skill installs the CLI and Chromium, configures MCP and profiles, installs the plugin skills, and verifies a real browser session. Skills are installed to the current project by default; add `-g` for all projects.
 
 ## Codex
 

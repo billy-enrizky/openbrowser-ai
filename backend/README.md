@@ -20,16 +20,19 @@ Backend API for the OpenBrowser AI Chat Interface. A FastAPI-based server that p
 ### Installation
 
 ```bash
-# Install dependencies
 cd backend
+uv venv --python 3.12
+source .venv/bin/activate
+
+# Install backend dependencies
 uv pip install -e .
 
-# Install openbrowser from local path
-uv pip install -e /path/to/openbrowser-ai
+# Install OpenBrowser from the repository root
+uv pip install -e ..
 
 # Copy environment file
 cp env.example .env
-# Edit .env with your API keys
+# Edit .env with your API keys and POSTGRES_PASSWORD
 ```
 
 ### Running the Server
@@ -101,17 +104,18 @@ Connect to `/ws` or `/ws/{client_id}` for real-time communication.
 
 ## Deployment
 
-### Docker Compose (Recommended)
+### Docker Compose (Development)
 
 The backend requires VNC support for live browser viewing, which needs special Docker privileges. Use Docker Compose from the repository root:
 
 ```bash
 # Development
 docker-compose up --build
-
-# Production
-docker-compose -f docker-compose.yml up -d
 ```
+
+Compose interpolates `${POSTGRES_PASSWORD}` from the shell or a root `.env`, while `backend/.env` supplies the service environment. Put `POSTGRES_PASSWORD` in the root `.env` or export it before running Compose. If an existing PostgreSQL volume already has a password, reuse that password; changing it here does not rotate the database password.
+
+The repository `docker-compose.yml` is a development configuration. It sets `DEBUG=true`, `AUTH_ENABLED=false`, and bind-mounts the source. Do not use it unchanged for production. Create a production override that disables debug, enables auth, removes source mounts, and supplies secrets.
 
 This starts both the backend (port 8000) and frontend (port 3000) with proper VNC configuration.
 
@@ -124,12 +128,12 @@ The backend uses VNC for live browser streaming, which requires:
 
 These requirements mean **PaaS platforms like Railway/Render are not compatible** with VNC mode.
 
-### Production Deployment Options
+### Production Deployment
 
-1. **VPS with Docker Compose** (Recommended)
+1. **VPS with a production Compose override** (Recommended)
    - Use a cloud VM (AWS EC2, GCP Compute Engine, DigitalOcean Droplet, etc.)
    - Install Docker and Docker Compose
-   - Clone the repository and run `docker-compose up -d`
+   - Clone the repository, copy `backend/env.example` to `backend/.env`, set `POSTGRES_PASSWORD` in the root `.env` or environment, create a production override that removes debug and bind mounts, then run `docker-compose -f docker-compose.yml -f docker-compose.production.yml up -d`
    - Configure nginx reverse proxy with SSL
    - Point api.openbrowser.me to the server
 
@@ -176,6 +180,8 @@ See `env.example` for all available configuration options:
 - `DEFAULT_LLM_MODEL` - Default LLM model
 - `MAX_CONCURRENT_AGENTS` - Max concurrent agents
 - `REDIS_URL` - Optional Redis for session persistence
+- `POSTGRES_PASSWORD` - PostgreSQL password used by Docker Compose
+- `DATABASE_URL` - Async PostgreSQL URL. Without it, chat persistence is skipped and chat routes return 503
 - `GOOGLE_API_KEY` / `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` - LLM API keys
 
 ### VNC Configuration
