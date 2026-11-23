@@ -40,6 +40,32 @@ uv run --locked python benchmarks/scraping/scrape_compare.py \
 For a longer run, use `--samples 30`. Report p50 and p95 with confidence
 intervals before making a claim.
 
+## Network-level render policy
+
+`scrape_compare.py` measures extraction. `no_render_compare.py` measures the
+CDP Fetch policy itself, because a blocked resource type must never reach the
+fixture server. Each arm launches a fresh headless browser with a temporary
+profile and `--use-mock-keychain`, then records server-observed requests and
+bytes.
+
+```sh
+uv run --locked python benchmarks/scraping/no_render_compare.py --samples 3
+```
+
+The command exits nonzero if a blocked type is served, if lightweight stops
+loading CSS, or if document, script, XHR, or fetch requests fail.
+
+Smoke run on 2026-11-23, 3 samples, local macOS arm64:
+
+| Arm | p50 ms | Requests | Bytes served | Bytes avoided |
+| --- | ---: | ---: | ---: | ---: |
+| full | 777.6 | 10 | 70,907 | 0 |
+| lightweight | 664.0 | 6 | 1,143 | 69,764 |
+| no-render | 687.4 | 5 | 972 | 69,935 |
+
+Latency ranges overlap at this sample count, so only the request and byte
+counts are deterministic. Do not claim a speed win from this table.
+
 ## Results, 2026-11-23
 
 Local macOS arm64, 3 measured samples after 1 warmup per arm and task. These
