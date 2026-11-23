@@ -162,8 +162,9 @@ Read the `health` key from that snapshot.
 `health.phase` is `unknown`, `healthy`, `degraded`, `crashed`, `stopped`, or `failed`.
 `health.healthy=true` means setup or focus recovery completed. It does not prove a page can accept commands.
 Read `last_focus_recovery_outcome`, `target_crash_count`, and `process_present` before retrying.
-`process_present` is `null` when the published root is not bound to the recorded local owner.
-This includes remote and stopped sessions.
+`process_present` is `null` when the published root is not bound to the recorded local owner
+or when process identity is inconclusive.
+This includes remote, stopped, and ambiguous local sessions.
 Read the `cdp` key from that snapshot, for example `cdp = browser.lifecycle_snapshot().get('cdp') or {}`.
 Read `cdp.get('healthy')`, `cdp.get('phase')`, and `cdp.get('last_error_code')` when present.
 `healthy` is the last accepted connect or probe observation while the lifecycle preserves an active health claim.

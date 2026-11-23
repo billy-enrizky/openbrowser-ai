@@ -252,6 +252,14 @@ class _PolicyRetentionFailure:
 	revision: int
 
 
+@dataclass
+class _PendingEventBusRetirement:
+	"""One failed event-bus retirement and any run loop still unwinding."""
+
+	event_bus: EventBus
+	runloop_task: asyncio.Future | None = None
+
+
 class BrowserSession(BaseModel):
 	"""Event-driven browser session with backwards compatibility.
 
@@ -511,7 +519,7 @@ class BrowserSession(BaseModel):
 	_start_cancelled_by_lifecycle: bool = PrivateAttr(default=False)
 	_stop_task: asyncio.Task | None = PrivateAttr(default=None)
 	_watchdogs_attached: bool = PrivateAttr(default=False)
-	_event_bus_retirement_pending: EventBus | None = PrivateAttr(default=None)
+	_event_bus_retirement_pending: list[_PendingEventBusRetirement] = PrivateAttr(default_factory=list)
 	_core_handlers_attached: bool = PrivateAttr(default=False)
 	_cached_browser_state_summary: Any = PrivateAttr(default=None)
 	_cached_selector_map: dict[int, EnhancedDOMTreeNode] = PrivateAttr(default_factory=dict)
@@ -792,13 +800,11 @@ class BrowserSession(BaseModel):
 			except Exception:
 				identity = 'unknown'
 			if identity == 'mismatch':
-				marker_match = self._process_ownership_marker_matches(
+				owner_identity_clearly_differs = self._process_ownership_marker_matches(
 					binding,
 					getattr(self._local_browser_watchdog, '_subprocess', None),
-				)
-				if marker_match is True:
-					identity = 'match'
-				elif marker_match is None:
+				) is False
+				if not owner_identity_clearly_differs:
 					identity = 'unknown'
 			if identity == 'match':
 				process_present = True
@@ -814,7 +820,7 @@ class BrowserSession(BaseModel):
 
 	@staticmethod
 	def _process_ownership_marker_matches(binding: OwnedRootBinding, process: Any | None) -> bool | None:
-		"""Return whether an existing PID still carries the unique bound owner marker."""
+		"""Return False only when a reused PID clearly lacks the bound owner identity."""
 		if process is None:
 			return None
 		import psutil
@@ -2326,7 +2332,7 @@ class BrowserSession(BaseModel):
 			self._cdp_client_root
 			or self._session_manager
 			or self._watchdogs_attached
-			or self._event_bus_retirement_pending is not None
+			or self._event_bus_retirement_pending
 			or (self.is_local and self.browser_profile.cdp_url)
 			or self._watchdog_has_live_resources(self._local_browser_watchdog)
 		)
@@ -2497,11 +2503,12 @@ class BrowserSession(BaseModel):
 	async def _reset_locked(self, *, stop_event_bus: bool) -> None:
 		"""Reset runtime state for the active lifecycle operation."""
 		await self._cancel_navigation()
-		pending_bus = self._event_bus_retirement_pending
-		if pending_bus is not None and pending_bus is not self.event_bus:
-			await self._retire_event_bus(pending_bus)
+		for retirement in tuple(self._event_bus_retirement_pending):
+			if retirement.event_bus is not self.event_bus:
+				await self._retire_event_bus(retirement.event_bus)
+		current_bus_pending = self._is_event_bus_retirement_pending(self.event_bus)
 		replace_event_bus = stop_event_bus and (
-			self._watchdogs_attached or self._event_bus_retirement_pending is not None
+			self._watchdogs_attached or current_bus_pending
 		)
 		await self._retire_event_bus(self.event_bus, stop_bus=replace_event_bus)
 		if replace_event_bus:
@@ -2618,7 +2625,7 @@ class BrowserSession(BaseModel):
 	@observe_debug(ignore_input=True, ignore_output=True, name='browser_session_start')
 	async def start(self) -> None:
 		"""Run one start while direct connect calls are excluded."""
-		if self._event_bus_retirement_pending is not None:
+		if self._event_bus_retirement_pending:
 			raise RuntimeError('Event bus retirement is still pending; run reset() or kill() before start()')
 		if self._has_cleanup_in_flight():
 			raise RuntimeError('Browser cleanup is still running; retry after it finishes')
@@ -2669,7 +2676,7 @@ class BrowserSession(BaseModel):
 
 	async def _start_admitted(self) -> None:
 		"""Start the browser session while holding connection admission."""
-		if self._event_bus_retirement_pending is not None:
+		if self._event_bus_retirement_pending:
 			raise RuntimeError('Event bus retirement is still pending; run reset() or kill() before start()')
 		if self._has_cleanup_in_flight():
 			raise RuntimeError('Browser cleanup is still running; retry after it finishes')
@@ -3490,6 +3497,10 @@ class BrowserSession(BaseModel):
 
 	async def _retire_event_bus(self, event_bus: EventBus, *, stop_bus: bool = True, timeout: float = 5.0) -> None:
 		await self._drain_navigation_policies()
+		pending_entry = self._pending_event_bus_retirement(event_bus)
+		runloop_task = self._event_bus_runloop_task(event_bus)
+		if runloop_task is None and pending_entry is not None:
+			runloop_task = pending_entry.runloop_task
 		stop_error: BaseException | None = None
 		if stop_bus:
 			try:
@@ -3499,17 +3510,63 @@ class BrowserSession(BaseModel):
 		try:
 			await self._drain_navigation_event_pumps(event_bus)
 		except BaseException as error:
-			self._event_bus_retirement_pending = event_bus
+			self._mark_event_bus_retirement_pending(event_bus, runloop_task)
 			self._lifecycle.fail(error, reason='event bus pump retirement failed')
 			if stop_error is not None:
 				raise error from stop_error
 			raise
 		if stop_error is not None:
-			self._event_bus_retirement_pending = event_bus
+			self._mark_event_bus_retirement_pending(event_bus, runloop_task)
 			self._lifecycle.fail(stop_error, reason='event bus stop failed')
 			raise stop_error
-		if stop_bus and self._event_bus_retirement_pending is event_bus:
-			self._event_bus_retirement_pending = None
+		if stop_bus:
+			if runloop_task is not None and not runloop_task.done():
+				self._mark_event_bus_retirement_pending(event_bus, runloop_task)
+				await self._wait_for_event_bus_runloop(runloop_task)
+			if runloop_task is not None and not runloop_task.done():
+				error = TimeoutError('Event bus run loop did not stop')
+				self._mark_event_bus_retirement_pending(event_bus, runloop_task)
+				self._lifecycle.fail(error, reason='event bus run loop did not stop')
+				raise error
+			self._clear_event_bus_retirement_pending(event_bus)
+
+	@staticmethod
+	async def _wait_for_event_bus_runloop(runloop_task: asyncio.Future) -> None:
+		"""Give a cancelled bus run loop one bounded chance to finish."""
+		await asyncio.wait({runloop_task}, timeout=0.1)
+
+	@staticmethod
+	def _event_bus_runloop_task(event_bus: EventBus) -> asyncio.Future | None:
+		"""Return the installed bus run loop when it exists."""
+		task = getattr(event_bus, '_runloop_task', None)
+		return task if isinstance(task, asyncio.Future) else None
+
+	def _pending_event_bus_retirement(self, event_bus: EventBus) -> _PendingEventBusRetirement | None:
+		"""Return the retained retirement entry for one bus identity."""
+		return next(
+			(entry for entry in self._event_bus_retirement_pending if entry.event_bus is event_bus),
+			None,
+		)
+
+	def _is_event_bus_retirement_pending(self, event_bus: EventBus) -> bool:
+		"""Return whether one bus still owns cleanup authority."""
+		return self._pending_event_bus_retirement(event_bus) is not None
+
+	def _mark_event_bus_retirement_pending(
+		self, event_bus: EventBus, runloop_task: asyncio.Future | None = None
+	) -> None:
+		"""Retain one retiring bus exactly once until its run loop is quiescent."""
+		entry = self._pending_event_bus_retirement(event_bus)
+		if entry is None:
+			self._event_bus_retirement_pending.append(_PendingEventBusRetirement(event_bus, runloop_task))
+		elif runloop_task is not None and (entry.runloop_task is None or entry.runloop_task.done()):
+			entry.runloop_task = runloop_task
+
+	def _clear_event_bus_retirement_pending(self, event_bus: EventBus) -> None:
+		"""Release pending ownership for one bus that was actually stopped."""
+		self._event_bus_retirement_pending = [
+			entry for entry in self._event_bus_retirement_pending if entry.event_bus is not event_bus
+		]
 
 	def _navigation_deadline(self, event: NavigateToUrlEvent, operation: NavigationOperation) -> float:
 		if operation.deadline is None:
@@ -5743,7 +5800,7 @@ class BrowserSession(BaseModel):
 		start_generation = self._lifecycle.generation
 		start_owner = self._start_task if _start_owned else None
 		self._raise_if_connect_admission_closed(start_owned=_start_owned)
-		if self._event_bus_retirement_pending is not None:
+		if self._event_bus_retirement_pending:
 			raise RuntimeError('Event bus retirement is still pending; run reset() or kill() before connecting')
 		active_start = self._start_task
 		if (
