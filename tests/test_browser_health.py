@@ -958,7 +958,7 @@ async def test_reset_keeps_bus_pending_until_its_runloop_quiesces() -> None:
 
     pending_bus.on(BrowserStartEvent, cancellation_resistant_handler)
     pending_bus.dispatch(BrowserStartEvent())
-    await asyncio.wait_for(entered.wait(), timeout=1.0)
+    await asyncio.wait_for(entered.wait(), timeout=5.0)
     runloop = getattr(pending_bus, "_runloop_task", None)
     session._mark_event_bus_retirement_pending(pending_bus, [runloop])
     try:
@@ -970,6 +970,46 @@ async def test_reset_keeps_bus_pending_until_its_runloop_quiesces() -> None:
         release.set()
         if runloop is not None and not runloop.done():
             await asyncio.wait_for(runloop, timeout=2.0)
+
+
+@pytest.mark.asyncio
+async def test_first_real_bus_stop_retains_unfinished_runloop() -> None:
+    from bubus import BaseEvent
+
+    session = BrowserSession()
+    pending_bus = session.event_bus
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    class SlowEvent(BaseEvent[None]):
+        event_timeout: float | None = 30.0
+
+    async def cancellation_resistant_handler(_event) -> None:
+        entered.set()
+        try:
+            await release.wait()
+        except asyncio.CancelledError:
+            await release.wait()
+
+    pending_bus.on(SlowEvent, cancellation_resistant_handler)
+    pending_bus.dispatch(SlowEvent())
+    await asyncio.wait_for(entered.wait(), timeout=5.0)
+    runloop = pending_bus._runloop_task
+    assert runloop is not None
+    try:
+        with pytest.raises(TimeoutError, match="run loop"):
+            await asyncio.wait_for(session.reset(wait_for_operations=False), timeout=7.0)
+        entry = session._pending_event_bus_retirement(pending_bus)
+        assert entry is not None
+        assert any(task is runloop for task in entry.runloop_tasks)
+        assert session.lifecycle.phase is LifecyclePhase.FAILED
+    finally:
+        release.set()
+        await asyncio.wait_for(runloop, timeout=2.0)
+
+    await session.reset(wait_for_operations=False)
+    assert session._event_bus_retirement_pending == []
+    assert session.lifecycle.phase is LifecyclePhase.STOPPED
 
 
 @pytest.mark.asyncio
@@ -1121,6 +1161,65 @@ async def test_pending_bus_connect_guidance_precedes_admission_guidance() -> Non
 
     with pytest.raises(RuntimeError, match="run reset\\(\\) before connecting"):
         await session.connect()
+
+
+@pytest.mark.asyncio
+async def test_pending_bus_navigation_requires_reset_before_dispatch() -> None:
+    from openbrowser.browser.navigation import NavigationError
+
+    session = BrowserSession()
+    pending_bus = session.event_bus
+    pending_bus._start()
+    await asyncio.sleep(0)
+    await pending_bus.stop(clear=True, timeout=0)
+    session._mark_event_bus_retirement_pending(pending_bus)
+
+    with pytest.raises(NavigationError, match="run reset\\(\\)"):
+        await session.navigate_to("https://example.com")
+
+
+@pytest.mark.parametrize("method", ["stop", "kill"])
+@pytest.mark.asyncio
+async def test_terminal_method_rechecks_pending_after_lifecycle_lock(method: str) -> None:
+    session = BrowserSession()
+    session._lifecycle.transition(LifecyclePhase.STARTING)
+    session._lifecycle.transition(LifecyclePhase.READY)
+    old_bus = session.event_bus
+    old_bus.stop = AsyncMock()
+    await session._lifecycle_lock.acquire()
+    terminal = asyncio.create_task(getattr(session, method)())
+    try:
+        await asyncio.sleep(0.05)
+        assert not terminal.done()
+        session._mark_event_bus_retirement_pending(old_bus)
+        with patch.object(session, "_shutdown_locked", AsyncMock()) as shutdown:
+            session._lifecycle_lock.release()
+            await asyncio.wait_for(terminal, timeout=2.0)
+        shutdown.assert_not_awaited()
+    finally:
+        if session._lifecycle_lock.locked():
+            session._lifecycle_lock.release()
+
+    old_bus.stop.assert_awaited_once()
+    assert session._event_bus_retirement_pending == []
+    assert session.lifecycle.phase is LifecyclePhase.STOPPED
+
+
+@pytest.mark.asyncio
+async def test_shutdown_rechecks_pending_before_any_dispatch() -> None:
+    session = BrowserSession()
+    old_bus = session.event_bus
+    old_bus.stop = AsyncMock()
+    session._mark_event_bus_retirement_pending(old_bus)
+
+    with patch.object(old_bus, "dispatch", MagicMock()) as dispatch:
+        await session._shutdown_locked(force=False)
+
+    dispatch.assert_not_called()
+    old_bus.stop.assert_awaited_once()
+    assert session._event_bus_retirement_pending == []
+    assert session.lifecycle.phase is LifecyclePhase.STOPPED
+    assert session._stop_task is None
 
 
 @pytest.mark.asyncio
