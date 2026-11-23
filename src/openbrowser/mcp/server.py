@@ -263,7 +263,14 @@ def _tool_catalog(description: str, *, modern: bool) -> tuple[types.Tool, ...]:
 			'session_not_found can come from target attachment during connect setup. '
 			'Use cdp.last_probe_at to tell whether a probe ran. '
 			'cdp_connected only means a client object is present. '
-			'Root CDP health does not prove a target session, tab, or page can accept commands.'
+			'Root CDP health does not prove a target session, tab, or page can accept commands. '
+			'When browser.health is present, phase is unknown, healthy, degraded, crashed, stopped, or failed. '
+			'health is the last event-driven crash or setup observation plus a status-time local process check, '
+			'not a live page probe. '
+			'Use last_focus_recovery_outcome, target_crash_count, and process_present before retrying. '
+			'process_present is null when the published root is not bound to the recorded local owner. '
+			'That includes remote or stopped sessions. '
+			'A missing health block means no browser session exists.'
 			+ (' Requires context_id from create_context.' if modern else '')
 		),
 		input_schema=status_schema,
@@ -1182,6 +1189,12 @@ class _BrowserOwner:
 						to_dict = getattr(focus_value, 'to_dict', None)
 						if callable(to_dict):
 							browser['focus'] = to_dict()
+				browser_health = getattr(self.browser_session, 'browser_health_snapshot', None)
+				if callable(browser_health):
+					with contextlib.suppress(Exception):
+						health_value = browser_health()
+						if isinstance(health_value, dict):
+							browser['health'] = health_value
 		if 'focus' not in browser:
 			from openbrowser.browser.focus import FocusSnapshot
 

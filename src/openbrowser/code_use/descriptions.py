@@ -7,7 +7,10 @@ dependency-free (no openbrowser imports) so the CLI -c fast path can
 load it without pulling in heavy packages.
 """
 
-EXECUTE_CODE_DESCRIPTION_COMPACT = """Execute Python code with browser automation. Most functions are async (use await); download_outcomes() and download_failures() are synchronous. Use print() to return output. Variables and browser login state persist between calls.
+EXECUTE_CODE_DESCRIPTION_COMPACT = """Execute Python code with browser automation. Most functions are async (use await).
+download_outcomes() and download_failures() are synchronous. Use print() to return output.
+Variables and browser login state persist between calls.
+After a browser error, use MCP `get_status` or CLI `openbrowser-ai daemon status`; `health` is not page readiness.
 
 ## Core Functions
 - `await navigate(url, new_tab=False)` -- Go to URL
@@ -155,6 +158,12 @@ EXECUTE_CODE_DESCRIPTION = """Execute Python code in a persistent namespace with
 
 If a call fails with a browser connection error, do not replay a page-changing action blindly.
 Check `browser.lifecycle_snapshot()` for the current state.
+Read the `health` key from that snapshot.
+`health.phase` is `unknown`, `healthy`, `degraded`, `crashed`, `stopped`, or `failed`.
+`health.healthy=true` means setup or focus recovery completed. It does not prove a page can accept commands.
+Read `last_focus_recovery_outcome`, `target_crash_count`, and `process_present` before retrying.
+`process_present` is `null` when the published root is not bound to the recorded local owner.
+This includes remote and stopped sessions.
 Read the `cdp` key from that snapshot, for example `cdp = browser.lifecycle_snapshot().get('cdp') or {}`.
 Read `cdp.get('healthy')`, `cdp.get('phase')`, and `cdp.get('last_error_code')` when present.
 `healthy` is the last accepted connect or probe observation while the lifecycle preserves an active health claim.

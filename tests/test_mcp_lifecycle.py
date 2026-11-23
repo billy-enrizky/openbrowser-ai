@@ -33,6 +33,7 @@ async def test_get_status_does_not_start_browser(mcp_server):
 	assert mcp_server.browser_session is None
 	assert payload['browser']['phase'] == 'stopped'
 	assert 'cdp' not in payload['browser']
+	assert 'health' not in payload['browser']
 	assert payload['namespace_variables'] == 0
 	assert payload['profile'] is None
 	assert payload['tools']['phase'] == 'not_initialized'
@@ -1008,6 +1009,8 @@ async def test_get_status_falls_back_to_cdp_health_when_snapshot_fails(mcp_serve
 	assert payload['browser']['cdp']['healthy'] is None
 	assert payload['browser']['cdp']['cleanup_pending'] is True
 	assert payload['browser']['cdp_connected'] is True
+	assert payload['browser']['health']['phase'] == 'unknown'
+	assert payload['browser']['health']['reason'] == 'initial'
 	root.send.Browser.getVersion.assert_not_awaited()
 
 

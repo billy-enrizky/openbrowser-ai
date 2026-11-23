@@ -64,6 +64,8 @@ Add to your project's `.mcp.json`:
 
 The MCP server exposes `execute_code`, `get_status`, and `reset_browser`. `execute_code` runs Python code in a persistent namespace with browser automation functions. `get_status` is a read-only lifecycle and tab snapshot. `reset_browser` closes a stuck browser while preserving user variables by default.
 
+`get_status` also adds `browser.health` for an existing session. It reports the latest page crash, focus-recovery outcome, and local process binding. It is not a live page-readiness probe, and `process_present` is `null` when the current root is not bound to the recorded local owner.
+
 Authenticated browser state is also persisted, so once a user logs in, later MCP calls can keep using the same cookies and localStorage.
 
 **Functions** (use `await` unless noted):

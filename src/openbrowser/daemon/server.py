@@ -968,6 +968,12 @@ class DaemonServer:
                         to_dict = getattr(focus_value, 'to_dict', None)
                         if callable(to_dict):
                             browser['focus'] = to_dict()
+                browser_health = getattr(self._session, 'browser_health_snapshot', None)
+                if callable(browser_health):
+                    with contextlib.suppress(Exception):
+                        health_value = browser_health()
+                        if isinstance(health_value, dict):
+                            browser['health'] = health_value
             else:
                 browser = snapshot_value if isinstance(snapshot_value, dict) else {'phase': 'unknown'}
         elif self._session is not None:

@@ -249,6 +249,8 @@ When a profile is present, both status surfaces include `profile.resolution`. Da
 
 When a browser session exists, status includes `browser.cdp` with the root connection phase, client presence, last probe time and latency, a closed error code, and any pending cleanup. `cdp.healthy` is the last accepted connect or probe observation while the lifecycle preserves an active health claim; an inactive snapshot can report `null` and keeps the history fields. Use `cdp.last_probe_at` to tell whether a probe has run and how recent it is. `cdp.phase` is one of `disconnected`, `resolving`, `connecting`, `connected`, `degraded`, or `failed`. `cdp.last_error_code` is `null` or one of `not_connected`, `timeout`, `connection_closed`, `session_not_found`, `probe_failed`, `connect_failed`, or `cancelled`. `session_not_found` can come from target attachment during connect setup, not from the root probe alone. `cdp_connected` is a legacy pointer-presence alias, not a health result. Root CDP health does not prove a target session, tab, or page can accept commands. Daemon status reports the last observation without probing. MCP probes an existing session before execution when time remains, while `get_status` itself stays read-only and does not probe or start a browser.
 
+The same status surfaces add `browser.health` when a session exists. `health.phase` is `unknown`, `healthy`, `degraded`, `crashed`, `stopped`, or `failed`. The block records page-target crash history, the latest focus-recovery outcome, and a status-time local process check. `health.healthy=true` means setup or focus recovery was observed, not that a page can accept commands. `process_present` is `null` when the published CDP root is not bound to the recorded local owner, including remote browsers and stopped sessions. `health` never performs a page probe or starts a browser. A status response without `health` means no browser session exists.
+
 ### Environment Variables
 
 ```bash
@@ -471,6 +473,8 @@ A context is process-local. It lives until `close_context` or server exit, and a
 
 If a browser connection fails, call `get_status` before retrying. Do not replay a page-changing action blindly because the first attempt may have partially run.
 
+Read `browser.health` after a crash or connection failure. `phase=crashed` means the local process bound to the current root is missing or no longer matches its recorded identity. `phase=degraded` records a page-target crash and reports recovery as `not_attempted`, `pending`, `succeeded`, or `failed`. Use `focus` and `tabs` for target-specific state. A missing `health` block means no context has a browser session.
+
 **Available functions** (use `await` unless noted):
 
 | Category | Functions |
@@ -602,6 +606,8 @@ uvx openbrowser-ai --mcp
 ```
 
 The `-c` flag connects to a persistent browser daemon over a Unix socket (localhost TCP on Windows). Variables persist across calls while the daemon is running. The daemon starts automatically on first use and shuts down after 10 minutes of inactivity.
+
+After a browser failure, run `openbrowser-ai daemon status` before retrying because the first call may have partially run. Read `browser.health` for the last crash, focus-recovery, and local process observation. `health` is not a live page-readiness probe. Use `openbrowser-ai daemon reset` when the existing session is not usable.
 
 The CLI daemon stores its browser profile in `~/.config/openbrowser/profiles/daemon`, so cookies and login sessions survive daemon restarts through Chrome's user-data directory. An explicit `storage_state` path is still loaded when configured. Custom sockets share the default profile by default to preserve existing logins. Set `OPENBROWSER_DAEMON_PROFILE_ISOLATION=true` or `OPENBROWSER_DAEMON_PROFILE_DIR` when several daemons must run with separate profiles. `OPENBROWSER_USER_DATA_DIR` takes precedence over both and always selects that explicit profile. One-shot `-p` runs use `~/.config/openbrowser/profiles/cli`. Managed profiles automatically clear disposable browser caches on startup and shutdown while keeping auth state.
 
