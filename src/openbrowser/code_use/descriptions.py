@@ -173,6 +173,6 @@ An inactive snapshot can report `null` and keeps the history fields.
 Root CDP health does not prove a target session, tab, or page can accept commands.
 If crash recovery is `pending`, wait for it before starting another recovery.
 If recovery `failed`, inspect `focus.last_error` and reset only when no usable target exists.
-If `health.phase` is `crashed` or `failed`, use `reset_browser` through MCP.
-Through the CLI, use `openbrowser-ai daemon reset` before retrying.
+If `health.phase` is `crashed` or `failed` and no usable target exists,
+use `reset_browser` through MCP or `openbrowser-ai daemon reset` through the CLI.
 """

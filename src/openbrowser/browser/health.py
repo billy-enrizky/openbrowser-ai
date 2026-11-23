@@ -239,8 +239,6 @@ class BrowserHealthMachine:
     def record_startup_failed(self, generation: int) -> bool:
         """Record a start failure unless a stronger failure or stop is stored."""
         value = self._advance_generation(generation)
-        if self._phase is BrowserHealthPhase.STOPPED:
-            return False
         if (
             self._phase is BrowserHealthPhase.FAILED
             and self._reason is BrowserHealthReason.CONNECT_FAILED

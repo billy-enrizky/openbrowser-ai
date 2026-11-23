@@ -511,6 +511,7 @@ class BrowserSession(BaseModel):
 	_start_cancelled_by_lifecycle: bool = PrivateAttr(default=False)
 	_stop_task: asyncio.Task | None = PrivateAttr(default=None)
 	_watchdogs_attached: bool = PrivateAttr(default=False)
+	_event_bus_retirement_pending: bool = PrivateAttr(default=False)
 	_core_handlers_attached: bool = PrivateAttr(default=False)
 	_cached_browser_state_summary: Any = PrivateAttr(default=None)
 	_cached_selector_map: dict[int, EnhancedDOMTreeNode] = PrivateAttr(default_factory=dict)
@@ -2287,6 +2288,7 @@ class BrowserSession(BaseModel):
 			self._cdp_client_root
 			or self._session_manager
 			or self._watchdogs_attached
+			or self._event_bus_retirement_pending
 			or (self.is_local and self.browser_profile.cdp_url)
 			or self._watchdog_has_live_resources(self._local_browser_watchdog)
 		)
@@ -2637,11 +2639,7 @@ class BrowserSession(BaseModel):
 			if self._stop_task is not None and not self._stop_task.done():
 				raise RuntimeError('Browser start cancelled by shutdown')
 			self._check_failed_runtime_retirement()
-			if self._lifecycle.phase is LifecyclePhase.FAILED and (
-				self._cdp_client_root is not None
-				or self._session_manager is not None
-				or self._watchdog_has_live_resources(self._local_browser_watchdog)
-			):
+			if self._lifecycle.phase is LifecyclePhase.FAILED and self._has_live_resources():
 				raise RuntimeError('Browser resources are still live; run kill() or reset() before start()')
 			if self._lifecycle.phase is LifecyclePhase.STARTING and self._start_event is not None:
 				start_event = self._start_event
@@ -3024,6 +3022,7 @@ class BrowserSession(BaseModel):
 			try:
 				await self._retire_event_bus(event_bus)
 			except BaseException as error:
+				self._watchdogs_attached = True
 				self._record_cleanup_failure_health()
 				self._lifecycle.fail(error, reason='event bus retirement failed after stop reset')
 				raise
@@ -3453,13 +3452,16 @@ class BrowserSession(BaseModel):
 		try:
 			await self._drain_navigation_event_pumps(event_bus)
 		except BaseException as error:
+			self._event_bus_retirement_pending = True
 			self._lifecycle.fail(error, reason='event bus pump retirement failed')
 			if stop_error is not None:
 				raise error from stop_error
 			raise
 		if stop_error is not None:
+			self._event_bus_retirement_pending = True
 			self._lifecycle.fail(stop_error, reason='event bus stop failed')
 			raise stop_error
+		self._event_bus_retirement_pending = False
 
 	def _navigation_deadline(self, event: NavigateToUrlEvent, operation: NavigationOperation) -> float:
 		if operation.deadline is None:

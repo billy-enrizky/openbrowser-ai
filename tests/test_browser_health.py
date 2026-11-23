@@ -202,8 +202,9 @@ def test_startup_failure_does_not_replace_connect_failure_or_stopped() -> None:
     assert health.snapshot().reason == BrowserHealthReason.CONNECT_FAILED
 
     health.record_stopped(BrowserHealthReason.STOP, 5)
-    assert health.record_startup_failed(5) is False
-    assert health.snapshot().phase is BrowserHealthPhase.STOPPED
+    assert health.record_startup_failed(5) is True
+    assert health.snapshot().phase is BrowserHealthPhase.FAILED
+    assert health.snapshot().reason is BrowserHealthReason.STARTUP_FAILED
 
 
 def test_startup_failure_replaces_a_previous_cleanup_failure() -> None:
@@ -679,6 +680,21 @@ async def test_retry_start_failure_replaces_previous_cleanup_failure() -> None:
 
 
 @pytest.mark.asyncio
+async def test_start_failure_after_completed_reset_replaces_stopped_health() -> None:
+    session = BrowserSession()
+    await session.reset()
+    assert session.browser_health_snapshot()["phase"] == "stopped"
+    session.event_bus.dispatch = MagicMock(return_value=_failing_start_event())
+
+    with pytest.raises(RuntimeError, match="start publication failed"):
+        await session.start()
+
+    health = session.browser_health_snapshot()
+    assert health["phase"] == "failed"
+    assert health["reason"] == "startup_failed"
+
+
+@pytest.mark.asyncio
 async def test_reset_records_reset_and_repeated_reset_updates_reason() -> None:
     session = BrowserSession()
 
@@ -714,20 +730,18 @@ async def test_stop_event_bus_retirement_failure_records_cleanup_failed() -> Non
             return advance_generation()
 
     session.event_bus.dispatch = MagicMock(side_effect=[ReadyEvent(), StopEvent()])
-    with (
-        patch.object(
-            session,
-            "_retire_event_bus",
-            AsyncMock(side_effect=RuntimeError("bus retirement failed")),
-        ),
-        pytest.raises(RuntimeError, match="bus retirement failed"),
-    ):
+    session.event_bus.stop = AsyncMock(side_effect=RuntimeError("bus retirement failed"))
+
+    with pytest.raises(RuntimeError, match="bus retirement failed"):
         await session._shutdown_locked(force=False)
 
     assert session.lifecycle.phase is LifecyclePhase.FAILED
     health = session.browser_health_snapshot()
     assert health["phase"] == "failed"
     assert health["reason"] == "cleanup_failed"
+    assert session._event_bus_retirement_pending is True
+    with pytest.raises(RuntimeError, match="resources are still live"):
+        await session.start()
 
 
 @pytest.mark.asyncio
@@ -860,6 +874,9 @@ def test_public_guidance_has_state_specific_recovery_actions(path: str) -> None:
     assert "pending" in text
     assert "usable target" in text
     assert "reset" in text
+
+    if path == "src/openbrowser/code_use/descriptions.py":
+        assert "daemon reset before retrying" not in text
 
 
 def test_compact_description_names_both_status_commands() -> None:
