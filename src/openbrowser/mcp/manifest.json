@@ -5,10 +5,10 @@
   "display_name": "OpenBrowser AI Browser Automation",
   "version": "0.1.29",
   "description": "CodeAgent MCP server with explicit application contexts, persistent namespaces, and isolated browser profiles",
-  "long_description": "OpenBrowser CodeAgent exposes create_context, execute_code, get_status, reset_browser, and close_context to 2026-07-28 MCP clients. create_context returns a server-minted context_id; later stateful calls pass that handle explicitly. execute_code runs Python with browser automation functions in a persistent per-context namespace. Older clients that negotiate 2024-11-05 through 2025-11-25 receive the original three-tool catalog and a legacy no-handle context.\n\n### Key Features:\n- **Explicit Contexts**: Modern clients create, use, and close isolated application contexts instead of relying on process identity\n- **Code Execution**: Write Python code with async browser functions (await navigate, click, evaluate, etc.)\n- **Persistent Namespace**: Variables and state persist between execute_code calls within one context\n- **Recovery Tools**: get_status reports lifecycle and tab state without starting a browser; reset_browser closes a stuck browser while preserving user variables by default\n- **Isolated Resources**: Each context has its own managed profile, workspace, default downloads directory, namespace, and locks\n- **Legacy Compatibility**: Older stdio clients keep the original three tools without context IDs\n- **Browser Automation**: Full browser control via CodeAgent functions\n- **JavaScript Evaluation**: Run JS in page context via evaluate()\n- **Data Libraries**: numpy, pandas, matplotlib, BeautifulSoup available\n- **Standard Libraries**: json, csv, re, datetime, requests, asyncio, Path",
+  "long_description": "OpenBrowser CodeAgent exposes create_context, execute_code, get_status, reset_browser, and close_context to 2026-07-28 MCP clients. create_context returns a server-minted context_id; later stateful calls pass that handle explicitly. execute_code runs Python with browser automation functions in a persistent per-context namespace. Older clients that negotiate 2024-11-05 through 2025-11-25 receive the original three-tool catalog and a legacy no-handle context.\n\n### Key Features:\n- **Explicit Contexts**: Modern clients create, use, and close isolated application contexts instead of relying on process identity\n- **Code Execution**: Write Python code with browser functions; most are async (await navigate, click, evaluate, etc.)\n- **Persistent Namespace**: Variables and state persist between execute_code calls within one context\n- **Recovery Tools**: get_status reports lifecycle and tab state without starting a browser; reset_browser closes a stuck browser while preserving scalar and scalar-only container variables by default\n- **Isolated Resources**: Each context has its own managed profile, workspace, default downloads directory, namespace, and locks\n- **Legacy Compatibility**: Older stdio clients keep the original three tools without context IDs\n- **Browser Automation**: Full browser control via CodeAgent functions\n- **JavaScript Evaluation**: Run JS in page context via evaluate()\n- **Data Libraries**: numpy and pandas are bundled; matplotlib, BeautifulSoup, pypdf, and tabulate are available only when installed\n- **Standard Libraries**: json, csv, re, datetime, requests, asyncio, Path",
   "icon": "icon.png",
   "homepage": "https://github.com/billy-enrizky/openbrowser-ai",
-  "documentation": "https://github.com/billy-enrizky/openbrowser-ai",
+  "documentation": "https://docs.openbrowser.me/customize/integrations/mcp-server",
   "repository": {
     "type": "git",
     "url": "https://github.com/billy-enrizky/openbrowser-ai"
@@ -32,14 +32,16 @@
         "OPENBROWSER_HEADLESS": "${user_config.headless}",
         "OPENBROWSER_ALLOWED_DOMAINS": "${user_config.allowed_domains}",
         "OPENBROWSER_USER_DATA_DIR": "${user_config.user_data_dir}",
-        "OPENBROWSER_STORAGE_STATE": "${user_config.storage_state}"
+        "OPENBROWSER_STORAGE_STATE": "${user_config.storage_state}",
+        "OPENBROWSER_MCP_WORKSPACE_DIR": "${user_config.workspace_directory}",
+        "OPENBROWSER_MCP_MAX_CONTEXTS": "${user_config.max_contexts}"
       }
     }
   },
   "tools": [
     {
       "name": "create_context",
-      "description": "Create an isolated OpenBrowser context and return its context_id. Does not start a browser until the first stateful call."
+      "description": "Create an isolated OpenBrowser context and return its context_id. No browser starts until the first execute_code call."
     },
     {
       "name": "execute_code",
@@ -51,7 +53,7 @@
     },
     {
       "name": "reset_browser",
-      "description": "Close the current browser session and release its profile. User-defined Python variables are preserved unless clear_variables is true."
+      "description": "Close the current browser session and release its profile. Scalar and scalar-only container variables are preserved unless clear_variables is true. Inspect namespace_transfer.dropped. Cookies and localStorage survive because the profile is reused."
     },
     {
       "name": "close_context",
@@ -93,8 +95,8 @@
     "workspace_directory": {
       "type": "directory",
       "title": "Workspace Directory",
-      "description": "Directory to use as workspace for downloads and file operations",
-      "default": "${HOME}/.config/openbrowser/workspace",
+      "description": "Base directory for per-context file operations. Downloads use a separate per-context path.",
+      "default": "${HOME}/Downloads/openbrowser-mcp/workspace",
       "required": false
     },
     "headless": {
@@ -102,13 +104,6 @@
       "title": "Headless Mode",
       "description": "Run browser without GUI (faster, less memory). Set to false to see the browser window",
       "default": true,
-      "required": false
-    },
-    "stealth": {
-      "type": "boolean",
-      "title": "Stealth Mode",
-      "description": "Use stealth mode to avoid detection by anti-bot systems",
-      "default": false,
       "required": false
     },
     "user_data_dir": {
@@ -123,29 +118,6 @@
       "description": "Optional JSON file used as a one-time seed for cookies plus localStorage in managed MCP profiles; later updates are saved to the active profile copy",
       "required": false
     },
-    "disable_security": {
-      "type": "boolean",
-      "title": "Disable Security",
-      "description": "Disable browser security features (CORS, CSP, etc). Use with caution",
-      "default": false,
-      "required": false
-    },
-    "deterministic_rendering": {
-      "type": "boolean",
-      "title": "Deterministic Rendering",
-      "description": "Force deterministic rendering for consistent screenshots. May break some sites",
-      "default": false,
-      "required": false
-    },
-    "viewport_expansion": {
-      "type": "number",
-      "title": "Viewport Expansion",
-      "description": "Extra pixels to expand viewport for better LLM context understanding",
-      "default": 500,
-      "minimum": 0,
-      "maximum": 2000,
-      "required": false
-    },
     "allowed_domains": {
       "type": "string",
       "title": "Allowed Domains",
@@ -153,50 +125,12 @@
       "default": "",
       "required": false
     },
-    "sensitive_data_masking": {
-      "type": "boolean",
-      "title": "Sensitive Data Masking",
-      "description": "Mask sensitive data (passwords, credit cards) in screenshots and logs",
-      "default": true,
-      "required": false
-    },
-    "browser_type": {
-      "type": "string",
-      "title": "Browser Type",
-      "description": "Which browser engine to use",
-      "enum": [
-        "chromium",
-        "firefox",
-        "webkit"
-      ],
-      "default": "chromium",
-      "required": false
-    },
-    "default_timeout": {
+    "max_contexts": {
       "type": "number",
-      "title": "Default Timeout (ms)",
-      "description": "Default timeout for browser operations in milliseconds",
-      "default": 30000,
-      "minimum": 1000,
-      "maximum": 300000,
-      "required": false
-    },
-    "wait_between_actions": {
-      "type": "number",
-      "title": "Wait Between Actions (seconds)",
-      "description": "Time to wait between browser actions for stability",
-      "default": 0.5,
-      "minimum": 0,
-      "maximum": 10,
-      "required": false
-    },
-    "session_timeout": {
-      "type": "number",
-      "title": "Session Timeout (minutes)",
-      "description": "Minutes of inactivity before browser session auto-closes",
-      "default": 10,
+      "title": "Maximum Contexts",
+      "description": "Maximum open contexts total, including the legacy no-handle context",
+      "default": 16,
       "minimum": 1,
-      "maximum": 60,
       "required": false
     }
   },

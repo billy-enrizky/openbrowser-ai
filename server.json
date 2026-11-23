@@ -1,7 +1,7 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "me.openbrowser/openbrowser-ai",
-  "description": "AI browser automation. Write async Python to navigate, click, type, and extract data.",
+  "description": "AI browser automation with explicit MCP contexts. Write async Python to navigate, click, type, and extract data.",
   "repository": {
     "url": "https://github.com/billy-enrizky/openbrowser-ai.git",
     "source": "github"
@@ -69,6 +69,40 @@
           "isRequired": false,
           "isSecret": false,
           "default": "true"
+        },
+        {
+          "name": "OPENBROWSER_MCP_MAX_CONTEXTS",
+          "description": "Maximum open contexts total, including the legacy no-handle context (default: 16). Set a positive integer.",
+          "isRequired": false,
+          "isSecret": false,
+          "default": "16"
+        },
+        {
+          "name": "OPENBROWSER_MCP_WORKSPACE_DIR",
+          "description": "Base directory for per-context workspaces (default: ~/Downloads/openbrowser-mcp/workspace).",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "OPENBROWSER_MCP_START_TIMEOUT",
+          "description": "Browser startup bound in seconds for one MCP execution (default: 30).",
+          "isRequired": false,
+          "isSecret": false,
+          "default": "30"
+        },
+        {
+          "name": "OPENBROWSER_MCP_EXEC_TIMEOUT",
+          "description": "Seconds before a tool call returns a structured timeout result (default: 110).",
+          "isRequired": false,
+          "isSecret": false,
+          "default": "110"
+        },
+        {
+          "name": "OPENBROWSER_SHUTDOWN_TIMEOUT",
+          "description": "Browser and context cleanup bound in seconds (default: 20).",
+          "isRequired": false,
+          "isSecret": false,
+          "default": "20"
         }
       ]
     }

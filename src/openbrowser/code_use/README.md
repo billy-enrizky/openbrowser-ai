@@ -33,7 +33,11 @@ The namespace is initialized with:
 - `close(tab_id)` - Close a browser tab
 - `evaluate(code, variables={})` - Execute JavaScript and return Python objects
 - `get_selector_from_index(index)` - Get CSS selector for an element by index
-- `done(text, success)` - Mark task complete
+- `done(text, success, files_to_display)` - Mark task complete
+- `download_file(url, filename=None)` - Download a file using browser cookies
+- `wait_for_download(timeout=30, url=None, lookback=0, download_ref=None)` - Wait for a terminal download phase; start it before the click
+- `download_outcomes()` / `download_failures()` - Synchronous recent attempts and failures
+- `list_downloads()` - List files in the downloads directory
 
 Indexed actions remain preferred whenever an element index exists. For screenshot-derived coordinates, divide screenshot pixels by `window.devicePixelRatio` before calling an `*_xy` function.
 
@@ -95,3 +99,10 @@ with open('products.json', 'w') as f:
 print(f'Total: {len(all_products)} products saved to products.json')
 await done(text='Extracted all products', success=True, files_to_display=['products.json'])
 ```
+
+
+## Run lifecycle
+
+`code_agent.status` returns a `CodeAgentRunStatus` with `phase`, `terminal`, `success`, `terminal_reason`, `result`, `error`, `attachments`, `step`, `max_steps`, `cancellation_requested`, `closed`, `started_at`, and `finished_at`. Terminal phases are `succeeded`, `failed`, `max_steps`, and `cancelled`.
+
+`code_agent.stop()` cancels between `await` points. It does not interrupt a cell that is already executing; cancel the `run()` task for that. A caller cancellation does not prove that the worker stopped, so inspect `status` and run required cleanup before starting another run.

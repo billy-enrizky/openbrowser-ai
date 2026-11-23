@@ -8,6 +8,9 @@ mode: "wide"
 ## Available Parameters
 
 ### Core Settings
+- `task`: Task description string that defines what the agent should accomplish
+- `llm`: Chat model instance. When omitted, `CONFIG.DEFAULT_LLM` is used, then `ChatBrowserUse`.
+- `max_steps` (default: `100`): Maximum number of steps in one `run()` call
 - `tools`: Registry of <a href = "../tools/available">tools</a> the agent can call. <a href = "../tools/basics">Example</a>
 - `browser`: Browser object where you can specify the browser settings.
 - `output_model_schema`: Pydantic model class for structured output validation. [Example](https://github.com/billy-enrizky/openbrowser-ai/blob/main/examples/features/custom_output.py)
@@ -23,13 +26,14 @@ mode: "wide"
 - `max_failures` (default: `3`): Maximum retries for steps with errors
 - `final_response_after_failure` (default: `True`): If True, attempt to force one final model call with intermediate output after max_failures is reached
 - `use_thinking` (default: `True`): Controls whether the agent uses its internal "thinking" field for explicit reasoning steps.
-- `flash_mode` (default: `False`): Fast mode that skips evaluation, next goal and thinking and only uses memory. If `flash_mode` is enabled, it overrides `use_thinking` and disables the thinking process entirely. [Example](https://github.com/billy-enrizky/openbrowser-ai/blob/main/examples/getting_started/05_fast_agent.py)
+- `flash_mode` (default: `False`): Fast mode that skips evaluation, next goal and thinking and only uses memory. If `flash_mode` is enabled, it overrides `use_thinking` and disables the thinking process entirely. `ChatBrowserUse` forces flash mode on. [Example](https://github.com/billy-enrizky/openbrowser-ai/blob/main/examples/getting_started/05_fast_agent.py)
 
 ### System Messages
 - `override_system_message`: Completely replace the default system prompt. 
 - `extend_system_message`: Add additional instructions to the default system prompt. [Example](https://github.com/billy-enrizky/openbrowser-ai/blob/main/examples/features/custom_system_prompt.py)
 
 ### File & Data Management
+- `file_system_path`: Base directory for the agent file system. When omitted, each agent uses `openbrowser_agent_<id>_<timestamp>` under the system temp directory. The file system constructor clears its `openbrowser_agent_data` subdirectory.
 - `save_conversation_path`: Path to save complete conversation history
 - `save_conversation_path_encoding` (default: `'utf-8'`): Encoding for saved conversations
 - `available_file_paths`: List of file paths the agent can access
@@ -41,7 +45,7 @@ mode: "wide"
 
 ### Performance & Limits
 - `max_history_items`: Maximum number of last steps to keep in the LLM memory. If `None`, we keep all steps. 
-- `llm_timeout` (default: `90`): Timeout in seconds for LLM calls
+- `llm_timeout` (default: auto): Timeout in seconds for LLM calls. When omitted, the model name selects 60 seconds generally, 45 for Gemini, 30 for Groq, and 90 for o3, Claude, Sonnet, or DeepSeek.
 - `step_timeout` (default: `120`): Timeout in seconds for each step
 - `directly_open_url` (default: `True`): If we detect a url in the task, we directly open it.
 
@@ -49,6 +53,19 @@ mode: "wide"
 - `calculate_cost` (default: `False`): Calculate and track API costs
 - `display_files_in_done_text` (default: `True`): Show file information in completion messages
 
+### Callbacks
+- `register_new_step_callback`: Called after each step with the browser state, agent output, and step number. Sync or async.
+- `register_done_callback`: Called with the final `AgentHistoryList`. Sync or async.
+- `register_should_stop_callback`: Async callback that can request a cooperative stop.
+- `register_external_agent_status_raise_error_callback`: Async callback for an external status error.
+
 ### Backwards Compatibility
 - `controller`: Alias for `tools` for backwards compatibility.
 - `browser_session`: Alias for `browser` for backwards compatibility.
+
+
+## Run Lifecycle
+
+`agent.status` returns an `AgentRunStatus` with `phase`, `terminal`, `success`, `terminal_reason`, `result`, `error`, `step`, `max_steps`, `consecutive_failures`, `pause_requested`, `stop_requested`, `started_at`, and `finished_at`.
+
+Terminal phases are `succeeded`, `failed`, `max_steps`, `stopped`, and `cancelled`. A successful phase requires an accepted successful `done`. A stop, pause, or caller cancellation is reported as its own phase and is not rewritten as success. A caller cancellation does not prove that the worker stopped; inspect `status` and run required cleanup before another run.

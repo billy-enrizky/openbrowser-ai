@@ -51,3 +51,18 @@ Prefer indexed actions whenever an element index exists. If converting screensho
 
 ### Task Completion
 - **`done`** - Complete the task (always available)
+
+### CodeAgent and MCP execution helpers
+
+The CodeAgent and MCP execution namespaces expose additional Python helpers beyond the Agent action registry:
+
+- **`browser.get_browser_state_summary()`** - page metadata and interactive elements
+- **`get_selector_from_index(index)`** - CSS selector for an element index
+- **`download_file(url, filename=None)`** - download with browser cookies
+- **`wait_for_download(timeout=30, url=None, lookback=0, download_ref=None)`** - wait for a terminal download phase; start it before the triggering click
+- **`download_outcomes()` / `download_failures()`** - synchronous recent attempts and failures
+- **`list_downloads()`** - list files in the downloads directory
+
+Indexed actions use the latest browser state. Readiness failures are `element_index_missing`, `element_index_invalid`, `browser_state_not_ready`, and `element_index_stale`. Re-read browser state before retrying.
+
+A registered action can still be unavailable. Action availability failures report `action_excluded`, `action_unknown`, `empty_domains`, `page_unknown`, or `domain_filtered`. `page_unknown` means the page URL is not known yet; `domain_filtered` means the action's domain filter does not include the current page. Check the registered action list and the page URL before retrying.

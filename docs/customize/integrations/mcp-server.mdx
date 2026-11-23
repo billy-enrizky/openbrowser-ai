@@ -7,7 +7,7 @@ mode: "wide"
 
 ## Overview
 
-The MCP (Model Context Protocol) Server exposes OpenBrowser's browser automation to AI assistants like Claude Desktop, Claude Code, and other MCP-compatible clients. A 2026-07-28 client calls `create_context` to get a server-minted `context_id`, passes that handle to `execute_code`, `get_status`, and `reset_browser`, and calls `close_context` when finished. `execute_code` runs Python to navigate, interact with, and extract data from web pages. `get_status` reports lifecycle and tab state without starting a browser, and `reset_browser` recovers a stuck browser while preserving user variables by default. Older clients that negotiate `2024-11-05`, `2025-03-26`, `2025-06-18`, or `2025-11-25` receive the original three-tool catalog with a legacy no-handle context. No external LLM API keys required -- the MCP client provides the intelligence.
+The MCP (Model Context Protocol) Server exposes OpenBrowser's browser automation to AI assistants like Claude Desktop, Claude Code, and other MCP-compatible clients. A 2026-07-28 client calls `create_context` to get a server-minted `context_id`, passes that handle to `execute_code`, `get_status`, and `reset_browser`, and calls `close_context` when finished. `execute_code` runs Python to navigate, interact with, and extract data from web pages. `get_status` reports lifecycle and tab state without starting a browser, and `reset_browser` recovers a stuck browser while preserving scalar and scalar-only container variables by default; functions, modules, browser-bound objects, cyclic values, and shadowed framework names are dropped and reported in `namespace_transfer`. Older clients that negotiate `2024-11-05`, `2025-03-26`, `2025-06-18`, or `2025-11-25` receive the original three-tool catalog with a legacy no-handle context. Any other protocol version is rejected with MCP error `-32602`; it is not downgraded to legacy. No external LLM API keys required -- the MCP client provides the intelligence. The server uses the official `mcp` Python SDK 2.3 and negotiates protocol version `2026-07-28` with modern clients.
 
 ## Quick Start
 
@@ -80,10 +80,16 @@ Optional configuration:
 |----------|-------------|---------|
 | `OPENBROWSER_HEADLESS` | Run browser without GUI | `true` |
 | `OPENBROWSER_ALLOWED_DOMAINS` | Comma-separated domain whitelist | (none) |
+| `OPENBROWSER_USER_DATA_DIR` | Optional explicit Chrome profile directory. Omit it for one managed profile per context; concurrent owners are rejected | (auto) |
+| `OPENBROWSER_STORAGE_STATE` | Optional JSON file used as a one-time seed for cookies plus localStorage in managed profiles | (auto seed) |
 | `OPENBROWSER_COMPACT_DESCRIPTION` | Minimal tool description (~500 tokens vs ~1,430) | `false` |
 | `OPENBROWSER_MAX_OUTPUT` | Maximum output characters per execution | `10000` |
-| `OPENBROWSER_MCP_MAX_CONTEXTS` | Maximum open modern contexts plus the activated legacy context | `16` |
+| `OPENBROWSER_MCP_START_TIMEOUT` | Browser startup bound in seconds for one execution | `30` |
+| `OPENBROWSER_MCP_EXEC_TIMEOUT` | Seconds before a tool call returns a structured timeout result | `110` |
+| `OPENBROWSER_MCP_MAX_CONTEXTS` | Maximum open contexts total, including the legacy no-handle context | `16` |
 | `OPENBROWSER_MCP_WORKSPACE_DIR` | Base directory for per-context workspaces | `~/Downloads/openbrowser-mcp/workspace` |
+| `OPENBROWSER_SHUTDOWN_TIMEOUT` | Browser and context cleanup bound in seconds | `20` |
+| `ANONYMIZED_TELEMETRY` | Set to `false` to disable anonymized usage telemetry | `true` |
 
 ## Tools
 
@@ -91,10 +97,10 @@ Modern 2026-07-28 clients see five tools. Older clients see the original three.
 
 | Tool | Use |
 |---|---|
-| `create_context` | Create an isolated browser and Python namespace. Returns `context_id` in text and `structuredContent`. Does not start a browser until the first stateful call. |
+| `create_context` | Create an isolated browser and Python namespace. Returns `context_id` in text and `structuredContent`. Does not start a browser until the first `execute_code` call. |
 | `execute_code` | Run Python in one context's persistent namespace with browser automation functions. Modern calls require `context_id`; functions are async unless noted. |
-| `get_status` | Read the server, context, browser, profile, tab, and config lifecycle state as JSON. It does not start or mutate a browser. |
-| `reset_browser` | Close a stuck browser and release its profile. User variables are preserved unless `clear_variables` is true. |
+| `get_status` | Read server, context, browser, profile, tab, tools, downloads, storage-state, namespace-transfer, and config lifecycle state as JSON. It does not start or mutate a browser. |
+| `reset_browser` | Close a stuck browser and release its profile. Scalar and scalar-only container variables are preserved unless `clear_variables` is true. Inspect `namespace_transfer.dropped`. Cookies and localStorage survive because the profile is reused. |
 | `close_context` | Close one context and release its browser and profile. A successful close invalidates the handle. |
 
 If a browser connection fails, call `get_status` before retrying. A page-changing action may have partially run, so do not replay it blindly. `get_status` includes `config.startup`, `config.current`, and `config.restart_required`.
@@ -123,16 +129,16 @@ For a managed local browser, use `reset_browser` to close the owned browser befo
 | **Dropdowns** | `select_dropdown(index, text)`, `dropdown_options(index)` |
 | **Tabs** | `switch(tab_id)`, `close(tab_id)`: accepts the four-character suffix or the full CDP target ID |
 | **JavaScript** | `evaluate(code)` -- run JS in page context, returns Python objects |
-| **Downloads** | `download_file(url, filename)`, `list_downloads()` (sync, no `await`) |
+| **Downloads** | `download_file(url, filename)`; `wait_for_download(timeout, url, lookback, download_ref)`; `download_outcomes()` and `download_failures()` (sync); `list_downloads()` (sync) |
 | **State** | `browser.get_browser_state_summary()` -- page metadata and interactive elements |
 | **CSS** | `get_selector_from_index(index)` -- CSS selector for an element |
 | **Completion** | `done(text, success)` -- signal task completion |
 
 Prefer indexed actions whenever an element index exists. Coordinate actions use CSS viewport pixels, not screenshot pixels. If a screenshot uses a `devicePixelRatio` other than 1, divide its coordinates by `window.devicePixelRatio` before calling an `*_xy` function.
 
-**Pre-imported libraries**: `json`, `csv`, `re`, `datetime`, `asyncio`, `Path`, `requests`, `numpy`, `pandas`, `matplotlib`, `BeautifulSoup`
+**Bundled libraries**: `json`, `csv`, `re`, `datetime`, `asyncio`, `Path`, `requests`, `numpy`, `pandas`. **Only if installed**: `matplotlib`, `BeautifulSoup`, `pypdf` (`openbrowser-ai[pdf]`), `tabulate`.
 
-Variables and state persist between `execute_code` calls within the same context. A context is process-local: it lives until `close_context` or server exit, and a new MCP server process cannot resume the same handle. Default workspaces and downloads are isolated per context; close retains the files.
+Variables and state persist between `execute_code` calls within the same context. A context is process-local: it lives until `close_context` or server exit, and a new MCP server process cannot resume the same handle. The browser session inside a context auto-closes after 10 minutes without an `execute_code` call. `get_status` does not refresh that timer. The handle and scalar variables remain, and the next `execute_code` call starts a fresh browser. A successful `close_context` invalidates the handle. If cleanup fails, the result is `close_failed` with `retryable: true`. Retry `close_context` to finish cleanup; the handle cannot be used for `execute_code`, `get_status`, or `reset_browser`. The default limit is 16 open contexts total, including the legacy no-handle context; set `OPENBROWSER_MCP_MAX_CONTEXTS` to a positive integer to change it. Default workspaces are under `~/Downloads/openbrowser-mcp/workspace/<owner-id>` and default downloads are under `~/Downloads/openbrowser-mcp/<owner-id>`. Each context also has a managed browser profile under `~/.config/openbrowser/profiles/mcp-<owner-id>`. Close retains the profile, workspace, and downloaded files. The owner ID is internal and is not the `context_id` handle. Read the resolved profile path from `get_status.profile.user_data_dir`. There is no disk quota or expiry cleanup for retained files. `close_context` waits for in-flight calls to finish before it closes the browser and profile. New calls while closing fail with `context_closing`. After a failed close, non-close calls fail with `context_close_failed`; retry `close_context` only. A second close after success returns `context_not_found`. Server shutdown closes every context and can enter a failed shutdown state if cleanup still fails.
 
 ## Example Usage
 
@@ -228,11 +234,7 @@ pip install --upgrade openbrowser-ai
 
 ### Debug Mode
 
-Enable debug logging by setting:
-```bash
-export OPENBROWSER_LOG_LEVEL=DEBUG
-uvx openbrowser-ai --mcp
-```
+The MCP server keeps Python logging off the stdio channel so JSON-RPC stays valid. `OPENBROWSER_LOG_LEVEL` is not read by the MCP server. To debug a client integration, inspect the client's captured server stderr or run `uvx openbrowser-ai --mcp` directly in a terminal.
 
 ## Security Considerations
 

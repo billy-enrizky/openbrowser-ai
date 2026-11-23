@@ -286,7 +286,9 @@ def _tool_catalog(description: str, *, modern: bool) -> tuple[types.Tool, ...]:
 		name='reset_browser',
 		description=(
 			'Close the current browser session and release its profile. '
-			'User-defined Python variables are preserved unless clear_variables is true. '
+			'Scalar and scalar-only container variables are preserved unless clear_variables is true. '
+			'Functions, modules, browser-bound objects, cyclic values, and names that shadow '
+			'framework bindings are dropped and reported in namespace_transfer. '
 			'The next execute_code call starts a fresh browser.'
 			+ (' Requires context_id from create_context.' if modern else '')
 		),
@@ -305,6 +307,7 @@ def _tool_catalog(description: str, *, modern: bool) -> tuple[types.Tool, ...]:
 		name='create_context',
 		description=(
 			'Create an isolated OpenBrowser context and return its context_id. '
+			'No browser starts until the first execute_code call. '
 			'Call this once, then pass context_id to execute_code, get_status, and reset_browser. '
 			'The context lives until close_context or server exit and cannot be resumed by a new server process. '
 			'Close it with close_context when finished.'
@@ -1267,7 +1270,7 @@ class _BrowserOwner:
 		}
 
 	async def _reset_browser(self, *, clear_variables: bool = False) -> str:
-		"""Close the current browser and preserve user variables by default."""
+		"""Close the current browser and preserve scalar user variables by default."""
 		async with self._execution_lock:
 			async with self._lifecycle_lock:
 				session = self.browser_session

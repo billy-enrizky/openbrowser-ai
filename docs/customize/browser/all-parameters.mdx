@@ -33,7 +33,8 @@ If sent authority remains unconfirmed, the runtime stays failed and refuses repl
 
 ## Display & Appearance
 
-- `headless` (default: `None`): Run browser without UI. Auto-detects based on display availability (`True`/`False`/`None`)
+- `headless` (default: `True`): Run browser without UI. `None` resolves to `True`; set `False` to show the window.
+- `auto_split_screen` (default: `True`): In headful mode, position the browser on the right half of the screen unless an explicit window size or position is set.
 - `window_size`: Browser window size for headful mode. Use dict `{'width': 1920, 'height': 1080}` or `ViewportSize` object
 - `window_position` (default: `{'width': 0, 'height': 0}`): Window position from top-left corner in pixels
 - `viewport`: Content area size, same format as `window_size`. Use `{'width': 1280, 'height': 720}` or `ViewportSize` object
@@ -56,12 +57,12 @@ If sent authority remains unconfirmed, the runtime stays failed and refuses repl
   - `['https://explicit-content.org']` - Block specific protocol/domain combination
   - **Performance**: Lists with 100+ domains are automatically optimized to sets for O(1) lookup (same as `allowed_domains`)
 - `enable_default_extensions` (default: `True`): Load automation extensions (uBlock Origin, cookie handlers, ClearURLs)
-- `cross_origin_iframes` (default: `False`): Enable cross-origin iframe support (may cause complexity)
-- `is_local` (default: `True`): Whether this is a local browser instance. Set to `False` for remote browsers. If we have a `executable_path` set, it will be automatically set to `True`. This can effect your download behavior.
+- `cross_origin_iframes` (default: `True`): Enable cross-origin iframe support (OOPIF). Set to `False` to process only same-origin frames.
+- `is_local` (default: `False`): Whether this is a local browser instance. `BrowserSession` sets it to `True` when no `cdp_url` is supplied, or when `executable_path` is set. Set it explicitly for remote browsers. This affects download behavior.
 
 ## User Data & Profiles
 
-- `user_data_dir` (default: auto-generated temp): Directory for browser profile data. Use `None` for incognito mode
+- `user_data_dir` (default: auto-generated temp): Directory for browser profile data. `None` creates a throwaway temporary profile directory with `tempfile.mkdtemp`, not Chrome incognito mode.
 - `profile_directory` (default: `'Default'`): Chrome profile subdirectory name (`'Profile 1'`, `'Work Profile'`, etc.)
 - `storage_state`: Browser storage state (cookies, localStorage). Can be file path string or dict object
 
@@ -71,6 +72,7 @@ If sent authority remains unconfirmed, the runtime stays failed and refuses repl
 - `permissions` (default: `['clipboardReadWrite', 'notifications']`): Browser permissions to grant. Use list like `['camera', 'microphone', 'geolocation']`
 
 - `headers`: Additional HTTP headers for connect requests (remote browsers only)
+- `block_ip_addresses` (default: `False`): Block navigation to URLs that contain IPv4 or IPv6 addresses, including localhost and private networks.
 
 ## Browser Launch
 
@@ -89,7 +91,7 @@ If sent authority remains unconfirmed, the runtime stays failed and refuses repl
 
 - `minimum_wait_page_load_time` (default: `0.25`): Minimum time to wait before capturing page state in seconds
 - `wait_for_network_idle_page_load_time` (default: `0.5`): Time to wait for network activity to cease in seconds
-- `wait_between_actions` (default: `0.5`): Time to wait between agent actions in seconds
+- `wait_between_actions` (default: `0.1`): Time to wait between agent actions in seconds
 
 ## AI Integration
 
@@ -99,7 +101,7 @@ If sent authority remains unconfirmed, the runtime stays failed and refuses repl
 ## Downloads & Files
 
 - `accept_downloads` (default: `True`): Automatically accept all downloads
-- `downloads_path`: Directory for downloaded files. Use string like `'./downloads'` or `Path` object
+- `downloads_path` (default: unique `/tmp/openbrowser-downloads-<id>`): Directory for downloaded files. Use a string like `'./downloads'` or a `Path` object.
 - `auto_download_pdfs` (default: `True`): Automatically download PDFs instead of viewing in browser
 
 ## Device Emulation
@@ -110,7 +112,7 @@ If sent authority remains unconfirmed, the runtime stays failed and refuses repl
 ## Recording & Debugging
 
 - `record_video_dir`: Directory to save video recordings as `.mp4` files
-- `record_video_size` (default: `ViewportSize`): The frame size (width, height) of the video recording.
+- `record_video_size` (default: `None`): The frame size (width, height) of the video recording. `None` uses the viewport size.
 - `record_video_framerate` (default: `30`): The framerate to use for the video recording.
 - `record_har_path`: Path to save network trace files as `.har` format
 - `traces_dir`: Directory to save complete trace files for debugging
@@ -124,14 +126,14 @@ If sent authority remains unconfirmed, the runtime stays failed and refuses repl
 
 ---
 
-## Outdated BrowserProfile
+## Using BrowserProfile
 
-For backward compatibility, you can pass all the parameters from above to the `BrowserProfile` and then to the `Browser`.
+`BrowserProfile` is a first-class configuration object. Pass it to `BrowserSession` when you want to reuse one configuration across sessions. Direct keyword arguments to `BrowserSession` are the convenience path.
 
 ```python
-from openbrowser import BrowserProfile
+from openbrowser import BrowserProfile, BrowserSession
 profile = BrowserProfile(headless=False)
-browser = Browser(browser_profile=profile)
+browser = BrowserSession(browser_profile=profile)
 ```
 
 ## Browser vs BrowserSession

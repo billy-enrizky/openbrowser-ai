@@ -11,9 +11,9 @@ allowed-tools: Bash(openbrowser-ai:*) Bash(curl:*) Bash(uv:*) Bash(irm:*) Read W
 
 Download files from websites using the browser's authenticated session. Handles PDFs, CSVs, images, and any downloadable content. Preserves cookies and login sessions for authenticated downloads.
 
-All code runs via `openbrowser-ai -c`. The daemon starts automatically and persists variables across calls. All browser functions are async -- use `await`.
+All code runs via `openbrowser-ai -c`. The daemon starts automatically and persists variables across calls. Most browser functions are async -- use `await`. `list_downloads()`, `download_outcomes()`, and `download_failures()` are synchronous.
 
-The CLI daemon also persists cookies and login state in `~/.config/openbrowser/profiles/daemon/storage_state.json`, so authenticated sessions can be reused across later runs.
+The CLI daemon persists cookies and login state in the Chrome user-data directory at `~/.config/openbrowser/profiles/daemon`, so authenticated sessions can be reused across later runs. No `storage_state.json` file is written unless you configure one explicitly.
 
 ## Setup
 
@@ -171,7 +171,27 @@ print(f"Total: {len(files)} files")
 EOF
 ```
 
-### Step 8 -- Download from authenticated pages
+### Step 8 -- Wait for a click-triggered download
+
+When a button or link triggers the download, start `wait_for_download` before the click. The waiter captures the terminal outcome even when the file finishes quickly.
+
+```bash
+openbrowser-ai -c - <<'EOF'
+import asyncio
+
+waiter = asyncio.create_task(wait_for_download(timeout=30))
+await click(download_button_index)
+outcome = await waiter
+
+print(outcome["phase"], outcome["path"], outcome["file_size"], outcome["stage"])
+if outcome["phase"] == "failed":
+    print(outcome["error"])
+EOF
+```
+
+`wait_for_download` returns `phase` (`completed`, `failed`, or `cancelled`), `path`, `file_size`, `file_type`, `stage`, `error`, and `download_ref`. To inspect earlier attempts, call `download_outcomes()`. To list only failures, call `download_failures()`. A `download_ref` resolves only in the current browser session's live registry; after the session stops or is replaced, read the completed history instead.
+
+### Step 9 -- Download from authenticated pages
 
 `download_file()` preserves the browser's login session. Log in first, then download:
 
@@ -193,32 +213,35 @@ EOF
 ## Tips
 
 - Code is piped via stdin using heredoc (`-c - <<'EOF'`), so all Python syntax works without shell escaping issues.
-- Use `download_file(url)` instead of `navigate(url)` for files. `navigate()` opens PDFs in the browser viewer but does not save them.
-- `download_file()` preserves cookies and authentication -- no need to re-authenticate.
+- Prefer `download_file(url)` when you need a deterministic filename and return path. `navigate()` may auto-download a PDF when `auto_download_pdfs` is enabled, but it does not return the saved path.
+- The browser-fetch path preserves cookies and authentication. The `requests` fallback does not send browser cookies, so authenticated downloads can fail after fallback.
+- Start `wait_for_download` before a click that triggers a download. A fast download can finish before a wait started afterward.
 - Filename conflicts are handled automatically with `(N)` suffix (e.g., `report (1).pdf`).
 - If no filename is provided, it is derived from the URL path.
-- Use `list_downloads()` to see all files saved in the downloads directory.
+- Use `list_downloads()` to see all files saved in the downloads directory. `download_outcomes()` and `download_failures()` are synchronous.
 - For large files, `download_file()` has a 120-second timeout.
-- The fallback strategy uses Python `requests` if the browser fetch fails (e.g., CORS restrictions), but without browser cookies.
 
 ## Cleanup
 
-This step is **mandatory**. Run it after every download run, whether the file landed successfully or the request failed. Without it, the daemon keeps Chrome running until its 10-minute idle timeout, leaving a stale browser process, a locked profile, and (on macOS/Linux desktop) a visible window.
+Run this step after the task, whether it succeeded or failed.
 
-Stop the daemon, then verify it is gone:
+**Do not stop a daemon you did not start.** Check `openbrowser-ai daemon status` before the first browser call. If it already reports a running daemon, reuse it and leave it running at the end. If it reports `daemon_not_running`, this run starts one and must clean it up.
+
+For a daemon started by this run:
 
 ```bash
 openbrowser-ai daemon stop
-openbrowser-ai daemon status
 ```
 
-`daemon stop` closes every tab, exits Chrome, flushes saved cookies/login state to the profile, and shuts down the daemon process. `daemon status` should report the daemon is not running. If it still reports running, run `openbrowser-ai daemon force-stop`. It targets the current daemon endpoint: the configured `OPENBROWSER_SOCKET` on macOS/Linux, or the fixed loopback port on Windows. It verifies listener and owner absence before success. `daemon reap` is broader: it scans the default socket plus custom sockets that have a matching PID file and attempts to stop verified daemons. Inspect its JSON before accepting global cleanup.
+`daemon stop` only acknowledges the request and returns. Poll `openbrowser-ai daemon status` until it reports `daemon_not_running`, up to about 30 seconds. If the daemon does not exit, run `openbrowser-ai daemon force-stop`, which waits and verifies listener, owner, and browser cleanup.
 
-If a download can fail mid-workflow (timeout, 4xx/5xx, CORS), guarantee cleanup with a shell trap so the browser is never left orphaned:
+If the task can fail mid-workflow, guarantee cleanup with a shell trap:
 
 ```bash
 trap 'openbrowser-ai daemon stop >/dev/null 2>&1 || true' EXIT
 # ... openbrowser-ai -c calls here ...
 ```
 
-Downloaded files in `~/.config/openbrowser/downloads/` survive `daemon stop`, only the browser process is terminated. Do not rely on the idle timeout. Do not call `done()` as a substitute, `done()` only marks the task complete inside the agent loop, it does not close the browser.
+Persist results to disk before stopping the daemon. `daemon reset` clears the Python namespace. Do not call `done()` as a substitute for cleanup; it only marks the task complete inside the agent loop.
+
+Downloaded files in `~/Downloads/openbrowser-daemon/` survive `daemon stop` and `daemon reset`. Persist the exact paths you need before cleanup.
