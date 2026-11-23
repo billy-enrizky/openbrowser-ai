@@ -17,9 +17,13 @@ from typing import Any
 LABEL = "merge-queue"
 RUNNING_LABEL = "merge-queue-running"
 FAILED_LABEL = "merge-queue-failed"
+BLOCKED_LABEL = "merge-queue-blocked"
 CHECK_NAME = "merge-queue-gate"
 TRUSTED_ASSOCIATIONS = {"OWNER", "MEMBER", "COLLABORATOR"}
 QUEUE_CHECKS = "scripts/ci/run_queue_checks.sh"
+MERGE_READY_STATES = frozenset({"CLEAN", "UNSTABLE", "HAS_HOOKS"})
+MERGE_BLOCKING_STATES = frozenset({"DIRTY", "DRAFT"})
+MERGE_RETRY_DELAYS = (2.0, 4.0, 8.0)
 
 
 def trusted_author(item: dict[str, Any]) -> bool:
@@ -94,6 +98,7 @@ def ensure_labels(repo: str) -> None:
         (LABEL, "0e8a16", "Queue this pull request for full-suite merge testing"),
         (RUNNING_LABEL, "fbca04", "The serialized merge queue is testing this pull request"),
         (FAILED_LABEL, "d73a4a", "The merge queue rejected this pull request"),
+        (BLOCKED_LABEL, "d4c5f9", "The merge queue passed but the merge needs attention"),
     ):
         existing = subprocess.run(
             ["gh", "api", f"/repos/{repo}/labels/{name}"],
@@ -182,6 +187,23 @@ def wait_for_check(repo: str, head_sha: str, name: str, timeout: float = 30.0) -
     return False
 
 
+def merge_ready(pull: dict[str, Any]) -> bool:
+    """Return true when GitHub allows the merge and no policy state is pending."""
+    return pull.get("mergeable") is True and pull.get("mergeStateStatus") in MERGE_READY_STATES
+
+
+def wait_for_mergeable(repo: str, number: int, timeout: float = 20.0) -> dict[str, Any]:
+    """Wait for GitHub to settle the pull request mergeability after a new check."""
+    deadline = time.monotonic() + timeout
+    pull = gh_api("GET", f"/repos/{repo}/pulls/{number}")
+    while time.monotonic() < deadline:
+        if merge_ready(pull) or pull.get("mergeStateStatus") in MERGE_BLOCKING_STATES:
+            return pull
+        time.sleep(2)
+        pull = gh_api("GET", f"/repos/{repo}/pulls/{number}")
+    return pull
+
+
 def reject(repo: str, number: int, head_sha: str, reason: str) -> None:
     print(f"merge queue rejected #{number}: {reason}", file=sys.stderr)
     post_check(repo, head_sha, "failure", reason)
@@ -189,6 +211,23 @@ def reject(repo: str, number: int, head_sha: str, reason: str) -> None:
     set_label(repo, number, RUNNING_LABEL, False)
     set_label(repo, number, LABEL, False)
     set_label(repo, number, FAILED_LABEL, True)
+    set_label(repo, number, BLOCKED_LABEL, False)
+
+
+def merge_blocked(repo: str, number: int, reason: str) -> None:
+    """Record a post-gate merge problem without revoking the successful gate."""
+    print(f"merge queue passed #{number} but could not merge: {reason}", file=sys.stderr)
+    comment(
+        repo,
+        number,
+        "Merge queue checks passed, but GitHub did not complete the merge: "
+        f"{reason}. The merge-queue-gate success is preserved. Resolve the branch policy "
+        "or merge issue, then merge the pull request or rerun the queue.",
+    )
+    set_label(repo, number, RUNNING_LABEL, False)
+    set_label(repo, number, LABEL, False)
+    set_label(repo, number, FAILED_LABEL, False)
+    set_label(repo, number, BLOCKED_LABEL, True)
 
 
 def base_sha(repo: str) -> str:
@@ -214,6 +253,7 @@ def process(repo: str, root: Path, number: int, checks_script: Path) -> None:
 
     set_label(repo, number, LABEL, False)
     set_label(repo, number, RUNNING_LABEL, True)
+    gate_passed = False
     main_before = base_sha(repo)
     branch = f"queue-pr-{number}"
     try:
@@ -253,16 +293,30 @@ def process(repo: str, root: Path, number: int, checks_script: Path) -> None:
             "Full non-integration suite, static checks, frontend checks, backend smoke, "
             "and merge-tree generation passed.",
         )
+        gate_passed = True
         if not wait_for_check(repo, head_sha, CHECK_NAME):
-            reject(repo, number, head_sha, "the merge-queue-gate check did not become visible")
+            merge_blocked(repo, number, "the merge-queue-gate check did not become visible")
             return
+        wait_for_mergeable(repo, number)
         merge_result = command(
             ["gh", "pr", "merge", str(number), "--merge", "--match-head-commit", head_sha],
             root,
             check=False,
         )
+        for delay in MERGE_RETRY_DELAYS:
+            if merge_result.returncode == 0:
+                break
+            print(f"merge attempt failed; retrying #{number} in {delay:g}s", file=sys.stderr)
+            time.sleep(delay)
+            wait_for_mergeable(repo, number)
+            merge_result = command(
+                ["gh", "pr", "merge", str(number), "--merge", "--match-head-commit", head_sha],
+                root,
+                check=False,
+            )
         if merge_result.returncode != 0:
-            reject(repo, number, head_sha, "GitHub rejected the merge after checks passed")
+            detail = (merge_result.stderr or merge_result.stdout or "GitHub rejected the merge").strip()
+            merge_blocked(repo, number, f"GitHub rejected the merge after checks passed: {detail}")
             return
         merged_main = base_sha(repo)
         output_path = os.environ.get("GITHUB_OUTPUT")
@@ -271,9 +325,13 @@ def process(repo: str, root: Path, number: int, checks_script: Path) -> None:
                 output.write(f"main_sha={merged_main}\n")
         set_label(repo, number, RUNNING_LABEL, False)
         set_label(repo, number, FAILED_LABEL, False)
+        set_label(repo, number, BLOCKED_LABEL, False)
         print(f"merged #{number} through the custom queue")
     except Exception as exc:
-        reject(repo, number, head_sha, f"queue error: {exc}")
+        if gate_passed:
+            merge_blocked(repo, number, f"queue error after checks passed: {exc}")
+        else:
+            reject(repo, number, head_sha, f"queue error: {exc}")
     finally:
         command(["git", "checkout", "-f", "origin/main"], root, check=False)
         command(["git", "reset", "--hard", "origin/main"], root, check=False)
