@@ -627,6 +627,54 @@ async def test_noop_stop_and_kill_leave_health_unchanged_after_reset() -> None:
     assert after_kill == before
 
 
+@pytest.mark.asyncio
+async def test_kill_retries_pending_cleanup_failure_into_health() -> None:
+    session = BrowserSession()
+    session._cdp_client_root = MagicMock()
+    session._cdp_health.mark_cleanup_failure(RuntimeError("retained cleanup"))
+
+    with (
+        patch.object(
+            session,
+            "_retry_pending_cdp_cleanup",
+            AsyncMock(return_value=RuntimeError("cleanup retry failed")),
+        ),
+        pytest.raises(RuntimeError, match="retained CDP resources"),
+    ):
+        await session.kill()
+
+    health = session.browser_health_snapshot()
+    assert health["phase"] == "failed"
+    assert health["reason"] == "cleanup_failed"
+
+
+@pytest.mark.asyncio
+async def test_kill_outer_force_failure_records_cleanup_failed() -> None:
+    session = BrowserSession()
+    session._lifecycle.transition(LifecyclePhase.STARTING)
+    session._lifecycle.transition(LifecyclePhase.READY)
+    session._local_browser_watchdog = SimpleNamespace(
+        _subprocess=MagicMock(),
+        _spawned_subprocess=None,
+        _profile_lease=MagicMock(),
+    )
+
+    with (
+        patch.object(session, "_shutdown_locked", AsyncMock()),
+        patch.object(
+            session,
+            "_force_stop_retained_browser",
+            AsyncMock(return_value=RuntimeError("force failed")),
+        ),
+        pytest.raises(RuntimeError, match="force failed"),
+    ):
+        await session.kill()
+
+    health = session.browser_health_snapshot()
+    assert health["phase"] == "failed"
+    assert health["reason"] == "cleanup_failed"
+
+
 def test_lifecycle_snapshot_carries_health_without_private_endpoint(tmp_path) -> None:
     session, *_ = _bound_session(tmp_path)
     with patch.object(ProfileLease, "process_identity_status", return_value="match"):

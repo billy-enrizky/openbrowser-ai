@@ -2876,6 +2876,7 @@ class BrowserSession(BaseModel):
 			if self._cdp_health.cleanup_pending and (self._stop_task is None or self._stop_task.done()):
 				cleanup_error = await self._retry_pending_cdp_cleanup()
 				if cleanup_error is not None:
+					self._record_cleanup_failure_health()
 					raise RuntimeError('Failed to release retained CDP resources') from cleanup_error
 			if self._lifecycle.phase is LifecyclePhase.STOPPED:
 				self._lifecycle.transition(LifecyclePhase.STOPPING, reason='kill requested')
@@ -2889,6 +2890,7 @@ class BrowserSession(BaseModel):
 		if self._watchdog_has_live_resources(self._local_browser_watchdog):
 			force_error = await self._force_stop_retained_browser()
 			if force_error is not None:
+				self._record_cleanup_failure_health()
 				raise force_error from None
 			if not self._watchdog_has_live_resources(self._local_browser_watchdog):
 				self._local_browser_watchdog = None
