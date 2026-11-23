@@ -79,7 +79,7 @@ async def run_agent_task(instruction: str):
     result = await agent.run()
     elapsed = time.time() - start
     
-    await browser.close()
+    await browser.stop()
     return {"time": elapsed, "steps": len(result.history), "success": result.is_done()}
 
 async def run_code_agent_task(instruction: str):
@@ -99,8 +99,8 @@ async def run_code_agent_task(instruction: str):
     result = await agent.run()
     elapsed = time.time() - start
     
-    await browser_session.close()
-    return {"time": elapsed, "steps": len(agent.complete_history), "success": result is not None}
+    await browser_session.stop()
+    return {"time": elapsed, "steps": len(agent.complete_history), "success": agent.status.success is True}
 
 async def main():
     task = """

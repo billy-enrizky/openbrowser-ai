@@ -188,7 +188,7 @@ async def run_agent_task(task_name: str, instruction: str) -> TaskResult:
     finally:
         if browser:
             try:
-                await browser.close()
+                await browser.stop()
             except Exception:
                 pass
 
@@ -283,7 +283,7 @@ async def run_code_agent_task(task_name: str, instruction: str) -> TaskResult:
     finally:
         if browser_session:
             try:
-                await browser_session.close()
+                await browser_session.stop()
             except Exception:
                 pass
 

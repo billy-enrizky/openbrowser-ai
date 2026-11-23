@@ -4,18 +4,19 @@ description: ""
 icon: "arrow-right-to-bracket"
 ---
 
-Connect your existing Chrome browser to preserve authentication.
+Launch Chrome with an existing profile to preserve authentication. To attach to an already-running Chrome process, use `cdp_url` instead.
 
 ## Basic Example
 
 ```python
 from openbrowser import Agent, Browser, ChatOpenAI
 
-# Connect to your existing Chrome browser
+# Launch Chrome with your existing profile
 browser = Browser(
     executable_path='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
     user_data_dir='~/Library/Application Support/Google/Chrome',
     profile_directory='Default',
+    headless=False,
 )
 
 agent = Agent(

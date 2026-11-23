@@ -53,7 +53,7 @@ This frontend is deployed to GitHub Pages at [openbrowser.me](https://openbrowse
 
 ### GitHub Pages Deployment
 
-The frontend is automatically deployed via GitHub Actions when you push to the main branch.
+Deployments use the manual `npm run deploy` command. The workflow under `frontend/.github/workflows/` is not discovered by GitHub Actions; only workflows under the repository root `.github/workflows/` run.
 
 **Manual deployment:**
 
@@ -67,12 +67,7 @@ npm run deploy
 
 ### Environment Variables
 
-For **production** (set in GitHub Actions secrets or `.env.production`):
-
-```env
-NEXT_PUBLIC_API_URL=https://api.openbrowser.me
-NEXT_PUBLIC_WS_URL=wss://api.openbrowser.me/ws
-```
+In production the frontend uses the page origin for API and WebSocket traffic (`frontend/src/lib/config.ts`). Set the environment variables only for local development; they are ignored outside localhost and 127.0.0.1.
 
 For **local development** (create `.env.local`):
 
@@ -89,12 +84,13 @@ The backend must be deployed separately to a platform that supports:
 - Persistent processes (for browser automation)
 
 Recommended platforms:
-- **Railway** - Easy Docker deployment
-- **Render** - Free tier available
-- **DigitalOcean App Platform** - Good for production
-- **AWS EC2/ECS** - Full control
+- **AWS EC2/ECS** - Full control and VNC support
+- **DigitalOcean Droplet** - Full VNC support
+- **Railway / Render only with `VNC_ENABLED=false`** - No live browser streaming
 
-See `/backend/README.md` and `/DEPLOYMENT.md` for backend deployment instructions.
+VNC mode requires shared memory, `seccomp:unconfined`, Xvfb, x11vnc, and websockify. PaaS platforms that do not allow those privileges cannot run VNC mode.
+
+See [`backend/README.md`](../backend/README.md) for backend deployment instructions.
 
 ## Project Structure
 

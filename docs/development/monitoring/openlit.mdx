@@ -1,130 +1,50 @@
 ---
 title: "OpenLIT"
-description: "Complete observability for OpenBrowser with OpenLIT tracing"
+description: "Instrument the LLM calls in an OpenBrowser process with OpenLIT"
 icon: "chart-line"
 mode: "wide"
 ---
 
 ## Overview
 
-OpenBrowser has native integration with [OpenLIT](https://github.com/openlit/openlit) - an open-source opentelemetry-native platform that provides complete, granular traces for every task your openbrowser agent performs—from high-level agent invocations down to individual browser actions.
+OpenLIT is an open-source OpenTelemetry-native observability tool. OpenBrowser does not ship a native OpenLIT integration and does not create spans for individual browser actions. OpenLIT can instrument the LLM SDK calls that run in the same process, such as OpenAI or Anthropic chat calls.
 
-Read more about OpenLIT in the [OpenLIT docs](https://docs.openlit.io).
+Read more in the [OpenLIT docs](https://docs.openlit.io).
 
 ## Setup
 
-Install OpenLIT alongside OpenBrowser:
+Install OpenLIT alongside the OpenBrowser package:
 
 ```bash
-pip install openlit openbrowser
+pip install openlit openbrowser-ai
 ```
 
 ## Usage
 
-OpenLIT provides automatic, comprehensive instrumentation with **zero code changes** beyond initialization:
-
-```python {5-6}
-from openbrowser import Agent, Browser, ChatOpenAI
-import asyncio
-import openlit
-
-# Initialize OpenLIT - that's it!
-openlit.init()
-
-async def main():
-	browser = Browser()
-
-	llm = ChatOpenAI(
-		model="gpt-4o",
-	)
-
-	agent = Agent(
-		task="Find the number trending post on Hacker news",
-		llm=llm,
-		browser=browser,
-	)
-
-	history = await agent.run()
-	return history
-
-if __name__ == "__main__":
-	history = asyncio.run(main())
-```
-
-## Viewing Traces
-
-OpenLIT provides a powerful dashboard where you can:
-
-### Monitor Execution Flows
-See the complete execution tree with timing information for every span. Click on any `invoke_model` span to see the exact prompt sent to the LLM and the complete response with agent reasoning.
-
-### Track Costs and Token Usage
-- Cost breakdown by agent, task, and model
-- Token usage per LLM call with full input/output visibility
-- Compare costs across different LLM providers
-- Identify expensive prompts and optimize them
-
-### Debug Failures with Agent Thoughts
-When an automation fails, you can:
-- See exactly which step failed
-- Read the agent's thinking at the failure point
-- Check the browser state and available elements
-- Analyze whether the failure was due to bad reasoning or bad information
-- Fix the root cause with full context
-
-### Performance Optimization
-- Identify slow steps (LLM calls vs browser actions vs HTTP requests)
-- Compare execution times across runs
-- Optimize max_steps and max_actions_per_step
-- Track HTTP request latency for page navigations
-
-## Configuration
-
-### Custom OpenTelemetry Endpoint Configuration
+Initialize OpenLIT before creating the agent:
 
 ```python
+import asyncio
+
 import openlit
+from openbrowser import Agent, Browser, ChatOpenAI
 
-# Configure custom OTLP endpoints
-openlit.init(
-	otlp_endpoint="http://localhost:4318",
-	application_name="my-browser-automation",
-	environment="production"
-)
+openlit.init()
+
+
+async def main():
+    browser = Browser()
+    llm = ChatOpenAI(model="gpt-4.1-mini")
+    agent = Agent(
+        task="Search for the latest AI news",
+        browser=browser,
+        llm=llm,
+    )
+    await agent.run()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
 ```
 
-### Environment Variables
-
-You can also configure OpenLIT via environment variables:
-
-```bash
-export OTEL_EXPORTER_OTLP_ENDPOINT="http://localhost:4318"
-export OTEL_SERVICE_NAME="browser-automation"
-export OTEL_ENVIRONMENT="production"
-```
-
-### Self-Hosted OpenLIT
-
-If you prefer to keep your data on-premises:
-
-```bash
-# Using Docker
-docker run -d \
-  -p 4318:4318 \
-  -p 3000:3000 \
-  openlit/openlit:latest
-
-# Access dashboard at http://localhost:3000
-```
-
-## Integration with Existing Tools
-
-OpenLIT uses OpenTelemetry under the hood, so it integrates seamlessly with:
-- **Jaeger** - Distributed tracing visualization
-- **Prometheus** - Metrics collection and alerting
-- **Grafana** - Custom dashboards and analytics
-- **Datadog** - APM and log management
-- **New Relic** - Full-stack observability
-- **Elastic APM** - Application performance monitoring
-
-Simply configure OpenLIT to export to your existing OTLP-compatible endpoint.
+OpenLIT records the LLM SDK calls it supports. It does not record CDP commands, DOM actions, navigation phases, or browser health. Use `agent.status` and `session.lifecycle_snapshot()` for browser-side state.

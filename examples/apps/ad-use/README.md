@@ -3,7 +3,7 @@
 Automatically generate Instagram image ads and TikTok video ads from any landing page using browser agents, Google's Nano Banana 🍌, and Veo3.
 
 > [!WARNING]
-> This demo requires openbrowser v0.7.7+.
+> This demo requires openbrowser v0.1.57+.
 
 https://github.com/user-attachments/assets/7fab54a9-b36b-4fba-ab98-a438f2b86b7e
 
@@ -31,7 +31,7 @@ export GOOGLE_API_KEY='your-google-api-key-here'
 Clone the repo and cd into the app folder
 ```bash
 git clone https://github.com/billy-enrizky/openbrowser-ai.git
-cd openbrowser/examples/apps/ad-use
+cd openbrowser-ai/examples/apps/ad-use
 ```
 
 ## Normal Usage

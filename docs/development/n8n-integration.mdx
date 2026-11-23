@@ -1,104 +1,30 @@
 ---
 title: 'n8n Integration'
-description: 'Learn how to integrate OpenBrowser with n8n workflows'
+description: 'Current status of the OpenBrowser n8n community node'
 icon: "diagram-project"
 mode: "wide"
 ---
 
-# OpenBrowser n8n Integration
+<Warning>
+The `n8n-nodes-openbrowser` community node is not published. There is no installable npm package or n8n community node yet. Do not run `npm install n8n-nodes-openbrowser`; it returns 404.
+</Warning>
 
-OpenBrowser can be integrated with [n8n](https://n8n.io), a workflow automation platform, using our community node. This integration allows you to trigger browser automation tasks directly from your n8n workflows.
+## Current options
 
-## Installing the n8n Community Node
-
-There are several ways to install the OpenBrowser community node in n8n:
-
-### Using n8n Desktop or Cloud
-
-1. Navigate to **Settings > Community Nodes**
-2. Click on **Install**
-3. Enter `n8n-nodes-openbrowser` in the **Name** field
-4. Click **Install**
-
-### Using a Self-hosted n8n Instance
-
-Run the following command in your n8n installation directory:
+You can still drive OpenBrowser from n8n with an **Execute Command** node:
 
 ```bash
-npm install n8n-nodes-openbrowser
+openbrowser-ai -c "await navigate('https://example.com'); print(await evaluate('document.title'))"
 ```
 
-### For Development
+Or call the MCP server from an MCP-capable node:
 
-<Note>
-The n8n community node repository is currently in development. The instructions below will be updated once the repository is available.
-</Note>
+```bash
+uvx openbrowser-ai --mcp
+```
 
-## Setting Up API Credentials
+For the CLI daemon workflow, see [CLI Daemon](/customize/integrations/cli-daemon). For the MCP tool catalog, see [Browser Automation MCP](/customize/integrations/mcp-server).
 
-To use the OpenBrowser node in n8n, you need to configure API credentials for your LLM provider:
+## Status
 
-1. Get an API key from your preferred LLM provider (OpenAI, Google, Anthropic, etc.)
-2. In n8n, create a new credential:
-   - Go to **Credentials** tab
-   - Click **Create New**
-   - Select the appropriate credential type for your LLM
-   - Enter your API key
-   - Save the credential
-
-## Using the OpenBrowser Node
-
-Once installed, you can add the OpenBrowser node to your workflows:
-
-1. In your workflow editor, search for "OpenBrowser" in the nodes panel
-2. Add the node to your workflow
-3. Set-up the credentials
-4. Choose your saved credentials
-5. Select an operation:
-   - **Run Task**: Execute a browser automation task with natural language instructions
-   - **Get Task**: Retrieve task details
-   - **Get Task Status**: Check task execution status
-   - **Pause/Resume/Stop Task**: Control running tasks
-   - **Get Task Media**: Retrieve screenshots, videos, or PDFs
-   - **List Tasks**: Get a list of tasks
-
-### Example: Running a Browser Task
-
-Here's a simple example of how to use the OpenBrowser node to run a browser task:
-
-1. Add the OpenBrowser node to your workflow
-2. Select the "Run Task" operation
-3. In the "Instructions" field, enter a natural language description of what you want the browser to do, for example:
-   ```
-   Go to example.com, take a screenshot of the homepage, and extract all the main heading texts
-   ```
-4. Optionally enable "Save Browser Data" to preserve cookies and session information
-5. Connect the node to subsequent nodes to process the results
-
-## Workflow Examples
-
-The OpenBrowser n8n node enables various automation scenarios:
-
-- **Web Scraping**: Extract data from websites on a schedule
-- **Form Filling**: Automate data entry across web applications
-- **Monitoring**: Check website status and capture visual evidence
-- **Report Generation**: Generate PDFs or screenshots of web dashboards
-- **Multi-step Processes**: Chain browser tasks together using session persistence
-
-## Troubleshooting
-
-If you encounter issues with the OpenBrowser node:
-
-- Verify your API key is valid and has sufficient credits
-- Check that your instructions are clear and specific
-- For complex tasks, consider breaking them into multiple steps
-- Refer to the [OpenBrowser documentation](https://docs.openbrowser.me) for instruction best practices
-
-## Resources
-
-- [n8n Community Nodes Documentation](https://docs.n8n.io/integrations/community-nodes/)
-- [OpenBrowser Documentation](https://docs.openbrowser.me)
-
-<Note>
-The n8n community node for OpenBrowser is currently in development. Check back soon for the official release.
-</Note> 
+The community node remains a planned integration. This page will be updated when a published package exists.

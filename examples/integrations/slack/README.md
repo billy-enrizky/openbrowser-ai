@@ -34,10 +34,11 @@ Steps to create and configure a Slack bot:
         ```env
         SLACK_SIGNING_SECRET=your-signing-secret
         SLACK_BOT_TOKEN=your-bot-token
+        GOOGLE_API_KEY=your-google-api-key
         ```
 6. Invite the bot to a channel:
     *   Use the `/invite @your-bot-name` command in the Slack channel where you want the bot to be active.
-7. Run the code in `examples/slack_example.py` to start the bot with your bot token and signing secret.
+7. From the repository root, run `python -m examples.integrations.slack.slack_example` to start the bot with your bot token, signing secret, and Google API key.
 8. Write e.g. "$bu what's the weather in Tokyo?" to start a openbrowser task and get a response inside the Slack channel.
 
 ## Installing and Starting ngrok
@@ -64,13 +65,22 @@ If you need to update the request URL (e.g., when the ngrok URL changes), follow
 
 ## Installing Required Packages
 
-To run this example, you need to install the following packages:
+To run this example, you need:
 
+- `openbrowser-ai`
 - `fastapi`
 - `uvicorn`
 - `slack_sdk`
 
-You can install these packages using pip:
+From the repository root:
 
 ```sh
-pip install fastapi uvicorn slack_sdk
+uv sync --all-extras
+uv pip install fastapi uvicorn slack_sdk
+```
+
+Or install the published package plus the Slack dependencies:
+
+```sh
+pip install openbrowser-ai fastapi uvicorn slack_sdk
+```

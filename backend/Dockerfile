@@ -50,7 +50,7 @@ RUN cd backend && pip install -e .
 COPY pyproject.toml .
 COPY src/ src/
 COPY README.md .
-ENV SETUPTOOLS_SCM_PRETEND_VERSION=0.1.38
+ENV SETUPTOOLS_SCM_PRETEND_VERSION=0.1.57
 RUN pip install -e .
 
 # Install python-xlib for the X11 key grabber daemon (kiosk security)

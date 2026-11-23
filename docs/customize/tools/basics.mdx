@@ -10,14 +10,14 @@ mode: "wide"
 
 
 ```python
-from openbrowser import Tools, ActionResult, Browser
+from openbrowser import Tools, Agent, ActionResult, BrowserSession
 
 tools = Tools()
 
 @tools.action('Ask human for help with a question')
-def ask_human(question: str, browser: Browser) -> ActionResult:
+def ask_human(question: str, browser_session: BrowserSession) -> ActionResult:
     answer = input(f'{question} > ')
-    return f'The human responded with: {answer}'
+    return ActionResult(extracted_content=f'The human responded with: {answer}')
 
 agent = Agent(
     task='Ask human for help',
@@ -27,5 +27,5 @@ agent = Agent(
 ```
 
 <Note>
-Use `browser` parameter in tools for deterministic [Actor](/customize/actor/basics) actions.
+Use the exact `browser_session` parameter name for deterministic [Actor](/customize/actor/basics) actions. A parameter named `browser` is treated as an LLM-provided argument and is not injected.
 </Note>

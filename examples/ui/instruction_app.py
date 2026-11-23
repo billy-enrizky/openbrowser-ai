@@ -7,7 +7,7 @@ This app reads instructions from a CSV file and allows users to:
 3. Execute browser automation with visual feedback
 
 Usage:
-    uv run chainlit run examples/ui/instruction_app.py
+    uv run --with chainlit chainlit run examples/ui/instruction_app.py
 """
 
 import asyncio

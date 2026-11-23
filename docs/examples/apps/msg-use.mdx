@@ -6,7 +6,7 @@ mode: "wide"
 ---
 
 <Note>
-This demo requires openbrowser v0.7.7+.
+This demo requires openbrowser v0.1.57+.
 </Note>
 
 ## Features
@@ -15,7 +15,7 @@ This demo requires openbrowser v0.7.7+.
 2. Parses natural language scheduling instructions
 3. Composes personalized messages using AI
 4. Schedules messages for future delivery or sends immediately
-5. Persistent session (no repeated QR scanning)
+5. Reuses the saved browser profile when WhatsApp keeps the session valid
 
 ## Setup
 
@@ -32,17 +32,17 @@ export GOOGLE_API_KEY='your-gemini-api-key-here'
 Clone the repo and cd into the app folder
 ```bash
 git clone https://github.com/billy-enrizky/openbrowser-ai.git
-cd openbrowser/examples/apps/msg-use
+cd openbrowser-ai/examples/apps/msg-use
 ```
 
 ## Initial Login
 
-First-time setup requires QR code scanning:
+WhatsApp Web may require a QR scan on first use or when the saved session expires:
 ```bash
 python login.py
 ```
-- Scan QR code when browser opens
-- Session will be saved for future use
+- Scan the QR code when the browser opens
+- The browser profile is reused on later runs when WhatsApp keeps the session valid
 
 ## Normal Usage
 
@@ -74,44 +74,29 @@ python scheduler.py --auto
 
 ```python
 import asyncio
-from scheduler import schedule_messages
+from scheduler import parse_messages, send_message
 
 async def main():
-    messages = [
-        "Send hello to John at 15:30",
-        "Remind Sarah about meeting tomorrow at 9am"
-    ]
-    await schedule_messages(messages, debug=False)
+    for item in await parse_messages():
+        await send_message(item["contact"], item["message"])
 
 asyncio.run(main())
 ```
 
 ## Example Output
 
-The scheduler processes natural language and outputs structured results:
+The scheduler prints the parsed schedule before sending:
 
-```json
-[
-  {
-    "contact": "Magnus",
-    "original_message": "Hi",
-    "composed_message": "Hi",
-    "scheduled_time": "2025-06-13 18:15"
-  },
-  {
-    "contact": "Camila", 
-    "original_message": "I miss her",
-    "composed_message": "I miss you ❤️",
-    "scheduled_time": "2025-06-14 20:00"
-  },
-  {
-    "contact": "sister",
-    "original_message": "happy birthday message", 
-    "composed_message": "Happy birthday! 🎉 Wishing you an amazing day, sis! Hope you have the best birthday ever! ❤️🎂🎈",
-    "scheduled_time": "2025-06-15 09:00"
-  }
-]
+```text
+Parsing messages.txt...
+
+Found 3 messages:
+  • 2025-06-13 18:15: Hi... to Magnus
+  • 2025-06-14 20:00: I miss her... to Camila
+  • 2025-06-15 09:00: happy birthday message... to sister
 ```
+
+Each parsed record has `contact`, `message`, and `datetime` fields.
 
 ## Source Code
 
