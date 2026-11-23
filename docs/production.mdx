@@ -18,7 +18,7 @@ browser = Browser(
     user_data_dir='~/Library/Application Support/Google/Chrome',
     profile_directory='Default',
 )
-agent = Agent(task="your task", browser=browser, llm=ChatGoogle(model="gemini-3-flash"))
+agent = Agent(task="your task", browser=browser, llm=ChatGoogle(model="gemini-3-flash-preview"))
 await agent.run()
 ```
 
@@ -49,7 +49,7 @@ browser = Browser(
 agent = Agent(
     task="Login to example.com and check notifications",
     browser=browser,
-    llm=ChatGoogle(model="gemini-3-flash")
+    llm=ChatGoogle(model="gemini-3-flash-preview")
 )
 await agent.run()
 ```
@@ -68,7 +68,7 @@ browser = Browser(cdp_url="http://localhost:9222")
 agent = Agent(
     task="your task",
     browser=browser,
-    llm=ChatGoogle(model="gemini-3-flash")
+    llm=ChatGoogle(model="gemini-3-flash-preview")
 )
 await agent.run()
 ```
@@ -93,6 +93,6 @@ browser = Browser(
 agent = Agent(
     task="Production task",
     browser=browser,
-    llm=ChatGoogle(model="gemini-3-flash"),
+    llm=ChatGoogle(model="gemini-3-flash-preview"),
 )
 ```

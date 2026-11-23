@@ -91,11 +91,7 @@ MCP and `openbrowser-ai -c` do not need an LLM key. Do not print the value.
 
 ## Step 4 -- Configure MCP
 
-The portable server command is:
-
-```bash
-uvx openbrowser-ai --mcp
-```
+The installed server command is `openbrowser-ai --mcp`. The zero-install form is `uvx openbrowser-ai --mcp`.
 
 Add it to the agent's native MCP configuration.
 
@@ -137,7 +133,7 @@ OpenCode `opencode.json`:
 }
 ```
 
-If `openbrowser-ai` is not on the agent's PATH, replace it with the absolute path to the installed executable or `uvx openbrowser-ai --mcp`.
+If `openbrowser-ai` is not on the agent's PATH, replace it with the absolute path to the installed executable. To use uvx instead, set `command` to `uvx` and `args` to `["openbrowser-ai", "--mcp"]`; do not put the whole command in one string.
 
 Useful MCP environment variables:
 
@@ -187,28 +183,36 @@ Codex manual installation is documented at `https://github.com/billy-enrizky/ope
 - Set `OPENBROWSER_USER_DATA_DIR` for a shared profile. The profile lease rejects concurrent owners.
 - Set `OPENBROWSER_DAEMON_PROFILE_ISOLATION=true` or `OPENBROWSER_DAEMON_PROFILE_DIR` for isolated daemons.
 
-## Step 7 -- Verify with an isolated daemon
+## Step 7 -- Verify a real browser
 
-Use a temporary socket and profile so setup never reuses or stops a user daemon:
+Use the direct API so verification never attaches to or stops a daemon:
 
 ```bash
-SETUP_SOCKET="${TMPDIR:-/tmp}/openbrowser-setup-$$.sock"
-SETUP_PROFILE="${TMPDIR:-/tmp}/openbrowser-setup-profile-$$"
-export OPENBROWSER_SOCKET="$SETUP_SOCKET"
-export OPENBROWSER_DAEMON_PROFILE_DIR="$SETUP_PROFILE"
-export OPENBROWSER_DAEMON_PROFILE_ISOLATION=true
+python - <<'PY'
+import asyncio
+from openbrowser import BrowserProfile, BrowserSession
 
-cleanup_setup() {
-  openbrowser-ai daemon force-stop >/dev/null 2>&1 || true
-  rm -rf "$SETUP_PROFILE" "$SETUP_SOCKET" "${SETUP_SOCKET%.sock}.log" "${SETUP_SOCKET%.sock}.pid" 2>/dev/null || true
-}
-trap cleanup_setup EXIT
 
-openbrowser-ai -c "await navigate('https://example.com'); print(await evaluate('document.title'))"
-openbrowser-ai daemon status
+async def main():
+    session = BrowserSession(
+        browser_profile=BrowserProfile(headless=True, user_data_dir=None)
+    )
+    try:
+        await session.start()
+        await session.navigate_to("https://example.com")
+        print(await session.get_current_page_title())
+        print(session.lifecycle_snapshot()["health"]["phase"])
+    finally:
+        await session.stop()
+
+
+asyncio.run(main())
+PY
 ```
 
-Read `state`, `browser.health.phase`, and `browser.cdp.phase`. A printed title and a healthy/ready status verify the install. A document title does not prove application hydration. The `trap` force-stops and removes only this temporary daemon and profile.
+`user_data_dir=None` creates a throwaway profile. The script starts a real Chrome, prints the title and health phase, and stops. It does not touch the user's daemon or profile. A document title does not prove application hydration.
+
+If you also want to verify the CLI daemon, run `openbrowser-ai -c "..."` explicitly. On macOS/Linux, set `OPENBROWSER_SOCKET` and `OPENBROWSER_DAEMON_PROFILE_DIR` to isolate it. On Windows the daemon uses fixed port 19222 and ignores `OPENBROWSER_SOCKET`, so only stop a daemon you started.
 
 Optional MCP smoke test:
 

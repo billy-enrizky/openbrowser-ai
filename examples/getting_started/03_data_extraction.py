@@ -30,7 +30,7 @@ from openbrowser import Agent, ChatGoogle
 
 async def main():
 	# Initialize the model
-	llm = ChatGoogle(model="gemini-3-flash")
+	llm = ChatGoogle(model="gemini-3-flash-preview")
 
 	# Define a data extraction task
 	task = """

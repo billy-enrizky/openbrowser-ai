@@ -110,10 +110,10 @@ The backend requires VNC support for live browser viewing, which needs special D
 
 ```bash
 # Development
-docker-compose --env-file backend/.env up --build
+docker-compose up --build
 ```
 
-Compose interpolates `${POSTGRES_PASSWORD}` from the shell or a root `.env`. Passing `--env-file backend/.env` makes the documented backend file the source for both the service environment and Compose interpolation.
+Compose interpolates `${POSTGRES_PASSWORD}` from the shell or a root `.env`, while `backend/.env` supplies the service environment. Put `POSTGRES_PASSWORD` in the root `.env` or export it before running Compose. If an existing PostgreSQL volume already has a password, reuse that password; changing it here does not rotate the database password.
 
 The repository `docker-compose.yml` is a development configuration. It sets `DEBUG=true`, `AUTH_ENABLED=false`, and bind-mounts the source. Do not use it unchanged for production. Create a production override that disables debug, enables auth, removes source mounts, and supplies secrets.
 
@@ -133,7 +133,7 @@ These requirements mean **PaaS platforms like Railway/Render are not compatible*
 1. **VPS with a production Compose override** (Recommended)
    - Use a cloud VM (AWS EC2, GCP Compute Engine, DigitalOcean Droplet, etc.)
    - Install Docker and Docker Compose
-   - Clone the repository, create a production override that removes debug and bind mounts, then run `docker-compose --env-file backend/.env -f docker-compose.yml -f docker-compose.production.yml up -d`
+   - Clone the repository, copy `backend/env.example` to `backend/.env`, set `POSTGRES_PASSWORD` in the root `.env` or environment, create a production override that removes debug and bind mounts, then run `docker-compose -f docker-compose.yml -f docker-compose.production.yml up -d`
    - Configure nginx reverse proxy with SSL
    - Point api.openbrowser.me to the server
 

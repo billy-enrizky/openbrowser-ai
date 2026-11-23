@@ -38,7 +38,15 @@ Steps to create and configure a Slack bot:
         ```
 6. Invite the bot to a channel:
     *   Use the `/invite @your-bot-name` command in the Slack channel where you want the bot to be active.
-7. From the repository root, run `uv run python -m examples.integrations.slack.slack_example` to start the bot with your bot token, signing secret, and Google API key. `uv run` uses the project environment where the dependencies were installed.
+7. From the repository root, start the bot with your bot token, signing secret, and Google API key:
+
+   ```bash
+   # If you installed with uv sync
+   uv run python -m examples.integrations.slack.slack_example
+
+   # If you installed with pip
+   python -m examples.integrations.slack.slack_example
+   ```
 8. Write e.g. "$bu what's the weather in Tokyo?" to start a openbrowser task and get a response inside the Slack channel.
 
 ## Installing and Starting ngrok

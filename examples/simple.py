@@ -12,6 +12,6 @@ load_dotenv()
 
 agent = Agent(
 	task='Find the number of stars of the following repos: openbrowser, playwright, stagehand, react, nextjs',
-	llm=ChatGoogle(model="gemini-3-flash"),
+	llm=ChatGoogle(model="gemini-3-flash-preview"),
 )
 agent.run_sync()

@@ -19,7 +19,7 @@ from openbrowser import Agent, ChatGoogle
 
 
 async def main():
-	llm = ChatGoogle(model="gemini-3-flash")
+	llm = ChatGoogle(model="gemini-3-flash-preview")
 	task = "Search Google for 'what is browser automation' and tell me the top 3 results"
 	agent = Agent(task=task, llm=llm)
 	await agent.run()

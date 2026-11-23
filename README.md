@@ -175,7 +175,7 @@ from openbrowser import CodeAgent, ChatGoogle
 async def main():
     agent = CodeAgent(
         task="Go to google.com and search for 'Python tutorials'",
-        llm=ChatGoogle(model="gemini-3-flash"),
+        llm=ChatGoogle(model="gemini-3-flash-preview"),
     )
 
     session = await agent.run()
@@ -202,7 +202,7 @@ agent = CodeAgent(task="...", llm=ChatOpenAI(model="gpt-5.2"))
 agent = CodeAgent(task="...", llm=ChatAnthropic(model="claude-sonnet-4-6"))
 
 # Google Gemini
-agent = CodeAgent(task="...", llm=ChatGoogle(model="gemini-3-flash"))
+agent = CodeAgent(task="...", llm=ChatGoogle(model="gemini-3-flash-preview"))
 ```
 
 ### Using Browser Session Directly
@@ -305,7 +305,7 @@ profile = BrowserProfile(
 
 | Provider | Class | Models |
 |----------|-------|--------|
-| **Google** | `ChatGoogle` | gemini-3-flash, gemini-3-pro |
+| **Google** | `ChatGoogle` | gemini-3-flash-preview, gemini-3-pro |
 | **OpenAI** | `ChatOpenAI` | gpt-5.2, o4-mini, o3 |
 | **Anthropic** | `ChatAnthropic` | claude-sonnet-4-6, claude-opus-4-6 |
 | **Groq** | `ChatGroq` | llama-4-scout, qwen3-32b |
