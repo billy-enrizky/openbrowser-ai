@@ -227,7 +227,7 @@ cleanup() {
   openbrowser-ai daemon stop >/dev/null 2>&1 || true
   i=0
   while [ "$i" -lt 30 ]; do
-    status=$(openbrowser-ai daemon status 2>/dev/null || true)
+    status=$(openbrowser-ai daemon status 2>&1 || true)
     case "$status" in
       *daemon_not_running*) return 0 ;;
     esac
