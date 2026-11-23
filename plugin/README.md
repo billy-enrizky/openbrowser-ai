@@ -2,7 +2,7 @@
 
 AI-powered browser automation for Claude Code. Control real web browsers directly from Claude -- navigate websites, fill forms, extract data, inspect accessibility trees, and automate multi-step workflows.
 
-Local CLI daemon sessions persist cookies and login state in Chrome's user-data directory at `~/.config/openbrowser/profiles/daemon` by default; no `storage_state.json` file is written unless you configure one explicitly. Each MCP server process uses an isolated `~/.config/openbrowser/profiles/mcp-<instance-id>` profile and seeds its state once from `profiles/default/storage_state.json`, preventing concurrent MCP servers from terminating or corrupting one another's browser. MCP instance profiles are retained on disk but are not automatically reused by later processes. Configure `OPENBROWSER_USER_DATA_DIR` for a profile that survives restarts; `OPENBROWSER_STORAGE_STATE` is a one-time seed for managed profiles, and later changes are saved to the active per-process copy rather than copied back automatically. Managed profiles also auto-clean disposable Chromium caches so they do not grow like normal long-lived Chrome profiles. Explicitly configured shared profiles are protected by a lease and reject concurrent owners.
+Local CLI daemon sessions persist cookies and login state in Chrome's user-data directory at `~/.config/openbrowser/profiles/daemon` by default; no `storage_state.json` file is written unless you configure one explicitly. Each modern MCP context uses an isolated `~/.config/openbrowser/profiles/mcp-<owner-id>` profile and seeds its state once from `profiles/default/storage_state.json`, preventing concurrent contexts from terminating or corrupting one another's browser. The legacy no-handle owner uses `mcp-<server-instance-id>`. The owner ID is internal and is not the `context_id` handle; read the resolved path from `get_status.profile.user_data_dir`. MCP profiles are retained on disk after `close_context`, but a new server process cannot resume the old context handle. Configure `OPENBROWSER_USER_DATA_DIR` for a profile that survives restarts; `OPENBROWSER_STORAGE_STATE` is a one-time seed for managed profiles, and later changes are saved to the active profile copy rather than copied back automatically. Managed profiles also auto-clean disposable Chromium caches so they do not grow like normal long-lived Chrome profiles. Explicitly configured shared profiles are protected by a lease and reject concurrent owners.
 
 ## Prerequisites
 
@@ -62,11 +62,15 @@ Add to your project's `.mcp.json`:
 
 ## Available Tools
 
-The MCP server exposes `execute_code`, `get_status`, and `reset_browser`. `execute_code` runs Python code in a persistent namespace with browser automation functions. `get_status` is a read-only lifecycle and tab snapshot. `reset_browser` closes a stuck browser while preserving user variables by default.
+A 2026-07-28 MCP client sees five tools. Call `create_context` first and keep the returned `context_id`. Pass that handle to `execute_code`, `get_status`, and `reset_browser`, then call `close_context` when finished. `execute_code` runs Python code in a persistent per-context namespace with browser automation functions. `get_status` is a read-only lifecycle and tab snapshot. `reset_browser` closes a stuck browser while preserving scalar and scalar-only container variables by default. Inspect `namespace_transfer.dropped` for names that could not be carried. `close_context` releases the context and its browser profile.
+
+A context is process-local. The handle lives until `close_context` or server exit, and a new MCP server process cannot resume it. The browser session inside a context auto-closes after 10 minutes without an `execute_code` call. `get_status` does not refresh that timer. The context handle and scalar variables remain available, and the next `execute_code` call starts a fresh browser. A successful `close_context` invalidates the handle. If cleanup fails, the result is `close_failed` with a retryable flag. Retry `close_context` to finish cleanup; the handle remains unavailable for `execute_code`, `get_status`, and `reset_browser`. New calls while closing fail with `context_closing`, and non-close calls after a failed close fail with `context_close_failed`.
+
+Older clients that negotiate `2024-11-05`, `2025-03-26`, `2025-06-18`, or `2025-11-25` see the original three-tool catalog: `execute_code`, `get_status`, and `reset_browser`, with a legacy no-handle context. Any other protocol version is rejected with MCP error `-32602`; it is not downgraded.
 
 `get_status` also adds `browser.health` for an existing session. It reports the latest page crash, focus-recovery outcome, and local process binding. It is not a live page-readiness probe, and `process_present` is `null` when the current root is not bound to the recorded local owner or when process identity is inconclusive. Wait while recovery is pending. Reset only when no usable target exists.
 
-Authenticated browser state is also persisted, so once a user logs in, later MCP calls can keep using the same cookies and localStorage.
+Authenticated browser state persists within one context, so later calls in that context keep using the same cookies and localStorage. A different context, or a new context after close, gets a separate managed profile seeded from the default profile. Use an explicit shared `OPENBROWSER_USER_DATA_DIR` when state must cross contexts; concurrent owners of that profile are rejected by the lease.
 
 **Functions** (use `await` unless noted):
 
@@ -78,16 +82,16 @@ Authenticated browser state is also persisted, so once a user logs in, later MCP
 | **Dropdowns** | `select_dropdown(index, text)`, `dropdown_options(index)` |
 | **Tabs** | `switch(tab_id)`, `close(tab_id)` |
 | **JavaScript** | `evaluate(code)` -- run JS in page context, returns Python objects |
-| **Downloads** | `download_file(url, filename)` -- download a file using browser cookies, `list_downloads()` (sync, no `await`) -- list downloaded files |
+| **Downloads** | `download_file(url, filename)` -- download a file using browser cookies; `wait_for_download(timeout, url, lookback, download_ref)` -- wait for a terminal download phase; `download_outcomes()` and `download_failures()` (sync); `list_downloads()` (sync) -- list downloaded files |
 | **State** | `browser.get_browser_state_summary()` -- page metadata and interactive elements |
 | **CSS** | `get_selector_from_index(index)` -- CSS selector for an element |
 | **Completion** | `done(text, success)` -- signal task completion |
 
 Prefer indexed actions whenever an element index exists. Coordinate actions use CSS viewport pixels, not screenshot pixels. If a screenshot uses a `devicePixelRatio` other than 1, divide its coordinates by `window.devicePixelRatio` before calling an `*_xy` function.
 
-**Pre-imported libraries**: `json`, `csv`, `re`, `datetime`, `asyncio`, `Path`, `requests`
+**Bundled libraries**: `json`, `csv`, `re`, `datetime`, `asyncio`, `Path`, `requests`, `numpy`/`np`, `pandas`/`pd`
 
-**Available if installed**: `numpy`/`np`, `pandas`/`pd`, `matplotlib`, `BeautifulSoup`, `PdfReader` (requires `pip install openbrowser-ai[pdf]`)
+**Available only if installed**: `matplotlib`, `BeautifulSoup`, `PdfReader` (requires `pip install openbrowser-ai[pdf]`), `tabulate`
 
 ## Benchmark: Token Efficiency
 
@@ -120,14 +124,14 @@ openbrowser-ai uses **2.1-2.6x fewer tokens** than all competitors via Python co
 |------------|------:|-------------------:|-----------:|---------------:|
 | **Playwright MCP** | 22 | 158,787 | 9.4 | **3.2x more tokens** |
 | **Chrome DevTools MCP** (Google) | 26 | 299,486 | 19.4 | **6.0x more tokens** |
-| **OpenBrowser MCP** | 1 | **50,195** | 13.8 | baseline |
+| **OpenBrowser MCP** | 1 (legacy catalog at benchmark time) | **50,195** | 13.8 | baseline |
 
 | Model | Playwright MCP | Chrome DevTools MCP | OpenBrowser MCP |
 |-------|---------------:|--------------------:|----------------:|
 | Claude Sonnet 4.6 ($3/$15 per M) | $0.50 | $0.92 | **$0.18** |
 | Claude Opus 4.6 ($5/$25 per M) | $0.83 | $1.53 | **$0.30** |
 
-[Full MCP comparison with methodology](https://docs.openbrowser.me/comparison)
+The OpenBrowser MCP entry used the legacy one-tool catalog at benchmark time. Current 2026-07-28 clients see five tools. [Full MCP comparison with methodology](https://docs.openbrowser.me/comparison)
 
 ## CLI Execute Mode
 
@@ -144,7 +148,7 @@ openbrowser-ai daemon start|ensure|stop|force-stop|status|reset|restart|list|rea
 
 Variables persist across `-c` calls while the daemon is running. The daemon starts automatically on first use and shuts down after 10 minutes of inactivity.
 
-The CLI daemon uses `~/.config/openbrowser/profiles/daemon` as its default browser profile, so saved logins survive daemon restarts through Chrome's user-data directory. An explicit `storage_state` path is still honored. Custom sockets share the default profile unless `OPENBROWSER_DAEMON_PROFILE_ISOLATION=true` or `OPENBROWSER_DAEMON_PROFILE_DIR` is set. `OPENBROWSER_USER_DATA_DIR` takes precedence over both and always selects that explicit profile.
+The CLI daemon uses `~/.config/openbrowser/profiles/daemon` as its default browser profile, so saved logins survive daemon restarts through Chrome's user-data directory. An explicit `storage_state` path is read and written by the storage-state watchdog at the configured path; that is separate from the MCP one-time seed behavior. Downloads default to `~/Downloads/openbrowser-daemon` and survive `daemon stop`. Daemon timeout, socket, and profile variables are listed in the CLI daemon guide. Custom sockets share the default profile unless `OPENBROWSER_DAEMON_PROFILE_ISOLATION=true` or `OPENBROWSER_DAEMON_PROFILE_DIR` is set. `OPENBROWSER_USER_DATA_DIR` takes precedence over both and always selects that explicit profile.
 
 ## Configuration
 
@@ -154,10 +158,15 @@ Optional environment variables:
 |----------|-------------|
 | `OPENBROWSER_HEADLESS` | Set to `true` to run browser without GUI |
 | `OPENBROWSER_ALLOWED_DOMAINS` | Comma-separated domain whitelist |
-| `OPENBROWSER_USER_DATA_DIR` | Optional explicit Chrome profile directory. Omit it for one isolated profile per MCP server process |
+| `OPENBROWSER_USER_DATA_DIR` | Optional explicit Chrome profile directory. Omit it for one managed profile per context; concurrent owners are rejected |
 | `OPENBROWSER_STORAGE_STATE` | Optional JSON file used as a one-time seed for cookies plus localStorage in managed MCP profiles |
 | `OPENBROWSER_COMPACT_DESCRIPTION` | Set to `true` for minimal tool description (~500 tokens) |
 | `OPENBROWSER_MAX_OUTPUT` | Maximum output characters per execution (default: 10,000) |
+| `OPENBROWSER_MCP_MAX_CONTEXTS` | Maximum open contexts total, including the legacy no-handle context (default: 16) |
+| `OPENBROWSER_MCP_WORKSPACE_DIR` | Base directory for per-context workspaces (default: `~/Downloads/openbrowser-mcp/workspace`) |
+| `OPENBROWSER_MCP_START_TIMEOUT` | Browser startup bound in seconds (default: 30) |
+| `OPENBROWSER_MCP_EXEC_TIMEOUT` | Seconds before a tool call returns a timeout result (default: 110) |
+| `OPENBROWSER_SHUTDOWN_TIMEOUT` | Browser and context cleanup bound in seconds (default: 20) |
 | `ANONYMIZED_TELEMETRY` | Set to `false` to disable anonymized usage telemetry (default: `true`) |
 
 Set these in your `.mcp.json`:
@@ -210,7 +219,7 @@ uv run python benchmarks/cdp_benchmark.py
 
 **MCP server not found**: Verify `uvx` is installed (`pip install uv`) and the MCP server starts (`uvx openbrowser-ai --mcp`).
 
-**Session timeout**: Browser sessions auto-close after 10 minutes of inactivity. Use any tool to keep the session alive.
+**Session timeout**: Browser sessions auto-close after 10 minutes without an `execute_code` call. `get_status` does not refresh the timer. The context remains open and the next `execute_code` call starts a fresh browser.
 
 ## License
 

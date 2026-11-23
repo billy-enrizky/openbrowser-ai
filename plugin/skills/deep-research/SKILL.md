@@ -25,7 +25,7 @@ Why one tab per sub-agent and not `asyncio.gather` over tabs in a single `-c` ca
 Hard rules:
 
 - One sub-agent = one tab. Sub-agents must NOT call `navigate(url, new_tab=True)` to spawn additional tabs.
-- All sub-agents share the same daemon (and so the same Chrome process). Tabs are isolated; navigation in one tab does not affect another.
+- All sub-agents share the same dedicated run daemon and Chrome process. Browser tabs are isolated targets, but the daemon has one global agent focus. Every sub-agent call must switch to its own tab before navigating.
 - Each sub-agent writes its findings to its own JSON file under `$DEEP_RESEARCH_PARTIAL_DIR/<slug>-NN.json`. The orchestrator reads and merges these.
 - The orchestrator never drives tabs itself. It only plans, dispatches, merges, renders, verifies, cleans up.
 
@@ -55,9 +55,9 @@ curl -fsSL https://openbrowser.me/install.sh | sh
 irm https://openbrowser.me/install.ps1 | iex
 ```
 
-No LLM API key required. The skill drives the daemon via `openbrowser-ai -c` only, which executes raw CDP / JS through the daemon's Python namespace and never invokes a model. (The `-p` "prompt mode" of the CLI is a separate code path that loads `get_llm()` and requires an OpenAI / Anthropic / Google key per `cli.py:434-490`. This skill explicitly avoids `-p`.)
+No LLM API key required. The skill drives the daemon via `openbrowser-ai -c` only, which executes raw CDP / JS through the daemon's Python namespace and never invokes a model. (The `-p` "prompt mode" of the CLI is a separate code path that loads `get_llm()` and requires an OpenAI / Anthropic / Google key. This skill explicitly avoids `-p`.)
 
-Set the headless env var so the daemon starts without a visible browser window (the default in `daemon/server.py` is already `headless: True`, but a user config file can override it; this env var wins over config):
+Set the headless env var so the daemon starts without a visible browser window. The daemon forces `headless=True` unless `OPENBROWSER_HEADLESS` is explicitly false; a config file alone does not opt into a visible window:
 
 ```bash
 export OPENBROWSER_HEADLESS=true
@@ -243,17 +243,19 @@ Workflow (run via openbrowser-ai -c - heredocs, all in this one bash session):
    openbrowser-ai -c - <<'EOF'
    await navigate("https://www.google.com/search?q=<URL_ENCODED_SUB_QUESTION>", new_tab=True)
    await wait(2)
-   state = await browser.get_browser_state_summary()
-   tab_id = state.tabs[-1].target_id
-   _MY_TAB = tab_id[-4:]
-   print(f"my tab: {_MY_TAB}")
+   tab_id = browser.agent_focus.target_id
+   _MY_TAB_<AGENT_INDEX> = tab_id[-4:]
+   print(f"my tab: {_MY_TAB_<AGENT_INDEX>}")
    EOF
 
 2. Scrape the SERP for top 5 result URLs.
 
-3. For each of the top 3 results, navigate IN THE SAME TAB (no new_tab=True),
-   wait 2s, capture body innerText, pick the sentence with the most word-overlap
-   vs the sub-question (40-280 chars, >3-letter keyword overlap >= 1).
+3. For each of the top 3 results, switch to your tab first, then navigate IN THE
+   SAME TAB (no new_tab=True), wait 2s, capture body innerText, pick the sentence
+   with the most word-overlap vs the sub-question (40-280 chars, >3-letter keyword
+   overlap >= 1).
+   Every later -c call must begin with:
+   await switch(_MY_TAB_<AGENT_INDEX>)
 
 4. Write the findings JSON array to the partial file.
 
@@ -312,7 +314,7 @@ If any sub-question's partial file is missing or has <2 findings, fall through t
 
 ### Step 2b -- Retry weak sub-questions with broader sub-agents
 
-If a sub-question came back with <2 findings, do NOT use `openbrowser-ai -p`. The `-p` mode requires an LLM API key (OpenAI / Anthropic / Google) because it runs the full Browser Agent loop with LLM-driven navigation, see `cli.py:434-490` `get_llm()`. This skill is `-c`-only by design: the daemon executes raw CDP / JS and needs no API key.
+If a sub-question came back with <2 findings, do NOT use `openbrowser-ai -p`. The `-p` mode requires an LLM API key (OpenAI / Anthropic / Google) because it runs the full Browser Agent loop with LLM-driven navigation,. This skill is `-c`-only by design: the daemon executes raw CDP / JS and needs no API key.
 
 Identify weak sub-questions, then dispatch a fresh round of parallel sub-agents (same `/dispatching-parallel-agents` pattern as Step 2a) with a broader prompt. The retry sub-agents reuse the same single-tab discipline and write to `agent-retry-NN.json` partials.
 
@@ -672,15 +674,15 @@ fi
 ## Tips
 
 - **Source the run environment first:** every later Bash call must begin with `. "<RUN_ENV_FILE>"`, using the exact absolute path printed by Step 0. Bare exports do not survive separate shell blocks.
-- **Headless by default:** `OPENBROWSER_HEADLESS=true` is set in Step 0 so the daemon always starts without a visible browser window. The daemon default in `daemon/server.py` is already `headless: True`, but a user config file can override it. The env var wins over config. If you need a visible window for debugging, unset or override: `export OPENBROWSER_HEADLESS=false`.
-- **One tab per sub-agent:** the orchestrator dispatches via `/dispatching-parallel-agents` and each sub-agent must own exactly one tab. Multiple-tab sub-agents serialize navigation at the CDP layer and lose the parallelism benefit. Enforce in the agent prompt: "NEVER pass new_tab=True to navigate() after the first call."
+- **Headless by default:** `OPENBROWSER_HEADLESS=true` is written to `RUN_ENV_FILE` in Step 0 so the daemon starts without a visible browser window. The daemon forces `headless=True` unless `OPENBROWSER_HEADLESS` is explicitly false; a config file alone does not opt into a visible window. To debug with a visible window, edit `RUN_ENV_FILE` before the first `-c` call and change that line to `export OPENBROWSER_HEADLESS=false`. Changing it after the daemon starts does not reconfigure the running browser.
+- **One tab per sub-agent:** the orchestrator dispatches via `/dispatching-parallel-agents` and each sub-agent must own exactly one tab. Multiple-tab sub-agents serialize navigation at the CDP layer and lose the parallelism benefit. Enforce in the agent prompt: "NEVER pass new_tab=True to navigate() after the first call." The daemon has one global agent focus, so every later sub-agent call must start with `await switch(_MY_TAB_<AGENT_INDEX>)` before navigating.
 - **Single message, multiple Agent calls:** to actually parallelize, the orchestrator must put all N `Agent` tool calls in ONE message. Sequential `Agent` invocations across messages run serially.
 - **Heredoc quoting:** always use `<<'EOF'` (single-quoted) so `$`, backticks, and `!` inside Python don't expand in the shell.
 - **Daemon namespace:** `_plan`, `_findings`, `_sources` persist across orchestrator `-c` calls. Sub-agents share the same daemon and so see the same namespace, but each operates in its own tab. Don't restart the daemon mid-run.
 - **Partial files as the contract:** sub-agents write to `$DEEP_RESEARCH_PARTIAL_DIR/agent-NN.json`, the orchestrator reads them back. Sub-agents do NOT communicate findings via stdout. If a partial file is missing or empty, that sub-agent failed; rerun it or fall through to Step 2b.
 - **`exact_url` normalization:** sub-agents may write `exact_url` instead of `url`. All merge steps (Step 2a, 2b, 3) normalize this automatically. Step 4 has a final safety pass. Never rely on `url` being set before the merge step runs.
 - **Daemon restart recovery:** if the daemon restarts mid-session, `_plan`/`_findings`/`_sources` are lost from namespace. Partial JSON files under `$DEEP_RESEARCH_PARTIAL_DIR` survive. Source the same run environment and re-run the Step 2a merge block. Re-run Step 1 with the same `QUERY` and project root to restore `_plan`; the slug-collision bump avoids overwriting the existing output file.
-- **No `-p`, ever:** this skill never shells out to `openbrowser-ai -p`. The `-p` mode runs the full Browser Agent loop with LLM-driven navigation and requires an OpenAI / Anthropic / Google API key (`cli.py:434-490` `get_llm()`). The `-c` daemon path needs no API key. If you see `-p` anywhere in skill code, that is a bug.
+- **No `-p`, ever:** this skill never shells out to `openbrowser-ai -p`. The `-p` mode runs the full Browser Agent loop with LLM-driven navigation and requires an OpenAI / Anthropic / Google API key. The `-c` daemon path needs no API key. If you see `-p` anywhere in skill code, that is a bug.
 - **Source diversity:** if dedup leaves <60% of findings (heavy domain repetition), rerun the affected sub-agent with explicit "prefer different domains than: <list>" appended to its prompt.
 - **Drilldown cost:** drilldown dispatches up to `len(sub_questions) * 3` extra parallel sub-agents. Reserve for genuinely deep topics.
 - **Rerun semantics:** rerunning Step 5 alone re-renders from current `_findings`, useful after manual edits.

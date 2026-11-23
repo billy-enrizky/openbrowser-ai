@@ -14,7 +14,7 @@ Backend API for the OpenBrowser AI Chat Interface. A FastAPI-based server that p
 
 ### Prerequisites
 
-- Python 3.11+
+- Python 3.12+
 - uv (recommended) or pip
 
 ### Installation

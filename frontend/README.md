@@ -1,6 +1,6 @@
 # OpenBrowser Frontend
 
-A modern chat interface for OpenBrowser AI. Built with Next.js, TypeScript, and Tailwind CSS, this frontend provides a sleek dark-themed UI for interacting with browser automation agents.
+A modern chat interface for OpenBrowser AI. Built with Next.js, TypeScript, and Tailwind CSS, this frontend provides a clean light-themed UI for interacting with browser automation agents.
 
 ## Features
 
@@ -10,7 +10,7 @@ A modern chat interface for OpenBrowser AI. Built with Next.js, TypeScript, and 
 - Screenshot display for browser automation tasks
 - File attachment preview (CSV, JSON, text, code, images)
 - Real-time backend log streaming
-- Responsive design with dark theme
+- Responsive design with a light theme
 
 ## Tech Stack
 

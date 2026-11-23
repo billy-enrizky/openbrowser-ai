@@ -23,7 +23,7 @@ The namespace is initialized with:
 - `click_xy(x, y, button='left', click_count=1)` - Click a no-index canvas, PDF, embed, or native-rendered target using CSS viewport pixels
 - `hover_xy(x, y)` - Move over a no-index canvas, PDF, embed, or native-rendered target using CSS viewport pixels
 - `input_text(index, text, clear=True)` - Type text into an input field
-- `scroll(down=True, pages=1.0, index=None)` - Scroll the page or a container
+- `scroll(down, pages=1.0, index=None)` - Scroll the page or a container. `down` is required.
 - `scroll_xy(x, y, delta_x=0, delta_y=0)` - Wheel-scroll a no-index surface using CSS viewport pixels
 - `send_keys(keys)` - Send keyboard keys or shortcuts
 - `upload_file(index, path)` - Upload a file to a file input element
@@ -33,7 +33,11 @@ The namespace is initialized with:
 - `close(tab_id)` - Close a browser tab
 - `evaluate(code, variables={})` - Execute JavaScript and return Python objects
 - `get_selector_from_index(index)` - Get CSS selector for an element by index
-- `done(text, success)` - Mark task complete
+- `done(text, success, files_to_display)` - Mark task complete
+- `download_file(url, filename=None)` - Download a file using browser cookies
+- `wait_for_download(timeout=30, url=None, lookback=0, download_ref=None)` - Wait for a terminal download phase; start it before the click
+- `download_outcomes()` / `download_failures()` - Synchronous recent attempts and failures
+- `list_downloads()` - List files in the downloads directory
 
 Indexed actions remain preferred whenever an element index exists. For screenshot-derived coordinates, divide screenshot pixels by `window.devicePixelRatio` before calling an `*_xy` function.
 
@@ -95,3 +99,10 @@ with open('products.json', 'w') as f:
 print(f'Total: {len(all_products)} products saved to products.json')
 await done(text='Extracted all products', success=True, files_to_display=['products.json'])
 ```
+
+
+## Run lifecycle
+
+`code_agent.status` returns a `CodeAgentRunStatus` with `phase`, `terminal`, `success`, `terminal_reason`, `result`, `error`, `attachments`, `step`, `max_steps`, `cancellation_requested`, `closed`, `started_at`, and `finished_at`. Terminal phases are `succeeded`, `failed`, `max_steps`, and `cancelled`.
+
+`code_agent.stop()` cancels between `await` points. It does not interrupt a cell that is already executing; cancel the `run()` task for that. A caller cancellation does not prove that the worker stopped, so inspect `status` and run required cleanup before starting another run.

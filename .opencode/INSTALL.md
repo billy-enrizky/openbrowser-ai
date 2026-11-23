@@ -61,6 +61,7 @@ Both should show symlinks pointing to the openbrowser directories.
 
 | Skill | Description |
 |-------|-------------|
+| `deep-research` | Conduct cited, multi-source web research and produce markdown and JSON reports |
 | `web-scraping` | Extract structured data from websites, handle pagination |
 | `form-filling` | Fill forms, login flows, multi-step wizards |
 | `e2e-testing` | Test web apps by simulating user interactions |

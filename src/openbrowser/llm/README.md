@@ -2,13 +2,18 @@
 
 We officially support the following LLMs:
 
-- OpenAI
-- Anthropic
-- Google
-- Groq
-- Ollama
-- DeepSeek
-- Cerebras
+- OpenAI (`ChatOpenAI`)
+- Anthropic (`ChatAnthropic`)
+- Google (`ChatGoogle`)
+- Groq (`ChatGroq`)
+- Ollama (`ChatOllama`)
+- DeepSeek (`ChatDeepSeek`)
+- Cerebras (`ChatCerebras`)
+- OpenRouter (`ChatOpenRouter`)
+- Azure OpenAI (`ChatAzureOpenAI`)
+- AWS Bedrock (`ChatAWSBedrock`, `ChatAnthropicBedrock`)
+- Oracle Cloud Infrastructure (`ChatOCIRaw`)
+- Browser-Use (`ChatBrowserUse`)
 
 ## Migrating from LangChain
 

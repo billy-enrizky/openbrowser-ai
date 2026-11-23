@@ -46,8 +46,8 @@ This enables incremental exploration -- navigate in one call, extract in the nex
 ```bash
 uvx openbrowser-ai config status    # Inspect the selected config file without starting a browser
 uvx openbrowser-ai daemon ensure    # Start or restart a daemon that matches the requested headless and profile settings
-uvx openbrowser-ai daemon start     # Start daemon (auto-starts on first -c call)
-uvx openbrowser-ai daemon stop      # Stop daemon and close browser
+uvx openbrowser-ai daemon start     # Start, or restart a daemon whose profile or headless mode differs (auto-starts on first -c call)
+uvx openbrowser-ai daemon stop      # Request shutdown; poll status or use force-stop to verify
 uvx openbrowser-ai daemon force-stop # Force-stop the current endpoint after verifying the owner
 uvx openbrowser-ai daemon status    # Show lifecycle, profile, browser, and tab state
 uvx openbrowser-ai daemon reset     # Close the browser but keep the daemon process
@@ -59,7 +59,7 @@ uvx openbrowser-ai daemon restart   # Restart with fresh browser session
 
 The daemon runs in the background and communicates via a Unix socket at `~/.openbrowser/daemon.sock`. Logs are written next to the socket. The default socket uses `~/.openbrowser/daemon.log`; a custom socket uses `<socket-stem>.log`.
 
-`daemon status` returns `state`, `profile`, `browser`, `exec_timeout`, `init_timeout`, and `last_error`. It also includes `config.startup`, `config.current`, and `config.restart_required`. Tab state is nested under `browser.tabs` and is omitted until the browser has started. The effective profile is resolved before the first browser start, so `daemon ensure` can compare `OPENBROWSER_USER_DATA_DIR`, `OPENBROWSER_DAEMON_PROFILE_DIR`, headless mode, and opted-in socket isolation without launching Chrome. When a browser connection fails, verify the page state and check status before retrying because the first call may have partially run. Use `daemon reset` to close the browser without stopping the daemon process, or `daemon doctor` / `daemon reap` when a socket or process is stuck.
+`daemon status` returns `state`, `profile`, `browser`, `exec_timeout`, `init_timeout`, `idle_timeout`, `last_error`, `generation`, `uptime_seconds`, `version`, `startup`, `storage_state`, `storage_state_save`, `namespace_transfer`, `tools`, and `downloads`. It also includes `config.startup`, `config.current`, and `config.restart_required`. Tab state is nested under `browser.tabs` and is omitted until the browser has started. `startup.phase` is `idle`, `checking_ownership`, `cleaning_stale_lock`, `acquiring_ownership`, `binding_socket`, `listening`, `failed`, or `stopped`; `owner_state` is `absent`, `active`, `unresponsive`, or `stale`. `storage_state` reports the last load, and `storage_state_save` reports the last save attempt. `downloads` reports `count`, `pending`, the last 10 attempts with their phases, redacted terminal detail, and `pdf_detection`. `namespace_transfer` records how user variables survived a browser rebuild. The effective profile is resolved before the first browser start, so `daemon ensure` can compare `OPENBROWSER_USER_DATA_DIR`, `OPENBROWSER_DAEMON_PROFILE_DIR`, headless mode, and opted-in socket isolation without launching Chrome. When a browser connection fails, verify the page state and check status before retrying because the first call may have partially run. Use `daemon reset` to close the browser without stopping the daemon process. Reset also clears the Python executor and namespace, so persist values first. Use `daemon doctor` / `daemon reap` when a socket or process is stuck.
 
 Each `profile.resolution` entry has a `source` key plus a `value`, or a `mode` and optional `count`. The source is `default`, `config`, `environment`, `managed`, or `cli`. `storage_state`, `proxy`, and `args` report a mode and source only. They do not include cookies, proxy credentials, or argument values, and `args` includes a count.
 
@@ -83,16 +83,18 @@ All functions from the MCP `execute_code` tool are available in `-c` mode:
 | **Dropdowns** | `select_dropdown(index, text)`, `dropdown_options(index)` |
 | **Tabs** | `switch(tab_id)`, `close(tab_id)` |
 | **JavaScript** | `evaluate(code)` -- run JS in page context, returns Python objects |
-| **Downloads** | `download_file(url, filename)`, `list_downloads()` |
+| **Downloads** | `download_file(url, filename)`; `wait_for_download(timeout, url, lookback, download_ref)`; `download_outcomes()` and `download_failures()` (sync); `list_downloads()` (sync) |
 | **State** | `browser.get_browser_state_summary()` -- page metadata and interactive elements |
 | **CSS** | `get_selector_from_index(index)` -- CSS selector for an element |
 | **Completion** | `done(text, success)` -- signal task completion |
 
 Prefer indexed actions whenever an element index exists. Coordinate actions use CSS viewport pixels, not screenshot pixels. If a screenshot uses a `devicePixelRatio` other than 1, divide its coordinates by `window.devicePixelRatio` before calling an `*_xy` function.
 
-**Pre-imported libraries**: `json`, `csv`, `re`, `datetime`, `asyncio`, `Path`, `requests`
+Downloads default to `~/Downloads/openbrowser-daemon`; files survive `daemon stop` and `daemon reset`.
 
-Optional (imported on first use): `numpy`/`np`, `pandas`/`pd`, `matplotlib`/`plt`, `BeautifulSoup`, `PdfReader`, `tabulate`
+**Bundled libraries**: `json`, `csv`, `re`, `datetime`, `asyncio`, `Path`, `requests`, `numpy`/`np`, `pandas`/`pd`
+
+Available only if installed: `matplotlib`/`plt`, `BeautifulSoup`, `PdfReader` (`openbrowser-ai[pdf]`), `tabulate`
 
 ## Multi-Action Batching
 
@@ -143,8 +145,9 @@ graph LR
 | `OPENBROWSER_DAEMON_PROFILE_ISOLATION` | Give a custom socket its own profile | `false` |
 | `OPENBROWSER_DAEMON_INIT_TIMEOUT` | Browser startup bound in seconds | `30` |
 | `OPENBROWSER_EXEC_TIMEOUT` | Execution bound in seconds | `110` |
+| `OPENBROWSER_IDLE_TIMEOUT` | Shut down an idle daemon after this many seconds | `600` |
 | `OPENBROWSER_READ_TIMEOUT` | Client response bound, must exceed exec timeout | `140` |
-| `OPENBROWSER_SHUTDOWN_TIMEOUT` | Browser cleanup bound in seconds | `20` |
+| `OPENBROWSER_SHUTDOWN_TIMEOUT` | Inner `BrowserSession` cleanup bound in seconds. The daemon reset/stop wrapper waits up to 5 seconds | `20` |
 
 ## Comparison with MCP Server
 
@@ -155,7 +158,7 @@ graph LR
 | **Startup** | ~30ms (thin client) | ~150ms (full MCP init) |
 | **Protocol** | Unix socket (JSON lines) | MCP over stdio |
 | **Persistence** | Variables persist across `-c` calls | Variables persist across tool calls |
-| **Idle timeout** | 10 minutes | Session-based |
+| **Idle timeout** | Daemon exits after 10 idle minutes | Browser closes after 10 idle minutes; the context remains until `close_context` or server exit |
 
 Both use the same `CodeExecutor` engine and browser automation functions.
 

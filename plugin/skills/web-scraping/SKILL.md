@@ -11,9 +11,9 @@ allowed-tools: Bash(openbrowser-ai:*) Bash(curl:*) Bash(uv:*) Bash(irm:*) Read W
 
 Extract structured data from websites using Python code execution with browser automation functions. Handles JavaScript-rendered content, pagination, and multi-page scraping.
 
-All code runs via `openbrowser-ai -c`. The daemon starts automatically and persists variables across calls. All browser functions are async -- use `await`.
+All code runs via `openbrowser-ai -c`. The daemon starts automatically and persists variables across calls. Most browser functions are async -- use `await`. `list_downloads()`, `download_outcomes()`, and `download_failures()` are synchronous.
 
-The CLI daemon also persists cookies and login state in `~/.config/openbrowser/profiles/daemon/storage_state.json`, so authenticated sessions can be reused across later runs.
+The CLI daemon persists cookies and login state in the Chrome user-data directory at `~/.config/openbrowser/profiles/daemon`, so authenticated sessions can be reused across later runs. No `storage_state.json` file is written unless you configure one explicitly.
 
 ## Setup
 
@@ -208,22 +208,36 @@ EOF
 
 ## Cleanup
 
-This step is **mandatory**. Run it after the scrape finishes, whether you collected every page or hit a rate limit halfway through. Without it, the daemon keeps Chrome running until its 10-minute idle timeout, leaving a stale browser process, a locked profile, and (on macOS/Linux desktop) a visible window.
+Run this step after the task, whether it succeeded or failed.
 
-Stop the daemon, then verify it is gone:
+**Do not stop a daemon you did not start.** Check `openbrowser-ai daemon status` before the first browser call. If it already reports a running daemon, reuse it and leave it running at the end. If it reports `daemon_not_running`, this run starts one and must clean it up.
+
+For a daemon started by this run:
 
 ```bash
 openbrowser-ai daemon stop
-openbrowser-ai daemon status
 ```
 
-`daemon stop` closes every tab, exits Chrome, flushes saved cookies/login state to the profile, and shuts down the daemon process. `daemon status` should report the daemon is not running. If it still reports running, run `openbrowser-ai daemon force-stop`. It targets the current daemon endpoint: the configured `OPENBROWSER_SOCKET` on macOS/Linux, or the fixed loopback port on Windows. It verifies listener and owner absence before success. `daemon reap` is broader: it scans the default socket plus custom sockets that have a matching PID file and attempts to stop verified daemons. Inspect its JSON before accepting global cleanup.
+`daemon stop` only acknowledges the request and returns. Poll `openbrowser-ai daemon status` until it reports `daemon_not_running`, up to about 30 seconds. If the daemon does not exit, run `openbrowser-ai daemon force-stop`, which waits and verifies listener, owner, and browser cleanup.
 
-Long scrapes fail often (rate limits, network drops, pagination dead-ends). Guarantee cleanup with a shell trap so a partial run never leaks a browser:
+If the task can fail mid-workflow, guarantee cleanup with a shell trap that stops, polls, and force-stops if needed:
 
 ```bash
-trap 'openbrowser-ai daemon stop >/dev/null 2>&1 || true' EXIT
+cleanup() {
+  openbrowser-ai daemon stop >/dev/null 2>&1 || true
+  i=0
+  while [ "$i" -lt 30 ]; do
+    status=$(openbrowser-ai daemon status 2>&1 || true)
+    case "$status" in
+      *daemon_not_running*) return 0 ;;
+    esac
+    sleep 1
+    i=$((i + 1))
+  done
+  openbrowser-ai daemon force-stop >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
 # ... openbrowser-ai -c calls here ...
 ```
 
-Persist scraped data to disk *before* calling `daemon stop`, in-memory variables die with the daemon. Do not rely on the idle timeout. Do not call `done()` as a substitute, `done()` only marks the task complete inside the agent loop, it does not close the browser.
+Persist results to disk before stopping the daemon. `daemon reset` clears the Python namespace. Do not call `done()` as a substitute for cleanup; it only marks the task complete inside the agent loop.

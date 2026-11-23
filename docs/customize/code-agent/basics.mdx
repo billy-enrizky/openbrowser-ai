@@ -83,16 +83,26 @@ The agent can use common Python libraries:
 
 The agent has access to browser control functions:
 
-- `navigate(url)` - Navigate to a URL
+- `navigate(url, new_tab=False)` - Navigate to a URL
+- `go_back()` - Go back in browser history
+- `wait(seconds=3)` - Wait for a specified time
 - `click(index)` - Click an element by index
 - `click_xy(x, y, button='left', click_count=1)` - Click a no-index canvas, PDF, embed, or native-rendered target
 - `hover_xy(x, y)` - Move over a no-index canvas, PDF, embed, or native-rendered target
-- `input(index, text)` - Type text into an input
-- `scroll(down, pages)` - Scroll the page
+- `input_text(index, text, clear=True)` - Type text into an input
+- `scroll(down, pages=1.0, index=None)` - Scroll the page or a container. `down` is required.
 - `scroll_xy(x, y, delta_x=0, delta_y=0)` - Wheel-scroll a no-index surface
-- `upload_file(path)` - Upload a file
+- `send_keys(keys)` - Send keyboard keys or shortcuts
+- `select_dropdown(index, text)` / `dropdown_options(index)` - Read or change a select element
+- `switch(tab_id)` / `close(tab_id)` - Switch or close a tab
+- `upload_file(index, path)` - Upload a file to a file input
 - `evaluate(code, variables={})` - Execute JavaScript and return results
+- `get_selector_from_index(index)` - CSS selector for an element index
+- `browser.get_browser_state_summary()` - Page metadata and interactive elements
+- `download_file`, `wait_for_download`, `download_outcomes`, `download_failures`, `list_downloads` - Download helpers
 - `done(text, success, files_to_display=[])` - Mark task complete
+
+CodeAgent excludes the Agent-only actions `extract`, `find_text`, `screenshot`, `search`, and the file-system tools. Use `evaluate` and `browser.get_browser_state_summary()` for extraction and inspection.
 
 Prefer indexed actions whenever an element index exists. The `*_xy` coordinates are CSS viewport pixels, not screenshot pixels. If a screenshot uses a `devicePixelRatio` other than 1, divide its coordinates by `window.devicePixelRatio` first.
 
@@ -127,3 +137,19 @@ Both formats include:
 - JavaScript code blocks as Python variables
 - All executed Python cells with outputs
 - Ready-to-run automation workflows
+
+## Run lifecycle and cancellation
+
+`agent.status` returns a `CodeAgentRunStatus`. Use it instead of inferring state from logs:
+
+- `phase`: `idle`, `starting`, `running`, `executing`, `validating`, `succeeded`, `failed`, `max_steps`, or `cancelled`
+- `terminal`: `true` only for `succeeded`, `failed`, `max_steps`, or `cancelled`
+- `success`, `terminal_reason`, `result`, `error`, `attachments`, `step`, `max_steps`, `cancellation_requested`, `closed`, `started_at`, `finished_at`
+
+`agent.stop()` requests cooperative cancellation between `await` points. A cell that is already executing is not interrupted. Cancel the `run()` task if that cell must stop immediately. A stop request before `run()` is retained and cancels the next run without starting a browser. A caller cancellation does not prove that the worker stopped; inspect `status` and run required cleanup before starting another agent.
+
+## Files and downloads
+
+When you do not pass `file_system`, every CodeAgent uses a unique temporary agent directory. Pass `FileSystem(base_dir=...)` if a stable path is required.
+
+The execution namespace includes `download_file`, `wait_for_download`, `download_outcomes`, `download_failures`, and `list_downloads`. Start `wait_for_download` before the click that triggers a download. A `download_ref` resolves only in the attached session's live registry; after the session stops or is replaced, read the completed history instead.

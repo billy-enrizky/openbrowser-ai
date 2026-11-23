@@ -1,27 +1,65 @@
 ---
 title: "Basics"
-description: ""
+description: "Create, start, inspect, and stop a BrowserSession"
 icon: "play"
+mode: "wide"
 ---
 
-
----
+`BrowserSession` is the direct browser API. `Browser` is an alias for `BrowserSession`.
 
 ```python
-from openbrowser import Agent, Browser, ChatBrowserUse
+from openbrowser import BrowserProfile, BrowserSession
 
-browser = Browser(
-	headless=False,  # Show browser window
-	window_size={'width': 1000, 'height': 700},  # Set window size
+profile = BrowserProfile(
+    headless=False,
+    window_size={'width': 1000, 'height': 700},
 )
 
-agent = Agent(
-	task='Search for OpenBrowser',
-	browser=browser,
-	llm=ChatBrowserUse(),
-)
-
-
-async def main():
-	await agent.run()
+session = BrowserSession(browser_profile=profile)
+try:
+    await session.start()
+    await session.navigate_to('https://example.com')
+    state = await session.get_browser_state_summary()
+    print(state.title, state.url)
+finally:
+    await session.stop()
 ```
+
+## Navigation contract
+
+`await session.navigate_to(url, new_tab=False, wait_until="load", timeout_ms=None)` waits for the declared document milestone. `wait_until` accepts `commit`, `domcontentloaded`, `load`, or `networkidle`. The last option waits for Chromium's matching `networkIdle` lifecycle event.
+
+A document milestone is not application hydration, page readiness, or business-task completion. A download handoff is recorded as `download`, not as document readiness. Overlapping navigation requests raise `NavigationBusyError`. Caller cancellation cancels that request without replaying it. Forbidden committed documents are tracked separately under `navigation.containment`.
+
+## Lifecycle and status
+
+`session.lifecycle_snapshot()` returns one JSON-safe snapshot:
+
+- `phase` and `generation`: shared lifecycle vocabulary: `stopped`, `starting`, `ready`, `degraded`, `recovering`, `stopping`, or `failed`
+- `cdp`: root transport phase, client presence, last probe time and latency, closed error code, and pending cleanup
+- `health`: browser health phase, crash history, latest focus-recovery outcome, and local process binding
+- `navigation`: active or last navigation transaction, including requested and observed URLs, generation, phase, and error
+- `focus`: active target and focus-recovery state
+- `tabs`: known tabs and ownership
+- `dom_cache`: cache generation and invalidation state
+- `storage_state` and `storage_state_save`: last load and save attempts
+- `warnings`: storage-state warnings
+
+Focus phases are `uninitialized`, `switching`, `focused`, `recovering`, and `lost`. Storage load phases are `not_configured`, `pending`, `loading`, `loaded`, `failed`, `skipped`, and `cancelled`; save phases are `idle`, `not_configured`, `saving`, `saved`, `failed`, `skipped`, and `cancelled`. A missing storage file reports `skipped`, not `failed`. Download phases are `requested`, `started`, `completed`, `failed`, and `cancelled`; the last three are terminal.
+
+`health.phase` is `unknown`, `healthy`, `degraded`, `crashed`, `stopped`, or `failed`. `health.healthy=true` means setup or focus recovery completed, not that a page can accept commands. `process_present` is `null` when the current CDP root is not bound to the recorded local owner or when process identity is inconclusive, including remote, stopped, and ambiguous local sessions.
+
+## Recovery
+
+Use the observed state before retrying. A page-changing action may have partially run after a connection failure. Do not replay it blindly.
+
+- `await session.reset()` clears CDP sessions and retires the event bus. User code that owns live browser resources may need `await session.kill()` first.
+- `await session.stop()` performs the normal shutdown and storage-state save.
+- `await session.kill()` force-stops a managed local browser and verifies process exit when it can.
+- After a failed recovery, replace the runtime only when no usable target exists. For a remote browser, close the actual remote browser before creating a replacement session.
+
+`reset()`, `stop()`, and `kill()` do not reject each other while event-bus retirement is pending. A failed cleanup remains visible. A caller cancellation does not prove that the browser stopped; inspect `lifecycle_snapshot()` before starting another session.
+
+## Downloads
+
+`session.wait_for_download(timeout=30, url=None, lookback=0, download_ref=None)` waits for a terminal download phase. Start the wait before the click that triggers the download. `session.download_outcomes()` returns recent attempts, including non-terminal ones. `download_failures()` is a CodeAgent and MCP namespace helper, not a `BrowserSession` method; filter `session.download_outcomes()` by `phase == "failed"` instead. A `download_ref` resolves only in the attached session's live registry. After the session stops or is replaced, read the completed history instead of waiting on that reference.
