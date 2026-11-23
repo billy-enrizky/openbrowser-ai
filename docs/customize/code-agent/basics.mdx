@@ -100,6 +100,7 @@ The agent has access to browser control functions:
 - `get_selector_from_index(index)` - CSS selector for an element index
 - `browser.get_browser_state_summary()` - Page metadata and interactive elements
 - `download_file`, `wait_for_download`, `download_outcomes`, `download_failures`, `list_downloads` - Download helpers
+- `scrape_page`, `scrape_pages` - Deterministic scraping without an LLM. `scrape_page` handles one URL; `scrape_pages` runs HTTP requests concurrently and browser fallbacks sequentially.
 - `done(text, success, files_to_display=[])` - Mark task complete
 
 CodeAgent excludes the Agent-only actions `extract`, `find_text`, `screenshot`, `search`, and the file-system tools. Use `evaluate` and `browser.get_browser_state_summary()` for extraction and inspection.

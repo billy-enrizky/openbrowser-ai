@@ -110,8 +110,21 @@ are smoke numbers for the harness, not a statistical claim.
 4. The table JSON output is 2490 bytes against 13067 bytes for the HTTP raw
    HTML path, a 5.2x output reduction. Smaller output means fewer tokens and
    lower downstream cost.
-5. Pagination still pays one namespace call per page. A future
-   `scrape_pages()` batch helper should remove that overhead.
+5. Pagination still pays one namespace call per page in the main harness.
+   The separate batch harness measures `scrape_pages()` against a sequential
+   HTTP loop with the same five-page fixture.
+
+## Batch harness
+
+```sh
+uv run --locked python benchmarks/scraping/batch_compare.py \
+  --samples 10 --warmups 1 --concurrency 4 \
+  --output /tmp/openbrowser-batch-results.json
+```
+
+The batch harness serves five deterministic pages with 20 rows each. Both
+arms return the same 100 row IDs. It reports p50, p95, request count, response
+bytes, and output bytes for a sequential HTTP loop and for `scrape_pages`.
 
 ## Firecrawl lane
 
