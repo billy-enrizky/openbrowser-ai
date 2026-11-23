@@ -12,6 +12,7 @@ import json
 import logging
 import re
 import time
+import weakref
 from collections.abc import Awaitable, Callable
 from inspect import isawaitable, iscoroutinefunction
 from pathlib import Path
@@ -293,6 +294,21 @@ async def evaluate(code: str, browser_session: BrowserSession) -> Any:
 		raise EvaluateError(f'Failed to execute JavaScript: {type(e).__name__}: {e}') from e
 
 
+_HTTP_CLIENTS: weakref.WeakKeyDictionary[Any, Any] = weakref.WeakKeyDictionary()
+
+
+def _get_http_client(timeout: float):
+	"""Return a per-event-loop HTTP client so static scrapes reuse connections."""
+	import httpx
+
+	loop = asyncio.get_running_loop()
+	client = _HTTP_CLIENTS.get(loop)
+	if client is None or client.is_closed:
+		client = httpx.AsyncClient(follow_redirects=True, timeout=timeout)
+		_HTTP_CLIENTS[loop] = client
+	return client
+
+
 async def scrape_http(
 	url: str,
 	*,
@@ -307,13 +323,25 @@ async def scrape_http(
 	Returns None when engine=auto finds page JavaScript and the browser path
 	should handle the page.
 	"""
-	import httpx
-	from bs4 import BeautifulSoup
-	from markdownify import markdownify as _markdownify
+	from openbrowser.dom.fast_html import (
+		to_links as fast_links,
+	)
+	from openbrowser.dom.fast_html import (
+		to_markdown as fast_markdown,
+	)
+	from openbrowser.dom.fast_html import (
+		to_nodes as fast_nodes,
+	)
+	from openbrowser.dom.fast_html import (
+		to_text as fast_text,
+	)
+	from openbrowser.dom.fast_html import (
+		to_title as fast_title,
+	)
 
 	timeout = (timeout_ms / 1000) if timeout_ms else 30.0
-	async with httpx.AsyncClient(follow_redirects=True, timeout=timeout) as client:
-		response = await client.get(url)
+	client = _get_http_client(timeout)
+	response = await client.get(url, timeout=timeout)
 	if response.status_code >= 400:
 		return None
 
@@ -338,52 +366,25 @@ async def scrape_http(
 		return None
 
 	html = response.text
-	soup = BeautifulSoup(html, 'html.parser')
 	if engine == 'auto':
 		# Use HTTP only when the server-rendered text is substantial. Thin
 		# shells usually need JavaScript, so fall back to the browser.
-		text_probe = soup.get_text(' ', strip=True)
+		text_probe = fast_text(html)
 		if len(text_probe) < 40:
 			return None
-		if soup.select_one('#root:empty, #app:empty, #__next:empty'):
-			return None
 
-	title = soup.title.get_text(strip=True) if soup.title else ''
+	title = fast_title(html)
 	content: Any
 	if format == 'markdown':
-		for tag in soup(['script', 'style', 'noscript']):
-			tag.decompose()
-		content = _markdownify(
-			str(soup),
-			heading_style='ATX',
-			bullets='-',
-			escape_asterisks=False,
-			escape_underscores=False,
-		).strip()
+		content = fast_markdown(html, selector)
 	elif format == 'text':
-		for tag in soup(['script', 'style', 'noscript']):
-			tag.decompose()
-		content = soup.get_text('\n', strip=True)
+		content = fast_text(html, selector)
 	elif format == 'html':
 		content = html
 	elif format == 'links':
-		content = [
-			{
-				'text': (tag.get_text(' ', strip=True) or ''),
-				'href': tag.get('href'),
-				'title': tag.get('title'),
-			}
-			for tag in soup.find_all('a', href=True)
-		]
+		content = fast_links(html)
 	else:
-		content = [
-			{
-				'text': tag.get_text(' ', strip=True),
-				'html': str(tag),
-				'attributes': dict(tag.attrs),
-			}
-			for tag in (soup.select(selector) if selector else [])
-		]
+		content = fast_nodes(html, selector) if selector else []
 
 	return {
 		'url': str(response.url),
