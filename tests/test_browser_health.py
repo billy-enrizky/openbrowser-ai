@@ -844,6 +844,37 @@ async def test_reset_retires_pending_bus_ownership() -> None:
 
 
 @pytest.mark.asyncio
+async def test_reset_retires_a_distinct_pending_bus() -> None:
+    from bubus import EventBus
+
+    session = BrowserSession()
+    pending_bus = EventBus()
+    pending_bus.stop = AsyncMock()
+    session._event_bus_retirement_pending = pending_bus
+
+    await session.reset()
+
+    pending_bus.stop.assert_awaited_once()
+    assert session._event_bus_retirement_pending is None
+
+
+@pytest.mark.asyncio
+async def test_retiring_a_different_bus_preserves_pending_identity() -> None:
+    from bubus import EventBus
+
+    session = BrowserSession()
+    pending_bus = EventBus()
+    current_bus = session.event_bus
+    current_bus.stop = AsyncMock()
+    session._event_bus_retirement_pending = pending_bus
+
+    await session._retire_event_bus(current_bus, stop_bus=True)
+
+    current_bus.stop.assert_awaited_once()
+    assert session._event_bus_retirement_pending is pending_bus
+
+
+@pytest.mark.asyncio
 async def test_pending_bus_ownership_blocks_direct_connect() -> None:
     session = BrowserSession(browser_profile=BrowserProfile(cdp_url="ws://127.0.0.1:9222", is_local=False))
     session._event_bus_retirement_pending = session.event_bus
