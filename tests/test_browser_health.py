@@ -830,6 +830,31 @@ async def test_pending_bus_ownership_alone_blocks_start() -> None:
 
 
 @pytest.mark.asyncio
+async def test_reset_retires_pending_bus_ownership() -> None:
+    session = BrowserSession()
+    old_bus = session.event_bus
+    session._event_bus_retirement_pending = old_bus
+    old_bus.stop = AsyncMock()
+
+    await session.reset()
+
+    old_bus.stop.assert_awaited_once()
+    assert session._event_bus_retirement_pending is None
+    assert session.lifecycle.phase is LifecyclePhase.STOPPED
+
+
+@pytest.mark.asyncio
+async def test_pending_bus_ownership_blocks_direct_connect() -> None:
+    session = BrowserSession(browser_profile=BrowserProfile(cdp_url="ws://127.0.0.1:9222", is_local=False))
+    session._event_bus_retirement_pending = session.event_bus
+
+    with pytest.raises(RuntimeError, match="retirement is still pending"):
+        await session.connect()
+
+    assert session.browser_health_snapshot()["phase"] == "unknown"
+
+
+@pytest.mark.asyncio
 async def test_noop_stop_and_kill_leave_health_unchanged_after_reset() -> None:
     session = BrowserSession()
     await session.reset()

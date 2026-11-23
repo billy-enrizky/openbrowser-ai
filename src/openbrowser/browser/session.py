@@ -2497,7 +2497,12 @@ class BrowserSession(BaseModel):
 	async def _reset_locked(self, *, stop_event_bus: bool) -> None:
 		"""Reset runtime state for the active lifecycle operation."""
 		await self._cancel_navigation()
-		replace_event_bus = stop_event_bus and self._watchdogs_attached
+		pending_bus = self._event_bus_retirement_pending
+		if pending_bus is not None and pending_bus is not self.event_bus:
+			await self._retire_event_bus(pending_bus)
+		replace_event_bus = stop_event_bus and (
+			self._watchdogs_attached or self._event_bus_retirement_pending is not None
+		)
 		await self._retire_event_bus(self.event_bus, stop_bus=replace_event_bus)
 		if replace_event_bus:
 			self.event_bus = EventBus()
@@ -5738,6 +5743,8 @@ class BrowserSession(BaseModel):
 		start_generation = self._lifecycle.generation
 		start_owner = self._start_task if _start_owned else None
 		self._raise_if_connect_admission_closed(start_owned=_start_owned)
+		if self._event_bus_retirement_pending is not None:
+			raise RuntimeError('Event bus retirement is still pending; run reset() or kill() before connecting')
 		active_start = self._start_task
 		if (
 			not _start_owned
