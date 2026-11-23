@@ -1393,12 +1393,13 @@ class TestBrowserSessionOnBrowserStopEvent:
         # Bypass Pydantic validate_assignment by patching at class level
         original_reset = BrowserSession.reset
         try:
-            BrowserSession.reset = AsyncMock(side_effect=Exception("reset fail"))
+            BrowserSession.reset = AsyncMock(side_effect=RuntimeError("reset fail"))
 
             from openbrowser.browser.events import BrowserStopEvent
 
             event = BrowserStopEvent(force=True)
-            await session.on_BrowserStopEvent(event)
+            with pytest.raises(RuntimeError, match="reset fail"):
+                await session.on_BrowserStopEvent(event)
             # BrowserErrorEvent should have been dispatched
             assert mock_bus.dispatch.called
         finally:

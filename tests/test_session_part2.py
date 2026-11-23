@@ -161,6 +161,11 @@ def _make_session_with_mocks(**overrides):
     return session, mocks
 
 
+def _clear_connection(session):
+    session._cdp_client_root = None
+    session._session_manager = None
+
+
 # ===========================================================================
 # export_storage_state (lines 1010-1041)
 # ===========================================================================
@@ -557,6 +562,7 @@ class TestConnect:
     async def test_connect_http_url_fetches_ws_url(self):
         """When given an HTTP URL, connect should query /json/version for the WS URL."""
         session, mocks = _make_session_with_mocks()
+        _clear_connection(session)
 
         mock_response = MagicMock()
         mock_response.json.return_value = {"webSocketDebuggerUrl": "ws://127.0.0.1:9222/devtools/browser/abc"}
@@ -599,6 +605,7 @@ class TestConnect:
     async def test_connect_http_timeout(self):
         """HTTP endpoint that never responds should timeout."""
         session, mocks = _make_session_with_mocks()
+        _clear_connection(session)
         session.browser_profile.cdp_url = "http://127.0.0.1:9222"
 
         import httpx
@@ -623,6 +630,7 @@ class TestConnect:
     async def test_connect_no_pages_creates_blank(self):
         """When no page targets exist, connect should create about:blank."""
         session, mocks = _make_session_with_mocks()
+        _clear_connection(session)
 
         with (
             patch("openbrowser.browser.session.CDPClient", return_value=mocks["cdp_root"]),
@@ -653,6 +661,7 @@ class TestConnect:
     async def test_connect_fatal_error_cleans_up(self):
         """Fatal CDP error should clean up and raise RuntimeError."""
         session, mocks = _make_session_with_mocks()
+        _clear_connection(session)
 
         mock_cdp = MagicMock()
         mock_cdp.start = AsyncMock(side_effect=Exception("Connection refused"))
@@ -667,6 +676,7 @@ class TestConnect:
     async def test_connect_attach_existing_target_failure_logged(self):
         """Failed attachment to existing target should be caught and logged."""
         session, mocks = _make_session_with_mocks()
+        _clear_connection(session)
 
         targets = [
             {"targetId": "fail-target", "type": "page", "url": "https://example.com"},
@@ -694,6 +704,7 @@ class TestConnect:
     async def test_connect_session_wait_timeout_raises(self):
         """When session manager never returns a session for target, connect raises."""
         session, mocks = _make_session_with_mocks()
+        _clear_connection(session)
 
         page_target = {"targetId": "page-target-1", "type": "page", "url": "about:blank"}
 
@@ -720,6 +731,7 @@ class TestConnect:
 
     async def test_connect_treats_post_commit_observation_timeout_as_nonfatal(self):
         session, mocks = _make_session_with_mocks()
+        _clear_connection(session)
         session.agent_focus = None
         session._focus_state = FocusSnapshot.uninitialized()
         page_target = {"targetId": "page-target-1", "type": "page", "url": "about:blank"}
@@ -776,6 +788,7 @@ class TestConnect:
     async def test_connect_unknown_title_warning(self):
         """Session with 'Unknown title' should log warning but not fail."""
         session, mocks = _make_session_with_mocks()
+        _clear_connection(session)
 
         page_target = {"targetId": "page-t", "type": "page", "url": "about:blank"}
         unknown_session = MagicMock(spec=CDPSession)

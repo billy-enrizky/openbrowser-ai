@@ -74,6 +74,22 @@ class LocalBrowserWatchdog(BaseWatchdog):
 	_browser_record: dict[str, Any] | None = PrivateAttr(default=None)
 	_spawned_subprocess: asyncio.subprocess.Process | None = PrivateAttr(default=None)
 
+	def adopt_owner(self, previous: 'LocalBrowserWatchdog') -> None:
+		"""Transfer a kept-alive browser owner from a retired watchdog instance."""
+		self._subprocess = previous._subprocess
+		self._spawned_subprocess = previous._spawned_subprocess
+		self._profile_lease = previous._profile_lease
+		self._browser_record = previous._browser_record
+		self._temp_dirs_to_cleanup = previous._temp_dirs_to_cleanup
+		self._original_user_data_dir = previous._original_user_data_dir
+		self._instance_id = previous._instance_id
+		previous._subprocess = None
+		previous._spawned_subprocess = None
+		previous._profile_lease = None
+		previous._browser_record = None
+		previous._temp_dirs_to_cleanup = []
+		previous._original_user_data_dir = None
+
 	@observe_debug(ignore_input=True, ignore_output=True, name='browser_launch_event')
 	async def on_BrowserLaunchEvent(self, event: BrowserLaunchEvent) -> BrowserLaunchResult:
 		"""Launch a local browser process."""
@@ -139,7 +155,10 @@ class LocalBrowserWatchdog(BaseWatchdog):
 		self.logger.debug('[LocalBrowserWatchdog] Browser cleanup completed')
 
 	async def on_BrowserStopEvent(self, event: BrowserStopEvent) -> None:
-		"""Listen for BrowserStopEvent and dispatch BrowserKillEvent without awaiting it."""
+		"""Dispatch and await BrowserKillEvent so cleanup failures reach the session."""
+		if self.browser_session.browser_profile.keep_alive and not getattr(event, 'force', False):
+			self.logger.debug('[LocalBrowserWatchdog] keep_alive=True; preserving the local browser')
+			return
 		if self.browser_session.is_local and (self._subprocess or self._profile_lease):
 			self.logger.debug('[LocalBrowserWatchdog] BrowserStopEvent received, dispatching BrowserKillEvent')
 			# Dispatch and await the child event so cleanup failures reach the owning

@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, create_autospec, patch
 import psutil
 import pytest
 from bubus import EventBus
+from openbrowser.browser.events import BrowserStopEvent
 from openbrowser.browser.session import BrowserSession
 from openbrowser.config import CONFIG, _config_cache, _get_env_bool_cached, _get_env_cached, _get_path_cached
 
@@ -29,6 +30,7 @@ def _make_mock_browser_session():
     user_data_dir = tempfile.mkdtemp(prefix='openbrowser-test-')
     session.browser_profile.user_data_dir = user_data_dir
     session.browser_profile.profile_directory = None
+    session.browser_profile.keep_alive = False
     session.browser_profile.get_args = MagicMock(return_value=[
         '--no-first-run',
         '--disable-default-apps',
@@ -319,6 +321,35 @@ class TestOnBrowserKillEvent:
         mock_cleanup.assert_called_once_with('/managed/profile', 'Default')
 
 
+def test_owner_handoff_transfers_process_lease_and_instance_identity():
+    from openbrowser.browser.watchdogs.local_browser_watchdog import LocalBrowserWatchdog
+
+    previous, session = _make_watchdog()
+    process = MagicMock()
+    lease = MagicMock()
+    previous._subprocess = process
+    previous._profile_lease = lease
+    previous._browser_record = {'pid': 123}
+    previous._temp_dirs_to_cleanup = [MagicMock()]
+    previous._original_user_data_dir = '/tmp/original-profile'
+    previous._instance_id = 'kept-instance'
+    replacement = LocalBrowserWatchdog(event_bus=EventBus(), browser_session=session)
+
+    replacement.adopt_owner(previous)
+
+    assert replacement._subprocess is process
+    assert replacement._profile_lease is lease
+    assert replacement._browser_record == {'pid': 123}
+    assert replacement._temp_dirs_to_cleanup
+    assert replacement._original_user_data_dir == '/tmp/original-profile'
+    assert replacement._instance_id == 'kept-instance'
+    assert previous._subprocess is None
+    assert previous._profile_lease is None
+    assert previous._browser_record is None
+    assert previous._temp_dirs_to_cleanup == []
+    assert previous._original_user_data_dir is None
+
+
 @pytest.mark.asyncio
 class TestOnBrowserStopEvent:
     """Tests for on_BrowserStopEvent."""
@@ -334,6 +365,31 @@ class TestOnBrowserStopEvent:
         await watchdog.on_BrowserStopEvent(event)
 
         watchdog.event_bus.dispatch.assert_called()
+
+    async def test_keep_alive_preserves_local_browser_for_nonforced_stop(self):
+        watchdog, session = _make_watchdog()
+        session.is_local = True
+        session.browser_profile.keep_alive = True
+        watchdog._subprocess = MagicMock()
+        watchdog.event_bus = MagicMock()
+
+        await watchdog.on_BrowserStopEvent(BrowserStopEvent())
+
+        watchdog.event_bus.dispatch.assert_not_called()
+
+    async def test_keep_alive_forced_stop_dispatches_kill(self):
+        watchdog, session = _make_watchdog()
+        session.is_local = True
+        session.browser_profile.keep_alive = True
+        watchdog._subprocess = MagicMock()
+        watchdog.event_bus = MagicMock()
+
+        await watchdog.on_BrowserStopEvent(BrowserStopEvent(force=True))
+
+        watchdog.event_bus.dispatch.assert_called_once()
+        from openbrowser.browser.events import BrowserKillEvent
+
+        assert isinstance(watchdog.event_bus.dispatch.call_args.args[0], BrowserKillEvent)
 
     async def test_no_dispatch_when_not_local(self):
         watchdog, session = _make_watchdog()
