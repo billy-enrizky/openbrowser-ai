@@ -1119,6 +1119,8 @@ async def test_worker_only_connect_cancellation_records_failure_without_cancelli
     assert health.phase is CdpConnectionPhase.FAILED
     assert health.last_error_code is CdpConnectionErrorCode.CONNECT_FAILED
     assert health.cleanup_pending is False
+    assert session.browser_health_snapshot()["phase"] == "failed"
+    assert session.browser_health_snapshot()["reason"] == "connect_failed"
 
 
 @pytest.mark.asyncio
@@ -1154,6 +1156,8 @@ async def test_caller_connect_cancellation_records_cancelled_health():
     assert health.phase is CdpConnectionPhase.FAILED
     assert health.last_error_code is CdpConnectionErrorCode.CANCELLED
     assert health.cleanup_pending is False
+    assert session.browser_health_snapshot()["phase"] == "failed"
+    assert session.browser_health_snapshot()["reason"] == "connect_failed"
 
 
 @pytest.mark.asyncio
@@ -1201,6 +1205,8 @@ async def test_connect_manager_cleanup_failure_retains_manager():
     health = session._cdp_health.snapshot(client_present=False, connection_expected=False)
     assert health.cleanup_pending is True
     assert health.last_cleanup_error is not None
+    assert session.browser_health_snapshot()["phase"] == "failed"
+    assert session.browser_health_snapshot()["reason"] == "connect_failed"
 
 
 @pytest.mark.asyncio
@@ -1224,6 +1230,8 @@ async def test_connect_cleanup_failure_retains_root_and_marks_pending():
     assert health.phase is CdpConnectionPhase.FAILED
     assert health.cleanup_pending is True
     assert health.last_cleanup_error is not None
+    assert session.browser_health_snapshot()["phase"] == "failed"
+    assert session.browser_health_snapshot()["reason"] == "connect_failed"
 
 
 @pytest.mark.asyncio
@@ -2964,6 +2972,8 @@ async def test_reset_cleanup_failure_retains_owners_and_blocks_start():
     assert session._cdp_client_root is root
     assert session._session_manager is manager
     assert session.cdp_connection_health().cleanup_pending is True
+    assert session.browser_health_snapshot()["phase"] == "failed"
+    assert session.browser_health_snapshot()["reason"] == "cleanup_failed"
     with pytest.raises(RuntimeError, match="CDP cleanup is still pending"):
         await session.start()
 
@@ -2975,6 +2985,8 @@ async def test_reset_cleanup_failure_retains_owners_and_blocks_start():
     assert session._session_manager is None
     assert session.cdp_connection_health().cleanup_pending is False
     assert session.lifecycle_snapshot()["phase"] == "stopped"
+    assert session.browser_health_snapshot()["phase"] == "stopped"
+    assert session.browser_health_snapshot()["reason"] == "reset"
 
 
 @pytest.mark.asyncio

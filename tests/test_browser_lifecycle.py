@@ -759,6 +759,8 @@ async def test_keep_alive_stop_retains_owners_when_final_reset_fails():
 	assert session._cdp_client_root is root
 	assert session._session_manager is manager
 	assert session.cdp_connection_health().cleanup_pending is True
+	assert session.browser_health_snapshot()['phase'] == 'failed'
+	assert session.browser_health_snapshot()['reason'] == 'cleanup_failed'
 
 	await session.kill()
 
@@ -767,6 +769,8 @@ async def test_keep_alive_stop_retains_owners_when_final_reset_fails():
 	assert session._cdp_client_root is None
 	assert session._session_manager is None
 	assert session.cdp_connection_health().cleanup_pending is False
+	assert session.browser_health_snapshot()['phase'] == 'stopped'
+	assert session.browser_health_snapshot()['reason'] == 'stop'
 
 
 @pytest.mark.asyncio
@@ -802,6 +806,8 @@ async def test_keep_alive_stop_preserves_local_owner_and_cdp_target():
 	assert session.browser_profile.cdp_url == 'ws://kept-browser/devtools/browser/fixture'
 	assert session.event_bus is not old_bus
 	assert session.lifecycle_snapshot()['phase'] == 'stopped'
+	assert session.browser_health_snapshot()['phase'] == 'stopped'
+	assert session.browser_health_snapshot()['reason'] == 'stop'
 
 	async def fake_connect(cdp_url=None, *, _start_owned=False):
 		assert cdp_url == 'ws://kept-browser/devtools/browser/fixture'
@@ -817,6 +823,7 @@ async def test_keep_alive_stop_preserves_local_owner_and_cdp_target():
 			await session.start()
 		connect.assert_awaited_once()
 		assert session.lifecycle_snapshot()['phase'] == 'ready'
+		assert session.browser_health_snapshot()['phase'] == 'healthy'
 	finally:
 		await session._retire_event_bus(session.event_bus, timeout=1.0)
 
@@ -1040,6 +1047,8 @@ async def test_keep_alive_failed_reset_retries_without_killing_local_owner():
 		await session.stop()
 
 	assert session.cdp_connection_health().cleanup_pending is True
+	assert session.browser_health_snapshot()['phase'] == 'failed'
+	assert session.browser_health_snapshot()['reason'] == 'cleanup_failed'
 	await session.reset()
 
 	assert manager.clear.await_count == 2
@@ -1051,6 +1060,8 @@ async def test_keep_alive_failed_reset_retries_without_killing_local_owner():
 	assert session.browser_profile.cdp_url == 'ws://kept-browser/devtools/browser/fixture'
 	assert session.cdp_connection_health().cleanup_pending is False
 	assert session.lifecycle_snapshot()['phase'] == 'stopped'
+	assert session.browser_health_snapshot()['phase'] == 'stopped'
+	assert session.browser_health_snapshot()['reason'] == 'reset'
 
 
 @pytest.mark.asyncio
@@ -1192,9 +1203,13 @@ async def test_stop_propagates_reset_cleanup_failure_and_retains_owners():
 	assert session._cdp_client_root is root
 	assert session._session_manager is manager
 	assert session.cdp_connection_health().cleanup_pending is True
+	assert session.browser_health_snapshot()["phase"] == "failed"
+	assert session.browser_health_snapshot()["reason"] == "cleanup_failed"
 
 	await session.kill()
 
 	assert session._cdp_client_root is None
 	assert session._session_manager is None
 	assert session.cdp_connection_health().cleanup_pending is False
+	assert session.browser_health_snapshot()["phase"] == "stopped"
+	assert session.browser_health_snapshot()["reason"] == "stop"

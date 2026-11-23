@@ -66,6 +66,12 @@ from openbrowser.browser.focus import (
 	FocusTransitionBudget,
 	FocusTransitionResult,
 )
+from openbrowser.browser.health import (
+	BrowserHealthMachine,
+	BrowserHealthReason,
+	OwnedRootBinding,
+	canonical_cdp_endpoint,
+)
 from openbrowser.browser.lifecycle import (
 	LifecycleMachine,
 	LifecyclePhase,
@@ -468,6 +474,8 @@ class BrowserSession(BaseModel):
 	_session_manager: Any = PrivateAttr(default=None)  # SessionManager instance
 	_cdp_health: CdpConnectionHealthTracker = PrivateAttr(default_factory=CdpConnectionHealthTracker)
 	_lifecycle: LifecycleMachine = PrivateAttr(default_factory=lambda: LifecycleMachine('browser_session'))
+	_health: BrowserHealthMachine = PrivateAttr(default_factory=BrowserHealthMachine)
+	_health_owned_root_binding: OwnedRootBinding | None = PrivateAttr(default=None)
 	_tab_registry: TabRegistry = PrivateAttr(default_factory=TabRegistry)
 	_lifecycle_lock: asyncio.Lock = PrivateAttr(default_factory=asyncio.Lock)
 	_connect_lock: asyncio.Lock = PrivateAttr(default_factory=asyncio.Lock)
@@ -580,6 +588,7 @@ class BrowserSession(BaseModel):
 		cdp_health = self.cdp_connection_health()
 		snapshot['cdp_connected'] = cdp_health.client_present
 		snapshot['cdp'] = cdp_health.to_dict()
+		snapshot['health'] = self.browser_health_snapshot()
 		snapshot['active_target_id'] = self.agent_focus.target_id if self.agent_focus else None
 		snapshot['tabs'] = self.tab_snapshot()
 		snapshot['navigation'] = self._navigation_monitor.snapshot()
@@ -617,6 +626,195 @@ class BrowserSession(BaseModel):
 			client_present=self._cdp_client_root is not None,
 			connection_expected=connection_expected,
 		)
+
+	def _health_binding_is_current(self, binding: OwnedRootBinding | None) -> bool:
+		"""Return True only while the published root is the exact bound owner root."""
+		if binding is None:
+			return False
+		root = self._cdp_client_root
+		if root is None or root is not binding.root:
+			return False
+		try:
+			websocket = getattr(root, 'ws', None)
+			transport = getattr(websocket, 'transport', None)
+		except Exception:
+			return False
+		if websocket is not binding.websocket or transport is not binding.transport:
+			return False
+		if self._cdp_health.connection_generation != binding.connection_generation:
+			return False
+		if canonical_cdp_endpoint(self.cdp_url) != binding.endpoint:
+			return False
+		watchdog = self._local_browser_watchdog
+		if watchdog is None or getattr(watchdog, '_owns_browser_resources', False) is not True:
+			return False
+		record = getattr(watchdog, '_browser_record', None)
+		lease = getattr(watchdog, '_profile_lease', None)
+		if not isinstance(record, dict) or lease is None:
+			return False
+		try:
+			profile = str(Path(record['profile_dir']).expanduser().resolve())
+			if (
+				int(record['pid']) != binding.pid
+				or float(record['start_time']) != binding.start_time
+				or profile != binding.profile_dir
+				or str(record['instance_id']) != binding.instance_id
+				or str(record['ownership_marker']) != binding.ownership_marker
+				or str(record['executable']) != binding.executable
+				or int(record['cdp_port']) != binding.cdp_port
+				or str(Path(lease.profile_dir).expanduser().resolve()) != binding.profile_dir
+				or str(lease.instance_id) != binding.instance_id
+				or str(getattr(watchdog, '_instance_id', '')) != binding.instance_id
+			):
+				return False
+		except (AttributeError, KeyError, TypeError, ValueError, OSError):
+			return False
+		return True
+
+	def _establish_owned_root_binding(self, generation: int) -> OwnedRootBinding | None:
+		"""Prove the live root socket belongs to the recorded local process and bind it."""
+		self._health_owned_root_binding = None
+		if not self.is_local:
+			return None
+		root = self._cdp_client_root
+		watchdog = self._local_browser_watchdog
+		if root is None or watchdog is None or getattr(watchdog, '_owns_browser_resources', False) is not True:
+			return None
+		record = getattr(watchdog, '_browser_record', None)
+		lease = getattr(watchdog, '_profile_lease', None)
+		process = getattr(watchdog, '_subprocess', None)
+		if not isinstance(record, dict) or lease is None or process is None:
+			return None
+
+		import ipaddress
+		import psutil
+		import socket
+		from openbrowser.browser.watchdogs.profile_lease import ProfileLease
+
+		try:
+			user_data_dir = self.browser_profile.user_data_dir
+			if user_data_dir is None:
+				return None
+			profile = str(Path(record['profile_dir']).expanduser().resolve())
+			if (
+				profile != str(Path(user_data_dir).expanduser().resolve())
+				or profile != str(Path(lease.profile_dir).expanduser().resolve())
+				or str(record['instance_id']) != str(lease.instance_id)
+				or str(record['instance_id']) != str(getattr(watchdog, '_instance_id', ''))
+				or not ProfileLease.process_matches_browser(process, record)
+			):
+				return None
+			endpoint = canonical_cdp_endpoint(self.cdp_url)
+			if endpoint is None:
+				return None
+			websocket = getattr(root, 'ws', None)
+			if websocket is None:
+				return None
+			transport = getattr(websocket, 'transport', None)
+			if transport is None:
+				return None
+			connection_socket = transport.get_extra_info('socket')
+			family = connection_socket.family
+			if family not in {socket.AF_INET, socket.AF_INET6}:
+				return None
+
+			def endpoint_for(value: Any) -> tuple[Any, int] | None:
+				if not isinstance(value, tuple) or len(value) < 2 or not isinstance(value[1], int) or any(value[2:]):
+					return None
+				address = ipaddress.ip_address(value[0])
+				if (
+					address.version != (4 if family == socket.AF_INET else 6)
+					or getattr(address, 'scope_id', None) is not None
+				):
+					return None
+				return address, value[1]
+
+			peer = endpoint_for(connection_socket.getpeername())
+			local = endpoint_for(connection_socket.getsockname())
+			cdp_port = int(record['cdp_port'])
+			if peer is None or local is None or not peer[0].is_loopback or not local[0].is_loopback:
+				return None
+			if peer[1] != cdp_port:
+				return None
+			connections = [connection for connection in process.net_connections(kind='tcp') if connection.family == family]
+			listeners = [
+				endpoint_for(connection.laddr) for connection in connections if connection.status == psutil.CONN_LISTEN
+			]
+			covers_peer = any(
+				listener is not None
+				and listener[1] == peer[1]
+				and (listener[0] == peer[0] or listener[0].is_unspecified)
+				for listener in listeners
+			)
+			accepted_peer = any(
+				connection.status == psutil.CONN_ESTABLISHED
+				and endpoint_for(connection.laddr) == peer
+				and endpoint_for(connection.raddr) == local
+				for connection in connections
+			)
+			if not covers_peer or not accepted_peer:
+				return None
+			binding = OwnedRootBinding(
+				connection_generation=int(generation),
+				endpoint=endpoint,
+				pid=int(record['pid']),
+				start_time=float(record['start_time']),
+				profile_dir=profile,
+				instance_id=str(record['instance_id']),
+				ownership_marker=str(record['ownership_marker']),
+				executable=str(record['executable']),
+				cdp_port=cdp_port,
+				root=root,
+				websocket=websocket,
+				transport=transport,
+			)
+		except Exception:
+			return None
+		self._health_owned_root_binding = binding
+		return binding
+
+	def browser_health_snapshot(self) -> dict[str, Any]:
+		"""Return browser health, including a status-time owned-process check."""
+		from openbrowser.browser.watchdogs.profile_lease import ProfileLease
+
+		binding = self._health_owned_root_binding
+		binding_current = self._health_binding_is_current(binding)
+		process_present: bool | None = None
+		process_pid: int | None = None
+		process_checked_at: float | None = None
+		projection_active = False
+		if binding_current and binding is not None and self._lifecycle.phase is not LifecyclePhase.STOPPING:
+			process_checked_at = time.time()
+			process_pid = binding.pid
+			try:
+				identity = ProfileLease.process_identity_status(binding.pid, binding.start_time)
+			except Exception:
+				identity = 'unknown'
+			if identity == 'match':
+				process_present = True
+			elif identity in {'missing', 'mismatch'}:
+				process_present = False
+				projection_active = self._cdp_client_root is not None
+		return self._health.snapshot(
+			process_present=process_present,
+			process_pid=process_pid,
+			process_checked_at=process_checked_at,
+			projection_active=projection_active,
+		).to_dict()
+
+	def _record_stopped_health(self, reason: BrowserHealthReason) -> None:
+		"""Record one completed public terminal operation."""
+		self._health.record_stopped(reason, self._cdp_health.connection_generation)
+
+	def _record_cleanup_failure_health(self) -> None:
+		"""Record one retained reset, stop, or kill cleanup failure."""
+		self._health.record_cleanup_failed(self._cdp_health.connection_generation)
+
+	def _record_startup_failure_health(self) -> None:
+		"""Record a health-bearing start failure without overriding shutdown."""
+		if self._lifecycle.phase in (LifecyclePhase.STOPPING, LifecyclePhase.STOPPED):
+			return
+		self._health.record_startup_failed(self._cdp_health.connection_generation)
 
 	async def probe_cdp_connection(self, *, timeout_seconds: float = 2.0) -> CdpConnectionHealth:
 		"""Send one root-level health probe and return the last known snapshot."""
@@ -2165,6 +2363,7 @@ class BrowserSession(BaseModel):
 		stop_event_bus: bool = True,
 		wait_for_operations: bool = True,
 		_reopen_admission: bool = True,
+		_health_reason: BrowserHealthReason | None = BrowserHealthReason.RESET,
 	) -> None:
 		"""Clear all cached CDP sessions with proper cleanup."""
 		current_task = asyncio.current_task()
@@ -2178,6 +2377,12 @@ class BrowserSession(BaseModel):
 					reopen_admission=_reopen_admission,
 					shutdown_fence_epoch=shutdown_fence_epoch,
 				)
+				if _health_reason is not None:
+					self._record_stopped_health(_health_reason)
+			except BaseException:
+				if self._lifecycle.phase is LifecyclePhase.FAILED or self._has_live_resources():
+					self._record_cleanup_failure_health()
+				raise
 			finally:
 				if self._reset_task is current_task:
 					self._reset_task = None
@@ -2337,6 +2542,7 @@ class BrowserSession(BaseModel):
 		self._storage_state_watchdog = None
 		if not self._watchdog_has_live_resources(self._local_browser_watchdog):
 			self._local_browser_watchdog = None
+		self._health_owned_root_binding = None
 		self._default_action_watchdog = None
 		self._dom_watchdog = None
 		self._screenshot_watchdog = None
@@ -2488,15 +2694,18 @@ class BrowserSession(BaseModel):
 			# Ensure any exceptions from the event handler are propagated
 			await start_event.event_result(raise_if_any=True, raise_if_none=False)
 		except asyncio.CancelledError:
+			self._record_startup_failure_health()
 			if self._lifecycle.phase is not LifecyclePhase.STOPPING:
 				self._lifecycle.fail('Browser start cancelled', reason='browser start cancelled')
 			await self._cleanup_cancelled_start()
 			raise
 		except BaseException as error:
+			self._record_startup_failure_health()
 			safe_error = f'{type(error).__name__}: {sanitize_error_detail(error) or type(error).__name__}'
 			self._lifecycle.fail(safe_error, reason='browser start failed')
 			raise
 		else:
+			self._health.record_connected(self._cdp_health.connection_generation)
 			self._lifecycle.transition(LifecyclePhase.READY, reason='browser ready')
 
 	async def _cleanup_cancelled_start(self) -> None:
@@ -2542,6 +2751,7 @@ class BrowserSession(BaseModel):
 		try:
 			await asyncio.wait_for(asyncio.shield(task), timeout=timeout)
 		except asyncio.TimeoutError as error:
+			self._record_cleanup_failure_health()
 			if task.done():
 				try:
 					task.result()
@@ -2620,6 +2830,7 @@ class BrowserSession(BaseModel):
 		self._cdp_session_pool.clear()
 		if not self._cdp_health.cleanup_pending:
 			self._cdp_client_root = None
+			self._health_owned_root_binding = None
 		self._tab_registry.clear()
 		self._watchdogs_attached = False
 		self.reset_dom_cache(reason='shutdown', purge_metadata=True)
@@ -2722,6 +2933,7 @@ class BrowserSession(BaseModel):
 		start_cancel_bus = self.event_bus
 		await self._cancel_owned_start()
 		if self.event_bus is not start_cancel_bus or self._lifecycle.generation != start_cancel_generation:
+			self._record_stopped_health(BrowserHealthReason.STOP)
 			return
 		if self._has_cleanup_in_flight():
 			error = TimeoutError('Prior browser cleanup is still running; retry after it finishes')
@@ -2788,6 +3000,7 @@ class BrowserSession(BaseModel):
 				stop_error = force_error
 
 		if stop_error is not None and self._has_live_resources():
+			self._record_cleanup_failure_health()
 			self._cdp_health.mark_cleanup_failure(stop_error)
 			self._watchdogs_attached = True
 			if self._lifecycle.phase is not LifecyclePhase.FAILED:
@@ -2795,6 +3008,7 @@ class BrowserSession(BaseModel):
 			raise stop_error
 
 		if self.event_bus is not event_bus:
+			self._record_stopped_health(BrowserHealthReason.STOP)
 			return
 		if self._lifecycle.generation != shutdown_generation:
 			# The stop handler already reset the lifecycle on this bus. Retire
@@ -2807,10 +3021,12 @@ class BrowserSession(BaseModel):
 			self.event_bus = EventBus()
 			self._core_handlers_attached = False
 			self._attach_core_handlers()
+			self._record_stopped_health(BrowserHealthReason.STOP)
 			return
 
 		try:
 			if stop_error is not None:
+				self._record_cleanup_failure_health()
 				# A force-stop may still be able to release the watchdog after the
 				# normal stop handler failed.
 				if force:
@@ -2867,6 +3083,7 @@ class BrowserSession(BaseModel):
 					self._force_reset_runtime_state(replace_event_bus=True)
 
 			if finalization_error is not None:
+				self._record_cleanup_failure_health()
 				raise finalization_error
 			if self.event_bus is event_bus:
 				# The old bus was stopped before finalization. Install a fresh
@@ -2882,15 +3099,18 @@ class BrowserSession(BaseModel):
 						error=save_error,
 						increment_generation=True,
 					)
+				self._record_stopped_health(BrowserHealthReason.STOP)
 				raise save_error
 			if self._lifecycle.phase is not LifecyclePhase.STOPPED:
 				self._lifecycle.transition(
 					LifecyclePhase.STOPPED, reason='browser stopped', increment_generation=True
 				)
+			self._record_stopped_health(BrowserHealthReason.STOP)
 		except BaseException as error:
 			if self._lifecycle.phase is not LifecyclePhase.FAILED and (
 				self._lifecycle.phase is not LifecyclePhase.STOPPED or self._has_live_resources()
 			):
+				self._record_cleanup_failure_health()
 				self._lifecycle.fail(error, reason='browser stop failed')
 			raise
 		finally:
@@ -4806,6 +5026,7 @@ class BrowserSession(BaseModel):
 					stop_event_bus=False,
 					wait_for_operations=False,
 					_reopen_admission=False,
+					_health_reason=None,
 				)
 
 			# Reset state
@@ -5479,6 +5700,7 @@ class BrowserSession(BaseModel):
 		if self._cdp_client_root is not None or self._session_manager is not None:
 			raise RuntimeError('CDP connection already exists; run kill() or reset() before connecting again')
 		generation = self._cdp_health.begin_connect()
+		self._health_owned_root_binding = None
 		try:
 			self.browser_profile.cdp_url = cdp_url or self.cdp_url
 			if not self.cdp_url:
@@ -5526,6 +5748,7 @@ class BrowserSession(BaseModel):
 				self._cdp_health.mark_connect_failed(
 					generation, error, client_present=self._cdp_client_root is not None
 				)
+				self._health.record_connect_failed(generation)
 				raise
 			await self._await_connect_failure(generation, error, None, None, cancelled=False)
 			raise
@@ -5543,11 +5766,13 @@ class BrowserSession(BaseModel):
 			self._cdp_health.mark_connect_failed(
 				generation, error, client_present=self._cdp_client_root is not None, cancelled=True
 			)
+			self._health.record_connect_failed(generation)
 			raise
 		except Exception as error:
 			self._cdp_health.mark_connect_failed(
 				generation, error, client_present=self._cdp_client_root is not None
 			)
+			self._health.record_connect_failed(generation)
 			raise
 		attempt_root: CDPClient | None = None
 		attempt_manager: Any = None
@@ -5730,6 +5955,8 @@ class BrowserSession(BaseModel):
 			raise RuntimeError(f'Failed to establish CDP connection to browser: {safe_error}') from error
 
 		self._cdp_health.mark_connected(generation)
+		self._establish_owned_root_binding(generation)
+		self._health.record_connected(generation)
 		return self
 
 	async def _handle_connect_failure(
@@ -5750,6 +5977,7 @@ class BrowserSession(BaseModel):
 			cancelled=cancelled,
 			worker_cancelled=worker_cancelled,
 		)
+		self._health.record_connect_failed(generation)
 		self._focus_epoch += 1
 		self._cancel_focus_observers()
 		error_detail = sanitize_error_detail(error) or type(error).__name__
