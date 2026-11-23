@@ -72,7 +72,7 @@ If sent authority remains unconfirmed, the runtime stays failed and refuses repl
 - `permissions` (default: `['clipboardReadWrite', 'notifications']`): Browser permissions to grant. Use list like `['camera', 'microphone', 'geolocation']`
 
 - `headers`: Additional HTTP headers for connect requests (remote browsers only)
-- `block_ip_addresses` (default: `False`): Block navigation to URLs that contain IPv4 or IPv6 addresses, including localhost and private networks.
+- `block_ip_addresses` (default: `False`): Block navigation to URLs whose host is a literal IPv4 or IPv6 address. Hostnames such as `localhost` are not resolved, so this flag does not block them by itself.
 
 ## Browser Launch
 

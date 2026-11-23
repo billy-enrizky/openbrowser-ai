@@ -54,7 +54,7 @@ mode: "wide"
 - `display_files_in_done_text` (default: `True`): Show file information in completion messages
 
 ### Callbacks
-- `register_new_step_callback`: Called after each step with the browser state, agent output, and step number. Sync or async.
+- `register_new_step_callback`: Called after the model proposes an action and before the actions execute. It receives the pre-action browser state, agent output, and step number. Sync or async. Do not treat it as post-step confirmation.
 - `register_done_callback`: Called with the final `AgentHistoryList`. Sync or async.
 - `register_should_stop_callback`: Async callback that can request a cooperative stop.
 - `register_external_agent_status_raise_error_callback`: Async callback for an external status error.

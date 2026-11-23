@@ -23,7 +23,7 @@ The namespace is initialized with:
 - `click_xy(x, y, button='left', click_count=1)` - Click a no-index canvas, PDF, embed, or native-rendered target using CSS viewport pixels
 - `hover_xy(x, y)` - Move over a no-index canvas, PDF, embed, or native-rendered target using CSS viewport pixels
 - `input_text(index, text, clear=True)` - Type text into an input field
-- `scroll(down=True, pages=1.0, index=None)` - Scroll the page or a container
+- `scroll(down, pages=1.0, index=None)` - Scroll the page or a container. `down` is required.
 - `scroll_xy(x, y, delta_x=0, delta_y=0)` - Wheel-scroll a no-index surface using CSS viewport pixels
 - `send_keys(keys)` - Send keyboard keys or shortcuts
 - `upload_file(index, path)` - Upload a file to a file input element

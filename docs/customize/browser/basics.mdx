@@ -16,8 +16,8 @@ profile = BrowserProfile(
 )
 
 session = BrowserSession(browser_profile=profile)
-await session.start()
 try:
+    await session.start()
     await session.navigate_to('https://example.com')
     state = await session.get_browser_state_summary()
     print(state.title, state.url)

@@ -220,10 +220,18 @@ openbrowser-ai daemon stop
 
 `daemon stop` only acknowledges the request and returns. Poll `openbrowser-ai daemon status` until it reports `daemon_not_running`, up to about 30 seconds. If the daemon does not exit, run `openbrowser-ai daemon force-stop`, which waits and verifies listener, owner, and browser cleanup.
 
-If the task can fail mid-workflow, guarantee cleanup with a shell trap:
+If the task can fail mid-workflow, guarantee cleanup with a shell trap that stops, polls, and force-stops if needed:
 
 ```bash
-trap 'openbrowser-ai daemon stop >/dev/null 2>&1 || true' EXIT
+cleanup() {
+  openbrowser-ai daemon stop >/dev/null 2>&1 || true
+  for _ in 1 2 3 4 5; do
+    openbrowser-ai daemon status >/dev/null 2>&1 || return 0
+    sleep 1
+  done
+  openbrowser-ai daemon force-stop >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
 # ... openbrowser-ai -c calls here ...
 ```
 
