@@ -160,6 +160,40 @@ def test_failed_phase_records_recovery_outcome_without_hiding_failure() -> None:
     assert snapshot["last_focus_recovery_outcome"] == "failed"
 
 
+def test_newer_connection_generation_clears_pending_recovery() -> None:
+    health = BrowserHealthMachine()
+    health.record_connected(1)
+    token = health.record_target_crash(1, "target-a", "status=crashed")
+    assert token is not None
+    assert health.record_focus_recovery_started(token, 1) is True
+
+    health.record_connect_failed(2)
+    snapshot = health.snapshot()
+
+    assert snapshot.phase is BrowserHealthPhase.FAILED
+    assert snapshot.connection_generation == 2
+    assert snapshot.last_focus_recovery_outcome is FocusRecoveryOutcome.NOT_ATTEMPTED
+    assert snapshot.last_focus_recovery_target_id is None
+    assert snapshot.last_focus_recovery_at is None
+
+
+def test_target_crash_detail_is_sanitized_and_bounded_in_public_snapshot() -> None:
+    health = BrowserHealthMachine()
+    health.record_connected(1)
+    health.record_target_crash(
+        1,
+        "target-a",
+        "Authorization: Bearer crash-secret https://example.test/private " + "x" * 400,
+    )
+
+    snapshot = health.snapshot().to_dict()
+
+    assert snapshot["last_target_crash_detail"] is not None
+    assert len(snapshot["last_target_crash_detail"]) <= 240
+    assert "crash-secret" not in snapshot["last_target_crash_detail"]
+    assert "https://" not in snapshot["last_target_crash_detail"]
+
+
 def test_startup_failure_does_not_replace_connect_failure_or_stopped() -> None:
     health = BrowserHealthMachine()
     health.record_connect_failed(5)
@@ -170,6 +204,16 @@ def test_startup_failure_does_not_replace_connect_failure_or_stopped() -> None:
     health.record_stopped(BrowserHealthReason.STOP, 5)
     assert health.record_startup_failed(5) is False
     assert health.snapshot().phase is BrowserHealthPhase.STOPPED
+
+
+def test_startup_failure_replaces_a_previous_cleanup_failure() -> None:
+    health = BrowserHealthMachine()
+    health.record_cleanup_failed(4)
+
+    assert health.record_startup_failed(4) is True
+    snapshot = health.snapshot()
+    assert snapshot.phase is BrowserHealthPhase.FAILED
+    assert snapshot.reason is BrowserHealthReason.STARTUP_FAILED
 
 
 def test_reset_and_stop_clear_recovery_fields_but_keep_crash_history() -> None:
@@ -304,6 +348,17 @@ def test_unknown_process_identity_is_not_a_crash(tmp_path) -> None:
     assert health["reason"] == "connected"
 
 
+def test_process_identity_inspection_error_is_unknown_not_a_crash(tmp_path) -> None:
+    session, *_ = _bound_session(tmp_path)
+
+    with patch.object(ProfileLease, "process_identity_status", side_effect=psutil.AccessDenied(4321)):
+        health = session.browser_health_snapshot()
+
+    assert health["phase"] == "healthy"
+    assert health["process_present"] is None
+    assert health["reason"] == "connected"
+
+
 def test_closed_socket_after_owner_exit_still_derives_crashed(tmp_path) -> None:
     session, _root, _websocket, transport, *_ = _bound_session(tmp_path)
     transport.get_extra_info = MagicMock(side_effect=ConnectionError("closed"))
@@ -323,10 +378,14 @@ def test_closed_socket_after_owner_exit_still_derives_crashed(tmp_path) -> None:
         "transport",
         "endpoint",
         "record",
+        "pid",
+        "start_time",
+        "generation",
         "marker",
         "executable",
         "profile",
         "instance",
+        "lease_profile",
         "lease",
     ],
 )
@@ -342,6 +401,12 @@ def test_stale_binding_returns_unknown_without_deriving_crash(tmp_path, mutation
         session.browser_profile.cdp_url = "ws://127.0.0.1:9222/devtools/browser/other"
     elif mutation == "record":
         record["cdp_port"] = 9333
+    elif mutation == "pid":
+        record["pid"] = 5432
+    elif mutation == "start_time":
+        record["start_time"] = 124.0
+    elif mutation == "generation":
+        session._cdp_health.begin_connect()
     elif mutation == "marker":
         record["ownership_marker"] = "--openbrowser-instance-id=other"
     elif mutation == "executable":
@@ -350,6 +415,8 @@ def test_stale_binding_returns_unknown_without_deriving_crash(tmp_path, mutation
         record["profile_dir"] = str((tmp_path / "other-profile").resolve())
     elif mutation == "instance":
         record["instance_id"] = "instance-2"
+    elif mutation == "lease_profile":
+        lease.profile_dir = (tmp_path / "other-profile").resolve()
     elif mutation == "lease":
         lease.instance_id = "instance-2"
 
@@ -598,6 +665,20 @@ async def test_failure_after_connect_before_ready_records_startup_failed() -> No
 
 
 @pytest.mark.asyncio
+async def test_retry_start_failure_replaces_previous_cleanup_failure() -> None:
+    session = BrowserSession()
+    session._health.record_cleanup_failed(0)
+    session.event_bus.dispatch = MagicMock(return_value=_failing_start_event())
+
+    with pytest.raises(RuntimeError, match="start publication failed"):
+        await session.start()
+
+    health = session.browser_health_snapshot()
+    assert health["phase"] == "failed"
+    assert health["reason"] == "startup_failed"
+
+
+@pytest.mark.asyncio
 async def test_reset_records_reset_and_repeated_reset_updates_reason() -> None:
     session = BrowserSession()
 
@@ -610,6 +691,43 @@ async def test_reset_records_reset_and_repeated_reset_updates_reason() -> None:
     second = session.browser_health_snapshot()
     assert second["phase"] == "stopped"
     assert second["reason"] == "reset"
+
+
+@pytest.mark.asyncio
+async def test_stop_event_bus_retirement_failure_records_cleanup_failed() -> None:
+    session = BrowserSession()
+    session._lifecycle.transition(LifecyclePhase.STARTING)
+    session._lifecycle.transition(LifecyclePhase.READY)
+
+    class ReadyEvent:
+        def __await__(self):
+            async def ready():
+                return None
+
+            return ready().__await__()
+
+    class StopEvent(ReadyEvent):
+        def event_result(self, **_kwargs):
+            async def advance_generation():
+                session._lifecycle.seed_generation(session._lifecycle.generation + 1)
+
+            return advance_generation()
+
+    session.event_bus.dispatch = MagicMock(side_effect=[ReadyEvent(), StopEvent()])
+    with (
+        patch.object(
+            session,
+            "_retire_event_bus",
+            AsyncMock(side_effect=RuntimeError("bus retirement failed")),
+        ),
+        pytest.raises(RuntimeError, match="bus retirement failed"),
+    ):
+        await session._shutdown_locked(force=False)
+
+    assert session.lifecycle.phase is LifecyclePhase.FAILED
+    health = session.browser_health_snapshot()
+    assert health["phase"] == "failed"
+    assert health["reason"] == "cleanup_failed"
 
 
 @pytest.mark.asyncio
@@ -646,6 +764,10 @@ async def test_kill_retries_pending_cleanup_failure_into_health() -> None:
     health = session.browser_health_snapshot()
     assert health["phase"] == "failed"
     assert health["reason"] == "cleanup_failed"
+    assert session.cdp_connection_health().cleanup_pending is True
+    assert session.lifecycle.phase is LifecyclePhase.FAILED
+    with pytest.raises(RuntimeError, match="cleanup"):
+        await session.start()
 
 
 @pytest.mark.asyncio
@@ -673,6 +795,10 @@ async def test_kill_outer_force_failure_records_cleanup_failed() -> None:
     health = session.browser_health_snapshot()
     assert health["phase"] == "failed"
     assert health["reason"] == "cleanup_failed"
+    assert session.cdp_connection_health().cleanup_pending is True
+    assert session.lifecycle.phase is LifecyclePhase.FAILED
+    with pytest.raises(RuntimeError, match="cleanup"):
+        await session.start()
 
 
 def test_lifecycle_snapshot_carries_health_without_private_endpoint(tmp_path) -> None:
@@ -715,6 +841,25 @@ def test_public_guidance_describes_health_without_page_readiness(path: str) -> N
     assert "browser.health" in text or "`health`" in text or "health`" in text
     assert "process_present" in text or "daemon status" in text
     assert "page" in text.lower() and ("not" in text.lower() or "does not" in text.lower())
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "README.md",
+        "plugin/README.md",
+        "docs/customize/integrations/mcp-server.mdx",
+        "docs/customize/integrations/cli-daemon.mdx",
+        "src/openbrowser/code_use/descriptions.py",
+    ],
+)
+def test_public_guidance_has_state_specific_recovery_actions(path: str) -> None:
+    root = Path(__file__).resolve().parents[1]
+    text = (root / path).read_text(encoding="utf-8").lower()
+
+    assert "pending" in text
+    assert "usable target" in text
+    assert "reset" in text
 
 
 def test_compact_description_names_both_status_commands() -> None:

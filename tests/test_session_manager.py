@@ -16,7 +16,7 @@ from openbrowser.browser.focus import (
     FocusTargetError,
     FocusTransitionBudget,
 )
-from openbrowser.browser.health import BrowserHealthMachine
+from openbrowser.browser.health import BrowserHealthMachine, BrowserHealthReason
 from openbrowser.browser.session_manager import SessionManager
 from openbrowser.browser.tabs import TabRegistry, TabState
 
@@ -862,3 +862,73 @@ class TestSessionManagerCrash:
 
         assert session._health.snapshot().target_crash_count == 0
         assert session._health.snapshot().phase.value == 'healthy'
+
+    @pytest.mark.parametrize('operation', ['reset', 'reconnect'])
+    async def test_reset_or_reconnect_discards_blocked_recovery_without_rollback(self, operation):
+        session = _make_mock_browser_session()
+        sm = SessionManager(session)
+        sm._target_types['target-1'] = 'page'
+        session._tab_registry.register('target-1', url='https://example.com', state=TabState.OPEN)
+        session.focus_snapshot.return_value = FocusSnapshot(
+            phase=FocusPhase.FOCUSED,
+            target_id='target-1',
+            session_id='session-1',
+            previous_target_id=None,
+            generation=1,
+            reason=FocusChangeReason.INITIAL,
+            last_error=None,
+            updated_at=0.0,
+        )
+        entered, release = asyncio.Event(), asyncio.Event()
+
+        async def recover(*args, **kwargs):
+            entered.set()
+            session.agent_focus = MagicMock(target_id='committed-replacement')
+            await asyncio.wait_for(release.wait(), timeout=2.0)
+            return FocusSnapshot(
+                phase=FocusPhase.FOCUSED,
+                target_id='committed-replacement',
+                session_id='replacement-session',
+                previous_target_id='target-1',
+                generation=2,
+                reason=FocusChangeReason.CRASH_RECOVERY,
+                last_error=None,
+                updated_at=0.0,
+            )
+
+        session._recover_agent_focus = AsyncMock(side_effect=recover)
+        task = asyncio.create_task(sm._handle_target_crashed('target-1', status='crashed', error_code=-1))
+        try:
+            await asyncio.wait_for(entered.wait(), timeout=2.0)
+            if operation == 'reset':
+                session._cdp_client_root = None
+                session._health.record_stopped(
+                    BrowserHealthReason.RESET,
+                    sm._monitored_connection_generation or 0,
+                )
+            else:
+                new_root = MagicMock()
+                session._cdp_client_root = new_root
+                generation = session._cdp_health.begin_connect()
+                session._cdp_health.mark_connected(generation)
+                session._health.record_connected(generation)
+                sm._monitored_root = new_root
+                sm._monitored_connection_generation = generation
+            release.set()
+            await asyncio.wait_for(task, timeout=2.0)
+        finally:
+            release.set()
+            if not task.done():
+                task.cancel()
+                await asyncio.wait_for(asyncio.gather(task, return_exceptions=True), timeout=2.0)
+
+        health = session._health.snapshot()
+        if operation == 'reset':
+            assert health.phase.value == 'stopped'
+            assert health.reason.value == 'reset'
+        else:
+            assert health.phase.value == 'healthy'
+            assert health.reason.value == 'connected'
+            assert health.connection_generation == 2
+        assert health.last_focus_recovery_outcome.value == 'not_attempted'
+        assert session.agent_focus.target_id == 'committed-replacement'

@@ -186,6 +186,10 @@ class BrowserHealthMachine:
             value = self._observed_generation
         if value > self._observed_generation:
             self._observed_generation = value
+            if self._last_recovery_outcome is FocusRecoveryOutcome.PENDING:
+                self._last_recovery_outcome = FocusRecoveryOutcome.NOT_ATTEMPTED
+                self._last_recovery_target_id = None
+                self._last_recovery_at = None
         return value
 
     @staticmethod
@@ -235,7 +239,13 @@ class BrowserHealthMachine:
     def record_startup_failed(self, generation: int) -> bool:
         """Record a start failure unless a stronger failure or stop is stored."""
         value = self._advance_generation(generation)
-        if self._phase in (BrowserHealthPhase.FAILED, BrowserHealthPhase.STOPPED):
+        if self._phase is BrowserHealthPhase.STOPPED:
+            return False
+        if (
+            self._phase is BrowserHealthPhase.FAILED
+            and self._reason is BrowserHealthReason.CONNECT_FAILED
+            and self._connection_generation == value
+        ):
             return False
         self._set_phase(BrowserHealthPhase.FAILED, BrowserHealthReason.STARTUP_FAILED, value)
         return True
