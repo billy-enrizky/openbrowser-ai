@@ -29,6 +29,23 @@ print(f'{len(state.dom_state.selector_map)} interactive elements')
 "
 ```
 
+## One-shot scraping
+
+Use `scrape` for deterministic extraction without an LLM. Static pages use HTTP first; thin JavaScript shells fall back to Chromium.
+
+```bash
+# Markdown of a page
+openbrowser-ai scrape https://example.com
+
+# Text with images, web fonts, and media blocked
+openbrowser-ai scrape https://example.com --format text --render-mode lightweight
+
+# JSON from a CSS selector, always in the browser
+openbrowser-ai scrape https://example.com --format json --selector "article" --engine browser
+```
+
+`--engine auto` is the default. `--engine http` never starts a browser. `--render-mode no-render` disables screenshots and visual-only actions for the browser fallback. Use `--wait-for` to wait for a selector on JavaScript-rendered pages.
+
 ## Variable Persistence
 
 Variables set in one `-c` call are available in the next, as long as the daemon is running:

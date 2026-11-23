@@ -1,7 +1,7 @@
 import sys
 import tempfile
 from collections.abc import Iterable
-from enum import Enum
+from enum import Enum, StrEnum
 from functools import cache
 from pathlib import Path
 from typing import Annotated, Any, Literal, Self
@@ -102,6 +102,17 @@ CHROME_DETERMINISTIC_RENDERING_ARGS = [
 	'--font-render-hinting=none',
 	'--force-color-profile=srgb',
 ]
+
+CHROME_LIGHTWEIGHT_ARGS = [
+	'--blink-settings=imagesEnabled=false',
+	'--disable-remote-fonts',
+	'--disable-gpu',
+	'--disable-accelerated-2d-canvas',
+	'--disable-accelerated-video-decode',
+	'--mute-audio',
+	'--autoplay-policy=user-gesture-required',
+]
+
 
 CHROME_DEFAULT_ARGS = [
 	# # provided by playwright by default: https://github.com/microsoft/playwright/blob/41008eeddd020e2dee1c540f7c0cdfa337e99637/packages/playwright-core/src/server/chromium/chromiumSwitches.ts#L76
@@ -288,6 +299,19 @@ CliArgStr = Annotated[str, AfterValidator(validate_cli_arg)]
 
 # ===== Base Models =====
 
+
+
+class RenderMode(StrEnum):
+	"""Rendering policy for a browser profile.
+
+	FULL keeps every resource. LIGHTWEIGHT blocks images, remote fonts, media,
+	and GPU acceleration. NO_RENDER additionally disables screenshots and
+	visual-only actions.
+	"""
+
+	FULL = 'full'
+	LIGHTWEIGHT = 'lightweight'
+	NO_RENDER = 'no-render'
 
 class BrowserContextArgs(BaseModel):
 	"""
@@ -553,6 +577,17 @@ class BrowserProfile(BrowserConnectArgs, BrowserLaunchPersistentContextArgs, Bro
 	# custom options we provide that aren't native playwright kwargs
 	disable_security: bool = Field(default=False, description='Disable browser security features.')
 	deterministic_rendering: bool = Field(default=False, description='Enable deterministic rendering flags.')
+	lightweight: bool = Field(
+		default=False,
+		description=(
+			'Reduce rendering work by disabling images, web fonts, GPU acceleration, '
+			'and media autoplay. Best for text scraping.'
+		),
+	)
+	render_mode: RenderMode | None = Field(
+		default=None,
+		description='Rendering policy. Defaults to lightweight when lightweight=True, otherwise full.',
+	)
 	allowed_domains: list[str] | set[str] | None = Field(
 		default=None,
 		description='List of allowed domains for navigation e.g. ["*.google.com", "https://example.com", "chrome-extension://*"]. Lists with 100+ items are auto-optimized to sets (no pattern matching).',
@@ -769,6 +804,13 @@ class BrowserProfile(BrowserConnectArgs, BrowserLaunchPersistentContextArgs, Bro
 		"""Called after model initialization to set up display configuration."""
 		self.detect_display_configuration()
 
+	@property
+	def effective_render_mode(self) -> RenderMode:
+		"""Return the explicit render mode or the legacy lightweight mapping."""
+		if self.render_mode is not None:
+			return self.render_mode
+		return RenderMode.LIGHTWEIGHT if self.lightweight else RenderMode.FULL
+
 	def get_args(self) -> list[str]:
 		"""Get the list of all Chrome CLI launch args for this profile (compiled from defaults, user-provided, and system-specific)."""
 
@@ -791,6 +833,7 @@ class BrowserProfile(BrowserConnectArgs, BrowserLaunchPersistentContextArgs, Bro
 			*(CHROME_HEADLESS_ARGS if self.headless else []),
 			*(CHROME_DISABLE_SECURITY_ARGS if self.disable_security else []),
 			*(CHROME_DETERMINISTIC_RENDERING_ARGS if self.deterministic_rendering else []),
+			*(CHROME_LIGHTWEIGHT_ARGS if self.effective_render_mode is not RenderMode.FULL else []),
 			*(
 				[f'--window-size={self.window_size["width"]},{self.window_size["height"]}']
 				if self.window_size

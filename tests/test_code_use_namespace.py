@@ -653,3 +653,208 @@ class TestGetNamespaceDocumentation:
         ns = {"no_doc": lambda: None}
         doc = get_namespace_documentation(ns)
         assert "no_doc" not in doc or "##" not in doc.split("no_doc")[0] if "no_doc" in doc else True
+
+
+
+# ---------------------------------------------------------------------------
+# scrape_page()
+# ---------------------------------------------------------------------------
+
+
+class TestScrapeHttp:
+    def _response(self, *, text='', status=200, content_type='text/html', payload=None, url='https://example.com'):
+        response = MagicMock()
+        response.status_code = status
+        response.headers = {'content-type': content_type}
+        response.text = text
+        response.url = url
+        response.json = MagicMock(return_value=payload)
+        return response
+
+    def _client(self, response):
+        client = AsyncMock()
+        client.__aenter__ = AsyncMock(return_value=client)
+        client.__aexit__ = AsyncMock(return_value=False)
+        client.get = AsyncMock(return_value=response)
+        return client
+
+    @pytest.mark.asyncio
+    async def test_http_markdown_returns_compact_content(self):
+        from openbrowser.code_use.namespace import scrape_http
+
+        html = '<html><head><title>T</title></head><body><h1>H</h1><script>x</script><p>Body</p></body></html>'
+        with patch('httpx.AsyncClient', return_value=self._client(self._response(text=html))):
+            result = await scrape_http(
+                'https://example.com',
+                format='markdown',
+                selector=None,
+                extract_links=False,
+                timeout_ms=None,
+                engine='http',
+            )
+        assert result is not None
+        assert result['engine_used'] == 'http'
+        assert '# H' in result['content']
+        assert 'Body' in result['content']
+        assert 'x' not in result['content']
+
+    @pytest.mark.asyncio
+    async def test_auto_uses_http_for_substantial_text(self):
+        from openbrowser.code_use.namespace import scrape_http
+
+        paragraph = 'Substantial server rendered content. ' * 5
+        html = f'<html><head><title>T</title></head><body><p>{paragraph}</p><script>x</script></body></html>'
+        with patch('httpx.AsyncClient', return_value=self._client(self._response(text=html))):
+            result = await scrape_http(
+                'https://example.com',
+                format='text',
+                selector=None,
+                extract_links=False,
+                timeout_ms=None,
+                engine='auto',
+            )
+        assert result is not None
+        assert 'Substantial server rendered content' in result['content']
+
+    @pytest.mark.asyncio
+    async def test_auto_falls_back_for_thin_shell(self):
+        from openbrowser.code_use.namespace import scrape_http
+
+        html = '<html><body><div id="root"></div><script>mount()</script></body></html>'
+        with patch('httpx.AsyncClient', return_value=self._client(self._response(text=html))):
+            result = await scrape_http(
+                'https://example.com',
+                format='markdown',
+                selector=None,
+                extract_links=False,
+                timeout_ms=None,
+                engine='auto',
+            )
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_http_engine_does_not_fall_back(self):
+        from openbrowser.code_use.namespace import scrape_http
+
+        html = '<html><body><div id="root"></div><p>Short</p></body></html>'
+        with patch('httpx.AsyncClient', return_value=self._client(self._response(text=html))):
+            result = await scrape_http(
+                'https://example.com',
+                format='text',
+                selector=None,
+                extract_links=False,
+                timeout_ms=None,
+                engine='http',
+            )
+        assert result is not None
+        assert result['content'] == 'Short'
+
+    @pytest.mark.asyncio
+    async def test_json_content_type_returns_payload(self):
+        from openbrowser.code_use.namespace import scrape_http
+
+        with patch(
+            'httpx.AsyncClient',
+            return_value=self._client(
+                self._response(content_type='application/json', payload={'ok': True})
+            ),
+        ):
+            result = await scrape_http(
+                'https://example.com/api',
+                format='json',
+                selector=None,
+                extract_links=False,
+                timeout_ms=None,
+                engine='auto',
+            )
+        assert result is not None
+        assert result['content'] == {'ok': True}
+
+
+class TestScrapePage:
+    @pytest.fixture(autouse=True)
+    def _disable_http_fast_path(self):
+        with patch(
+            'openbrowser.code_use.namespace.scrape_http',
+            new_callable=AsyncMock,
+            return_value=None,
+        ):
+            yield
+
+    def _make_namespace(self, values):
+        session = MagicMock()
+        session.browser_profile = MagicMock()
+        session.browser_profile.downloads_path = None
+        session.navigate_to = AsyncMock()
+        session.get_current_page_url = AsyncMock(return_value="https://example.com/final")
+        cdp = AsyncMock()
+        cdp.cdp_client.send.Runtime.evaluate = AsyncMock(
+            side_effect=[{"result": {"value": value}} for value in values]
+        )
+        session.get_or_create_cdp_session = AsyncMock(return_value=cdp)
+        tools = MagicMock()
+        tools.registry.registry.actions = {}
+        return create_namespace(session, tools=tools), session, cdp
+
+    @pytest.mark.asyncio
+    async def test_text_format_navigates_and_returns_text(self):
+        ns, session, _ = self._make_namespace(["Example", "Hello world"])
+        result = await ns["scrape_page"]("https://example.com", format="text")
+        session.navigate_to.assert_awaited_once()
+        assert result["title"] == "Example"
+        assert result["url"] == "https://example.com/final"
+        assert result["content"] == "Hello world"
+        assert result["format"] == "text"
+
+    @pytest.mark.asyncio
+    async def test_wait_for_polls_until_selector_appears(self):
+        ns, _, _ = self._make_namespace([False, True, "Example", "Ready"])
+        result = await ns["scrape_page"](format="text", wait_for=".ready")
+        assert result["content"] == "Ready"
+
+    @pytest.mark.asyncio
+    async def test_links_format_returns_link_objects(self):
+        links = [{"text": "Docs", "href": "https://example.com/docs", "title": None}]
+        ns, _, _ = self._make_namespace(["Example", links])
+        result = await ns["scrape_page"](format="links")
+        assert result["content"] == links
+        assert result["content_type"] == "application/json"
+
+    @pytest.mark.asyncio
+    async def test_markdown_format_uses_shared_extractor(self):
+        ns, _, _ = self._make_namespace(["Example"])
+        with patch(
+            "openbrowser.dom.markdown_extractor.extract_clean_markdown",
+            new_callable=AsyncMock,
+            return_value=("# Title", {"final_filtered_chars": 7}),
+        ):
+            result = await ns["scrape_page"](format="markdown", extract_links=True)
+        assert result["content"] == "# Title"
+        assert result["stats"]["final_filtered_chars"] == 7
+
+    @pytest.mark.asyncio
+    async def test_json_selector_returns_matches(self):
+        matches = [{"text": "x", "html": "<p>x</p>", "attributes": {}}]
+        ns, _, _ = self._make_namespace(["Example", matches])
+        result = await ns["scrape_page"](format="json", selector="p")
+        assert result["content"] == matches
+        assert result["selector"] == "p"
+
+    @pytest.mark.asyncio
+    async def test_invalid_format_raises(self):
+        ns, _, _ = self._make_namespace([])
+        with pytest.raises(ValueError, match="format must be one of"):
+            await ns["scrape_page"](format="xml")
+
+    @pytest.mark.asyncio
+    async def test_max_chars_truncates_text(self):
+        ns, _, _ = self._make_namespace(["Example", "abcdef"])
+        result = await ns["scrape_page"](format="text", max_chars=3)
+        assert result["content"] == "abc"
+        assert result["truncated"] is True
+        assert result["total_chars"] == 6
+
+    @pytest.mark.asyncio
+    async def test_scrape_alias_points_to_scrape_page(self):
+        ns, _, _ = self._make_namespace([])
+        assert ns["scrape"] is ns["scrape_page"]

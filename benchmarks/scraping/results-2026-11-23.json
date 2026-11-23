@@ -1,0 +1,413 @@
+{
+  "samples": 3,
+  "warmups": 1,
+  "arms": [
+    "openbrowser-full",
+    "openbrowser-lightweight",
+    "openbrowser-no-render",
+    "http"
+  ],
+  "tasks": [
+    "asset_heavy",
+    "js_list",
+    "pagination",
+    "static_article",
+    "table"
+  ],
+  "groups": [
+    {
+      "task": "asset_heavy",
+      "arm": "http",
+      "successes": 0,
+      "runs": 3,
+      "ok": false,
+      "latency": {
+        "count": 0
+      },
+      "mean_output_bytes": 1165.0,
+      "mean_requests": 1.0,
+      "mean_response_bytes": 1165.0,
+      "engines": [
+        "http"
+      ],
+      "errors": []
+    },
+    {
+      "task": "asset_heavy",
+      "arm": "openbrowser-full",
+      "successes": 3,
+      "runs": 3,
+      "ok": true,
+      "latency": {
+        "count": 3,
+        "p50_ms": 57.066,
+        "p95_ms": 57.197,
+        "mean_ms": 56.482
+      },
+      "mean_output_bytes": 242.0,
+      "mean_requests": 25.0,
+      "mean_response_bytes": 4064.0,
+      "engines": [
+        "browser"
+      ],
+      "errors": []
+    },
+    {
+      "task": "asset_heavy",
+      "arm": "openbrowser-lightweight",
+      "successes": 3,
+      "runs": 3,
+      "ok": true,
+      "latency": {
+        "count": 3,
+        "p50_ms": 17.47,
+        "p95_ms": 19.592,
+        "mean_ms": 18.139
+      },
+      "mean_output_bytes": 242.0,
+      "mean_requests": 4.0,
+      "mean_response_bytes": 2492.0,
+      "engines": [
+        "browser"
+      ],
+      "errors": []
+    },
+    {
+      "task": "asset_heavy",
+      "arm": "openbrowser-no-render",
+      "successes": 3,
+      "runs": 3,
+      "ok": true,
+      "latency": {
+        "count": 3,
+        "p50_ms": 20.815,
+        "p95_ms": 25.148,
+        "mean_ms": 22.009
+      },
+      "mean_output_bytes": 242.0,
+      "mean_requests": 4.0,
+      "mean_response_bytes": 2492.0,
+      "engines": [
+        "browser"
+      ],
+      "errors": []
+    },
+    {
+      "task": "js_list",
+      "arm": "http",
+      "successes": 0,
+      "runs": 3,
+      "ok": false,
+      "latency": {
+        "count": 0
+      },
+      "mean_output_bytes": 432.0,
+      "mean_requests": 1.0,
+      "mean_response_bytes": 432.0,
+      "engines": [
+        "http"
+      ],
+      "errors": []
+    },
+    {
+      "task": "js_list",
+      "arm": "openbrowser-full",
+      "successes": 3,
+      "runs": 3,
+      "ok": true,
+      "latency": {
+        "count": 3,
+        "p50_ms": 18.665,
+        "p95_ms": 19.257,
+        "mean_ms": 18.397
+      },
+      "mean_output_bytes": 330.0,
+      "mean_requests": 3.0,
+      "mean_response_bytes": 2523.0,
+      "engines": [
+        "browser"
+      ],
+      "errors": []
+    },
+    {
+      "task": "js_list",
+      "arm": "openbrowser-lightweight",
+      "successes": 3,
+      "runs": 3,
+      "ok": true,
+      "latency": {
+        "count": 3,
+        "p50_ms": 17.503,
+        "p95_ms": 46.045,
+        "mean_ms": 26.884
+      },
+      "mean_output_bytes": 330.0,
+      "mean_requests": 3.0,
+      "mean_response_bytes": 2523.0,
+      "engines": [
+        "browser"
+      ],
+      "errors": []
+    },
+    {
+      "task": "js_list",
+      "arm": "openbrowser-no-render",
+      "successes": 3,
+      "runs": 3,
+      "ok": true,
+      "latency": {
+        "count": 3,
+        "p50_ms": 19.669,
+        "p95_ms": 24.648,
+        "mean_ms": 21.198
+      },
+      "mean_output_bytes": 330.0,
+      "mean_requests": 3.0,
+      "mean_response_bytes": 2523.0,
+      "engines": [
+        "browser"
+      ],
+      "errors": []
+    },
+    {
+      "task": "pagination",
+      "arm": "http",
+      "successes": 3,
+      "runs": 3,
+      "ok": true,
+      "latency": {
+        "count": 3,
+        "p50_ms": 2.756,
+        "p95_ms": 2.77,
+        "mean_ms": 2.73
+      },
+      "mean_output_bytes": 1650.0,
+      "mean_requests": 5.0,
+      "mean_response_bytes": 6923.0,
+      "engines": [
+        "http"
+      ],
+      "errors": []
+    },
+    {
+      "task": "pagination",
+      "arm": "openbrowser-full",
+      "successes": 3,
+      "runs": 3,
+      "ok": true,
+      "latency": {
+        "count": 3,
+        "p50_ms": 24.677,
+        "p95_ms": 25.083,
+        "mean_ms": 24.419
+      },
+      "mean_output_bytes": 1650.0,
+      "mean_requests": 5.0,
+      "mean_response_bytes": 6923.0,
+      "engines": [
+        "http"
+      ],
+      "errors": []
+    },
+    {
+      "task": "pagination",
+      "arm": "openbrowser-lightweight",
+      "successes": 3,
+      "runs": 3,
+      "ok": true,
+      "latency": {
+        "count": 3,
+        "p50_ms": 22.334,
+        "p95_ms": 22.936,
+        "mean_ms": 22.519
+      },
+      "mean_output_bytes": 1650.0,
+      "mean_requests": 5.0,
+      "mean_response_bytes": 6923.0,
+      "engines": [
+        "http"
+      ],
+      "errors": []
+    },
+    {
+      "task": "pagination",
+      "arm": "openbrowser-no-render",
+      "successes": 3,
+      "runs": 3,
+      "ok": true,
+      "latency": {
+        "count": 3,
+        "p50_ms": 25.855,
+        "p95_ms": 26.594,
+        "mean_ms": 25.88
+      },
+      "mean_output_bytes": 1650.0,
+      "mean_requests": 5.0,
+      "mean_response_bytes": 6923.0,
+      "engines": [
+        "http"
+      ],
+      "errors": []
+    },
+    {
+      "task": "static_article",
+      "arm": "http",
+      "successes": 3,
+      "runs": 3,
+      "ok": true,
+      "latency": {
+        "count": 3,
+        "p50_ms": 3.829,
+        "p95_ms": 4.667,
+        "mean_ms": 4.058
+      },
+      "mean_output_bytes": 1182.0,
+      "mean_requests": 1.0,
+      "mean_response_bytes": 3631.0,
+      "engines": [
+        "http"
+      ],
+      "errors": []
+    },
+    {
+      "task": "static_article",
+      "arm": "openbrowser-full",
+      "successes": 3,
+      "runs": 3,
+      "ok": true,
+      "latency": {
+        "count": 3,
+        "p50_ms": 7.448,
+        "p95_ms": 7.931,
+        "mean_ms": 7.47
+      },
+      "mean_output_bytes": 1182.0,
+      "mean_requests": 1.0,
+      "mean_response_bytes": 3631.0,
+      "engines": [
+        "http"
+      ],
+      "errors": []
+    },
+    {
+      "task": "static_article",
+      "arm": "openbrowser-lightweight",
+      "successes": 3,
+      "runs": 3,
+      "ok": true,
+      "latency": {
+        "count": 3,
+        "p50_ms": 6.835,
+        "p95_ms": 8.303,
+        "mean_ms": 7.268
+      },
+      "mean_output_bytes": 1182.0,
+      "mean_requests": 1.0,
+      "mean_response_bytes": 3631.0,
+      "engines": [
+        "http"
+      ],
+      "errors": []
+    },
+    {
+      "task": "static_article",
+      "arm": "openbrowser-no-render",
+      "successes": 3,
+      "runs": 3,
+      "ok": true,
+      "latency": {
+        "count": 3,
+        "p50_ms": 7.837,
+        "p95_ms": 9.466,
+        "mean_ms": 8.234
+      },
+      "mean_output_bytes": 1182.0,
+      "mean_requests": 1.0,
+      "mean_response_bytes": 3631.0,
+      "engines": [
+        "http"
+      ],
+      "errors": []
+    },
+    {
+      "task": "table",
+      "arm": "http",
+      "successes": 3,
+      "runs": 3,
+      "ok": true,
+      "latency": {
+        "count": 3,
+        "p50_ms": 0.678,
+        "p95_ms": 0.694,
+        "mean_ms": 0.674
+      },
+      "mean_output_bytes": 13067.0,
+      "mean_requests": 1.0,
+      "mean_response_bytes": 13067.0,
+      "engines": [
+        "http"
+      ],
+      "errors": []
+    },
+    {
+      "task": "table",
+      "arm": "openbrowser-full",
+      "successes": 3,
+      "runs": 3,
+      "ok": true,
+      "latency": {
+        "count": 3,
+        "p50_ms": 11.807,
+        "p95_ms": 11.81,
+        "mean_ms": 11.707
+      },
+      "mean_output_bytes": 2490.0,
+      "mean_requests": 1.0,
+      "mean_response_bytes": 13067.0,
+      "engines": [
+        "http"
+      ],
+      "errors": []
+    },
+    {
+      "task": "table",
+      "arm": "openbrowser-lightweight",
+      "successes": 3,
+      "runs": 3,
+      "ok": true,
+      "latency": {
+        "count": 3,
+        "p50_ms": 11.637,
+        "p95_ms": 11.743,
+        "mean_ms": 11.481
+      },
+      "mean_output_bytes": 2490.0,
+      "mean_requests": 1.0,
+      "mean_response_bytes": 13067.0,
+      "engines": [
+        "http"
+      ],
+      "errors": []
+    },
+    {
+      "task": "table",
+      "arm": "openbrowser-no-render",
+      "successes": 3,
+      "runs": 3,
+      "ok": true,
+      "latency": {
+        "count": 3,
+        "p50_ms": 12.453,
+        "p95_ms": 13.01,
+        "mean_ms": 12.597
+      },
+      "mean_output_bytes": 2490.0,
+      "mean_requests": 1.0,
+      "mean_response_bytes": 13067.0,
+      "engines": [
+        "http"
+      ],
+      "errors": []
+    }
+  ]
+}

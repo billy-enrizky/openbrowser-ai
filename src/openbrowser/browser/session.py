@@ -95,7 +95,7 @@ from openbrowser.browser.navigation import (
 	security_policy_blocked_message,
 	validate_actor_wait_until,
 )
-from openbrowser.browser.profile import BrowserProfile, ProxySettings
+from openbrowser.browser.profile import BrowserProfile, ProxySettings, RenderMode
 from openbrowser.browser.tabs import TabError, TabRegistry, TabState
 from openbrowser.browser.views import BrowserStateSummary, TabInfo
 from openbrowser.dom.views import DOMRect, EnhancedDOMTreeNode, TargetInfo
@@ -5645,6 +5645,8 @@ class BrowserSession(BaseModel):
 		cached: bool = False,
 		include_recent_events: bool = False,
 	) -> BrowserStateSummary:
+		if self.browser_profile.effective_render_mode is RenderMode.NO_RENDER:
+			include_screenshot = False
 		cached_summary = self._cached_browser_state_summary
 		cached_target_id = self.current_target_id
 		if (
@@ -8297,6 +8299,10 @@ class BrowserSession(BaseModel):
 		Returns:
                 Screenshot data as bytes
 		"""
+		if self.browser_profile.effective_render_mode is RenderMode.NO_RENDER:
+			from openbrowser.browser.views import BrowserError
+
+			raise BrowserError('Screenshots are disabled in no-render mode')
 		import base64
 
 		from cdp_use.cdp.page import CaptureScreenshotParameters
@@ -8355,6 +8361,10 @@ class BrowserSession(BaseModel):
 		Returns:
                 Screenshot data as bytes
 		"""
+		if self.browser_profile.effective_render_mode is RenderMode.NO_RENDER:
+			from openbrowser.browser.views import BrowserError
+
+			raise BrowserError('Screenshots are disabled in no-render mode')
 
 		bounds = await self._get_element_bounds(selector)
 		if not bounds:

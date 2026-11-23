@@ -21,6 +21,7 @@ import requests
 from pydantic import ValidationError
 
 from openbrowser.browser import BrowserSession
+from openbrowser.browser.navigation import WaitUntil
 
 try:
 	from openbrowser.filesystem.file_system import FileSystem
@@ -289,6 +290,125 @@ async def evaluate(code: str, browser_session: BrowserSession) -> Any:
 	except Exception as e:
 		# Wrap other exceptions in EvaluateError
 		raise EvaluateError(f'Failed to execute JavaScript: {type(e).__name__}: {e}') from e
+
+
+async def scrape_http(
+	url: str,
+	*,
+	format: str,
+	selector: str | None,
+	extract_links: bool,
+	timeout_ms: int | None,
+	engine: str,
+) -> dict[str, Any] | None:
+	"""Fetch and parse a URL without a browser.
+
+	Returns None when engine=auto finds page JavaScript and the browser path
+	should handle the page.
+	"""
+	import httpx
+	from bs4 import BeautifulSoup
+	from markdownify import markdownify as _markdownify
+
+	timeout = (timeout_ms / 1000) if timeout_ms else 30.0
+	async with httpx.AsyncClient(follow_redirects=True, timeout=timeout) as client:
+		response = await client.get(url)
+	if response.status_code >= 400:
+		return None
+
+	content_type = response.headers.get('content-type', '').split(';')[0].strip().lower()
+	if 'json' in content_type:
+		try:
+			payload = response.json()
+		except Exception:
+			return None
+		return {
+			'url': str(response.url),
+			'title': '',
+			'format': format,
+			'content_type': 'application/json',
+			'content': payload,
+			'stats': {'engine_used': 'http', 'status_code': response.status_code},
+			'engine_used': 'http',
+			'status_code': response.status_code,
+		}
+
+	if 'html' not in content_type and content_type not in ('', 'text/plain'):
+		return None
+
+	html = response.text
+	soup = BeautifulSoup(html, 'html.parser')
+	if engine == 'auto':
+		# Use HTTP only when the server-rendered text is substantial. Thin
+		# shells usually need JavaScript, so fall back to the browser.
+		text_probe = soup.get_text(' ', strip=True)
+		if len(text_probe) < 40:
+			return None
+		if soup.select_one('#root:empty, #app:empty, #__next:empty'):
+			return None
+
+	title = soup.title.get_text(strip=True) if soup.title else ''
+	content: Any
+	if format == 'markdown':
+		for tag in soup(['script', 'style', 'noscript']):
+			tag.decompose()
+		content = _markdownify(
+			str(soup),
+			heading_style='ATX',
+			bullets='-',
+			escape_asterisks=False,
+			escape_underscores=False,
+		).strip()
+	elif format == 'text':
+		for tag in soup(['script', 'style', 'noscript']):
+			tag.decompose()
+		content = soup.get_text('\n', strip=True)
+	elif format == 'html':
+		content = html
+	elif format == 'links':
+		content = [
+			{
+				'text': (tag.get_text(' ', strip=True) or ''),
+				'href': tag.get('href'),
+				'title': tag.get('title'),
+			}
+			for tag in soup.find_all('a', href=True)
+		]
+	else:
+		content = [
+			{
+				'text': tag.get_text(' ', strip=True),
+				'html': str(tag),
+				'attributes': dict(tag.attrs),
+			}
+			for tag in (soup.select(selector) if selector else [])
+		]
+
+	return {
+		'url': str(response.url),
+		'title': title,
+		'format': format,
+		'content_type': 'application/json' if format in {'links', 'json'} else f'text/{format}',
+		'content': content,
+		'stats': {
+			'engine_used': 'http',
+			'status_code': response.status_code,
+			'html_chars': len(html),
+		},
+		'engine_used': 'http',
+		'status_code': response.status_code,
+	}
+
+
+def _truncate_scrape_result(result: dict[str, Any], max_chars: int | None) -> dict[str, Any]:
+	"""Apply the optional output cap to a scrape result."""
+	if max_chars is not None:
+		content = result.get('content')
+		if isinstance(content, str) and len(content) > max_chars:
+			result['content'] = content[:max_chars]
+			result['truncated'] = True
+			result['total_chars'] = len(content)
+	return result
 
 
 def create_namespace(
@@ -838,6 +958,151 @@ def create_namespace(
 	namespace['wait_for_download'] = wait_for_download
 	namespace['download_outcomes'] = download_outcomes
 	namespace['download_failures'] = download_failures
+
+	async def scrape_page(
+		url: str | None = None,
+		*,
+		format: str = 'markdown',
+		selector: str | None = None,
+		wait_for: str | None = None,
+		wait_until: WaitUntil = 'load',
+		timeout_ms: int | None = None,
+		extract_links: bool = False,
+		max_chars: int | None = None,
+		engine: str = 'auto',
+	) -> dict[str, Any]:
+		"""Scrape the current page or a URL without an LLM.
+
+		Args:
+			url: Optional URL to navigate to before scraping. Uses the current page when omitted.
+			format: One of markdown, text, html, links, or json.
+			selector: Optional CSS selector. Limits text, html, and json output to matching elements.
+			wait_for: Optional CSS selector to wait for before scraping. Useful for SPAs.
+			wait_until: Navigation readiness: load, domcontentloaded, networkidle, or commit.
+			timeout_ms: Optional navigation and selector wait timeout in milliseconds.
+			extract_links: Preserve links in markdown output.
+			max_chars: Optional maximum content length. Adds truncated and total_chars fields.
+
+		Returns:
+			A dict with url, title, format, content, content_type, and optional stats.
+		"""
+		allowed_formats = {'markdown', 'text', 'html', 'links', 'json'}
+		if format not in allowed_formats:
+			raise ValueError(f'format must be one of {sorted(allowed_formats)}, got {format!r}')
+		if engine not in {'auto', 'http', 'browser'}:
+			raise ValueError(f"engine must be one of ['auto', 'browser', 'http'], got {engine!r}")
+
+		if engine in {'auto', 'http'} and url:
+			http_result = await scrape_http(
+				url,
+				format=format,
+				selector=selector,
+				extract_links=extract_links,
+				timeout_ms=timeout_ms,
+				engine=engine,
+			)
+			if http_result is not None:
+				return _truncate_scrape_result(http_result, max_chars)
+			if engine == 'http':
+				raise RuntimeError(f'HTTP scrape failed for {url}')
+
+		if url:
+			await browser_session.navigate_to(url, wait_until=wait_until, timeout_ms=timeout_ms)
+
+		selector_js = json.dumps(selector) if selector is not None else None
+		wait_selector_js = json.dumps(wait_for) if wait_for is not None else None
+		deadline = time.monotonic() + ((timeout_ms / 1000) if timeout_ms else 30.0)
+
+		if wait_selector_js is not None:
+			while True:
+				found = await namespace['evaluate'](f'document.querySelector({wait_selector_js}) !== null')
+				if found:
+					break
+				if time.monotonic() >= deadline:
+					raise TimeoutError(f'wait_for selector did not appear within {timeout_ms or 30000} ms: {wait_for}')
+				await asyncio.sleep(0.05)
+
+		title = await namespace['evaluate']('document.title || ""')
+		final_url = await browser_session.get_current_page_url()
+
+		content: Any
+		stats: dict[str, Any] = {}
+		if format == 'markdown':
+			if selector is None:
+				from openbrowser.dom.markdown_extractor import extract_clean_markdown
+
+				content, stats = await extract_clean_markdown(
+					browser_session=browser_session,
+					extract_links=extract_links,
+				)
+			else:
+				html = await namespace['evaluate'](
+					f'(document.querySelector({selector_js}) || document.body).outerHTML'
+				)
+				from markdownify import markdownify as _markdownify
+
+				content = _markdownify(
+					html or '',
+					heading_style='ATX',
+					strip=['script', 'style'],
+					bullets='-',
+					escape_asterisks=False,
+					escape_underscores=False,
+				).strip()
+				stats = {'method': 'selector_html', 'selector': selector}
+		elif format == 'text':
+			expression = (
+				f'(document.querySelector({selector_js}) || document.body)?.innerText || ""'
+				if selector is not None
+				else 'document.body ? document.body.innerText : ""'
+			)
+			content = await namespace['evaluate'](expression)
+		elif format == 'html':
+			expression = (
+				f'(document.querySelector({selector_js}) || document.documentElement).outerHTML'
+				if selector is not None
+				else 'document.documentElement ? document.documentElement.outerHTML : ""'
+			)
+			content = await namespace['evaluate'](expression)
+		elif format == 'links':
+			content = await namespace['evaluate'](
+				'Array.from(document.links).map(a => ('
+				'{text: (a.innerText || "").trim(), href: a.href, title: a.title || null}'
+				'))'
+			)
+		else:
+			if selector is not None:
+				content = await namespace['evaluate'](
+					f'Array.from(document.querySelectorAll({selector_js})).map(el => ({{'
+					'text: (el.innerText || "").trim(), '
+					'html: el.outerHTML, '
+					'attributes: Object.fromEntries(Array.from(el.attributes).map(a => [a.name, a.value]))'
+					'}))'
+				)
+			else:
+				from openbrowser.dom.markdown_extractor import extract_clean_markdown
+
+				content, stats = await extract_clean_markdown(
+					browser_session=browser_session,
+					extract_links=extract_links,
+				)
+
+		result: dict[str, Any] = {
+			'url': final_url,
+			'title': title,
+			'format': format,
+			'content_type': 'application/json' if format in {'links', 'json'} else f'text/{format}',
+			'content': content,
+			'stats': {**stats, 'engine_used': 'browser'},
+			'engine_used': 'browser',
+		}
+		if selector is not None:
+			result['selector'] = selector
+		return _truncate_scrape_result(result, max_chars)
+
+	namespace['scrape_page'] = scrape_page
+	namespace['scrape'] = scrape_page
+
 
 	# Inject all tools as functions into the namespace
 	# Skip 'evaluate' since we have a custom implementation above

@@ -240,7 +240,7 @@ class TestClickTriggeredDownload:
             session = server.browser_session
             await session.navigate_to(urls["html_url"])
             before = {
-                outcome["download_id"]
+                outcome["download_ref"]
                 for outcome in session.download_outcomes()
                 if outcome.get("terminal")
             }
@@ -256,14 +256,14 @@ class TestClickTriggeredDownload:
             new_terminals = [
                 entry
                 for entry in session.download_outcomes()
-                if entry.get("terminal") and entry["download_id"] not in before
+                if entry.get("terminal") and entry["download_ref"] not in before
             ]
             return outcome, new_terminals
 
         outcome, new_terminals = loop.run_until_complete(run())
 
         assert len(new_terminals) == 1, new_terminals
-        assert new_terminals[0]["download_id"] == outcome["download_id"]
+        assert new_terminals[0]["download_ref"] == outcome["download_ref"]
         assert outcome["phase"] == "completed", outcome
         saved = Path(str(outcome["path"]))
         assert saved.exists(), outcome

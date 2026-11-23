@@ -131,6 +131,9 @@ uvx openbrowser-ai --mcp
 
 # CLI daemon mode
 uvx openbrowser-ai -c "await navigate('https://example.com')"
+# Fast scraping without an LLM
+uvx openbrowser-ai scrape https://example.com --format markdown
+uvx openbrowser-ai scrape https://example.com --format json --selector "article"
 ```
 
 ### pipx
