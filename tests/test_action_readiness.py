@@ -320,6 +320,9 @@ def test_descriptions_explain_the_readiness_contract():
 
 	assert 'stale index fails the action' in EXECUTE_CODE_DESCRIPTION_COMPACT
 	assert 'RuntimeError' in EXECUTE_CODE_DESCRIPTION
+	assert 'browser.cdp.' not in EXECUTE_CODE_DESCRIPTION
+	assert "lifecycle_snapshot().get('cdp')" in EXECUTE_CODE_DESCRIPTION
+	assert "cdp.get('phase')" in EXECUTE_CODE_DESCRIPTION
 
 
 # ---------------------------------------------------------------------------

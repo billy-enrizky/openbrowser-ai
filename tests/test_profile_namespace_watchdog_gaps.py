@@ -54,6 +54,7 @@ def _make_mock_browser_session(**overrides):
     session.browser_profile = MagicMock()
     session.browser_profile.downloads_path = tempfile.mkdtemp(prefix="openbrowser-test-")
     session.browser_profile.auto_download_pdfs = False
+    session.browser_profile.keep_alive = False
 
     for k, v in overrides.items():
         setattr(session, k, v)

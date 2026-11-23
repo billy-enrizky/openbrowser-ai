@@ -560,7 +560,7 @@ async def test_go_back_fails_when_the_agent_focus_changes():
         lifecycle = client.register.Page.lifecycleEvent.call_args.args[0]
         lifecycle({'frameId': 'frame', 'loaderId': 'next', 'name': 'load'}, focus.session_id)
         with pytest.raises(NavigationError, match='Agent focus changed'):
-            await task
+            await asyncio.wait_for(task, timeout=5.0)
     assert not session._navigation_lock.locked()
 
 
@@ -820,7 +820,7 @@ async def test_go_back_cancellation_is_terminal_and_releases_the_lock():
         await _wait_for_trigger(task, sent)
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
-            await task
+            await asyncio.wait_for(task, timeout=5.0)
     assert session.lifecycle_snapshot()['navigation']['phase'] == 'cancelled'
     assert not session._navigation_lock.locked()
 
@@ -881,7 +881,6 @@ async def test_handler_rejects_mutated_session_binding():
 
 
 async def test_public_overlap_and_cancellation_own_the_handler():
-    from openbrowser.browser.session import BrowserSession
     from bubus import EventBus
 
     session, client, _, _, patches = handler_fixture()
@@ -897,12 +896,12 @@ async def test_public_overlap_and_cancellation_own_the_handler():
     client.send.Page.navigate.side_effect = navigate
     with patches[0], patches[1]:
         task = asyncio.create_task(session.navigate_to('https://example.com/'))
-        await entered.wait()
+        await asyncio.wait_for(entered.wait(), timeout=5.0)
         with pytest.raises(NavigationBusyError):
             await session.navigate_to('https://other.example/')
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
-            await task
+            await asyncio.wait_for(task, timeout=5.0)
         owner = session._navigation_task
         if owner:
             await asyncio.wait({owner}, timeout=0.2)
@@ -1022,7 +1021,7 @@ async def test_slow_terminal_observer_does_not_delay_public_navigation():
     async def terminal_observer(event: NavigationFinishedEvent):
         entered.set()
         try:
-            await release.wait()
+            await asyncio.wait_for(release.wait(), timeout=5.0)
         finally:
             finished.set()
 
@@ -1040,7 +1039,7 @@ async def test_slow_terminal_observer_does_not_delay_public_navigation():
                 release.set()
                 if not navigation.done():
                     navigation.cancel()
-                await asyncio.gather(navigation, return_exceptions=True)
+                await asyncio.wait_for(asyncio.gather(navigation, return_exceptions=True), timeout=5.0)
     finally:
         await session.event_bus.stop(clear=True, timeout=0.2)
 
@@ -1096,21 +1095,21 @@ async def test_public_cancel_drains_matching_owner_before_returning_when_coopera
             await asyncio.Event().wait()
         except asyncio.CancelledError:
             cancelling.set()
-            await release.wait()
+            await asyncio.wait_for(release.wait(), timeout=5.0)
             raise
 
     client.send.Page.navigate.side_effect = navigate
     try:
         with patches[0], patches[1]:
             task = asyncio.create_task(session.navigate_to('https://example.com/'))
-            await entered.wait()
+            await asyncio.wait_for(entered.wait(), timeout=5.0)
             task.cancel()
             await asyncio.wait_for(cancelling.wait(), 0.5)
             await asyncio.sleep(0)
             assert not task.done(), 'Caller returned while cooperative owner was still cleaning up'
             release.set()
             with pytest.raises(asyncio.CancelledError):
-                await task
+                await asyncio.wait_for(task, timeout=5.0)
             assert session._navigation_task is None
     finally:
         release.set()
@@ -1139,7 +1138,7 @@ async def test_real_public_cancellation_keeps_bus_alive_for_next_navigation():
             owner = session._navigation_task
             task.cancel()
             with pytest.raises(asyncio.CancelledError):
-                await task
+                await asyncio.wait_for(task, timeout=5.0)
             assert owner.done() and not owner.cancelled(), 'Owned cancellation must not escape into Bubus'
             client.send.Page.navigate.side_effect = original
             await asyncio.wait_for(session.navigate_to('https://next.example/'), 0.5)
@@ -1214,7 +1213,7 @@ async def test_navigation_deadline_cancels_owned_observer_work():
     finally:
         if task is not None and not task.done():
             task.cancel()
-            await asyncio.gather(task, return_exceptions=True)
+            await asyncio.wait_for(asyncio.gather(task, return_exceptions=True), timeout=5.0)
         await session.event_bus.stop(clear=True, timeout=0.2)
 
 
@@ -1267,7 +1266,7 @@ async def test_queued_public_cancellation_never_sends_its_command():
         await asyncio.sleep(0)
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
-            await task
+            await asyncio.wait_for(task, timeout=5.0)
         release.set()
         await pending
         with patches[0], patches[1]:
@@ -1306,7 +1305,7 @@ async def test_public_deadline_includes_event_bus_queue_time():
         done, _ = await asyncio.wait({task}, timeout=0.2)
         assert task in done, 'Public navigation deadline did not include event bus queue time'
         with pytest.raises(NavigationTimeoutError):
-            await task
+            await asyncio.wait_for(task, timeout=5.0)
         assert session.lifecycle_snapshot()['navigation']['phase'] == 'timed_out'
         client.send.Page.navigate.assert_not_awaited()
         release.set()
@@ -1319,7 +1318,7 @@ async def test_public_deadline_includes_event_bus_queue_time():
     finally:
         if task is not None and not task.done():
             task.cancel()
-            await asyncio.gather(task, return_exceptions=True)
+            await asyncio.wait_for(asyncio.gather(task, return_exceptions=True), timeout=5.0)
         release.set()
         await session.event_bus.stop(clear=True, timeout=0.2)
 
@@ -1390,7 +1389,7 @@ async def test_navigation_cancel_does_not_cancel_unrelated_switch_pumped_by_bubu
             assert not session._navigation_monitor.active.child_tasks
             task.cancel()
             with pytest.raises(asyncio.CancelledError):
-                await task
+                await asyncio.wait_for(task, timeout=5.0)
             assert not switch_cancelled.is_set()
             release_switch.set()
             await asyncio.wait_for(independent, 0.5)
@@ -1401,7 +1400,7 @@ async def test_navigation_cancel_does_not_cancel_unrelated_switch_pumped_by_bubu
         continue_nav.set()
         if task is not None and not task.done():
             task.cancel()
-            await asyncio.gather(task, return_exceptions=True)
+            await asyncio.wait_for(asyncio.gather(task, return_exceptions=True), timeout=5.0)
         await session.event_bus.stop(clear=True, timeout=0.2)
 
 
@@ -1428,7 +1427,7 @@ async def test_public_waiter_in_handler_context_does_not_cancel_unrelated_pumped
         task = asyncio.create_task(session.navigate_to('https://cancelled.example/'))
         waiters.append(task)
         try:
-            await task
+            await asyncio.wait_for(task, timeout=5.0)
         except asyncio.CancelledError:
             pass
 
@@ -1505,7 +1504,7 @@ async def test_raw_navigation_deadline_cancels_owned_observer_without_cancelling
         if waiter is not None and not waiter.done():
             waiter.cancel()
         if waiter is not None:
-            await asyncio.gather(waiter, return_exceptions=True)
+            await asyncio.wait_for(asyncio.gather(waiter, return_exceptions=True), timeout=5.0)
         await session.event_bus.stop(clear=True, timeout=0.2)
 
 
@@ -1537,7 +1536,7 @@ async def test_retiring_bus_cancels_its_retained_navigation_event_pumps(forced):
         await entered.wait()
         owner.cancel()
         with pytest.raises(asyncio.CancelledError):
-            await owner
+            await asyncio.wait_for(owner, timeout=5.0)
         pumps = set(session._navigation_event_pumps)
         assert len(pumps) == 1
         if forced:
@@ -1555,7 +1554,7 @@ async def test_retiring_bus_cancels_its_retained_navigation_event_pumps(forced):
             assert session.event_bus is not old_bus
     finally:
         release.set()
-        await asyncio.gather(*session._navigation_event_pumps, return_exceptions=True)
+        await asyncio.wait_for(asyncio.gather(*session._navigation_event_pumps, return_exceptions=True), timeout=5.0)
 
 
 async def test_second_cancellation_during_child_drain_cannot_strand_navigation_lock():
@@ -1591,12 +1590,12 @@ async def test_second_cancellation_during_child_drain_cannot_strand_navigation_l
             assert not session._navigation_lock.locked(), 'Second cancellation skipped lock release'
             assert session._navigation_task is None
             release.set()
-            await asyncio.gather(task, return_exceptions=True)
+            await asyncio.wait_for(asyncio.gather(task, return_exceptions=True), timeout=5.0)
             assert session._navigation_monitor.active is None
     finally:
         release.set()
         if task is not None:
-            await asyncio.gather(task, return_exceptions=True)
+            await asyncio.wait_for(asyncio.gather(task, return_exceptions=True), timeout=5.0)
         await session.event_bus.stop(clear=True, timeout=0.2)
 
 
@@ -1653,12 +1652,12 @@ async def test_interrupted_bus_stop_retires_pumps_and_preserves_failed_runtime(s
             continue_nav.set()
             await asyncio.wait_for(switching.wait(), 0.5)
             nav.cancel()
-            await asyncio.gather(nav, return_exceptions=True)
+            await asyncio.wait_for(asyncio.gather(nav, return_exceptions=True), timeout=5.0)
             reset = asyncio.create_task(session.reset(stop_event_bus=True))
             await stopping.wait()
             if stop_failure is asyncio.CancelledError:
                 reset.cancel()
-            (result,) = await asyncio.gather(reset, return_exceptions=True)
+            (result,) = await asyncio.wait_for(asyncio.gather(reset, return_exceptions=True), timeout=5.0)
             assert isinstance(result, stop_failure), 'Reset must propagate unsuccessful bus retirement'
             assert session.event_bus is old_bus
             assert session._cdp_client_root is client
@@ -1676,7 +1675,7 @@ async def test_interrupted_bus_stop_retires_pumps_and_preserves_failed_runtime(s
         for task in (nav, reset):
             if task is not None and not task.done():
                 task.cancel()
-                await asyncio.gather(task, return_exceptions=True)
+                await asyncio.wait_for(asyncio.gather(task, return_exceptions=True), timeout=5.0)
         await original_stop(clear=True, timeout=0.1)
         await session._drain_navigation_event_pumps(old_bus)
         if session.event_bus is not old_bus:
@@ -1711,7 +1710,7 @@ async def test_reset_preserves_runtime_when_pump_retirement_exceeds_bound():
         assert not pump.done()
     finally:
         release.set()
-        await asyncio.gather(pump, return_exceptions=True)
+        await asyncio.wait_for(asyncio.gather(pump, return_exceptions=True), timeout=2.0)
 
 
 async def test_failed_shutdown_preserves_runtime_when_bus_and_pump_cannot_retire():
@@ -1764,10 +1763,10 @@ async def test_failed_shutdown_preserves_runtime_when_bus_and_pump_cannot_retire
             proceed.set()
             await asyncio.wait_for(switching.wait(), 0.5)
             nav.cancel()
-            await asyncio.gather(nav, return_exceptions=True)
+            await asyncio.wait_for(asyncio.gather(nav, return_exceptions=True), timeout=5.0)
             old_bus.dispatch = MagicMock(side_effect=dispatch)
             old_bus.stop = AsyncMock(side_effect=RuntimeError('bus stop failed'))
-            (result,) = await asyncio.gather(session.stop(), return_exceptions=True)
+            (result,) = await asyncio.wait_for(asyncio.gather(session.stop(), return_exceptions=True), timeout=5.0)
             assert isinstance(result, (RuntimeError, TimeoutError))
             assert session.event_bus is old_bus, 'Failed shutdown abandoned its unretired bus'
             assert session._cdp_client_root is client
@@ -1779,7 +1778,7 @@ async def test_failed_shutdown_preserves_runtime_when_bus_and_pump_cannot_retire
         old_bus.dispatch, old_bus.stop = original_dispatch, original_stop
         if nav is not None and not nav.done():
             nav.cancel()
-            await asyncio.gather(nav, return_exceptions=True)
+            await asyncio.wait_for(asyncio.gather(nav, return_exceptions=True), timeout=5.0)
         await original_stop(clear=True, timeout=0.1)
         await session._drain_navigation_event_pumps(old_bus)
         if session.event_bus is not old_bus:
@@ -1799,14 +1798,14 @@ async def test_exceptional_cleanup_retains_runtime_until_stubborn_pump_is_quiesc
         try:
             await asyncio.Event().wait()
         except asyncio.CancelledError:
-            await release.wait()
+            await asyncio.wait_for(release.wait(), timeout=5.0)
 
     pump = asyncio.create_task(stubborn_pump())
     session._navigation_event_pumps[pump] = old_bus
     pump.add_done_callback(session._navigation_event_pump_done)
     owner = None
     try:
-        await entered.wait()
+        await asyncio.wait_for(entered.wait(), timeout=5.0)
         if entry == 'synchronous':
             with pytest.raises(NavigationError, match='retir'):
                 session._force_reset_runtime_state(replace_event_bus=False)
@@ -1821,7 +1820,11 @@ async def test_exceptional_cleanup_retains_runtime_until_stubborn_pump_is_quiesc
             with pytest.raises(TimeoutError):
                 await session.reset(stop_event_bus=False)
         assert session.event_bus is old_bus
-        assert session._cdp_client_root is client
+        if entry == 'cancelled_start':
+            client.stop.assert_awaited_once()
+            assert session._cdp_client_root is None
+        else:
+            assert session._cdp_client_root is client
         assert session.agent_focus is focus
         assert session.lifecycle_snapshot()['phase'] == 'failed'
         assert not pump.done()
@@ -1830,13 +1833,20 @@ async def test_exceptional_cleanup_retains_runtime_until_stubborn_pump_is_quiesc
         if owner is not None:
             owner.cancel()
         pump.cancel()
-        await asyncio.gather(pump, *([owner] if owner is not None else []), return_exceptions=True)
+        await asyncio.wait_for(
+            asyncio.gather(pump, *([owner] if owner is not None else []), return_exceptions=True),
+            timeout=2.0,
+        )
 
 
 async def test_forced_timeout_retires_genuinely_quiescent_real_bus_without_long_wait():
     from bubus import BaseEvent, EventBus
 
     session, _, _, _, _ = handler_fixture()
+    session._cdp_client_root = None
+    session._session_manager = None
+    session.agent_focus = None
+    session.browser_profile.cdp_url = None
     old_bus = EventBus()
     session.event_bus = old_bus
     await old_bus.dispatch(BaseEvent())
@@ -1849,7 +1859,7 @@ async def test_forced_timeout_retires_genuinely_quiescent_real_bus_without_long_
         assert session.lifecycle_snapshot()['phase'] == 'stopped'
     finally:
         owner.cancel()
-        await asyncio.gather(owner, return_exceptions=True)
+        await asyncio.wait_for(asyncio.gather(owner, return_exceptions=True), timeout=5.0)
         await old_bus.stop(clear=True, timeout=0)
         await session.event_bus.stop(clear=True, timeout=0)
 
@@ -1909,13 +1919,14 @@ async def test_failed_runtime_cannot_resume_while_retained_bus_work_is_live(entr
             assert session.agent_focus is focus
             assert session.event_bus is old_bus
             release.set()
-            await pump
-            await session.start()
-            start.assert_awaited_once()
-            assert session.lifecycle_snapshot()['phase'] == 'ready'
+            await asyncio.wait_for(pump, timeout=2.0)
+            with pytest.raises(RuntimeError, match='resources are still live'):
+                await session.start()
+            start.assert_not_awaited()
+            assert session.lifecycle_snapshot()['phase'] == 'failed'
     finally:
         release.set()
-        await asyncio.gather(pump, return_exceptions=True)
+        await asyncio.wait_for(asyncio.gather(pump, return_exceptions=True), timeout=2.0)
 
 
 async def test_completed_cleanup_timeout_is_not_misclassified_as_shutdown_deadline():
@@ -1927,10 +1938,8 @@ async def test_completed_cleanup_timeout_is_not_misclassified_as_shutdown_deadli
         raise TimeoutError('event bus retirement blocked')
 
     owner = asyncio.create_task(retirement_failure())
-    with patch.object(BrowserSession, '_force_stop_resources', MagicMock()) as force:
-        with pytest.raises(TimeoutError, match='event bus retirement blocked'):
-            await session._await_task_bounded(owner, timeout=20)
-        force.assert_not_called()
+    with pytest.raises(TimeoutError, match='event bus retirement blocked'):
+        await session._await_task_bounded(owner, timeout=20)
     assert session._cdp_client_root is client
     assert session.agent_focus is focus
 
@@ -1952,12 +1961,15 @@ async def test_start_rechecks_retirement_after_acquiring_lifecycle_lock():
                 session._navigation_event_pumps[pump] = session.event_bus
                 pump.add_done_callback(session._navigation_event_pump_done)
             with pytest.raises(NavigationError, match='retir'):
-                await task
+                await asyncio.wait_for(task, timeout=5.0)
             start.assert_not_awaited()
             assert session.lifecycle_snapshot()['phase'] == 'failed'
     finally:
         release.set()
-        await asyncio.gather(pump, *([task] if task is not None else []), return_exceptions=True)
+        await asyncio.wait_for(
+            asyncio.gather(pump, *([task] if task is not None else []), return_exceptions=True),
+            timeout=2.0,
+        )
 
 
 async def test_shutdown_reset_failure_cannot_bypass_synchronous_retirement_gate():
@@ -1979,7 +1991,7 @@ async def test_shutdown_reset_failure_cannot_bypass_synchronous_retirement_gate(
         raise RuntimeError('reset failed with event work still live')
 
     try:
-        with patch.object(BrowserSession, 'reset', AsyncMock(side_effect=reset_failure)):
+        with patch.object(BrowserSession, '_reset_transaction', AsyncMock(side_effect=reset_failure)):
             with pytest.raises(RuntimeError):
                 await session.stop()
         assert session.event_bus is old_bus
@@ -1988,13 +2000,10 @@ async def test_shutdown_reset_failure_cannot_bypass_synchronous_retirement_gate(
         assert session.lifecycle_snapshot()['phase'] == 'failed'
     finally:
         release.set()
-        await asyncio.gather(*pumps, return_exceptions=True)
+        await asyncio.wait_for(asyncio.gather(*pumps, return_exceptions=True), timeout=2.0)
 
 
-async def test_direct_connect_refuses_failed_live_transport_before_mutation_then_accepts_quiescence():
-    from openbrowser.browser.session import BrowserSession
-    from test_session_part1 import _make_cdp_session, _make_mock_cdp_client
-
+async def test_direct_connect_refuses_failed_live_transport_before_mutation_and_never_replaces_active_root():
     session, client, focus, _, _ = handler_fixture()
     old_url = session.browser_profile.cdp_url
     old_manager = session._session_manager
@@ -2003,23 +2012,11 @@ async def test_direct_connect_refuses_failed_live_transport_before_mutation_then
     pump = asyncio.create_task(release.wait())
     session._navigation_event_pumps[pump] = session.event_bus
     pump.add_done_callback(session._navigation_event_pump_done)
-    replacement_root = _make_mock_cdp_client()
-    replacement_root.start = AsyncMock()
-    replacement_root.send.Target.setAutoAttach = AsyncMock()
-    target = {'targetId': 'replacement', 'type': 'page', 'url': 'https://replacement.example/'}
-    replacement_root.send.Target.getTargets = AsyncMock(return_value={'targetInfos': [target]})
-    replacement = _make_cdp_session(replacement_root, target_id=target['targetId'], session_id='replacement-session')
-    manager = MagicMock()
-    manager.start_monitoring = AsyncMock()
-    manager.get_session_for_target = AsyncMock(return_value=replacement)
-    manager.get_live_session_for_target = AsyncMock(return_value=replacement)
-    manager.clear = AsyncMock()
-    manager.cancel_pending = MagicMock()
+    before_health = session.cdp_connection_health()
     try:
         with (
-            patch('openbrowser.browser.session.CDPClient', return_value=replacement_root) as factory,
-            patch('openbrowser.browser.session_manager.SessionManager', return_value=manager) as manager_factory,
-            patch.object(BrowserSession, '_setup_proxy_auth', AsyncMock()),
+            patch('openbrowser.browser.session.CDPClient') as factory,
+            patch('openbrowser.browser.session_manager.SessionManager') as manager_factory,
         ):
             with pytest.raises(NavigationError, match='retir'):
                 await session.connect(cdp_url='ws://replacement.invalid/devtools/browser/fixture')
@@ -2029,16 +2026,24 @@ async def test_direct_connect_refuses_failed_live_transport_before_mutation_then
             assert session._cdp_client_root is client
             assert session.agent_focus is focus
             assert session._session_manager is old_manager
+            after_early_guard = session.cdp_connection_health()
+            assert after_early_guard.connect_attempts == before_health.connect_attempts
+            assert after_early_guard.last_error_code is before_health.last_error_code
             release.set()
-            await pump
-            result = await session.connect(cdp_url='ws://replacement.invalid/devtools/browser/fixture')
-            assert result is session
-            factory.assert_called_once_with('ws://replacement.invalid/devtools/browser/fixture')
-            assert session._cdp_client_root is replacement_root
-            assert session.agent_focus is replacement
+            await asyncio.wait_for(pump, timeout=2.0)
+            with pytest.raises(RuntimeError, match='connection already exists'):
+                await session.connect(cdp_url='ws://replacement.invalid/devtools/browser/fixture')
+            factory.assert_not_called()
+            manager_factory.assert_not_called()
+            assert session._cdp_client_root is client
+            assert session.agent_focus is focus
+            assert session._session_manager is old_manager
+            after_replacement_refusal = session.cdp_connection_health()
+            assert after_replacement_refusal.connect_attempts == before_health.connect_attempts
+            assert after_replacement_refusal.last_error_code is before_health.last_error_code
     finally:
         release.set()
-        await asyncio.gather(pump, return_exceptions=True)
+        await asyncio.wait_for(asyncio.gather(pump, return_exceptions=True), timeout=2.0)
 
 
 @pytest.mark.parametrize('failure_boundary', ['response', 'context_exit'])
@@ -2046,8 +2051,12 @@ async def test_connect_rechecks_shared_retirement_guard_after_http_discovery(fai
     from openbrowser.browser.session import BrowserSession
     from test_session_part1 import _make_cdp_session, _make_mock_cdp_client
 
-    session, client, focus, _, _ = handler_fixture()
-    old_manager = session._session_manager
+    session, _, _, _, _ = handler_fixture()
+    # An active replacement is refused before discovery. Keep only the stale
+    # navigation state that this test needs, so discovery still runs.
+    session._cdp_client_root = None
+    session._session_manager = None
+    session.agent_focus = None
     release = asyncio.Event()
     pumps = []
     http_url = 'http://replacement.invalid:9222'
@@ -2098,12 +2107,18 @@ async def test_connect_rechecks_shared_retirement_guard_after_http_discovery(fai
             factory.assert_not_called()
             manager_factory.assert_not_called()
             assert session.browser_profile.cdp_url == (http_url if failure_boundary == 'response' else ws_url)
-            assert session._cdp_client_root is client
-            assert session.agent_focus is focus
-            assert session._session_manager is old_manager
+            assert session._cdp_client_root is None
+            assert session.agent_focus is None
+            assert session._session_manager is None
+            from openbrowser.browser.cdp_connection import CdpConnectionErrorCode, CdpConnectionPhase
+
+            health = session.cdp_connection_health()
+            assert health.connect_attempts == 1
+            assert health.phase is CdpConnectionPhase.FAILED
+            assert health.last_error_code is CdpConnectionErrorCode.CONNECT_FAILED
     finally:
         release.set()
-        await asyncio.gather(*pumps, return_exceptions=True)
+        await asyncio.wait_for(asyncio.gather(*pumps, return_exceptions=True), timeout=2.0)
 
 
 def test_policy_commit_is_separate_from_ack_and_survives_primary_terminalization():
@@ -2325,13 +2340,13 @@ async def test_policy_sent_job_survives_primary_timeout_and_repeated_caller_canc
             await wait_primary_terminal(op)
             if ending == 'double_cancel':
                 task.cancel()
-                (result,) = await asyncio.gather(task, return_exceptions=True)
+                (result,) = await asyncio.wait_for(asyncio.gather(task, return_exceptions=True), timeout=5.0)
                 assert isinstance(result, asyncio.CancelledError)
                 assert not op.policy_task.done() and not op.policy_task.cancelled()
                 with pytest.raises(NavigationError):
                     await session.navigate_to('https://allowed.test/too-early')
             controls.release_action.set()
-            (result,) = await asyncio.gather(task, return_exceptions=True)
+            (result,) = await asyncio.wait_for(asyncio.gather(task, return_exceptions=True), timeout=5.0)
             assert isinstance(result, NavigationTimeoutError if ending == 'timeout' else asyncio.CancelledError)
             await asyncio.wait_for(asyncio.shield(op.policy_task), 2)
             if session._navigation_task is not None:
@@ -2347,7 +2362,7 @@ async def test_policy_sent_job_survives_primary_timeout_and_repeated_caller_canc
         controls.release_action.set()
         controls.ack.set()
         if task is not None:
-            await asyncio.gather(task, return_exceptions=True)
+            await asyncio.wait_for(asyncio.gather(task, return_exceptions=True), timeout=5.0)
         await session.event_bus.stop(clear=True, timeout=0.1)
         await session._drain_navigation_event_pumps(session.event_bus)
 
@@ -2372,13 +2387,13 @@ async def test_policy_preparation_cannot_act_on_replacement_binding(replacement)
                 focus.session_id = 'replacement-session'
             controls.release_world.set()
             with pytest.raises(NavigationError):
-                await task
+                await asyncio.wait_for(task, timeout=5.0)
             client.send.Runtime.callFunctionOn.assert_not_awaited()
             assert frame['url'] == 'https://blocked.test/forbidden'
     finally:
         controls.release_world.set()
         if task is not None:
-            await asyncio.gather(task, return_exceptions=True)
+            await asyncio.wait_for(asyncio.gather(task, return_exceptions=True), timeout=5.0)
         await session.event_bus.stop(clear=True, timeout=0.1)
         await session._drain_navigation_event_pumps(session.event_bus)
 
@@ -2456,14 +2471,14 @@ async def test_reset_does_not_cancel_sent_policy_action_or_replace_before_retire
             assert session.lifecycle_snapshot()['phase'] == 'failed'
             controls.release_action.set()
             await asyncio.wait_for(asyncio.shield(op.policy_task), 2)
-            await asyncio.gather(task, return_exceptions=True)
+            await asyncio.wait_for(asyncio.gather(task, return_exceptions=True), timeout=5.0)
             assert op.containment.phase.value == 'contained'
             await session.reset(stop_event_bus=False)
             assert session._cdp_client_root is None
     finally:
         controls.release_action.set()
         if task is not None:
-            await asyncio.gather(task, return_exceptions=True)
+            await asyncio.wait_for(asyncio.gather(task, return_exceptions=True), timeout=5.0)
         await session.event_bus.stop(clear=True, timeout=0.1)
         await session._drain_navigation_event_pumps(session.event_bus)
 
@@ -2563,7 +2578,7 @@ async def test_owned_browser_exit_revokes_unconfirmed_policy_authority_and_allow
         if any(connection.status == psutil.CONN_ESTABLISHED for connection in owned.net_connections(kind='tcp')):
             break
         await asyncio.sleep(0.01)
-    client.ws = SimpleNamespace(transport=writer.transport)
+    client.ws = SimpleNamespace(transport=writer.transport, close=AsyncMock())
     record = {
         'pid': process.pid,
         'start_time': owned.create_time(),
@@ -2613,7 +2628,8 @@ async def test_owned_browser_exit_revokes_unconfirmed_policy_authority_and_allow
             getsockname=actual_socket.getsockname,
         )
         client.ws = SimpleNamespace(
-            transport=SimpleNamespace(get_extra_info=lambda name: peer_socket if name == 'socket' else None)
+            transport=SimpleNamespace(get_extra_info=lambda name: peer_socket if name == 'socket' else None),
+            close=AsyncMock(),
         )
     elif endpoint == 'missing_peer':
         client.ws = None
@@ -2690,11 +2706,11 @@ async def test_ready_runtime_cannot_connect_over_live_sent_policy_authority():
             assert session.browser_profile.cdp_url == old_url
             assert session.lifecycle_snapshot()['phase'] == 'ready'
             controls.release_action.set()
-            await asyncio.gather(task, return_exceptions=True)
+            await asyncio.wait_for(asyncio.gather(task, return_exceptions=True), timeout=5.0)
     finally:
         controls.release_action.set()
         if task is not None:
-            await asyncio.gather(task, return_exceptions=True)
+            await asyncio.wait_for(asyncio.gather(task, return_exceptions=True), timeout=5.0)
         await session.event_bus.stop(clear=True, timeout=0.1)
         await session._drain_navigation_event_pumps(session.event_bus)
 
@@ -2773,7 +2789,7 @@ async def test_expired_containment_grace_is_not_restarted_by_request_finalizatio
         assert op.containment.phase is ContainmentPhase.UNCONFIRMED
     finally:
         release.set()
-        await asyncio.gather(op.policy_task, return_exceptions=True)
+        await asyncio.wait_for(asyncio.gather(op.policy_task, return_exceptions=True), timeout=5.0)
 
 
 async def test_real_wire_ipv4_policy_authority_cannot_be_revoked_by_same_port_ipv6_process_exit(tmp_path):
@@ -2923,7 +2939,7 @@ async def test_real_wire_ipv4_policy_authority_cannot_be_revoked_by_same_port_ip
                         await session.navigate_to('https://allowed.test/start', timeout_ms=150)
                 await asyncio.wait_for(seen.wait(), 2)
                 operation = session._navigation_monitor.active
-                (outcome,) = await asyncio.gather(session.kill(), return_exceptions=True)
+                (outcome,) = await asyncio.wait_for(asyncio.gather(session.kill(), return_exceptions=True), timeout=5.0)
                 assert isinstance(outcome, NavigationError), (
                     'Different address-family process death falsely retired the live endpoint'
                 )
@@ -2940,19 +2956,19 @@ async def test_real_wire_ipv4_policy_authority_cannot_be_revoked_by_same_port_ip
             finally:
                 release.set()
                 if actions:
-                    await asyncio.gather(*actions, return_exceptions=True)
-                await root.stop()
+                    await asyncio.wait_for(asyncio.gather(*actions, return_exceptions=True), timeout=5.0)
+                await asyncio.wait_for(root.stop(), timeout=5.0)
     finally:
         release.set()
+        if process.returncode is None:
+            process.kill()
+            await asyncio.wait_for(process.wait(), timeout=5.0)
         if session is not None:
             if operation is not None and operation.policy_task is not None:
                 await asyncio.wait({operation.policy_task}, timeout=1)
             session._navigation_policies.clear()
             await session.event_bus.stop(clear=True, timeout=0.1)
             await session._drain_navigation_event_pumps(session.event_bus)
-        if process.returncode is None:
-            process.kill()
-            await process.wait()
 
 
 @pytest.mark.parametrize(
@@ -3068,6 +3084,6 @@ async def test_stale_tab_viewport_acquisition_does_not_command_or_register():
         session.seed_generation(op.generation + 1)
         release.set()
         with pytest.raises(NavigationError):
-            await task
+            await asyncio.wait_for(task, timeout=5.0)
     client.send.Emulation.setDeviceMetricsOverride.assert_not_awaited()
     assert session.tab_snapshot() == []

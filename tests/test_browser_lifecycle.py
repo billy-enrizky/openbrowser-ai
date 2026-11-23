@@ -8,6 +8,7 @@ from bubus import EventBus
 
 from openbrowser.browser import BrowserProfile, BrowserSession
 from openbrowser.browser.events import (
+	BrowserKillEvent,
 	BrowserStartEvent,
 	BrowserStopEvent,
 	CloseTabEvent,
@@ -623,38 +624,6 @@ async def test_stop_during_a_real_start_finishes_stopped_and_can_restart():
 	assert session.lifecycle_snapshot()['phase'] == 'ready'
 
 
-@pytest.mark.asyncio
-async def test_failed_stop_retires_its_bus_and_allows_a_clean_restart():
-	session = _make_session()
-	session._cdp_client_root = MagicMock()
-	save_event = _ready_awaitable()
-
-	class StopEvent:
-		async def _resolve(self):
-			return None
-
-		def __await__(self):
-			return self._resolve().__await__()
-
-	stop_event = StopEvent()
-	stop_event.event_result = AsyncMock(side_effect=RuntimeError('watchdog cleanup failed'))
-	old_bus = session.event_bus
-	session.event_bus.dispatch = MagicMock(side_effect=[save_event, stop_event])
-	old_bus.stop = AsyncMock()
-
-	with pytest.raises(RuntimeError, match='watchdog cleanup failed'):
-		await session.kill()
-
-	assert session.event_bus is not old_bus
-	assert session.lifecycle_snapshot()['phase'] == 'failed'
-
-	async def fake_start():
-		session._lifecycle.transition(LifecyclePhase.READY, reason='restart after failed stop')
-
-	with patch.object(session, '_start_locked', side_effect=fake_start):
-		await session.start()
-
-	assert session.lifecycle_snapshot()['phase'] == 'ready'
 
 
 @pytest.mark.asyncio
@@ -665,7 +634,7 @@ async def test_failed_force_stop_keeps_ownership_until_kill_retry_succeeds():
 	watchdog._subprocess = MagicMock()
 	watchdog._spawned_subprocess = None
 	watchdog._profile_lease = MagicMock()
-	watchdog.on_BrowserKillEvent = AsyncMock(side_effect=RuntimeError('kill failed'))
+	watchdog.on_BrowserKillEvent = AsyncMock(side_effect=RuntimeError("kill failed"))
 	session._local_browser_watchdog = watchdog
 
 	class StopEvent:
@@ -685,15 +654,15 @@ async def test_failed_force_stop_keeps_ownership_until_kill_retry_succeeds():
 	session.event_bus.dispatch = MagicMock(side_effect=[_ready_awaitable(), StopEvent()])
 	old_bus.stop = AsyncMock()
 
-	with pytest.raises(RuntimeError, match='kill failed'):
+	with pytest.raises(RuntimeError, match="kill failed"):
 		await session.kill()
 
 	assert session.event_bus is old_bus
 	assert session._local_browser_watchdog is watchdog
-	assert session.lifecycle_snapshot()['phase'] == 'failed'
-	with pytest.raises(RuntimeError, match='resources are still live'):
+	assert session.lifecycle_snapshot()["phase"] == "failed"
+	with pytest.raises(RuntimeError, match="cleanup is still pending"):
 		await session.start()
-	with pytest.raises(RuntimeError, match='resources are still live'):
+	with pytest.raises(RuntimeError, match="resources are still live"):
 		await session.reset()
 
 	async def release_on_retry(event):
@@ -706,7 +675,7 @@ async def test_failed_force_stop_keeps_ownership_until_kill_retry_succeeds():
 
 	assert session.event_bus is not old_bus
 	assert session._local_browser_watchdog is None
-	assert session.lifecycle_snapshot()['phase'] == 'stopped'
+	assert session.lifecycle_snapshot()["phase"] == "stopped"
 
 
 @pytest.mark.asyncio
@@ -743,21 +712,17 @@ async def test_reset_restores_core_handlers_on_a_fresh_bus():
 
 
 @pytest.mark.asyncio
-async def test_bounded_cleanup_force_releases_a_stuck_task():
+async def test_bounded_cleanup_resets_runtime_without_a_second_stop_event():
 	session = _make_session()
 
 	async def hang():
 		await asyncio.sleep(60)
 
 	task = asyncio.create_task(hang())
-	with (
-		patch.object(session, '_force_stop_resources') as force_stop,
-		patch.object(session, '_force_reset_runtime_state') as force_reset,
-	):
+	with patch.object(session, '_force_reset_runtime_state') as force_reset:
 		with pytest.raises(TimeoutError, match='Browser shutdown timed out'):
 			await session._await_task_bounded(task, 0.05)
 
-	force_stop.assert_called_once()
 	force_reset.assert_called_once()
 
 
@@ -772,3 +737,464 @@ def test_lifecycle_snapshot_includes_storage_state_previews(tmp_path):
 	assert snapshot['storage_state']['path'] == str(state_path.resolve())
 	assert snapshot['storage_state_save']['phase'] == 'idle'
 	assert snapshot['storage_state_save']['path'] == str(state_path.resolve())
+
+@pytest.mark.asyncio
+async def test_keep_alive_stop_retains_owners_when_final_reset_fails():
+	session = _make_session()
+	session.browser_profile.keep_alive = True
+	root = MagicMock()
+	root.stop = AsyncMock()
+	manager = MagicMock()
+	manager.clear = AsyncMock(side_effect=[RuntimeError('keep-alive clear failed'), None])
+	manager.cancel_pending = MagicMock()
+	session._cdp_client_root = root
+	session._session_manager = manager
+	session._lifecycle.transition(LifecyclePhase.STARTING)
+	session._lifecycle.transition(LifecyclePhase.READY)
+
+	with pytest.raises(RuntimeError, match='keep-alive clear failed'):
+		await session.stop()
+
+	assert session.lifecycle_snapshot()['phase'] == 'failed'
+	assert session._cdp_client_root is root
+	assert session._session_manager is manager
+	assert session.cdp_connection_health().cleanup_pending is True
+
+	await session.kill()
+
+	assert manager.clear.await_count == 2
+	assert root.stop.await_count == 2
+	assert session._cdp_client_root is None
+	assert session._session_manager is None
+	assert session.cdp_connection_health().cleanup_pending is False
+
+
+@pytest.mark.asyncio
+async def test_keep_alive_stop_preserves_local_owner_and_cdp_target():
+	session = _make_session()
+	session.browser_profile.keep_alive = True
+	session.browser_profile.cdp_url = 'ws://kept-browser/devtools/browser/fixture'
+	root = MagicMock()
+	root.stop = AsyncMock()
+	manager = MagicMock()
+	manager.clear = AsyncMock()
+	manager.cancel_pending = MagicMock()
+	watchdog = MagicMock()
+	watchdog._subprocess = MagicMock()
+	watchdog._spawned_subprocess = None
+	watchdog._profile_lease = MagicMock()
+	watchdog.on_BrowserKillEvent = AsyncMock()
+	session._cdp_client_root = root
+	session._session_manager = manager
+	session._local_browser_watchdog = watchdog
+	session._watchdogs_attached = True
+	session._lifecycle.transition(LifecyclePhase.STARTING)
+	session._lifecycle.transition(LifecyclePhase.READY)
+	old_bus = session.event_bus
+
+	await session.stop()
+
+	root.stop.assert_awaited_once()
+	manager.clear.assert_awaited_once()
+	watchdog.on_BrowserKillEvent.assert_not_awaited()
+	assert session._local_browser_watchdog is watchdog
+	assert session._watchdog_has_live_resources(watchdog) is True
+	assert session.browser_profile.cdp_url == 'ws://kept-browser/devtools/browser/fixture'
+	assert session.event_bus is not old_bus
+	assert session.lifecycle_snapshot()['phase'] == 'stopped'
+
+	async def fake_connect(cdp_url=None, *, _start_owned=False):
+		assert cdp_url == 'ws://kept-browser/devtools/browser/fixture'
+		assert _start_owned is True
+		session._cdp_client_root = MagicMock()
+		return session
+
+	try:
+		with (
+			patch.object(BrowserSession, 'attach_all_watchdogs', AsyncMock()),
+			patch.object(BrowserSession, 'connect', side_effect=fake_connect) as connect,
+		):
+			await session.start()
+		connect.assert_awaited_once()
+		assert session.lifecycle_snapshot()['phase'] == 'ready'
+	finally:
+		await session._retire_event_bus(session.event_bus, timeout=1.0)
+
+
+@pytest.mark.asyncio
+async def test_keep_alive_stop_start_kill_preserves_one_owner_chain(monkeypatch):
+	from openbrowser.browser.watchdogs import (
+		aboutblank_watchdog,
+		default_action_watchdog,
+		dom_watchdog,
+		downloads_watchdog,
+		permissions_watchdog,
+		popups_watchdog,
+		recording_watchdog,
+		screenshot_watchdog,
+		security_watchdog,
+		storage_state_watchdog,
+	)
+	from openbrowser.browser.watchdogs.local_browser_watchdog import LocalBrowserWatchdog
+
+	for module, class_name in (
+		(aboutblank_watchdog, 'AboutBlankWatchdog'),
+		(default_action_watchdog, 'DefaultActionWatchdog'),
+		(dom_watchdog, 'DOMWatchdog'),
+		(downloads_watchdog, 'DownloadsWatchdog'),
+		(permissions_watchdog, 'PermissionsWatchdog'),
+		(popups_watchdog, 'PopupsWatchdog'),
+		(recording_watchdog, 'RecordingWatchdog'),
+		(screenshot_watchdog, 'ScreenshotWatchdog'),
+		(security_watchdog, 'SecurityWatchdog'),
+		(storage_state_watchdog, 'StorageStateWatchdog'),
+	):
+		monkeypatch.setattr(module, class_name, MagicMock())
+
+	session = _make_session()
+	session.browser_profile.keep_alive = True
+	session.browser_profile.cdp_url = 'ws://kept-browser/devtools/browser/fixture'
+
+	class FakeProcess:
+		pid = 4321
+		start_time = 123.0
+
+		def __init__(self):
+			self.running = True
+			self.terminated = False
+			self.wait_checks = 0
+
+		def create_time(self):
+			return self.start_time
+
+		def children(self, recursive=True):
+			return []
+
+		def terminate(self):
+			self.terminated = True
+			self.running = False
+
+		def kill(self):
+			self.terminated = True
+			self.running = False
+
+		def is_running(self):
+			self.wait_checks += 1
+			return self.running
+
+	process = FakeProcess()
+	lease = MagicMock()
+	browser_record = {
+		'pid': process.pid,
+		'start_time': process.start_time,
+		'profile_dir': '/tmp/kept-profile',
+		'instance_id': 'kept-owner',
+		'ownership_marker': '--openbrowser-instance-id=kept-owner',
+		'executable': '/Applications/Chrome',
+		'cdp_port': 9222,
+	}
+	previous = LocalBrowserWatchdog(event_bus=session.event_bus, browser_session=session)
+	previous._subprocess = process
+	previous._browser_record = browser_record
+	previous._profile_lease = lease
+	previous._instance_id = 'kept-owner'
+	session._local_browser_watchdog = previous
+	session._watchdogs_attached = False
+	session._lifecycle.transition(LifecyclePhase.STARTING)
+	session._lifecycle.transition(LifecyclePhase.READY)
+
+	async def fake_connect(cdp_url=None, *, _start_owned=False):
+		assert cdp_url == 'ws://kept-browser/devtools/browser/fixture'
+		assert _start_owned is True
+		session._cdp_client_root = MagicMock()
+		return session
+
+	try:
+		with patch.object(
+			LocalBrowserWatchdog,
+			'_launch_browser',
+			AsyncMock(side_effect=AssertionError('must not launch a second browser')),
+		):
+			await session.stop()
+
+			assert session._local_browser_watchdog is previous
+			assert previous._subprocess is process
+			assert previous._profile_lease is lease
+			assert session.browser_profile.cdp_url == 'ws://kept-browser/devtools/browser/fixture'
+
+			with patch.object(BrowserSession, 'connect', side_effect=fake_connect) as connect:
+				await session.start()
+
+			connect.assert_awaited_once()
+			replacement = session._local_browser_watchdog
+			assert replacement is not previous
+			assert replacement._subprocess is process
+			assert replacement._profile_lease is lease
+			assert replacement._instance_id == 'kept-owner'
+			assert previous._subprocess is None
+			assert previous._profile_lease is None
+
+			replacement._cleanup_profile_cache = MagicMock(return_value=0)
+			with (
+				patch.object(LocalBrowserWatchdog, '_merge_owned_descendants', return_value=True),
+				patch.object(
+					LocalBrowserWatchdog,
+					'_cleanup_owned_descendants',
+					AsyncMock(return_value=True),
+				),
+			):
+				await session.kill()
+
+			assert process.terminated is True
+			assert process.running is False
+			assert process.wait_checks > 0
+			lease.clear_browser.assert_called_once()
+			lease.release.assert_called_once()
+			assert replacement._subprocess is None
+			assert replacement._profile_lease is None
+	finally:
+		await session._retire_event_bus(session.event_bus, timeout=1.0)
+
+
+@pytest.mark.asyncio
+async def test_attach_all_watchdogs_adopts_kept_alive_local_owner(monkeypatch):
+	from openbrowser.browser.watchdogs import (
+		aboutblank_watchdog,
+		default_action_watchdog,
+		dom_watchdog,
+		downloads_watchdog,
+		permissions_watchdog,
+		popups_watchdog,
+		recording_watchdog,
+		screenshot_watchdog,
+		security_watchdog,
+		storage_state_watchdog,
+	)
+	from openbrowser.browser.watchdogs.local_browser_watchdog import LocalBrowserWatchdog
+
+	for module, class_name in (
+		(aboutblank_watchdog, 'AboutBlankWatchdog'),
+		(default_action_watchdog, 'DefaultActionWatchdog'),
+		(dom_watchdog, 'DOMWatchdog'),
+		(downloads_watchdog, 'DownloadsWatchdog'),
+		(permissions_watchdog, 'PermissionsWatchdog'),
+		(popups_watchdog, 'PopupsWatchdog'),
+		(recording_watchdog, 'RecordingWatchdog'),
+		(screenshot_watchdog, 'ScreenshotWatchdog'),
+		(security_watchdog, 'SecurityWatchdog'),
+		(storage_state_watchdog, 'StorageStateWatchdog'),
+	):
+		monkeypatch.setattr(module, class_name, MagicMock())
+
+	session = _make_session()
+	previous = LocalBrowserWatchdog(event_bus=session.event_bus, browser_session=session)
+	process = MagicMock()
+	lease = MagicMock()
+	previous._subprocess = process
+	previous._profile_lease = lease
+	previous._instance_id = 'kept-owner'
+	session._local_browser_watchdog = previous
+	session._watchdogs_attached = False
+
+	await session.attach_all_watchdogs()
+
+	replacement = session._local_browser_watchdog
+	assert replacement is not previous
+	assert replacement._subprocess is process
+	assert replacement._profile_lease is lease
+	assert replacement._instance_id == 'kept-owner'
+	assert previous._subprocess is None
+	assert previous._profile_lease is None
+
+	replacement._cleanup_process = AsyncMock(return_value=True)
+	replacement._cleanup_profile_cache = MagicMock(return_value=0)
+	await replacement.on_BrowserKillEvent(BrowserKillEvent())
+
+	replacement._cleanup_process.assert_awaited_once()
+	assert replacement._subprocess is None
+	assert replacement._profile_lease is None
+
+
+@pytest.mark.asyncio
+async def test_keep_alive_failed_reset_retries_without_killing_local_owner():
+	session = _make_session()
+	session.browser_profile.keep_alive = True
+	session.browser_profile.cdp_url = 'ws://kept-browser/devtools/browser/fixture'
+	root = MagicMock()
+	root.stop = AsyncMock()
+	manager = MagicMock()
+	manager.clear = AsyncMock(side_effect=[RuntimeError('keep-alive clear failed'), None])
+	manager.cancel_pending = MagicMock()
+	watchdog = MagicMock()
+	watchdog._subprocess = MagicMock()
+	watchdog._spawned_subprocess = None
+	watchdog._profile_lease = MagicMock()
+	watchdog.on_BrowserKillEvent = AsyncMock()
+	session._cdp_client_root = root
+	session._session_manager = manager
+	session._local_browser_watchdog = watchdog
+	session._lifecycle.transition(LifecyclePhase.STARTING)
+	session._lifecycle.transition(LifecyclePhase.READY)
+
+	with pytest.raises(RuntimeError, match='keep-alive clear failed'):
+		await session.stop()
+
+	assert session.cdp_connection_health().cleanup_pending is True
+	await session.reset()
+
+	assert manager.clear.await_count == 2
+	assert root.stop.await_count >= 1
+	watchdog.on_BrowserKillEvent.assert_not_awaited()
+	assert session._cdp_client_root is None
+	assert session._session_manager is None
+	assert session._local_browser_watchdog is watchdog
+	assert session.browser_profile.cdp_url == 'ws://kept-browser/devtools/browser/fixture'
+	assert session.cdp_connection_health().cleanup_pending is False
+	assert session.lifecycle_snapshot()['phase'] == 'stopped'
+
+
+@pytest.mark.asyncio
+async def test_keep_alive_reset_retries_failed_forced_watchdog_cleanup():
+	session = _make_session()
+	session.browser_profile.keep_alive = True
+	watchdog = MagicMock()
+	watchdog._subprocess = MagicMock()
+	watchdog._spawned_subprocess = None
+	watchdog._profile_lease = MagicMock()
+
+	async def release_owner(_event):
+		watchdog._subprocess = None
+		watchdog._profile_lease = None
+
+	watchdog.on_BrowserKillEvent = AsyncMock(side_effect=release_owner)
+	session._local_browser_watchdog = watchdog
+	session._cdp_health.mark_cleanup_failure(RuntimeError('watchdog cleanup failed'))
+	session._watchdog_cleanup_error = RuntimeError('watchdog cleanup failed')
+	session._lifecycle.transition(LifecyclePhase.STARTING)
+	session._lifecycle.transition(LifecyclePhase.READY)
+	session._lifecycle.fail('retained watchdog failure')
+
+	await session.reset(wait_for_operations=False)
+
+	watchdog.on_BrowserKillEvent.assert_awaited_once()
+	assert session._local_browser_watchdog is None
+	assert session.cdp_connection_health().cleanup_pending is False
+	assert session.lifecycle_snapshot()['phase'] == 'stopped'
+
+
+@pytest.mark.asyncio
+async def test_keep_alive_reset_retains_failed_watchdog_cleanup():
+	session = _make_session()
+	session.browser_profile.keep_alive = True
+	watchdog = MagicMock()
+	watchdog._subprocess = MagicMock()
+	watchdog._spawned_subprocess = None
+	watchdog._profile_lease = MagicMock()
+	watchdog.on_BrowserKillEvent = AsyncMock(side_effect=RuntimeError('watchdog still live'))
+	session._local_browser_watchdog = watchdog
+	session._cdp_health.mark_cleanup_failure(RuntimeError('watchdog cleanup failed'))
+	session._watchdog_cleanup_error = RuntimeError('watchdog cleanup failed')
+	session._lifecycle.transition(LifecyclePhase.STARTING)
+	session._lifecycle.transition(LifecyclePhase.READY)
+	session._lifecycle.fail('retained watchdog failure')
+
+	with pytest.raises(RuntimeError, match='watchdog still live'):
+		await session.reset(wait_for_operations=False)
+
+	assert session._local_browser_watchdog is watchdog
+	assert session._watchdog_has_live_resources(watchdog) is True
+	assert session.cdp_connection_health().cleanup_pending is True
+	assert session.lifecycle_snapshot()['phase'] == 'failed'
+
+
+@pytest.mark.asyncio
+async def test_failed_stop_retains_ownership_then_allows_a_clean_restart():
+	session = _make_session()
+	root = MagicMock()
+	root.stop = AsyncMock()
+	session._cdp_client_root = root
+	save_event = _ready_awaitable()
+
+	class StopEvent:
+		async def _resolve(self):
+			return None
+
+		def __await__(self):
+			return self._resolve().__await__()
+
+	stop_event = StopEvent()
+	stop_event.event_result = AsyncMock(side_effect=RuntimeError("watchdog cleanup failed"))
+	old_bus = session.event_bus
+	session.event_bus.dispatch = MagicMock(side_effect=[save_event, stop_event])
+	old_bus.stop = AsyncMock()
+
+	with pytest.raises(RuntimeError, match="watchdog cleanup failed"):
+		await session.kill()
+
+	assert session.event_bus is old_bus
+	assert session._cdp_client_root is root
+	assert session.cdp_connection_health().cleanup_pending is True
+	assert session.lifecycle_snapshot()["phase"] == "failed"
+
+	session.event_bus.dispatch = MagicMock(side_effect=[_ready_awaitable(), StopEvent()])
+	await session.kill()
+
+	assert session.event_bus is not old_bus
+	assert session._cdp_client_root is None
+	assert session.lifecycle_snapshot()["phase"] == "stopped"
+
+	async def fake_start():
+		session._lifecycle.transition(LifecyclePhase.READY, reason="restart after failed stop")
+
+	with patch.object(session, "_start_locked", side_effect=fake_start):
+		await session.start()
+
+	assert session.lifecycle_snapshot()["phase"] == "ready"
+
+@pytest.mark.asyncio
+async def test_shutdown_returns_when_start_cancellation_replaces_the_bus():
+	session = _make_session()
+	session._lifecycle.transition(LifecyclePhase.STARTING)
+	session._lifecycle.transition(LifecyclePhase.READY)
+	old_bus = session.event_bus
+	replacement_bus = EventBus()
+	old_bus.dispatch = MagicMock()
+	old_bus.stop = AsyncMock()
+
+	async def replace_bus():
+		session.event_bus = replacement_bus
+		session._lifecycle.seed_generation(session._lifecycle.generation + 1)
+
+	with patch.object(session, "_cancel_owned_start", side_effect=replace_bus):
+		await session._shutdown_locked(force=False)
+
+	old_bus.dispatch.assert_not_called()
+	old_bus.stop.assert_not_awaited()
+	assert session.event_bus is replacement_bus
+
+@pytest.mark.asyncio
+async def test_stop_propagates_reset_cleanup_failure_and_retains_owners():
+	session = _make_session()
+	root = MagicMock()
+	root.stop = AsyncMock()
+	manager = MagicMock()
+	manager.clear = AsyncMock(side_effect=[RuntimeError("manager clear failed"), None])
+	manager.cancel_pending = MagicMock()
+	session._cdp_client_root = root
+	session._session_manager = manager
+	session._lifecycle.transition(LifecyclePhase.STARTING)
+	session._lifecycle.transition(LifecyclePhase.READY)
+
+	with pytest.raises(RuntimeError, match="manager clear failed"):
+		await session.stop()
+
+	assert session.lifecycle_snapshot()["phase"] == "failed"
+	assert session._cdp_client_root is root
+	assert session._session_manager is manager
+	assert session.cdp_connection_health().cleanup_pending is True
+
+	await session.kill()
+
+	assert session._cdp_client_root is None
+	assert session._session_manager is None
+	assert session.cdp_connection_health().cleanup_pending is False

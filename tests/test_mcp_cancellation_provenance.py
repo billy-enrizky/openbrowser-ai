@@ -509,7 +509,7 @@ async def test_validated_tool_owner_is_cancelled_once_and_drained_before_telemet
     assert raised.value is observed[0]
     assert len(child_cancellations) == 1
     assert len(telemetry) == 1 and telemetry[0][1]
-    assert "CancelledError" in telemetry[0][0].error_message
+    assert telemetry[0][0].error_message == "cancelled"
 
 
 @pytest.mark.asyncio

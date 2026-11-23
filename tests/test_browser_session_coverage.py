@@ -13,6 +13,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from cdp_use import CDPClient
 
+from openbrowser.browser.lifecycle import LifecyclePhase
+
 logger = logging.getLogger(__name__)
 
 
@@ -471,7 +473,7 @@ class TestBrowserSessionLifecycle:
         event_bus = session.event_bus
         event_bus.stop = AsyncMock()
 
-        with patch.object(BrowserSession, "reset", new_callable=AsyncMock) as reset:
+        with patch.object(BrowserSession, "_reset_transaction", new_callable=AsyncMock) as reset:
             with pytest.raises(RuntimeError, match="storage save failed"):
                 await session.kill()
 
@@ -489,7 +491,7 @@ class TestBrowserSessionLifecycle:
         session.event_bus.dispatch = MagicMock(side_effect=[save_event, stop_event])
         event_bus.stop = AsyncMock(side_effect=RuntimeError("event bus finalization failed"))
 
-        with patch.object(type(session), "reset", new_callable=AsyncMock) as reset:
+        with patch.object(type(session), "_reset_transaction", new_callable=AsyncMock) as reset:
             with pytest.raises(RuntimeError, match="event bus finalization failed"):
                 await session.kill()
 
@@ -505,7 +507,7 @@ class TestBrowserSessionLifecycle:
         session.event_bus.dispatch = MagicMock(side_effect=[save_event, stop_event])
         event_bus.stop = AsyncMock()
 
-        with patch.object(type(session), "reset", new_callable=AsyncMock) as reset:
+        with patch.object(type(session), "_reset_transaction", new_callable=AsyncMock) as reset:
             reset.side_effect = RuntimeError("session reset failed")
             with pytest.raises(RuntimeError, match="session reset failed"):
                 await session.kill()
@@ -550,6 +552,7 @@ class TestOnBrowserStartEvent:
 
     async def test_start_with_cdp_url(self):
         session = _make_browser_session()
+        session._lifecycle.transition(LifecyclePhase.STARTING)
         session.__dict__["attach_all_watchdogs"] = AsyncMock()
 
         async def mock_connect(**kwargs):
@@ -568,6 +571,7 @@ class TestOnBrowserStartEvent:
 
     async def test_start_already_connected(self):
         session = _make_browser_session()
+        session._lifecycle.transition(LifecyclePhase.STARTING)
         session.__dict__["attach_all_watchdogs"] = AsyncMock()
         session._cdp_client_root = _make_mock_cdp_client()
 
@@ -579,6 +583,7 @@ class TestOnBrowserStartEvent:
 
     async def test_start_no_cdp_url_local(self):
         session = _make_browser_session()
+        session._lifecycle.transition(LifecyclePhase.STARTING)
         session.browser_profile.cdp_url = None
         session.browser_profile.is_local = True
         session.__dict__["attach_all_watchdogs"] = AsyncMock()
@@ -603,6 +608,7 @@ class TestOnBrowserStartEvent:
 
     async def test_start_no_cdp_url_not_local_raises(self):
         session = _make_browser_session()
+        session._lifecycle.transition(LifecyclePhase.STARTING)
         session.browser_profile.cdp_url = None
         session.browser_profile.is_local = False
         session.__dict__["attach_all_watchdogs"] = AsyncMock()
@@ -615,6 +621,7 @@ class TestOnBrowserStartEvent:
 
     async def test_start_exception_dispatches_error(self):
         session = _make_browser_session()
+        session._lifecycle.transition(LifecyclePhase.STARTING)
         session.__dict__["attach_all_watchdogs"] = AsyncMock()
         _setattr(session, "connect", AsyncMock(side_effect=RuntimeError("connection failed")))
         session._cdp_client_root = None
@@ -661,7 +668,10 @@ class TestOnBrowserStopEvent:
 
         from openbrowser.browser.events import BrowserStopEvent
 
-        with patch.object(session.event_bus, "dispatch", return_value=_make_awaitable_event()):
+        with (
+            patch.object(session.event_bus, "dispatch", return_value=_make_awaitable_event()),
+            pytest.raises(RuntimeError, match="reset failed"),
+        ):
             await session.on_BrowserStopEvent(BrowserStopEvent(force=True))
 
 
@@ -1213,9 +1223,7 @@ class TestDOMHelperMethods:
         session.agent_focus = _make_mock_cdp_session()
         new_map = {1: MagicMock(), 2: MagicMock()}
         assert (
-            session.update_cached_selector_map(
-                new_map, identity=DocumentIdentity("loader-1", "https://example.com")
-            )
+            session.update_cached_selector_map(new_map, identity=DocumentIdentity("loader-1", "https://example.com"))
             is True
         )
         assert session._cached_selector_map == new_map
@@ -1606,9 +1614,7 @@ class TestCDPHelperMethods:
         )
         real_cdp.cdp_client.send.Page.getFrameTree = AsyncMock(
             return_value={
-                "frameTree": {
-                    "frame": {"id": "frame-1", "loaderId": "loader-new", "url": "https://example.com"}
-                }
+                "frameTree": {"frame": {"id": "frame-1", "loaderId": "loader-new", "url": "https://example.com"}}
             }
         )
         session.__dict__["agent_focus"] = real_cdp

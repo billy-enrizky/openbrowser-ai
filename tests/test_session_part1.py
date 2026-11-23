@@ -3,6 +3,7 @@
 Covers CDPSession and BrowserSession event handlers and public methods.
 """
 
+import asyncio
 import logging
 from unittest.mock import ANY, AsyncMock, MagicMock, PropertyMock, patch
 
@@ -25,6 +26,7 @@ from openbrowser.browser.events import (
     TabCreatedEvent,
 )
 from openbrowser.browser.focus import FocusChangeReason, FocusPhase, FocusSnapshot, FocusTargetCode, FocusTargetError
+from openbrowser.browser.lifecycle import LifecyclePhase
 from openbrowser.browser.profile import BrowserProfile, ViewportSize
 from openbrowser.browser.session import _LOGGED_UNIQUE_SESSION_IDS, BrowserSession, CDPSession
 from openbrowser.browser.tabs import TabState
@@ -42,8 +44,10 @@ class _MockCDPClient(CDPClient):
     """Subclass CDPClient so isinstance checks pass for Pydantic validation."""
 
     def __init__(self):
-        # Skip super().__init__ to avoid real websocket connections
-        pass
+        # Skip super().__init__ to avoid real websocket connections.
+        self._message_handler_task = None
+        self.pending_requests = {}
+        self.ws = None
 
 
 def _make_mock_cdp_client():
@@ -546,7 +550,7 @@ class TestBrowserSessionReset:
     async def test_reset_clears_cdp_url_for_local(self):
         profile = BrowserProfile(cdp_url="ws://localhost:5555", is_local=True)
         session = BrowserSession(browser_profile=profile)
-        session.event_bus.dispatch = MagicMock()
+        session.event_bus.dispatch = MagicMock(side_effect=lambda event: asyncio.sleep(0))
         _setup_session_with_cdp(session)
 
         await session.reset()
@@ -575,6 +579,7 @@ class TestOnBrowserStartEvent:
     async def test_start_with_existing_cdp_url_and_connected(self):
         """When already connected, skip reconnection (line 575)."""
         session = _make_browser_session()
+        session._lifecycle.transition(LifecyclePhase.STARTING)
         client, focus, sm = _setup_session_with_cdp(session)
 
         with patch.object(BrowserSession, "attach_all_watchdogs", new_callable=AsyncMock):
@@ -585,12 +590,13 @@ class TestOnBrowserStartEvent:
 
     async def test_start_connects_when_not_connected(self):
         session = _make_browser_session()
+        session._lifecycle.transition(LifecyclePhase.STARTING)
         session._cdp_client_root = None
         session.agent_focus = None
 
         mock_client = _make_mock_cdp_client()
 
-        async def fake_connect(cdp_url=None):
+        async def fake_connect(cdp_url=None, *, _start_owned=False):
             session._cdp_client_root = mock_client
             return session
 
@@ -604,6 +610,7 @@ class TestOnBrowserStartEvent:
         """Should raise ValueError when no cdp_url and not local (line 562)."""
         # Construct with cdp_url then clear it + set is_local=False to reach the error branch
         session = _make_browser_session()
+        session._lifecycle.transition(LifecyclePhase.STARTING)
         session.browser_profile.cdp_url = None
         session.browser_profile.is_local = False
 
@@ -614,6 +621,7 @@ class TestOnBrowserStartEvent:
     async def test_start_dispatches_error_event_on_exception(self):
         """On exception, should dispatch BrowserErrorEvent (lines 580-588)."""
         session = _make_browser_session()
+        session._lifecycle.transition(LifecyclePhase.STARTING)
         session._cdp_client_root = None
 
         with patch.object(BrowserSession, "attach_all_watchdogs", new_callable=AsyncMock):
@@ -1144,7 +1152,7 @@ class TestOnBrowserStopEvent:
         session = _make_browser_session()
         _setup_session_with_cdp(session)
 
-        with patch.object(BrowserSession, "reset", new_callable=AsyncMock) as mock_reset:
+        with patch.object(BrowserSession, "_reset_transaction", new_callable=AsyncMock) as mock_reset:
             await session.on_BrowserStopEvent(BrowserStopEvent(force=True))
             mock_reset.assert_awaited_once()
 
@@ -1153,7 +1161,8 @@ class TestOnBrowserStopEvent:
         _setup_session_with_cdp(session)
 
         with patch.object(BrowserSession, "reset", new_callable=AsyncMock, side_effect=RuntimeError("reset fail")):
-            await session.on_BrowserStopEvent(BrowserStopEvent(force=True))
+            with pytest.raises(RuntimeError, match="reset fail"):
+                await session.on_BrowserStopEvent(BrowserStopEvent(force=True))
 
         dispatch_calls = session.event_bus.dispatch.call_args_list
         error_events = [c for c in dispatch_calls if isinstance(c[0][0], BrowserErrorEvent)]
@@ -1163,7 +1172,7 @@ class TestOnBrowserStopEvent:
     async def test_stop_resets_cdp_url_for_local(self):
         profile = BrowserProfile(cdp_url="ws://localhost:5555", is_local=True)
         session = BrowserSession(browser_profile=profile)
-        session.event_bus.dispatch = MagicMock()
+        session.event_bus.dispatch = MagicMock(side_effect=lambda event: asyncio.sleep(0))
         _setup_session_with_cdp(session)
 
         with patch.object(BrowserSession, "reset", new_callable=AsyncMock):
@@ -1388,7 +1397,7 @@ class TestStartKillStop:
         stop_mock = AsyncMock()
         session.event_bus.stop = stop_mock
 
-        with patch.object(BrowserSession, "reset", new_callable=AsyncMock) as mock_reset:
+        with patch.object(BrowserSession, "_reset_transaction", new_callable=AsyncMock) as mock_reset:
             await session.kill()
 
         mock_reset.assert_awaited_once()
@@ -1402,7 +1411,7 @@ class TestStartKillStop:
         session.event_bus.dispatch = dispatch_mock
         session.event_bus.stop = AsyncMock()
 
-        with patch.object(BrowserSession, "reset", new_callable=AsyncMock):
+        with patch.object(BrowserSession, "_reset_transaction", new_callable=AsyncMock):
             await session.stop()
 
         dispatched = dispatch_mock._dispatched_events

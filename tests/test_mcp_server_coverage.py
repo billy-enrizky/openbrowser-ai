@@ -205,20 +205,26 @@ class TestOpenBrowserServerIsCdpAlive:
 
     @pytest.mark.asyncio
     async def test_no_cdp_root(self, mcp_server_instance):
-        """Line 361: no CDP root client."""
+        from types import SimpleNamespace
+
+        async def probe(*, timeout_seconds):
+            return SimpleNamespace(client_present=False, healthy=False)
+
         mock_session = MagicMock()
-        mock_session._cdp_client_root = None
+        mock_session.probe_cdp_connection = probe
         mcp_server_instance.browser_session = mock_session
         result = await mcp_server_instance._is_cdp_alive()
         assert result is False
 
     @pytest.mark.asyncio
     async def test_cdp_alive(self, mcp_server_instance):
-        """Lines 362-364: CDP is alive."""
+        from types import SimpleNamespace
+
+        async def probe(*, timeout_seconds):
+            return SimpleNamespace(client_present=True, healthy=True)
+
         mock_session = MagicMock()
-        mock_root = MagicMock()
-        mock_root.send.Browser.getVersion = AsyncMock(return_value={})
-        mock_session._cdp_client_root = mock_root
+        mock_session.probe_cdp_connection = probe
         mcp_server_instance.browser_session = mock_session
 
         result = await mcp_server_instance._is_cdp_alive()
@@ -226,11 +232,11 @@ class TestOpenBrowserServerIsCdpAlive:
 
     @pytest.mark.asyncio
     async def test_cdp_dead(self, mcp_server_instance):
-        """Lines 365-366: CDP is dead."""
+        async def probe(*, timeout_seconds):
+            raise RuntimeError("dead")
+
         mock_session = MagicMock()
-        mock_root = MagicMock()
-        mock_root.send.Browser.getVersion = AsyncMock(side_effect=Exception("dead"))
-        mock_session._cdp_client_root = mock_root
+        mock_session.probe_cdp_connection = probe
         mcp_server_instance.browser_session = mock_session
 
         result = await mcp_server_instance._is_cdp_alive()
@@ -273,9 +279,7 @@ class TestOpenBrowserServerExecuteCode:
         mock_session = MagicMock()
         mcp_server_instance.browser_session = mock_session
 
-        with patch.object(
-            mcp_server_instance, "_is_cdp_alive", new_callable=AsyncMock, return_value=False
-        ):
+        with patch.object(mcp_server_instance, "_is_cdp_alive", new_callable=AsyncMock, return_value=False):
             with patch.object(
                 mcp_server_instance,
                 "_recover_browser_session",
@@ -300,9 +304,7 @@ class TestOpenBrowserServerExecuteCode:
         mock_session = MagicMock()
         mcp_server_instance.browser_session = mock_session
 
-        with patch.object(
-            mcp_server_instance, "_is_cdp_alive", new_callable=AsyncMock, return_value=False
-        ):
+        with patch.object(mcp_server_instance, "_is_cdp_alive", new_callable=AsyncMock, return_value=False):
             with patch.object(
                 mcp_server_instance,
                 "_recover_browser_session",
@@ -350,9 +352,7 @@ class TestOpenBrowserServerExecuteCode:
         mcp_server_instance._executor.execute = AsyncMock(return_value=mock_result)
         mcp_server_instance.browser_session = None
 
-        with patch.object(
-            mcp_server_instance, "_ensure_namespace", new_callable=AsyncMock
-        ):
+        with patch.object(mcp_server_instance, "_ensure_namespace", new_callable=AsyncMock):
             result = await mcp_server_instance._execute_code("x = 1")
             mcp_server_instance._executor.set_namespace.assert_called_once()
 
@@ -386,9 +386,7 @@ class TestOpenBrowserServerCleanup:
         mcp_server_instance.session_timeout_minutes = 1
 
         with patch("openbrowser.mcp.server.BrowserStopEvent", create=True):
-            with patch(
-                "openbrowser.browser.events.BrowserStopEvent", create=True
-            ):
+            with patch("openbrowser.browser.events.BrowserStopEvent", create=True):
                 await mcp_server_instance._cleanup_expired_session()
                 assert mcp_server_instance.browser_session is None
 
@@ -438,9 +436,7 @@ class TestMCPServerMain:
         monkeypatch.setattr(mcp_server_module, "TELEMETRY_AVAILABLE", True)
 
         mock_telemetry = MagicMock()
-        monkeypatch.setattr(
-            mcp_server_module, "ProductTelemetry", lambda: mock_telemetry
-        )
+        monkeypatch.setattr(mcp_server_module, "ProductTelemetry", lambda: mock_telemetry)
         monkeypatch.setattr(
             mcp_server_module,
             "MCPServerTelemetryEvent",

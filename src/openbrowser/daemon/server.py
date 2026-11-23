@@ -24,6 +24,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
+from openbrowser.browser.cdp_connection import MAX_ERROR_CHARS, bound_text_with_suffix, sanitize_error_detail
 from openbrowser.browser.download_state import downloads_summary
 from openbrowser.browser.lifecycle import (
     LifecycleMachine,
@@ -36,6 +37,7 @@ from openbrowser.browser.storage_state import (
     StorageStateSaveSnapshot,
     StorageStateSnapshot,
 )
+from openbrowser.code_use.executor import output_limit_for_executor
 from openbrowser.code_use.namespace_transfer import transfer_namespace
 from openbrowser.config import CONFIG, ConfigStartupError, apply_managed_browser_profile_defaults, get_default_profile
 from openbrowser.config_lifecycle import ConfigLoadResult, restart_required
@@ -61,6 +63,10 @@ DEFAULT_EXEC_TIMEOUT = 110  # Leave room for the client to receive a timeout res
 DAEMON_INIT_TIMEOUT = 30  # Bound browser startup so clients never wait indefinitely
 DAEMON_CLEANUP_TIMEOUT = 5  # Bound cleanup after failed startup
 PID_FILE_WRITE_GRACE_SECONDS = 2.0  # Let another owner finish publishing an empty file
+
+
+class RetainedBrowserSessionError(RuntimeError):
+    """The daemon must reset a failed session before starting another browser."""
 
 
 def _init_timeout() -> float:
@@ -492,6 +498,7 @@ class DaemonServer:
         self._last_closed_session: object | None = None
         self._profile_summary: dict[str, object] | None = None
         self._browser_generation = 0
+        self._cleanup_required = False
         self._startup_phase = DaemonStartupPhase.IDLE
         self._startup_detail: str | None = None
         self._startup_history: list[DaemonStartupPhase] = []
@@ -519,7 +526,7 @@ class DaemonServer:
 
     def _fail_startup(self, detail: str, error: BaseException | str | None = None) -> None:
         """Record one terminal startup failure without hiding it as a clean stop."""
-        bounded = detail if len(detail) <= 500 else f'{detail[:497]}...'
+        bounded = sanitize_error_detail(detail, max_chars=500) or ''
         self._set_startup(DaemonStartupPhase.FAILED, bounded)
         if self._lifecycle.phase is not LifecyclePhase.FAILED:
             try:
@@ -723,11 +730,19 @@ class DaemonServer:
 
     async def _ensure_executor(self):
         """Lazy-initialize browser + namespace on first request."""
+        if getattr(self, '_cleanup_required', False):
+            raise RetainedBrowserSessionError(
+                'A previous daemon reset failed; run daemon reset again before retrying'
+            )
         if self._executor is not None:
             return
         async with self._init_lock:
             if self._executor is not None:
                 return  # another coroutine initialized while we waited
+            if self._session is not None:
+                raise RetainedBrowserSessionError(
+                    'A failed browser session still requires cleanup; run daemon reset before retrying'
+                )
 
             # Suppress verbose logging for clean daemon output
             os.environ['OPENBROWSER_LOGGING_LEVEL'] = 'critical'
@@ -735,10 +750,7 @@ class DaemonServer:
             logging.getLogger('openbrowser').setLevel(logging.ERROR)
 
             from openbrowser.browser import BrowserSession
-            from openbrowser.code_use.executor import (
-                DEFAULT_MAX_OUTPUT_CHARS,
-                CodeExecutor,
-            )
+            from openbrowser.code_use.executor import DEFAULT_MAX_OUTPUT_CHARS, CodeExecutor
             from openbrowser.code_use.namespace import create_namespace
             from openbrowser.tools.service import CodeAgentTools
 
@@ -772,46 +784,53 @@ class DaemonServer:
             except BaseException as error:
                 # Kill the browser if startup or namespace setup fails. Bound
                 # cleanup too, so a broken browser cannot block the client.
-                self._browser_error = f'{type(error).__name__}: {error}'
+                self._browser_error = f'{type(error).__name__}: {sanitize_error_detail(error) or type(error).__name__}'
                 self._tools = None
-                await self._cleanup_failed_session(session)
+                self._session = session
+                try:
+                    cleaned = await self._cleanup_failed_session(session)
+                except asyncio.CancelledError:
+                    self._cleanup_required = True
+                    raise
+                except BaseException:
+                    logger.warning('Failed to clean up browser after daemon initialization failure', exc_info=True)
+                    cleaned = False
+                if cleaned and self._session is session:
+                    self._session = None
                 raise
 
-    async def _cleanup_failed_session(self, session) -> None:
-        """Bound failed-start cleanup without cancelling BrowserSession.kill()."""
+    async def _cleanup_failed_session(self, session) -> bool:
+        """Bound daemon startup cleanup.
+
+        Cancel the wrapper at the deadline or on caller cancellation. The daemon
+        retains the BrowserSession owner, refuses execution, and lets a later
+        daemon reset retry the cancellation-resistant cleanup.
+        """
         cleanup_task = asyncio.create_task(session.kill())
         try:
             done, pending = await asyncio.wait({cleanup_task}, timeout=DAEMON_CLEANUP_TIMEOUT)
         except BaseException:
             cleanup_task.add_done_callback(self._log_cleanup_task_failure)
             cleanup_task.cancel()
-            self._request_force_stop(session)
             raise
 
         if pending:
             cleanup_task.add_done_callback(self._log_cleanup_task_failure)
             cleanup_task.cancel()
-            self._request_force_stop(session)
             logger.warning(
-                'Browser cleanup exceeded %ss after daemon initialization failure; force-stop requested',
+                'Browser cleanup exceeded %ss after daemon initialization failure; cleanup retained',
                 DAEMON_CLEANUP_TIMEOUT,
             )
-            return
+            return False
 
-        # Retrieve any cleanup error so the detached-task callback does not
-        # produce an unhandled-task warning or replace the startup exception.
+        # Consume the completed cleanup result before the startup failure is re-raised.
         done_task = done.pop()
         try:
             done_task.result()
         except BaseException:
             logger.warning('Failed to clean up browser after daemon initialization failure', exc_info=True)
-
-    @staticmethod
-    def _request_force_stop(session) -> None:
-        """Queue the normal forced browser-stop event without awaiting it."""
-        from openbrowser.browser.events import BrowserStopEvent
-
-        session.event_bus.dispatch(BrowserStopEvent(force=True))
+            return False
+        return True
 
     @staticmethod
     def _log_cleanup_task_failure(task: asyncio.Task) -> None:
@@ -893,15 +912,20 @@ class DaemonServer:
                 self._needs_browser_recovery = False
                 self._last_closed_session = None
             except BaseException as error:
-                self._browser_error = f'{type(error).__name__}: {error}'
+                self._browser_error = f'{type(error).__name__}: {sanitize_error_detail(error) or type(error).__name__}'
                 self._tools = None
                 if session is not None:
+                    self._session = session
                     try:
-                        await self._cleanup_failed_session(session)
+                        cleaned = await self._cleanup_failed_session(session)
+                    except asyncio.CancelledError:
+                        self._cleanup_required = True
+                        raise
                     except BaseException:
                         logger.warning('Failed to clean up replacement browser session', exc_info=True)
-                if self._session is session:
-                    self._session = None
+                        cleaned = False
+                    if cleaned and self._session is session:
+                        self._session = None
                 if self._executor is not None:
                     # The old session is gone. Remove stale browser references
                     # from the live namespace while keeping user scalars for the
@@ -918,7 +942,10 @@ class DaemonServer:
                 # `daemon ensure` can compare configuration before first use.
                 self._build_browser_profile()
             except Exception as error:
-                self._browser_error = f'Profile configuration failed: {type(error).__name__}: {error}'
+                self._browser_error = (
+                    f'Profile configuration failed: {type(error).__name__}: '
+                    f'{sanitize_error_detail(error) or type(error).__name__}'
+                )
 
         browser: dict
         if self._session is not None and hasattr(self._session, 'lifecycle_snapshot'):
@@ -926,6 +953,14 @@ class DaemonServer:
                 snapshot_value = self._session.lifecycle_snapshot()
             except Exception:
                 browser = {'phase': 'unknown'}
+                health_snapshot = getattr(self._session, 'cdp_connection_health', None)
+                if callable(health_snapshot):
+                    with contextlib.suppress(Exception):
+                        health_value = health_snapshot()
+                        to_dict = getattr(health_value, 'to_dict', None)
+                        if callable(to_dict):
+                            browser['cdp'] = to_dict()
+                            browser['cdp_connected'] = bool(getattr(health_value, 'client_present', False))
                 focus_snapshot = getattr(self._session, 'focus_snapshot', None)
                 if callable(focus_snapshot):
                     with contextlib.suppress(Exception):
@@ -972,14 +1007,14 @@ class DaemonServer:
             'idle_timeout': self._idle_timeout,
             'init_timeout': self._init_timeout,
             'exec_timeout': self._exec_timeout,
-            'last_error': snapshot.last_error or self._browser_error,
+            'last_error': sanitize_error_detail(snapshot.last_error or self._browser_error),
             'generation': snapshot.generation,
             'uptime_seconds': max(0.0, time.time() - self._started_at),
             'version': version,
             'browser': browser,
             'startup': {
                 'phase': self._startup_phase.value,
-                'detail': self._startup_detail,
+                'detail': sanitize_error_detail(self._startup_detail, max_chars=500),
                 'history': [phase.value for phase in self._startup_history],
                 'stale_pid_removed': self._startup_stale_pid_removed,
                 'stale_socket_removed': self._startup_stale_socket_removed,
@@ -1017,14 +1052,22 @@ class DaemonServer:
         }
 
     async def _close_session_bounded(self, session) -> bool:
-        """Close a session without letting a broken browser block the daemon."""
+        """Close a session without letting a broken browser block the daemon.
+
+        A timed-out kill wrapper is cancelled and the retained session remains the
+        reset owner. Caller cancellation also cancels and observes the wrapper.
+        """
         task = asyncio.create_task(session.kill())
-        done, pending = await asyncio.wait({task}, timeout=DAEMON_CLEANUP_TIMEOUT)
+        try:
+            done, pending = await asyncio.wait({task}, timeout=DAEMON_CLEANUP_TIMEOUT)
+        except asyncio.CancelledError:
+            task.add_done_callback(self._log_cleanup_task_failure)
+            task.cancel()
+            raise
         if pending:
             task.add_done_callback(self._log_cleanup_task_failure)
             task.cancel()
-            self._request_force_stop(session)
-            logger.warning('Browser cleanup exceeded %ss', DAEMON_CLEANUP_TIMEOUT)
+            logger.warning('Browser cleanup exceeded %ss; cleanup retained', DAEMON_CLEANUP_TIMEOUT)
             return False
         done_task = done.pop()
         try:
@@ -1064,11 +1107,22 @@ class DaemonServer:
                     try:
                         await self._ensure_executor()
                     except ConfigStartupError as error:
-                        return self._error_response(req_id, str(error), code=error.code, hint=error.hint)
-                    except Exception as error:
+                        safe_error = sanitize_error_detail(error) or error.code
+                        safe_hint = sanitize_error_detail(error.hint) or error.hint
+                        return self._error_response(req_id, safe_error, code=error.code, hint=safe_hint)
+                    except RetainedBrowserSessionError as error:
+                        safe_error = sanitize_error_detail(error) or type(error).__name__
                         return self._error_response(
                             req_id,
-                            f'Browser initialization failed: {type(error).__name__}: {error}',
+                            safe_error,
+                            code='daemon_reset_required',
+                            hint='Run `openbrowser-ai daemon reset`, then retry the request.',
+                        )
+                    except Exception as error:
+                        safe_error = sanitize_error_detail(error) or type(error).__name__
+                        return self._error_response(
+                            req_id,
+                            f'Browser initialization failed: {type(error).__name__}: {safe_error}',
                             code='daemon_start_failed',
                             hint='Run `openbrowser-ai daemon doctor` and check the profile path and daemon log.',
                         )
@@ -1076,13 +1130,19 @@ class DaemonServer:
                         try:
                             await self._recover_browser_session()
                         except ConfigStartupError as error:
-                            return self._error_response(req_id, str(error), code=error.code, hint=error.hint)
+                            safe_error = sanitize_error_detail(error) or error.code
+                            safe_hint = sanitize_error_detail(error.hint) or error.hint
+                            return self._error_response(req_id, safe_error, code=error.code, hint=safe_hint)
                         except Exception as recovery_error:
+                            safe_error = sanitize_error_detail(recovery_error) or type(recovery_error).__name__
                             return self._error_response(
                                 req_id,
-                                f'Browser recovery failed: {type(recovery_error).__name__}: {recovery_error}',
+                                f'Browser recovery failed: {type(recovery_error).__name__}: {safe_error}',
                                 code='cdp_recovery_failed',
-                                hint='Run `openbrowser-ai daemon doctor` or `openbrowser-ai daemon reset` before retrying.',
+                                hint=(
+                                    'Run `openbrowser-ai daemon doctor` or `openbrowser-ai daemon reset` '
+                                    'before retrying.'
+                                ),
                             )
                     executor = self._executor
                     if executor is None:
@@ -1098,30 +1158,91 @@ class DaemonServer:
                     # Recover while still holding the execution lock so the next
                     # request cannot run user code against the dead browser.
                     error_text = result.error or result.output
+                    safe_output = result.output
+                    safe_error = result.error
+                    if not result.success:
+                        output_limit = output_limit_for_executor(executor)
+                        safe_output = sanitize_error_detail(
+                            result.output, max_chars=output_limit, preserve_lines=True
+                        )
+                        safe_error = sanitize_error_detail(
+                            result.error, max_chars=output_limit, preserve_lines=True
+                        )
+                        safe_output = (
+                            safe_output or safe_error or 'Execution failed without diagnostic text'
+                        )
                     if not result.success and self._is_connection_error(error_text):
                         try:
                             await self._recover_browser_session(expected_session=failed_session)
                         except ConfigStartupError as error:
-                            partial_message = result.error or result.output or 'Browser connection lost'
+                            recovery_budget = max(1, output_limit // 4)
+                            recovery_detail = sanitize_error_detail(
+                                error.detail, max_chars=recovery_budget, preserve_lines=True
+                            )
+                            recovery_text = recovery_detail or sanitize_error_detail(
+                                error, max_chars=recovery_budget, preserve_lines=True
+                            )
+                            if recovery_text:
+                                partial_budget = max(0, output_limit - len(recovery_text) - 1)
+                                partial_detail = (
+                                    sanitize_error_detail(
+                                        result.output or result.error,
+                                        max_chars=partial_budget,
+                                        preserve_lines=True,
+                                    )
+                                    if partial_budget > 0
+                                    else None
+                                )
+                                typed_error = (
+                                    f'{partial_detail}\n{recovery_text}'
+                                    if partial_detail
+                                    else recovery_text
+                                )
+                            else:
+                                typed_error = (
+                                    sanitize_error_detail(
+                                        result.output or result.error,
+                                        max_chars=output_limit,
+                                        preserve_lines=True,
+                                    )
+                                    or safe_output
+                                    or error.code
+                                )
+                            safe_hint = bound_text_with_suffix(
+                                error.hint,
+                                'The code may have partially run; verify the page before retrying.',
+                                max_chars=MAX_ERROR_CHARS,
+                            )
                             return self._error_response(
                                 req_id,
-                                f'{partial_message}\n{error}',
+                                typed_error,
                                 code=error.code,
-                                hint=f'{error.hint} The code may have partially run; verify the page before retrying.',
+                                hint=safe_hint or error.code,
                             )
                         except Exception as recovery_err:
                             logger.error('CDP recovery failed: %s', recovery_err)
+                            safe_recovery_error = (
+                                sanitize_error_detail(recovery_err) or type(recovery_err).__name__
+                            )
+                            safe_recovery_hint = bound_text_with_suffix(
+                                f'Browser recovery failed: {type(recovery_err).__name__}: {safe_recovery_error}',
+                                'The code may have partially run; verify the page before retrying.',
+                                max_chars=MAX_ERROR_CHARS,
+                            )
                             return self._error_response(
                                 req_id,
-                                result.error or result.output,
+                                safe_output,
                                 code='cdp_recovery_failed',
-                                hint=f'Browser recovery failed: {type(recovery_err).__name__}: {recovery_err}',
+                                hint=safe_recovery_hint or type(recovery_err).__name__,
                             )
                         return self._error_response(
                             req_id,
-                            result.error or result.output,
+                            safe_output,
                             code='cdp_connection_lost',
-                            hint='The browser was recovered. The code may have partially run; verify the page before retrying.',
+                            hint=(
+                                'The browser was recovered. The code may have partially run; '
+                                'verify the page before retrying.'
+                            ),
                         )
             except asyncio.TimeoutError:
                 return self._error_response(
@@ -1134,8 +1255,8 @@ class DaemonServer:
             return {
                 'id': req_id,
                 'success': result.success,
-                'output': result.output,
-                'error': result.error,
+                'output': safe_output,
+                'error': safe_error,
                 'error_code': None,
                 'state': self._lifecycle.phase.value,
             }
@@ -1169,14 +1290,23 @@ class DaemonServer:
             async with self._exec_lock:
                 async with self._init_lock:
                     if self._session:
-                        closed = await self._close_session_bounded(self._session)
+                        try:
+                            closed = await self._close_session_bounded(self._session)
+                        except asyncio.CancelledError:
+                            self._cleanup_required = True
+                            raise
                         if not closed:
+                            self._cleanup_required = True
                             return self._error_response(
                                 req_id,
                                 'Unable to close the current browser session',
                                 code='reset_failed',
-                                hint='Run `openbrowser-ai daemon doctor` and restart the daemon if the browser process is stuck.',
+                                hint=(
+                                    'Run `openbrowser-ai daemon reset` again, then `daemon doctor` '
+                                    'if cleanup remains stuck.'
+                                ),
                             )
+                    self._cleanup_required = False
                     self._executor = None
                     self._session = None
                     self._tools = None
@@ -1215,11 +1345,12 @@ class DaemonServer:
             pass
         except Exception as e:
             try:
+                safe_error = sanitize_error_detail(e) or type(e).__name__
                 err = {
                     'id': 0,
                     'success': False,
                     'output': '',
-                    'error': str(e),
+                    'error': safe_error,
                     'error_code': 'daemon_request_failed',
                     'state': self._lifecycle.phase.value,
                 }
