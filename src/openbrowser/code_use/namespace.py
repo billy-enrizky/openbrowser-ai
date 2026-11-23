@@ -12,7 +12,7 @@ import json
 import logging
 import re
 import time
-from inspect import iscoroutinefunction
+from inspect import isawaitable, iscoroutinefunction
 from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import unquote, urlparse
@@ -451,6 +451,8 @@ def create_namespace(
 
 	if available_file_paths is None:
 		available_file_paths = []
+
+	browser_scrape_lock = asyncio.Lock()
 
 	namespace: dict[str, Any] = {
 		# Core objects
@@ -1100,8 +1102,232 @@ def create_namespace(
 			result['selector'] = selector
 		return _truncate_scrape_result(result, max_chars)
 
+	async def scrape_pages(
+		urls: list[str],
+		*,
+		concurrency: int = 4,
+		format: str = 'markdown',
+		selector: str | None = None,
+		wait_for: str | None = None,
+		wait_until: WaitUntil = 'load',
+		timeout_ms: int | None = None,
+		extract_links: bool = False,
+		max_chars: int | None = None,
+		engine: str = 'auto',
+	) -> list[dict[str, Any]]:
+		"""Scrape multiple URLs without an LLM.
+
+		HTTP requests run concurrently up to ``concurrency``. A URL that needs
+		the browser falls back sequentially after the HTTP pass because one
+		session has one global agent focus. Results keep input order. A failure
+		for one URL is recorded in its result and never aborts the batch.
+
+		Args:
+			urls: URLs to scrape.
+			concurrency: Maximum number of concurrent HTTP requests.
+			format: One of markdown, text, html, links, or json.
+			selector: Optional CSS selector. Limits text, html, and json output.
+			wait_for: Optional CSS selector to wait for before browser scraping.
+			wait_until: Navigation readiness for browser scraping.
+			timeout_ms: Optional timeout for HTTP and browser scraping.
+			extract_links: Preserve links in markdown output.
+			max_chars: Optional maximum content length per result.
+			engine: auto, http, or browser.
+
+		Returns:
+			A list of per-URL dicts with url, ok, engine_used, content, error,
+			duration_ms, and timing. Successful results also include title,
+			format, content_type, and stats.
+		"""
+		allowed_formats = {'markdown', 'text', 'html', 'links', 'json'}
+		if format not in allowed_formats:
+			raise ValueError(f'format must be one of {sorted(allowed_formats)}, got {format!r}')
+		if engine not in {'auto', 'http', 'browser'}:
+			raise ValueError(f"engine must be one of ['auto', 'browser', 'http'], got {engine!r}")
+		if not isinstance(concurrency, int) or isinstance(concurrency, bool) or concurrency < 1:
+			raise ValueError('concurrency must be a positive integer')
+
+		if isinstance(urls, str):
+			url_list = [urls]
+		else:
+			try:
+				url_list = list(urls)
+			except TypeError as error:
+				raise ValueError('urls must be a sequence of URL strings') from error
+		if not url_list:
+			return []
+		url_list = [str(url).strip() for url in url_list]
+		started_at = [time.perf_counter() for _ in url_list]
+		http_attempts: list[tuple[dict[str, Any] | None, str | None, float]] = [
+			(None, None, 0.0) for _ in url_list
+		]
+
+		if engine in {'auto', 'http'}:
+			semaphore = asyncio.Semaphore(concurrency)
+
+			async def _fetch_http(url: str) -> tuple[dict[str, Any] | None, str | None, float]:
+				async with semaphore:
+					http_started = time.perf_counter()
+					try:
+						result = await scrape_http(
+							url,
+							format=format,
+							selector=selector,
+							extract_links=extract_links,
+							timeout_ms=timeout_ms,
+							engine=engine,
+						)
+						return result, None, (time.perf_counter() - http_started) * 1000.0
+					except Exception as exc:
+						return None, f'{type(exc).__name__}: {exc}', (time.perf_counter() - http_started) * 1000.0
+
+			http_attempts = await asyncio.gather(*(_fetch_http(url) for url in url_list))
+
+		def _batch_result(
+			*,
+			url: str,
+			started: float,
+			result: dict[str, Any] | None,
+			error: str | None,
+			engine_used: str,
+			http_ms: float,
+			browser_ms: float | None = None,
+		) -> dict[str, Any]:
+			item = dict(result) if isinstance(result, dict) else {}
+			final_url = item.pop('url', None)
+			item['url'] = url
+			if final_url and final_url != url:
+				item['final_url'] = final_url
+			item['ok'] = result is not None and error is None
+			item['engine_used'] = engine_used
+			item['content'] = item.get('content')
+			item['error'] = error
+			elapsed_ms = (time.perf_counter() - started) * 1000.0
+			duration_ms = elapsed_ms if browser_ms is not None or http_ms <= 0 else http_ms
+			item['duration_ms'] = round(duration_ms, 3)
+			timing = {'total_ms': item['duration_ms']}
+			if http_ms > 0:
+				timing['http_ms'] = round(http_ms, 3)
+			if browser_ms is not None:
+				timing['browser_ms'] = round(browser_ms, 3)
+			item['timing'] = timing
+			return item
+
+		results: list[dict[str, Any] | None] = [None] * len(url_list)
+		browser_indices: list[int] = []
+		for index, url in enumerate(url_list):
+			http_result, http_error, http_ms = http_attempts[index]
+			if http_result is not None:
+				_truncate_scrape_result(http_result, max_chars)
+				results[index] = _batch_result(
+					url=url,
+					started=started_at[index],
+					result=http_result,
+					error=None,
+					engine_used=str(http_result.get('engine_used') or 'http'),
+					http_ms=http_ms,
+				)
+				continue
+			if engine == 'http':
+				results[index] = _batch_result(
+					url=url,
+					started=started_at[index],
+					result=None,
+					error=http_error or f'HTTP scrape failed for {url}',
+					engine_used='http',
+					http_ms=http_ms,
+				)
+				continue
+			browser_indices.append(index)
+
+		if browser_indices:
+			async with browser_scrape_lock:
+				start_error: str | None = None
+				try:
+					starter = getattr(browser_session, 'start', None)
+					if callable(starter):
+						start_result = starter()
+						if isawaitable(start_result):
+							await start_result
+				except Exception as exc:
+					start_error = f'{type(exc).__name__}: {exc}'
+
+				if start_error is not None:
+					for index in browser_indices:
+						url = url_list[index]
+						_, http_error, http_ms = http_attempts[index]
+						item = _batch_result(
+							url=url,
+							started=started_at[index],
+							result=None,
+							error=f'Browser start failed: {start_error}',
+							engine_used='browser',
+							http_ms=http_ms,
+						)
+						if http_error:
+							item['http_error'] = http_error
+						results[index] = item
+				else:
+					for index in browser_indices:
+						url = url_list[index]
+						_, http_error, http_ms = http_attempts[index]
+						browser_started = time.perf_counter()
+						try:
+							result = await namespace['scrape_page'](
+								url,
+								format=format,
+								selector=selector,
+								wait_for=wait_for,
+								wait_until=wait_until,
+								timeout_ms=timeout_ms,
+								extract_links=extract_links,
+								max_chars=max_chars,
+								engine='browser',
+							)
+						except Exception as exc:
+							item = _batch_result(
+								url=url,
+								started=started_at[index],
+								result=None,
+								error=f'{type(exc).__name__}: {exc}',
+								engine_used='browser',
+								http_ms=http_ms,
+								browser_ms=(time.perf_counter() - browser_started) * 1000.0,
+							)
+						else:
+							item = _batch_result(
+								url=url,
+								started=started_at[index],
+								result=result,
+								error=None if isinstance(result, dict) else 'Browser scrape returned no result',
+								engine_used='browser',
+								http_ms=http_ms,
+								browser_ms=(time.perf_counter() - browser_started) * 1000.0,
+							)
+						if http_error:
+							item['http_error'] = http_error
+						results[index] = item
+
+		complete: list[dict[str, Any]] = []
+		for index, result in enumerate(results):
+			if result is None:
+				_, http_error, http_ms = http_attempts[index]
+				result = _batch_result(
+					url=url_list[index],
+					started=started_at[index],
+					result=None,
+					error='Scrape finished without a result',
+					engine_used=engine if engine != 'auto' else 'browser',
+					http_ms=http_ms,
+				)
+				if http_error:
+					result['http_error'] = http_error
+			complete.append(result)
+		return complete
+
 	namespace['scrape_page'] = scrape_page
 	namespace['scrape'] = scrape_page
+	namespace['scrape_pages'] = scrape_pages
 
 
 	# Inject all tools as functions into the namespace

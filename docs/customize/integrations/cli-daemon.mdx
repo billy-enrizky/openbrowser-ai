@@ -46,6 +46,23 @@ openbrowser-ai scrape https://example.com --format json --selector "article" --e
 
 `--engine auto` is the default. `--engine http` never starts a browser. `--render-mode no-render` disables screenshots and visual-only actions for the browser fallback. Use `--wait-for` to wait for a selector on JavaScript-rendered pages.
 
+### Batch scraping
+
+Pass several URLs or a URL file. HTTP requests run concurrently up to `--concurrency`. Browser fallbacks run one at a time because one session has one global agent focus.
+
+```bash
+# JSONL on stdout
+openbrowser-ai scrape https://a.example https://b.example --jsonl --concurrency 8
+
+# Read one URL per line, then write a JSON array
+openbrowser-ai scrape --urls-file urls.txt --output results.json
+
+# Write JSONL when the output path ends in .jsonl
+openbrowser-ai scrape --urls-file urls.txt --output results.jsonl
+```
+
+`--output-format json|jsonl` selects the batch serialization explicitly. Each batch result has `url`, `ok`, `engine_used`, `content`, `error`, `duration_ms`, and `timing`. A failure for one URL does not abort the batch. A single URL keeps the original content-only output.
+
 ## Variable Persistence
 
 Variables set in one `-c` call are available in the next, as long as the daemon is running:
@@ -101,6 +118,7 @@ All functions from the MCP `execute_code` tool are available in `-c` mode:
 | **Tabs** | `switch(tab_id)`, `close(tab_id)` |
 | **JavaScript** | `evaluate(code)` -- run JS in page context, returns Python objects |
 | **Downloads** | `download_file(url, filename)`; `wait_for_download(timeout, url, lookback, download_ref)`; `download_outcomes()` and `download_failures()` (sync); `list_downloads()` (sync) |
+| **Scraping** | `scrape_page(url, format, selector, wait_for, engine)`; `scrape_pages(urls, concurrency, format, engine)` |
 | **State** | `browser.get_browser_state_summary()` -- page metadata and interactive elements |
 | **CSS** | `get_selector_from_index(index)` -- CSS selector for an element |
 | **Completion** | `done(text, success)` -- signal task completion |

@@ -44,6 +44,15 @@ openbrowser-ai scrape <url> --format json --selector "article"
 
 `--engine auto` (default) uses HTTP first and falls back to Chromium for thin JavaScript shells. Use `--engine browser` when JavaScript is required, `--render-mode lightweight` to block images, fonts, and media, and `--wait-for <selector>` for client-rendered content.
 
+For several URLs, use batch mode. HTTP requests run concurrently, while browser fallbacks run one at a time:
+
+```bash
+openbrowser-ai scrape https://a.example https://b.example --jsonl --concurrency 8
+openbrowser-ai scrape --urls-file urls.txt --output results.json
+```
+
+In CodeAgent, call `await scrape_page(url)` for one page or `await scrape_pages(urls, concurrency=4)` for a batch. Each batch result has `ok`, `engine_used`, `content`, `error`, and `duration_ms`, so one failed URL does not stop the rest.
+
 ## Workflow
 
 ### Step 1 -- Navigate and get content overview

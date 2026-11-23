@@ -31,6 +31,15 @@ After a browser error, use MCP `get_status` or CLI `openbrowser-ai daemon status
 - To wait for a prior outcome, pass its `download_ref`; it resolves only in the attached session's live registry
 - `download_outcomes()` / `download_failures()` -- Synchronous recent attempts and failures
 
+## Scraping
+- `await scrape_page(url=None, format="markdown", selector=None, wait_for=None, engine="auto")`
+  : Scrape one page without an LLM. Formats: markdown, text, html, links, json.
+    `engine=auto` uses HTTP first and falls back to the browser.
+    `scrape` is an alias for `scrape_page`.
+- `await scrape_pages(urls, concurrency=4, format="markdown", wait_for=None, engine="auto")`
+  : Scrape URLs without an LLM. HTTP requests run concurrently. Browser fallbacks
+    run one at a time. Returns ok, engine_used, content, error, and duration_ms per URL.
+
 ## State
 - `state = await browser.get_browser_state_summary()` -- Get page URL, title, interactive elements
 - Elements shown as `[i_N]` -- use the integer N for click/input_text, not the label text
@@ -101,6 +110,20 @@ EXECUTE_CODE_DESCRIPTION = """Execute Python code in a persistent namespace with
 - `download_outcomes()` -- Synchronous. Return recent download attempts, oldest first, with their last phase and terminal detail.
 - `download_failures()` -- Synchronous. Return only the attempts that ended in `failed`, with `stage` and `error`.
 - `list_downloads()` -- List all files in the downloads directory. Returns a list of absolute file paths.
+
+## Scraping
+
+- `await scrape_page(url=None, *, format="markdown", selector=None, wait_for=None, ...)`
+  Scrape the current page or a URL without an LLM.
+  Formats: `markdown`, `text`, `html`, `links`, and selector `json`.
+  `engine="auto"` tries HTTP first and falls back to the browser.
+  Use `engine="http"` to forbid a browser and `engine="browser"` to require one.
+  `scrape` is an alias for `scrape_page`.
+- `await scrape_pages(urls, *, concurrency=4, format="markdown", ...)`
+  Scrape many URLs without an LLM. HTTP requests run concurrently up to `concurrency`.
+  Browser fallbacks run one at a time because one browser session has one global agent focus.
+  Results keep input order and each item has `ok`, `engine_used`, `content`, `error`, and `duration_ms`.
+  One URL failure does not abort the batch.
 
 ## CSS Selectors
 

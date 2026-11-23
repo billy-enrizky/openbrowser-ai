@@ -858,3 +858,233 @@ class TestScrapePage:
     async def test_scrape_alias_points_to_scrape_page(self):
         ns, _, _ = self._make_namespace([])
         assert ns["scrape"] is ns["scrape_page"]
+
+
+# ---------------------------------------------------------------------------
+# scrape_pages()
+# ---------------------------------------------------------------------------
+
+
+class TestScrapePages:
+    def _make_namespace(self):
+        session = MagicMock()
+        session.browser_profile = MagicMock()
+        session.browser_profile.downloads_path = None
+        session.start = AsyncMock()
+        session.kill = AsyncMock()
+        tools = MagicMock()
+        tools.registry.registry.actions = {}
+        return create_namespace(session, tools=tools), session
+
+    @pytest.mark.asyncio
+    async def test_http_batch_runs_concurrently_and_keeps_order(self):
+        ns, session = self._make_namespace()
+        urls = [f"https://example.com/{index}" for index in range(4)]
+        active = 0
+        max_active = 0
+        gate = asyncio.Event()
+
+        async def fake_http(url, **_kwargs):
+            nonlocal active, max_active
+            active += 1
+            max_active = max(max_active, active)
+            if active >= 2:
+                gate.set()
+            try:
+                await asyncio.wait_for(gate.wait(), timeout=1)
+            finally:
+                active -= 1
+            return {
+                "url": url,
+                "title": url.rsplit("/", 1)[-1],
+                "format": "text",
+                "content_type": "text/text",
+                "content": url,
+                "stats": {"engine_used": "http"},
+                "engine_used": "http",
+            }
+
+        with patch("openbrowser.code_use.namespace.scrape_http", new=fake_http):
+            results = await ns["scrape_pages"](urls, concurrency=2, format="text", engine="http")
+
+        assert max_active == 2
+        assert [result["url"] for result in results] == urls
+        assert all(result["ok"] for result in results)
+        assert all(result["engine_used"] == "http" for result in results)
+        assert all(result["content"] == result["url"] for result in results)
+        assert all(result["duration_ms"] >= 0 for result in results)
+        assert all("total_ms" in result["timing"] for result in results)
+        session.start.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_http_batch_isolates_failures(self):
+        ns, session = self._make_namespace()
+        urls = ["https://example.com/ok", "https://example.com/empty", "https://example.com/error"]
+
+        async def fake_http(url, **_kwargs):
+            if url.endswith("/ok"):
+                return {
+                    "url": url,
+                    "title": "OK",
+                    "format": "text",
+                    "content_type": "text/text",
+                    "content": "ok",
+                    "stats": {"engine_used": "http"},
+                    "engine_used": "http",
+                }
+            if url.endswith("/empty"):
+                return None
+            raise RuntimeError("network down")
+
+        with patch("openbrowser.code_use.namespace.scrape_http", new=fake_http):
+            results = await ns["scrape_pages"](urls, format="text", engine="http")
+
+        assert len(results) == 3
+        assert results[0]["ok"] is True
+        assert results[1]["ok"] is False
+        assert "HTTP scrape failed" in results[1]["error"]
+        assert results[2]["ok"] is False
+        assert "RuntimeError: network down" in results[2]["error"]
+        assert all(result["content"] is None for result in results[1:])
+        session.start.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_browser_fallbacks_run_one_at_a_time_after_http(self):
+        ns, session = self._make_namespace()
+        urls = ["https://example.com/a", "https://example.com/b", "https://example.com/c"]
+        browser_calls = []
+        browser_active = 0
+        browser_max_active = 0
+        http_finished = 0
+
+        async def fake_http(_url, **_kwargs):
+            nonlocal http_finished
+            await asyncio.sleep(0)
+            http_finished += 1
+            return None
+
+        async def fake_browser(url=None, **_kwargs):
+            nonlocal browser_active, browser_max_active
+            assert http_finished == len(urls)
+            browser_calls.append(url)
+            browser_active += 1
+            browser_max_active = max(browser_max_active, browser_active)
+            try:
+                await asyncio.sleep(0.01)
+            finally:
+                browser_active -= 1
+            return {
+                "url": url,
+                "title": "Browser",
+                "format": "text",
+                "content_type": "text/text",
+                "content": f"browser:{url}",
+                "stats": {"engine_used": "browser"},
+                "engine_used": "browser",
+            }
+
+        ns["scrape_page"] = fake_browser
+        with patch("openbrowser.code_use.namespace.scrape_http", new=fake_http):
+            results = await ns["scrape_pages"](urls, concurrency=3, format="text", engine="auto")
+
+        assert http_finished == 3
+        assert browser_calls == urls
+        assert browser_max_active == 1
+        assert [result["url"] for result in results] == urls
+        assert all(result["ok"] for result in results)
+        assert all(result["engine_used"] == "browser" for result in results)
+        assert all(result["timing"]["browser_ms"] >= 0 for result in results)
+        session.start.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_browser_failure_does_not_abort_batch(self):
+        ns, session = self._make_namespace()
+        urls = ["https://example.com/ok", "https://example.com/fail", "https://example.com/next"]
+
+        async def fake_http(_url, **_kwargs):
+            return None
+
+        async def fake_browser(url=None, **_kwargs):
+            if url.endswith("/fail"):
+                raise RuntimeError("browser down")
+            return {
+                "url": url,
+                "title": "Browser",
+                "format": "text",
+                "content_type": "text/text",
+                "content": f"browser:{url}",
+                "stats": {"engine_used": "browser"},
+                "engine_used": "browser",
+            }
+
+        ns["scrape_page"] = fake_browser
+        with patch("openbrowser.code_use.namespace.scrape_http", new=fake_http):
+            results = await ns["scrape_pages"](urls, format="text", engine="auto")
+
+        assert len(results) == 3
+        assert results[0]["ok"] is True
+        assert results[1]["ok"] is False
+        assert "RuntimeError: browser down" in results[1]["error"]
+        assert results[2]["ok"] is True
+        assert [result["url"] for result in results] == urls
+        session.start.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_http_max_chars_applies_per_result(self):
+        ns, _ = self._make_namespace()
+
+        async def fake_http(url, **_kwargs):
+            return {
+                "url": url,
+                "title": "Long",
+                "format": "text",
+                "content_type": "text/text",
+                "content": "abcdef",
+                "stats": {"engine_used": "http"},
+                "engine_used": "http",
+            }
+
+        with patch("openbrowser.code_use.namespace.scrape_http", new=fake_http):
+            results = await ns["scrape_pages"](["https://example.com"], format="text", max_chars=3, engine="http")
+
+        assert results[0]["content"] == "abc"
+        assert results[0]["truncated"] is True
+        assert results[0]["total_chars"] == 6
+
+    @pytest.mark.asyncio
+    async def test_invalid_concurrency_raises(self):
+        ns, _ = self._make_namespace()
+        with pytest.raises(ValueError, match="concurrency must be a positive integer"):
+            await ns["scrape_pages"](["https://example.com"], concurrency=0)
+
+    @pytest.mark.asyncio
+    async def test_string_input_is_treated_as_one_url(self):
+        ns, _ = self._make_namespace()
+
+        async def fake_http(url, **_kwargs):
+            return {
+                "url": url,
+                "title": "One",
+                "format": "text",
+                "content_type": "text/text",
+                "content": "one",
+                "stats": {"engine_used": "http"},
+                "engine_used": "http",
+            }
+
+        with patch("openbrowser.code_use.namespace.scrape_http", new=fake_http):
+            results = await ns["scrape_pages"]("https://example.com", format="text", engine="http")
+
+        assert [result["url"] for result in results] == ["https://example.com"]
+
+
+def test_scraping_descriptions_cover_single_and_batch():
+    from openbrowser.code_use.descriptions import EXECUTE_CODE_DESCRIPTION, EXECUTE_CODE_DESCRIPTION_COMPACT
+
+    for description in (EXECUTE_CODE_DESCRIPTION_COMPACT, EXECUTE_CODE_DESCRIPTION):
+        assert "scrape_page" in description
+        assert "scrape_pages" in description
+        assert "`scrape` is an alias" in description
+        assert "auto" in description
+        assert "HTTP first" in description
+        assert "browser" in description

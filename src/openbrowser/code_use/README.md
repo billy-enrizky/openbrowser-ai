@@ -38,6 +38,8 @@ The namespace is initialized with:
 - `wait_for_download(timeout=30, url=None, lookback=0, download_ref=None)` - Wait for a terminal download phase; start it before the click
 - `download_outcomes()` / `download_failures()` - Synchronous recent attempts and failures
 - `list_downloads()` - List files in the downloads directory
+- `scrape_page(url=None, format='markdown', selector=None, wait_for=None, engine='auto')` - Scrape one page without an LLM; `engine=auto` uses HTTP first and falls back to the browser
+- `scrape_pages(urls, concurrency=4, format='markdown', engine='auto')` - Scrape many URLs without an LLM; HTTP runs concurrently and browser fallbacks run sequentially
 
 Indexed actions remain preferred whenever an element index exists. For screenshot-derived coordinates, divide screenshot pixels by `window.devicePixelRatio` before calling an `*_xy` function.
 

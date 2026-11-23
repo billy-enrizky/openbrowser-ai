@@ -1094,10 +1094,29 @@ def _quiet_stderr_logging() -> None:
 		logger_obj.propagate = False
 
 
+def _read_scrape_urls_file(path: Path) -> list[str]:
+	"""Read one scrape URL per line, ignoring blank lines and comments."""
+	try:
+		lines = Path(path).read_text(encoding='utf-8').splitlines()
+	except OSError as error:
+		raise click.ClickException(f'Could not read {path}: {error}') from error
+	return [line.strip() for line in lines if line.strip() and not line.lstrip().startswith('#')]
+
+
+def _serialize_scrape_batch(results: list[dict], *, jsonl: bool) -> str:
+	"""Serialize batch scrape results as a JSON array or JSONL."""
+	if jsonl:
+		return '\n'.join(json.dumps(item, ensure_ascii=False, default=str) for item in results)
+	return json.dumps(results, indent=2, ensure_ascii=False, default=str)
 
 
 @main.command()
-@click.argument('url')
+@click.argument('urls', nargs=-1, required=False, metavar='URL...')
+@click.option(
+	'--urls-file',
+	type=click.Path(exists=True, dir_okay=False, path_type=Path),
+	help='Read one URL per line from a file. Blank lines and lines starting with # are ignored.',
+)
 @click.option(
 	'--format',
 	'output_format',
@@ -1131,12 +1150,27 @@ def _quiet_stderr_logging() -> None:
 	type=click.Choice(['full', 'lightweight', 'no-render']),
 	help='Rendering policy. Overrides --lightweight.',
 )
+@click.option(
+	'--concurrency',
+	type=click.IntRange(min=1),
+	default=4,
+	show_default=True,
+	help='Maximum concurrent HTTP requests in batch mode.',
+)
 @click.option('--output', '-o', type=click.Path(), help='Write the result to a file.')
+@click.option(
+	'--output-format',
+	'batch_output_format',
+	type=click.Choice(['json', 'jsonl']),
+	help='Batch serialization: a JSON array or one JSON object per line. A .jsonl output path selects JSONL.',
+)
+@click.option('--jsonl', is_flag=True, help='Print one JSON object per line for a batch.')
 @click.option('--json', 'as_json', is_flag=True, help='Print the full result object as JSON.')
 @click.pass_context
 def scrape(
 	ctx: click.Context,
-	url: str,
+	urls: tuple[str, ...],
+	urls_file: Path | None,
 	output_format: str,
 	selector: str | None,
 	engine: str,
@@ -1147,10 +1181,13 @@ def scrape(
 	max_chars: int | None,
 	lightweight: bool,
 	render_mode: str | None,
+	concurrency: int,
 	output: str | None,
+	batch_output_format: str | None,
+	jsonl: bool,
 	as_json: bool,
 ):
-	"""Scrape a URL without an LLM.
+	"""Scrape one or more URLs without an LLM.
 
 	Examples:
 
@@ -1163,8 +1200,12 @@ def scrape(
 	openbrowser-ai scrape https://example.com --format json --selector "article"
 
 	\b
-	# Fast text scrape with no images or web fonts
-	openbrowser-ai scrape https://example.com --format text --lightweight
+	# Batch scrape with bounded HTTP concurrency and JSONL output
+	openbrowser-ai scrape https://a.example https://b.example --jsonl --concurrency 8
+
+	\b
+	# Read URLs from a file and write a JSON array
+	openbrowser-ai scrape --urls-file urls.txt --output results.json
 	"""
 	import json as _json
 
@@ -1177,6 +1218,13 @@ def scrape(
 	from openbrowser.browser import BrowserProfile, BrowserSession
 	from openbrowser.code_use.namespace import create_namespace, scrape_http
 	from openbrowser.tools.service import CodeAgentTools
+
+	url_list = [url.strip() for url in urls if url.strip()]
+	if urls_file is not None:
+		url_list.extend(_read_scrape_urls_file(urls_file))
+	if not url_list:
+		raise click.UsageError('Provide at least one URL or --urls-file.')
+	batch_mode = len(url_list) > 1 or urls_file is not None
 
 	parent = ctx.parent.params if ctx.parent is not None else {}
 	config_result = CONFIG.require_browser_start_allowed()
@@ -1196,7 +1244,7 @@ def scrape(
 	elif lightweight:
 		browser_config['render_mode'] = 'lightweight'
 
-	async def _run_scrape() -> dict:
+	async def _run_single_scrape(url: str) -> dict:
 		if engine in {'auto', 'http'}:
 			http_result = await scrape_http(
 				url,
@@ -1237,14 +1285,59 @@ def scrape(
 			with contextlib.suppress(Exception):
 				await session.kill()
 
+	async def _run_batch_scrape(batch_urls: list[str]) -> list[dict]:
+		session = BrowserSession(browser_profile=BrowserProfile(**browser_config))
+		try:
+			namespace = create_namespace(browser_session=session, tools=CodeAgentTools())
+			return await namespace['scrape_pages'](
+				batch_urls,
+				concurrency=concurrency,
+				format=output_format,
+				selector=selector,
+				wait_for=wait_for,
+				wait_until=wait_until,
+				timeout_ms=timeout_ms,
+				extract_links=extract_links,
+				max_chars=max_chars,
+				engine=engine,
+			)
+		finally:
+			with contextlib.suppress(Exception):
+				await session.kill()
+
 	try:
-		result = asyncio.run(_run_scrape())
+		if batch_mode:
+			batch_payload = asyncio.run(_run_batch_scrape(url_list))
+		else:
+			payload: dict[str, Any] = asyncio.run(_run_single_scrape(url_list[0]))
 	except Exception as error:
 		click.echo(f'Scrape failed: {type(error).__name__}: {error}', err=True)
 		sys.exit(1)
 
-	content = result.get('content')
-	rendered = _json.dumps(result, indent=2, ensure_ascii=False) if as_json or not isinstance(content, str) else content
+	serialization = 'jsonl' if jsonl else batch_output_format
+	if serialization is None and output and Path(output).suffix.lower() == '.jsonl':
+		serialization = 'jsonl'
+	if serialization is None:
+		serialization = 'json'
+	explicit_serialization = jsonl or batch_output_format is not None
+
+	if batch_mode:
+		rendered = _serialize_scrape_batch(batch_payload, jsonl=serialization == 'jsonl')
+		if output:
+			Path(output).write_text(rendered + ('' if rendered.endswith('\n') else '\n'), encoding='utf-8')
+			click.echo(f'Wrote {len(rendered)} characters to {output}', err=True)
+		else:
+			click.echo(rendered)
+		return
+
+	if serialization == 'jsonl':
+		rendered = _json.dumps(payload, ensure_ascii=False)
+	else:
+		content = payload.get('content')
+		if as_json or (explicit_serialization and serialization == 'json') or not isinstance(content, str):
+			rendered = _json.dumps(payload, indent=2, ensure_ascii=False)
+		else:
+			rendered = content
 	if output:
 		Path(output).write_text(rendered, encoding='utf-8')
 		click.echo(f'Wrote {len(rendered)} characters to {output}')
