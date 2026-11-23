@@ -386,6 +386,24 @@ class TestBrowserProfile:
         args = profile.get_args()
         assert any("--deterministic-mode" in arg for arg in args)
 
+    def test_lightweight_is_off_by_default(self, tmp_path):
+        profile = BrowserProfile(user_data_dir=str(tmp_path / "data"))
+        assert profile.lightweight is False
+        args = profile.get_args()
+        assert not any("--blink-settings=imagesEnabled=false" in arg for arg in args)
+
+    def test_lightweight_adds_render_reduction_args(self, tmp_path):
+        profile = BrowserProfile(
+            lightweight=True,
+            enable_default_extensions=False,
+            user_data_dir=str(tmp_path / "data"),
+        )
+        assert profile.lightweight is True
+        args = profile.get_args()
+        assert "--blink-settings=imagesEnabled=false" in args
+        assert "--disable-remote-fonts" in args
+        assert "--disable-gpu" in args
+
 
     def test_proxy_bypass_without_server_warning(self):
         """proxy.bypass without proxy.server should not crash."""

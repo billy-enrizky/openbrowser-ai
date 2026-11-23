@@ -6,6 +6,7 @@ from bubus import BaseEvent
 from cdp_use.cdp.page import CaptureScreenshotParameters
 
 from openbrowser.browser.events import ScreenshotEvent
+from openbrowser.browser.profile import RenderMode
 from openbrowser.browser.views import BrowserError
 from openbrowser.browser.watchdog_base import BaseWatchdog
 from openbrowser.observability import observe_debug
@@ -34,6 +35,8 @@ class ScreenshotWatchdog(BaseWatchdog):
 			Dict with 'screenshot' key containing base64-encoded screenshot or None
 		"""
 		self.logger.debug('[ScreenshotWatchdog] Handler START - on_ScreenshotEvent called')
+		if self.browser_session.browser_profile.effective_render_mode is RenderMode.NO_RENDER:
+			raise BrowserError('Screenshots are disabled in no-render mode')
 		try:
 			# Get CDP client and session for current target
 			cdp_session = await self.browser_session.get_or_create_cdp_session()

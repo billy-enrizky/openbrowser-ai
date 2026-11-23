@@ -442,6 +442,17 @@ async def test_explicit_profile_path_is_shared_by_explicit_opt_in(
 
 
 @pytest.mark.asyncio
+async def test_render_mode_env_is_applied(registry, monkeypatch):
+    _, contexts = registry
+    monkeypatch.setenv("OPENBROWSER_RENDER_MODE", "lightweight")
+    context_id = await contexts.create()
+    owner = contexts._entries[context_id].owner
+    profile = owner._build_browser_profile()
+    assert profile.effective_render_mode.value == "lightweight"
+    assert owner._profile_summary["render_mode"] == "lightweight"
+
+
+@pytest.mark.asyncio
 async def test_expired_deadline_does_not_start_user_code(registry):
     _, contexts = registry
     context_id = await contexts.create()

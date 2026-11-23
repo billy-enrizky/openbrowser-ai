@@ -33,6 +33,17 @@ curl -fsSL https://raw.githubusercontent.com/billy-enrizky/openbrowser-ai/main/i
 irm https://raw.githubusercontent.com/billy-enrizky/openbrowser-ai/main/install.ps1 | iex
 ```
 
+## Fast path: scrape without an LLM
+
+For a single page, prefer the built-in scrape command before writing code:
+
+```bash
+openbrowser-ai scrape <url> --format markdown
+openbrowser-ai scrape <url> --format json --selector "article"
+```
+
+`--engine auto` (default) uses HTTP first and falls back to Chromium for thin JavaScript shells. Use `--engine browser` when JavaScript is required, `--render-mode lightweight` to block images, fonts, and media, and `--wait-for <selector>` for client-rendered content.
+
 ## Workflow
 
 ### Step 1 -- Navigate and get content overview

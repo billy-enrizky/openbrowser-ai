@@ -1,6 +1,8 @@
 # pyright: reportMissingImports=false
 
 # Check for MCP mode early to prevent logging initialization
+import contextlib
+import logging
 import sys
 from enum import Enum
 
@@ -662,6 +664,8 @@ def get_default_config(config_result: ConfigLoadResult | None = None) -> dict[st
 			'is_mobile': browser_profile.get('is_mobile'),
 			'device_scale_factor': browser_profile.get('device_scale_factor'),
 			'disable_security': browser_profile.get('disable_security'),
+			'render_mode': browser_profile.get('render_mode'),
+			'lightweight': browser_profile.get('lightweight', False),
 		},
 		'command_history': [],
 	}
@@ -722,6 +726,12 @@ def update_config_with_click_args(config: dict[str, Any], ctx: click.Context) ->
 		config['browser']['profile_directory'] = ctx.params['profile_directory']
 	if ctx.params.get('cdp_url'):
 		config['browser']['cdp_url'] = ctx.params['cdp_url']
+	if ctx.params.get('render_mode'):
+		config['browser']['render_mode'] = ctx.params['render_mode']
+	if ctx.params.get('no_render'):
+		config['browser']['render_mode'] = 'no-render'
+	if ctx.params.get('lightweight'):
+		config['browser']['render_mode'] = 'lightweight'
 
 	# Consolidated proxy dict
 	proxy: dict[str, str] = {}
@@ -870,12 +880,9 @@ async def run_prompt_mode(prompt: str, ctx: click.Context, debug: bool = False):
 		# The agent's close() method only kills the browser if keep_alive=False,
 		# but we need to ensure all background tasks are stopped regardless
 		if browser_session:
-			try:
-				# Kill the browser session to stop all background tasks
+			# Kill the browser session to stop all background tasks
+			with contextlib.suppress(Exception):
 				await browser_session.kill()
-			except Exception:
-				# Ignore errors during cleanup
-				pass
 
 		# Capture telemetry for successful completion
 		telemetry.capture(
@@ -964,6 +971,12 @@ async def run_prompt_mode(prompt: str, ctx: click.Context, debug: bool = False):
 )
 @click.option('--profile-directory', type=str, help='Chrome profile directory name (e.g. "Default", "Profile 1")')
 @click.option('--cdp-url', type=str, help='Connect to existing Chrome via CDP URL (e.g. http://localhost:9222)')
+@click.option(
+	'--render-mode',
+	type=click.Choice(['full', 'lightweight', 'no-render']),
+	help='Rendering policy: full, lightweight, or no-render.',
+)
+@click.option('--no-render', is_flag=True, help='Shortcut for --render-mode no-render.')
 @click.option('--proxy-url', type=str, help='Proxy server for Chromium traffic (e.g. http://host:8080 or socks5://host:1080)')
 @click.option('--no-proxy', type=str, help='Comma-separated hosts to bypass proxy (e.g. localhost,127.0.0.1,*.internal)')
 @click.option('--proxy-username', type=str, help='Proxy auth username')
@@ -1062,6 +1075,181 @@ def install():
 	else:
 		print('\n❌ Installation failed')
 		sys.exit(1)
+
+
+# ============================================================================
+# Scrape - Fetch a page and return markdown, text, HTML, links, or JSON
+# ============================================================================
+
+def _quiet_stderr_logging() -> None:
+	"""Send every log record to stderr so a scrape pipe receives only the result."""
+	handler = logging.StreamHandler(sys.stderr)
+	handler.setFormatter(logging.Formatter('%(levelname)s %(name)s %(message)s'))
+	logging.root.handlers = [handler]
+	logging.root.setLevel(logging.CRITICAL)
+	for name in list(logging.root.manager.loggerDict):
+		logger_obj = logging.getLogger(name)
+		logger_obj.handlers = [handler]
+		logger_obj.setLevel(logging.CRITICAL)
+		logger_obj.propagate = False
+
+
+
+
+@main.command()
+@click.argument('url')
+@click.option(
+	'--format',
+	'output_format',
+	type=click.Choice(['markdown', 'text', 'html', 'links', 'json']),
+	default='markdown',
+	show_default=True,
+	help='Output format.',
+)
+@click.option('--selector', type=str, help='CSS selector to limit text, HTML, or JSON output.')
+@click.option(
+	'--engine',
+	type=click.Choice(['auto', 'http', 'browser']),
+	default='auto',
+	show_default=True,
+	help='Fetch with HTTP first, always use HTTP, or always use the browser.',
+)
+@click.option('--wait-for', type=str, help='CSS selector to wait for before scraping.')
+@click.option(
+	'--wait-until',
+	type=click.Choice(['load', 'domcontentloaded', 'networkidle', 'commit']),
+	default='load',
+	show_default=True,
+	help='Navigation readiness state.',
+)
+@click.option('--timeout-ms', type=int, help='Navigation and selector wait timeout in milliseconds.')
+@click.option('--extract-links', is_flag=True, help='Preserve links in markdown output.')
+@click.option('--max-chars', type=int, help='Truncate string content to this many characters.')
+@click.option('--lightweight', is_flag=True, help='Disable images, web fonts, GPU acceleration, and media.')
+@click.option(
+	'--render-mode',
+	type=click.Choice(['full', 'lightweight', 'no-render']),
+	help='Rendering policy. Overrides --lightweight.',
+)
+@click.option('--output', '-o', type=click.Path(), help='Write the result to a file.')
+@click.option('--json', 'as_json', is_flag=True, help='Print the full result object as JSON.')
+@click.pass_context
+def scrape(
+	ctx: click.Context,
+	url: str,
+	output_format: str,
+	selector: str | None,
+	engine: str,
+	wait_for: str | None,
+	wait_until: str,
+	timeout_ms: int | None,
+	extract_links: bool,
+	max_chars: int | None,
+	lightweight: bool,
+	render_mode: str | None,
+	output: str | None,
+	as_json: bool,
+):
+	"""Scrape a URL without an LLM.
+
+	Examples:
+
+	\b
+	# Markdown of a page
+	openbrowser-ai scrape https://example.com
+
+	\b
+	# JSON list from a CSS selector
+	openbrowser-ai scrape https://example.com --format json --selector "article"
+
+	\b
+	# Fast text scrape with no images or web fonts
+	openbrowser-ai scrape https://example.com --format text --lightweight
+	"""
+	import json as _json
+
+	from openbrowser.logging_config import setup_logging
+
+	# Keep stdout clean: the scrape result is the only thing a pipe should receive.
+	setup_logging(stream=sys.stderr, log_level='critical', force_setup=True)
+	_quiet_stderr_logging()
+
+	from openbrowser.browser import BrowserProfile, BrowserSession
+	from openbrowser.code_use.namespace import create_namespace, scrape_http
+	from openbrowser.tools.service import CodeAgentTools
+
+	parent = ctx.parent.params if ctx.parent is not None else {}
+	config_result = CONFIG.require_browser_start_allowed()
+	config = load_user_config(config_result)
+	if ctx.parent is not None:
+		config = update_config_with_click_args(config, ctx.parent)
+	browser_config = {k: v for k, v in config.get('browser', {}).items() if v is not None}
+	browser_config = apply_managed_browser_profile_defaults(browser_config, USER_DATA_DIR)
+	# A one-shot scrape does not need extensions, and storage_state conflicts with a persistent profile.
+	browser_config['enable_default_extensions'] = False
+	browser_config.pop('storage_state', None)
+	effective_render_mode = render_mode or parent.get('render_mode')
+	if parent.get('no_render'):
+		effective_render_mode = 'no-render'
+	if effective_render_mode:
+		browser_config['render_mode'] = effective_render_mode
+	elif lightweight:
+		browser_config['render_mode'] = 'lightweight'
+
+	async def _run_scrape() -> dict:
+		if engine in {'auto', 'http'}:
+			http_result = await scrape_http(
+				url,
+				format=output_format,
+				selector=selector,
+				extract_links=extract_links,
+				timeout_ms=timeout_ms,
+				engine=engine,
+			)
+			if http_result is not None:
+				if max_chars is not None and isinstance(http_result.get('content'), str):
+					content = http_result['content']
+					if len(content) > max_chars:
+						http_result['content'] = content[:max_chars]
+						http_result['truncated'] = True
+						http_result['total_chars'] = len(content)
+				return http_result
+			if engine == 'http':
+				raise RuntimeError(f'HTTP scrape failed for {url}')
+
+		session = BrowserSession(browser_profile=BrowserProfile(**browser_config))
+		try:
+			await session.start()
+			_quiet_stderr_logging()
+			namespace = create_namespace(browser_session=session, tools=CodeAgentTools())
+			return await namespace['scrape_page'](
+				url,
+				format=output_format,
+				selector=selector,
+				wait_for=wait_for,
+				wait_until=wait_until,
+				timeout_ms=timeout_ms,
+				extract_links=extract_links,
+				max_chars=max_chars,
+				engine='browser',
+			)
+		finally:
+			with contextlib.suppress(Exception):
+				await session.kill()
+
+	try:
+		result = asyncio.run(_run_scrape())
+	except Exception as error:
+		click.echo(f'Scrape failed: {type(error).__name__}: {error}', err=True)
+		sys.exit(1)
+
+	content = result.get('content')
+	rendered = _json.dumps(result, indent=2, ensure_ascii=False) if as_json or not isinstance(content, str) else content
+	if output:
+		Path(output).write_text(rendered, encoding='utf-8')
+		click.echo(f'Wrote {len(rendered)} characters to {output}')
+	else:
+		click.echo(rendered)
 
 
 # ============================================================================

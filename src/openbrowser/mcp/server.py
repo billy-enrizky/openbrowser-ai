@@ -634,6 +634,21 @@ class _BrowserOwner:
 			profile_data['headless'] = False
 			provenance.record('headless', False, ProfileValueSource.ENVIRONMENT)
 
+		env_render_mode = os.environ.get('OPENBROWSER_RENDER_MODE', '').strip().lower()
+		if env_render_mode:
+			from openbrowser.browser.profile import RenderMode
+
+			try:
+				render_mode = RenderMode(env_render_mode)
+			except ValueError:
+				logger.warning(
+					'Ignoring invalid OPENBROWSER_RENDER_MODE=%r; expected full, lightweight, or no-render',
+					env_render_mode,
+				)
+			else:
+				profile_data['render_mode'] = render_mode.value
+				provenance.record('render_mode', render_mode.value, ProfileValueSource.ENVIRONMENT)
+
 		if explicit_user_data_dir:
 			# Explicit paths are intentionally shared and protected by the
 			# profile lease. Never silently replace one with a temporary path.
@@ -684,6 +699,7 @@ class _BrowserOwner:
 		self._profile_summary = {
 			'user_data_dir': str(profile.user_data_dir) if profile.user_data_dir else None,
 			'headless': profile.headless,
+			'render_mode': profile.effective_render_mode.value,
 			'storage_state': storage_state_summary,
 			'storage_state_mode': storage_state_mode,
 			'instance_id': self.owner_id,
