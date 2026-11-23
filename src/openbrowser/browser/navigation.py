@@ -28,10 +28,15 @@ class NavigationBlockedError(NavigationError, ValueError):
 def security_policy_blocked_message(url: str) -> str:
 	"""Return a policy refusal with an actionable local-file fallback."""
 	message = f'Navigation to {url} blocked by security policy'
-	if urlsplit(url).scheme == 'file':
+	try:
+		scheme = urlsplit(url).scheme
+	except ValueError:
+		return message
+	if scheme == 'file':
 		return (
 			f'{message}. Local file URLs are not allowed; serve the directory over a loopback '
-			'HTTP URL such as http://127.0.0.1:8000/ and navigate there instead.'
+			'HTTP URL such as http://127.0.0.1:8000/ and navigate there instead. The HTTP URL '
+			'must also be allowed by the configured policy, including allowed domains and IP-address blocking.'
 		)
 	return message
 
