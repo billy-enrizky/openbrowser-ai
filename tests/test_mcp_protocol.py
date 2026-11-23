@@ -772,6 +772,7 @@ async def test_exact_catalog_input_contracts_and_annotations(monkeypatch):
         assert "browser.health" in status_tool.description
         assert "last_focus_recovery_outcome" in status_tool.description
         assert "process_present is null" in status_tool.description
+        assert "process identity is inconclusive" in status_tool.description
         assert "Wait while recovery is pending" in status_tool.description
         assert "Reset only when no usable target exists" in status_tool.description
         assert "missing health block means no browser session" in status_tool.description
@@ -1417,6 +1418,7 @@ async def test_all_allowlisted_legacy_versions_keep_three_tools(tmp_path, versio
         assert "browser.health" in status_tool["description"]
         assert "last_focus_recovery_outcome" in status_tool["description"]
         assert "process_present is null" in status_tool["description"]
+        assert "process identity is inconclusive" in status_tool["description"]
         assert "Wait while recovery is pending" in status_tool["description"]
         assert "Reset only when no usable target exists" in status_tool["description"]
         assert "missing health block means no browser session" in status_tool["description"]

@@ -269,8 +269,8 @@ def _tool_catalog(description: str, *, modern: bool) -> tuple[types.Tool, ...]:
 			'not a live page probe. '
 			'Use last_focus_recovery_outcome, target_crash_count, and process_present before retrying. '
 			'Wait while recovery is pending. Reset only when no usable target exists. '
-			'process_present is null when the published root is not bound to the recorded local owner. '
-			'That includes remote or stopped sessions. '
+			'process_present is null when the published root is not bound to the recorded local owner, '
+			'or when process identity is inconclusive. That includes remote, stopped, or ambiguous local sessions. '
 			'A missing health block means no browser session exists.'
 			+ (' Requires context_id from create_context.' if modern else '')
 		),

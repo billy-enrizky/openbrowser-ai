@@ -540,6 +540,37 @@ class TestSecurityWatchdog:
             await watchdog.on_NavigateToUrlEvent(event)
 
     @pytest.mark.asyncio
+    async def test_file_navigation_error_suggests_loopback_http(self):
+        from openbrowser.browser.navigation import NavigationBlockedError
+        from openbrowser.browser.watchdogs.security_watchdog import SecurityWatchdog
+
+        session = _make_mock_browser_session()
+        event_bus = EventBus()
+        watchdog = SecurityWatchdog(event_bus=event_bus, browser_session=session)
+        watchdog.event_bus = MagicMock()
+        event = MagicMock()
+        event.url = 'file:///tmp/page.html'
+
+        with pytest.raises(NavigationBlockedError, match=r'http://127\.0\.0\.1:8000/') as file_error:
+            await watchdog.on_NavigateToUrlEvent(event)
+        assert 'must also be allowed by the configured policy' in str(file_error.value)
+
+    @pytest.mark.asyncio
+    async def test_malformed_url_keeps_policy_error(self):
+        from openbrowser.browser.navigation import NavigationBlockedError
+        from openbrowser.browser.watchdogs.security_watchdog import SecurityWatchdog
+
+        session = _make_mock_browser_session()
+        event_bus = EventBus()
+        watchdog = SecurityWatchdog(event_bus=event_bus, browser_session=session)
+        watchdog.event_bus = MagicMock()
+        event = MagicMock()
+        event.url = 'http://[::1'
+
+        with pytest.raises(NavigationBlockedError, match='blocked by security policy'):
+            await watchdog.on_NavigateToUrlEvent(event)
+
+    @pytest.mark.asyncio
     async def test_navigate_event_allows_permitted(self):
         from openbrowser.browser.watchdogs.security_watchdog import SecurityWatchdog
 

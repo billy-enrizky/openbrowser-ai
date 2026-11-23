@@ -11,7 +11,7 @@ from openbrowser.browser.events import (
 	TabCreatedEvent,
 )
 from openbrowser.browser.watchdog_base import BaseWatchdog
-from openbrowser.browser.navigation import NavigationBlockedError
+from openbrowser.browser.navigation import NavigationBlockedError, security_policy_blocked_message
 
 if TYPE_CHECKING:
 	pass
@@ -46,7 +46,7 @@ class SecurityWatchdog(BaseWatchdog):
 				)
 			)
 			# Stop event propagation by raising exception
-			raise NavigationBlockedError(f'Navigation to {event.url} blocked by security policy')
+			raise NavigationBlockedError(security_policy_blocked_message(event.url))
 
 	async def on_NavigationCompleteEvent(self, event: NavigationCompleteEvent) -> None:
 		"""Check if navigated URL is allowed (catches redirects to blocked domains)."""

@@ -2016,7 +2016,7 @@ async def test_bus_retirement_failure_keeps_retained_owners_unstartable():
     assert session.cdp_connection_health().cleanup_pending is True
     assert session._cdp_client_root is root
     assert session._session_manager is manager
-    with pytest.raises(RuntimeError, match="cleanup is still pending"):
+    with pytest.raises(RuntimeError, match="retirement is still pending"):
         await session.start()
 
     session.event_bus.stop = AsyncMock()
