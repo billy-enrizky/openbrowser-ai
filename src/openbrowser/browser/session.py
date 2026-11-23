@@ -511,7 +511,7 @@ class BrowserSession(BaseModel):
 	_start_cancelled_by_lifecycle: bool = PrivateAttr(default=False)
 	_stop_task: asyncio.Task | None = PrivateAttr(default=None)
 	_watchdogs_attached: bool = PrivateAttr(default=False)
-	_event_bus_retirement_pending: bool = PrivateAttr(default=False)
+	_event_bus_retirement_pending: EventBus | None = PrivateAttr(default=None)
 	_core_handlers_attached: bool = PrivateAttr(default=False)
 	_cached_browser_state_summary: Any = PrivateAttr(default=None)
 	_cached_selector_map: dict[int, EnhancedDOMTreeNode] = PrivateAttr(default_factory=dict)
@@ -791,6 +791,15 @@ class BrowserSession(BaseModel):
 				identity = ProfileLease.process_identity_status(binding.pid, binding.start_time)
 			except Exception:
 				identity = 'unknown'
+			if identity == 'mismatch':
+				marker_match = self._process_ownership_marker_matches(
+					binding,
+					getattr(self._local_browser_watchdog, '_subprocess', None),
+				)
+				if marker_match is True:
+					identity = 'match'
+				elif marker_match is None:
+					identity = 'unknown'
 			if identity == 'match':
 				process_present = True
 			elif identity in {'missing', 'mismatch'}:
@@ -802,6 +811,35 @@ class BrowserSession(BaseModel):
 			process_checked_at=process_checked_at,
 			projection_active=projection_active,
 		).to_dict()
+
+	@staticmethod
+	def _process_ownership_marker_matches(binding: OwnedRootBinding, process: Any | None) -> bool | None:
+		"""Return whether an existing PID still carries the unique bound owner marker."""
+		if process is None:
+			return None
+		import psutil
+
+		try:
+			if int(process.pid) != binding.pid:
+				return False
+			cmdline = process.cmdline()
+		except psutil.NoSuchProcess:
+			return False
+		except (AttributeError, OSError, psutil.Error):
+			return None
+		if not isinstance(cmdline, (list, tuple)):
+			return None
+		profile_matches = False
+		for argument in cmdline:
+			if not isinstance(argument, str) or not argument.startswith('--user-data-dir='):
+				continue
+			try:
+				profile_matches = str(Path(argument.split('=', 1)[1]).expanduser().resolve()) == binding.profile_dir
+			except OSError:
+				profile_matches = False
+			if profile_matches:
+				break
+		return profile_matches and binding.ownership_marker in cmdline
 
 	def _record_stopped_health(self, reason: BrowserHealthReason) -> None:
 		"""Record one completed public terminal operation."""
@@ -2288,7 +2326,7 @@ class BrowserSession(BaseModel):
 			self._cdp_client_root
 			or self._session_manager
 			or self._watchdogs_attached
-			or self._event_bus_retirement_pending
+			or self._event_bus_retirement_pending is not None
 			or (self.is_local and self.browser_profile.cdp_url)
 			or self._watchdog_has_live_resources(self._local_browser_watchdog)
 		)
@@ -3452,16 +3490,17 @@ class BrowserSession(BaseModel):
 		try:
 			await self._drain_navigation_event_pumps(event_bus)
 		except BaseException as error:
-			self._event_bus_retirement_pending = True
+			self._event_bus_retirement_pending = event_bus
 			self._lifecycle.fail(error, reason='event bus pump retirement failed')
 			if stop_error is not None:
 				raise error from stop_error
 			raise
 		if stop_error is not None:
-			self._event_bus_retirement_pending = True
+			self._event_bus_retirement_pending = event_bus
 			self._lifecycle.fail(stop_error, reason='event bus stop failed')
 			raise stop_error
-		self._event_bus_retirement_pending = False
+		if stop_bus and self._event_bus_retirement_pending is event_bus:
+			self._event_bus_retirement_pending = None
 
 	def _navigation_deadline(self, event: NavigateToUrlEvent, operation: NavigationOperation) -> float:
 		if operation.deadline is None:

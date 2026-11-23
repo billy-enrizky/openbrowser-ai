@@ -282,7 +282,12 @@ def _bound_session(tmp_path):
         "executable": "/Applications/Chrome",
         "cdp_port": 9222,
     }
-    process = SimpleNamespace(pid=4321, create_time=lambda: 123.0, net_connections=MagicMock(return_value=[]))
+    process = SimpleNamespace(
+        pid=4321,
+        create_time=lambda: 123.0,
+        net_connections=MagicMock(return_value=[]),
+        cmdline=MagicMock(return_value=["/Applications/Other"]),
+    )
     lease = SimpleNamespace(profile_dir=profile.resolve(), instance_id="instance-1")
     watchdog = SimpleNamespace(
         _owns_browser_resources=True,
@@ -336,6 +341,28 @@ def test_missing_or_reused_bound_process_derives_crashed(tmp_path, identity) -> 
     assert health["process_present"] is False
     assert health["process_checked_at"] is not None
     assert health["last_change_at"] == recorded_change
+
+
+def test_wall_clock_drift_with_matching_owner_marker_is_not_a_crash(tmp_path) -> None:
+    session, _root, _websocket, _transport, record, process, *_ = _bound_session(tmp_path)
+    process.cmdline = MagicMock(return_value=[f"--user-data-dir={record['profile_dir']}", record["ownership_marker"]])
+
+    with patch.object(ProfileLease, "process_identity_status", return_value="mismatch"):
+        health = session.browser_health_snapshot()
+
+    assert health["phase"] == "healthy"
+    assert health["process_present"] is True
+
+
+def test_pid_reuse_without_matching_owner_marker_still_derives_crashed(tmp_path) -> None:
+    session, _root, _websocket, _transport, _record, process, *_ = _bound_session(tmp_path)
+    process.cmdline = MagicMock(return_value=["/Applications/Chrome", "--user-data-dir=/tmp/other"])
+
+    with patch.object(ProfileLease, "process_identity_status", return_value="mismatch"):
+        health = session.browser_health_snapshot()
+
+    assert health["phase"] == "crashed"
+    assert health["process_present"] is False
 
 
 def test_unknown_process_identity_is_not_a_crash(tmp_path) -> None:
@@ -739,9 +766,30 @@ async def test_stop_event_bus_retirement_failure_records_cleanup_failed() -> Non
     health = session.browser_health_snapshot()
     assert health["phase"] == "failed"
     assert health["reason"] == "cleanup_failed"
-    assert session._event_bus_retirement_pending is True
+    assert session._event_bus_retirement_pending is session.event_bus
     with pytest.raises(RuntimeError, match="resources are still live"):
         await session.start()
+
+
+@pytest.mark.asyncio
+async def test_unstopped_bus_retirement_keeps_pending_ownership() -> None:
+    session = BrowserSession()
+    session._event_bus_retirement_pending = session.event_bus
+
+    await session._retire_event_bus(session.event_bus, stop_bus=False)
+
+    assert session._event_bus_retirement_pending is session.event_bus
+
+
+@pytest.mark.asyncio
+async def test_stopped_bus_retirement_clears_pending_ownership() -> None:
+    session = BrowserSession()
+    session._event_bus_retirement_pending = session.event_bus
+    session.event_bus.stop = AsyncMock()
+
+    await session._retire_event_bus(session.event_bus, stop_bus=True)
+
+    assert session._event_bus_retirement_pending is None
 
 
 @pytest.mark.asyncio
