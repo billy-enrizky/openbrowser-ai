@@ -402,9 +402,14 @@ If the task can fail mid-workflow, guarantee cleanup with a shell trap that stop
 ```bash
 cleanup() {
   openbrowser-ai daemon stop >/dev/null 2>&1 || true
-  for _ in 1 2 3 4 5; do
-    openbrowser-ai daemon status >/dev/null 2>&1 || return 0
+  i=0
+  while [ "$i" -lt 30 ]; do
+    status=$(openbrowser-ai daemon status 2>/dev/null || true)
+    case "$status" in
+      *daemon_not_running*) return 0 ;;
+    esac
     sleep 1
+    i=$((i + 1))
   done
   openbrowser-ai daemon force-stop >/dev/null 2>&1 || true
 }
