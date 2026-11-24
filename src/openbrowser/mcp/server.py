@@ -706,6 +706,31 @@ class _BrowserOwner:
 				profile_data['render_mode'] = render_mode.value
 				provenance.record('render_mode', render_mode.value, ProfileValueSource.ENVIRONMENT)
 
+		env_text_only = os.environ.get('OPENBROWSER_TEXT_ONLY', '').strip().lower()
+		if env_text_only in ('true', '1', 'yes'):
+			profile_data['text_only'] = True
+			provenance.record('text_only', True, ProfileValueSource.ENVIRONMENT)
+
+		env_block = os.environ.get('OPENBROWSER_BLOCK_RESOURCES', '').strip().lower()
+		if env_block:
+			block_fields = {
+				'css': 'block_css',
+				'images': 'block_images',
+				'fonts': 'block_fonts',
+				'media': 'block_media',
+				'scripts': 'block_scripts',
+			}
+			requested = {item.strip() for item in env_block.split(',') if item.strip()}
+			unknown = requested - set(block_fields)
+			if unknown:
+				logger.warning(
+					'Ignoring unknown OPENBROWSER_BLOCK_RESOURCES entries: %s',
+					', '.join(sorted(unknown)),
+				)
+			for key in sorted(requested & set(block_fields)):
+				profile_data[block_fields[key]] = True
+				provenance.record(block_fields[key], True, ProfileValueSource.ENVIRONMENT)
+
 		if explicit_user_data_dir:
 			# Explicit paths are intentionally shared and protected by the
 			# profile lease. Never silently replace one with a temporary path.

@@ -66,6 +66,15 @@ _SCRAPE_FLAG_OPTIONS = {
 	'--jsonl',
 	'--json',
 	'--only-main-content',
+	'--text-only',
+	'--no-css',
+	'--css',
+	'--no-images',
+	'--images',
+	'--no-fonts',
+	'--fonts',
+	'--no-media',
+	'--media',
 }
 _FORMATS = {'markdown', 'text', 'html', 'links', 'json'}
 _OUTPUT_FORMATS = {'json', 'jsonl'}

@@ -421,3 +421,17 @@ def test_static_scrape_does_not_require_the_browser_stack():
     assert completed.returncode == 0, completed.stderr[-2000:]
     assert "BROWSER_IMPORTED False" in completed.stdout, completed.stdout[-2000:]
     assert "Static content" in completed.stdout
+
+
+def test_scrape_passes_granular_render_flags_to_the_browser_profile():
+    outcome, _, profile_cls, _ = _invoke(
+        ["https://example.com", "--text-only", "--no-css", "--images"],
+        http_result=None,
+    )
+
+    assert outcome.exit_code == 0, outcome.output
+    kwargs = profile_cls.call_args.kwargs
+    assert kwargs["text_only"] is True
+    assert kwargs["block_css"] is True
+    assert kwargs["block_images"] is False
+    assert "block_fonts" not in kwargs
