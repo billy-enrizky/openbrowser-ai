@@ -296,6 +296,40 @@ class TestNavigateAction:
         assert "site unavailable" in result.error
 
     @pytest.mark.asyncio
+    async def test_navigate_reports_browser_block_reason(self):
+        tools = Tools()
+        session = _make_mock_browser_session()
+        session.navigate_to.side_effect = RuntimeError("net::ERR_BLOCKED_BY_CLIENT")
+
+        result = await tools.registry.execute_action(
+            "navigate",
+            {"url": "http://example.com"},
+            browser_session=session,
+        )
+
+        assert result.error == (
+            "The browser blocked navigation to http://example.com "
+            "(net::ERR_BLOCKED_BY_CLIENT)"
+        )
+
+    @pytest.mark.asyncio
+    async def test_navigate_reports_tls_certificate_failure(self):
+        tools = Tools()
+        session = _make_mock_browser_session()
+        session.navigate_to.side_effect = RuntimeError("net::ERR_CERT_AUTHORITY_INVALID")
+
+        result = await tools.registry.execute_action(
+            "navigate",
+            {"url": "https://example.com"},
+            browser_session=session,
+        )
+
+        assert result.error == (
+            "The browser rejected the TLS certificate for https://example.com "
+            "(net::ERR_CERT_AUTHORITY_INVALID)"
+        )
+
+    @pytest.mark.asyncio
     async def test_navigate_generic_error(self):
         tools = Tools()
         session = _make_mock_browser_session()
