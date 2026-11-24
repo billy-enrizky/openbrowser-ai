@@ -23,12 +23,16 @@ The namespace is initialized with:
 - `click_xy(x, y, button='left', click_count=1)` - Click a no-index canvas, PDF, embed, or native-rendered target using CSS viewport pixels
 - `hover_xy(x, y)` - Move over a no-index canvas, PDF, embed, or native-rendered target using CSS viewport pixels
 - `input_text(index, text, clear=True)` - Type text into an input field
+- `find_element(role=None, name=None, element_id=None, tag=None, timeout=0)` - Resolve an index from a screenshotless state
+- `click_element(role=..., name=...)` - Find and click in one call
+- `fill_element(text, role=..., name=...)` - Find an input and type in one call
 - `scroll(down, pages=1.0, index=None)` - Scroll the page or a container. `down` is required.
 - `scroll_xy(x, y, delta_x=0, delta_y=0)` - Wheel-scroll a no-index surface using CSS viewport pixels
 - `send_keys(keys)` - Send keyboard keys or shortcuts
 - `upload_file(index, path)` - Upload a file to a file input element
 - `select_dropdown(index, text)` - Select an option in a `<select>` dropdown
 - `dropdown_options(index)` - Get all options for a `<select>` dropdown
+- `get_tabs()` - List tabs without a DOM scan
 - `switch(tab_id)` - Switch to a different browser tab
 - `close(tab_id)` - Close a browser tab
 - `evaluate(code, variables={})` - Execute JavaScript and return Python objects

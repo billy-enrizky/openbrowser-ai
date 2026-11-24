@@ -9,7 +9,9 @@ import json
 import logging
 import os
 import tempfile
+import time
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -655,6 +657,217 @@ class TestGetNamespaceDocumentation:
         assert "no_doc" not in doc or "##" not in doc.split("no_doc")[0] if "no_doc" in doc else True
 
 
+
+# ---------------------------------------------------------------------------
+# Interactive element helpers
+# ---------------------------------------------------------------------------
+
+
+class TestInteractiveHelpers:
+    def _make_session(self, summaries):
+        session = MagicMock()
+        session.browser_profile = MagicMock()
+        session.browser_profile.downloads_path = None
+        session.get_browser_state_summary = AsyncMock(side_effect=summaries)
+        return session
+
+    def _make_tools(self):
+        tools = MagicMock()
+        tools.registry.registry.actions = {}
+        return tools
+
+    def _node(self, *, tag='div', element_id=None, role=None, name=None):
+        node = MagicMock()
+        node.tag_name = tag
+        node.attributes = {'id': element_id} if element_id else {}
+        if role is None and name is None:
+            node.ax_node = None
+        else:
+            node.ax_node = SimpleNamespace(role=role, name=name)
+        return node
+
+    def _summary(self, nodes):
+        summary = MagicMock()
+        summary.dom_state.selector_map = nodes
+        return summary
+
+    def _namespace(self, session):
+        return create_namespace(session, tools=self._make_tools())
+
+    @pytest.mark.asyncio
+    async def test_find_element_by_role_name(self):
+        node = self._node(tag='input', role='textbox', name='Email')
+        session = self._make_session([self._summary({7: node})])
+        ns = self._namespace(session)
+
+        index = await ns['find_element'](role='textbox', name='Email')
+
+        assert index == 7
+        session.get_browser_state_summary.assert_awaited_once_with(include_screenshot=False)
+
+    @pytest.mark.asyncio
+    async def test_find_element_by_id_and_tag(self):
+        node = self._node(tag='INPUT', element_id='email', role='textbox', name='Email')
+        summary = self._summary({4: node})
+        session = self._make_session([summary, summary])
+        ns = self._namespace(session)
+
+        assert await ns['find_element'](element_id='email') == 4
+        assert await ns['find_element'](tag='input', name='Email') == 4
+
+    @pytest.mark.asyncio
+    async def test_find_element_requires_a_filter(self):
+        session = self._make_session([self._summary({})])
+        ns = self._namespace(session)
+
+        with pytest.raises(ValueError, match='needs role, name, element_id, or tag'):
+            await ns['find_element']()
+
+    @pytest.mark.asyncio
+    async def test_find_element_reports_a_missing_element(self):
+        session = self._make_session([self._summary({})])
+        ns = self._namespace(session)
+
+        with pytest.raises(RuntimeError, match="role='button'"):
+            await ns['find_element'](role='button', name='Next')
+
+    @pytest.mark.asyncio
+    async def test_find_element_polls_until_the_element_appears(self):
+        node = self._node(tag='button', role='button', name='Next')
+        session = self._make_session([self._summary({}), self._summary({2: node})])
+        ns = self._namespace(session)
+
+        index = await ns['find_element'](role='button', name='Next', timeout=0.2, poll_interval=0.01)
+
+        assert index == 2
+        assert session.get_browser_state_summary.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_find_element_requires_every_supplied_filter_to_match(self):
+        wrong = self._node(tag='input', element_id='shipping-email', role='textbox', name='Email')
+        right = self._node(tag='input', element_id='billing-email', role='textbox', name='Email')
+        session = self._make_session([self._summary({1: wrong, 2: right})])
+        ns = self._namespace(session)
+
+        index = await ns['find_element'](
+            element_id='billing-email',
+            role='textbox',
+            name='Email',
+        )
+
+        assert index == 2
+
+    @pytest.mark.asyncio
+    async def test_find_element_caps_sleep_at_the_remaining_timeout(self):
+        session = self._make_session([self._summary({})])
+        ns = self._namespace(session)
+
+        started = time.monotonic()
+        with pytest.raises(RuntimeError, match='Element not found'):
+            await ns['find_element'](role='button', timeout=0.05, poll_interval=10)
+
+        assert time.monotonic() - started < 1.0
+
+    @pytest.mark.asyncio
+    async def test_find_element_does_not_return_after_the_deadline(self):
+        node = self._node(tag='button', role='button', name='Next')
+
+        async def slow_summary(*args, **kwargs):
+            await asyncio.sleep(0.05)
+            return self._summary({2: node})
+
+        session = self._make_session([])
+        session.get_browser_state_summary = AsyncMock(side_effect=slow_summary)
+        ns = self._namespace(session)
+
+        with pytest.raises(RuntimeError, match='Element not found'):
+            await ns['find_element'](role='button', name='Next', timeout=0.01)
+
+    @pytest.mark.asyncio
+    async def test_click_element_resolves_and_clicks(self):
+        node = self._node(tag='button', role='button', name='Next')
+        session = self._make_session([self._summary({3: node})])
+        ns = self._namespace(session)
+        ns['click'] = AsyncMock(return_value={'clicked': True})
+
+        result = await ns['click_element'](role='button', name='Next')
+
+        assert result == {'clicked': True}
+        ns['click'].assert_awaited_once_with(index=3)
+
+    @pytest.mark.asyncio
+    async def test_fill_element_resolves_and_types(self):
+        node = self._node(tag='input', element_id='seats', role='textbox', name='Seats')
+        session = self._make_session([self._summary({5: node})])
+        ns = self._namespace(session)
+        ns['input_text'] = AsyncMock(return_value={'typed': True})
+
+        result = await ns['fill_element']('5', element_id='seats')
+
+        assert result == {'typed': True}
+        ns['input_text'].assert_awaited_once_with(index=5, text='5')
+
+    @pytest.mark.asyncio
+    async def test_get_tabs_uses_the_cdp_tab_list(self):
+        session = self._make_session([self._summary({})])
+        session.current_target_id = 'TARGET-TWO'
+        session.get_tabs = AsyncMock(
+            return_value=[
+                SimpleNamespace(
+                    target_id='TARGET-ONE',
+                    url='https://one.example',
+                    title='One',
+                    parent_target_id=None,
+                ),
+                SimpleNamespace(
+                    target_id='TARGET-TWO',
+                    url='https://two.example',
+                    title='Two',
+                    parent_target_id='TARGET-ONE',
+                ),
+            ]
+        )
+        ns = self._namespace(session)
+
+        tabs = await ns['get_tabs']()
+
+        assert tabs == [
+            {
+                'target_id': 'TARGET-ONE',
+                'url': 'https://one.example',
+                'title': 'One',
+                'parent_target_id': None,
+                'active': False,
+            },
+            {
+                'target_id': 'TARGET-TWO',
+                'url': 'https://two.example',
+                'title': 'Two',
+                'parent_target_id': 'TARGET-ONE',
+                'active': True,
+            },
+        ]
+        session.get_tabs.assert_awaited_once_with()
+        session.get_browser_state_summary.assert_not_awaited()
+
+    def test_descriptions_and_namespace_docs_name_the_helpers(self):
+        from openbrowser.code_use.descriptions import (
+            EXECUTE_CODE_DESCRIPTION,
+            EXECUTE_CODE_DESCRIPTION_COMPACT,
+        )
+
+        for description in (EXECUTE_CODE_DESCRIPTION_COMPACT, EXECUTE_CODE_DESCRIPTION):
+            assert 'find_element' in description
+            assert 'click_element' in description
+            assert 'fill_element' in description
+            assert 'get_tabs' in description
+
+        session = self._make_session([self._summary({})])
+        docs = get_namespace_documentation(self._namespace(session))
+        assert '## find_element' in docs
+        assert '## click_element' in docs
+        assert '## fill_element' in docs
+        assert '## get_tabs' in docs
 
 # ---------------------------------------------------------------------------
 # scrape_page()

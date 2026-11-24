@@ -1,3 +1,4 @@
+# ruff: noqa: E501
 # src/openbrowser/code_use/descriptions.py
 """Canonical description strings for the execute_code tool.
 
@@ -14,6 +15,9 @@ After a browser error, use MCP `get_status` or CLI `openbrowser-ai daemon status
 
 ## Core Functions
 - `await navigate(url, new_tab=False)` -- Go to URL
+- `await find_element(role=None, name=None, element_id=None, tag=None, timeout=0)` -- Resolve an index from a screenshotless state
+- `await click_element(role=..., name=...)` -- Find and click in one call
+- `await fill_element(text, role=..., name=...)` -- Find an input and type in one call
 - `await click(index)` -- Click element by index
 - `await input_text(index, text, clear=True)` -- Type into input field
 - `await scroll(down=True, pages=1.0)` -- Scroll page
@@ -21,6 +25,7 @@ After a browser error, use MCP `get_status` or CLI `openbrowser-ai daemon status
 - `await hover_xy(x, y)` -- Move over a no-index canvas, PDF, embed, or native-rendered target
 - `await scroll_xy(x, y, delta_x=0, delta_y=0)` -- Wheel-scroll a no-index surface
 - `await send_keys(keys)` -- Keyboard input (e.g. "Enter", "Escape")
+- `await get_tabs()` -- List open tabs without a DOM scan
 - `await evaluate(code)` -- Run JavaScript, returns Python objects
 - `await select_dropdown(index, text)` -- Select dropdown option
 - `await done(text, success=True)` -- Signal task complete
@@ -64,6 +69,9 @@ EXECUTE_CODE_DESCRIPTION = """Execute Python code in a persistent namespace with
 
 - `await click(index: int)` -- Click an element by its index from browser state. Index must be >= 1. Works for buttons, links, checkboxes, radio buttons. Does NOT work for <select> elements (use select_dropdown instead).
 - `await input_text(index: int, text: str, clear: bool = True)` -- Type text into an input field. clear=True (default) clears the field first; clear=False appends.
+- `await find_element(role=None, name=None, element_id=None, tag=None, timeout=0.0, poll_interval=0.1)` -- Return the current interactive index for a matching element. It matches by exact element id, accessibility role and name, or tag and name, and returns the first match in selector-map order. The lookup uses `get_browser_state_summary(include_screenshot=False)`. A positive timeout polls until the element appears.
+- `await click_element(role=None, name=None, element_id=None, tag=None, timeout=10.0, **click_kwargs)` -- Find an element and click it in one call. The same filters as find_element() apply.
+- `await fill_element(text, role=None, name=None, element_id=None, tag=None, timeout=10.0, **input_kwargs)` -- Find an input and type text into it in one call. The same filters as find_element() apply.
 - `await scroll(down: bool = True, pages: float = 1.0, index: int | None = None)` -- Scroll the page. down=True scrolls down, down=False scrolls up. pages=0.5 for half page, 1 for full page, 10 for top/bottom. Pass index to scroll within a specific container element.
 - `await click_xy(x: float, y: float, button: str = "left", click_count: int = 1)` -- Click a no-index canvas, PDF, embed, or native-rendered target.
 - `await hover_xy(x: float, y: float)` -- Move over a no-index canvas, PDF, embed, or native-rendered target.
@@ -79,6 +87,7 @@ EXECUTE_CODE_DESCRIPTION = """Execute Python code in a persistent namespace with
 
 ## Tab Management
 
+- `await get_tabs()` -- Return open tabs with full target_id, url, title, parent_target_id, and active flag. It uses the CDP tab list instead of reading the full DOM.
 - `await switch(tab_id: str)` -- Switch to a different browser tab. Pass the full target_id or its 4-character suffix from the browser state tabs list. If a suffix is ambiguous, retry with one of the returned full IDs.
 - `await close(tab_id: str)` -- Close a browser tab. Pass the full target_id or its 4-character suffix. Closing an already closed tab is a no-op.
 
@@ -136,6 +145,7 @@ EXECUTE_CODE_DESCRIPTION = """Execute Python code in a persistent namespace with
 ## Browser State
 
 - `browser` -- The BrowserSession object. Use `state = await browser.get_browser_state_summary()` to get current page state including:
+  - For index-only lookup, `find_element()` and both action helpers read `get_browser_state_summary(include_screenshot=False)`. Use a screenshot only when visual confirmation is part of the task.
   - `state.url` -- current URL
   - `state.title` -- page title
   - `state.tabs` -- list of open tabs (each has .target_id, .url, .title). For switch()/close(), use the last 4 chars of target_id or the full target_id.

@@ -331,7 +331,7 @@ The benchmark run used v0.1.26 with `execute_code`. `get_status` and `reset_brow
 
 | Tool | Capabilities |
 |------|-------------|
-| `execute_code` | Python code execution in a persistent namespace with browser automation functions: `navigate()`, `click()`, `input_text()`, `scroll()`, `go_back()`, `select_dropdown()`, `send_keys()`, `upload_file()`, `evaluate()` (JS), `switch()`/`close()` (tabs), `done()` (task completion). Also provides `file_system` for local file operations and pre-imported libraries (json, pandas, re, csv, etc.) |
+| `execute_code` | Python code execution in a persistent namespace with browser automation functions: `navigate()`, `find_element()`, `click_element()`, `fill_element()`, `click()`, `input_text()`, `scroll()`, `go_back()`, `select_dropdown()`, `send_keys()`, `upload_file()`, `evaluate()` (JS), `get_tabs()`/`switch()`/`close()` (tabs), `done()` (task completion). Also provides `file_system` for local file operations and pre-imported libraries (json, pandas, re, csv, etc.) |
 | `get_status` | Read-only server, browser, profile, and tab state. Does not start a browser. |
 | `reset_browser` | Close a stuck browser and release its profile while preserving scalar and scalar-only container variables by default. |
 
