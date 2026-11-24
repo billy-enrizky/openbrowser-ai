@@ -349,24 +349,7 @@ def _http_result_from_response(
 	engine: str,
 ) -> dict[str, Any] | None:
 	"""Convert an HTTP response into a scrape result, or None to use the browser."""
-	from openbrowser.dom.fast_html import (
-		probe_static_html,
-	)
-	from openbrowser.dom.fast_html import (
-		to_links as fast_links,
-	)
-	from openbrowser.dom.fast_html import (
-		to_markdown as fast_markdown,
-	)
-	from openbrowser.dom.fast_html import (
-		to_nodes as fast_nodes,
-	)
-	from openbrowser.dom.fast_html import (
-		to_text as fast_text,
-	)
-	from openbrowser.dom.fast_html import (
-		to_title as fast_title,
-	)
+	from openbrowser.dom.fast_html import parse_document
 
 	if response.status_code >= 400:
 		return None
@@ -392,25 +375,16 @@ def _http_result_from_response(
 		return None
 
 	html = response.text
+	document = parse_document(html)
 	if engine == 'auto':
 		# Use HTTP only when the server-rendered text is substantial. Thin
 		# shells usually need JavaScript, so fall back to the browser.
-		text_probe, empty_application_root = probe_static_html(html)
+		text_probe, empty_application_root = document.probe_static()
 		if len(text_probe) < 40 or empty_application_root:
 			return None
 
-	title = fast_title(html)
-	content: Any
-	if format == 'markdown':
-		content = fast_markdown(html, selector)
-	elif format == 'text':
-		content = fast_text(html, selector)
-	elif format == 'html':
-		content = html
-	elif format == 'links':
-		content = fast_links(html)
-	else:
-		content = fast_nodes(html, selector) if selector else []
+	title = document.title()
+	content = document.extract(format, selector)
 
 	return {
 		'url': str(response.url),

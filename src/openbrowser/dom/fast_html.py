@@ -217,18 +217,6 @@ def _parse(html: str) -> LexborHTMLParser:
     return tree
 
 
-def to_markdown(html: str, selector: str | None = None) -> str:
-    """Convert HTML to compact markdown with the fast Lexbor tree."""
-    tree = _parse(html)
-    selected = tree.css_first(selector) if selector else None
-    if selected is not None:
-        text = _render(selected)
-    else:
-        node = tree.body or tree.root
-        text = _render_children(node)
-    return _EXCESS_NEWLINES.sub("\n\n\n", text).strip()
-
-
 def _has_empty_application_root(tree: LexborHTMLParser) -> bool:
     for node in tree.css("#root, #app, #__next"):
         child = node.first_child
@@ -243,57 +231,110 @@ def _has_empty_application_root(tree: LexborHTMLParser) -> bool:
     return False
 
 
+class ParsedHTML:
+    """Read several extraction results from one cleaned Lexbor tree."""
+
+    __slots__ = ("_html", "_tree")
+
+    def __init__(self, html: str) -> None:
+        self._html = html
+        self._tree = _parse(html)
+
+    def probe_static(self) -> tuple[str, bool]:
+        node = self._tree.body or self._tree.root
+        text = node.text(separator="\n", strip=True) if node is not None else ""
+        return text, _has_empty_application_root(self._tree)
+
+    def has_empty_application_root(self) -> bool:
+        return _has_empty_application_root(self._tree)
+
+    def title(self) -> str:
+        node = self._tree.css_first("title")
+        return node.text(separator=" ", strip=True) if node is not None else ""
+
+    def markdown(self, selector: str | None = None) -> str:
+        selected = self._tree.css_first(selector) if selector else None
+        if selected is not None:
+            text = _render(selected)
+        else:
+            node = self._tree.body or self._tree.root
+            text = _render_children(node)
+        return _EXCESS_NEWLINES.sub("\n\n\n", text).strip()
+
+    def text(self, selector: str | None = None) -> str:
+        node = self._tree.css_first(selector) if selector else None
+        if node is None:
+            node = self._tree.body or self._tree.root
+        assert node is not None
+        return node.text(separator="\n", strip=True)
+
+    def links(self) -> list[dict[str, Any]]:
+        return [
+            {
+                "text": node.text(separator=" ", strip=True),
+                "href": node.attrs.get("href"),
+                "title": node.attrs.get("title"),
+            }
+            for node in self._tree.css("a[href]")
+        ]
+
+    def nodes(self, selector: str) -> list[dict[str, Any]]:
+        return [
+            {
+                "text": node.text(separator=" ", strip=True),
+                "html": node.html or "",
+                "attributes": dict(node.attrs),
+            }
+            for node in self._tree.css(selector)
+        ]
+
+    def extract(self, format: str, selector: str | None = None) -> Any:
+        if format == "markdown":
+            return self.markdown(selector)
+        if format == "text":
+            return self.text(selector)
+        if format == "html":
+            return self._html
+        if format == "links":
+            return self.links()
+        return self.nodes(selector) if selector else []
+
+
+def parse_document(html: str) -> ParsedHTML:
+    """Parse HTML once for several static extraction operations."""
+    return ParsedHTML(html)
+
+
+def to_markdown(html: str, selector: str | None = None) -> str:
+    """Convert HTML to compact markdown with the fast Lexbor tree."""
+    return parse_document(html).markdown(selector)
+
+
 def has_empty_application_root(html: str) -> bool:
     """Return True when a common SPA mount point has no text or element children."""
-    return _has_empty_application_root(_parse(html))
+    return parse_document(html).has_empty_application_root()
 
 
 def probe_static_html(html: str) -> tuple[str, bool]:
     """Return visible text and whether a common SPA mount point is empty."""
-    tree = _parse(html)
-    node = tree.body or tree.root
-    text = node.text(separator="\n", strip=True) if node is not None else ""
-    return text, _has_empty_application_root(tree)
+    return parse_document(html).probe_static()
 
 
 def to_title(html: str) -> str:
     """Return the document title or an empty string."""
-    tree = _parse(html)
-    node = tree.css_first("title")
-    return node.text(separator=" ", strip=True) if node is not None else ""
+    return parse_document(html).title()
 
 
 def to_text(html: str, selector: str | None = None) -> str:
     """Return visible text with one block per line."""
-    tree = _parse(html)
-    node = tree.css_first(selector) if selector else None
-    if node is None:
-        node = tree.body or tree.root
-    assert node is not None
-    return node.text(separator="\n", strip=True)
+    return parse_document(html).text(selector)
 
 
 def to_links(html: str) -> list[dict[str, Any]]:
     """Return every link with text, href, and title."""
-    tree = _parse(html)
-    return [
-        {
-            "text": node.text(separator=" ", strip=True),
-            "href": node.attrs.get("href"),
-            "title": node.attrs.get("title"),
-        }
-        for node in tree.css("a[href]")
-    ]
+    return parse_document(html).links()
 
 
 def to_nodes(html: str, selector: str) -> list[dict[str, Any]]:
     """Return matching nodes with text, inner HTML, and attributes."""
-    tree = _parse(html)
-    return [
-        {
-            "text": node.text(separator=" ", strip=True),
-            "html": node.html or "",
-            "attributes": dict(node.attrs),
-        }
-        for node in tree.css(selector)
-    ]
+    return parse_document(html).nodes(selector)
