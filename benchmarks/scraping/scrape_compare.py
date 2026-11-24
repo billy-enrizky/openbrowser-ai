@@ -862,49 +862,50 @@ async def main() -> int:
 
     firecrawl_server: FirecrawlServer | None = None
     firecrawl_waits: dict[str, dict[str, int]] = {}
-    if any(name.startswith("firecrawl") for name in args.arms):
-        if args.firecrawl_url:
-            firecrawl_server = FirecrawlServer(url=args.firecrawl_url, chrome_path=args.chrome)
-        else:
-            binary = _resolve_firecrawl_binary(args.firecrawl_bin)
-            if not binary:
-                raise SystemExit(
-                    "Firecrawl arms need firecrawl-local. Install it with "
-                    "`cargo install firecrawl-local --version 0.1.1 --root <tools-dir>`, "
-                    "pass --firecrawl-bin, set FIRECRAWL_LOCAL_BIN, or attach with --firecrawl-url."
-                )
-            firecrawl_server = FirecrawlServer(binary=binary, chrome_path=args.chrome)
-        firecrawl_server.start()
-        print(f"firecrawl-local {firecrawl_server.version} at {firecrawl_server.url}")
-
-    arms = []
-    for name in args.arms:
-        if name == "http":
-            arms.append(HttpArm())
-        elif name == "openbrowser-full":
-            arms.append(BrowserArm(name, "full", chrome_path=args.chrome))
-        elif name == "openbrowser-lightweight":
-            arms.append(BrowserArm(name, "lightweight", chrome_path=args.chrome))
-        elif name == "openbrowser-no-render":
-            arms.append(BrowserArm(name, "no-render", chrome_path=args.chrome))
-        elif name == "firecrawl-local":
-            firecrawl_waits[name] = {"asset_heavy": FIRECRAWL_ASSET_WAIT_MS}
-            arms.append(FirecrawlArm(name, firecrawl_server, firecrawl_waits[name]))
-        elif name == "firecrawl-local-auto":
-            firecrawl_waits[name] = {}
-            arms.append(FirecrawlArm(name, firecrawl_server, firecrawl_waits[name]))
-        elif name == "lightpanda":
-            binary = args.lightpanda_bin or os.environ.get("LIGHTPANDA_BIN") or shutil.which("lightpanda")
-            if not binary:
-                raise SystemExit("Lightpanda arm needs a binary. Pass --lightpanda-bin or set LIGHTPANDA_BIN.")
-            arms.append(LightpandaArm(binary))
-        else:
-            raise SystemExit(f"unknown arm: {name}")
-
-    lightpanda_arm = next((arm for arm in arms if isinstance(arm, LightpandaArm)), None)
-    environment = _environment(firecrawl_server, firecrawl_waits, args.chrome, lightpanda_arm)
+    arms: list = []
     results: list[TaskResult] = []
+    environment: dict = {}
     try:
+        if any(name.startswith("firecrawl") for name in args.arms):
+            if args.firecrawl_url:
+                firecrawl_server = FirecrawlServer(url=args.firecrawl_url, chrome_path=args.chrome)
+            else:
+                binary = _resolve_firecrawl_binary(args.firecrawl_bin)
+                if not binary:
+                    raise SystemExit(
+                        "Firecrawl arms need firecrawl-local. Install it with "
+                        "`cargo install firecrawl-local --version 0.1.1 --root <tools-dir>`, "
+                        "pass --firecrawl-bin, set FIRECRAWL_LOCAL_BIN, or attach with --firecrawl-url."
+                    )
+                firecrawl_server = FirecrawlServer(binary=binary, chrome_path=args.chrome)
+            firecrawl_server.start()
+            print(f"firecrawl-local {firecrawl_server.version} at {firecrawl_server.url}")
+
+        for name in args.arms:
+            if name == "http":
+                arms.append(HttpArm())
+            elif name == "openbrowser-full":
+                arms.append(BrowserArm(name, "full", chrome_path=args.chrome))
+            elif name == "openbrowser-lightweight":
+                arms.append(BrowserArm(name, "lightweight", chrome_path=args.chrome))
+            elif name == "openbrowser-no-render":
+                arms.append(BrowserArm(name, "no-render", chrome_path=args.chrome))
+            elif name == "firecrawl-local":
+                firecrawl_waits[name] = {"asset_heavy": FIRECRAWL_ASSET_WAIT_MS}
+                arms.append(FirecrawlArm(name, firecrawl_server, firecrawl_waits[name]))
+            elif name == "firecrawl-local-auto":
+                firecrawl_waits[name] = {}
+                arms.append(FirecrawlArm(name, firecrawl_server, firecrawl_waits[name]))
+            elif name == "lightpanda":
+                binary = args.lightpanda_bin or os.environ.get("LIGHTPANDA_BIN") or shutil.which("lightpanda")
+                if not binary:
+                    raise SystemExit("Lightpanda arm needs a binary. Pass --lightpanda-bin or set LIGHTPANDA_BIN.")
+                arms.append(LightpandaArm(binary))
+            else:
+                raise SystemExit(f"unknown arm: {name}")
+
+        lightpanda_arm = next((arm for arm in arms if isinstance(arm, LightpandaArm)), None)
+        environment = _environment(firecrawl_server, firecrawl_waits, args.chrome, lightpanda_arm)
         for arm in arms:
             await arm.start()
             for task_name in args.tasks:
