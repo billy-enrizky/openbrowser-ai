@@ -400,3 +400,66 @@ N=10 with 2 warmups, macOS arm64, Firecrawl Local 0.1.1:
 The table path returns 2490 structured bytes against Firecrawl's 6736 markdown bytes. The static result is parity, not a claim of a clear static latency win. The JavaScript tasks remain the largest OpenBrowser advantage.
 
 The raw `httpx` arm still uses BeautifulSoup and markdownify. It is retained as a baseline, not as the product path.
+
+## Resource lane, 2026-11-24
+
+`resource_compare.py` runs the same arms and task oracles with a process-tree
+sampler. It records peak RSS, live tree CPU, reaped child CPU, and the maximum
+child RSS reported by `getrusage`. The sampler adds overhead, so use
+`scrape_compare.py` for clean latency claims.
+
+N=3 with 1 warmup per arm and task, macOS arm64, Chrome for Testing
+`159.0.8154.6`, Firecrawl Local 0.1.1, Lightpanda 1.0.5. The host load average
+was `15.7 / 16.8 / 18.4`, so rely on CPU time and RSS rather than the sampled
+latency. The Firecrawl server is started per arm, so its memory is not
+attributed to the other arms.
+
+Peak process-tree RSS, p50 MB:
+
+| Task | HTTP | OpenBrowser full | OpenBrowser lightweight | OpenBrowser no-render | Firecrawl Local | Lightpanda |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| static_article | 51.6 | 780.7 | 741.8 | 744.6 | 155.7 | 123.6 |
+| js_list | n/a | 741.8 | 762.3 | 764.1 | 1411.0 | 124.9 |
+| pagination | 51.7 | 740.0 | 765.3 | 766.5 | 1433.4 | 122.9 |
+| table | 51.8 | 740.4 | 765.5 | 766.2 | 1384.2 | 123.4 |
+| asset_heavy | n/a | 749.2 | 783.2 | 777.4 | 1687.0 | 124.5 |
+
+Live process-tree CPU, p50 ms:
+
+| Task | HTTP | OpenBrowser full | OpenBrowser lightweight | OpenBrowser no-render | Firecrawl Local | Lightpanda |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| static_article | 41.0 | 46.7 | 41.0 | 41.2 | 32.5 | 60.5 |
+| js_list | n/a | 133.8 | 100.0 | 108.5 | 380.4 | 61.6 |
+| pagination | 31.4 | 44.9 | 44.3 | 44.7 | 74.7 | 203.3 |
+| table | 33.8 | 36.4 | 30.8 | 32.2 | 34.4 | 62.6 |
+| asset_heavy | n/a | 215.8 | 115.4 | 100.6 | 520.6 | 62.7 |
+
+What the lane shows:
+
+- The HTTP path is the memory and CPU winner for server-rendered pages at
+  about 52 MB, but it fails the JavaScript tasks by design.
+- OpenBrowser browser arms use roughly 740 to 783 MB across tasks. Lightweight
+  and no-render keep similar memory while cutting CPU on JavaScript and
+  asset-heavy pages. No-render uses 100.6 ms on asset-heavy against 215.8 ms
+  for full.
+- Firecrawl Local uses 155.7 MB on the static article, but grows to 1.38 to
+  1.69 GB on JavaScript and asset-heavy pages. Its CPU reaches 380.4 ms on
+  `js_list` and 520.6 ms on `asset_heavy`.
+- Lightpanda uses about 123 MB, the lowest browser-like footprint here, but its
+  pagination CPU is 203.3 ms against 44.9 ms for OpenBrowser full. It is a
+  different engine and not a Chromium memory or capability equivalent.
+- The HTTP arm's `n/a` rows are expected failures, not missing measurements.
+
+Run:
+
+```sh
+uv run --locked python -m benchmarks.scraping.resource_compare \
+  --samples 3 --warmups 1 \
+  --arms http openbrowser-full openbrowser-lightweight openbrowser-no-render firecrawl-local lightpanda \
+  --firecrawl-bin "$FIRECRAWL_LOCAL_BIN" \
+  --chrome "$CHROME_EXECUTABLE" \
+  --lightpanda-bin "$LIGHTPANDA_BIN" \
+  --output benchmarks/scraping/results-resources-2026-11-24-n3.json
+```
+
+Raw evidence: `results-resources-2026-11-24-n3.json`.
