@@ -554,7 +554,9 @@ def create_namespace(
 			remaining = deadline - time.monotonic()
 			if remaining <= 0:
 				break
-			await asyncio.sleep(min(0.1, remaining))
+			# A 25 ms poll keeps a selector that appears mid-interval from
+			# costing up to 100 ms of dead time. Each probe is one evaluate.
+			await asyncio.sleep(min(0.025, remaining))
 
 		if helper_name == 'wait_for_selector':
 			raise TimeoutError(f'No element matches CSS selector {selector!r} within {timeout:g} seconds')
