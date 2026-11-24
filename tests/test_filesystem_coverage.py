@@ -128,10 +128,10 @@ class TestPdfFile:
             mock_styles.__getitem__ = MagicMock(return_value=MagicMock())
 
             with patch("openbrowser.filesystem.file_system.REPORTLAB_AVAILABLE", True):
-                with patch("openbrowser.filesystem.file_system.SimpleDocTemplate", return_value=mock_doc):
-                    with patch("openbrowser.filesystem.file_system.getSampleStyleSheet", return_value=mock_styles):
-                        with patch("openbrowser.filesystem.file_system.Paragraph", return_value=MagicMock()):
-                            with patch("openbrowser.filesystem.file_system.Spacer", return_value=MagicMock()):
+                with patch("reportlab.platypus.SimpleDocTemplate", return_value=mock_doc):
+                    with patch("reportlab.lib.styles.getSampleStyleSheet", return_value=mock_styles):
+                        with patch("reportlab.platypus.Paragraph", return_value=MagicMock()):
+                            with patch("reportlab.platypus.Spacer", return_value=MagicMock()):
                                 f.sync_to_disk_sync(Path(tmpdir))
                                 mock_doc.build.assert_called_once()
 
@@ -143,7 +143,7 @@ class TestPdfFile:
 
         with patch("openbrowser.filesystem.file_system.REPORTLAB_AVAILABLE", True):
             with patch(
-                "openbrowser.filesystem.file_system.SimpleDocTemplate",
+                "reportlab.platypus.SimpleDocTemplate",
                 side_effect=Exception("build error"),
             ):
                 with pytest.raises(FileSystemError, match="Could not write"):
