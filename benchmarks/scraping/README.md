@@ -48,6 +48,79 @@ arm once and keeps it running until the task set finishes. Use
 Warmup samples are not included in the JSONL file. The summary JSON remains at
 `--output`.
 
+## Current interleaved comparison, 2026-11-24
+
+This run compares the current OpenBrowser HTTP path with Firecrawl Local and
+Lightpanda on the same fixtures. It uses 10 measured samples and 2 warmups per
+arm and task. The harness alternates arm order for every sample and records one
+JSONL row per measured sample. All arms passed their oracle on every sample.
+
+Host load at the start was `7.67 / 7.74 / 8.06` on 18 logical CPUs. Load at the
+end was `9.64 / 8.23 / 8.23`. This is above the conservative quiet-host gate,
+so read the absolute p50 values as shared-host evidence. The alternating order
+puts all arms under the same drift. OpenBrowser was `0.1.58.dev56+g8065994cc`,
+Firecrawl Local was `0.1.1`, and both used Chrome for Testing `159.0.8154.6`.
+
+### Firecrawl Local
+
+| Task | OpenBrowser full, p50 ms | OpenBrowser lightweight, p50 ms | Firecrawl Local, p50 ms | Result |
+| --- | ---: | ---: | ---: | --- |
+| `static_article` | 2.09 | 2.20 | 2.29 | OpenBrowser full 1.10x faster |
+| `pagination` | 10.4 | 10.8 | 9.7 | Firecrawl 1.07x faster |
+| `table` | 2.23 | 2.25 | 4.67 | OpenBrowser full 2.09x faster |
+| `js_list` | 29.8 | 32.8 | 616.4 | OpenBrowser full 20.7x faster |
+| `asset_heavy` | 59.0 | 32.4 | 619.4 | OpenBrowser lightweight 19.1x faster |
+
+OpenBrowser wins four of the five local tasks and is within 7 percent on
+pagination. The JavaScript gap is architectural: OpenBrowser keeps one browser
+per arm, while Firecrawl Local starts a browser for each JavaScript scrape.
+OpenBrowser returns 2490 structured bytes for the table task. Firecrawl returns
+6736 markdown bytes. Those outputs are not semantically identical artifacts.
+
+Raw evidence:
+
+- `results-firecrawl-all-2026-11-24-n10-interleaved.json`
+- `results-firecrawl-all-2026-11-24-n10-interleaved.jsonl`
+
+### Lightpanda
+
+| Task | OpenBrowser no-render, p50 ms | Lightpanda, p50 ms | Result |
+| --- | ---: | ---: | --- |
+| `static_article` | 2.44 | 166.2 | OpenBrowser 68.1x faster |
+| `pagination` | 9.37 | 837.4 | OpenBrowser 89.4x faster |
+| `table` | 3.07 | 160.3 | OpenBrowser 52.2x faster |
+| `js_list` | 26.8 | 170.6 | OpenBrowser 6.37x faster |
+| `asset_heavy` | 31.2 | 159.9 | OpenBrowser 5.12x faster |
+
+This run used 10 samples and 2 warmups per arm and task. Host load at the start
+was `5.81 / 7.44 / 7.93`. All 100 measured runs passed their oracle. The static,
+pagination, and table tasks used the HTTP path. The JavaScript and asset-heavy
+tasks used Chromium because they require client-side rendering.
+
+This is a latency result, not a memory result. Lightpanda used about 123 MB of
+peak RSS in the resource lane, while OpenBrowser browser arms used about 740 to
+783 MB. OpenBrowser no-render still runs Blink layout and does not match
+Lightpanda's small engine footprint. Do not convert this table into a memory or
+full-site compatibility claim.
+
+Raw evidence:
+
+- `results-lightpanda-after-n10-interleaved.json`
+- `results-lightpanda-after-n10-interleaved.jsonl`
+
+### Charts
+
+Generate both documentation charts from the raw result files:
+
+```sh
+uv run --with matplotlib python benchmarks/scraping/plot_results.py
+```
+
+The script writes:
+
+- `docs/images/native-scraping-current-p50.png`
+- `docs/images/native-lightpanda-current-p50.png`
+
 ## Network-level render policy
 
 `scrape_compare.py` measures extraction. `no_render_compare.py` measures the
