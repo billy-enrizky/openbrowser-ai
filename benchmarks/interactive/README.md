@@ -137,6 +137,39 @@ Raw evidence: `results/results-2026-11-23-lean.jsonl`.
 The original default-extension run remains at
 `results/results-2026-11-23.jsonl`.
 
+## Current cold lane, 2026-11-24
+
+This run uses the current OpenBrowser 0.1.58 build for both OpenBrowser arms
+and the pinned competitor versions. It starts a fresh process tree, daemon,
+and browser for every task. All 75 runs passed. Shared host, no load average
+was recorded.
+
+| Task | OpenBrowser semantic, p50 ms | OpenBrowser selectors, p50 ms | chrome-devtools-mcp, p50 ms | agent-browser, p50 ms | browser-use, p50 ms |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `wizard` | 4349 | 2138 | 4472 | 1652 | 1426 |
+| `modal` | 3023 | 2115 | 3730 | 2418 | 1915 |
+| `download` | 2883 | 2308 | 1741 | 1727 | 1439 |
+| `tabs` | 2697 | 1936 | 2404 | 1665 | 1078 |
+| `auth` | 4149 | 4200 | 3926 | 2872 | 2847 |
+
+The selector arm beats chrome-devtools-mcp on wizard, modal, and tabs. It
+loses download and auth. Browser-use has the lowest p50 on every task.
+Agent-browser beats the selector arm on wizard, download, tabs, and auth; the
+selector arm wins modal.
+
+The cold lane is a startup lane. A same-session probe measured a cold
+`openbrowser-ai -c` no-op cell at 1381 ms p50 and a warm `-c` cell at 99.8 ms.
+`openbrowser-ai warm` took 1454 ms p50. Direct `BrowserSession.start()` took
+459 ms p50, so daemon, config, event bus, and namespace setup add about one
+second before task code runs. Browser-use non-auth totals were 1.1 to 1.9
+seconds, so OpenBrowser startup alone is close to the whole browser-use run.
+The auth task starts the browser twice and shows the startup gap twice.
+
+Raw evidence:
+
+- `results-cold-current-five-arm-2026-11-24-n3.jsonl`
+- `results-cold-current-five-arm-2026-11-24-n3.summary.json`
+
 ## Warm session lane, 2026-11-24
 
 The cold lane starts a new process tree, daemon, and browser for every task.
@@ -228,9 +261,11 @@ Generate the documentation chart from the summary:
 
 ```sh
 uv run --with matplotlib python benchmarks/interactive/plot_results.py
+uv run --with matplotlib python benchmarks/interactive/plot_cold_results.py
 ```
 
-The script writes `docs/images/native-interactive-warm-current-p50.png`.
+The first script writes `docs/images/native-interactive-warm-current-p50.png`.
+The cold script writes `docs/images/native-interactive-cold-p50.png`.
 
 Raw evidence:
 

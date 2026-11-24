@@ -161,6 +161,7 @@ Generate the documentation charts from the raw result files:
 ```sh
 uv run --with matplotlib python benchmarks/scraping/plot_results.py
 uv run --with matplotlib python benchmarks/scraping/plot_batch_results.py
+uv run --with matplotlib python benchmarks/scraping/plot_resources.py
 ```
 
 The first script writes:
@@ -171,6 +172,10 @@ The first script writes:
 The batch script writes:
 
 - `docs/images/native-scraping-batch-current.png`
+
+The resource script writes:
+
+- `docs/images/native-scraping-resources.png`
 
 ## HTTP-only CLI batch, 2026-11-24
 
@@ -286,7 +291,7 @@ are smoke numbers for the harness, not a statistical claim.
 2. `engine=auto` turns the static article, pagination, and table tasks into
    HTTP paths. Static article latency falls from the full-browser baseline
    measured in the earlier harness runs (about 25 to 27 ms) to 6.8 to 7.8 ms.
-3. The HTTP arm fails `js_list` and `asset_heavy`, as expected. The browser
+3. The raw HTTP arm fails `js_list` and `asset_heavy`, as expected. The browser
    path is still required for JavaScript-rendered content.
 4. The table JSON output is 2490 bytes against 13067 bytes for the HTTP raw
    HTML path, a 5.2x output reduction. Smaller output means fewer tokens and
@@ -639,9 +644,13 @@ was `15.7 / 16.8 / 18.4`, so rely on CPU time and RSS rather than the sampled
 latency. The Firecrawl server is started per arm, so its memory is not
 attributed to the other arms.
 
+The `http` arm is a separate raw HTTP baseline: `httpx` plus BeautifulSoup
+and markdownify. It is not OpenBrowser's HTTP scraper. OpenBrowser's HTTP-only
+CLI batch is measured separately at 47.859 MB peak RSS for five pages.
+
 Peak process-tree RSS, p50 MB:
 
-| Task | HTTP | OpenBrowser full | OpenBrowser lightweight | OpenBrowser no-render | Firecrawl Local | Lightpanda |
+| Task | Raw HTTP (httpx) | OpenBrowser full | OpenBrowser lightweight | OpenBrowser no-render | Firecrawl Local | Lightpanda |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | static_article | 51.6 | 780.7 | 741.8 | 744.6 | 155.7 | 123.6 |
 | js_list | n/a | 741.8 | 762.3 | 764.1 | 1411.0 | 124.9 |
@@ -651,7 +660,7 @@ Peak process-tree RSS, p50 MB:
 
 Live process-tree CPU, p50 ms:
 
-| Task | HTTP | OpenBrowser full | OpenBrowser lightweight | OpenBrowser no-render | Firecrawl Local | Lightpanda |
+| Task | Raw HTTP (httpx) | OpenBrowser full | OpenBrowser lightweight | OpenBrowser no-render | Firecrawl Local | Lightpanda |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | static_article | 41.0 | 46.7 | 41.0 | 41.2 | 32.5 | 60.5 |
 | js_list | n/a | 133.8 | 100.0 | 108.5 | 380.4 | 61.6 |
@@ -661,8 +670,9 @@ Live process-tree CPU, p50 ms:
 
 What the lane shows:
 
-- The HTTP path is the memory and CPU winner for server-rendered pages at
-  about 52 MB, but it fails the JavaScript tasks by design.
+- The raw HTTP baseline is the memory and CPU winner for server-rendered pages
+  at about 52 MB, but it fails the JavaScript tasks by design. It does not use
+  OpenBrowser.
 - OpenBrowser browser arms use roughly 740 to 783 MB across tasks. Lightweight
   and no-render keep similar memory while cutting CPU on JavaScript and
   asset-heavy pages. No-render uses 100.6 ms on asset-heavy against 215.8 ms
@@ -673,7 +683,10 @@ What the lane shows:
 - Lightpanda uses about 123 MB, the lowest browser-like footprint here, but its
   pagination CPU is 203.3 ms against 44.9 ms for OpenBrowser full. It is a
   different engine and not a Chromium memory or capability equivalent.
-- The HTTP arm's `n/a` rows are expected failures, not missing measurements.
+- The raw HTTP baseline's `n/a` rows are expected failures, not missing
+  measurements.
+- OpenBrowser's HTTP-only CLI batch is measured in the CLI batch section:
+  205.029 ms and 47.859 MB peak RSS for five pages.
 
 Run:
 
