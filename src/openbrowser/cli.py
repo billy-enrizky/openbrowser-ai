@@ -1170,7 +1170,7 @@ def _render_search_table(results: list[Any]) -> str:
 	return buffer.getvalue()
 
 
-@main.command()
+@main.command(name='search')
 @click.argument("query")
 @click.option(
 	"--max-results",
@@ -1192,7 +1192,7 @@ def _render_search_table(results: list[Any]) -> str:
 @click.option("--json", "as_json", is_flag=True, help="Print a JSON array of search results.")
 @click.option("--urls-only", is_flag=True, help="Print one result URL per line.")
 @click.option("--output", type=click.Path(dir_okay=False), help="Write output to a file.")
-def search(
+def search_command(
 	query: str,
 	max_results: int,
 	backend: str,
@@ -1207,11 +1207,16 @@ def search(
 	import json
 	from pathlib import Path
 
-	from openbrowser.search import SearchError
-	from openbrowser.search import search as search_web
-
 	if as_json and urls_only:
 		raise click.UsageError("--json and --urls-only cannot be used together.")
+
+	from openbrowser.logging_config import setup_logging
+
+	setup_logging(stream=sys.stderr, log_level='critical', force_setup=True)
+	_quiet_stderr_logging()
+
+	from openbrowser.search import SearchError
+	from openbrowser.search import search as search_web
 
 	try:
 		results = search_web(

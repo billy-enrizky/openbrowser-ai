@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import logging
+import sys
 from unittest.mock import AsyncMock, patch
 
 from click.testing import CliRunner
@@ -34,6 +36,30 @@ def test_search_json_emits_result_array(monkeypatch):
     monkeypatch.setattr("openbrowser.search.search", lambda *_args, **_kwargs: _results())
 
     result = CliRunner().invoke(main, ["search", "browser automation", "--json"])
+
+    assert result.exit_code == 0
+    assert json.loads(result.output) == [item.as_dict() for item in _results()]
+
+
+def test_search_keeps_provider_logs_off_json_stdout(monkeypatch):
+    root = logging.getLogger()
+    original_handlers = root.handlers
+    original_level = root.level
+    root.handlers = [logging.StreamHandler(sys.stdout)]
+    root.setLevel(logging.INFO)
+
+    def noisy_search(*_args, **_kwargs):
+        assert any(handler.stream is sys.stderr for handler in root.handlers)
+        logging.getLogger("primp").info("provider diagnostic")
+        return _results()
+
+    monkeypatch.setattr("openbrowser.search.search", noisy_search)
+    monkeypatch.setattr("openbrowser.cli._quiet_stderr_logging", lambda: None)
+    try:
+        result = CliRunner().invoke(main, ["search", "browser automation", "--json"])
+    finally:
+        root.handlers = original_handlers
+        root.setLevel(original_level)
 
     assert result.exit_code == 0
     assert json.loads(result.output) == [item.as_dict() for item in _results()]
