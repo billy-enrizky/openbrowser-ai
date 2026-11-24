@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import os
 import sys
-import threading
 
 # Set environment variables BEFORE any openbrowser imports to prevent early logging
 os.environ['OPENBROWSER_LOGGING_LEVEL'] = 'critical'
@@ -109,24 +108,6 @@ from openbrowser.code_use.prewarm import join_namespace_import, start_namespace_
 BrowserProfile: Any = None
 BrowserSession: Any = None
 CodeAgentTools: Any = None
-
-
-_BROWSER_STACK_THREAD: threading.Thread | None = None
-_BROWSER_STACK_LOCK = threading.Lock()
-
-
-def start_browser_stack_import() -> threading.Thread:
-	"""Warm the browser stack on a worker thread while the client handshakes."""
-	global _BROWSER_STACK_THREAD
-	with _BROWSER_STACK_LOCK:
-		if _BROWSER_STACK_THREAD is None:
-			_BROWSER_STACK_THREAD = threading.Thread(
-				target=_ensure_browser_stack,
-				name='openbrowser-browser-stack',
-				daemon=True,
-			)
-			_BROWSER_STACK_THREAD.start()
-		return _BROWSER_STACK_THREAD
 
 
 def _ensure_browser_stack() -> None:
@@ -2328,10 +2309,6 @@ async def main(session_timeout_minutes: int = 10):
 		sys.exit(1)
 
 	server = OpenBrowserServer(session_timeout_minutes=session_timeout_minutes)
-	# The browser stack is not needed for server/discover, tools/list, or
-	# search_web. Warm it in the background so the first execute_code does not
-	# pay for the import after the client has already connected.
-	start_browser_stack_import()
 	if server._telemetry and TELEMETRY_AVAILABLE:
 		server._telemetry.capture(
 			MCPServerTelemetryEvent(
