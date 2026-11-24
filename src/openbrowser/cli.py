@@ -1239,6 +1239,12 @@ def source_discovery_command(
 @click.option('--timeout-ms', type=int, help='Navigation and selector wait timeout in milliseconds.')
 @click.option('--extract-links', is_flag=True, help='Preserve links in markdown output.')
 @click.option('--max-chars', type=int, help='Truncate string content to this many characters.')
+@click.option('--only-main-content', is_flag=True,
+	help='Remove navigation, header, footer, aside, cookie banners, and ad blocks before extraction.')
+@click.option('--include-tag', 'include_tags', multiple=True,
+	help='Keep only the first matching selector. Repeat to try several selectors.')
+@click.option('--exclude-tag', 'exclude_tags', multiple=True,
+	help='Remove matching elements before extraction. Repeat for several selectors.')
 @click.option('--lightweight', is_flag=True, help='Disable images, web fonts, GPU acceleration, and media.')
 @click.option(
 	'--render-mode',
@@ -1274,6 +1280,9 @@ def scrape(
 	timeout_ms: int | None,
 	extract_links: bool,
 	max_chars: int | None,
+	only_main_content: bool,
+	include_tags: tuple[str, ...],
+	exclude_tags: tuple[str, ...],
 	lightweight: bool,
 	render_mode: str | None,
 	concurrency: int,
@@ -1323,6 +1332,9 @@ def scrape(
 				timeout_ms=timeout_ms,
 				max_chars=max_chars,
 				concurrency=concurrency,
+				only_main_content=only_main_content,
+				include_tags=list(include_tags) or None,
+				exclude_tags=list(exclude_tags) or None,
 			)
 		except Exception as error:
 			click.echo(f'Scrape failed: {type(error).__name__}: {error}', err=True)
@@ -1378,6 +1390,9 @@ def scrape(
 				extract_links=extract_links,
 				timeout_ms=timeout_ms,
 				engine=engine,
+				only_main_content=only_main_content,
+				include_tags=list(include_tags) or None,
+				exclude_tags=list(exclude_tags) or None,
 			)
 			if http_result is not None:
 				if max_chars is not None and isinstance(http_result.get('content'), str):
@@ -1410,6 +1425,9 @@ def scrape(
 				extract_links=extract_links,
 				max_chars=max_chars,
 				engine='browser',
+				only_main_content=only_main_content,
+				include_tags=list(include_tags) or None,
+				exclude_tags=list(exclude_tags) or None,
 			)
 		finally:
 			if namespace is not None:
@@ -1443,6 +1461,9 @@ def scrape(
 				extract_links=extract_links,
 				max_chars=max_chars,
 				engine=engine,
+				only_main_content=only_main_content,
+				include_tags=list(include_tags) or None,
+				exclude_tags=list(exclude_tags) or None,
 			)
 		finally:
 			if namespace is not None:
@@ -1473,6 +1494,93 @@ def scrape(
 		output=output,
 		as_json=as_json,
 	)
+
+
+@main.command()
+@click.argument('url')
+@click.option('--max-urls', type=click.IntRange(min=1), default=100, show_default=True,
+	help='Maximum URLs to return.')
+@click.option('--include', 'include_pattern', type=str,
+	help='Only keep URLs that match this regular expression.')
+@click.option('--exclude', 'exclude_pattern', type=str,
+	help='Drop URLs that match this regular expression.')
+@click.option('--no-sitemap', 'skip_sitemap', is_flag=True,
+	help='Skip /sitemap.xml discovery and map only links on the page.')
+@click.option('--timeout-ms', type=int, help='Per-request timeout in milliseconds.')
+@click.option('--output', '-o', type=click.Path(), help='Write the JSON result to a file.')
+def map(url: str, max_urls: int, include_pattern: str | None, exclude_pattern: str | None,
+		skip_sitemap: bool, timeout_ms: int | None, output: str | None):
+	"""List URLs discovered from URL and its sitemap. No browser starts."""
+	from openbrowser.scrape.crawl import map_urls
+
+	try:
+		result = asyncio.run(
+			map_urls(
+				url,
+				max_urls=max_urls,
+				include=include_pattern,
+				exclude=exclude_pattern,
+				use_sitemap=not skip_sitemap,
+				timeout_ms=timeout_ms,
+			)
+		)
+	except Exception as error:
+		click.echo(f'Map failed: {type(error).__name__}: {error}', err=True)
+		sys.exit(1)
+	rendered = json.dumps(result, indent=2, ensure_ascii=False)
+	if output:
+		Path(output).write_text(rendered + "\n", encoding="utf-8")
+		click.echo(f'Wrote map output to {output}', err=True)
+	else:
+		click.echo(rendered)
+
+
+@main.command()
+@click.argument('url')
+@click.option('--max-pages', type=click.IntRange(min=1), default=10, show_default=True,
+	help='Maximum pages to fetch.')
+@click.option('--max-depth', type=click.IntRange(min=0), default=2, show_default=True,
+	help='Maximum link hops from the start URL.')
+@click.option('--format', 'output_format', type=click.Choice(['markdown', 'text', 'html', 'links']),
+	default='markdown', show_default=True, help='Output format for each page.')
+@click.option('--selector', type=str, help='CSS selector to limit each page output.')
+@click.option('--include', 'include_pattern', type=str,
+	help='Only follow URLs that match this regular expression.')
+@click.option('--exclude', 'exclude_pattern', type=str,
+	help='Do not follow URLs that match this regular expression.')
+@click.option('--concurrency', type=click.IntRange(min=1), default=4, show_default=True,
+	help='Maximum concurrent requests per depth level.')
+@click.option('--timeout-ms', type=int, help='Per-request timeout in milliseconds.')
+@click.option('--output', '-o', type=click.Path(), help='Write the JSON result to a file.')
+def crawl(url: str, max_pages: int, max_depth: int, output_format: str, selector: str | None,
+		include_pattern: str | None, exclude_pattern: str | None, concurrency: int,
+		timeout_ms: int | None, output: str | None):
+	"""Crawl same-origin links from URL and return page content. No browser starts."""
+	from openbrowser.scrape.crawl import crawl_site
+
+	try:
+		result = asyncio.run(
+			crawl_site(
+				url,
+				max_pages=max_pages,
+				max_depth=max_depth,
+				format=output_format,
+				selector=selector,
+				include=include_pattern,
+				exclude=exclude_pattern,
+				concurrency=concurrency,
+				timeout_ms=timeout_ms,
+			)
+		)
+	except Exception as error:
+		click.echo(f'Crawl failed: {type(error).__name__}: {error}', err=True)
+		sys.exit(1)
+	rendered = json.dumps(result, indent=2, ensure_ascii=False)
+	if output:
+		Path(output).write_text(rendered + "\n", encoding="utf-8")
+		click.echo(f'Wrote crawl output to {output}', err=True)
+	else:
+		click.echo(rendered)
 
 
 # ============================================================================

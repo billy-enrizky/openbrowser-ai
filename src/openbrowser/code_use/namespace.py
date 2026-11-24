@@ -1383,6 +1383,9 @@ def create_namespace(
 		extract_links: bool = False,
 		max_chars: int | None = None,
 		engine: str = 'auto',
+		only_main_content: bool = False,
+		include_tags: list[str] | None = None,
+		exclude_tags: list[str] | None = None,
 	) -> dict[str, Any]:
 		"""Scrape the current page or a URL without an LLM.
 
@@ -1395,6 +1398,9 @@ def create_namespace(
 			timeout_ms: Optional navigation and selector wait timeout in milliseconds.
 			extract_links: Preserve links in markdown output.
 			max_chars: Optional maximum content length. Adds truncated and total_chars fields.
+			only_main_content: Remove navigation, header, footer, aside, and ad elements before extraction.
+			include_tags: CSS selectors to keep. The first match becomes the extraction root.
+			exclude_tags: CSS selectors to remove before extraction.
 
 		Returns:
 			A dict with url, title, format, content, content_type, and optional stats.
@@ -1414,6 +1420,9 @@ def create_namespace(
 				timeout_ms=timeout_ms,
 				engine=engine,
 				client=http_client_owner.get((timeout_ms / 1000) if timeout_ms else 30.0),
+				only_main_content=only_main_content,
+				include_tags=include_tags,
+				exclude_tags=exclude_tags,
 			)
 			if http_result is not None:
 				return _truncate_scrape_result(http_result, max_chars)
@@ -1441,7 +1450,21 @@ def create_namespace(
 
 		content: Any
 		stats: dict[str, Any] = {}
-		if format == 'markdown':
+		if format in {'markdown', 'text', 'html'} and (only_main_content or include_tags or exclude_tags):
+			html = await namespace['evaluate']('document.documentElement ? document.documentElement.outerHTML : ""')
+			from openbrowser.dom.fast_html import apply_content_filters, parse_document
+
+			document = parse_document(html or '')
+			filter_stats = apply_content_filters(
+				document,
+				only_main_content=only_main_content,
+				include_tags=include_tags,
+				exclude_tags=exclude_tags,
+			)
+			root = selector if selector is not None else filter_stats.get('include_root')
+			content = document.extract(format, root)
+			stats = {'method': 'browser_html_filtered', 'content_filter': filter_stats}
+		elif format == 'markdown':
 			if selector is None:
 				from openbrowser.dom.markdown_extractor import extract_clean_markdown
 
@@ -1526,6 +1549,9 @@ def create_namespace(
 		extract_links: bool = False,
 		max_chars: int | None = None,
 		engine: str = 'auto',
+		only_main_content: bool = False,
+		include_tags: list[str] | None = None,
+		exclude_tags: list[str] | None = None,
 	) -> list[dict[str, Any]]:
 		"""Scrape multiple URLs without an LLM.
 
@@ -1545,6 +1571,9 @@ def create_namespace(
 			extract_links: Preserve links in markdown output.
 			max_chars: Optional maximum content length per result.
 			engine: auto, http, or browser.
+			only_main_content: Remove navigation, header, footer, aside, and ad elements.
+			include_tags: CSS selectors to keep. The first match becomes the extraction root.
+			exclude_tags: CSS selectors to remove before extraction.
 
 		Returns:
 			A list of per-URL dicts with url, ok, engine_used, content, error,
@@ -1589,6 +1618,9 @@ def create_namespace(
 							timeout_ms=timeout_ms,
 							engine=engine,
 							client=http_client_owner.get((timeout_ms / 1000) if timeout_ms else 30.0),
+							only_main_content=only_main_content,
+							include_tags=include_tags,
+							exclude_tags=exclude_tags,
 						)
 						return result, None, (time.perf_counter() - http_started) * 1000.0
 					except Exception as exc:
@@ -1696,6 +1728,9 @@ def create_namespace(
 								extract_links=extract_links,
 								max_chars=max_chars,
 								engine='browser',
+								only_main_content=only_main_content,
+								include_tags=include_tags,
+								exclude_tags=exclude_tags,
 							)
 						except Exception as exc:
 							item = _batch_result(
@@ -1805,11 +1840,61 @@ def create_namespace(
 			'page_results': page_results,
 		}
 
+	async def map_urls(
+		url: str,
+		*,
+		max_urls: int = 100,
+		include: str | None = None,
+		exclude: str | None = None,
+		timeout_ms: int | None = None,
+		use_sitemap: bool = True,
+	) -> dict[str, Any]:
+		"""List URLs discovered from one page and, optionally, its sitemap."""
+		from openbrowser.scrape.crawl import map_urls as discover
+
+		return await discover(
+			url,
+			max_urls=max_urls,
+			include=include,
+			exclude=exclude,
+			timeout_ms=timeout_ms,
+			use_sitemap=use_sitemap,
+		)
+
+	async def crawl_site(
+		url: str,
+		*,
+		max_pages: int = 10,
+		max_depth: int = 2,
+		format: str = 'markdown',
+		selector: str | None = None,
+		include: str | None = None,
+		exclude: str | None = None,
+		timeout_ms: int | None = None,
+		concurrency: int = 4,
+	) -> dict[str, Any]:
+		"""Crawl same-origin links from one URL and return page content."""
+		from openbrowser.scrape.crawl import crawl_site as crawl
+
+		return await crawl(
+			url,
+			max_pages=max_pages,
+			max_depth=max_depth,
+			format=format,
+			selector=selector,
+			include=include,
+			exclude=exclude,
+			timeout_ms=timeout_ms,
+			concurrency=concurrency,
+		)
+
 	namespace['scrape_page'] = scrape_page
 	namespace['scrape'] = scrape_page
 	namespace['scrape_pages'] = scrape_pages
 	namespace['search_web'] = search_web
 	namespace['search_and_scrape'] = search_and_scrape
+	namespace['map_urls'] = map_urls
+	namespace['crawl_site'] = crawl_site
 	namespace['_close_http_client'] = http_client_owner.close
 
 

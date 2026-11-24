@@ -105,9 +105,12 @@ def _http_result_from_response(
     format: str,
     selector: str | None,
     engine: str,
+    only_main_content: bool = False,
+    include_tags: list[str] | None = None,
+    exclude_tags: list[str] | None = None,
 ) -> dict[str, Any] | None:
     """Convert an HTTP response into a scrape result, or None to use the browser."""
-    from openbrowser.dom.fast_html import parse_document
+    from openbrowser.dom.fast_html import apply_content_filters, parse_document
 
     if response.status_code >= 400:
         return None
@@ -142,6 +145,16 @@ def _http_result_from_response(
             return None
 
     title = document.title()
+    filter_stats: dict[str, Any] = {}
+    if only_main_content or include_tags or exclude_tags:
+        filter_stats = apply_content_filters(
+            document,
+            only_main_content=only_main_content,
+            include_tags=include_tags,
+            exclude_tags=exclude_tags,
+        )
+        if selector is None and filter_stats.get("include_root"):
+            selector = str(filter_stats["include_root"])
     content = document.extract(format, selector)
 
     return {
@@ -154,6 +167,7 @@ def _http_result_from_response(
             "engine_used": "http",
             "status_code": response.status_code,
             "html_chars": len(html),
+            **({"content_filter": filter_stats} if filter_stats else {}),
         },
         "engine_used": "http",
         "status_code": response.status_code,
@@ -169,6 +183,9 @@ async def scrape_http(
     timeout_ms: int | None,
     engine: str,
     client: Any | None = None,
+    only_main_content: bool = False,
+    include_tags: list[str] | None = None,
+    exclude_tags: list[str] | None = None,
 ) -> dict[str, Any] | None:
     """Fetch and parse a URL without a browser.
 
@@ -185,6 +202,9 @@ async def scrape_http(
                 format=format,
                 selector=selector,
                 engine=engine,
+                only_main_content=only_main_content,
+                include_tags=include_tags,
+                exclude_tags=exclude_tags,
             )
     response = await client.get(url, timeout=timeout)
     return _http_result_from_response(
@@ -192,6 +212,9 @@ async def scrape_http(
         format=format,
         selector=selector,
         engine=engine,
+        only_main_content=only_main_content,
+        include_tags=include_tags,
+        exclude_tags=exclude_tags,
     )
 
 
@@ -216,6 +239,9 @@ async def scrape_http_batch(
     timeout_ms: int | None = None,
     max_chars: int | None = None,
     engine: str = "http",
+    only_main_content: bool = False,
+    include_tags: list[str] | None = None,
+    exclude_tags: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Scrape URLs over HTTP concurrently without starting a browser.
 
@@ -259,6 +285,9 @@ async def scrape_http_batch(
                     timeout_ms=timeout_ms,
                     engine=engine,
                     client=owner.get((timeout_ms / 1000) if timeout_ms else 30.0),
+                    only_main_content=only_main_content,
+                    include_tags=include_tags,
+                    exclude_tags=exclude_tags,
                 )
                 return result, None, (time.perf_counter() - http_started) * 1000.0
             except Exception as exc:
@@ -309,6 +338,9 @@ def run_http_scrape_sync(
     max_chars: int | None,
     concurrency: int,
     engine: str = "http",
+    only_main_content: bool = False,
+    include_tags: list[str] | None = None,
+    exclude_tags: list[str] | None = None,
 ) -> dict[str, Any] | list[dict[str, Any]] | None:
     """Run a single or batch HTTP scrape through one event loop.
 
@@ -330,6 +362,9 @@ def run_http_scrape_sync(
                 timeout_ms=timeout_ms,
                 max_chars=max_chars,
                 engine="http",
+                only_main_content=only_main_content,
+                include_tags=include_tags,
+                exclude_tags=exclude_tags,
             )
         )
     result = asyncio.run(
@@ -340,6 +375,9 @@ def run_http_scrape_sync(
             extract_links=extract_links,
             timeout_ms=timeout_ms,
             engine=engine,
+            only_main_content=only_main_content,
+            include_tags=include_tags,
+            exclude_tags=exclude_tags,
         )
     )
     if result is None:
