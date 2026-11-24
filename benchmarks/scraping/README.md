@@ -42,6 +42,12 @@ uv run --locked python benchmarks/scraping/scrape_compare.py \
 For a longer run, use `--samples 30`. Report p50 and p95 with confidence
 intervals before making a claim.
 
+Use `--interleave` to alternate arm order for each sample. This mode starts each
+arm once and keeps it running until the task set finishes. Use
+`--raw-jsonl <path>` to write a run record and one record per measured sample.
+Warmup samples are not included in the JSONL file. The summary JSON remains at
+`--output`.
+
 ## Network-level render policy
 
 `scrape_compare.py` measures extraction. `no_render_compare.py` measures the
@@ -400,6 +406,50 @@ N=10 with 2 warmups, macOS arm64, Firecrawl Local 0.1.1:
 The table path returns 2490 structured bytes against Firecrawl's 6736 markdown bytes. The static result is parity, not a claim of a clear static latency win. The JavaScript tasks remain the largest OpenBrowser advantage.
 
 The raw `httpx` arm still uses BeautifulSoup and markdownify. It is retained as a baseline, not as the product path.
+
+These numbers are historical. They came from OpenBrowser `0.1.58.dev6+gcf873b951`, before commit `6326786ed` changed the fast HTML renderer and HTTP probe. The result file has no host-load value or per-sample records. Do not use it as the current before measurement for the parsed-document change.
+
+## Parsed HTML work reduction, 2026-11-24
+
+The HTTP response path now creates one `ParsedHTML` value. The `auto` engine uses its Lexbor tree for the static probe, title, and content. It returns to the browser before title and content extraction when a page is a thin JavaScript shell.
+
+A cProfile diagnostic ran 100 extraction calls per fixture. The old response path called `_parse` 300 times. The new path called it 100 times. On the article fixture, sibling-search generator calls fell from 21,700 to zero. These are work counts, not latency results. An exact comparison against the `728099213` source output matched the title, probe, and extracted content for all three tasks.
+
+The markdown renderer also skips HTML comments and preserves one visible space around them. It keeps adjacent inline nodes joined when the source has no whitespace. This fixes text such as `A <!-- comment --> B` without changing the benchmark fixtures.
+
+### Correctness smoke
+
+The smoke run used one measured sample and one warmup. It ran on macOS 26.6 arm64 with Python 3.12.12, OpenBrowser `0.1.58.dev43+g728099213`, Firecrawl Local 0.1.1, and Chrome for Testing 159.0.8154.6. Host load at start was `10.09 / 12.62 / 12.49`. All six task and arm oracles passed. Do not use this run for a latency claim.
+
+| Task | OpenBrowser passed | Firecrawl passed | OpenBrowser output bytes | Firecrawl output bytes |
+| --- | ---: | ---: | ---: | ---: |
+| `static_article` | 1/1 | 1/1 | 1168 | 1137 |
+| `pagination` | 1/1 | 1/1 | 1650 | 2064 |
+| `table` | 1/1 | 1/1 | 2490 | 6736 |
+
+OpenBrowser returns structured rows for `pagination` and `table`. Firecrawl returns markdown. Their output byte counts are not equivalent for those tasks.
+
+### Quiet-host comparison pending
+
+The N=10 before and after medians are pending. The host load was above 4, so this change makes no latency claim. Before the next N=10 run, check `uptime`. Run only when all three load averages are below 4.
+
+Run the before measurement on the base revision. Run the after measurement on the merged revision. Keep separate summary and JSONL paths for both runs.
+
+```sh
+CHROME="$HOME/Library/Caches/ms-playwright/chromium-1255/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"
+FIRECRAWL_LOCAL_BIN="$HOME/.local/firecrawl-tools/bin/firecrawl-local"
+
+uv run --locked python benchmarks/scraping/scrape_compare.py \
+  --arms openbrowser-full firecrawl-local \
+  --tasks static_article pagination table \
+  --samples 10 --warmups 2 --interleave \
+  --firecrawl-bin "$FIRECRAWL_LOCAL_BIN" \
+  --chrome "$CHROME" \
+  --output benchmarks/scraping/results-firecrawl-static-before-n10.json \
+  --raw-jsonl benchmarks/scraping/results-firecrawl-static-before-n10.jsonl
+```
+
+For the merged revision, change `before` to `after` in both output paths. The raw JSONL file starts with run metadata, then has one record per measured sample. The run records the load averages, versions, task and arm order, correctness result, output bytes, and errors.
 
 ## Resource lane, 2026-11-24
 
