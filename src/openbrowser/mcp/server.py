@@ -300,8 +300,54 @@ def _tool_catalog(description: str, *, modern: bool) -> tuple[types.Tool, ...]:
 			idempotent_hint=True,
 		),
 	)
+	search = types.Tool(
+		name='search_web',
+		description=(
+			'Search the web without starting a browser or requiring a context_id. '
+			'Returns a JSON array with title, url, and snippet fields. Snippets are unverified previews, not evidence. '
+			'Scrape and read the source page before citing it. Results are capped by the search package.'
+		),
+		input_schema={
+			'type': 'object',
+			'properties': {
+				'query': {'type': 'string', 'minLength': 1, 'maxLength': 2048},
+				'max_results': {
+					'type': 'integer',
+					'minimum': 1,
+					'default': 5,
+					'description': 'Maximum results. Values above the package limit are capped.',
+				},
+				'backend': {
+					'type': 'string',
+					'minLength': 1,
+					'maxLength': 256,
+					'default': 'auto',
+					'description': 'DDGS backend or comma-delimited backends.',
+				},
+				'region': {'type': 'string', 'minLength': 1, 'maxLength': 32, 'default': 'us-en'},
+				'safe_search': {
+					'type': 'string',
+					'enum': ['on', 'moderate', 'off'],
+					'default': 'moderate',
+				},
+				'timelimit': {
+					'type': 'string',
+					'maxLength': 64,
+					'description': 'Optional DDGS time limit, such as d, w, m, or y.',
+				},
+			},
+			'required': ['query'],
+			'additionalProperties': False,
+		},
+		annotations=types.ToolAnnotations(
+			read_only_hint=True,
+			destructive_hint=False,
+			open_world_hint=True,
+			idempotent_hint=False,
+		),
+	)
 	if not modern:
-		return (execute, status, reset)
+		return (execute, status, reset, search)
 
 	create = types.Tool(
 		name='create_context',
@@ -356,7 +402,7 @@ def _tool_catalog(description: str, *, modern: bool) -> tuple[types.Tool, ...]:
 			idempotent_hint=True,
 		),
 	)
-	return (create, execute, status, reset, close)
+	return (create, execute, status, reset, close, search)
 
 
 def _ensure_all_loggers_use_stderr():
@@ -1846,6 +1892,36 @@ class OpenBrowserServer(_BrowserOwner):
 					telemetry_error = 'empty_code'
 					error_msg = 'Error: No code provided'
 					return types.CallToolResult(content=[types.TextContent(type='text', text=error_msg)], is_error=True)
+				if params.name == 'search_web':
+					from openbrowser.search import SearchError, asearch
+
+					try:
+						results = await asearch(
+							arguments['query'],
+							max_results=arguments.get('max_results', 5),
+							backend=arguments.get('backend', 'auto'),
+							region=arguments.get('region', 'us-en'),
+							safe_search=arguments.get('safe_search', 'moderate'),
+							timelimit=arguments.get('timelimit'),
+						)
+						txt = json.dumps([result.as_dict() for result in results], ensure_ascii=False)
+					except SearchError as error:
+						telemetry_error = 'search_failed'
+						error_msg = 'search_failed'
+						txt = json.dumps({'error': 'search_failed', 'message': str(error)}, ensure_ascii=False)
+						return types.CallToolResult(
+							content=[types.TextContent(type='text', text=txt)], is_error=True
+						)
+					except (TypeError, ValueError) as error:
+						telemetry_error = 'invalid_search_arguments'
+						error_msg = 'invalid_search_arguments'
+						txt = json.dumps(
+							{'error': 'invalid_search_arguments', 'message': str(error)}, ensure_ascii=False
+						)
+						return types.CallToolResult(
+							content=[types.TextContent(type='text', text=txt)], is_error=True
+						)
+					return types.CallToolResult(content=[types.TextContent(type='text', text=txt)])
 
 				if era == 'modern':
 					if params.name == 'create_context':
