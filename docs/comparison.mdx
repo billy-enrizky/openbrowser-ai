@@ -30,7 +30,7 @@ The short version:
 
 - OpenBrowser wins every sequential scraping task against Firecrawl Local, and 50 of 50 paired samples.
 - OpenBrowser wins every warm interactive task against every competitor, 10 of 10 pairs each.
-- The cold lane now wins two of five tasks outright and is inside 2 percent on a third. Browser-use still wins click-triggered download and multi-tab work.
+- The cold lane wins two of five tasks outright against browser-use, ties a third, and beats every other competitor on four of five. Browser-use still wins click-triggered download and multi-tab work.
 - A one-shot static scrape costs 148.6 ms and 47.7 MB of peak memory. A browser scrape costs 355 to 382 MB with the headless shell, against 742 to 755 MB with full Chrome.
 
 <a id="native-local-lanes"></a>
@@ -152,17 +152,17 @@ Raw data:
 
 <img src="/images/native-interactive-cold-p50.png" alt="Cold interactive p50 latency for the OpenBrowser MCP and CLI arms, chrome-devtools-mcp, agent-browser, and browser-use across five tasks." />
 
-The cold lane starts a fresh process tree, daemon or server, and browser for every task. N=3 per arm and task. All 75 runs passed their oracle.
+The cold lane starts a fresh process tree, daemon or server, and browser for every task. N=5 per arm and task, run when host load fell to 3.92 before the first sample. All 125 runs passed their oracle.
 
 | Task | OpenBrowser MCP, p50 ms | OpenBrowser CLI, p50 ms | chrome-devtools-mcp, p50 ms | agent-browser, p50 ms | browser-use, p50 ms |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `wizard` | 1387 | 1345 | 4409 | 1608 | 1367 |
-| `modal` | 1506 | 1559 | 3704 | 2250 | 1628 |
-| `download` | 1668 | 1707 | 1690 | 1645 | 1442 |
-| `tabs` | 1394 | 1446 | 2401 | 1503 | 1048 |
-| `auth` | 2407 | 2644 | 3735 | 2487 | 2711 |
+| `wizard` | 1405 | 1493 | 4403 | 1692 | 1408 |
+| `modal` | 1555 | 1585 | 3672 | 2365 | 1723 |
+| `download` | 1698 | 1737 | 1681 | 1731 | 1424 |
+| `tabs` | 1442 | 1449 | 2383 | 1670 | 1035 |
+| `auth` | 2416 | 2636 | 3758 | 2760 | 2856 |
 
-The MCP arm beats chrome-devtools-mcp on all five tasks, agent-browser on four of five, and browser-use on modal and auth. It is within 2 percent of browser-use on wizard. Browser-use still wins download and tabs.
+The MCP arm beats agent-browser on all five cold tasks. It beats chrome-devtools-mcp on four of five, losing download to a 17 ms difference that is inside run noise. Against browser-use it wins modal and auth, ties wizard, and loses download and tabs. Browser-use remains the cold-lane leader on the two click-and-wait tasks.
 
 #### What changed in the cold lane
 
@@ -176,7 +176,7 @@ A cold start is one browser launch plus one server startup. On this host a `Brow
 
 Cold `openbrowser-ai -c pass` measured 1337.6 ms p50 before this work and 968.7 ms after. A paired N=12 run measured 1234.8 ms to 1019.4 ms with 11 of 12 pairs faster.
 
-Raw data: [results-cold-six-arm-final3-2026-11-24-n3.jsonl](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-cold-six-arm-final3-2026-11-24-n3.jsonl).
+Raw data: [results-cold-six-arm-quiet-2026-11-24-n5.jsonl](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-cold-six-arm-quiet-2026-11-24-n5.jsonl).
 
 <a id="interactive-warm"></a>
 
@@ -306,7 +306,7 @@ OpenBrowser is faster than Firecrawl Local on every sequential scraping task, an
 
 OpenBrowser is faster than every competitor on every warm interactive task in the paired runs. The MCP arm won 10 of 10 pairs on wizard, modal, tabs, and download, with p50 deltas of 330.5 ms, 519.4 ms, 75.8 ms, and 89.4 ms.
 
-Cold starts are no longer a blanket loss. The MCP arm beats chrome-devtools-mcp on all five cold tasks, agent-browser on four, and browser-use on two, and it is within 2 percent on a third. Download and tabs still belong to browser-use.
+Cold starts are no longer a blanket loss. The MCP arm beats agent-browser on all five cold tasks, chrome-devtools-mcp on four, and browser-use on two with a tie on a third. Download and tabs still belong to browser-use.
 
 Memory depends on the surface, not the brand. The same product costs 47.7 MB for a static page, 355 to 382 MB for a JavaScript page in the headless shell, and 742 to 755 MB in full Chrome.
 
