@@ -856,6 +856,25 @@ class BrowserProfile(BrowserConnectArgs, BrowserLaunchPersistentContextArgs, Bro
 			return self.render_mode
 		return RenderMode.LIGHTWEIGHT if self.lightweight else RenderMode.FULL
 
+	def prefers_headless_shell(self) -> bool:
+		"""Return whether to launch the Playwright headless shell.
+
+		An explicit use_headless_shell wins. Otherwise a headless profile with
+		no extensions gets the shell automatically: browser UI and extension
+		support are unused, and the shell uses about half the memory. Set
+		OPENBROWSER_USE_HEADLESS_SHELL=0 to force full Chrome.
+		"""
+		import os
+
+		override = os.environ.get('OPENBROWSER_USE_HEADLESS_SHELL', '').strip().lower()
+		if override in ('0', 'false', 'no'):
+			return False
+		if override in ('1', 'true', 'yes'):
+			return True
+		if self.use_headless_shell:
+			return True
+		return bool(self.headless and not self.enable_default_extensions)
+
 	def blocked_resource_types(self) -> tuple[str, ...]:
 		"""Return the CDP resource types this profile must not fetch, in stable order."""
 		from openbrowser.browser.render_policy import ordered_resource_types, resolve_blocked_resource_types

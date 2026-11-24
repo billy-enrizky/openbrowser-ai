@@ -80,6 +80,8 @@ Optional configuration:
 |----------|-------------|---------|
 | `OPENBROWSER_HEADLESS` | Run browser without GUI | `true` |
 | `OPENBROWSER_RENDER_MODE` | Rendering policy for new contexts: `full`, `lightweight`, or `no-render` | `full` |
+| `OPENBROWSER_TEXT_ONLY` | Set to `1` to block external CSS, images, web fonts, media, and text tracks while keeping scripts and screenshots | `false` |
+| `OPENBROWSER_BLOCK_RESOURCES` | Comma-separated asset groups to block for new contexts: `css`, `images`, `fonts`, `media`, `scripts` | (none) |
 | `OPENBROWSER_ALLOWED_DOMAINS` | Comma-separated domain whitelist | (none) |
 | `OPENBROWSER_USER_DATA_DIR` | Optional explicit Chrome profile directory. Omit it for one managed profile per context; concurrent owners are rejected | (auto) |
 | `OPENBROWSER_STORAGE_STATE` | Optional JSON file used as a one-time seed for cookies plus localStorage in managed profiles | (auto seed) |

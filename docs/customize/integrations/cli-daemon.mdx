@@ -55,11 +55,45 @@ openbrowser-ai scrape https://example.com
 # Text with images, web fonts, and media blocked
 openbrowser-ai scrape https://example.com --format text --render-mode lightweight
 
+# Text with external CSS, images, fonts, and media blocked, screenshots still on
+openbrowser-ai scrape https://example.com --format text --text-only
+
+# Keep only the article body, without navigation or footers
+openbrowser-ai scrape https://example.com --only-main-content
+
 # JSON from a CSS selector, always in the browser
 openbrowser-ai scrape https://example.com --format json --selector "article" --engine browser
 ```
 
 `--engine auto` is the default. `--engine http` never starts a browser. An explicit `--engine http` command uses a light console entry that does not import the browser or configuration stack. `--render-mode no-render` disables screenshots and visual-only actions for the browser fallback. Use `--wait-for` to wait for a selector on JavaScript-rendered pages.
+
+### Render modes and asset flags
+
+| Mode | Blocks | Screenshots |
+| --- | --- | --- |
+| `--render-mode full` | nothing | yes |
+| `--render-mode lightweight` | images, web fonts, media, text tracks | yes |
+| `--render-mode no-render` | the four above plus external stylesheets | no |
+| `--text-only` | the same five as `no-render` | yes |
+
+The granular flags change only the asset policy, so they combine with any mode:
+
+- `--no-css` blocks external stylesheets. Inline `<style>` still applies.
+- `--no-images`, `--no-fonts`, `--no-media` block one asset group.
+- `--no-scripts` blocks scripts and calls `Emulation.setScriptExecutionDisabled`. Use it only for server-rendered pages.
+- Each flag has a positive form (`--css`, `--images`, and so on) that re-enables a group a preset blocked.
+
+```bash
+# Keep screenshots but skip external CSS
+openbrowser-ai --render-mode full --no-css --no-scripts -c "await navigate('https://example.com')"
+
+# Text-only interactive session with scripts
+openbrowser-ai --text-only -c "await navigate('https://example.com')"
+```
+
+Blocking external CSS exposes content that the page hides with `display:none` or `visibility:hidden`. Use `lightweight` when visibility matters. Asset flags reduce requests and bytes, not Chromium process memory; use `--engine http` or the static path for low memory.
+
+The `scrape` browser fallback uses the installed Playwright headless shell by default. The shell has no browser UI or extension support and uses about half the process memory of full Chrome. Set `OPENBROWSER_USE_HEADLESS_SHELL=0` to force full Chrome.
 
 ### Batch scraping
 

@@ -207,6 +207,17 @@ The search JSON contains `title`, `url`, and `snippet` fields. The URL file cont
 
 Search snippets do not count as evidence. Do not cite them. Read the scraped `content` field and cite its page URL. If native search fails or returns no results, use the Google search in Step 2a. The package retries provider failures twice with short backoff. It retries a no-results response once. Two consecutive no-results responses produce an empty list.
 
+The search backend lives in the package at `openbrowser.search`, so `openbrowser-ai search` and the CodeAgent `search_web()` helper use the same provider path. Nothing is installed at run time.
+
+When a source is a documentation site or a wiki rather than a single page, discover its pages before scraping. This does not start a browser:
+
+```bash
+openbrowser-ai map https://docs.example.com --max-urls 50 --include '/guide/'
+openbrowser-ai crawl https://docs.example.com --max-pages 20 --max-depth 2 --format markdown
+```
+
+Filter boilerplate when you scrape a long page. `--only-main-content` removes navigation, headers, footers, cookie banners, and ad blocks, which keeps citations focused and the report shorter.
+
 Check each scraper row's `ok`, `url`, `content`, and `error` fields before you use it:
 
 ```bash

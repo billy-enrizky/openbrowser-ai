@@ -42,7 +42,11 @@ openbrowser-ai scrape <url> --format markdown
 openbrowser-ai scrape <url> --format json --selector "article"
 ```
 
-`--engine auto` (default) uses HTTP first and falls back to Chromium for thin JavaScript shells. Use `--engine browser` when JavaScript is required. `--render-mode` accepts `full`, `lightweight`, or `no-render`. Lightweight mode blocks images, fonts, and media. No-render mode disables screenshots and visual-only actions. For `scrape`, use `--render-mode no-render`. The top-level `--no-render` flag is a shortcut for `--render-mode no-render` on one-shot prompt runs. Use `--wait-for <selector>` for client-rendered content.
+`--engine auto` (default) uses HTTP first and falls back to Chromium for thin JavaScript shells. Use `--engine browser` when JavaScript is required. The browser fallback uses the Playwright headless shell, which uses about half the memory of full Chrome; set `OPENBROWSER_USE_HEADLESS_SHELL=0` to force full Chrome.
+
+Add `--only-main-content` to drop navigation, headers, footers, cookie banners, and ad blocks before extraction. `--include-tag` keeps the first matching selector, and `--exclude-tag` removes matches before extraction. They work on the HTTP path and on the browser fallback.
+
+`--render-mode` accepts `full`, `lightweight`, or `no-render`. Lightweight blocks images, fonts, media, and text tracks. No-render adds external stylesheets and disables screenshots. For assets, use the granular flags instead of another mode: `--text-only` blocks CSS, images, fonts, media, and text tracks while keeping scripts and screenshots, and `--no-css`, `--no-images`, `--no-fonts`, `--no-media`, `--no-scripts` each block one group. Blocking external CSS exposes content the page hides with `display:none`, so prefer `lightweight` when visibility matters. Use `--wait-for <selector>` for client-rendered content.
 
 For several URLs, use batch mode. HTTP requests run concurrently, while browser fallbacks run one at a time:
 
@@ -62,7 +66,20 @@ openbrowser-ai scrape https://a.example https://b.example --engine http --jsonl 
 
 The explicit `--engine http` path is the fastest and lowest-memory option for server-rendered HTML. Use `auto` when a page may need JavaScript, or `browser` when it definitely does.
 
-In CodeAgent, call `await scrape_page(url)` for one page or `await scrape_pages(urls, concurrency=4)` for a batch. Each URL returns its own result, and results keep the input order. HTTP requests run concurrently up to the limit. Browser fallbacks run sequentially. Pass `engine="http"` to `scrape_pages()` when the batch is static and must not start a browser.
+In CodeAgent, call `await scrape_page(url)` for one page or `await scrape_pages(urls, concurrency=4)` for a batch. Each URL returns its own result, and results keep the input order. HTTP requests run concurrently up to the limit. Browser fallbacks run sequentially. Pass `engine="http"` to `scrape_pages()` when the batch is static and must not start a browser. `scrape_page` and `scrape_pages` also accept `only_main_content=True`, `include_tags=[...]`, and `exclude_tags=[...]`.
+
+### Site discovery: map and crawl
+
+Use `map` when you need to know which pages exist, and `crawl` when you need their content. Neither starts a browser.
+
+```bash
+openbrowser-ai map https://docs.example.com --max-urls 50 --exclude '\.pdf$'
+openbrowser-ai crawl https://docs.example.com --max-pages 20 --max-depth 2 --format markdown
+```
+
+`map` reads the page, `/sitemap.xml`, and one sitemap index level. It normalizes, deduplicates, and filters by origin and by `--include` / `--exclude` regular expressions. `crawl` follows same-origin links breadth first, fetches and parses each page once, and reports `ok`, `depth`, `title`, `content`, and `links_found` per page.
+
+In CodeAgent, call `await map_urls(url)` and `await crawl_site(url, max_pages=20, max_depth=2)`. Both are HTTP-only, so a JavaScript shell page is reported as skipped rather than rendered.
 
 ## Workflow
 
