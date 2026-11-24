@@ -34,6 +34,29 @@ _BLOCK_CONTAINERS = {
     "dd",
 }
 _REMOVED = {"script", "style", "noscript", "template", "svg"}
+_INLINE_TAGS = {
+    "a",
+    "abbr",
+    "b",
+    "br",
+    "cite",
+    "code",
+    "del",
+    "em",
+    "i",
+    "img",
+    "ins",
+    "mark",
+    "q",
+    "s",
+    "small",
+    "span",
+    "strong",
+    "sub",
+    "sup",
+    "time",
+    "u",
+}
 _WHITESPACE = re.compile(r"\s+")
 _EXCESS_NEWLINES = re.compile(r"\n{4,}")
 
@@ -58,7 +81,7 @@ def _inline(node) -> str:
         elif tag in ("em", "i"):
             parts.append(f"*{_inline(child).strip()}*")
         elif tag == "code":
-            parts.append(f"`{(child.text_content or '').strip()}`")
+            parts.append(f"`{(child.text() or '').strip()}`")
         elif tag == "br":
             parts.append("\n")
         elif tag == "img":
@@ -68,8 +91,37 @@ def _inline(node) -> str:
     return "".join(parts)
 
 
+def _is_whitespace_text(node) -> bool:
+    return node.tag == "-text" and not (node.text_content or "").strip()
+
+
+def _is_inline_node(node) -> bool:
+    return node.tag == "-text" or node.tag in _INLINE_TAGS
+
+
 def _render_children(node) -> str:
-    return "".join(_render(child) for child in _children(node))
+    children = list(_children(node))
+    parts: list[str] = []
+    for index, child in enumerate(children):
+        if _is_whitespace_text(child):
+            previous = next(
+                (candidate for candidate in reversed(children[:index]) if not _is_whitespace_text(candidate)),
+                None,
+            )
+            following = next(
+                (candidate for candidate in children[index + 1 :] if not _is_whitespace_text(candidate)),
+                None,
+            )
+            if (
+                previous is not None
+                and following is not None
+                and _is_inline_node(previous)
+                and _is_inline_node(following)
+            ):
+                parts.append(" ")
+            continue
+        parts.append(_render(child))
+    return "".join(parts)
 
 
 def _render(node) -> str:
@@ -89,7 +141,7 @@ def _render(node) -> str:
     if tag == "hr":
         return "---\n\n"
     if tag == "pre":
-        return "```\n" + (node.text_content or "").strip("\n") + "\n```\n\n"
+        return "```\n" + (node.text() or "").strip("\n") + "\n```\n\n"
     if tag == "blockquote":
         body = _render_children(node).strip()
         return "\n".join("> " + line for line in body.splitlines()) + "\n\n"
@@ -112,7 +164,7 @@ def _render(node) -> str:
     if tag in ("em", "i"):
         return f"*{_inline(node).strip()}*"
     if tag == "code":
-        return f"`{(node.text_content or '').strip()}`"
+        return f"`{(node.text() or '').strip()}`"
     if tag == "img":
         return f"![{node.attrs.get('alt', '')}]({node.attrs.get('src', '')})"
     body = _render_children(node)
@@ -122,10 +174,14 @@ def _render(node) -> str:
     return body
 
 
+def _escape_table_cell(text: str) -> str:
+    return text.replace("|", "\\|")
+
+
 def _render_table(node) -> str:
     rows: list[list[str]] = []
     for row in node.css("tr"):
-        cells = [_inline(cell).strip() for cell in row.css("th,td")]
+        cells = [_escape_table_cell(_inline(cell).strip()) for cell in row.css("th,td")]
         if cells:
             rows.append(cells)
     if not rows:
@@ -150,11 +206,40 @@ def _parse(html: str) -> LexborHTMLParser:
 def to_markdown(html: str, selector: str | None = None) -> str:
     """Convert HTML to compact markdown with the fast Lexbor tree."""
     tree = _parse(html)
-    node = tree.css_first(selector) if selector else None
-    if node is None:
+    selected = tree.css_first(selector) if selector else None
+    if selected is not None:
+        text = _render(selected)
+    else:
         node = tree.body or tree.root
-    text = _render_children(node)
+        text = _render_children(node)
     return _EXCESS_NEWLINES.sub("\n\n\n", text).strip()
+
+
+def _has_empty_application_root(tree: LexborHTMLParser) -> bool:
+    for node in tree.css("#root, #app, #__next"):
+        child = node.first_child
+        empty = True
+        while child is not None:
+            if child.tag != "-text" or (child.text_content or "").strip():
+                empty = False
+                break
+            child = child.next
+        if empty:
+            return True
+    return False
+
+
+def has_empty_application_root(html: str) -> bool:
+    """Return True when a common SPA mount point has no text or element children."""
+    return _has_empty_application_root(_parse(html))
+
+
+def probe_static_html(html: str) -> tuple[str, bool]:
+    """Return visible text and whether a common SPA mount point is empty."""
+    tree = _parse(html)
+    node = tree.body or tree.root
+    text = node.text(separator="\n", strip=True) if node is not None else ""
+    return text, _has_empty_application_root(tree)
 
 
 def to_title(html: str) -> str:

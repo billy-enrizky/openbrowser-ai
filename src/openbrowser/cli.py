@@ -4,7 +4,9 @@
 import contextlib
 import logging
 import sys
+from collections.abc import Awaitable, Callable
 from enum import Enum
+from typing import Any, cast
 
 
 class CliMode(str, Enum):
@@ -595,7 +597,6 @@ import logging
 import os
 import time
 from pathlib import Path
-from typing import Any
 
 from dotenv import load_dotenv
 
@@ -1266,6 +1267,7 @@ def scrape(
 				raise RuntimeError(f'HTTP scrape failed for {url}')
 
 		session = BrowserSession(browser_profile=BrowserProfile(**browser_config))
+		namespace = None
 		try:
 			await session.start()
 			_quiet_stderr_logging()
@@ -1282,11 +1284,20 @@ def scrape(
 				engine='browser',
 			)
 		finally:
+			if namespace is not None:
+				close_http = cast(
+					Callable[[], Awaitable[None]] | None,
+					namespace.get('_close_http_client'),
+				)
+				if close_http is not None:
+					with contextlib.suppress(Exception):
+						await close_http()
 			with contextlib.suppress(Exception):
 				await session.kill()
 
 	async def _run_batch_scrape(batch_urls: list[str]) -> list[dict]:
 		session = BrowserSession(browser_profile=BrowserProfile(**browser_config))
+		namespace = None
 		try:
 			namespace = create_namespace(browser_session=session, tools=CodeAgentTools())
 			return await namespace['scrape_pages'](
@@ -1302,6 +1313,14 @@ def scrape(
 				engine=engine,
 			)
 		finally:
+			if namespace is not None:
+				close_http = cast(
+					Callable[[], Awaitable[None]] | None,
+					namespace.get('_close_http_client'),
+				)
+				if close_http is not None:
+					with contextlib.suppress(Exception):
+						await close_http()
 			with contextlib.suppress(Exception):
 				await session.kill()
 

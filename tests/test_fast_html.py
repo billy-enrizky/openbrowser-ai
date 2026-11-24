@@ -1,6 +1,13 @@
 """Tests for the fast Lexbor HTML extraction path."""
 
-from openbrowser.dom.fast_html import to_links, to_markdown, to_nodes, to_text, to_title
+from openbrowser.dom.fast_html import (
+    has_empty_application_root,
+    to_links,
+    to_markdown,
+    to_nodes,
+    to_text,
+    to_title,
+)
 
 
 def test_markdown_headings_paragraphs_and_inline():
@@ -56,3 +63,31 @@ def test_nodes_return_text_html_and_attributes():
 def test_title_returns_document_title():
     assert to_title("<html><head><title>Bench Title</title></head></html>") == "Bench Title"
     assert to_title("<html><body>No title</body></html>") == ""
+
+
+def test_markdown_keeps_code_and_pre_content():
+    assert to_markdown("<p><code>x = 1</code></p>") == "`x = 1`"
+    assert to_markdown("<pre><code>x = 1\ny = 2</code></pre>") == "```\nx = 1\ny = 2\n```"
+
+
+def test_markdown_preserves_inline_spaces_but_drops_indentation():
+    assert to_markdown("<div><span>Hello</span> <span>world</span></div>") == "Hello world"
+    assert to_markdown("<div>\n  <span>Hello</span>\n  <span>world</span>\n</div>") == "Hello world"
+    assert to_markdown("<div><p>First</p> <p>Second</p></div>") == "First\n\nSecond"
+
+
+def test_markdown_escapes_pipes_inside_table_cells():
+    html = "<table><tr><th>A|B</th><th>C</th></tr><tr><td>1</td><td>2</td></tr></table>"
+    assert to_markdown(html) == "| A\\|B | C |\n| --- | --- |\n| 1 | 2 |"
+
+
+def test_markdown_selector_renders_the_selected_node():
+    assert to_markdown("<table><tr><td>A</td><td>B</td></tr></table>", "table") == "| A | B |\n| --- | --- |"
+    assert to_markdown('<img src="x.png" alt="X">', "img") == "![X](x.png)"
+
+
+def test_empty_application_root_detection():
+    assert has_empty_application_root('<div id="root"></div><nav>Static navigation text that is long enough</nav>')
+    assert has_empty_application_root('<div id="app"> \n </div>')
+    assert not has_empty_application_root('<div id="root"><p>Mounted</p></div>')
+    assert not has_empty_application_root("<main>No application shell</main>")

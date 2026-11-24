@@ -963,6 +963,72 @@ class TestScrapeHttp:
         assert result['content'] == 'Short'
 
     @pytest.mark.asyncio
+    async def test_auto_falls_back_for_an_empty_application_root_with_static_text(self):
+        from openbrowser.code_use.namespace import scrape_http
+
+        html = (
+            '<html><body><div id="root"></div>'
+            "<nav>Static navigation text that is long enough to pass the length probe.</nav></body></html>"
+        )
+        with patch('httpx.AsyncClient', return_value=self._client(self._response(text=html))):
+            result = await scrape_http(
+                'https://example.com',
+                format='markdown',
+                selector=None,
+                extract_links=False,
+                timeout_ms=None,
+                engine='auto',
+            )
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_http_client_does_not_persist_response_cookies(self):
+        import httpx
+
+        from openbrowser.code_use.namespace import _NoCookieJar, scrape_http
+
+        seen_cookies: list[str | None] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen_cookies.append(request.headers.get('cookie'))
+            return httpx.Response(
+                200,
+                headers={'content-type': 'text/html', 'set-cookie': 'session=abc; Path=/'},
+                text='<html><body><p>Body</p></body></html>',
+            )
+
+        client = httpx.AsyncClient(transport=httpx.MockTransport(handler), cookies=_NoCookieJar())
+        try:
+            for _ in range(2):
+                result = await scrape_http(
+                    'https://example.com',
+                    format='text',
+                    selector=None,
+                    extract_links=False,
+                    timeout_ms=None,
+                    engine='http',
+                    client=client,
+                )
+                assert result is not None
+        finally:
+            await client.aclose()
+
+        assert seen_cookies == [None, None]
+        assert len(client.cookies) == 0
+
+    @pytest.mark.asyncio
+    async def test_http_client_owner_closes_once(self):
+        from openbrowser.code_use.namespace import _HttpClientOwner
+
+        owner = _HttpClientOwner()
+        client = owner.get(1.0)
+        assert not client.is_closed
+
+        await owner.close()
+        assert client.is_closed
+        await owner.close()
+
+    @pytest.mark.asyncio
     async def test_json_content_type_returns_payload(self):
         from openbrowser.code_use.namespace import scrape_http
 
@@ -982,6 +1048,21 @@ class TestScrapeHttp:
             )
         assert result is not None
         assert result['content'] == {'ok': True}
+
+
+class TestScrapeHttpClientLifecycle:
+    @pytest.mark.asyncio
+    async def test_namespace_exposes_http_client_cleanup(self):
+        session = MagicMock()
+        session.browser_profile = MagicMock()
+        session.browser_profile.downloads_path = None
+        tools = MagicMock()
+        tools.registry.registry.actions = {}
+
+        ns = create_namespace(session, tools=tools)
+
+        assert callable(ns['_close_http_client'])
+        await ns['_close_http_client']()
 
 
 class TestScrapePage:

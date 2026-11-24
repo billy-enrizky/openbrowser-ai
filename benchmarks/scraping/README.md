@@ -385,17 +385,17 @@ Raw evidence: `results-lightpanda-2026-11-24-n10.json`.
 
 ## Fast static path, 2026-11-23
 
-The static HTTP path now uses selectolax with the Lexbor parser and one persistent `httpx.AsyncClient` per event loop. The browser path is unchanged.
+The static HTTP path now uses selectolax with the Lexbor parser and one reusable `httpx.AsyncClient` per namespace or scrape batch. Cookies are disabled on that client, and the namespace owner closes it on agent shutdown.
 
 N=10 with 2 warmups, macOS arm64, Firecrawl Local 0.1.1:
 
-| Task | Firecrawl Local | OpenBrowser | Result |
-| --- | ---: | ---: | --- |
-| static_article | 1.3 ms | 1.1 ms | parity, p95 1.5 ms for both |
-| pagination | 6.5 ms | 4.9 ms | OpenBrowser 1.33x |
-| table | 3.4 ms | 1.4 ms | OpenBrowser 2.43x |
-| js_list | 594.0 ms | 16.5 ms | OpenBrowser 36.0x |
-| asset_heavy | 614.8 ms | 16.3 ms | OpenBrowser 37.7x |
+| Task | OpenBrowser arm | Engine | Firecrawl Local | OpenBrowser | Result |
+| --- | --- | --- | ---: | ---: | --- |
+| static_article | full | http | 1.3 ms | 1.1 ms | parity, p95 1.5 ms for both |
+| pagination | full | http | 6.5 ms | 4.9 ms | OpenBrowser 1.33x |
+| table | full | http | 3.4 ms | 1.4 ms | OpenBrowser 2.43x |
+| js_list | full | browser | 594.0 ms | 16.5 ms | OpenBrowser 36.0x |
+| asset_heavy | lightweight | browser | 614.8 ms | 16.3 ms | OpenBrowser 37.7x |
 
 The table path returns 2490 structured bytes against Firecrawl's 6736 markdown bytes. The static result is parity, not a claim of a clear static latency win. The JavaScript tasks remain the largest OpenBrowser advantage.
 

@@ -923,6 +923,16 @@ class TestClose:
         agent.browser_session.kill.assert_called_once()
 
     @pytest.mark.asyncio
+    async def test_close_closes_the_namespace_http_client(self):
+        agent = _create_agent()
+        close_http = AsyncMock()
+        agent.namespace = {'_close_http_client': close_http}
+
+        await agent.close()
+
+        close_http.assert_awaited_once_with()
+
+    @pytest.mark.asyncio
     async def test_close_keeps_alive(self):
         agent = _create_agent()
         agent.browser_session.browser_profile.keep_alive = True
