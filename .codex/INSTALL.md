@@ -5,7 +5,7 @@ Browser automation skills for Codex via native skill discovery. Clone and symlin
 ## Prerequisites
 
 - Git
-- Chrome or Chromium installed
+- Chrome or Chromium installed, or the ability to install Chromium with `openbrowser-ai install`
 - Python 3.12+ with [uv](https://docs.astral.sh/uv/)
 
 ## Quick install with skills.sh
@@ -16,6 +16,8 @@ npx skills add billy-enrizky/openbrowser-ai -a codex
 ```
 
 The first command installs only the setup skill. The second installs all eight OpenBrowser skills. The `setup` skill installs the CLI and Chromium, configures MCP, and verifies a real browser session.
+
+These commands install skill files. They do not run the setup workflow. After installation, ask Codex to run the `openbrowser/setup` skill.
 
 ## Installation
 
@@ -38,11 +40,41 @@ The first command installs only the setup skill. The second installs all eight O
 
 3. **Install OpenBrowser CLI:**
    ```bash
-   uv tool install openbrowser-ai
+   uv tool install --upgrade openbrowser-ai
    openbrowser-ai install
    ```
 
 4. **Restart Codex** to discover the skills.
+
+## Configure the MCP server
+
+Add this entry to `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.openbrowser]
+command = "openbrowser-ai"
+args = ["--mcp"]
+```
+
+If Codex cannot find `openbrowser-ai`, use `uvx` instead:
+
+```toml
+[mcp_servers.openbrowser]
+command = "uvx"
+args = ["openbrowser-ai", "--mcp"]
+```
+
+The OpenBrowser server uses MCP SDK 2.3 and negotiates protocol version `2026-07-28` with modern clients. Call `create_context` first, pass its returned `context_id` to stateful tools, and call `close_context` when finished. Older supported clients use the legacy three-tool catalog.
+
+## Use the CLI daemon
+
+Before a sequence of `openbrowser-ai -c` calls, run `openbrowser-ai warm` once to start the daemon and browser. Variables persist between calls while the daemon remains running.
+
+```bash
+openbrowser-ai warm
+openbrowser-ai -c "await navigate('https://example.com')"
+openbrowser-ai -c "print(await evaluate('document.title'))"
+```
 
 ## Verify
 

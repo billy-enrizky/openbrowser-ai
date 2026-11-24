@@ -13,6 +13,8 @@ The daemon starts automatically on first use, persists variables across calls, a
 
 ## Quick Start
 
+Before a sequence of `-c` calls, run `openbrowser-ai warm` once to start the daemon and browser.
+
 ```bash
 # Navigate to a page
 uvx openbrowser-ai -c "await navigate('https://example.com')"

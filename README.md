@@ -94,13 +94,15 @@ curl -fsSL https://raw.githubusercontent.com/billy-enrizky/openbrowser-ai/main/i
 irm https://raw.githubusercontent.com/billy-enrizky/openbrowser-ai/main/install.ps1 | iex
 ```
 
-Detects `uv`, `pipx`, or `pip` and installs OpenBrowser automatically.
+The installers require Python 3.12 or newer. They use `uv`, then `pipx`, then `pip`.
 
-Install to `~/.local/bin` without sudo:
+To request a pip user install with `--local`, run:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/billy-enrizky/openbrowser-ai/main/install.sh | sh -s -- --local
 ```
+
+The installer still prefers `uv` or `pipx` when either is available. The flag changes the pip fallback to `pip install --user`.
 
 ### Homebrew (macOS / Linux)
 
@@ -123,7 +125,7 @@ uv tool install openbrowser-ai
 
 ### uvx (zero install)
 
-Run directly without installing -- `uvx` downloads and caches the package automatically:
+Run without installing the CLI. `uvx` downloads and caches the package.
 
 ```bash
 # MCP server mode
@@ -134,11 +136,24 @@ uvx openbrowser-ai -c "await navigate('https://example.com')"
 # Fast scraping without an LLM
 uvx openbrowser-ai scrape https://example.com --format markdown
 uvx openbrowser-ai scrape https://example.com --format json --selector "article"
+uvx openbrowser-ai scrape https://example.com --render-mode no-render
+
+# One-shot task with lightweight rendering
+uvx openbrowser-ai --render-mode lightweight -p "Read the page title"
+
+# One-shot task without screenshots or visual-only actions
+uvx openbrowser-ai --no-render -p "Read the page title"
 
 # Batch scrape with bounded HTTP concurrency
 uvx openbrowser-ai scrape https://a.example https://b.example --jsonl --concurrency 8
 uvx openbrowser-ai scrape --urls-file urls.txt --output results.jsonl
 ```
+
+`scrape` accepts multiple URLs or a file with one URL per line. Use `--output-format json` or `--output-format jsonl` to select batch output. A `.jsonl` output path selects JSONL by default. Each result records its URL, success state, engine, content or error, duration, and timing. One failed URL does not stop the batch.
+
+In CodeAgent and MCP execution, call `await scrape_pages(urls, concurrency=4)`. HTTP requests run concurrently up to the limit. Browser fallbacks run sequentially, and each URL returns its own result.
+
+The render modes are `full`, `lightweight`, and `no-render`. Full mode uses normal browser rendering. Lightweight mode blocks images, web fonts, and media. No-render mode disables screenshots and visual-only actions. For one-shot prompt runs, pass `--render-mode` or use `--no-render` as a shortcut for `--render-mode no-render`. The `scrape` command accepts `--render-mode`; `--lightweight` selects lightweight rendering.
 
 ### pipx
 
@@ -367,7 +382,7 @@ Install only the first-time setup skill:
 npx skills add billy-enrizky/openbrowser-ai --skill setup -a codex
 ```
 
-The pack includes `setup`, `deep-research`, `web-scraping`, `form-filling`, `e2e-testing`, `page-analysis`, `accessibility-audit`, and `file-download`. The `setup` skill installs the CLI and Chromium, configures MCP and profiles, installs the plugin skills, and verifies a real browser session. Skills are installed to the current project by default; add `-g` for all projects.
+The pack includes `setup`, `deep-research`, `web-scraping`, `form-filling`, `e2e-testing`, `page-analysis`, `accessibility-audit`, and `file-download`. These commands install skill definitions. They do not run the setup workflow. After installation, invoke the `setup` skill to install the CLI and Chromium, configure MCP and profiles, and verify a real browser session. Skills are installed to the current project by default; add `-g` for all projects.
 
 ## Codex
 
@@ -435,7 +450,10 @@ Detailed docs: [.opencode/INSTALL.md](.opencode/INSTALL.md)
 [OpenClaw](https://openclaw.ai) supports OpenBrowser via the CLI daemon. Install OpenBrowser,
 then use `openbrowser-ai -c` from the Bash tool:
 
+Before a sequence of calls, run `openbrowser-ai warm` once to start the daemon and browser.
+
 ```bash
+openbrowser-ai warm
 openbrowser-ai -c "await navigate('https://example.com')"
 openbrowser-ai -c "print(await evaluate('document.title'))"
 ```
@@ -488,6 +506,8 @@ By default, each modern MCP context uses an isolated managed profile under `~/.c
 ```bash
 uvx openbrowser-ai --mcp
 ```
+
+Set `OPENBROWSER_RENDER_MODE` to `full`, `lightweight`, or `no-render` to choose the policy for new MCP contexts. The default is `full`.
 
 ### Tools
 
@@ -638,6 +658,14 @@ uvx openbrowser-ai install
 uvx openbrowser-ai --mcp
 ```
 
+Before a sequence of `-c` calls, run `openbrowser-ai warm` once to start the daemon and browser:
+
+```bash
+openbrowser-ai warm
+```
+
+Then run the calls in the same environment. The daemon keeps Python variables between calls while it remains running. Use `--render-mode full`, `--render-mode lightweight`, or `--render-mode no-render` to choose a rendering policy for a one-shot run. Use `--no-render` as a shortcut for `--render-mode no-render`. No-render mode disables screenshots and visual-only actions.
+
 The `-c` flag connects to a persistent browser daemon over a Unix socket (localhost TCP on Windows). Variables persist across calls while the daemon is running. The daemon starts automatically on first use and shuts down after 10 minutes of inactivity.
 
 After a browser failure, run `openbrowser-ai daemon status` before retrying because the first call may have partially run. Read `browser.health` for the last crash, focus-recovery, and local process observation. `health` is not a live page-readiness probe. Wait while recovery is pending. After a failed recovery, use `openbrowser-ai daemon reset` only when no usable target exists. Reset clears the Python executor and namespace, so persist values first.
@@ -659,7 +687,7 @@ openbrowser-ai/
 ├── plugin/                    # Plugin package (skills + MCP config)
 │   ├── .claude-plugin/
 │   ├── .mcp.json
-│   └── skills/                # 7 browser automation skills
+│   └── skills/                # 8 guided skills
 ├── src/openbrowser/
 │   ├── __init__.py            # Main exports
 │   ├── cli.py                 # CLI commands
