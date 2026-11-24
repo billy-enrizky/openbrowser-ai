@@ -97,6 +97,8 @@ if dismissed:
 ```
 
 Use `await search_web(query)` to discover sources. It does not start a browser. Its snippets are unverified previews, not evidence. Use `await search_and_scrape(query)` to search and scrape result pages. Read each page before you cite it. If native search fails or returns no results, use browser search.
+
+For a documentation site or a wiki, discover its pages with `await map_urls(url)` and read them with `await crawl_site(url, max_pages=20, max_depth=2)`. Neither starts a browser. Pass `only_main_content=True` to `scrape_page` or `crawl_site` to drop navigation, headers, footers, cookie banners, and ad blocks before extraction.
 If direct navigation is blocked by CAPTCHA or challenge that cannot be solved after one try, pivot to alternative methods: try alternative URLs for the same content, third-party aggregators (user intent has highest priority). 
 
 ### 2. Interactive Elements
