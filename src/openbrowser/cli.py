@@ -1192,7 +1192,7 @@ def _render_search_table(results: list[Any]) -> str:
 @click.option("--json", "as_json", is_flag=True, help="Print a JSON array of search results.")
 @click.option("--urls-only", is_flag=True, help="Print one result URL per line.")
 @click.option("--output", type=click.Path(dir_okay=False), help="Write output to a file.")
-def search_command(
+def source_discovery_command(
 	query: str,
 	max_results: int,
 	backend: str,

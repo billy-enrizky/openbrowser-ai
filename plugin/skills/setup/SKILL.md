@@ -26,12 +26,17 @@ Use this skill once per machine or project. It installs the CLI and browser, con
 
 ```bash
 openbrowser-ai --version 2>/dev/null || true
+openbrowser-ai search --help 2>/dev/null || true
 command -v uv || true
 command -v pipx || true
 python3 --version || python --version
 ```
 
-If `openbrowser-ai --version` reports 0.1.57 or newer, skip only the CLI install commands in Step 2. Still run `openbrowser-ai install` to repair Chromium. If Python is below 3.12, install a supported Python first and repeat this step.
+Run `openbrowser-ai search --help`. This shows whether the installed CLI has native search.
+If it succeeds, skip only the CLI upgrade commands in Step 2.
+Always run `openbrowser-ai install` to repair Chromium.
+If it fails, upgrade the CLI.
+If Python is below 3.12, install a supported Python. Then repeat this step.
 
 ## Step 2 -- Install or upgrade OpenBrowser
 

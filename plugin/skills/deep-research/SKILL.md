@@ -205,7 +205,7 @@ fi
 
 The search JSON contains `title`, `url`, and `snippet` fields. The URL file contains up to five result URLs in provider order. OpenBrowser removes duplicate and non-HTTP URLs before it writes the JSON.
 
-Search snippets do not count as evidence. Do not cite them. Read the scraped `content` field and cite its page URL. If native search fails or returns no results, use the Google search in Step 2a. The package retries provider failures twice with short backoff before it returns an actionable error.
+Search snippets do not count as evidence. Do not cite them. Read the scraped `content` field and cite its page URL. If native search fails or returns no results, use the Google search in Step 2a. The package retries provider failures twice with short backoff. It retries a no-results response once. Two consecutive no-results responses produce an empty list.
 
 Check each scraper row's `ok`, `url`, `content`, and `error` fields before you use it:
 
