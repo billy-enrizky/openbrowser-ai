@@ -11,7 +11,7 @@ allowed-tools: Bash(openbrowser-ai:*) Bash(curl:*) Bash(uv:*) Bash(irm:*) Read W
 
 Extract structured data from websites using Python code execution with browser automation functions. Handles JavaScript-rendered content, pagination, and multi-page scraping.
 
-All code runs via `openbrowser-ai -c`. The daemon starts automatically and persists variables across calls. Run `openbrowser-ai warm` once before a multi-call workflow so the first task does not pay the browser start. Most browser functions are async, use `await`. `list_downloads()`, `download_outcomes()`, and `download_failures()` are synchronous.
+All code runs via `openbrowser-ai -c`. The daemon starts automatically and persists variables across calls. Run `openbrowser-ai warm` once before a multi-call workflow to start the daemon and browser before the workflow begins. Most browser functions are async, use `await`. `list_downloads()`, `download_outcomes()`, and `download_failures()` are synchronous.
 
 The CLI daemon persists cookies and login state in the Chrome user-data directory at `~/.config/openbrowser/profiles/daemon`, so authenticated sessions can be reused across later runs. No `storage_state.json` file is written unless you configure one explicitly.
 
@@ -42,16 +42,19 @@ openbrowser-ai scrape <url> --format markdown
 openbrowser-ai scrape <url> --format json --selector "article"
 ```
 
-`--engine auto` (default) uses HTTP first and falls back to Chromium for thin JavaScript shells. Use `--engine browser` when JavaScript is required, `--render-mode lightweight` to block images, fonts, and media, and `--wait-for <selector>` for client-rendered content.
+`--engine auto` (default) uses HTTP first and falls back to Chromium for thin JavaScript shells. Use `--engine browser` when JavaScript is required. `--render-mode` accepts `full`, `lightweight`, or `no-render`. Lightweight mode blocks images, fonts, and media. No-render mode disables screenshots and visual-only actions. For `scrape`, use `--render-mode no-render`. The top-level `--no-render` flag is a shortcut for `--render-mode no-render` on one-shot prompt runs. Use `--wait-for <selector>` for client-rendered content.
 
 For several URLs, use batch mode. HTTP requests run concurrently, while browser fallbacks run one at a time:
 
 ```bash
 openbrowser-ai scrape https://a.example https://b.example --jsonl --concurrency 8
 openbrowser-ai scrape --urls-file urls.txt --output results.json
+openbrowser-ai scrape --urls-file urls.txt --output results.jsonl
 ```
 
-In CodeAgent, call `await scrape_page(url)` for one page or `await scrape_pages(urls, concurrency=4)` for a batch. Each batch result has `ok`, `engine_used`, `content`, `error`, and `duration_ms`, so one failed URL does not stop the rest.
+Use `--output-format json` or `--output-format jsonl` to choose batch serialization. A `.jsonl` output path selects JSONL by default. Each URL produces a record with `url`, `ok`, `engine_used`, `content`, `error`, `duration_ms`, and `timing`. A failed URL does not stop the batch.
+
+In CodeAgent, call `await scrape_page(url)` for one page or `await scrape_pages(urls, concurrency=4)` for a batch. Each URL returns its own result, and results keep the input order. HTTP requests run concurrently up to the limit. Browser fallbacks run sequentially.
 
 ## Workflow
 
@@ -224,6 +227,7 @@ EOF
 - Use Python for post-processing: filtering, sorting, deduplication, format conversion.
 - For large datasets, process pages incrementally rather than loading everything into memory.
 - Check for rate limiting; add `await wait(2)` between page loads if needed.
+- Use `get_tabs()` to list tabs without a DOM scan. Pass a returned `tab_id` to `switch()` or `close()` when a page opens a new tab.
 - Variables persist between `-c` calls while the daemon is running, so you can build up results across multiple calls.
 
 ## Cleanup

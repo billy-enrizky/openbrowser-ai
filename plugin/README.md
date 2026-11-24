@@ -59,6 +59,8 @@ Install only the setup skill:
 npx skills add billy-enrizky/openbrowser-ai --skill setup -a codex
 ```
 
+This command installs the setup skill file. It does not run the setup workflow. Invoke the `setup` skill after installation.
+
 ### Standalone MCP server (without plugin)
 
 Add to your project's `.mcp.json`:

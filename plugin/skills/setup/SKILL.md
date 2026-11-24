@@ -18,6 +18,7 @@ Use this skill once per machine or project. It installs the CLI and browser, con
 - Prefer `uv`, then `pipx`, then `pip`.
 - Python 3.12 or newer is required.
 - Use `openbrowser-ai -c` for CLI verification and `openbrowser-ai --mcp` for the installed MCP server.
+- For modern MCP clients, call `create_context` first, pass the returned `context_id` to stateful tools, and call `close_context` when finished.
 - Verify with a temporary socket and profile. Never stop a user daemon that this setup did not start.
 - Do not install optional provider packages unless the user wants that provider.
 
@@ -65,6 +66,8 @@ curl -fsSL https://raw.githubusercontent.com/billy-enrizky/openbrowser-ai/main/i
 irm https://raw.githubusercontent.com/billy-enrizky/openbrowser-ai/main/install.ps1 | iex
 ```
 
+Pass `--no-browser` to either installer to skip Chromium installation. If `install.sh` falls back to pip, pass `--local` to request a user install.
+
 Install or repair Chromium:
 
 ```bash
@@ -91,7 +94,7 @@ MCP and `openbrowser-ai -c` do not need an LLM key. Do not print the value.
 
 ## Step 4 -- Configure MCP
 
-The installed server command is `openbrowser-ai --mcp`. The zero-install form is `uvx openbrowser-ai --mcp`.
+The installed server command is `openbrowser-ai --mcp`. The zero-install form is `uvx openbrowser-ai --mcp`. OpenBrowser uses MCP SDK 2.3 and negotiates protocol version `2026-07-28` with modern clients. Those clients see five tools and use the handle returned by `create_context` for stateful calls. Older supported clients see the legacy three-tool catalog without context handles.
 
 Add it to the agent's native MCP configuration.
 
@@ -163,6 +166,8 @@ Install only this setup skill:
 npx skills add billy-enrizky/openbrowser-ai --skill setup -a codex
 ```
 
+These commands install skill files. They do not execute the setup workflow. Run this skill after installation to configure the CLI and MCP server.
+
 Claude Code plugin:
 
 ```bash
@@ -214,13 +219,13 @@ PY
 
 If you also want to verify the CLI daemon, run `openbrowser-ai -c "..."` explicitly. On macOS/Linux, set `OPENBROWSER_SOCKET` and `OPENBROWSER_DAEMON_PROFILE_DIR` to isolate it. On Windows the daemon uses fixed port 19222 and ignores `OPENBROWSER_SOCKET`, so only stop a daemon you started.
 
-Warm the daemon before a batch of autonomous commands:
+For a batch of autonomous commands, start the daemon and browser once before the first call:
 
 ```bash
 openbrowser-ai warm
 ```
 
-This starts the daemon and browser once and prints `{"ok": true, "elapsed_ms": ..., "url": ...}`. Later `openbrowser-ai -c` calls reuse the same process and avoid the cold browser start. It does not change the browser profile or navigate to an external site.
+This starts the daemon and browser and prints `{"ok": true, "elapsed_ms": ..., "url": ...}`. Later `openbrowser-ai -c` calls reuse the same process. The command does not change the browser profile or navigate to an external site.
 
 Optional MCP smoke test:
 

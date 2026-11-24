@@ -4,7 +4,7 @@
 
 - [OpenCode.ai](https://opencode.ai) installed
 - Git installed
-- Chrome or Chromium installed
+- Chrome or Chromium installed, or the ability to install Chromium with `openbrowser-ai install`
 - Python 3.12+ with [uv](https://docs.astral.sh/uv/)
 
 ## Quick install with skills.sh
@@ -15,6 +15,8 @@ npx skills add billy-enrizky/openbrowser-ai -a opencode
 ```
 
 The first command installs only the setup skill. The second installs all eight OpenBrowser skills. The `setup` skill installs the CLI and Chromium, configures MCP, and verifies a real browser session.
+
+These commands install skill files. They do not run the setup workflow. After installation, ask OpenCode to run the `setup` skill.
 
 ## Installation
 
@@ -64,7 +66,28 @@ ls -l ~/.config/opencode/plugins/openbrowser.js
 ls -l ~/.config/opencode/skills/openbrowser
 ```
 
-Both should show symlinks pointing to the openbrowser directories.
+Both paths should resolve to the OpenBrowser plugin and skill directories. On Windows, the skills path is a junction.
+
+## Configure the MCP server
+
+Add this entry to `opencode.json` in your project:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "openbrowser": {
+      "type": "local",
+      "command": ["openbrowser-ai", "--mcp"],
+      "enabled": true
+    }
+  }
+}
+```
+
+If OpenCode cannot find `openbrowser-ai`, set `command` to `["uvx", "openbrowser-ai", "--mcp"]`.
+
+The OpenBrowser server uses MCP SDK 2.3 and negotiates protocol version `2026-07-28` with modern clients. Call `create_context` first, pass its returned `context_id` to stateful tools, and call `close_context` when finished. Older supported clients use the legacy three-tool catalog.
 
 ## Available Skills
 
@@ -92,6 +115,14 @@ Skills are discovered automatically. Load a specific skill:
 
 ```
 use skill tool to load openbrowser/web-scraping
+```
+
+Before a sequence of CLI calls, start the daemon and browser once:
+
+```bash
+openbrowser-ai warm
+openbrowser-ai -c "await navigate('https://example.com')"
+openbrowser-ai -c "print(await evaluate('document.title'))"
 ```
 
 ### Tool Mapping

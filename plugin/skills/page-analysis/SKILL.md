@@ -11,7 +11,7 @@ allowed-tools: Bash(openbrowser-ai:*) Bash(curl:*) Bash(uv:*) Bash(irm:*) Read W
 
 Analyze and understand web page content, structure, and interactive elements using Python code execution. Produces a comprehensive breakdown of what is on the page and how it is organized.
 
-All code runs via `openbrowser-ai -c`. The daemon starts automatically and persists variables across calls. Run `openbrowser-ai warm` once before a multi-call workflow so the first task does not pay the browser start. Most browser functions are async, use `await`. `list_downloads()`, `download_outcomes()`, and `download_failures()` are synchronous.
+All code runs via `openbrowser-ai -c`. The daemon starts automatically and persists variables across calls. Run `openbrowser-ai warm` once before a multi-call workflow to start the daemon and browser before the workflow begins. Most browser functions are async, use `await`. `list_downloads()`, `download_outcomes()`, and `download_failures()` are synchronous.
 
 The CLI daemon persists cookies and login state in the Chrome user-data directory at `~/.config/openbrowser/profiles/daemon`, so authenticated sessions can be reused across later runs. No `storage_state.json` file is written unless you configure one explicitly.
 
@@ -222,6 +222,7 @@ EOF
 - Code is piped via stdin using heredoc (`-c - <<'EOF'`), so all Python syntax works without shell escaping issues.
 - Start with `evaluate()` for metadata and DOM statistics -- gives a fast structured overview.
 - Use `browser.get_browser_state_summary()` for interactive element analysis.
+- Use `get_tabs()` to list tabs without a DOM scan. Pass a returned `tab_id` to `switch()` or `close()` when you need to inspect another tab.
 - Use Python regex on extracted text for pattern matching (emails, phones, dates, prices).
 - For long pages, use `await scroll(down=True)` and re-extract to analyze below-fold content.
 - Variables persist between `-c` calls while the daemon is running, so you can build a comprehensive analysis incrementally.

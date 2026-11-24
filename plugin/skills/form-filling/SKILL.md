@@ -11,7 +11,7 @@ allowed-tools: Bash(openbrowser-ai:*) Bash(curl:*) Bash(uv:*) Bash(irm:*) Read W
 
 Automate filling web forms including login, registration, checkout, and multi-step form wizards using Python code execution.
 
-All code runs via `openbrowser-ai -c`. The daemon starts automatically and persists variables across calls. Run `openbrowser-ai warm` once before a multi-call workflow so the first task does not pay the browser start. Most browser functions are async, use `await`. `list_downloads()`, `download_outcomes()`, and `download_failures()` are synchronous.
+All code runs via `openbrowser-ai -c`. The daemon starts automatically and persists variables across calls. Run `openbrowser-ai warm` once before a multi-call workflow to start the daemon and browser before the workflow begins. Most browser functions are async, use `await`. `list_downloads()`, `download_outcomes()`, and `download_failures()` are synchronous.
 
 The CLI daemon persists cookies and login state in the Chrome user-data directory at `~/.config/openbrowser/profiles/daemon`, so authenticated sessions can be reused across later runs. No `storage_state.json` file is written unless you configure one explicitly.
 
@@ -206,7 +206,8 @@ EOF
 ## Tips
 
 - Code is piped via stdin using heredoc (`-c - <<'EOF'`), so all Python syntax works without shell escaping issues.
-- Always discover fields with `browser.get_browser_state_summary()` before typing -- do not guess element indices.
+- Always discover fields with `browser.get_browser_state_summary()` before typing. Do not guess element indices.
+- Use `click_element(role=..., name=...)` for a button with a stable accessible name. Use `send_keys()` to test keyboard-only form flows.
 - For sensitive data (passwords, tokens), confirm with the user before entering values.
 - Use `evaluate()` to bypass custom components that do not respond to standard click/type.
 - Variables persist between `-c` calls while the daemon is running, so you can store field indices in one call and use them in the next.
