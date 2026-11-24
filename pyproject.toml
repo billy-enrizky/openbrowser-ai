@@ -25,6 +25,7 @@ dependencies = [
     "click>=8.1.8",
     "psutil>=7.2.0",
     "markdownify>=0.11.6",
+    "selectolax>=1.0",
     "imageio>=2.37.2",
     "imageio-ffmpeg>=0.6.0",
     "numpy>=2.4.0",

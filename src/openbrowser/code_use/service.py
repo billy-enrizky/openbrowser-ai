@@ -8,8 +8,9 @@ import tempfile
 import time
 import traceback
 from asyncio import CancelledError
+from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from uuid_extensions import uuid7str
 
@@ -1767,6 +1768,15 @@ __code_exec_coro__ = __code_exec__()
 		async with self._close_lock:
 			if self._closed:
 				return
+			close_http = cast(
+				Callable[[], Awaitable[None]] | None,
+				self.namespace.get('_close_http_client'),
+			)
+			if close_http is not None:
+				try:
+					await close_http()
+				except Exception as error:
+					logger.debug(f'Failed to close the HTTP scrape client: {error}')
 			if self.browser_session:
 				# Check if we should close the browser based on keep_alive setting
 				if not self.browser_session.browser_profile.keep_alive:

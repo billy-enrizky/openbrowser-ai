@@ -13,6 +13,7 @@ import logging
 import re
 import time
 from collections.abc import Awaitable, Callable
+from http.cookiejar import CookieJar
 from inspect import isawaitable, iscoroutinefunction
 from pathlib import Path
 from typing import Any, cast
@@ -293,27 +294,80 @@ async def evaluate(code: str, browser_session: BrowserSession) -> Any:
 		raise EvaluateError(f'Failed to execute JavaScript: {type(e).__name__}: {e}') from e
 
 
-async def scrape_http(
-	url: str,
+class _NoCookieJar(CookieJar):
+	"""A cookie jar that neither sends nor stores cookies."""
+
+	def extract_cookies(self, response: Any, request: Any) -> None:
+		return None
+
+	def add_cookie_header(self, request: Any) -> None:
+		return None
+
+
+class _HttpClientOwner:
+	"""Own one reusable HTTP client for a namespace or a scrape batch."""
+
+	def __init__(self) -> None:
+		self._client: Any | None = None
+
+	def get(self, timeout: float):
+		"""Return the owned client, creating it on first use."""
+		import httpx
+
+		if self._client is None or self._client.is_closed:
+			self._client = httpx.AsyncClient(
+				follow_redirects=True,
+				timeout=timeout,
+				cookies=_NoCookieJar(),
+			)
+		return self._client
+
+	async def close(self) -> None:
+		"""Close the owned client once."""
+		client = self._client
+		self._client = None
+		if client is not None and not client.is_closed:
+			await client.aclose()
+
+
+def _new_http_client(timeout: float):
+	"""Create a one-shot client that cannot read or write host cookies."""
+	import httpx
+
+	return httpx.AsyncClient(
+		follow_redirects=True,
+		timeout=timeout,
+		cookies=_NoCookieJar(),
+	)
+
+
+def _http_result_from_response(
+	response: Any,
 	*,
 	format: str,
 	selector: str | None,
-	extract_links: bool,
-	timeout_ms: int | None,
 	engine: str,
 ) -> dict[str, Any] | None:
-	"""Fetch and parse a URL without a browser.
+	"""Convert an HTTP response into a scrape result, or None to use the browser."""
+	from openbrowser.dom.fast_html import (
+		probe_static_html,
+	)
+	from openbrowser.dom.fast_html import (
+		to_links as fast_links,
+	)
+	from openbrowser.dom.fast_html import (
+		to_markdown as fast_markdown,
+	)
+	from openbrowser.dom.fast_html import (
+		to_nodes as fast_nodes,
+	)
+	from openbrowser.dom.fast_html import (
+		to_text as fast_text,
+	)
+	from openbrowser.dom.fast_html import (
+		to_title as fast_title,
+	)
 
-	Returns None when engine=auto finds page JavaScript and the browser path
-	should handle the page.
-	"""
-	import httpx
-	from bs4 import BeautifulSoup
-	from markdownify import markdownify as _markdownify
-
-	timeout = (timeout_ms / 1000) if timeout_ms else 30.0
-	async with httpx.AsyncClient(follow_redirects=True, timeout=timeout) as client:
-		response = await client.get(url)
 	if response.status_code >= 400:
 		return None
 
@@ -338,52 +392,25 @@ async def scrape_http(
 		return None
 
 	html = response.text
-	soup = BeautifulSoup(html, 'html.parser')
 	if engine == 'auto':
 		# Use HTTP only when the server-rendered text is substantial. Thin
 		# shells usually need JavaScript, so fall back to the browser.
-		text_probe = soup.get_text(' ', strip=True)
-		if len(text_probe) < 40:
-			return None
-		if soup.select_one('#root:empty, #app:empty, #__next:empty'):
+		text_probe, empty_application_root = probe_static_html(html)
+		if len(text_probe) < 40 or empty_application_root:
 			return None
 
-	title = soup.title.get_text(strip=True) if soup.title else ''
+	title = fast_title(html)
 	content: Any
 	if format == 'markdown':
-		for tag in soup(['script', 'style', 'noscript']):
-			tag.decompose()
-		content = _markdownify(
-			str(soup),
-			heading_style='ATX',
-			bullets='-',
-			escape_asterisks=False,
-			escape_underscores=False,
-		).strip()
+		content = fast_markdown(html, selector)
 	elif format == 'text':
-		for tag in soup(['script', 'style', 'noscript']):
-			tag.decompose()
-		content = soup.get_text('\n', strip=True)
+		content = fast_text(html, selector)
 	elif format == 'html':
 		content = html
 	elif format == 'links':
-		content = [
-			{
-				'text': (tag.get_text(' ', strip=True) or ''),
-				'href': tag.get('href'),
-				'title': tag.get('title'),
-			}
-			for tag in soup.find_all('a', href=True)
-		]
+		content = fast_links(html)
 	else:
-		content = [
-			{
-				'text': tag.get_text(' ', strip=True),
-				'html': str(tag),
-				'attributes': dict(tag.attrs),
-			}
-			for tag in (soup.select(selector) if selector else [])
-		]
+		content = fast_nodes(html, selector) if selector else []
 
 	return {
 		'url': str(response.url),
@@ -399,6 +426,41 @@ async def scrape_http(
 		'engine_used': 'http',
 		'status_code': response.status_code,
 	}
+
+
+async def scrape_http(
+	url: str,
+	*,
+	format: str,
+	selector: str | None,
+	extract_links: bool,
+	timeout_ms: int | None,
+	engine: str,
+	client: Any | None = None,
+) -> dict[str, Any] | None:
+	"""Fetch and parse a URL without a browser.
+
+	Returns None when engine=auto finds page JavaScript and the browser path
+	should handle the page. Pass a client only when the caller owns its
+	lifecycle and will close it.
+	"""
+	timeout = (timeout_ms / 1000) if timeout_ms else 30.0
+	if client is None:
+		async with _new_http_client(timeout) as owned_client:
+			response = await owned_client.get(url, timeout=timeout)
+			return _http_result_from_response(
+				response,
+				format=format,
+				selector=selector,
+				engine=engine,
+			)
+	response = await client.get(url, timeout=timeout)
+	return _http_result_from_response(
+		response,
+		format=format,
+		selector=selector,
+		engine=engine,
+	)
 
 
 def _truncate_scrape_result(result: dict[str, Any], max_chars: int | None) -> dict[str, Any]:
@@ -454,6 +516,7 @@ def create_namespace(
 		available_file_paths = []
 
 	browser_scrape_lock = asyncio.Lock()
+	http_client_owner = _HttpClientOwner()
 
 	namespace: dict[str, Any] = {
 		# Core objects
@@ -1169,6 +1232,7 @@ def create_namespace(
 				extract_links=extract_links,
 				timeout_ms=timeout_ms,
 				engine=engine,
+				client=http_client_owner.get((timeout_ms / 1000) if timeout_ms else 30.0),
 			)
 			if http_result is not None:
 				return _truncate_scrape_result(http_result, max_chars)
@@ -1343,6 +1407,7 @@ def create_namespace(
 							extract_links=extract_links,
 							timeout_ms=timeout_ms,
 							engine=engine,
+							client=http_client_owner.get((timeout_ms / 1000) if timeout_ms else 30.0),
 						)
 						return result, None, (time.perf_counter() - http_started) * 1000.0
 					except Exception as exc:
@@ -1495,6 +1560,7 @@ def create_namespace(
 	namespace['scrape_page'] = scrape_page
 	namespace['scrape'] = scrape_page
 	namespace['scrape_pages'] = scrape_pages
+	namespace['_close_http_client'] = http_client_owner.close
 
 
 	# Inject all tools as functions into the namespace
