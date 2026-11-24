@@ -14,6 +14,7 @@ class CliMode(str, Enum):
 	EXECUTE_CODE = 'execute_code'
 	CONFIG = 'config'
 	DAEMON = 'daemon'
+	WARM = 'warm'
 	INSTALL = 'install'
 	INIT = 'init'
 	TEMPLATE = 'template'
@@ -45,6 +46,8 @@ def select_cli_mode(args: list[str]) -> CliMode | None:
 		return CliMode.CONFIG
 	if args and args[0] == 'daemon':
 		return CliMode.DAEMON
+	if args and args[0] == 'warm':
+		return CliMode.WARM
 	if args and args[0] == 'install':
 		return CliMode.INSTALL
 	if args and args[0] == 'init':
@@ -194,8 +197,8 @@ if _mode is CliMode.CONFIG:
 	print('Usage: openbrowser-ai config status', file=sys.stderr)
 	sys.exit(2)
 
-# Check for daemon subcommand early
-if _mode is CliMode.DAEMON:
+# Check for daemon and warm subcommands early
+if _mode in (CliMode.DAEMON, CliMode.WARM):
 	import os
 	os.environ['OPENBROWSER_SETUP_LOGGING'] = 'false'
 	try:
@@ -206,13 +209,14 @@ if _mode is CliMode.DAEMON:
 
 	import asyncio
 	import json
+	import time
 	from pathlib import Path
 
-	from openbrowser.daemon.client import DaemonClient
+	from openbrowser.daemon.client import DaemonClient, execute_code_via_daemon
 	from openbrowser.daemon import DAEMON_DIR, IS_WINDOWS, WINDOWS_PORT, get_log_path, get_pid_path, get_socket_path
 	from openbrowser.daemon.diagnostics import daemon_processes, reap_orphan_processes, socket_candidates
 
-	sub = sys.argv[2] if len(sys.argv) > 2 else 'status'
+	sub = 'warm' if _mode is CliMode.WARM else (sys.argv[2] if len(sys.argv) > 2 else 'status')
 	client = DaemonClient()
 
 	def _print_daemon_error(resp) -> None:
@@ -303,6 +307,26 @@ if _mode is CliMode.DAEMON:
 				sys.exit(1)
 			print('Daemon started')
 		asyncio.run(_ensure())
+	elif sub == 'warm':
+		async def _warm():
+			status = await client.status()
+			if status.success and not _status_matches_request(status):
+				stop = await client.force_stop()
+				if not stop.success:
+					_print_daemon_error(stop)
+					sys.exit(1)
+			started = time.monotonic()
+			resp = await execute_code_via_daemon(
+				'summary = await browser.get_browser_state_summary(include_screenshot=False); print(summary.url)'
+			)
+			elapsed_ms = (time.monotonic() - started) * 1000.0
+			if not resp.success:
+				_print_daemon_error(resp)
+				sys.exit(1)
+			output = (resp.output or '').strip()
+			url = output.splitlines()[-1].strip() if output else ''
+			print(json.dumps({'ok': True, 'elapsed_ms': round(elapsed_ms, 1), 'url': url}, indent=2))
+		asyncio.run(_warm())
 	elif sub == 'stop':
 		resp = asyncio.run(client.stop())
 		if not resp.success:
@@ -459,7 +483,8 @@ if _mode is CliMode.DAEMON:
 	else:
 		print(f'Unknown daemon command: {sub}', file=sys.stderr)
 		print(
-			'Usage: openbrowser-ai daemon [start|ensure|stop|force-stop|status|reset|restart|list|reap|doctor]',
+			'Usage: openbrowser-ai warm | openbrowser-ai daemon '
+			'[start|ensure|warm|stop|force-stop|status|reset|restart|list|reap|doctor]',
 			file=sys.stderr,
 		)
 		sys.exit(1)
