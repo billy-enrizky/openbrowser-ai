@@ -42,10 +42,12 @@ The namespace is initialized with:
 - `wait_for_download(timeout=30, url=None, lookback=0, download_ref=None)` - Wait for a terminal download phase; start it before the click
 - `download_outcomes()` / `download_failures()` - Synchronous recent attempts and failures
 - `list_downloads()` - List files in the downloads directory
-- `scrape_page(url=None, format='markdown', selector=None, wait_for=None, engine='auto')` - Scrape one page without an LLM. `engine=auto` uses HTTP first and falls back to the browser
-- `scrape_pages(urls, concurrency=4, format='markdown', engine='auto')` - Scrape many URLs without an LLM. HTTP requests run concurrently. Browser fallbacks run sequentially
+- `scrape_page(url=None, format='markdown', selector=None, wait_for=None, engine='auto', only_main_content=False, include_tags=None, exclude_tags=None)` - Scrape one page without an LLM. `engine=auto` uses HTTP first and falls back to the browser. `only_main_content` drops navigation, headers, footers, cookie banners, and ad blocks. `include_tags` keeps the first matching selector and `exclude_tags` removes matches
+- `scrape_pages(urls, concurrency=4, format='markdown', engine='auto', only_main_content=False, include_tags=None, exclude_tags=None)` - Scrape many URLs without an LLM. HTTP requests run concurrently. Browser fallbacks run sequentially
 - `search_web(query, max_results=5, backend='auto', region='us-en', safe_search='moderate', timelimit=None)` - Search with DDGS and return title, URL, and snippet fields
 - `search_and_scrape(query, max_results=5, concurrency=4, format='markdown', ...)` - Search, then scrape result URLs through `scrape_pages`
+- `map_urls(url, max_urls=100, include=None, exclude=None, timeout_ms=None, use_sitemap=True)` - List URLs from one page, `/sitemap.xml`, and one sitemap index level. Normalizes, deduplicates, and keeps same-origin links. No browser
+- `crawl_site(url, max_pages=10, max_depth=2, format='markdown', selector=None, include=None, exclude=None, timeout_ms=None, concurrency=4)` - Follow same-origin links breadth first and return each page's content. No browser
 
 ### CSS selector fast path
 - `click_selector(selector, timeout=0.0)` - Click the first CSS match through `evaluate()`. A zero timeout makes one lookup. A positive finite timeout waits for a match.

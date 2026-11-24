@@ -879,10 +879,15 @@ class TestInteractiveHelpers:
         assert 'click_selector_and_wait_for_new_tab' in (code_use_dir / 'README.md').read_text()
         assert 'fill_selector' in (code_use_dir / 'README.md').read_text()
         assert 'wait_for_selector' in (code_use_dir / 'README.md').read_text()
+        assert 'map_urls' in (code_use_dir / 'README.md').read_text()
+        assert 'crawl_site' in (code_use_dir / 'README.md').read_text()
+        assert 'only_main_content' in (code_use_dir / 'README.md').read_text()
         assert 'click_selector' in (code_use_dir / 'system_prompt.md').read_text()
         assert 'click_selector_and_wait_for_new_tab' in (code_use_dir / 'system_prompt.md').read_text()
         assert 'fill_selector' in (code_use_dir / 'system_prompt.md').read_text()
         assert 'wait_for_selector' in (code_use_dir / 'system_prompt.md').read_text()
+        assert 'map_urls' in (code_use_dir / 'system_prompt.md').read_text()
+        assert 'crawl_site' in (code_use_dir / 'system_prompt.md').read_text()
 
     @pytest.mark.asyncio
     async def test_click_selector_uses_dom_click_without_browser_state_summary(self):
