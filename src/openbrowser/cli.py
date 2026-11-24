@@ -729,6 +729,11 @@ def update_config_with_click_args(config: dict[str, Any], ctx: click.Context) ->
 		config['browser']['render_mode'] = 'no-render'
 	if ctx.params.get('lightweight'):
 		config['browser']['render_mode'] = 'lightweight'
+	if ctx.params.get('text_only'):
+		config['browser']['text_only'] = True
+	for name in ('block_css', 'block_images', 'block_fonts', 'block_media', 'block_scripts'):
+		if ctx.params.get(name) is not None:
+			config['browser'][name] = ctx.params[name]
 
 	# Consolidated proxy dict
 	proxy: dict[str, str] = {}
@@ -974,6 +979,18 @@ async def run_prompt_mode(prompt: str, ctx: click.Context, debug: bool = False):
 	help='Rendering policy: full, lightweight, or no-render.',
 )
 @click.option('--no-render', is_flag=True, help='Shortcut for --render-mode no-render.')
+@click.option('--text-only', is_flag=True,
+	help='Block external CSS, images, web fonts, media, and text tracks. Scripts and screenshots stay on.')
+@click.option('--no-css/--css', 'block_css', default=None,
+	help='Block or allow external stylesheets.')
+@click.option('--no-images/--images', 'block_images', default=None,
+	help='Block or allow image requests.')
+@click.option('--no-fonts/--fonts', 'block_fonts', default=None,
+	help='Block or allow web font requests.')
+@click.option('--no-media/--media', 'block_media', default=None,
+	help='Block or allow media and text track requests.')
+@click.option('--no-scripts/--scripts', 'block_scripts', default=None,
+	help='Block and disable scripts. Use only for server-rendered pages.')
 @click.option('--proxy-url', type=str, help='Proxy server for Chromium traffic (e.g. http://host:8080 or socks5://host:1080)')
 @click.option('--no-proxy', type=str, help='Comma-separated hosts to bypass proxy (e.g. localhost,127.0.0.1,*.internal)')
 @click.option('--proxy-username', type=str, help='Proxy auth username')
@@ -1251,6 +1268,16 @@ def source_discovery_command(
 	type=click.Choice(['full', 'lightweight', 'no-render']),
 	help='Rendering policy. Overrides --lightweight.',
 )
+@click.option('--text-only', 'text_only', is_flag=True,
+	help='Block external CSS, images, web fonts, media, and text tracks for the browser fallback.')
+@click.option('--no-css/--css', 'block_css', default=None,
+	help='Block or allow external stylesheets in the browser fallback.')
+@click.option('--no-images/--images', 'block_images', default=None,
+	help='Block or allow image requests in the browser fallback.')
+@click.option('--no-fonts/--fonts', 'block_fonts', default=None,
+	help='Block or allow web font requests in the browser fallback.')
+@click.option('--no-media/--media', 'block_media', default=None,
+	help='Block or allow media requests in the browser fallback.')
 @click.option(
 	'--concurrency',
 	type=click.IntRange(min=1),
@@ -1285,6 +1312,11 @@ def scrape(
 	exclude_tags: tuple[str, ...],
 	lightweight: bool,
 	render_mode: str | None,
+	text_only: bool,
+	block_css: bool | None,
+	block_images: bool | None,
+	block_fonts: bool | None,
+	block_media: bool | None,
 	concurrency: int,
 	output: str | None,
 	batch_output_format: str | None,
@@ -1380,6 +1412,16 @@ def scrape(
 		browser_config['render_mode'] = effective_render_mode
 	elif lightweight:
 		browser_config['render_mode'] = 'lightweight'
+	if text_only:
+		browser_config['text_only'] = True
+	for name, value in (
+		('block_css', block_css),
+		('block_images', block_images),
+		('block_fonts', block_fonts),
+		('block_media', block_media),
+	):
+		if value is not None:
+			browser_config[name] = value
 
 	async def _run_single_scrape(url: str) -> dict:
 		if engine in {'auto', 'http'}:

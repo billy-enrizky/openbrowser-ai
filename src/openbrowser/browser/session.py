@@ -98,6 +98,15 @@ from openbrowser.browser.navigation import (
 	validate_actor_wait_until,
 )
 from openbrowser.browser.profile import BrowserProfile, ProxySettings, RenderMode
+from openbrowser.browser.render_policy import (
+	LIGHTWEIGHT_BLOCKED_RESOURCE_TYPES as LIGHTWEIGHT_BLOCKED_RESOURCE_TYPES,
+)
+from openbrowser.browser.render_policy import (
+	NO_RENDER_BLOCKED_RESOURCE_TYPES as NO_RENDER_BLOCKED_RESOURCE_TYPES,
+)
+from openbrowser.browser.render_policy import (
+	blocked_resource_types_for_render_mode as blocked_resource_types_for_render_mode,
+)
 from openbrowser.browser.tabs import TabError, TabRegistry, TabState
 from openbrowser.browser.views import BrowserStateSummary, TabInfo
 from openbrowser.dom.views import DOMRect, EnhancedDOMTreeNode, TargetInfo
@@ -114,25 +123,6 @@ DEFAULT_BROWSER_PROFILE = BrowserProfile()
 NAVIGATION_CONTAINMENT_GRACE = 1.0
 MAX_RETAINED_PROBES = 8
 MAX_RETAINED_FETCH_DECISIONS = 4096
-
-# Resource types the render policy keeps off the network. Stylesheet is only
-# blocked for no-render; lightweight keeps CSS so layout and visibility match.
-LIGHTWEIGHT_BLOCKED_RESOURCE_TYPES: tuple[str, ...] = ('Image', 'Font', 'Media', 'TextTrack')
-NO_RENDER_BLOCKED_RESOURCE_TYPES: tuple[str, ...] = (*LIGHTWEIGHT_BLOCKED_RESOURCE_TYPES, 'Stylesheet')
-
-
-def blocked_resource_types_for_render_mode(mode: RenderMode | str | None) -> tuple[str, ...]:
-	"""Return the CDP resource types a render mode must not fetch."""
-	try:
-		resolved = RenderMode(mode) if mode is not None else RenderMode.FULL
-	except ValueError:
-		resolved = RenderMode.FULL
-	if resolved is RenderMode.NO_RENDER:
-		return NO_RENDER_BLOCKED_RESOURCE_TYPES
-	if resolved is RenderMode.LIGHTWEIGHT:
-		return LIGHTWEIGHT_BLOCKED_RESOURCE_TYPES
-	return ()
-
 
 class _ProbeLifecycleClosed(RuntimeError):
 	"""Internal signal that shutdown closed probe admission before the command ran."""
@@ -722,8 +712,10 @@ class BrowserSession(BaseModel):
 			return None
 
 		import ipaddress
-		import psutil
 		import socket
+
+		import psutil
+
 		from openbrowser.browser.watchdogs.profile_lease import ProfileLease
 
 		try:
@@ -3794,8 +3786,10 @@ class BrowserSession(BaseModel):
 		self, operation: NavigationOperation, root: CDPClient
 	) -> tuple[int, float, str, str] | None:
 		import ipaddress
-		import psutil
 		import socket
+
+		import psutil
+
 		from openbrowser.browser.watchdogs.profile_lease import ProfileLease
 
 		watchdog = self._local_browser_watchdog
@@ -6416,7 +6410,7 @@ class BrowserSession(BaseModel):
 			username = (proxy_cfg.username if proxy_cfg else None) or ''
 			password = (proxy_cfg.password if proxy_cfg else None) or ''
 			handle_auth = bool(username and password)
-			blocked_types = blocked_resource_types_for_render_mode(self.browser_profile.effective_render_mode)
+			blocked_types = self.browser_profile.blocked_resource_types()
 			blocked_set = frozenset(blocked_types)
 			if not handle_auth and not blocked_set:
 				self.logger.debug('Fetch interception skipped: full render mode and no proxy credentials')
@@ -6585,10 +6579,31 @@ class BrowserSession(BaseModel):
 						)
 						return
 
+			disable_scripts = 'Script' in blocked_set
+
+			async def _disable_scripts(target_session_id: SessionID | None) -> None:
+				# Fetch alone stops external scripts. Inline scripts still run, so
+				# the engine flag is required for a true no-scripts policy.
+				try:
+					await root.send.Emulation.setScriptExecutionDisabled(
+						params={'value': True},
+						session_id=target_session_id,
+					)
+					self.logger.debug(f'Script execution disabled on session {target_session_id}')
+				except Exception as e:
+					self.logger.debug(
+						f'Emulation.setScriptExecutionDisabled failed for session {target_session_id}: '
+						f'{type(e).__name__}: {e}'
+					)
+
 			# Enable Fetch on the root client and the focused page before any navigation.
 			await _enable(None)
+			if disable_scripts:
+				await _disable_scripts(None)
 			if self.agent_focus is not None:
 				await _enable(self.agent_focus.session_id)
+				if disable_scripts:
+					await _disable_scripts(self.agent_focus.session_id)
 
 			# Reapply the same policy to every newly attached target.
 			def _on_attached(event: AttachedToTargetEvent, session_id: SessionID | None = None):
@@ -6596,6 +6611,8 @@ class BrowserSession(BaseModel):
 				if not attached_session_id:
 					return
 				_spawn(_enable(attached_session_id))
+				if disable_scripts:
+					_spawn(_disable_scripts(attached_session_id))
 
 			try:
 				root.register.Target.attachedToTarget(_on_attached)

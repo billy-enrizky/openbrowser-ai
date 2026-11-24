@@ -595,6 +595,36 @@ class BrowserProfile(BrowserConnectArgs, BrowserLaunchPersistentContextArgs, Bro
 		default=None,
 		description='Rendering policy. Defaults to lightweight when lightweight=True, otherwise full.',
 	)
+	text_only: bool = Field(
+		default=False,
+		description=(
+			'Block external stylesheets, images, web fonts, media, and text tracks while keeping '
+			'scripts and screenshots. Independent of render_mode.'
+		),
+	)
+	block_css: bool | None = Field(
+		default=None,
+		description='Block external stylesheets. True blocks, False allows, None follows the preset.',
+	)
+	block_images: bool | None = Field(
+		default=None,
+		description='Block image requests. True blocks, False allows, None follows the preset.',
+	)
+	block_fonts: bool | None = Field(
+		default=None,
+		description='Block web font requests. True blocks, False allows, None follows the preset.',
+	)
+	block_media: bool | None = Field(
+		default=None,
+		description='Block media and text track requests. True blocks, False allows, None follows the preset.',
+	)
+	block_scripts: bool | None = Field(
+		default=None,
+		description=(
+			'Block and disable scripts. True blocks, False allows, None follows the preset. '
+			'Disables JavaScript execution, so use it only for server-rendered pages.'
+		),
+	)
 	allowed_domains: list[str] | set[str] | None = Field(
 		default=None,
 		description='List of allowed domains for navigation e.g. ["*.google.com", "https://example.com", "chrome-extension://*"]. Lists with 100+ items are auto-optimized to sets (no pattern matching).',
@@ -818,6 +848,47 @@ class BrowserProfile(BrowserConnectArgs, BrowserLaunchPersistentContextArgs, Bro
 			return self.render_mode
 		return RenderMode.LIGHTWEIGHT if self.lightweight else RenderMode.FULL
 
+	def blocked_resource_types(self) -> tuple[str, ...]:
+		"""Return the CDP resource types this profile must not fetch, in stable order."""
+		from openbrowser.browser.render_policy import ordered_resource_types, resolve_blocked_resource_types
+
+		blocked = resolve_blocked_resource_types(
+			self.effective_render_mode,
+			text_only=self.text_only,
+			block_css=self.block_css,
+			block_images=self.block_images,
+			block_fonts=self.block_fonts,
+			block_media=self.block_media,
+			block_scripts=self.block_scripts,
+		)
+		return ordered_resource_types(blocked)
+
+	def _render_launch_args(self) -> list[str]:
+		"""Return launch args that match the resolved asset policy.
+
+		A non-full render mode keeps the GPU and media flags. Per-asset flags
+		follow the resolved blocked set, so ``text_only`` or ``block_images``
+		also stops Blink from creating or decoding the asset.
+		"""
+		blocked = self.blocked_resource_types()
+		args: list[str] = []
+		if self.effective_render_mode is not RenderMode.FULL:
+			args.extend(
+				[
+					'--disable-gpu',
+					'--disable-accelerated-2d-canvas',
+					'--mute-audio',
+					'--autoplay-policy=user-gesture-required',
+				]
+			)
+		if 'Image' in blocked:
+			args.append('--blink-settings=imagesEnabled=false')
+		if 'Font' in blocked:
+			args.append('--disable-remote-fonts')
+		if 'Media' in blocked:
+			args.append('--disable-accelerated-video-decode')
+		return args
+
 	def get_args(self) -> list[str]:
 		"""Get the list of all Chrome CLI launch args for this profile (compiled from defaults, user-provided, and system-specific)."""
 
@@ -841,7 +912,7 @@ class BrowserProfile(BrowserConnectArgs, BrowserLaunchPersistentContextArgs, Bro
 			*(CHROME_MACOS_ARGS if sys.platform == 'darwin' else []),
 			*(CHROME_DISABLE_SECURITY_ARGS if self.disable_security else []),
 			*(CHROME_DETERMINISTIC_RENDERING_ARGS if self.deterministic_rendering else []),
-			*(CHROME_LIGHTWEIGHT_ARGS if self.effective_render_mode is not RenderMode.FULL else []),
+			*self._render_launch_args(),
 			*(
 				[f'--window-size={self.window_size["width"]},{self.window_size["height"]}']
 				if self.window_size
