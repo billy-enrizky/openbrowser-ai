@@ -156,13 +156,13 @@ The cold lane starts a fresh process tree, daemon or server, and browser for eve
 
 | Task | OpenBrowser MCP, p50 ms | OpenBrowser CLI, p50 ms | chrome-devtools-mcp, p50 ms | agent-browser, p50 ms | browser-use, p50 ms |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `wizard` | 1474 | 1553 | 4471 | 1686 | 1441 |
-| `modal` | 1501 | 1617 | 3645 | 2266 | 1922 |
-| `download` | 1631 | 1759 | 1674 | 1684 | 1442 |
-| `tabs` | 1397 | 1460 | 2438 | 1532 | 1075 |
-| `auth` | 2368 | 2657 | 3805 | 2482 | 2790 |
+| `wizard` | 1387 | 1345 | 4409 | 1608 | 1367 |
+| `modal` | 1506 | 1559 | 3704 | 2250 | 1628 |
+| `download` | 1668 | 1707 | 1690 | 1645 | 1442 |
+| `tabs` | 1394 | 1446 | 2401 | 1503 | 1048 |
+| `auth` | 2407 | 2644 | 3735 | 2487 | 2711 |
 
-The MCP arm now beats chrome-devtools-mcp on all five tasks, agent-browser on four of five, and browser-use on modal and auth. It is within 2 percent of browser-use on wizard. Browser-use still wins download and tabs.
+The MCP arm beats chrome-devtools-mcp on all five tasks, agent-browser on four of five, and browser-use on modal and auth. It is within 2 percent of browser-use on wizard. Browser-use still wins download and tabs.
 
 #### What changed in the cold lane
 
@@ -172,10 +172,11 @@ A cold start is one browser launch plus one server startup. On this host a `Brow
 2. Optional namespace libraries resolve lazily. numpy, pandas, bs4, pypdf, reportlab, and the video recorder no longer load unless a cell uses them.
 3. The MCP server answers `server/discover` without the code-use stack.
 4. Readiness polls are 20 ms, and a fixed 50 ms redirect sleep is gone.
+5. A headless profile with no extensions now uses the Playwright headless shell automatically, which removes the browser UI renderers from startup.
 
 Cold `openbrowser-ai -c pass` measured 1337.6 ms p50 before this work and 968.7 ms after. A paired N=12 run measured 1234.8 ms to 1019.4 ms with 11 of 12 pairs faster.
 
-Raw data: [results-cold-six-arm-final2-2026-11-24-n3.jsonl](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-cold-six-arm-final2-2026-11-24-n3.jsonl).
+Raw data: [results-cold-six-arm-final3-2026-11-24-n3.jsonl](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-cold-six-arm-final3-2026-11-24-n3.jsonl).
 
 <a id="interactive-warm"></a>
 
