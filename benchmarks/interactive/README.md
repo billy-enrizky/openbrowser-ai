@@ -10,11 +10,13 @@ server-side oracle, not by the adapter's self-report.
 | --- | --- | --- | --- |
 | `openbrowser` | OpenBrowser CLI `0.1.58.dev67+gfc17d3201.d20261124` | One `openbrowser-ai -c` Python cell per task | System Chrome 158.0.8127.36 through `channel=chrome` |
 | `openbrowser-fast` | OpenBrowser CLI `0.1.58.dev67+gfc17d3201.d20261124` | One `openbrowser-ai -c` Python cell with CSS helpers for fixture ids | System Chrome 158.0.8127.36 through `channel=chrome` |
+| `openbrowser-mcp` | OpenBrowser CLI `0.1.58.dev67+gfc17d3201.d20261124` | MCP stdio `2026-07-28`: `create_context`, `execute_code`, `close_context` | System Chrome 158.0.8127.36 through `channel=chrome` |
+| `openbrowser-mcp-fast` | OpenBrowser CLI `0.1.58.dev67+gfc17d3201.d20261124` | Same MCP surface with CSS helpers for fixture ids | System Chrome 158.0.8127.36 through `channel=chrome` |
 | `chrome-devtools-mcp` | `chrome-devtools-mcp` 1.13.0 | MCP stdio, 33 tools, `pageId` routing | System Chrome 158.0.8127.36 |
 | `agent-browser` | `agent-browser` 0.43.0 | CLI commands, one process per command | System Chrome 158.0.8127.36 |
 | `browser-use` | `browser-use` 1.0.8 (`browser-harness` 0.1.13) | Piped Python in one CLI process | Dedicated system Chrome 158.0.8127.36 |
 
-All five arms use a fresh profile per run, a 1280x800 viewport, and local
+All seven arms use a fresh profile per run, a 1280x800 viewport, and local
 fixtures only. Every Chrome launch includes `--use-mock-keychain`. The harness
 checks the actual browser process command line and fails the run if the flag is
 missing.
@@ -41,7 +43,9 @@ new `HOME`, `TMPDIR`, and `OPENBROWSER_SOCKET`. The OpenBrowser daemon is
 stopped and removed before every run. `agent-browser` sessions are closed with
 `close --all`.
 `chrome-devtools-mcp` servers are terminated and their Chrome processes are
-killed by profile path. `browser-use` daemons and dedicated Chrome processes
+killed by profile path. The OpenBrowser MCP arm speaks the stateless
+`2026-07-28` protocol with `server/discover` and no handshake, so it measures
+the same per-request path a coding agent uses. `browser-use` daemons and dedicated Chrome processes
 are killed after every run.
 
 ## Fair-run procedure

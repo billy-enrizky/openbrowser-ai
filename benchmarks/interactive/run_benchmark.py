@@ -28,6 +28,7 @@ from .adapters.base import RunContext, terminate_matching
 from .adapters.browser_use import BrowserUseArm
 from .adapters.chrome_devtools import ChromeDevToolsArm
 from .adapters.openbrowser import OpenBrowserArm
+from .adapters.openbrowser_mcp import OpenBrowserMcpArm
 from .fixtures.server import FixtureServer
 from .tasks import ORACLES, TASKS
 
@@ -41,6 +42,10 @@ def make_arm(name: str, *, openbrowser_extensions: bool = False):
         return OpenBrowserArm(extensions=openbrowser_extensions)
     if name == "openbrowser-fast":
         return OpenBrowserArm(extensions=openbrowser_extensions, fast_selectors=True)
+    if name == "openbrowser-mcp":
+        return OpenBrowserMcpArm()
+    if name == "openbrowser-mcp-fast":
+        return OpenBrowserMcpArm(fast_selectors=True)
     if name == "chrome-devtools-mcp":
         return ChromeDevToolsArm()
     if name == "agent-browser":

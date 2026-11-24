@@ -34,7 +34,15 @@ DEFAULT_OUTPUT = HERE / "results" / "results-warm.jsonl"
 DEFAULT_WORKDIR = Path("/tmp/obib-warm-runs")
 DEFAULT_COLD_RESULTS = HERE / "results" / "results-2026-11-23-lean.jsonl"
 WARM_TASKS = ("wizard", "modal", "download", "tabs")
-DEFAULT_ARMS = ("openbrowser", "openbrowser-fast", "chrome-devtools-mcp", "agent-browser", "browser-use")
+DEFAULT_ARMS = (
+    "openbrowser",
+    "openbrowser-fast",
+    "openbrowser-mcp",
+    "openbrowser-mcp-fast",
+    "chrome-devtools-mcp",
+    "agent-browser",
+    "browser-use",
+)
 
 
 def percentile(values: list[float], fraction: float) -> float | None:
@@ -193,7 +201,7 @@ def main() -> int:
     environments: dict[str, dict] = {}
     for arm_name in args.arms:
         root_ctx = make_context(args.workdir, arm_name)
-        if arm_name in {"openbrowser", "openbrowser-fast"}:
+        if arm_name in {"openbrowser", "openbrowser-fast", "openbrowser-mcp", "openbrowser-mcp-fast"}:
             _write_config(root_ctx, extensions=False)
         arm = make_arm(arm_name)
         warmup_payload: dict = {}
