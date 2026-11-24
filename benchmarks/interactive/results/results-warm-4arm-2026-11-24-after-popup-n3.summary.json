@@ -1,0 +1,241 @@
+{
+  "environment": {
+    "cold_results": "benchmarks/interactive/results/results-2026-11-23-lean.jsonl",
+    "tasks": [
+      "wizard",
+      "modal",
+      "download",
+      "tabs"
+    ],
+    "samples": 3,
+    "arms": {
+      "openbrowser": {
+        "platform": "macOS-26.6-arm64-arm-64bit",
+        "machine": "arm64",
+        "binary": "working copy",
+        "version": "0.1.58.dev67+gfc17d3201",
+        "warmup_ms": 23629.589,
+        "warmup_payload": {
+          "ok": true,
+          "elapsed_ms": 23427.0,
+          "url": "about:blank"
+        }
+      },
+      "chrome-devtools-mcp": {
+        "platform": "macOS-26.6-arm64-arm-64bit",
+        "machine": "arm64",
+        "binary": "$HOME/.cache/openbrowser-interactive-bench/npm/node_modules/.bin/chrome-devtools-mcp",
+        "version": "1.13.0",
+        "warmup_ms": 1810.428,
+        "warmup_payload": {
+          "ok": true,
+          "page_id": 1,
+          "browser_version": "1.13.0",
+          "keychain_verified": true
+        }
+      },
+      "agent-browser": {
+        "platform": "macOS-26.6-arm64-arm-64bit",
+        "machine": "arm64",
+        "binary": "$HOME/.cache/openbrowser-interactive-bench/npm/node_modules/.bin/agent-browser",
+        "version": "agent-browser 0.43.0",
+        "warmup_ms": 1947.27,
+        "warmup_payload": {
+          "ok": true,
+          "session": "w6954aff5b3",
+          "keychain_verified": true
+        }
+      },
+      "browser-use": {
+        "platform": "macOS-26.6-arm64-arm-64bit",
+        "machine": "arm64",
+        "binary": "$HOME/.cache/openbrowser-interactive-bench/browser-use-venv/bin/browser-use",
+        "version": "browser-use 1.0.8 (browser-harness 0.1.13)",
+        "warmup_ms": 821.808,
+        "warmup_payload": {
+          "ok": true,
+          "cdp_url": "http://127.0.0.1:63032",
+          "keychain_verified": true
+        }
+      }
+    }
+  },
+  "rows": [
+    {
+      "task": "wizard",
+      "arm": "openbrowser",
+      "runs": 3,
+      "ok": 3,
+      "warm_p50_ms": 2607.0397079965915,
+      "warm_p95_ms": 2777.50958300021,
+      "cold_p50_ms": 4836.965499998769,
+      "speedup": 1.8553478434418587,
+      "errors": []
+    },
+    {
+      "task": "wizard",
+      "arm": "chrome-devtools-mcp",
+      "runs": 3,
+      "ok": 3,
+      "warm_p50_ms": 3511.426583005232,
+      "warm_p95_ms": 3534.9894169994514,
+      "cold_p50_ms": 4569.888666999759,
+      "speedup": 1.3014336364363481,
+      "errors": []
+    },
+    {
+      "task": "wizard",
+      "arm": "agent-browser",
+      "runs": 3,
+      "ok": 3,
+      "warm_p50_ms": 1231.322542000271,
+      "warm_p95_ms": 1250.6581249981537,
+      "cold_p50_ms": 1788.8962499964691,
+      "speedup": 1.4528250632774296,
+      "errors": []
+    },
+    {
+      "task": "wizard",
+      "arm": "browser-use",
+      "runs": 3,
+      "ok": 3,
+      "warm_p50_ms": 723.0666249961359,
+      "warm_p95_ms": 1310.5923750044894,
+      "cold_p50_ms": 1498.8583750018734,
+      "speedup": 2.0729187645880947,
+      "errors": []
+    },
+    {
+      "task": "modal",
+      "arm": "openbrowser",
+      "runs": 3,
+      "ok": 3,
+      "warm_p50_ms": 1421.0729580008774,
+      "warm_p95_ms": 1534.0208749985322,
+      "cold_p50_ms": 3508.890417000657,
+      "speedup": 2.4691838636749925,
+      "errors": []
+    },
+    {
+      "task": "modal",
+      "arm": "chrome-devtools-mcp",
+      "runs": 3,
+      "ok": 3,
+      "warm_p50_ms": 2767.6487080025254,
+      "warm_p95_ms": 2772.094082996773,
+      "cold_p50_ms": 3805.4805000028864,
+      "speedup": 1.3749868214847931,
+      "errors": []
+    },
+    {
+      "task": "modal",
+      "arm": "agent-browser",
+      "runs": 3,
+      "ok": 3,
+      "warm_p50_ms": 1604.105124999478,
+      "warm_p95_ms": 1680.781791001209,
+      "cold_p50_ms": 2468.277374999161,
+      "speedup": 1.5387254466878935,
+      "errors": []
+    },
+    {
+      "task": "modal",
+      "arm": "browser-use",
+      "runs": 3,
+      "ok": 3,
+      "warm_p50_ms": 787.264625003445,
+      "warm_p95_ms": 1223.6037920010858,
+      "cold_p50_ms": 1810.6856249978591,
+      "speedup": 2.299970769028185,
+      "errors": []
+    },
+    {
+      "task": "download",
+      "arm": "openbrowser",
+      "runs": 3,
+      "ok": 3,
+      "warm_p50_ms": 923.6757499966188,
+      "warm_p95_ms": 925.5523329993594,
+      "cold_p50_ms": 3492.069457999605,
+      "speedup": 3.7806226460014654,
+      "errors": []
+    },
+    {
+      "task": "download",
+      "arm": "chrome-devtools-mcp",
+      "runs": 3,
+      "ok": 3,
+      "warm_p50_ms": 785.2942499957862,
+      "warm_p95_ms": 785.7958749955287,
+      "cold_p50_ms": 2054.438208000647,
+      "speedup": 2.616138101115182,
+      "errors": []
+    },
+    {
+      "task": "download",
+      "arm": "agent-browser",
+      "runs": 3,
+      "ok": 3,
+      "warm_p50_ms": 589.3931669997983,
+      "warm_p95_ms": 613.7773750015185,
+      "cold_p50_ms": 1710.352583999338,
+      "speedup": 2.9018873644321084,
+      "errors": []
+    },
+    {
+      "task": "download",
+      "arm": "browser-use",
+      "runs": 3,
+      "ok": 3,
+      "warm_p50_ms": 719.5519160013646,
+      "warm_p95_ms": 719.7720420008409,
+      "cold_p50_ms": 1450.8089580012893,
+      "speedup": 2.01626724318046,
+      "errors": []
+    },
+    {
+      "task": "tabs",
+      "arm": "openbrowser",
+      "runs": 3,
+      "ok": 3,
+      "warm_p50_ms": 1123.5987079999177,
+      "warm_p95_ms": 1202.5753330017324,
+      "cold_p50_ms": 7792.231542000081,
+      "speedup": 6.935066306609399,
+      "errors": []
+    },
+    {
+      "task": "tabs",
+      "arm": "chrome-devtools-mcp",
+      "runs": 3,
+      "ok": 3,
+      "warm_p50_ms": 1484.7110000046086,
+      "warm_p95_ms": 1497.4464589977288,
+      "cold_p50_ms": 2426.1812919976364,
+      "speedup": 1.6341101345582443,
+      "errors": []
+    },
+    {
+      "task": "tabs",
+      "arm": "agent-browser",
+      "runs": 3,
+      "ok": 3,
+      "warm_p50_ms": 918.3471249998547,
+      "warm_p95_ms": 989.1448749986012,
+      "cold_p50_ms": 1638.351417001104,
+      "speedup": 1.7840219372400858,
+      "errors": []
+    },
+    {
+      "task": "tabs",
+      "arm": "browser-use",
+      "runs": 3,
+      "ok": 3,
+      "warm_p50_ms": 335.3224999955273,
+      "warm_p95_ms": 351.4698340004543,
+      "cold_p50_ms": 1110.9051249986805,
+      "speedup": 3.3129453735239904,
+      "errors": []
+    }
+  ]
+}
