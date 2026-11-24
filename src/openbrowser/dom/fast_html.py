@@ -70,24 +70,45 @@ def _children(node):
 
 def _inline(node) -> str:
     parts: list[str] = []
+    pending_space = False
     for child in _children(node):
         tag = child.tag
+        if tag == "-comment":
+            continue
         if tag == "-text":
-            parts.append(_WHITESPACE.sub(" ", child.text_content or ""))
-        elif tag == "a":
-            parts.append(f"[{_inline(child).strip()}]({child.attrs.get('href', '')})")
+            text = _WHITESPACE.sub(" ", child.text_content or "")
+            if not text:
+                continue
+            if not text.strip():
+                pending_space = True
+                continue
+            leading_space = text.startswith(" ")
+            trailing_space = text.endswith(" ")
+            if parts and (pending_space or leading_space) and not parts[-1].endswith(" "):
+                parts.append(" ")
+            parts.append(text.strip())
+            pending_space = trailing_space
+            continue
+        if tag == "a":
+            rendered = f"[{_inline(child).strip()}]({child.attrs.get('href', '')})"
         elif tag in ("strong", "b"):
-            parts.append(f"**{_inline(child).strip()}**")
+            rendered = f"**{_inline(child).strip()}**"
         elif tag in ("em", "i"):
-            parts.append(f"*{_inline(child).strip()}*")
+            rendered = f"*{_inline(child).strip()}*"
         elif tag == "code":
-            parts.append(f"`{(child.text() or '').strip()}`")
+            rendered = f"`{(child.text() or '').strip()}`"
         elif tag == "br":
-            parts.append("\n")
+            rendered = "\n"
         elif tag == "img":
-            parts.append(f"![{child.attrs.get('alt', '')}]({child.attrs.get('src', '')})")
+            rendered = f"![{child.attrs.get('alt', '')}]({child.attrs.get('src', '')})"
         else:
-            parts.append(_inline(child))
+            rendered = _inline(child)
+        if not rendered:
+            continue
+        if parts and pending_space and not parts[-1].endswith(" "):
+            parts.append(" ")
+        parts.append(rendered)
+        pending_space = False
     return "".join(parts)
 
 
@@ -100,27 +121,20 @@ def _is_inline_node(node) -> bool:
 
 
 def _render_children(node) -> str:
-    children = list(_children(node))
     parts: list[str] = []
-    for index, child in enumerate(children):
-        if _is_whitespace_text(child):
-            previous = next(
-                (candidate for candidate in reversed(children[:index]) if not _is_whitespace_text(candidate)),
-                None,
-            )
-            following = next(
-                (candidate for candidate in children[index + 1 :] if not _is_whitespace_text(candidate)),
-                None,
-            )
-            if (
-                previous is not None
-                and following is not None
-                and _is_inline_node(previous)
-                and _is_inline_node(following)
-            ):
-                parts.append(" ")
+    previous = None
+    pending_space = False
+    for child in _children(node):
+        if child.tag == "-comment":
             continue
+        if _is_whitespace_text(child):
+            pending_space = True
+            continue
+        if pending_space and previous is not None and _is_inline_node(previous) and _is_inline_node(child):
+            parts.append(" ")
         parts.append(_render(child))
+        previous = child
+        pending_space = False
     return "".join(parts)
 
 

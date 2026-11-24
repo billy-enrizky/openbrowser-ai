@@ -91,3 +91,18 @@ def test_empty_application_root_detection():
     assert has_empty_application_root('<div id="app"> \n </div>')
     assert not has_empty_application_root('<div id="root"><p>Mounted</p></div>')
     assert not has_empty_application_root("<main>No application shell</main>")
+
+
+def test_markdown_preserves_inline_space_around_html_comments():
+    html = "<div><span>A</span> <!--split--> <span>B</span></div>"
+    assert to_markdown(html) == "A B"
+
+
+def test_markdown_does_not_add_space_for_adjacent_nodes_around_html_comments():
+    html = "<div><span>A</span><!--split--><span>B</span></div>"
+    assert to_markdown(html) == "AB"
+
+
+def test_markdown_collapses_inline_whitespace_split_by_a_comment():
+    html = "<p>A <!--split--> B</p>"
+    assert to_markdown(html) == "A B"
