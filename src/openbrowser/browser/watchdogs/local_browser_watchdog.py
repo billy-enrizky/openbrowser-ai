@@ -228,7 +228,11 @@ class LocalBrowserWatchdog(BaseWatchdog):
 				else:
 					# Try fallback paths first (system browsers preferred)
 					browser_path = self._find_installed_browser_path(
-						prefer_headless_shell=bool(getattr(profile, 'use_headless_shell', False))
+						prefer_headless_shell=(
+							profile.prefers_headless_shell()
+							if hasattr(profile, 'prefers_headless_shell')
+							else bool(getattr(profile, 'use_headless_shell', False))
+						)
 					)
 					if not browser_path:
 						self.logger.error(

@@ -71,3 +71,23 @@ def test_lightweight_launch_args_are_preserved():
         "--autoplay-policy=user-gesture-required",
     ):
         assert expected in args
+
+
+def test_headless_shell_is_automatic_for_headless_profiles_without_extensions(monkeypatch):
+    monkeypatch.delenv("OPENBROWSER_USE_HEADLESS_SHELL", raising=False)
+
+    assert _profile(headless=True, enable_default_extensions=False).prefers_headless_shell() is True
+    assert _profile(headless=True, enable_default_extensions=True).prefers_headless_shell() is False
+    assert _profile(headless=False, enable_default_extensions=False).prefers_headless_shell() is False
+    assert (
+        _profile(use_headless_shell=True, headless=True, enable_default_extensions=True).prefers_headless_shell()
+        is True
+    )
+
+
+def test_headless_shell_environment_override_wins(monkeypatch):
+    monkeypatch.setenv("OPENBROWSER_USE_HEADLESS_SHELL", "0")
+    assert _profile(headless=True, enable_default_extensions=False).prefers_headless_shell() is False
+
+    monkeypatch.setenv("OPENBROWSER_USE_HEADLESS_SHELL", "1")
+    assert _profile(headless=True, enable_default_extensions=True).prefers_headless_shell() is True
