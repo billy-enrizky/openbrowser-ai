@@ -406,6 +406,50 @@ Raw evidence:
 - `results-warm-tabs-five-arm-direct-cdp-2026-11-24-n5.jsonl`
 - `results-warm-tabs-five-arm-direct-cdp-2026-11-24-n5.summary.json`
 
+## Download wait wakeup A/B, 2026-11-24
+
+This run compared the 100 ms registry-poll baseline with the event-wakeup
+candidate. Both builds used `openbrowser-fast`, the same fixture, and the same
+download directory rules. The runner alternated build order by sample. It
+measured the full task, click-to-terminal time, and terminal-to-return time.
+The exact oracle checked the server request, completion count, file size, and
+SHA-256. The baseline binary came from `01c4a2e29`, before the tabs PR merged.
+The quiet-host confirmation will use the rebased main build.
+
+| Build | Task p50 ms, range | Click to terminal p50 ms, range | Terminal to return p50 ms, range |
+| --- | --- | --- | --- |
+| 100 ms poll | 674.032, 642.360 to 685.604 | 311.288, 308.036 to 318.717 | 94.760, 88.762 to 96.343 |
+| Event wakeup | 598.000, 549.018 to 630.450 | 309.362, 307.491 to 316.997 | 0.148, 0.085 to 0.158 |
+
+All 10 samples passed. Each file had 2,229 bytes and SHA-256
+`293ce662323595edec422dd7b0abebc9884971c8d7928de483fb23620c0cf2e3`. The task
+p50 difference was 76.032 ms. The terminal-to-return p50 difference was
+94.612 ms. The task p50 difference is smaller than the largest sample range,
+so this run did not establish a full-task latency win.
+
+The host had 18 logical CPUs. Load averages were 11.01, 13.79, and 12.68 before
+the run. They were 10.40, 13.57, and 12.61 after the measured samples. The
+maximum sampled load was 13.792. Treat every latency here as exploratory. Do
+not call 598.000 ms a quiet-host p50 or claim a competitor win from this run.
+The quiet-host confirmation is pending after merge.
+
+The runner acquires `/tmp/openbrowser-bench.lock` with a `mkdir` spin-wait. It
+requires a short work path under `/tmp`. It marks `claimable` false if any
+sampled load average exceeds 4. Re-run it with five or more samples:
+
+```sh
+uv run --locked python -m benchmarks.interactive.download_wait_ab \
+  --baseline-bin /path/to/baseline/bin/openbrowser-ai \
+  --treatment-bin /path/to/treatment/bin/openbrowser-ai \
+  --baseline-sha 01c4a2e29 \
+  --treatment-sha candidate-source-id \
+  --workdir /tmp/obab \
+  --output benchmarks/interactive/results/results-warm-download-wakeup-ab.jsonl \
+  --samples 5
+```
+
+Raw evidence: [`A/B JSONL`](results/results-warm-download-wakeup-ab-2026-11-24-n5.jsonl) and [`summary`](results/results-warm-download-wakeup-ab-2026-11-24-n5.summary.json).
+
 ## OpenBrowser extension A/B, 2026-11-23
 
 The A/B uses one binary, the same screenshot setting, and 3 samples per task.
