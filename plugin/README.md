@@ -118,7 +118,7 @@ Prefer indexed actions whenever an element index exists. Coordinate actions use 
 
 Current local deterministic fixtures show OpenBrowser winning four of five scraping tasks against Firecrawl Local. It is 20.7x faster on the JavaScript list, 19.1x faster on the asset-heavy page, and 2.09x faster on structured table extraction. Firecrawl is 7 percent faster on pagination. Against Lightpanda, OpenBrowser no-render is faster on all five local tasks but uses more memory.
 
-The interactive warm lane remains split. The popup fix reduced OpenBrowser `tabs` from 6170 ms to 1124 ms. OpenBrowser beats chrome-devtools-mcp on warm `wizard`, `modal`, and `tabs`, while browser-use remains faster on all four warm tasks. See the [charted comparison](https://docs.openbrowser.me/comparison) and the raw artifacts under [`benchmarks/`](../benchmarks/).
+The CSS selector helpers make the warm interactive lane competitive. The selector arm wins all four tasks against chrome-devtools-mcp, three against browser-use, and two against agent-browser. Browser-use still wins tabs, and agent-browser still wins download and tabs. See the [charted comparison](https://docs.openbrowser.me/comparison) and the raw artifacts under [`benchmarks/`](../benchmarks/).
 
 ### CLI Benchmark: 4-Way Comparison (6 Tasks, N=3 runs)
 

@@ -615,7 +615,7 @@ Local deterministic fixtures, no LLM, and interleaved N=10 samples with 2 warmup
 
 OpenBrowser wins four of five local scraping tasks and returns structured rows for table and list extraction. Against Lightpanda, OpenBrowser no-render is faster on all five local tasks. It uses more memory: about 740 to 783 MB for browser arms against about 123 MB for Lightpanda.
 
-The interactive warm lane remains split. The popup fix reduced OpenBrowser `tabs` from 6170 ms to 1124 ms, and OpenBrowser now beats chrome-devtools-mcp on warm `wizard`, `modal`, and `tabs`. Browser-use remains faster on all four warm tasks. These local-fixture results are not a live-site ranking. See [the charted comparison](https://docs.openbrowser.me/comparison).
+The CSS selector helpers make the warm interactive lane competitive. The selector arm wins all four tasks against chrome-devtools-mcp, three against browser-use, and two against agent-browser. Browser-use still wins tabs, and agent-browser still wins download and tabs. These local-fixture results are not a live-site ranking. See [the charted comparison](https://docs.openbrowser.me/comparison).
 
 ### CLI Benchmark: 4-Way Comparison (6 Tasks, N=3 runs)
 

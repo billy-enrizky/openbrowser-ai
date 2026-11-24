@@ -90,40 +90,41 @@ Raw data: `benchmarks/interactive/results/results-2026-11-23-lean.jsonl`.
 
 ### Interactive browsing, warm lane
 
-<img src="/images/native-interactive-warm-current-p50.png" alt="Warm interactive p50 latency in milliseconds for OpenBrowser, chrome-devtools-mcp, agent-browser, and browser-use across four tasks after the popup fix." />
+<img src="/images/native-interactive-warm-current-p50.png" alt="Warm interactive p50 latency for OpenBrowser semantic, OpenBrowser CSS selector, chrome-devtools-mcp, agent-browser, and browser-use across four tasks." />
 
-The warm lane starts each arm once, then runs each task against a fresh fixture. This run used 3 samples per arm and task with the same tool versions and Chrome `158.0.8127.36` as the cold lane. OpenBrowser was `0.1.58.dev67+gfc17d3201`. All 48 warm runs passed their oracle. The host carried other workloads, and OpenBrowser warmup took 23.6 seconds. Treat these N=3 values as smoke evidence.
+The warm lane starts each arm once, then runs each task against a fresh fixture. This run used 3 samples per arm and task with Chrome `158.0.8127.36`. OpenBrowser semantic and selector arms both used `0.1.58.dev67+gfc17d3201`. All 60 runs passed their oracle. The run used arm-major order on a shared host, not a quiet interleaved run.
 
-| Task | OpenBrowser, p50 ms | chrome-devtools-mcp, p50 ms | agent-browser, p50 ms | browser-use, p50 ms |
-| --- | ---: | ---: | ---: | ---: |
-| `wizard` | 2607 | 3511 | 1231 | 723 |
-| `modal` | 1421 | 2768 | 1604 | 787 |
-| `download` | 924 | 785 | 589 | 720 |
-| `tabs` | 1124 | 1485 | 918 | 335 |
+| Task | OpenBrowser semantic, p50 ms | OpenBrowser selectors, p50 ms | chrome-devtools-mcp, p50 ms | agent-browser, p50 ms | browser-use, p50 ms |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `wizard` | 2165 | 204 | 3533 | 537 | 524 |
+| `modal` | 1161 | 396 | 2776 | 1205 | 1167 |
+| `download` | 799 | 576 | 781 | 481 | 585 |
+| `tabs` | 994 | 985 | 1492 | 440 | 217 |
 
-OpenBrowser reduced warm `tabs` from 6170 ms to 1124 ms, a 5.49x improvement against the earlier run. It now beats chrome-devtools-mcp on `wizard`, `modal`, and `tabs`. It still trails browser-use on every task and trails agent-browser on `wizard`, `download`, and `tabs`.
+The CSS selector helpers cut `wizard` by 10.6x, `modal` by 2.93x, and `download` by 1.39x against the semantic helper arm. `tabs` shows no measurable change because a blank-target link still uses the popup-safe click path. The selector arm beats chrome-devtools-mcp on all four tasks and browser-use on three. Agent-browser is faster on download and tabs, and browser-use is faster on tabs.
 
-Raw data: `benchmarks/interactive/results/results-warm-4arm-2026-11-24-after-popup-n3.jsonl`.
+Raw data: `benchmarks/interactive/results/results-warm-fast-selector-final-all-2026-11-24-n3.jsonl`.
 
 ### Head-to-head scorecard
 
 This table counts task-level latency wins on the local fixtures. It does not score memory, features, stability, or live-site coverage.
 
-| Workload | Opponent | OpenBrowser wins | Opponent wins | Detail |
-| --- | --- | ---: | ---: | --- |
-| Scraping, 5 tasks | Firecrawl Local | 4 | 1 | Firecrawl leads pagination by 7 percent |
-| No-render, 5 tasks | Lightpanda `1.0.5` | 5 | 0 | Lightpanda uses less memory |
-| Warm interactive, 4 tasks | chrome-devtools-mcp | 3 | 1 | chrome-devtools-mcp wins download |
-| Warm interactive, 4 tasks | agent-browser | 1 | 3 | OpenBrowser wins modal |
-| Warm interactive, 4 tasks | browser-use | 0 | 4 | browser-use wins every warm task |
+| Workload | OpenBrowser arm | Opponent | OpenBrowser wins | Opponent wins | Detail |
+| --- | --- | --- | ---: | ---: | --- |
+| Scraping, 5 tasks | full or lightweight | Firecrawl Local | 4 | 1 | Firecrawl leads pagination by 7 percent |
+| No-render, 5 tasks | no-render | Lightpanda `1.0.5` | 5 | 0 | Lightpanda uses less memory |
+| Warm interactive, 4 tasks | semantic | chrome-devtools-mcp | 3 | 1 | chrome-devtools-mcp wins download |
+| Warm interactive, 4 tasks | selectors | chrome-devtools-mcp | 4 | 0 | All four tasks |
+| Warm interactive, 4 tasks | selectors | agent-browser | 2 | 2 | agent-browser wins download and tabs |
+| Warm interactive, 4 tasks | selectors | browser-use | 3 | 1 | browser-use wins tabs |
 
-OpenBrowser is the faster local scraping tool in this matrix. It does not win the warm interactive lane against browser-use or agent-browser. The page does not support a universal product ranking.
+The selector arm wins most local interactive tasks, but browser-use still wins tabs and agent-browser wins download and tabs. No single OpenBrowser arm wins every task against every competitor.
 
 ### What these lanes show
 
 OpenBrowser is the faster local scraping tool overall. It wins four of five tasks against Firecrawl Local. The largest wins are 20.7x on the JavaScript list, 19.1x on the asset-heavy page, and 2.09x on table extraction. Firecrawl leads pagination by 7 percent. Against Lightpanda, OpenBrowser no-render is faster on all five tasks, but Lightpanda uses far less memory.
 
-The interactive lanes remain split. OpenBrowser leads chrome-devtools-mcp on warm `wizard`, `modal`, and `tabs`, but browser-use is faster on all four warm tasks. Agent-browser is also faster on `wizard`, `download`, and `tabs`. The popup fix cut the tabs task from 6170 ms to 1124 ms, so the remaining gap is smaller but still real.
+The CSS selector helpers make OpenBrowser competitive in the warm interactive lane. The selector arm wins all four tasks against chrome-devtools-mcp, three against browser-use, and two against agent-browser. Browser-use still wins tabs by 4.54x, and agent-browser still wins download and tabs. The semantic helper arm remains a separate, slower API path.
 
 The fixtures do not test live-site anti-bot behavior, CAPTCHA, or login providers. The resource lane measures RSS and CPU, not GPU memory, disk I/O, or energy. Lightpanda and Chromium use different engines and do not have identical layout, paint, extension, or screenshot behavior. Local fixture results do not establish a ranking for live websites.
 
