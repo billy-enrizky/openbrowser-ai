@@ -210,6 +210,10 @@ class Tools(Generic[Context]):
 				if isinstance(e, RuntimeError) and 'CDP client not initialized' in error_msg:
 					browser_session.logger.error('❌ Browser connection failed - CDP client not properly initialized')
 					return ActionResult(error=f'Browser connection error: {error_msg}')
+				elif 'ERR_BLOCKED_BY_CLIENT' in error_msg:
+					return ActionResult(error=f'The browser blocked navigation to {params.url} ({error_msg})')
+				elif 'ERR_CERT_' in error_msg:
+					return ActionResult(error=f'The browser rejected the TLS certificate for {params.url} ({error_msg})')
 				# Check for network-related errors
 				elif any(
 					err in error_msg
