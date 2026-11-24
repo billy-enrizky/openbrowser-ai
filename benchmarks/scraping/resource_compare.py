@@ -32,7 +32,6 @@ from .scrape_compare import (
     FirecrawlArm,
     FirecrawlServer,
     FixtureServer,
-    HttpArm,
     LightpandaArm,
     _measure,
     _resolve_firecrawl_binary,
@@ -43,7 +42,6 @@ DEFAULT_ARMS = (
     "openbrowser-full",
     "openbrowser-lightweight",
     "openbrowser-no-render",
-    "http",
     "firecrawl-local",
 )
 
@@ -123,8 +121,6 @@ class ResourceSampler:
 
 
 def _build_arm(name: str, args: argparse.Namespace, firecrawl_server: FirecrawlServer | None):
-    if name == "http":
-        return HttpArm()
     if name == "openbrowser-full":
         return BrowserArm(name, "full", chrome_path=args.chrome)
     if name == "openbrowser-lightweight":

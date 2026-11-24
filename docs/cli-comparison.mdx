@@ -31,8 +31,8 @@ Four CLI browser automation tools compared head-to-head. Each tool gets a single
 - **Browser**: Persistent daemon per approach across all 6 tasks, headless mode, browser cleanup between approaches
 - **Statistics**: N=3 runs, 10,000-sample bootstrap for 95% confidence intervals
 - **Tasks**: Same 6 tasks as the [MCP benchmark](/comparison) (fact_lookup, form_fill, multi_page_extract, search_navigate, deep_navigation, content_analysis) against live websites
-- **Benchmark script**: `benchmarks/e2e_4way_cli_benchmark.py`
-- **Results data**: `benchmarks/e2e_4way_cli_results.json`
+- **Benchmark script**: [e2e_4way_cli_benchmark.py](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/e2e_4way_cli_benchmark.py)
+- **Results data**: [e2e_4way_cli_results.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/e2e_4way_cli_results.json)
 
 > **Historical benchmark, not a current-version ranking.** Recorded 2026-03-15 with Claude Sonnet 4.6 on AWS Bedrock, N=3 runs per approach. The retained artifact records the model, region, sample counts, headless mode, and timestamp, but it does not record the CLI tool versions, and it sets no fixed random seed or records the random state. The run is not exactly reproducible and is not a comparison against today's releases. No universal winner follows from it. See [Provenance and limits](#provenance-and-limits).
 
@@ -60,7 +60,7 @@ Additional fairness measures:
 
 ### Provenance and limits
 
-- Retained artifact: `benchmarks/e2e_4way_cli_results.json`. It records the model, region, N=3 runs, 10,000-sample bootstrap, headless mode, timestamp, and per-approach raw runs.
+- Retained artifact: [e2e_4way_cli_results.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/e2e_4way_cli_results.json). It records the model, region, N=3 runs, 10,000-sample bootstrap, headless mode, timestamp, and per-approach raw runs.
 - The artifact does not record the openbrowser-ai, browser-use, playwright-cli, or agent-browser versions. It also sets no fixed random seed and does not record the random state used for approach and task order. The exact run cannot be replayed from the repository.
 - All tasks ran against live public websites. DNS, network, and site changes can move the numbers independently of the tools.
 - The six tasks are a fixed sample. Token volume and duration are not a universal measure of task success or product quality.

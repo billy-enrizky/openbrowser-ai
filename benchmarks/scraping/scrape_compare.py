@@ -4,7 +4,6 @@ Arms:
   - openbrowser-full
   - openbrowser-lightweight
   - openbrowser-no-render
-  - http (httpx plus markdownify, no browser)
   - firecrawl-local (Firecrawl Local, native per-task wait)
   - firecrawl-local-auto (Firecrawl Local, no waitFor override)
 
@@ -41,8 +40,6 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 import httpx
-from bs4 import BeautifulSoup
-from markdownify import markdownify
 
 STATIC_ROWS = 50
 JS_ITEMS = 30
@@ -355,54 +352,6 @@ class BrowserArm:
         headlines = re.findall(r"Headline \d+", content)
         ok = len(headlines) == ASSET_COUNT
         return ok, content, ""
-
-
-class HttpArm:
-    name = "http"
-
-    def __init__(self):
-        self.client = httpx.Client(follow_redirects=True, timeout=30)
-        self.last_engine = "http"
-
-    async def start(self) -> None:
-        return
-
-    async def stop(self) -> None:
-        self.client.close()
-
-    async def run_static(self, base: str):
-        text = self.client.get(f"{base}/static").text
-        soup = BeautifulSoup(text, "html.parser")
-        for tag in soup(["script", "style"]):
-            tag.decompose()
-        content = markdownify(str(soup), heading_style="ATX")
-        ok = "Static Bench" in content and "Item 49" in content and "DO NOT INCLUDE" not in content
-        return ok, content, ""
-
-    async def run_js_list(self, base: str):
-        text = self.client.get(f"{base}/js-list").text
-        ok = "SKU-000" in text
-        return ok, text, "no JavaScript execution"
-
-    async def run_pagination(self, base: str):
-        ids: list[str] = []
-        for page in range(1, PAGE_COUNT + 1):
-            text = self.client.get(f"{base}/pagination?page={page}").text
-            ids.extend(re.findall(r'data-id="([^"]+)"', text))
-        ok = len(ids) == PAGE_COUNT * PAGE_SIZE and len(set(ids)) == len(ids)
-        return ok, json.dumps(ids), ""
-
-    async def run_table(self, base: str):
-        text = self.client.get(f"{base}/table").text
-        rows = re.findall(r'<tr data-id="[^"]+">(.*?)</tr>', text, re.S)
-        ok = len(rows) == TABLE_ROWS and all(len(re.findall(r"<td>", row)) == TABLE_COLS for row in rows)
-        return ok, text, ""
-
-    async def run_assets(self, base: str):
-        text = self.client.get(f"{base}/assets").text
-        headlines = re.findall(r"Headline \d+", text)
-        ok = len(headlines) == ASSET_COUNT
-        return ok, text, "no JavaScript execution"
 
 
 # Firecrawl Local arms. Firecrawl Local serves the Firecrawl v2 API on loopback
@@ -832,7 +781,7 @@ async def main() -> int:
     parser.add_argument("--samples", type=int, default=3)
     parser.add_argument("--warmups", type=int, default=1)
     parser.add_argument("--tasks", nargs="+", choices=sorted(TASKS), default=sorted(TASKS))
-    default_arms = ["openbrowser-full", "openbrowser-lightweight", "openbrowser-no-render", "http"]
+    default_arms = ["openbrowser-full", "openbrowser-lightweight", "openbrowser-no-render"]
     parser.add_argument("--arms", nargs="+", default=default_arms)
     parser.add_argument(
         "--firecrawl-url",
@@ -888,9 +837,7 @@ async def main() -> int:
             print(f"firecrawl-local {firecrawl_server.version} at {firecrawl_server.url}")
 
         for name in args.arms:
-            if name == "http":
-                arms.append(HttpArm())
-            elif name == "openbrowser-full":
+            if name == "openbrowser-full":
                 arms.append(BrowserArm(name, "full", chrome_path=args.chrome))
             elif name == "openbrowser-lightweight":
                 arms.append(BrowserArm(name, "lightweight", chrome_path=args.chrome))

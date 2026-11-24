@@ -29,7 +29,7 @@ The current results:
 
 ## Native local benchmark lanes, 2026-11-24
 
-These local fixture runs use no LLM, cloud browser, or AWS. They measure different workloads, so they do not produce one product ranking. The raw data and methods live in `benchmarks/scraping/README.md` and `benchmarks/interactive/README.md`.
+These local fixture runs use no LLM, cloud browser, or AWS. They measure different workloads, so they do not produce one product ranking. The raw data and methods live in [scraping README](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/scraping/README.md) and [interactive README](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/README.md).
 
 <a id="scraping-latency"></a>
 
@@ -57,7 +57,7 @@ A separate profile broke down the OpenBrowser page. The HTTP fetch took 1.24 ms 
 
 The 10-sample ranges overlap. Treat the sequential pagination result as parity. The batch surface removes the per-page call overhead. OpenBrowser HTTP batch took 4.619 ms against Firecrawl Local batch at 14.598 ms, a 3.16x win in 10 of 10 pairs. See [Firecrawl batch scraping](#firecrawl-batch).
 
-Raw data: `benchmarks/scraping/results-firecrawl-all-2026-11-24-n10-interleaved.json`.
+Raw data: [results-firecrawl-all-2026-11-24-n10-interleaved.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/scraping/results-firecrawl-all-2026-11-24-n10-interleaved.json).
 
 <a id="lightpanda"></a>
 
@@ -77,27 +77,27 @@ This interleaved run used 10 samples and 2 warmups per arm and task. It ran on m
 
 OpenBrowser no-render is faster on all five local tasks. The static, pagination, and table tasks use HTTP. The JavaScript and asset-heavy tasks use Chromium. This is a latency result, not a memory result. Lightpanda uses about 123 MB peak RSS, while OpenBrowser Chromium browser arms use about 740 to 783 MB. OpenBrowser no-render still runs Blink layout. The separate HTTP-only CLI batch starts no browser and measured 47.859 MB for five pages; see the CLI batch section below.
 
-Raw data: `benchmarks/scraping/results-lightpanda-after-n10-interleaved.json`.
+Raw data: [results-lightpanda-after-n10-interleaved.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/scraping/results-lightpanda-after-n10-interleaved.json).
 
 ### Scraping resource use
 
-<img src="/images/native-scraping-resources.png" alt="Two-panel chart of peak process-tree RSS in megabytes and live process-tree CPU in milliseconds for raw HTTP with httpx, OpenBrowser lightweight, Firecrawl Local, and Lightpanda." />
+<img src="/images/native-scraping-resources.png" alt="Two-panel chart of peak process-tree RSS in megabytes and live process-tree CPU in milliseconds for OpenBrowser lightweight, Firecrawl Local, and Lightpanda." />
 
 This resource lane used 3 samples and 1 warmup per arm and task on 2026-11-24. It ran on macOS arm64 with Chrome for Testing `159.0.8154.6`, Firecrawl Local `0.1.1`, and Lightpanda `1.0.5`. The resource artifact does not record the OpenBrowser build. The host load average was `15.7, 16.8, 18.4`. The sampler adds overhead, so use these values for RSS and CPU, not latency.
 
-The `Raw HTTP (httpx)` arm is a separate baseline: `httpx` plus BeautifulSoup and markdownify. It is not OpenBrowser's HTTP scraper. OpenBrowser's HTTP-only CLI batch is measured separately at 47.859 MB peak RSS for five pages; see [HTTP-only CLI batch](#cli-batch). The harnesses differ, so compare the resource numbers within this lane, not across lanes.
+OpenBrowser's HTTP-only CLI batch is measured separately at 47.859 MB peak RSS for five pages; see [HTTP-only CLI batch](#cli-batch). The harnesses differ, so compare the resource numbers within this lane, not across lanes.
 
-Each table cell gives peak RSS in MB, then live process-tree CPU in ms. `n/a` means the raw HTTP arm failed the JavaScript task oracle because it runs no JavaScript.
+Each table cell gives peak RSS in MB, then live process-tree CPU in ms.
 
-| Task | Raw HTTP (httpx), RSS and CPU | OpenBrowser lightweight, RSS and CPU | Firecrawl Local, RSS and CPU | Lightpanda, RSS and CPU |
-| --- | ---: | ---: | ---: | ---: |
-| `static_article` | 51.6 MB, 41.0 ms | 741.8 MB, 41.0 ms | 155.7 MB, 32.5 ms | 123.6 MB, 60.5 ms |
-| `js_list` | n/a | 762.3 MB, 100.0 ms | 1411.0 MB, 380.4 ms | 124.9 MB, 61.6 ms |
-| `pagination` | 51.7 MB, 31.4 ms | 765.3 MB, 44.3 ms | 1433.4 MB, 74.7 ms | 122.9 MB, 203.3 ms |
-| `table` | 51.8 MB, 33.8 ms | 765.5 MB, 30.8 ms | 1384.2 MB, 34.4 ms | 123.4 MB, 62.6 ms |
-| `asset_heavy` | n/a | 783.2 MB, 115.4 ms | 1687.0 MB, 520.6 ms | 124.5 MB, 62.7 ms |
+| Task | OpenBrowser lightweight, RSS and CPU | Firecrawl Local, RSS and CPU | Lightpanda, RSS and CPU |
+| --- | ---: | ---: | ---: |
+| `static_article` | 741.8 MB, 41.0 ms | 155.7 MB, 32.5 ms | 123.6 MB, 60.5 ms |
+| `js_list` | 762.3 MB, 100.0 ms | 1411.0 MB, 380.4 ms | 124.9 MB, 61.6 ms |
+| `pagination` | 765.3 MB, 44.3 ms | 1433.4 MB, 74.7 ms | 122.9 MB, 203.3 ms |
+| `table` | 765.5 MB, 30.8 ms | 1384.2 MB, 34.4 ms | 123.4 MB, 62.6 ms |
+| `asset_heavy` | 783.2 MB, 115.4 ms | 1687.0 MB, 520.6 ms | 124.5 MB, 62.7 ms |
 
-Raw data: `benchmarks/scraping/results-resources-2026-11-24-n3.json`.
+Raw data: [results-resources-2026-11-24-n3.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/scraping/results-resources-2026-11-24-n3.json).
 
 ### Interactive browsing, cold lane
 
@@ -123,7 +123,7 @@ The browser-use cold totals for the non-auth tasks were 1.1 to 1.9 seconds. Open
 
 The warm paired lane is the steady-state comparison, and OpenBrowser wins all four tasks there. The cold lane is the cost of the daemon and a fresh browser. A direct one-shot mode could remove the daemon, but it would lose cross-call persistence. Do not claim a cold-lane win.
 
-Raw data: `benchmarks/interactive/results/results-cold-current-five-arm-2026-11-24-n3.jsonl`.
+Raw data: [results-cold-current-five-arm-2026-11-24-n3.jsonl](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-cold-current-five-arm-2026-11-24-n3.jsonl).
 
 ### Interactive browsing, warm lane
 
@@ -140,7 +140,7 @@ The chart and table show the current five-arm run. It used 5 samples per arm and
 
 The selector arm had the lowest p50 on all four tasks. It beat chrome-devtools-mcp by 2.8x to 15.0x, agent-browser by 1.05x to 5.4x, and browser-use by 1.3x to 3.7x in this arm-major run. The download margin against agent-browser is small, so the paired result below is the claim to use.
 
-Raw data: `benchmarks/interactive/results/results-warm-five-arm-tabs-ready-2026-11-24-n5.jsonl`.
+Raw data: [results-warm-five-arm-tabs-ready-2026-11-24-n5.jsonl](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-warm-five-arm-tabs-ready-2026-11-24-n5.jsonl).
 
 <a id="paired-interactive"></a>
 
@@ -163,10 +163,10 @@ Wizard, modal, and tabs use browser-use as the closest competitor. Agent-browser
 
 Raw data:
 
-- `benchmarks/interactive/results/results-paired-wizard-2026-11-24-n10.jsonl`
-- `benchmarks/interactive/results/results-paired-modal-2026-11-24-n10.jsonl`
-- `benchmarks/interactive/results/results-paired-tabs-2026-11-24-n10.jsonl`
-- `benchmarks/interactive/results/results-paired-download-2026-11-24-n10.jsonl`
+- [results-paired-wizard-2026-11-24-n10.jsonl](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-paired-wizard-2026-11-24-n10.jsonl)
+- [results-paired-modal-2026-11-24-n10.jsonl](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-paired-modal-2026-11-24-n10.jsonl)
+- [results-paired-tabs-2026-11-24-n10.jsonl](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-paired-tabs-2026-11-24-n10.jsonl)
+- [results-paired-download-2026-11-24-n10.jsonl](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-paired-download-2026-11-24-n10.jsonl)
 
 <a id="firecrawl-batch"></a>
 
@@ -187,8 +187,8 @@ This is the batch surface. The sequential five-request comparison above is parit
 
 Raw data:
 
-- `benchmarks/scraping/results-batch-firecrawl-2026-11-24-n10.json`
-- `benchmarks/scraping/results-batch-firecrawl-2026-11-24-n10.summary.json`
+- [results-batch-firecrawl-2026-11-24-n10.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/scraping/results-batch-firecrawl-2026-11-24-n10.json)
+- [results-batch-firecrawl-2026-11-24-n10.summary.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/scraping/results-batch-firecrawl-2026-11-24-n10.summary.json)
 
 <a id="cli-batch"></a>
 
@@ -216,8 +216,8 @@ For direction only, the Lightpanda lane measured `837.4` ms p50 and about `123` 
 
 Raw data:
 
-- `benchmarks/scraping/results-cli-http-batch-2026-11-24-n10.json`
-- `benchmarks/scraping/results-cli-http-batch-2026-11-24-n10.summary.json`
+- [results-cli-http-batch-2026-11-24-n10.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/scraping/results-cli-http-batch-2026-11-24-n10.json)
+- [results-cli-http-batch-2026-11-24-n10.summary.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/scraping/results-cli-http-batch-2026-11-24-n10.summary.json)
 
 <a id="scorecard"></a>
 
@@ -617,7 +617,7 @@ Feature lists below are from the versions tested on 2026-02-21. Competitor resol
 ### Provenance and limits
 
 - The 5-step token benchmark was recorded on 2026-02-21 with OpenBrowser MCP v0.1.26. The Playwright MCP and Chrome DevTools MCP resolved versions were not recorded.
-- The 6-task LLM benchmark was recorded on the same date with Claude Sonnet 4.6 on AWS Bedrock, 5 runs per server, and a 10,000-sample bootstrap. The retained aggregate is `benchmarks/e2e_llm_stats_results.json`. It records the model, run count, and server aggregates, but not the competitor tool versions or a timestamp. The page date is a page record, not an artifact field.
+- The 6-task LLM benchmark was recorded on the same date with Claude Sonnet 4.6 on AWS Bedrock, 5 runs per server, and a 10,000-sample bootstrap. The retained aggregate is [e2e_llm_stats_results.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/e2e_llm_stats_results.json). It records the model, run count, and server aggregates, but not the competitor tool versions or a timestamp. The page date is a page record, not an artifact field.
 - The per-response files cited by earlier revisions of this page are not present in the repository. Their numbers cannot be recomputed from the retained files. The tables on this page remain a historical summary, not a reproducible artifact.
 - Token volume is not task success, latency, or cost for every workload. The six tasks are a fixed local sample against public sites. Treat differences in tool count and response shape as design tradeoffs, not a universal winner.
 - Do not compare these numbers with a later release without a new pinned run. The native navigation harness is a separate lane and is not a source for this page.
@@ -644,5 +644,5 @@ Feature lists below are from the versions tested on 2026-02-21. Competitor resol
 - Chrome DevTools MCP installed from `npx -y chrome-devtools-mcp@latest` on the run date; the resolved version was not recorded
 - OpenBrowser MCP v0.1.26 tested via `uvx openbrowser-ai[mcp]==0.1.26 --mcp`
 - All tests run on macOS, M-series Apple Silicon
-- Benchmark scripts: `benchmarks/e2e_llm_benchmark.py`, `benchmarks/e2e_llm_stats.py`
-- Results: `benchmarks/e2e_llm_stats_results.json`
+- Benchmark scripts: [e2e_llm_benchmark.py](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/e2e_llm_benchmark.py), [e2e_llm_stats.py](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/e2e_llm_stats.py)
+- Results: [e2e_llm_stats_results.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/e2e_llm_stats_results.json)
