@@ -510,10 +510,10 @@ Read `browser.health` after a crash or connection failure. `phase=crashed` means
 | Category | Functions |
 |----------|-----------|
 | **Navigation** | `navigate(url, new_tab)`, `go_back()`, `wait(seconds)` |
-| **Interaction** | `find_element(role, name, element_id, tag, timeout)`, `click_element(...)`, `fill_element(text, ...)`, `click(index)`, `input_text(index, text, clear)`, `scroll(down, pages, index)`, `send_keys(keys)`, `upload_file(index, path)` |
+| **Interaction** | `find_element(role, name, element_id, tag, *, timeout)`, `click_element(...)`, `fill_element(text, ...)`, `click(index)`, `input_text(index, text, clear)`, `scroll(down, pages, index)`, `send_keys(keys)`, `upload_file(index, path)` |
 | **Coordinate interaction** | `click_xy(x, y, button, click_count)`, `hover_xy(x, y)`, `scroll_xy(x, y, delta_x, delta_y)` for no-index canvas, PDF, embedded, and native-rendered targets |
 | **Dropdowns** | `select_dropdown(index, text)`, `dropdown_options(index)` |
-| **Tabs** | `switch(tab_id)`, `close(tab_id)`: accepts the four-character suffix or the full CDP target ID |
+| **Tabs** | `get_tabs()`: list tabs without a DOM scan; `switch(tab_id)`, `close(tab_id)`: accepts the four-character suffix or the full CDP target ID |
 | **JavaScript** | `evaluate(code)`: run JS in page context, returns Python objects |
 | **Downloads** | `download_file(url, filename)`: download a file using browser cookies; `wait_for_download(timeout, url, lookback, download_ref)`: wait for a terminal phase; `download_outcomes()`, `download_failures()`, `list_downloads()`: synchronous history and directory views |
 | **State** | `browser.get_browser_state_summary()`: get page metadata and interactive elements; helpers use a screenshotless read |

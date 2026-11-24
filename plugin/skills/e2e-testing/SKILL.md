@@ -79,7 +79,9 @@ openbrowser-ai -c - <<'EOF'
 await fill_element("test@example.com", role="textbox", name="Email")
 await fill_element("test-password", role="textbox", name="Password")
 await click_element(role="button", name="Sign in")
-await wait(2)
+await wait_for_load()
+logged_in = await evaluate("!!document.querySelector('[data-testid=dashboard], main.dashboard, #dashboard')")
+assert logged_in, "Login did not reach the dashboard"
 EOF
 ```
 

@@ -25,6 +25,7 @@ After a browser error, use MCP `get_status` or CLI `openbrowser-ai daemon status
 - `await hover_xy(x, y)` -- Move over a no-index canvas, PDF, embed, or native-rendered target
 - `await scroll_xy(x, y, delta_x=0, delta_y=0)` -- Wheel-scroll a no-index surface
 - `await send_keys(keys)` -- Keyboard input (e.g. "Enter", "Escape")
+- `await get_tabs()` -- List open tabs without a DOM scan
 - `await evaluate(code)` -- Run JavaScript, returns Python objects
 - `await select_dropdown(index, text)` -- Select dropdown option
 - `await done(text, success=True)` -- Signal task complete
@@ -86,6 +87,7 @@ EXECUTE_CODE_DESCRIPTION = """Execute Python code in a persistent namespace with
 
 ## Tab Management
 
+- `await get_tabs()` -- Return open tabs with full target_id, url, title, parent_target_id, and active flag. It uses the CDP tab list instead of reading the full DOM.
 - `await switch(tab_id: str)` -- Switch to a different browser tab. Pass the full target_id or its 4-character suffix from the browser state tabs list. If a suffix is ambiguous, retry with one of the returned full IDs.
 - `await close(tab_id: str)` -- Close a browser tab. Pass the full target_id or its 4-character suffix. Closing an already closed tab is a no-op.
 

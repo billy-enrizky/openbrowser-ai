@@ -32,6 +32,7 @@ The namespace is initialized with:
 - `upload_file(index, path)` - Upload a file to a file input element
 - `select_dropdown(index, text)` - Select an option in a `<select>` dropdown
 - `dropdown_options(index)` - Get all options for a `<select>` dropdown
+- `get_tabs()` - List tabs without a DOM scan
 - `switch(tab_id)` - Switch to a different browser tab
 - `close(tab_id)` - Close a browser tab
 - `evaluate(code, variables={})` - Execute JavaScript and return Python objects

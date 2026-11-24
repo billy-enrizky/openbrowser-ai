@@ -70,7 +70,6 @@ If the field has a stable accessibility name or id, avoid hard-coded indices:
 openbrowser-ai -c - <<'EOF'
 await fill_element("user@example.com", role="textbox", name="Email")
 await fill_element("secure-password", role="textbox", name="Password")
-await click_element(role="button", name="Sign in")
 EOF
 ```
 

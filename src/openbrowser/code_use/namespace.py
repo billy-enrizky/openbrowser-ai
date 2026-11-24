@@ -720,39 +720,37 @@ def create_namespace(
 		if role is None and name is None and element_id is None and tag is None:
 			raise ValueError('find_element() needs role, name, element_id, or tag')
 		deadline = time.monotonic() + max(0.0, timeout)
+		first_lookup = True
 		while True:
+			if not first_lookup and time.monotonic() >= deadline:
+				break
+			first_lookup = False
 			summary = await browser_session.get_browser_state_summary(include_screenshot=False)
+			match: int | None = None
 			for raw_index, node in summary.dom_state.selector_map.items():
 				ax_node = getattr(node, 'ax_node', None)
 				node_id = node.attributes.get('id') if node.attributes else None
 				node_tag = (node.tag_name or '').lower()
-				if element_id is not None and node_id == element_id:
-					return int(raw_index)
-				if (
-					role is not None
-					and ax_node is not None
-					and ax_node.role == role
-					and (name is None or ax_node.name == name)
-				):
-					return int(raw_index)
-				if (
-					tag is not None
-					and node_tag == tag.lower()
-					and (name is None or (ax_node is not None and ax_node.name == name))
-				):
-					return int(raw_index)
-				if (
-					role is None
-					and tag is None
-					and element_id is None
-					and name is not None
-					and ax_node is not None
-					and ax_node.name == name
-				):
-					return int(raw_index)
-			if timeout <= 0 or time.monotonic() >= deadline:
+				if element_id is not None and node_id != element_id:
+					continue
+				if role is not None and (ax_node is None or ax_node.role != role):
+					continue
+				if name is not None and (ax_node is None or ax_node.name != name):
+					continue
+				if tag is not None and node_tag != tag.lower():
+					continue
+				match = int(raw_index)
 				break
-			await asyncio.sleep(max(0.01, poll_interval))
+			if match is not None:
+				if timeout <= 0 or time.monotonic() <= deadline:
+					return match
+				break
+			if timeout <= 0:
+				break
+			remaining = deadline - time.monotonic()
+			if remaining <= 0:
+				break
+			await asyncio.sleep(min(max(0.01, poll_interval), remaining))
 		selector = ', '.join(
 			part
 			for part in (
@@ -767,6 +765,26 @@ def create_namespace(
 			f'Element not found after {timeout:g}s: {selector}. '
 			'Read the current browser state or increase timeout.'
 		)
+
+	async def get_tabs() -> list[dict[str, Any]]:
+		"""Return open tabs without reading the full DOM.
+
+		Each entry includes the full target_id, url, title, parent_target_id,
+		and active flag. Use target_id with switch() or close(). A four-character
+		suffix is accepted by those actions when it is unique.
+		"""
+		tabs = await browser_session.get_tabs()
+		active_target_id = browser_session.current_target_id
+		return [
+			{
+				'target_id': tab.target_id,
+				'url': tab.url,
+				'title': tab.title,
+				'parent_target_id': tab.parent_target_id,
+				'active': tab.target_id == active_target_id,
+			}
+			for tab in tabs
+		]
 
 	async def click_element(
 		role: str | None = None,
@@ -833,6 +851,7 @@ def create_namespace(
 	namespace['find_element'] = find_element
 	namespace['click_element'] = click_element
 	namespace['fill_element'] = fill_element
+	namespace['get_tabs'] = get_tabs
 
 
 	# Add download_file function for downloading files via browser session

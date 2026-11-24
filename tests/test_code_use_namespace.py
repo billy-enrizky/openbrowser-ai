@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import tempfile
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -742,6 +743,47 @@ class TestInteractiveHelpers:
         assert session.get_browser_state_summary.await_count == 2
 
     @pytest.mark.asyncio
+    async def test_find_element_requires_every_supplied_filter_to_match(self):
+        wrong = self._node(tag='input', element_id='shipping-email', role='textbox', name='Email')
+        right = self._node(tag='input', element_id='billing-email', role='textbox', name='Email')
+        session = self._make_session([self._summary({1: wrong, 2: right})])
+        ns = self._namespace(session)
+
+        index = await ns['find_element'](
+            element_id='billing-email',
+            role='textbox',
+            name='Email',
+        )
+
+        assert index == 2
+
+    @pytest.mark.asyncio
+    async def test_find_element_caps_sleep_at_the_remaining_timeout(self):
+        session = self._make_session([self._summary({})])
+        ns = self._namespace(session)
+
+        started = time.monotonic()
+        with pytest.raises(RuntimeError, match='Element not found'):
+            await ns['find_element'](role='button', timeout=0.05, poll_interval=10)
+
+        assert time.monotonic() - started < 1.0
+
+    @pytest.mark.asyncio
+    async def test_find_element_does_not_return_after_the_deadline(self):
+        node = self._node(tag='button', role='button', name='Next')
+
+        async def slow_summary(*args, **kwargs):
+            await asyncio.sleep(0.05)
+            return self._summary({2: node})
+
+        session = self._make_session([])
+        session.get_browser_state_summary = AsyncMock(side_effect=slow_summary)
+        ns = self._namespace(session)
+
+        with pytest.raises(RuntimeError, match='Element not found'):
+            await ns['find_element'](role='button', name='Next', timeout=0.01)
+
+    @pytest.mark.asyncio
     async def test_click_element_resolves_and_clicks(self):
         node = self._node(tag='button', role='button', name='Next')
         session = self._make_session([self._summary({3: node})])
@@ -765,6 +807,49 @@ class TestInteractiveHelpers:
         assert result == {'typed': True}
         ns['input_text'].assert_awaited_once_with(index=5, text='5')
 
+    @pytest.mark.asyncio
+    async def test_get_tabs_uses_the_cdp_tab_list(self):
+        session = self._make_session([self._summary({})])
+        session.current_target_id = 'TARGET-TWO'
+        session.get_tabs = AsyncMock(
+            return_value=[
+                SimpleNamespace(
+                    target_id='TARGET-ONE',
+                    url='https://one.example',
+                    title='One',
+                    parent_target_id=None,
+                ),
+                SimpleNamespace(
+                    target_id='TARGET-TWO',
+                    url='https://two.example',
+                    title='Two',
+                    parent_target_id='TARGET-ONE',
+                ),
+            ]
+        )
+        ns = self._namespace(session)
+
+        tabs = await ns['get_tabs']()
+
+        assert tabs == [
+            {
+                'target_id': 'TARGET-ONE',
+                'url': 'https://one.example',
+                'title': 'One',
+                'parent_target_id': None,
+                'active': False,
+            },
+            {
+                'target_id': 'TARGET-TWO',
+                'url': 'https://two.example',
+                'title': 'Two',
+                'parent_target_id': 'TARGET-ONE',
+                'active': True,
+            },
+        ]
+        session.get_tabs.assert_awaited_once_with()
+        session.get_browser_state_summary.assert_not_awaited()
+
     def test_descriptions_and_namespace_docs_name_the_helpers(self):
         from openbrowser.code_use.descriptions import (
             EXECUTE_CODE_DESCRIPTION,
@@ -775,12 +860,14 @@ class TestInteractiveHelpers:
             assert 'find_element' in description
             assert 'click_element' in description
             assert 'fill_element' in description
+            assert 'get_tabs' in description
 
         session = self._make_session([self._summary({})])
         docs = get_namespace_documentation(self._namespace(session))
         assert '## find_element' in docs
         assert '## click_element' in docs
         assert '## fill_element' in docs
+        assert '## get_tabs' in docs
 
 # ---------------------------------------------------------------------------
 # scrape_page()
