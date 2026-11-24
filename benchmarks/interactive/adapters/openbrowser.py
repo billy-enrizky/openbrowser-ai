@@ -19,7 +19,7 @@ from .base import (
     verify_mock_keychain,
 )
 
-HEADER = '''
+HEADER = """
 import asyncio
 import json as _json
 
@@ -46,11 +46,13 @@ async def wait_js(expression, timeout=15.0):
 async def current_tabs():
     summary = await browser.get_browser_state_summary(include_screenshot=False)
     return [(tab.target_id, tab.url, tab.title) for tab in summary.tabs]
-'''
+"""
 
 
 def _wizard(url: str) -> str:
-    return HEADER + f'''
+    return (
+        HEADER
+        + f"""
 await navigate({url!r})
 await input_text(index=await find('textbox', 'Full name'), text='Alice Bench')
 await input_text(index=await find('textbox', 'Email'), text='alice@example.com')
@@ -67,11 +69,14 @@ await click(index=await find('checkbox', 'I accept the terms'))
 await click(index=await find('button', 'Submit'))
 await wait_js("!!document.getElementById('quote')")
 print(_json.dumps({{"quote": await evaluate("document.getElementById('quote').textContent")}}))
-'''
+"""
+    )
 
 
 def _modal(url: str) -> str:
-    return HEADER + f'''
+    return (
+        HEADER
+        + f"""
 await navigate({url!r})
 await click(index=await find('button', 'Choose project'))
 await wait_js("!document.getElementById('modal').hidden")
@@ -84,21 +89,27 @@ await wait_js("[...document.querySelectorAll('#project-list [role=option]')].fil
 await click(index=await find('option', 'Project Atlas'))
 await wait_js("document.getElementById('selected-value').textContent === 'Project Atlas'")
 print(_json.dumps({{"selected": await evaluate("document.getElementById('selected-value').textContent")}}))
-'''
+"""
+    )
 
 
 def _download(url: str) -> str:
-    return HEADER + f'''
+    return (
+        HEADER
+        + f"""
 await navigate({url!r})
 waiter = asyncio.create_task(wait_for_download(timeout=90))
 await click(index=await find('button', 'Download report'))
 outcome = await waiter
 print(_json.dumps({{"download": outcome}}))
-'''
+"""
+    )
 
 
 def _tabs(url: str) -> str:
-    return HEADER + f'''
+    return (
+        HEADER
+        + f"""
 await navigate({url!r})
 summary = await browser.get_browser_state_summary()
 original = summary.tabs[0].target_id if summary.tabs else None
@@ -125,11 +136,14 @@ print(_json.dumps({{
     "status": await evaluate("document.getElementById('status').textContent"),
     "original_title": await evaluate("document.title"),
 }}))
-'''
+"""
+    )
 
 
 def _login(url: str, state_path: str) -> str:
-    return HEADER + f'''
+    return (
+        HEADER
+        + f"""
 await navigate({url!r})
 await input_text(index=await find('textbox', 'Username'), text={BENCH_USER!r})
 await input_text(index=await find(element_id='password'), text={BENCH_PASSWORD!r})
@@ -138,15 +152,19 @@ await wait_js("!!document.getElementById('secret')")
 secret = await evaluate("document.getElementById('secret').textContent")
 await browser.export_storage_state({state_path!r})
 print(_json.dumps({{"secret": secret}}))
-'''
+"""
+    )
 
 
 def _read_account(url: str) -> str:
-    return HEADER + f'''
+    return (
+        HEADER
+        + f"""
 await navigate({url!r})
 await wait_js("!!document.getElementById('secret')")
 print(_json.dumps({{"secret": await evaluate("document.getElementById('secret').textContent")}}))
-'''
+"""
+    )
 
 
 def _write_config(ctx: RunContext, *, extensions: bool) -> None:
@@ -221,7 +239,14 @@ class OpenBrowserArm:
                     continue
         return {}
 
-    def run(self, ctx: RunContext) -> ArmResult:
+    def run(
+        self,
+        ctx: RunContext,
+        *,
+        cleanup: bool = True,
+        restart_for_auth: bool = True,
+    ) -> ArmResult:
+        self._result = ArmResult(ok=False)
         _write_config(ctx, extensions=self.extensions)
         url = ctx.base_url
         try:
@@ -235,7 +260,8 @@ class OpenBrowserArm:
                 self._invoke(ctx, _tabs(url + "/tabs"), 120)
             elif ctx.task == "auth":
                 self._invoke(ctx, _login(url + "/login", str(ctx.root / "storage_state.json")), 120)
-                self._stop_daemon(ctx)
+                if restart_for_auth:
+                    self._stop_daemon(ctx)
                 self._invoke(ctx, _read_account(url + "/account"), 120)
             else:
                 raise ValueError(f"unknown task {ctx.task}")
@@ -249,8 +275,26 @@ class OpenBrowserArm:
             self._result.ok = False
             self._result.error = str(exc)
         finally:
-            self.cleanup(ctx)
+            if cleanup:
+                self.cleanup(ctx)
         return self._result
+
+    def warmup(self, ctx: RunContext) -> tuple[dict, float]:
+        """Start the daemon and browser once and return its JSON plus wall time."""
+        started = time.monotonic()
+        returncode, stdout, stderr, _elapsed = run_process(
+            [self.binary, "warm"],
+            env=_env(ctx),
+            timeout=180,
+        )
+        elapsed_ms = (time.monotonic() - started) * 1000.0
+        if returncode != 0:
+            raise RuntimeError(f"openbrowser-ai warm exited {returncode}: {stderr.strip()[:600]}")
+        try:
+            payload = json.loads(stdout)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(f"openbrowser-ai warm returned invalid JSON: {stdout[:600]}") from exc
+        return payload, elapsed_ms
 
     def _stop_daemon(self, ctx: RunContext) -> None:
         pid_file = ctx.home / ".openbrowser" / "daemon.pid"

@@ -130,6 +130,50 @@ Raw evidence: `results/results-2026-11-23-lean.jsonl`.
 The original default-extension run remains at
 `results/results-2026-11-23.jsonl`.
 
+## Warm session lane, 2026-11-24
+
+The cold lane starts a new daemon, browser, and fixture for every task. The
+warm lane starts the daemon and browser once with `openbrowser-ai warm`, then
+runs each task against a fresh fixture server. It keeps the cold-start cost
+separate from steady-state task latency. The `auth` task remains in the cold
+lane because it deliberately restarts the daemon to prove profile reuse across
+processes.
+
+Paired N=5 run, macOS arm64, OpenBrowser `0.1.58.dev24+gd77c43315`, system
+Chrome `158.0.8127.36`, isolated HOME, config, and socket, headless, with
+`--use-mock-keychain`. The warm command took 1919 ms total and reported 1833 ms.
+The first timed task reused that browser.
+
+| Task | Cold p50 ms | Warm p50 ms | Warm p95 ms | Speedup |
+| --- | ---: | ---: | ---: | ---: |
+| wizard | 5528 | 2241 | 2396 | 2.47x |
+| modal | 3928 | 1181 | 1256 | 3.33x |
+| download | 3678 | 782 | 824 | 4.70x |
+| tabs | 8369 | 5745 | 5801 | 1.46x |
+
+All 20 warm runs passed their oracle. The warm run records one CLI process per
+task and no browser start after warmup. Cold and warm are separate lanes with
+the same fixture and browser build; do not compare these numbers to a competitor
+arm unless that arm is measured in both lanes.
+
+Run the lane:
+
+```sh
+OPENBROWSER_BIN=/path/to/openbrowser-ai \
+uv run --locked python -m benchmarks.interactive.warm_benchmark \
+  --samples 5 \
+  --tasks wizard modal download tabs \
+  --output benchmarks/interactive/results/results-warm.jsonl \
+  --cold-results benchmarks/interactive/results/results-cold.jsonl
+```
+
+Raw evidence:
+
+- `results-cold-2026-11-24-n5.jsonl`
+- `results-warm-2026-11-24-n5.jsonl`
+- `results-warm-2026-11-24-n5.summary.json`
+- `results-cold-2026-11-24-n5.summary.json`
+
 ## OpenBrowser extension A/B, 2026-11-23
 
 The A/B uses one binary, the same screenshot setting, and 3 samples per task.
