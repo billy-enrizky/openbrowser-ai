@@ -82,6 +82,43 @@ Raw evidence:
 - `results-firecrawl-all-2026-11-24-n10-interleaved.json`
 - `results-firecrawl-all-2026-11-24-n10-interleaved.jsonl`
 
+### Firecrawl batch, 2026-11-24
+
+Firecrawl Local exposes a native `/v2/batch/scrape` job API. The batch
+comparison sends the same five pagination URLs to both products and checks
+that each returns the same 100 ordered names. The OpenBrowser arm uses
+`scrape_pages(engine="http", concurrency=5)` and never starts a browser. The
+Firecrawl arm submits one batch job, polls it every 10 ms, and downloads the
+results. All 20 measured runs passed their oracle.
+
+| Arm | Samples | p50 ms | p95 ms | Range ms | Requests |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| OpenBrowser HTTP batch | 10 | 4.619 | 6.911 | 3.985 to 6.911 | 5 |
+| Firecrawl Local batch | 10 | 14.598 | 15.354 | 13.747 to 15.354 | 5 |
+
+OpenBrowser was faster in 10 of 10 pairs. The median paired difference was
+`9.966` ms, and OpenBrowser was 3.16 times faster at p50. The arms return
+different artifacts: OpenBrowser returns selected row dictionaries, while
+Firecrawl returns markdown pages. Both satisfy the same 100-name oracle.
+`openbrowser_browser_started` was false for every OpenBrowser batch.
+
+This is the batch surface. The sequential five-request comparison above remains
+parity within sample ranges. Do not substitute one result for the other.
+
+Rerun the batch comparison:
+
+```sh
+uv run --locked python -m benchmarks.scraping.batch_firecrawl_compare \
+  --samples 10 --warmups 1 \
+  --firecrawl-bin ~/.local/firecrawl-tools/bin/firecrawl-local \
+  --output benchmarks/scraping/results-batch-firecrawl.json
+```
+
+Raw evidence:
+
+- `results-batch-firecrawl-2026-11-24-n10.json`
+- `results-batch-firecrawl-2026-11-24-n10.summary.json`
+
 ### Lightpanda
 
 | Task | OpenBrowser no-render, p50 ms | Lightpanda, p50 ms | Result |
