@@ -132,47 +132,66 @@ The original default-extension run remains at
 
 ## Warm session lane, 2026-11-24
 
-The cold lane starts a new daemon, browser, and fixture for every task. The
-warm lane starts the daemon and browser once with `openbrowser-ai warm`, then
-runs each task against a fresh fixture server. It keeps the cold-start cost
-separate from steady-state task latency. The `auth` task remains in the cold
-lane because it deliberately restarts the daemon to prove profile reuse across
-processes.
+The cold lane starts a new process tree, daemon, and browser for every task.
+The warm lane starts each arm once, then runs each task against a fresh fixture
+server. It keeps the startup cost separate from steady-state task latency. The
+`auth` task remains in the cold lane because it deliberately restarts the
+browser to prove profile reuse across processes.
 
-Paired N=5 run, macOS arm64, OpenBrowser `0.1.58.dev24+gd77c43315`, system
-Chrome `158.0.8127.36`, isolated HOME, config, and socket, headless, with
-`--use-mock-keychain`. The warm command took 1919 ms total and reported 1833 ms.
-The first timed task reused that browser.
+The OpenBrowser arm uses `openbrowser-ai warm`. chrome-devtools-mcp starts its
+MCP server and Chrome once. agent-browser starts one named session.
+browser-use starts one dedicated Chrome and reuses its CDP URL.
 
-| Task | Cold p50 ms | Warm p50 ms | Warm p95 ms | Speedup |
-| --- | ---: | ---: | ---: | ---: |
-| wizard | 5528 | 2241 | 2396 | 2.47x |
-| modal | 3928 | 1181 | 1256 | 3.33x |
-| download | 3678 | 782 | 824 | 4.70x |
-| tabs | 8369 | 5745 | 5801 | 1.46x |
+Paired N=3 run, macOS arm64, system Chrome `158.0.8127.36`, isolated HOME,
+config, profile, and socket, headless, with `--use-mock-keychain`. Cold p50 is
+from `results-2026-11-23-lean.jsonl`. Warmup wall time by arm: OpenBrowser
+6896 ms, chrome-devtools-mcp
+3638 ms, agent-browser
+3214 ms, browser-use
+1874 ms.
 
-All 20 warm runs passed their oracle. The warm run records one CLI process per
-task and no browser start after warmup. Cold and warm are separate lanes with
-the same fixture and browser build; do not compare these numbers to a competitor
-arm unless that arm is measured in both lanes.
+| Task | Arm | Cold p50 ms | Warm p50 ms | Warm p95 ms | Speedup |
+| --- | --- | ---: | ---: | ---: | ---: |
+| wizard | openbrowser | 4837 | 3401 | 3477 | 1.42x |
+| wizard | chrome-devtools-mcp | 4570 | 4089 | 4403 | 1.12x |
+| wizard | agent-browser | 1789 | 1264 | 1670 | 1.42x |
+| wizard | browser-use | 1499 | 2111 | 3067 | 0.71x |
+| modal | openbrowser | 3509 | 1574 | 1875 | 2.23x |
+| modal | chrome-devtools-mcp | 3805 | 2910 | 2936 | 1.31x |
+| modal | agent-browser | 2468 | 1754 | 1789 | 1.41x |
+| modal | browser-use | 1811 | 1057 | 1258 | 1.71x |
+| download | openbrowser | 3492 | 966 | 1391 | 3.62x |
+| download | chrome-devtools-mcp | 2054 | 836 | 840 | 2.46x |
+| download | agent-browser | 1710 | 629 | 723 | 2.72x |
+| download | browser-use | 1451 | 915 | 1001 | 1.59x |
+| tabs | openbrowser | 7792 | 6170 | 6668 | 1.26x |
+| tabs | chrome-devtools-mcp | 2426 | 1644 | 1689 | 1.48x |
+| tabs | agent-browser | 1638 | 1237 | 2480 | 1.32x |
+| tabs | browser-use | 1111 | 650 | 651 | 1.71x |
+
+All 48 warm runs passed their oracle. OpenBrowser improves over its own cold
+lane, but it still trails agent-browser and browser-use on wizard, download,
+and tabs. It beats chrome-devtools-mcp on modal and is close on wizard. The
+tabs task is the largest gap: OpenBrowser 6170 ms warm versus browser-use
+650 ms. This is a benchmark adapter and product API gap to address next, not a
+universal warm-lane win.
 
 Run the lane:
 
 ```sh
 OPENBROWSER_BIN=/path/to/openbrowser-ai \
 uv run --locked python -m benchmarks.interactive.warm_benchmark \
-  --samples 5 \
+  --samples 3 \
+  --arms openbrowser chrome-devtools-mcp agent-browser browser-use \
   --tasks wizard modal download tabs \
   --output benchmarks/interactive/results/results-warm.jsonl \
-  --cold-results benchmarks/interactive/results/results-cold.jsonl
+  --cold-results benchmarks/interactive/results/results-2026-11-23-lean.jsonl
 ```
 
 Raw evidence:
 
-- `results-cold-2026-11-24-n5.jsonl`
-- `results-warm-2026-11-24-n5.jsonl`
-- `results-warm-2026-11-24-n5.summary.json`
-- `results-cold-2026-11-24-n5.summary.json`
+- `results-warm-4arm-2026-11-24-n3.jsonl`
+- `results-warm-4arm-2026-11-24-n3.summary.json`
 
 ## OpenBrowser extension A/B, 2026-11-23
 

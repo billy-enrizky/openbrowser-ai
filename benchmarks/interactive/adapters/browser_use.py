@@ -27,7 +27,7 @@ BINARY = os.environ.get(
     str(Path.home() / ".cache" / "openbrowser-interactive-bench" / "browser-use-venv" / "bin" / "browser-use"),
 )
 
-HEADER = '''
+HEADER = """
 import json as _json
 import time as _time
 
@@ -49,11 +49,19 @@ def wait_js(expression, timeout=20.0):
 def emit(payload):
     payload['tool_calls'] = _calls
     print('BENCH_RESULT ' + _json.dumps(payload))
-'''
+
+def close_current():
+    try:
+        _tick(); close_tab(current_tab()['targetId'])
+    except Exception:
+        pass
+"""
 
 
 def _wizard(url: str) -> str:
-    return HEADER + f'''
+    return (
+        HEADER
+        + f"""
 _tick(); new_tab({url!r})
 _tick(); fill_input('#name', 'Alice Bench')
 _tick(); fill_input('#email', 'alice@example.com')
@@ -69,12 +77,17 @@ wait_js("!!document.getElementById('step3')")
 _tick(); js("document.querySelector('#terms').click()")
 _tick(); js("document.querySelector('#submit').click()")
 wait_js("!!document.getElementById('quote')")
-emit({{'quote': js("document.getElementById('quote').textContent")}})
-'''
+quote = js("document.getElementById('quote').textContent")
+_tick(); close_current()
+emit({{'quote': quote}})
+"""
+    )
 
 
 def _modal(url: str) -> str:
-    return HEADER + f'''
+    return (
+        HEADER
+        + f"""
 _tick(); new_tab({url!r})
 _tick(); js("document.querySelector('#open-modal').click()")
 wait_js("!document.getElementById('modal').hidden")
@@ -86,21 +99,31 @@ _tick(); fill_input('#project-search', 'Atlas')
 wait_js("[...document.querySelectorAll('#project-list [role=option]')].filter(o => !o.hidden).length === 1")
 _tick(); js("document.querySelector('[data-value=\\"Project Atlas\\"]').click()")
 wait_js("document.getElementById('selected-value').textContent === 'Project Atlas'")
-emit({{'selected': js("document.getElementById('selected-value').textContent")}})
-'''
+selected = js("document.getElementById('selected-value').textContent")
+_tick(); close_current()
+emit({{'selected': selected}})
+"""
+    )
 
 
 def _download(url: str) -> str:
-    return HEADER + f'''
+    return (
+        HEADER
+        + f"""
 _tick(); new_tab({url!r})
 _tick(); js("document.querySelector('#download-report').click()")
 _tick(); wait_js("document.getElementById('download-status').textContent === 'requested'")
-emit({{'status': js("document.getElementById('download-status').textContent")}})
-'''
+status = js("document.getElementById('download-status').textContent")
+_tick(); close_current()
+emit({{'status': status}})
+"""
+    )
 
 
 def _tabs(url: str) -> str:
-    return HEADER + f'''
+    return (
+        HEADER
+        + f"""
 _tick(); new_tab({url!r})
 _tick(); original = current_tab()['targetId']
 _tick(); box = js(
@@ -112,9 +135,9 @@ _tick(); deadline = _time.time() + 20
 detail = ''
 while _time.time() < deadline:
     tabs = list_tabs()
-    others = [tab for tab in tabs if tab['targetId'] != original]
+    others = [tab for tab in tabs if tab['targetId'] != original and '/detail' in str(tab.get('url', ''))]
     if others:
-        detail = others[0]['targetId']
+        detail = others[-1]['targetId']
         break
     _time.sleep(0.1)
 if not detail:
@@ -126,12 +149,17 @@ _tick(); switch_tab(original)
 wait_js("document.getElementById('status').textContent === 'approved:42'")
 _tick(); title = js("document.title")
 _tick(); close_tab(detail)
-emit({{'status': js("document.getElementById('status').textContent"), 'original_title': title}})
-'''
+status = js("document.getElementById('status').textContent")
+_tick(); close_current()
+emit({{'status': status, 'original_title': title}})
+"""
+    )
 
 
 def _login(url: str) -> str:
-    return HEADER + f'''
+    return (
+        HEADER
+        + f"""
 _tick(); new_tab({url!r})
 _tick(); fill_input('#username', {BENCH_USER!r})
 _tick(); fill_input('#password', {BENCH_PASSWORD!r})
@@ -140,23 +168,29 @@ wait_js("!!document.getElementById('secret')")
 secret = js("document.getElementById('secret').textContent")
 _tick(); emit({{'secret': secret}})
 _tick(); cdp('Browser.close')
-'''
+"""
+    )
 
 
 def _read_account(url: str) -> str:
-    return HEADER + f'''
+    return (
+        HEADER
+        + f"""
 _tick(); new_tab({url!r})
 wait_js("!!document.getElementById('secret')")
 emit({{'secret': js("document.getElementById('secret').textContent")}})
-'''
+"""
+    )
 
 
 class BrowserUseArm:
     name = "browser-use"
 
     def __init__(self) -> None:
+        self.binary = BINARY
         self._result = ArmResult(ok=False)
         self._chrome: ChromeInstance | None = None
+        self._warm_keychain_verified: bool | None = None
 
     def _env(self, ctx: RunContext) -> dict[str, str]:
         assert self._chrome is not None
@@ -174,6 +208,7 @@ class BrowserUseArm:
         self._chrome = ChromeInstance(CHROME, ctx.profile, downloads=ctx.downloads, headless=True)
         self._chrome.start()
         verified = verify_mock_keychain(str(ctx.profile))
+        self._warm_keychain_verified = verified
         self._result.keychain_verified = verified
         if verified is False:
             raise RuntimeError("browser-use Chrome launched without --use-mock-keychain")
@@ -202,12 +237,31 @@ class BrowserUseArm:
                     reported = {}
         self._result.tool_calls += int(reported.pop("tool_calls", 0))
         if returncode != 0:
-            raise RuntimeError(f"browser-use exited {returncode}: {stderr.strip()[:600]}")
+            raise RuntimeError(f"browser-use exited {returncode}: {stderr.strip()[:2000]}")
         return reported
 
-    def run(self, ctx: RunContext) -> ArmResult:
+    def warmup(self, ctx: RunContext) -> tuple[dict, float]:
+        """Start the dedicated Chrome once for a warm browser-use session."""
+        started = time.monotonic()
+        self._result = ArmResult(ok=False)
+        self._start_chrome(ctx)
+        elapsed_ms = (time.monotonic() - started) * 1000.0
+        assert self._chrome is not None
+        payload = {
+            "ok": True,
+            "cdp_url": self._chrome.cdp_url,
+            "keychain_verified": self._warm_keychain_verified,
+        }
+        self._result = ArmResult(ok=False)
+        return payload, elapsed_ms
+
+    def run(self, ctx: RunContext, *, cleanup: bool = True) -> ArmResult:
+        self._result = ArmResult(ok=False)
         try:
-            self._start_chrome(ctx)
+            if self._chrome is None:
+                self._start_chrome(ctx)
+            else:
+                self._result.keychain_verified = self._warm_keychain_verified
             if ctx.task == "wizard":
                 self._result.reported = self._script(ctx, _wizard(ctx.base_url + "/wizard"), 120)
             elif ctx.task == "modal":
@@ -246,7 +300,8 @@ class BrowserUseArm:
             self._result.ok = False
             self._result.error = str(exc)
         finally:
-            self.cleanup(ctx)
+            if cleanup:
+                self.cleanup(ctx)
         return self._result
 
     def cleanup(self, ctx: RunContext) -> None:
