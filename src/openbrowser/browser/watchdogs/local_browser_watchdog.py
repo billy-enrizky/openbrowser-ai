@@ -227,7 +227,9 @@ class LocalBrowserWatchdog(BaseWatchdog):
 					self.logger.debug(f'[LocalBrowserWatchdog] Using custom local browser executable_path= {browser_path}')
 				else:
 					# Try fallback paths first (system browsers preferred)
-					browser_path = self._find_installed_browser_path()
+					browser_path = self._find_installed_browser_path(
+						prefer_headless_shell=bool(getattr(profile, 'use_headless_shell', False))
+					)
 					if not browser_path:
 						self.logger.error(
 							'[LocalBrowserWatchdog] No local browser binary found, installing browser using playwright subprocess...'
@@ -450,14 +452,14 @@ class LocalBrowserWatchdog(BaseWatchdog):
 				pass
 
 	@staticmethod
-	def _find_installed_browser_path() -> str | None:
+	def _find_installed_browser_path(prefer_headless_shell: bool = False) -> str | None:
 		"""Try to find browser executable from common fallback locations.
 
 		Prioritizes:
-		1. System Chrome Stable
-		1. Playwright chromium
-		2. Other system native browsers (Chromium -> Chrome Canary/Dev -> Brave)
-		3. Playwright headless-shell fallback
+		1. Playwright headless shell, when the caller asks for it
+		2. System Chrome Stable, then Playwright chromium
+		3. Other system native browsers (Chromium -> Chrome Canary/Dev -> Brave)
+		4. Playwright headless-shell fallback
 
 		Returns:
 			Path to browser executable or None if not found
@@ -475,17 +477,28 @@ class LocalBrowserWatchdog(BaseWatchdog):
 		if system == 'Darwin':  # macOS
 			if not playwright_path:
 				playwright_path = '~/Library/Caches/ms-playwright'
+			headless_shell_patterns = [
+				f'{playwright_path}/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell',
+				f'{playwright_path}/chromium_headless_shell-*/chrome-headless-shell-mac-x64/chrome-headless-shell',
+			]
 			patterns = [
 				'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
 				f'{playwright_path}/chromium-*/chrome-mac/Chromium.app/Contents/MacOS/Chromium',
 				'/Applications/Chromium.app/Contents/MacOS/Chromium',
 				'/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary',
 				'/Applications/Brave Browser.app/Contents/MacOS/Brave Browser',
-				f'{playwright_path}/chromium_headless_shell-*/chrome-mac/Chromium.app/Contents/MacOS/Chromium',
+				*headless_shell_patterns,
 			]
+			if prefer_headless_shell:
+				patterns = [*headless_shell_patterns, *patterns]
 		elif system == 'Linux':
 			if not playwright_path:
 				playwright_path = '~/.cache/ms-playwright'
+			headless_shell_patterns = [
+				f'{playwright_path}/chromium_headless_shell-*/chrome-linux64/headless_shell',
+				f'{playwright_path}/chromium_headless_shell-*/chrome-linux/headless_shell',
+				f'{playwright_path}/chromium_headless_shell-*/chrome-headless-shell-linux64/chrome-headless-shell',
+			]
 			patterns = [
 				'/usr/bin/google-chrome-stable',
 				'/usr/bin/google-chrome',
@@ -499,9 +512,10 @@ class LocalBrowserWatchdog(BaseWatchdog):
 				'/usr/bin/google-chrome-beta',
 				'/usr/bin/google-chrome-dev',
 				'/usr/bin/brave-browser',
-				f'{playwright_path}/chromium_headless_shell-*/chrome-linux/chrome',
-				f'{playwright_path}/chromium_headless_shell-*/chrome-linux64/chrome',
+				*headless_shell_patterns,
 			]
+			if prefer_headless_shell:
+				patterns = [*headless_shell_patterns, *patterns]
 		elif system == 'Windows':
 			if not playwright_path:
 				playwright_path = r'%LOCALAPPDATA%\ms-playwright'
@@ -520,8 +534,14 @@ class LocalBrowserWatchdog(BaseWatchdog):
 				r'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe',
 				r'C:\Program Files\Microsoft\Edge\Application\msedge.exe',
 				r'%LOCALAPPDATA%\Microsoft\Edge\Application\msedge.exe',
-				f'{playwright_path}\\chromium_headless_shell-*\\chrome-win\\chrome.exe',
 			]
+			headless_shell_patterns = [
+				f'{playwright_path}\\chromium_headless_shell-*\\chrome-headless-shell-win64\\chrome-headless-shell.exe',
+				f'{playwright_path}\\chromium_headless_shell-*\\chrome-win\\headless_shell.exe',
+			]
+			patterns = [*patterns, *headless_shell_patterns]
+			if prefer_headless_shell:
+				patterns = [*headless_shell_patterns, *patterns]
 
 		for pattern in patterns:
 			# Expand user home directory

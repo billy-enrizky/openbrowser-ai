@@ -1405,6 +1405,16 @@ def scrape(
 	# A one-shot scrape does not need extensions, and storage_state conflicts with a persistent profile.
 	browser_config['enable_default_extensions'] = False
 	browser_config.pop('storage_state', None)
+	# Scrape does not use VNC, extensions, or exact screenshot bytes, so the
+	# Playwright headless shell is safe here and uses about half the memory of
+	# full Chrome. An explicit executable_path still wins.
+	env_shell = os.environ.get('OPENBROWSER_USE_HEADLESS_SHELL', '').strip().lower()
+	if env_shell in ('0', 'false', 'no'):
+		browser_config['use_headless_shell'] = False
+	elif env_shell in ('1', 'true', 'yes'):
+		browser_config['use_headless_shell'] = True
+	else:
+		browser_config.setdefault('use_headless_shell', True)
 	effective_render_mode = render_mode or parent.get('render_mode')
 	if parent.get('no_render'):
 		effective_render_mode = 'no-render'

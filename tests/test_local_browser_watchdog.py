@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, create_autospec, patch
 import psutil
 import pytest
 from bubus import EventBus
+
 from openbrowser.browser.events import BrowserStopEvent
 from openbrowser.browser.session import BrowserSession
 from openbrowser.config import CONFIG, _config_cache, _get_env_bool_cached, _get_env_cached, _get_path_cached
@@ -20,22 +21,24 @@ logger = logging.getLogger(__name__)
 def _make_mock_browser_session():
     """Create a mock BrowserSession for LocalBrowserWatchdog tests."""
     session = create_autospec(BrowserSession, instance=True)
-    session.logger = logging.getLogger('test_local_browser_watchdog')
+    session.logger = logging.getLogger("test_local_browser_watchdog")
     session.event_bus = EventBus()
     session._cdp_client_root = MagicMock()
     session.is_local = True
 
     session.browser_profile = MagicMock()
     session.browser_profile.executable_path = None
-    user_data_dir = tempfile.mkdtemp(prefix='openbrowser-test-')
+    user_data_dir = tempfile.mkdtemp(prefix="openbrowser-test-")
     session.browser_profile.user_data_dir = user_data_dir
     session.browser_profile.profile_directory = None
     session.browser_profile.keep_alive = False
-    session.browser_profile.get_args = MagicMock(return_value=[
-        '--no-first-run',
-        '--disable-default-apps',
-        f'--user-data-dir={user_data_dir}',
-    ])
+    session.browser_profile.get_args = MagicMock(
+        return_value=[
+            "--no-first-run",
+            "--disable-default-apps",
+            f"--user-data-dir={user_data_dir}",
+        ]
+    )
 
     return session
 
@@ -96,9 +99,9 @@ class TestFindInstalledBrowserPath:
         # Should return a path string or None
         assert result is None or isinstance(result, str)
 
-    @patch('platform.system', return_value='Darwin')
-    @patch('pathlib.Path.exists', return_value=True)
-    @patch('pathlib.Path.is_file', return_value=True)
+    @patch("platform.system", return_value="Darwin")
+    @patch("pathlib.Path.exists", return_value=True)
+    @patch("pathlib.Path.is_file", return_value=True)
     def test_darwin_finds_chrome(self, mock_is_file, mock_exists, mock_system):
         from openbrowser.browser.watchdogs.local_browser_watchdog import LocalBrowserWatchdog
 
@@ -106,7 +109,7 @@ class TestFindInstalledBrowserPath:
         if result is not None:
             assert isinstance(result, str)
 
-    @patch('platform.system', return_value='Linux')
+    @patch("platform.system", return_value="Linux")
     def test_linux_patterns(self, mock_system):
         from openbrowser.browser.watchdogs.local_browser_watchdog import LocalBrowserWatchdog
 
@@ -120,7 +123,7 @@ class TestCleanupTempDir:
 
     def test_cleanup_valid_dir(self):
         watchdog, _ = _make_watchdog()
-        tmpdir = tempfile.mkdtemp(prefix='openbrowser-tmp-')
+        tmpdir = tempfile.mkdtemp(prefix="openbrowser-tmp-")
         assert os.path.exists(tmpdir)
 
         watchdog._cleanup_temp_dir(tmpdir)
@@ -130,7 +133,7 @@ class TestCleanupTempDir:
     def test_cleanup_empty_path(self):
         watchdog, _ = _make_watchdog()
         # Should not raise
-        watchdog._cleanup_temp_dir('')
+        watchdog._cleanup_temp_dir("")
 
     def test_cleanup_none_path(self):
         watchdog, _ = _make_watchdog()
@@ -139,7 +142,7 @@ class TestCleanupTempDir:
 
     def test_cleanup_non_openbrowser_dir_skipped(self):
         watchdog, _ = _make_watchdog()
-        tmpdir = tempfile.mkdtemp(prefix='other-')
+        tmpdir = tempfile.mkdtemp(prefix="other-")
         assert os.path.exists(tmpdir)
 
         watchdog._cleanup_temp_dir(tmpdir)
@@ -156,9 +159,9 @@ class TestCleanupProfileCache:
         from openbrowser.browser.watchdogs.local_browser_watchdog import LocalBrowserWatchdog
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            cache_dir = Path(tmpdir) / 'Default' / 'Cache'
+            cache_dir = Path(tmpdir) / "Default" / "Cache"
             cache_dir.mkdir(parents=True)
-            (cache_dir / 'data.bin').write_bytes(b'x' * 1024)
+            (cache_dir / "data.bin").write_bytes(b"x" * 1024)
 
             cleared = LocalBrowserWatchdog._cleanup_profile_cache(tmpdir)
 
@@ -169,21 +172,21 @@ class TestCleanupProfileCache:
         from openbrowser.browser.watchdogs.local_browser_watchdog import LocalBrowserWatchdog
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            config_dir = Path(tmpdir) / 'config'
-            managed_profile = config_dir / 'profiles' / 'daemon'
-            cache_dir = managed_profile / 'Default' / 'Cache'
-            code_cache_dir = managed_profile / 'Default' / 'Code Cache'
-            cookies_file = managed_profile / 'Default' / 'Cookies'
+            config_dir = Path(tmpdir) / "config"
+            managed_profile = config_dir / "profiles" / "daemon"
+            cache_dir = managed_profile / "Default" / "Cache"
+            code_cache_dir = managed_profile / "Default" / "Code Cache"
+            cookies_file = managed_profile / "Default" / "Cookies"
 
             cache_dir.mkdir(parents=True)
             code_cache_dir.mkdir(parents=True)
             cookies_file.parent.mkdir(parents=True, exist_ok=True)
 
-            (cache_dir / 'data.bin').write_bytes(b'a' * 2048)
-            (code_cache_dir / 'data.bin').write_bytes(b'b' * 1024)
-            cookies_file.write_bytes(b'keep-me')
+            (cache_dir / "data.bin").write_bytes(b"a" * 2048)
+            (code_cache_dir / "data.bin").write_bytes(b"b" * 1024)
+            cookies_file.write_bytes(b"keep-me")
 
-            with patch.dict(os.environ, {'OPENBROWSER_CONFIG_DIR': str(config_dir)}, clear=False):
+            with patch.dict(os.environ, {"OPENBROWSER_CONFIG_DIR": str(config_dir)}, clear=False):
                 _config_cache.clear()
                 CONFIG._env_config = None
                 _get_env_cached.cache_clear()
@@ -215,7 +218,7 @@ class TestCleanupProcess:
         mock_process.terminate = MagicMock()
         mock_process.is_running.return_value = False
 
-        with patch('asyncio.sleep', new_callable=AsyncMock):
+        with patch("asyncio.sleep", new_callable=AsyncMock):
             await LocalBrowserWatchdog._cleanup_process(mock_process, require_identity=False)
 
         mock_process.terminate.assert_called_once()
@@ -228,7 +231,7 @@ class TestCleanupProcess:
         mock_process.kill = MagicMock()
         mock_process.is_running.return_value = True  # Never stops
 
-        with patch('asyncio.sleep', new_callable=AsyncMock):
+        with patch("asyncio.sleep", new_callable=AsyncMock):
             await LocalBrowserWatchdog._cleanup_process(mock_process, require_identity=False)
 
         mock_process.terminate.assert_called_once()
@@ -240,7 +243,7 @@ class TestCleanupProcess:
         mock_process = MagicMock()
         mock_process.terminate.side_effect = psutil.NoSuchProcess(pid=99999)
 
-        with patch('asyncio.sleep', new_callable=AsyncMock):
+        with patch("asyncio.sleep", new_callable=AsyncMock):
             # Should not raise
             await LocalBrowserWatchdog._cleanup_process(mock_process, require_identity=False)
 
@@ -255,22 +258,22 @@ class TestOnBrowserLaunchEvent:
         mock_process = MagicMock()
         mock_process.pid = 12345
 
-        with patch.object(watchdog, '_launch_browser', new_callable=AsyncMock) as mock_launch:
-            mock_launch.return_value = (mock_process, 'http://localhost:9222/')
+        with patch.object(watchdog, "_launch_browser", new_callable=AsyncMock) as mock_launch:
+            mock_launch.return_value = (mock_process, "http://localhost:9222/")
             event = MagicMock()
             result = await watchdog.on_BrowserLaunchEvent(event)
 
-        assert result.cdp_url == 'http://localhost:9222/'
+        assert result.cdp_url == "http://localhost:9222/"
         assert watchdog._subprocess is mock_process
 
     async def test_launch_failure_raises(self):
         watchdog, _ = _make_watchdog()
 
-        with patch.object(watchdog, '_launch_browser', new_callable=AsyncMock) as mock_launch:
-            mock_launch.side_effect = RuntimeError('Launch failed')
+        with patch.object(watchdog, "_launch_browser", new_callable=AsyncMock) as mock_launch:
+            mock_launch.side_effect = RuntimeError("Launch failed")
             event = MagicMock()
 
-            with pytest.raises(RuntimeError, match='Launch failed'):
+            with pytest.raises(RuntimeError, match="Launch failed"):
                 await watchdog.on_BrowserLaunchEvent(event)
 
 
@@ -285,19 +288,19 @@ class TestOnBrowserKillEvent:
         mock_process.terminate = MagicMock()
         mock_process.is_running.return_value = False
         watchdog._subprocess = mock_process
-        watchdog._original_user_data_dir = '/original/path'
+        watchdog._original_user_data_dir = "/original/path"
 
-        tmpdir = tempfile.mkdtemp(prefix='openbrowser-tmp-')
+        tmpdir = tempfile.mkdtemp(prefix="openbrowser-tmp-")
         watchdog._temp_dirs_to_cleanup = [Path(tmpdir)]
 
         event = MagicMock()
 
-        with patch.object(type(watchdog), '_cleanup_process', new_callable=AsyncMock) as mock_cleanup:
+        with patch.object(type(watchdog), "_cleanup_process", new_callable=AsyncMock) as mock_cleanup:
             await watchdog.on_BrowserKillEvent(event)
 
         assert watchdog._subprocess is None
         assert watchdog._temp_dirs_to_cleanup == []
-        assert session.browser_profile.user_data_dir == '/original/path'
+        assert session.browser_profile.user_data_dir == "/original/path"
         assert watchdog._original_user_data_dir is None
 
     async def test_kill_no_subprocess(self):
@@ -310,15 +313,15 @@ class TestOnBrowserKillEvent:
 
     async def test_kill_cleans_managed_profile_cache(self):
         watchdog, session = _make_watchdog()
-        session.browser_profile.user_data_dir = '/managed/profile'
-        session.browser_profile.profile_directory = 'Default'
+        session.browser_profile.user_data_dir = "/managed/profile"
+        session.browser_profile.profile_directory = "Default"
 
         event = MagicMock()
 
-        with patch.object(type(watchdog), '_cleanup_profile_cache', return_value=4096) as mock_cleanup:
+        with patch.object(type(watchdog), "_cleanup_profile_cache", return_value=4096) as mock_cleanup:
             await watchdog.on_BrowserKillEvent(event)
 
-        mock_cleanup.assert_called_once_with('/managed/profile', 'Default')
+        mock_cleanup.assert_called_once_with("/managed/profile", "Default")
 
 
 def test_owner_handoff_transfers_process_lease_and_instance_identity():
@@ -329,20 +332,20 @@ def test_owner_handoff_transfers_process_lease_and_instance_identity():
     lease = MagicMock()
     previous._subprocess = process
     previous._profile_lease = lease
-    previous._browser_record = {'pid': 123}
+    previous._browser_record = {"pid": 123}
     previous._temp_dirs_to_cleanup = [MagicMock()]
-    previous._original_user_data_dir = '/tmp/original-profile'
-    previous._instance_id = 'kept-instance'
+    previous._original_user_data_dir = "/tmp/original-profile"
+    previous._instance_id = "kept-instance"
     replacement = LocalBrowserWatchdog(event_bus=EventBus(), browser_session=session)
 
     replacement.adopt_owner(previous)
 
     assert replacement._subprocess is process
     assert replacement._profile_lease is lease
-    assert replacement._browser_record == {'pid': 123}
+    assert replacement._browser_record == {"pid": 123}
     assert replacement._temp_dirs_to_cleanup
-    assert replacement._original_user_data_dir == '/tmp/original-profile'
-    assert replacement._instance_id == 'kept-instance'
+    assert replacement._original_user_data_dir == "/tmp/original-profile"
+    assert replacement._instance_id == "kept-instance"
     assert previous._subprocess is None
     assert previous._profile_lease is None
     assert previous._browser_record is None
@@ -419,12 +422,12 @@ class TestOnBrowserStopEvent:
                 return asyncio.sleep(0).__await__()
 
             async def event_result(self, raise_if_any=True, raise_if_none=False):
-                raise RuntimeError('browser cleanup failed')
+                raise RuntimeError("browser cleanup failed")
 
         watchdog.event_bus = MagicMock()
         watchdog.event_bus.dispatch.return_value = FailedKillEvent()
 
-        with pytest.raises(RuntimeError, match='browser cleanup failed'):
+        with pytest.raises(RuntimeError, match="browser cleanup failed"):
             await watchdog.on_BrowserStopEvent(MagicMock())
 
 
@@ -435,14 +438,14 @@ class TestWaitForCdpUrl:
     async def test_timeout_raises(self):
         from openbrowser.browser.watchdogs.local_browser_watchdog import LocalBrowserWatchdog
 
-        with patch('httpx.AsyncClient') as MockClient:
+        with patch("httpx.AsyncClient") as MockClient:
             mock_client = AsyncMock()
-            mock_client.get.side_effect = ConnectionError('refused')
+            mock_client.get.side_effect = ConnectionError("refused")
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
             mock_client.__aexit__ = AsyncMock(return_value=False)
             MockClient.return_value = mock_client
 
-            with pytest.raises(TimeoutError, match='did not start within'):
+            with pytest.raises(TimeoutError, match="did not start within"):
                 await LocalBrowserWatchdog._wait_for_cdp_url(9999, timeout=0.2)
 
     async def test_success_returns_url(self):
@@ -451,7 +454,7 @@ class TestWaitForCdpUrl:
         mock_response = MagicMock()
         mock_response.status_code = 200
 
-        with patch('httpx.AsyncClient') as MockClient:
+        with patch("httpx.AsyncClient") as MockClient:
             mock_client = AsyncMock()
             mock_client.get = AsyncMock(return_value=mock_response)
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
@@ -459,7 +462,7 @@ class TestWaitForCdpUrl:
             MockClient.return_value = mock_client
 
             result = await LocalBrowserWatchdog._wait_for_cdp_url(9222)
-            assert result == 'http://localhost:9222/'
+            assert result == "http://localhost:9222/"
 
 
 @pytest.mark.asyncio
@@ -471,7 +474,7 @@ class TestGetBrowserPidViaCdp:
 
         mock_browser = MagicMock()
         mock_cdp_session = AsyncMock()
-        mock_cdp_session.send = AsyncMock(return_value={'processInfo': {'id': 54321}})
+        mock_cdp_session.send = AsyncMock(return_value={"processInfo": {"id": 54321}})
         mock_cdp_session.detach = AsyncMock()
         mock_browser.new_browser_cdp_session = AsyncMock(return_value=mock_cdp_session)
 
@@ -482,7 +485,7 @@ class TestGetBrowserPidViaCdp:
         from openbrowser.browser.watchdogs.local_browser_watchdog import LocalBrowserWatchdog
 
         mock_browser = MagicMock()
-        mock_browser.new_browser_cdp_session = AsyncMock(side_effect=Exception('fail'))
+        mock_browser.new_browser_cdp_session = AsyncMock(side_effect=Exception("fail"))
 
         result = await LocalBrowserWatchdog.get_browser_pid_via_cdp(mock_browser)
         assert result is None
@@ -495,18 +498,18 @@ class TestKillStaleChromeForProfile:
     async def test_no_stale_processes(self):
         from openbrowser.browser.watchdogs.local_browser_watchdog import LocalBrowserWatchdog
 
-        with patch('psutil.process_iter', return_value=[]):
-            result = await LocalBrowserWatchdog._kill_stale_chrome_for_profile('/tmp/no-such-profile')
+        with patch("psutil.process_iter", return_value=[]):
+            result = await LocalBrowserWatchdog._kill_stale_chrome_for_profile("/tmp/no-such-profile")
             assert result is False
 
     async def test_ignores_non_chrome_processes(self):
         from openbrowser.browser.watchdogs.local_browser_watchdog import LocalBrowserWatchdog
 
         mock_proc = MagicMock()
-        mock_proc.info = {'pid': 123, 'name': 'python', 'cmdline': ['python', 'test.py']}
+        mock_proc.info = {"pid": 123, "name": "python", "cmdline": ["python", "test.py"]}
 
-        with patch('psutil.process_iter', return_value=[mock_proc]):
-            result = await LocalBrowserWatchdog._kill_stale_chrome_for_profile('/tmp/test-profile')
+        with patch("psutil.process_iter", return_value=[mock_proc]):
+            result = await LocalBrowserWatchdog._kill_stale_chrome_for_profile("/tmp/test-profile")
             assert result is False
 
     async def test_ignores_matching_chrome_without_ownership_metadata(self):
@@ -516,14 +519,10 @@ class TestKillStaleChromeForProfile:
             resolved = str(Path(tmpdir).resolve())
 
             mock_proc = MagicMock()
-            mock_proc.info = {
-                'pid': 999,
-                'name': 'chrome',
-                'cmdline': ['chrome', f'--user-data-dir={resolved}']
-            }
+            mock_proc.info = {"pid": 999, "name": "chrome", "cmdline": ["chrome", f"--user-data-dir={resolved}"]}
             mock_proc.kill = MagicMock()
 
-            with patch('psutil.process_iter', return_value=[mock_proc]):
+            with patch("psutil.process_iter", return_value=[mock_proc]):
                 result = await LocalBrowserWatchdog._kill_stale_chrome_for_profile(tmpdir)
 
             assert result is False
@@ -542,33 +541,33 @@ class TestInstallBrowserWithPlaywright:
         mock_process.kill = MagicMock()
         mock_process.wait = AsyncMock()
 
-        with patch('asyncio.create_subprocess_exec', new_callable=AsyncMock, return_value=mock_process):
-            with pytest.raises(RuntimeError, match='Timeout'):
+        with patch("asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=mock_process):
+            with pytest.raises(RuntimeError, match="Timeout"):
                 await watchdog._install_browser_with_playwright()
 
     async def test_no_path_after_install_raises(self):
         watchdog, _ = _make_watchdog()
 
         mock_process = MagicMock()
-        mock_process.communicate = AsyncMock(return_value=(b'installed', b''))
+        mock_process.communicate = AsyncMock(return_value=(b"installed", b""))
         mock_process.returncode = 0
 
-        with patch('asyncio.create_subprocess_exec', new_callable=AsyncMock, return_value=mock_process):
-            with patch.object(type(watchdog), '_find_installed_browser_path', return_value=None):
-                with pytest.raises(RuntimeError, match='No local browser path'):
+        with patch("asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=mock_process):
+            with patch.object(type(watchdog), "_find_installed_browser_path", return_value=None):
+                with pytest.raises(RuntimeError, match="No local browser path"):
                     await watchdog._install_browser_with_playwright()
 
     async def test_successful_install(self):
         watchdog, _ = _make_watchdog()
 
         mock_process = MagicMock()
-        mock_process.communicate = AsyncMock(return_value=(b'installed', b''))
+        mock_process.communicate = AsyncMock(return_value=(b"installed", b""))
         mock_process.returncode = 0
 
-        with patch('asyncio.create_subprocess_exec', new_callable=AsyncMock, return_value=mock_process):
-            with patch.object(type(watchdog), '_find_installed_browser_path', return_value='/usr/bin/chrome'):
+        with patch("asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=mock_process):
+            with patch.object(type(watchdog), "_find_installed_browser_path", return_value="/usr/bin/chrome"):
                 result = await watchdog._install_browser_with_playwright()
-                assert result == '/usr/bin/chrome'
+                assert result == "/usr/bin/chrome"
 
 
 @pytest.mark.asyncio
@@ -579,47 +578,55 @@ class TestLaunchBrowser:
         watchdog, session = _make_watchdog()
         session.browser_profile.executable_path = None
 
-        with patch.object(type(watchdog), '_find_installed_browser_path', return_value=None):
-            with patch.object(watchdog, '_install_browser_with_playwright', new_callable=AsyncMock, return_value=None):
-                with pytest.raises(RuntimeError, match='No local Chrome'):
+        with patch.object(type(watchdog), "_find_installed_browser_path", return_value=None):
+            with patch.object(watchdog, "_install_browser_with_playwright", new_callable=AsyncMock, return_value=None):
+                with pytest.raises(RuntimeError, match="No local Chrome"):
                     await watchdog._launch_browser(max_retries=1)
 
     async def test_custom_executable_path(self):
         watchdog, session = _make_watchdog()
-        session.browser_profile.executable_path = '/custom/chrome'
+        session.browser_profile.executable_path = "/custom/chrome"
 
         mock_subprocess = MagicMock()
         mock_subprocess.pid = 12345
 
-        with patch('asyncio.create_subprocess_exec', new_callable=AsyncMock, return_value=mock_subprocess):
-            with patch('psutil.Process', return_value=MagicMock()):
-                with patch.object(type(watchdog), '_wait_for_cdp_url', new_callable=AsyncMock, return_value='http://localhost:9222/'):
-                    with patch.object(type(watchdog), '_kill_stale_chrome_for_profile', new_callable=AsyncMock, return_value=False):
+        with patch("asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=mock_subprocess):
+            with patch("psutil.Process", return_value=MagicMock()):
+                with patch.object(
+                    type(watchdog), "_wait_for_cdp_url", new_callable=AsyncMock, return_value="http://localhost:9222/"
+                ):
+                    with patch.object(
+                        type(watchdog), "_kill_stale_chrome_for_profile", new_callable=AsyncMock, return_value=False
+                    ):
                         process, cdp_url = await watchdog._launch_browser(max_retries=1)
 
-        assert cdp_url == 'http://localhost:9222/'
+        assert cdp_url == "http://localhost:9222/"
 
     async def test_cleans_managed_profile_cache_before_launch(self):
         watchdog, session = _make_watchdog()
-        session.browser_profile.executable_path = '/custom/chrome'
-        session.browser_profile.profile_directory = 'Default'
+        session.browser_profile.executable_path = "/custom/chrome"
+        session.browser_profile.profile_directory = "Default"
 
         mock_subprocess = MagicMock()
         mock_subprocess.pid = 12345
 
-        with patch('asyncio.create_subprocess_exec', new_callable=AsyncMock, return_value=mock_subprocess):
-            with patch('psutil.Process', return_value=MagicMock()):
-                with patch.object(type(watchdog), '_wait_for_cdp_url', new_callable=AsyncMock, return_value='http://localhost:9222/'):
-                    with patch.object(type(watchdog), '_kill_stale_chrome_for_profile', new_callable=AsyncMock, return_value=False):
-                        with patch.object(type(watchdog), '_cleanup_profile_cache', return_value=8192) as mock_cleanup:
+        with patch("asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=mock_subprocess):
+            with patch("psutil.Process", return_value=MagicMock()):
+                with patch.object(
+                    type(watchdog), "_wait_for_cdp_url", new_callable=AsyncMock, return_value="http://localhost:9222/"
+                ):
+                    with patch.object(
+                        type(watchdog), "_kill_stale_chrome_for_profile", new_callable=AsyncMock, return_value=False
+                    ):
+                        with patch.object(type(watchdog), "_cleanup_profile_cache", return_value=8192) as mock_cleanup:
                             process, cdp_url = await watchdog._launch_browser(max_retries=1)
 
-        assert cdp_url == 'http://localhost:9222/'
-        mock_cleanup.assert_called_once_with(str(session.browser_profile.user_data_dir), 'Default')
+        assert cdp_url == "http://localhost:9222/"
+        mock_cleanup.assert_called_once_with(str(session.browser_profile.user_data_dir), "Default")
 
     async def test_retries_with_temp_dir_on_profile_error(self):
         watchdog, session = _make_watchdog()
-        session.browser_profile.executable_path = '/usr/bin/chrome'
+        session.browser_profile.executable_path = "/usr/bin/chrome"
 
         call_count = 0
 
@@ -627,16 +634,46 @@ class TestLaunchBrowser:
             nonlocal call_count
             call_count += 1
             if call_count == 1:
-                raise RuntimeError('user data directory already in use')
+                raise RuntimeError("user data directory already in use")
             mock_proc = MagicMock()
             mock_proc.pid = 12345
             return mock_proc
 
-        with patch('asyncio.create_subprocess_exec', side_effect=mock_create_subprocess):
-            with patch('psutil.Process', return_value=MagicMock()):
-                with patch.object(type(watchdog), '_wait_for_cdp_url', new_callable=AsyncMock, return_value='http://localhost:9222/'):
-                    with patch.object(type(watchdog), '_kill_stale_chrome_for_profile', new_callable=AsyncMock, return_value=False):
+        with patch("asyncio.create_subprocess_exec", side_effect=mock_create_subprocess):
+            with patch("psutil.Process", return_value=MagicMock()):
+                with patch.object(
+                    type(watchdog), "_wait_for_cdp_url", new_callable=AsyncMock, return_value="http://localhost:9222/"
+                ):
+                    with patch.object(
+                        type(watchdog), "_kill_stale_chrome_for_profile", new_callable=AsyncMock, return_value=False
+                    ):
                         process, cdp_url = await watchdog._launch_browser(max_retries=3)
 
-        assert cdp_url == 'http://localhost:9222/'
+        assert cdp_url == "http://localhost:9222/"
         assert call_count == 2
+
+
+def test_headless_shell_preference_reaches_the_path_lookup(monkeypatch):
+    from openbrowser.browser.watchdogs import local_browser_watchdog as module
+
+    seen: list[bool] = []
+
+    def fake_lookup(prefer_headless_shell=False):
+        seen.append(prefer_headless_shell)
+        return '/fake/spawn'
+
+    monkeypatch.setattr(module.LocalBrowserWatchdog, '_find_installed_browser_path', staticmethod(fake_lookup))
+    assert module.LocalBrowserWatchdog._find_installed_browser_path(True) == '/fake/spawn'
+    assert seen == [True]
+
+
+def test_headless_shell_patterns_cover_each_platform_layout():
+    import inspect
+
+    from openbrowser.browser.watchdogs import local_browser_watchdog as module
+
+    source = inspect.getsource(module.LocalBrowserWatchdog._find_installed_browser_path)
+    assert "chrome-headless-shell-mac-arm64/chrome-headless-shell" in source
+    assert "chrome-headless-shell-mac-x64/chrome-headless-shell" in source
+    assert "chrome-linux64/headless_shell" in source
+    assert "chrome-headless-shell-win64" in source

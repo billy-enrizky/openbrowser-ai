@@ -595,6 +595,14 @@ class BrowserProfile(BrowserConnectArgs, BrowserLaunchPersistentContextArgs, Bro
 		default=None,
 		description='Rendering policy. Defaults to lightweight when lightweight=True, otherwise full.',
 	)
+	use_headless_shell: bool = Field(
+		default=False,
+		description=(
+			'Prefer the installed Playwright headless shell over full Chrome when no executable_path is set. '
+			'The shell has no browser UI, no extensions, and a much smaller process tree. '
+			'Use it for scraping and headless text work, not for VNC, extensions, or exact screenshot bytes.'
+		),
+	)
 	text_only: bool = Field(
 		default=False,
 		description=(
