@@ -16,122 +16,94 @@ This page combines historical benchmark runs with current native local lanes:
 
 ## Native local benchmark lanes, 2026-11-24
 
-These lanes are current, local, and reproducible. They use no LLM, no cloud
-browser, and no AWS. The raw JSONL and the full per-task tables live in the
-repository:
+These local fixture runs use no LLM, cloud browser, or AWS. They measure different workloads, so they do not produce one product ranking. The raw data and methods live in `benchmarks/scraping/README.md` and `benchmarks/interactive/README.md`.
 
-- `benchmarks/scraping/README.md`
-- `benchmarks/interactive/README.md`
+### Scraping latency
 
-### Web scraping vs Firecrawl Local
+<img src="/images/native-scraping-p50.png" alt="Log-scale chart of p50 scraping latency in milliseconds for OpenBrowser full and lightweight, Lightpanda, and Firecrawl Local across five local tasks." />
 
-N=10 with 2 warmups, macOS arm64, Firecrawl Local 0.1.1. The OpenBrowser arm is
-named because `asset_heavy` uses lightweight mode.
+The chart uses the same N=10 run for all four arms. Each arm had 2 warmups. The run took place on macOS arm64 on 2026-11-24. It used OpenBrowser `0.1.58.dev16+g325d7b469`, Lightpanda `1.0.5`, Firecrawl Local `0.1.1`, and Chrome for Testing `159.0.8154.6`. The host load average was `13.6, 16.3, 16.4` at start. Treat the p50 values as shared-host evidence, not quiet-host results. The chart uses a logarithmic axis.
 
-| Task | OpenBrowser arm | Firecrawl Local | OpenBrowser | Result |
-| --- | --- | ---: | ---: | --- |
-| static_article | full | 1.3 ms | 1.1 ms | parity, p95 1.5 ms for both |
-| pagination | full | 6.5 ms | 4.9 ms | OpenBrowser 1.33x |
-| table | full | 3.4 ms | 1.4 ms | OpenBrowser 2.43x |
-| js_list | full | 594.0 ms | 16.5 ms | OpenBrowser 36.0x |
-| asset_heavy | lightweight | 614.8 ms | 16.3 ms | OpenBrowser 37.7x |
-
-The table path returns 2490 structured bytes against Firecrawl's 6736 markdown
-bytes. The JavaScript tasks are the largest OpenBrowser advantage. Static
-article is parity, not a clear win. A later N=10 rerun on a host at load average
-12.29 was noisy and is not used as a new claim.
-
-### Lightweight no-render vs Lightpanda
-
-Lightpanda 1.0.5 and OpenBrowser no-render were measured on the same five local
-fixtures with N=10 and 2 warmups. OpenBrowser no-render was faster on all five:
-static article 12.3 ms versus 189.1 ms, JS list 47.5 versus 207.1, pagination
-47.9 versus 935.5, table 19.8 versus 169.3, and asset-heavy 41.6 versus 164.1.
-OpenBrowser no-render still runs Blink layout and uses more memory than
-Lightpanda. Do not turn this latency result into a memory, startup, or
-full-site compatibility claim.
-
-### Efficiency and resource use
-
-A separate resource lane samples the benchmark process tree. N=3 with 1
-warmup, same arms and fixtures, host load average `15.7 / 16.8 / 18.4`. Peak
-RSS is p50 MB and CPU is live process-tree p50 ms.
-
-| Task | HTTP | OpenBrowser lightweight | Firecrawl Local | Lightpanda |
+| Task | OpenBrowser full, p50 ms | OpenBrowser lightweight, p50 ms | Lightpanda, p50 ms | Firecrawl Local, p50 ms |
 | --- | ---: | ---: | ---: | ---: |
-| static_article RSS | 51.6 | 741.8 | 155.7 | 123.6 |
-| static_article CPU | 41.0 | 41.0 | 32.5 | 60.5 |
-| js_list RSS | n/a | 762.3 | 1411.0 | 124.9 |
-| js_list CPU | n/a | 100.0 | 380.4 | 61.6 |
-| pagination RSS | 51.7 | 765.3 | 1433.4 | 122.9 |
-| pagination CPU | 31.4 | 44.3 | 74.7 | 203.3 |
-| table RSS | 51.8 | 765.5 | 1384.2 | 123.4 |
-| table CPU | 33.8 | 30.8 | 34.4 | 62.6 |
-| asset_heavy RSS | n/a | 783.2 | 1687.0 | 124.5 |
-| asset_heavy CPU | n/a | 115.4 | 520.6 | 62.7 |
+| `static_article` | 17.9 | 17.4 | 189.1 | 2.9 |
+| `js_list` | 44.8 | 42.0 | 207.1 | 641.8 |
+| `pagination` | 46.0 | 47.2 | 935.5 | 9.1 |
+| `table` | 25.7 | 22.2 | 169.3 | 8.0 |
+| `asset_heavy` | 82.7 | 50.0 | 164.1 | 639.2 |
 
-The HTTP path is the memory and CPU winner on server-rendered pages, but it
-fails the JavaScript tasks by design. OpenBrowser browser arms use about 740 to
-783 MB. Lightweight and no-render cut CPU on JavaScript and asset-heavy pages.
-Firecrawl Local uses 155.7 MB on the static article but 1.38 to 1.69 GB on the
-JavaScript and asset-heavy pages. Lightpanda has the lowest browser-like RSS at
-about 123 MB, but its pagination CPU is 203.3 ms against 44.3 ms for
-OpenBrowser lightweight. The resource sampler adds overhead, so use this table
-for RSS and CPU, not latency.
+All plotted arms passed 10 of 10 oracle checks per task. Raw data: `benchmarks/scraping/results-lightpanda-2026-11-24-n10.json`.
+
+The earlier fast-static run used 10 samples and 2 warmups per arm and task. It ran on 2026-11-23 with OpenBrowser `0.1.58.dev6+gcf873b951.d20261123`, Firecrawl Local `0.1.1`, and Chrome for Testing `159.0.8154.6`. The raw artifact does not record a host-load average.
+
+| Task | OpenBrowser full, p50 ms | OpenBrowser lightweight, p50 ms | Firecrawl Local, p50 ms |
+| --- | ---: | ---: | ---: |
+| `static_article` | 1.1 | 1.9 | 1.3 |
+| `js_list` | 16.5 | 17.4 | 594.0 |
+| `pagination` | 4.9 | 6.8 | 6.5 |
+| `table` | 1.4 | 2.8 | 3.4 |
+| `asset_heavy` | 57.0 | 16.3 | 614.8 |
+
+Raw data: `benchmarks/scraping/results-fast-static-2026-11-23-n10.json`.
+
+### Scraping resource use
+
+<img src="/images/native-scraping-resources.png" alt="Two-panel chart of peak process-tree RSS in megabytes and live process-tree CPU in milliseconds for HTTP, OpenBrowser lightweight, Firecrawl Local, and Lightpanda." />
+
+This resource lane used 3 samples and 1 warmup per arm and task on 2026-11-24. It ran on macOS arm64 with Chrome for Testing `159.0.8154.6`, Firecrawl Local `0.1.1`, and Lightpanda `1.0.5`. The resource artifact does not record the OpenBrowser build. The host load average was `15.7, 16.8, 18.4`. The sampler adds overhead, so use these values for RSS and CPU, not latency.
+
+Each table cell gives peak RSS in MB, then live process-tree CPU in ms. `n/a` means the HTTP arm failed the JavaScript task oracle.
+
+| Task | HTTP, RSS and CPU | OpenBrowser lightweight, RSS and CPU | Firecrawl Local, RSS and CPU | Lightpanda, RSS and CPU |
+| --- | ---: | ---: | ---: | ---: |
+| `static_article` | 51.6 MB, 41.0 ms | 741.8 MB, 41.0 ms | 155.7 MB, 32.5 ms | 123.6 MB, 60.5 ms |
+| `js_list` | n/a | 762.3 MB, 100.0 ms | 1411.0 MB, 380.4 ms | 124.9 MB, 61.6 ms |
+| `pagination` | 51.7 MB, 31.4 ms | 765.3 MB, 44.3 ms | 1433.4 MB, 74.7 ms | 122.9 MB, 203.3 ms |
+| `table` | 51.8 MB, 33.8 ms | 765.5 MB, 30.8 ms | 1384.2 MB, 34.4 ms | 123.4 MB, 62.6 ms |
+| `asset_heavy` | n/a | 783.2 MB, 115.4 ms | 1687.0 MB, 520.6 ms | 124.5 MB, 62.7 ms |
+
+Raw data: `benchmarks/scraping/results-resources-2026-11-24-n3.json`.
 
 ### Interactive browsing, cold lane
 
-OpenBrowser, chrome-devtools-mcp 1.13.0, agent-browser 0.43.0, and browser-use
-1.0.8 ran on identical local fixtures and exact server-side oracles. All four
-arms started a fresh process tree, daemon, and browser per task. N=3 per task
-and arm; p50 milliseconds:
+<img src="/images/native-interactive-cold-p50.png" alt="Cold interactive p50 latency in milliseconds for OpenBrowser, chrome-devtools-mcp, agent-browser, and browser-use across five tasks." />
 
-| Task | OpenBrowser | chrome-devtools-mcp | agent-browser | browser-use |
+The cold lane starts a fresh process tree, daemon, and browser for every task. It ran on macOS arm64 on 2026-11-23 with 3 samples and no warmups per arm and task. All 60 runs passed their oracle. The tools were OpenBrowser CLI `0.1.58.dev12+gc421f7eac`, chrome-devtools-mcp `1.13.0`, agent-browser `0.43.0`, and browser-use `1.0.8` with browser-harness `0.1.13`. All arms used Chrome `158.0.8127.36`. The artifacts do not record host load average. Treat these N=3 values as smoke evidence, not a statistical claim.
+
+| Task | OpenBrowser, p50 ms | chrome-devtools-mcp, p50 ms | agent-browser, p50 ms | browser-use, p50 ms |
 | --- | ---: | ---: | ---: | ---: |
-| wizard | 4837 | 4570 | 1789 | 1499 |
-| modal | 3509 | 3805 | 2468 | 1811 |
-| download | 3492 | 2054 | 1710 | 1451 |
-| tabs | 7792 | 2426 | 1638 | 1111 |
-| auth | 5110 | 3963 | 2709 | 3150 |
+| `wizard` | 4837 | 4570 | 1789 | 1499 |
+| `modal` | 3509 | 3805 | 2468 | 1811 |
+| `download` | 3492 | 2054 | 1710 | 1451 |
+| `tabs` | 7792 | 2426 | 1638 | 1111 |
+| `auth` | 5110 | 3963 | 2709 | 3150 |
 
-OpenBrowser leads chrome-devtools-mcp on modal only and trails the other arms.
-The cold daemon and browser start is the dominant gap. This is not a universal
-speed win.
+Raw data: `benchmarks/interactive/results/results-2026-11-23-lean.jsonl`.
 
 ### Interactive browsing, warm lane
 
-The warm lane starts each arm once, then runs each task against a fresh fixture.
-OpenBrowser uses `openbrowser-ai warm`; chrome-devtools-mcp starts its MCP
-server and Chrome once; agent-browser starts one named session; browser-use
-starts one dedicated Chrome and reuses its CDP URL. The auth task remains cold
-because it deliberately restarts the browser.
+<img src="/images/native-interactive-warm-p50.png" alt="Warm interactive p50 latency in milliseconds for OpenBrowser, chrome-devtools-mcp, agent-browser, and browser-use across four tasks." />
 
-Paired N=3 run, same browser build, isolated HOME, config, profile, and socket,
-headless, with `--use-mock-keychain`. Warm p50 milliseconds:
+The warm lane starts each arm once, then runs each task against a fresh fixture. The auth task stays in the cold lane because it restarts the browser. This paired run took place on macOS arm64 on 2026-11-24. It used 3 samples per arm and task. It used the same tool versions and Chrome build as the cold lane. It used an isolated HOME, config, profile, and socket. It ran headless with `--use-mock-keychain`. All 48 warm runs passed their oracle. The artifacts do not record host load average. Treat these N=3 values as smoke evidence, not a statistical claim.
 
-| Task | OpenBrowser | chrome-devtools-mcp | agent-browser | browser-use |
+| Task | OpenBrowser, p50 ms | chrome-devtools-mcp, p50 ms | agent-browser, p50 ms | browser-use, p50 ms |
 | --- | ---: | ---: | ---: | ---: |
-| wizard | 3401 | 4089 | 1264 | 2111 |
-| modal | 1574 | 2910 | 1754 | 1057 |
-| download | 966 | 836 | 629 | 915 |
-| tabs | 6170 | 1644 | 1237 | 650 |
+| `wizard` | 3401 | 4089 | 1264 | 2111 |
+| `modal` | 1574 | 2910 | 1754 | 1057 |
+| `download` | 966 | 836 | 629 | 915 |
+| `tabs` | 6170 | 1644 | 1237 | 650 |
 
-All 48 warm runs passed their oracle. OpenBrowser improves over its own cold
-lane by 1.26x to 3.62x. It beats chrome-devtools-mcp on modal and is close on
-wizard, but still trails agent-browser and browser-use on wizard, download, and
-tabs. The tabs task is the largest gap, 6170 ms for OpenBrowser against 650 ms
-for browser-use. The warm lane shows that startup is not the only gap; tab
-discovery, focus switching, and per-action overhead still matter.
+Raw data: `benchmarks/interactive/results/results-warm-4arm-2026-11-24-n3.jsonl`.
 
-### What these lanes do not prove
+### What these lanes show
 
-- No live-site anti-bot, CAPTCHA, or login-provider coverage.
-- The resource lane measures RSS and CPU, not GPU memory, disk I/O, or energy.
-- Lightpanda and Chromium have different engines, layout, paint, extension, and
-  screenshot semantics.
-- The warm lane covers four arms but excludes the auth task. The cold lane
-  covers auth.
-- Local fixture wins are not a universal ranking of live-site behavior.
+No product wins every lane. Firecrawl Local has lower RSS than OpenBrowser lightweight on `static_article`: 155.7 MB against 741.8 MB. It uses much more RSS on JavaScript pages. It reaches 1411.0 MB on `js_list` and 1687.0 MB on `asset_heavy`, against 762.3 MB and 783.2 MB for OpenBrowser lightweight.
+
+Lightpanda has lower RSS than OpenBrowser lightweight in the resource lane. Its `pagination` RSS is 122.9 MB against 765.3 MB. The separate N=10 latency lane records 935.5 ms for Lightpanda pagination and 47.2 ms for OpenBrowser lightweight. Lower RSS does not mean faster pagination.
+
+OpenBrowser beats chrome-devtools-mcp on warm `modal` and is close on warm `wizard`. It trails agent-browser and browser-use on warm `wizard`, `download`, and `tabs`. The largest warm gap is `tabs`: OpenBrowser takes 6170 ms, against 650 ms for browser-use. These results do not show a universal win.
+
+The fixtures do not test live-site anti-bot behavior, CAPTCHA, or login providers. The resource lane measures RSS and CPU, not GPU memory, disk I/O, or energy. Lightpanda and Chromium use different engines and do not have identical layout, paint, extension, or screenshot behavior. Local fixture results do not establish a ranking for live websites.
 
 ## MCP Server Comparison
 
