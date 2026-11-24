@@ -72,6 +72,21 @@ EOF
 
 ### Step 3 -- Test user interactions (login flow)
 
+For stable role or name locators, resolve and act in one step:
+
+```bash
+openbrowser-ai -c - <<'EOF'
+await fill_element("test@example.com", role="textbox", name="Email")
+await fill_element("test-password", role="textbox", name="Password")
+await click_element(role="button", name="Sign in")
+await wait(2)
+EOF
+```
+
+Use `find_element(...)` when a later indexed action needs the resolved index. It reads a screenshotless browser state and can wait for an element after navigation.
+
+You can also inspect and use indices directly:
+
 ```bash
 openbrowser-ai -c - <<'EOF'
 # Get form fields

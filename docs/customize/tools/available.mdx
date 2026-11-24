@@ -57,6 +57,9 @@ Prefer indexed actions whenever an element index exists. If converting screensho
 The CodeAgent and MCP execution namespaces expose additional Python helpers beyond the Agent action registry:
 
 - **`browser.get_browser_state_summary()`** - page metadata and interactive elements
+- **`find_element(role=None, name=None, element_id=None, tag=None, timeout=0)`** - resolve an interactive index from a screenshotless state
+- **`click_element(role=..., name=...)`** - find and click in one call
+- **`fill_element(text, role=..., name=...)`** - find an input and type in one call
 - **`get_selector_from_index(index)`** - CSS selector for an element index
 - **`download_file(url, filename=None)`** - download with browser cookies
 - **`wait_for_download(timeout=30, url=None, lookback=0, download_ref=None)`** - wait for a terminal download phase; start it before the triggering click

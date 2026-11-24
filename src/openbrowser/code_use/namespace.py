@@ -12,9 +12,10 @@ import json
 import logging
 import re
 import time
+from collections.abc import Awaitable, Callable
 from inspect import isawaitable, iscoroutinefunction
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, cast
 from urllib.parse import unquote, urlparse
 
 import requests
@@ -686,6 +687,153 @@ def create_namespace(
 		raise ValueError(f'Could not generate selector for element index {index}')
 
 	namespace['get_selector_from_index'] = get_selector_from_index_wrapper
+
+	# Add screenshotless element lookup and action helpers for interactive flows.
+	async def find_element(
+		role: str | None = None,
+		name: str | None = None,
+		element_id: str | None = None,
+		tag: str | None = None,
+		*,
+		timeout: float = 0.0,  # noqa: ASYNC109 - polling owns the deadline
+		poll_interval: float = 0.1,
+	) -> int:
+		"""Return the current interactive index for a matching element.
+
+		Matches by element id, accessibility role and name, or tag and name.
+		The first matching element in selector-map order is returned. The lookup
+		reads a screenshotless browser state. Use timeout to wait for an element
+		that appears after an action or navigation.
+
+		Args:
+			role: Accessibility role, for example button, textbox, or radio.
+			name: Exact accessibility name or visible label when available.
+			element_id: Exact HTML id attribute.
+			tag: HTML tag name, case-insensitive.
+			timeout: Seconds to keep polling. Zero performs one lookup.
+			poll_interval: Seconds between lookups when timeout is positive.
+
+		Returns:
+			The integer index to pass to click(), input_text(), or another
+			indexed action.
+		"""
+		if role is None and name is None and element_id is None and tag is None:
+			raise ValueError('find_element() needs role, name, element_id, or tag')
+		deadline = time.monotonic() + max(0.0, timeout)
+		while True:
+			summary = await browser_session.get_browser_state_summary(include_screenshot=False)
+			for raw_index, node in summary.dom_state.selector_map.items():
+				ax_node = getattr(node, 'ax_node', None)
+				node_id = node.attributes.get('id') if node.attributes else None
+				node_tag = (node.tag_name or '').lower()
+				if element_id is not None and node_id == element_id:
+					return int(raw_index)
+				if (
+					role is not None
+					and ax_node is not None
+					and ax_node.role == role
+					and (name is None or ax_node.name == name)
+				):
+					return int(raw_index)
+				if (
+					tag is not None
+					and node_tag == tag.lower()
+					and (name is None or (ax_node is not None and ax_node.name == name))
+				):
+					return int(raw_index)
+				if (
+					role is None
+					and tag is None
+					and element_id is None
+					and name is not None
+					and ax_node is not None
+					and ax_node.name == name
+				):
+					return int(raw_index)
+			if timeout <= 0 or time.monotonic() >= deadline:
+				break
+			await asyncio.sleep(max(0.01, poll_interval))
+		selector = ', '.join(
+			part
+			for part in (
+				f'role={role!r}' if role is not None else '',
+				f'name={name!r}' if name is not None else '',
+				f'element_id={element_id!r}' if element_id is not None else '',
+				f'tag={tag!r}' if tag is not None else '',
+			)
+			if part
+		)
+		raise RuntimeError(
+			f'Element not found after {timeout:g}s: {selector}. '
+			'Read the current browser state or increase timeout.'
+		)
+
+	async def click_element(
+		role: str | None = None,
+		name: str | None = None,
+		element_id: str | None = None,
+		tag: str | None = None,
+		*,
+		timeout: float = 10.0,  # noqa: ASYNC109 - polling owns the deadline
+		poll_interval: float = 0.1,
+		**click_kwargs: Any,
+	) -> Any:
+		"""Find an element and click it in one call.
+
+		Uses find_element() to resolve the current index, then calls click().
+		Pass the same role, name, element_id, or tag filters accepted by
+		find_element(). The default timeout waits up to 10 seconds for an
+		element that appears after navigation or another action.
+		"""
+		action = namespace.get('click')
+		if not callable(action):
+			raise RuntimeError('click_element() requires the click action')
+		click_action = cast(Callable[..., Awaitable[Any]], action)
+		index = await find_element(
+			role=role,
+			name=name,
+			element_id=element_id,
+			tag=tag,
+			timeout=timeout,
+			poll_interval=poll_interval,
+		)
+		return await click_action(index=index, **click_kwargs)
+
+	async def fill_element(
+		text: str,
+		role: str | None = None,
+		name: str | None = None,
+		element_id: str | None = None,
+		tag: str | None = None,
+		*,
+		timeout: float = 10.0,  # noqa: ASYNC109 - polling owns the deadline
+		poll_interval: float = 0.1,
+		**input_kwargs: Any,
+	) -> Any:
+		"""Find an input element and type text into it in one call.
+
+		Uses find_element() to resolve the current index, then calls
+		input_text(). The default timeout waits up to 10 seconds for an
+		element that appears after navigation or another action.
+		"""
+		action = namespace.get('input_text')
+		if not callable(action):
+			raise RuntimeError('fill_element() requires the input_text action')
+		input_action = cast(Callable[..., Awaitable[Any]], action)
+		index = await find_element(
+			role=role,
+			name=name,
+			element_id=element_id,
+			tag=tag,
+			timeout=timeout,
+			poll_interval=poll_interval,
+		)
+		return await input_action(index=index, text=text, **input_kwargs)
+
+	namespace['find_element'] = find_element
+	namespace['click_element'] = click_element
+	namespace['fill_element'] = fill_element
+
 
 	# Add download_file function for downloading files via browser session
 	async def download_file(url: str, filename: str | None = None) -> str:

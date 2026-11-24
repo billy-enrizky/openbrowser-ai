@@ -64,9 +64,22 @@ EOF
 
 ### Step 3 -- Fill text inputs
 
+If the field has a stable accessibility name or id, avoid hard-coded indices:
+
 ```bash
 openbrowser-ai -c - <<'EOF'
-# Fill fields using their indices from Step 2
+await fill_element("user@example.com", role="textbox", name="Email")
+await fill_element("secure-password", role="textbox", name="Password")
+await click_element(role="button", name="Sign in")
+EOF
+```
+
+`find_element(role=..., name=..., element_id=..., tag=..., timeout=...)` returns the index when a later indexed action needs it. The helper reads a screenshotless browser state and waits for the element when a timeout is set.
+
+You can also use indices from Step 2:
+
+```bash
+openbrowser-ai -c - <<'EOF'
 await input_text(index=5, text="user@example.com")
 await input_text(index=7, text="secure-password")
 EOF
