@@ -31,9 +31,22 @@ print(f'{len(state.dom_state.selector_map)} interactive elements')
 "
 ```
 
+## Native web search
+
+Use `search` to find source URLs without starting Chromium. The command prints a compact table by default.
+
+```bash
+openbrowser-ai search "OpenBrowser MCP docs"
+openbrowser-ai search "OpenBrowser MCP docs" --json --output search-results.json
+openbrowser-ai search "OpenBrowser MCP docs" --urls-only --output search-urls.txt
+openbrowser-ai scrape --urls-file search-urls.txt --output scraped-pages.jsonl --output-format jsonl
+```
+
+Use `--json` for a JSON array. Use `--urls-only` to write one URL per line. Search snippets do not count as evidence. Scrape and read the source page before you cite it. The package caps `max_results` at 20.
+
 ## One-shot scraping
 
-Use `scrape` for deterministic extraction without an LLM. Static pages use HTTP first; thin JavaScript shells fall back to Chromium.
+Use `scrape` for deterministic extraction without an LLM. Static pages use HTTP first. Thin JavaScript shells fall back to Chromium.
 
 ```bash
 # Markdown of a page
@@ -121,7 +134,8 @@ All functions from the MCP `execute_code` tool are available in `-c` mode:
 | **Tabs** | `get_tabs()`, `switch(tab_id)`, `close(tab_id)` |
 | **JavaScript** | `evaluate(code)` -- run JS in page context, returns Python objects |
 | **Downloads** | `download_file(url, filename)`; `wait_for_download(timeout, url, lookback, download_ref)`; `download_outcomes()` and `download_failures()` (sync); `list_downloads()` (sync) |
-| **Scraping** | `scrape_page(url, format, selector, wait_for, engine)`; `scrape_pages(urls, concurrency, format, engine)` |
+| **Search** | `search_web(query, max_results, backend, region, safe_search, timelimit)`, `search_and_scrape(query, max_results, concurrency, format, ...)` |
+| **Scraping** | `scrape_page(url, format, selector, wait_for, engine)`, `scrape_pages(urls, concurrency, format, engine)` |
 | **State** | `browser.get_browser_state_summary()` -- page metadata and interactive elements |
 | **CSS** | `get_selector_from_index(index)` -- CSS selector for an element |
 | **Completion** | `done(text, success)` -- signal task completion |

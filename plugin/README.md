@@ -78,11 +78,13 @@ Add to your project's `.mcp.json`:
 
 ## Available Tools
 
-A 2026-07-28 MCP client sees five tools. Call `create_context` first and keep the returned `context_id`. Pass that handle to `execute_code`, `get_status`, and `reset_browser`, then call `close_context` when finished. `execute_code` runs Python code in a persistent per-context namespace with browser automation functions. `get_status` is a read-only lifecycle and tab snapshot. `reset_browser` closes a stuck browser while preserving scalar and scalar-only container variables by default. Inspect `namespace_transfer.dropped` for names that could not be carried. `close_context` releases the context and its browser profile.
+A 2026-07-28 MCP client sees six tools. Older supported clients see four. Both catalogs include the stateless `search_web` tool. It needs no `context_id` and does not start a browser. Its snippets do not count as evidence. Scrape and read source pages before you cite them.
+
+For stateful calls, call `create_context` first and keep the returned `context_id`. Pass that handle to `execute_code`, `get_status`, and `reset_browser`, then call `close_context` when finished. `execute_code` runs Python code in a persistent per-context namespace with browser automation functions. `get_status` is a read-only lifecycle and tab snapshot. `reset_browser` closes a stuck browser while preserving scalar and scalar-only container variables by default. Inspect `namespace_transfer.dropped` for names that could not be carried. `close_context` releases the context and its browser profile.
 
 A context is process-local. The handle lives until `close_context` or server exit, and a new MCP server process cannot resume it. The browser session inside a context auto-closes after 10 minutes without an `execute_code` call. `get_status` does not refresh that timer. The context handle and scalar variables remain available, and the next `execute_code` call starts a fresh browser. A successful `close_context` invalidates the handle. If cleanup fails, the result is `close_failed` with a retryable flag. Retry `close_context` to finish cleanup; the handle remains unavailable for `execute_code`, `get_status`, and `reset_browser`. New calls while closing fail with `context_closing`, and non-close calls after a failed close fail with `context_close_failed`.
 
-Older clients that negotiate `2024-11-05`, `2025-03-26`, `2025-06-18`, or `2025-11-25` see the original three-tool catalog: `execute_code`, `get_status`, and `reset_browser`, with a legacy no-handle context. Any other protocol version is rejected with MCP error `-32602`; it is not downgraded.
+Older clients that negotiate `2024-11-05`, `2025-03-26`, `2025-06-18`, or `2025-11-25` see four tools: `execute_code`, `get_status`, `reset_browser`, and `search_web`. Stateful calls use a legacy no-handle context. OpenBrowser rejects other protocol versions with MCP error `-32602`. It does not downgrade them.
 
 `get_status` also adds `browser.health` for an existing session. It reports the latest page crash, focus-recovery outcome, and local process binding. It is not a live page-readiness probe, and `process_present` is `null` when the current root is not bound to the recorded local owner or when process identity is inconclusive. Wait while recovery is pending. Reset only when no usable target exists.
 
@@ -101,6 +103,7 @@ Authenticated browser state persists within one context, so later calls in that 
 | **Downloads** | `download_file(url, filename)` -- download a file using browser cookies; `wait_for_download(timeout, url, lookback, download_ref)` -- wait for a terminal download phase; `download_outcomes()` and `download_failures()` (sync); `list_downloads()` (sync) -- list downloaded files |
 | **State** | `browser.get_browser_state_summary()` -- page metadata and interactive elements |
 | **CSS** | `get_selector_from_index(index)` -- CSS selector for an element |
+| **Search and scraping** | `search_web(query, max_results, backend, region, safe_search, timelimit)`, `search_and_scrape(query, max_results, concurrency, format, ...)` |
 | **Completion** | `done(text, success)` -- signal task completion |
 
 Prefer indexed actions whenever an element index exists. Coordinate actions use CSS viewport pixels, not screenshot pixels. If a screenshot uses a `devicePixelRatio` other than 1, divide its coordinates by `window.devicePixelRatio` before calling an `*_xy` function.
@@ -147,7 +150,17 @@ openbrowser-ai uses **2.1-2.6x fewer tokens** than all competitors via Python co
 | Claude Sonnet 4.6 ($3/$15 per M) | $0.50 | $0.92 | **$0.18** |
 | Claude Opus 4.6 ($5/$25 per M) | $0.83 | $1.53 | **$0.30** |
 
-The OpenBrowser MCP entry used the legacy one-tool catalog at benchmark time. Current 2026-07-28 clients see five tools. [Full MCP comparison with methodology](https://docs.openbrowser.me/comparison)
+The OpenBrowser MCP entry used the legacy one-tool catalog at benchmark time. Current 2026-07-28 clients see six tools. [Full MCP comparison with methodology](https://docs.openbrowser.me/comparison)
+
+## Native web search
+
+Use `openbrowser-ai search "your query"` to search without starting a browser. Use `--json` for a JSON array or `--urls-only` for one URL per line. Search snippets are not evidence. Scrape and read source pages before you cite them.
+
+```bash
+openbrowser-ai search "OpenBrowser MCP docs" --json --output search-results.json
+openbrowser-ai search "OpenBrowser MCP docs" --urls-only --output search-urls.txt
+openbrowser-ai scrape --urls-file search-urls.txt --output scraped-pages.jsonl --output-format jsonl
+```
 
 ## CLI Execute Mode
 

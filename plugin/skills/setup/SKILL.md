@@ -18,7 +18,7 @@ Use this skill once per machine or project. It installs the CLI and browser, con
 - Prefer `uv`, then `pipx`, then `pip`.
 - Python 3.12 or newer is required.
 - Use `openbrowser-ai -c` for CLI verification and `openbrowser-ai --mcp` for the installed MCP server.
-- For modern MCP clients, call `create_context` first, pass the returned `context_id` to stateful tools, and call `close_context` when finished.
+- For stateful MCP calls, create a context and pass its `context_id`. Call `close_context` when finished. The stateless `search_web` tool needs no context and does not start a browser.
 - Verify with a temporary socket and profile. Never stop a user daemon that this setup did not start.
 - Do not install optional provider packages unless the user wants that provider.
 
@@ -76,15 +76,18 @@ openbrowser-ai install
 
 `openbrowser-ai install` uses `uvx playwright install chromium`. If `uvx` is unavailable, install uv first or run `python -m playwright install chromium` with the interpreter that owns the OpenBrowser install. The MCP command also uses `openbrowser-ai --mcp`, so it does not require uvx at runtime.
 
-### Optional DDGS web search
+### Native web search
 
-Run `uvx ddgs ...` to use the DDGS search CLI without a global install. If `uvx` is unavailable, install DDGS for your user:
+The base OpenBrowser package includes DDGS. Do not install DDGS separately. The `search` command does not start a browser.
 
 ```bash
-python3 -m pip install --user --upgrade ddgs
+openbrowser-ai search "OpenBrowser MCP docs"
+openbrowser-ai search "OpenBrowser MCP docs" --json --output search-results.json
+openbrowser-ai search "OpenBrowser MCP docs" --urls-only --output search-urls.txt
+openbrowser-ai scrape --urls-file search-urls.txt --output scraped-pages.jsonl --output-format jsonl
 ```
 
-The install adds the `ddgs` command to your user Python scripts directory. Add that directory to `PATH` if the shell cannot find `ddgs`.
+Search snippets do not count as evidence. Scrape and read the source page before citing it. The package caps `max_results` at 20.
 
 ## Step 3 -- Inspect and repair config
 
@@ -104,7 +107,7 @@ MCP and `openbrowser-ai -c` do not need an LLM key. Do not print the value.
 
 ## Step 4 -- Configure MCP
 
-The installed server command is `openbrowser-ai --mcp`. The zero-install form is `uvx openbrowser-ai --mcp`. OpenBrowser uses MCP SDK 2.3 and negotiates protocol version `2026-07-28` with modern clients. Those clients see five tools and use the handle returned by `create_context` for stateful calls. Older supported clients see the legacy three-tool catalog without context handles.
+The installed server command is `openbrowser-ai --mcp`. The zero-install form is `uvx openbrowser-ai --mcp`. OpenBrowser uses MCP SDK 2.3 and negotiates protocol version `2026-07-28` with modern clients. Those clients see six tools. Older supported clients see four tools. Both catalogs include stateless `search_web`, which needs no `context_id` and does not start a browser. Use the handle returned by `create_context` for stateful calls.
 
 Add it to the agent's native MCP configuration.
 

@@ -816,7 +816,7 @@ async def test_exact_catalog_input_contracts_and_annotations(monkeypatch):
                 "type": "integer",
                 "minimum": 1,
                 "default": 5,
-                "description": "Maximum results. Values above the package limit are capped.",
+                "description": "Maximum results. Values above 20 are capped at 20.",
             },
             "backend": {
                 "type": "string",
@@ -841,7 +841,7 @@ async def test_exact_catalog_input_contracts_and_annotations(monkeypatch):
         "additionalProperties": False,
     }
     assert "context_id" not in search_tool.input_schema["properties"]
-    assert "Snippets are unverified previews, not evidence" in search_tool.description
+    assert "Snippets do not count as evidence." in search_tool.description
     assert [tool.annotations.model_dump(by_alias=True, exclude_none=True) for tool in catalog.tools] == [
         {
             "readOnlyHint": False,

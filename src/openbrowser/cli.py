@@ -1177,7 +1177,7 @@ def _render_search_table(results: list[Any]) -> str:
 	type=click.IntRange(min=1),
 	default=5,
 	show_default=True,
-	help="Maximum results to return. Large values are capped by the search package.",
+	help="Maximum results to return. Values above 20 are capped at 20.",
 )
 @click.option("--backend", default="auto", show_default=True, help="DDGS backend or comma-delimited backends.")
 @click.option("--region", default="us-en", show_default=True, help="Search region.")

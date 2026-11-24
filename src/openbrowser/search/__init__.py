@@ -12,7 +12,7 @@ from urllib.parse import urlsplit, urlunsplit
 from ddgs import DDGS
 from ddgs.exceptions import DDGSException
 
-__all__ = ["SafeSearch", "SearchError", "SearchResult", "asearch", "search"]
+__all__ = ["MAX_SEARCH_RESULTS", "SafeSearch", "SearchError", "SearchResult", "asearch", "search"]
 
 SafeSearch = Literal["on", "moderate", "off"]
 MAX_SEARCH_RESULTS = 20
@@ -62,7 +62,10 @@ def search(
     safe_search: SafeSearch = "moderate",
     timelimit: str | None = None,
 ) -> list[SearchResult]:
-    """Search synchronously and return normalized results in provider order."""
+    """Search synchronously and return normalized results in provider order.
+
+    Reject non-positive ``max_results`` values and cap values above 20.
+    """
     request = _make_request(query, max_results, backend, region, safe_search, timelimit)
     return _search_sync(request)
 
@@ -76,7 +79,10 @@ async def asearch(
     safe_search: SafeSearch = "moderate",
     timelimit: str | None = None,
 ) -> list[SearchResult]:
-    """Search asynchronously without blocking the event loop."""
+    """Search asynchronously without blocking the event loop.
+
+    Reject non-positive ``max_results`` values and cap values above 20.
+    """
     request = _make_request(query, max_results, backend, region, safe_search, timelimit)
     return await asyncio.to_thread(_search_sync, request)
 

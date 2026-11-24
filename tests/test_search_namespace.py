@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 import openbrowser.code_use.namespace as namespace_module
+from openbrowser.code_use.descriptions import EXECUTE_CODE_DESCRIPTION, EXECUTE_CODE_DESCRIPTION_COMPACT
 from openbrowser.code_use.namespace import create_namespace
 from openbrowser.search import SearchResult
 
@@ -17,6 +18,14 @@ def _make_namespace():
     tools = MagicMock()
     tools.registry.registry.actions = {}
     return create_namespace(session, tools=tools), session
+
+
+def test_code_agent_descriptions_explain_search_and_snippet_limits():
+    for description in (EXECUTE_CODE_DESCRIPTION_COMPACT, EXECUTE_CODE_DESCRIPTION):
+        assert "search_web" in description
+        assert "search_and_scrape" in description
+        assert "do not count as evidence" in description
+        assert "scrape_pages" in description
 
 
 @pytest.mark.asyncio

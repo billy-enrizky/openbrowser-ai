@@ -304,8 +304,8 @@ def _tool_catalog(description: str, *, modern: bool) -> tuple[types.Tool, ...]:
 		name='search_web',
 		description=(
 			'Search the web without starting a browser or requiring a context_id. '
-			'Returns a JSON array with title, url, and snippet fields. Snippets are unverified previews, not evidence. '
-			'Scrape and read the source page before citing it. Results are capped by the search package.'
+			'Returns a JSON array with title, url, and snippet fields. Snippets do not count as evidence. '
+			'Scrape and read the source page before citing it. Values above 20 are capped at 20.'
 		),
 		input_schema={
 			'type': 'object',
@@ -315,7 +315,7 @@ def _tool_catalog(description: str, *, modern: bool) -> tuple[types.Tool, ...]:
 					'type': 'integer',
 					'minimum': 1,
 					'default': 5,
-					'description': 'Maximum results. Values above the package limit are capped.',
+					'description': 'Maximum results. Values above 20 are capped at 20.',
 				},
 				'backend': {
 					'type': 'string',
