@@ -6,12 +6,43 @@ scrapes, and daemon commands do not load the agent stack. This wrapper executes
 normal library import of `openbrowser.cli` execute a command.
 """
 
-import runpy
 import sys
 
 from openbrowser.cli_modes import CliMode, select_cli_mode
-from openbrowser.scrape.http import run_http_scrape_sync
-from openbrowser.scrape.output import emit_scrape_payload, read_scrape_urls_file
+
+
+class _LazyRunpy:
+	"""Resolve ``runpy`` only when a path that needs it runs."""
+
+	def run_module(self, *args, **kwargs):
+		"""Import ``runpy`` and delegate to ``run_module``."""
+		import runpy
+
+		return runpy.run_module(*args, **kwargs)
+
+
+def run_http_scrape_sync(*args, **kwargs):
+	"""Resolve the HTTP scrape runner on first use."""
+	from openbrowser.scrape.http import run_http_scrape_sync as implementation
+
+	return implementation(*args, **kwargs)
+
+
+def emit_scrape_payload(*args, **kwargs):
+	"""Resolve the scrape payload writer on first use."""
+	from openbrowser.scrape.output import emit_scrape_payload as implementation
+
+	return implementation(*args, **kwargs)
+
+
+def read_scrape_urls_file(*args, **kwargs):
+	"""Resolve the URL file reader on first use."""
+	from openbrowser.scrape.output import read_scrape_urls_file as implementation
+
+	return implementation(*args, **kwargs)
+
+
+runpy = _LazyRunpy()
 
 _SCRAPE_VALUE_OPTIONS = {
 	'--format',

@@ -751,9 +751,10 @@ class DaemonServer:
 
             from openbrowser.browser import BrowserSession
             from openbrowser.code_use.executor import DEFAULT_MAX_OUTPUT_CHARS, CodeExecutor
-            from openbrowser.code_use.namespace import create_namespace
+            from openbrowser.code_use.prewarm import join_namespace_import, start_namespace_import
             from openbrowser.tools.service import CodeAgentTools
 
+            namespace_import = start_namespace_import()
             CONFIG.require_browser_start_allowed(self._startup_config_result)
             profile = self._build_browser_profile()
             session = BrowserSession(browser_profile=profile)
@@ -768,6 +769,9 @@ class DaemonServer:
                     await seeded
 
                 tools = CodeAgentTools()
+                join_namespace_import(namespace_import)
+                from openbrowser.code_use.namespace import create_namespace
+
                 namespace = create_namespace(browser_session=session, tools=tools)
 
                 try:

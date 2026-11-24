@@ -621,10 +621,10 @@ class LocalBrowserWatchdog(BaseWatchdog):
 						return f'http://localhost:{port}/'
 					else:
 						# Chrome is starting up and returning 502/500 errors
-						await asyncio.sleep(0.1)
+						await asyncio.sleep(0.02)
 				except Exception:
 					# Connection error or request timeout - Chrome might not be ready yet
-					await asyncio.sleep(0.1)
+					await asyncio.sleep(0.02)
 
 		raise TimeoutError(f'Browser did not start within {timeout} seconds')
 

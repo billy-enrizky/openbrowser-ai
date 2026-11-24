@@ -100,7 +100,18 @@ from openbrowser.browser.lifecycle import (
 	LifecycleTransitionError,
 )
 from openbrowser.code_use.executor import DEFAULT_MAX_OUTPUT_CHARS, CodeExecutor, output_limit_for_executor
-from openbrowser.code_use.namespace import create_namespace
+from openbrowser.code_use.prewarm import join_namespace_import, start_namespace_import
+
+
+def create_namespace(*args, **kwargs):
+	"""Resolve the code-use namespace factory on first use.
+
+	Keeping a module-level callable preserves the seam that tests and embedders
+	replace while letting the server import without the data-science stack.
+	"""
+	from openbrowser.code_use.namespace import create_namespace as implementation
+
+	return implementation(*args, **kwargs)
 from openbrowser.config import (
 	CONFIG,
 	ConfigStartupError,
@@ -801,7 +812,10 @@ class _BrowserOwner:
 					pass
 			self._browser_lifecycle.transition(LifecyclePhase.STARTING, reason='browser start requested')
 
-			# Initialize browser session
+			# Initialize browser session. The namespace import runs on a
+			# worker thread at the same time, so a cold start pays the larger
+			# of the two costs instead of their sum.
+			namespace_import = start_namespace_import()
 			session = None
 			try:
 				profile = self._build_browser_profile()
@@ -816,6 +830,8 @@ class _BrowserOwner:
 				# Create CodeAgent tools and namespace
 				self._tools = CodeAgentTools()
 				self._tools_generation = self._browser_generation
+				join_namespace_import(namespace_import)
+
 				self._namespace = create_namespace(
 					browser_session=self.browser_session,
 					tools=self._tools,

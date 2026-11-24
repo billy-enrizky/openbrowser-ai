@@ -22,7 +22,6 @@ from sys import stderr
 from typing import Any, ParamSpec, TypeVar
 from urllib.parse import urlparse
 
-import httpx
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -33,16 +32,28 @@ URL_PATTERN = re.compile(r'https?://[^\s<>"\']+|www\.[^\s<>"\']+|[^\s<>"\']+\.[a
 
 logger = logging.getLogger(__name__)
 
-# Import error types - these may need to be adjusted based on actual import paths
-try:
-	from openai import BadRequestError as OpenAIBadRequestError
-except ImportError:
-	OpenAIBadRequestError = None
+# Error types from optional LLM SDKs are resolved on first access. Importing
+# the OpenAI SDK costs about 130 ms, and every CLI, daemon, and MCP start
+# imports this module, so the import is deferred until a caller asks for it.
+_LAZY_ERROR_TYPES = {
+	'OpenAIBadRequestError': ('openai', 'BadRequestError'),
+	'GroqBadRequestError': ('groq', 'BadRequestError'),
+}
 
-try:
-	from groq import BadRequestError as GroqBadRequestError  # type: ignore[import-not-found]
-except ImportError:
-	GroqBadRequestError = None
+
+def __getattr__(name: str):
+	"""Resolve optional SDK error types on first use."""
+	target = _LAZY_ERROR_TYPES.get(name)
+	if target is None:
+		raise AttributeError(f'module {__name__!r} has no attribute {name!r}')
+	module_name, attribute = target
+	try:
+		module = __import__(module_name, fromlist=[attribute])
+		value = getattr(module, attribute)
+	except ImportError:
+		value = None
+	globals()[name] = value
+	return value
 
 
 # Global flag to prevent duplicate exit messages
@@ -605,6 +616,8 @@ async def check_latest_openbrowser_version() -> str | None:
 		The latest version string if successful, None if failed
 	"""
 	try:
+		import httpx
+
 		async with httpx.AsyncClient(timeout=3.0) as client:
 			response = await client.get('https://pypi.org/pypi/openbrowser-ai/json')
 			if response.status_code == 200:
