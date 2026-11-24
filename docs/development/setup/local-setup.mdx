@@ -41,18 +41,32 @@ OPENBROWSER_ALLOWED_DOMAINS=example.com,*.example.com
 
 Run `uv run openbrowser-ai config status` to inspect the selected config path and state.
 
+## Verify without a browser
+
+Search and HTTP-only scraping work before Chromium is installed. Neither command starts a browser:
+
+```bash
+uv run openbrowser-ai search "OpenBrowser MCP docs" --max-results 5
+uv run openbrowser-ai scrape https://example.com --engine http --format text
+uv run openbrowser-ai scrape https://a.example https://b.example --engine http --jsonl --concurrency 8
+```
+
+Search snippets are not evidence. Scrape and read the source page before you cite it.
+
 ## Install Chromium
 
 ```bash
 uv run openbrowser-ai install
 ```
 
-## Verify
+## Verify a browser session
 
 ```bash
 uv run openbrowser-ai --version
 uv run openbrowser-ai -c "await navigate('https://example.com'); print(await evaluate('document.title'))"
 ```
+
+A warm `-c` call uses a standard-library thin client and does not import the full CLI or agent stack. A cold call falls back to the full client and starts the daemon.
 
 The second command starts the CLI daemon, opens a real browser, prints the page title, and leaves the daemon running for later calls. Stop it when finished:
 
