@@ -196,19 +196,27 @@ def test_cli_entry_executes_warm_code_without_loading_full_cli(socket_path):
     assert server.request.get("code") == 'print("thin-path")'
 
 
-def test_cli_entry_falls_back_when_daemon_is_absent(tmp_path, monkeypatch):
-    # No server exists at this socket. The normal CLI path must run and start a
-    # daemon, so the observed failure comes from cold startup, not from a
-    # silently dropped request.
-    socket_path = tmp_path / "missing.sock"
-    result = _run_cli(
-        ["-c", "print(1)"],
-        env={
-            "OPENBROWSER_SOCKET": str(socket_path),
-            "OPENBROWSER_SETUP_LOGGING": "false",
-            "OPENBROWSER_DAEMON_START_TIMEOUT": "0.1",
-        },
-        timeout=60,
-    )
-    assert result.returncode != 0
-    assert "daemon" in (result.stderr + result.stdout).lower()
+def test_execute_code_fast_path_falls_back_without_daemon(monkeypatch):
+    from openbrowser import cli_entry
+    from openbrowser.daemon import thin_client
+
+    monkeypatch.setattr(thin_client, "execute_code_sync", lambda _code: None)
+    assert cli_entry._execute_code_fast_path(["openbrowser-ai", "-c", "print(1)"]) is False
+
+
+def test_cli_entry_runs_the_full_cli_when_the_fast_path_declines(monkeypatch):
+    import sys
+
+    from openbrowser import cli_entry
+
+    calls: list[tuple[str, str | None]] = []
+
+    def fake_run_module(name: str, run_name: str | None = None, alter_sys: bool = False) -> dict:
+        calls.append((name, run_name))
+        return {}
+
+    monkeypatch.setattr(cli_entry.runpy, "run_module", fake_run_module)
+    monkeypatch.setattr(cli_entry, "_execute_code_fast_path", lambda _argv: False)
+    monkeypatch.setattr(sys, "argv", ["openbrowser-ai", "-c", "print(1)"])
+    cli_entry.cli()
+    assert calls == [("openbrowser.cli", "__main__")]
