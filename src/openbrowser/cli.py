@@ -1327,6 +1327,9 @@ def scrape(
 		except Exception as error:
 			click.echo(f'Scrape failed: {type(error).__name__}: {error}', err=True)
 			sys.exit(1)
+		if http_payload is None:
+			click.echo('Scrape failed: the HTTP engine returned no payload', err=True)
+			sys.exit(1)
 		emit_scrape_payload(
 			http_payload,
 			batch_mode=batch_mode,
@@ -1343,9 +1346,10 @@ def scrape(
 	setup_logging(stream=sys.stderr, log_level='critical', force_setup=True)
 	_quiet_stderr_logging()
 
-	from openbrowser.browser import BrowserProfile, BrowserSession
-	from openbrowser.code_use.namespace import create_namespace, scrape_http
-	from openbrowser.tools.service import CodeAgentTools
+	# The browser stack and the code-use namespace are imported inside the
+	# browser fallback. A static page is served over HTTP, and loading those
+	# modules costs RSS and import time the HTTP path never uses.
+	from openbrowser.scrape.http import scrape_http
 
 	parent = ctx.parent.params if ctx.parent is not None else {}
 	config_result = CONFIG.require_browser_start_allowed()
@@ -1386,6 +1390,10 @@ def scrape(
 			if engine == 'http':
 				raise RuntimeError(f'HTTP scrape failed for {url}')
 
+		from openbrowser.browser import BrowserProfile, BrowserSession
+		from openbrowser.code_use.namespace import create_namespace
+		from openbrowser.tools.service import CodeAgentTools
+
 		session = BrowserSession(browser_profile=BrowserProfile(**browser_config))
 		namespace = None
 		try:
@@ -1416,6 +1424,10 @@ def scrape(
 				await session.kill()
 
 	async def _run_batch_scrape(batch_urls: list[str]) -> list[dict]:
+		from openbrowser.browser import BrowserProfile, BrowserSession
+		from openbrowser.code_use.namespace import create_namespace
+		from openbrowser.tools.service import CodeAgentTools
+
 		session = BrowserSession(browser_profile=BrowserProfile(**browser_config))
 		namespace = None
 		try:

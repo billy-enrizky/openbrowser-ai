@@ -308,9 +308,18 @@ def run_http_scrape_sync(
     timeout_ms: int | None,
     max_chars: int | None,
     concurrency: int,
-) -> dict[str, Any] | list[dict[str, Any]]:
-    """Run a single or batch HTTP scrape through one event loop."""
+    engine: str = "http",
+) -> dict[str, Any] | list[dict[str, Any]] | None:
+    """Run a single or batch HTTP scrape through one event loop.
+
+    With ``engine="auto"`` a single URL returns ``None`` when the page needs a
+    browser, so the caller can fall back before paying for the browser stack.
+    """
+    if engine not in ("http", "auto"):
+        raise ValueError(f"engine must be 'http' or 'auto', got {engine!r}")
     if batch_mode:
+        if engine != "http":
+            raise ValueError("batch scraping over HTTP requires engine='http'")
         return asyncio.run(
             scrape_http_batch(
                 url_list,
@@ -330,9 +339,11 @@ def run_http_scrape_sync(
             selector=selector,
             extract_links=extract_links,
             timeout_ms=timeout_ms,
-            engine="http",
+            engine=engine,
         )
     )
     if result is None:
+        if engine == "auto":
+            return None
         raise RuntimeError(f"HTTP scrape failed for {url_list[0]}")
     return _truncate_scrape_result(result, max_chars)

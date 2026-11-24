@@ -357,3 +357,67 @@ def test_scrape_urls_file_only_uses_batch_mode(tmp_path):
     assert outcome.exit_code == 0
     assert namespace["scrape_pages"].await_args.args[0] == ["https://a.example", "https://b.example"]
     namespace["scrape_page"].assert_not_awaited()
+
+
+_STATIC_ONLY_SCRIPT = r"""
+import sys
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+
+class BlockBrowserStack:
+    def find_spec(self, name, path=None, target=None):
+        if name == 'openbrowser.browser' or name.startswith('openbrowser.browser.'):
+            raise ImportError('the browser stack must not load for a static scrape')
+        return None
+
+
+sys.meta_path.insert(0, BlockBrowserStack())
+
+
+class Handler(BaseHTTPRequestHandler):
+    protocol_version = 'HTTP/1.1'
+
+    def log_message(self, *args):
+        return
+
+    def do_GET(self):
+        body = (
+            b'<html><head><title>Static Only</title></head><body>'
+            b'<p>Static content that is long enough to pass the render probe.</p>'
+            b'</body></html>'
+        )
+        self.send_response(200)
+        self.send_header('content-type', 'text/html')
+        self.send_header('content-length', str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
+server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+threading.Thread(target=server.serve_forever, daemon=True).start()
+url = 'http://127.0.0.1:%d/page' % server.server_address[1]
+
+from openbrowser.cli_entry import cli
+
+sys.argv = ['openbrowser-ai', 'scrape', url, '--format', 'markdown']
+cli()
+print('BROWSER_IMPORTED', 'openbrowser.browser' in sys.modules)
+server.shutdown()
+"""
+
+
+def test_static_scrape_does_not_require_the_browser_stack():
+    """A static page must scrape over HTTP without importing the browser stack."""
+    env = {**os.environ}
+    env.pop("PYTHONPATH", None)
+    completed = subprocess.run(
+        [sys.executable, "-c", _STATIC_ONLY_SCRIPT],
+        capture_output=True,
+        text=True,
+        timeout=180,
+        env=env,
+    )
+    assert completed.returncode == 0, completed.stderr[-2000:]
+    assert "BROWSER_IMPORTED False" in completed.stdout, completed.stdout[-2000:]
+    assert "Static content" in completed.stdout
