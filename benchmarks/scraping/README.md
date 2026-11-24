@@ -66,14 +66,23 @@ Firecrawl Local was `0.1.1`, and both used Chrome for Testing `159.0.8154.6`.
 | Task | OpenBrowser full, p50 ms | OpenBrowser lightweight, p50 ms | Firecrawl Local, p50 ms | Result |
 | --- | ---: | ---: | ---: | --- |
 | `static_article` | 2.09 | 2.20 | 2.29 | Parity, sample ranges overlap |
-| `pagination` | 10.4 | 10.8 | 9.7 | Firecrawl 1.07x faster |
+| `pagination` | 10.4 | 10.8 | 9.7 | Parity, ranges overlap. Firecrawl p50 7% lower |
 | `table` | 2.23 | 2.25 | 4.67 | OpenBrowser full 2.09x faster |
 | `js_list` | 29.8 | 32.8 | 616.4 | OpenBrowser full 20.7x faster |
 | `asset_heavy` | 59.0 | 32.4 | 619.4 | OpenBrowser lightweight 19.1x faster |
 
-OpenBrowser wins three of the five local tasks, draws static article, and is
-within 7 percent on pagination. The JavaScript gap is architectural: OpenBrowser keeps one browser
-per arm, while Firecrawl Local starts a browser for each JavaScript scrape.
+OpenBrowser wins three of the five local tasks and draws static article.
+Pagination is parity because the sample ranges overlap, but Firecrawl's p50
+is 7 percent lower.
+
+A separate profile of the pagination task measured 1.24 ms for the HTTP fetch
+and 0.09 ms for Lexbor extraction per page. The extraction is about 7 percent
+of the page cost. The 0.7 ms total difference over five pages is request and
+Python orchestration overhead, not a parsing gap. See the batch comparison
+below for the multi-page surface.
+
+The JavaScript gap is architectural: OpenBrowser keeps one browser per arm,
+while Firecrawl Local starts a browser for each JavaScript scrape.
 OpenBrowser returns 2490 structured bytes for the table task. Firecrawl returns
 6736 markdown bytes. Those outputs are not semantically identical artifacts.
 

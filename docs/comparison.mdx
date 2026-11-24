@@ -6,17 +6,32 @@ icon: "scale-balanced"
 
 # Browser Automation Comparison
 
-This page combines historical benchmark runs with current native local lanes:
+## Benchmark index
 
-1. **[CLI Benchmark](/cli-comparison)** (2026-03-15) -- 4-way comparison of CLI tools driven by an LLM via a single Bash tool
-2. **MCP Benchmark** (below) -- 3-way historical comparison of MCP servers as tool providers
-3. **Native local lanes** (2026-11-24) -- scraping, Firecrawl batch, HTTP-only CLI batch, lightweight no-render, interactive cold, and interactive warm benchmarks, including paired competitor comparisons with raw JSONL evidence
+The latest run is first. The other runs are historical and retained for provenance.
 
-> **Historical benchmark, not a current-version ranking.** The two MCP runs below were recorded on the dates shown. The 6-task LLM run installed Playwright MCP and Chrome DevTools MCP from `@latest` at run time, but their resolved versions were not written to the retained artifacts. The 5-step run's install method was not retained. The 5-step token benchmark's raw per-response files are also not retained in this repository. Treat these numbers as historical observations for the versions installed on the run date, not as a comparison against today's releases. No universal winner follows from them. See [Provenance and limits](#provenance-and-limits).
+| Run | Date | Scope | Status |
+| --- | --- | --- | --- |
+| [Native local benchmark lanes](#native-local-lanes) | 2026-11-24 | Scraping, Firecrawl batch, HTTP-only CLI batch, Lightpanda no-render, and paired interactive comparisons | Current |
+| [CLI Benchmark](/cli-comparison) | 2026-03-15 | 4-way CLI comparison driven by an LLM through one Bash tool | Historical |
+| [MCP Server Comparison](#mcp-benchmark) | 2026-02-21 | 3-way MCP server comparison | Historical |
+
+Start with the current run. It uses deterministic local fixtures, no LLM, no cloud browser, and no AWS. The CLI and MCP runs are historical. Their resolved versions and raw artifacts are incomplete, so do not read them as current-version rankings.
+
+The current results:
+
+- [Paired interactive comparisons](#paired-interactive): OpenBrowser won 10 of 10 on every task.
+- [Firecrawl batch](#firecrawl-batch): OpenBrowser was 3.16x faster at p50.
+- [HTTP-only CLI batch](#cli-batch): OpenBrowser measured 205.029 ms and 47.859 MB peak RSS.
+- [Sequential scraping](#scraping-latency): OpenBrowser had 3 wins and 2 parity results.
+
+<a id="native-local-lanes"></a>
 
 ## Native local benchmark lanes, 2026-11-24
 
 These local fixture runs use no LLM, cloud browser, or AWS. They measure different workloads, so they do not produce one product ranking. The raw data and methods live in `benchmarks/scraping/README.md` and `benchmarks/interactive/README.md`.
+
+<a id="scraping-latency"></a>
 
 ### Scraping latency
 
@@ -27,14 +42,24 @@ This interleaved run used 10 samples and 2 warmups per arm and task. It ran on m
 | Task | OpenBrowser full, p50 ms | OpenBrowser lightweight, p50 ms | Firecrawl Local, p50 ms | Result |
 | --- | ---: | ---: | ---: | --- |
 | `static_article` | 2.09 | 2.20 | 2.29 | Parity, sample ranges overlap |
-| `pagination` | 10.4 | 10.8 | 9.7 | Firecrawl 1.07x faster |
+| `pagination` | 10.4 | 10.8 | 9.7 | Parity, ranges overlap. Firecrawl p50 7% lower |
 | `table` | 2.23 | 2.25 | 4.67 | OpenBrowser full 2.09x faster |
 | `js_list` | 29.8 | 32.8 | 616.4 | OpenBrowser full 20.7x faster |
 | `asset_heavy` | 59.0 | 32.4 | 619.4 | OpenBrowser lightweight 19.1x faster |
 
-All arms passed 10 of 10 oracle checks on every task. OpenBrowser wins three of the five local scraping tasks. Static article and pagination are parity because the sample ranges overlap. Firecrawl's pagination p50 is 7 percent lower, which is its only p50 lead. OpenBrowser returns 2490 structured bytes for the table task. Firecrawl returns 6736 markdown bytes. Those outputs are not identical artifacts.
+All arms passed 10 of 10 oracle checks on every task. OpenBrowser wins three of the five local scraping tasks. Static article and pagination are parity because the sample ranges overlap. Firecrawl's pagination p50 is 7 percent lower. OpenBrowser returns 2490 structured bytes for the table task. Firecrawl returns 6736 markdown bytes. Those outputs are not identical artifacts.
+
+#### Why sequential pagination is parity
+
+The pagination task makes five sequential requests to a local HTTP/1.0 fixture. The OpenBrowser page cost was 2.08 ms and the Firecrawl page cost was 1.94 ms. The five-page difference is 0.7 ms.
+
+A separate profile broke down the OpenBrowser page. The HTTP fetch took 1.24 ms and Lexbor extraction took 0.09 ms. Extraction is about 7 percent of the page cost. The rest is request and Python call overhead. Firecrawl's local fetch runs in Rust and has less per-call overhead.
+
+The 10-sample ranges overlap. Treat the sequential pagination result as parity. The batch surface removes the per-page call overhead. OpenBrowser HTTP batch took 4.619 ms against Firecrawl Local batch at 14.598 ms, a 3.16x win in 10 of 10 pairs. See [Firecrawl batch scraping](#firecrawl-batch).
 
 Raw data: `benchmarks/scraping/results-firecrawl-all-2026-11-24-n10-interleaved.json`.
+
+<a id="lightpanda"></a>
 
 ### Lightweight no-render vs Lightpanda
 
@@ -105,6 +130,8 @@ The selector arm had the lowest p50 on all four tasks. It beat chrome-devtools-m
 
 Raw data: `benchmarks/interactive/results/results-warm-five-arm-tabs-ready-2026-11-24-n5.jsonl`.
 
+<a id="paired-interactive"></a>
+
 #### Paired current comparisons
 
 The arm-major lane runs every sample for one arm before the next arm. On a shared host, load drift can dominate a small difference. The paired runner warms both arms once and alternates their order for every sample. Each run gets a fresh fixture server and an exact oracle check. All 80 runs passed.
@@ -129,6 +156,8 @@ Raw data:
 - `benchmarks/interactive/results/results-paired-tabs-2026-11-24-n10.jsonl`
 - `benchmarks/interactive/results/results-paired-download-2026-11-24-n10.jsonl`
 
+<a id="firecrawl-batch"></a>
+
 ### Firecrawl batch scraping
 
 <img src="/images/native-scraping-batch-current.png" alt="Three-panel chart of API batch p50 latency for OpenBrowser and Firecrawl Local, CLI batch p50 latency for the OpenBrowser fast entry, the pre-change CLI, and Lightpanda, and peak RSS for those three CLI paths." />
@@ -148,6 +177,8 @@ Raw data:
 
 - `benchmarks/scraping/results-batch-firecrawl-2026-11-24-n10.json`
 - `benchmarks/scraping/results-batch-firecrawl-2026-11-24-n10.summary.json`
+
+<a id="cli-batch"></a>
 
 ### HTTP-only CLI batch
 
@@ -176,6 +207,8 @@ Raw data:
 - `benchmarks/scraping/results-cli-http-batch-2026-11-24-n10.json`
 - `benchmarks/scraping/results-cli-http-batch-2026-11-24-n10.summary.json`
 
+<a id="scorecard"></a>
+
 ### Head-to-head scorecard
 
 This table counts task-level results on the local fixtures. It does not score features, stability, or live-site coverage.
@@ -200,6 +233,10 @@ Against Lightpanda, OpenBrowser no-render is faster on all five tasks, but the C
 
 The fixtures do not test live-site anti-bot behavior, CAPTCHA, or login providers. The resource lane measures RSS and CPU, not GPU memory, disk I/O, or energy. Lightpanda and Chromium use different engines and do not have identical layout, paint, extension, or screenshot behavior. Local fixture results do not establish a ranking for live websites.
 
+
+> **Historical benchmark, not a current-version ranking.** The MCP runs below were recorded on the dates shown. The 6-task LLM run installed Playwright MCP and Chrome DevTools MCP from `@latest` at run time, but their resolved versions were not written to the retained artifacts. The 5-step run's install method was not retained. The 5-step token benchmark's raw per-response files are also not retained in this repository. Treat these numbers as historical observations for the versions installed on the run date, not as a comparison against today's releases. No universal winner follows from them. See [Provenance and limits](#provenance-and-limits).
+
+<a id="mcp-benchmark"></a>
 
 ## MCP Server Comparison
 
