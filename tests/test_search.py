@@ -139,6 +139,25 @@ def test_provider_no_results_retry_can_recover(monkeypatch):
     assert delays == [0.2]
 
 
+def test_no_results_after_another_provider_failure_does_not_become_empty(monkeypatch):
+    delays: list[float] = []
+
+    def respond(attempt: int, query: str, kwargs: dict[str, Any]):
+        if attempt == 1:
+            raise TimeoutError("provider timeout")
+        raise DDGSException("No results found.")
+
+    calls = _install_provider(monkeypatch, respond)
+    monkeypatch.setattr(search_module.time, "sleep", delays.append)
+
+    with pytest.raises(SearchError) as error:
+        search("query")
+
+    assert error.value.attempts == 3
+    assert len(calls) == 3
+    assert delays == [0.2, 0.4]
+
+
 def test_nonempty_invalid_provider_rows_raise_instead_of_becoming_empty(monkeypatch):
     calls = _install_provider(monkeypatch, lambda *_: [{"title": "No usable URL", "href": "file:///tmp/a"}])
 

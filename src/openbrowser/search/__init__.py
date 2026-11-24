@@ -34,7 +34,7 @@ class _SearchRequest:
 
 @dataclass(frozen=True, slots=True)
 class SearchResult:
-    """A search result whose snippet is an unverified provider preview."""
+    """A search result whose snippet does not count as evidence."""
 
     title: str
     url: str
@@ -138,7 +138,7 @@ def _text_option(name: str, value: str, max_length: int) -> str:
 
 def _search_sync(request: _SearchRequest) -> list[SearchResult]:
     last_error: Exception | None = None
-    previous_attempt_was_no_results = False
+    first_attempt_was_no_results = False
     for attempt in range(len(_RETRY_BACKOFF_SECONDS) + 1):
         try:
             with DDGS() as provider:
@@ -152,12 +152,12 @@ def _search_sync(request: _SearchRequest) -> list[SearchResult]:
                 )
         except DDGSException as error:
             is_no_results = type(error) is DDGSException and str(error).strip() == _NO_RESULTS_MESSAGE
-            if is_no_results and previous_attempt_was_no_results:
+            if attempt == 1 and first_attempt_was_no_results and is_no_results:
                 return []
-            previous_attempt_was_no_results = is_no_results
+            if attempt == 0:
+                first_attempt_was_no_results = is_no_results
             last_error = error
         except Exception as error:
-            previous_attempt_was_no_results = False
             last_error = error
         else:
             return _normalize_results(rows, request.max_results)
