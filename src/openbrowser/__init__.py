@@ -4,17 +4,53 @@ Performance optimizations:
 - Lazy imports with caching (imports only when accessed)
 - Optimized __getattr__ with dict lookup instead of repeated conditionals
 - Minimal module-level imports
-- Event loop error handling patched at module load
+- Event loop error handling installed when a browser session loads
+- CLI fast paths skip logging setup, asyncio, and configuration imports
 """
 
-import logging
 import os
+import sys
+from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
-logger = logging.getLogger('openbrowser')
+_CLI_PROGRAM_NAMES = frozenset({'openbrowser-ai', 'openbrowser', 'cli.py', 'cli_entry.py'})
 
-# Only set up logging if not in MCP mode or daemon mode
-if os.environ.get('OPENBROWSER_SETUP_LOGGING', 'true').lower() != 'false':
+
+class _LazyLogger:
+	"""Logger-shaped object that imports logging on first use."""
+
+	name = 'openbrowser'
+
+	def __getattr__(self, item: str):
+		import logging
+
+		return getattr(logging.getLogger(self.name), item)
+
+
+def _is_openbrowser_cli(argv: list[str]) -> bool:
+	program = os.path.basename(argv[0] or '') if argv else ''
+	return program in _CLI_PROGRAM_NAMES or program.startswith('openbrowser-ai')
+
+
+def _should_setup_logging(argv: list[str], env: Mapping[str, str]) -> bool:
+	"""Return False for an explicit CLI fast path that owns its output.
+
+	Library imports and Click commands keep the existing logging setup. Only a
+	recognized OpenBrowser CLI invocation in an explicit fast mode skips it.
+	"""
+	if env.get('OPENBROWSER_SETUP_LOGGING', 'true').lower() == 'false':
+		return False
+	if not _is_openbrowser_cli(argv):
+		return True
+	from openbrowser.cli_modes import select_cli_mode
+
+	return select_cli_mode(argv[1:]) is None
+
+
+logger = _LazyLogger()
+
+# Only set up logging if this is not an explicit CLI fast path.
+if _should_setup_logging(sys.argv, os.environ):
 	try:
 		from openbrowser.config import CONFIG
 		from openbrowser.logging_config import setup_logging
@@ -27,20 +63,27 @@ if os.environ.get('OPENBROWSER_SETUP_LOGGING', 'true').lower() != 'false':
 		import warnings
 		warnings.warn(f'Failed to set up openbrowser logging: {e}', stacklevel=2)
 
-# Monkeypatch BaseSubprocessTransport.__del__ to handle closed event loops gracefully
-from asyncio import base_subprocess
-
-_original_del = base_subprocess.BaseSubprocessTransport.__del__
+# Event loop error handling is installed when a browser session loads. Keeping
+# asyncio out of this module keeps the CLI warm path to the standard library.
+_original_del = None
+_asyncio_guard_installed = False
 
 
 def _patched_del(self):
-	"""Patched __del__ that handles closed event loops without throwing noisy red-herring errors like RuntimeError: Event loop is closed"""
+	"""Patched __del__ that handles closed event loops without noisy errors."""
+	global _original_del
+	original = _original_del
+	if original is None:
+		from asyncio import base_subprocess
+
+		original = base_subprocess.BaseSubprocessTransport.__del__
+		_original_del = original
 	try:
 		# Check if the event loop is closed before calling the original
 		if hasattr(self, '_loop') and self._loop and self._loop.is_closed():
 			# Event loop is closed, skip cleanup that requires the loop
 			return
-		_original_del(self)
+		original(self)
 	except RuntimeError as e:
 		if 'Event loop is closed' in str(e):
 			# Silently ignore this specific error
@@ -49,7 +92,16 @@ def _patched_del(self):
 			raise
 
 
-base_subprocess.BaseSubprocessTransport.__del__ = _patched_del
+def _install_asyncio_del_guard() -> None:
+	"""Install the subprocess transport guard once, after asyncio is loaded."""
+	global _original_del, _asyncio_guard_installed
+	if _asyncio_guard_installed:
+		return
+	from asyncio import base_subprocess
+
+	_original_del = base_subprocess.BaseSubprocessTransport.__del__
+	base_subprocess.BaseSubprocessTransport.__del__ = _patched_del
+	_asyncio_guard_installed = True
 
 
 # Type stubs for lazy imports - fixes linter warnings

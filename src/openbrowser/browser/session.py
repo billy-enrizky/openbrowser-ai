@@ -27,6 +27,7 @@ from uuid_extensions import uuid7str
 
 # CDP logging is now handled by setup_logging() in logging_config.py
 # It automatically sets CDP logs to the same level as openbrowser logs
+from openbrowser import _install_asyncio_del_guard
 from openbrowser.browser.cdp_connection import (
 	CdpConnectionHealth,
 	CdpConnectionHealthTracker,
@@ -106,6 +107,8 @@ from openbrowser.utils import _log_pretty_url, is_new_tab_page
 if TYPE_CHECKING:
 	from openbrowser.actor.page import Page
 	from openbrowser.browser.download_state import PdfDetectionSnapshot
+
+_install_asyncio_del_guard()
 
 DEFAULT_BROWSER_PROFILE = BrowserProfile()
 NAVIGATION_CONTAINMENT_GRACE = 1.0
