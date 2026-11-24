@@ -343,3 +343,42 @@ The host was shared, so read the sub 10 ms rows as order-of-magnitude values.
   startup.
 - The benchmark does not yet measure peak RSS or CPU. Add cgroup or process
   sampling before calling a result an efficiency win.
+
+## Native Lightpanda lane, 2026-11-24
+
+Lightpanda 1.0.5 (macOS arm64, SHA-256 `eec3781086ee512320a04b036f092806a8a959944ea78fc8f4fe7dfe215a84b4`), Chrome for Testing `159.0.8154.6`, Firecrawl Local 0.1.1, and OpenBrowser `0.1.58.dev16+g325d7b469`. The run used 10 samples per arm and task and 2 warmups. The host load average was `13.6 / 16.3 / 16.4` at start, so treat the absolute p50 values as shared-host evidence, not a quiet-host record.
+
+| Task | Lightpanda | OpenBrowser no-render | OpenBrowser lightweight | OpenBrowser full | Firecrawl Local |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| static_article | 189.1 ms | 12.3 ms | 17.4 ms | 17.9 ms | 2.9 ms |
+| js_list | 207.1 ms | 47.5 ms | 42.0 ms | 44.8 ms | 641.8 ms |
+| pagination | 935.5 ms | 47.9 ms | 47.2 ms | 46.0 ms | 9.1 ms |
+| table | 169.3 ms | 19.8 ms | 22.2 ms | 25.7 ms | 8.0 ms |
+| asset_heavy | 164.1 ms | 41.6 ms | 50.0 ms | 82.7 ms | 639.2 ms |
+
+The raw `http` arm was 5.8 ms on static_article, 3.8 ms on pagination, and 1.1 ms on table. It failed `js_list` and `asset_heavy` because those pages need JavaScript.
+
+Lightpanda uses `fetch --dump markdown` or `fetch --dump html`, with one process per URL and its default no-subresource policy. The OpenBrowser full arm loaded 25 requests on asset_heavy, lightweight loaded 4, and no-render loaded 2. The task is text extraction, so the no-subresource Lightpanda default is fair for text, but this is not a rendering or screenshot comparison.
+
+OpenBrowser no-render is faster than Lightpanda on all five local tasks and keeps Chromium JavaScript and DOM capability. It is not a lighter browser: it still runs Blink layout and uses more memory than Lightpanda by design. The HTTP path is the efficiency path for server-rendered pages. Do not claim Lightpanda-level memory, startup, or full-site compatibility.
+
+Limitations:
+
+- No peak RSS or CPU sampling yet. This lane measures wall clock and fixture requests only.
+- Lightpanda and OpenBrowser have different process models. Lightpanda starts one process per URL; OpenBrowser reuses one browser session for a task.
+- The shared host was under high load. The relative ordering was stable in a second clean N=10 run. An earlier run was excluded after transient OpenBrowser full-mode CDP closes and a 3 to 4 times Lightpanda outlier.
+- Lightpanda does not provide the same layout, paint, extension, or screenshot semantics as Chromium. Keep capability and latency results separate.
+
+Run:
+
+```sh
+uv run --locked python benchmarks/scraping/scrape_compare.py \
+  --samples 10 --warmups 2 \
+  --arms lightpanda http openbrowser-full openbrowser-lightweight openbrowser-no-render firecrawl-local \
+  --lightpanda-bin "$LIGHTPANDA_BIN" \
+  --firecrawl-bin "$FIRECRAWL_LOCAL_BIN" \
+  --chrome "$CHROME_EXECUTABLE" \
+  --output benchmarks/scraping/results-lightpanda-2026-11-24-n10.json
+```
+
+Raw evidence: `results-lightpanda-2026-11-24-n10.json`.

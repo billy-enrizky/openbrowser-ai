@@ -607,6 +607,116 @@ class FirecrawlArm:
         return ok, content, ""
 
 
+class LightpandaArm:
+    """Scrape through the native Lightpanda fetch command."""
+
+    name = "lightpanda"
+
+    def __init__(self, binary: str):
+        self.binary = binary
+        self.version = self._read_version()
+        self.last_engine = "lightpanda"
+
+    def _read_version(self) -> str:
+        completed = subprocess.run(
+            [self.binary, "version"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+        if completed.returncode != 0:
+            raise RuntimeError(f"lightpanda version failed: {(completed.stderr or completed.stdout)[:300]}")
+        return (completed.stdout or completed.stderr).strip()
+
+    async def start(self) -> None:
+        return
+
+    async def stop(self) -> None:
+        return
+
+    def _fetch(
+        self,
+        url: str,
+        dump: str,
+        *,
+        wait_ms: int | None = None,
+        wait_script: str | None = None,
+    ) -> str:
+        command = [self.binary, "fetch", url, "--dump", dump, "--json"]
+        if wait_ms is not None:
+            command.extend(["--wait-ms", str(wait_ms), "--wait-until", "load"])
+        if wait_script is not None:
+            command.extend(["--wait-script", wait_script])
+        completed = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+        if completed.returncode != 0:
+            detail = (completed.stderr or completed.stdout)[-500:]
+            raise RuntimeError(f"lightpanda fetch exited {completed.returncode}: {detail}")
+        try:
+            payload = json.loads(completed.stdout)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(f"lightpanda returned invalid JSON: {exc}") from exc
+        if payload.get("error"):
+            raise RuntimeError(f"lightpanda fetch error: {payload['error']}")
+        return str(payload.get("content") or "")
+
+    async def run_static(self, base: str):
+        content = self._fetch(f"{base}/static", "markdown", wait_ms=100)
+        ok = "Static Bench" in content and "Item 49" in content and "DO NOT INCLUDE" not in content
+        return ok, content, ""
+
+    async def run_js_list(self, base: str):
+        content = self._fetch(
+            f"{base}/js-list",
+            "markdown",
+            wait_script="document.querySelectorAll('#items [data-sku]').length === 30",
+        )
+        expected = [f"Product {index}{index * 10}" for index in range(JS_ITEMS)]
+        cursor = 0
+        ordered = True
+        for token in expected:
+            found = content.find(token, cursor)
+            if found < 0:
+                ordered = False
+                break
+            cursor = found + len(token)
+        ok = ordered and content.count("Product") == JS_ITEMS
+        return ok, content, ""
+
+    async def run_pagination(self, base: str):
+        ids: list[str] = []
+        pages: list[str] = []
+        for page in range(1, PAGE_COUNT + 1):
+            content = self._fetch(f"{base}/pagination?page={page}", "html", wait_ms=100)
+            pages.append(content)
+            ids.extend(re.findall(r'data-id="(page-[^"]+)"', content))
+        expected = [f"page-{page}-row-{row}" for page in range(1, PAGE_COUNT + 1) for row in range(PAGE_SIZE)]
+        ok = ids == expected
+        return ok, "\n".join(pages), ""
+
+    async def run_table(self, base: str):
+        content = self._fetch(f"{base}/table", "html", wait_ms=100)
+        rows = re.findall(r'<tr data-id="table-[^"]+">(.*?)</tr>', content, re.S)
+        ok = len(rows) == TABLE_ROWS and all(len(re.findall(r"<td>", row)) == TABLE_COLS for row in rows)
+        return ok, content, ""
+
+    async def run_assets(self, base: str):
+        content = self._fetch(
+            f"{base}/assets",
+            "markdown",
+            wait_script="document.querySelectorAll('#headlines h2').length === 20",
+        )
+        headlines = [int(value) for value in re.findall(r"Headline (\d+)", content)]
+        ok = len(headlines) == ASSET_COUNT and sorted(set(headlines)) == list(range(1, ASSET_COUNT + 1))
+        return ok, content, ""
+
+
 TASKS = {
     "static_article": "run_static",
     "js_list": "run_js_list",
@@ -674,6 +784,7 @@ def _environment(
     firecrawl_server: FirecrawlServer | None,
     firecrawl_waits: dict[str, dict[str, int]],
     chrome_path: str | None = None,
+    lightpanda_arm: LightpandaArm | None = None,
 ) -> dict:
     try:
         from openbrowser.utils import get_openbrowser_version
@@ -689,7 +800,17 @@ def _environment(
         "chrome_path": chrome_path,
         "chrome_version": _chrome_version(chrome_path),
         "firecrawl": None,
+        "lightpanda": None,
+        "load_average": list(os.getloadavg()) if hasattr(os, "getloadavg") else None,
     }
+    if lightpanda_arm is not None:
+        environment["lightpanda"] = {
+            "version": lightpanda_arm.version,
+            "binary": lightpanda_arm.binary,
+            "wait_policy": {"static": "wait-until load, wait-ms 100",
+                            "js": "wait-script, default wait budget",
+                            "resources": "Lightpanda fetch default, no subresources"},
+        }
     if firecrawl_server is not None:
         environment["firecrawl"] = {
             "version": firecrawl_server.version,
@@ -726,6 +847,11 @@ async def main() -> int:
         default=None,
         help="Chrome or Chromium binary used by both arms: BrowserProfile.executable_path and FIRECRAWL_CHROME_PATH.",
     )
+    parser.add_argument(
+        "--lightpanda-bin",
+        default=None,
+        help="Path to the Lightpanda binary. Falls back to LIGHTPANDA_BIN or PATH.",
+    )
     parser.add_argument("--output", type=Path, default=Path("benchmarks/scraping/results.json"))
     args = parser.parse_args()
 
@@ -736,43 +862,50 @@ async def main() -> int:
 
     firecrawl_server: FirecrawlServer | None = None
     firecrawl_waits: dict[str, dict[str, int]] = {}
-    if any(name.startswith("firecrawl") for name in args.arms):
-        if args.firecrawl_url:
-            firecrawl_server = FirecrawlServer(url=args.firecrawl_url, chrome_path=args.chrome)
-        else:
-            binary = _resolve_firecrawl_binary(args.firecrawl_bin)
-            if not binary:
-                raise SystemExit(
-                    "Firecrawl arms need firecrawl-local. Install it with "
-                    "`cargo install firecrawl-local --version 0.1.1 --root <tools-dir>`, "
-                    "pass --firecrawl-bin, set FIRECRAWL_LOCAL_BIN, or attach with --firecrawl-url."
-                )
-            firecrawl_server = FirecrawlServer(binary=binary, chrome_path=args.chrome)
-        firecrawl_server.start()
-        print(f"firecrawl-local {firecrawl_server.version} at {firecrawl_server.url}")
-
-    arms = []
-    for name in args.arms:
-        if name == "http":
-            arms.append(HttpArm())
-        elif name == "openbrowser-full":
-            arms.append(BrowserArm(name, "full", chrome_path=args.chrome))
-        elif name == "openbrowser-lightweight":
-            arms.append(BrowserArm(name, "lightweight", chrome_path=args.chrome))
-        elif name == "openbrowser-no-render":
-            arms.append(BrowserArm(name, "no-render", chrome_path=args.chrome))
-        elif name == "firecrawl-local":
-            firecrawl_waits[name] = {"asset_heavy": FIRECRAWL_ASSET_WAIT_MS}
-            arms.append(FirecrawlArm(name, firecrawl_server, firecrawl_waits[name]))
-        elif name == "firecrawl-local-auto":
-            firecrawl_waits[name] = {}
-            arms.append(FirecrawlArm(name, firecrawl_server, firecrawl_waits[name]))
-        else:
-            raise SystemExit(f"unknown arm: {name}")
-
-    environment = _environment(firecrawl_server, firecrawl_waits, args.chrome)
+    arms: list = []
     results: list[TaskResult] = []
+    environment: dict = {}
     try:
+        if any(name.startswith("firecrawl") for name in args.arms):
+            if args.firecrawl_url:
+                firecrawl_server = FirecrawlServer(url=args.firecrawl_url, chrome_path=args.chrome)
+            else:
+                binary = _resolve_firecrawl_binary(args.firecrawl_bin)
+                if not binary:
+                    raise SystemExit(
+                        "Firecrawl arms need firecrawl-local. Install it with "
+                        "`cargo install firecrawl-local --version 0.1.1 --root <tools-dir>`, "
+                        "pass --firecrawl-bin, set FIRECRAWL_LOCAL_BIN, or attach with --firecrawl-url."
+                    )
+                firecrawl_server = FirecrawlServer(binary=binary, chrome_path=args.chrome)
+            firecrawl_server.start()
+            print(f"firecrawl-local {firecrawl_server.version} at {firecrawl_server.url}")
+
+        for name in args.arms:
+            if name == "http":
+                arms.append(HttpArm())
+            elif name == "openbrowser-full":
+                arms.append(BrowserArm(name, "full", chrome_path=args.chrome))
+            elif name == "openbrowser-lightweight":
+                arms.append(BrowserArm(name, "lightweight", chrome_path=args.chrome))
+            elif name == "openbrowser-no-render":
+                arms.append(BrowserArm(name, "no-render", chrome_path=args.chrome))
+            elif name == "firecrawl-local":
+                firecrawl_waits[name] = {"asset_heavy": FIRECRAWL_ASSET_WAIT_MS}
+                arms.append(FirecrawlArm(name, firecrawl_server, firecrawl_waits[name]))
+            elif name == "firecrawl-local-auto":
+                firecrawl_waits[name] = {}
+                arms.append(FirecrawlArm(name, firecrawl_server, firecrawl_waits[name]))
+            elif name == "lightpanda":
+                binary = args.lightpanda_bin or os.environ.get("LIGHTPANDA_BIN") or shutil.which("lightpanda")
+                if not binary:
+                    raise SystemExit("Lightpanda arm needs a binary. Pass --lightpanda-bin or set LIGHTPANDA_BIN.")
+                arms.append(LightpandaArm(binary))
+            else:
+                raise SystemExit(f"unknown arm: {name}")
+
+        lightpanda_arm = next((arm for arm in arms if isinstance(arm, LightpandaArm)), None)
+        environment = _environment(firecrawl_server, firecrawl_waits, args.chrome, lightpanda_arm)
         for arm in arms:
             await arm.start()
             for task_name in args.tasks:
