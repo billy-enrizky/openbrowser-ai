@@ -105,6 +105,20 @@ OpenBrowser reduced warm `tabs` from 6170 ms to 1124 ms, a 5.49x improvement aga
 
 Raw data: `benchmarks/interactive/results/results-warm-4arm-2026-11-24-after-popup-n3.jsonl`.
 
+### Head-to-head scorecard
+
+This table counts task-level latency wins on the local fixtures. It does not score memory, features, stability, or live-site coverage.
+
+| Workload | Opponent | OpenBrowser wins | Opponent wins | Detail |
+| --- | --- | ---: | ---: | --- |
+| Scraping, 5 tasks | Firecrawl Local | 4 | 1 | Firecrawl leads pagination by 7 percent |
+| No-render, 5 tasks | Lightpanda `1.0.5` | 5 | 0 | Lightpanda uses less memory |
+| Warm interactive, 4 tasks | chrome-devtools-mcp | 3 | 1 | chrome-devtools-mcp wins download |
+| Warm interactive, 4 tasks | agent-browser | 1 | 3 | OpenBrowser wins modal |
+| Warm interactive, 4 tasks | browser-use | 0 | 4 | browser-use wins every warm task |
+
+OpenBrowser is the faster local scraping tool in this matrix. It does not win the warm interactive lane against browser-use or agent-browser. The page does not support a universal product ranking.
+
 ### What these lanes show
 
 OpenBrowser is the faster local scraping tool overall. It wins four of five tasks against Firecrawl Local. The largest wins are 20.7x on the JavaScript list, 19.1x on the asset-heavy page, and 2.09x on table extraction. Firecrawl leads pagination by 7 percent. Against Lightpanda, OpenBrowser no-render is faster on all five tasks, but Lightpanda uses far less memory.
