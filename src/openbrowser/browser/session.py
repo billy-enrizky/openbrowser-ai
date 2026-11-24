@@ -5746,7 +5746,6 @@ class BrowserSession(BaseModel):
 		from openbrowser.browser.watchdogs.local_browser_watchdog import LocalBrowserWatchdog
 		from openbrowser.browser.watchdogs.permissions_watchdog import PermissionsWatchdog
 		from openbrowser.browser.watchdogs.popups_watchdog import PopupsWatchdog
-		from openbrowser.browser.watchdogs.recording_watchdog import RecordingWatchdog
 		from openbrowser.browser.watchdogs.screenshot_watchdog import ScreenshotWatchdog
 		from openbrowser.browser.watchdogs.security_watchdog import SecurityWatchdog
 		from openbrowser.browser.watchdogs.storage_state_watchdog import StorageStateWatchdog
@@ -5870,10 +5869,16 @@ class BrowserSession(BaseModel):
 		# self.event_bus.on(BrowserStateRequestEvent, self._dom_watchdog.on_BrowserStateRequestEvent)
 		self._dom_watchdog.attach_to_session()
 
-		# Initialize RecordingWatchdog (handles video recording)
-		RecordingWatchdog.model_rebuild()
-		self._recording_watchdog = RecordingWatchdog(event_bus=self.event_bus, browser_session=self)
-		self._recording_watchdog.attach_to_session()
+		# Initialize RecordingWatchdog only when video recording is configured.
+		# Importing it pulls imageio, numpy, and PIL (~45 ms on a cold daemon).
+		if self.browser_profile.record_video_dir:
+			from openbrowser.browser.watchdogs.recording_watchdog import RecordingWatchdog
+
+			RecordingWatchdog.model_rebuild()
+			self._recording_watchdog = RecordingWatchdog(event_bus=self.event_bus, browser_session=self)
+			self._recording_watchdog.attach_to_session()
+		else:
+			self.logger.debug('Recording watchdog disabled (no record_video_dir configured)')
 
 		# Mark watchdogs as attached to prevent duplicate attachment
 		self._watchdogs_attached = True
@@ -6094,7 +6099,6 @@ class BrowserSession(BaseModel):
 								params={'url': 'about:blank'}, session_id=session.session_id
 							)
 							target['url'] = 'about:blank'
-							await asyncio.sleep(0.05)  # Let navigation start
 					except Exception as e:
 						self.logger.warning(f'Failed to redirect {target_url}: {e}')
 
