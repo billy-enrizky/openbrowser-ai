@@ -1,0 +1,64 @@
+{
+  "environment": {
+    "platform": "macOS-26.6-arm64-arm-64bit",
+    "machine": "arm64",
+    "binary": "/Users/billy/Documents/openbrowser-production/.worktrees/warm-lane-bench/.venv/bin/openbrowser-ai",
+    "version": "0.1.58.dev24+gd77c43315.d20261124",
+    "cold_results": "benchmarks/interactive/results/results-cold-2026-11-24-n5.jsonl",
+    "tasks": [
+      "wizard",
+      "modal",
+      "download",
+      "tabs"
+    ],
+    "samples": 5,
+    "warmup_ms": 1919.0158330020495,
+    "warmup_payload": {
+      "ok": true,
+      "elapsed_ms": 1833.3,
+      "url": "about:blank"
+    }
+  },
+  "rows": [
+    {
+      "task": "wizard",
+      "runs": 5,
+      "ok": 5,
+      "warm_p50_ms": 2240.7318749974365,
+      "warm_p95_ms": 2396.466167003382,
+      "cold_p50_ms": 5528.416041997843,
+      "speedup": 2.4672367558497683,
+      "errors": []
+    },
+    {
+      "task": "modal",
+      "runs": 5,
+      "ok": 5,
+      "warm_p50_ms": 1180.8297499956097,
+      "warm_p95_ms": 1255.7138329939335,
+      "cold_p50_ms": 3927.607999998145,
+      "speedup": 3.3261424858348523,
+      "errors": []
+    },
+    {
+      "task": "download",
+      "runs": 5,
+      "ok": 5,
+      "warm_p50_ms": 782.0949169981759,
+      "warm_p95_ms": 823.6399169982178,
+      "cold_p50_ms": 3677.825874998234,
+      "speedup": 4.702531361684853,
+      "errors": []
+    },
+    {
+      "task": "tabs",
+      "runs": 5,
+      "ok": 5,
+      "warm_p50_ms": 5744.692500004021,
+      "warm_p95_ms": 5800.9593329989,
+      "cold_p50_ms": 8369.249082999886,
+      "speedup": 1.4568663306163085,
+      "errors": []
+    }
+  ]
+}
