@@ -76,6 +76,8 @@ OpenBrowser is a framework for intelligent browser automation. It combines direc
 - **MCP Server** - Model Context Protocol for Claude Desktop, Claude Code, Codex, OpenCode, and other AI assistants.
   Modern clients use explicit contexts and isolated profiles. The server includes read-only status and reset tools.
 - **CLI Daemon** - Persistent browser daemon with `-c` flag for direct code execution from Bash, explicit startup ownership, health and recovery status, saved login state, and 10-minute auto-shutdown
+- **Fast CLI paths** - `-c` uses a standard-library thin client against a warm daemon. `scrape --engine http` uses a light console entry that does not import the browser or configuration stack
+- **Batch scraping** - `scrape_pages` and the CLI batch scrape multiple URLs with bounded concurrency. An explicit `--engine http` batch starts no browser
 - **Explicit Lifecycle State** - Browser, CDP, navigation, focus, storage, downloads, agent runs, and CodeAgent runs report typed phases instead of relying on logs
 - **Workflow Recording** - Record, replay, and export browser sessions to Jupyter notebooks or API crawler code
 - **Video Recording** - Record browser sessions as video files with ffmpeg
@@ -613,9 +615,20 @@ Local deterministic fixtures, no LLM, and interleaved N=10 samples with 2 warmup
 | `js_list` | 29.8 ms | 616.4 ms | OpenBrowser 20.7x |
 | `asset_heavy` | 32.4 ms | 619.4 ms | OpenBrowser 19.1x |
 
-OpenBrowser wins three of five local scraping tasks, draws static article, and returns structured rows for table and list extraction. Against Lightpanda, OpenBrowser no-render is faster on all five local tasks. It uses more memory: about 740 to 783 MB for browser arms against about 123 MB for Lightpanda.
+OpenBrowser wins three of five local scraping tasks, draws static article, and returns structured rows for table and list extraction. Firecrawl's sequential pagination p50 is 7 percent lower, but the ranges overlap. On the native batch surface, OpenBrowser HTTP batch measured 4.619 ms p50 against Firecrawl Local batch at 14.598 ms, a 3.16x win in 10 of 10 pairs. The OpenBrowser batch started no browser.
 
-The CSS selector helpers make the warm interactive lane competitive. The selector arm wins all four tasks against chrome-devtools-mcp, two against browser-use, and two against agent-browser. Download against browser-use is parity. Browser-use still wins tabs, and agent-browser still wins download and tabs. These local-fixture results are not a live-site ranking. See [the charted comparison](https://docs.openbrowser.me/comparison).
+The HTTP-only CLI batch is also the low-memory path. A five-page batch measured 205.029 ms and 47.859 MB peak RSS against 1144.941 ms and 153.844 MB for the pre-change CLI. Lightpanda measured 837.4 ms and about 123 MB for the same pagination task in a separate lane, so treat that comparison as directional.
+
+Against Lightpanda, OpenBrowser no-render is faster on all five local tasks. The Chromium no-render arm uses more memory than Lightpanda, about 740 to 783 MB against about 123 MB. The HTTP-only batch path is the low-memory alternative for static pages.
+
+The current warm interactive lane is a five-arm N=5 run. The selector arm had the lowest p50 on all four tasks. The paired runs below confirm 10 of 10 wins against the closest competitor on every task. These local-fixture results are not a live-site ranking. See [the charted comparison](https://docs.openbrowser.me/comparison).
+
+| Task | OpenBrowser selectors p50 | Closest competitor | Competitor p50 | Pairs won |
+| --- | ---: | --- | ---: | ---: |
+| `wizard` | 337.088 ms | browser-use | 721.613 ms | 10/10 |
+| `modal` | 460.357 ms | browser-use | 738.789 ms | 10/10 |
+| `tabs` | 226.797 ms | browser-use | 279.402 ms | 10/10 |
+| `download` | 464.463 ms | agent-browser | 491.526 ms | 10/10 |
 
 ### CLI Benchmark: 4-Way Comparison (6 Tasks, N=3 runs)
 

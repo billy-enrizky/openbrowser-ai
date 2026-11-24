@@ -1,0 +1,76 @@
+{
+  "environment": {
+    "cold_results": "/Users/billy/Documents/openbrowser-production/.worktrees/http-cli-fast/benchmarks/interactive/results/results-2026-11-23-lean.jsonl",
+    "task": "wizard",
+    "samples": 10,
+    "load_before": [
+      8.111,
+      9.795,
+      9.659
+    ],
+    "load_after": [
+      23.308,
+      13.27,
+      10.926
+    ],
+    "arms": {
+      "openbrowser-fast": {
+        "platform": "macOS-26.6-arm64-arm-64bit",
+        "machine": "arm64",
+        "binary": "working copy",
+        "version": "/Users/billy/Documents/openbrowser-production/.worktrees/http-cli-fast/.venv/bin/openbrowser-ai",
+        "warmup_ms": 11981.348,
+        "warmup_payload": {
+          "ok": true,
+          "elapsed_ms": 11789.9,
+          "url": "about:blank"
+        }
+      },
+      "browser-use": {
+        "platform": "macOS-26.6-arm64-arm-64bit",
+        "machine": "arm64",
+        "binary": "$HOME/.cache/openbrowser-interactive-bench/browser-use-venv/bin/browser-use",
+        "version": "/Users/billy/.cache/openbrowser-interactive-bench/browser-use-venv/bin/browser-use",
+        "warmup_ms": 761.911,
+        "warmup_payload": {
+          "ok": true,
+          "cdp_url": "http://127.0.0.1:51665",
+          "keychain_verified": true
+        }
+      }
+    }
+  },
+  "rows": [
+    {
+      "arm": "openbrowser-fast",
+      "task": "wizard",
+      "ok": 10,
+      "runs": 10,
+      "p50_ms": 337.088,
+      "p95_ms": 500.567,
+      "min_ms": 297.846,
+      "max_ms": 500.567
+    },
+    {
+      "arm": "browser-use",
+      "task": "wizard",
+      "ok": 10,
+      "runs": 10,
+      "p50_ms": 721.613,
+      "p95_ms": 8093.341,
+      "min_ms": 628.088,
+      "max_ms": 8093.341
+    }
+  ],
+  "paired": {
+    "faster_arm": "openbrowser-fast",
+    "delta_ms_arm1_minus_arm0": {
+      "p50": 375.219,
+      "min": 242.397,
+      "max": 7592.774
+    },
+    "arm0_faster_pairs": 10,
+    "arm1_faster_pairs": 0,
+    "pairs": 10
+  }
+}

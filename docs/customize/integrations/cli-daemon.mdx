@@ -13,7 +13,7 @@ The daemon starts automatically on first use, persists variables across calls, a
 
 ## Quick Start
 
-Before a sequence of `-c` calls, run `openbrowser-ai warm` once to start the daemon and browser.
+Before a sequence of `-c` calls, run `openbrowser-ai warm` once to start the daemon and browser. A warm `-c` call uses a standard-library thin client, so it does not import the full CLI or agent stack. A cold call falls back to the full client and starts the daemon.
 
 ```bash
 # Navigate to a page
@@ -59,7 +59,7 @@ openbrowser-ai scrape https://example.com --format text --render-mode lightweigh
 openbrowser-ai scrape https://example.com --format json --selector "article" --engine browser
 ```
 
-`--engine auto` is the default. `--engine http` never starts a browser. `--render-mode no-render` disables screenshots and visual-only actions for the browser fallback. Use `--wait-for` to wait for a selector on JavaScript-rendered pages.
+`--engine auto` is the default. `--engine http` never starts a browser. An explicit `--engine http` command uses a light console entry that does not import the browser or configuration stack. `--render-mode no-render` disables screenshots and visual-only actions for the browser fallback. Use `--wait-for` to wait for a selector on JavaScript-rendered pages.
 
 ### Batch scraping
 
@@ -74,6 +74,12 @@ openbrowser-ai scrape --urls-file urls.txt --output results.json
 
 # Write JSONL when the output path ends in .jsonl
 openbrowser-ai scrape --urls-file urls.txt --output results.jsonl
+```
+
+For a static batch, add `--engine http`. This path starts no browser and uses the light console entry:
+
+```bash
+openbrowser-ai scrape https://a.example https://b.example --engine http --jsonl --concurrency 8
 ```
 
 `--output-format json|jsonl` selects the batch serialization explicitly. Each batch result has `url`, `ok`, `engine_used`, `content`, `error`, `duration_ms`, and `timing`. A failure for one URL does not abort the batch. A single URL keeps the original content-only output.
@@ -182,7 +188,7 @@ graph LR
     end
 ```
 
-- The **CLI** is a thin client (~30ms startup) that sends code over the Unix socket
+- The **CLI** is a thin client (about 50 to 60 ms warm startup in the paired benchmark) that sends code over the Unix socket
 - The **daemon** holds the browser session, CodeExecutor, and persistent namespace in memory
 - The **browser** connects via Chrome DevTools Protocol (CDP)
 
@@ -207,7 +213,7 @@ graph LR
 |---------|-------------------|---------------------|
 | **Use case** | Bash scripts, shell pipelines, manual exploration | AI assistants (Claude, Codex) |
 | **Intelligence** | You write the code | LLM writes the code |
-| **Startup** | ~30ms (thin client) | ~150ms (full MCP init) |
+| **Startup** | ~50 to 60 ms warm (thin client) | ~150ms (full MCP init) |
 | **Protocol** | Unix socket (JSON lines) | MCP over stdio |
 | **Persistence** | Variables persist across `-c` calls | Variables persist across tool calls |
 | **Idle timeout** | Daemon exits after 10 idle minutes | Browser closes after 10 idle minutes; the context remains until `close_context` or server exit |

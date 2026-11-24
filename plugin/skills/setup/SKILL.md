@@ -94,6 +94,19 @@ openbrowser-ai scrape --urls-file search-urls.txt --output scraped-pages.jsonl -
 
 Search snippets do not count as evidence. Scrape and read the source page before citing it. The package caps `max_results` at 20.
 
+### Fast CLI paths
+
+A warm `openbrowser-ai -c` call uses a standard-library thin client against the daemon. It does not import the full CLI or agent stack. A cold call falls back to the full client and starts the daemon. No extra setup is required.
+
+For static pages, `openbrowser-ai scrape --engine http` uses a light console entry that does not import the browser or configuration stack. Multi-URL batches use bounded concurrency and start no browser:
+
+```bash
+openbrowser-ai scrape https://example.com --engine http --format text
+openbrowser-ai scrape https://a.example https://b.example --engine http --jsonl --concurrency 8
+```
+
+Use the default `auto` or explicit `browser` engine when a page needs JavaScript.
+
 ## Step 3 -- Inspect and repair config
 
 ```bash
@@ -208,7 +221,13 @@ Codex manual installation is documented at `https://github.com/billy-enrizky/ope
 
 ## Step 7 -- Verify a real browser
 
-Use the direct API so verification never attaches to or stops a daemon:
+First verify the HTTP-only path. It should print page text without starting Chromium:
+
+```bash
+openbrowser-ai scrape https://example.com --engine http --format text
+```
+
+Then verify a real browser. Use the direct API so verification never attaches to or stops a daemon:
 
 ```bash
 python - <<'PY'

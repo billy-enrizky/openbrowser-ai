@@ -17,7 +17,7 @@ import matplotlib.pyplot as plt
 
 HERE = Path(__file__).resolve().parent
 DEFAULT_INPUT = (
-    HERE / "results" / "results-warm-fast-selector-final-all-2026-11-24-n3.summary.json"
+    HERE / "results" / "results-warm-five-arm-tabs-ready-2026-11-24-n5.summary.json"
 )
 DEFAULT_OUTPUT = HERE.parents[1] / "docs" / "images" / "native-interactive-warm-current-p50.png"
 TASKS = ("wizard", "modal", "download", "tabs")
@@ -107,7 +107,7 @@ def main() -> int:
     fig.text(
         0.06,
         0.94,
-        f"N={samples} per arm and task. Each arm starts once and uses a fresh fixture per task. Paired arm-major run on a shared host.",
+        f"N={samples} per arm and task. Each arm starts once and uses a fresh fixture per task. Arm-major run on a shared host.",
         ha="left",
         va="top",
         fontsize=12.5,

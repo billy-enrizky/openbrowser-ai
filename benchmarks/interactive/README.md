@@ -21,7 +21,9 @@ missing.
 
 The earlier four-arm warm results below used OpenBrowser CLI
 `0.1.58.dev12+gc421f7eac`. The fast selector results use the build listed
-above.
+above. Each results section is dated and names the build it used. The newest
+paired sections near the end of this file use the build from PR #225 and later,
+so use those for current competitor claims.
 
 ## Tasks
 
@@ -276,7 +278,7 @@ Load averages were `9.66`, `8.75`, and `7.63` before the run. They were `7.59`,
 The cells show warm p50 milliseconds. `openbrowser-fast` was lower than the
 semantic arm on wizard, modal, and download. The tabs result changed direction
 between the paired run and the full lane. Its ranges overlap, so the data show
-no measurable difference. `agent-browser` was faster on download and tabs. Download against `browser-use` is parity because the sample ranges overlap. `browser-use` was faster on tabs. This does not establish a universal win.
+no measurable difference. `agent-browser` was faster on download and tabs. Download against `browser-use` is parity because the sample ranges overlap. `browser-use` was faster on tabs. This does not establish a universal win. The paired comparisons near the end of this file supersede this section for current competitor claims.
 
 Rerun the paired selector check:
 
@@ -385,7 +387,8 @@ latencies as exploratory.
 `openbrowser-fast` had a lower p50 than `agent-browser` and
 `chrome-devtools-mcp` in this run. Its range overlaps the `browser-use` range.
 The run does not show a measurable difference against `browser-use`. Do not
-use these high-load results as a competitor ranking.
+use these high-load results as a competitor ranking. The paired tabs section
+below supersedes this run for the competitor claim.
 
 Rerun this lane:
 

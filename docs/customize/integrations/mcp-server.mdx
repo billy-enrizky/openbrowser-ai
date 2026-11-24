@@ -136,6 +136,7 @@ For a managed local browser, use `reset_browser` to close the owned browser befo
 | **Search** | `search_web(query, max_results, backend, region, safe_search, timelimit)`, `search_and_scrape(query, max_results, concurrency, format, ...)` |
 | **State** | `browser.get_browser_state_summary()` -- page metadata and interactive elements |
 | **CSS** | `get_selector_from_index(index)` -- CSS selector for an element |
+| **CSS fast paths** | `click_selector(selector, timeout)`, `fill_selector(selector, text)`, `wait_for_selector(selector, timeout)`, `click_selector_and_wait_for_new_tab(selector)` |
 | **Completion** | `done(text, success)` -- signal task completion |
 
 Prefer indexed actions whenever an element index exists. Coordinate actions use CSS viewport pixels, not screenshot pixels. If a screenshot uses a `devicePixelRatio` other than 1, divide its coordinates by `window.devicePixelRatio` before calling an `*_xy` function.

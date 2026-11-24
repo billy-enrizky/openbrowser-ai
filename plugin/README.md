@@ -103,7 +103,8 @@ Authenticated browser state persists within one context, so later calls in that 
 | **Downloads** | `download_file(url, filename)` -- download a file using browser cookies; `wait_for_download(timeout, url, lookback, download_ref)` -- wait for a terminal download phase; `download_outcomes()` and `download_failures()` (sync); `list_downloads()` (sync) -- list downloaded files |
 | **State** | `browser.get_browser_state_summary()` -- page metadata and interactive elements |
 | **CSS** | `get_selector_from_index(index)` -- CSS selector for an element |
-| **Search and scraping** | `search_web(query, max_results, backend, region, safe_search, timelimit)`, `search_and_scrape(query, max_results, concurrency, format, ...)` |
+| **Search and scraping** | `search_web(query, max_results, backend, region, safe_search, timelimit)`, `search_and_scrape(query, max_results, concurrency, format, ...)`, `scrape_page(url, format, selector, wait_for, engine)`, `scrape_pages(urls, concurrency, format, selector, engine)` |
+| **CSS fast paths** | `click_selector(selector, timeout)`, `fill_selector(selector, text)`, `wait_for_selector(selector, timeout)`, `click_selector_and_wait_for_new_tab(selector)` |
 | **Completion** | `done(text, success)` -- signal task completion |
 
 Prefer indexed actions whenever an element index exists. Coordinate actions use CSS viewport pixels, not screenshot pixels. If a screenshot uses a `devicePixelRatio` other than 1, divide its coordinates by `window.devicePixelRatio` before calling an `*_xy` function.
@@ -116,9 +117,11 @@ Prefer indexed actions whenever an element index exists. Coordinate actions use 
 
 ### Native Local Benchmark (2026-11-24)
 
-Current local deterministic fixtures show OpenBrowser winning three of five scraping tasks against Firecrawl Local, with static article at parity. It is 20.7x faster on the JavaScript list, 19.1x faster on the asset-heavy page, and 2.09x faster on structured table extraction. Firecrawl is 7 percent faster on pagination. Against Lightpanda, OpenBrowser no-render is faster on all five local tasks but uses more memory.
+Current local deterministic fixtures show OpenBrowser winning three of five sequential scraping tasks against Firecrawl Local, with static article at parity and pagination within overlapping ranges. On the native batch surface, OpenBrowser HTTP batch measured 4.619 ms p50 against Firecrawl Local batch at 14.598 ms, a 3.16x win in 10 of 10 pairs. The OpenBrowser batch started no browser.
 
-The CSS selector helpers make the warm interactive lane competitive. The selector arm wins all four tasks against chrome-devtools-mcp, two against browser-use, and two against agent-browser. Download against browser-use is parity. Browser-use still wins tabs, and agent-browser still wins download and tabs. See the [charted comparison](https://docs.openbrowser.me/comparison) and the raw artifacts under [`benchmarks/`](../benchmarks/).
+The HTTP-only CLI batch measured 205.029 ms and 47.859 MB peak RSS for five pages, against 1144.941 ms and 153.844 MB for the pre-change CLI. This is the low-memory path for static pages. The Chromium no-render arm is faster than Lightpanda on all five local tasks but uses more memory than Lightpanda.
+
+The current warm interactive lane is a five-arm N=5 run. The selector arm had the lowest p50 on all four tasks. Paired runs won 10 of 10 against the closest competitor on every task: wizard 337.088 ms vs browser-use 721.613 ms, modal 460.357 ms vs 738.789 ms, tabs 226.797 ms vs 279.402 ms, and download 464.463 ms vs agent-browser 491.526 ms. See the [charted comparison](https://docs.openbrowser.me/comparison) and the raw artifacts under [`benchmarks/`](../benchmarks/).
 
 ### CLI Benchmark: 4-Way Comparison (6 Tasks, N=3 runs)
 
@@ -181,7 +184,9 @@ openbrowser-ai -c "print(await evaluate('document.title'))"
 openbrowser-ai daemon start|ensure|stop|force-stop|status|reset|restart|list|reap|doctor
 ```
 
-Variables persist across `-c` calls while the daemon is running. The daemon starts automatically on first use and shuts down after 10 minutes of inactivity.
+Variables persist across `-c` calls while the daemon is running. The daemon starts automatically on first use and shuts down after 10 minutes of inactivity. A warm `-c` call uses a standard-library thin client, so it does not import the full CLI or agent stack. A cold call falls back to the full client and starts the daemon.
+
+For static pages, `openbrowser-ai scrape URL1 URL2 --engine http --jsonl` uses a light console entry. It does not import the browser or configuration stack and starts no browser. Use this path for batch HTML extraction; use the default `auto` or `browser` engine when a page needs JavaScript.
 
 The CLI daemon uses `~/.config/openbrowser/profiles/daemon` as its default browser profile, so saved logins survive daemon restarts through Chrome's user-data directory. An explicit `storage_state` path is read and written by the storage-state watchdog at the configured path; that is separate from the MCP one-time seed behavior. Downloads default to `~/Downloads/openbrowser-daemon` and survive `daemon stop`. Daemon timeout, socket, and profile variables are listed in the CLI daemon guide. Custom sockets share the default profile unless `OPENBROWSER_DAEMON_PROFILE_ISOLATION=true` or `OPENBROWSER_DAEMON_PROFILE_DIR` is set. `OPENBROWSER_USER_DATA_DIR` takes precedence over both and always selects that explicit profile.
 

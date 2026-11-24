@@ -54,7 +54,15 @@ openbrowser-ai scrape --urls-file urls.txt --output results.jsonl
 
 Use `--output-format json` or `--output-format jsonl` to choose batch serialization. A `.jsonl` output path selects JSONL by default. Each URL produces a record with `url`, `ok`, `engine_used`, `content`, `error`, `duration_ms`, and `timing`. A failed URL does not stop the batch.
 
-In CodeAgent, call `await scrape_page(url)` for one page or `await scrape_pages(urls, concurrency=4)` for a batch. Each URL returns its own result, and results keep the input order. HTTP requests run concurrently up to the limit. Browser fallbacks run sequentially.
+For static pages, add `--engine http`. This uses a light console entry, does not import the browser or configuration stack, and starts no browser:
+
+```bash
+openbrowser-ai scrape https://a.example https://b.example --engine http --jsonl --concurrency 8
+```
+
+The explicit `--engine http` path is the fastest and lowest-memory option for server-rendered HTML. Use `auto` when a page may need JavaScript, or `browser` when it definitely does.
+
+In CodeAgent, call `await scrape_page(url)` for one page or `await scrape_pages(urls, concurrency=4)` for a batch. Each URL returns its own result, and results keep the input order. HTTP requests run concurrently up to the limit. Browser fallbacks run sequentially. Pass `engine="http"` to `scrape_pages()` when the batch is static and must not start a browser.
 
 ## Workflow
 

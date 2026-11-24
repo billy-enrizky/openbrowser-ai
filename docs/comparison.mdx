@@ -10,7 +10,7 @@ This page combines historical benchmark runs with current native local lanes:
 
 1. **[CLI Benchmark](/cli-comparison)** (2026-03-15) -- 4-way comparison of CLI tools driven by an LLM via a single Bash tool
 2. **MCP Benchmark** (below) -- 3-way historical comparison of MCP servers as tool providers
-3. **Native local lanes** (2026-11-24) -- scraping, lightweight, interactive cold, and interactive warm benchmarks with raw JSONL evidence
+3. **Native local lanes** (2026-11-24) -- scraping, Firecrawl batch, HTTP-only CLI batch, lightweight no-render, interactive cold, and interactive warm benchmarks, including paired competitor comparisons with raw JSONL evidence
 
 > **Historical benchmark, not a current-version ranking.** The two MCP runs below were recorded on the dates shown. The 6-task LLM run installed Playwright MCP and Chrome DevTools MCP from `@latest` at run time, but their resolved versions were not written to the retained artifacts. The 5-step run's install method was not retained. The 5-step token benchmark's raw per-response files are also not retained in this repository. Treat these numbers as historical observations for the versions installed on the run date, not as a comparison against today's releases. No universal winner follows from them. See [Provenance and limits](#provenance-and-limits).
 
@@ -32,7 +32,7 @@ This interleaved run used 10 samples and 2 warmups per arm and task. It ran on m
 | `js_list` | 29.8 | 32.8 | 616.4 | OpenBrowser full 20.7x faster |
 | `asset_heavy` | 59.0 | 32.4 | 619.4 | OpenBrowser lightweight 19.1x faster |
 
-All arms passed 10 of 10 oracle checks on every task. OpenBrowser wins three of the five local scraping tasks. Static article is parity because the sample ranges overlap. Firecrawl leads pagination by 7 percent, which is the only task it leads. OpenBrowser returns 2490 structured bytes for the table task. Firecrawl returns 6736 markdown bytes. Those outputs are not identical artifacts.
+All arms passed 10 of 10 oracle checks on every task. OpenBrowser wins three of the five local scraping tasks. Static article and pagination are parity because the sample ranges overlap. Firecrawl's pagination p50 is 7 percent lower, which is its only p50 lead. OpenBrowser returns 2490 structured bytes for the table task. Firecrawl returns 6736 markdown bytes. Those outputs are not identical artifacts.
 
 Raw data: `benchmarks/scraping/results-firecrawl-all-2026-11-24-n10-interleaved.json`.
 
@@ -50,7 +50,7 @@ This interleaved run used 10 samples and 2 warmups per arm and task. It ran on m
 | `js_list` | 26.8 | 170.6 | OpenBrowser 6.37x faster |
 | `asset_heavy` | 31.2 | 159.9 | OpenBrowser 5.12x faster |
 
-OpenBrowser no-render is faster on all five local tasks. The static, pagination, and table tasks use HTTP. The JavaScript and asset-heavy tasks use Chromium. This is a latency result, not a memory result. Lightpanda uses about 123 MB peak RSS, while OpenBrowser browser arms use about 740 to 783 MB. OpenBrowser no-render still runs Blink layout.
+OpenBrowser no-render is faster on all five local tasks. The static, pagination, and table tasks use HTTP. The JavaScript and asset-heavy tasks use Chromium. This is a latency result, not a memory result. Lightpanda uses about 123 MB peak RSS, while OpenBrowser Chromium browser arms use about 740 to 783 MB. OpenBrowser no-render still runs Blink layout. The separate HTTP-only CLI batch starts no browser and measured 47.859 MB for five pages; see the CLI batch section below.
 
 Raw data: `benchmarks/scraping/results-lightpanda-after-n10-interleaved.json`.
 
@@ -90,85 +90,116 @@ Raw data: `benchmarks/interactive/results/results-2026-11-23-lean.jsonl`.
 
 ### Interactive browsing, warm lane
 
-<img src="/images/native-interactive-warm-current-p50.png" alt="Warm interactive p50 latency for the prior OpenBrowser selector build, chrome-devtools-mcp, agent-browser, and browser-use across four tasks." />
+<img src="/images/native-interactive-warm-current-p50.png" alt="Warm interactive p50 latency for the current OpenBrowser build, chrome-devtools-mcp, agent-browser, and browser-use across four tasks." />
 
-The chart and table show the selector build before the direct popup helper. The warm lane starts each arm once, then runs each task against a fresh fixture. This run used 3 samples per arm and task with Chrome `158.0.8127.36`. OpenBrowser semantic and selector arms both used `0.1.58.dev67+gfc17d3201`. All 60 runs passed their oracle. The run used arm-major order on a shared host, not a quiet interleaved run.
+The chart and table show the current five-arm run. It used 5 samples per arm and task with Chrome `158.0.8127.36`. OpenBrowser semantic and selector arms both used the branch build that includes the warm CLI path, the direct popup helper, the 5 ms target poll, and the background tab close. All 100 runs passed their oracle. The run used arm-major order on a shared host. Load was `9.29`, `8.42`, and `9.25` on 18 logical CPUs before the run. Treat the absolute p50 values as shared-host evidence.
 
 | Task | OpenBrowser semantic, p50 ms | OpenBrowser selectors, p50 ms | chrome-devtools-mcp, p50 ms | agent-browser, p50 ms | browser-use, p50 ms |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `wizard` | 2165 | 204 | 3533 | 537 | 524 |
-| `modal` | 1161 | 396 | 2776 | 1205 | 1167 |
-| `download` | 799 | 576 | 781 | 481 | 585 |
-| `tabs` | 994 | 985 | 1492 | 440 | 217 |
+| `wizard` | 2447 | 234 | 3511 | 683 | 870 |
+| `modal` | 1222 | 397 | 2751 | 1260 | 849 |
+| `download` | 704 | 470 | 772 | 495 | 687 |
+| `tabs` | 926 | 264 | 1483 | 574 | 349 |
 
-In this run, the CSS selector helpers cut `wizard` by 10.6x, `modal` by 2.93x, and `download` by 1.39x against the semantic helper arm. `tabs` showed no measurable change because a blank-target link still used the generic click path. The selector arm beat chrome-devtools-mcp on all four tasks and browser-use on three. Agent-browser was faster on download and tabs, and browser-use was faster on tabs.
+The selector arm had the lowest p50 on all four tasks. It beat chrome-devtools-mcp by 2.8x to 15.0x, agent-browser by 1.05x to 5.4x, and browser-use by 1.3x to 3.7x in this arm-major run. The download margin against agent-browser is small, so the paired result below is the claim to use.
 
-Raw data: `benchmarks/interactive/results/results-warm-fast-selector-final-all-2026-11-24-n3.jsonl`.
+Raw data: `benchmarks/interactive/results/results-warm-five-arm-tabs-ready-2026-11-24-n5.jsonl`.
 
-#### Direct popup click comparison
+#### Paired current comparisons
 
-The new CodeAgent helper uses a CDP mouse click for the `#compare` link. It waits for the new page target and returns its full target ID. The adapter then uses the existing focus-aware `switch` and `close` actions. The semantic arm keeps its current `_tabs` script.
+The arm-major lane runs every sample for one arm before the next arm. On a shared host, load drift can dominate a small difference. The paired runner warms both arms once and alternates their order for every sample. Each run gets a fresh fixture server and an exact oracle check. All 80 runs passed.
 
-This paired run alternated the prior fast script and the direct helper. Each path ran five times in one warm browser session. Each run used a fresh fixture. All ten adapter checks and all ten exact server-side oracles passed.
+| Task | OpenBrowser selectors, p50 ms | Closest competitor | Competitor p50 ms | Pairs won | Paired delta p50 ms |
+| --- | ---: | --- | ---: | ---: | ---: |
+| `wizard` | 337.088 | browser-use | 721.613 | 10/10 | 375.219 |
+| `modal` | 460.357 | browser-use | 738.789 | 10/10 | 279.423 |
+| `tabs` | 226.797 | browser-use | 279.402 | 10/10 | 57.794 |
+| `download` | 464.463 | agent-browser | 491.526 | 10/10 | 24.587 |
 
-| OpenBrowser path | Samples | p50 ms | Range ms | Oracle |
-| --- | ---: | ---: | ---: | ---: |
-| Prior fast click | 5 | 1,062.497 | 974.280 to 1,216.891 | 5/5 |
-| Direct CDP click | 5 | 367.326 | 289.933 to 405.063 | 5/5 |
+The wizard run started at load `8.111`, `9.795`, and `9.659` and ended at `23.308`, `13.270`, and `10.926`. The modal run started at the same end load and finished at `24.674`, `14.376`, and `11.391`. The tabs and download runs started at `8.399`, `11.152`, and `10.625` and finished at `8.170`, `10.786`, and `10.511`. These are shared-host values. The alternating order makes the paired result robust to the drift.
 
-The direct path was 695.171 ms lower at p50, or 65.428%. Load on 18 logical CPUs was `9.48`, `8.20`, and `8.18` before the run. It was `9.51`, `8.27`, and `8.20` after the run. Load exceeded 4, so these values are exploratory, not quiet-host p50. This run did not include competitors and does not establish a competitor win.
+The download fixture holds the response for 300 ms. The `24.587` ms paired difference is the control-plane margin above that fixed delay, not a claim that the whole task is three times faster.
 
-The direct click helper took 42.772 ms at p50, with a 42.048 to 46.592 ms range. The baseline step run measured 517.223 ms for the generic click. It measured 151.925 ms for a fixed focus wait and 101.369 ms for a target-poll wait. The step runs used different host loads. Do not treat them as paired deltas.
+Wizard, modal, and tabs use browser-use as the closest competitor. Agent-browser is slower than browser-use on those three tasks at p50, so the paired wins also cover agent-browser. Download uses agent-browser because it was the closest competitor there.
 
 Raw data:
 
-- `benchmarks/interactive/results/results-warm-tabs-step-baseline-2026-11-24-n5.jsonl`
-- `benchmarks/interactive/results/results-warm-tabs-direct-cdp-2026-11-24-n5-paired.jsonl`
+- `benchmarks/interactive/results/results-paired-wizard-2026-11-24-n10.jsonl`
+- `benchmarks/interactive/results/results-paired-modal-2026-11-24-n10.jsonl`
+- `benchmarks/interactive/results/results-paired-tabs-2026-11-24-n10.jsonl`
+- `benchmarks/interactive/results/results-paired-download-2026-11-24-n10.jsonl`
 
-#### Five-arm tabs-only warm lane
+### Firecrawl batch scraping
 
-This later run used the direct helper and all three interactive competitors.
-It warmed each arm once and ran five fresh fixtures per arm. It used arm-major
-order, not interleaved order. All 25 adapter checks and exact oracles passed.
+<img src="/images/native-scraping-batch-current.png" alt="Three-panel chart of API batch p50 latency for OpenBrowser and Firecrawl Local, CLI batch p50 latency for the OpenBrowser fast entry, the pre-change CLI, and Lightpanda, and peak RSS for those three CLI paths." />
 
-| Arm | Samples | p50 ms | Range ms | Oracle |
+Firecrawl Local exposes a native `/v2/batch/scrape` job API. The batch comparison sends the same five pagination URLs to both products and checks that each returns the same 100 ordered names. The OpenBrowser arm uses `scrape_pages(engine="http", concurrency=5)` and never starts a browser. The Firecrawl arm submits one batch job, polls it every 10 ms, and downloads the results. All 20 measured runs passed.
+
+| Arm | Samples | p50 ms | p95 ms | Range ms | Requests |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| OpenBrowser HTTP batch | 10 | 4.619 | 6.911 | 3.985 to 6.911 | 5 |
+| Firecrawl Local batch | 10 | 14.598 | 15.354 | 13.747 to 15.354 | 5 |
+
+OpenBrowser was faster in 10 of 10 pairs. The median paired difference was `9.966` ms, and OpenBrowser was 3.16 times faster at p50. `openbrowser_browser_started` was false for every OpenBrowser batch. The arms return different artifacts: OpenBrowser returns selected row dictionaries, while Firecrawl returns markdown pages. Both satisfy the 100-name oracle.
+
+This is the batch surface. The sequential five-request comparison above is parity: Firecrawl's p50 is 7 percent lower, and the sample ranges overlap. Do not substitute one result for the other.
+
+Raw data:
+
+- `benchmarks/scraping/results-batch-firecrawl-2026-11-24-n10.json`
+- `benchmarks/scraping/results-batch-firecrawl-2026-11-24-n10.summary.json`
+
+### HTTP-only CLI batch
+
+The console entry now handles `scrape --engine http` without importing the Click command tree, browser modules, or the configuration stack. A single URL uses `scrape_http()`. Multiple URLs use `scrape_http_batch()` with bounded concurrency. Unknown flags fall back to the full Click command.
+
+The A/B ran the same five local pagination URLs through the pre-change and branch binaries with:
+
+```sh
+openbrowser-ai scrape URL1 URL2 URL3 URL4 URL5 \
+  --engine http --format json --selector 'tbody tr' --jsonl
+```
+
+Each sample alternated binary order. Peak RSS was sampled every 5 ms while the child process ran. Load was `7.491`, `8.508`, and `9.131` before the run and `9.162`, `8.815`, and `9.226` after it. All 20 runs passed the 100-row oracle.
+
+| Binary | p50 ms | p95 ms | Peak RSS p50 MB | Peak RSS max MB |
 | --- | ---: | ---: | ---: | ---: |
-| `openbrowser` | 5 | 1,171.336 | 1,055.090 to 1,207.928 | 5/5 |
-| `openbrowser-fast` | 5 | 484.242 | 377.246 to 539.227 | 5/5 |
-| `chrome-devtools-mcp` | 5 | 1,552.286 | 1,534.648 to 1,621.911 | 5/5 |
-| `agent-browser` | 5 | 795.759 | 779.441 to 893.941 | 5/5 |
-| `browser-use` | 5 | 594.553 | 507.341 to 1,050.248 | 5/5 |
+| Pre-change | 1144.941 | 1177.547 | 153.844 | 154.094 |
+| HTTP fast entry | 205.029 | 212.359 | 47.859 | 47.969 |
 
-Load on 18 logical CPUs was `16.81`, `10.82`, and `9.78` before the run. It
-was `20.09`, `12.91`, and `10.63` after the run. Load stayed above 4, so treat
-these values as exploratory. The direct helper range overlaps the `browser-use`
-range. The run shows no measurable difference against `browser-use`. It does
-not establish a competitor win.
+The new path was faster in 10 of 10 pairs and used less peak RSS in 10 of 10. The median paired difference was `936.032` ms and `106.000` MB. Both binaries returned the same five JSONL rows with the same 100 row IDs. Only the measured `duration_ms` and `timing` values differed.
 
-Raw data: `benchmarks/interactive/results/results-warm-tabs-five-arm-direct-cdp-2026-11-24-n5.jsonl`.
+For direction only, the Lightpanda lane measured `837.4` ms p50 and about `123` MB peak RSS for the same five-page pagination task. The command surfaces and harnesses differ, so this is not a converted competitor claim. The OpenBrowser CLI numbers above are from this A/B only.
+
+Raw data:
+
+- `benchmarks/scraping/results-cli-http-batch-2026-11-24-n10.json`
+- `benchmarks/scraping/results-cli-http-batch-2026-11-24-n10.summary.json`
 
 ### Head-to-head scorecard
 
-This table counts task-level latency wins on the local fixtures. It uses the prior four-task selector run. The later tabs-only result above covers one task and does not change this scorecard. The table does not score memory, features, stability, or live-site coverage.
+This table counts task-level results on the local fixtures. It does not score features, stability, or live-site coverage.
 
-| Workload | OpenBrowser arm | Opponent | OpenBrowser wins | Opponent wins | Detail |
-| --- | --- | --- | ---: | ---: | --- |
-| Scraping, 5 tasks | full or lightweight | Firecrawl Local | 3 | 1 | Static article is parity. Firecrawl leads pagination by 7 percent. |
-| No-render, 5 tasks | no-render | Lightpanda `1.0.5` | 5 | 0 | Lightpanda uses less memory |
-| Warm interactive, 4 tasks | semantic | chrome-devtools-mcp | 3 | 1 | chrome-devtools-mcp wins download |
-| Warm interactive, 4 tasks | selectors, prior build | chrome-devtools-mcp | 4 | 0 | All four tasks |
-| Warm interactive, 4 tasks | selectors, prior build | agent-browser | 2 | 2 | agent-browser wins download and tabs |
-| Warm interactive, 4 tasks | selectors, prior build | browser-use | 2 | 1 | Download is parity. browser-use wins tabs. |
-
-The prior selector build won most local interactive tasks, but browser-use won tabs and agent-browser won download and tabs. Download against browser-use was parity because the observed ranges overlap. The later five-arm tabs-only run had high host load and overlapping ranges against browser-use. It does not establish a new competitor ranking.
+| Workload | OpenBrowser arm | Opponent | OpenBrowser wins | Opponent wins | Parity | Detail |
+| --- | --- | --- | ---: | ---: | ---: | --- |
+| Scraping, 5 sequential tasks | full or lightweight | Firecrawl Local | 3 | 0 | 2 | Static article and pagination ranges overlap. Firecrawl's pagination p50 is 7 percent lower. |
+| Scraping batch, 5 pages | HTTP batch | Firecrawl Local batch | 1 | 0 | 0 | OpenBrowser 3.16x faster at p50, 10/10 pairs. |
+| No-render, 5 tasks | no-render | Lightpanda `1.0.5` | 5 | 0 | 0 | Latency only. Lightpanda uses less memory than the Chromium no-render arm. |
+| Static CLI batch, 5 pages | HTTP fast entry | Lightpanda `1.0.5` | 1 | 0 | 0 | Directional. OpenBrowser 205.029 ms and 47.859 MB against 837.4 ms and about 123 MB. |
+| Warm interactive, 4 tasks | selectors | chrome-devtools-mcp | 4 | 0 | 0 | Arm-major run. |
+| Warm interactive, 4 tasks | selectors | agent-browser | 4 | 0 | 0 | Three arm-major results and the paired download result. |
+| Warm interactive, 4 tasks | selectors | browser-use | 4 | 0 | 0 | Paired, 10/10 on every task. |
 
 ### What these lanes show
 
-OpenBrowser is the faster local scraping tool overall. It wins three of five tasks against Firecrawl Local. Static article is parity. The largest wins are 20.7x on the JavaScript list, 19.1x on the asset-heavy page, and 2.09x on table extraction. Firecrawl leads pagination by 7 percent. Against Lightpanda, OpenBrowser no-render is faster on all five tasks, but Lightpanda uses far less memory.
+OpenBrowser is the faster local interactive product in the current runs. The selector arm had the lowest p50 on all four tasks in the five-arm lane. The paired runs confirm 10/10 wins against the closest competitor on every task, with median paired advantages of 375.219 ms on wizard, 279.423 ms on modal, 57.794 ms on tabs, and 24.587 ms on download.
 
-In the prior warm run, the CSS selector arm beat chrome-devtools-mcp on all four tasks, beat browser-use on two tasks, and beat agent-browser on two tasks. Download against browser-use was parity. Browser-use won tabs, and agent-browser won download and tabs. The direct popup helper lowers OpenBrowser's local tabs p50 against its prior path. Its competitor result remains exploratory. The semantic helper arm remains separate.
+OpenBrowser is the faster local scraping product overall. It wins three of five sequential tasks against Firecrawl Local, draws static article and pagination within sample ranges, and wins the native batch surface by 3.16x. The JavaScript list, asset-heavy page, and table extraction are the largest sequential wins. Firecrawl's sequential pagination p50 remains 7 percent lower.
+
+Against Lightpanda, OpenBrowser no-render is faster on all five tasks, but the Chromium no-render arm uses far more memory. The HTTP-only CLI batch is a separate surface that starts no browser. It measured 205.029 ms and 47.859 MB peak RSS for five pages, below the Lightpanda pagination values, but the harnesses differ.
 
 The fixtures do not test live-site anti-bot behavior, CAPTCHA, or login providers. The resource lane measures RSS and CPU, not GPU memory, disk I/O, or energy. Lightpanda and Chromium use different engines and do not have identical layout, paint, extension, or screenshot behavior. Local fixture results do not establish a ranking for live websites.
+
 
 ## MCP Server Comparison
 
