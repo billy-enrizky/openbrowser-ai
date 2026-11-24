@@ -1,10 +1,48 @@
 # Interactive browser benchmark
 
+<!-- toc:start -->
+## Table of Contents
+
+- [1. Arms](#1-arms)
+- [2. Tasks](#2-tasks)
+- [3. Fair-run procedure](#3-fair-run-procedure)
+- [4. Metrics](#4-metrics)
+- [5. OpenBrowser lean profile](#5-openbrowser-lean-profile)
+- [6. Results, 2026-11-23, lean profile](#6-results-2026-11-23-lean-profile)
+- [7. Current cold lane, 2026-11-24](#7-current-cold-lane-2026-11-24)
+- [8. Warm session lane, 2026-11-24](#8-warm-session-lane-2026-11-24)
+- [9. Warm session lane after the popup fix, 2026-11-24](#9-warm-session-lane-after-the-popup-fix-2026-11-24)
+- [10. Fast selector arm, 2026-11-24](#10-fast-selector-arm-2026-11-24)
+- [11. Warm tabs direct CDP click, 2026-11-24](#11-warm-tabs-direct-cdp-click-2026-11-24)
+- [12. Five-arm tabs-only warm lane, 2026-11-24](#12-five-arm-tabs-only-warm-lane-2026-11-24)
+- [13. Download wait wakeup A/B, 2026-11-24](#13-download-wait-wakeup-ab-2026-11-24)
+- [14. Warm CLI startup A/B, 2026-11-24](#14-warm-cli-startup-ab-2026-11-24)
+- [15. Paired tabs and download comparisons, 2026-11-24](#15-paired-tabs-and-download-comparisons-2026-11-24)
+- [16. OpenBrowser extension A/B, 2026-11-23](#16-openbrowser-extension-ab-2026-11-23)
+- [17. What the results show](#17-what-the-results-show)
+- [18. Top three OpenBrowser product gaps exposed](#18-top-three-openbrowser-product-gaps-exposed)
+- [19. Limitations](#19-limitations)
+- [20. Setup](#20-setup)
+- [21. Run](#21-run)
+- [22. Files](#22-files)
+- [23. Final lanes, 2026-11-24, OpenBrowser 0.1.59.dev18](#23-final-lanes-2026-11-24-openbrowser-0159dev18)
+  - [23.1. Warm five-arm, N=5](#231-warm-five-arm-n5)
+  - [23.2. Warm paired, N=10](#232-warm-paired-n10)
+  - [23.3. Cold six-arm, N=3](#233-cold-six-arm-n3)
+  - [23.4. MCP arm](#234-mcp-arm)
+- [24. Safety and cleanup](#24-safety-and-cleanup)
+- [25. Second final lanes, 2026-11-24, OpenBrowser 0.1.59.dev28](#25-second-final-lanes-2026-11-24-openbrowser-0159dev28)
+  - [25.1. Cold six-arm, N=3](#251-cold-six-arm-n3)
+  - [25.2. Warm five-arm, N=5](#252-warm-five-arm-n5)
+  - [25.3. Warm paired, N=10](#253-warm-paired-n10)
+
+<!-- toc:end -->
+
 Deterministic local benchmark for scripted interactive browser tasks. No LLM,
 no cloud browser, no AWS, and no external network. Every task is scored by a
 server-side oracle, not by the adapter's self-report.
 
-## Arms
+## 1. Arms
 
 | Arm | Version | Native scripted surface | Browser |
 | --- | --- | --- | --- |
@@ -27,7 +65,7 @@ above. Each results section is dated and names the build it used. The newest
 paired sections near the end of this file use the build from PR #225 and later,
 so use those for current competitor claims.
 
-## Tasks
+## 2. Tasks
 
 | Task | Route | Exact oracle |
 | --- | --- | --- |
@@ -53,7 +91,7 @@ killed by profile path. The OpenBrowser MCP arm speaks the stateless
 the same per-request path a coding agent uses. `browser-use` daemons and dedicated Chrome processes
 are killed after every run.
 
-## Fair-run procedure
+## 3. Fair-run procedure
 
 1. Pin every version and record the browser executable. The Chrome build in
    this run was `158.0.8127.36`.
@@ -71,7 +109,7 @@ are killed after every run.
    latency is recorded in the raw JSONL.
 6. Keep the raw JSONL. The README table is a summary, not the evidence.
 
-## Metrics
+## 4. Metrics
 
 - `p50` and `p95`: nearest-rank over successful runs. Three samples per arm
   and task in this smoke run. These are smoke numbers, not a statistical
@@ -88,7 +126,7 @@ are killed after every run.
   output is larger by design.
 - `requests` and `request bytes`: fixture request count and response bytes.
 
-## OpenBrowser lean profile
+## 5. OpenBrowser lean profile
 
 The OpenBrowser arm uses the lean automation profile:
 
@@ -111,7 +149,7 @@ environment as unknown. When the environment is readable and has no explicit
 `OPENBROWSER_SOCKET`, it derives the default socket from that daemon's own
 `HOME`. The caller's default socket is never reused for another process.
 
-## Results, 2026-11-23, lean profile
+## 6. Results, 2026-11-23, lean profile
 
 macOS arm64, Chrome `158.0.8127.36`, 3 measured samples per arm and task, no
 warmups. 60 of 60 runs passed their oracle. All 60 runs reported
@@ -146,7 +184,7 @@ Raw evidence: [results-2026-11-23-lean.jsonl](results/results-2026-11-23-lean.js
 The original default-extension run remains at
 [results-2026-11-23.jsonl](results/results-2026-11-23.jsonl).
 
-## Current cold lane, 2026-11-24
+## 7. Current cold lane, 2026-11-24
 
 This run uses the current OpenBrowser 0.1.58 build for both OpenBrowser arms
 and the pinned competitor versions. It starts a fresh process tree, daemon,
@@ -179,7 +217,7 @@ Raw evidence:
 - [results-cold-current-five-arm-2026-11-24-n3.jsonl](results/results-cold-current-five-arm-2026-11-24-n3.jsonl)
 - [results-cold-current-five-arm-2026-11-24-n3.summary.json](results/results-cold-current-five-arm-2026-11-24-n3.summary.json)
 
-## Warm session lane, 2026-11-24
+## 8. Warm session lane, 2026-11-24
 
 The cold lane starts a new process tree, daemon, and browser for every task.
 The warm lane starts each arm once, then runs each task against a fresh fixture
@@ -242,7 +280,7 @@ Raw evidence:
 - [results-warm-4arm-2026-11-24-n3.jsonl](results/results-warm-4arm-2026-11-24-n3.jsonl)
 - [results-warm-4arm-2026-11-24-n3.summary.json](results/results-warm-4arm-2026-11-24-n3.summary.json)
 
-## Warm session lane after the popup fix, 2026-11-24
+## 9. Warm session lane after the popup fix, 2026-11-24
 
 The popup fix in PR #217 stops a `target="_blank"` click from waiting the full
 five-second mouse-release bound. It checks for a new page target and fails
@@ -281,7 +319,7 @@ Raw evidence:
 - [results-warm-4arm-2026-11-24-after-popup-n3.jsonl](results/results-warm-4arm-2026-11-24-after-popup-n3.jsonl)
 - [results-warm-4arm-2026-11-24-after-popup-n3.summary.json](results/results-warm-4arm-2026-11-24-after-popup-n3.summary.json)
 
-## Fast selector arm, 2026-11-24
+## 10. Fast selector arm, 2026-11-24
 
 `openbrowser-fast` uses the same adapter and lifecycle as `openbrowser`. Its
 task code uses CSS helpers for fixture ids. The semantic `openbrowser` scripts
@@ -355,7 +393,7 @@ Raw evidence:
 - [results-warm-fast-selector-final-all-2026-11-24-n3.jsonl](results/results-warm-fast-selector-final-all-2026-11-24-n3.jsonl)
 - [results-warm-fast-selector-final-all-2026-11-24-n3.summary.json](results/results-warm-fast-selector-final-all-2026-11-24-n3.summary.json)
 
-## Warm tabs direct CDP click, 2026-11-24
+## 11. Warm tabs direct CDP click, 2026-11-24
 
 `openbrowser-fast` now calls `click_selector_and_wait_for_new_tab()` for the
 `#compare` link. The helper reads the link rectangle with `evaluate()`. It sends
@@ -409,7 +447,7 @@ Raw evidence:
 - [results-warm-tabs-direct-cdp-2026-11-24-n5-paired.jsonl](results/results-warm-tabs-direct-cdp-2026-11-24-n5-paired.jsonl)
 - [results-warm-tabs-direct-cdp-2026-11-24-n5-paired.summary.json](results/results-warm-tabs-direct-cdp-2026-11-24-n5-paired.summary.json)
 
-## Five-arm tabs-only warm lane, 2026-11-24
+## 12. Five-arm tabs-only warm lane, 2026-11-24
 
 This lane used the direct popup helper and the three interactive competitors.
 It warmed each arm once, then ran five fresh tabs fixtures per arm. It used
@@ -453,7 +491,7 @@ Raw evidence:
 - [results-warm-tabs-five-arm-direct-cdp-2026-11-24-n5.jsonl](results/results-warm-tabs-five-arm-direct-cdp-2026-11-24-n5.jsonl)
 - [results-warm-tabs-five-arm-direct-cdp-2026-11-24-n5.summary.json](results/results-warm-tabs-five-arm-direct-cdp-2026-11-24-n5.summary.json)
 
-## Download wait wakeup A/B, 2026-11-24
+## 13. Download wait wakeup A/B, 2026-11-24
 
 This run compared the 100 ms registry-poll baseline with the event-wakeup
 candidate. Both builds used `openbrowser-fast`, the same fixture, and the same
@@ -497,7 +535,7 @@ uv run --locked python -m benchmarks.interactive.download_wait_ab \
 
 Raw evidence: [`A/B JSONL`](results/results-warm-download-wakeup-ab-2026-11-24-n5.jsonl) and [`summary`](results/results-warm-download-wakeup-ab-2026-11-24-n5.summary.json).
 
-## Warm CLI startup A/B, 2026-11-24
+## 14. Warm CLI startup A/B, 2026-11-24
 
 The `-c` fast path now executes a cell against a warm daemon without importing
 asyncio, the logging configuration, pydantic settings, or dotenv. The full
@@ -532,7 +570,7 @@ Raw evidence:
 - [results-cli-startup-ab-2026-11-24-n12.jsonl](results/results-cli-startup-ab-2026-11-24-n12.jsonl)
 - [results-cli-startup-ab-2026-11-24-n12.summary.json](results/results-cli-startup-ab-2026-11-24-n12.summary.json)
 
-## Paired tabs and download comparisons, 2026-11-24
+## 15. Paired tabs and download comparisons, 2026-11-24
 
 The five-arm lane runs every sample for one arm before it runs the next arm.
 On a shared host, load drift can dominate a small difference. The paired runner
@@ -575,7 +613,7 @@ Raw evidence:
 - [results-paired-download-2026-11-24-n10.jsonl](results/results-paired-download-2026-11-24-n10.jsonl)
 - [results-paired-download-2026-11-24-n10.summary.json](results/results-paired-download-2026-11-24-n10.summary.json)
 
-## OpenBrowser extension A/B, 2026-11-23
+## 16. OpenBrowser extension A/B, 2026-11-23
 
 The A/B uses one binary, the same screenshot setting, and 3 samples per task.
 Only `enable_default_extensions` changes. The default bundle adds 12.9 to 21.8
@@ -591,7 +629,7 @@ percent to the measured p50.
 
 Raw evidence: [results-2026-11-23-extensions.jsonl](results/results-2026-11-23-extensions.jsonl).
 
-## What the results show
+## 17. What the results show
 
 Capability: all four arms completed all five tasks. That includes the custom
 ARIA combobox, the click-triggered download, the multi-tab opener flow, and
@@ -613,7 +651,7 @@ The lean profile cuts OpenBrowser p50 by 12.9 to 21.8 percent compared with
 the same binary using the default extension bundle. That is a real efficiency
 gain, but it does not close the gap with the native command and Python arms.
 
-## Top three OpenBrowser product gaps exposed
+## 18. Top three OpenBrowser product gaps exposed
 
 1. Cold start and per-action latency remain the largest gap. OpenBrowser p50
    is `4837` ms on wizard, `3509` ms on modal, `3492` ms on download, `7792`
@@ -640,7 +678,7 @@ gain, but it does not close the gap with the native command and Python arms.
    stop` should not report completion before the browser and profile lock are
    released.
 
-## Limitations
+## 19. Limitations
 
 - Three samples per arm and task. The p95 values are indicative, not a
   statistical claim.
@@ -662,7 +700,7 @@ gain, but it does not close the gap with the native command and Python arms.
 - The harness runs on macOS. Linux results can differ because browser launch
   and filesystem costs differ.
 
-## Setup
+## 20. Setup
 
 Tools live outside the repository:
 
@@ -683,7 +721,7 @@ The local `chrome-devtools-mcp` binary is the same 1.13.0 package that
 `npx -y chrome-devtools-mcp@1.13.0` would download. The harness uses the local
 install to remove network and npx startup jitter from the measurement.
 
-## Run
+## 21. Run
 
 ```sh
 uv run --no-project python -m benchmarks.interactive.run_benchmark \
@@ -711,7 +749,7 @@ Useful flags:
 The default temp root is `/tmp/obib-runs`. It is outside the repository so the
 OpenBrowser daemon socket path stays below the macOS `AF_UNIX` limit.
 
-## Files
+## 22. Files
 
 | Path | Purpose |
 | --- | --- |
@@ -726,13 +764,13 @@ OpenBrowser daemon socket path stays below the macOS `AF_UNIX` limit.
 | `run_benchmark.py` | Runner, JSONL writer, summary table |
 | [results](results) | Raw JSONL and summary JSON |
 
-## Final lanes, 2026-11-24, OpenBrowser 0.1.59.dev18
+## 23. Final lanes, 2026-11-24, OpenBrowser 0.1.59.dev18
 
 These are the runs behind the current comparison page. Every run used a fresh
 fixture server and an exact oracle check. All 75 cold runs, all 100 warm runs,
 and all 40 paired runs passed.
 
-### Warm five-arm, N=5
+### 23.1. Warm five-arm, N=5
 
 | Task | OpenBrowser MCP | OpenBrowser CLI | chrome-devtools-mcp | agent-browser | browser-use |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -743,7 +781,7 @@ and all 40 paired runs passed.
 
 Raw evidence: [results-warm-five-arm-final-2026-11-24-n5.jsonl](results/results-warm-five-arm-final-2026-11-24-n5.jsonl).
 
-### Warm paired, N=10
+### 23.2. Warm paired, N=10
 
 | Task | OpenBrowser MCP | Closest competitor | Pairs won | Paired delta p50 |
 | --- | ---: | --- | ---: | ---: |
@@ -755,7 +793,7 @@ Raw evidence: [results-warm-five-arm-final-2026-11-24-n5.jsonl](results/results-
 Raw evidence: the `results-paired-*-final-2026-11-24-n10.json` files in
 [results](results).
 
-### Cold six-arm, N=3
+### 23.3. Cold six-arm, N=3
 
 | Task | OpenBrowser MCP | OpenBrowser CLI | chrome-devtools-mcp | agent-browser | browser-use |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -771,7 +809,7 @@ The cold lane is a startup lane with N=3. Do not treat it as a statistical
 claim. The MCP arm beats chrome-devtools-mcp on all five tasks and agent-browser
 on wizard, and still trails browser-use on three.
 
-### MCP arm
+### 23.4. MCP arm
 
 `openbrowser-mcp` and `openbrowser-mcp-fast` drive the package's own MCP server
 over the stateless `2026-07-28` protocol. The client in
@@ -780,7 +818,7 @@ request with the `_meta` envelope. The arm calls `create_context`,
 `execute_code`, and `close_context`. The warm lane keeps one context so one
 browser serves every task.
 
-## Safety and cleanup
+## 24. Safety and cleanup
 
 - Every browser launch includes `--use-mock-keychain`. The harness reads the
   actual Chrome command line and records `keychain_verified`.
@@ -790,13 +828,13 @@ browser serves every task.
   contains the run's unique temp path.
 - No AWS, cloud browser, paid API, or model provider is called.
 
-## Second final lanes, 2026-11-24, OpenBrowser 0.1.59.dev28
+## 25. Second final lanes, 2026-11-24, OpenBrowser 0.1.59.dev28
 
 Rerun after the lazy namespace imports, deferred recording watchdog, removed
 redirect sleep, and headless shell landed. All 75 cold, 100 warm, and 40
 paired runs passed their exact oracles.
 
-### Cold six-arm, N=3
+### 25.1. Cold six-arm, N=3
 
 | Task | OpenBrowser MCP | OpenBrowser CLI | chrome-devtools-mcp | agent-browser | browser-use |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -808,7 +846,7 @@ paired runs passed their exact oracles.
 
 Raw evidence: [results-cold-six-arm-final3-2026-11-24-n3.jsonl](results/results-cold-six-arm-final3-2026-11-24-n3.jsonl).
 
-### Warm five-arm, N=5
+### 25.2. Warm five-arm, N=5
 
 | Task | OpenBrowser MCP | OpenBrowser CLI | chrome-devtools-mcp | agent-browser | browser-use |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -819,7 +857,7 @@ Raw evidence: [results-cold-six-arm-final3-2026-11-24-n3.jsonl](results/results-
 
 Raw evidence: [results-warm-five-arm-final2-2026-11-24-n5.jsonl](results/results-warm-five-arm-final2-2026-11-24-n5.jsonl).
 
-### Warm paired, N=10
+### 25.3. Warm paired, N=10
 
 | Task | OpenBrowser MCP | Closest competitor | Pairs won | Paired delta p50 |
 | --- | ---: | --- | ---: | ---: |

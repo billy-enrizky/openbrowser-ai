@@ -7,6 +7,26 @@ allowed-tools: Bash(openbrowser-ai:*) Bash(curl:*) Bash(uv:*) Bash(uvx:*) Bash(p
 
 # Deep Research
 
+<!-- toc:start -->
+## Table of Contents
+
+- [1. Setup](#1-setup)
+- [2. Workflow](#2-workflow)
+  - [2.1. Step 0 -- Session check](#21-step-0----session-check)
+  - [2.2. Step 0.5 -- Run `/search` to discover sources](#22-step-05----run-search-to-discover-sources)
+  - [2.3. Step 1 -- Plan](#23-step-1----plan)
+  - [2.4. Step 2a -- Dispatch parallel sub-agents (one tab per agent)](#24-step-2a----dispatch-parallel-sub-agents-one-tab-per-agent)
+  - [2.5. Step 2b -- Retry weak sub-questions with broader sub-agents](#25-step-2b----retry-weak-sub-questions-with-broader-sub-agents)
+  - [2.6. Step 3 -- Drilldown (drilldown mode only): second wave of parallel sub-agents](#26-step-3----drilldown-drilldown-mode-only-second-wave-of-parallel-sub-agents)
+  - [2.7. Step 4 -- Aggregate and dedup](#27-step-4----aggregate-and-dedup)
+  - [2.8. Step 5 -- Render report](#28-step-5----render-report)
+  - [2.9. Step 6 -- Verify citations](#29-step-6----verify-citations)
+  - [2.10. Step 7 -- Cleanup](#210-step-7----cleanup)
+- [3. Tips](#3-tips)
+- [4. Cleanup](#4-cleanup)
+
+<!-- toc:end -->
+
 Drive `openbrowser-ai` to investigate a topic across multiple web sources and produce a cited markdown report plus structured JSON. Two modes:
 
 - **flat synthesis** (default) -- decompose query into 3-7 sub-questions, dispatch one parallel sub-agent per sub-question (each owns one tab), merge into one cited report.
@@ -36,7 +56,7 @@ Variables persist across `-c` calls in the daemon namespace.
 
 Every factual claim in the report carries a footnote citation `[N]`. Verifier fails the run if uncited prose is found.
 
-## Setup
+## 1. Setup
 
 Verify install:
 
@@ -68,9 +88,9 @@ Prepare output dir at the project root (NOT user home):
 mkdir -p local_docs/research
 ```
 
-## Workflow
+## 2. Workflow
 
-### Step 0 -- Session check
+### 2.1. Step 0 -- Session check
 
 Use a dedicated socket and profile for the research run so the user's existing daemon, tabs, and namespace are never restarted or touched. If this research run already started its own daemon, reuse it. Otherwise the next `-c` call auto-starts one.
 
@@ -139,7 +159,7 @@ print(f"Pre-existing tabs: {len(_preexisting_tab_ids)}")
 EOF
 ```
 
-### Step 0.5 -- Run `/search` to discover sources
+### 2.2. Step 0.5 -- Run `/search` to discover sources
 
 Run this step after Step 0 for `/search`, web search, or source-discovery requests. Use the run directory from Step 0. The search command does not start Chromium.
 
@@ -239,7 +259,7 @@ PYTHON
 fi
 ```
 
-### Step 1 -- Plan
+### 2.3. Step 1 -- Plan
 
 Decompose the user query into sub-questions and pick the mode. Daemon namespace persists `_plan` across later `-c` calls.
 
@@ -301,7 +321,7 @@ EOF
 
 Edit the `QUERY`, `PROJECT_ROOT`, and `sub_questions` list before running. `PROJECT_ROOT` MUST be an absolute path: the daemon runs in its own working directory (usually wherever the daemon was first started), so relative paths land in the wrong place. Use the shell `pwd` output as the value. Verify output looks right before continuing.
 
-### Step 2a -- Dispatch parallel sub-agents (one tab per agent)
+### 2.4. Step 2a -- Dispatch parallel sub-agents (one tab per agent)
 
 The orchestrator (the Claude session running this skill) MUST invoke `/dispatching-parallel-agents` and dispatch one sub-agent per sub-question. All sub-agents share the same `openbrowser-ai` daemon. Each sub-agent owns exactly one tab, the one it opens at the start of its run.
 
@@ -436,7 +456,7 @@ EOF
 
 If any sub-question's partial file is missing or has <2 findings, fall through to Step 2b for that one.
 
-### Step 2b -- Retry weak sub-questions with broader sub-agents
+### 2.5. Step 2b -- Retry weak sub-questions with broader sub-agents
 
 If a sub-question came back with <2 findings, do NOT use `openbrowser-ai -p`. The `-p` mode requires an LLM API key (OpenAI / Anthropic / Google) because it runs the full Browser Agent loop with LLM-driven navigation,. This skill is `-c`-only by design: the daemon executes raw CDP / JS and needs no API key.
 
@@ -516,7 +536,7 @@ EOF
 
 `_findings` lives in the daemon namespace for the next steps.
 
-### Step 3 -- Drilldown (drilldown mode only): second wave of parallel sub-agents
+### 2.6. Step 3 -- Drilldown (drilldown mode only): second wave of parallel sub-agents
 
 Skip this step in flat mode. In drilldown mode, dispatch a second wave of `/dispatching-parallel-agents` -- one sub-agent per `needs_depth=true` finding, max 3 follow-ups per parent sub-question. Each follow-up sub-agent owns ONE tab, exactly like Step 2a.
 
@@ -592,7 +612,7 @@ print(f"Drilldown added {len(extra)} findings -> total {len(_findings)}")
 EOF
 ```
 
-### Step 4 -- Aggregate and dedup
+### 2.7. Step 4 -- Aggregate and dedup
 
 Merge findings, dedup by URL, build the source index that footnote numbers will point to.
 
@@ -637,7 +657,7 @@ print(f"After dedup: {len(_findings)} findings, {len(_sources)} unique sources")
 EOF
 ```
 
-### Step 5 -- Render report
+### 2.8. Step 5 -- Render report
 
 Write paired markdown + JSON. Every claim line in markdown ends with `[N]` cite. Summary cites top 3-5 sources.
 
@@ -719,7 +739,7 @@ print(f"Wrote {_plan['json_path']}")
 EOF
 ```
 
-### Step 6 -- Verify citations
+### 2.9. Step 6 -- Verify citations
 
 Fail loud if any prose sentence outside headings, quotes, code, or source list lacks a `[N]` cite. Fix by adding the missing source then rerendering, never by deleting prose silently.
 
@@ -770,7 +790,7 @@ print(f"OK: all prose cited in {md_path}")
 EOF
 ```
 
-### Step 7 -- Cleanup
+### 2.10. Step 7 -- Cleanup
 
 Two cases:
 
@@ -795,7 +815,7 @@ fi
 
 **Always:** the final cleanup below removes this run's partial directory and run directory after the report is written. If an owned daemon cannot be shut down, it keeps the run directory intact so the partials and environment remain available for recovery.
 
-## Tips
+## 3. Tips
 
 - **Source the run environment first:** every later Bash call must begin with `. "<RUN_ENV_FILE>"`, using the exact absolute path printed by Step 0. Bare exports do not survive separate shell blocks.
 - **Headless by default:** `OPENBROWSER_HEADLESS=true` is written to `RUN_ENV_FILE` in Step 0 so the daemon starts without a visible browser window. The daemon forces `headless=True` unless `OPENBROWSER_HEADLESS` is explicitly false; a config file alone does not opt into a visible window. To debug with a visible window, edit `RUN_ENV_FILE` before the first `-c` call and change that line to `export OPENBROWSER_HEADLESS=false`. Changing it after the daemon starts does not reconfigure the running browser.
@@ -812,7 +832,7 @@ fi
 - **Rerun semantics:** rerunning Step 5 alone re-renders from current `_findings`, useful after manual edits.
 - **Slug collisions:** Step 1 auto-bumps `-2`, `-3` if file exists, so rerunning the same query never overwrites.
 
-## Cleanup
+## 4. Cleanup
 
 **Mandatory.** Run after every workflow, success or failure.
 

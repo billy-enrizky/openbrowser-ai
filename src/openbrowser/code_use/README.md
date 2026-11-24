@@ -1,8 +1,21 @@
 # Code-Use Mode
 
+<!-- toc:start -->
+## Table of Contents
+
+- [1. Problem Solved](#1-problem-solved)
+  - [1.1. Namespace](#11-namespace)
+  - [1.2. CSS selector fast path](#12-css-selector-fast-path)
+  - [1.3. Step 1: Navigate](#13-step-1-navigate)
+  - [1.4. Step 2 analyse our DOM state and write code to extract the data we need.](#14-step-2-analyse-our-dom-state-and-write-code-to-extract-the-data-we-need)
+  - [1.5. Step 3: Analyse output & save the data to a file](#15-step-3-analyse-output-save-the-data-to-a-file)
+- [2. Run lifecycle](#2-run-lifecycle)
+
+<!-- toc:end -->
+
 Code-Use Mode is a Notebook-like code execution system for browser automation. Instead of the agent choosing from a predefined set of actions, the LLM writes Python code that gets executed in a persistent namespace with all browser control functions available.
 
-## Problem Solved
+## 1. Problem Solved
 
 **Code-Use Mode solves this** by giving the agent a Python execution environment where it can:
 - Store extracted data in variables
@@ -12,7 +25,7 @@ Code-Use Mode is a Notebook-like code execution system for browser automation. I
 - Use conditional logic to decide what to do next
 - Output more tokens than the LLM writes
 
-### Namespace
+### 1.1. Namespace
 The namespace is initialized with:
 
 **Browser Control Functions:**
@@ -49,7 +62,7 @@ The namespace is initialized with:
 - `map_urls(url, max_urls=100, include=None, exclude=None, timeout_ms=None, use_sitemap=True)` - List URLs from one page, `/sitemap.xml`, and one sitemap index level. Normalizes, deduplicates, and keeps same-origin links. No browser
 - `crawl_site(url, max_pages=10, max_depth=2, format='markdown', selector=None, include=None, exclude=None, timeout_ms=None, concurrency=4)` - Follow same-origin links breadth first and return each page's content. No browser
 
-### CSS selector fast path
+### 1.2. CSS selector fast path
 - `click_selector(selector, timeout=0.0)` - Click the first CSS match through `evaluate()`. A zero timeout makes one lookup. A positive finite timeout waits for a match.
 - `click_selector_and_wait_for_new_tab(selector, timeout=5.0)` - Click a visible `<a target="_blank">` with CDP mouse input. Return its full page target ID after it opens. The helper does not switch tabs. Call `switch(tab_id=target_id)` to focus the new tab.
 - `fill_selector(selector, text, timeout=0.0)` - Set a standard `<input>` or `<textarea>` with the native value setter and dispatch bubbling `input` and `change` events. Use `input_text(index, text)` for rich editors and other controls.
@@ -80,12 +93,12 @@ The agent can just utilize packages like `requests`, `pandas`, `numpy`, `matplot
 
 The agent will write code like:
 
-### Step 1: Navigate
+### 1.3. Step 1: Navigate
 ```python
 # Navigate to first page
 await navigate(url='https://example.com/products?page=1')
 ```
-### Step 2 analyse our DOM state and write code to extract the data we need.
+### 1.4. Step 2 analyse our DOM state and write code to extract the data we need.
 
 ```js extract_products
 (function(){
@@ -109,7 +122,7 @@ for page in range(1, 6):
     print(f'Page {page}: Found {len(products)} products')
 ```
 
-### Step 3: Analyse output & save the data to a file
+### 1.5. Step 3: Analyse output & save the data to a file
 ```python
 # Save to file
 import json
@@ -121,7 +134,7 @@ await done(text='Extracted all products', success=True, files_to_display=['produ
 ```
 
 
-## Run lifecycle
+## 2. Run lifecycle
 
 `code_agent.status` returns a `CodeAgentRunStatus` with `phase`, `terminal`, `success`, `terminal_reason`, `result`, `error`, `attachments`, `step`, `max_steps`, `cancellation_requested`, `closed`, `started_at`, and `finished_at`. Terminal phases are `succeeded`, `failed`, `max_steps`, and `cancelled`.
 

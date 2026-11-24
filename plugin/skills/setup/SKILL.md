@@ -10,9 +10,26 @@ allowed-tools: Bash(openbrowser-ai:*) Bash(uv:*) Bash(uvx:*) Bash(python3:*) Bas
 
 # OpenBrowser Setup
 
+<!-- toc:start -->
+## Table of Contents
+
+- [1. Rules](#1-rules)
+- [2. Step 1 -- Inspect the machine](#2-step-1----inspect-the-machine)
+- [3. Step 2 -- Install or upgrade OpenBrowser](#3-step-2----install-or-upgrade-openbrowser)
+  - [3.1. Native web search](#31-native-web-search)
+  - [3.2. Fast CLI paths](#32-fast-cli-paths)
+- [4. Step 3 -- Inspect and repair config](#4-step-3----inspect-and-repair-config)
+- [5. Step 4 -- Configure MCP](#5-step-4----configure-mcp)
+- [6. Step 5 -- Install the skills](#6-step-5----install-the-skills)
+- [7. Step 6 -- Understand the profiles](#7-step-6----understand-the-profiles)
+- [8. Step 7 -- Verify a real browser](#8-step-7----verify-a-real-browser)
+- [9. Step 8 -- Report](#9-step-8----report)
+
+<!-- toc:end -->
+
 Use this skill once per machine or project. It installs the CLI and browser, configures the MCP server and profiles, installs the plugin skills, and verifies a real browser session.
 
-## Rules
+## 1. Rules
 
 - Never print API keys, cookies, proxy credentials, or storage-state contents. Report only whether a key is set.
 - Prefer `uv`, then `pipx`, then `pip`.
@@ -22,7 +39,7 @@ Use this skill once per machine or project. It installs the CLI and browser, con
 - Verify with a temporary socket and profile. Never stop a user daemon that this setup did not start.
 - Do not install optional provider packages unless the user wants that provider.
 
-## Step 1 -- Inspect the machine
+## 2. Step 1 -- Inspect the machine
 
 ```bash
 openbrowser-ai --version 2>/dev/null || true
@@ -38,7 +55,7 @@ Always run `openbrowser-ai install` to repair Chromium.
 If it fails, upgrade the CLI.
 If Python is below 3.12, install a supported Python. Then repeat this step.
 
-## Step 2 -- Install or upgrade OpenBrowser
+## 3. Step 2 -- Install or upgrade OpenBrowser
 
 Preferred:
 
@@ -81,7 +98,7 @@ openbrowser-ai install
 
 `openbrowser-ai install` uses `uvx playwright install chromium`. If `uvx` is unavailable, install uv first or run `python -m playwright install chromium` with the interpreter that owns the OpenBrowser install. The MCP command also uses `openbrowser-ai --mcp`, so it does not require uvx at runtime.
 
-### Native web search
+### 3.1. Native web search
 
 The base OpenBrowser package includes DDGS. Do not install DDGS separately. The `search` command does not start a browser.
 
@@ -94,7 +111,7 @@ openbrowser-ai scrape --urls-file search-urls.txt --output scraped-pages.jsonl -
 
 Search snippets do not count as evidence. Scrape and read the source page before citing it. The package caps `max_results` at 20.
 
-### Fast CLI paths
+### 3.2. Fast CLI paths
 
 A warm `openbrowser-ai -c` call uses a standard-library thin client against the daemon. It does not import the full CLI or agent stack. A cold call falls back to the full client and starts the daemon. No extra setup is required.
 
@@ -107,7 +124,7 @@ openbrowser-ai scrape https://a.example https://b.example --engine http --jsonl 
 
 Use the default `auto` or explicit `browser` engine when a page needs JavaScript.
 
-## Step 3 -- Inspect and repair config
+## 4. Step 3 -- Inspect and repair config
 
 ```bash
 openbrowser-ai config status
@@ -123,7 +140,7 @@ export GOOGLE_API_KEY=...   # or OPENAI_API_KEY / ANTHROPIC_API_KEY
 
 MCP and `openbrowser-ai -c` do not need an LLM key. Do not print the value.
 
-## Step 4 -- Configure MCP
+## 5. Step 4 -- Configure MCP
 
 The installed server command is `openbrowser-ai --mcp`. The zero-install form is `uvx openbrowser-ai --mcp`. OpenBrowser uses MCP SDK 2.3 and negotiates protocol version `2026-07-28` with modern clients. Those clients see six tools. Older supported clients see four tools. Both catalogs include stateless `search_web`, which needs no `context_id` and does not start a browser. Use the handle returned by `create_context` for stateful calls.
 
@@ -186,7 +203,7 @@ Useful MCP environment variables:
 | `OPENBROWSER_MCP_EXEC_TIMEOUT` | Tool call timeout in seconds | `110` |
 | `OPENBROWSER_SHUTDOWN_TIMEOUT` | Cleanup bound in seconds | `20` |
 
-## Step 5 -- Install the skills
+## 6. Step 5 -- Install the skills
 
 For skills.sh-compatible agents:
 
@@ -211,7 +228,7 @@ claude plugin install openbrowser@openbrowser-ai
 
 Codex manual installation is documented at `https://github.com/billy-enrizky/openbrowser-ai/blob/main/.codex/INSTALL.md`. OpenCode manual installation is documented at `https://github.com/billy-enrizky/openbrowser-ai/blob/main/.opencode/INSTALL.md`.
 
-## Step 6 -- Understand the profiles
+## 7. Step 6 -- Understand the profiles
 
 - CLI daemon profile: `~/.config/openbrowser/profiles/daemon`. This is a Chrome user-data directory. No `storage_state.json` is written unless configured.
 - Modern MCP context profile: `~/.config/openbrowser/profiles/mcp-<owner-id>`, seeded once from `profiles/default/storage_state.json`.
@@ -222,7 +239,7 @@ Codex manual installation is documented at `https://github.com/billy-enrizky/ope
 - Set `OPENBROWSER_USER_DATA_DIR` for a shared profile. The profile lease rejects concurrent owners.
 - Set `OPENBROWSER_DAEMON_PROFILE_ISOLATION=true` or `OPENBROWSER_DAEMON_PROFILE_DIR` for isolated daemons.
 
-## Step 7 -- Verify a real browser
+## 8. Step 7 -- Verify a real browser
 
 First verify the HTTP-only path. It should print page text without starting Chromium:
 
@@ -288,7 +305,7 @@ async def main():
 asyncio.run(main())
 ```
 
-## Step 8 -- Report
+## 9. Step 8 -- Report
 
 Print a short setup report:
 

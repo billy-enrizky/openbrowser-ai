@@ -9,13 +9,31 @@ allowed-tools: Bash(openbrowser-ai:*) Bash(curl:*) Bash(uv:*) Bash(irm:*) Read W
 
 # Web Scraping
 
+<!-- toc:start -->
+## Table of Contents
+
+- [1. Setup](#1-setup)
+- [2. Fast path: scrape without an LLM](#2-fast-path-scrape-without-an-llm)
+  - [2.1. Site discovery: map and crawl](#21-site-discovery-map-and-crawl)
+- [3. Workflow](#3-workflow)
+  - [3.1. Step 1 -- Navigate and get content overview](#31-step-1----navigate-and-get-content-overview)
+  - [3.2. Step 2 -- Extract data with JavaScript](#32-step-2----extract-data-with-javascript)
+  - [3.3. Step 3 -- Process data with Python](#33-step-3----process-data-with-python)
+  - [3.4. Step 4 -- Handle pagination](#34-step-4----handle-pagination)
+  - [3.5. Step 5 -- Handle infinite scroll](#35-step-5----handle-infinite-scroll)
+  - [3.6. Step 6 -- Multi-page scraping](#36-step-6----multi-page-scraping)
+- [4. Tips](#4-tips)
+- [5. Cleanup](#5-cleanup)
+
+<!-- toc:end -->
+
 Extract structured data from websites using Python code execution with browser automation functions. Handles JavaScript-rendered content, pagination, and multi-page scraping.
 
 All code runs via `openbrowser-ai -c`. The daemon starts automatically and persists variables across calls. Run `openbrowser-ai warm` once before a multi-call workflow to start the daemon and browser before the workflow begins. Most browser functions are async, use `await`. `list_downloads()`, `download_outcomes()`, and `download_failures()` are synchronous.
 
 The CLI daemon persists cookies and login state in the Chrome user-data directory at `~/.config/openbrowser/profiles/daemon`, so authenticated sessions can be reused across later runs. No `storage_state.json` file is written unless you configure one explicitly.
 
-## Setup
+## 1. Setup
 
 Before running, verify openbrowser-ai is installed:
 
@@ -33,7 +51,7 @@ curl -fsSL https://raw.githubusercontent.com/billy-enrizky/openbrowser-ai/main/i
 irm https://raw.githubusercontent.com/billy-enrizky/openbrowser-ai/main/install.ps1 | iex
 ```
 
-## Fast path: scrape without an LLM
+## 2. Fast path: scrape without an LLM
 
 For a single page, prefer the built-in scrape command before writing code:
 
@@ -68,7 +86,7 @@ The explicit `--engine http` path is the fastest and lowest-memory option for se
 
 In CodeAgent, call `await scrape_page(url)` for one page or `await scrape_pages(urls, concurrency=4)` for a batch. Each URL returns its own result, and results keep the input order. HTTP requests run concurrently up to the limit. Browser fallbacks run sequentially. Pass `engine="http"` to `scrape_pages()` when the batch is static and must not start a browser. `scrape_page` and `scrape_pages` also accept `only_main_content=True`, `include_tags=[...]`, and `exclude_tags=[...]`.
 
-### Site discovery: map and crawl
+### 2.1. Site discovery: map and crawl
 
 Use `map` when you need to know which pages exist, and `crawl` when you need their content. Neither starts a browser.
 
@@ -81,9 +99,9 @@ openbrowser-ai crawl https://docs.example.com --max-pages 20 --max-depth 2 --for
 
 In CodeAgent, call `await map_urls(url)` and `await crawl_site(url, max_pages=20, max_depth=2)`. Both are HTTP-only, so a JavaScript shell page is reported as skipped rather than rendered.
 
-## Workflow
+## 3. Workflow
 
-### Step 1 -- Navigate and get content overview
+### 3.1. Step 1 -- Navigate and get content overview
 
 ```bash
 openbrowser-ai -c - <<'EOF'
@@ -97,7 +115,7 @@ print(f"Elements: {len(state.dom_state.selector_map)}")
 EOF
 ```
 
-### Step 2 -- Extract data with JavaScript
+### 3.2. Step 2 -- Extract data with JavaScript
 
 Use `evaluate()` to run JS in the browser and return structured data directly as Python objects:
 
@@ -118,7 +136,7 @@ print(json.dumps(data, indent=2))
 EOF
 ```
 
-### Step 3 -- Process data with Python
+### 3.3. Step 3 -- Process data with Python
 
 Use pandas, regex, or other Python tools to clean and transform extracted data:
 
@@ -149,7 +167,7 @@ print(df.to_string())
 EOF
 ```
 
-### Step 4 -- Handle pagination
+### 3.4. Step 4 -- Handle pagination
 
 ```bash
 openbrowser-ai -c - <<'EOF'
@@ -185,7 +203,7 @@ print(f"Total: {len(results)} items")
 EOF
 ```
 
-### Step 5 -- Handle infinite scroll
+### 3.5. Step 5 -- Handle infinite scroll
 
 ```bash
 openbrowser-ai -c - <<'EOF'
@@ -217,7 +235,7 @@ print(f"Extracted {len(results)} items")
 EOF
 ```
 
-### Step 6 -- Multi-page scraping
+### 3.6. Step 6 -- Multi-page scraping
 
 ```bash
 openbrowser-ai -c - <<'EOF'
@@ -245,7 +263,7 @@ print(json.dumps(all_data, indent=2))
 EOF
 ```
 
-## Tips
+## 4. Tips
 
 - Code is piped via stdin using heredoc (`-c - <<'EOF'`), so all Python syntax works without shell escaping issues.
 - Use `evaluate()` for structured DOM extraction -- it returns Python objects directly.
@@ -255,7 +273,7 @@ EOF
 - Use `get_tabs()` to list tabs without a DOM scan. Pass a returned `tab_id` to `switch()` or `close()` when a page opens a new tab.
 - Variables persist between `-c` calls while the daemon is running, so you can build up results across multiple calls.
 
-## Cleanup
+## 5. Cleanup
 
 Run this step after the task, whether it succeeded or failed.
 

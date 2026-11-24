@@ -1,18 +1,43 @@
 # OpenBrowser - Claude Code Plugin
 
+<!-- toc:start -->
+## Table of Contents
+
+- [1. Prerequisites](#1-prerequisites)
+- [2. Installation](#2-installation)
+  - [2.1. From GitHub marketplace](#21-from-github-marketplace)
+  - [2.2. Local development](#22-local-development)
+  - [2.3. OpenClaw](#23-openclaw)
+  - [2.4. skills.sh](#24-skillssh)
+  - [2.5. Standalone MCP server (without plugin)](#25-standalone-mcp-server-without-plugin)
+- [3. Available Tools](#3-available-tools)
+- [4. Benchmark: Token Efficiency](#4-benchmark-token-efficiency)
+  - [4.1. Native Local Benchmark (2026-11-24)](#41-native-local-benchmark-2026-11-24)
+  - [4.2. CLI Benchmark: 4-Way Comparison (6 Tasks, N=3 runs)](#42-cli-benchmark-4-way-comparison-6-tasks-n3-runs)
+  - [4.3. E2E LLM Benchmark: MCP Server Comparison (6 Tasks, N=5 runs)](#43-e2e-llm-benchmark-mcp-server-comparison-6-tasks-n5-runs)
+- [5. Native web search](#5-native-web-search)
+- [6. CLI Execute Mode](#6-cli-execute-mode)
+- [7. Configuration](#7-configuration)
+- [8. Skills](#8-skills)
+- [9. Testing and Benchmarks](#9-testing-and-benchmarks)
+- [10. Troubleshooting](#10-troubleshooting)
+- [11. License](#11-license)
+
+<!-- toc:end -->
+
 AI-powered browser automation for Claude Code. Control real web browsers directly from Claude -- navigate websites, fill forms, extract data, inspect accessibility trees, and automate multi-step workflows.
 
 Local CLI daemon sessions persist cookies and login state in Chrome's user-data directory at `~/.config/openbrowser/profiles/daemon` by default; no `storage_state.json` file is written unless you configure one explicitly. Each modern MCP context uses an isolated `~/.config/openbrowser/profiles/mcp-<owner-id>` profile and seeds its state once from `profiles/default/storage_state.json`, preventing concurrent contexts from terminating or corrupting one another's browser. The legacy no-handle owner uses `mcp-<server-instance-id>`. The owner ID is internal and is not the `context_id` handle; read the resolved path from `get_status.profile.user_data_dir`. MCP profiles are retained on disk after `close_context`, but a new server process cannot resume the old context handle. Configure `OPENBROWSER_USER_DATA_DIR` for a profile that survives restarts; `OPENBROWSER_STORAGE_STATE` is a one-time seed for managed profiles, and later changes are saved to the active profile copy rather than copied back automatically. Managed profiles also auto-clean disposable Chromium caches so they do not grow like normal long-lived Chrome profiles. Explicitly configured shared profiles are protected by a lease and reject concurrent owners.
 
-## Prerequisites
+## 1. Prerequisites
 
 - **Chrome or Chromium** installed on your system
 - **Python 3.12+** with [uv](https://docs.astral.sh/uv/) package manager
 - **Claude Code** CLI
 
-## Installation
+## 2. Installation
 
-### From GitHub marketplace
+### 2.1. From GitHub marketplace
 
 ```bash
 # Add the OpenBrowser marketplace (one-time)
@@ -24,14 +49,14 @@ claude plugin install openbrowser@openbrowser-ai
 
 This installs the MCP server, 8 skills, and auto-enables the plugin. Restart Claude Code to activate.
 
-### Local development
+### 2.2. Local development
 
 ```bash
 # Test from a local clone without installing
 claude --plugin-dir /path/to/openbrowser-ai/plugin
 ```
 
-### OpenClaw
+### 2.3. OpenClaw
 
 [OpenClaw](https://openclaw.ai) supports OpenBrowser via the CLI daemon. Install OpenBrowser,
 then use `openbrowser-ai -c` from the Bash tool:
@@ -45,7 +70,7 @@ The daemon starts automatically on first use and persists variables across calls
 
 For OpenClaw plugin documentation, see [docs.openclaw.ai/tools/plugin](https://docs.openclaw.ai/tools/plugin).
 
-### skills.sh
+### 2.4. skills.sh
 
 Install the same skill pack with the skills.sh CLI:
 
@@ -61,7 +86,7 @@ npx skills add billy-enrizky/openbrowser-ai --skill setup -a codex
 
 This command installs the setup skill file. It does not run the setup workflow. Invoke the `setup` skill after installation.
 
-### Standalone MCP server (without plugin)
+### 2.5. Standalone MCP server (without plugin)
 
 Add to your project's `.mcp.json`:
 
@@ -76,7 +101,7 @@ Add to your project's `.mcp.json`:
 }
 ```
 
-## Available Tools
+## 3. Available Tools
 
 A 2026-07-28 MCP client sees six tools. Older supported clients see four. Both catalogs include the stateless `search_web` tool. It needs no `context_id` and does not start a browser. Its snippets do not count as evidence. Scrape and read source pages before you cite them.
 
@@ -113,9 +138,9 @@ Prefer indexed actions whenever an element index exists. Coordinate actions use 
 
 **Available only if installed**: `matplotlib`, `BeautifulSoup`, `PdfReader` (requires `pip install openbrowser-ai[pdf]`), `tabulate`
 
-## Benchmark: Token Efficiency
+## 4. Benchmark: Token Efficiency
 
-### Native Local Benchmark (2026-11-24)
+### 4.1. Native Local Benchmark (2026-11-24)
 
 Current local deterministic fixtures show OpenBrowser winning all five sequential scraping tasks against Firecrawl Local, 50 of 50 paired samples. Pagination measured 3.02 ms against 4.42 ms, and static article measured 0.94 ms against 1.54 ms. On the native batch surface, OpenBrowser HTTP batch measured 2.834 ms p50 against Firecrawl Local batch at 13.448 ms, a 4.75x win in 10 of 10 pairs. No browser started for the OpenBrowser batch.
 
@@ -123,7 +148,7 @@ The one-shot static path is the low-memory path: 148.6 ms and 47.7 MB peak RSS f
 
 The warm interactive lane uses the OpenBrowser MCP arm. Paired runs won 10 of 10 against the closest competitor on every task: wizard 121.966 ms vs browser-use 446.056 ms, modal 267.286 ms vs 806.803 ms, tabs 140.130 ms vs 220.321 ms, and download 393.629 ms vs agent-browser 482.813 ms. The cold lane beats chrome-devtools-mcp on all five tasks and browser-use on two, and still trails browser-use on download and tabs. See the [charted comparison](https://docs.openbrowser.me/comparison) and the raw artifacts under [`benchmarks/`](../benchmarks/).
 
-### CLI Benchmark: 4-Way Comparison (6 Tasks, N=3 runs)
+### 4.2. CLI Benchmark: 4-Way Comparison (6 Tasks, N=3 runs)
 
 Four CLI tools compared with a single Bash tool each. Claude Sonnet 4.6 on Bedrock. Randomized order. All achieve 100% accuracy.
 
@@ -146,7 +171,7 @@ openbrowser-ai uses **2.1-2.6x fewer tokens** than all competitors via Python co
 
 [Full 4-way comparison](https://docs.openbrowser.me/cli-comparison)
 
-### E2E LLM Benchmark: MCP Server Comparison (6 Tasks, N=5 runs)
+### 4.3. E2E LLM Benchmark: MCP Server Comparison (6 Tasks, N=5 runs)
 
 | MCP Server | Tools | Bedrock API Tokens | Tool Calls (mean) | vs OpenBrowser |
 |------------|------:|-------------------:|-----------:|---------------:|
@@ -161,7 +186,7 @@ openbrowser-ai uses **2.1-2.6x fewer tokens** than all competitors via Python co
 
 The OpenBrowser MCP entry used the legacy one-tool catalog at benchmark time. Current 2026-07-28 clients see six tools. [Full MCP comparison with methodology](https://docs.openbrowser.me/comparison)
 
-## Native web search
+## 5. Native web search
 
 Use `openbrowser-ai search "your query"` to search without starting a browser. Use `--json` for a JSON array or `--urls-only` for one URL per line. Search snippets are not evidence. Scrape and read source pages before you cite them.
 
@@ -171,7 +196,7 @@ openbrowser-ai search "OpenBrowser MCP docs" --urls-only --output search-urls.tx
 openbrowser-ai scrape --urls-file search-urls.txt --output scraped-pages.jsonl --output-format jsonl
 ```
 
-## CLI Execute Mode
+## 6. CLI Execute Mode
 
 Run browser automation directly from Bash without the MCP server:
 
@@ -196,7 +221,7 @@ Use `--text-only` on `scrape` to block external CSS, images, fonts, media, and t
 
 The CLI daemon uses `~/.config/openbrowser/profiles/daemon` as its default browser profile, so saved logins survive daemon restarts through Chrome's user-data directory. An explicit `storage_state` path is read and written by the storage-state watchdog at the configured path; that is separate from the MCP one-time seed behavior. Downloads default to `~/Downloads/openbrowser-daemon` and survive `daemon stop`. Daemon timeout, socket, and profile variables are listed in the CLI daemon guide. Custom sockets share the default profile unless `OPENBROWSER_DAEMON_PROFILE_ISOLATION=true` or `OPENBROWSER_DAEMON_PROFILE_DIR` is set. `OPENBROWSER_USER_DATA_DIR` takes precedence over both and always selects that explicit profile.
 
-## Configuration
+## 7. Configuration
 
 Optional environment variables:
 
@@ -231,7 +256,7 @@ Set these in your `.mcp.json`:
 }
 ```
 
-## Skills
+## 8. Skills
 
 The plugin includes 8 built-in skills that provide guided workflows for common browser automation tasks. All skills use the CLI-first approach via `openbrowser-ai -c` for direct code execution. Each skill is triggered automatically when the user's request matches its description.
 
@@ -248,7 +273,7 @@ The plugin includes 8 built-in skills that provide guided workflows for common b
 
 Each skill file (`SKILL.md`) contains YAML frontmatter with trigger conditions and a step-by-step workflow. All skills use `openbrowser-ai -c` via the Bash tool for CLI-first browser automation.
 
-## Testing and Benchmarks
+## 9. Testing and Benchmarks
 
 ```bash
 # E2E test the MCP server against the published PyPI package
@@ -260,7 +285,7 @@ uv run python benchmarks/playwright_benchmark.py
 uv run python benchmarks/cdp_benchmark.py
 ```
 
-## Troubleshooting
+## 10. Troubleshooting
 
 **Browser does not launch**: Ensure Chrome or Chromium is installed and accessible from PATH.
 
@@ -268,6 +293,6 @@ uv run python benchmarks/cdp_benchmark.py
 
 **Session timeout**: Browser sessions auto-close after 10 minutes without an `execute_code` call. `get_status` does not refresh the timer. The context remains open and the next `execute_code` call starts a fresh browser.
 
-## License
+## 11. License
 
 MIT

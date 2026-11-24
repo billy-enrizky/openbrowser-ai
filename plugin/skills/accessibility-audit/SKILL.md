@@ -10,13 +10,33 @@ allowed-tools: Bash(openbrowser-ai:*) Bash(curl:*) Bash(uv:*) Bash(irm:*) Read W
 
 # Accessibility Audit
 
+<!-- toc:start -->
+## Table of Contents
+
+- [1. Setup](#1-setup)
+- [2. Workflow](#2-workflow)
+  - [2.1. Step 1 -- Navigate and initialize audit](#21-step-1----navigate-and-initialize-audit)
+  - [2.2. Step 2 -- Check heading structure](#22-step-2----check-heading-structure)
+  - [2.3. Step 3 -- Check images for alt text](#23-step-3----check-images-for-alt-text)
+  - [2.4. Step 4 -- Check form labels](#24-step-4----check-form-labels)
+  - [2.5. Step 5 -- Check ARIA attributes](#25-step-5----check-aria-attributes)
+  - [2.6. Step 6 -- Check landmark regions](#26-step-6----check-landmark-regions)
+  - [2.7. Step 7 -- Check links and buttons](#27-step-7----check-links-and-buttons)
+  - [2.8. Step 8 -- Check keyboard navigation](#28-step-8----check-keyboard-navigation)
+  - [2.9. Step 9 -- Compile audit report](#29-step-9----compile-audit-report)
+- [3. WCAG Quick Reference](#3-wcag-quick-reference)
+- [4. Tips](#4-tips)
+- [5. Cleanup](#5-cleanup)
+
+<!-- toc:end -->
+
 Audit web pages for accessibility issues following WCAG 2.1 guidelines using Python code execution. Checks heading structure, form labels, image alt text, ARIA attributes, landmark regions, and keyboard navigation.
 
 All code runs via `openbrowser-ai -c`. The daemon starts automatically and persists variables across calls. Run `openbrowser-ai warm` once before a multi-call workflow to start the daemon and browser before the workflow begins. Most browser functions are async, use `await`. `list_downloads()`, `download_outcomes()`, and `download_failures()` are synchronous.
 
 The CLI daemon persists cookies and login state in the Chrome user-data directory at `~/.config/openbrowser/profiles/daemon`, so authenticated sessions can be reused across later runs. No `storage_state.json` file is written unless you configure one explicitly.
 
-## Setup
+## 1. Setup
 
 Before running, verify openbrowser-ai is installed:
 
@@ -34,9 +54,9 @@ curl -fsSL https://raw.githubusercontent.com/billy-enrizky/openbrowser-ai/main/i
 irm https://raw.githubusercontent.com/billy-enrizky/openbrowser-ai/main/install.ps1 | iex
 ```
 
-## Workflow
+## 2. Workflow
 
-### Step 1 -- Navigate and initialize audit
+### 2.1. Step 1 -- Navigate and initialize audit
 
 ```bash
 openbrowser-ai -c - <<'EOF'
@@ -54,7 +74,7 @@ audit = {
 EOF
 ```
 
-### Step 2 -- Check heading structure
+### 2.2. Step 2 -- Check heading structure
 
 ```bash
 openbrowser-ai -c - <<'EOF'
@@ -96,7 +116,7 @@ if not headings_result.get("issues"):
 EOF
 ```
 
-### Step 3 -- Check images for alt text
+### 2.3. Step 3 -- Check images for alt text
 
 ```bash
 openbrowser-ai -c - <<'EOF'
@@ -135,7 +155,7 @@ if not images_result.get("issues"):
 EOF
 ```
 
-### Step 4 -- Check form labels
+### 2.4. Step 4 -- Check form labels
 
 ```bash
 openbrowser-ai -c - <<'EOF'
@@ -182,7 +202,7 @@ if not forms_result.get("issues"):
 EOF
 ```
 
-### Step 5 -- Check ARIA attributes
+### 2.5. Step 5 -- Check ARIA attributes
 
 ```bash
 openbrowser-ai -c - <<'EOF'
@@ -229,7 +249,7 @@ if not aria_result.get("issues"):
 EOF
 ```
 
-### Step 6 -- Check landmark regions
+### 2.6. Step 6 -- Check landmark regions
 
 ```bash
 openbrowser-ai -c - <<'EOF'
@@ -263,7 +283,7 @@ if not landmarks_result.get("issues"):
 EOF
 ```
 
-### Step 7 -- Check links and buttons
+### 2.7. Step 7 -- Check links and buttons
 
 ```bash
 openbrowser-ai -c - <<'EOF'
@@ -295,7 +315,7 @@ if not links_result.get("issues"):
 EOF
 ```
 
-### Step 8 -- Check keyboard navigation
+### 2.8. Step 8 -- Check keyboard navigation
 
 ```bash
 openbrowser-ai -c - <<'EOF'
@@ -329,7 +349,7 @@ if not keyboard_result.get("issues"):
 EOF
 ```
 
-### Step 9 -- Compile audit report
+### 2.9. Step 9 -- Compile audit report
 
 ```bash
 openbrowser-ai -c - <<'EOF'
@@ -362,7 +382,7 @@ if total_issues > 0:
 EOF
 ```
 
-## WCAG Quick Reference
+## 3. WCAG Quick Reference
 
 | Check | WCAG Criterion | Level |
 |-------|---------------|-------|
@@ -374,7 +394,7 @@ EOF
 | Focus order is logical | 2.4.3 Focus Order | A |
 | ARIA attributes valid | 4.1.2 Name, Role, Value | A |
 
-## Tips
+## 4. Tips
 
 - Code is piped via stdin using heredoc (`-c - <<'EOF'`), so all Python syntax works without shell escaping issues.
 - Store results in the `audit` dict -- variables persist between `-c` calls while the daemon is running.
@@ -383,7 +403,7 @@ EOF
 - The heading check catches the most common structural issues.
 - Missing form labels are the most common form accessibility failure.
 
-## Cleanup
+## 5. Cleanup
 
 Run this step after the task, whether it succeeded or failed.
 
