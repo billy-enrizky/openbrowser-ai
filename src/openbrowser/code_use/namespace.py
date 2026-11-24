@@ -16,7 +16,7 @@ from collections.abc import Awaitable, Callable
 from http.cookiejar import CookieJar
 from inspect import isawaitable, iscoroutinefunction
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Literal, cast
 from urllib.parse import unquote, urlparse
 
 import requests
@@ -1537,7 +1537,7 @@ def create_namespace(
 		*,
 		backend: str = 'auto',
 		region: str = 'us-en',
-		safe_search: str = 'moderate',
+		safe_search: Literal['on', 'moderate', 'off'] = 'moderate',
 		timelimit: str | None = None,
 	) -> list[dict[str, str]]:
 		"""Search the web. Snippets are previews, not evidence."""
@@ -1561,7 +1561,7 @@ def create_namespace(
 		*,
 		backend: str = 'auto',
 		region: str = 'us-en',
-		safe_search: str = 'moderate',
+		safe_search: Literal['on', 'moderate', 'off'] = 'moderate',
 		timelimit: str | None = None,
 		selector: str | None = None,
 		wait_for: str | None = None,

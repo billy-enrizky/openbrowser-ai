@@ -6,7 +6,7 @@ import logging
 import sys
 from collections.abc import Awaitable, Callable
 from enum import Enum
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 
 class CliMode(str, Enum):
@@ -1197,7 +1197,7 @@ def search(
 	max_results: int,
 	backend: str,
 	region: str,
-	safe_search: str,
+	safe_search: Literal['on', 'moderate', 'off'],
 	timelimit: str | None,
 	as_json: bool,
 	urls_only: bool,
@@ -1207,7 +1207,8 @@ def search(
 	import json
 	from pathlib import Path
 
-	from openbrowser.search import SearchError, search as search_web
+	from openbrowser.search import SearchError
+	from openbrowser.search import search as search_web
 
 	if as_json and urls_only:
 		raise click.UsageError("--json and --urls-only cannot be used together.")
