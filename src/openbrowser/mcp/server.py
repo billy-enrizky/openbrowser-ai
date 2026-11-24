@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import os
 import sys
+import threading
 
 # Set environment variables BEFORE any openbrowser imports to prevent early logging
 os.environ['OPENBROWSER_LOGGING_LEVEL'] = 'critical'
@@ -91,9 +92,10 @@ _configure_mcp_server_logging()
 # Suppress all logging for MCP mode
 logging.disable(logging.CRITICAL)
 
-# Import openbrowser modules
-from openbrowser.browser import BrowserProfile, BrowserSession
-from openbrowser.browser.download_state import downloads_summary
+# Import openbrowser modules. The browser, tools, and filesystem stacks are
+# imported on first context use: a client that only calls server/discover,
+# tools/list, or search_web never needs them, and deferring them lets the
+# first execute_code overlap those imports with Chrome startup.
 from openbrowser.browser.lifecycle import (
 	LifecycleMachine,
 	LifecyclePhase,
@@ -101,6 +103,52 @@ from openbrowser.browser.lifecycle import (
 )
 from openbrowser.code_use.executor import DEFAULT_MAX_OUTPUT_CHARS, CodeExecutor, output_limit_for_executor
 from openbrowser.code_use.prewarm import join_namespace_import, start_namespace_import
+
+# These names are bound on first context use. Keeping them as module globals
+# preserves the seam that tests and embedders replace with fakes.
+BrowserProfile: Any = None
+BrowserSession: Any = None
+CodeAgentTools: Any = None
+
+
+_BROWSER_STACK_THREAD: threading.Thread | None = None
+_BROWSER_STACK_LOCK = threading.Lock()
+
+
+def start_browser_stack_import() -> threading.Thread:
+	"""Warm the browser stack on a worker thread while the client handshakes."""
+	global _BROWSER_STACK_THREAD
+	with _BROWSER_STACK_LOCK:
+		if _BROWSER_STACK_THREAD is None:
+			_BROWSER_STACK_THREAD = threading.Thread(
+				target=_ensure_browser_stack,
+				name='openbrowser-browser-stack',
+				daemon=True,
+			)
+			_BROWSER_STACK_THREAD.start()
+		return _BROWSER_STACK_THREAD
+
+
+def _ensure_browser_stack() -> None:
+	"""Import the browser stack and action registry on first context use."""
+	global BrowserProfile, BrowserSession, CodeAgentTools
+	if BrowserSession is None:
+		from openbrowser.browser import BrowserProfile as profile_cls
+		from openbrowser.browser import BrowserSession as session_cls
+
+		BrowserProfile = profile_cls
+		BrowserSession = session_cls
+	if CodeAgentTools is None:
+		from openbrowser.tools.service import CodeAgentTools as tools_cls
+
+		CodeAgentTools = tools_cls
+
+
+def _downloads_summary(session: object):
+	"""Import the download summary helper on first use."""
+	from openbrowser.browser.download_state import downloads_summary
+
+	return downloads_summary(session)  # type: ignore[arg-type]
 
 
 def create_namespace(*args, **kwargs):
@@ -112,22 +160,34 @@ def create_namespace(*args, **kwargs):
 	from openbrowser.code_use.namespace import create_namespace as implementation
 
 	return implementation(*args, **kwargs)
+import importlib.util
+
 from openbrowser.config import (
 	CONFIG,
 	ConfigStartupError,
 	apply_managed_browser_profile_defaults,
 	get_default_profile,
 )
-from openbrowser.tools.service import CodeAgentTools
 
-try:
-	from openbrowser.filesystem.file_system import FileSystem
 
-	FILESYSTEM_AVAILABLE = True
-except ModuleNotFoundError:
-	FILESYSTEM_AVAILABLE = False
-except Exception:
-	FILESYSTEM_AVAILABLE = False
+def _filesystem_available() -> bool:
+	try:
+		return importlib.util.find_spec('openbrowser.filesystem.file_system') is not None
+	except (ImportError, ValueError):
+		return False
+
+
+FILESYSTEM_AVAILABLE = _filesystem_available()
+FileSystem: Any = None
+
+
+def _ensure_file_system() -> None:
+	"""Import the FileSystem class on first use."""
+	global FileSystem
+	if FileSystem is None:
+		from openbrowser.filesystem.file_system import FileSystem as fs_cls
+
+		FileSystem = fs_cls
 
 logger = logging.getLogger(__name__)
 
@@ -176,6 +236,7 @@ def _create_mcp_file_system() -> Any:
 	"""Create a FileSystem instance for MCP mode, or None if unavailable."""
 	if not FILESYSTEM_AVAILABLE:
 		return None
+	_ensure_file_system()
 	return FileSystem(base_dir=str(_MCP_WORKSPACE_DIR), create_default_files=False)
 
 
@@ -526,7 +587,7 @@ class _BrowserOwner:
 		self.owner_id = owner_id
 		self._adapter = adapter
 		self.config = config
-		self.browser_session: BrowserSession | None = None
+		self.browser_session: Any = None
 		self._browser_lifecycle = LifecycleMachine(f'mcp_browser:{owner_id}')
 		self._browser_generation = 0
 		self._pending_variables: dict[str, Any] = {}
@@ -542,7 +603,7 @@ class _BrowserOwner:
 		except (ValueError, TypeError):
 			max_output = 0
 		self._executor = CodeExecutor(max_output_chars=max_output if max_output > 0 else DEFAULT_MAX_OUTPUT_CHARS)
-		self._tools: CodeAgentTools | None = None
+		self._tools: Any = None
 		self._tools_generation: int | None = None
 
 		# Session management
@@ -593,6 +654,7 @@ class _BrowserOwner:
 		if not FILESYSTEM_AVAILABLE:
 			return None
 		if self._file_system is None:
+			_ensure_file_system()
 			self._file_system = FileSystem(base_dir=str(self._workspace_dir), create_default_files=False)
 		return self._file_system
 
@@ -766,6 +828,7 @@ class _BrowserOwner:
 			args.append(ownership_marker)
 			provenance.record('args', args, ProfileValueSource.MANAGED)
 		profile_data['args'] = args
+		_ensure_browser_stack()
 		profile = BrowserProfile(**profile_data)
 		provenance.refresh_from_profile(profile)
 		storage_state = profile.storage_state
@@ -844,6 +907,7 @@ class _BrowserOwner:
 			session = None
 			try:
 				profile = self._build_browser_profile()
+				_ensure_browser_stack()
 				session = BrowserSession(browser_profile=profile)
 				self.browser_session = session
 				await asyncio.wait_for(
@@ -853,6 +917,7 @@ class _BrowserOwner:
 				session.seed_generation(self._browser_generation)
 
 				# Create CodeAgent tools and namespace
+				_ensure_browser_stack()
 				self._tools = CodeAgentTools()
 				self._tools_generation = self._browser_generation
 				join_namespace_import(namespace_import)
@@ -908,7 +973,7 @@ class _BrowserOwner:
 			return False
 		return getattr(health, 'client_present', False) is True and getattr(health, 'healthy', False) is True
 
-	async def _kill_session_safely(self, session: BrowserSession) -> _CleanupOutcome:
+	async def _kill_session_safely(self, session: Any) -> _CleanupOutcome:
 		"""Complete owned cleanup without confusing worker and caller cancellation."""
 
 		async def owned_cleanup() -> bool:
@@ -1014,6 +1079,7 @@ class _BrowserOwner:
 			# lease and can reclaim only its recorded browser process.
 			try:
 				profile = self._build_browser_profile()
+				_ensure_browser_stack()
 				session = BrowserSession(browser_profile=profile)
 			except BaseException as error:
 				from openbrowser.browser.cdp_connection import sanitize_error_detail
@@ -1037,6 +1103,7 @@ class _BrowserOwner:
 				session.seed_generation(self._browser_generation)
 
 				# 3. Rebuild namespace with the new session (preserving user variables)
+				_ensure_browser_stack()
 				self._tools = CodeAgentTools()
 				self._tools_generation = self._browser_generation
 				self._namespace = create_namespace(
@@ -1267,7 +1334,7 @@ class _BrowserOwner:
 
 	def _downloads_snapshot(self) -> dict[str, Any]:
 		"""Return a bounded download outcome summary without starting the browser."""
-		return downloads_summary(self.browser_session)
+		return _downloads_summary(self.browser_session)
 
 	def _status_payload(self) -> dict[str, Any]:
 		"""Build a JSON-safe status snapshot without starting the browser."""
@@ -2259,6 +2326,10 @@ async def main(session_timeout_minutes: int = 10):
 		sys.exit(1)
 
 	server = OpenBrowserServer(session_timeout_minutes=session_timeout_minutes)
+	# The browser stack is not needed for server/discover, tools/list, or
+	# search_web. Warm it in the background so the first execute_code does not
+	# pay for the import after the client has already connected.
+	start_browser_stack_import()
 	if server._telemetry and TELEMETRY_AVAILABLE:
 		server._telemetry.capture(
 			MCPServerTelemetryEvent(
