@@ -5,7 +5,7 @@ description: |
   Trigger when the user asks to: install OpenBrowser, set up OpenBrowser,
   configure the MCP server, install the CLI, set up browser profiles,
   install the plugin skills, verify a browser, or repair a broken install.
-allowed-tools: Bash(openbrowser-ai:*) Bash(uv:*) Bash(uvx:*) Bash(pip:*) Bash(pipx:*) Bash(npm:*) Bash(npx:*) Bash(claude:*) Bash(curl:*) Bash(irm:*) Read Write Edit
+allowed-tools: Bash(openbrowser-ai:*) Bash(uv:*) Bash(uvx:*) Bash(python3:*) Bash(pip:*) Bash(pipx:*) Bash(npm:*) Bash(npx:*) Bash(claude:*) Bash(curl:*) Bash(irm:*) Read Write Edit
 ---
 
 # OpenBrowser Setup
@@ -75,6 +75,16 @@ openbrowser-ai install
 ```
 
 `openbrowser-ai install` uses `uvx playwright install chromium`. If `uvx` is unavailable, install uv first or run `python -m playwright install chromium` with the interpreter that owns the OpenBrowser install. The MCP command also uses `openbrowser-ai --mcp`, so it does not require uvx at runtime.
+
+### Optional DDGS web search
+
+Run `uvx ddgs ...` to use the DDGS search CLI without a global install. If `uvx` is unavailable, install DDGS for your user:
+
+```bash
+python3 -m pip install --user --upgrade ddgs
+```
+
+The install adds the `ddgs` command to your user Python scripts directory. Add that directory to `PATH` if the shell cannot find `ddgs`.
 
 ## Step 3 -- Inspect and repair config
 
