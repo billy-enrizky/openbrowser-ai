@@ -17,13 +17,13 @@ import matplotlib.pyplot as plt
 
 HERE = Path(__file__).resolve().parent
 DEFAULT_INPUT = (
-    HERE / "results" / "results-warm-five-arm-tabs-ready-2026-11-24-n5.summary.json"
+    HERE / "results" / "results-warm-five-arm-final-2026-11-24-n5.summary.json"
 )
 DEFAULT_OUTPUT = HERE.parents[1] / "docs" / "images" / "native-interactive-warm-current-p50.png"
 TASKS = ("wizard", "modal", "download", "tabs")
 ARMS = (
-    ("openbrowser", "OpenBrowser semantic", "#0f6270"),
-    ("openbrowser-fast", "OpenBrowser selectors", "#58a69f"),
+    ("openbrowser-mcp-fast", "OpenBrowser MCP", "#0f6270"),
+    ("openbrowser-fast", "OpenBrowser CLI", "#58a69f"),
     ("chrome-devtools-mcp", "chrome-devtools-mcp", "#c2852a"),
     ("agent-browser", "agent-browser", "#4f7f5b"),
     ("browser-use", "browser-use", "#8871b4"),
