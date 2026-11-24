@@ -44,8 +44,7 @@ async def wait_js(expression, timeout=15.0):
     raise RuntimeError('timeout waiting for: ' + expression)
 
 async def current_tabs():
-    summary = await browser.get_browser_state_summary(include_screenshot=False)
-    return [(tab.target_id, tab.url, tab.title) for tab in summary.tabs]
+    return [(tab["target_id"], tab["url"], tab["title"]) for tab in await get_tabs()]
 """
 
 
@@ -111,24 +110,41 @@ def _tabs(url: str) -> str:
         HEADER
         + f"""
 await navigate({url!r})
-summary = await browser.get_browser_state_summary()
-original = summary.tabs[0].target_id if summary.tabs else None
+tabs = await get_tabs()
+original = next((tab["target_id"] for tab in tabs if tab["active"]), tabs[0]["target_id"] if tabs else None)
 await click(index=await find('link', 'Compare plans'))
-deadline = asyncio.get_event_loop().time() + 20
-detail = None
-while asyncio.get_event_loop().time() < deadline:
-    tabs = await current_tabs()
-    others = [tab for tab in tabs if tab[0] != original]
-    if others:
-        detail = others[0][0]
-        break
-    await asyncio.sleep(0.1)
-if detail is None:
-    raise RuntimeError('detail tab did not open')
-await switch(tab_id=detail)
+
+async def open_detail():
+    deadline = asyncio.get_event_loop().time() + 20
+    last_error = None
+    while asyncio.get_event_loop().time() < deadline:
+        tabs = await current_tabs()
+        detail_tabs = [tab for tab in reversed(tabs) if tab[0] != original and "/detail" in tab[1]]
+        for tab in detail_tabs:
+            try:
+                await switch(tab_id=tab[0])
+            except RuntimeError as error:
+                last_error = error
+                if 'closed' not in str(error).lower():
+                    raise
+                continue
+            await asyncio.sleep(0.15)
+            return tab[0]
+        await asyncio.sleep(0.1)
+    raise RuntimeError('detail tab did not open: %s' % last_error)
+
+detail = await open_detail()
 await wait_js("!!document.getElementById('approve')")
-await click(index=await find('button', 'Approve'))
-await wait_js("document.getElementById('approved').textContent === 'approved'")
+for attempt in range(3):
+    try:
+        await evaluate("document.getElementById('approve').click()")
+        await wait_js("document.getElementById('approved').textContent === 'approved'", timeout=5)
+        break
+    except RuntimeError:
+        if attempt == 2:
+            raise
+        detail = await open_detail()
+        await wait_js("!!document.getElementById('approve')")
 await close(tab_id=detail)
 await switch(tab_id=original)
 await wait_js("document.getElementById('status').textContent === 'approved:42'")
@@ -226,7 +242,9 @@ class OpenBrowserArm:
         self._result.stdout += stdout
         self._result.stderr += stderr
         if returncode != 0:
-            raise RuntimeError(f"openbrowser-ai exited {returncode}: {stderr.strip()[:600]}")
+            raise RuntimeError(
+                f"openbrowser-ai exited {returncode}: {stderr.strip()[:2500]} stdout={stdout.strip()[:1500]}"
+            )
         return returncode, stdout, stderr
 
     def _parse_last_json(self) -> dict:

@@ -107,8 +107,11 @@ class ChromeDevToolsArm:
     name = "chrome-devtools-mcp"
 
     def __init__(self) -> None:
+        self.binary = SERVER
         self._client: StdioMcpClient | None = None
         self._page_id: int | None = None
+        self._browser_version = ""
+        self._warm_keychain_verified: bool | None = None
         self._result = ArmResult(ok=False)
 
     def _start(self, ctx: RunContext) -> None:
@@ -129,12 +132,14 @@ class ChromeDevToolsArm:
         self._client = StdioMcpClient(command, env=ctx.env, timeout=120)
         self._result.process_starts += 1
         init = self._client.initialize()
-        self._result.browser_version = init.get("serverInfo", {}).get("version", "")
+        self._browser_version = init.get("serverInfo", {}).get("version", "")
+        self._result.browser_version = self._browser_version
         pages = self._pages()
         if not pages:
             raise RuntimeError("chrome-devtools-mcp reported no pages")
         self._page_id = pages[0][0]
         verified = verify_mock_keychain(str(ctx.profile))
+        self._warm_keychain_verified = verified
         self._result.keychain_verified = verified
         if verified is False:
             raise RuntimeError("chrome-devtools-mcp Chrome launched without --use-mock-keychain")
@@ -243,8 +248,7 @@ class ChromeDevToolsArm:
             {
                 "pageId": self._page_id,
                 "function": (
-                    "() => { document.querySelector('[data-value=\"Project Atlas\"]').click(); "
-                    "return true; }"
+                    "() => { document.querySelector('[data-value=\"Project Atlas\"]').click(); return true; }"
                 ),
             },
         )
@@ -263,8 +267,7 @@ class ChromeDevToolsArm:
                 return
             time.sleep(0.2)
         raise RuntimeError(
-            "chrome-devtools-mcp exposes no download lifecycle and Chrome saved no file to "
-            f"{ctx.downloads}"
+            f"chrome-devtools-mcp exposes no download lifecycle and Chrome saved no file to {ctx.downloads}"
         )
 
     def _run_tabs(self, ctx: RunContext) -> None:
@@ -277,9 +280,9 @@ class ChromeDevToolsArm:
         detail = None
         while time.monotonic() < deadline:
             pages = self._pages()
-            others = [page for page in pages if page[0] != original]
+            others = [page for page in pages if page[0] != original and "/detail" in page[1]]
             if others:
-                detail = others[0][0]
+                detail = others[-1][0]
                 break
             time.sleep(0.15)
         if detail is None:
@@ -332,12 +335,32 @@ class ChromeDevToolsArm:
             self._client.close()
             self._client = None
 
-    def run(self, ctx: RunContext) -> ArmResult:
+    def warmup(self, ctx: RunContext) -> tuple[dict, float]:
+        """Start the MCP server and Chrome once for a warm session."""
+        started = time.monotonic()
+        self._result = ArmResult(ok=False)
+        self._start(ctx)
+        elapsed_ms = (time.monotonic() - started) * 1000.0
+        payload = {
+            "ok": True,
+            "page_id": self._page_id,
+            "browser_version": self._browser_version,
+            "keychain_verified": self._warm_keychain_verified,
+        }
+        self._result = ArmResult(ok=False)
+        return payload, elapsed_ms
+
+    def run(self, ctx: RunContext, *, cleanup: bool = True) -> ArmResult:
+        self._result = ArmResult(ok=False)
         try:
             if ctx.task == "auth":
                 self._run_auth(ctx)
             else:
-                self._start(ctx)
+                if self._client is None:
+                    self._start(ctx)
+                else:
+                    self._result.browser_version = self._browser_version
+                    self._result.keychain_verified = self._warm_keychain_verified
                 if ctx.task == "wizard":
                     self._run_wizard(ctx)
                 elif ctx.task == "modal":
@@ -353,8 +376,9 @@ class ChromeDevToolsArm:
             self._result.ok = False
             self._result.error = str(exc)
         finally:
-            self._stop_client()
-            self.cleanup(ctx)
+            if cleanup:
+                self._stop_client()
+                self.cleanup(ctx)
         return self._result
 
     def cleanup(self, ctx: RunContext) -> None:

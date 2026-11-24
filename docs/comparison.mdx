@@ -72,21 +72,28 @@ speed win.
 
 ### Interactive browsing, warm lane
 
-The warm lane starts OpenBrowser once with `openbrowser-ai warm`, then runs each
-task against a fresh fixture. Paired N=5 cold and warm run, same browser build,
-isolated HOME, config, and socket, headless, with `--use-mock-keychain`. Warmup
-was 1919 ms total and 1833 ms reported.
+The warm lane starts each arm once, then runs each task against a fresh fixture.
+OpenBrowser uses `openbrowser-ai warm`; chrome-devtools-mcp starts its MCP
+server and Chrome once; agent-browser starts one named session; browser-use
+starts one dedicated Chrome and reuses its CDP URL. The auth task remains cold
+because it deliberately restarts the browser.
 
-| Task | Cold p50 ms | Warm p50 ms | Warm p95 ms | Speedup |
+Paired N=3 run, same browser build, isolated HOME, config, profile, and socket,
+headless, with `--use-mock-keychain`. Warm p50 milliseconds:
+
+| Task | OpenBrowser | chrome-devtools-mcp | agent-browser | browser-use |
 | --- | ---: | ---: | ---: | ---: |
-| wizard | 5528 | 2241 | 2396 | 2.47x |
-| modal | 3928 | 1181 | 1256 | 3.33x |
-| download | 3678 | 782 | 824 | 4.70x |
-| tabs | 8369 | 5745 | 5801 | 1.46x |
+| wizard | 3401 | 4089 | 1264 | 2111 |
+| modal | 1574 | 2910 | 1754 | 1057 |
+| download | 966 | 836 | 629 | 915 |
+| tabs | 6170 | 1644 | 1237 | 650 |
 
-All 20 warm runs passed their oracle. This is an OpenBrowser cold-versus-warm
-measurement, not a competitor warm comparison. It shows that most of the cold
-gap is startup, not task execution.
+All 48 warm runs passed their oracle. OpenBrowser improves over its own cold
+lane by 1.26x to 3.62x. It beats chrome-devtools-mcp on modal and is close on
+wizard, but still trails agent-browser and browser-use on wizard, download, and
+tabs. The tabs task is the largest gap, 6170 ms for OpenBrowser against 650 ms
+for browser-use. The warm lane shows that startup is not the only gap; tab
+discovery, focus switching, and per-action overhead still matter.
 
 ### What these lanes do not prove
 
@@ -94,7 +101,8 @@ gap is startup, not task execution.
 - No peak RSS or CPU sampling yet.
 - Lightpanda and Chromium have different engines, layout, paint, extension, and
   screenshot semantics.
-- The warm lane currently measures OpenBrowser only.
+- The warm lane covers four arms but excludes the auth task. The cold lane
+  covers auth.
 - Local fixture wins are not a universal ranking of live-site behavior.
 
 ## MCP Server Comparison

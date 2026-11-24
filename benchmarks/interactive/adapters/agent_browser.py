@@ -16,15 +16,7 @@ CHROME = os.environ.get(
 )
 BINARY = os.environ.get(
     "AGENT_BROWSER_BIN",
-    str(
-        Path.home()
-        / ".cache"
-        / "openbrowser-interactive-bench"
-        / "npm"
-        / "node_modules"
-        / ".bin"
-        / "agent-browser"
-    ),
+    str(Path.home() / ".cache" / "openbrowser-interactive-bench" / "npm" / "node_modules" / ".bin" / "agent-browser"),
 )
 
 
@@ -32,7 +24,9 @@ class AgentBrowserArm:
     name = "agent-browser"
 
     def __init__(self) -> None:
+        self.binary = BINARY
         self._result = ArmResult(ok=False)
+        self._warm_keychain_verified: bool | None = None
 
     def _command(self, ctx: RunContext, *args: str) -> list[str]:
         return [
@@ -173,9 +167,9 @@ class AgentBrowserArm:
         detail = ""
         while time.monotonic() < deadline:
             tabs = self._tabs(ctx)
-            others = [tab for tab in tabs if self._tab_id(tab) != original]
+            others = [tab for tab in tabs if self._tab_id(tab) != original and "/detail" in str(tab.get("url", ""))]
             if others:
-                detail = self._tab_id(others[0])
+                detail = self._tab_id(others[-1])
                 break
             time.sleep(0.15)
         if not detail:
@@ -211,7 +205,23 @@ class AgentBrowserArm:
         if secret != ACCOUNT_SECRET:
             raise RuntimeError(f"secret after restart was {secret!r}")
 
-    def run(self, ctx: RunContext) -> ArmResult:
+    def warmup(self, ctx: RunContext) -> tuple[dict, float]:
+        """Start an agent-browser session once for a warm lane."""
+        started = time.monotonic()
+        self._result = ArmResult(ok=False)
+        self._run(ctx, "open", "about:blank")
+        self._run(ctx, "set", "viewport", "1280", "800")
+        verified = verify_mock_keychain(str(ctx.profile))
+        self._warm_keychain_verified = verified
+        if verified is False:
+            raise RuntimeError("agent-browser Chrome launched without --use-mock-keychain")
+        elapsed_ms = (time.monotonic() - started) * 1000.0
+        payload = {"ok": True, "session": ctx.session, "keychain_verified": verified}
+        self._result = ArmResult(ok=False)
+        return payload, elapsed_ms
+
+    def run(self, ctx: RunContext, *, cleanup: bool = True) -> ArmResult:
+        self._result = ArmResult(ok=False)
         try:
             if ctx.task == "wizard":
                 self._run_wizard(ctx)
@@ -226,6 +236,7 @@ class AgentBrowserArm:
             else:
                 raise ValueError(f"unknown task {ctx.task}")
             verified = verify_mock_keychain(str(ctx.profile))
+            self._warm_keychain_verified = verified
             self._result.keychain_verified = verified
             if verified is False:
                 raise RuntimeError("agent-browser Chrome launched without --use-mock-keychain")
@@ -234,7 +245,8 @@ class AgentBrowserArm:
             self._result.ok = False
             self._result.error = str(exc)
         finally:
-            self.cleanup(ctx)
+            if cleanup:
+                self.cleanup(ctx)
         return self._result
 
     def cleanup(self, ctx: RunContext) -> None:

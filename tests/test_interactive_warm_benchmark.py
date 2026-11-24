@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from benchmarks.interactive.adapters.openbrowser import OpenBrowserArm
-from benchmarks.interactive.warm_benchmark import WARM_TASKS, cold_p50, summarize
+from benchmarks.interactive.warm_benchmark import WARM_TASKS, cold_p50, redact, summarize
 
 
 def _ctx() -> SimpleNamespace:
@@ -62,12 +62,12 @@ def test_openbrowser_warmup_parses_json():
 
 def test_summarize_uses_paired_cold_p50():
     records = [
-        {"task": "wizard", "ok": True, "latency_ms": 100.0, "error": ""},
-        {"task": "wizard", "ok": True, "latency_ms": 200.0, "error": ""},
-        {"task": "wizard", "ok": True, "latency_ms": 300.0, "error": ""},
+        {"task": "wizard", "arm": "openbrowser", "ok": True, "latency_ms": 100.0, "error": ""},
+        {"task": "wizard", "arm": "openbrowser", "ok": True, "latency_ms": 200.0, "error": ""},
+        {"task": "wizard", "arm": "openbrowser", "ok": True, "latency_ms": 300.0, "error": ""},
     ]
 
-    rows = summarize(records, {"wizard": 400.0})
+    rows = summarize(records, {("wizard", "openbrowser"): 400.0})
 
     assert rows[0]["warm_p50_ms"] == 200.0
     assert rows[0]["speedup"] == 2.0
@@ -87,4 +87,9 @@ def test_cold_p50_reads_openbrowser_records(tmp_path: Path):
         + "\n"
     )
 
-    assert cold_p50(path)["wizard"] == 200.0
+    assert cold_p50(path)[("wizard", "openbrowser")] == 200.0
+
+
+def test_redact_hides_home_and_worktrees():
+    assert redact(str(Path.home() / "bin" / "openbrowser-ai")) == "$HOME/bin/openbrowser-ai"
+    assert redact("/repo/.worktrees/example/.venv/bin/openbrowser-ai") == "working copy"
