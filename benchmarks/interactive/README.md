@@ -309,6 +309,103 @@ Raw evidence:
 - `results-warm-fast-selector-final-all-2026-11-24-n3.jsonl`
 - `results-warm-fast-selector-final-all-2026-11-24-n3.summary.json`
 
+## Warm tabs direct CDP click, 2026-11-24
+
+`openbrowser-fast` now calls `click_selector_and_wait_for_new_tab()` for the
+`#compare` link. The helper reads the link rectangle with `evaluate()`. It sends
+CDP mouse input and returns the new page target ID. The adapter then calls the
+existing `switch` and `close` actions. The semantic arm keeps its current `_tabs`
+script.
+
+The paired run alternated the pre-helper fast script and the direct helper in
+one warm browser session. Each variant ran five times with a fresh fixture. All
+ten adapter checks and server-side oracles passed. The oracle checks that the
+detail page sees `window.opener`, sends an approval event, and sends
+`approved:42` to the original page. It also checks the original title and the
+detail-page close event.
+
+Load on 18 logical CPUs was `9.48`, `8.20`, and `8.18` before the run. It was
+`9.51`, `8.27`, and `8.20` after the run. Load exceeded the declared limit of
+4, so the results are exploratory, not quiet-host p50.
+
+| Path | Samples | p50 ms | Range ms | Adapter and oracle |
+| --- | ---: | ---: | ---: | ---: |
+| Existing CodeAgent click | 5 | 1,062.497 | 974.280 to 1,216.891 | 5/5 |
+| Direct CDP click helper | 5 | 367.326 | 289.933 to 405.063 | 5/5 |
+
+The direct helper lowered p50 by `695.171` ms, or `65.428%`, in this run. This
+paired comparison tests two OpenBrowser paths. It does not compare a competitor
+or establish a competitor win.
+
+The step timings show where the time went. The baseline values came from a
+separate N=5 diagnostic run. The direct values came from the paired run. These
+step values are not paired deltas.
+
+| Step | Baseline p50 ms | Direct p50 ms |
+| --- | ---: | ---: |
+| Popup click and target wait | 517.223 | 42.772 |
+| Fixed focus-settle sleep | 151.925 | Not used |
+| Separate target-poll sleep | 101.369 | Not used |
+| Switch to detail tab | 6.752 | 13.523 |
+| Wait for the approve button | 1.253 | 13.132 |
+| Close detail tab | 16.723 | 27.784 |
+| Switch to original tab | 4.957 | 8.924 |
+
+The legacy step profile also measured `get_browser_state_summary()` at `18.632`
+ms and `get_selector_map()` at `0.486` ms. The `DefaultActionWatchdog` click
+handler took `506.184` ms in one diagnostic sample. The click handler, not the
+state summary, dominated that step.
+
+Raw evidence:
+
+- `results-warm-tabs-step-baseline-2026-11-24-n5.jsonl`
+- `results-warm-tabs-step-baseline-2026-11-24-n5.summary.json`
+- `results-warm-tabs-direct-cdp-2026-11-24-n5-paired.jsonl`
+- `results-warm-tabs-direct-cdp-2026-11-24-n5-paired.summary.json`
+
+## Five-arm tabs-only warm lane, 2026-11-24
+
+This lane used the direct popup helper and the three interactive competitors.
+It warmed each arm once, then ran five fresh tabs fixtures per arm. It used
+arm-major order, not interleaved. All 25 runs passed the adapter check and the
+exact tabs oracle.
+
+Load on 18 logical CPUs was `16.81`, `10.82`, and `9.78` before the run. It was
+`20.09`, `12.91`, and `10.63` after the run. Load stayed above 4, so treat the
+latencies as exploratory.
+
+| Arm | Samples | p50 ms | Range ms | Adapter and oracle |
+| --- | ---: | ---: | ---: | ---: |
+| `openbrowser` | 5 | 1,171.336 | 1,055.090 to 1,207.928 | 5/5 |
+| `openbrowser-fast` | 5 | 484.242 | 377.246 to 539.227 | 5/5 |
+| `chrome-devtools-mcp` | 5 | 1,552.286 | 1,534.648 to 1,621.911 | 5/5 |
+| `agent-browser` | 5 | 795.759 | 779.441 to 893.941 | 5/5 |
+| `browser-use` | 5 | 594.553 | 507.341 to 1,050.248 | 5/5 |
+
+`openbrowser-fast` had a lower p50 than `agent-browser` and
+`chrome-devtools-mcp` in this run. Its range overlaps the `browser-use` range.
+The run does not show a measurable difference against `browser-use`. Do not
+use these high-load results as a competitor ranking.
+
+Rerun this lane:
+
+```sh
+while ! mkdir /tmp/openbrowser-bench.lock 2>/dev/null; do sleep 1; done
+trap 'rmdir /tmp/openbrowser-bench.lock 2>/dev/null || true' EXIT HUP INT TERM
+OPENBROWSER_BIN=/path/to/openbrowser-ai \
+uv run --locked python -m benchmarks.interactive.warm_benchmark \
+  --samples 5 \
+  --arms openbrowser openbrowser-fast chrome-devtools-mcp agent-browser browser-use \
+  --tasks tabs \
+  --output benchmarks/interactive/results/results-warm-tabs-five-arm.jsonl \
+  --cold-results benchmarks/interactive/results/results-2026-11-23-lean.jsonl
+```
+
+Raw evidence:
+
+- `results-warm-tabs-five-arm-direct-cdp-2026-11-24-n5.jsonl`
+- `results-warm-tabs-five-arm-direct-cdp-2026-11-24-n5.summary.json`
+
 ## OpenBrowser extension A/B, 2026-11-23
 
 The A/B uses one binary, the same screenshot setting, and 3 samples per task.

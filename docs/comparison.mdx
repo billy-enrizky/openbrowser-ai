@@ -90,9 +90,9 @@ Raw data: `benchmarks/interactive/results/results-2026-11-23-lean.jsonl`.
 
 ### Interactive browsing, warm lane
 
-<img src="/images/native-interactive-warm-current-p50.png" alt="Warm interactive p50 latency for OpenBrowser semantic, OpenBrowser CSS selector, chrome-devtools-mcp, agent-browser, and browser-use across four tasks." />
+<img src="/images/native-interactive-warm-current-p50.png" alt="Warm interactive p50 latency for the prior OpenBrowser selector build, chrome-devtools-mcp, agent-browser, and browser-use across four tasks." />
 
-The warm lane starts each arm once, then runs each task against a fresh fixture. This run used 3 samples per arm and task with Chrome `158.0.8127.36`. OpenBrowser semantic and selector arms both used `0.1.58.dev67+gfc17d3201`. All 60 runs passed their oracle. The run used arm-major order on a shared host, not a quiet interleaved run.
+The chart and table show the selector build before the direct popup helper. The warm lane starts each arm once, then runs each task against a fresh fixture. This run used 3 samples per arm and task with Chrome `158.0.8127.36`. OpenBrowser semantic and selector arms both used `0.1.58.dev67+gfc17d3201`. All 60 runs passed their oracle. The run used arm-major order on a shared host, not a quiet interleaved run.
 
 | Task | OpenBrowser semantic, p50 ms | OpenBrowser selectors, p50 ms | chrome-devtools-mcp, p50 ms | agent-browser, p50 ms | browser-use, p50 ms |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -101,30 +101,72 @@ The warm lane starts each arm once, then runs each task against a fresh fixture.
 | `download` | 799 | 576 | 781 | 481 | 585 |
 | `tabs` | 994 | 985 | 1492 | 440 | 217 |
 
-The CSS selector helpers cut `wizard` by 10.6x, `modal` by 2.93x, and `download` by 1.39x against the semantic helper arm. `tabs` shows no measurable change because a blank-target link still uses the popup-safe click path. The selector arm beats chrome-devtools-mcp on all four tasks and browser-use on three. Agent-browser is faster on download and tabs, and browser-use is faster on tabs.
+In this run, the CSS selector helpers cut `wizard` by 10.6x, `modal` by 2.93x, and `download` by 1.39x against the semantic helper arm. `tabs` showed no measurable change because a blank-target link still used the generic click path. The selector arm beat chrome-devtools-mcp on all four tasks and browser-use on three. Agent-browser was faster on download and tabs, and browser-use was faster on tabs.
 
 Raw data: `benchmarks/interactive/results/results-warm-fast-selector-final-all-2026-11-24-n3.jsonl`.
 
+#### Direct popup click comparison
+
+The new CodeAgent helper uses a CDP mouse click for the `#compare` link. It waits for the new page target and returns its full target ID. The adapter then uses the existing focus-aware `switch` and `close` actions. The semantic arm keeps its current `_tabs` script.
+
+This paired run alternated the prior fast script and the direct helper. Each path ran five times in one warm browser session. Each run used a fresh fixture. All ten adapter checks and all ten exact server-side oracles passed.
+
+| OpenBrowser path | Samples | p50 ms | Range ms | Oracle |
+| --- | ---: | ---: | ---: | ---: |
+| Prior fast click | 5 | 1,062.497 | 974.280 to 1,216.891 | 5/5 |
+| Direct CDP click | 5 | 367.326 | 289.933 to 405.063 | 5/5 |
+
+The direct path was 695.171 ms lower at p50, or 65.428%. Load on 18 logical CPUs was `9.48`, `8.20`, and `8.18` before the run. It was `9.51`, `8.27`, and `8.20` after the run. Load exceeded 4, so these values are exploratory, not quiet-host p50. This run did not include competitors and does not establish a competitor win.
+
+The direct click helper took 42.772 ms at p50, with a 42.048 to 46.592 ms range. The baseline step run measured 517.223 ms for the generic click. It measured 151.925 ms for a fixed focus wait and 101.369 ms for a target-poll wait. The step runs used different host loads. Do not treat them as paired deltas.
+
+Raw data:
+
+- `benchmarks/interactive/results/results-warm-tabs-step-baseline-2026-11-24-n5.jsonl`
+- `benchmarks/interactive/results/results-warm-tabs-direct-cdp-2026-11-24-n5-paired.jsonl`
+
+#### Five-arm tabs-only warm lane
+
+This later run used the direct helper and all three interactive competitors.
+It warmed each arm once and ran five fresh fixtures per arm. It used arm-major
+order, not interleaved order. All 25 adapter checks and exact oracles passed.
+
+| Arm | Samples | p50 ms | Range ms | Oracle |
+| --- | ---: | ---: | ---: | ---: |
+| `openbrowser` | 5 | 1,171.336 | 1,055.090 to 1,207.928 | 5/5 |
+| `openbrowser-fast` | 5 | 484.242 | 377.246 to 539.227 | 5/5 |
+| `chrome-devtools-mcp` | 5 | 1,552.286 | 1,534.648 to 1,621.911 | 5/5 |
+| `agent-browser` | 5 | 795.759 | 779.441 to 893.941 | 5/5 |
+| `browser-use` | 5 | 594.553 | 507.341 to 1,050.248 | 5/5 |
+
+Load on 18 logical CPUs was `16.81`, `10.82`, and `9.78` before the run. It
+was `20.09`, `12.91`, and `10.63` after the run. Load stayed above 4, so treat
+these values as exploratory. The direct helper range overlaps the `browser-use`
+range. The run shows no measurable difference against `browser-use`. It does
+not establish a competitor win.
+
+Raw data: `benchmarks/interactive/results/results-warm-tabs-five-arm-direct-cdp-2026-11-24-n5.jsonl`.
+
 ### Head-to-head scorecard
 
-This table counts task-level latency wins on the local fixtures. It does not score memory, features, stability, or live-site coverage.
+This table counts task-level latency wins on the local fixtures. It uses the prior four-task selector run. The later tabs-only result above covers one task and does not change this scorecard. The table does not score memory, features, stability, or live-site coverage.
 
 | Workload | OpenBrowser arm | Opponent | OpenBrowser wins | Opponent wins | Detail |
 | --- | --- | --- | ---: | ---: | --- |
 | Scraping, 5 tasks | full or lightweight | Firecrawl Local | 3 | 1 | Static article is parity. Firecrawl leads pagination by 7 percent. |
 | No-render, 5 tasks | no-render | Lightpanda `1.0.5` | 5 | 0 | Lightpanda uses less memory |
 | Warm interactive, 4 tasks | semantic | chrome-devtools-mcp | 3 | 1 | chrome-devtools-mcp wins download |
-| Warm interactive, 4 tasks | selectors | chrome-devtools-mcp | 4 | 0 | All four tasks |
-| Warm interactive, 4 tasks | selectors | agent-browser | 2 | 2 | agent-browser wins download and tabs |
-| Warm interactive, 4 tasks | selectors | browser-use | 2 | 1 | Download is parity. browser-use wins tabs. |
+| Warm interactive, 4 tasks | selectors, prior build | chrome-devtools-mcp | 4 | 0 | All four tasks |
+| Warm interactive, 4 tasks | selectors, prior build | agent-browser | 2 | 2 | agent-browser wins download and tabs |
+| Warm interactive, 4 tasks | selectors, prior build | browser-use | 2 | 1 | Download is parity. browser-use wins tabs. |
 
-The selector arm wins most local interactive tasks, but browser-use still wins tabs and agent-browser wins download and tabs. Download against browser-use is parity because the observed ranges overlap. No single OpenBrowser arm wins every task against every competitor.
+The prior selector build won most local interactive tasks, but browser-use won tabs and agent-browser won download and tabs. Download against browser-use was parity because the observed ranges overlap. The later five-arm tabs-only run had high host load and overlapping ranges against browser-use. It does not establish a new competitor ranking.
 
 ### What these lanes show
 
 OpenBrowser is the faster local scraping tool overall. It wins three of five tasks against Firecrawl Local. Static article is parity. The largest wins are 20.7x on the JavaScript list, 19.1x on the asset-heavy page, and 2.09x on table extraction. Firecrawl leads pagination by 7 percent. Against Lightpanda, OpenBrowser no-render is faster on all five tasks, but Lightpanda uses far less memory.
 
-The CSS selector helpers make OpenBrowser competitive in the warm interactive lane. The selector arm wins all four tasks against chrome-devtools-mcp, two against browser-use, and two against agent-browser. Download against browser-use is parity. Browser-use still wins tabs by 4.54x, and agent-browser still wins download and tabs. The semantic helper arm remains a separate, slower API path.
+In the prior warm run, the CSS selector arm beat chrome-devtools-mcp on all four tasks, beat browser-use on two tasks, and beat agent-browser on two tasks. Download against browser-use was parity. Browser-use won tabs, and agent-browser won download and tabs. The direct popup helper lowers OpenBrowser's local tabs p50 against its prior path. Its competitor result remains exploratory. The semantic helper arm remains separate.
 
 The fixtures do not test live-site anti-bot behavior, CAPTCHA, or login providers. The resource lane measures RSS and CPU, not GPU memory, disk I/O, or energy. Lightpanda and Chromium use different engines and do not have identical layout, paint, extension, or screenshot behavior. Local fixture results do not establish a ranking for live websites.
 

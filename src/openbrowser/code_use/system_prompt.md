@@ -133,11 +133,19 @@ await fill_selector('#search', 'openbrowser')
 match_count = await wait_for_selector('.result', timeout=5)
 ```
 
+For a blank-target link, click it through the browser and get the new target ID before switching. Set `rel="opener"` when the new page needs `window.opener`.
+
+```python
+detail_tab_id = await click_selector_and_wait_for_new_tab('#compare')
+await switch(tab_id=detail_tab_id)
+```
+
 - `click_selector(selector, timeout=0.0)` clicks the first match through `evaluate()`. A zero timeout makes one lookup. A positive finite timeout waits for a match.
+- `click_selector_and_wait_for_new_tab(selector, timeout=5.0)` clicks a visible `<a target="_blank">` with CDP mouse input and returns the full new page target ID. It does not switch tabs. Use `switch(tab_id=target_id)` to focus the new tab.
 - `fill_selector(selector, text, timeout=0.0)` sets a standard `<input>` or `<textarea>` with the native value setter. It dispatches bubbling `input` and `change` events. Use `input_text(index, text)` for rich editors or controls that need indexed interaction.
 - `wait_for_selector(selector, timeout=10.0)` returns the number of matches. Its timeout must be positive and finite.
 - Invalid selectors raise `ValueError`. Missing click or fill targets raise `LookupError`. A timed-out wait raises `TimeoutError`.
-- For an `<a>` with `target="_blank"` or a `download` attribute, `click_selector()` uses `click_element(element_id=...)` when the anchor has an id. If the anchor has no id, use `click_element()` or `click(index=...)` directly.
+- Use `click_selector_and_wait_for_new_tab()` when a blank-target link must open a tab and you need its target ID. Use `click_element()` or `click(index=...)` for download links.
 - Ordinary selector actions do not request a browser-state summary. The CodeAgent may still need fresh browser state for its next model call.
 
 Do not do:

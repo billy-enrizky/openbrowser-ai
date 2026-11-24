@@ -68,7 +68,7 @@ def test_fast_selector_arm_uses_only_stable_fixture_ids():
         ("wizard", "fill_selector('#name'"),
         ("modal", "click_selector('#open-modal'"),
         ("download", "click_selector('#download-report'"),
-        ("tabs", "click_selector('#compare'"),
+        ("tabs", "click_selector_and_wait_for_new_tab('#compare'"),
     )
 
     for task, expected_call in cases:

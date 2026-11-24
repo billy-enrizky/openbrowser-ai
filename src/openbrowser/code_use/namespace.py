@@ -756,6 +756,177 @@ def create_namespace(
 			return await semantic_click(element_id=element_id, timeout=timeout_seconds)
 		return True
 
+	async def click_selector_and_wait_for_new_tab(
+		selector: str, *, timeout: float = 5.0  # noqa: ASYNC109 - target polling owns the deadline
+	) -> str:
+		"""Click a visible ``target="_blank"`` anchor and return its new page target ID.
+
+		The helper sends CDP mouse input, so the browser handles the click and its
+		opener relationship. Use ``rel="opener"`` when the new page needs
+		``window.opener``. The helper does not change agent focus. Call ``switch()``
+		with the returned target ID when you need to act in the new tab.
+		"""
+		validate_selector_input(selector, 'click_selector_and_wait_for_new_tab')
+		timeout_seconds = validate_selector_timeout(
+			timeout,
+			'click_selector_and_wait_for_new_tab',
+			allow_zero=False,
+		)
+		focus_before_click = browser_session.focus_snapshot()
+		source_target_id = focus_before_click.target_id
+		if not source_target_id:
+			raise RuntimeError('No focused page is available for the popup click')
+
+		result = await evaluate_selector_until_match(
+			selector,
+			'''(function(params) {
+				let element;
+				try {
+					element = document.querySelector(params.selector);
+				} catch (error) {
+					return {status: 'invalid', message: error.message};
+				}
+				if (!element) return {status: 'missing'};
+				if (!(element instanceof HTMLAnchorElement) ||
+					element.target.trim().toLowerCase() !== '_blank' ||
+					element.hasAttribute('download')) {
+					return {status: 'unsupported', message: 'use a visible target="_blank" anchor'};
+				}
+				const rect = element.getBoundingClientRect();
+				const x = rect.left + rect.width / 2;
+				const y = rect.top + rect.height / 2;
+				if (rect.width <= 0 || rect.height <= 0 || x < 0 || y < 0 ||
+					x >= window.innerWidth || y >= window.innerHeight) {
+					return {status: 'unsupported', message: 'the anchor is outside the viewport'};
+				}
+				const top = document.elementFromPoint(x, y);
+				if (!top || (top !== element && !element.contains(top))) {
+					return {status: 'unsupported', message: 'the anchor is covered by another element'};
+				}
+				return {status: 'special', x, y};
+			})''',
+			0.0,
+			'click_selector_and_wait_for_new_tab',
+		)
+
+		current_focus = browser_session.focus_snapshot()
+		if (
+			current_focus.target_id != source_target_id
+			or current_focus.generation != focus_before_click.generation
+		):
+			raise RuntimeError('Browser focus changed before the popup click')
+
+		cdp_session = await browser_session.get_or_create_cdp_session(
+			target_id=source_target_id,
+			focus=False,
+		)
+		if cdp_session.target_id != source_target_id:
+			raise RuntimeError('Could not bind the popup click to the focused page')
+		current_focus = browser_session.focus_snapshot()
+		if (
+			current_focus.target_id != source_target_id
+			or current_focus.generation != focus_before_click.generation
+		):
+			raise RuntimeError('Browser focus changed before the popup click')
+
+		target_result = await browser_session.cdp_client.send.Target.getTargets()
+		target_infos = target_result.get('targetInfos') if isinstance(target_result, dict) else None
+		if not isinstance(target_infos, list):
+			raise RuntimeError('Could not read browser page targets before the popup click')
+		previous_page_ids = {
+			info['targetId']
+			for info in target_infos
+			if isinstance(info, dict)
+			and info.get('type') == 'page'
+			and isinstance(info.get('targetId'), str)
+		}
+		if source_target_id not in previous_page_ids:
+			raise RuntimeError('The focused page is not present in the browser target list')
+
+		session_id = cdp_session.session_id
+		cdp_client = cdp_session.cdp_client
+		x_value = result.get('x')
+		y_value = result.get('y')
+		if (
+			isinstance(x_value, bool)
+			or not isinstance(x_value, (int, float))
+			or not math.isfinite(x_value)
+			or isinstance(y_value, bool)
+			or not isinstance(y_value, (int, float))
+			or not math.isfinite(y_value)
+		):
+			raise RuntimeError('Selector evaluation returned invalid click coordinates')
+		x = float(x_value)
+		y = float(y_value)
+		await cdp_client.send.Input.dispatchMouseEvent(
+			params={'type': 'mouseMoved', 'x': x, 'y': y},
+			session_id=session_id,
+		)
+		await cdp_client.send.Input.dispatchMouseEvent(
+			params={
+				'type': 'mousePressed',
+				'x': x,
+				'y': y,
+				'button': 'left',
+				'clickCount': 1,
+			},
+			session_id=session_id,
+		)
+		release_task = asyncio.create_task(
+			cdp_client.send.Input.dispatchMouseEvent(
+				params={
+					'type': 'mouseReleased',
+					'x': x,
+					'y': y,
+					'button': 'left',
+					'clickCount': 1,
+				},
+				session_id=session_id,
+			)
+		)
+		loop = asyncio.get_running_loop()
+		deadline = loop.time() + timeout_seconds
+		try:
+			await asyncio.sleep(0)
+			while loop.time() < deadline:
+				remaining = deadline - loop.time()
+				try:
+					target_result = await asyncio.wait_for(
+						browser_session.cdp_client.send.Target.getTargets(),
+						timeout=remaining,
+					)
+				except TimeoutError:
+					break
+				target_infos = target_result.get('targetInfos') if isinstance(target_result, dict) else None
+				if not isinstance(target_infos, list):
+					raise RuntimeError('Could not read browser page targets after the popup click')
+				new_pages = [
+					info
+					for info in target_infos
+					if isinstance(info, dict)
+					and info.get('type') == 'page'
+					and isinstance(info.get('targetId'), str)
+					and info['targetId'] not in previous_page_ids
+				]
+				opener_pages = [
+					info for info in new_pages if info.get('openerId') == source_target_id
+				]
+				candidates = opener_pages or new_pages
+				if len(candidates) == 1:
+					return candidates[0]['targetId']
+				if len(candidates) > 1:
+					raise RuntimeError('The click opened more than one new page target')
+				remaining = deadline - loop.time()
+				if remaining > 0:
+					await asyncio.sleep(min(0.025, remaining))
+			raise TimeoutError(
+				f'No new page target appeared within {timeout_seconds:g} seconds after the click'
+			)
+		finally:
+			if not release_task.done():
+				release_task.cancel()
+			await asyncio.gather(release_task, return_exceptions=True)
+
 	async def fill_selector(selector: str, text: str, *, timeout: float = 0.0) -> bool:  # noqa: ASYNC109 - CSS polling owns the deadline
 		"""Set a standard input value and dispatch bubbling input and change events.
 
@@ -828,6 +999,7 @@ def create_namespace(
 		return count
 
 	namespace['click_selector'] = click_selector
+	namespace['click_selector_and_wait_for_new_tab'] = click_selector_and_wait_for_new_tab
 	namespace['fill_selector'] = fill_selector
 	namespace['wait_for_selector'] = wait_for_selector
 

@@ -219,10 +219,18 @@ def _fast_tabs(url: str) -> str:
     return (
         HEADER
         + f"""
-await navigate({url!r})
-tabs = await get_tabs()
+_step_ms = {{}}
+
+async def _time_step(name, operation):
+    started = asyncio.get_running_loop().time()
+    try:
+        return await operation
+    finally:
+        _step_ms[name] = _step_ms.get(name, 0.0) + (asyncio.get_running_loop().time() - started) * 1000
+
+await _time_step('navigate', navigate({url!r}))
+tabs = await _time_step('enumerate_initial_tabs', get_tabs())
 original = next((tab["target_id"] for tab in tabs if tab["active"]), tabs[0]["target_id"] if tabs else None)
-await click_selector('#compare')
 
 async def open_detail():
     deadline = asyncio.get_event_loop().time() + 20
@@ -243,24 +251,35 @@ async def open_detail():
         await asyncio.sleep(0.1)
     raise RuntimeError('detail tab did not open: %s' % last_error)
 
-detail = await open_detail()
-await wait_for_selector('#approve', timeout=15)
+detail = await _time_step(
+    'click_selector_and_wait_for_new_tab',
+    click_selector_and_wait_for_new_tab('#compare'),
+)
+await _time_step('switch_to_detail', switch(tab_id=detail))
+await _time_step('wait_for_approve', wait_for_selector('#approve', timeout=15))
 for attempt in range(3):
     try:
-        await click_selector('#approve')
-        await wait_js("document.getElementById('approved').textContent === 'approved'", timeout=5)
+        await _time_step('click_approve', click_selector('#approve'))
+        await _time_step(
+            'wait_for_approval',
+            wait_js("document.getElementById('approved').textContent === 'approved'", timeout=5),
+        )
         break
     except RuntimeError:
         if attempt == 2:
             raise
         detail = await open_detail()
         await wait_for_selector('#approve', timeout=15)
-await close(tab_id=detail)
-await switch(tab_id=original)
-await wait_js("document.getElementById('status').textContent === 'approved:42'")
+await _time_step('close_detail', close(tab_id=detail))
+await _time_step('switch_to_original', switch(tab_id=original))
+await _time_step(
+    'wait_for_original_status',
+    wait_js("document.getElementById('status').textContent === 'approved:42'"),
+)
 print(_json.dumps({{
-    "status": await evaluate("document.getElementById('status').textContent"),
-    "original_title": await evaluate("document.title"),
+    "status": await _time_step('read_status', evaluate("document.getElementById('status').textContent")),
+    "original_title": await _time_step('read_original_title', evaluate("document.title")),
+    "step_ms": {{name: round(value, 3) for name, value in _step_ms.items()}},
 }}))
 """
     )
