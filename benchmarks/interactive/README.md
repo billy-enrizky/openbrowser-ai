@@ -276,8 +276,7 @@ Load averages were `9.66`, `8.75`, and `7.63` before the run. They were `7.59`,
 The cells show warm p50 milliseconds. `openbrowser-fast` was lower than the
 semantic arm on wizard, modal, and download. The tabs result changed direction
 between the paired run and the full lane. Its ranges overlap, so the data show
-no measurable difference. `agent-browser` was faster on download and tabs.
-`browser-use` was faster on tabs. This does not establish a universal win.
+no measurable difference. `agent-browser` was faster on download and tabs. Download against `browser-use` is parity because the sample ranges overlap. `browser-use` was faster on tabs. This does not establish a universal win.
 
 Rerun the paired selector check:
 

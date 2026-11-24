@@ -607,15 +607,15 @@ Local deterministic fixtures, no LLM, and interleaved N=10 samples with 2 warmup
 
 | Task | OpenBrowser p50 | Firecrawl Local p50 | Result |
 | --- | ---: | ---: | --- |
-| `static_article` | 2.09 ms | 2.29 ms | OpenBrowser 1.10x |
+| `static_article` | 2.09 ms | 2.29 ms | Parity, ranges overlap |
 | `pagination` | 10.4 ms | 9.7 ms | Firecrawl 1.07x |
 | `table` | 2.23 ms | 4.67 ms | OpenBrowser 2.09x |
 | `js_list` | 29.8 ms | 616.4 ms | OpenBrowser 20.7x |
 | `asset_heavy` | 32.4 ms | 619.4 ms | OpenBrowser 19.1x |
 
-OpenBrowser wins four of five local scraping tasks and returns structured rows for table and list extraction. Against Lightpanda, OpenBrowser no-render is faster on all five local tasks. It uses more memory: about 740 to 783 MB for browser arms against about 123 MB for Lightpanda.
+OpenBrowser wins three of five local scraping tasks, draws static article, and returns structured rows for table and list extraction. Against Lightpanda, OpenBrowser no-render is faster on all five local tasks. It uses more memory: about 740 to 783 MB for browser arms against about 123 MB for Lightpanda.
 
-The CSS selector helpers make the warm interactive lane competitive. The selector arm wins all four tasks against chrome-devtools-mcp, three against browser-use, and two against agent-browser. Browser-use still wins tabs, and agent-browser still wins download and tabs. These local-fixture results are not a live-site ranking. See [the charted comparison](https://docs.openbrowser.me/comparison).
+The CSS selector helpers make the warm interactive lane competitive. The selector arm wins all four tasks against chrome-devtools-mcp, two against browser-use, and two against agent-browser. Download against browser-use is parity. Browser-use still wins tabs, and agent-browser still wins download and tabs. These local-fixture results are not a live-site ranking. See [the charted comparison](https://docs.openbrowser.me/comparison).
 
 ### CLI Benchmark: 4-Way Comparison (6 Tasks, N=3 runs)
 

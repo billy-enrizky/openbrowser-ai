@@ -65,14 +65,14 @@ Firecrawl Local was `0.1.1`, and both used Chrome for Testing `159.0.8154.6`.
 
 | Task | OpenBrowser full, p50 ms | OpenBrowser lightweight, p50 ms | Firecrawl Local, p50 ms | Result |
 | --- | ---: | ---: | ---: | --- |
-| `static_article` | 2.09 | 2.20 | 2.29 | OpenBrowser full 1.10x faster |
+| `static_article` | 2.09 | 2.20 | 2.29 | Parity, sample ranges overlap |
 | `pagination` | 10.4 | 10.8 | 9.7 | Firecrawl 1.07x faster |
 | `table` | 2.23 | 2.25 | 4.67 | OpenBrowser full 2.09x faster |
 | `js_list` | 29.8 | 32.8 | 616.4 | OpenBrowser full 20.7x faster |
 | `asset_heavy` | 59.0 | 32.4 | 619.4 | OpenBrowser lightweight 19.1x faster |
 
-OpenBrowser wins four of the five local tasks and is within 7 percent on
-pagination. The JavaScript gap is architectural: OpenBrowser keeps one browser
+OpenBrowser wins three of the five local tasks, draws static article, and is
+within 7 percent on pagination. The JavaScript gap is architectural: OpenBrowser keeps one browser
 per arm, while Firecrawl Local starts a browser for each JavaScript scrape.
 OpenBrowser returns 2490 structured bytes for the table task. Firecrawl returns
 6736 markdown bytes. Those outputs are not semantically identical artifacts.
