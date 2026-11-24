@@ -65,11 +65,52 @@ def test_unknown_option_falls_back_to_click():
     )
 
 
-def test_missing_http_engine_falls_back_to_click():
+def test_auto_engine_uses_the_fast_entry(monkeypatch, capsys):
     import openbrowser.cli_entry as entry
 
-    assert entry._execute_scrape_fast_path(["scrape", "https://a.example"]) is False
+    seen: dict = {}
+
+    def fake_run(urls, **kwargs):
+        seen["urls"] = urls
+        seen["engine"] = kwargs.get("engine")
+        return {
+            "url": urls[0],
+            "title": "",
+            "format": "markdown",
+            "content_type": "text/markdown",
+            "content": "# auto",
+            "stats": {},
+        }
+
+    emitted: dict = {}
+
+    monkeypatch.setattr(entry, "run_http_scrape_sync", fake_run)
+    monkeypatch.setattr(entry, "emit_scrape_payload", lambda payload, **kwargs: emitted.update(payload))
+
+    assert entry._execute_scrape_fast_path(["scrape", "https://a.example"]) is True
+    assert seen == {"urls": ["https://a.example"], "engine": "auto"}
+    assert emitted["content"] == "# auto"
+    assert capsys.readouterr().out == ""
+
+
+def test_auto_engine_falls_back_when_the_page_needs_a_browser(monkeypatch):
+    import openbrowser.cli_entry as entry
+
+    monkeypatch.setattr(entry, "run_http_scrape_sync", lambda *args, **kwargs: None)
+
     assert entry._execute_scrape_fast_path(["scrape", "https://a.example", "--engine", "auto"]) is False
+
+
+def test_browser_engine_falls_back_to_click():
+    import openbrowser.cli_entry as entry
+
+    assert entry._execute_scrape_fast_path(["scrape", "https://a.example", "--engine", "browser"]) is False
+
+
+def test_auto_engine_batch_falls_back_to_click():
+    import openbrowser.cli_entry as entry
+
+    assert entry._execute_scrape_fast_path(["scrape", "https://a.example", "https://b.example"]) is False
 
 
 def test_fast_entry_reads_urls_file(monkeypatch, tmp_path, capsys):

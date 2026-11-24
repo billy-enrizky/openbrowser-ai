@@ -140,7 +140,8 @@ def _parse_http_scrape_args(args: list[str]) -> dict | None:
 		urls.append(arg)
 		index += 1
 
-	if values.get('--engine') != 'http':
+	engine = values.get('--engine')
+	if engine not in (None, 'http', 'auto'):
 		return None
 	urls_file = values.get('--urls-file')
 	if urls_file:
@@ -150,6 +151,10 @@ def _parse_http_scrape_args(args: list[str]) -> dict | None:
 			raise SystemExit(f'Scrape failed: {error}') from error
 	urls = [url.strip() for url in urls if url.strip()]
 	if not urls:
+		return None
+	if engine != 'http' and (len(urls) > 1 or urls_file):
+		# Batch scraping over HTTP only exists for the explicit engine. Fall
+		# back to the Click command, which owns the browser batch path.
 		return None
 	output_format = str(values.get('--format') or 'markdown')
 	if output_format not in _FORMATS:
@@ -178,6 +183,7 @@ def _parse_http_scrape_args(args: list[str]) -> dict | None:
 		'batch_output_format': batch_output_format,
 		'output': values.get('--output'),
 		'as_json': bool(values.get('--json')),
+		'engine': str(engine or 'auto'),
 	}
 
 
@@ -198,7 +204,11 @@ def _execute_scrape_fast_path(argv: list[str]) -> bool:
 			timeout_ms=parsed['timeout_ms'],
 			max_chars=parsed['max_chars'],
 			concurrency=parsed['concurrency'],
+			engine=parsed['engine'],
 		)
+		if payload is None:
+			# The page needs a browser. The full command owns that path.
+			return False
 		emit_scrape_payload(
 			payload,
 			batch_mode=parsed['batch_mode'],
