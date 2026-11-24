@@ -1,9 +1,9 @@
 ---
 name: deep-research
 description: |
-  Conduct deep web research using the openbrowser-ai agent: decompose a query, investigate sub-questions across multiple sources, and produce a cited markdown report plus structured JSON under local_docs/research/.
-  Trigger when the user asks to: research a topic, do a deep dive, investigate, gather evidence, compare options, write a literature review, build a briefing, or produce a cited report.
-allowed-tools: Bash(openbrowser-ai:*) Bash(curl:*) Bash(uv:*) Bash(irm:*) Bash(mkdir:*) Bash(date:*) Read Write
+  Conduct deep web research using the openbrowser-ai agent. Discover sources with ddgs, investigate sub-questions across multiple sources, and produce cited markdown and JSON reports.
+  Trigger for /search, web search, source discovery, or requests to find sources. Also trigger for research, deep dives, investigations, evidence gathering, comparisons, literature reviews, briefings, or cited reports.
+allowed-tools: Bash(openbrowser-ai:*) Bash(curl:*) Bash(uv:*) Bash(uvx:*) Bash(python3:*) Bash(sleep:*) Bash(cat:*) Bash(irm:*) Bash(mkdir:*) Bash(date:*) Read Write
 ---
 
 # Deep Research
@@ -139,6 +139,157 @@ _preexisting_tab_ids = {t.target_id for t in state.tabs} if state.tabs else set(
 print(f"Pre-existing tabs: {len(_preexisting_tab_ids)}")
 EOF
 ```
+
+### Step 0.5 -- Run `/search` to discover sources
+
+Run this step after Step 0 for `/search`, web search, or source-discovery requests. It uses the run directory that Step 0 created. It does not change the dedicated daemon or profile.
+
+Set `SEARCH_QUERY` to the user's query. Run DDGS in an isolated `uvx` environment. The command does not install DDGS globally.
+
+```bash
+set -e
+. "<RUN_ENV_FILE>"
+SEARCH_QUERY="<USER_QUERY>"
+DDGS_RAW_JSON="$DEEP_RESEARCH_RUN_DIR/ddgs-search-raw.json"
+SEARCH_RESULTS="$DEEP_RESEARCH_RUN_DIR/search-results.json"
+SEARCH_URLS="$DEEP_RESEARCH_RUN_DIR/search-urls.txt"
+SCRAPE_JSONL="$DEEP_RESEARCH_RUN_DIR/scraped-pages.jsonl"
+NORMALIZER="$DEEP_RESEARCH_RUN_DIR/normalize-ddgs-search.py"
+
+cat > "$NORMALIZER" <<'PY'
+import json
+import sys
+from urllib.parse import urlsplit, urlunsplit
+
+raw_path, results_path, urls_path = sys.argv[1:]
+with open(raw_path, encoding="utf-8") as source:
+    rows = json.load(source)
+if isinstance(rows, dict):
+    rows = rows.get("results", [])
+if not isinstance(rows, list):
+    raise SystemExit("DDGS output is not a JSON result list")
+
+results = []
+seen = set()
+for row in rows:
+    if not isinstance(row, dict):
+        continue
+    candidate = str(row.get("href") or row.get("url") or "").strip()
+    parts = urlsplit(candidate)
+    if parts.scheme.lower() not in {"http", "https"} or not parts.netloc:
+        continue
+    url = urlunsplit((parts.scheme.lower(), parts.netloc.lower(), parts.path or "/", parts.query, ""))
+    if url in seen:
+        continue
+    seen.add(url)
+    results.append({
+        "title": str(row.get("title") or "").strip(),
+        "url": url,
+        "snippet": str(row.get("body") or row.get("snippet") or row.get("description") or "").strip(),
+    })
+
+with open(results_path, "w", encoding="utf-8") as output:
+    json.dump(results, output, ensure_ascii=False, indent=2)
+    output.write("\n")
+with open(urls_path, "w", encoding="utf-8") as output:
+    for result in results[:5]:
+        output.write(result["url"] + "\n")
+print(f"Saved {len(results)} unique results to {results_path}")
+print(f"Selected {min(5, len(results))} page URLs in {urls_path}")
+PY
+
+[ -n "$SEARCH_QUERY" ] || { echo "Set SEARCH_QUERY before searching"; exit 1; }
+if DDGS_OUTPUT=$(uvx ddgs text --query "$SEARCH_QUERY" --max_results 10 --output "$DDGS_RAW_JSON" 2>&1); then
+    printf '%s\n' "$DDGS_OUTPUT"
+else
+    printf '%s\n' "$DDGS_OUTPUT"
+    case "$DDGS_OUTPUT" in
+        *"No results found"*)
+            printf '[]\n' > "$SEARCH_RESULTS"
+            : > "$SEARCH_URLS"
+            echo "DDGS returned no results."
+            ;;
+        *)
+            echo "DDGS search failed. Check the error before continuing."
+            exit 1
+            ;;
+    esac
+fi
+
+if [ -s "$DDGS_RAW_JSON" ]; then
+    python3 "$NORMALIZER" "$DDGS_RAW_JSON" "$SEARCH_RESULTS" "$SEARCH_URLS"
+elif [ ! -f "$SEARCH_RESULTS" ]; then
+    printf '[]\n' > "$SEARCH_RESULTS"
+    : > "$SEARCH_URLS"
+fi
+
+if [ ! -s "$SEARCH_URLS" ]; then
+    echo "DDGS returned no usable URLs. Do not scrape an empty URL list."
+else
+    openbrowser-ai scrape --urls-file "$SEARCH_URLS" --output "$SCRAPE_JSONL" --output-format jsonl
+fi
+```
+
+The search result file is a JSON array. Each item has `title`, `url`, and `snippet`. The URL list contains the first five unique results. Edit that list before scraping if you want to select different pages.
+
+If DDGS reports `429`, `rate limit`, or `too many requests`, wait 30 seconds. Retry once with five results and a new raw file:
+
+```bash
+set -e
+. "<RUN_ENV_FILE>"
+SEARCH_QUERY="<USER_QUERY>"
+NORMALIZER="$DEEP_RESEARCH_RUN_DIR/normalize-ddgs-search.py"
+SEARCH_RESULTS="$DEEP_RESEARCH_RUN_DIR/search-results.json"
+SEARCH_URLS="$DEEP_RESEARCH_RUN_DIR/search-urls.txt"
+SCRAPE_JSONL="$DEEP_RESEARCH_RUN_DIR/scraped-pages.jsonl"
+sleep 30
+DDGS_RAW_JSON="$DEEP_RESEARCH_RUN_DIR/ddgs-search-retry.json"
+if DDGS_OUTPUT=$(uvx ddgs text --query "$SEARCH_QUERY" --max_results 5 --output "$DDGS_RAW_JSON" 2>&1); then
+    printf '%s\n' "$DDGS_OUTPUT"
+    python3 "$NORMALIZER" "$DDGS_RAW_JSON" "$SEARCH_RESULTS" "$SEARCH_URLS"
+else
+    printf '%s\n' "$DDGS_OUTPUT"
+    case "$DDGS_OUTPUT" in
+        *"No results found"*)
+            printf '[]\n' > "$SEARCH_RESULTS"
+            : > "$SEARCH_URLS"
+            echo "DDGS returned no results."
+            ;;
+        *)
+            echo "DDGS retry failed. Stop and report the error."
+            exit 1
+            ;;
+    esac
+fi
+if [ -s "$SEARCH_URLS" ]; then
+    openbrowser-ai scrape --urls-file "$SEARCH_URLS" --output "$SCRAPE_JSONL" --output-format jsonl
+else
+    echo "DDGS returned no usable URLs. Do not scrape an empty URL list."
+fi
+```
+
+If the retry fails, stop the search workflow and report the error. Do not retry again. If DDGS returns no results, keep the empty result file and do not call the scraper.
+
+The scraper writes one JSON object per line. Check each row's `ok`, `url`, `content`, and `error` fields before using it:
+
+```bash
+python3 - "$SCRAPE_JSONL" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as source:
+    for line in source:
+        if not line.strip():
+            continue
+        result = json.loads(line)
+        if result.get("ok") and result.get("content"):
+            print(f"OK {result.get('url')}: {len(result['content'])} characters")
+        else:
+            print(f"FAILED {result.get('url')}: {result.get('error')}")
+PY
+```
+
+Read the scraped `content` before you cite a page. Do not cite search snippets. A snippet is not evidence until you scrape and read its source page. Cite the source page URL in the report.
 
 ### Step 1 -- Plan
 
