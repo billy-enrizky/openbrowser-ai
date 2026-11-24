@@ -16,11 +16,14 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 HERE = Path(__file__).resolve().parent
-DEFAULT_INPUT = HERE / "results" / "results-warm-4arm-2026-11-24-after-popup-n3.summary.json"
+DEFAULT_INPUT = (
+    HERE / "results" / "results-warm-fast-selector-final-all-2026-11-24-n3.summary.json"
+)
 DEFAULT_OUTPUT = HERE.parents[1] / "docs" / "images" / "native-interactive-warm-current-p50.png"
 TASKS = ("wizard", "modal", "download", "tabs")
 ARMS = (
-    ("openbrowser", "OpenBrowser", "#0f6270"),
+    ("openbrowser", "OpenBrowser semantic", "#0f6270"),
+    ("openbrowser-fast", "OpenBrowser selectors", "#58a69f"),
     ("chrome-devtools-mcp", "chrome-devtools-mcp", "#c2852a"),
     ("agent-browser", "agent-browser", "#4f7f5b"),
     ("browser-use", "browser-use", "#8871b4"),
@@ -38,6 +41,13 @@ def main() -> int:
 
     report = json.loads(args.input.read_text(encoding="utf-8"))
     rows = {(row["task"], row["arm"]): row for row in report["rows"]}
+    arms = tuple(
+        arm
+        for arm in ARMS
+        if all((task, arm[0]) in rows for task in TASKS)
+    )
+    if not arms:
+        raise SystemExit("No complete arm is present in the summary")
     samples = report["environment"]["samples"]
 
     plt.rcParams.update(
@@ -51,14 +61,14 @@ def main() -> int:
             "ytick.color": TEXT,
         }
     )
-    fig, ax = plt.subplots(figsize=(14, 8), dpi=180)
+    fig, ax = plt.subplots(figsize=(14, 9), dpi=180)
     fig.patch.set_facecolor("#ffffff")
     ax.set_facecolor("#ffffff")
 
-    bar_height = 0.2
-    offsets = [index - (len(ARMS) - 1) / 2 for index in range(len(ARMS))]
+    bar_height = 0.16
+    offsets = [index - (len(arms) - 1) / 2 for index in range(len(arms))]
     positions = list(range(len(TASKS)))
-    for offset, (arm, label, color) in zip(offsets, ARMS, strict=True):
+    for offset, (arm, label, color) in zip(offsets, arms, strict=True):
         values = [rows[(task, arm)]["warm_p50_ms"] for task in TASKS]
         y = [position + offset * bar_height for position in positions]
         bars = ax.barh(y, values, height=bar_height, color=color, label=label, zorder=3)
@@ -85,7 +95,7 @@ def main() -> int:
     ax.tick_params(axis="x", length=0, pad=8)
 
     fig.suptitle(
-        "Interactive browsing, warm p50 after the popup fix",
+        "Interactive browsing, warm p50 with the selector fast path",
         x=0.06,
         y=0.99,
         ha="left",
@@ -97,7 +107,7 @@ def main() -> int:
     fig.text(
         0.06,
         0.94,
-        f"N={samples} per arm and task. Each arm starts once and uses a fresh fixture per task. Host was shared.",
+        f"N={samples} per arm and task. Each arm starts once and uses a fresh fixture per task. Paired arm-major run on a shared host.",
         ha="left",
         va="top",
         fontsize=12.5,
@@ -106,7 +116,7 @@ def main() -> int:
     ax.legend(
         loc="upper center",
         bbox_to_anchor=(0.5, 1.05),
-        ncol=len(ARMS),
+        ncol=len(arms),
         frameon=False,
         fontsize=12.5,
         handlelength=1.2,
