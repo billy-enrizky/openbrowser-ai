@@ -188,6 +188,12 @@ Variables persist across `-c` calls while the daemon is running. The daemon star
 
 For static pages, `openbrowser-ai scrape URL1 URL2 --engine http --jsonl` uses a light console entry. It does not import the browser or configuration stack and starts no browser. Use this path for batch HTML extraction; use the default `auto` or `browser` engine when a page needs JavaScript.
 
+`openbrowser-ai scrape URL --only-main-content` drops navigation, headers, footers, cookie banners, and ad blocks before extraction. `--include-tag` keeps the first matching selector and `--exclude-tag` removes matches.
+
+`openbrowser-ai map URL` lists the URLs a site exposes from the page and its sitemap. `openbrowser-ai crawl URL` follows same-origin links with `--max-pages` and `--max-depth` limits. Neither starts a browser.
+
+Use `--text-only` on `scrape` to block external CSS, images, fonts, media, and text tracks while keeping scripts and screenshots, or `--no-css`, `--no-images`, `--no-fonts`, `--no-media`, and `--no-scripts` for one group each. The scrape browser fallback uses the Playwright headless shell by default; set `OPENBROWSER_USE_HEADLESS_SHELL=0` to force full Chrome.
+
 The CLI daemon uses `~/.config/openbrowser/profiles/daemon` as its default browser profile, so saved logins survive daemon restarts through Chrome's user-data directory. An explicit `storage_state` path is read and written by the storage-state watchdog at the configured path; that is separate from the MCP one-time seed behavior. Downloads default to `~/Downloads/openbrowser-daemon` and survive `daemon stop`. Daemon timeout, socket, and profile variables are listed in the CLI daemon guide. Custom sockets share the default profile unless `OPENBROWSER_DAEMON_PROFILE_ISOLATION=true` or `OPENBROWSER_DAEMON_PROFILE_DIR` is set. `OPENBROWSER_USER_DATA_DIR` takes precedence over both and always selects that explicit profile.
 
 ## Configuration

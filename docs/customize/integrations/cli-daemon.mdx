@@ -67,6 +67,25 @@ openbrowser-ai scrape https://example.com --format json --selector "article" --e
 
 `--engine auto` is the default. `--engine http` never starts a browser. An explicit `--engine http` command uses a light console entry that does not import the browser or configuration stack. `--render-mode no-render` disables screenshots and visual-only actions for the browser fallback. Use `--wait-for` to wait for a selector on JavaScript-rendered pages.
 
+### Site discovery: map and crawl
+
+Use `map` to list the URLs a site exposes, and `crawl` to read them. Neither starts a browser.
+
+```bash
+# List URLs from the page, /sitemap.xml, and one sitemap index level
+openbrowser-ai map https://docs.example.com --max-urls 50
+
+# Filter the list with regular expressions
+openbrowser-ai map https://docs.example.com --include '/guide/' --exclude '\.pdf$'
+
+# Read up to 20 pages, two link hops from the start URL
+openbrowser-ai crawl https://docs.example.com --max-pages 20 --max-depth 2 --format markdown
+```
+
+`map` normalizes and deduplicates URLs, keeps same-origin links by default, and reports how many came from the page and how many from the sitemap. `crawl` follows same-origin links breadth first, fetches and parses each page once, and returns `ok`, `depth`, `title`, `content`, and `links_found` per page. Add `--timeout-ms` to bound each request.
+
+Both commands are HTTP-only. A page that needs JavaScript is reported as skipped rather than rendered.
+
 ### Render modes and asset flags
 
 | Mode | Blocks | Screenshots |

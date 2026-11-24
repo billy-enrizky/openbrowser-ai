@@ -726,6 +726,11 @@ uvx openbrowser-ai daemon list      # List sockets and this user's daemon proces
 uvx openbrowser-ai daemon reap      # Stop verified daemons and reap orphaned daemon processes
 uvx openbrowser-ai daemon restart   # Restart daemon
 
+# Scrape static pages, discover a site, or crawl it without a browser
+uvx openbrowser-ai scrape https://example.com --only-main-content
+uvx openbrowser-ai map https://docs.example.com --max-urls 50
+uvx openbrowser-ai crawl https://docs.example.com --max-pages 20 --max-depth 2
+
 # Install browser
 uvx openbrowser-ai install
 
@@ -739,7 +744,9 @@ Before a sequence of `-c` calls, run `openbrowser-ai warm` once to start the dae
 openbrowser-ai warm
 ```
 
-Then run the calls in the same environment. The daemon keeps Python variables between calls while it remains running. Use `--render-mode full`, `--render-mode lightweight`, or `--render-mode no-render` to choose a rendering policy for a one-shot run. Use `--no-render` as a shortcut for `--render-mode no-render`. No-render mode disables screenshots and visual-only actions.
+Then run the calls in the same environment. The daemon keeps Python variables between calls while it remains running.
+
+Use `--render-mode full`, `--render-mode lightweight`, or `--render-mode no-render` to choose a rendering policy for a one-shot run, or `--no-render` as a shortcut for the last one. No-render mode disables screenshots and visual-only actions. For asset control without changing the mode, use `--text-only` to block external CSS, images, fonts, media, and text tracks while keeping scripts and screenshots, or one of `--no-css`, `--no-images`, `--no-fonts`, `--no-media`, `--no-scripts`. The `scrape` browser fallback uses the Playwright headless shell by default; set `OPENBROWSER_USE_HEADLESS_SHELL=0` to force full Chrome.
 
 The `-c` flag connects to a persistent browser daemon over a Unix socket (localhost TCP on Windows). Variables persist across calls while the daemon is running. The daemon starts automatically on first use and shuts down after 10 minutes of inactivity.
 
