@@ -87,7 +87,7 @@ Add this entry to `opencode.json` in your project:
 
 If OpenCode cannot find `openbrowser-ai`, set `command` to `["uvx", "openbrowser-ai", "--mcp"]`.
 
-The OpenBrowser server uses MCP SDK 2.3 and negotiates protocol version `2026-07-28` with modern clients. Call `create_context` first, pass its returned `context_id` to stateful tools, and call `close_context` when finished. Older supported clients use the legacy three-tool catalog.
+The OpenBrowser server uses MCP SDK 2.3 and negotiates protocol version `2026-07-28` with modern clients. Call `create_context` first, pass its returned `context_id` to stateful tools, and call `close_context` when finished. Older supported clients use the legacy four-tool catalog, which includes stateless `search_web`.
 
 ## Available Skills
 
@@ -123,6 +123,14 @@ Before a sequence of CLI calls, start the daemon and browser once:
 openbrowser-ai warm
 openbrowser-ai -c "await navigate('https://example.com')"
 openbrowser-ai -c "print(await evaluate('document.title'))"
+```
+
+A warm `-c` call uses a standard-library thin client, so it does not import the full CLI or agent stack. A cold call falls back to the full client and starts the daemon.
+
+For static pages, scrape a batch without starting a browser:
+
+```bash
+openbrowser-ai scrape https://a.example https://b.example --engine http --jsonl --concurrency 8
 ```
 
 ### Tool Mapping

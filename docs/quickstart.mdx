@@ -103,6 +103,23 @@ To get started with OpenBrowser you need to install the package and set up an AP
 **No separate browser install needed.** OpenBrowser auto-detects any installed Chromium-based browser (Chrome, Edge, Brave, Chromium) and uses it directly. If none is found and `uvx` is available, Chromium is installed automatically on first run. To pre-install manually (requires `uvx`): `openbrowser-ai install`
 </Info>
 
+## Try it without an LLM
+
+Search and scrape work immediately. Neither command needs an API key.
+
+```bash
+# Search with DDGS. This does not start a browser.
+openbrowser-ai search "OpenBrowser MCP docs" --max-results 5
+
+# Scrape a static page over HTTP. This does not start a browser.
+openbrowser-ai scrape https://example.com --engine http --format markdown
+
+# Batch scrape static pages with bounded concurrency.
+openbrowser-ai scrape https://a.example https://b.example --engine http --jsonl --concurrency 8
+```
+
+Search snippets are not evidence. Scrape and read the source page before you cite it. Use the default `auto` engine when a page may need JavaScript.
+
 ## 2. Choose your favorite LLM
 Create a `.env` file and add your API key.
 

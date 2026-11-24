@@ -147,16 +147,21 @@ Raw evidence:
 
 ### Charts
 
-Generate both documentation charts from the raw result files:
+Generate the documentation charts from the raw result files:
 
 ```sh
 uv run --with matplotlib python benchmarks/scraping/plot_results.py
+uv run --with matplotlib python benchmarks/scraping/plot_batch_results.py
 ```
 
-The script writes:
+The first script writes:
 
 - `docs/images/native-scraping-current-p50.png`
 - `docs/images/native-lightpanda-current-p50.png`
+
+The batch script writes:
+
+- `docs/images/native-scraping-batch-current.png`
 
 ## HTTP-only CLI batch, 2026-11-24
 
