@@ -800,13 +800,13 @@ paired runs passed their exact oracles.
 
 | Task | OpenBrowser MCP | OpenBrowser CLI | chrome-devtools-mcp | agent-browser | browser-use |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `wizard` | 1474 | 1553 | 4471 | 1686 | 1441 |
-| `modal` | 1501 | 1617 | 3645 | 2266 | 1922 |
-| `download` | 1631 | 1759 | 1674 | 1684 | 1442 |
-| `tabs` | 1397 | 1460 | 2438 | 1532 | 1075 |
-| `auth` | 2368 | 2657 | 3805 | 2482 | 2790 |
+| `wizard` | 1387 | 1345 | 4409 | 1608 | 1367 |
+| `modal` | 1506 | 1559 | 3704 | 2250 | 1628 |
+| `download` | 1668 | 1707 | 1690 | 1645 | 1442 |
+| `tabs` | 1394 | 1446 | 2401 | 1503 | 1048 |
+| `auth` | 2407 | 2644 | 3735 | 2487 | 2711 |
 
-Raw evidence: [results-cold-six-arm-final2-2026-11-24-n3.jsonl](results/results-cold-six-arm-final2-2026-11-24-n3.jsonl).
+Raw evidence: [results-cold-six-arm-final3-2026-11-24-n3.jsonl](results/results-cold-six-arm-final3-2026-11-24-n3.jsonl).
 
 ### Warm five-arm, N=5
 
