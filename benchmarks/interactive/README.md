@@ -418,19 +418,19 @@ The quiet-host confirmation will use the rebased main build.
 
 | Build | Task p50 ms, range | Click to terminal p50 ms, range | Terminal to return p50 ms, range |
 | --- | --- | --- | --- |
-| 100 ms poll | 674.032, 642.360 to 685.604 | 311.288, 308.036 to 318.717 | 94.760, 88.762 to 96.343 |
-| Event wakeup | 598.000, 549.018 to 630.450 | 309.362, 307.491 to 316.997 | 0.148, 0.085 to 0.158 |
+| 100 ms poll | 620.720, 613.253 to 709.969 | 317.844, 308.553 to 326.329 | 87.354, 81.045 to 95.159 |
+| Event wakeup | 526.401, 519.624 to 552.766 | 308.707, 307.779 to 317.485 | 0.159, 0.141 to 0.183 |
 
 All 10 samples passed. Each file had 2,229 bytes and SHA-256
 `293ce662323595edec422dd7b0abebc9884971c8d7928de483fb23620c0cf2e3`. The task
-p50 difference was 76.032 ms. The terminal-to-return p50 difference was
-94.612 ms. The task p50 difference is smaller than the largest sample range,
-so this run did not establish a full-task latency win.
+p50 difference was 94.318 ms. The terminal-to-return p50 difference was
+87.195 ms. The task p50 difference is smaller than the largest sample range
+of 96.716 ms, so this run did not establish a full-task latency win.
 
-The host had 18 logical CPUs. Load averages were 11.01, 13.79, and 12.68 before
-the run. They were 10.40, 13.57, and 12.61 after the measured samples. The
-maximum sampled load was 13.792. Treat every latency here as exploratory. Do
-not call 598.000 ms a quiet-host p50 or claim a competitor win from this run.
+The host had 18 logical CPUs. Load averages were 25.46, 17.03, and 13.29 before
+the run. They were 23.55, 17.13, and 13.41 after the measured samples. The
+maximum sampled load was 25.456. Treat every latency here as exploratory. Do
+not call 526.401 ms a quiet-host p50 or claim a competitor win from this run.
 The quiet-host confirmation is pending after merge.
 
 The runner acquires `/tmp/openbrowser-bench.lock` with a `mkdir` spin-wait. It
