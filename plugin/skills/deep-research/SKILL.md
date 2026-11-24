@@ -199,76 +199,42 @@ print(f"Selected {min(5, len(results))} page URLs in {urls_path}")
 PY
 
 [ -n "$SEARCH_QUERY" ] || { echo "Set SEARCH_QUERY before searching"; exit 1; }
-if DDGS_OUTPUT=$(uvx ddgs text --query "$SEARCH_QUERY" --max_results 10 --output "$DDGS_RAW_JSON" 2>&1); then
+DDGS_OK=0
+for ATTEMPT in 1 2 3; do
+    DDGS_RAW_JSON="$DEEP_RESEARCH_RUN_DIR/ddgs-search-attempt-${ATTEMPT}.json"
+    if DDGS_OUTPUT=$(uvx --from ddgs ddgs text --query "$SEARCH_QUERY" --max_results 10 --backend auto --output "$DDGS_RAW_JSON" 2>&1); then
+        DDGS_STATUS=0
+    else
+        DDGS_STATUS=$?
+    fi
     printf '%s\n' "$DDGS_OUTPUT"
-else
-    printf '%s\n' "$DDGS_OUTPUT"
-    case "$DDGS_OUTPUT" in
-        *"No results found"*)
-            printf '[]\n' > "$SEARCH_RESULTS"
-            : > "$SEARCH_URLS"
-            echo "DDGS returned no results."
-            ;;
-        *)
-            echo "DDGS search failed. Check the error before continuing."
-            exit 1
-            ;;
-    esac
-fi
+    if [ "$DDGS_STATUS" -eq 0 ] && [ -s "$DDGS_RAW_JSON" ]; then
+        DDGS_OK=1
+        break
+    fi
+    if [ "$ATTEMPT" -lt 3 ]; then
+        sleep "$((ATTEMPT * 5))"
+    fi
+done
 
-if [ -s "$DDGS_RAW_JSON" ]; then
+if [ "$DDGS_OK" -eq 1 ] && [ -s "$DDGS_RAW_JSON" ]; then
     python3 "$NORMALIZER" "$DDGS_RAW_JSON" "$SEARCH_RESULTS" "$SEARCH_URLS"
-elif [ ! -f "$SEARCH_RESULTS" ]; then
+else
     printf '[]\n' > "$SEARCH_RESULTS"
     : > "$SEARCH_URLS"
+    echo "DDGS returned no usable result file. Retry once later, or continue with the browser search fallback in Step 2."
 fi
 
-if [ ! -s "$SEARCH_URLS" ]; then
-    echo "DDGS returned no usable URLs. Do not scrape an empty URL list."
-else
+if [ -s "$SEARCH_URLS" ]; then
     openbrowser-ai scrape --urls-file "$SEARCH_URLS" --output "$SCRAPE_JSONL" --output-format jsonl
+else
+    echo "No URLs to scrape. Continue with the browser search fallback in Step 2. Do not cite a search snippet."
 fi
 ```
 
 The search result file is a JSON array. Each item has `title`, `url`, and `snippet`. The URL list contains the first five unique results. Edit that list before scraping if you want to select different pages.
 
-If DDGS reports `429`, `rate limit`, or `too many requests`, wait 30 seconds. Retry once with five results and a new raw file:
-
-```bash
-set -e
-. "<RUN_ENV_FILE>"
-SEARCH_QUERY="<USER_QUERY>"
-NORMALIZER="$DEEP_RESEARCH_RUN_DIR/normalize-ddgs-search.py"
-SEARCH_RESULTS="$DEEP_RESEARCH_RUN_DIR/search-results.json"
-SEARCH_URLS="$DEEP_RESEARCH_RUN_DIR/search-urls.txt"
-SCRAPE_JSONL="$DEEP_RESEARCH_RUN_DIR/scraped-pages.jsonl"
-sleep 30
-DDGS_RAW_JSON="$DEEP_RESEARCH_RUN_DIR/ddgs-search-retry.json"
-if DDGS_OUTPUT=$(uvx ddgs text --query "$SEARCH_QUERY" --max_results 5 --output "$DDGS_RAW_JSON" 2>&1); then
-    printf '%s\n' "$DDGS_OUTPUT"
-    python3 "$NORMALIZER" "$DDGS_RAW_JSON" "$SEARCH_RESULTS" "$SEARCH_URLS"
-else
-    printf '%s\n' "$DDGS_OUTPUT"
-    case "$DDGS_OUTPUT" in
-        *"No results found"*)
-            printf '[]\n' > "$SEARCH_RESULTS"
-            : > "$SEARCH_URLS"
-            echo "DDGS returned no results."
-            ;;
-        *)
-            echo "DDGS retry failed. Stop and report the error."
-            exit 1
-            ;;
-    esac
-fi
-if [ -s "$SEARCH_URLS" ]; then
-    openbrowser-ai scrape --urls-file "$SEARCH_URLS" --output "$SCRAPE_JSONL" --output-format jsonl
-else
-    echo "DDGS returned no usable URLs. Do not scrape an empty URL list."
-fi
-```
-
-If the retry fails, stop the search workflow and report the error. Do not retry again. If DDGS returns no results, keep the empty result file and do not call the scraper.
+DDGS can return `No results found`, an empty file, or a rate-limit error. The loop retries after 5 and 10 seconds. If all three attempts fail, keep the empty result file and proceed with the browser search workflow in Step 2. Do not retry more than three times in one run. Do not treat a snippet as evidence.
 
 The scraper writes one JSON object per line. Check each row's `ok`, `url`, `content`, and `error` fields before using it:
 
