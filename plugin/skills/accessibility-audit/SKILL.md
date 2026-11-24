@@ -12,7 +12,7 @@ allowed-tools: Bash(openbrowser-ai:*) Bash(curl:*) Bash(uv:*) Bash(irm:*) Read W
 
 Audit web pages for accessibility issues following WCAG 2.1 guidelines using Python code execution. Checks heading structure, form labels, image alt text, ARIA attributes, landmark regions, and keyboard navigation.
 
-All code runs via `openbrowser-ai -c`. The daemon starts automatically and persists variables across calls. Most browser functions are async -- use `await`. `list_downloads()`, `download_outcomes()`, and `download_failures()` are synchronous.
+All code runs via `openbrowser-ai -c`. The daemon starts automatically and persists variables across calls. Run `openbrowser-ai warm` once before a multi-call workflow so the first task does not pay the browser start. Most browser functions are async, use `await`. `list_downloads()`, `download_outcomes()`, and `download_failures()` are synchronous.
 
 The CLI daemon persists cookies and login state in the Chrome user-data directory at `~/.config/openbrowser/profiles/daemon`, so authenticated sessions can be reused across later runs. No `storage_state.json` file is written unless you configure one explicitly.
 

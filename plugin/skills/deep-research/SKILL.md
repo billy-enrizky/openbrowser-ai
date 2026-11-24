@@ -123,6 +123,8 @@ fi
 printf 'export DEEP_RESEARCH_REUSED=%s\nexport DEEP_RESEARCH_OWNED=%s\n' \
     "$DEEP_RESEARCH_REUSED" "$DEEP_RESEARCH_OWNED" >> "$ENV_FILE"
 export DEEP_RESEARCH_REUSED DEEP_RESEARCH_OWNED
+warm_output=$(openbrowser-ai warm 2>&1) || { echo "$warm_output"; exit 1; }
+printf 'Research browser warm: %s\n' "$warm_output"
 echo "RUN_ENV_FILE=$ENV_FILE"
 ```
 
