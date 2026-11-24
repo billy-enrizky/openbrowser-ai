@@ -450,6 +450,84 @@ uv run --locked python -m benchmarks.interactive.download_wait_ab \
 
 Raw evidence: [`A/B JSONL`](results/results-warm-download-wakeup-ab-2026-11-24-n5.jsonl) and [`summary`](results/results-warm-download-wakeup-ab-2026-11-24-n5.summary.json).
 
+## Warm CLI startup A/B, 2026-11-24
+
+The `-c` fast path now executes a cell against a warm daemon without importing
+asyncio, the logging configuration, pydantic settings, or dotenv. The full
+client remains the cold-start fallback for a missing daemon.
+
+The A/B compared the pre-change binary at `03c81dd5e` with the branch binary.
+It ran 12 samples per binary in alternating order against the same warm daemon.
+Load on 18 logical CPUs was `12.129`, `12.341`, and `10.945` before the run.
+It was `12.083`, `12.328`, and `10.957` after the run. Absolute values are
+shared-host evidence; the paired result is load-robust.
+
+| Arm | Samples | p50 ms | p95 ms | Range ms |
+| --- | ---: | ---: | ---: | ---: |
+| Pre-change `-c` | 12 | 98.730 | 103.334 | 95.060 to 118.617 |
+| Warm-path `-c` | 12 | 61.825 | 69.616 | 58.601 to 70.649 |
+
+The warm path was faster in 12 of 12 pairs. The median paired difference was
+`34.452` ms, or `34.9` percent of the pre-change p50.
+
+Rerun the A/B:
+
+```sh
+uv run --locked python -m benchmarks.interactive.cli_startup_ab \
+  --old-binary /path/to/pre-change/openbrowser-ai \
+  --new-binary /path/to/branch/openbrowser-ai \
+  --samples 12 \
+  --output benchmarks/interactive/results/results-cli-startup-ab.jsonl
+```
+
+Raw evidence:
+
+- `results-cli-startup-ab-2026-11-24-n12.jsonl`
+- `results-cli-startup-ab-2026-11-24-n12.summary.json`
+
+## Paired tabs and download comparisons, 2026-11-24
+
+The five-arm lane runs every sample for one arm before it runs the next arm.
+On a shared host, load drift can dominate a small difference. The paired runner
+warms both arms once and alternates their order for every sample. Each run gets
+a fresh fixture server and an exact oracle check.
+
+The tabs script now switches to the original tab before it closes the detail
+tab. Closing a background tab skips focus repair. The script passes
+`timeout=15` to `click_selector()` so the selector wait and click share one
+helper call. The popup target poll is bounded at 5 ms instead of 25 ms.
+
+Load on 18 logical CPUs was `8.399`, `11.152`, and `10.625` before the run.
+It was `8.170`, `10.786`, and `10.511` after the run. Absolute values are not a
+quiet-host estimate. All 40 runs passed their adapter check and exact oracle.
+
+| Task | OpenBrowser fast p50 ms | Competitor | Competitor p50 ms | Pairs won | Paired delta p50 ms |
+| --- | ---: | --- | ---: | ---: | ---: |
+| `tabs` | 226.797 | browser-use | 279.402 | 10/10 | 57.794 |
+| `download` | 464.463 | agent-browser | 491.526 | 10/10 | 24.587 |
+
+The download fixture holds the response for 300 ms. The `24.587` ms paired
+difference is the control-plane margin above that fixed delay, not a claim that
+the whole task is three times faster.
+
+Rerun a paired comparison:
+
+```sh
+OPENBROWSER_BIN=/path/to/openbrowser-ai \
+uv run --locked python -m benchmarks.interactive.paired_compare \
+  --arms openbrowser-fast browser-use \
+  --task tabs \
+  --samples 10 \
+  --output benchmarks/interactive/results/results-paired-tabs.jsonl
+```
+
+Raw evidence:
+
+- `results-paired-tabs-2026-11-24-n10.jsonl`
+- `results-paired-tabs-2026-11-24-n10.summary.json`
+- `results-paired-download-2026-11-24-n10.jsonl`
+- `results-paired-download-2026-11-24-n10.summary.json`
+
 ## OpenBrowser extension A/B, 2026-11-23
 
 The A/B uses one binary, the same screenshot setting, and 3 samples per task.

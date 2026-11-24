@@ -1,0 +1,49 @@
+{
+  "environment": {
+    "platform": "macOS-26.6-arm64-arm-64bit",
+    "machine": "arm64",
+    "old_binary": "working copy",
+    "new_binary": "working copy",
+    "warmup_ms": 3.108,
+    "load_before": [
+      12.129,
+      12.341,
+      10.945
+    ],
+    "load_after": [
+      12.083,
+      12.328,
+      10.957
+    ]
+  },
+  "rows": [
+    {
+      "arm": "old",
+      "ok": 12,
+      "runs": 12,
+      "p50_ms": 98.73,
+      "p95_ms": 103.334,
+      "min_ms": 95.06,
+      "max_ms": 118.617
+    },
+    {
+      "arm": "new",
+      "ok": 12,
+      "runs": 12,
+      "p50_ms": 61.825,
+      "p95_ms": 69.616,
+      "min_ms": 58.601,
+      "max_ms": 70.649
+    }
+  ],
+  "paired": {
+    "delta_ms_old_minus_new": {
+      "p50": 34.452,
+      "min": 31.406,
+      "max": 58.791
+    },
+    "new_faster_pairs": 12,
+    "old_faster_pairs": 0,
+    "pairs": 12
+  }
+}
