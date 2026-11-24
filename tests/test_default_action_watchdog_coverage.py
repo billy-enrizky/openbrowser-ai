@@ -1519,8 +1519,9 @@ class TestClickElementNodeImpl:
         session.get_element_coordinates = AsyncMock(return_value=rect)
 
         watchdog = _make_watchdog(session=session)
-        with patch.object(watchdog, "_check_element_occlusion", new_callable=AsyncMock, return_value=False):
-            with patch("asyncio.sleep", new_callable=AsyncMock):
-                with patch("asyncio.wait_for", new_callable=AsyncMock, return_value=None):
-                    node = _make_element_node()
-                    result = await watchdog._click_element_node_impl(node)
+        with (
+            patch.object(watchdog, "_check_element_occlusion", new_callable=AsyncMock, return_value=False),
+            patch("asyncio.sleep", new_callable=AsyncMock),
+        ):
+            node = _make_element_node()
+            result = await watchdog._click_element_node_impl(node)
