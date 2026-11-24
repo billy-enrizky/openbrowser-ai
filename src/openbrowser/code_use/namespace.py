@@ -918,7 +918,10 @@ def create_namespace(
 					raise RuntimeError('The click opened more than one new page target')
 				remaining = deadline - loop.time()
 				if remaining > 0:
-					await asyncio.sleep(min(0.025, remaining))
+					# A new page usually appears within a few milliseconds. Poll
+					# tightly inside the bounded deadline instead of adding a
+					# fixed 25 ms discovery tail.
+					await asyncio.sleep(min(0.005, remaining))
 			raise TimeoutError(
 				f'No new page target appeared within {timeout_seconds:g} seconds after the click'
 			)

@@ -145,9 +145,9 @@ for attempt in range(3):
             raise
         detail = await open_detail()
         await wait_js("!!document.getElementById('approve')")
-await close(tab_id=detail)
 await switch(tab_id=original)
 await wait_js("document.getElementById('status').textContent === 'approved:42'")
+await close(tab_id=detail)
 print(_json.dumps({{
     "status": await evaluate("document.getElementById('status').textContent"),
     "original_title": await evaluate("document.title"),
@@ -256,10 +256,11 @@ detail = await _time_step(
     click_selector_and_wait_for_new_tab('#compare'),
 )
 await _time_step('switch_to_detail', switch(tab_id=detail))
-await _time_step('wait_for_approve', wait_for_selector('#approve', timeout=15))
 for attempt in range(3):
     try:
-        await _time_step('click_approve', click_selector('#approve'))
+        # The click helper waits for the selector inside its own deadline, so
+        # a separate wait_for_selector round trip is unnecessary.
+        await _time_step('click_approve', click_selector('#approve', timeout=15))
         await _time_step(
             'wait_for_approval',
             wait_js("document.getElementById('approved').textContent === 'approved'", timeout=5),
@@ -269,13 +270,16 @@ for attempt in range(3):
         if attempt == 2:
             raise
         detail = await open_detail()
-        await wait_for_selector('#approve', timeout=15)
-await _time_step('close_detail', close(tab_id=detail))
+        await switch(tab_id=detail)
 await _time_step('switch_to_original', switch(tab_id=original))
 await _time_step(
     'wait_for_original_status',
     wait_js("document.getElementById('status').textContent === 'approved:42'"),
 )
+# Close the detail tab after focus returns to the original tab. The close
+# action then skips focus repair because the closing target is in the
+# background.
+await _time_step('close_detail', close(tab_id=detail))
 print(_json.dumps({{
     "status": await _time_step('read_status', evaluate("document.getElementById('status').textContent")),
     "original_title": await _time_step('read_original_title', evaluate("document.title")),
