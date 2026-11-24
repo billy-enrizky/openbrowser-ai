@@ -9,13 +9,31 @@ allowed-tools: Bash(openbrowser-ai:*) Bash(curl:*) Bash(uv:*) Bash(irm:*) Read W
 
 # Form Filling
 
+<!-- toc:start -->
+## Table of Contents
+
+- [1. Setup](#1-setup)
+- [2. Workflow](#2-workflow)
+  - [2.1. Step 1 -- Navigate to the form page](#21-step-1----navigate-to-the-form-page)
+  - [2.2. Step 2 -- Discover form fields](#22-step-2----discover-form-fields)
+  - [2.3. Step 3 -- Fill text inputs](#23-step-3----fill-text-inputs)
+  - [2.4. Step 4 -- Handle dropdowns](#24-step-4----handle-dropdowns)
+  - [2.5. Step 5 -- Handle checkboxes and radio buttons](#25-step-5----handle-checkboxes-and-radio-buttons)
+  - [2.6. Step 6 -- Submit the form](#26-step-6----submit-the-form)
+  - [2.7. Step 7 -- Verify submission result](#27-step-7----verify-submission-result)
+  - [2.8. Step 8 -- Handle multi-step forms](#28-step-8----handle-multi-step-forms)
+- [3. Tips](#3-tips)
+- [4. Cleanup](#4-cleanup)
+
+<!-- toc:end -->
+
 Automate filling web forms including login, registration, checkout, and multi-step form wizards using Python code execution.
 
 All code runs via `openbrowser-ai -c`. The daemon starts automatically and persists variables across calls. Run `openbrowser-ai warm` once before a multi-call workflow to start the daemon and browser before the workflow begins. Most browser functions are async, use `await`. `list_downloads()`, `download_outcomes()`, and `download_failures()` are synchronous.
 
 The CLI daemon persists cookies and login state in the Chrome user-data directory at `~/.config/openbrowser/profiles/daemon`, so authenticated sessions can be reused across later runs. No `storage_state.json` file is written unless you configure one explicitly.
 
-## Setup
+## 1. Setup
 
 Before running, verify openbrowser-ai is installed:
 
@@ -33,9 +51,9 @@ curl -fsSL https://raw.githubusercontent.com/billy-enrizky/openbrowser-ai/main/i
 irm https://raw.githubusercontent.com/billy-enrizky/openbrowser-ai/main/install.ps1 | iex
 ```
 
-## Workflow
+## 2. Workflow
 
-### Step 1 -- Navigate to the form page
+### 2.1. Step 1 -- Navigate to the form page
 
 ```bash
 openbrowser-ai -c - <<'EOF'
@@ -46,7 +64,7 @@ print(f"Interactive elements: {len(state.dom_state.selector_map)}")
 EOF
 ```
 
-### Step 2 -- Discover form fields
+### 2.2. Step 2 -- Discover form fields
 
 ```bash
 openbrowser-ai -c - <<'EOF'
@@ -62,7 +80,7 @@ for index, element in state.dom_state.selector_map.items():
 EOF
 ```
 
-### Step 3 -- Fill text inputs
+### 2.3. Step 3 -- Fill text inputs
 
 If the field has a stable accessibility name or id, avoid hard-coded indices:
 
@@ -94,7 +112,7 @@ await input_text(index=5, text="new-value")
 EOF
 ```
 
-### Step 4 -- Handle dropdowns
+### 2.4. Step 4 -- Handle dropdowns
 
 Standard HTML select elements:
 
@@ -127,7 +145,7 @@ await evaluate("""
 EOF
 ```
 
-### Step 5 -- Handle checkboxes and radio buttons
+### 2.5. Step 5 -- Handle checkboxes and radio buttons
 
 ```bash
 openbrowser-ai -c - <<'EOF'
@@ -139,7 +157,7 @@ print(f"Checkbox checked: {checked}")
 EOF
 ```
 
-### Step 6 -- Submit the form
+### 2.6. Step 6 -- Submit the form
 
 ```bash
 openbrowser-ai -c - <<'EOF'
@@ -160,7 +178,7 @@ await evaluate("document.querySelector(\"form\").submit()")
 EOF
 ```
 
-### Step 7 -- Verify submission result
+### 2.7. Step 7 -- Verify submission result
 
 ```bash
 openbrowser-ai -c - <<'EOF'
@@ -180,7 +198,7 @@ print(result)
 EOF
 ```
 
-### Step 8 -- Handle multi-step forms
+### 2.8. Step 8 -- Handle multi-step forms
 
 ```bash
 openbrowser-ai -c - <<'EOF'
@@ -203,7 +221,7 @@ for step in range(1, 5):
 EOF
 ```
 
-## Tips
+## 3. Tips
 
 - Code is piped via stdin using heredoc (`-c - <<'EOF'`), so all Python syntax works without shell escaping issues.
 - Always discover fields with `browser.get_browser_state_summary()` before typing. Do not guess element indices.
@@ -213,7 +231,7 @@ EOF
 - Variables persist between `-c` calls while the daemon is running, so you can store field indices in one call and use them in the next.
 - Check for CAPTCHA or bot detection; notify the user if manual intervention is needed.
 
-## Cleanup
+## 4. Cleanup
 
 Run this step after the task, whether it succeeded or failed.
 

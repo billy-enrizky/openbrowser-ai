@@ -38,35 +38,75 @@ https://github.com/user-attachments/assets/16f7ef1a-beb1-45e2-a733-9592536e0ef7
 
 OpenBrowser is a framework for intelligent browser automation. It combines direct CDP communication with a CodeAgent architecture, where the LLM writes Python code executed in a persistent namespace, to navigate, interact with, and extract information from web pages autonomously.
 
+<!-- toc:start -->
 ## Table of Contents
 
-- [Documentation](#documentation)
-- [Key Features](#key-features)
-- [Installation](#installation)
-- [Quick Start](#quick-start)
-- [Configuration](#configuration)
-- [Supported LLM Providers](#supported-llm-providers)
-- [Claude Code Plugin](#claude-code-plugin)
-- [skills.sh](#skillssh)
-- [Codex](#codex)
-- [OpenCode](#opencode)
-- [OpenClaw](#openclaw)
-- [MCP Server](#mcp-server)
-- [Benchmark: Token Efficiency](#benchmark-token-efficiency)
-- [CLI Usage](#cli-usage)
-- [Project Structure](#project-structure)
-- [Backend and Frontend Deployment](#backend-and-frontend-deployment)
-- [Testing](#testing)
-- [Research: Reinforcement Fine-Tuning for Browser Agents](#research-reinforcement-fine-tuning-for-browser-agents)
-- [Contributing](#contributing)
-- [License](#license)
-- [Contact](#contact)
+- [1. Documentation](#1-documentation)
+- [2. Key Features](#2-key-features)
+- [3. Installation](#3-installation)
+  - [3.1. Quick install (macOS / Linux)](#31-quick-install-macos-linux)
+  - [3.2. Quick install (Windows PowerShell)](#32-quick-install-windows-powershell)
+  - [3.3. Homebrew (macOS / Linux)](#33-homebrew-macos-linux)
+  - [3.4. pip](#34-pip)
+  - [3.5. uv (recommended)](#35-uv-recommended)
+  - [3.6. uvx (zero install)](#36-uvx-zero-install)
+  - [3.7. pipx](#37-pipx)
+  - [3.8. From source](#38-from-source)
+  - [3.9. Optional Dependencies](#39-optional-dependencies)
+- [4. Quick Start](#4-quick-start)
+  - [4.1. Basic Usage](#41-basic-usage)
+  - [4.2. With Different LLM Providers](#42-with-different-llm-providers)
+  - [4.3. Using Browser Session Directly](#43-using-browser-session-directly)
+- [5. Configuration](#5-configuration)
+  - [5.1. Config file lifecycle](#51-config-file-lifecycle)
+  - [5.2. Environment Variables](#52-environment-variables)
+  - [5.3. BrowserProfile Options](#53-browserprofile-options)
+- [6. Supported LLM Providers](#6-supported-llm-providers)
+- [7. Claude Code Plugin](#7-claude-code-plugin)
+- [8. skills.sh](#8-skillssh)
+- [9. Codex](#9-codex)
+  - [9.1. Quick Install](#91-quick-install)
+  - [9.2. Manual Install](#92-manual-install)
+- [10. OpenCode](#10-opencode)
+  - [10.1. Quick Install](#101-quick-install)
+  - [10.2. Manual Install](#102-manual-install)
+- [11. OpenClaw](#11-openclaw)
+- [12. MCP Server](#12-mcp-server)
+  - [12.1. Quick Setup](#121-quick-setup)
+  - [12.2. Tools](#122-tools)
+  - [12.3. Configuration](#123-configuration)
+- [13. Benchmark: Token Efficiency](#13-benchmark-token-efficiency)
+  - [13.1. Native Local Benchmarks (2026-11-24)](#131-native-local-benchmarks-2026-11-24)
+  - [13.2. CLI Benchmark: 4-Way Comparison (6 Tasks, N=3 runs)](#132-cli-benchmark-4-way-comparison-6-tasks-n3-runs)
+    - [13.2.1. Per-Task Token Usage](#1321-per-task-token-usage)
+    - [13.2.2. Cost per Benchmark Run (6 Tasks)](#1322-cost-per-benchmark-run-6-tasks)
+  - [13.3. E2E LLM Benchmark: MCP Server Comparison (6 Tasks, N=5 runs)](#133-e2e-llm-benchmark-mcp-server-comparison-6-tasks-n5-runs)
+- [14. CLI Usage](#14-cli-usage)
+- [15. Project Structure](#15-project-structure)
+- [16. Testing](#16-testing)
+  - [16.1. Benchmarks](#161-benchmarks)
+- [17. Backend and Frontend Deployment](#17-backend-and-frontend-deployment)
+  - [17.1. Prerequisites](#171-prerequisites)
+  - [17.2. Local Development (Docker Compose)](#172-local-development-docker-compose)
+  - [17.3. Full Stack (Docker Compose)](#173-full-stack-docker-compose)
+  - [17.4. Backend](#174-backend)
+  - [17.5. Frontend](#175-frontend)
+  - [17.6. Environment Variables](#176-environment-variables)
+- [18. Research: Reinforcement Fine-Tuning for Browser Agents](#18-research-reinforcement-fine-tuning-for-browser-agents)
+  - [18.1. Study 1: Browser-in-the-Loop (Autoregressive RL)](#181-study-1-browser-in-the-loop-autoregressive-rl)
+  - [18.2. Study 2: Diffusion Language Models for Web Action Planning](#182-study-2-diffusion-language-models-for-web-action-planning)
+  - [18.3. Reproducing RL Experiments](#183-reproducing-rl-experiments)
+- [19. Contributing](#19-contributing)
+- [20. License](#20-license)
+- [21. Contact](#21-contact)
 
-## Documentation
+<!-- toc:end -->
+
+## 1. Documentation
 
 **Full documentation**: [https://docs.openbrowser.me](https://docs.openbrowser.me)
 
-## Key Features
+## 2. Key Features
 
 - **CodeAgent Architecture** - LLM writes Python code in a persistent Jupyter-like namespace for browser automation
 - **Raw CDP Communication** - Direct Chrome DevTools Protocol for maximum control and speed
@@ -84,15 +124,15 @@ OpenBrowser is a framework for intelligent browser automation. It combines direc
 - **Cloud Platform** - Full-stack web UI with real-time VNC streaming, saved logins (KMS-encrypted), scheduled workflows (EventBridge + SQS), and email notifications (SES)
 - **Plugin System** - Claude Code plugin and skills.sh pack with 8 guided skills (setup, deep research, web scraping, form filling, e2e testing, page analysis, accessibility audit, file download)
 
-## Installation
+## 3. Installation
 
-### Quick install (macOS / Linux)
+### 3.1. Quick install (macOS / Linux)
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/billy-enrizky/openbrowser-ai/main/install.sh | sh
 ```
 
-### Quick install (Windows PowerShell)
+### 3.2. Quick install (Windows PowerShell)
 
 ```powershell
 irm https://raw.githubusercontent.com/billy-enrizky/openbrowser-ai/main/install.ps1 | iex
@@ -108,26 +148,26 @@ curl -fsSL https://raw.githubusercontent.com/billy-enrizky/openbrowser-ai/main/i
 
 The installer still prefers `uv` or `pipx` when either is available. The flag changes the pip fallback to `pip install --user`.
 
-### Homebrew (macOS / Linux)
+### 3.3. Homebrew (macOS / Linux)
 
 ```bash
 brew tap billy-enrizky/openbrowser
 brew install openbrowser-ai
 ```
 
-### pip
+### 3.4. pip
 
 ```bash
 pip install openbrowser-ai
 ```
 
-### uv (recommended)
+### 3.5. uv (recommended)
 
 ```bash
 uv tool install openbrowser-ai
 ```
 
-### uvx (zero install)
+### 3.6. uvx (zero install)
 
 Run without installing the CLI. `uvx` downloads and caches the package.
 
@@ -184,13 +224,13 @@ results = await asearch("OpenBrowser MCP", max_results=5)
 
 The render modes are `full`, `lightweight`, and `no-render`. Full mode uses normal browser rendering. Lightweight mode blocks images, web fonts, and media. No-render mode disables screenshots and visual-only actions. For one-shot prompt runs, pass `--render-mode` or use `--no-render` as a shortcut for `--render-mode no-render`. The `scrape` command accepts `--render-mode`; `--lightweight` selects lightweight rendering.
 
-### pipx
+### 3.7. pipx
 
 ```bash
 pipx install openbrowser-ai
 ```
 
-### From source
+### 3.8. From source
 
 ```bash
 git clone https://github.com/billy-enrizky/openbrowser-ai.git
@@ -200,7 +240,7 @@ source .venv/bin/activate
 uv pip install -e ".[all]"
 ```
 
-### Optional Dependencies
+### 3.9. Optional Dependencies
 
 ```bash
 pip install openbrowser-ai             # CLI, MCP, Agent, and CodeAgent (base package)
@@ -215,9 +255,9 @@ pip install openbrowser-ai[video]      # Video recording support
 
 > **No separate browser install needed.** OpenBrowser auto-detects any installed Chromium-based browser (Chrome, Edge, Brave, Chromium) and uses it directly. If none is found and `uvx` is available, Chromium is installed automatically on first run. To pre-install manually (requires `uvx`): `openbrowser-ai install`
 
-## Quick Start
+## 4. Quick Start
 
-### Basic Usage
+### 4.1. Basic Usage
 
 ```python
 import asyncio
@@ -241,7 +281,7 @@ directory. Pass `file_system=FileSystem(base_dir=...)` when a stable path is
 required. Constructing `FileSystem` clears `<base_dir>/openbrowser_agent_data`,
 so keep that subdirectory disposable or use a fresh base directory per run.
 
-### With Different LLM Providers
+### 4.2. With Different LLM Providers
 
 ```python
 from openbrowser import CodeAgent, ChatOpenAI, ChatAnthropic, ChatGoogle
@@ -256,7 +296,7 @@ agent = CodeAgent(task="...", llm=ChatAnthropic(model="claude-sonnet-4-6"))
 agent = CodeAgent(task="...", llm=ChatGoogle(model="gemini-3-flash-preview"))
 ```
 
-### Using Browser Session Directly
+### 4.3. Using Browser Session Directly
 
 ```python
 import asyncio
@@ -285,9 +325,9 @@ Cancelling `navigate_to()` cancels that request without replaying navigation. An
 
 When CodeAgent extracts an initial URL from its task, it awaits the registered `navigate` action without an additional fixed delay. The default action awaits the navigation contract above. If you replace `navigate` with a custom action, that action must await the readiness your task needs before returning. CodeAgent does not add a load or hydration check after a custom action returns, even if the action waits only for `commit`.
 
-## Configuration
+## 5. Configuration
 
-### Config file lifecycle
+### 5.1. Config file lifecycle
 
 OpenBrowser reads `config.json` from `OPENBROWSER_CONFIG_PATH`, then `OPENBROWSER_CONFIG_DIR/config.json`, then `XDG_CONFIG_HOME/openbrowser/config.json`. Run `uvx openbrowser-ai config status` to inspect the selected path and its state as JSON. If the selected file does not exist, the status check creates the default once.
 
@@ -308,7 +348,7 @@ When a browser session exists, status includes `browser.cdp` with the root conne
 
 The same status surfaces add `browser.health` when a session exists. `health.phase` is `unknown`, `healthy`, `degraded`, `crashed`, `stopped`, or `failed`. The block records page-target crash history, the latest focus-recovery outcome, and a status-time local process check. `health.healthy=true` means setup or focus recovery was observed, not that a page can accept commands. `process_present` is `null` when the published CDP root is not bound to the recorded local owner, or when process identity is inconclusive. That includes remote browsers, stopped sessions, and ambiguous PID reuse. `health` never performs a page probe or starts a browser. A status response without `health` means no browser session exists.
 
-### Environment Variables
+### 5.2. Environment Variables
 
 ```bash
 # Google (recommended)
@@ -333,7 +373,7 @@ export AZURE_OPENAI_API_KEY="..."
 export AZURE_OPENAI_ENDPOINT="https://your-resource.openai.azure.com/"
 ```
 
-### BrowserProfile Options
+### 5.3. BrowserProfile Options
 
 ```python
 from openbrowser import BrowserProfile
@@ -352,7 +392,7 @@ profile = BrowserProfile(
 )
 ```
 
-## Supported LLM Providers
+## 6. Supported LLM Providers
 
 | Provider | Class | Models |
 |----------|-------|--------|
@@ -370,7 +410,7 @@ profile = BrowserProfile(
 | **OCI** | `ChatOCIRaw` | Oracle Cloud GenAI models |
 | **Browser-Use** | `ChatBrowserUse` | External LLM service |
 
-## Claude Code Plugin
+## 7. Claude Code Plugin
 
 Install OpenBrowser as a Claude Code plugin:
 
@@ -397,7 +437,7 @@ This installs the MCP server and 8 built-in skills:
 
 See [plugin/README.md](plugin/README.md) for detailed tool parameter documentation.
 
-## skills.sh
+## 8. skills.sh
 
 Install the OpenBrowser skill pack with the [skills.sh](https://skills.sh) CLI:
 
@@ -413,11 +453,11 @@ npx skills add billy-enrizky/openbrowser-ai --skill setup -a codex
 
 The pack includes `setup`, `deep-research`, `web-scraping`, `form-filling`, `e2e-testing`, `page-analysis`, `accessibility-audit`, and `file-download`. These commands install skill definitions. They do not run the setup workflow. After installation, invoke the `setup` skill to install the CLI and Chromium, configure MCP and profiles, and verify a real browser session. Skills are installed to the current project by default; add `-g` for all projects.
 
-## Codex
+## 9. Codex
 
 OpenBrowser works with OpenAI Codex via native skill discovery.
 
-### Quick Install
+### 9.1. Quick Install
 
 Tell Codex:
 
@@ -425,7 +465,7 @@ Tell Codex:
 Fetch and follow instructions from https://raw.githubusercontent.com/billy-enrizky/openbrowser-ai/refs/heads/main/.codex/INSTALL.md
 ```
 
-### Manual Install
+### 9.2. Manual Install
 
 ```bash
 # Clone the repository
@@ -438,15 +478,15 @@ ln -s ~/.codex/openbrowser/plugin/skills ~/.agents/skills/openbrowser
 # Restart Codex
 ```
 
-Then configure the MCP server in your project (see [MCP Server](#mcp-server) below).
+Then configure the MCP server in your project (see [MCP Server](#12-mcp-server) below).
 
 Detailed docs: [.codex/INSTALL.md](.codex/INSTALL.md)
 
-## OpenCode
+## 10. OpenCode
 
 OpenBrowser works with [OpenCode.ai](https://opencode.ai) via plugin and skill symlinks.
 
-### Quick Install
+### 10.1. Quick Install
 
 Tell OpenCode:
 
@@ -454,7 +494,7 @@ Tell OpenCode:
 Fetch and follow instructions from https://raw.githubusercontent.com/billy-enrizky/openbrowser-ai/refs/heads/main/.opencode/INSTALL.md
 ```
 
-### Manual Install
+### 10.2. Manual Install
 
 ```bash
 # Clone the repository
@@ -470,11 +510,11 @@ ln -s ~/.config/opencode/openbrowser/plugin/skills ~/.config/opencode/skills/ope
 # Restart OpenCode
 ```
 
-Then configure the MCP server in your project (see [MCP Server](#mcp-server) below).
+Then configure the MCP server in your project (see [MCP Server](#12-mcp-server) below).
 
 Detailed docs: [.opencode/INSTALL.md](.opencode/INSTALL.md)
 
-## OpenClaw
+## 11. OpenClaw
 
 [OpenClaw](https://openclaw.ai) supports OpenBrowser via the CLI daemon. Install OpenBrowser,
 then use `openbrowser-ai -c` from the Bash tool:
@@ -491,7 +531,7 @@ The daemon starts automatically on first use and persists variables across calls
 
 For OpenClaw plugin documentation, see [docs.openclaw.ai/tools/plugin](https://docs.openclaw.ai/tools/plugin).
 
-## MCP Server
+## 12. MCP Server
 
 [![MCP Registry](https://img.shields.io/badge/MCP-Registry-blue)](https://registry.modelcontextprotocol.io/?q=openbrowser)
 
@@ -499,7 +539,7 @@ OpenBrowser includes an MCP (Model Context Protocol) server that exposes browser
 
 By default, each modern MCP context uses an isolated managed profile under `~/.config/openbrowser/profiles/mcp-<owner-id>`. The legacy no-handle owner uses `mcp-<server-instance-id>`. The owner ID is internal and is not the `context_id` handle; read the resolved path from `get_status.profile.user_data_dir`. The profile's `storage_state.json` is seeded once from `~/.config/openbrowser/profiles/default/storage_state.json`, so existing logins are available without allowing concurrent contexts to kill or corrupt one another's browser. Profiles are retained on disk after `close_context`. A new MCP server process cannot resume a context handle, and it creates a new isolated profile unless you configure an explicit shared profile. Configure `OPENBROWSER_USER_DATA_DIR` for a profile that survives restarts; `OPENBROWSER_STORAGE_STATE` is a one-time seed for managed profiles, and later changes are saved to the active profile copy rather than copied back automatically. OpenBrowser also auto-cleans disposable Chromium caches in managed profiles, which keeps disk usage down without deleting cookies or login state. If you explicitly configure the same `OPENBROWSER_USER_DATA_DIR` for multiple contexts or servers, the profile lease rejects the second owner with a clear error.
 
-### Quick Setup
+### 12.1. Quick Setup
 
 **Claude Code**: add to your project's `.mcp.json`:
 
@@ -538,7 +578,7 @@ uvx openbrowser-ai --mcp
 
 Set `OPENBROWSER_RENDER_MODE` to `full`, `lightweight`, or `no-render` to choose the policy for new MCP contexts. The default is `full`.
 
-### Tools
+### 12.2. Tools
 
 The MCP server exposes six tools to 2026-07-28 clients and four tools to older clients. Both catalogs include the stateless `search_web` tool.
 
@@ -582,7 +622,7 @@ Prefer indexed actions whenever an element index exists. Coordinate actions use 
 
 **Bundled libraries**: `json`, `csv`, `re`, `datetime`, `asyncio`, `Path`, `requests`, `numpy`, `pandas`. **Only if installed**: `matplotlib`, `BeautifulSoup`, `pypdf` (`openbrowser-ai[pdf]`), `tabulate`.
 
-### Configuration
+### 12.3. Configuration
 
 | Environment Variable | Description | Default |
 |---------------------|-------------|---------|
@@ -599,11 +639,11 @@ Prefer indexed actions whenever an element index exists. Coordinate actions use 
 | `OPENBROWSER_SHUTDOWN_TIMEOUT` | Browser and context cleanup bound in seconds | `20` |
 | `ANONYMIZED_TELEMETRY` | Set to `false` to disable anonymized usage telemetry | `true` |
 
-## Benchmark: Token Efficiency
+## 13. Benchmark: Token Efficiency
 
 The figures below are historical model-driven benchmark results, not a comparison of current tool releases or navigation latency. For a local, no-LLM comparison with pinned runtimes and verified page work, use the [navigation comparison verifier](benchmarks/navigation_compare_README.md), its [counterbalanced policy-fix results](benchmarks/navigation_results_2026-11-15_policy_v2.json), and the retained [earlier results](benchmarks/navigation_results_2026-11-15.json). These report engine, IPC, wait-policy, failure, and cleanup differences rather than declaring a universal winner. They are not MCP or CLI agent-comparison numbers.
 
-### Native Local Benchmarks (2026-11-24)
+### 13.1. Native Local Benchmarks (2026-11-24)
 
 Local deterministic fixtures, no LLM, and interleaved samples with exact oracles. The full method, raw JSONL, and host-load caveats are in [benchmarks/scraping/README.md](benchmarks/scraping/README.md) and [benchmarks/interactive/README.md](benchmarks/interactive/README.md). Build under test: `0.1.59.dev28+gbbc8b52f5`.
 
@@ -640,7 +680,7 @@ Warm interactive, paired N=10, OpenBrowser MCP:
 
 The cold lane, N=3, starts a fresh server and browser per task. The MCP arm beats chrome-devtools-mcp on all five tasks, agent-browser on four, and browser-use on modal and auth, and is within 2 percent of browser-use on wizard. Browser-use still wins download and tabs. Cold p50 in ms: MCP 1387 wizard, 1506 modal, 1668 download, 1394 tabs, 2407 auth. See [the charted comparison](https://docs.openbrowser.me/comparison).
 
-### CLI Benchmark: 4-Way Comparison (6 Tasks, N=3 runs)
+### 13.2. CLI Benchmark: 4-Way Comparison (6 Tasks, N=3 runs)
 
 Four CLI tools compared with a single Bash tool each. Claude Sonnet 4.6 on Bedrock. Randomized order. All achieve 100% accuracy.
 
@@ -661,7 +701,7 @@ openbrowser-ai uses **2.1-2.6x fewer tokens** than all competitors via Python co
   <img src="benchmarks/cli_benchmark_overview.png" alt="CLI Benchmark: Overview" width="800" />
 </p>
 
-#### Per-Task Token Usage
+#### 13.2.1. Per-Task Token Usage
 
 <p align="center">
   <img src="benchmarks/cli_benchmark_per_task.png" alt="CLI Benchmark: Per-Task Token Usage" width="800" />
@@ -678,7 +718,7 @@ openbrowser-ai uses **2.1-2.6x fewer tokens** than all competitors via Python co
 
 openbrowser-ai wins 5 of 6 tasks. The advantage is largest on complex pages (search_navigate: 2.9x fewer tokens than browser-use) where code batching avoids repeated page state dumps.
 
-#### Cost per Benchmark Run (6 Tasks)
+#### 13.2.2. Cost per Benchmark Run (6 Tasks)
 
 | Model | openbrowser-ai | browser-use | playwright-cli | agent-browser |
 |-------|---------------:|------------:|---------------:|--------------:|
@@ -687,7 +727,7 @@ openbrowser-ai wins 5 of 6 tasks. The advantage is largest on complex pages (sea
 
 Raw results are in [`benchmarks/e2e_4way_cli_results.json`](benchmarks/e2e_4way_cli_results.json). [Full 4-way comparison with methodology](https://docs.openbrowser.me/cli-comparison).
 
-### E2E LLM Benchmark: MCP Server Comparison (6 Tasks, N=5 runs)
+### 13.3. E2E LLM Benchmark: MCP Server Comparison (6 Tasks, N=5 runs)
 
 <p align="center">
   <img src="benchmarks/benchmark_comparison.png" alt="E2E LLM Benchmark: MCP Server Comparison" width="800" />
@@ -703,7 +743,7 @@ OpenBrowser uses **3.2x fewer tokens** than Playwright and **6.0x fewer** than C
 
 [Full MCP comparison with methodology](https://docs.openbrowser.me/comparison)
 
-## CLI Usage
+## 14. CLI Usage
 
 ```bash
 # Run a browser automation task with an LLM agent
@@ -756,7 +796,7 @@ The CLI daemon stores its browser profile in `~/.config/openbrowser/profiles/dae
 
 Execution defaults to 110 seconds so an agent with a 120 second tool timeout receives a structured timeout response. Override it with `OPENBROWSER_EXEC_TIMEOUT` and set `OPENBROWSER_READ_TIMEOUT` above that value if you need longer calls. `OPENBROWSER_DAEMON_INIT_TIMEOUT` bounds browser startup. `OPENBROWSER_SHUTDOWN_TIMEOUT` bounds inner session cleanup, while the daemon reset/stop wrapper waits up to 5 seconds. `OPENBROWSER_IDLE_TIMEOUT` changes the 600-second idle shutdown. The daemon downloads to `~/Downloads/openbrowser-daemon` by default, and those files survive `daemon stop`.
 
-## Project Structure
+## 15. Project Structure
 
 ```
 openbrowser-ai/
@@ -791,7 +831,7 @@ openbrowser-ai/
 └── tests/                     # Test suite
 ```
 
-## Testing
+## 16. Testing
 
 ```bash
 # Run unit tests
@@ -804,7 +844,7 @@ pytest tests/ -v
 uv run python benchmarks/e2e_published_test.py
 ```
 
-### Benchmarks
+### 16.1. Benchmarks
 
 Run individual MCP server benchmarks (JSON-RPC stdio, 5-step Wikipedia workflow):
 
@@ -816,16 +856,16 @@ uv run python benchmarks/cdp_benchmark.py            # Chrome DevTools MCP
 
 Raw results are in [`benchmarks/e2e_4way_cli_results.json`](benchmarks/e2e_4way_cli_results.json). See [full comparison](https://docs.openbrowser.me/comparison) for methodology.
 
-## Backend and Frontend Deployment
+## 17. Backend and Frontend Deployment
 
 The project includes a FastAPI backend and a Next.js frontend, both containerized with Docker.
 
-### Prerequisites
+### 17.1. Prerequisites
 
 - Docker and Docker Compose
 - A `.env` file in the project root with `POSTGRES_PASSWORD` and any LLM API keys (see `backend/env.example`)
 
-### Local Development (Docker Compose)
+### 17.2. Local Development (Docker Compose)
 
 ```bash
 # Start backend + PostgreSQL (frontend runs locally)
@@ -844,7 +884,7 @@ cd frontend && npm install && npm run dev
 
 The dev compose mounts `backend/app/` and `src/` as volumes for hot-reload. API keys are loaded from `backend/.env` via `env_file`. The `POSTGRES_PASSWORD` is read from the root `.env` file.
 
-### Full Stack (Docker Compose)
+### 17.3. Full Stack (Docker Compose)
 
 ```bash
 # Start all services (backend + frontend + PostgreSQL)
@@ -853,7 +893,7 @@ docker-compose up --build
 
 This builds and runs both the backend and frontend containers together with PostgreSQL.
 
-### Backend
+### 17.4. Backend
 
 The backend is a FastAPI application in `backend/` with a Dockerfile at `backend/Dockerfile`. It includes:
 
@@ -876,7 +916,7 @@ docker run -p 8000:8000 -p 6080:6080 \
   openbrowser-backend
 ```
 
-### Frontend
+### 17.5. Frontend
 
 The frontend is a Next.js application in `frontend/` with a Dockerfile at `frontend/Dockerfile`.
 
@@ -891,7 +931,7 @@ docker run -p 3000:3000 \
   openbrowser-frontend
 ```
 
-### Environment Variables
+### 17.6. Environment Variables
 
 Key environment variables for the backend (see `backend/env.example` for the full list):
 
@@ -904,11 +944,11 @@ Key environment variables for the backend (see `backend/env.example` for the ful
 | `DATABASE_URL` | PostgreSQL connection string | (optional) |
 | `POSTGRES_PASSWORD` | PostgreSQL password (root `.env`) | (required for compose) |
 
-## Research: Reinforcement Fine-Tuning for Browser Agents
+## 18. Research: Reinforcement Fine-Tuning for Browser Agents
 
 Beyond the framework, we conducted two independent research studies on improving browser agents through reinforcement learning, both using the [FormFactory benchmark](https://arxiv.org/abs/2506.01520) (1,250 form-filling tasks across 8 domains) and OpenBrowser's browser execution environment.
 
-### Study 1: Browser-in-the-Loop (Autoregressive RL)
+### 18.1. Study 1: Browser-in-the-Loop (Autoregressive RL)
 
 We investigated whether reinforcement learning can improve a language model's ability to fill web forms beyond what supervised learning achieves.
 
@@ -918,7 +958,7 @@ We investigated whether reinforcement learning can improve a language model's ab
 - **Paper**: [Browser-in-the-Loop: Reinforcement Fine-Tuning LLM Agents for Web Form Filling](https://www.researchgate.net/profile/Muhammad-Enrizky-Brillian)
 - **Models**: [Qwen3-8B-FormFactory-SFT-LoRA](https://huggingface.co/billyenrizky/Qwen3-8B-FormFactory-SFT-LoRA), [Qwen3-8B-FormFactory-GRPO-LoRA](https://huggingface.co/billyenrizky/Qwen3-8B-FormFactory-GRPO-LoRA)
 
-### Study 2: Diffusion Language Models for Web Action Planning
+### 18.2. Study 2: Diffusion Language Models for Web Action Planning
 
 We investigated whether diffusion language models -- which generate text by iteratively denoising an entire sequence in parallel rather than left-to-right -- can learn web action planning.
 
@@ -928,7 +968,7 @@ We investigated whether diffusion language models -- which generate text by iter
 - **Paper**: [Concentrate or Collapse: When Reinforcement Learning Meets Diffusion Language Models for Web Planning](https://www.researchgate.net/profile/Muhammad-Enrizky-Brillian)
 - **Models**: [10 trained models on HuggingFace](https://huggingface.co/billyenrizky) including ReFusion-8B-MDPO, FS-DFM-1.3B-ESPO-mu8, and more
 
-### Reproducing RL Experiments
+### 18.3. Reproducing RL Experiments
 
 All training code is in `infra/training/`. Training runs on a single NVIDIA A10G GPU (24GB VRAM) via Anyscale.
 
@@ -969,7 +1009,7 @@ python infra/training/serving/export_gguf.py   # Export to GGUF for Ollama
 
 Reward function (in `infra/training/shared/reward_functions.py`): composite score = 0.4 * task completion + 0.4 * field accuracy + 0.2 * execution completeness. Online reward (`online_reward.py`) launches headless Chromium, executes the model's action plan, and computes the score from live browser state.
 
-## Contributing
+## 19. Contributing
 
 Contributions are welcome! Please:
 
@@ -980,11 +1020,11 @@ Contributions are welcome! Please:
 5. Open a Pull Request
 6. After CI passes, add the `merge-queue` label. The queue tests the merge tree with the full non-integration suite and all static, frontend, and backend checks, then merges it. Direct merges to `main` are blocked.
 
-## License
+## 20. License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## Contact
+## 21. Contact
 
 - **Email**: billy.suharno@gmail.com
 - **GitHub**: [@billy-enrizky](https://github.com/billy-enrizky)

@@ -9,13 +9,32 @@ allowed-tools: Bash(openbrowser-ai:*) Bash(curl:*) Bash(uv:*) Bash(irm:*) Read W
 
 # File Download
 
+<!-- toc:start -->
+## Table of Contents
+
+- [1. Setup](#1-setup)
+- [2. Workflow](#2-workflow)
+  - [2.1. Step 1 -- Navigate and find download links](#21-step-1----navigate-and-find-download-links)
+  - [2.2. Step 2 -- Download a file by URL](#22-step-2----download-a-file-by-url)
+  - [2.3. Step 3 -- Extract a download URL from the page](#23-step-3----extract-a-download-url-from-the-page)
+  - [2.4. Step 4 -- Read a downloaded PDF](#24-step-4----read-a-downloaded-pdf)
+  - [2.5. Step 5 -- Read other file types](#25-step-5----read-other-file-types)
+  - [2.6. Step 6 -- Download multiple files](#26-step-6----download-multiple-files)
+  - [2.7. Step 7 -- List all downloads](#27-step-7----list-all-downloads)
+  - [2.8. Step 8 -- Wait for a click-triggered download](#28-step-8----wait-for-a-click-triggered-download)
+  - [2.9. Step 9 -- Download from authenticated pages](#29-step-9----download-from-authenticated-pages)
+- [3. Tips](#3-tips)
+- [4. Cleanup](#4-cleanup)
+
+<!-- toc:end -->
+
 Download files from websites using the browser's authenticated session. Handles PDFs, CSVs, images, and any downloadable content. Preserves cookies and login sessions for authenticated downloads.
 
 All code runs via `openbrowser-ai -c`. The daemon starts automatically and persists variables across calls. Run `openbrowser-ai warm` once before a multi-call workflow to start the daemon and browser before the workflow begins. Most browser functions are async, use `await`. `list_downloads()`, `download_outcomes()`, and `download_failures()` are synchronous.
 
 The CLI daemon persists cookies and login state in the Chrome user-data directory at `~/.config/openbrowser/profiles/daemon`, so authenticated sessions can be reused across later runs. No `storage_state.json` file is written unless you configure one explicitly.
 
-## Setup
+## 1. Setup
 
 Before running, verify openbrowser-ai is installed:
 
@@ -33,9 +52,9 @@ curl -fsSL https://raw.githubusercontent.com/billy-enrizky/openbrowser-ai/main/i
 irm https://raw.githubusercontent.com/billy-enrizky/openbrowser-ai/main/install.ps1 | iex
 ```
 
-## Workflow
+## 2. Workflow
 
-### Step 1 -- Navigate and find download links
+### 2.1. Step 1 -- Navigate and find download links
 
 ```bash
 openbrowser-ai -c - <<'EOF'
@@ -50,7 +69,7 @@ for idx, el in state.dom_state.selector_map.items():
 EOF
 ```
 
-### Step 2 -- Download a file by URL
+### 2.2. Step 2 -- Download a file by URL
 
 Use `download_file()` to download directly. This uses the browser's JavaScript `fetch` internally, preserving cookies and authentication:
 
@@ -73,7 +92,7 @@ print(f"Saved to: {path}")
 EOF
 ```
 
-### Step 3 -- Extract a download URL from the page
+### 2.3. Step 3 -- Extract a download URL from the page
 
 When the download URL is not directly visible, extract it from a link or button:
 
@@ -95,7 +114,7 @@ else:
 EOF
 ```
 
-### Step 4 -- Read a downloaded PDF
+### 2.4. Step 4 -- Read a downloaded PDF
 
 After downloading, use `pypdf` to extract text (requires `pip install openbrowser-ai[pdf]`):
 
@@ -114,7 +133,7 @@ for i, page in enumerate(reader.pages):
 EOF
 ```
 
-### Step 5 -- Read other file types
+### 2.5. Step 5 -- Read other file types
 
 ```bash
 openbrowser-ai -c - <<'EOF'
@@ -140,7 +159,7 @@ if file_path.suffix in (".txt", ".md", ".log"):
 EOF
 ```
 
-### Step 6 -- Download multiple files
+### 2.6. Step 6 -- Download multiple files
 
 ```bash
 openbrowser-ai -c - <<'EOF'
@@ -160,7 +179,7 @@ print(f"Total files: {len(paths)}")
 EOF
 ```
 
-### Step 7 -- List all downloads
+### 2.7. Step 7 -- List all downloads
 
 ```bash
 openbrowser-ai -c - <<'EOF'
@@ -171,7 +190,7 @@ print(f"Total: {len(files)} files")
 EOF
 ```
 
-### Step 8 -- Wait for a click-triggered download
+### 2.8. Step 8 -- Wait for a click-triggered download
 
 When a button or link triggers the download, start `wait_for_download` before the click. The waiter captures the terminal outcome even when the file finishes quickly.
 
@@ -191,7 +210,7 @@ EOF
 
 `wait_for_download` returns `phase` (`completed`, `failed`, or `cancelled`), `path`, `file_size`, `file_type`, `stage`, `error`, and `download_ref`. To inspect earlier attempts, call `download_outcomes()`. To list only failures, call `download_failures()`. A `download_ref` resolves only in the current browser session's live registry; after the session stops or is replaced, read the completed history instead.
 
-### Step 9 -- Download from authenticated pages
+### 2.9. Step 9 -- Download from authenticated pages
 
 `download_file()` preserves the browser's login session on its browser-fetch path. Log in first, then download:
 
@@ -210,7 +229,7 @@ print(f"Downloaded: {path}")
 EOF
 ```
 
-## Tips
+## 3. Tips
 
 - Code is piped via stdin using heredoc (`-c - <<'EOF'`), so all Python syntax works without shell escaping issues.
 - Prefer `download_file(url)` when you need a deterministic filename and return path. `navigate()` may auto-download a PDF when `auto_download_pdfs` is enabled, but it does not return the saved path.
@@ -221,7 +240,7 @@ EOF
 - Use `list_downloads()` to see all files saved in the downloads directory. `download_outcomes()` and `download_failures()` are synchronous.
 - For large files, `download_file()` has a 120-second timeout.
 
-## Cleanup
+## 4. Cleanup
 
 Run this step after the task, whether it succeeded or failed.
 

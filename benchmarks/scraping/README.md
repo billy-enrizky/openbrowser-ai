@@ -1,8 +1,52 @@
 # Local scraping benchmark
 
+<!-- toc:start -->
+## Table of Contents
+
+- [1. Arms](#1-arms)
+- [2. Tasks](#2-tasks)
+- [3. Run](#3-run)
+- [4. Current interleaved comparison, 2026-11-24](#4-current-interleaved-comparison-2026-11-24)
+  - [4.1. Firecrawl Local](#41-firecrawl-local)
+  - [4.2. Firecrawl batch, 2026-11-24](#42-firecrawl-batch-2026-11-24)
+  - [4.3. Lightpanda](#43-lightpanda)
+  - [4.4. Charts](#44-charts)
+- [5. HTTP-only CLI batch, 2026-11-24](#5-http-only-cli-batch-2026-11-24)
+- [6. Network-level render policy](#6-network-level-render-policy)
+- [7. Results, 2026-11-23](#7-results-2026-11-23)
+- [8. What this run shows](#8-what-this-run-shows)
+- [9. Batch harness](#9-batch-harness)
+- [10. Firecrawl lane](#10-firecrawl-lane)
+  - [10.1. Install and run](#101-install-and-run)
+  - [10.2. Fairness rules](#102-fairness-rules)
+  - [10.3. Correctness oracles](#103-correctness-oracles)
+  - [10.4. Results, 2026-11-23, N=10](#104-results-2026-11-23-n10)
+  - [10.5. What the lane shows](#105-what-the-lane-shows)
+  - [10.6. Hillclimb targets from this lane](#106-hillclimb-targets-from-this-lane)
+  - [10.7. Limits for this lane](#107-limits-for-this-lane)
+- [11. Limits](#11-limits)
+- [12. Native Lightpanda lane, 2026-11-24](#12-native-lightpanda-lane-2026-11-24)
+- [13. Fast static path, 2026-11-23](#13-fast-static-path-2026-11-23)
+- [14. Parsed HTML work reduction, 2026-11-24](#14-parsed-html-work-reduction-2026-11-24)
+  - [14.1. Correctness smoke](#141-correctness-smoke)
+  - [14.2. Quiet-host comparison pending](#142-quiet-host-comparison-pending)
+- [15. Resource lane, 2026-11-24](#15-resource-lane-2026-11-24)
+- [16. Final lanes, 2026-11-24, OpenBrowser 0.1.59.dev18](#16-final-lanes-2026-11-24-openbrowser-0159dev18)
+  - [16.1. Sequential scraping against Firecrawl Local](#161-sequential-scraping-against-firecrawl-local)
+  - [16.2. No-render against Lightpanda](#162-no-render-against-lightpanda)
+  - [16.3. Firecrawl batch](#163-firecrawl-batch)
+  - [16.4. One-shot CLI static path](#164-one-shot-cli-static-path)
+  - [16.5. Resource lane caveat](#165-resource-lane-caveat)
+- [17. Second final lanes, 2026-11-24, OpenBrowser 0.1.59.dev28](#17-second-final-lanes-2026-11-24-openbrowser-0159dev28)
+  - [17.1. Sequential scraping against Firecrawl Local](#171-sequential-scraping-against-firecrawl-local)
+  - [17.2. Headless shell against full Chrome](#172-headless-shell-against-full-chrome)
+  - [17.3. One-shot CLI static path](#173-one-shot-cli-static-path)
+
+<!-- toc:end -->
+
 Measure OpenBrowser render modes on deterministic local pages. No external network, cloud browser, or LLM is used.
 
-## Arms
+## 1. Arms
 
 | Arm | Engine | Render mode |
 | --- | --- | --- |
@@ -15,7 +59,7 @@ Measure OpenBrowser render modes on deterministic local pages. No external netwo
 `engine=auto` uses HTTP when the server-rendered text is substantial, and
 falls back to Chromium when the page is a thin JavaScript shell.
 
-## Tasks
+## 2. Tasks
 
 | Task | What it checks |
 | --- | --- |
@@ -28,7 +72,7 @@ falls back to Chromium when the page is a thin JavaScript shell.
 The fixture server records every request and response body size. Correctness is
 checked before latency counts. A failed run is a failure, not a fast success.
 
-## Run
+## 3. Run
 
 ```sh
 uv run --locked python benchmarks/scraping/scrape_compare.py \
@@ -45,7 +89,7 @@ arm once and keeps it running until the task set finishes. Use
 Warmup samples are not included in the JSONL file. The summary JSON remains at
 `--output`.
 
-## Current interleaved comparison, 2026-11-24
+## 4. Current interleaved comparison, 2026-11-24
 
 This run compares the current OpenBrowser HTTP path with Firecrawl Local and
 Lightpanda on the same fixtures. It uses 10 measured samples and 2 warmups per
@@ -58,7 +102,7 @@ so read the absolute p50 values as shared-host evidence. The alternating order
 puts all arms under the same drift. OpenBrowser was `0.1.58.dev56+g8065994cc`,
 Firecrawl Local was `0.1.1`, and both used Chrome for Testing `159.0.8154.6`.
 
-### Firecrawl Local
+### 4.1. Firecrawl Local
 
 | Task | OpenBrowser full, p50 ms | OpenBrowser lightweight, p50 ms | Firecrawl Local, p50 ms | Result |
 | --- | ---: | ---: | ---: | --- |
@@ -88,7 +132,7 @@ Raw evidence:
 - [results-firecrawl-all-2026-11-24-n10-interleaved.json](results-firecrawl-all-2026-11-24-n10-interleaved.json)
 - [results-firecrawl-all-2026-11-24-n10-interleaved.jsonl](results-firecrawl-all-2026-11-24-n10-interleaved.jsonl)
 
-### Firecrawl batch, 2026-11-24
+### 4.2. Firecrawl batch, 2026-11-24
 
 Firecrawl Local exposes a native `/v2/batch/scrape` job API. The batch
 comparison sends the same five pagination URLs to both products and checks
@@ -125,7 +169,7 @@ Raw evidence:
 - [results-batch-firecrawl-2026-11-24-n10.json](results-batch-firecrawl-2026-11-24-n10.json)
 - [results-batch-firecrawl-2026-11-24-n10.summary.json](results-batch-firecrawl-2026-11-24-n10.summary.json)
 
-### Lightpanda
+### 4.3. Lightpanda
 
 | Task | OpenBrowser no-render, p50 ms | Lightpanda, p50 ms | Result |
 | --- | ---: | ---: | --- |
@@ -151,7 +195,7 @@ Raw evidence:
 - [results-lightpanda-after-n10-interleaved.json](results-lightpanda-after-n10-interleaved.json)
 - [results-lightpanda-after-n10-interleaved.jsonl](results-lightpanda-after-n10-interleaved.jsonl)
 
-### Charts
+### 4.4. Charts
 
 Generate the documentation charts from the raw result files:
 
@@ -174,7 +218,7 @@ The resource script writes:
 
 - `docs/images/native-scraping-resources.png`
 
-## HTTP-only CLI batch, 2026-11-24
+## 5. HTTP-only CLI batch, 2026-11-24
 
 The console entry now handles `scrape --engine http` without importing the
 Click command tree, browser modules, or the configuration stack. A single URL
@@ -225,7 +269,7 @@ Raw evidence:
 - [results-cli-http-batch-2026-11-24-n10.json](results-cli-http-batch-2026-11-24-n10.json)
 - [results-cli-http-batch-2026-11-24-n10.summary.json](results-cli-http-batch-2026-11-24-n10.summary.json)
 
-## Network-level render policy
+## 6. Network-level render policy
 
 `scrape_compare.py` measures extraction. `no_render_compare.py` measures the
 CDP Fetch policy itself, because a blocked resource type must never reach the
@@ -251,7 +295,7 @@ Smoke run on 2026-11-23, 3 samples, local macOS arm64:
 Latency ranges overlap at this sample count, so only the request and byte
 counts are deterministic. Do not claim a speed win from this table.
 
-## Results, 2026-11-23
+## 7. Results, 2026-11-23
 
 Local macOS arm64, 3 measured samples after 1 warmup per arm and task. These
 are smoke numbers for the harness, not a statistical claim.
@@ -274,7 +318,7 @@ are smoke numbers for the harness, not a statistical claim.
 | asset_heavy | openbrowser-lightweight | 3/3 | 17.5 | 19.6 | 242 | 4 | browser |
 | asset_heavy | openbrowser-no-render | 3/3 | 20.8 | 25.1 | 242 | 4 | browser |
 
-## What this run shows
+## 8. What this run shows
 
 1. `lightweight` cuts the asset-heavy page from 57.1 ms and 25 requests to
    17.5 ms and 4 requests. Images, web fonts, and media no longer reach the
@@ -289,7 +333,7 @@ are smoke numbers for the harness, not a statistical claim.
    The separate batch harness measures `scrape_pages()` against a sequential
    HTTP loop with the same five-page fixture.
 
-## Batch harness
+## 9. Batch harness
 
 ```sh
 uv run --locked python benchmarks/scraping/batch_compare.py \
@@ -301,7 +345,7 @@ The batch harness serves five deterministic pages with 20 rows each. Both
 arms return the same 100 row IDs. It reports p50, p95, request count, response
 bytes, and output bytes for a sequential HTTP loop and for `scrape_pages`.
 
-## Firecrawl lane
+## 10. Firecrawl lane
 
 Compare Firecrawl Local 0.1.1 with OpenBrowser on the same fixtures, browser
 binary, correctness oracles, samples, and warmups. Firecrawl Cloud is not used.
@@ -316,7 +360,7 @@ Results files:
 
 Recorded paths replace the user home directory with `$HOME`.
 
-### Install and run
+### 10.1. Install and run
 
 ```sh
 cargo install firecrawl-local --version 0.1.1 --locked \
@@ -364,7 +408,7 @@ The Firecrawl adapter posts the documented v2 body:
 No cache hit can hide fetch or render work, and no cloud fallback can serve a
 blocked page.
 
-### Fairness rules
+### 10.2. Fairness rules
 
 - One browser binary for both arms. `--chrome` sets
   `BrowserProfile.executable_path` for OpenBrowser and `FIRECRAWL_CHROME_PATH`
@@ -394,7 +438,7 @@ blocked page.
   structured JSON rows for `js_list`, `pagination`, and `table`. Output bytes are
   the bytes each tool returned, not a normalized artifact.
 
-### Correctness oracles
+### 10.3. Correctness oracles
 
 The oracle is exact for every task and runs before latency counts.
 
@@ -406,7 +450,7 @@ The oracle is exact for every task and runs before latency counts.
 | `table` | Exact 100 by 6 cell matrix | 100 rows with 6 cells each |
 | `asset_heavy` | 20 distinct `Headline N` values after the wait | 20 headlines |
 
-### Results, 2026-11-23, N=10
+### 10.4. Results, 2026-11-23, N=10
 
 Local macOS 26.6 arm64, Python 3.12.12, OpenBrowser
 `0.1.58.dev4+g36ccf113b`, Firecrawl Local 0.1.1, Google Chrome for Testing
@@ -441,7 +485,7 @@ The host was shared, so read the sub 10 ms rows as order-of-magnitude values.
 | asset_heavy | openbrowser-lightweight | 10/10 | 33.1 | 50.5 | 242 | 4.0 | 2492 | browser |
 | asset_heavy | openbrowser-no-render | 10/10 | 37.8 | 44.5 | 242 | 4.0 | 2492 | browser |
 
-### What the lane shows
+### 10.5. What the lane shows
 
 1. The result is a split, not a Firecrawl win and not an OpenBrowser win.
 2. Firecrawl Local wins the static fetch lanes. It is faster on
@@ -467,7 +511,7 @@ The host was shared, so read the sub 10 ms rows as order-of-magnitude values.
    `pagination`, and `table` the OpenBrowser arms deliver typed rows while
    Firecrawl delivers markdown that a caller still has to parse.
 
-### Hillclimb targets from this lane
+### 10.6. Hillclimb targets from this lane
 
 1. Static HTTP path: OpenBrowser spends 9.7 to 11.7 ms and Firecrawl spends
    2.2 ms. Cut the Python cleaning and wrapper overhead to get under 5 ms.
@@ -482,7 +526,7 @@ The host was shared, so read the sub 10 ms rows as order-of-magnitude values.
    exposes `engine` and `wait_for`, and the benchmark should keep testing the
    case where a caller asks for rendering.
 
-### Limits for this lane
+### 10.7. Limits for this lane
 
 - This is Firecrawl Local 0.1.1, not Firecrawl Cloud. It has no `json` or
   `summary` format, no screenshots without Chrome, no page actions, and
@@ -496,7 +540,7 @@ The host was shared, so read the sub 10 ms rows as order-of-magnitude values.
 - Do not claim a universal Firecrawl win or a universal OpenBrowser win from
   this lane. Report the split.
 
-## Limits
+## 11. Limits
 
 - Local fixtures do not cover anti-bot pages, real login providers, CAPTCHAs,
   or the full diversity of production sites.
@@ -510,7 +554,7 @@ The host was shared, so read the sub 10 ms rows as order-of-magnitude values.
 - The benchmark does not yet measure peak RSS or CPU. Add cgroup or process
   sampling before calling a result an efficiency win.
 
-## Native Lightpanda lane, 2026-11-24
+## 12. Native Lightpanda lane, 2026-11-24
 
 Lightpanda 1.0.5 (macOS arm64, SHA-256 `eec3781086ee512320a04b036f092806a8a959944ea78fc8f4fe7dfe215a84b4`), Chrome for Testing `159.0.8154.6`, Firecrawl Local 0.1.1, and OpenBrowser `0.1.58.dev16+g325d7b469`. The run used 10 samples per arm and task and 2 warmups. The host load average was `13.6 / 16.3 / 16.4` at start, so treat the absolute p50 values as shared-host evidence, not a quiet-host record.
 
@@ -547,7 +591,7 @@ uv run --locked python benchmarks/scraping/scrape_compare.py \
 
 Raw evidence: [results-lightpanda-2026-11-24-n10.json](results-lightpanda-2026-11-24-n10.json).
 
-## Fast static path, 2026-11-23
+## 13. Fast static path, 2026-11-23
 
 The static HTTP path now uses selectolax with the Lexbor parser and one reusable `httpx.AsyncClient` per namespace or scrape batch. Cookies are disabled on that client, and the namespace owner closes it on agent shutdown.
 
@@ -567,7 +611,7 @@ The raw `httpx` arm still uses BeautifulSoup and markdownify. It is retained as 
 
 These numbers are historical. They came from OpenBrowser `0.1.58.dev6+gcf873b951`, before commit `6326786ed` changed the fast HTML renderer and HTTP probe. The result file has no host-load value or per-sample records. Do not use it as the current before measurement for the parsed-document change.
 
-## Parsed HTML work reduction, 2026-11-24
+## 14. Parsed HTML work reduction, 2026-11-24
 
 The HTTP response path now creates one `ParsedHTML` value. The `auto` engine uses its Lexbor tree for the static probe, title, and content. It returns to the browser before title and content extraction when a page is a thin JavaScript shell.
 
@@ -575,7 +619,7 @@ A cProfile diagnostic ran 100 extraction calls per fixture. The old response pat
 
 The markdown renderer also skips HTML comments and preserves one visible space around them. It keeps adjacent inline nodes joined when the source has no whitespace. This fixes text such as `A <!-- comment --> B` without changing the benchmark fixtures.
 
-### Correctness smoke
+### 14.1. Correctness smoke
 
 The smoke run used one measured sample and one warmup. It ran on macOS 26.6 arm64 with Python 3.12.12, OpenBrowser `0.1.58.dev43+g728099213`, Firecrawl Local 0.1.1, and Chrome for Testing 159.0.8154.6. Host load at start was `10.09 / 12.62 / 12.49`. All six task and arm oracles passed. Do not use this run for a latency claim.
 
@@ -587,7 +631,7 @@ The smoke run used one measured sample and one warmup. It ran on macOS 26.6 arm6
 
 OpenBrowser returns structured rows for `pagination` and `table`. Firecrawl returns markdown. Their output byte counts are not equivalent for those tasks.
 
-### Quiet-host comparison pending
+### 14.2. Quiet-host comparison pending
 
 The N=10 before and after medians are pending. The host load was above 4, so this change makes no latency claim. Before the next N=10 run, check `uptime`. Run only when all three load averages are below 4.
 
@@ -609,7 +653,7 @@ uv run --locked python benchmarks/scraping/scrape_compare.py \
 
 For the merged revision, change `before` to `after` in both output paths. The raw JSONL file starts with run metadata, then has one record per measured sample. The run records the load averages, versions, task and arm order, correctness result, output bytes, and errors.
 
-## Resource lane, 2026-11-24
+## 15. Resource lane, 2026-11-24
 
 `resource_compare.py` runs the same arms and task oracles with a process-tree
 sampler. It records peak RSS, live tree CPU, reaped child CPU, and the maximum
@@ -671,12 +715,12 @@ uv run --locked python -m benchmarks.scraping.resource_compare \
 
 Raw evidence: [results-resources-2026-11-24-n3.json](results-resources-2026-11-24-n3.json).
 
-## Final lanes, 2026-11-24, OpenBrowser 0.1.59.dev18
+## 16. Final lanes, 2026-11-24, OpenBrowser 0.1.59.dev18
 
 These are the runs behind the current comparison page. All use local fixtures,
 exact oracles, and alternating arm order.
 
-### Sequential scraping against Firecrawl Local
+### 16.1. Sequential scraping against Firecrawl Local
 
 N=10 per arm and task, 1 warmup, interleaved. Host load `5.81, 7.09, 6.60` on
 18 logical CPUs. All 30 runs per task passed.
@@ -692,7 +736,7 @@ N=10 per arm and task, 1 warmup, interleaved. Host load `5.81, 7.09, 6.60` on
 Raw evidence: [results-firecrawl-final-2026-11-24-n10-interleaved.json](results/results-firecrawl-final-2026-11-24-n10-interleaved.json)
 and the matching `.jsonl`.
 
-### No-render against Lightpanda
+### 16.2. No-render against Lightpanda
 
 N=10 per arm and task, 1 warmup, interleaved. Lightpanda `1.0.5`. All 100 runs
 passed.
@@ -711,14 +755,14 @@ ordering, not the absolute value.
 
 Raw evidence: [results-lightpanda-final-2026-11-24-n10-interleaved.json](results/results-lightpanda-final-2026-11-24-n10-interleaved.json).
 
-### Firecrawl batch
+### 16.3. Firecrawl batch
 
 N=10, both arms, 10 of 10 pairs. OpenBrowser 2.834 ms p50 against Firecrawl
 Local 13.448 ms p50, a 4.75x difference. No browser started.
 
 Raw evidence: [results-batch-firecrawl-final-2026-11-24-n10.json](results/results-batch-firecrawl-final-2026-11-24-n10.json).
 
-### One-shot CLI static path
+### 16.4. One-shot CLI static path
 
 Five fresh processes per arm, peak child RSS sampled every 5 ms, identical
 1169-byte output.
@@ -738,19 +782,19 @@ uv run --no-project python -m benchmarks.scraping.cli_static_resource_compare \
 
 Raw evidence: [results-cli-static-final-2026-11-24-n5.json](results/results-cli-static-final-2026-11-24-n5.json).
 
-### Resource lane caveat
+### 16.5. Resource lane caveat
 
 `resource_compare.py` starts a browser for every arm before it runs any task.
 The OpenBrowser static rows therefore include a Chromium process that the real
 static path never starts. Read those rows as a persistent browser session. Use
 the one-shot CLI table above for static scraping memory.
 
-## Second final lanes, 2026-11-24, OpenBrowser 0.1.59.dev28
+## 17. Second final lanes, 2026-11-24, OpenBrowser 0.1.59.dev28
 
 Rerun after the sync HTTP client, main-content filters, render asset flags,
 headless shell, and cold-start work landed. Load `5.40, 5.36, 5.11`.
 
-### Sequential scraping against Firecrawl Local
+### 17.1. Sequential scraping against Firecrawl Local
 
 N=10, 1 warmup, interleaved. All 30 runs per task passed.
 
@@ -764,7 +808,7 @@ N=10, 1 warmup, interleaved. All 30 runs per task passed.
 
 Raw evidence: [results-firecrawl-final2-2026-11-24-n10-interleaved.json](results/results-firecrawl-final2-2026-11-24-n10-interleaved.json).
 
-### Headless shell against full Chrome
+### 17.2. Headless shell against full Chrome
 
 N=6 per arm, order alternated, peak process-tree RSS every 20 ms.
 
@@ -782,7 +826,7 @@ uv run --no-project python -m benchmarks.scraping.headless_shell_ab 6 \
 
 Raw evidence: [results-headless-shell-final2-2026-11-24-n6.json](results/results-headless-shell-final2-2026-11-24-n6.json).
 
-### One-shot CLI static path
+### 17.3. One-shot CLI static path
 
 Five fresh processes per arm, peak child RSS every 5 ms, identical 1169-byte output.
 

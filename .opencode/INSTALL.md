@@ -1,13 +1,32 @@
 # Installing OpenBrowser for OpenCode
 
-## Prerequisites
+<!-- toc:start -->
+## Table of Contents
+
+- [1. Prerequisites](#1-prerequisites)
+- [2. Quick install with skills.sh](#2-quick-install-with-skillssh)
+- [3. Installation](#3-installation)
+  - [3.1. macOS / Linux](#31-macos-linux)
+  - [3.2. Windows (PowerShell)](#32-windows-powershell)
+- [4. Verify](#4-verify)
+- [5. Configure the MCP server](#5-configure-the-mcp-server)
+- [6. Available Skills](#6-available-skills)
+- [7. Install OpenBrowser CLI](#7-install-openbrowser-cli)
+- [8. Usage](#8-usage)
+  - [8.1. Tool Mapping](#81-tool-mapping)
+- [9. Updating](#9-updating)
+- [10. Uninstalling](#10-uninstalling)
+
+<!-- toc:end -->
+
+## 1. Prerequisites
 
 - [OpenCode.ai](https://opencode.ai) installed
 - Git installed
 - Chrome or Chromium installed, or the ability to install Chromium with `openbrowser-ai install`
 - Python 3.12+ with [uv](https://docs.astral.sh/uv/)
 
-## Quick install with skills.sh
+## 2. Quick install with skills.sh
 
 ```bash
 npx skills add billy-enrizky/openbrowser-ai --skill setup -a opencode
@@ -18,9 +37,9 @@ The first command installs only the setup skill. The second installs all eight O
 
 These commands install skill files. They do not run the setup workflow. After installation, ask OpenCode to run the `setup` skill.
 
-## Installation
+## 3. Installation
 
-### macOS / Linux
+### 3.1. macOS / Linux
 
 ```bash
 # 1. Clone the repository
@@ -38,7 +57,7 @@ ln -s ~/.config/opencode/openbrowser/plugin/skills ~/.config/opencode/skills/ope
 # 5. Restart OpenCode
 ```
 
-### Windows (PowerShell)
+### 3.2. Windows (PowerShell)
 
 Run as Administrator or with Developer Mode enabled:
 
@@ -59,7 +78,7 @@ cmd /c mklink /J "$env:USERPROFILE\.config\opencode\skills\openbrowser" "$env:US
 # 5. Restart OpenCode
 ```
 
-## Verify
+## 4. Verify
 
 ```bash
 ls -l ~/.config/opencode/plugins/openbrowser.js
@@ -68,7 +87,7 @@ ls -l ~/.config/opencode/skills/openbrowser
 
 Both paths should resolve to the OpenBrowser plugin and skill directories. On Windows, the skills path is a junction.
 
-## Configure the MCP server
+## 5. Configure the MCP server
 
 Add this entry to `opencode.json` in your project:
 
@@ -89,7 +108,7 @@ If OpenCode cannot find `openbrowser-ai`, set `command` to `["uvx", "openbrowser
 
 The OpenBrowser server uses MCP SDK 2.3 and negotiates protocol version `2026-07-28` with modern clients. Call `create_context` first, pass its returned `context_id` to stateful tools, and call `close_context` when finished. Older supported clients use the legacy four-tool catalog, which includes stateless `search_web`.
 
-## Available Skills
+## 6. Available Skills
 
 | Skill | Description |
 |-------|-------------|
@@ -102,14 +121,14 @@ The OpenBrowser server uses MCP SDK 2.3 and negotiates protocol version `2026-07
 | `accessibility-audit` | Audit pages for WCAG compliance |
 | `file-download` | Download files (PDFs, CSVs) using browser session |
 
-## Install OpenBrowser CLI
+## 7. Install OpenBrowser CLI
 
 ```bash
 uv tool install openbrowser-ai
 openbrowser-ai install
 ```
 
-## Usage
+## 8. Usage
 
 Skills are discovered automatically. Load a specific skill:
 
@@ -133,20 +152,20 @@ For static pages, scrape a batch without starting a browser:
 openbrowser-ai scrape https://a.example https://b.example --engine http --jsonl --concurrency 8
 ```
 
-### Tool Mapping
+### 8.1. Tool Mapping
 
 When skills reference Claude Code tools, substitute OpenCode equivalents:
 - `Read`, `Write`, `Edit`, `Bash` -- use your native tools
 - `Task` with subagents -- use OpenCode's subagent system
 - `Skill` tool -- use OpenCode's native `skill` tool
 
-## Updating
+## 9. Updating
 
 ```bash
 cd ~/.config/opencode/openbrowser && git pull
 ```
 
-## Uninstalling
+## 10. Uninstalling
 
 ```bash
 rm ~/.config/opencode/plugins/openbrowser.js

@@ -9,13 +9,30 @@ allowed-tools: Bash(openbrowser-ai:*) Bash(curl:*) Bash(uv:*) Bash(irm:*) Read W
 
 # End-to-End Testing
 
+<!-- toc:start -->
+## Table of Contents
+
+- [1. Setup](#1-setup)
+- [2. Workflow](#2-workflow)
+  - [2.1. Step 1 -- Navigate and verify page load](#21-step-1----navigate-and-verify-page-load)
+  - [2.2. Step 2 -- Content assertions](#22-step-2----content-assertions)
+  - [2.3. Step 3 -- Test user interactions (login flow)](#23-step-3----test-user-interactions-login-flow)
+  - [2.4. Step 4 -- Test navigation flows](#24-step-4----test-navigation-flows)
+  - [2.5. Step 5 -- Test error handling](#25-step-5----test-error-handling)
+  - [2.6. Step 6 -- Test responsive behavior](#26-step-6----test-responsive-behavior)
+  - [2.7. Step 7 -- Test multi-page flows](#27-step-7----test-multi-page-flows)
+- [3. Tips](#3-tips)
+- [4. Cleanup](#4-cleanup)
+
+<!-- toc:end -->
+
 Simulate real user interactions and verify web application behavior using Python code execution. Covers navigation, form interaction, content assertions, and multi-page flows.
 
 All code runs via `openbrowser-ai -c`. The daemon starts automatically and persists variables across calls. Run `openbrowser-ai warm` once before a multi-call workflow to start the daemon and browser before the workflow begins. Most browser functions are async, use `await`. `list_downloads()`, `download_outcomes()`, and `download_failures()` are synchronous.
 
 The CLI daemon persists cookies and login state in the Chrome user-data directory at `~/.config/openbrowser/profiles/daemon`, so authenticated sessions can be reused across later runs. No `storage_state.json` file is written unless you configure one explicitly.
 
-## Setup
+## 1. Setup
 
 Before running, verify openbrowser-ai is installed:
 
@@ -33,9 +50,9 @@ curl -fsSL https://raw.githubusercontent.com/billy-enrizky/openbrowser-ai/main/i
 irm https://raw.githubusercontent.com/billy-enrizky/openbrowser-ai/main/install.ps1 | iex
 ```
 
-## Workflow
+## 2. Workflow
 
-### Step 1 -- Navigate and verify page load
+### 2.1. Step 1 -- Navigate and verify page load
 
 ```bash
 openbrowser-ai -c - <<'EOF'
@@ -48,7 +65,7 @@ print(f"Page loaded: {state.title} ({state.url})")
 EOF
 ```
 
-### Step 2 -- Content assertions
+### 2.2. Step 2 -- Content assertions
 
 ```bash
 openbrowser-ai -c - <<'EOF'
@@ -70,7 +87,7 @@ print("All content assertions passed")
 EOF
 ```
 
-### Step 3 -- Test user interactions (login flow)
+### 2.3. Step 3 -- Test user interactions (login flow)
 
 For stable role or name locators, resolve and act in one step:
 
@@ -113,7 +130,7 @@ print("Login test passed")
 EOF
 ```
 
-### Step 4 -- Test navigation flows
+### 2.4. Step 4 -- Test navigation flows
 
 ```bash
 openbrowser-ai -c - <<'EOF'
@@ -138,7 +155,7 @@ print(f"After back: {state.url}")
 EOF
 ```
 
-### Step 5 -- Test error handling
+### 2.5. Step 5 -- Test error handling
 
 ```bash
 openbrowser-ai -c - <<'EOF'
@@ -163,7 +180,7 @@ print(f"Still on: {path}")
 EOF
 ```
 
-### Step 6 -- Test responsive behavior
+### 2.6. Step 6 -- Test responsive behavior
 
 ```bash
 openbrowser-ai -c - <<'EOF'
@@ -190,7 +207,7 @@ print(f"Mobile menu display: {mobile_display}")
 EOF
 ```
 
-### Step 7 -- Test multi-page flows
+### 2.7. Step 7 -- Test multi-page flows
 
 ```bash
 openbrowser-ai -c - <<'EOF'
@@ -215,7 +232,7 @@ print(json.dumps(test_results, indent=2))
 EOF
 ```
 
-## Tips
+## 3. Tips
 
 - Code is piped via stdin using heredoc (`-c - <<'EOF'`), so all Python syntax works without shell escaping issues.
 - Use Python `assert` statements for test assertions -- they produce clear error messages on failure.
@@ -226,7 +243,7 @@ EOF
 - Use `evaluate()` for DOM state assertions and `browser.get_browser_state_summary()` for page metadata.
 - Use `send_keys()` for keyboard-only paths. Use `get_tabs()` to inspect open tabs, then pass a `tab_id` to `switch()` or `close()`.
 
-## Cleanup
+## 4. Cleanup
 
 Run this step after the task, whether it succeeded or failed.
 

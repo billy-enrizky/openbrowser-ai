@@ -1,14 +1,29 @@
 # Installing OpenBrowser for Codex
 
+<!-- toc:start -->
+## Table of Contents
+
+- [1. Prerequisites](#1-prerequisites)
+- [2. Quick install with skills.sh](#2-quick-install-with-skillssh)
+- [3. Installation](#3-installation)
+- [4. Configure the MCP server](#4-configure-the-mcp-server)
+- [5. Use the CLI daemon](#5-use-the-cli-daemon)
+- [6. Verify](#6-verify)
+- [7. Available Skills](#7-available-skills)
+- [8. Updating](#8-updating)
+- [9. Uninstalling](#9-uninstalling)
+
+<!-- toc:end -->
+
 Browser automation skills for Codex via native skill discovery. Clone and symlink.
 
-## Prerequisites
+## 1. Prerequisites
 
 - Git
 - Chrome or Chromium installed, or the ability to install Chromium with `openbrowser-ai install`
 - Python 3.12+ with [uv](https://docs.astral.sh/uv/)
 
-## Quick install with skills.sh
+## 2. Quick install with skills.sh
 
 ```bash
 npx skills add billy-enrizky/openbrowser-ai --skill setup -a codex
@@ -19,7 +34,7 @@ The first command installs only the setup skill. The second installs all eight O
 
 These commands install skill files. They do not run the setup workflow. After installation, ask Codex to run the `openbrowser/setup` skill.
 
-## Installation
+## 3. Installation
 
 1. **Clone the repository:**
    ```bash
@@ -46,7 +61,7 @@ These commands install skill files. They do not run the setup workflow. After in
 
 4. **Restart Codex** to discover the skills.
 
-## Configure the MCP server
+## 4. Configure the MCP server
 
 Add this entry to `~/.codex/config.toml`:
 
@@ -66,7 +81,7 @@ args = ["openbrowser-ai", "--mcp"]
 
 The OpenBrowser server uses MCP SDK 2.3 and negotiates protocol version `2026-07-28` with modern clients. Call `create_context` first, pass its returned `context_id` to stateful tools, and call `close_context` when finished. Older supported clients use the legacy four-tool catalog, which includes stateless `search_web`.
 
-## Use the CLI daemon
+## 5. Use the CLI daemon
 
 Before a sequence of `openbrowser-ai -c` calls, run `openbrowser-ai warm` once to start the daemon and browser. Variables persist between calls while the daemon remains running.
 
@@ -84,7 +99,7 @@ For static pages, scrape a batch without starting a browser:
 openbrowser-ai scrape https://a.example https://b.example --engine http --jsonl --concurrency 8
 ```
 
-## Verify
+## 6. Verify
 
 ```bash
 ls -la ~/.agents/skills/openbrowser
@@ -92,7 +107,7 @@ ls -la ~/.agents/skills/openbrowser
 
 You should see a symlink pointing to the openbrowser plugin skills directory.
 
-## Available Skills
+## 7. Available Skills
 
 | Skill | Description |
 |-------|-------------|
@@ -105,7 +120,7 @@ You should see a symlink pointing to the openbrowser plugin skills directory.
 | `accessibility-audit` | Audit pages for WCAG compliance |
 | `file-download` | Download files (PDFs, CSVs) using browser session |
 
-## Updating
+## 8. Updating
 
 ```bash
 cd ~/.codex/openbrowser && git pull
@@ -113,7 +128,7 @@ cd ~/.codex/openbrowser && git pull
 
 Skills update instantly through the symlink.
 
-## Uninstalling
+## 9. Uninstalling
 
 ```bash
 rm ~/.agents/skills/openbrowser

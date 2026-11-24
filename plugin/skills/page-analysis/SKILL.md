@@ -9,13 +9,31 @@ allowed-tools: Bash(openbrowser-ai:*) Bash(curl:*) Bash(uv:*) Bash(irm:*) Read W
 
 # Page Analysis
 
+<!-- toc:start -->
+## Table of Contents
+
+- [1. Setup](#1-setup)
+- [2. Workflow](#2-workflow)
+  - [2.1. Step 1 -- Navigate and get overview](#21-step-1----navigate-and-get-overview)
+  - [2.2. Step 2 -- Extract page metadata](#22-step-2----extract-page-metadata)
+  - [2.3. Step 3 -- Detect frameworks and technologies](#23-step-3----detect-frameworks-and-technologies)
+  - [2.4. Step 4 -- Content summary and statistics](#24-step-4----content-summary-and-statistics)
+  - [2.5. Step 5 -- Analyze heading structure](#25-step-5----analyze-heading-structure)
+  - [2.6. Step 6 -- Analyze interactive elements](#26-step-6----analyze-interactive-elements)
+  - [2.7. Step 7 -- Page dimensions and scroll analysis](#27-step-7----page-dimensions-and-scroll-analysis)
+  - [2.8. Step 8 -- Search for specific content patterns](#28-step-8----search-for-specific-content-patterns)
+- [3. Tips](#3-tips)
+- [4. Cleanup](#4-cleanup)
+
+<!-- toc:end -->
+
 Analyze and understand web page content, structure, and interactive elements using Python code execution. Produces a comprehensive breakdown of what is on the page and how it is organized.
 
 All code runs via `openbrowser-ai -c`. The daemon starts automatically and persists variables across calls. Run `openbrowser-ai warm` once before a multi-call workflow to start the daemon and browser before the workflow begins. Most browser functions are async, use `await`. `list_downloads()`, `download_outcomes()`, and `download_failures()` are synchronous.
 
 The CLI daemon persists cookies and login state in the Chrome user-data directory at `~/.config/openbrowser/profiles/daemon`, so authenticated sessions can be reused across later runs. No `storage_state.json` file is written unless you configure one explicitly.
 
-## Setup
+## 1. Setup
 
 Before running, verify openbrowser-ai is installed:
 
@@ -33,9 +51,9 @@ curl -fsSL https://raw.githubusercontent.com/billy-enrizky/openbrowser-ai/main/i
 irm https://raw.githubusercontent.com/billy-enrizky/openbrowser-ai/main/install.ps1 | iex
 ```
 
-## Workflow
+## 2. Workflow
 
-### Step 1 -- Navigate and get overview
+### 2.1. Step 1 -- Navigate and get overview
 
 ```bash
 openbrowser-ai -c - <<'EOF'
@@ -48,7 +66,7 @@ print(f"Tabs: {len(state.tabs)}")
 EOF
 ```
 
-### Step 2 -- Extract page metadata
+### 2.2. Step 2 -- Extract page metadata
 
 ```bash
 openbrowser-ai -c - <<'EOF'
@@ -71,7 +89,7 @@ print(json.dumps(meta, indent=2))
 EOF
 ```
 
-### Step 3 -- Detect frameworks and technologies
+### 2.3. Step 3 -- Detect frameworks and technologies
 
 ```bash
 openbrowser-ai -c - <<'EOF'
@@ -92,7 +110,7 @@ print(f"Technologies detected: {tech}")
 EOF
 ```
 
-### Step 4 -- Content summary and statistics
+### 2.4. Step 4 -- Content summary and statistics
 
 ```bash
 openbrowser-ai -c - <<'EOF'
@@ -121,7 +139,7 @@ print(json.dumps(stats, indent=2))
 EOF
 ```
 
-### Step 5 -- Analyze heading structure
+### 2.5. Step 5 -- Analyze heading structure
 
 ```bash
 openbrowser-ai -c - <<'EOF'
@@ -142,7 +160,7 @@ for h in headings:
 EOF
 ```
 
-### Step 6 -- Analyze interactive elements
+### 2.6. Step 6 -- Analyze interactive elements
 
 ```bash
 openbrowser-ai -c - <<'EOF'
@@ -170,7 +188,7 @@ for tag, elems in sorted(elements_by_tag.items()):
 EOF
 ```
 
-### Step 7 -- Page dimensions and scroll analysis
+### 2.7. Step 7 -- Page dimensions and scroll analysis
 
 ```bash
 openbrowser-ai -c - <<'EOF'
@@ -194,7 +212,7 @@ if dims["scrollable"]:
 EOF
 ```
 
-### Step 8 -- Search for specific content patterns
+### 2.8. Step 8 -- Search for specific content patterns
 
 ```bash
 openbrowser-ai -c - <<'EOF'
@@ -217,7 +235,7 @@ print(f"Dates found: {dates}")
 EOF
 ```
 
-## Tips
+## 3. Tips
 
 - Code is piped via stdin using heredoc (`-c - <<'EOF'`), so all Python syntax works without shell escaping issues.
 - Start with `evaluate()` for metadata and DOM statistics -- gives a fast structured overview.
@@ -227,7 +245,7 @@ EOF
 - For long pages, use `await scroll(down=True)` and re-extract to analyze below-fold content.
 - Variables persist between `-c` calls while the daemon is running, so you can build a comprehensive analysis incrementally.
 
-## Cleanup
+## 4. Cleanup
 
 Run this step after the task, whether it succeeded or failed.
 
