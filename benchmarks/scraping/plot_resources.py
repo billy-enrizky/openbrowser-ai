@@ -20,7 +20,6 @@ DEFAULT_INPUT = HERE / 'results-resources-2026-11-24-n3.json'
 DEFAULT_OUTPUT = HERE.parents[1] / 'docs' / 'images' / 'native-scraping-resources.png'
 TASKS = ('static_article', 'js_list', 'pagination', 'table', 'asset_heavy')
 ARMS = (
-    ('http', 'Raw HTTP (httpx)', '#6b7280'),
     ('openbrowser-lightweight', 'OpenBrowser lightweight', '#58a69f'),
     ('firecrawl-local', 'Firecrawl Local', '#c25b2a'),
     ('lightpanda', 'Lightpanda', '#8871b4'),
@@ -107,8 +106,7 @@ def main() -> int:
     fig.text(
         0.06,
         0.93,
-        f'N={samples} per arm and task, {warmups} warmup. Raw HTTP is httpx plus BeautifulSoup, not OpenBrowser. '
-        'n/a means the arm failed the JavaScript fixture oracle.',
+        f'N={samples} per arm and task, {warmups} warmup. Shared host. Use RSS and CPU, not sampled latency.',
         fontsize=9.5,
         color=MUTED,
         ha='left',

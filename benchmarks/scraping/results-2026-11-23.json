@@ -4,8 +4,7 @@
   "arms": [
     "openbrowser-full",
     "openbrowser-lightweight",
-    "openbrowser-no-render",
-    "http"
+    "openbrowser-no-render"
   ],
   "tasks": [
     "asset_heavy",
@@ -15,23 +14,6 @@
     "table"
   ],
   "groups": [
-    {
-      "task": "asset_heavy",
-      "arm": "http",
-      "successes": 0,
-      "runs": 3,
-      "ok": false,
-      "latency": {
-        "count": 0
-      },
-      "mean_output_bytes": 1165.0,
-      "mean_requests": 1.0,
-      "mean_response_bytes": 1165.0,
-      "engines": [
-        "http"
-      ],
-      "errors": []
-    },
     {
       "task": "asset_heavy",
       "arm": "openbrowser-full",
@@ -89,23 +71,6 @@
       "mean_response_bytes": 2492.0,
       "engines": [
         "browser"
-      ],
-      "errors": []
-    },
-    {
-      "task": "js_list",
-      "arm": "http",
-      "successes": 0,
-      "runs": 3,
-      "ok": false,
-      "latency": {
-        "count": 0
-      },
-      "mean_output_bytes": 432.0,
-      "mean_requests": 1.0,
-      "mean_response_bytes": 432.0,
-      "engines": [
-        "http"
       ],
       "errors": []
     },
@@ -171,26 +136,6 @@
     },
     {
       "task": "pagination",
-      "arm": "http",
-      "successes": 3,
-      "runs": 3,
-      "ok": true,
-      "latency": {
-        "count": 3,
-        "p50_ms": 2.756,
-        "p95_ms": 2.77,
-        "mean_ms": 2.73
-      },
-      "mean_output_bytes": 1650.0,
-      "mean_requests": 5.0,
-      "mean_response_bytes": 6923.0,
-      "engines": [
-        "http"
-      ],
-      "errors": []
-    },
-    {
-      "task": "pagination",
       "arm": "openbrowser-full",
       "successes": 3,
       "runs": 3,
@@ -251,26 +196,6 @@
     },
     {
       "task": "static_article",
-      "arm": "http",
-      "successes": 3,
-      "runs": 3,
-      "ok": true,
-      "latency": {
-        "count": 3,
-        "p50_ms": 3.829,
-        "p95_ms": 4.667,
-        "mean_ms": 4.058
-      },
-      "mean_output_bytes": 1182.0,
-      "mean_requests": 1.0,
-      "mean_response_bytes": 3631.0,
-      "engines": [
-        "http"
-      ],
-      "errors": []
-    },
-    {
-      "task": "static_article",
       "arm": "openbrowser-full",
       "successes": 3,
       "runs": 3,
@@ -324,26 +249,6 @@
       "mean_output_bytes": 1182.0,
       "mean_requests": 1.0,
       "mean_response_bytes": 3631.0,
-      "engines": [
-        "http"
-      ],
-      "errors": []
-    },
-    {
-      "task": "table",
-      "arm": "http",
-      "successes": 3,
-      "runs": 3,
-      "ok": true,
-      "latency": {
-        "count": 3,
-        "p50_ms": 0.678,
-        "p95_ms": 0.694,
-        "mean_ms": 0.674
-      },
-      "mean_output_bytes": 13067.0,
-      "mean_requests": 1.0,
-      "mean_response_bytes": 13067.0,
       "engines": [
         "http"
       ],

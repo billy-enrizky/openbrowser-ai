@@ -132,10 +132,10 @@ warmups. 60 of 60 runs passed their oracle. All 60 runs reported
 | auth | agent-browser | 3/3 | 2709 | 2777 | 10 | 11 | 3856 |
 | auth | browser-use | 3/3 | 3150 | 3300 | 8 | 2 | 124 |
 
-Raw evidence: `results/results-2026-11-23-lean.jsonl`.
+Raw evidence: [results-2026-11-23-lean.jsonl](results/results-2026-11-23-lean.jsonl).
 
 The original default-extension run remains at
-`results/results-2026-11-23.jsonl`.
+[results-2026-11-23.jsonl](results/results-2026-11-23.jsonl).
 
 ## Current cold lane, 2026-11-24
 
@@ -167,8 +167,8 @@ The auth task starts the browser twice and shows the startup gap twice.
 
 Raw evidence:
 
-- `results-cold-current-five-arm-2026-11-24-n3.jsonl`
-- `results-cold-current-five-arm-2026-11-24-n3.summary.json`
+- [results-cold-current-five-arm-2026-11-24-n3.jsonl](results/results-cold-current-five-arm-2026-11-24-n3.jsonl)
+- [results-cold-current-five-arm-2026-11-24-n3.summary.json](results/results-cold-current-five-arm-2026-11-24-n3.summary.json)
 
 ## Warm session lane, 2026-11-24
 
@@ -184,7 +184,7 @@ browser-use starts one dedicated Chrome and reuses its CDP URL.
 
 Paired N=3 run, macOS arm64, system Chrome `158.0.8127.36`, isolated HOME,
 config, profile, and socket, headless, with `--use-mock-keychain`. Cold p50 is
-from `results-2026-11-23-lean.jsonl`. Warmup wall time by arm: OpenBrowser
+from [results-2026-11-23-lean.jsonl](results/results-2026-11-23-lean.jsonl). Warmup wall time by arm: OpenBrowser
 6896 ms, chrome-devtools-mcp
 3638 ms, agent-browser
 3214 ms, browser-use
@@ -230,8 +230,8 @@ uv run --locked python -m benchmarks.interactive.warm_benchmark \
 
 Raw evidence:
 
-- `results-warm-4arm-2026-11-24-n3.jsonl`
-- `results-warm-4arm-2026-11-24-n3.summary.json`
+- [results-warm-4arm-2026-11-24-n3.jsonl](results/results-warm-4arm-2026-11-24-n3.jsonl)
+- [results-warm-4arm-2026-11-24-n3.summary.json](results/results-warm-4arm-2026-11-24-n3.summary.json)
 
 ## Warm session lane after the popup fix, 2026-11-24
 
@@ -269,8 +269,8 @@ The cold script writes `docs/images/native-interactive-cold-p50.png`.
 
 Raw evidence:
 
-- `results/results-warm-4arm-2026-11-24-after-popup-n3.jsonl`
-- `results/results-warm-4arm-2026-11-24-after-popup-n3.summary.json`
+- [results-warm-4arm-2026-11-24-after-popup-n3.jsonl](results/results-warm-4arm-2026-11-24-after-popup-n3.jsonl)
+- [results-warm-4arm-2026-11-24-after-popup-n3.summary.json](results/results-warm-4arm-2026-11-24-after-popup-n3.summary.json)
 
 ## Fast selector arm, 2026-11-24
 
@@ -341,10 +341,10 @@ uv run --locked python -m benchmarks.interactive.warm_benchmark \
 
 Raw evidence:
 
-- `results-warm-fast-selector-final-ab-2026-11-24-n3.jsonl`
-- `results-warm-fast-selector-final-ab-2026-11-24-n3.summary.json`
-- `results-warm-fast-selector-final-all-2026-11-24-n3.jsonl`
-- `results-warm-fast-selector-final-all-2026-11-24-n3.summary.json`
+- [results-warm-fast-selector-final-ab-2026-11-24-n3.jsonl](results/results-warm-fast-selector-final-ab-2026-11-24-n3.jsonl)
+- [results-warm-fast-selector-final-ab-2026-11-24-n3.summary.json](results/results-warm-fast-selector-final-ab-2026-11-24-n3.summary.json)
+- [results-warm-fast-selector-final-all-2026-11-24-n3.jsonl](results/results-warm-fast-selector-final-all-2026-11-24-n3.jsonl)
+- [results-warm-fast-selector-final-all-2026-11-24-n3.summary.json](results/results-warm-fast-selector-final-all-2026-11-24-n3.summary.json)
 
 ## Warm tabs direct CDP click, 2026-11-24
 
@@ -395,10 +395,10 @@ state summary, dominated that step.
 
 Raw evidence:
 
-- `results-warm-tabs-step-baseline-2026-11-24-n5.jsonl`
-- `results-warm-tabs-step-baseline-2026-11-24-n5.summary.json`
-- `results-warm-tabs-direct-cdp-2026-11-24-n5-paired.jsonl`
-- `results-warm-tabs-direct-cdp-2026-11-24-n5-paired.summary.json`
+- [results-warm-tabs-step-baseline-2026-11-24-n5.jsonl](results/results-warm-tabs-step-baseline-2026-11-24-n5.jsonl)
+- [results-warm-tabs-step-baseline-2026-11-24-n5.summary.json](results/results-warm-tabs-step-baseline-2026-11-24-n5.summary.json)
+- [results-warm-tabs-direct-cdp-2026-11-24-n5-paired.jsonl](results/results-warm-tabs-direct-cdp-2026-11-24-n5-paired.jsonl)
+- [results-warm-tabs-direct-cdp-2026-11-24-n5-paired.summary.json](results/results-warm-tabs-direct-cdp-2026-11-24-n5-paired.summary.json)
 
 ## Five-arm tabs-only warm lane, 2026-11-24
 
@@ -441,8 +441,8 @@ uv run --locked python -m benchmarks.interactive.warm_benchmark \
 
 Raw evidence:
 
-- `results-warm-tabs-five-arm-direct-cdp-2026-11-24-n5.jsonl`
-- `results-warm-tabs-five-arm-direct-cdp-2026-11-24-n5.summary.json`
+- [results-warm-tabs-five-arm-direct-cdp-2026-11-24-n5.jsonl](results/results-warm-tabs-five-arm-direct-cdp-2026-11-24-n5.jsonl)
+- [results-warm-tabs-five-arm-direct-cdp-2026-11-24-n5.summary.json](results/results-warm-tabs-five-arm-direct-cdp-2026-11-24-n5.summary.json)
 
 ## Download wait wakeup A/B, 2026-11-24
 
@@ -520,8 +520,8 @@ uv run --locked python -m benchmarks.interactive.cli_startup_ab \
 
 Raw evidence:
 
-- `results-cli-startup-ab-2026-11-24-n12.jsonl`
-- `results-cli-startup-ab-2026-11-24-n12.summary.json`
+- [results-cli-startup-ab-2026-11-24-n12.jsonl](results/results-cli-startup-ab-2026-11-24-n12.jsonl)
+- [results-cli-startup-ab-2026-11-24-n12.summary.json](results/results-cli-startup-ab-2026-11-24-n12.summary.json)
 
 ## Paired tabs and download comparisons, 2026-11-24
 
@@ -561,10 +561,10 @@ uv run --locked python -m benchmarks.interactive.paired_compare \
 
 Raw evidence:
 
-- `results-paired-tabs-2026-11-24-n10.jsonl`
-- `results-paired-tabs-2026-11-24-n10.summary.json`
-- `results-paired-download-2026-11-24-n10.jsonl`
-- `results-paired-download-2026-11-24-n10.summary.json`
+- [results-paired-tabs-2026-11-24-n10.jsonl](results/results-paired-tabs-2026-11-24-n10.jsonl)
+- [results-paired-tabs-2026-11-24-n10.summary.json](results/results-paired-tabs-2026-11-24-n10.summary.json)
+- [results-paired-download-2026-11-24-n10.jsonl](results/results-paired-download-2026-11-24-n10.jsonl)
+- [results-paired-download-2026-11-24-n10.summary.json](results/results-paired-download-2026-11-24-n10.summary.json)
 
 ## OpenBrowser extension A/B, 2026-11-23
 
@@ -580,7 +580,7 @@ percent to the measured p50.
 | tabs | 8947 | 7792 | 12.9% lower |
 | auth | 6273 | 5110 | 18.5% lower |
 
-Raw evidence: `results/results-2026-11-23-extensions.jsonl`.
+Raw evidence: [results-2026-11-23-extensions.jsonl](results/results-2026-11-23-extensions.jsonl).
 
 ## What the results show
 
@@ -715,7 +715,7 @@ OpenBrowser daemon socket path stays below the macOS `AF_UNIX` limit.
 | `adapters/mcp_stdio.py` | Minimal newline-delimited JSON-RPC MCP client |
 | `adapters/base.py` | Run context, process hygiene, dedicated Chrome, keychain verification |
 | `run_benchmark.py` | Runner, JSONL writer, summary table |
-| `results/` | Raw JSONL and summary JSON |
+| [results](results) | Raw JSONL and summary JSON |
 
 ## Safety and cleanup
 

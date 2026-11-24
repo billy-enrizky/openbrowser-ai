@@ -9,7 +9,6 @@
     "asset_heavy"
   ],
   "arms": [
-    "http",
     "openbrowser-full",
     "openbrowser-lightweight",
     "openbrowser-no-render",
@@ -27,10 +26,6 @@
       18.38427734375
     ],
     "arms": {
-      "http": {
-        "loaded": true,
-        "version": ""
-      },
       "openbrowser-full": {
         "loaded": true,
         "version": ""
@@ -74,24 +69,6 @@
       "child_maxrss_mb_max": 186.781,
       "mean_requests": 24.0,
       "mean_response_bytes": 2899.0,
-      "errors": []
-    },
-    {
-      "task": "asset_heavy",
-      "arm": "http",
-      "successes": 0,
-      "runs": 3,
-      "ok": false,
-      "latency": {
-        "count": 0
-      },
-      "peak_rss_mb_max": null,
-      "peak_rss_mb_p50": null,
-      "live_tree_cpu_ms_p50": null,
-      "reaped_child_cpu_ms_p50": null,
-      "child_maxrss_mb_max": null,
-      "mean_requests": 1.0,
-      "mean_response_bytes": 1165.0,
       "errors": []
     },
     {
@@ -201,24 +178,6 @@
     },
     {
       "task": "js_list",
-      "arm": "http",
-      "successes": 0,
-      "runs": 3,
-      "ok": false,
-      "latency": {
-        "count": 0
-      },
-      "peak_rss_mb_max": null,
-      "peak_rss_mb_p50": null,
-      "live_tree_cpu_ms_p50": null,
-      "reaped_child_cpu_ms_p50": null,
-      "child_maxrss_mb_max": null,
-      "mean_requests": 1.0,
-      "mean_response_bytes": 432.0,
-      "errors": []
-    },
-    {
-      "task": "js_list",
       "arm": "lightpanda",
       "successes": 3,
       "runs": 3,
@@ -318,27 +277,6 @@
       "live_tree_cpu_ms_p50": 74.738,
       "reaped_child_cpu_ms_p50": 0.0,
       "child_maxrss_mb_max": 186.781,
-      "mean_requests": 5.0,
-      "mean_response_bytes": 6923.0,
-      "errors": []
-    },
-    {
-      "task": "pagination",
-      "arm": "http",
-      "successes": 3,
-      "runs": 3,
-      "ok": true,
-      "latency": {
-        "count": 3,
-        "p50_ms": 9.216,
-        "p95_ms": 9.679,
-        "mean_ms": 9.369
-      },
-      "peak_rss_mb_max": 51.734,
-      "peak_rss_mb_p50": 51.734,
-      "live_tree_cpu_ms_p50": 31.432,
-      "reaped_child_cpu_ms_p50": 0.0,
-      "child_maxrss_mb_max": 0.0,
       "mean_requests": 5.0,
       "mean_response_bytes": 6923.0,
       "errors": []
@@ -450,27 +388,6 @@
     },
     {
       "task": "static_article",
-      "arm": "http",
-      "successes": 3,
-      "runs": 3,
-      "ok": true,
-      "latency": {
-        "count": 3,
-        "p50_ms": 22.415,
-        "p95_ms": 28.585,
-        "mean_ms": 22.118
-      },
-      "peak_rss_mb_max": 51.625,
-      "peak_rss_mb_p50": 51.594,
-      "live_tree_cpu_ms_p50": 41.0,
-      "reaped_child_cpu_ms_p50": 0.0,
-      "child_maxrss_mb_max": 0.0,
-      "mean_requests": 1.0,
-      "mean_response_bytes": 3631.0,
-      "errors": []
-    },
-    {
-      "task": "static_article",
       "arm": "lightpanda",
       "successes": 3,
       "runs": 3,
@@ -570,27 +487,6 @@
       "live_tree_cpu_ms_p50": 34.425,
       "reaped_child_cpu_ms_p50": 0.0,
       "child_maxrss_mb_max": 186.781,
-      "mean_requests": 1.0,
-      "mean_response_bytes": 13067.0,
-      "errors": []
-    },
-    {
-      "task": "table",
-      "arm": "http",
-      "successes": 3,
-      "runs": 3,
-      "ok": true,
-      "latency": {
-        "count": 3,
-        "p50_ms": 7.849,
-        "p95_ms": 7.924,
-        "mean_ms": 7.06
-      },
-      "peak_rss_mb_max": 51.828,
-      "peak_rss_mb_p50": 51.797,
-      "live_tree_cpu_ms_p50": 33.783,
-      "reaped_child_cpu_ms_p50": 0.0,
-      "child_maxrss_mb_max": 0.0,
       "mean_requests": 1.0,
       "mean_response_bytes": 13067.0,
       "errors": []
