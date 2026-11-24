@@ -10,8 +10,10 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import io
+import math
 import re
 import time
+from contextlib import suppress
 from dataclasses import dataclass, field
 from enum import Enum, StrEnum
 from typing import Any
@@ -209,6 +211,7 @@ class DownloadRegistry:
 		self._terminal_order: list[str] = []
 		# Active waiters pin only the outcomes they could match.
 		self._active_waiters: list[tuple[str | None, str | None, float]] = []
+		self._terminal_changed = asyncio.Event()
 
 	@property
 	def max_active(self) -> int:
@@ -404,7 +407,7 @@ class DownloadRegistry:
 		timeout: float,
 		download_id: str | None = None,
 		url: str | None = None,
-		poll_interval: float = 0.1,
+		poll_interval: float | None = None,
 		lookback: float = 0.0,
 	) -> DownloadOutcome:
 		"""Wait for a terminal outcome, optionally for one specific download.
@@ -415,8 +418,13 @@ class DownloadRegistry:
 		`download_id` returns its current terminal state even if it predates
 		the call. `lookback` additionally accepts a terminal outcome that
 		finished within that many seconds before the call, so "click, then
-		wait" still works when the download was very fast.
+		wait" still works when the download was very fast. The default waits
+		for terminal notifications. `poll_interval` adds a bounded rescan.
 		"""
+		if poll_interval is not None:
+			if not math.isfinite(poll_interval):
+				raise ValueError('poll_interval must be finite')
+			poll_interval = min(max(poll_interval, 0.01), 1.0)
 		excluded = (
 			frozenset()
 			if download_id is not None
@@ -435,6 +443,9 @@ class DownloadRegistry:
 
 		try:
 			while True:
+				# Clear before scanning. Registry transitions run on this loop, so a
+				# later terminal notification cannot be lost before the wait begins.
+				self._terminal_changed.clear()
 				match = self._match(
 					download_id=download_id,
 					url=url,
@@ -463,7 +474,11 @@ class DownloadRegistry:
 						+ (f' (last phase: {last.phase.value})' if last is not None else ' (no download observed)'),
 						outcome=last,
 					)
-				await asyncio.sleep(min(poll_interval, remaining))
+				wait_timeout = remaining
+				if poll_interval is not None:
+					wait_timeout = min(poll_interval, remaining)
+				with suppress(TimeoutError):
+					await asyncio.wait_for(self._terminal_changed.wait(), timeout=wait_timeout)
 		finally:
 			self._active_waiters.remove(waiter)
 			# Release anything pinned by this waiter and re-bound the history.
@@ -553,6 +568,7 @@ class DownloadRegistry:
 		if download_id in self._terminal_order:
 			self._terminal_order.remove(download_id)
 		self._terminal_order.append(download_id)
+		self._terminal_changed.set()
 
 	def _trim(self) -> None:
 		# Never evict an active attempt, and always keep the newest terminal

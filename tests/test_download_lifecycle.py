@@ -5,6 +5,7 @@ import json
 
 import pytest
 
+import openbrowser.browser.download_state as download_state_module
 from openbrowser.browser.download_state import (
 	DownloadOutcome,
 	DownloadPhase,
@@ -188,6 +189,103 @@ async def test_wait_returns_a_terminal_outcome_created_after_the_call():
 	outcome = await waiter
 	assert outcome.download_id == 'dl-wait'
 	assert outcome.phase is DownloadPhase.COMPLETED
+
+
+@pytest.mark.asyncio
+async def test_wait_wakes_on_terminal_before_a_long_poll_interval():
+	registry = DownloadRegistry()
+	registry.start('dl-wake')
+	waiter = asyncio.create_task(
+		registry.wait_for_terminal(timeout=2.0, download_id='dl-wake', poll_interval=10.0)
+	)
+	await asyncio.sleep(0)
+	registry.complete('dl-wake', path='/tmp/wake.bin', file_size=1)
+
+	outcome = await asyncio.wait_for(waiter, timeout=0.2)
+
+	assert outcome.download_id == 'dl-wake'
+	assert outcome.phase is DownloadPhase.COMPLETED
+
+
+@pytest.mark.asyncio
+async def test_terminal_wakeup_reaches_multiple_waiters():
+	registry = DownloadRegistry()
+	registry.start('dl-shared')
+	waiters = [
+		asyncio.create_task(
+			registry.wait_for_terminal(timeout=2.0, download_id='dl-shared', poll_interval=10.0)
+		)
+		for _ in range(2)
+	]
+	await asyncio.sleep(0)
+	registry.complete('dl-shared', path='/tmp/shared.bin', file_size=1)
+
+	outcomes = await asyncio.wait_for(asyncio.gather(*waiters), timeout=0.2)
+
+	assert [outcome.download_id for outcome in outcomes] == ['dl-shared', 'dl-shared']
+	assert all(outcome.phase is DownloadPhase.COMPLETED for outcome in outcomes)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+	('transition', 'expected_phase'),
+	[
+		('complete', DownloadPhase.COMPLETED),
+		('fail', DownloadPhase.FAILED),
+		('cancel', DownloadPhase.CANCELLED),
+		('reject', DownloadPhase.FAILED),
+		('capacity', DownloadPhase.FAILED),
+	],
+)
+async def test_wait_wakes_for_each_terminal_transition(transition, expected_phase):
+	registry = DownloadRegistry(max_active=1)
+	download_id = 'dl-terminal'
+	if transition != 'reject':
+		registry.start(download_id)
+	waiter = asyncio.create_task(
+		registry.wait_for_terminal(timeout=2.0, download_id=download_id, poll_interval=10.0)
+	)
+	await asyncio.sleep(0)
+
+	if transition == 'complete':
+		registry.complete(download_id, path='/tmp/terminal.bin', file_size=1)
+	elif transition == 'fail':
+		registry.fail(download_id, stage='transfer', error='transfer failed')
+	elif transition == 'cancel':
+		registry.cancel(download_id, detail='cancelled')
+	elif transition == 'reject':
+		registry.reject(download_id, stage='capacity', error='not admitted')
+	else:
+		registry.start('dl-capacity')
+
+	outcome = await asyncio.wait_for(waiter, timeout=0.2)
+
+	assert outcome.download_id == download_id
+	assert outcome.phase is expected_phase
+
+
+@pytest.mark.asyncio
+async def test_zero_poll_interval_cannot_request_a_zero_delay_loop(monkeypatch):
+	registry = DownloadRegistry()
+	original_sleep = asyncio.sleep
+
+	async def sleep_without_spin(delay, result=None):
+		assert delay >= 0.01
+		return await original_sleep(delay, result)
+
+	monkeypatch.setattr(download_state_module.asyncio, 'sleep', sleep_without_spin)
+
+	with pytest.raises(DownloadTimeoutError):
+		await registry.wait_for_terminal(timeout=0.1, poll_interval=0.0)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('poll_interval', [float('inf'), float('-inf'), float('nan')])
+async def test_non_finite_poll_interval_is_rejected(poll_interval):
+	registry = DownloadRegistry()
+
+	with pytest.raises(ValueError, match='poll_interval must be finite'):
+		await registry.wait_for_terminal(timeout=1.0, poll_interval=poll_interval)
 
 
 @pytest.mark.asyncio
