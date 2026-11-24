@@ -8,15 +8,20 @@ server-side oracle, not by the adapter's self-report.
 
 | Arm | Version | Native scripted surface | Browser |
 | --- | --- | --- | --- |
-| `openbrowser` | OpenBrowser CLI `0.1.58.dev12+gc421f7eac` | One `openbrowser-ai -c` Python cell per task | System Chrome 158.0.8127.36 through `channel=chrome` |
+| `openbrowser` | OpenBrowser CLI `0.1.58.dev67+gfc17d3201.d20261124` | One `openbrowser-ai -c` Python cell per task | System Chrome 158.0.8127.36 through `channel=chrome` |
+| `openbrowser-fast` | OpenBrowser CLI `0.1.58.dev67+gfc17d3201.d20261124` | One `openbrowser-ai -c` Python cell with CSS helpers for fixture ids | System Chrome 158.0.8127.36 through `channel=chrome` |
 | `chrome-devtools-mcp` | `chrome-devtools-mcp` 1.13.0 | MCP stdio, 33 tools, `pageId` routing | System Chrome 158.0.8127.36 |
 | `agent-browser` | `agent-browser` 0.43.0 | CLI commands, one process per command | System Chrome 158.0.8127.36 |
 | `browser-use` | `browser-use` 1.0.8 (`browser-harness` 0.1.13) | Piped Python in one CLI process | Dedicated system Chrome 158.0.8127.36 |
 
-All four arms use a fresh profile per run, a 1280x800 viewport, and local
+All five arms use a fresh profile per run, a 1280x800 viewport, and local
 fixtures only. Every Chrome launch includes `--use-mock-keychain`. The harness
 checks the actual browser process command line and fails the run if the flag is
 missing.
+
+The earlier four-arm warm results below used OpenBrowser CLI
+`0.1.58.dev12+gc421f7eac`. The fast selector results use the build listed
+above.
 
 ## Tasks
 
@@ -192,6 +197,81 @@ Raw evidence:
 
 - `results-warm-4arm-2026-11-24-n3.jsonl`
 - `results-warm-4arm-2026-11-24-n3.summary.json`
+
+## Fast selector arm, 2026-11-24
+
+`openbrowser-fast` uses the same adapter and lifecycle as `openbrowser`. Its
+task code uses CSS helpers for fixture ids. The semantic `openbrowser` scripts
+and the earlier result files remain unchanged. The tabs task still routes the
+`target="_blank"` anchor through `click_element()`. The oracle verifies that
+the detail tab sees `window.opener`.
+
+The paired run used three samples per arm and task on an 18-core Mac. Load
+averages were `9.24`, `8.27`, and `7.40` before the run. They were `9.66`,
+`8.75`, and `7.63` after the run. The harness ran all samples for `openbrowser`
+before it ran `openbrowser-fast`. This was not an interleaved or quiet-host
+comparison.
+
+| Task | `openbrowser` p50 ms | `openbrowser-fast` p50 ms | Observed result |
+| --- | ---: | ---: | --- |
+| wizard | 2319.702 | 204.657 | Fast lower by 2115.045 ms |
+| modal | 1161.486 | 383.861 | Fast lower by 777.625 ms |
+| download | 772.710 | 570.671 | Fast lower by 202.039 ms |
+| tabs | 975.636 | 990.837 | No measurable difference |
+
+All 24 paired-run samples passed both the adapter check and the task oracle.
+The modal oracle confirms that the fill action triggers the search filter. The
+helper test checks that its `input` and `change` events bubble. The tabs oracle
+confirms that the popup keeps its opener. Treat these N=3 results as
+exploratory because the host was busy and the run order was sequential.
+
+The full five-arm lane used the same host and three samples per arm and task.
+Load averages were `9.66`, `8.75`, and `7.63` before the run. They were `7.59`,
+`8.17`, and `7.52` after the run. All 60 samples passed both checks.
+
+| Task | `openbrowser` | `openbrowser-fast` | `chrome-devtools-mcp` | `agent-browser` | `browser-use` |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| wizard | 2164.780 | 204.323 | 3532.686 | 537.348 | 524.218 |
+| modal | 1161.091 | 396.123 | 2775.570 | 1205.172 | 1167.143 |
+| download | 798.839 | 575.519 | 781.001 | 480.877 | 585.277 |
+| tabs | 994.065 | 984.681 | 1492.314 | 440.220 | 217.152 |
+
+The cells show warm p50 milliseconds. `openbrowser-fast` was lower than the
+semantic arm on wizard, modal, and download. The tabs result changed direction
+between the paired run and the full lane. Its ranges overlap, so the data show
+no measurable difference. `agent-browser` was faster on download and tabs.
+`browser-use` was faster on tabs. This does not establish a universal win.
+
+Rerun the paired selector check:
+
+```sh
+OPENBROWSER_BIN=/path/to/openbrowser-ai \
+uv run --locked python -m benchmarks.interactive.warm_benchmark \
+  --samples 3 \
+  --arms openbrowser openbrowser-fast \
+  --tasks wizard modal download tabs \
+  --output benchmarks/interactive/results/results-warm-fast-selector-final-ab-2026-11-24-n3.jsonl \
+  --cold-results benchmarks/interactive/results/results-2026-11-23-lean.jsonl
+```
+
+Rerun the five-arm lane:
+
+```sh
+OPENBROWSER_BIN=/path/to/openbrowser-ai \
+uv run --locked python -m benchmarks.interactive.warm_benchmark \
+  --samples 3 \
+  --arms openbrowser openbrowser-fast chrome-devtools-mcp agent-browser browser-use \
+  --tasks wizard modal download tabs \
+  --output benchmarks/interactive/results/results-warm-fast-selector-final-all-2026-11-24-n3.jsonl \
+  --cold-results benchmarks/interactive/results/results-2026-11-23-lean.jsonl
+```
+
+Raw evidence:
+
+- `results-warm-fast-selector-final-ab-2026-11-24-n3.jsonl`
+- `results-warm-fast-selector-final-ab-2026-11-24-n3.summary.json`
+- `results-warm-fast-selector-final-all-2026-11-24-n3.jsonl`
+- `results-warm-fast-selector-final-all-2026-11-24-n3.summary.json`
 
 ## OpenBrowser extension A/B, 2026-11-23
 

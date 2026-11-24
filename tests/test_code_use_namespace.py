@@ -7,6 +7,7 @@ create_namespace(), get_namespace_documentation(), download_file, list_downloads
 import asyncio
 import logging
 import time
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -856,6 +857,9 @@ class TestInteractiveHelpers:
             assert 'find_element' in description
             assert 'click_element' in description
             assert 'fill_element' in description
+            assert 'click_selector' in description
+            assert 'fill_selector' in description
+            assert 'wait_for_selector' in description
             assert 'get_tabs' in description
 
         session = self._make_session([self._summary({})])
@@ -863,7 +867,161 @@ class TestInteractiveHelpers:
         assert '## find_element' in docs
         assert '## click_element' in docs
         assert '## fill_element' in docs
+        assert '## click_selector' in docs
+        assert '## fill_selector' in docs
+        assert '## wait_for_selector' in docs
         assert '## get_tabs' in docs
+
+        code_use_dir = Path(__file__).parents[1] / 'src' / 'openbrowser' / 'code_use'
+        assert 'click_selector' in (code_use_dir / 'README.md').read_text()
+        assert 'fill_selector' in (code_use_dir / 'README.md').read_text()
+        assert 'wait_for_selector' in (code_use_dir / 'README.md').read_text()
+        assert 'click_selector' in (code_use_dir / 'system_prompt.md').read_text()
+        assert 'fill_selector' in (code_use_dir / 'system_prompt.md').read_text()
+        assert 'wait_for_selector' in (code_use_dir / 'system_prompt.md').read_text()
+
+    @pytest.mark.asyncio
+    async def test_click_selector_uses_dom_click_without_browser_state_summary(self):
+        session = self._make_session([])
+        ns = self._namespace(session)
+        ns['evaluate'] = AsyncMock(return_value={'status': 'matched'})
+
+        result = await ns['click_selector']('#save')
+
+        assert result is True
+        expression, kwargs = ns['evaluate'].await_args.args[0], ns['evaluate'].await_args.kwargs
+        assert 'document.querySelector(params.selector)' in expression
+        assert 'element.click()' in expression
+        assert kwargs['variables'] == {'selector': '#save'}
+        session.get_browser_state_summary.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_click_selector_routes_blank_target_through_one_semantic_lookup(self):
+        session = self._make_session([])
+        ns = self._namespace(session)
+        ns['evaluate'] = AsyncMock(
+            return_value={'status': 'special', 'element_id': 'open-detail'}
+        )
+        ns['click_element'] = AsyncMock(return_value='clicked')
+
+        result = await ns['click_selector']('#open-detail')
+
+        assert result == 'clicked'
+        ns['click_element'].assert_awaited_once_with(
+            element_id='open-detail', timeout=0.0
+        )
+        session.get_browser_state_summary.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_click_selector_rejects_special_anchor_without_id(self):
+        session = self._make_session([])
+        ns = self._namespace(session)
+        ns['evaluate'] = AsyncMock(return_value={'status': 'special', 'element_id': None})
+        ns['click_element'] = AsyncMock()
+
+        with pytest.raises(RuntimeError, match='Use click_element'):
+            await ns['click_selector']('a[target="_blank"]')
+
+        ns['click_element'].assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_selector_helpers_report_missing_elements(self):
+        session = self._make_session([])
+        ns = self._namespace(session)
+        ns['evaluate'] = AsyncMock(return_value={'status': 'missing'})
+
+        with pytest.raises(LookupError, match='No element matches CSS selector'):
+            await ns['click_selector']('#missing')
+
+        with pytest.raises(LookupError, match='No element matches CSS selector'):
+            await ns['fill_selector']('#missing', 'text')
+
+    @pytest.mark.asyncio
+    async def test_fill_selector_sets_native_value_and_dispatches_bubbling_events(self):
+        session = self._make_session([])
+        ns = self._namespace(session)
+        ns['evaluate'] = AsyncMock(return_value={'status': 'matched'})
+
+        result = await ns['fill_selector']('#email', 'user@example.com')
+
+        assert result is True
+        expression = ns['evaluate'].await_args.args[0]
+        assert 'Object.getOwnPropertyDescriptor' in expression
+        assert "new Event('input', {bubbles: true})" in expression
+        assert "new Event('change', {bubbles: true})" in expression
+        assert ns['evaluate'].await_args.kwargs['variables'] == {
+            'selector': '#email',
+            'text': 'user@example.com',
+        }
+        session.get_browser_state_summary.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_wait_for_selector_returns_match_count(self):
+        session = self._make_session([])
+        ns = self._namespace(session)
+        ns['evaluate'] = AsyncMock(return_value={'status': 'matched', 'count': 2})
+
+        result = await ns['wait_for_selector']('.result', timeout=0.1)
+
+        assert result == 2
+        assert 'document.querySelectorAll(params.selector)' in ns['evaluate'].await_args.args[0]
+        session.get_browser_state_summary.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_wait_for_selector_times_out_after_a_bounded_wait(self):
+        session = self._make_session([])
+        ns = self._namespace(session)
+        ns['evaluate'] = AsyncMock(return_value={'status': 'missing'})
+
+        started = time.monotonic()
+        with pytest.raises(TimeoutError, match=r'within 0\.02 seconds'):
+            await ns['wait_for_selector']('#late', timeout=0.02)
+
+        assert time.monotonic() - started < 1.0
+        assert ns['evaluate'].await_count >= 1
+
+    @pytest.mark.asyncio
+    async def test_wait_for_selector_does_not_return_a_match_after_the_deadline(self):
+        session = self._make_session([])
+        ns = self._namespace(session)
+
+        async def late_match(*_args, **_kwargs):
+            await asyncio.sleep(0.05)
+            return {'status': 'matched', 'count': 1}
+
+        ns['evaluate'] = AsyncMock(side_effect=late_match)
+
+        with pytest.raises(TimeoutError, match=r'within 0\.02 seconds'):
+            await ns['wait_for_selector']('#late', timeout=0.02)
+
+    @pytest.mark.asyncio
+    async def test_selector_helpers_validate_selectors_and_timeouts(self):
+        session = self._make_session([])
+        ns = self._namespace(session)
+        ns['evaluate'] = AsyncMock(
+            return_value={'status': 'invalid', 'message': "not a valid selector"}
+        )
+
+        with pytest.raises(ValueError, match='Invalid CSS selector'):
+            await ns['click_selector']('[')
+
+        with pytest.raises(ValueError, match='timeout must be'):
+            await ns['click_selector']('#save', timeout=-1)
+
+        with pytest.raises(ValueError, match='timeout must be positive'):
+            await ns['wait_for_selector']('#save', timeout=0)
+
+        with pytest.raises(ValueError, match='timeout must be finite'):
+            await ns['wait_for_selector']('#save', timeout=10**1000)
+
+    @pytest.mark.asyncio
+    async def test_selector_helpers_reject_unknown_evaluation_status(self):
+        session = self._make_session([])
+        ns = self._namespace(session)
+        ns['evaluate'] = AsyncMock(return_value={'status': 'unexpected'})
+
+        with pytest.raises(RuntimeError, match='unexpected selector status'):
+            await ns['click_selector']('#save')
 
 # ---------------------------------------------------------------------------
 # scrape_page()

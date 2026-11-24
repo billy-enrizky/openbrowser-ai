@@ -1,0 +1,128 @@
+{
+  "environment": {
+    "cold_results": "benchmarks/interactive/results/results-2026-11-23-lean.jsonl",
+    "tasks": [
+      "wizard",
+      "modal",
+      "download",
+      "tabs"
+    ],
+    "samples": 3,
+    "arms": {
+      "openbrowser": {
+        "platform": "macOS-26.6-arm64-arm-64bit",
+        "machine": "arm64",
+        "binary": "working copy",
+        "version": "0.1.58.dev67+gfc17d3201.d20261124",
+        "warmup_ms": 5010.728,
+        "warmup_payload": {
+          "ok": true,
+          "elapsed_ms": 4756.4,
+          "url": "about:blank"
+        }
+      },
+      "openbrowser-fast": {
+        "platform": "macOS-26.6-arm64-arm-64bit",
+        "machine": "arm64",
+        "binary": "working copy",
+        "version": "0.1.58.dev67+gfc17d3201.d20261124",
+        "warmup_ms": 1954.87,
+        "warmup_payload": {
+          "ok": true,
+          "elapsed_ms": 1867.6,
+          "url": "about:blank"
+        }
+      }
+    }
+  },
+  "rows": [
+    {
+      "task": "wizard",
+      "arm": "openbrowser",
+      "runs": 3,
+      "ok": 3,
+      "warm_p50_ms": 2319.7020000006887,
+      "warm_p95_ms": 2337.775583997427,
+      "cold_p50_ms": 4836.965499998769,
+      "speedup": 2.085166758487656,
+      "errors": []
+    },
+    {
+      "task": "wizard",
+      "arm": "openbrowser-fast",
+      "runs": 3,
+      "ok": 3,
+      "warm_p50_ms": 204.6572500039474,
+      "warm_p95_ms": 210.29175000148825,
+      "cold_p50_ms": null,
+      "speedup": null,
+      "errors": []
+    },
+    {
+      "task": "modal",
+      "arm": "openbrowser",
+      "runs": 3,
+      "ok": 3,
+      "warm_p50_ms": 1161.48562500166,
+      "warm_p95_ms": 1196.546084000147,
+      "cold_p50_ms": 3508.890417000657,
+      "speedup": 3.021036456646325,
+      "errors": []
+    },
+    {
+      "task": "modal",
+      "arm": "openbrowser-fast",
+      "runs": 3,
+      "ok": 3,
+      "warm_p50_ms": 383.86091699794633,
+      "warm_p95_ms": 390.58262500475394,
+      "cold_p50_ms": null,
+      "speedup": null,
+      "errors": []
+    },
+    {
+      "task": "download",
+      "arm": "openbrowser",
+      "runs": 3,
+      "ok": 3,
+      "warm_p50_ms": 772.7096249946044,
+      "warm_p95_ms": 787.9773329987074,
+      "cold_p50_ms": 3492.069457999605,
+      "speedup": 4.519251922122737,
+      "errors": []
+    },
+    {
+      "task": "download",
+      "arm": "openbrowser-fast",
+      "runs": 3,
+      "ok": 3,
+      "warm_p50_ms": 570.6710840022424,
+      "warm_p95_ms": 571.6555410035653,
+      "cold_p50_ms": null,
+      "speedup": null,
+      "errors": []
+    },
+    {
+      "task": "tabs",
+      "arm": "openbrowser",
+      "runs": 3,
+      "ok": 3,
+      "warm_p50_ms": 975.6363330016029,
+      "warm_p95_ms": 1061.6988750043674,
+      "cold_p50_ms": 7792.231542000081,
+      "speedup": 7.986819758984191,
+      "errors": []
+    },
+    {
+      "task": "tabs",
+      "arm": "openbrowser-fast",
+      "runs": 3,
+      "ok": 3,
+      "warm_p50_ms": 990.8373750004102,
+      "warm_p95_ms": 993.4638749982696,
+      "cold_p50_ms": null,
+      "speedup": null,
+      "errors": []
+    }
+  ]
+}

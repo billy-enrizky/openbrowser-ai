@@ -39,6 +39,8 @@ DEFAULT_WORKDIR = Path("/tmp/obib-runs")
 def make_arm(name: str, *, openbrowser_extensions: bool = False):
     if name == "openbrowser":
         return OpenBrowserArm(extensions=openbrowser_extensions)
+    if name == "openbrowser-fast":
+        return OpenBrowserArm(extensions=openbrowser_extensions, fast_selectors=True)
     if name == "chrome-devtools-mcp":
         return ChromeDevToolsArm()
     if name == "agent-browser":
