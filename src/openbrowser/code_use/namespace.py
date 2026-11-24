@@ -10,13 +10,14 @@ import csv
 import datetime
 import json
 import logging
+import math
 import re
 import time
 from collections.abc import Awaitable, Callable
 from http.cookiejar import CookieJar
 from inspect import isawaitable, iscoroutinefunction
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 from urllib.parse import unquote, urlparse
 
 import requests
@@ -25,10 +26,16 @@ from pydantic import ValidationError
 from openbrowser.browser import BrowserSession
 from openbrowser.browser.navigation import WaitUntil
 
-try:
-	from openbrowser.filesystem.file_system import FileSystem
-except ImportError:
-	FileSystem = None  # type: ignore[assignment,misc]
+if TYPE_CHECKING:
+	from openbrowser.filesystem.file_system import FileSystem as FileSystemType
+else:
+	try:
+		from openbrowser.filesystem.file_system import FileSystem
+	except ImportError:
+		FileSystem = None  # type: ignore[assignment,misc]
+		FileSystemType = Any
+	else:
+		FileSystemType = FileSystem
 from openbrowser.llm.base import BaseChatModel
 from openbrowser.tools.action_availability import ActionAvailabilityCode, ActionAvailabilityError
 from openbrowser.tools.action_readiness import (
@@ -452,7 +459,7 @@ def create_namespace(
 	browser_session: BrowserSession,
 	tools: Tools | None = None,
 	page_extraction_llm: BaseChatModel | None = None,
-	file_system: FileSystem | None = None,
+	file_system: FileSystemType | None = None,
 	available_file_paths: list[str] | None = None,
 	sensitive_data: dict[str, str | dict[str, str]] | None = None,
 	completion_callback: Callable[[Any], None] | None = None,
@@ -646,6 +653,183 @@ def create_namespace(
 		namespace['evaluate'] = excluded_evaluate_wrapper
 	else:
 		namespace['evaluate'] = evaluate_wrapper
+
+	def validate_selector_input(selector: str, helper_name: str) -> None:
+		if not isinstance(selector, str):
+			raise TypeError(f'{helper_name}() selector must be a string')
+		if not selector.strip():
+			raise ValueError(f'{helper_name}() selector must not be empty')
+
+	def validate_selector_timeout(timeout: float, helper_name: str, *, allow_zero: bool) -> float:
+		if isinstance(timeout, bool) or not isinstance(timeout, (int, float)):
+			raise TypeError(f'{helper_name}() timeout must be a number')
+		try:
+			timeout_seconds = float(timeout)
+		except OverflowError as error:
+			raise ValueError(f'{helper_name}() timeout must be finite') from error
+		if not math.isfinite(timeout_seconds) or timeout_seconds < 0 or (not allow_zero and timeout_seconds == 0):
+			constraint = 'positive' if not allow_zero else 'finite and non-negative'
+			raise ValueError(f'{helper_name}() timeout must be {constraint}')
+		return timeout_seconds
+
+	async def evaluate_selector_until_match(
+		selector: str,
+		expression: str,
+		timeout: float,  # noqa: ASYNC109 - CSS polling owns the deadline
+		helper_name: str,
+		*,
+		variables: dict[str, str] | None = None,
+	) -> dict[str, Any]:
+		deadline = time.monotonic() + timeout
+		first_attempt = True
+		while first_attempt or time.monotonic() < deadline:
+			first_attempt = False
+			result = await namespace['evaluate'](
+				expression,
+				variables=variables or {'selector': selector},
+			)
+			if not isinstance(result, dict):
+				raise RuntimeError(f'{helper_name}() received an invalid selector result')
+
+			status = result.get('status')
+			if status == 'invalid':
+				message = str(result.get('message') or 'the selector is not valid CSS')
+				raise ValueError(f'Invalid CSS selector {selector!r} for {helper_name}(): {message}')
+			if status == 'unsupported':
+				message = str(result.get('message') or 'the selected element is not supported')
+				raise TypeError(f'{helper_name}() cannot use {selector!r}: {message}')
+			if status not in ('missing', 'matched', 'special'):
+				raise RuntimeError(f'{helper_name}() received an unexpected selector status: {status!r}')
+			if status != 'missing':
+				if helper_name != 'wait_for_selector' or time.monotonic() <= deadline:
+					return result
+				break
+
+			remaining = deadline - time.monotonic()
+			if remaining <= 0:
+				break
+			await asyncio.sleep(min(0.1, remaining))
+
+		if helper_name == 'wait_for_selector':
+			raise TimeoutError(f'No element matches CSS selector {selector!r} within {timeout:g} seconds')
+		raise LookupError(f'No element matches CSS selector {selector!r} within {timeout:g} seconds')
+
+	async def click_selector(selector: str, *, timeout: float = 0.0) -> Any:  # noqa: ASYNC109 - CSS polling owns the deadline
+		"""Click the first CSS match without reading browser state.
+
+		Anchors that open a new tab or download a file use click_element() when
+		the anchor has an id. Otherwise, use click_element() or click() directly.
+		"""
+		validate_selector_input(selector, 'click_selector')
+		timeout_seconds = validate_selector_timeout(timeout, 'click_selector', allow_zero=True)
+		result = await evaluate_selector_until_match(
+			selector,
+			'''(function(params) {
+				let element;
+				try {
+					element = document.querySelector(params.selector);
+				} catch (error) {
+					return {status: 'invalid', message: error.message};
+				}
+				if (!element) return {status: 'missing'};
+				if (element instanceof HTMLAnchorElement &&
+					(element.target.trim().toLowerCase() === '_blank' || element.hasAttribute('download'))) {
+					return {status: 'special', element_id: element.id || null};
+				}
+				element.click();
+				return {status: 'matched'};
+			})''',
+			timeout_seconds,
+			'click_selector',
+		)
+		if result.get('status') == 'special':
+			element_id = result.get('element_id')
+			if not isinstance(element_id, str) or not element_id:
+				raise RuntimeError(
+					'click_selector() cannot safely handle an anchor that opens a new tab or download without an id. '
+					'Use click_element() or click() so the browser can manage the action.'
+				)
+			click_action = namespace.get('click_element')
+			if not callable(click_action):
+				raise RuntimeError('click_selector() needs click_element() for this anchor')
+			semantic_click = cast(Callable[..., Awaitable[Any]], click_action)
+			return await semantic_click(element_id=element_id, timeout=timeout_seconds)
+		return True
+
+	async def fill_selector(selector: str, text: str, *, timeout: float = 0.0) -> bool:  # noqa: ASYNC109 - CSS polling owns the deadline
+		"""Set a standard input value and dispatch bubbling input and change events.
+
+		This fast path supports HTMLInputElement and HTMLTextAreaElement. Use
+		input_text() for rich editors and controls that need indexed interaction.
+		"""
+		validate_selector_input(selector, 'fill_selector')
+		if not isinstance(text, str):
+			raise TypeError('fill_selector() text must be a string')
+		timeout_seconds = validate_selector_timeout(timeout, 'fill_selector', allow_zero=True)
+		result = await evaluate_selector_until_match(
+			selector,
+			'''(function(params) {
+				let element;
+				try {
+					element = document.querySelector(params.selector);
+				} catch (error) {
+					return {status: 'invalid', message: error.message};
+				}
+				if (!element) return {status: 'missing'};
+				if (!(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement)) {
+					return {status: 'unsupported', message: 'use a standard input or textarea'};
+				}
+				const nonTextInputTypes = [
+					'button', 'checkbox', 'file', 'hidden', 'image', 'radio', 'reset', 'submit'
+				];
+				if (element instanceof HTMLInputElement && nonTextInputTypes.includes(element.type)) {
+					return {status: 'unsupported', message: 'use an indexed helper for this input type'};
+				}
+				const prototype = element instanceof HTMLTextAreaElement
+					? HTMLTextAreaElement.prototype
+					: HTMLInputElement.prototype;
+				const setter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
+				if (!setter) return {status: 'unsupported', message: 'the native value setter is unavailable'};
+				setter.call(element, params.text);
+				element.dispatchEvent(new Event('input', {bubbles: true}));
+				element.dispatchEvent(new Event('change', {bubbles: true}));
+				return {status: 'matched'};
+			})''',
+			timeout_seconds,
+			'fill_selector',
+			variables={'selector': selector, 'text': text},
+		)
+		if result.get('status') != 'matched':
+			raise RuntimeError('fill_selector() received an unexpected selector result')
+		return True
+
+	async def wait_for_selector(selector: str, timeout: float = 10.0) -> int:  # noqa: ASYNC109 - CSS polling owns the deadline
+		"""Wait for a CSS match and return the number of matching elements."""
+		validate_selector_input(selector, 'wait_for_selector')
+		timeout_seconds = validate_selector_timeout(timeout, 'wait_for_selector', allow_zero=False)
+		result = await evaluate_selector_until_match(
+			selector,
+			'''(function(params) {
+				try {
+					const count = document.querySelectorAll(params.selector).length;
+					return count ? {status: 'matched', count} : {status: 'missing'};
+				} catch (error) {
+					return {status: 'invalid', message: error.message};
+				}
+			})''',
+			timeout_seconds,
+			'wait_for_selector',
+		)
+		if result.get('status') != 'matched':
+			raise RuntimeError('wait_for_selector() received an unexpected selector result')
+		count = result.get('count')
+		if isinstance(count, bool) or not isinstance(count, int) or count < 1:
+			raise RuntimeError('wait_for_selector() received an invalid match count')
+		return count
+
+	namespace['click_selector'] = click_selector
+	namespace['fill_selector'] = fill_selector
+	namespace['wait_for_selector'] = wait_for_selector
 
 	# Add get_selector_from_index helper for code_use mode
 	async def get_selector_from_index_wrapper(index: int) -> str:

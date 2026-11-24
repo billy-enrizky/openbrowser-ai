@@ -8,8 +8,9 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from benchmarks.interactive.adapters.openbrowser import OpenBrowserArm
+from benchmarks.interactive.run_benchmark import make_arm
 from benchmarks.interactive.tasks import oracle_tabs
-from benchmarks.interactive.warm_benchmark import WARM_TASKS, cold_p50, redact, summarize
+from benchmarks.interactive.warm_benchmark import DEFAULT_ARMS, WARM_TASKS, cold_p50, redact, summarize
 
 
 def _ctx() -> SimpleNamespace:
@@ -34,7 +35,7 @@ def test_openbrowser_warm_run_skips_cleanup_and_resets_result():
 
     with (
         patch("benchmarks.interactive.adapters.openbrowser._write_config"),
-        patch.object(arm, "_invoke", return_value=(0, "", "")),
+        patch.object(arm, "_invoke", return_value=(0, "", "")) as invoke,
         patch("benchmarks.interactive.adapters.openbrowser.verify_mock_keychain", return_value=True),
         patch.object(arm, "cleanup") as cleanup,
     ):
@@ -43,6 +44,48 @@ def test_openbrowser_warm_run_skips_cleanup_and_resets_result():
     cleanup.assert_not_called()
     assert result.ok is True
     assert result.error == ""
+    assert "await input_text(index=await find" in invoke.call_args.args[1]
+    assert "await fill_selector" not in invoke.call_args.args[1]
+
+
+def test_openbrowser_fast_is_a_distinct_warm_arm():
+    semantic_arm = make_arm("openbrowser")
+    fast_arm = make_arm("openbrowser-fast")
+
+    assert "openbrowser" in DEFAULT_ARMS
+    assert "openbrowser-fast" in DEFAULT_ARMS
+    assert isinstance(semantic_arm, OpenBrowserArm)
+    assert isinstance(fast_arm, OpenBrowserArm)
+    assert semantic_arm.fast_selectors is False
+    assert fast_arm.fast_selectors is True
+    assert semantic_arm.name == "openbrowser"
+    assert fast_arm.name == "openbrowser-fast"
+
+
+def test_fast_selector_arm_uses_only_stable_fixture_ids():
+    arm = make_arm("openbrowser-fast")
+    cases = (
+        ("wizard", "fill_selector('#name'"),
+        ("modal", "click_selector('#open-modal'"),
+        ("download", "click_selector('#download-report'"),
+        ("tabs", "click_selector('#compare'"),
+    )
+
+    for task, expected_call in cases:
+        ctx = _ctx()
+        ctx.task = task
+        with (
+            patch("benchmarks.interactive.adapters.openbrowser._write_config"),
+            patch.object(arm, "_invoke", return_value=(0, "", "")) as invoke,
+            patch("benchmarks.interactive.adapters.openbrowser.verify_mock_keychain", return_value=True),
+        ):
+            result = arm.run(ctx, cleanup=False)
+
+        assert result.ok is True
+        program = invoke.call_args.args[1]
+        assert expected_call in program
+        assert "await click(index=await find(" not in program
+        assert "await input_text(index=await find(" not in program
 
 
 def test_openbrowser_warmup_parses_json():

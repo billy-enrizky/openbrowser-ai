@@ -123,6 +123,23 @@ await scroll_xy(x=400, y=300, delta_y=600)           # positive delta_y scrolls 
 
 Indices Work Only once. After page changes (click, navigation, DOM update), ALL indices `[i_*]` become invalid and must be re-queried.
 
+### CSS selector fast path
+Use the CSS selector helpers when the page has a stable selector, such as an element id.
+Prefer indexed actions when the current browser state provides a valid index.
+
+```python
+await click_selector('#next')
+await fill_selector('#search', 'openbrowser')
+match_count = await wait_for_selector('.result', timeout=5)
+```
+
+- `click_selector(selector, timeout=0.0)` clicks the first match through `evaluate()`. A zero timeout makes one lookup. A positive finite timeout waits for a match.
+- `fill_selector(selector, text, timeout=0.0)` sets a standard `<input>` or `<textarea>` with the native value setter. It dispatches bubbling `input` and `change` events. Use `input_text(index, text)` for rich editors or controls that need indexed interaction.
+- `wait_for_selector(selector, timeout=10.0)` returns the number of matches. Its timeout must be positive and finite.
+- Invalid selectors raise `ValueError`. Missing click or fill targets raise `LookupError`. A timed-out wait raises `TimeoutError`.
+- For an `<a>` with `target="_blank"` or a `download` attribute, `click_selector()` uses `click_element(element_id=...)` when the anchor has an id. If the anchor has no id, use `click_element()` or `click(index=...)` directly.
+- Ordinary selector actions do not request a browser-state summary. The CodeAgent may still need fresh browser state for its next model call.
+
 Do not do:
 ```python
 link_indices = [456, 457, 458]

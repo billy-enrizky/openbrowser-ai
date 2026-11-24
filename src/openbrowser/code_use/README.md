@@ -47,6 +47,13 @@ The namespace is initialized with:
 - `search_web(query, max_results=5, backend='auto', region='us-en', safe_search='moderate', timelimit=None)` - Search with DDGS and return title, URL, and snippet fields
 - `search_and_scrape(query, max_results=5, concurrency=4, format='markdown', ...)` - Search, then scrape result URLs through `scrape_pages`
 
+### CSS selector fast path
+- `click_selector(selector, timeout=0.0)` - Click the first CSS match through `evaluate()`. A zero timeout makes one lookup. A positive finite timeout waits for a match.
+- `fill_selector(selector, text, timeout=0.0)` - Set a standard `<input>` or `<textarea>` with the native value setter and dispatch bubbling `input` and `change` events. Use `input_text(index, text)` for rich editors and other controls.
+- `wait_for_selector(selector, timeout=10.0)` - Wait for a CSS match and return the number of matching elements. The timeout must be positive and finite.
+
+Use these helpers when the page has a stable CSS selector, such as a fixture id. For an `<a>` with `target="_blank"` or a `download` attribute, `click_selector()` uses `click_element(element_id=...)` when the anchor has an id. Use `click_element()` or `click(index=...)` when the anchor has no id. Ordinary selector actions do not request a browser-state summary.
+
 Search snippets do not count as evidence. Read each scraped page before you cite it. The package caps `max_results` at 20. Set `engine='http'` to prevent browser fallback.
 
 Indexed actions remain preferred whenever an element index exists. For screenshot-derived coordinates, divide screenshot pixels by `window.devicePixelRatio` before calling an `*_xy` function.

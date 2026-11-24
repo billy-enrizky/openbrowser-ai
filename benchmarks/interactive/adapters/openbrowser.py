@@ -156,6 +156,116 @@ print(_json.dumps({{
     )
 
 
+def _fast_wizard(url: str) -> str:
+    return (
+        HEADER
+        + f"""
+await navigate({url!r})
+await fill_selector('#name', 'Alice Bench')
+await fill_selector('#email', 'alice@example.com')
+await click_selector('#country-ca')
+await wait_for_selector('#province-group:not([hidden])', timeout=15)
+await click_selector('#province-on')
+await click_selector('#step1-next')
+await wait_for_selector('#step2', timeout=15)
+await click_selector('#plan-pro')
+await fill_selector('#seats', '5')
+await click_selector('#step2-next')
+await wait_for_selector('#step3', timeout=15)
+await click_selector('#terms')
+await click_selector('#submit')
+await wait_for_selector('#quote', timeout=15)
+print(_json.dumps({{"quote": await evaluate("document.getElementById('quote').textContent")}}))
+"""
+    )
+
+
+def _fast_modal(url: str) -> str:
+    return (
+        HEADER
+        + f"""
+await navigate({url!r})
+await click_selector('#open-modal')
+await wait_for_selector('#modal:not([hidden])')
+await send_keys(keys='Escape')
+await wait_for_selector('#modal[hidden]')
+await click_selector('#open-modal')
+await fill_selector('#project-search', 'Atlas')
+await wait_js("[...document.querySelectorAll('#project-list [role=option]')].filter(o => !o.hidden).length === 1")
+option_id = await evaluate("Array.from(document.querySelectorAll('#project-list [role=option]')).find(o => !o.hidden && o.textContent.trim() === 'Project Atlas')?.id")
+if not option_id:
+    raise RuntimeError('Project Atlas option has no stable fixture id')
+await click_selector('#' + option_id)
+await wait_js("document.getElementById('selected-value').textContent === 'Project Atlas'")
+print(_json.dumps({{"selected": await evaluate("document.getElementById('selected-value').textContent")}}))
+"""
+    )
+
+
+def _fast_download(url: str) -> str:
+    return (
+        HEADER
+        + f"""
+await navigate({url!r})
+waiter = asyncio.create_task(wait_for_download(timeout=90))
+await click_selector('#download-report')
+outcome = await waiter
+print(_json.dumps({{"download": outcome}}))
+"""
+    )
+
+
+def _fast_tabs(url: str) -> str:
+    return (
+        HEADER
+        + f"""
+await navigate({url!r})
+tabs = await get_tabs()
+original = next((tab["target_id"] for tab in tabs if tab["active"]), tabs[0]["target_id"] if tabs else None)
+await click_selector('#compare')
+
+async def open_detail():
+    deadline = asyncio.get_event_loop().time() + 20
+    last_error = None
+    while asyncio.get_event_loop().time() < deadline:
+        tabs = await current_tabs()
+        detail_tabs = [tab for tab in reversed(tabs) if tab[0] != original and "/detail" in tab[1]]
+        for tab in detail_tabs:
+            try:
+                await switch(tab_id=tab[0])
+            except RuntimeError as error:
+                last_error = error
+                if 'closed' not in str(error).lower():
+                    raise
+                continue
+            await asyncio.sleep(0.15)
+            return tab[0]
+        await asyncio.sleep(0.1)
+    raise RuntimeError('detail tab did not open: %s' % last_error)
+
+detail = await open_detail()
+await wait_for_selector('#approve', timeout=15)
+for attempt in range(3):
+    try:
+        await click_selector('#approve')
+        await wait_js("document.getElementById('approved').textContent === 'approved'", timeout=5)
+        break
+    except RuntimeError:
+        if attempt == 2:
+            raise
+        detail = await open_detail()
+        await wait_for_selector('#approve', timeout=15)
+await close(tab_id=detail)
+await switch(tab_id=original)
+await wait_js("document.getElementById('status').textContent === 'approved:42'")
+print(_json.dumps({{
+    "status": await evaluate("document.getElementById('status').textContent"),
+    "original_title": await evaluate("document.title"),
+}}))
+"""
+    )
+
+
 def _login(url: str, state_path: str) -> str:
     return (
         HEADER
@@ -226,9 +336,17 @@ def _env(ctx: RunContext) -> dict[str, str]:
 class OpenBrowserArm:
     name = "openbrowser"
 
-    def __init__(self, binary: str | None = None, *, extensions: bool = False) -> None:
+    def __init__(
+        self,
+        binary: str | None = None,
+        *,
+        extensions: bool = False,
+        fast_selectors: bool = False,
+    ) -> None:
         self.binary = binary or os.environ.get("OPENBROWSER_BIN") or _default_binary()
         self.extensions = extensions
+        self.fast_selectors = fast_selectors
+        self.name = "openbrowser-fast" if fast_selectors else "openbrowser"
         self._result = ArmResult(ok=False)
 
     def _invoke(self, ctx: RunContext, code: str, timeout: float) -> tuple[int, str, str]:
@@ -269,13 +387,17 @@ class OpenBrowserArm:
         url = ctx.base_url
         try:
             if ctx.task == "wizard":
-                self._invoke(ctx, _wizard(url + "/wizard"), 120)
+                program = _fast_wizard(url + "/wizard") if self.fast_selectors else _wizard(url + "/wizard")
+                self._invoke(ctx, program, 120)
             elif ctx.task == "modal":
-                self._invoke(ctx, _modal(url + "/modal"), 120)
+                program = _fast_modal(url + "/modal") if self.fast_selectors else _modal(url + "/modal")
+                self._invoke(ctx, program, 120)
             elif ctx.task == "download":
-                self._invoke(ctx, _download(url + "/download"), 120)
+                program = _fast_download(url + "/download") if self.fast_selectors else _download(url + "/download")
+                self._invoke(ctx, program, 120)
             elif ctx.task == "tabs":
-                self._invoke(ctx, _tabs(url + "/tabs"), 120)
+                program = _fast_tabs(url + "/tabs") if self.fast_selectors else _tabs(url + "/tabs")
+                self._invoke(ctx, program, 120)
             elif ctx.task == "auth":
                 self._invoke(ctx, _login(url + "/login", str(ctx.root / "storage_state.json")), 120)
                 if restart_for_auth:
