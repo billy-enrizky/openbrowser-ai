@@ -2,7 +2,7 @@
   "environment": {
     "platform": "macOS-26.6-arm64-arm-64bit",
     "machine": "arm64",
-    "binary": "/Users/billy/Documents/openbrowser-production/.worktrees/warm-lane-bench/.venv/bin/openbrowser-ai",
+    "binary": "working copy",
     "version": "0.1.58.dev24+gd77c43315.d20261124",
     "cold_results": "benchmarks/interactive/results/results-cold-2026-11-24-n5.jsonl",
     "tasks": [

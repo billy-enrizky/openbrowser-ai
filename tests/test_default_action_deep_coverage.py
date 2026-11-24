@@ -111,6 +111,31 @@ def _make_cdp_session_mock():
     return cdp
 
 
+def _make_popup_click(*, release_times_out: bool, popup_appears: bool):
+    wd, session = _make_watchdog()
+    cdp = _make_cdp_session_mock()
+    session.cdp_client_for_node = AsyncMock(return_value=cdp)
+    session.get_or_create_cdp_session = AsyncMock(return_value=cdp)
+    session.get_element_coordinates = AsyncMock(return_value=MagicMock(x=100, y=100, width=50, height=50))
+    session.tab_snapshot = MagicMock(return_value=[{"target_id": "original-target"}])
+    session.cdp_client.send.Target = MagicMock()
+    target_infos = [{"targetId": "original-target", "type": "page"}]
+    if popup_appears:
+        target_infos.append({"targetId": "popup-target", "type": "page"})
+    session.cdp_client.send.Target.getTargets = AsyncMock(return_value={"targetInfos": target_infos})
+    cdp.cdp_client.send.Input.dispatchMouseEvent.side_effect = [
+        None,
+        None,
+        TimeoutError("release acknowledgement timed out") if release_times_out else None,
+    ]
+    node = _make_element_node(
+        tag_name="a",
+        node_name="A",
+        attributes={"href": "/detail", "rel": "opener", "target": "_blank"},
+    )
+    return wd, session, cdp, node
+
+
 def _make_watchdog():
     from openbrowser.browser.watchdogs.default_action_watchdog import DefaultActionWatchdog
 
@@ -248,8 +273,7 @@ class TestTypeTextEventDeep:
 
         with patch.object(DefaultActionWatchdog, "_input_text_element_node_impl", new_callable=AsyncMock, side_effect=Exception("gone")), \
              patch.object(DefaultActionWatchdog, "_click_element_node_impl", new_callable=AsyncMock), \
-             patch.object(DefaultActionWatchdog, "_type_to_page", new_callable=AsyncMock), \
-             patch("asyncio.wait_for", new_callable=AsyncMock):
+             patch.object(DefaultActionWatchdog, "_type_to_page", new_callable=AsyncMock):
             result = await wd.on_TypeTextEvent(event)
         assert result is None
 
@@ -400,6 +424,91 @@ class TestClickElementNodeImplDeep:
             cdp.cdp_client.send.Input.dispatchMouseEvent = AsyncMock(side_effect=dispatch_side_effect)
             result = await wd._click_element_node_impl(_make_element_node())
         assert result is not None
+
+    @pytest.mark.parametrize(
+        ("release_times_out", "release_status"),
+        [(False, "acknowledged"), (True, "timed out")],
+    )
+    async def test_new_context_anchor_without_popup_raises_browser_error(
+        self, monkeypatch, release_times_out, release_status
+    ):
+        from openbrowser.browser.watchdogs import default_action_watchdog
+        from openbrowser.browser.watchdogs.default_action_watchdog import DefaultActionWatchdog
+
+        monkeypatch.setattr(default_action_watchdog, "_NEW_CONTEXT_RELEASE_ACK_TIMEOUT", 0.01, raising=False)
+        monkeypatch.setattr(default_action_watchdog, "_NEW_CONTEXT_TARGET_WAIT_TIMEOUT", 0.01, raising=False)
+        monkeypatch.setattr(default_action_watchdog, "_NEW_CONTEXT_TARGET_POLL_INTERVAL", 0.001, raising=False)
+        wd, session, cdp, node = _make_popup_click(release_times_out=release_times_out, popup_appears=False)
+
+        with (
+            patch.object(DefaultActionWatchdog, "_check_element_occlusion", new_callable=AsyncMock, return_value=False),
+            patch("asyncio.sleep", new_callable=AsyncMock),
+            pytest.raises(BrowserError) as error,
+        ):
+            await wd._click_element_node_impl(node)
+
+        assert release_status in error.value.message.lower()
+        assert cdp.cdp_client.send.Input.dispatchMouseEvent.await_count == 3
+        cdp.cdp_client.send.Runtime.callFunctionOn.assert_not_awaited()
+        assert session.cdp_client.send.Target.getTargets.await_count > 0
+
+    @pytest.mark.parametrize("release_times_out", [False, True])
+    async def test_new_context_anchor_succeeds_when_popup_target_appears(self, monkeypatch, release_times_out):
+        from openbrowser.browser.watchdogs import default_action_watchdog
+        from openbrowser.browser.watchdogs.default_action_watchdog import DefaultActionWatchdog
+
+        monkeypatch.setattr(default_action_watchdog, "_NEW_CONTEXT_RELEASE_ACK_TIMEOUT", 0.01, raising=False)
+        monkeypatch.setattr(default_action_watchdog, "_NEW_CONTEXT_TARGET_WAIT_TIMEOUT", 0.01, raising=False)
+        monkeypatch.setattr(default_action_watchdog, "_NEW_CONTEXT_TARGET_POLL_INTERVAL", 0.001, raising=False)
+        wd, session, cdp, node = _make_popup_click(release_times_out=release_times_out, popup_appears=True)
+        timeouts = []
+        original_wait_for = asyncio.wait_for
+
+        async def record_timeout(awaitable, **kwargs):
+            timeouts.append(kwargs.get("timeout"))
+            return await original_wait_for(awaitable, **kwargs)
+
+        with (
+            patch.object(DefaultActionWatchdog, "_check_element_occlusion", new_callable=AsyncMock, return_value=False),
+            patch("asyncio.sleep", new_callable=AsyncMock),
+            patch("asyncio.wait_for", new=record_timeout),
+        ):
+            result = await wd._click_element_node_impl(node)
+
+        assert result == {"click_x": 125.0, "click_y": 125.0}
+        assert timeouts[:2] == [3.0, 0.01]
+        assert cdp.cdp_client.send.Input.dispatchMouseEvent.await_count == 3
+        assert session.cdp_client.send.Target.getTargets.await_count > 0
+        cdp.cdp_client.send.Runtime.callFunctionOn.assert_not_awaited()
+
+    async def test_ordinary_click_keeps_five_second_release_bound(self):
+        from openbrowser.browser.watchdogs.default_action_watchdog import DefaultActionWatchdog
+
+        wd, session = _make_watchdog()
+        cdp = _make_cdp_session_mock()
+        session.cdp_client_for_node = AsyncMock(return_value=cdp)
+        session.get_or_create_cdp_session = AsyncMock(return_value=cdp)
+        session.get_element_coordinates = AsyncMock(return_value=MagicMock(x=100, y=100, width=50, height=50))
+        session.cdp_client.send.Target = MagicMock()
+        session.cdp_client.send.Target.getTargets = AsyncMock(return_value={"targetInfos": []})
+        timeouts = []
+        original_wait_for = asyncio.wait_for
+
+        async def record_timeout(awaitable, **kwargs):
+            timeouts.append(kwargs.get("timeout"))
+            return await original_wait_for(awaitable, **kwargs)
+
+        with (
+            patch.object(DefaultActionWatchdog, "_check_element_occlusion", new_callable=AsyncMock, return_value=False),
+            patch("asyncio.sleep", new_callable=AsyncMock),
+            patch("asyncio.wait_for", new=record_timeout),
+        ):
+            result = await wd._click_element_node_impl(_make_element_node())
+
+        assert result == {"click_x": 125.0, "click_y": 125.0}
+        assert timeouts[:2] == [3.0, 5.0]
+        session.tab_snapshot.assert_not_called()
+        session.cdp_client.send.Target.getTargets.assert_not_awaited()
 
     async def test_cdp_click_exception_js_fallback(self):
         from openbrowser.browser.watchdogs.default_action_watchdog import DefaultActionWatchdog

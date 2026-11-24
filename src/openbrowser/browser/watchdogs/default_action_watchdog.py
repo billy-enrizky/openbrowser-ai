@@ -35,6 +35,10 @@ TypeTextEvent.model_rebuild()
 ScrollEvent.model_rebuild()
 UploadFileEvent.model_rebuild()
 
+_NEW_CONTEXT_RELEASE_ACK_TIMEOUT = 0.3
+_NEW_CONTEXT_TARGET_WAIT_TIMEOUT = 0.5
+_NEW_CONTEXT_TARGET_POLL_INTERVAL = 0.025
+
 
 class DefaultActionWatchdog(BaseWatchdog):
 	"""Handles default browser actions like click, type, and scroll using CDP."""
@@ -430,7 +434,13 @@ class DefaultActionWatchdog(BaseWatchdog):
 		try:
 			# Check if element is a file input or select dropdown - these should not be clicked
 			tag_name = element_node.tag_name.lower() if element_node.tag_name else ''
-			element_type = element_node.attributes.get('type', '').lower() if element_node.attributes else ''
+			attributes = element_node.attributes or {}
+			element_type = attributes.get('type', '').lower()
+			is_new_context_anchor = (
+				tag_name == 'a'
+				and str(attributes.get('target') or '').strip().lower() == '_blank'
+				and 'download' not in attributes
+			)
 
 			if tag_name == 'select':
 				msg = f'Cannot click on <select> elements. Use dropdown_options(index={element_node.backend_node_id}) action instead.'
@@ -593,6 +603,14 @@ class DefaultActionWatchdog(BaseWatchdog):
 					self.logger.error(f'JavaScript click fallback failed: {js_e}')
 					raise Exception(f'Failed to click occluded element: {js_e}')
 
+			existing_target_ids = set()
+			if is_new_context_anchor:
+				existing_target_ids = {
+					tab['target_id'] for tab in self.browser_session.tab_snapshot() if tab.get('target_id')
+				}
+				if self.browser_session.agent_focus and self.browser_session.agent_focus.target_id:
+					existing_target_ids.add(self.browser_session.agent_focus.target_id)
+
 			# Perform the click using CDP (element is not occluded)
 			try:
 				self.logger.debug(f'👆 Dragging mouse over element before clicking x: {center_x}px y: {center_y}px ...')
@@ -629,6 +647,7 @@ class DefaultActionWatchdog(BaseWatchdog):
 					# Don't sleep if we timed out
 
 				# Mouse up
+				release_acknowledged = True
 				try:
 					await asyncio.wait_for(
 						cdp_session.cdp_client.send.Input.dispatchMouseEvent(
@@ -641,16 +660,73 @@ class DefaultActionWatchdog(BaseWatchdog):
 							},
 							session_id=session_id,
 						),
-						timeout=5.0,  # 5 second timeout for mouseReleased
+						timeout=_NEW_CONTEXT_RELEASE_ACK_TIMEOUT if is_new_context_anchor else 5.0,
 					)
 				except TimeoutError:
-					self.logger.debug('⏱️ Mouse up timed out (possibly due to lag or dialog popup), continuing...')
+					if is_new_context_anchor:
+						release_acknowledged = False
+						self.logger.debug('Mouse release acknowledgement timed out; checking for a new page target.')
+					else:
+						self.logger.debug('⏱️ Mouse up timed out (possibly due to lag or dialog popup), continuing...')
+
+				if is_new_context_anchor:
+					event_loop = asyncio.get_running_loop()
+					deadline = event_loop.time() + _NEW_CONTEXT_TARGET_WAIT_TIMEOUT
+					new_page_found = False
+					while event_loop.time() < deadline:
+						remaining = deadline - event_loop.time()
+						try:
+							target_result = await asyncio.wait_for(
+								self.browser_session.cdp_client.send.Target.getTargets(),
+								timeout=remaining,
+							)
+						except TimeoutError:
+							break
+						except Exception as target_error:
+							raise BrowserError(
+								message=(
+									'Could not verify a new page target after mouse release: '
+									f'{type(target_error).__name__}: {target_error}'
+								),
+								long_term_memory='Check the browser tab list before retrying this click.',
+							) from target_error
+
+						target_infos = target_result.get('targetInfos', []) if isinstance(target_result, dict) else []
+						current_page_ids = {
+							target_info.get('targetId')
+							for target_info in target_infos
+							if isinstance(target_info, dict)
+							and target_info.get('type') == 'page'
+							and target_info.get('targetId')
+						}
+						if current_page_ids - existing_target_ids:
+							new_page_found = True
+							break
+
+						remaining = deadline - event_loop.time()
+						if remaining > 0:
+							await asyncio.sleep(min(_NEW_CONTEXT_TARGET_POLL_INTERVAL, remaining))
+
+					if not new_page_found:
+						release_status = 'acknowledged' if release_acknowledged else 'timed out'
+						raise BrowserError(
+							message=(
+								f'Mouse release was {release_status}, but no new page target appeared '
+								f'within {_NEW_CONTEXT_TARGET_WAIT_TIMEOUT:g} seconds.'
+							),
+							long_term_memory=(
+								'The click did not create a new page target. Check the link target and '
+								'current browser tabs before retrying.'
+							),
+						)
 
 				self.logger.debug('🖱️ Clicked successfully using x,y coordinates')
 
 				# Return coordinates as dict for metadata
 				return {'click_x': center_x, 'click_y': center_y}
 
+			except BrowserError:
+				raise
 			except Exception as e:
 				self.logger.warning(f'CDP click failed: {type(e).__name__}: {e}')
 				# Fall back to JavaScript click via CDP

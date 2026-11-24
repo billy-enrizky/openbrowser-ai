@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from benchmarks.interactive.adapters.openbrowser import OpenBrowserArm
+from benchmarks.interactive.tasks import oracle_tabs
 from benchmarks.interactive.warm_benchmark import WARM_TASKS, cold_p50, redact, summarize
 
 
@@ -71,6 +72,41 @@ def test_summarize_uses_paired_cold_p50():
 
     assert rows[0]["warm_p50_ms"] == 200.0
     assert rows[0]["speedup"] == 2.0
+
+
+def test_tabs_oracle_rejects_a_flow_without_a_new_popup():
+    events = [
+        {"event": "detail_loaded", "opener": True},
+        {"event": "approve"},
+        {"event": "status", "status": "approved:42"},
+        {"event": "detail_closed"},
+    ]
+    reported = {"original_title": "Tabs Bench"}
+
+    assert oracle_tabs({"tab_events": events}, reported).ok
+    result = oracle_tabs({"tab_events": events[1:]}, reported)
+
+    assert result.ok is False
+    assert result.detail == "detail tab never loaded"
+
+    events[0]["opener"] = False
+    result = oracle_tabs({"tab_events": events}, reported)
+
+    assert result.ok is False
+    assert result.detail == "detail tab did not see window.opener"
+
+
+def test_tabs_summary_excludes_samples_that_fail_the_oracle():
+    records = [
+        {"task": "tabs", "arm": "openbrowser", "ok": False, "latency_ms": 1.0, "error": "popup missing"},
+        {"task": "tabs", "arm": "openbrowser", "ok": True, "latency_ms": 100.0, "error": ""},
+    ]
+
+    row = next(row for row in summarize(records, {}) if row["task"] == "tabs" and row["arm"] == "openbrowser")
+
+    assert row["runs"] == 2
+    assert row["ok"] == 1
+    assert row["warm_p50_ms"] == 100.0
 
 
 def test_cold_p50_reads_openbrowser_records(tmp_path: Path):
