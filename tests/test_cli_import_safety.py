@@ -35,6 +35,8 @@ def _run_python(source: str, *, timeout: int = 30) -> subprocess.CompletedProces
         (['--mcp'], CliMode.MCP),
         (['-c', 'print(1)'], CliMode.EXECUTE_CODE),
         (['daemon', 'status'], CliMode.DAEMON),
+        (['daemon', 'warm'], CliMode.DAEMON),
+        (['warm'], CliMode.WARM),
         (['install'], CliMode.INSTALL),
         (['init'], CliMode.INIT),
         (['--template', 'default'], CliMode.TEMPLATE),

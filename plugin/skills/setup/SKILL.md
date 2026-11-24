@@ -214,6 +214,14 @@ PY
 
 If you also want to verify the CLI daemon, run `openbrowser-ai -c "..."` explicitly. On macOS/Linux, set `OPENBROWSER_SOCKET` and `OPENBROWSER_DAEMON_PROFILE_DIR` to isolate it. On Windows the daemon uses fixed port 19222 and ignores `OPENBROWSER_SOCKET`, so only stop a daemon you started.
 
+Warm the daemon before a batch of autonomous commands:
+
+```bash
+openbrowser-ai warm
+```
+
+This starts the daemon and browser once and prints `{"ok": true, "elapsed_ms": ..., "url": ...}`. Later `openbrowser-ai -c` calls reuse the same process and avoid the cold browser start. It does not change the browser profile or navigate to an external site.
+
 Optional MCP smoke test:
 
 ```python

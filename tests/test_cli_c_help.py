@@ -2,6 +2,8 @@
 """Tests for `openbrowser-ai -c` (no argument) self-documenting behaviour."""
 
 import asyncio
+import contextlib
+import json
 import os
 import subprocess
 import sys
@@ -10,6 +12,7 @@ import threading
 import time
 import uuid
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -159,3 +162,65 @@ class TestCliCHelp:
                     tmp_dir.rmdir()
                 except OSError:
                     pass
+
+
+class TestCliWarm:
+    def test_warm_starts_the_browser_and_reports_the_url(self):
+        from openbrowser.code_use.executor import CodeExecutor
+        from openbrowser.daemon.server import DaemonServer
+
+        class FakeBrowser:
+            async def get_browser_state_summary(self, include_screenshot=False):
+                assert include_screenshot is False
+                return SimpleNamespace(url='about:blank')
+
+        test_id = uuid.uuid4().hex[:8]
+        tmp_dir = Path(f'/tmp/ob_warm_{test_id}')
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+        sock = tmp_dir / 'd.sock'
+        server = DaemonServer(idle_timeout=60)
+        executor = CodeExecutor()
+        executor.set_namespace({'browser': FakeBrowser(), 'json': json, 'asyncio': asyncio})
+        server._executor = executor
+        loop = asyncio.new_event_loop()
+
+        def run_daemon():
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(server.serve_daemon())
+
+        try:
+            with (
+                patch('openbrowser.daemon.server.get_socket_path', return_value=sock),
+                patch('openbrowser.daemon.server.get_pid_path', return_value=tmp_dir / 'd.pid'),
+            ):
+                thread = threading.Thread(target=run_daemon, daemon=True)
+                thread.start()
+                for _ in range(200):
+                    if sock.exists():
+                        break
+                    time.sleep(0.05)
+                else:
+                    pytest.fail('Mock daemon socket never appeared')
+
+                env = {**os.environ, 'OPENBROWSER_SOCKET': str(sock)}
+                result = subprocess.run(
+                    [sys.executable, '-m', 'openbrowser.cli', 'warm'],
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                    env=env,
+                )
+                assert result.returncode == 0, f'stderr: {result.stderr}'
+                payload = json.loads(result.stdout)
+                assert payload['ok'] is True
+                assert payload['url'] == 'about:blank'
+                assert payload['elapsed_ms'] >= 0
+        finally:
+            server._running = False
+            server._stop_event.set()
+            with contextlib.suppress(NameError):
+                thread.join(timeout=5)
+            sock.unlink(missing_ok=True)
+            (tmp_dir / 'd.pid').unlink(missing_ok=True)
+            with contextlib.suppress(OSError):
+                tmp_dir.rmdir()

@@ -619,6 +619,7 @@ uvx openbrowser-ai -c "await navigate('https://example.com')"
 uvx openbrowser-ai -c "print(await evaluate('document.title'))"
 
 # Daemon management
+uvx openbrowser-ai warm             # Start the daemon and browser before the first timed call
 uvx openbrowser-ai daemon ensure    # Start or restart a daemon that matches the requested headless and profile settings
 uvx openbrowser-ai daemon start     # Start, or restart a daemon whose profile or headless mode differs (auto-starts on first -c call)
 uvx openbrowser-ai daemon stop      # Request shutdown; poll status or use force-stop to verify

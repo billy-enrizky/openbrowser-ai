@@ -79,6 +79,7 @@ This enables incremental exploration -- navigate in one call, extract in the nex
 
 ```bash
 uvx openbrowser-ai config status    # Inspect the selected config file without starting a browser
+uvx openbrowser-ai warm             # Start the daemon and browser before the first timed call
 uvx openbrowser-ai daemon ensure    # Start or restart a daemon that matches the requested headless and profile settings
 uvx openbrowser-ai daemon start     # Start, or restart a daemon whose profile or headless mode differs (auto-starts on first -c call)
 uvx openbrowser-ai daemon stop      # Request shutdown; poll status or use force-stop to verify
