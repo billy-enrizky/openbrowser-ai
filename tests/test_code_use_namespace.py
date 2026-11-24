@@ -1051,6 +1051,21 @@ class TestInteractiveHelpers:
         session.get_browser_state_summary.assert_not_awaited()
 
     @pytest.mark.asyncio
+    async def test_wait_for_selector_notices_a_match_quickly(self):
+        session = self._make_session([])
+        ns = self._namespace(session)
+        ns['evaluate'] = AsyncMock(
+            side_effect=[{'status': 'missing'}, {'status': 'matched', 'count': 1}]
+        )
+
+        started = time.monotonic()
+        result = await ns['wait_for_selector']('#late', timeout=5.0)
+        elapsed = time.monotonic() - started
+
+        assert result == 1
+        assert elapsed < 0.06, f'poll interval too coarse: {elapsed:.3f}s after one miss'
+
+    @pytest.mark.asyncio
     async def test_wait_for_selector_times_out_after_a_bounded_wait(self):
         session = self._make_session([])
         ns = self._namespace(session)

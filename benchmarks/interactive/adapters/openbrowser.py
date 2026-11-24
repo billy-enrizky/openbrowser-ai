@@ -35,12 +35,12 @@ async def find(role=None, name=None, element_id=None, tag=None):
             return idx
     raise RuntimeError('element not found role=%s name=%s id=%s' % (role, name, element_id))
 
-async def wait_js(expression, timeout=15.0):
+async def wait_js(expression, timeout=15.0, interval=0.025):
     deadline = asyncio.get_event_loop().time() + timeout
     while asyncio.get_event_loop().time() < deadline:
         if await evaluate(expression):
             return True
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(interval)
     raise RuntimeError('timeout waiting for: ' + expression)
 
 async def current_tabs():
@@ -289,6 +289,22 @@ print(_json.dumps({{
     )
 
 
+def _fast_login(url: str, state_path: str) -> str:
+    return (
+        HEADER
+        + f"""
+await navigate({url!r})
+await fill_selector('#username', {BENCH_USER!r})
+await fill_selector('#password', {BENCH_PASSWORD!r})
+await click_selector('#login-submit')
+await wait_for_selector('#secret', timeout=15)
+secret = await evaluate("document.getElementById('secret').textContent")
+await browser.export_storage_state({state_path!r})
+print(_json.dumps({{"secret": secret}}))
+"""
+    )
+
+
 def _login(url: str, state_path: str) -> str:
     return (
         HEADER
@@ -422,7 +438,8 @@ class OpenBrowserArm:
                 program = _fast_tabs(url + "/tabs") if self.fast_selectors else _tabs(url + "/tabs")
                 self._invoke(ctx, program, 120)
             elif ctx.task == "auth":
-                self._invoke(ctx, _login(url + "/login", str(ctx.root / "storage_state.json")), 120)
+                login = _fast_login if self.fast_selectors else _login
+                self._invoke(ctx, login(url + "/login", str(ctx.root / "storage_state.json")), 120)
                 if restart_for_auth:
                     self._stop_daemon(ctx)
                 self._invoke(ctx, _read_account(url + "/account"), 120)
