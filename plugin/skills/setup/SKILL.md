@@ -175,6 +175,9 @@ Useful MCP environment variables:
 |---|---|---|
 | `OPENBROWSER_HEADLESS` | Run without a visible window | `true` |
 | `OPENBROWSER_ALLOWED_DOMAINS` | Comma-separated domain whitelist | none |
+| `OPENBROWSER_RENDER_MODE` | Asset policy for new contexts: `full`, `lightweight`, or `no-render` | `full` |
+| `OPENBROWSER_TEXT_ONLY` | Set to `1` to block external CSS, images, fonts, media, and text tracks while keeping scripts and screenshots | `false` |
+| `OPENBROWSER_BLOCK_RESOURCES` | Comma-separated groups to block: `css`, `images`, `fonts`, `media`, `scripts` | none |
 | `OPENBROWSER_USER_DATA_DIR` | Explicit shared profile; concurrent owners are rejected | per-context managed profile |
 | `OPENBROWSER_STORAGE_STATE` | One-time MCP seed for cookies plus localStorage | per-context copy |
 | `OPENBROWSER_MCP_MAX_CONTEXTS` | Open contexts total, including legacy | `16` |

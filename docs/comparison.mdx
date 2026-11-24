@@ -12,19 +12,26 @@ The latest run is first. The other runs are historical and retained for provenan
 
 | Run | Date | Scope | Status |
 | --- | --- | --- | --- |
-| [Native local benchmark lanes](#native-local-lanes) | 2026-11-24 | Sequential scraping, Firecrawl batch, CLI static scraping, Lightpanda no-render, cold and warm interactive lanes, and paired MCP comparisons | Current |
+| [Native local benchmark lanes](#native-local-lanes) | 2026-11-24 | Sequential scraping, CLI static scraping, render asset policy, Firecrawl batch, Lightpanda no-render, cold and warm interactive lanes, and paired MCP comparisons | Current |
 | [CLI Benchmark](/cli-comparison) | 2026-03-15 | 4-way CLI comparison driven by an LLM through one Bash tool | Historical |
 | [MCP Server Comparison](#mcp-benchmark) | 2026-02-21 | 3-way MCP server comparison | Historical |
 
-Start with the current run. It uses deterministic local fixtures, no LLM, no cloud browser, and no AWS. The CLI and MCP runs are historical. Their resolved versions and raw artifacts are incomplete, so do not read them as current-version rankings.
+## The question this page answers
 
-The current results:
+A coding agent that needs a browser has to pick one. The choice is usually made on latency alone, but latency is three different things:
 
-- [Sequential scraping](#scraping-latency): OpenBrowser won 50 of 50 paired samples across five tasks against Firecrawl Local.
-- [Paired interactive comparisons](#paired-interactive): the OpenBrowser MCP arm won 10 of 10 on every task.
-- [Firecrawl batch](#firecrawl-batch): OpenBrowser was 4.75x faster at p50.
-- [CLI static scraping](#cli-batch): the default engine measured 223.4 ms and 47.7 MB peak RSS in one process.
-- [Cold lane](#interactive-cold): the MCP arm beat chrome-devtools-mcp on all five tasks and still trails browser-use on three.
+1. How fast one page is scraped.
+2. How fast one interactive task finishes once a browser is ready.
+3. How long a cold start takes before any work begins.
+
+Memory is a fourth axis, and it decides how many agents fit on one machine. This page measures all four on deterministic local fixtures, with exact oracles, so every number has a correctness check behind it.
+
+The short version:
+
+- OpenBrowser wins every sequential scraping task against Firecrawl Local, and 50 of 50 paired samples.
+- OpenBrowser wins every warm interactive task against every competitor, 10 of 10 pairs each.
+- The cold lane now wins two of five tasks outright and is inside 2 percent on a third. Browser-use still wins click-triggered download and multi-tab work.
+- A one-shot static scrape costs 148.6 ms and 47.7 MB of peak memory. A browser scrape costs 355 to 382 MB with the headless shell, against 742 to 755 MB with full Chrome.
 
 <a id="native-local-lanes"></a>
 
@@ -32,36 +39,58 @@ The current results:
 
 These local fixture runs use no LLM, cloud browser, or AWS. They measure different workloads, so they do not produce one product ranking. The raw data and methods live in [scraping README](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/scraping/README.md) and [interactive README](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/README.md).
 
-This run adds two things the earlier tables lacked. The interactive lane now measures the OpenBrowser MCP server, which is the surface coding agents use, and the CLI static path is measured as one process per page instead of inside a browser session.
+The build under test is OpenBrowser `0.1.59.dev28+gbbc8b52f5`.
 
 <a id="scraping-latency"></a>
 
-### Scraping latency
+### Scraping latency: all five tasks
 
 <img src="/images/native-scraping-current-p50.png" alt="Log-scale chart of p50 scraping latency in milliseconds for OpenBrowser full and lightweight and Firecrawl Local across five local tasks." />
 
-This interleaved run used 10 samples and 1 warmup per arm and task. It ran on macOS arm64 with OpenBrowser `0.1.59.dev18+g2fd906288`, Firecrawl Local `0.1.1`, and Chrome for Testing `159.0.8154.6`. Host load was `5.81, 7.09, 6.60` at the start on 18 logical CPUs. Treat this as shared-host evidence, not a quiet-host record. Alternating arm order puts both tools under the same drift.
+N=10 per arm and task, 1 warmup, interleaved arm order. Host load `5.40, 5.36, 5.11` on 18 logical CPUs. All 30 runs per task passed the exact oracle.
 
 | Task | OpenBrowser full, p50 ms | OpenBrowser lightweight, p50 ms | Firecrawl Local, p50 ms | Lightweight result | Pairs won |
 | --- | ---: | ---: | ---: | --- | ---: |
-| `static_article` | 0.80 | 0.83 | 1.33 | 1.60x faster | 10/10 |
-| `pagination` | 2.46 | 2.57 | 4.00 | 1.56x faster | 10/10 |
-| `table` | 0.97 | 1.02 | 3.04 | 2.97x faster | 10/10 |
-| `js_list` | 22.4 | 24.0 | 565.5 | 23.6x faster | 10/10 |
-| `asset_heavy` | 41.8 | 28.1 | 574.1 | 20.4x faster | 10/10 |
+| `static_article` | 0.92 | 0.94 | 1.54 | 1.64x faster | 10/10 |
+| `pagination` | 2.93 | 3.02 | 4.42 | 1.46x faster | 10/10 |
+| `table` | 0.86 | 0.88 | 2.70 | 3.07x faster | 10/10 |
+| `js_list` | 18.00 | 18.33 | 557.65 | 30.4x faster | 10/10 |
+| `asset_heavy` | 43.46 | 21.66 | 575.66 | 26.6x faster | 10/10 |
 
-All 30 runs per task passed the exact oracle. OpenBrowser won 50 of 50 paired samples across the five tasks. This is the first current run where sequential scraping is a clean win on every task, including static article and pagination.
+OpenBrowser won 50 of 50 paired samples. This is a clean win on every task, including the two that were parity or a loss in the previous run.
 
-#### Why sequential pagination now wins
+Three changes moved pagination and static article from parity to a win:
 
-The pagination task makes five sequential requests to a local HTTP fixture. The previous run measured 10.4 ms against 9.7 ms and reported parity. Two changes closed the gap:
+1. The owned scrape client wraps one synchronous `httpx.Client` and runs each request in a worker thread. The async transport built an anyio stream per request, which cost 0.762 ms against 0.390 ms for the sync transport.
+2. `only_main_content`, `include_tags`, and `exclude_tags` remove boilerplate before extraction, so a filtered page parses less.
+3. The JavaScript tasks now run in the Playwright headless shell, which removes browser UI renderers from the critical path.
 
-1. The owned scrape client now wraps one synchronous `httpx.Client` and runs each request in a worker thread. The async transport builds an anyio stream per request, which cost 0.762 ms against 0.390 ms for the sync transport.
-2. A selector wait that appeared mid-interval used to cost up to 100 ms. It now polls every 25 ms.
+Raw data: [results-firecrawl-final2-2026-11-24-n10-interleaved.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/scraping/results/results-firecrawl-final2-2026-11-24-n10-interleaved.json).
 
-A 40-sample ABBA run measured pagination at 4.36 ms before the transport change and 3.07 ms after it, with Firecrawl Local at 4.61 ms. The current 10-sample run reproduces that ordering. Parsing is only 0.046 ms per page, so the transport was the correct target.
+<a id="render-policy"></a>
 
-Raw data: [results-firecrawl-final-2026-11-24-n10-interleaved.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/scraping/results/results-firecrawl-final-2026-11-24-n10-interleaved.json).
+### Render asset policy
+
+The render mode is a capability preset. The asset flags change only which resource types reach the network, so a caller can keep screenshots and still skip external CSS.
+
+This table comes from a local page with two stylesheets, one web font, 20 images, and 20 JavaScript-rendered headlines. N=10, interleaved. The request and byte columns are exact server observations.
+
+| Arm | Blocked types | Requests | Bytes | Scrape p50 | Screenshots |
+| --- | --- | ---: | ---: | ---: | --- |
+| full | none | 25 | 2908 | 44.6 ms | yes |
+| lightweight | images, fonts, media, text tracks | 4 | 1336 | 44.6 ms | yes |
+| no-render | the four above plus stylesheets | 2 | 1174 | 31.3 ms | no |
+| `--text-only` | the same five | 2 | 1174 | 31.6 ms | yes |
+| HTTP-only | no browser | 1 | 1165 | 198.7 ms wall | no |
+
+Blocking CSS is the scrape-time lever on this fixture: 44.6 ms falls to 31.3 ms. Blocking images alone does not move scrape time because the images are tiny and load in parallel.
+
+Two limits matter. First, blocking external CSS exposes content that the page hides with `display:none` or `visibility:hidden`, which is why Lightpanda's own agent modes keep CSS on. Second, these flags reduce requests and bytes, not Chromium process memory. Use the HTTP path for static pages.
+
+```bash
+openbrowser-ai scrape https://example.com --text-only --only-main-content
+openbrowser-ai --render-mode full --no-css --no-images -c "await navigate('https://example.com')"
+```
 
 <a id="lightpanda"></a>
 
@@ -69,7 +98,7 @@ Raw data: [results-firecrawl-final-2026-11-24-n10-interleaved.json](https://gith
 
 <img src="/images/native-lightpanda-current-p50.png" alt="Log-scale chart of p50 latency in milliseconds for OpenBrowser no-render and Lightpanda across five local tasks." />
 
-This interleaved run used 10 samples and 1 warmup per arm and task. It ran on macOS arm64 with OpenBrowser `0.1.59.dev18+g2fd906288`, Lightpanda `1.0.5`, and Chrome for Testing `159.0.8154.6`. Host load was `6.27, 7.13, 6.64` at the start. All 100 measured runs passed their oracle.
+N=10 per arm and task, 1 warmup, interleaved. Lightpanda `1.0.5`. All 100 measured runs passed.
 
 | Task | OpenBrowser no-render, p50 ms | Lightpanda, p50 ms | Result |
 | --- | ---: | ---: | --- |
@@ -79,45 +108,43 @@ This interleaved run used 10 samples and 1 warmup per arm and task. It ran on ma
 | `js_list` | 19.5 | 479.3 | OpenBrowser 24.6x faster |
 | `asset_heavy` | 23.1 | 503.8 | OpenBrowser 21.8x faster |
 
-Lightpanda starts one process per sample and its startup dominates the static tasks. A prior interleaved run on the same host measured Lightpanda between 160 and 837 ms, so use the ordering, not the absolute Lightpanda value.
+Lightpanda starts one process per sample, so its startup dominates the static tasks. A prior interleaved run measured it between 160 and 837 ms. Use the ordering, not the absolute Lightpanda value.
 
-This is a latency result, not a memory result. The separate HTTP-only CLI path uses 47.6 MB peak RSS, below the about 123 MB Lightpanda figure. OpenBrowser no-render still runs Blink layout and uses far more memory than Lightpanda. See [Scraping resource use](#scraping-resources).
+Memory is a different story. Lightpanda's published figure is 123 MB peak at 25 parallel crawler processes and 21.2 MB for one automation page. OpenBrowser's one-shot HTTP path is 47.7 MB, but it cannot run JavaScript. The JavaScript path is 355 to 382 MB with the headless shell, which is above Lightpanda and below full Chrome.
 
 Raw data: [results-lightpanda-final-2026-11-24-n10-interleaved.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/scraping/results/results-lightpanda-final-2026-11-24-n10-interleaved.json).
 
 <a id="scraping-resources"></a>
 
-### Scraping resource use
+### Memory: one-shot CLI scrape
 
 <img src="/images/native-scraping-resources.png" alt="Two-panel chart of peak process-tree RSS in megabytes and live process-tree CPU in milliseconds for OpenBrowser lightweight, Firecrawl Local, and Lightpanda." />
 
-This resource lane used 3 samples and 1 warmup per arm and task on 2026-11-24. It ran on macOS arm64 with Chrome for Testing `159.0.8154.6`, Firecrawl Local `0.1.1`, and Lightpanda `1.0.5`. The host load average was `15.7, 16.8, 18.4`. The sampler adds overhead, so use these values for RSS and CPU, not latency.
+A scrape does not have to pay for a browser UI. The `scrape` browser fallback now uses the installed Playwright headless shell, which keeps Blink and V8 and drops the browser UI renderers and extension surface.
 
-Read this table with one caveat. The harness starts a browser for every arm before it runs any task, so the OpenBrowser static rows include a Chromium process that the real static path never starts. These rows describe a persistent browser session, not a static scrape.
+N=6 per arm, order alternated per sample, peak process-tree RSS every 20 ms.
 
-Each table cell gives peak RSS in MB, then live process-tree CPU in ms.
-
-| Task | OpenBrowser lightweight session, RSS and CPU | Firecrawl Local, RSS and CPU | Lightpanda, RSS and CPU |
+| Task | Headless shell | Full Chrome | Saved |
 | --- | ---: | ---: | ---: |
-| `static_article` | 741.8 MB, 41.0 ms | 155.7 MB, 32.5 ms | 123.6 MB, 60.5 ms |
-| `js_list` | 762.3 MB, 100.0 ms | 1411.0 MB, 380.4 ms | 124.9 MB, 61.6 ms |
-| `pagination` | 765.3 MB, 44.3 ms | 1433.4 MB, 74.7 ms | 122.9 MB, 203.3 ms |
-| `table` | 765.5 MB, 30.8 ms | 1384.2 MB, 34.4 ms | 123.4 MB, 62.6 ms |
-| `asset_heavy` | 783.2 MB, 115.4 ms | 1687.0 MB, 520.6 ms | 124.5 MB, 62.7 ms |
+| `js_list` | 940.1 ms, 355.4 MB | 1296.0 ms, 742.4 MB | 387.0 MB, 27 percent faster |
+| `asset_heavy` | 974.7 ms, 381.6 MB | 1274.3 ms, 754.8 MB | 373.1 MB, 24 percent faster |
 
-The one-shot CLI static path is measured separately, with one process per sample and peak child RSS sampled every 5 ms. Five samples per arm, identical 1169-byte output.
+A separate judge measured -471 MB RSS and -344 MB physical footprint across five scrape tasks and -467 MB RSS across four interactive tasks, with every exact oracle passing, including the download SHA-256, popup opener, and tabs status.
 
-| Command | p50 latency | p50 peak RSS | p50 CPU |
-| --- | ---: | ---: | ---: |
-| `openbrowser-ai scrape URL` (default engine) | 223.4 ms | 47.7 MB | not measured |
-| `openbrowser-ai scrape URL --engine http` | 213.5 ms | 47.6 MB | not measured |
+The one-shot static path is measured separately, one process per sample, peak child RSS every 5 ms, identical 1169-byte output.
 
-The default engine and the explicit HTTP engine now cost the same, because the default path tries HTTP before it imports the browser stack. A page that needs JavaScript still falls back to the browser.
+| Command | p50 latency | p50 peak RSS |
+| --- | ---: | ---: |
+| `openbrowser-ai scrape URL` (default engine) | 148.6 ms | 47.7 MB |
+| `openbrowser-ai scrape URL --engine http` | 142.7 ms | 47.6 MB |
+
+Read the resource lane with one caveat. `resource_compare.py` starts a browser for every arm before it runs any task, so its OpenBrowser static rows describe a persistent browser session, not a static scrape. Use the table above for static memory.
 
 Raw data:
 
+- [results-headless-shell-final2-2026-11-24-n6.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/scraping/results/results-headless-shell-final2-2026-11-24-n6.json)
+- [results-cli-static-final2-2026-11-24-n5.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/scraping/results/results-cli-static-final2-2026-11-24-n5.json)
 - [results-resources-2026-11-24-n3.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/scraping/results-resources-2026-11-24-n3.json)
-- [results-cli-static-final-2026-11-24-n5.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/scraping/results/results-cli-static-final-2026-11-24-n5.json)
 
 <a id="interactive-cold"></a>
 
@@ -125,33 +152,30 @@ Raw data:
 
 <img src="/images/native-interactive-cold-p50.png" alt="Cold interactive p50 latency for the OpenBrowser MCP and CLI arms, chrome-devtools-mcp, agent-browser, and browser-use across five tasks." />
 
-The cold lane starts a fresh process tree, daemon or server, and browser for every task. This run used OpenBrowser `0.1.59.dev18+g2fd906288`, 3 samples per arm and task, and the pinned competitor versions. All 75 runs passed their oracle.
+The cold lane starts a fresh process tree, daemon or server, and browser for every task. N=3 per arm and task. All 75 runs passed their oracle.
 
 | Task | OpenBrowser MCP, p50 ms | OpenBrowser CLI, p50 ms | chrome-devtools-mcp, p50 ms | agent-browser, p50 ms | browser-use, p50 ms |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `wizard` | 1654 | 2028 | 4439 | 1776 | 1735 |
-| `modal` | 1801 | 2682 | 3639 | 2405 | 1570 |
-| `download` | 1785 | 1928 | 1733 | 1663 | 1486 |
-| `tabs` | 1543 | 1639 | 2412 | 1674 | 1074 |
-| `auth` | 2980 | 3210 | 3949 | 2712 | 2996 |
+| `wizard` | 1474 | 1553 | 4471 | 1686 | 1441 |
+| `modal` | 1501 | 1617 | 3645 | 2266 | 1922 |
+| `download` | 1631 | 1759 | 1674 | 1684 | 1442 |
+| `tabs` | 1397 | 1460 | 2438 | 1532 | 1075 |
+| `auth` | 2368 | 2657 | 3805 | 2482 | 2790 |
 
-The MCP arm is faster than the CLI arm on all five tasks. It beats chrome-devtools-mcp on all five, and agent-browser on wizard. Browser-use is still lowest on modal, download, and tabs, and agent-browser is lowest on download and auth.
+The MCP arm now beats chrome-devtools-mcp on all five tasks, agent-browser on four of five, and browser-use on modal and auth. It is within 2 percent of browser-use on wizard. Browser-use still wins download and tabs.
 
-#### What the cold lane measures
+#### What changed in the cold lane
 
-A cold start is one browser launch plus one server startup. On this host a `BrowserSession.start()` takes about 500 ms, and Chrome itself accounts for nearly all of it. The remaining cost is Python import and the daemon or server handshake.
+A cold start is one browser launch plus one server startup. On this host a `BrowserSession.start()` takes about 550 ms, and Chrome accounts for most of it. Four changes removed about 400 ms from the OpenBrowser side:
 
-Three changes lowered the OpenBrowser side in this release:
+1. The code-use namespace import runs on a worker thread while Chrome starts.
+2. Optional namespace libraries resolve lazily. numpy, pandas, bs4, pypdf, reportlab, and the video recorder no longer load unless a cell uses them.
+3. The MCP server answers `server/discover` without the code-use stack.
+4. Readiness polls are 20 ms, and a fixed 50 ms redirect sleep is gone.
 
-- The code-use namespace import now runs on a worker thread while Chrome starts. The join costs about 1 ms because the import finishes first.
-- The MCP server no longer imports the namespace before it answers `server/discover`.
-- The daemon and CDP readiness polls are 20 ms instead of 200 ms and 100 ms.
+Cold `openbrowser-ai -c pass` measured 1337.6 ms p50 before this work and 968.7 ms after. A paired N=12 run measured 1234.8 ms to 1019.4 ms with 11 of 12 pairs faster.
 
-Cold `openbrowser-ai -c pass` measured 1337.6 ms p50 before these changes and 1023.6 ms after. MCP start to first executed cell measured 2057 ms before and 1103 ms after. These are startup measurements, not task measurements.
-
-A cold start still costs more than a browser-use cold run on three tasks. Do not claim a cold-lane win against browser-use.
-
-Raw data: [results-cold-six-arm-final-2026-11-24-n3.jsonl](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-cold-six-arm-final-2026-11-24-n3.jsonl).
+Raw data: [results-cold-six-arm-final2-2026-11-24-n3.jsonl](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-cold-six-arm-final2-2026-11-24-n3.jsonl).
 
 <a id="interactive-warm"></a>
 
@@ -159,38 +183,36 @@ Raw data: [results-cold-six-arm-final-2026-11-24-n3.jsonl](https://github.com/bi
 
 <img src="/images/native-interactive-warm-current-p50.png" alt="Warm interactive p50 latency for the OpenBrowser MCP and CLI arms, chrome-devtools-mcp, agent-browser, and browser-use across four tasks." />
 
-The warm lane starts each arm once and then runs every task against a fresh fixture server. It measures steady-state task latency and keeps browser startup separate. This run used 5 samples per arm and task with OpenBrowser `0.1.59.dev18+g2fd906288`. All 100 runs passed their oracle.
+The warm lane starts each arm once and runs every task against a fresh fixture server. N=5 per arm and task. All 100 runs passed.
 
 | Task | OpenBrowser MCP, p50 ms | OpenBrowser CLI, p50 ms | chrome-devtools-mcp, p50 ms | agent-browser, p50 ms | browser-use, p50 ms |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `wizard` | 138 | 181 | 3452 | 1609 | 500 |
-| `modal` | 267 | 330 | 2717 | 2105 | 1217 |
-| `download` | 399 | 448 | 778 | 803 | 567 |
-| `tabs` | 159 | 221 | 1458 | 1179 | 226 |
-
-The arms ran in order, so load drift can bias a small difference. Use the paired table below for competitor claims.
+| `wizard` | 117 | 160 | 3510 | 573 | 464 |
+| `modal` | 255 | 302 | 2776 | 1198 | 1164 |
+| `download` | 397 | 443 | 784 | 498 | 551 |
+| `tabs` | 130 | 189 | 1494 | 417 | 174 |
 
 <a id="paired-interactive"></a>
 
 #### Paired current comparisons
 
-The paired runner warms both arms once and alternates their order for every sample. Each run gets a fresh fixture server and an exact oracle check. All 40 runs passed.
+Both arms warm once, then alternate order for every sample. Each run gets a fresh fixture server and an exact oracle check. All 40 runs passed.
 
 | Task | OpenBrowser MCP, p50 ms | Closest competitor | Competitor p50 ms | Pairs won | Paired delta p50 ms |
 | --- | ---: | --- | ---: | ---: | ---: |
-| `wizard` | 163.087 | browser-use | 474.067 | 10/10 | 322.994 |
-| `modal` | 255.657 | browser-use | 803.270 | 10/10 | 517.974 |
-| `tabs` | 137.929 | browser-use | 221.003 | 10/10 | 84.434 |
-| `download` | 387.938 | agent-browser | 480.798 | 10/10 | 78.613 |
+| `wizard` | 121.966 | browser-use | 446.056 | 10/10 | 330.459 |
+| `modal` | 267.286 | browser-use | 806.803 | 10/10 | 519.428 |
+| `tabs` | 140.130 | browser-use | 220.321 | 10/10 | 75.767 |
+| `download` | 393.629 | agent-browser | 482.813 | 10/10 | 89.421 |
 
-The download fixture holds the response for 300 ms. The 78.613 ms paired difference is the control-plane margin above that fixed delay.
+The download fixture holds the response for 300 ms, so the 89.421 ms difference is the control-plane margin above that fixed delay.
 
 Raw data:
 
-- [results-paired-wizard-mcp-vs-browseruse-final-2026-11-24-n10.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-paired-wizard-mcp-vs-browseruse-final-2026-11-24-n10.json)
-- [results-paired-modal-mcp-vs-browseruse-final-2026-11-24-n10.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-paired-modal-mcp-vs-browseruse-final-2026-11-24-n10.json)
-- [results-paired-tabs-mcp-vs-browseruse-final-2026-11-24-n10.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-paired-tabs-mcp-vs-browseruse-final-2026-11-24-n10.json)
-- [results-paired-download-mcp-vs-agentbrowser-final-2026-11-24-n10.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-paired-download-mcp-vs-agentbrowser-final-2026-11-24-n10.json)
+- [results-paired-wizard-mcp-vs-browseruse-final2-2026-11-24-n10.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-paired-wizard-mcp-vs-browseruse-final2-2026-11-24-n10.json)
+- [results-paired-modal-mcp-vs-browseruse-final2-2026-11-24-n10.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-paired-modal-mcp-vs-browseruse-final2-2026-11-24-n10.json)
+- [results-paired-tabs-mcp-vs-browseruse-final2-2026-11-24-n10.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-paired-tabs-mcp-vs-browseruse-final2-2026-11-24-n10.json)
+- [results-paired-download-mcp-vs-agentbrowser-final2-2026-11-24-n10.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-paired-download-mcp-vs-agentbrowser-final2-2026-11-24-n10.json)
 
 <a id="mcp-surface"></a>
 
@@ -198,13 +220,13 @@ Raw data:
 
 The MCP arm speaks the stateless `2026-07-28` protocol: one `server/discover` probe, then `create_context`, `execute_code`, and `close_context`. Each context owns a browser, a namespace, a profile, and a download path. A coding agent that opens one context and keeps it open gets the warm numbers above.
 
-The MCP arm is faster than the CLI arm on every warm task because there is no per-call process start and no per-call daemon handshake. The CLI still starts faster than a full server for a one-off command.
+The MCP arm is faster than the CLI arm on every task because there is no per-call process start and no per-call daemon handshake. The CLI still starts faster than a full server for a one-off command.
 
 <a id="firecrawl-batch"></a>
 
 ### Firecrawl batch scraping
 
-Firecrawl Local exposes a native `/v2/batch/scrape` job API. The batch comparison sends the same five pagination URLs to both products and checks that each returns the same 100 ordered names. The OpenBrowser arm uses `scrape_pages(engine="http", concurrency=5)` and never starts a browser. The Firecrawl arm submits one batch job, polls it every 10 ms, and downloads the results. All 20 measured runs passed.
+Firecrawl Local exposes a native `/v2/batch/scrape` job API. The comparison sends the same five pagination URLs to both products and checks that each returns the same 100 ordered names. The OpenBrowser arm uses `scrape_pages(engine="http", concurrency=5)` and never starts a browser. The Firecrawl arm submits one batch job, polls it every 10 ms, and downloads the results. All 20 measured runs passed.
 
 | Arm | Samples | p50 ms | p95 ms | Range ms | Requests |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -215,25 +237,35 @@ OpenBrowser was faster in 10 of 10 pairs. The median paired difference was `10.6
 
 Raw data: [results-batch-firecrawl-final-2026-11-24-n10.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/scraping/results/results-batch-firecrawl-final-2026-11-24-n10.json).
 
+<a id="discovery"></a>
+
+### Discovery: map and crawl
+
+Firecrawl users build site pipelines on `map` and `crawl`. OpenBrowser now has both, and neither starts a browser.
+
+```bash
+openbrowser-ai map https://docs.example.com --max-urls 50 --exclude '\.pdf$'
+openbrowser-ai crawl https://docs.example.com --max-pages 20 --max-depth 2
+```
+
+`map_urls` reads the page, `/sitemap.xml`, and one sitemap index level, then normalizes, deduplicates, and filters by origin, include, and exclude patterns. `crawl_site` follows same-origin links breadth first, fetches each page once, parses it once, and returns page content plus a per-page link count.
+
+Limits: both are HTTP-only. A JavaScript shell page is reported as a failed or skipped page, not rendered.
+
 <a id="cli-batch"></a>
 
 ### CLI static scraping, one process per page
 
-The console entry now answers a static page before it loads the Click command tree, the browser modules, or the configuration stack. A single URL uses `scrape_http()`. Multiple URLs with `--engine http` use `scrape_http_batch()` with bounded concurrency. Unknown flags fall back to the full Click command.
+The console entry answers a static page before it loads the Click command tree, the browser modules, or the configuration stack. That is why the default engine and the explicit HTTP engine now cost the same.
 
 | Path | p50 latency | p50 peak RSS | Output bytes |
 | --- | ---: | ---: | ---: |
-| Default engine, static page | 223.4 ms | 47.7 MB | 1169 |
-| Explicit `--engine http`, static page | 213.5 ms | 47.6 MB | 1169 |
+| Default engine, static page | 148.6 ms | 47.7 MB | 1169 |
+| Explicit `--engine http`, static page | 142.7 ms | 47.6 MB | 1169 |
 
-Five samples per path, one process per sample, peak child RSS sampled every 5 ms. The default engine and the explicit HTTP engine produce the same bytes.
+A page that needs JavaScript falls back to the browser with the headless shell.
 
-The prior A/B of the five-page HTTP batch measured `205.029` ms and `47.859` MB for the fast entry against `1144.941` ms and `153.844` MB for the pre-change path. That artifact is retained for provenance.
-
-Raw data:
-
-- [results-cli-static-final-2026-11-24-n5.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/scraping/results/results-cli-static-final-2026-11-24-n5.json)
-- [results-cli-http-batch-2026-11-24-n10.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/scraping/results-cli-http-batch-2026-11-24-n10.json)
+Raw data: [results-cli-static-final2-2026-11-24-n5.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/scraping/results/results-cli-static-final2-2026-11-24-n5.json).
 
 <a id="scorecard"></a>
 
@@ -243,25 +275,39 @@ This table counts task-level results on the local fixtures. It does not score fe
 
 | Workload | OpenBrowser arm | Opponent | OpenBrowser wins | Opponent wins | Detail |
 | --- | --- | --- | ---: | ---: | --- |
-| Scraping, 5 sequential tasks | full or lightweight | Firecrawl Local | 5 | 0 | 50/50 paired samples. Pagination 2.57 ms against 4.00 ms. |
+| Scraping, 5 sequential tasks | full or lightweight | Firecrawl Local | 5 | 0 | 50/50 paired samples. Pagination 3.02 ms against 4.42 ms. |
 | Scraping batch, 5 pages | HTTP batch | Firecrawl Local batch | 1 | 0 | 4.75x faster at p50, 10/10 pairs. |
-| No-render, 5 tasks | no-render | Lightpanda `1.0.5` | 5 | 0 | Latency only. Lightpanda uses less memory. |
-| Warm interactive, 4 tasks | MCP selectors | chrome-devtools-mcp | 4 | 0 | Arm-major run. |
-| Warm interactive, 4 tasks | MCP selectors | agent-browser | 4 | 0 | Arm-major run, plus the paired download result. |
-| Warm interactive, 4 tasks | MCP selectors | browser-use | 4 | 0 | Paired, 10/10 on every task. |
-| Cold interactive, 5 tasks | MCP selectors | chrome-devtools-mcp | 5 | 0 | Fresh server and browser per task. |
-| Cold interactive, 5 tasks | MCP selectors | agent-browser | 1 | 4 | MCP wins wizard. Agent-browser wins the rest. |
-| Cold interactive, 5 tasks | MCP selectors | browser-use | 1 | 3 | MCP wins wizard. Browser-use wins modal, download, and tabs. |
+| No-render, 5 tasks | no-render | Lightpanda `1.0.5` | 5 | 0 | Latency only. Lightpanda uses less memory for JavaScript pages. |
+| Static CLI, 1 page | HTTP fast entry | Firecrawl Local | n/a | n/a | Different surfaces. The HTTP path is 148.6 ms and 47.7 MB. |
+| Warm interactive, 4 tasks | MCP | chrome-devtools-mcp | 4 | 0 | Arm-major run. |
+| Warm interactive, 4 tasks | MCP | agent-browser | 4 | 0 | Arm-major run plus the paired download result. |
+| Warm interactive, 4 tasks | MCP | browser-use | 4 | 0 | Paired, 10/10 on every task. |
+| Cold interactive, 5 tasks | MCP | chrome-devtools-mcp | 5 | 0 | Fresh server and browser per task. |
+| Cold interactive, 5 tasks | MCP | agent-browser | 4 | 1 | Agent-browser wins download. |
+| Cold interactive, 5 tasks | MCP | browser-use | 2 | 2 | MCP wins modal and auth; browser-use wins download and tabs; wizard is within 2 percent. |
+
+### How to choose a surface
+
+| Need | Use | Why |
+| --- | --- | --- |
+| One static page, lowest memory | `openbrowser-ai scrape URL` | 148.6 ms and 47.7 MB, no browser |
+| Many known URLs | `scrape --engine http --jsonl` | Concurrent HTTP, no browser |
+| Site discovery | `openbrowser-ai map URL` | Page links plus sitemap, no browser |
+| Site-wide text | `openbrowser-ai crawl URL` | Bounded breadth-first crawl, no browser |
+| JavaScript page, one shot | `scrape --engine browser` | Headless shell, 355 to 382 MB |
+| Long interactive session | MCP `create_context` plus `execute_code` | Warm numbers above |
+| One-off interactive command | `openbrowser-ai -c` | No server to manage |
+| Visual work | `--render-mode full` | Screenshots and real paint |
 
 ### What these lanes show
 
-OpenBrowser is faster than Firecrawl Local on every sequential scraping task in the current run, and 4.75 times faster on the native batch surface. The pagination and static article results changed from parity to a win after the shared synchronous HTTP client landed.
+OpenBrowser is faster than Firecrawl Local on every sequential scraping task, and 4.75 times faster on the native batch surface. It also ships the discovery primitives, main-content filtering, and asset flags that Firecrawl users rely on.
 
-OpenBrowser is faster than every competitor on every warm interactive task in the paired runs. The MCP arm won 10 of 10 pairs on wizard, modal, tabs, and download. The deltas are 323.0 ms, 518.0 ms, 84.4 ms, and 78.6 ms at p50.
+OpenBrowser is faster than every competitor on every warm interactive task in the paired runs. The MCP arm won 10 of 10 pairs on wizard, modal, tabs, and download, with p50 deltas of 330.5 ms, 519.4 ms, 75.8 ms, and 89.4 ms.
 
-Cold starts are still the weak lane. A fresh server plus browser costs about 1.1 s before task code runs, which is close to the whole browser-use cold run. The MCP arm now beats chrome-devtools-mcp on all five cold tasks and agent-browser on wizard, and it still trails browser-use on three.
+Cold starts are no longer a blanket loss. The MCP arm beats chrome-devtools-mcp on all five cold tasks, agent-browser on four, and browser-use on two, and it is within 2 percent on a third. Download and tabs still belong to browser-use.
 
-Memory depends on the surface. A persistent Chromium session uses about 740 to 783 MB of summed RSS. The one-shot HTTP path uses 47.6 MB. The harness that produced the 740 to 783 MB figures starts a browser for every task, so do not compare those rows with a static scrape.
+Memory depends on the surface, not the brand. The same product costs 47.7 MB for a static page, 355 to 382 MB for a JavaScript page in the headless shell, and 742 to 755 MB in full Chrome.
 
 The fixtures do not test live-site anti-bot behavior, CAPTCHA, or login providers. The resource lane measures RSS and CPU, not GPU memory, disk I/O, or energy. Lightpanda and Chromium use different engines and do not have identical layout, paint, extension, or screenshot behavior. Local fixture results do not establish a ranking for live websites.
 

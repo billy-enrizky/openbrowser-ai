@@ -789,3 +789,44 @@ browser serves every task.
   `finally` block. The runner also terminates any process whose command line
   contains the run's unique temp path.
 - No AWS, cloud browser, paid API, or model provider is called.
+
+## Second final lanes, 2026-11-24, OpenBrowser 0.1.59.dev28
+
+Rerun after the lazy namespace imports, deferred recording watchdog, removed
+redirect sleep, and headless shell landed. All 75 cold, 100 warm, and 40
+paired runs passed their exact oracles.
+
+### Cold six-arm, N=3
+
+| Task | OpenBrowser MCP | OpenBrowser CLI | chrome-devtools-mcp | agent-browser | browser-use |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `wizard` | 1474 | 1553 | 4471 | 1686 | 1441 |
+| `modal` | 1501 | 1617 | 3645 | 2266 | 1922 |
+| `download` | 1631 | 1759 | 1674 | 1684 | 1442 |
+| `tabs` | 1397 | 1460 | 2438 | 1532 | 1075 |
+| `auth` | 2368 | 2657 | 3805 | 2482 | 2790 |
+
+Raw evidence: [results-cold-six-arm-final2-2026-11-24-n3.jsonl](results/results-cold-six-arm-final2-2026-11-24-n3.jsonl).
+
+### Warm five-arm, N=5
+
+| Task | OpenBrowser MCP | OpenBrowser CLI | chrome-devtools-mcp | agent-browser | browser-use |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `wizard` | 117 | 160 | 3510 | 573 | 464 |
+| `modal` | 255 | 302 | 2776 | 1198 | 1164 |
+| `download` | 397 | 443 | 784 | 498 | 551 |
+| `tabs` | 130 | 189 | 1494 | 417 | 174 |
+
+Raw evidence: [results-warm-five-arm-final2-2026-11-24-n5.jsonl](results/results-warm-five-arm-final2-2026-11-24-n5.jsonl).
+
+### Warm paired, N=10
+
+| Task | OpenBrowser MCP | Closest competitor | Pairs won | Paired delta p50 |
+| --- | ---: | --- | ---: | ---: |
+| `wizard` | 121.966 ms | browser-use 446.056 ms | 10/10 | 330.459 ms |
+| `modal` | 267.286 ms | browser-use 806.803 ms | 10/10 | 519.428 ms |
+| `tabs` | 140.130 ms | browser-use 220.321 ms | 10/10 | 75.767 ms |
+| `download` | 393.629 ms | agent-browser 482.813 ms | 10/10 | 89.421 ms |
+
+Raw evidence: the `results-paired-*-final2-2026-11-24-n10.json` files in
+[results](results).

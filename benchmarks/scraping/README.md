@@ -744,3 +744,51 @@ Raw evidence: [results-cli-static-final-2026-11-24-n5.json](results/results-cli-
 The OpenBrowser static rows therefore include a Chromium process that the real
 static path never starts. Read those rows as a persistent browser session. Use
 the one-shot CLI table above for static scraping memory.
+
+## Second final lanes, 2026-11-24, OpenBrowser 0.1.59.dev28
+
+Rerun after the sync HTTP client, main-content filters, render asset flags,
+headless shell, and cold-start work landed. Load `5.40, 5.36, 5.11`.
+
+### Sequential scraping against Firecrawl Local
+
+N=10, 1 warmup, interleaved. All 30 runs per task passed.
+
+| Task | OpenBrowser full | Lightweight | Firecrawl Local | Pairs won |
+| --- | ---: | ---: | ---: | ---: |
+| `static_article` | 0.92 ms | 0.94 ms | 1.54 ms | 10/10 |
+| `pagination` | 2.93 ms | 3.02 ms | 4.42 ms | 10/10 |
+| `table` | 0.86 ms | 0.88 ms | 2.70 ms | 10/10 |
+| `js_list` | 18.00 ms | 18.33 ms | 557.65 ms | 10/10 |
+| `asset_heavy` | 43.46 ms | 21.66 ms | 575.66 ms | 10/10 |
+
+Raw evidence: [results-firecrawl-final2-2026-11-24-n10-interleaved.json](results/results-firecrawl-final2-2026-11-24-n10-interleaved.json).
+
+### Headless shell against full Chrome
+
+N=6 per arm, order alternated, peak process-tree RSS every 20 ms.
+
+| Task | Shell | Full Chrome | Saved |
+| --- | ---: | ---: | ---: |
+| `js_list` | 940.1 ms, 355.4 MB | 1296.0 ms, 742.4 MB | 387.0 MB |
+| `asset_heavy` | 974.7 ms, 381.6 MB | 1274.3 ms, 754.8 MB | 373.1 MB |
+
+Run it with:
+
+```sh
+uv run --no-project python -m benchmarks.scraping.headless_shell_ab 6 \
+  benchmarks/scraping/results/results-headless-shell-final2-2026-11-24-n6.json
+```
+
+Raw evidence: [results-headless-shell-final2-2026-11-24-n6.json](results/results-headless-shell-final2-2026-11-24-n6.json).
+
+### One-shot CLI static path
+
+Five fresh processes per arm, peak child RSS every 5 ms, identical 1169-byte output.
+
+| Command | p50 latency | p50 peak RSS |
+| --- | ---: | ---: |
+| Default engine | 148.6 ms | 47.7 MB |
+| `--engine http` | 142.7 ms | 47.6 MB |
+
+Raw evidence: [results-cli-static-final2-2026-11-24-n5.json](results/results-cli-static-final2-2026-11-24-n5.json).
