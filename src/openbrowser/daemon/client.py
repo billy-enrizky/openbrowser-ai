@@ -497,7 +497,7 @@ class DaemonClient:
             if IS_WINDOWS or get_socket_path().exists():
                 if await self._probe_within(deadline):
                     return
-            await asyncio.sleep(0.2)
+            await asyncio.sleep(0.02)
         if await self._probe_within(time.monotonic() + 1.0):
             return
         await self._terminate_started_child()
