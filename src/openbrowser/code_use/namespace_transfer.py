@@ -123,6 +123,8 @@ class NamespaceTransfer:
 
 def _looks_like_framework_value(name: str, value: Any) -> bool:
 	"""Whether a value is the kind of object this framework name binds."""
+	if getattr(value, '_openbrowser_lazy_binding', False) is True:
+		return True
 	if name == 'file_system' and value is None:
 		return True
 	if isinstance(value, (types.ModuleType, types.FunctionType, types.BuiltinFunctionType, types.MethodType, type)):

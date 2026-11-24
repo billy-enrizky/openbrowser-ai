@@ -1,5 +1,6 @@
 import asyncio
 import contextlib
+import importlib.util
 import os
 import re
 import shutil
@@ -9,13 +10,16 @@ from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, Field
-try:
-	from reportlab.lib.pagesizes import letter
-	from reportlab.lib.styles import getSampleStyleSheet
-	from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
-	REPORTLAB_AVAILABLE = True
-except ImportError:
-	REPORTLAB_AVAILABLE = False
+
+
+def _reportlab_available() -> bool:
+	try:
+		return importlib.util.find_spec('reportlab') is not None
+	except (ImportError, ValueError):
+		return False
+
+
+REPORTLAB_AVAILABLE = _reportlab_available()
 
 INVALID_FILENAME_ERROR_MESSAGE = 'Error: Invalid filename format. Must be alphanumeric with supported extension.'
 DEFAULT_FILE_SYSTEM_PATH = 'openbrowser_agent_data'
@@ -138,6 +142,10 @@ class PdfFile(BaseFile):
 		if not REPORTLAB_AVAILABLE:
 			raise FileSystemError('PDF generation requires reportlab. Install with: pip install openbrowser-ai[pdf]')
 		try:
+			from reportlab.lib.pagesizes import letter
+			from reportlab.lib.styles import getSampleStyleSheet
+			from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
+
 			# Create PDF document
 			doc = SimpleDocTemplate(str(file_path), pagesize=letter)
 			styles = getSampleStyleSheet()

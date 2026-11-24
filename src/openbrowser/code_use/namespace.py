@@ -8,6 +8,8 @@ import asyncio
 import base64
 import csv
 import datetime
+import importlib
+import importlib.util
 import json
 import logging
 import math
@@ -48,34 +50,66 @@ from openbrowser.tools.views import IndexedAction
 
 logger = logging.getLogger(__name__)
 
-# Try to import optional data science libraries
-try:
-	import numpy as np  # type: ignore
+def _optional_module_available(module_name: str) -> bool:
+	"""Return whether an optional module can be imported, without importing it."""
+	try:
+		return importlib.util.find_spec(module_name) is not None
+	except (ImportError, ValueError):
+		return False
 
-	NUMPY_AVAILABLE = True
-except ImportError:
-	NUMPY_AVAILABLE = False
 
-try:
-	import pandas as pd  # type: ignore
+class _LazyOptionalBinding:
+	"""Resolve an optional namespace binding on first attribute access or call.
 
-	PANDAS_AVAILABLE = True
-except ImportError:
-	PANDAS_AVAILABLE = False
+	The code-use namespace exposes data-science libraries for convenience, but
+	most cells never touch them. Importing pandas, numpy, matplotlib, bs4, and
+	reportlab eagerly costs several hundred milliseconds on a cold interpreter
+	and competes with browser startup for the GIL. This proxy keeps the binding
+	visible while deferring the import until the first real use.
+	"""
 
-try:
-	import matplotlib.pyplot as plt  # type: ignore
+	__slots__ = ('_attribute', '_module_name', '_resolved')
+	_openbrowser_lazy_binding = True
 
-	MATPLOTLIB_AVAILABLE = True
-except ImportError:
-	MATPLOTLIB_AVAILABLE = False
+	def __init__(self, module_name: str, attribute: str | None = None) -> None:
+		self._module_name = module_name
+		self._attribute = attribute
+		self._resolved = None
 
-try:
-	from bs4 import BeautifulSoup  # type: ignore
+	def _resolve(self):
+		resolved = self._resolved
+		if resolved is None:
+			module = importlib.import_module(self._module_name)
+			resolved = getattr(module, self._attribute) if self._attribute else module
+			self._resolved = resolved
+		return resolved
 
-	BS4_AVAILABLE = True
-except ImportError:
-	BS4_AVAILABLE = False
+	def __getattr__(self, name: str):
+		return getattr(self._resolve(), name)
+
+	def __call__(self, *args, **kwargs):
+		from typing import Any, cast
+
+		callable_binding = cast(Any, self._resolve())
+		return callable_binding(*args, **kwargs)
+
+	def __repr__(self) -> str:
+		target = f'{self._module_name}.{self._attribute}' if self._attribute else self._module_name
+		return f'<lazy optional binding {target}>'
+
+
+# Optional data-science bindings are resolved on first use.
+NUMPY_AVAILABLE = _optional_module_available('numpy')
+np = _LazyOptionalBinding('numpy') if NUMPY_AVAILABLE else None
+
+PANDAS_AVAILABLE = _optional_module_available('pandas')
+pd = _LazyOptionalBinding('pandas') if PANDAS_AVAILABLE else None
+
+MATPLOTLIB_AVAILABLE = _optional_module_available('matplotlib')
+plt = _LazyOptionalBinding('matplotlib.pyplot') if MATPLOTLIB_AVAILABLE else None
+
+BS4_AVAILABLE = _optional_module_available('bs4')
+BeautifulSoup = _LazyOptionalBinding('bs4', 'BeautifulSoup') if BS4_AVAILABLE else None
 
 _PDF_INSTALL_HINT = "pypdf is not installed. Install it with: pip install 'openbrowser-ai[pdf]'"
 
@@ -96,22 +130,16 @@ class _MissingPypdfModule:
 		raise AttributeError(name)
 
 
-try:
-	import pypdf  # type: ignore
-	from pypdf import PdfReader  # type: ignore
-
-	PYPDF_AVAILABLE = True
-except ImportError:
+PYPDF_AVAILABLE = _optional_module_available('pypdf')
+if PYPDF_AVAILABLE:
+	pypdf = _LazyOptionalBinding('pypdf')  # type: ignore[assignment]
+	PdfReader = _LazyOptionalBinding('pypdf', 'PdfReader')  # type: ignore[assignment,misc]
+else:
 	pypdf = _MissingPypdfModule()  # type: ignore[assignment]
 	PdfReader = _MissingPdfReader  # type: ignore[assignment,misc]
-	PYPDF_AVAILABLE = False
 
-try:
-	from tabulate import tabulate  # type: ignore
-
-	TABULATE_AVAILABLE = True
-except ImportError:
-	TABULATE_AVAILABLE = False
+TABULATE_AVAILABLE = _optional_module_available('tabulate')
+tabulate = _LazyOptionalBinding('tabulate', 'tabulate') if TABULATE_AVAILABLE else None
 
 
 def _strip_js_comments(js_code: str) -> str:
