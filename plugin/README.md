@@ -117,11 +117,11 @@ Prefer indexed actions whenever an element index exists. Coordinate actions use 
 
 ### Native Local Benchmark (2026-11-24)
 
-Current local deterministic fixtures show OpenBrowser winning three of five sequential scraping tasks against Firecrawl Local, with static article at parity and pagination within overlapping ranges. On the native batch surface, OpenBrowser HTTP batch measured 4.619 ms p50 against Firecrawl Local batch at 14.598 ms, a 3.16x win in 10 of 10 pairs. The OpenBrowser batch started no browser.
+Current local deterministic fixtures show OpenBrowser winning all five sequential scraping tasks against Firecrawl Local, 50 of 50 paired samples. Pagination measured 2.57 ms against 4.00 ms, and static article measured 0.83 ms against 1.33 ms. On the native batch surface, OpenBrowser HTTP batch measured 2.834 ms p50 against Firecrawl Local batch at 13.448 ms, a 4.75x win in 10 of 10 pairs. No browser started for the OpenBrowser batch.
 
-The HTTP-only CLI batch measured 205.029 ms and 47.859 MB peak RSS for five pages, against 1144.941 ms and 153.844 MB for the pre-change CLI. This is the low-memory path for static pages. The Chromium no-render arm is faster than Lightpanda on all five local tasks but uses more memory than Lightpanda.
+The CLI static path is the low-memory path. `openbrowser-ai scrape URL` in one process measured 223.4 ms and 47.7 MB peak RSS for a static page with the default engine. The Chromium no-render arm is faster than Lightpanda on all five local tasks but uses more memory than Lightpanda.
 
-The current warm interactive lane is a five-arm N=5 run. The selector arm had the lowest p50 on all four tasks. Paired runs won 10 of 10 against the closest competitor on every task: wizard 337.088 ms vs browser-use 721.613 ms, modal 460.357 ms vs 738.789 ms, tabs 226.797 ms vs 279.402 ms, and download 464.463 ms vs agent-browser 491.526 ms. See the [charted comparison](https://docs.openbrowser.me/comparison) and the raw artifacts under [`benchmarks/`](../benchmarks/).
+The current warm interactive lane is a five-arm N=5 run. The OpenBrowser MCP arm had the lowest p50 on all four tasks. Paired runs won 10 of 10 against the closest competitor on every task: wizard 163.087 ms vs browser-use 474.067 ms, modal 255.657 ms vs 803.270 ms, tabs 137.929 ms vs 221.003 ms, and download 387.938 ms vs agent-browser 480.798 ms. The cold lane still trails browser-use on three tasks because a cold start dominates. See the [charted comparison](https://docs.openbrowser.me/comparison) and the raw artifacts under [`benchmarks/`](../benchmarks/).
 
 ### CLI Benchmark: 4-Way Comparison (6 Tasks, N=3 runs)
 

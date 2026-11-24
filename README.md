@@ -605,30 +605,34 @@ The figures below are historical model-driven benchmark results, not a compariso
 
 ### Native Local Benchmarks (2026-11-24)
 
-Local deterministic fixtures, no LLM, and interleaved N=10 samples with 2 warmups per arm and task. The full method, raw JSONL, and host-load caveats are in [benchmarks/scraping/README.md](benchmarks/scraping/README.md) and [benchmarks/interactive/README.md](benchmarks/interactive/README.md).
+Local deterministic fixtures, no LLM, and interleaved samples with exact oracles. The full method, raw JSONL, and host-load caveats are in [benchmarks/scraping/README.md](benchmarks/scraping/README.md) and [benchmarks/interactive/README.md](benchmarks/interactive/README.md).
 
-| Task | OpenBrowser p50 | Firecrawl Local p50 | Result |
-| --- | ---: | ---: | --- |
-| `static_article` | 2.09 ms | 2.29 ms | Parity, ranges overlap |
-| `pagination` | 10.4 ms | 9.7 ms | Firecrawl 1.07x |
-| `table` | 2.23 ms | 4.67 ms | OpenBrowser 2.09x |
-| `js_list` | 29.8 ms | 616.4 ms | OpenBrowser 20.7x |
-| `asset_heavy` | 32.4 ms | 619.4 ms | OpenBrowser 19.1x |
+Sequential scraping, N=10, OpenBrowser lightweight against Firecrawl Local `0.1.1`:
 
-OpenBrowser wins three of five local scraping tasks, draws static article, and returns structured rows for table and list extraction. Firecrawl's sequential pagination p50 is 7 percent lower, but the ranges overlap. On the native batch surface, OpenBrowser HTTP batch measured 4.619 ms p50 against Firecrawl Local batch at 14.598 ms, a 3.16x win in 10 of 10 pairs. The OpenBrowser batch started no browser.
+| Task | OpenBrowser p50 | Firecrawl Local p50 | Result | Pairs won |
+| --- | ---: | ---: | --- | ---: |
+| `static_article` | 0.83 ms | 1.33 ms | OpenBrowser 1.60x | 10/10 |
+| `pagination` | 2.57 ms | 4.00 ms | OpenBrowser 1.56x | 10/10 |
+| `table` | 1.02 ms | 3.04 ms | OpenBrowser 2.97x | 10/10 |
+| `js_list` | 24.0 ms | 565.5 ms | OpenBrowser 23.6x | 10/10 |
+| `asset_heavy` | 28.1 ms | 574.1 ms | OpenBrowser 20.4x | 10/10 |
 
-The HTTP-only CLI batch is also the low-memory path. A five-page batch measured 205.029 ms and 47.859 MB peak RSS against 1144.941 ms and 153.844 MB for the pre-change CLI. Lightpanda measured 837.4 ms and about 123 MB for the same pagination task in a separate lane, so treat that comparison as directional.
+OpenBrowser won 50 of 50 paired samples and returns structured rows for table and list extraction. On the native batch surface, OpenBrowser HTTP batch measured 2.834 ms p50 against Firecrawl Local batch at 13.448 ms, a 4.75x win in 10 of 10 pairs. The OpenBrowser batch started no browser.
 
-Against Lightpanda, OpenBrowser no-render is faster on all five local tasks. The Chromium no-render arm uses more memory than Lightpanda, about 740 to 783 MB against about 123 MB. The HTTP-only batch path is the low-memory alternative for static pages.
+The CLI static path is also the low-memory path. `openbrowser-ai scrape URL` in one process measured 223.4 ms and 47.7 MB peak RSS for a static page with the default engine, and 213.5 ms and 47.6 MB with `--engine http`. Both produce the same bytes.
 
-The current warm interactive lane is a five-arm N=5 run. The selector arm had the lowest p50 on all four tasks. The paired runs below confirm 10 of 10 wins against the closest competitor on every task. These local-fixture results are not a live-site ranking. See [the charted comparison](https://docs.openbrowser.me/comparison).
+Against Lightpanda, OpenBrowser no-render is faster on all five local tasks. The Chromium no-render arm uses more memory than Lightpanda, about 740 to 783 MB against about 123 MB. That figure is a persistent browser session; the one-shot HTTP path uses 47.6 MB. Use the HTTP path for static pages.
 
-| Task | OpenBrowser selectors p50 | Closest competitor | Competitor p50 | Pairs won |
+The current warm interactive lane is a five-arm N=5 run. The OpenBrowser MCP arm had the lowest p50 on all four tasks. The paired runs below confirm 10 of 10 wins against the closest competitor on every task. These local-fixture results are not a live-site ranking. See [the charted comparison](https://docs.openbrowser.me/comparison).
+
+| Task | OpenBrowser MCP p50 | Closest competitor | Competitor p50 | Pairs won |
 | --- | ---: | --- | ---: | ---: |
-| `wizard` | 337.088 ms | browser-use | 721.613 ms | 10/10 |
-| `modal` | 460.357 ms | browser-use | 738.789 ms | 10/10 |
-| `tabs` | 226.797 ms | browser-use | 279.402 ms | 10/10 |
-| `download` | 464.463 ms | agent-browser | 491.526 ms | 10/10 |
+| `wizard` | 163.087 ms | browser-use | 474.067 ms | 10/10 |
+| `modal` | 255.657 ms | browser-use | 803.270 ms | 10/10 |
+| `tabs` | 137.929 ms | browser-use | 221.003 ms | 10/10 |
+| `download` | 387.938 ms | agent-browser | 480.798 ms | 10/10 |
+
+The cold lane still trails browser-use on modal, download, and tabs. A cold start costs about 1.1 s for the MCP server plus browser, which is close to a whole browser-use cold run. The MCP arm beats chrome-devtools-mcp on all five cold tasks.
 
 ### CLI Benchmark: 4-Way Comparison (6 Tasks, N=3 runs)
 

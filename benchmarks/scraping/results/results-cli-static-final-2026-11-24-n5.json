@@ -1,0 +1,127 @@
+{
+  "environment": {
+    "binary": "/Users/billy/Documents/openbrowser-production/.worktrees/final-bench/.venv/bin/openbrowser-ai",
+    "platform": "macOS-26.6-arm64-arm-64bit",
+    "python": "3.12.12",
+    "load_average": [
+      7.1708984375,
+      7.00830078125,
+      6.63037109375
+    ],
+    "samples": 5
+  },
+  "arms": {
+    "auto": {
+      "ok": 5,
+      "runs": 5,
+      "latency_p50_ms": 223.399,
+      "rss_p50_mb": 47.734,
+      "rss_max_mb": 48.391,
+      "output_bytes": [
+        1169
+      ]
+    },
+    "http": {
+      "ok": 5,
+      "runs": 5,
+      "latency_p50_ms": 213.452,
+      "rss_p50_mb": 47.625,
+      "rss_max_mb": 47.906,
+      "output_bytes": [
+        1169
+      ]
+    }
+  },
+  "records": [
+    {
+      "code": 0,
+      "latency_ms": 231.218250002712,
+      "peak_rss_mb": 47.96875,
+      "arm": "auto",
+      "sample": 0,
+      "ok": true,
+      "output_bytes": 1169
+    },
+    {
+      "code": 0,
+      "latency_ms": 226.10879100102466,
+      "peak_rss_mb": 47.53125,
+      "arm": "http",
+      "sample": 0,
+      "ok": true,
+      "output_bytes": 1169
+    },
+    {
+      "code": 0,
+      "latency_ms": 192.0442090013239,
+      "peak_rss_mb": 47.71875,
+      "arm": "auto",
+      "sample": 1,
+      "ok": true,
+      "output_bytes": 1169
+    },
+    {
+      "code": 0,
+      "latency_ms": 213.45191599903046,
+      "peak_rss_mb": 47.90625,
+      "arm": "http",
+      "sample": 1,
+      "ok": true,
+      "output_bytes": 1169
+    },
+    {
+      "code": 0,
+      "latency_ms": 232.63116700036335,
+      "peak_rss_mb": 48.390625,
+      "arm": "auto",
+      "sample": 2,
+      "ok": true,
+      "output_bytes": 1169
+    },
+    {
+      "code": 0,
+      "latency_ms": 220.97445899999002,
+      "peak_rss_mb": 47.53125,
+      "arm": "http",
+      "sample": 2,
+      "ok": true,
+      "output_bytes": 1169
+    },
+    {
+      "code": 0,
+      "latency_ms": 223.39916700002505,
+      "peak_rss_mb": 47.734375,
+      "arm": "auto",
+      "sample": 3,
+      "ok": true,
+      "output_bytes": 1169
+    },
+    {
+      "code": 0,
+      "latency_ms": 188.12391700339504,
+      "peak_rss_mb": 47.625,
+      "arm": "http",
+      "sample": 3,
+      "ok": true,
+      "output_bytes": 1169
+    },
+    {
+      "code": 0,
+      "latency_ms": 184.20762499954435,
+      "peak_rss_mb": 47.625,
+      "arm": "auto",
+      "sample": 4,
+      "ok": true,
+      "output_bytes": 1169
+    },
+    {
+      "code": 0,
+      "latency_ms": 176.62216600001557,
+      "peak_rss_mb": 47.75,
+      "arm": "http",
+      "sample": 4,
+      "ok": true,
+      "output_bytes": 1169
+    }
+  ]
+}

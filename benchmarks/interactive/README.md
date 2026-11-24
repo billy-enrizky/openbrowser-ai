@@ -726,6 +726,60 @@ OpenBrowser daemon socket path stays below the macOS `AF_UNIX` limit.
 | `run_benchmark.py` | Runner, JSONL writer, summary table |
 | [results](results) | Raw JSONL and summary JSON |
 
+## Final lanes, 2026-11-24, OpenBrowser 0.1.59.dev18
+
+These are the runs behind the current comparison page. Every run used a fresh
+fixture server and an exact oracle check. All 75 cold runs, all 100 warm runs,
+and all 40 paired runs passed.
+
+### Warm five-arm, N=5
+
+| Task | OpenBrowser MCP | OpenBrowser CLI | chrome-devtools-mcp | agent-browser | browser-use |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `wizard` | 138 | 181 | 3452 | 1609 | 500 |
+| `modal` | 267 | 330 | 2717 | 2105 | 1217 |
+| `download` | 399 | 448 | 778 | 803 | 567 |
+| `tabs` | 159 | 221 | 1458 | 1179 | 226 |
+
+Raw evidence: [results-warm-five-arm-final-2026-11-24-n5.jsonl](results/results-warm-five-arm-final-2026-11-24-n5.jsonl).
+
+### Warm paired, N=10
+
+| Task | OpenBrowser MCP | Closest competitor | Pairs won | Paired delta p50 |
+| --- | ---: | --- | ---: | ---: |
+| `wizard` | 163.087 ms | browser-use 474.067 ms | 10/10 | 322.994 ms |
+| `modal` | 255.657 ms | browser-use 803.270 ms | 10/10 | 517.974 ms |
+| `tabs` | 137.929 ms | browser-use 221.003 ms | 10/10 | 84.434 ms |
+| `download` | 387.938 ms | agent-browser 480.798 ms | 10/10 | 78.613 ms |
+
+Raw evidence: the `results-paired-*-final-2026-11-24-n10.json` files in
+[results](results).
+
+### Cold six-arm, N=3
+
+| Task | OpenBrowser MCP | OpenBrowser CLI | chrome-devtools-mcp | agent-browser | browser-use |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `wizard` | 1654 | 2028 | 4439 | 1776 | 1735 |
+| `modal` | 1801 | 2682 | 3639 | 2405 | 1570 |
+| `download` | 1785 | 1928 | 1733 | 1663 | 1486 |
+| `tabs` | 1543 | 1639 | 2412 | 1674 | 1074 |
+| `auth` | 2980 | 3210 | 3949 | 2712 | 2996 |
+
+Raw evidence: [results-cold-six-arm-final-2026-11-24-n3.jsonl](results/results-cold-six-arm-final-2026-11-24-n3.jsonl).
+
+The cold lane is a startup lane with N=3. Do not treat it as a statistical
+claim. The MCP arm beats chrome-devtools-mcp on all five tasks and agent-browser
+on wizard, and still trails browser-use on three.
+
+### MCP arm
+
+`openbrowser-mcp` and `openbrowser-mcp-fast` drive the package's own MCP server
+over the stateless `2026-07-28` protocol. The client in
+`adapters/mcp_modern.py` sends one `server/discover` probe and stamps every
+request with the `_meta` envelope. The arm calls `create_context`,
+`execute_code`, and `close_context`. The warm lane keeps one context so one
+browser serves every task.
+
 ## Safety and cleanup
 
 - Every browser launch includes `--use-mock-keychain`. The harness reads the

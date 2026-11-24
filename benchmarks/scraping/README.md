@@ -670,3 +670,77 @@ uv run --locked python -m benchmarks.scraping.resource_compare \
 ```
 
 Raw evidence: [results-resources-2026-11-24-n3.json](results-resources-2026-11-24-n3.json).
+
+## Final lanes, 2026-11-24, OpenBrowser 0.1.59.dev18
+
+These are the runs behind the current comparison page. All use local fixtures,
+exact oracles, and alternating arm order.
+
+### Sequential scraping against Firecrawl Local
+
+N=10 per arm and task, 1 warmup, interleaved. Host load `5.81, 7.09, 6.60` on
+18 logical CPUs. All 30 runs per task passed.
+
+| Task | OpenBrowser full | OpenBrowser lightweight | Firecrawl Local | Pairs won |
+| --- | ---: | ---: | ---: | ---: |
+| `static_article` | 0.80 ms | 0.83 ms | 1.33 ms | 10/10 |
+| `pagination` | 2.46 ms | 2.57 ms | 4.00 ms | 10/10 |
+| `table` | 0.97 ms | 1.02 ms | 3.04 ms | 10/10 |
+| `js_list` | 22.4 ms | 24.0 ms | 565.5 ms | 10/10 |
+| `asset_heavy` | 41.8 ms | 28.1 ms | 574.1 ms | 10/10 |
+
+Raw evidence: [results-firecrawl-final-2026-11-24-n10-interleaved.json](results/results-firecrawl-final-2026-11-24-n10-interleaved.json)
+and the matching `.jsonl`.
+
+### No-render against Lightpanda
+
+N=10 per arm and task, 1 warmup, interleaved. Lightpanda `1.0.5`. All 100 runs
+passed.
+
+| Task | OpenBrowser no-render | Lightpanda |
+| --- | ---: | ---: |
+| `static_article` | 1.8 ms | 425.8 ms |
+| `pagination` | 4.5 ms | 2197.7 ms |
+| `table` | 2.1 ms | 479.4 ms |
+| `js_list` | 19.5 ms | 479.3 ms |
+| `asset_heavy` | 23.1 ms | 503.8 ms |
+
+Lightpanda starts one process per sample, so its startup dominates the static
+tasks. A prior interleaved run measured it between 160 and 837 ms. Use the
+ordering, not the absolute value.
+
+Raw evidence: [results-lightpanda-final-2026-11-24-n10-interleaved.json](results/results-lightpanda-final-2026-11-24-n10-interleaved.json).
+
+### Firecrawl batch
+
+N=10, both arms, 10 of 10 pairs. OpenBrowser 2.834 ms p50 against Firecrawl
+Local 13.448 ms p50, a 4.75x difference. No browser started.
+
+Raw evidence: [results-batch-firecrawl-final-2026-11-24-n10.json](results/results-batch-firecrawl-final-2026-11-24-n10.json).
+
+### One-shot CLI static path
+
+Five fresh processes per arm, peak child RSS sampled every 5 ms, identical
+1169-byte output.
+
+| Command | p50 latency | p50 peak RSS |
+| --- | ---: | ---: |
+| Default engine | 223.4 ms | 47.7 MB |
+| `--engine http` | 213.5 ms | 47.6 MB |
+
+Run it with:
+
+```sh
+uv run --no-project python -m benchmarks.scraping.cli_static_resource_compare \
+  --binary "$(which openbrowser-ai)" --samples 5 \
+  --output benchmarks/scraping/results/results-cli-static-final-2026-11-24-n5.json
+```
+
+Raw evidence: [results-cli-static-final-2026-11-24-n5.json](results/results-cli-static-final-2026-11-24-n5.json).
+
+### Resource lane caveat
+
+`resource_compare.py` starts a browser for every arm before it runs any task.
+The OpenBrowser static rows therefore include a Chromium process that the real
+static path never starts. Read those rows as a persistent browser session. Use
+the one-shot CLI table above for static scraping memory.
