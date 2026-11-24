@@ -198,6 +198,43 @@ Raw evidence:
 - `results-warm-4arm-2026-11-24-n3.jsonl`
 - `results-warm-4arm-2026-11-24-n3.summary.json`
 
+## Warm session lane after the popup fix, 2026-11-24
+
+The popup fix in PR #217 stops a `target="_blank"` click from waiting the full
+five-second mouse-release bound. It checks for a new page target and fails
+quickly when none appears. This run uses the same four arms, tasks, fixtures,
+and Chromium build as the earlier warm lane.
+
+The run uses 3 samples per arm and task. All 48 runs passed their oracle. Host
+load was high during the run, and OpenBrowser warmup took 23.6 seconds, so treat
+these values as shared-host smoke evidence, not a quiet-host p50.
+
+| Task | OpenBrowser | chrome-devtools-mcp | agent-browser | browser-use |
+| --- | ---: | ---: | ---: | ---: |
+| `wizard` | 2607 | 3511 | 1231 | 723 |
+| `modal` | 1421 | 2768 | 1604 | 787 |
+| `download` | 924 | 785 | 589 | 720 |
+| `tabs` | 1124 | 1485 | 918 | 335 |
+
+OpenBrowser reduced warm `tabs` from 6170 ms to 1124 ms, a 5.49x improvement
+against the earlier run. It now beats chrome-devtools-mcp on `wizard`, `modal`,
+and `tabs`. It still trails browser-use on every task and trails agent-browser
+on `wizard`, `download`, and `tabs`. The result is progress, not a universal
+warm-lane win.
+
+Generate the documentation chart from the summary:
+
+```sh
+uv run --with matplotlib python benchmarks/interactive/plot_results.py
+```
+
+The script writes `docs/images/native-interactive-warm-current-p50.png`.
+
+Raw evidence:
+
+- `results/results-warm-4arm-2026-11-24-after-popup-n3.jsonl`
+- `results/results-warm-4arm-2026-11-24-after-popup-n3.summary.json`
+
 ## Fast selector arm, 2026-11-24
 
 `openbrowser-fast` uses the same adapter and lifecycle as `openbrowser`. Its

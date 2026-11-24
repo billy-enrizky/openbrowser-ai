@@ -1,9 +1,10 @@
 """MCP (Model Context Protocol) support for openbrowser.
 
 Provides a CodeAgent-based MCP server. Modern 2026-07-28 clients use
-``create_context``, ``execute_code``, ``get_status``, ``reset_browser``, and
-``close_context`` with an explicit context handle. Older clients receive the
-original three-tool catalog and a legacy no-handle context.
+``create_context``, ``execute_code``, ``get_status``, ``reset_browser``,
+``close_context``, and stateless ``search_web``. Stateful calls use an explicit
+context handle. Older clients receive a four-tool catalog with a legacy
+no-handle context.
 
 All imports are lazy to avoid pulling in heavy dependencies when only the
 MCP server is needed (e.g., ``python -m openbrowser.mcp`` or

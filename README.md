@@ -601,6 +601,22 @@ Prefer indexed actions whenever an element index exists. Coordinate actions use 
 
 The figures below are historical model-driven benchmark results, not a comparison of current tool releases or navigation latency. For a local, no-LLM comparison with pinned runtimes and verified page work, use the [navigation comparison verifier](benchmarks/navigation_compare_README.md), its [counterbalanced policy-fix results](benchmarks/navigation_results_2026-11-15_policy_v2.json), and the retained [earlier results](benchmarks/navigation_results_2026-11-15.json). These report engine, IPC, wait-policy, failure, and cleanup differences rather than declaring a universal winner. They are not MCP or CLI agent-comparison numbers.
 
+### Native Local Benchmarks (2026-11-24)
+
+Local deterministic fixtures, no LLM, and interleaved N=10 samples with 2 warmups per arm and task. The full method, raw JSONL, and host-load caveats are in [benchmarks/scraping/README.md](benchmarks/scraping/README.md) and [benchmarks/interactive/README.md](benchmarks/interactive/README.md).
+
+| Task | OpenBrowser p50 | Firecrawl Local p50 | Result |
+| --- | ---: | ---: | --- |
+| `static_article` | 2.09 ms | 2.29 ms | OpenBrowser 1.10x |
+| `pagination` | 10.4 ms | 9.7 ms | Firecrawl 1.07x |
+| `table` | 2.23 ms | 4.67 ms | OpenBrowser 2.09x |
+| `js_list` | 29.8 ms | 616.4 ms | OpenBrowser 20.7x |
+| `asset_heavy` | 32.4 ms | 619.4 ms | OpenBrowser 19.1x |
+
+OpenBrowser wins four of five local scraping tasks and returns structured rows for table and list extraction. Against Lightpanda, OpenBrowser no-render is faster on all five local tasks. It uses more memory: about 740 to 783 MB for browser arms against about 123 MB for Lightpanda.
+
+The interactive warm lane remains split. The popup fix reduced OpenBrowser `tabs` from 6170 ms to 1124 ms, and OpenBrowser now beats chrome-devtools-mcp on warm `wizard`, `modal`, and `tabs`. Browser-use remains faster on all four warm tasks. These local-fixture results are not a live-site ranking. See [the charted comparison](https://docs.openbrowser.me/comparison).
+
 ### CLI Benchmark: 4-Way Comparison (6 Tasks, N=3 runs)
 
 Four CLI tools compared with a single Bash tool each. Claude Sonnet 4.6 on Bedrock. Randomized order. All achieve 100% accuracy.
