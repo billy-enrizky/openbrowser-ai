@@ -5,12 +5,8 @@ create_namespace(), get_namespace_documentation(), download_file, list_downloads
 """
 
 import asyncio
-import json
 import logging
-import os
-import tempfile
 import time
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -254,7 +250,7 @@ class TestValidateTaskCompletion:
             return_value=MagicMock(completion="Reasoning: not done\nVerdict: NO")
         )
 
-        is_complete, reasoning = await validate_task_completion("task", "output", mock_llm)
+        is_complete, _reasoning = await validate_task_completion("task", "output", mock_llm)
         assert is_complete is False
 
     @pytest.mark.asyncio
@@ -273,7 +269,7 @@ class TestValidateTaskCompletion:
             return_value=MagicMock(completion="Reasoning: no output\nVerdict: YES")
         )
 
-        is_complete, reasoning = await validate_task_completion("task", None, mock_llm)
+        is_complete, _reasoning = await validate_task_completion("task", None, mock_llm)
         assert is_complete is True
 
     @pytest.mark.asyncio
@@ -294,7 +290,7 @@ class TestValidateTaskCompletion:
             return_value=MagicMock(completion="Some random text with no verdict line")
         )
 
-        is_complete, reasoning = await validate_task_completion("task", "output", mock_llm)
+        is_complete, _reasoning = await validate_task_completion("task", "output", mock_llm)
         assert is_complete is False
 
 
@@ -928,6 +924,40 @@ class TestScrapeHttp:
             )
         assert result is not None
         assert 'Substantial server rendered content' in result['content']
+
+    def test_static_response_reuses_one_parsed_html_tree(self, monkeypatch):
+        from openbrowser.code_use.namespace import _http_result_from_response
+        from openbrowser.dom import fast_html
+
+        html = (
+            '<html><head><title>Static page</title></head><body>'
+            '<h1>Static heading</h1>'
+            '<p>Substantial visible text keeps this page on the HTTP extraction path.</p>'
+            '</body></html>'
+        )
+        parse = fast_html._parse
+        parse_calls = 0
+
+        def count_parse(value):
+            nonlocal parse_calls
+            parse_calls += 1
+            return parse(value)
+
+        monkeypatch.setattr(fast_html, '_parse', count_parse)
+        result = _http_result_from_response(
+            self._response(text=html),
+            format='markdown',
+            selector=None,
+            engine='auto',
+        )
+
+        assert result is not None
+        assert result['title'] == 'Static page'
+        assert result['content'] == (
+            '# Static heading\n\n'
+            'Substantial visible text keeps this page on the HTTP extraction path.'
+        )
+        assert parse_calls == 1
 
     @pytest.mark.asyncio
     async def test_auto_falls_back_for_thin_shell(self):

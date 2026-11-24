@@ -35,7 +35,7 @@ import subprocess
 import tempfile
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -807,9 +807,11 @@ def _environment(
         environment["lightpanda"] = {
             "version": lightpanda_arm.version,
             "binary": lightpanda_arm.binary,
-            "wait_policy": {"static": "wait-until load, wait-ms 100",
-                            "js": "wait-script, default wait budget",
-                            "resources": "Lightpanda fetch default, no subresources"},
+            "wait_policy": {
+                "static": "wait-until load, wait-ms 100",
+                "js": "wait-script, default wait budget",
+                "resources": "Lightpanda fetch default, no subresources",
+            },
         }
     if firecrawl_server is not None:
         environment["firecrawl"] = {
@@ -853,7 +855,10 @@ async def main() -> int:
         help="Path to the Lightpanda binary. Falls back to LIGHTPANDA_BIN or PATH.",
     )
     parser.add_argument("--output", type=Path, default=Path("benchmarks/scraping/results.json"))
+    parser.add_argument("--raw-jsonl", type=Path, default=None, help="Write one JSON object per measured sample.")
+    parser.add_argument("--interleave", action="store_true", help="Alternate arm order for each measured sample.")
     args = parser.parse_args()
+    load_average_start = list(os.getloadavg()) if hasattr(os, "getloadavg") else None
 
     server = FixtureServer()
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -864,6 +869,7 @@ async def main() -> int:
     firecrawl_waits: dict[str, dict[str, int]] = {}
     arms: list = []
     results: list[TaskResult] = []
+    raw_samples: list[dict] = []
     environment: dict = {}
     try:
         if any(name.startswith("firecrawl") for name in args.arms):
@@ -906,15 +912,48 @@ async def main() -> int:
 
         lightpanda_arm = next((arm for arm in arms if isinstance(arm, LightpandaArm)), None)
         environment = _environment(firecrawl_server, firecrawl_waits, args.chrome, lightpanda_arm)
-        for arm in arms:
-            await arm.start()
+        environment["load_average_start"] = load_average_start
+        if args.interleave:
+            for arm in arms:
+                await arm.start()
             for task_name in args.tasks:
                 method = TASKS[task_name]
-                for _ in range(args.warmups):
-                    await _measure(arm, task_name, method, base, server.state)
-                for _ in range(args.samples):
-                    results.append(await _measure(arm, task_name, method, base, server.state))
-            await arm.stop()
+                for warmup_index in range(args.warmups):
+                    order = arms if warmup_index % 2 == 0 else list(reversed(arms))
+                    for arm in order:
+                        await _measure(arm, task_name, method, base, server.state)
+                for sample_index in range(args.samples):
+                    order = arms if sample_index % 2 == 0 else list(reversed(arms))
+                    for arm_position, arm in enumerate(order, start=1):
+                        result = await _measure(arm, task_name, method, base, server.state)
+                        results.append(result)
+                        raw_samples.append(
+                            {
+                                "record_type": "sample",
+                                "sample_index": sample_index + 1,
+                                "arm_position": arm_position,
+                                **asdict(result),
+                            }
+                        )
+        else:
+            for arm_position, arm in enumerate(arms, start=1):
+                await arm.start()
+                for task_name in args.tasks:
+                    method = TASKS[task_name]
+                    for _ in range(args.warmups):
+                        await _measure(arm, task_name, method, base, server.state)
+                    for sample_index in range(args.samples):
+                        result = await _measure(arm, task_name, method, base, server.state)
+                        results.append(result)
+                        raw_samples.append(
+                            {
+                                "record_type": "sample",
+                                "sample_index": sample_index + 1,
+                                "arm_position": arm_position,
+                                **asdict(result),
+                            }
+                        )
+                await arm.stop()
     finally:
         await asyncio.gather(*(arm.stop() for arm in arms), return_exceptions=True)
         if firecrawl_server is not None:
@@ -926,6 +965,7 @@ async def main() -> int:
     for result in results:
         grouped.setdefault((result.task, result.arm), []).append(result)
 
+    environment["load_average_end"] = list(os.getloadavg()) if hasattr(os, "getloadavg") else None
     report = {
         "samples": args.samples,
         "warmups": args.warmups,
@@ -963,6 +1003,20 @@ async def main() -> int:
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     print(f"\nWrote {args.output}")
+    if args.raw_jsonl is not None:
+        raw_run = {
+            "record_type": "run",
+            "samples": args.samples,
+            "warmups": args.warmups,
+            "arms": args.arms,
+            "tasks": args.tasks,
+            "sample_order": "alternating" if args.interleave else "grouped",
+            "environment": environment,
+        }
+        args.raw_jsonl.parent.mkdir(parents=True, exist_ok=True)
+        lines = [json.dumps(record, separators=(",", ":"), sort_keys=True) for record in [raw_run, *raw_samples]]
+        args.raw_jsonl.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        print(f"Wrote {args.raw_jsonl}")
     return 0
 
 
