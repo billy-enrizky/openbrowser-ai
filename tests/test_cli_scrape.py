@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from click.testing import CliRunner
@@ -10,7 +14,16 @@ from click.testing import CliRunner
 from openbrowser.cli import main
 
 
-def _invoke(args, *, result=None, error=None, http_result=None, batch_result=None, batch_error=None):
+def _invoke(
+    args,
+    *,
+    result=None,
+    error=None,
+    http_result=None,
+    http_batch_result=None,
+    batch_result=None,
+    batch_error=None,
+):
     session = MagicMock()
     session.start = AsyncMock()
     session.kill = AsyncMock()
@@ -41,6 +54,16 @@ def _invoke(args, *, result=None, error=None, http_result=None, batch_result=Non
             "openbrowser.code_use.namespace.scrape_http",
             new_callable=AsyncMock,
             return_value=http_result,
+        ),
+        patch(
+            "openbrowser.scrape.http.scrape_http",
+            new_callable=AsyncMock,
+            return_value=http_result,
+        ),
+        patch(
+            "openbrowser.scrape.http.scrape_http_batch",
+            new_callable=AsyncMock,
+            return_value=http_batch_result,
         ),
     ):
         outcome = CliRunner().invoke(main, ["scrape", *args])
@@ -112,6 +135,66 @@ def test_scrape_http_path_skips_browser():
     session.start.assert_not_awaited()
     profile_cls.assert_not_called()
     namespace["scrape_page"].assert_not_awaited()
+
+
+def test_http_only_cli_does_not_import_the_browser_stack():
+    source = """
+import sys, types
+fake = types.ModuleType('openbrowser.browser')
+class Boom:
+    def __init__(self, *args, **kwargs):
+        raise RuntimeError('browser stack imported')
+fake.BrowserSession = Boom
+fake.BrowserProfile = Boom
+sys.modules['openbrowser.browser'] = fake
+
+import openbrowser.scrape.http as http
+async def fake_scrape_http(*args, **kwargs):
+    return {
+        'url': 'https://example.com',
+        'title': '',
+        'format': 'text',
+        'content_type': 'text/text',
+        'content': 'fake-http',
+        'engine_used': 'http',
+    }
+http.scrape_http = fake_scrape_http
+
+from click.testing import CliRunner
+from openbrowser.cli import main
+outcome = CliRunner().invoke(main, ['scrape', 'https://example.com', '--engine', 'http'])
+print(outcome.output)
+raise SystemExit(outcome.exit_code)
+"""
+    root = Path(__file__).parents[1]
+    env = {**os.environ, "PYTHONPATH": str(root / "src")}
+    result = subprocess.run(
+        [sys.executable, "-c", source],
+        check=False,
+        cwd=root,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "fake-http" in result.stdout
+
+
+def test_scrape_http_batch_skips_browser():
+    batch = [
+        {"url": "https://a.example", "ok": True, "engine_used": "http", "content": "# A"},
+        {"url": "https://b.example", "ok": True, "engine_used": "http", "content": "# B"},
+    ]
+    outcome, session, profile_cls, namespace = _invoke(
+        ["https://a.example", "https://b.example", "--engine", "http", "--jsonl"],
+        http_batch_result=batch,
+    )
+    assert outcome.exit_code == 0
+    assert len(outcome.output.strip().splitlines()) == 2
+    session.start.assert_not_awaited()
+    profile_cls.assert_not_called()
+    namespace["scrape_pages"].assert_not_awaited()
 
 
 def test_scrape_writes_output_file(tmp_path):

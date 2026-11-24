@@ -8,6 +8,8 @@ from collections.abc import Awaitable, Callable
 from typing import Any, Literal, cast
 
 from openbrowser.cli_modes import CliMode, select_cli_mode
+from openbrowser.scrape.http import run_http_scrape_sync
+from openbrowser.scrape.output import emit_scrape_payload, read_scrape_urls_file
 
 # Fast paths execute only when this module is the process entry point. The
 # __test__ seam keeps the existing source-executing coverage tests honest.
@@ -1070,22 +1072,6 @@ def _quiet_stderr_logging() -> None:
 		logger_obj.propagate = False
 
 
-def _read_scrape_urls_file(path: Path) -> list[str]:
-	"""Read one scrape URL per line, ignoring blank lines and comments."""
-	try:
-		lines = Path(path).read_text(encoding='utf-8').splitlines()
-	except OSError as error:
-		raise click.ClickException(f'Could not read {path}: {error}') from error
-	return [line.strip() for line in lines if line.strip() and not line.lstrip().startswith('#')]
-
-
-def _serialize_scrape_batch(results: list[dict], *, jsonl: bool) -> str:
-	"""Serialize batch scrape results as a JSON array or JSONL."""
-	if jsonl:
-		return '\n'.join(json.dumps(item, ensure_ascii=False, default=str) for item in results)
-	return json.dumps(results, indent=2, ensure_ascii=False, default=str)
-
-
 def _render_search_table(results: list[Any]) -> str:
 	"""Render search results as a plain-text table."""
 	from io import StringIO
@@ -1297,7 +1283,40 @@ def scrape(
 	# Read URLs from a file and write a JSON array
 	openbrowser-ai scrape --urls-file urls.txt --output results.json
 	"""
-	import json as _json
+	url_list = [url.strip() for url in urls if url.strip()]
+	if urls_file is not None:
+		try:
+			url_list.extend(read_scrape_urls_file(urls_file))
+		except ValueError as error:
+			raise click.ClickException(str(error)) from error
+	if not url_list:
+		raise click.UsageError('Provide at least one URL or --urls-file.')
+	batch_mode = len(url_list) > 1 or urls_file is not None
+
+	if engine == 'http':
+		try:
+			http_payload = run_http_scrape_sync(
+				url_list,
+				batch_mode=batch_mode,
+				output_format=output_format,
+				selector=selector,
+				extract_links=extract_links,
+				timeout_ms=timeout_ms,
+				max_chars=max_chars,
+				concurrency=concurrency,
+			)
+		except Exception as error:
+			click.echo(f'Scrape failed: {type(error).__name__}: {error}', err=True)
+			sys.exit(1)
+		emit_scrape_payload(
+			http_payload,
+			batch_mode=batch_mode,
+			jsonl=jsonl,
+			batch_output_format=batch_output_format,
+			output=output,
+			as_json=as_json,
+		)
+		return
 
 	from openbrowser.logging_config import setup_logging
 
@@ -1308,13 +1327,6 @@ def scrape(
 	from openbrowser.browser import BrowserProfile, BrowserSession
 	from openbrowser.code_use.namespace import create_namespace, scrape_http
 	from openbrowser.tools.service import CodeAgentTools
-
-	url_list = [url.strip() for url in urls if url.strip()]
-	if urls_file is not None:
-		url_list.extend(_read_scrape_urls_file(urls_file))
-	if not url_list:
-		raise click.UsageError('Provide at least one URL or --urls-file.')
-	batch_mode = len(url_list) > 1 or urls_file is not None
 
 	parent = ctx.parent.params if ctx.parent is not None else {}
 	config_result = CONFIG.require_browser_start_allowed()
@@ -1422,35 +1434,14 @@ def scrape(
 		click.echo(f'Scrape failed: {type(error).__name__}: {error}', err=True)
 		sys.exit(1)
 
-	serialization = 'jsonl' if jsonl else batch_output_format
-	if serialization is None and output and Path(output).suffix.lower() == '.jsonl':
-		serialization = 'jsonl'
-	if serialization is None:
-		serialization = 'json'
-	explicit_serialization = jsonl or batch_output_format is not None
-
-	if batch_mode:
-		rendered = _serialize_scrape_batch(batch_payload, jsonl=serialization == 'jsonl')
-		if output:
-			Path(output).write_text(rendered + ('' if rendered.endswith('\n') else '\n'), encoding='utf-8')
-			click.echo(f'Wrote {len(rendered)} characters to {output}', err=True)
-		else:
-			click.echo(rendered)
-		return
-
-	if serialization == 'jsonl':
-		rendered = _json.dumps(payload, ensure_ascii=False)
-	else:
-		content = payload.get('content')
-		if as_json or (explicit_serialization and serialization == 'json') or not isinstance(content, str):
-			rendered = _json.dumps(payload, indent=2, ensure_ascii=False)
-		else:
-			rendered = content
-	if output:
-		Path(output).write_text(rendered, encoding='utf-8')
-		click.echo(f'Wrote {len(rendered)} characters to {output}')
-	else:
-		click.echo(rendered)
+	emit_scrape_payload(
+		batch_payload if batch_mode else payload,
+		batch_mode=batch_mode,
+		jsonl=jsonl,
+		batch_output_format=batch_output_format,
+		output=output,
+		as_json=as_json,
+	)
 
 
 # ============================================================================
