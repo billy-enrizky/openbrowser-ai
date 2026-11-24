@@ -49,10 +49,11 @@ The namespace is initialized with:
 
 ### CSS selector fast path
 - `click_selector(selector, timeout=0.0)` - Click the first CSS match through `evaluate()`. A zero timeout makes one lookup. A positive finite timeout waits for a match.
+- `click_selector_and_wait_for_new_tab(selector, timeout=5.0)` - Click a visible `<a target="_blank">` with CDP mouse input. Return its full page target ID after it opens. The helper does not switch tabs. Call `switch(tab_id=target_id)` to focus the new tab.
 - `fill_selector(selector, text, timeout=0.0)` - Set a standard `<input>` or `<textarea>` with the native value setter and dispatch bubbling `input` and `change` events. Use `input_text(index, text)` for rich editors and other controls.
 - `wait_for_selector(selector, timeout=10.0)` - Wait for a CSS match and return the number of matching elements. The timeout must be positive and finite.
 
-Use these helpers when the page has a stable CSS selector, such as a fixture id. For an `<a>` with `target="_blank"` or a `download` attribute, `click_selector()` uses `click_element(element_id=...)` when the anchor has an id. Use `click_element()` or `click(index=...)` when the anchor has no id. Ordinary selector actions do not request a browser-state summary.
+Use these helpers when the page has a stable CSS selector, such as a fixture id. Use `click_selector_and_wait_for_new_tab()` when a blank-target link must open a tab and you need its target ID. Set `rel="opener"` when the new page needs `window.opener`. Use `click_element()` or `click(index=...)` for download links. Ordinary selector actions do not request a browser-state summary.
 
 Search snippets do not count as evidence. Read each scraped page before you cite it. The package caps `max_results` at 20. Set `engine='http'` to prevent browser fallback.
 

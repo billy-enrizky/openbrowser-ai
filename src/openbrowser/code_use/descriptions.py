@@ -33,6 +33,7 @@ After a browser error, use MCP `get_status` or CLI `openbrowser-ai daemon status
 ## CSS selector fast path
 - Prefer indexed actions when the current browser state provides a valid index. Use CSS helpers when a selector is stable.
 - `await click_selector(selector, timeout=0.0)`: Click the first CSS match through `evaluate()`. A zero timeout makes one lookup. A positive finite timeout waits for a match. For an `<a>` with `target="_blank"` or `download`, the helper uses `click_element(element_id=...)` when the anchor has an id. Otherwise, use `click_element()` or `click(index=...)`.
+- `await click_selector_and_wait_for_new_tab(selector, timeout=5.0)`: Click a visible `<a target="_blank">` with CDP mouse input and return its new page target ID. Set `rel="opener"` when the new page needs `window.opener`. The helper does not switch tabs. Call `switch(tab_id=target_id)` to focus the new tab.
 - `await fill_selector(selector, text, timeout=0.0)`: Set a standard `<input>` or `<textarea>` with the native value setter and dispatch bubbling `input` and `change` events. Use `input_text(index, text)` for rich editors and other controls.
 - `await wait_for_selector(selector, timeout=10.0)`: Wait for a CSS match and return the number of matching elements. The timeout must be positive and finite.
 - Invalid CSS selectors raise `ValueError`. Missing matches raise `LookupError` for click and fill helpers, and `TimeoutError` for `wait_for_selector()`.
@@ -159,10 +160,11 @@ EXECUTE_CODE_DESCRIPTION = """Execute Python code in a persistent namespace with
 
 - `await get_selector_from_index(index: int)`: Get the CSS selector for an element by its interactive index. Useful for building JS queries targeting specific elements. Returns a CSS selector string.
 - `await click_selector(selector: str, *, timeout: float = 0.0)`: Click the first CSS match through `evaluate()`. A zero timeout makes one lookup. A positive finite timeout waits for a match.
+- `await click_selector_and_wait_for_new_tab(selector: str, *, timeout: float = 5.0) -> str`: Click a visible `<a target="_blank">` with CDP mouse input. Wait for a new page target and return its full target ID. Set `rel="opener"` when the new page needs `window.opener`. The helper does not switch tabs. Call `switch(tab_id=target_id)` to focus the new tab.
 - `await fill_selector(selector: str, text: str, *, timeout: float = 0.0)`: Set a standard `<input>` or `<textarea>` with the native value setter. The helper dispatches bubbling `input` and `change` events. Use `input_text()` for rich editors and other controls.
 - `await wait_for_selector(selector: str, timeout: float = 10.0)`: Wait for a CSS match and return the match count. The timeout must be positive and finite.
 
-For an `<a>` with `target="_blank"` or a `download` attribute, `click_selector()` uses `click_element(element_id=...)` when the anchor has an id. Use `click_element()` or `click()` directly when the anchor has no id. Invalid selectors raise `ValueError`. Missing click and fill matches raise `LookupError`. A timed-out wait raises `TimeoutError`.
+For an `<a>` with `target="_blank"` or a `download` attribute, `click_selector()` uses `click_element(element_id=...)` when the anchor has an id. Use `click_selector_and_wait_for_new_tab()` for a visible blank-target link when you need its target ID. The helper supports links without an id. Use `click_element()` or `click()` for download links. Invalid selectors raise `ValueError`. Missing matches raise `LookupError`. Unsupported anchors raise `TypeError`. A timed-out wait raises `TimeoutError`.
 
 ## Task Completion
 

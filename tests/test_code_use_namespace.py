@@ -858,6 +858,7 @@ class TestInteractiveHelpers:
             assert 'click_element' in description
             assert 'fill_element' in description
             assert 'click_selector' in description
+            assert 'click_selector_and_wait_for_new_tab' in description
             assert 'fill_selector' in description
             assert 'wait_for_selector' in description
             assert 'get_tabs' in description
@@ -868,15 +869,18 @@ class TestInteractiveHelpers:
         assert '## click_element' in docs
         assert '## fill_element' in docs
         assert '## click_selector' in docs
+        assert '## click_selector_and_wait_for_new_tab' in docs
         assert '## fill_selector' in docs
         assert '## wait_for_selector' in docs
         assert '## get_tabs' in docs
 
         code_use_dir = Path(__file__).parents[1] / 'src' / 'openbrowser' / 'code_use'
         assert 'click_selector' in (code_use_dir / 'README.md').read_text()
+        assert 'click_selector_and_wait_for_new_tab' in (code_use_dir / 'README.md').read_text()
         assert 'fill_selector' in (code_use_dir / 'README.md').read_text()
         assert 'wait_for_selector' in (code_use_dir / 'README.md').read_text()
         assert 'click_selector' in (code_use_dir / 'system_prompt.md').read_text()
+        assert 'click_selector_and_wait_for_new_tab' in (code_use_dir / 'system_prompt.md').read_text()
         assert 'fill_selector' in (code_use_dir / 'system_prompt.md').read_text()
         assert 'wait_for_selector' in (code_use_dir / 'system_prompt.md').read_text()
 
@@ -911,6 +915,85 @@ class TestInteractiveHelpers:
             element_id='open-detail', timeout=0.0
         )
         session.get_browser_state_summary.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_click_selector_and_wait_for_new_tab_returns_opener_target(self):
+        session = self._make_session([])
+        source_focus = SimpleNamespace(target_id='source-target', generation=7)
+        session.focus_snapshot = MagicMock(return_value=source_focus)
+
+        root_cdp = MagicMock()
+        root_cdp.send.Target.getTargets = AsyncMock(
+            side_effect=[
+                {'targetInfos': [{'targetId': 'source-target', 'type': 'page'}]},
+                {
+                    'targetInfos': [
+                        {'targetId': 'source-target', 'type': 'page'},
+                        {
+                            'targetId': 'detail-target',
+                            'type': 'page',
+                            'openerId': 'source-target',
+                        },
+                    ]
+                },
+            ]
+        )
+        session.cdp_client = root_cdp
+
+        input_cdp = MagicMock()
+        input_cdp.send.Input.dispatchMouseEvent = AsyncMock(return_value={})
+        session.get_or_create_cdp_session = AsyncMock(
+            return_value=SimpleNamespace(
+                target_id='source-target',
+                session_id='source-session',
+                cdp_client=input_cdp,
+            )
+        )
+        ns = self._namespace(session)
+        ns['evaluate'] = AsyncMock(return_value={'status': 'special', 'x': 11.0, 'y': 22.0})
+
+        target_id = await ns['click_selector_and_wait_for_new_tab']('#compare')
+
+        assert target_id == 'detail-target'
+        assert ns['evaluate'].await_args.kwargs['variables'] == {'selector': '#compare'}
+        session.get_or_create_cdp_session.assert_awaited_once_with(
+            target_id='source-target', focus=False
+        )
+        assert [
+            call.kwargs['params']['type']
+            for call in input_cdp.send.Input.dispatchMouseEvent.await_args_list
+        ] == ['mouseMoved', 'mousePressed', 'mouseReleased']
+        assert all(
+            call.kwargs['session_id'] == 'source-session'
+            for call in input_cdp.send.Input.dispatchMouseEvent.await_args_list
+        )
+        session.get_browser_state_summary.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_click_selector_and_wait_for_new_tab_stops_if_focus_changes(self):
+        session = self._make_session([])
+        session.focus_snapshot = MagicMock(
+            side_effect=[
+                SimpleNamespace(target_id='source-target', generation=7),
+                SimpleNamespace(target_id='other-target', generation=8),
+            ]
+        )
+        input_cdp = MagicMock()
+        input_cdp.send.Input.dispatchMouseEvent = AsyncMock(return_value={})
+        session.get_or_create_cdp_session = AsyncMock(
+            return_value=SimpleNamespace(
+                target_id='source-target',
+                session_id='source-session',
+                cdp_client=input_cdp,
+            )
+        )
+        ns = self._namespace(session)
+        ns['evaluate'] = AsyncMock(return_value={'status': 'special', 'x': 11.0, 'y': 22.0})
+
+        with pytest.raises(RuntimeError, match='focus changed'):
+            await ns['click_selector_and_wait_for_new_tab']('#compare')
+
+        input_cdp.send.Input.dispatchMouseEvent.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_click_selector_rejects_special_anchor_without_id(self):
