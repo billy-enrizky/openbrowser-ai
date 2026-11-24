@@ -16,7 +16,7 @@ from collections.abc import Awaitable, Callable
 from http.cookiejar import CookieJar
 from inspect import isawaitable, iscoroutinefunction
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Literal, cast
 from urllib.parse import unquote, urlparse
 
 import requests
@@ -1531,9 +1531,78 @@ def create_namespace(
 			complete.append(result)
 		return complete
 
+	async def search_web(
+		query: str,
+		max_results: int = 5,
+		*,
+		backend: str = 'auto',
+		region: str = 'us-en',
+		safe_search: Literal['on', 'moderate', 'off'] = 'moderate',
+		timelimit: str | None = None,
+	) -> list[dict[str, str]]:
+		"""Search the web. Snippets are previews, not evidence."""
+		from openbrowser.search import asearch
+
+		results = await asearch(
+			query,
+			max_results=max_results,
+			backend=backend,
+			region=region,
+			safe_search=safe_search,
+			timelimit=timelimit,
+		)
+		return [result.as_dict() for result in results]
+
+	async def search_and_scrape(
+		query: str,
+		max_results: int = 5,
+		concurrency: int = 4,
+		format: str = 'markdown',
+		*,
+		backend: str = 'auto',
+		region: str = 'us-en',
+		safe_search: Literal['on', 'moderate', 'off'] = 'moderate',
+		timelimit: str | None = None,
+		selector: str | None = None,
+		wait_for: str | None = None,
+		wait_until: WaitUntil = 'load',
+		timeout_ms: int | None = None,
+		extract_links: bool = False,
+		max_chars: int | None = None,
+		engine: str = 'auto',
+	) -> dict[str, Any]:
+		"""Search and scrape each result through the namespace scraper."""
+		results = await search_web(
+			query,
+			max_results=max_results,
+			backend=backend,
+			region=region,
+			safe_search=safe_search,
+			timelimit=timelimit,
+		)
+		page_results = await scrape_pages(
+			[result['url'] for result in results],
+			concurrency=concurrency,
+			format=format,
+			selector=selector,
+			wait_for=wait_for,
+			wait_until=wait_until,
+			timeout_ms=timeout_ms,
+			extract_links=extract_links,
+			max_chars=max_chars,
+			engine=engine,
+		)
+		return {
+			'query': query.strip(),
+			'search_results': results,
+			'page_results': page_results,
+		}
+
 	namespace['scrape_page'] = scrape_page
 	namespace['scrape'] = scrape_page
 	namespace['scrape_pages'] = scrape_pages
+	namespace['search_web'] = search_web
+	namespace['search_and_scrape'] = search_and_scrape
 	namespace['_close_http_client'] = http_client_owner.close
 
 

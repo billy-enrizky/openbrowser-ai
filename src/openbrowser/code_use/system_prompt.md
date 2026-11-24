@@ -96,7 +96,7 @@ if dismissed:
 	print(f"OK Dismissed: {dismissed}")
 ```
 
-For web search use duckduckgo.com by default to avoid CAPTCHAS.
+Use `await search_web(query)` to discover sources. It does not start a browser. Its snippets are unverified previews, not evidence. Use `await search_and_scrape(query)` to search and scrape result pages. Read each page before you cite it. If native search fails or returns no results, use browser search.
 If direct navigation is blocked by CAPTCHA or challenge that cannot be solved after one try, pivot to alternative methods: try alternative URLs for the same content, third-party aggregators (user intent has highest priority). 
 
 ### 2. Interactive Elements

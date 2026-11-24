@@ -70,9 +70,11 @@ OpenBrowser is a framework for intelligent browser automation. It combines direc
 
 - **CodeAgent Architecture** - LLM writes Python code in a persistent Jupyter-like namespace for browser automation
 - **Raw CDP Communication** - Direct Chrome DevTools Protocol for maximum control and speed
+- **Native Web Search** - DDGS search in Python, the CLI, CodeAgent, and MCP. Search snippets do not count as evidence.
 - **Vision Support** - Screenshot analysis for visual understanding of pages
 - **15 LLM Providers** - OpenAI, Anthropic, Google, Groq, AWS Bedrock, Azure, Ollama, DeepSeek, Cerebras, OpenRouter, OCI, and more
-- **MCP Server** - Model Context Protocol for Claude Desktop, Claude Code, Codex, OpenCode, and other AI assistants, with explicit 2026-07-28 application contexts, isolated profiles and workspaces, and read-only status plus reset tools
+- **MCP Server** - Model Context Protocol for Claude Desktop, Claude Code, Codex, OpenCode, and other AI assistants.
+  Modern clients use explicit contexts and isolated profiles. The server includes read-only status and reset tools.
 - **CLI Daemon** - Persistent browser daemon with `-c` flag for direct code execution from Bash, explicit startup ownership, health and recovery status, saved login state, and 10-minute auto-shutdown
 - **Explicit Lifecycle State** - Browser, CDP, navigation, focus, storage, downloads, agent runs, and CodeAgent runs report typed phases instead of relying on logs
 - **Workflow Recording** - Record, replay, and export browser sessions to Jupyter notebooks or API crawler code
@@ -133,6 +135,13 @@ uvx openbrowser-ai --mcp
 
 # CLI daemon mode
 uvx openbrowser-ai -c "await navigate('https://example.com')"
+
+# Native web search. This command does not start Chromium.
+uvx openbrowser-ai search "OpenBrowser MCP docs"
+uvx openbrowser-ai search "OpenBrowser MCP docs" --json --output search-results.json
+uvx openbrowser-ai search "OpenBrowser MCP docs" --urls-only --output search-urls.txt
+uvx openbrowser-ai scrape --urls-file search-urls.txt --output scraped-pages.jsonl --output-format jsonl
+
 # Fast scraping without an LLM
 uvx openbrowser-ai scrape https://example.com --format markdown
 uvx openbrowser-ai scrape https://example.com --format json --selector "article"
@@ -152,6 +161,24 @@ uvx openbrowser-ai scrape --urls-file urls.txt --output results.jsonl
 `scrape` accepts multiple URLs or a file with one URL per line. Use `--output-format json` or `--output-format jsonl` to select batch output. A `.jsonl` output path selects JSONL by default. Each result records its URL, success state, engine, content or error, duration, and timing. One failed URL does not stop the batch.
 
 In CodeAgent and MCP execution, call `await scrape_pages(urls, concurrency=4)`. HTTP requests run concurrently up to the limit. Browser fallbacks run sequentially, and each URL returns its own result.
+
+`openbrowser-ai search` prints a compact table by default. Use `--json` for a JSON array or `--urls-only` to write one URL per line. Search snippets do not count as evidence. Scrape and read each source page before you cite it. The package caps `max_results` at 20.
+
+The Python API exports synchronous `search` and asynchronous `asearch` from `openbrowser.search`. Both functions return typed `SearchResult` values with `title`, `url`, and `snippet` fields. Provider failures raise `SearchError`. The error recommends browser search as a fallback.
+
+```python
+from openbrowser.search import search
+
+results = search("OpenBrowser MCP", max_results=5)
+```
+
+Inside an async function, import and await `asearch`:
+
+```python
+from openbrowser.search import asearch
+
+results = await asearch("OpenBrowser MCP", max_results=5)
+```
 
 The render modes are `full`, `lightweight`, and `no-render`. Full mode uses normal browser rendering. Lightweight mode blocks images, web fonts, and media. No-render mode disables screenshots and visual-only actions. For one-shot prompt runs, pass `--render-mode` or use `--no-render` as a shortcut for `--render-mode no-render`. The `scrape` command accepts `--render-mode`; `--lightweight` selects lightweight rendering.
 
@@ -511,15 +538,24 @@ Set `OPENBROWSER_RENDER_MODE` to `full`, `lightweight`, or `no-render` to choose
 
 ### Tools
 
-The MCP server exposes five tools to 2026-07-28 clients and the original three tools to older clients:
+The MCP server exposes six tools to 2026-07-28 clients and four tools to older clients. Both catalogs include the stateless `search_web` tool.
 
 - `create_context` creates an isolated context and returns a server-minted `context_id`. It does not start a browser until the first `execute_code` call.
 - `execute_code` runs Python code in the namespace for one context. Modern calls require `context_id`.
 - `get_status` returns server, context, browser, profile, tab, tools, downloads, storage-state, namespace-transfer, and config state as JSON. It includes `tools` availability and `downloads` (`count`, `pending`, `recent`, `pdf_detection`). It is read-only and does not start a browser.
 - `reset_browser` closes a stuck browser and preserves scalar and scalar-only container variables unless `clear_variables` is true. Inspect `namespace_transfer.dropped` for names that could not be carried. Cookies and localStorage survive because the profile is reused.
 - `close_context` closes one context and releases its browser and profile. The handle cannot be used after a successful close.
+- `search_web` searches the web and returns a JSON array. It needs no `context_id` and does not start a browser. Treat snippets as previews. Scrape and read source pages before citing them.
 
-A context is process-local. It lives until `close_context` or server exit, and a new MCP server process cannot resume the same handle. The browser session inside a context auto-closes after 10 minutes without an `execute_code` call. `get_status` does not refresh that timer. The context handle and scalar variables remain available, and the next `execute_code` call starts a fresh browser. A successful `close_context` invalidates the handle. If cleanup fails, the result is `close_failed` with a retryable flag. Retry `close_context` to finish cleanup; the handle cannot be used for `execute_code`, `get_status`, or `reset_browser`. New calls while closing fail with `context_closing`, and non-close calls after a failed close fail with `context_close_failed`. Older clients that negotiate `2024-11-05`, `2025-03-26`, `2025-06-18`, or `2025-11-25` receive the original three-tool catalog and a legacy no-handle context. Any other protocol version is rejected with MCP error `-32602`; it is not downgraded. A modern stateful request without the handle returned by `create_context` is rejected before any browser effect. `create_context` itself takes no handle. The default limit is 16 open contexts total, including the legacy no-handle context, configurable with `OPENBROWSER_MCP_MAX_CONTEXTS`.
+A context is process-local. It lives until `close_context` or server exit. A new MCP server process cannot resume it.
+
+The browser session closes after 10 minutes without an `execute_code` call. `get_status` does not refresh that timer. The context handle and scalar variables remain available. The next `execute_code` call starts a fresh browser.
+
+A successful `close_context` invalidates the handle. If cleanup fails, the result is `close_failed` with a retryable flag. Retry `close_context` to finish cleanup. The handle cannot run `execute_code`, `get_status`, or `reset_browser` after a failed close. New calls while closing fail with `context_closing`. Calls after failed close fail with `context_close_failed`.
+
+Clients that negotiate `2024-11-05`, `2025-03-26`, `2025-06-18`, or `2025-11-25` see four tools. The catalog includes stateless `search_web` and uses a legacy no-handle context. OpenBrowser rejects other protocol versions with MCP error `-32602`.
+
+A modern stateful request without `context_id` fails before it affects a browser. `create_context` does not need a handle. The default limit is 16 open contexts, including the legacy context. Set `OPENBROWSER_MCP_MAX_CONTEXTS` to change the limit.
 
 If a browser connection fails, call `get_status` before retrying. Do not replay a page-changing action blindly because the first attempt may have partially run.
 

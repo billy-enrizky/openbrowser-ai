@@ -7,7 +7,7 @@ mode: "wide"
 
 ## Overview
 
-The MCP (Model Context Protocol) Server exposes OpenBrowser's browser automation to AI assistants like Claude Desktop, Claude Code, and other MCP-compatible clients. A 2026-07-28 client calls `create_context` to get a server-minted `context_id`, passes that handle to `execute_code`, `get_status`, and `reset_browser`, and calls `close_context` when finished. `execute_code` runs Python to navigate, interact with, and extract data from web pages. `get_status` reports lifecycle and tab state without starting a browser, and `reset_browser` recovers a stuck browser while preserving scalar and scalar-only container variables by default; functions, modules, browser-bound objects, cyclic values, and shadowed framework names are dropped and reported in `namespace_transfer`. Older clients that negotiate `2024-11-05`, `2025-03-26`, `2025-06-18`, or `2025-11-25` receive the original three-tool catalog with a legacy no-handle context. Any other protocol version is rejected with MCP error `-32602`; it is not downgraded to legacy. No external LLM API keys required -- the MCP client provides the intelligence. The server uses the official `mcp` Python SDK 2.3 and negotiates protocol version `2026-07-28` with modern clients.
+The MCP server exposes OpenBrowser to Claude Desktop, Claude Code, and other MCP clients. Modern clients negotiate protocol `2026-07-28` and see six tools. Call `create_context` before stateful calls. Pass its `context_id` to `execute_code`, `get_status`, and `reset_browser`. Call `close_context` when finished. The stateless `search_web` tool needs no `context_id` and does not start a browser. Its snippets do not count as evidence. Scrape and read source pages before you cite them. The four supported older protocol versions see four tools. Other versions get MCP error `-32602`. OpenBrowser uses MCP SDK 2.3. The MCP client supplies the model, so users do not need an external LLM API key.
 
 ## Quick Start
 
@@ -94,7 +94,7 @@ Optional configuration:
 
 ## Tools
 
-Modern 2026-07-28 clients see five tools. Older clients see the original three.
+Modern 2026-07-28 clients see six tools. Older clients see four tools. Both catalogs include stateless `search_web`.
 
 | Tool | Use |
 |---|---|
@@ -103,6 +103,7 @@ Modern 2026-07-28 clients see five tools. Older clients see the original three.
 | `get_status` | Read server, context, browser, profile, tab, tools, downloads, storage-state, namespace-transfer, and config lifecycle state as JSON. It does not start or mutate a browser. |
 | `reset_browser` | Close a stuck browser and release its profile. Scalar and scalar-only container variables are preserved unless `clear_variables` is true. Inspect `namespace_transfer.dropped`. Cookies and localStorage survive because the profile is reused. |
 | `close_context` | Close one context and release its browser and profile. A successful close invalidates the handle. |
+| `search_web` | Search without a browser or `context_id`. The result is JSON text with title, URL, and snippet fields. Snippets do not count as evidence. |
 
 If a browser connection fails, call `get_status` before retrying. A page-changing action may have partially run, so do not replay it blindly. `get_status` includes `config.startup`, `config.current`, and `config.restart_required`.
 
@@ -131,7 +132,8 @@ For a managed local browser, use `reset_browser` to close the owned browser befo
 | **Tabs** | `get_tabs()`: list tabs without a DOM scan; `switch(tab_id)`, `close(tab_id)`: accepts the four-character suffix or the full CDP target ID |
 | **JavaScript** | `evaluate(code)` -- run JS in page context, returns Python objects |
 | **Downloads** | `download_file(url, filename)`; `wait_for_download(timeout, url, lookback, download_ref)`; `download_outcomes()` and `download_failures()` (sync); `list_downloads()` (sync) |
-| **Scraping** | `scrape_page(url, format, selector, wait_for, engine)`; `scrape_pages(urls, concurrency, format, engine)` |
+| **Scraping** | `scrape_page(url, format, selector, wait_for, engine)`, `scrape_pages(urls, concurrency, format, engine)` |
+| **Search** | `search_web(query, max_results, backend, region, safe_search, timelimit)`, `search_and_scrape(query, max_results, concurrency, format, ...)` |
 | **State** | `browser.get_browser_state_summary()` -- page metadata and interactive elements |
 | **CSS** | `get_selector_from_index(index)` -- CSS selector for an element |
 | **Completion** | `done(text, success)` -- signal task completion |

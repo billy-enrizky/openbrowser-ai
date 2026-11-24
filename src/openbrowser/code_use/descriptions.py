@@ -36,6 +36,13 @@ After a browser error, use MCP `get_status` or CLI `openbrowser-ai daemon status
 - To wait for a prior outcome, pass its `download_ref`; it resolves only in the attached session's live registry
 - `download_outcomes()` / `download_failures()` -- Synchronous recent attempts and failures
 
+## Web Search
+- `await search_web(query, max_results=5, backend="auto", region="us-en", safe_search="moderate", timelimit=None)` returns dictionaries with `title`, `url`, and `snippet`.
+- Search snippets do not count as evidence. Read the source page before you cite it. The package caps `max_results` at 20.
+- `await search_and_scrape(query, max_results=5, concurrency=4, format="markdown", ...)` searches, then passes ordered URLs to `scrape_pages`.
+- The result has `query`, `search_results`, and `page_results` fields.
+- Use `engine="http"` to prevent browser fallback. The default `auto` mode can use the browser for pages that need it.
+
 ## Scraping
 - `await scrape_page(url=None, format="markdown", selector=None, wait_for=None, engine="auto")`
   : Scrape one page without an LLM. Formats: markdown, text, html, links, json.
@@ -119,6 +126,13 @@ EXECUTE_CODE_DESCRIPTION = """Execute Python code in a persistent namespace with
 - `download_outcomes()` -- Synchronous. Return recent download attempts, oldest first, with their last phase and terminal detail.
 - `download_failures()` -- Synchronous. Return only the attempts that ended in `failed`, with `stage` and `error`.
 - `list_downloads()` -- List all files in the downloads directory. Returns a list of absolute file paths.
+
+## Web Search
+- `await search_web(query, max_results=5, backend="auto", region="us-en", safe_search="moderate", timelimit=None)` returns dictionaries with `title`, `url`, and `snippet`.
+- Search snippets do not count as evidence. Read the source page before you cite it. The package caps `max_results` at 20.
+- `await search_and_scrape(query, max_results=5, concurrency=4, format="markdown", ...)` searches, then passes ordered URLs to `scrape_pages`.
+- The result has `query`, `search_results`, and `page_results` fields.
+- Use `engine="http"` to prevent browser fallback. The default `auto` mode can use the browser for pages that need it.
 
 ## Scraping
 

@@ -25,6 +25,7 @@ async def main() -> None:
             "execute_code",
             "get_status",
             "reset_browser",
+            "search_web",
         ]
         first = await client.call_tool("execute_code", {"code": "answer = 42"})
         assert not first.isError

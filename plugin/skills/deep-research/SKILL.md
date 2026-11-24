@@ -1,8 +1,7 @@
 ---
 name: deep-research
 description: |
-  Conduct deep web research using the openbrowser-ai agent. Discover sources with ddgs, investigate sub-questions across multiple sources, and produce cited markdown and JSON reports.
-  Trigger for /search, web search, source discovery, or requests to find sources. Also trigger for research, deep dives, investigations, evidence gathering, comparisons, literature reviews, briefings, or cited reports.
+  Use when the user asks for /search, web search, source discovery, research, investigations, evidence gathering, comparisons, literature reviews, briefings, or cited reports.
 allowed-tools: Bash(openbrowser-ai:*) Bash(curl:*) Bash(uv:*) Bash(uvx:*) Bash(python3:*) Bash(sleep:*) Bash(cat:*) Bash(irm:*) Bash(mkdir:*) Bash(date:*) Read Write
 ---
 
@@ -142,138 +141,77 @@ EOF
 
 ### Step 0.5 -- Run `/search` to discover sources
 
-Run this step after Step 0 for `/search`, web search, or source-discovery requests. It uses the run directory that Step 0 created. It does not change the dedicated daemon or profile.
+Run this step after Step 0 for `/search`, web search, or source-discovery requests. Use the run directory from Step 0. The search command does not start Chromium.
 
-Set `SEARCH_QUERY` to the user's query. Run DDGS in an isolated `uvx` environment. The command does not install DDGS globally.
+Set `SEARCH_QUERY` to the user's exact query. The OpenBrowser package provides DDGS. Do not install DDGS separately.
 
 ```bash
-set -e
 . "<RUN_ENV_FILE>"
 SEARCH_QUERY="<USER_QUERY>"
-DDGS_RAW_JSON="$DEEP_RESEARCH_RUN_DIR/ddgs-search-raw.json"
 SEARCH_RESULTS="$DEEP_RESEARCH_RUN_DIR/search-results.json"
 SEARCH_URLS="$DEEP_RESEARCH_RUN_DIR/search-urls.txt"
 SCRAPE_JSONL="$DEEP_RESEARCH_RUN_DIR/scraped-pages.jsonl"
-NORMALIZER="$DEEP_RESEARCH_RUN_DIR/normalize-ddgs-search.py"
+: > "$SEARCH_RESULTS"
+: > "$SEARCH_URLS"
+: > "$SCRAPE_JSONL"
 
-cat > "$NORMALIZER" <<'PY'
+if [ -z "$SEARCH_QUERY" ]; then
+    echo "Set SEARCH_QUERY before searching."
+    exit 1
+fi
+
+if openbrowser-ai search "$SEARCH_QUERY" --max-results 10 --json --output "$SEARCH_RESULTS"; then
+    if python3 - "$SEARCH_RESULTS" "$SEARCH_URLS" <<'PYTHON'
 import json
 import sys
-from urllib.parse import urlsplit, urlunsplit
 
-raw_path, results_path, urls_path = sys.argv[1:]
-with open(raw_path, encoding="utf-8") as source:
-    rows = json.load(source)
-if isinstance(rows, dict):
-    rows = rows.get("results", [])
-if not isinstance(rows, list):
-    raise SystemExit("DDGS output is not a JSON result list")
+results_path, urls_path = sys.argv[1:]
+with open(results_path, encoding="utf-8") as source:
+    results = json.load(source)
+if not isinstance(results, list):
+    raise SystemExit("Search output must be a JSON array.")
 
-results = []
-seen = set()
-for row in rows:
-    if not isinstance(row, dict):
-        continue
-    candidate = str(row.get("href") or row.get("url") or "").strip()
-    parts = urlsplit(candidate)
-    if parts.scheme.lower() not in {"http", "https"} or not parts.netloc:
-        continue
-    url = urlunsplit((parts.scheme.lower(), parts.netloc.lower(), parts.path or "/", parts.query, ""))
-    if url in seen:
-        continue
-    seen.add(url)
-    results.append({
-        "title": str(row.get("title") or "").strip(),
-        "url": url,
-        "snippet": str(row.get("body") or row.get("snippet") or row.get("description") or "").strip(),
-    })
-
-with open(results_path, "w", encoding="utf-8") as output:
-    json.dump(results, output, ensure_ascii=False, indent=2)
-    output.write("\n")
+urls = [
+    item["url"]
+    for item in results
+    if isinstance(item, dict) and isinstance(item.get("url"), str) and item["url"]
+]
 with open(urls_path, "w", encoding="utf-8") as output:
-    for result in results[:5]:
-        output.write(result["url"] + "\n")
-print(f"Saved {len(results)} unique results to {results_path}")
-print(f"Selected {min(5, len(results))} page URLs in {urls_path}")
-PY
-
-[ -n "$SEARCH_QUERY" ] || { echo "Set SEARCH_QUERY before searching"; exit 1; }
-if DDGS_OUTPUT=$(uvx ddgs text --query "$SEARCH_QUERY" --max_results 10 --output "$DDGS_RAW_JSON" 2>&1); then
-    printf '%s\n' "$DDGS_OUTPUT"
+    for url in urls[:5]:
+        output.write(url + "\n")
+print(f"Selected {min(5, len(urls))} page URLs in {urls_path}")
+PYTHON
+    then
+        if [ -s "$SEARCH_URLS" ]; then
+            if openbrowser-ai scrape --urls-file "$SEARCH_URLS" --output "$SCRAPE_JSONL" --output-format jsonl; then
+                echo "Scraped search results. Read successful page content before citing it."
+            else
+                echo "Native scraping failed. Continue with browser search in Step 2a."
+            fi
+        else
+            echo "Native search returned no results. Continue with browser search in Step 2a."
+        fi
+    else
+        printf '[]\n' > "$SEARCH_RESULTS"
+        : > "$SEARCH_URLS"
+        echo "Native search output was invalid. Continue with browser search in Step 2a."
+    fi
 else
-    printf '%s\n' "$DDGS_OUTPUT"
-    case "$DDGS_OUTPUT" in
-        *"No results found"*)
-            printf '[]\n' > "$SEARCH_RESULTS"
-            : > "$SEARCH_URLS"
-            echo "DDGS returned no results."
-            ;;
-        *)
-            echo "DDGS search failed. Check the error before continuing."
-            exit 1
-            ;;
-    esac
-fi
-
-if [ -s "$DDGS_RAW_JSON" ]; then
-    python3 "$NORMALIZER" "$DDGS_RAW_JSON" "$SEARCH_RESULTS" "$SEARCH_URLS"
-elif [ ! -f "$SEARCH_RESULTS" ]; then
     printf '[]\n' > "$SEARCH_RESULTS"
     : > "$SEARCH_URLS"
-fi
-
-if [ ! -s "$SEARCH_URLS" ]; then
-    echo "DDGS returned no usable URLs. Do not scrape an empty URL list."
-else
-    openbrowser-ai scrape --urls-file "$SEARCH_URLS" --output "$SCRAPE_JSONL" --output-format jsonl
+    echo "Native search failed. Continue with browser search in Step 2a."
 fi
 ```
 
-The search result file is a JSON array. Each item has `title`, `url`, and `snippet`. The URL list contains the first five unique results. Edit that list before scraping if you want to select different pages.
+The search JSON contains `title`, `url`, and `snippet` fields. The URL file contains up to five result URLs in provider order. OpenBrowser removes duplicate and non-HTTP URLs before it writes the JSON.
 
-If DDGS reports `429`, `rate limit`, or `too many requests`, wait 30 seconds. Retry once with five results and a new raw file:
+Search snippets do not count as evidence. Do not cite them. Read the scraped `content` field and cite its page URL. If native search fails or returns no results, use the Google search in Step 2a. The package retries provider failures twice with short backoff. It retries a no-results response once. Two consecutive no-results responses produce an empty list.
 
-```bash
-set -e
-. "<RUN_ENV_FILE>"
-SEARCH_QUERY="<USER_QUERY>"
-NORMALIZER="$DEEP_RESEARCH_RUN_DIR/normalize-ddgs-search.py"
-SEARCH_RESULTS="$DEEP_RESEARCH_RUN_DIR/search-results.json"
-SEARCH_URLS="$DEEP_RESEARCH_RUN_DIR/search-urls.txt"
-SCRAPE_JSONL="$DEEP_RESEARCH_RUN_DIR/scraped-pages.jsonl"
-sleep 30
-DDGS_RAW_JSON="$DEEP_RESEARCH_RUN_DIR/ddgs-search-retry.json"
-if DDGS_OUTPUT=$(uvx ddgs text --query "$SEARCH_QUERY" --max_results 5 --output "$DDGS_RAW_JSON" 2>&1); then
-    printf '%s\n' "$DDGS_OUTPUT"
-    python3 "$NORMALIZER" "$DDGS_RAW_JSON" "$SEARCH_RESULTS" "$SEARCH_URLS"
-else
-    printf '%s\n' "$DDGS_OUTPUT"
-    case "$DDGS_OUTPUT" in
-        *"No results found"*)
-            printf '[]\n' > "$SEARCH_RESULTS"
-            : > "$SEARCH_URLS"
-            echo "DDGS returned no results."
-            ;;
-        *)
-            echo "DDGS retry failed. Stop and report the error."
-            exit 1
-            ;;
-    esac
-fi
-if [ -s "$SEARCH_URLS" ]; then
-    openbrowser-ai scrape --urls-file "$SEARCH_URLS" --output "$SCRAPE_JSONL" --output-format jsonl
-else
-    echo "DDGS returned no usable URLs. Do not scrape an empty URL list."
-fi
-```
-
-If the retry fails, stop the search workflow and report the error. Do not retry again. If DDGS returns no results, keep the empty result file and do not call the scraper.
-
-The scraper writes one JSON object per line. Check each row's `ok`, `url`, `content`, and `error` fields before using it:
+Check each scraper row's `ok`, `url`, `content`, and `error` fields before you use it:
 
 ```bash
-python3 - "$SCRAPE_JSONL" <<'PY'
+if [ -f "$SCRAPE_JSONL" ]; then
+python3 - "$SCRAPE_JSONL" <<'PYTHON'
 import json
 import sys
 
@@ -286,10 +224,9 @@ with open(sys.argv[1], encoding="utf-8") as source:
             print(f"OK {result.get('url')}: {len(result['content'])} characters")
         else:
             print(f"FAILED {result.get('url')}: {result.get('error')}")
-PY
+PYTHON
+fi
 ```
-
-Read the scraped `content` before you cite a page. Do not cite search snippets. A snippet is not evidence until you scrape and read its source page. Cite the source page URL in the report.
 
 ### Step 1 -- Plan
 
@@ -362,7 +299,7 @@ Give every sub-agent the exact absolute `RUN_ENV_FILE` path printed by Step 0 an
 **Hard rules for the orchestrator:**
 
 - Send ONE message containing N parallel `Agent` tool calls, where N = `len(_plan["sub_questions"])`.
-- Each sub-agent gets the prompt template below, parameterized with: `SUB_QUESTION`, `AGENT_INDEX` (zero-padded 2 digits, used in output filename), `PROJECT_ROOT` (absolute path).
+- Each sub-agent gets the prompt template below, parameterized with: `SUB_QUESTION`, `AGENT_INDEX` (zero-padded 2 digits, used in output filename), `PROJECT_ROOT` (absolute path), and `DEEP_RESEARCH_RUN_DIR` (absolute path).
 - After dispatch, wait for all sub-agents to return. Do not begin Step 4 until every partial JSON file under `$DEEP_RESEARCH_PARTIAL_DIR/` is on disk.
 - The orchestrator does NOT drive any tab in this step.
 
@@ -375,6 +312,15 @@ in ONE Chrome tab and write findings to a JSON file.
 Sub-question: <SUB_QUESTION>
 Agent index: <AGENT_INDEX>
 Project root: <PROJECT_ROOT>
+Deep-research run directory: <DEEP_RESEARCH_RUN_DIR>
+
+Native search seeds:
+
+- Read successful rows from `<DEEP_RESEARCH_RUN_DIR>/scraped-pages.jsonl` before Google search.
+- Use only rows where `ok` is true and `content` is non-empty.
+- Use page `content` as evidence. Cite the row's `url`.
+- Use `search-results.json` only to find URLs. Do not cite its `snippet` values.
+- If the files are missing or no page is relevant, continue with Google search.
 
 Hard constraints:
 
@@ -392,7 +338,21 @@ Hard constraints:
 
 Workflow (run via openbrowser-ai -c - heredocs, all in this one bash session):
 
-1. Open exactly one tab on Google search:
+1. Read relevant scraped native-search pages without opening a browser tab:
+
+   openbrowser-ai -c - <<'EOF'
+   from pathlib import Path
+   import json
+
+   path = Path("<DEEP_RESEARCH_RUN_DIR>") / "scraped-pages.jsonl"
+   if path.exists():
+       pages = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+       for page in pages:
+           if page.get("ok") and page.get("content"):
+               print(json.dumps({"url": page["url"], "content": page["content"][:2500]}, ensure_ascii=False))
+   EOF
+
+2. Open exactly one tab on Google search:
    openbrowser-ai -c - <<'EOF'
    await navigate("https://www.google.com/search?q=<URL_ENCODED_SUB_QUESTION>", new_tab=True)
    await wait(2)
@@ -401,18 +361,18 @@ Workflow (run via openbrowser-ai -c - heredocs, all in this one bash session):
    print(f"my tab: {_MY_TAB_<AGENT_INDEX>}")
    EOF
 
-2. Scrape the SERP for top 5 result URLs.
+3. Scrape the SERP for top 5 result URLs.
 
-3. For each of the top 3 results, switch to your tab first, then navigate IN THE
+4. For each of the top 3 results, switch to your tab first, then navigate IN THE
    SAME TAB (no new_tab=True), wait 2s, capture body innerText, pick the sentence
    with the most word-overlap vs the sub-question (40-280 chars, >3-letter keyword
    overlap >= 1).
    Every later -c call must begin with:
    await switch(_MY_TAB_<AGENT_INDEX>)
 
-4. Write the findings JSON array to the partial file.
+5. Write the findings JSON array to the partial file.
 
-5. Print a one-line summary: "agent <AGENT_INDEX>: <N> findings written".
+6. Print a one-line summary: "agent <AGENT_INDEX>: <N> findings written".
 
 Return: a one-line confirmation that the partial JSON file was written, and
 its absolute path. Do not include the findings in your text reply -- the

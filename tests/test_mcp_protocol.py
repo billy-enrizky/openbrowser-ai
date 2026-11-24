@@ -161,6 +161,7 @@ async def test_real_entrypoint_modern_first_catalog_and_status_without_handshake
             "get_status",
             "reset_browser",
             "close_context",
+            "search_web",
         ]
         identity = catalog["_meta"]["io.modelcontextprotocol/serverInfo"]
         assert identity == {
@@ -188,7 +189,7 @@ async def test_latest_sdk_real_stdio_discovery_and_direct_calls(tmp_path, mode):
     async with Client(params, mode=mode) as client:
         assert client.protocol_version == "2026-07-28"
         catalog = await client.list_tools()
-        assert len(catalog.tools) == 5
+        assert len(catalog.tools) == 6
         created = await client.call_tool("create_context", {})
         assert not created.is_error
         context_id = created.structured_content["context_id"]
@@ -300,7 +301,7 @@ async def test_legacy_2024_raw_stdio_preserves_catalog_and_status(tmp_path):
         assert init["protocolVersion"] == "2024-11-05"
         await c.send(None, "notifications/initialized", modern=False)
         catalog = await c.request(2, "tools/list", modern=False)
-        assert len(catalog["tools"]) == 3
+        assert len(catalog["tools"]) == 4
         assert not {"ttlMs", "cacheScope", "resultType"} & catalog.keys()
         status = await c.request(3, "tools/call", {"name": "get_status", "arguments": {}}, modern=False)
         assert json.loads(status["content"][0]["text"])["browser"]["phase"] == "stopped"
@@ -720,8 +721,9 @@ async def test_exact_catalog_input_contracts_and_annotations(monkeypatch):
         "get_status",
         "reset_browser",
         "close_context",
+        "search_web",
     ]
-    create, execute, status, reset, close = catalog.tools
+    create, execute, status, reset, close, search_tool = catalog.tools
     context_property = {
         "type": "string",
         "description": (
@@ -806,6 +808,40 @@ async def test_exact_catalog_input_contracts_and_annotations(monkeypatch):
         "required": ["context_id", "status", "retryable"],
         "additionalProperties": False,
     }
+    assert search_tool.input_schema == {
+        "type": "object",
+        "properties": {
+            "query": {"type": "string", "minLength": 1, "maxLength": 2048},
+            "max_results": {
+                "type": "integer",
+                "minimum": 1,
+                "default": 5,
+                "description": "Maximum results. Values above 20 are capped at 20.",
+            },
+            "backend": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "default": "auto",
+                "description": "DDGS backend or comma-delimited backends.",
+            },
+            "region": {"type": "string", "minLength": 1, "maxLength": 32, "default": "us-en"},
+            "safe_search": {
+                "type": "string",
+                "enum": ["on", "moderate", "off"],
+                "default": "moderate",
+            },
+            "timelimit": {
+                "type": "string",
+                "maxLength": 64,
+                "description": "Optional DDGS time limit, such as d, w, m, or y.",
+            },
+        },
+        "required": ["query"],
+        "additionalProperties": False,
+    }
+    assert "context_id" not in search_tool.input_schema["properties"]
+    assert "Snippets do not count as evidence." in search_tool.description
     assert [tool.annotations.model_dump(by_alias=True, exclude_none=True) for tool in catalog.tools] == [
         {
             "readOnlyHint": False,
@@ -837,6 +873,12 @@ async def test_exact_catalog_input_contracts_and_annotations(monkeypatch):
             "openWorldHint": False,
             "idempotentHint": True,
         },
+        {
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "openWorldHint": True,
+            "idempotentHint": False,
+        },
     ]
 
     legacy = await server.server.get_request_handler("tools/list").handler(None, None)
@@ -844,8 +886,10 @@ async def test_exact_catalog_input_contracts_and_annotations(monkeypatch):
         "execute_code",
         "get_status",
         "reset_browser",
+        "search_web",
     ]
-    legacy_execute, legacy_status, legacy_reset = legacy.tools
+    legacy_execute, legacy_status, legacy_reset, legacy_search = legacy.tools
+    assert "context_id" not in legacy_search.input_schema["properties"]
     assert legacy_execute.input_schema == {
         "type": "object",
         "properties": {
@@ -1385,7 +1429,7 @@ async def test_modern_context_capacity_returns_before_allocation(tmp_path):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("version", ["2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25"])
-async def test_all_allowlisted_legacy_versions_keep_three_tools(tmp_path, version):
+async def test_all_allowlisted_legacy_versions_keep_four_tools(tmp_path, version):
     async with wire(tmp_path, browser_fixture=True) as c:
         init = await c.request(
             1,
@@ -1404,6 +1448,7 @@ async def test_all_allowlisted_legacy_versions_keep_three_tools(tmp_path, versio
             "execute_code",
             "get_status",
             "reset_browser",
+            "search_web",
         ]
         status_tool = next(tool for tool in catalog["tools"] if tool["name"] == "get_status")
         assert "does not start a browser or probe CDP health" in status_tool["description"]

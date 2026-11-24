@@ -6,7 +6,7 @@ import logging
 import sys
 from collections.abc import Awaitable, Callable
 from enum import Enum
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 
 class CliMode(str, Enum):
@@ -1134,6 +1134,120 @@ def _serialize_scrape_batch(results: list[dict], *, jsonl: bool) -> str:
 	if jsonl:
 		return '\n'.join(json.dumps(item, ensure_ascii=False, default=str) for item in results)
 	return json.dumps(results, indent=2, ensure_ascii=False, default=str)
+
+
+def _render_search_table(results: list[Any]) -> str:
+	"""Render search results as a plain-text table."""
+	from io import StringIO
+
+	from rich import box
+	from rich.console import Console
+	from rich.table import Table
+	from rich.text import Text
+
+	buffer = StringIO()
+	console = Console(
+		file=buffer,
+		width=120,
+		force_terminal=False,
+		color_system=None,
+		no_color=True,
+		highlight=False,
+	)
+	table = Table(box=box.SIMPLE, pad_edge=False, show_header=True)
+	table.add_column("#", justify="right", no_wrap=True)
+	table.add_column("Title", overflow="fold")
+	table.add_column("URL", overflow="fold")
+	table.add_column("Snippet", overflow="fold")
+	for index, result in enumerate(results, start=1):
+		table.add_row(
+			Text(str(index)),
+			Text(result.title or "(untitled)"),
+			Text(result.url),
+			Text(result.snippet),
+		)
+	console.print(table)
+	return buffer.getvalue()
+
+
+@main.command(name='search')
+@click.argument("query")
+@click.option(
+	"--max-results",
+	type=click.IntRange(min=1),
+	default=5,
+	show_default=True,
+	help="Maximum results to return. Values above 20 are capped at 20.",
+)
+@click.option("--backend", default="auto", show_default=True, help="DDGS backend or comma-delimited backends.")
+@click.option("--region", default="us-en", show_default=True, help="Search region.")
+@click.option(
+	"--safe-search",
+	type=click.Choice(["on", "moderate", "off"]),
+	default="moderate",
+	show_default=True,
+	help="Safe search level.",
+)
+@click.option("--timelimit", type=str, help="Limit results by age, for example d, w, m, or y.")
+@click.option("--json", "as_json", is_flag=True, help="Print a JSON array of search results.")
+@click.option("--urls-only", is_flag=True, help="Print one result URL per line.")
+@click.option("--output", type=click.Path(dir_okay=False), help="Write output to a file.")
+def source_discovery_command(
+	query: str,
+	max_results: int,
+	backend: str,
+	region: str,
+	safe_search: Literal['on', 'moderate', 'off'],
+	timelimit: str | None,
+	as_json: bool,
+	urls_only: bool,
+	output: str | None,
+) -> None:
+	"""Search the web. Scrape and read source pages before citing results."""
+	import json
+	from pathlib import Path
+
+	if as_json and urls_only:
+		raise click.UsageError("--json and --urls-only cannot be used together.")
+
+	from openbrowser.logging_config import setup_logging
+
+	setup_logging(stream=sys.stderr, log_level='critical', force_setup=True)
+	_quiet_stderr_logging()
+
+	from openbrowser.search import SearchError
+	from openbrowser.search import search as search_web
+
+	try:
+		results = search_web(
+			query,
+			max_results=max_results,
+			backend=backend,
+			region=region,
+			safe_search=safe_search,
+			timelimit=timelimit,
+		)
+	except SearchError as error:
+		raise click.ClickException(str(error)) from error
+	except (TypeError, ValueError) as error:
+		raise click.BadParameter(str(error)) from error
+
+	if as_json:
+		rendered = json.dumps([result.as_dict() for result in results], indent=2, ensure_ascii=False)
+	elif urls_only:
+		rendered = "\n".join(result.url for result in results)
+	else:
+		rendered = _render_search_table(results) if results else "No search results."
+
+	if output:
+		path = Path(output)
+		try:
+			path.write_text(rendered + ("" if not rendered or rendered.endswith("\n") else "\n"), encoding="utf-8")
+		except OSError as error:
+			raise click.ClickException(f"Could not write search output to {path}: {error}") from error
+		click.echo(f"Wrote search output to {path}", err=True)
+	elif rendered:
+		click.echo(rendered, nl=not rendered.endswith("\n"))
 
 
 @main.command()

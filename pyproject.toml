@@ -12,6 +12,7 @@ dependencies = [
     "pydantic-settings>=2.0.0",
     "playwright",
     "python-dotenv",
+    "ddgs>=9.16.1,<10.0.0",
     "httpx>=0.28.1",
     "websockets>=15.0.1",
     "aiofiles",
