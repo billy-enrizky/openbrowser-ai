@@ -103,7 +103,10 @@ def daemon_processes() -> list[dict[str, Any]]:
             environment: dict[str, str] = {}
             socket_known = True
             try:
-                environment = process.environ() or {}
+                environment = {
+                    str(key): str(value)
+                    for key, value in (process.environ() or {}).items()
+                }
             except (psutil.AccessDenied, OSError):
                 socket_known = False
 
@@ -111,10 +114,18 @@ def daemon_processes() -> list[dict[str, Any]]:
                 socket_path = None
                 socket_exists = socket_known and _windows_daemon_is_listening(process.pid)
                 socket_live = socket_exists
-            elif socket_known:
+            elif socket_known and environment:
                 raw_socket = environment.get('OPENBROWSER_SOCKET')
-                resolved_socket = Path(raw_socket).expanduser() if raw_socket else SOCKET_PATH
-                if resolved_socket.is_absolute():
+                if raw_socket:
+                    resolved_socket = Path(raw_socket).expanduser()
+                else:
+                    daemon_home = environment.get('HOME')
+                    resolved_socket = (
+                        Path(daemon_home).expanduser() / '.openbrowser' / 'daemon.sock'
+                        if daemon_home
+                        else None
+                    )
+                if resolved_socket is not None and resolved_socket.is_absolute():
                     socket_path = str(resolved_socket)
                     socket_exists = resolved_socket.exists()
                     socket_live = socket_exists and _unix_socket_is_live(resolved_socket)
@@ -124,6 +135,7 @@ def daemon_processes() -> list[dict[str, Any]]:
                     socket_exists = False
                     socket_live = True
             else:
+                socket_known = False
                 socket_path = None
                 socket_exists = False
                 socket_live = True
