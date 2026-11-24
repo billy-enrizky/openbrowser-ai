@@ -290,7 +290,9 @@ async def _run(args: argparse.Namespace) -> int:
         for error in group["errors"]:
             print(f"    error: {error[:160]}")
     print(f"Wrote {args.output}")
-    return 0 if all(group["ok"] for group in groups) else 1
+    # Some arms are expected to fail JavaScript tasks. Correctness is recorded
+    # per group; the benchmark command itself completes after writing evidence.
+    return 0
 
 
 def main() -> int:
