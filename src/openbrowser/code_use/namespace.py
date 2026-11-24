@@ -14,7 +14,6 @@ import math
 import re
 import time
 from collections.abc import Awaitable, Callable
-from http.cookiejar import CookieJar
 from inspect import isawaitable, iscoroutinefunction
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
@@ -37,6 +36,7 @@ else:
 	else:
 		FileSystemType = FileSystem
 from openbrowser.llm.base import BaseChatModel
+from openbrowser.scrape.http import _HttpClientOwner, _truncate_scrape_result, scrape_http
 from openbrowser.tools.action_availability import ActionAvailabilityCode, ActionAvailabilityError
 from openbrowser.tools.action_readiness import (
 	readiness_error_from_validation_error,
@@ -299,160 +299,6 @@ async def evaluate(code: str, browser_session: BrowserSession) -> Any:
 	except Exception as e:
 		# Wrap other exceptions in EvaluateError
 		raise EvaluateError(f'Failed to execute JavaScript: {type(e).__name__}: {e}') from e
-
-
-class _NoCookieJar(CookieJar):
-	"""A cookie jar that neither sends nor stores cookies."""
-
-	def extract_cookies(self, response: Any, request: Any) -> None:
-		return None
-
-	def add_cookie_header(self, request: Any) -> None:
-		return None
-
-
-class _HttpClientOwner:
-	"""Own one reusable HTTP client for a namespace or a scrape batch."""
-
-	def __init__(self) -> None:
-		self._client: Any | None = None
-
-	def get(self, timeout: float):
-		"""Return the owned client, creating it on first use."""
-		import httpx
-
-		if self._client is None or self._client.is_closed:
-			self._client = httpx.AsyncClient(
-				follow_redirects=True,
-				timeout=timeout,
-				cookies=_NoCookieJar(),
-			)
-		return self._client
-
-	async def close(self) -> None:
-		"""Close the owned client once."""
-		client = self._client
-		self._client = None
-		if client is not None and not client.is_closed:
-			await client.aclose()
-
-
-def _new_http_client(timeout: float):
-	"""Create a one-shot client that cannot read or write host cookies."""
-	import httpx
-
-	return httpx.AsyncClient(
-		follow_redirects=True,
-		timeout=timeout,
-		cookies=_NoCookieJar(),
-	)
-
-
-def _http_result_from_response(
-	response: Any,
-	*,
-	format: str,
-	selector: str | None,
-	engine: str,
-) -> dict[str, Any] | None:
-	"""Convert an HTTP response into a scrape result, or None to use the browser."""
-	from openbrowser.dom.fast_html import parse_document
-
-	if response.status_code >= 400:
-		return None
-
-	content_type = response.headers.get('content-type', '').split(';')[0].strip().lower()
-	if 'json' in content_type:
-		try:
-			payload = response.json()
-		except Exception:
-			return None
-		return {
-			'url': str(response.url),
-			'title': '',
-			'format': format,
-			'content_type': 'application/json',
-			'content': payload,
-			'stats': {'engine_used': 'http', 'status_code': response.status_code},
-			'engine_used': 'http',
-			'status_code': response.status_code,
-		}
-
-	if 'html' not in content_type and content_type not in ('', 'text/plain'):
-		return None
-
-	html = response.text
-	document = parse_document(html)
-	if engine == 'auto':
-		# Use HTTP only when the server-rendered text is substantial. Thin
-		# shells usually need JavaScript, so fall back to the browser.
-		text_probe, empty_application_root = document.probe_static()
-		if len(text_probe) < 40 or empty_application_root:
-			return None
-
-	title = document.title()
-	content = document.extract(format, selector)
-
-	return {
-		'url': str(response.url),
-		'title': title,
-		'format': format,
-		'content_type': 'application/json' if format in {'links', 'json'} else f'text/{format}',
-		'content': content,
-		'stats': {
-			'engine_used': 'http',
-			'status_code': response.status_code,
-			'html_chars': len(html),
-		},
-		'engine_used': 'http',
-		'status_code': response.status_code,
-	}
-
-
-async def scrape_http(
-	url: str,
-	*,
-	format: str,
-	selector: str | None,
-	extract_links: bool,
-	timeout_ms: int | None,
-	engine: str,
-	client: Any | None = None,
-) -> dict[str, Any] | None:
-	"""Fetch and parse a URL without a browser.
-
-	Returns None when engine=auto finds page JavaScript and the browser path
-	should handle the page. Pass a client only when the caller owns its
-	lifecycle and will close it.
-	"""
-	timeout = (timeout_ms / 1000) if timeout_ms else 30.0
-	if client is None:
-		async with _new_http_client(timeout) as owned_client:
-			response = await owned_client.get(url, timeout=timeout)
-			return _http_result_from_response(
-				response,
-				format=format,
-				selector=selector,
-				engine=engine,
-			)
-	response = await client.get(url, timeout=timeout)
-	return _http_result_from_response(
-		response,
-		format=format,
-		selector=selector,
-		engine=engine,
-	)
-
-
-def _truncate_scrape_result(result: dict[str, Any], max_chars: int | None) -> dict[str, Any]:
-	"""Apply the optional output cap to a scrape result."""
-	if max_chars is not None:
-		content = result.get('content')
-		if isinstance(content, str) and len(content) > max_chars:
-			result['content'] = content[:max_chars]
-			result['truncated'] = True
-			result['total_chars'] = len(content)
-	return result
 
 
 def create_namespace(

@@ -158,6 +158,57 @@ The script writes:
 - `docs/images/native-scraping-current-p50.png`
 - `docs/images/native-lightpanda-current-p50.png`
 
+## HTTP-only CLI batch, 2026-11-24
+
+The console entry now handles `scrape --engine http` without importing the
+Click command tree, browser modules, or the configuration stack. A single URL
+uses `scrape_http()`. Multiple URLs use `scrape_http_batch()` with bounded
+concurrency. The fast entry accepts only the documented HTTP flags and falls
+back to the full Click command for anything else.
+
+The A/B used the pre-change binary and the branch binary with the same five
+local pagination URLs:
+
+```sh
+openbrowser-ai scrape URL1 URL2 URL3 URL4 URL5 \
+  --engine http --format json --selector 'tbody tr' --jsonl
+```
+
+Each sample alternated binary order. Peak RSS was sampled every 5 ms while the
+child process ran. Load on 18 logical CPUs was `7.491`, `8.508`, and `9.131`
+before the run and `9.162`, `8.815`, and `9.226` after it. All 20 runs passed
+the 100-row oracle.
+
+| Binary | p50 ms | p95 ms | Peak RSS p50 MB | Peak RSS max MB |
+| --- | ---: | ---: | ---: | ---: |
+| Pre-change | 1144.941 | 1177.547 | 153.844 | 154.094 |
+| HTTP fast entry | 205.029 | 212.359 | 47.859 | 47.969 |
+
+The new path was faster in 10 of 10 pairs and used less peak RSS in 10 of 10.
+The median paired difference was `936.032` ms and `106.000` MB. Both binaries
+returned the same five JSONL rows with the same 100 row IDs; only the measured
+`duration_ms` and `timing` values differed.
+
+The Lightpanda lane measured `837.4` ms p50 and about `123` MB peak RSS for the
+same five-page pagination task. The command surfaces and harnesses differ, so
+treat that comparison as directional. The OpenBrowser CLI numbers above are
+from this A/B only.
+
+Rerun the A/B:
+
+```sh
+uv run --locked python -m benchmarks.scraping.cli_http_batch_compare \
+  --old-binary /path/to/pre-change/openbrowser-ai \
+  --new-binary /path/to/branch/openbrowser-ai \
+  --samples 10 \
+  --output benchmarks/scraping/results-cli-http-batch.json
+```
+
+Raw evidence:
+
+- `results-cli-http-batch-2026-11-24-n10.json`
+- `results-cli-http-batch-2026-11-24-n10.summary.json`
+
 ## Network-level render policy
 
 `scrape_compare.py` measures extraction. `no_render_compare.py` measures the

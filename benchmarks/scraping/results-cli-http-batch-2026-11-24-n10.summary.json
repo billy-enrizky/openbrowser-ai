@@ -1,0 +1,43 @@
+{
+  "samples": 10,
+  "tasks": {
+    "pages": 5
+  },
+  "load_before": [
+    7.491,
+    8.508,
+    9.131
+  ],
+  "load_after": [
+    9.162,
+    8.815,
+    9.226
+  ],
+  "rows": [
+    {
+      "arm": "old",
+      "ok": 10,
+      "runs": 10,
+      "latency_p50_ms": 1144.941,
+      "latency_p95_ms": 1177.547,
+      "peak_rss_p50_mb": 153.844,
+      "peak_rss_max_mb": 154.094
+    },
+    {
+      "arm": "new",
+      "ok": 10,
+      "runs": 10,
+      "latency_p50_ms": 205.029,
+      "latency_p95_ms": 212.359,
+      "peak_rss_p50_mb": 47.859,
+      "peak_rss_max_mb": 47.969
+    }
+  ],
+  "paired": {
+    "old_minus_new_latency_p50_ms": 936.032,
+    "old_minus_new_rss_p50_mb": 106.0,
+    "new_faster_pairs": 10,
+    "new_lower_rss_pairs": 10,
+    "pairs": 10
+  }
+}

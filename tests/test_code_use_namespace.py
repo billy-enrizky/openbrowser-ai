@@ -1167,8 +1167,8 @@ class TestScrapeHttp:
         assert 'Substantial server rendered content' in result['content']
 
     def test_static_response_reuses_one_parsed_html_tree(self, monkeypatch):
-        from openbrowser.code_use.namespace import _http_result_from_response
         from openbrowser.dom import fast_html
+        from openbrowser.scrape.http import _http_result_from_response
 
         html = (
             '<html><head><title>Static page</title></head><body>'
@@ -1256,7 +1256,7 @@ class TestScrapeHttp:
     async def test_http_client_does_not_persist_response_cookies(self):
         import httpx
 
-        from openbrowser.code_use.namespace import _NoCookieJar, scrape_http
+        from openbrowser.scrape.http import _NoCookieJar, scrape_http
 
         seen_cookies: list[str | None] = []
 
