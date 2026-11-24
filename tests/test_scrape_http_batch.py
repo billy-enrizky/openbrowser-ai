@@ -240,3 +240,99 @@ async def test_owned_client_closes_once_and_reopens_after_close():
     assert second.is_closed is False
     await owner.close()
     assert second.is_closed is True
+
+
+class _BoilerplateHandler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+
+    def log_message(self, *_args):
+        return
+
+    def do_GET(self):
+        body = (
+            b"<html><head><title>Boiler</title></head><body>"
+            b"<nav>NAV LINK</nav><header>HEADER</header>"
+            b"<article><h1>Article Title</h1><p>Article body text.</p>"
+            b"<div class='ad'>BUY NOW</div></article>"
+            b"<aside>ASIDE</aside><footer>FOOTER</footer>"
+            b"</body></html>"
+        )
+        self.send_response(200)
+        self.send_header("content-type", "text/html")
+        self.send_header("content-length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
+@pytest.fixture()
+def boilerplate_server():
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _BoilerplateHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_address[1]}"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+@pytest.mark.asyncio
+async def test_only_main_content_removes_page_boilerplate(boilerplate_server):
+    from openbrowser.scrape.http import scrape_http
+
+    plain = await scrape_http(
+        f"{boilerplate_server}/",
+        format="text",
+        selector=None,
+        extract_links=False,
+        timeout_ms=5000,
+        engine="http",
+    )
+    filtered = await scrape_http(
+        f"{boilerplate_server}/",
+        format="text",
+        selector=None,
+        extract_links=False,
+        timeout_ms=5000,
+        engine="http",
+        only_main_content=True,
+    )
+
+    assert plain is not None and filtered is not None
+    for marker in ("NAV LINK", "HEADER", "ASIDE", "FOOTER", "BUY NOW"):
+        assert marker in plain["content"]
+        assert marker not in filtered["content"]
+    assert "Article body text." in filtered["content"]
+    assert filtered["stats"]["content_filter"]["removed"] >= 4
+    assert "content_filter" not in plain["stats"]
+
+
+@pytest.mark.asyncio
+async def test_include_and_exclude_tags_control_the_root(boilerplate_server):
+    from openbrowser.scrape.http import scrape_http
+
+    included = await scrape_http(
+        f"{boilerplate_server}/",
+        format="text",
+        selector=None,
+        extract_links=False,
+        timeout_ms=5000,
+        engine="http",
+        include_tags=["article"],
+    )
+    excluded = await scrape_http(
+        f"{boilerplate_server}/",
+        format="text",
+        selector=None,
+        extract_links=False,
+        timeout_ms=5000,
+        engine="http",
+        exclude_tags=[".ad"],
+    )
+
+    assert included is not None and excluded is not None
+    assert included["content"].startswith("Article Title")
+    assert "NAV LINK" not in included["content"]
+    assert "BUY NOW" not in excluded["content"]
+    assert "Article body text." in excluded["content"]

@@ -57,12 +57,15 @@ _SCRAPE_VALUE_OPTIONS = {
 	'--output-format',
 	'--urls-file',
 	'--render-mode',
+	'--include-tag',
+	'--exclude-tag',
 }
 _SCRAPE_FLAG_OPTIONS = {
 	'--extract-links',
 	'--lightweight',
 	'--jsonl',
 	'--json',
+	'--only-main-content',
 }
 _FORMATS = {'markdown', 'text', 'html', 'links', 'json'}
 _OUTPUT_FORMATS = {'json', 'jsonl'}
@@ -107,6 +110,7 @@ def _parse_http_scrape_args(args: list[str]) -> dict | None:
 	option returns None so the full Click command owns validation and help.
 	"""
 	values: dict[str, object] = {}
+	tag_values: dict[str, list[str]] = {'--include-tag': [], '--exclude-tag': []}
 	urls: list[str] = []
 	positional_only = False
 	index = 0
@@ -133,7 +137,10 @@ def _parse_http_scrape_args(args: list[str]) -> dict | None:
 			if name in _SCRAPE_VALUE_OPTIONS:
 				if index + 1 >= len(args):
 					return None
-				values[name] = args[index + 1]
+				if name in tag_values:
+					tag_values[name].append(args[index + 1])
+				else:
+					values[name] = args[index + 1]
 				index += 2
 				continue
 			return None
@@ -184,6 +191,9 @@ def _parse_http_scrape_args(args: list[str]) -> dict | None:
 		'output': values.get('--output'),
 		'as_json': bool(values.get('--json')),
 		'engine': str(engine or 'auto'),
+		'only_main_content': bool(values.get('--only-main-content')),
+		'include_tags': list(tag_values['--include-tag']),
+		'exclude_tags': list(tag_values['--exclude-tag']),
 	}
 
 
@@ -205,6 +215,9 @@ def _execute_scrape_fast_path(argv: list[str]) -> bool:
 			max_chars=parsed['max_chars'],
 			concurrency=parsed['concurrency'],
 			engine=parsed['engine'],
+			only_main_content=parsed['only_main_content'],
+			include_tags=parsed['include_tags'] or None,
+			exclude_tags=parsed['exclude_tags'] or None,
 		)
 		if payload is None:
 			# The page needs a browser. The full command owns that path.

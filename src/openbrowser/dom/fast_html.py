@@ -8,6 +8,7 @@ microseconds instead of milliseconds.
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from typing import Any
 
 from selectolax.lexbor import LexborHTMLParser
@@ -298,6 +299,62 @@ class ParsedHTML:
         if format == "links":
             return self.links()
         return self.nodes(selector) if selector else []
+
+
+BOILERPLATE_SELECTORS: tuple[str, ...] = (
+    "nav",
+    "header",
+    "footer",
+    "aside",
+    "[role=navigation]",
+    "[role=banner]",
+    "[role=contentinfo]",
+    "[aria-hidden=true]",
+    ".cookie-banner",
+    ".cookie-consent",
+    "#cookie-banner",
+    ".advertisement",
+    ".ads",
+    ".ad",
+    "[class*=advert]",
+    "[id*=advert]",
+)
+
+
+def apply_content_filters(
+    document: ParsedHTML,
+    *,
+    only_main_content: bool = False,
+    include_tags: Sequence[str] | None = None,
+    exclude_tags: Sequence[str] | None = None,
+) -> dict[str, Any]:
+    """Prune boilerplate and excluded nodes, and pick an include root.
+
+    Removal uses the parsed tree, so one parse serves both filtering and
+    extraction. ``include_tags`` is a keep list: the first selector that
+    matches becomes the extraction root. A caller selector always wins over
+    the include root.
+    """
+    removed = 0
+    selectors: list[str] = []
+    if only_main_content:
+        selectors.extend(BOILERPLATE_SELECTORS)
+    if exclude_tags:
+        selectors.extend(tag for tag in exclude_tags if tag)
+    for selector in selectors:
+        for node in document._tree.css(selector):
+            node.decompose()
+            removed += 1
+
+    include_root: str | None = None
+    if include_tags:
+        for selector in include_tags:
+            if not selector:
+                continue
+            if document._tree.css_first(selector) is not None:
+                include_root = selector
+                break
+    return {"removed": removed, "include_root": include_root}
 
 
 def parse_document(html: str) -> ParsedHTML:
