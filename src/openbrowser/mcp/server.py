@@ -132,12 +132,14 @@ def start_browser_stack_import() -> threading.Thread:
 def _ensure_browser_stack() -> None:
 	"""Import the browser stack and action registry on first context use."""
 	global BrowserProfile, BrowserSession, CodeAgentTools
-	if BrowserSession is None:
+	if BrowserProfile is None or BrowserSession is None:
 		from openbrowser.browser import BrowserProfile as profile_cls
 		from openbrowser.browser import BrowserSession as session_cls
 
-		BrowserProfile = profile_cls
-		BrowserSession = session_cls
+		if BrowserProfile is None:
+			BrowserProfile = profile_cls
+		if BrowserSession is None:
+			BrowserSession = session_cls
 	if CodeAgentTools is None:
 		from openbrowser.tools.service import CodeAgentTools as tools_cls
 
