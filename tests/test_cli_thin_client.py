@@ -235,3 +235,39 @@ def test_cli_entry_runs_the_full_cli_when_the_fast_path_declines(monkeypatch):
     monkeypatch.setattr(sys, "argv", ["openbrowser-ai", "-c", "print(1)"])
     cli_entry.cli()
     assert calls == [("openbrowser.cli", "__main__")]
+
+
+def test_daemon_force_stop_fast_path_uses_client(monkeypatch):
+    from openbrowser import cli_entry
+    from openbrowser.daemon.client import DaemonClient, DaemonResponse
+
+    calls = []
+
+    async def fake_force_stop(self):
+        calls.append("force_stop")
+        return DaemonResponse(success=True, output="Daemon force-stopped", error=None)
+
+    monkeypatch.setattr(DaemonClient, "force_stop", fake_force_stop)
+    assert cli_entry._daemon_stop_fast_path(["openbrowser-ai", "daemon", "force-stop"]) is True
+    assert calls == ["force_stop"]
+
+
+def test_daemon_stop_fast_path_uses_client(monkeypatch):
+    from openbrowser import cli_entry
+    from openbrowser.daemon.client import DaemonClient, DaemonResponse
+
+    calls = []
+
+    async def fake_stop(self):
+        calls.append("stop")
+        return DaemonResponse(success=True, output="Daemon stopped", error=None)
+
+    monkeypatch.setattr(DaemonClient, "stop", fake_stop)
+    assert cli_entry._daemon_stop_fast_path(["openbrowser-ai", "daemon", "stop"]) is True
+    assert calls == ["stop"]
+
+
+def test_daemon_fast_path_skips_other_subcommands():
+    from openbrowser import cli_entry
+
+    assert cli_entry._daemon_stop_fast_path(["openbrowser-ai", "daemon", "status"]) is False

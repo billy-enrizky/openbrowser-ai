@@ -81,6 +81,31 @@ _FORMATS = {"markdown", "text", "html", "links", "json"}
 _OUTPUT_FORMATS = {"json", "jsonl"}
 
 
+def _daemon_stop_fast_path(argv: list[str]) -> bool:
+    """Stop or force-stop the daemon without importing the Click tree."""
+    if select_cli_mode(argv[1:]) is not CliMode.DAEMON:
+        return False
+    args = argv[1:]
+    if len(args) != 2 or args[1] not in {"stop", "force-stop"}:
+        return False
+    import asyncio
+
+    from openbrowser.daemon.client import DaemonClient
+
+    client = DaemonClient()
+    operation = client.stop if args[1] == "stop" else client.force_stop
+    response = asyncio.run(operation())
+    if not response.success:
+        print(response.output or response.error, file=sys.stderr)
+        if response.error_code:
+            print(f"Error code: {response.error_code}", file=sys.stderr)
+        if response.hint:
+            print(f"Hint: {response.hint}", file=sys.stderr)
+        raise SystemExit(1)
+    print(response.output or ("Daemon stopped" if args[1] == "stop" else "Daemon force-stopped"))
+    return True
+
+
 def _execute_code_fast_path(argv: list[str]) -> bool:
     """Run `-c` against a warm daemon without importing the Click tree."""
     if select_cli_mode(argv[1:]) is not CliMode.EXECUTE_CODE:
@@ -262,6 +287,8 @@ def _execute_scrape_fast_path(argv: list[str]) -> bool:
 
 
 def cli() -> None:
+    if _daemon_stop_fast_path(sys.argv):
+        return
     if _execute_code_fast_path(sys.argv):
         return
     if _execute_scrape_fast_path(sys.argv[1:]):
