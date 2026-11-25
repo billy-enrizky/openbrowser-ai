@@ -56,7 +56,7 @@ Raw evidence:
 
 - [results-mcp-scrape-web-resource-2026-11-25-n5.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/scraping/results/results-mcp-scrape-web-resource-2026-11-25-n5.json)
 
-Chart: [native-mcp-http-memory.png](https://github.com/billy-enrizky/openbrowser-ai/blob/main/docs/images/native-mcp-http-memory.png). The chart has been regenerated from the same artifact with these medians and is labeled `Lower is better ↓` for memory. It shows only OpenBrowser process-tree RSS and does not overlay Lightpanda or Firecrawl.
+Chart: [native-mcp-http-memory-2026-11-25.png](https://github.com/billy-enrizky/openbrowser-ai/blob/main/docs/images/native-mcp-http-memory-2026-11-25.png). The chart has been regenerated from the same artifact with these medians and is labeled `Lower is better ↓` for memory. It shows only OpenBrowser process-tree RSS and does not overlay Lightpanda or Firecrawl.
 
 Non-comparable published context, not measured in this run and not a direct win claim:
 
