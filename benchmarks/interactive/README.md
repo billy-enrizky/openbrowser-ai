@@ -8,7 +8,7 @@
   - [2.1. Cold interactive](#21-cold-interactive)
   - [2.2. Warm interactive](#22-warm-interactive)
   - [2.3. Timer and cleanup boundary](#23-timer-and-cleanup-boundary)
-- [3. Interactive resource pilot, 2026-11-25](#3-interactive-resource-pilot-2026-11-25)
+- [3. Interactive resource lane, 2026-11-25](#3-interactive-resource-lane-2026-11-25)
 - [4. Arms](#4-arms)
 - [5. Tasks](#5-tasks)
 - [6. Fair-run procedure](#6-fair-run-procedure)
@@ -114,31 +114,39 @@ The timer runs from the start of `arm.run` to its return. Cleanup runs once afte
 
 This is a harness change, not a product speedup. The cold table above is the current measurement. The earlier final2 table included teardown and is retained only as history.
 
-## 3. Interactive resource pilot, 2026-11-25
+## 3. Interactive resource lane, 2026-11-25
 
-Memory: **Lower is better** ↓.
+Memory and CPU: **Lower is better** ↓.
 
-This pilot measures one sample per arm and task. All 25 observations passed the exact oracle, keychain check, resource gate, and cleanup. It is descriptive, not a significance claim.
+The lane runs 125 observations, five tasks by five arms by five samples. All 125 passed the exact oracle, keychain check, and cleanup. 123 are resource-eligible. One cold `auth` sample from OpenBrowser CLI and one from browser-use hit a fatal `AccessDenied` read error, so those two cells report N=4. The failed samples are retained and excluded from the medians.
 
 | Task | OpenBrowser MCP footprint MiB | OpenBrowser CLI footprint MiB | chrome-devtools-mcp footprint MiB | agent-browser footprint MiB | browser-use footprint MiB |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| wizard | 136.2 | 146.5 | 480.5 | 494.2 | 554.7 |
-| modal | 133.5 | 149.6 | 473.2 | 480.3 | 550.4 |
-| download | 124.9 | 141.7 | 447.2 | 485.3 | 433.4 |
-| tabs | 132.0 | 144.2 | 461.7 | 472.9 | 438.7 |
-| auth | 132.8 | 144.6 | 455.1 | 475.0 | 547.1 |
+| wizard | 137.6 | 148.7 | 481.0 | 496.9 | 561.4 |
+| modal | 136.7 | 151.8 | 478.8 | 488.9 | 560.3 |
+| download | 128.8 | 142.9 | 455.4 | 479.8 | 439.9 |
+| tabs | 133.1 | 148.2 | 469.8 | 485.6 | 457.2 |
+| auth | 135.9 (N=5) | 140.9 (N=4) | 468.6 | 479.9 | 550.9 (N=4) |
 
 | Task | OpenBrowser MCP tree RSS MiB | OpenBrowser CLI tree RSS MiB | chrome-devtools-mcp tree RSS MiB | agent-browser tree RSS MiB | browser-use tree RSS MiB |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| wizard | 408.9 | 428.2 | 761.9 | 1205.7 | 1201.1 |
-| modal | 409.4 | 433.8 | 805.8 | 1204.4 | 1198.2 |
-| download | 390.9 | 418.6 | 762.0 | 1179.9 | 960.2 |
-| tabs | 408.2 | 431.3 | 763.2 | 1193.4 | 980.9 |
-| auth | 411.2 | 419.5 | 731.6 | 1188.3 | 1196.0 |
+| wizard | 407.1 | 426.2 | 786.2 | 1202.5 | 1205.1 |
+| modal | 408.1 | 432.1 | 791.8 | 1203.6 | 1202.2 |
+| download | 393.8 | 416.5 | 758.0 | 1187.1 | 979.3 |
+| tabs | 406.7 | 429.3 | 773.3 | 1193.6 | 1014.0 |
+| auth | 411.2 (N=5) | 412.7 (N=4) | 776.5 | 1187.3 | 1194.5 (N=4) |
 
-Both OpenBrowser arms have the lowest child footprint and tree RSS on all five tasks. Observed CPU: OpenBrowser MCP is lowest on all five tasks. OpenBrowser CLI is lowest on four; the one gap is cold `auth` at 3.13 seconds against agent-browser at 3.06 seconds. CPU is a sampled lower bound and includes native driver subprocesses.
+| Task | OpenBrowser MCP CPU s | OpenBrowser CLI CPU s | chrome-devtools-mcp CPU s | agent-browser CPU s | browser-use CPU s |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| wizard | 1.0 | 1.2 | 2.1 | 1.8 | 1.8 |
+| modal | 1.0 | 1.1 | 2.0 | 1.6 | 1.7 |
+| download | 1.0 | 1.1 | 1.8 | 1.6 | 1.5 |
+| tabs | 1.0 | 1.1 | 1.9 | 1.7 | 1.5 |
+| auth | 1.3 (N=5) | 1.8 (N=4) | 2.9 | 2.9 | 2.8 (N=4) |
 
-Raw data: [results-interactive-resources-pilot-2026-11-25-n1.jsonl](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-interactive-resources-pilot-2026-11-25-n1.jsonl).
+Both OpenBrowser arms have the lowest median on every task for all three metrics. Across the 150 planned OpenBrowser-to-competitor pairs per metric, 145 are eligible. Both arms won all 145 eligible footprint pairs and all 145 eligible RSS pairs. CPU won 143 of 145 eligible pairs. The two losses are the same CLI `modal` sample against agent-browser and browser-use. That sample is a valid outlier and remains included.
+
+Raw data: [results-interactive-resources-2026-11-25-n5.jsonl](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-interactive-resources-2026-11-25-n5.jsonl).
 
 ## 4. Arms
 

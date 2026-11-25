@@ -16,8 +16,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 HERE = Path(__file__).resolve().parent
-DEFAULT_INPUT = HERE / "results" / "results-interactive-resources-pilot-2026-11-25-n1.summary.json"
-DEFAULT_OUTPUT = HERE.parents[1] / "docs" / "images" / "native-interactive-resources-pilot.png"
+DEFAULT_INPUT = HERE / "results" / "results-interactive-resources-2026-11-25-n5.summary.json"
+DEFAULT_OUTPUT = HERE.parents[1] / "docs" / "images" / "native-interactive-resources.png"
 TASKS = ("wizard", "modal", "download", "tabs", "auth")
 ARMS = (
     ("openbrowser-mcp-fast", "OpenBrowser MCP", "#0f6270"),
@@ -94,7 +94,7 @@ def main() -> int:
         fontsize=10.5,
     )
     fig.suptitle(
-        "Interactive resource pilot \u2193 Lower is better",
+        "Interactive resources \u2193 Lower is better",
         fontsize=19,
         color=TEXT,
         x=0.06,
@@ -104,7 +104,7 @@ def main() -> int:
     fig.text(
         0.06,
         0.93,
-        "N=1 per arm and task. Descriptive pilot, not a significance claim. CPU is a sampled lower bound.",
+        "N=5 per arm and task. Auth is N=4 for OpenBrowser CLI and browser-use after one fatal read error each. Invalid rows are excluded. CPU is a sampled lower bound.",
         fontsize=9.5,
         color=MUTED,
         ha="left",

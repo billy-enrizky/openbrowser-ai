@@ -1,0 +1,1077 @@
+[
+  {
+    "task": "auth",
+    "arm": "agent-browser",
+    "runs": 5,
+    "successes": 5,
+    "failures": 0,
+    "all_correct": true,
+    "resource_eligible": 5,
+    "provenance_verified": true,
+    "metrics": {
+      "peak_tree_rss_bytes": {
+        "count": 5,
+        "median": 1244987392,
+        "max": 1254113280
+      },
+      "peak_worker_rss_bytes": {
+        "count": 5,
+        "median": 32194560,
+        "max": 32210944
+      },
+      "peak_child_tree_rss_bytes": {
+        "count": 5,
+        "median": 1214201856,
+        "max": 1223409664
+      },
+      "peak_child_footprint_bytes": {
+        "count": 5,
+        "median": 503184696,
+        "max": 510066504
+      },
+      "observed_tree_cpu_seconds": {
+        "count": 5,
+        "median": 2.854425993,
+        "max": 2.908867027
+      },
+      "observed_child_cpu_seconds": {
+        "count": 5,
+        "median": 2.752545701,
+        "max": 2.791084195
+      }
+    },
+    "errors": []
+  },
+  {
+    "task": "auth",
+    "arm": "browser-use",
+    "runs": 5,
+    "successes": 5,
+    "failures": 0,
+    "all_correct": true,
+    "resource_eligible": 4,
+    "provenance_verified": true,
+    "metrics": {
+      "peak_tree_rss_bytes": {
+        "count": 4,
+        "median": 1252532224.0,
+        "max": 1256128512
+      },
+      "peak_worker_rss_bytes": {
+        "count": 4,
+        "median": 36265984.0,
+        "max": 36634624
+      },
+      "peak_child_tree_rss_bytes": {
+        "count": 4,
+        "median": 1216774144.0,
+        "max": 1220345856
+      },
+      "peak_child_footprint_bytes": {
+        "count": 4,
+        "median": 577665892.0,
+        "max": 580336376
+      },
+      "observed_tree_cpu_seconds": {
+        "count": 4,
+        "median": 2.8055650155,
+        "max": 2.84105801
+      },
+      "observed_child_cpu_seconds": {
+        "count": 4,
+        "median": 2.6647564315,
+        "max": 2.692746762
+      }
+    },
+    "errors": []
+  },
+  {
+    "task": "auth",
+    "arm": "chrome-devtools-mcp",
+    "runs": 5,
+    "successes": 5,
+    "failures": 0,
+    "all_correct": true,
+    "resource_eligible": 5,
+    "provenance_verified": true,
+    "metrics": {
+      "peak_tree_rss_bytes": {
+        "count": 5,
+        "median": 814268416,
+        "max": 815054848
+      },
+      "peak_worker_rss_bytes": {
+        "count": 5,
+        "median": 32292864,
+        "max": 32817152
+      },
+      "peak_child_tree_rss_bytes": {
+        "count": 5,
+        "median": 782123008,
+        "max": 782893056
+      },
+      "peak_child_footprint_bytes": {
+        "count": 5,
+        "median": 491342424,
+        "max": 494684832
+      },
+      "observed_tree_cpu_seconds": {
+        "count": 5,
+        "median": 2.912954769,
+        "max": 2.97964335
+      },
+      "observed_child_cpu_seconds": {
+        "count": 5,
+        "median": 2.814495937,
+        "max": 2.87122777
+      }
+    },
+    "errors": []
+  },
+  {
+    "task": "auth",
+    "arm": "openbrowser-fast",
+    "runs": 5,
+    "successes": 5,
+    "failures": 0,
+    "all_correct": true,
+    "resource_eligible": 4,
+    "provenance_verified": true,
+    "metrics": {
+      "peak_tree_rss_bytes": {
+        "count": 4,
+        "median": 432758784.0,
+        "max": 435388416
+      },
+      "peak_worker_rss_bytes": {
+        "count": 4,
+        "median": 32104448.0,
+        "max": 32522240
+      },
+      "peak_child_tree_rss_bytes": {
+        "count": 4,
+        "median": 401719296.0,
+        "max": 403308544
+      },
+      "peak_child_footprint_bytes": {
+        "count": 4,
+        "median": 147714944.0,
+        "max": 148296504
+      },
+      "observed_tree_cpu_seconds": {
+        "count": 4,
+        "median": 1.801515013,
+        "max": 1.818740579
+      },
+      "observed_child_cpu_seconds": {
+        "count": 4,
+        "median": 1.690366973,
+        "max": 1.709450415
+      }
+    },
+    "errors": []
+  },
+  {
+    "task": "auth",
+    "arm": "openbrowser-mcp-fast",
+    "runs": 5,
+    "successes": 5,
+    "failures": 0,
+    "all_correct": true,
+    "resource_eligible": 5,
+    "provenance_verified": true,
+    "metrics": {
+      "peak_tree_rss_bytes": {
+        "count": 5,
+        "median": 431128576,
+        "max": 435486720
+      },
+      "peak_worker_rss_bytes": {
+        "count": 5,
+        "median": 32112640,
+        "max": 32178176
+      },
+      "peak_child_tree_rss_bytes": {
+        "count": 5,
+        "median": 400343040,
+        "max": 404783104
+      },
+      "peak_child_footprint_bytes": {
+        "count": 5,
+        "median": 142529072,
+        "max": 144790064
+      },
+      "observed_tree_cpu_seconds": {
+        "count": 5,
+        "median": 1.3374564310000001,
+        "max": 1.37106203
+      },
+      "observed_child_cpu_seconds": {
+        "count": 5,
+        "median": 1.250278253,
+        "max": 1.287692114
+      }
+    },
+    "errors": []
+  },
+  {
+    "task": "download",
+    "arm": "agent-browser",
+    "runs": 5,
+    "successes": 5,
+    "failures": 0,
+    "all_correct": true,
+    "resource_eligible": 5,
+    "provenance_verified": true,
+    "metrics": {
+      "peak_tree_rss_bytes": {
+        "count": 5,
+        "median": 1244741632,
+        "max": 1249525760
+      },
+      "peak_worker_rss_bytes": {
+        "count": 5,
+        "median": 32030720,
+        "max": 32210944
+      },
+      "peak_child_tree_rss_bytes": {
+        "count": 5,
+        "median": 1213956096,
+        "max": 1218985984
+      },
+      "peak_child_footprint_bytes": {
+        "count": 5,
+        "median": 503086920,
+        "max": 504168408
+      },
+      "observed_tree_cpu_seconds": {
+        "count": 5,
+        "median": 1.593891717,
+        "max": 1.663901836
+      },
+      "observed_child_cpu_seconds": {
+        "count": 5,
+        "median": 1.4989423849999999,
+        "max": 1.55802446
+      }
+    },
+    "errors": []
+  },
+  {
+    "task": "download",
+    "arm": "browser-use",
+    "runs": 5,
+    "successes": 5,
+    "failures": 0,
+    "all_correct": true,
+    "resource_eligible": 5,
+    "provenance_verified": true,
+    "metrics": {
+      "peak_tree_rss_bytes": {
+        "count": 5,
+        "median": 1026850816,
+        "max": 1035403264
+      },
+      "peak_worker_rss_bytes": {
+        "count": 5,
+        "median": 36159488,
+        "max": 36225024
+      },
+      "peak_child_tree_rss_bytes": {
+        "count": 5,
+        "median": 991150080,
+        "max": 999555072
+      },
+      "peak_child_footprint_bytes": {
+        "count": 5,
+        "median": 461255712,
+        "max": 463516824
+      },
+      "observed_tree_cpu_seconds": {
+        "count": 5,
+        "median": 1.480614838,
+        "max": 1.483285821
+      },
+      "observed_child_cpu_seconds": {
+        "count": 5,
+        "median": 1.351822117,
+        "max": 1.368694338
+      }
+    },
+    "errors": []
+  },
+  {
+    "task": "download",
+    "arm": "chrome-devtools-mcp",
+    "runs": 5,
+    "successes": 5,
+    "failures": 0,
+    "all_correct": true,
+    "resource_eligible": 5,
+    "provenance_verified": true,
+    "metrics": {
+      "peak_tree_rss_bytes": {
+        "count": 5,
+        "median": 794869760,
+        "max": 797245440
+      },
+      "peak_worker_rss_bytes": {
+        "count": 5,
+        "median": 32145408,
+        "max": 32260096
+      },
+      "peak_child_tree_rss_bytes": {
+        "count": 5,
+        "median": 762757120,
+        "max": 765116416
+      },
+      "peak_child_footprint_bytes": {
+        "count": 5,
+        "median": 477562952,
+        "max": 481953696
+      },
+      "observed_tree_cpu_seconds": {
+        "count": 5,
+        "median": 1.775649228,
+        "max": 1.837305659
+      },
+      "observed_child_cpu_seconds": {
+        "count": 5,
+        "median": 1.682650188,
+        "max": 1.748680243
+      }
+    },
+    "errors": []
+  },
+  {
+    "task": "download",
+    "arm": "openbrowser-fast",
+    "runs": 5,
+    "successes": 5,
+    "failures": 0,
+    "all_correct": true,
+    "resource_eligible": 5,
+    "provenance_verified": true,
+    "metrics": {
+      "peak_tree_rss_bytes": {
+        "count": 5,
+        "median": 436699136,
+        "max": 438091776
+      },
+      "peak_worker_rss_bytes": {
+        "count": 5,
+        "median": 31997952,
+        "max": 32129024
+      },
+      "peak_child_tree_rss_bytes": {
+        "count": 5,
+        "median": 406110208,
+        "max": 407355392
+      },
+      "peak_child_footprint_bytes": {
+        "count": 5,
+        "median": 149885848,
+        "max": 150311784
+      },
+      "observed_tree_cpu_seconds": {
+        "count": 5,
+        "median": 1.11211068,
+        "max": 1.152297199
+      },
+      "observed_child_cpu_seconds": {
+        "count": 5,
+        "median": 1.021243556,
+        "max": 1.070196451
+      }
+    },
+    "errors": []
+  },
+  {
+    "task": "download",
+    "arm": "openbrowser-mcp-fast",
+    "runs": 5,
+    "successes": 5,
+    "failures": 0,
+    "all_correct": true,
+    "resource_eligible": 5,
+    "provenance_verified": true,
+    "metrics": {
+      "peak_tree_rss_bytes": {
+        "count": 5,
+        "median": 412925952,
+        "max": 414138368
+      },
+      "peak_worker_rss_bytes": {
+        "count": 5,
+        "median": 32014336,
+        "max": 32112640
+      },
+      "peak_child_tree_rss_bytes": {
+        "count": 5,
+        "median": 382238720,
+        "max": 382894080
+      },
+      "peak_child_footprint_bytes": {
+        "count": 5,
+        "median": 135107072,
+        "max": 135385648
+      },
+      "observed_tree_cpu_seconds": {
+        "count": 5,
+        "median": 1.002600994,
+        "max": 1.024919969
+      },
+      "observed_child_cpu_seconds": {
+        "count": 5,
+        "median": 0.912171658,
+        "max": 0.940919513
+      }
+    },
+    "errors": []
+  },
+  {
+    "task": "modal",
+    "arm": "agent-browser",
+    "runs": 5,
+    "successes": 5,
+    "failures": 0,
+    "all_correct": true,
+    "resource_eligible": 5,
+    "provenance_verified": true,
+    "metrics": {
+      "peak_tree_rss_bytes": {
+        "count": 5,
+        "median": 1262075904,
+        "max": 1268285440
+      },
+      "peak_worker_rss_bytes": {
+        "count": 5,
+        "median": 32161792,
+        "max": 32325632
+      },
+      "peak_child_tree_rss_bytes": {
+        "count": 5,
+        "median": 1231208448,
+        "max": 1237516288
+      },
+      "peak_child_footprint_bytes": {
+        "count": 5,
+        "median": 512605928,
+        "max": 515325888
+      },
+      "observed_tree_cpu_seconds": {
+        "count": 5,
+        "median": 1.6140451,
+        "max": 1.675946181
+      },
+      "observed_child_cpu_seconds": {
+        "count": 5,
+        "median": 1.506642346,
+        "max": 1.571925433
+      }
+    },
+    "errors": []
+  },
+  {
+    "task": "modal",
+    "arm": "browser-use",
+    "runs": 5,
+    "successes": 5,
+    "failures": 0,
+    "all_correct": true,
+    "resource_eligible": 5,
+    "provenance_verified": true,
+    "metrics": {
+      "peak_tree_rss_bytes": {
+        "count": 5,
+        "median": 1260584960,
+        "max": 1282883584
+      },
+      "peak_worker_rss_bytes": {
+        "count": 5,
+        "median": 36290560,
+        "max": 36978688
+      },
+      "peak_child_tree_rss_bytes": {
+        "count": 5,
+        "median": 1224409088,
+        "max": 1247100928
+      },
+      "peak_child_footprint_bytes": {
+        "count": 5,
+        "median": 587496328,
+        "max": 595476032
+      },
+      "observed_tree_cpu_seconds": {
+        "count": 5,
+        "median": 1.738324047,
+        "max": 2.238051677
+      },
+      "observed_child_cpu_seconds": {
+        "count": 5,
+        "median": 1.619394752,
+        "max": 2.081581133
+      }
+    },
+    "errors": []
+  },
+  {
+    "task": "modal",
+    "arm": "chrome-devtools-mcp",
+    "runs": 5,
+    "successes": 5,
+    "failures": 0,
+    "all_correct": true,
+    "resource_eligible": 5,
+    "provenance_verified": true,
+    "metrics": {
+      "peak_tree_rss_bytes": {
+        "count": 5,
+        "median": 830259200,
+        "max": 834224128
+      },
+      "peak_worker_rss_bytes": {
+        "count": 5,
+        "median": 32276480,
+        "max": 32997376
+      },
+      "peak_child_tree_rss_bytes": {
+        "count": 5,
+        "median": 797900800,
+        "max": 801325056
+      },
+      "peak_child_footprint_bytes": {
+        "count": 5,
+        "median": 502025800,
+        "max": 505794264
+      },
+      "observed_tree_cpu_seconds": {
+        "count": 5,
+        "median": 2.018275666,
+        "max": 2.323373929
+      },
+      "observed_child_cpu_seconds": {
+        "count": 5,
+        "median": 1.913783368,
+        "max": 2.197765053
+      }
+    },
+    "errors": []
+  },
+  {
+    "task": "modal",
+    "arm": "openbrowser-fast",
+    "runs": 5,
+    "successes": 5,
+    "failures": 0,
+    "all_correct": true,
+    "resource_eligible": 5,
+    "provenance_verified": true,
+    "metrics": {
+      "peak_tree_rss_bytes": {
+        "count": 5,
+        "median": 453083136,
+        "max": 457048064
+      },
+      "peak_worker_rss_bytes": {
+        "count": 5,
+        "median": 32112640,
+        "max": 33112064
+      },
+      "peak_child_tree_rss_bytes": {
+        "count": 5,
+        "median": 422215680,
+        "max": 425738240
+      },
+      "peak_child_footprint_bytes": {
+        "count": 5,
+        "median": 159126400,
+        "max": 162386984
+      },
+      "observed_tree_cpu_seconds": {
+        "count": 5,
+        "median": 1.143752366,
+        "max": 2.313731422
+      },
+      "observed_child_cpu_seconds": {
+        "count": 5,
+        "median": 1.0560843659999999,
+        "max": 2.146437798
+      }
+    },
+    "errors": []
+  },
+  {
+    "task": "modal",
+    "arm": "openbrowser-mcp-fast",
+    "runs": 5,
+    "successes": 5,
+    "failures": 0,
+    "all_correct": true,
+    "resource_eligible": 5,
+    "provenance_verified": true,
+    "metrics": {
+      "peak_tree_rss_bytes": {
+        "count": 5,
+        "median": 427900928,
+        "max": 431063040
+      },
+      "peak_worker_rss_bytes": {
+        "count": 5,
+        "median": 32129024,
+        "max": 32833536
+      },
+      "peak_child_tree_rss_bytes": {
+        "count": 5,
+        "median": 397115392,
+        "max": 398589952
+      },
+      "peak_child_footprint_bytes": {
+        "count": 5,
+        "median": 143364656,
+        "max": 144544376
+      },
+      "observed_tree_cpu_seconds": {
+        "count": 5,
+        "median": 1.029745335,
+        "max": 1.540799455
+      },
+      "observed_child_cpu_seconds": {
+        "count": 5,
+        "median": 0.944768963,
+        "max": 1.409600455
+      }
+    },
+    "errors": []
+  },
+  {
+    "task": "tabs",
+    "arm": "agent-browser",
+    "runs": 5,
+    "successes": 5,
+    "failures": 0,
+    "all_correct": true,
+    "resource_eligible": 5,
+    "provenance_verified": true,
+    "metrics": {
+      "peak_tree_rss_bytes": {
+        "count": 5,
+        "median": 1251573760,
+        "max": 1254703104
+      },
+      "peak_worker_rss_bytes": {
+        "count": 5,
+        "median": 32112640,
+        "max": 32178176
+      },
+      "peak_child_tree_rss_bytes": {
+        "count": 5,
+        "median": 1220870144,
+        "max": 1224163328
+      },
+      "peak_child_footprint_bytes": {
+        "count": 5,
+        "median": 509230728,
+        "max": 511131392
+      },
+      "observed_tree_cpu_seconds": {
+        "count": 5,
+        "median": 1.696946619,
+        "max": 1.715222767
+      },
+      "observed_child_cpu_seconds": {
+        "count": 5,
+        "median": 1.577738623,
+        "max": 1.60389097
+      }
+    },
+    "errors": []
+  },
+  {
+    "task": "tabs",
+    "arm": "browser-use",
+    "runs": 5,
+    "successes": 5,
+    "failures": 0,
+    "all_correct": true,
+    "resource_eligible": 5,
+    "provenance_verified": true,
+    "metrics": {
+      "peak_tree_rss_bytes": {
+        "count": 5,
+        "median": 1063256064,
+        "max": 1071267840
+      },
+      "peak_worker_rss_bytes": {
+        "count": 5,
+        "median": 36208640,
+        "max": 36290560
+      },
+      "peak_child_tree_rss_bytes": {
+        "count": 5,
+        "median": 1027473408,
+        "max": 1035403264
+      },
+      "peak_child_footprint_bytes": {
+        "count": 5,
+        "median": 479360368,
+        "max": 486307256
+      },
+      "observed_tree_cpu_seconds": {
+        "count": 5,
+        "median": 1.490381494,
+        "max": 1.567920178
+      },
+      "observed_child_cpu_seconds": {
+        "count": 5,
+        "median": 1.362740131,
+        "max": 1.45362347
+      }
+    },
+    "errors": []
+  },
+  {
+    "task": "tabs",
+    "arm": "chrome-devtools-mcp",
+    "runs": 5,
+    "successes": 5,
+    "failures": 0,
+    "all_correct": true,
+    "resource_eligible": 5,
+    "provenance_verified": true,
+    "metrics": {
+      "peak_tree_rss_bytes": {
+        "count": 5,
+        "median": 810844160,
+        "max": 832602112
+      },
+      "peak_worker_rss_bytes": {
+        "count": 5,
+        "median": 32161792,
+        "max": 32227328
+      },
+      "peak_child_tree_rss_bytes": {
+        "count": 5,
+        "median": 778715136,
+        "max": 800505856
+      },
+      "peak_child_footprint_bytes": {
+        "count": 5,
+        "median": 492636664,
+        "max": 495784792
+      },
+      "observed_tree_cpu_seconds": {
+        "count": 5,
+        "median": 1.914496406,
+        "max": 1.959634309
+      },
+      "observed_child_cpu_seconds": {
+        "count": 5,
+        "median": 1.823046698,
+        "max": 1.862350101
+      }
+    },
+    "errors": []
+  },
+  {
+    "task": "tabs",
+    "arm": "openbrowser-fast",
+    "runs": 5,
+    "successes": 5,
+    "failures": 0,
+    "all_correct": true,
+    "resource_eligible": 5,
+    "provenance_verified": true,
+    "metrics": {
+      "peak_tree_rss_bytes": {
+        "count": 5,
+        "median": 450183168,
+        "max": 453099520
+      },
+      "peak_worker_rss_bytes": {
+        "count": 5,
+        "median": 32063488,
+        "max": 32112640
+      },
+      "peak_child_tree_rss_bytes": {
+        "count": 5,
+        "median": 418136064,
+        "max": 422395904
+      },
+      "peak_child_footprint_bytes": {
+        "count": 5,
+        "median": 155440072,
+        "max": 156144512
+      },
+      "observed_tree_cpu_seconds": {
+        "count": 5,
+        "median": 1.149753141,
+        "max": 1.172789949
+      },
+      "observed_child_cpu_seconds": {
+        "count": 5,
+        "median": 1.059324517,
+        "max": 1.087757489
+      }
+    },
+    "errors": []
+  },
+  {
+    "task": "tabs",
+    "arm": "openbrowser-mcp-fast",
+    "runs": 5,
+    "successes": 5,
+    "failures": 0,
+    "all_correct": true,
+    "resource_eligible": 5,
+    "provenance_verified": true,
+    "metrics": {
+      "peak_tree_rss_bytes": {
+        "count": 5,
+        "median": 426426368,
+        "max": 428834816
+      },
+      "peak_worker_rss_bytes": {
+        "count": 5,
+        "median": 32030720,
+        "max": 32079872
+      },
+      "peak_child_tree_rss_bytes": {
+        "count": 5,
+        "median": 395034624,
+        "max": 398262272
+      },
+      "peak_child_footprint_bytes": {
+        "count": 5,
+        "median": 139514392,
+        "max": 142545288
+      },
+      "observed_tree_cpu_seconds": {
+        "count": 5,
+        "median": 1.016464312,
+        "max": 1.054956142
+      },
+      "observed_child_cpu_seconds": {
+        "count": 5,
+        "median": 0.932130999,
+        "max": 0.973598562
+      }
+    },
+    "errors": []
+  },
+  {
+    "task": "wizard",
+    "arm": "agent-browser",
+    "runs": 5,
+    "successes": 5,
+    "failures": 0,
+    "all_correct": true,
+    "resource_eligible": 5,
+    "provenance_verified": true,
+    "metrics": {
+      "peak_tree_rss_bytes": {
+        "count": 5,
+        "median": 1260945408,
+        "max": 1269891072
+      },
+      "peak_worker_rss_bytes": {
+        "count": 5,
+        "median": 32309248,
+        "max": 32342016
+      },
+      "peak_child_tree_rss_bytes": {
+        "count": 5,
+        "median": 1230045184,
+        "max": 1239138304
+      },
+      "peak_child_footprint_bytes": {
+        "count": 5,
+        "median": 521076648,
+        "max": 531661072
+      },
+      "observed_tree_cpu_seconds": {
+        "count": 5,
+        "median": 1.758856234,
+        "max": 1.79780623
+      },
+      "observed_child_cpu_seconds": {
+        "count": 5,
+        "median": 1.651653946,
+        "max": 1.6896427299999999
+      }
+    },
+    "errors": []
+  },
+  {
+    "task": "wizard",
+    "arm": "browser-use",
+    "runs": 5,
+    "successes": 5,
+    "failures": 0,
+    "all_correct": true,
+    "resource_eligible": 5,
+    "provenance_verified": true,
+    "metrics": {
+      "peak_tree_rss_bytes": {
+        "count": 5,
+        "median": 1263665152,
+        "max": 1283866624
+      },
+      "peak_worker_rss_bytes": {
+        "count": 5,
+        "median": 36208640,
+        "max": 36306944
+      },
+      "peak_child_tree_rss_bytes": {
+        "count": 5,
+        "median": 1227800576,
+        "max": 1247985664
+      },
+      "peak_child_footprint_bytes": {
+        "count": 5,
+        "median": 588643328,
+        "max": 592051632
+      },
+      "observed_tree_cpu_seconds": {
+        "count": 5,
+        "median": 1.815407893,
+        "max": 1.84869074
+      },
+      "observed_child_cpu_seconds": {
+        "count": 5,
+        "median": 1.6862277479999999,
+        "max": 1.7277182800000002
+      }
+    },
+    "errors": []
+  },
+  {
+    "task": "wizard",
+    "arm": "chrome-devtools-mcp",
+    "runs": 5,
+    "successes": 5,
+    "failures": 0,
+    "all_correct": true,
+    "resource_eligible": 5,
+    "provenance_verified": true,
+    "metrics": {
+      "peak_tree_rss_bytes": {
+        "count": 5,
+        "median": 824393728,
+        "max": 826654720
+      },
+      "peak_worker_rss_bytes": {
+        "count": 5,
+        "median": 32210944,
+        "max": 32374784
+      },
+      "peak_child_tree_rss_bytes": {
+        "count": 5,
+        "median": 792068096,
+        "max": 794525696
+      },
+      "peak_child_footprint_bytes": {
+        "count": 5,
+        "median": 504319176,
+        "max": 506334600
+      },
+      "observed_tree_cpu_seconds": {
+        "count": 5,
+        "median": 2.111126262,
+        "max": 2.147783831
+      },
+      "observed_child_cpu_seconds": {
+        "count": 5,
+        "median": 2.019136262,
+        "max": 2.051673083
+      }
+    },
+    "errors": []
+  },
+  {
+    "task": "wizard",
+    "arm": "openbrowser-fast",
+    "runs": 5,
+    "successes": 5,
+    "failures": 0,
+    "all_correct": true,
+    "resource_eligible": 5,
+    "provenance_verified": true,
+    "metrics": {
+      "peak_tree_rss_bytes": {
+        "count": 5,
+        "median": 446873600,
+        "max": 453148672
+      },
+      "peak_worker_rss_bytes": {
+        "count": 5,
+        "median": 32129024,
+        "max": 32145408
+      },
+      "peak_child_tree_rss_bytes": {
+        "count": 5,
+        "median": 416104448,
+        "max": 422428672
+      },
+      "peak_child_footprint_bytes": {
+        "count": 5,
+        "median": 155915208,
+        "max": 161862624
+      },
+      "observed_tree_cpu_seconds": {
+        "count": 5,
+        "median": 1.182288987,
+        "max": 1.218187109
+      },
+      "observed_child_cpu_seconds": {
+        "count": 5,
+        "median": 1.095445403,
+        "max": 1.138235945
+      }
+    },
+    "errors": []
+  },
+  {
+    "task": "wizard",
+    "arm": "openbrowser-mcp-fast",
+    "runs": 5,
+    "successes": 5,
+    "failures": 0,
+    "all_correct": true,
+    "resource_eligible": 5,
+    "provenance_verified": true,
+    "metrics": {
+      "peak_tree_rss_bytes": {
+        "count": 5,
+        "median": 426901504,
+        "max": 429735936
+      },
+      "peak_worker_rss_bytes": {
+        "count": 5,
+        "median": 32194560,
+        "max": 32260096
+      },
+      "peak_child_tree_rss_bytes": {
+        "count": 5,
+        "median": 395608064,
+        "max": 397918208
+      },
+      "peak_child_footprint_bytes": {
+        "count": 5,
+        "median": 144298568,
+        "max": 146739832
+      },
+      "observed_tree_cpu_seconds": {
+        "count": 5,
+        "median": 1.014838629,
+        "max": 1.069105546
+      },
+      "observed_child_cpu_seconds": {
+        "count": 5,
+        "median": 0.926466961,
+        "max": 0.986244254
+      }
+    },
+    "errors": []
+  }
+]
