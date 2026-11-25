@@ -696,7 +696,7 @@ Cold interactive, N=5, rotated arm order, lower is better. The timer measures ti
 
 Both OpenBrowser arms have the lowest p50 on all five cold tasks, and both won 5 of 5 pairs on every task against every competitor. Browser-use does not win download or tabs in the current lane. All 125 runs passed the exact oracle and keychain check.
 
-Interactive resource lane, N=5: both OpenBrowser arms have the lowest median child footprint, process-tree RSS, and CPU on all five tasks. Footprint and RSS won all 145 eligible pairs per metric. CPU won 143 of 145. Two cold `auth` cells are N=4 after one fatal read error each, retained and excluded from the medians. See [the charted comparison](https://docs.openbrowser.me/comparison).
+Interactive resource lane, N=5: both OpenBrowser arms have the lowest median child footprint, process-tree RSS, and CPU on all five tasks. Both arms won all 150 eligible pairs per metric. Every cell is N=5 and all 125 observations passed. See [the charted comparison](https://docs.openbrowser.me/comparison).
 
 ### 13.2. CLI Benchmark: 4-Way Comparison (6 Tasks, N=3 runs)
 
