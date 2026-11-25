@@ -1,7 +1,7 @@
 # OpenBrowser LLMs
 
 <!-- toc:start -->
-## Table of Contents
+## Contents
 
 - [1. Migrating from LangChain](#1-migrating-from-langchain)
 

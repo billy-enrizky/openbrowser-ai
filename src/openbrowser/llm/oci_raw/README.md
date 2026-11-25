@@ -1,7 +1,7 @@
 # OCI Raw API Integration
 
 <!-- toc:start -->
-## Table of Contents
+## Contents
 
 - [1. Features](#1-features)
 - [2. Installation](#2-installation)

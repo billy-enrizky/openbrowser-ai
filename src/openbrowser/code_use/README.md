@@ -1,7 +1,7 @@
 # Code-Use Mode
 
 <!-- toc:start -->
-## Table of Contents
+## Contents
 
 - [1. Problem Solved](#1-problem-solved)
   - [1.1. Namespace](#11-namespace)

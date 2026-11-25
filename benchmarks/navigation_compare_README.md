@@ -1,7 +1,7 @@
 # Compare local navigation contracts
 
 <!-- toc:start -->
-## Table of Contents
+## Contents
 
 - [1. Prepare the runtimes](#1-prepare-the-runtimes)
 - [2. Claim tiers and pins](#2-claim-tiers-and-pins)

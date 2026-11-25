@@ -1,7 +1,7 @@
 # Context Atlas
 
 <!-- toc:start -->
-## Table of Contents
+## Contents
 
 - [1. Two ways to search](#1-two-ways-to-search)
 - [2. Run the separate localhost page](#2-run-the-separate-localhost-page)

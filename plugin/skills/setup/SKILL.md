@@ -11,7 +11,7 @@ allowed-tools: Bash(openbrowser-ai:*) Bash(uv:*) Bash(uvx:*) Bash(python3:*) Bas
 # OpenBrowser Setup
 
 <!-- toc:start -->
-## Table of Contents
+## Contents
 
 - [1. Rules](#1-rules)
 - [2. Step 1 -- Inspect the machine](#2-step-1----inspect-the-machine)

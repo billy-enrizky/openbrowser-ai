@@ -7,7 +7,7 @@ icon: "scale-balanced"
 # Browser Automation Comparison
 
 {/* toc:start */}
-## Table of Contents
+## Contents
 
 - [1. Benchmark index](#1-benchmark-index)
 - [2. How to read this page](#2-how-to-read-this-page)
@@ -231,7 +231,7 @@ Raw data: [results-interactive-resources-2026-11-25-n5-final.jsonl](https://gith
 
 Peak process-tree RSS (MiB) ↓ **Lower is better**.
 
-<img src="/images/native-mcp-http-memory.png" alt="Bar chart of peak process-tree RSS in MiB for one scrape_web call and 25 concurrent scrape_web calls. Both use no browser process." />
+<img src="/images/native-mcp-http-memory-2026-11-25.png" alt="Bar chart of peak process-tree RSS in MiB for one scrape_web call and 25 concurrent scrape_web calls. Both use no browser process." />
 
 The `scrape_web` MCP tool runs without Chromium, Blink, or V8. It performs an HTTP fetch and parses the response. It does not run JavaScript, take screenshots, or use browser cookies. It never falls back to a browser. This is not the same scope as a browser engine. A page that needs JavaScript must use `execute_code` with a browser.
 

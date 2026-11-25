@@ -1,7 +1,7 @@
 # Langchain Models (legacy)
 
 <!-- toc:start -->
-## Table of Contents
+## Contents
 
 - [1. How to use](#1-how-to-use)
 

@@ -39,7 +39,7 @@ https://github.com/user-attachments/assets/16f7ef1a-beb1-45e2-a733-9592536e0ef7
 OpenBrowser is a framework for intelligent browser automation. It combines direct CDP communication with a CodeAgent architecture, where the LLM writes Python code executed in a persistent namespace, to navigate, interact with, and extract information from web pages autonomously.
 
 <!-- toc:start -->
-## Table of Contents
+## Contents
 
 - [1. Documentation](#1-documentation)
 - [2. Key Features](#2-key-features)

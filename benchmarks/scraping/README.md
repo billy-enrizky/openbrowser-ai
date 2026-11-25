@@ -1,7 +1,7 @@
 # Local scraping benchmark
 
 <!-- toc:start -->
-## Table of Contents
+## Contents
 
 - [1. How to read these numbers](#1-how-to-read-these-numbers)
 - [2. Current results, 2026-11-25, and reference lanes](#2-current-results-2026-11-25-and-reference-lanes)
