@@ -23,6 +23,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextlib
+import html
 import json
 import os
 import platform
@@ -48,6 +49,37 @@ PAGE_COUNT = 5
 TABLE_ROWS = 100
 TABLE_COLS = 6
 ASSET_COUNT = 20
+
+EXPECTED_JS_SKUS = [f"SKU-{index:03d}" for index in range(JS_ITEMS)]
+EXPECTED_PAGINATION_IDS = [
+    f"page-{page}-row-{row}" for page in range(1, PAGE_COUNT + 1) for row in range(PAGE_SIZE)
+]
+EXPECTED_TABLE_CELLS = [
+    [str(index)] + [f"cell-{index}-{column}" for column in range(1, TABLE_COLS)]
+    for index in range(TABLE_ROWS)
+]
+EXPECTED_TABLE_ROWS = [
+    [f"table-{index}", *EXPECTED_TABLE_CELLS[index]] for index in range(TABLE_ROWS)
+]
+
+
+def exact_js_list(skus: list[str]) -> bool:
+    """Require the complete ordered SKU sequence."""
+    return skus == EXPECTED_JS_SKUS
+
+
+def exact_pagination(ids: list[str]) -> bool:
+    """Require the complete ordered page and row ID sequence."""
+    return ids == EXPECTED_PAGINATION_IDS
+
+
+def exact_table(rows: list[list[str]]) -> bool:
+    """Require every row ID and every cell in order."""
+    return rows == EXPECTED_TABLE_ROWS
+
+
+def _cell_text(value: str) -> str:
+    return html.unescape(re.sub(r"<[^>]+>", "", value)).strip()
 
 
 def _static_page() -> str:
@@ -272,6 +304,7 @@ class BrowserArm:
         self.session = None
         self.namespace = None
         self.last_engine = ""
+        self._started = False
 
     async def start(self) -> None:
         from openbrowser.browser import BrowserProfile, BrowserSession
@@ -288,8 +321,12 @@ class BrowserArm:
         if self.chrome_path:
             profile_kwargs["executable_path"] = self.chrome_path
         self.session = BrowserSession(browser_profile=BrowserProfile(**profile_kwargs))
-        await self.session.start()
         self.namespace = create_namespace(browser_session=self.session, tools=CodeAgentTools())
+
+    async def _ensure_started(self) -> None:
+        if not self._started:
+            await self.session.start()
+            self._started = True
 
     async def stop(self) -> None:
         if self.session is not None:
@@ -309,6 +346,7 @@ class BrowserArm:
         return ok, content, ""
 
     async def run_js_list(self, base: str):
+        await self._ensure_started()
         result = await self.scrape(
             url=f"{base}/js-list",
             format="json",
@@ -316,7 +354,7 @@ class BrowserArm:
             wait_for='#items[data-count="30"]',
         )
         skus = _skus_from_json(result)
-        ok = len(skus) == JS_ITEMS and skus[0] == "SKU-000" and skus[-1] == "SKU-029"
+        ok = exact_js_list(skus)
         return ok, json.dumps(skus), ""
 
     async def run_pagination(self, base: str):
@@ -331,18 +369,24 @@ class BrowserArm:
                 row_id = (item.get("attributes") or {}).get("data-id")
                 if row_id:
                     ids.append(row_id)
-        ok = len(ids) == PAGE_COUNT * PAGE_SIZE and len(set(ids)) == len(ids)
+        ok = exact_pagination(ids)
         return ok, json.dumps(ids), ""
 
     async def run_table(self, base: str):
         result = await self.scrape(url=f"{base}/table", format="json", selector="tbody tr")
-        rows = result.get("content") or []
-        ok = len(rows) == TABLE_ROWS and all(
-            len(re.findall(r"<td>", item.get("html") or "")) == TABLE_COLS for item in rows
-        )
-        return ok, json.dumps([item.get("attributes") for item in rows]), ""
+        items = result.get("content") or []
+        rows = [
+            [
+                str((item.get("attributes") or {}).get("data-id") or ""),
+                *[_cell_text(cell) for cell in re.findall(r"<td>(.*?)</td>", item.get("html") or "", re.S)],
+            ]
+            for item in items
+        ]
+        ok = exact_table(rows)
+        return ok, json.dumps(rows), ""
 
     async def run_assets(self, base: str):
+        await self._ensure_started()
         result = await self.scrape(
             url=f"{base}/assets",
             format="text",
@@ -651,8 +695,11 @@ class LightpandaArm:
 
     async def run_table(self, base: str):
         content = self._fetch(f"{base}/table", "html", wait_ms=100)
-        rows = re.findall(r'<tr data-id="table-[^"]+">(.*?)</tr>', content, re.S)
-        ok = len(rows) == TABLE_ROWS and all(len(re.findall(r"<td>", row)) == TABLE_COLS for row in rows)
+        rows = [
+            [row_id, *[_cell_text(cell) for cell in re.findall(r"<td>(.*?)</td>", body, re.S)]]
+            for row_id, body in re.findall(r'<tr data-id="(table-[^"]+)">(.*?)</tr>', content, re.S)
+        ]
+        ok = exact_table(rows)
         return ok, content, ""
 
     async def run_assets(self, base: str):
