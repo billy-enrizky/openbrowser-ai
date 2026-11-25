@@ -1,0 +1,307 @@
+{
+  "environment": {
+    "cold_results": "benchmarks/interactive/results/results-cold-five-arm-lean-2026-11-25-n5-final4.jsonl",
+    "tasks": [
+      "wizard",
+      "modal",
+      "download",
+      "tabs"
+    ],
+    "samples": 5,
+    "rotate_arms": true,
+    "load_before": [
+      5.04,
+      5.66,
+      4.924
+    ],
+    "load_after": [
+      6.482,
+      6.212,
+      5.238
+    ],
+    "arms": {
+      "openbrowser-fast": {
+        "platform": "macOS-26.6-arm64-arm-64bit",
+        "machine": "arm64",
+        "binary": "working copy",
+        "version": "0.1.59.dev47+gbedbbee6b.d20261125",
+        "warmup_ms": 845.555,
+        "warmup_payload": {
+          "ok": true,
+          "elapsed_ms": 776.0,
+          "url": "about:blank"
+        }
+      },
+      "openbrowser-mcp-fast": {
+        "platform": "macOS-26.6-arm64-arm-64bit",
+        "machine": "arm64",
+        "binary": "working copy",
+        "version": "0.1.59.dev47+gbedbbee6b.d20261125",
+        "warmup_ms": 518.027,
+        "warmup_payload": {
+          "server": "started",
+          "context_id": "960ec66aea2e4e3fbd8d152a96e896d4"
+        }
+      },
+      "chrome-devtools-mcp": {
+        "platform": "macOS-26.6-arm64-arm-64bit",
+        "machine": "arm64",
+        "binary": "$HOME/.cache/openbrowser-interactive-bench/npm/node_modules/.bin/chrome-devtools-mcp",
+        "version": "1.13.0",
+        "warmup_ms": 927.195,
+        "warmup_payload": {
+          "ok": true,
+          "page_id": 1,
+          "browser_version": "1.13.0",
+          "keychain_verified": true
+        }
+      },
+      "agent-browser": {
+        "platform": "macOS-26.6-arm64-arm-64bit",
+        "machine": "arm64",
+        "binary": "$HOME/.cache/openbrowser-interactive-bench/npm/node_modules/.bin/agent-browser",
+        "version": "agent-browser 0.43.0",
+        "warmup_ms": 1130.185,
+        "warmup_payload": {
+          "ok": true,
+          "session": "wf8328729f8",
+          "keychain_verified": true
+        }
+      },
+      "browser-use": {
+        "platform": "macOS-26.6-arm64-arm-64bit",
+        "machine": "arm64",
+        "binary": "$HOME/.cache/openbrowser-interactive-bench/browser-use-venv/bin/browser-use",
+        "version": "browser-use 1.0.8 (browser-harness 0.1.13)",
+        "warmup_ms": 349.574,
+        "warmup_payload": {
+          "ok": true,
+          "cdp_url": "http://127.0.0.1:58798",
+          "keychain_verified": true
+        }
+      }
+    }
+  },
+  "rows": [
+    {
+      "task": "wizard",
+      "arm": "openbrowser-fast",
+      "runs": 5,
+      "ok": 5,
+      "warm_p50_ms": 119.85924999953568,
+      "warm_p95_ms": 120.3729580001891,
+      "cold_p50_ms": 677.1464170001309,
+      "speedup": 5.6495132165665485,
+      "errors": []
+    },
+    {
+      "task": "wizard",
+      "arm": "openbrowser-mcp-fast",
+      "runs": 5,
+      "ok": 5,
+      "warm_p50_ms": 56.18366700036859,
+      "warm_p95_ms": 88.77170799951273,
+      "cold_p50_ms": 569.277499999771,
+      "speedup": 10.132437599632581,
+      "errors": []
+    },
+    {
+      "task": "wizard",
+      "arm": "chrome-devtools-mcp",
+      "runs": 5,
+      "ok": 5,
+      "warm_p50_ms": 3481.926208999539,
+      "warm_p95_ms": 3539.5516660000794,
+      "cold_p50_ms": 4311.600334000104,
+      "speedup": 1.2382802148006908,
+      "errors": []
+    },
+    {
+      "task": "wizard",
+      "arm": "agent-browser",
+      "runs": 5,
+      "ok": 5,
+      "warm_p50_ms": 494.05441700037045,
+      "warm_p95_ms": 518.8907089996064,
+      "cold_p50_ms": 1572.7427499996338,
+      "speedup": 3.1833391138338,
+      "errors": []
+    },
+    {
+      "task": "wizard",
+      "arm": "browser-use",
+      "runs": 5,
+      "ok": 5,
+      "warm_p50_ms": 519.1502920006315,
+      "warm_p95_ms": 735.3406669999458,
+      "cold_p50_ms": 1111.4117500001157,
+      "speedup": 2.140828517532191,
+      "errors": []
+    },
+    {
+      "task": "modal",
+      "arm": "openbrowser-fast",
+      "runs": 5,
+      "ok": 5,
+      "warm_p50_ms": 267.5244170004589,
+      "warm_p95_ms": 299.72004200044466,
+      "cold_p50_ms": 840.6898329999422,
+      "speedup": 3.142478890061463,
+      "errors": []
+    },
+    {
+      "task": "modal",
+      "arm": "openbrowser-mcp-fast",
+      "runs": 5,
+      "ok": 5,
+      "warm_p50_ms": 211.14612499968644,
+      "warm_p95_ms": 221.14820800015877,
+      "cold_p50_ms": 725.165458000447,
+      "speedup": 3.4344246573387216,
+      "errors": []
+    },
+    {
+      "task": "modal",
+      "arm": "chrome-devtools-mcp",
+      "runs": 5,
+      "ok": 5,
+      "warm_p50_ms": 2760.4252500004804,
+      "warm_p95_ms": 2779.5752920001178,
+      "cold_p50_ms": 3470.6541250002374,
+      "speedup": 1.2572896603520176,
+      "errors": []
+    },
+    {
+      "task": "modal",
+      "arm": "agent-browser",
+      "runs": 5,
+      "ok": 5,
+      "warm_p50_ms": 1146.5011669997693,
+      "warm_p95_ms": 1368.7601669998912,
+      "cold_p50_ms": 2303.756125000291,
+      "speedup": 2.009379659881981,
+      "errors": []
+    },
+    {
+      "task": "modal",
+      "arm": "browser-use",
+      "runs": 5,
+      "ok": 5,
+      "warm_p50_ms": 810.5962499994348,
+      "warm_p95_ms": 1242.0274159994733,
+      "cold_p50_ms": 1744.1728750000038,
+      "speedup": 2.1517159436664306,
+      "errors": []
+    },
+    {
+      "task": "download",
+      "arm": "openbrowser-fast",
+      "runs": 5,
+      "ok": 5,
+      "warm_p50_ms": 394.58483300040825,
+      "warm_p95_ms": 398.6021250002523,
+      "cold_p50_ms": 963.4517919998871,
+      "speedup": 2.441684807481919,
+      "errors": []
+    },
+    {
+      "task": "download",
+      "arm": "openbrowser-mcp-fast",
+      "runs": 5,
+      "ok": 5,
+      "warm_p50_ms": 347.69895899989933,
+      "warm_p95_ms": 361.6521249996367,
+      "cold_p50_ms": 859.9833330004003,
+      "speedup": 2.4733560764001288,
+      "errors": []
+    },
+    {
+      "task": "download",
+      "arm": "chrome-devtools-mcp",
+      "runs": 5,
+      "ok": 5,
+      "warm_p50_ms": 772.2920000005615,
+      "warm_p95_ms": 791.3673749999361,
+      "cold_p50_ms": 1512.7307080001628,
+      "speedup": 1.9587548595596782,
+      "errors": []
+    },
+    {
+      "task": "download",
+      "arm": "agent-browser",
+      "runs": 5,
+      "ok": 5,
+      "warm_p50_ms": 438.36354199993366,
+      "warm_p95_ms": 452.3847919999753,
+      "cold_p50_ms": 1483.9986669999234,
+      "speedup": 3.385314983608167,
+      "errors": []
+    },
+    {
+      "task": "download",
+      "arm": "browser-use",
+      "runs": 5,
+      "ok": 5,
+      "warm_p50_ms": 573.0639580006027,
+      "warm_p95_ms": 592.1157919992766,
+      "cold_p50_ms": 1126.0604170001898,
+      "speedup": 1.9649820954173591,
+      "errors": []
+    },
+    {
+      "task": "tabs",
+      "arm": "openbrowser-fast",
+      "runs": 5,
+      "ok": 5,
+      "warm_p50_ms": 130.95529099973646,
+      "warm_p95_ms": 142.62795800004824,
+      "cold_p50_ms": 683.2295829999566,
+      "speedup": 5.2172736037166425,
+      "errors": []
+    },
+    {
+      "task": "tabs",
+      "arm": "openbrowser-mcp-fast",
+      "runs": 5,
+      "ok": 5,
+      "warm_p50_ms": 71.71583300078055,
+      "warm_p95_ms": 79.98983299967222,
+      "cold_p50_ms": 592.6269580004373,
+      "speedup": 8.263544230100306,
+      "errors": []
+    },
+    {
+      "task": "tabs",
+      "arm": "chrome-devtools-mcp",
+      "runs": 5,
+      "ok": 5,
+      "warm_p50_ms": 1484.9649999996473,
+      "warm_p95_ms": 1522.3063329995057,
+      "cold_p50_ms": 2220.3090409998367,
+      "speedup": 1.4951928436026196,
+      "errors": []
+    },
+    {
+      "task": "tabs",
+      "arm": "agent-browser",
+      "runs": 5,
+      "ok": 5,
+      "warm_p50_ms": 396.89033400009066,
+      "warm_p95_ms": 577.160458000435,
+      "cold_p50_ms": 1393.0580410001312,
+      "speedup": 3.5099318921680087,
+      "errors": []
+    },
+    {
+      "task": "tabs",
+      "arm": "browser-use",
+      "runs": 5,
+      "ok": 5,
+      "warm_p50_ms": 232.46320799989917,
+      "warm_p95_ms": 284.6543749992634,
+      "cold_p50_ms": 797.3483749997285,
+      "speedup": 3.429998156955979,
+      "errors": []
+    }
+  ]
+}
