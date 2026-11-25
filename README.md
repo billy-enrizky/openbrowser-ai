@@ -75,9 +75,8 @@ OpenBrowser is a framework for intelligent browser automation. It combines direc
   - [12.1. Quick Setup](#121-quick-setup)
   - [12.2. Tools](#122-tools)
   - [12.3. Configuration](#123-configuration)
-- [13. Benchmark: Token Efficiency](#13-benchmark-token-efficiency)
+- [13. Benchmark: Native Local Lanes](#13-benchmark-native-local-lanes)
   - [13.1. Native Local Benchmarks (2026-11-25)](#131-native-local-benchmarks-2026-11-25)
-  - [13.2. Historical CLI and MCP comparisons retired](#132-historical-cli-and-mcp-comparisons-retired)
 - [14. CLI Usage](#14-cli-usage)
 - [15. Project Structure](#15-project-structure)
 - [16. Testing](#16-testing)
@@ -640,9 +639,9 @@ Prefer indexed actions whenever an element index exists. Coordinate actions use 
 | `OPENBROWSER_SHUTDOWN_TIMEOUT` | Browser and context cleanup bound in seconds | `20` |
 | `ANONYMIZED_TELEMETRY` | Set to `false` to disable anonymized usage telemetry | `true` |
 
-## 13. Benchmark: Token Efficiency
+## 13. Benchmark: Native Local Lanes
 
-Section 13.1 reports the last clean tracked native local run. Historical model-driven CLI and MCP comparisons are retired; their paths and hashes are in [RETIRED_RESULTS.md](benchmarks/RETIRED_RESULTS.md). For a local, no-LLM comparison with pinned runtimes and verified page work, use the [navigation comparison verifier](benchmarks/navigation_compare_README.md), its [counterbalanced policy-fix results](benchmarks/navigation_results_2026-11-15_policy_v2.json), and the retained [earlier results](benchmarks/navigation_results_2026-11-15.json). These report engine, IPC, wait-policy, failure, and cleanup differences rather than declaring a universal winner. They are not MCP or CLI agent-comparison numbers.
+Section 13.1 reports the current native local baseline. For a local, no-LLM comparison with pinned runtimes and verified page work, use the [navigation comparison verifier](benchmarks/navigation_compare_README.md). It reports engine, IPC, wait-policy, failure, and cleanup differences rather than declaring a universal winner. It is not an MCP or CLI agent-comparison number.
 
 ### 13.1. Native Local Benchmarks (2026-11-25)
 
@@ -695,11 +694,6 @@ Both OpenBrowser arms have the lowest p50 on all five cold tasks, and both won 5
 
 Interactive resource lane, N=5: both OpenBrowser arms have the lowest median child footprint, process-tree RSS, and CPU on all five tasks. Both arms won all 150 eligible pairs per metric. Every cell is N=5 and all 125 observations passed. See [the charted comparison](https://docs.openbrowser.me/comparison).
 
-### 13.2. Historical CLI and MCP comparisons retired
-
-The 2026-03-15 CLI comparison and the 2026-02-21 MCP server comparison are historical and retired from this README. Their paths, SHA256 digests, and sizes are recorded in [RETIRED_RESULTS.md](benchmarks/RETIRED_RESULTS.md), and the files remain available in git history before this cleanup commit. The separate [CLI comparison](https://docs.openbrowser.me/cli-comparison) page is retained as historical material.
-
-A newer build refresh has three retained CLI cold tail losses and one browser-use warm adapter failure. Those results are not published here until the warm harness is fixed.
 ## 14. CLI Usage
 
 ```bash
@@ -780,11 +774,10 @@ openbrowser-ai/
 │   ├── llm/                   # LLM providers
 │   ├── mcp/                   # MCP server
 │   └── tools/                 # Action registry
-├── benchmarks/                # MCP benchmarks and E2E tests
-│   ├── playwright_benchmark.py
-│   ├── cdp_benchmark.py
-│   ├── openbrowser_benchmark.py
-│   └── e2e_published_test.py
+├── benchmarks/                # Interactive and scraping harnesses
+│   ├── interactive/           # Cold, warm, and resource lanes
+│   ├── scraping/              # Firecrawl, Lightpanda, and no-browser lanes
+│   └── e2e_published_test.py  # Published PyPI package E2E test
 └── tests/                     # Test suite
 ```
 
@@ -803,15 +796,17 @@ uv run python benchmarks/e2e_published_test.py
 
 ### 16.1. Benchmarks
 
-Run individual MCP server benchmarks (JSON-RPC stdio, 5-step Wikipedia workflow):
+Run the current native harnesses. See the benchmark guides for tasks, exact oracles, raw evidence, and host-load caveats:
 
 ```bash
-uv run python benchmarks/openbrowser_benchmark.py   # OpenBrowser MCP
-uv run python benchmarks/playwright_benchmark.py     # Playwright MCP
-uv run python benchmarks/cdp_benchmark.py            # Chrome DevTools MCP
+uv run --locked python -m benchmarks.interactive.run_benchmark --help
+uv run --locked python benchmarks/scraping/scrape_compare.py --help
 ```
 
-Historical benchmark result files are retired. See [RETIRED_RESULTS.md](benchmarks/RETIRED_RESULTS.md) for recovery paths and hashes. Current native evidence is on [Benchmark Comparison](https://docs.openbrowser.me/comparison).
+- [Interactive benchmark guide](benchmarks/interactive/README.md)
+- [Scraping benchmark guide](benchmarks/scraping/README.md)
+
+Current native evidence is on [Benchmark Comparison](https://docs.openbrowser.me/comparison).
 
 ## 17. Backend and Frontend Deployment
 

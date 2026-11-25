@@ -19,7 +19,6 @@
 - [11. Run](#11-run)
 - [12. Files](#12-files)
 - [13. Safety and cleanup](#13-safety-and-cleanup)
-- [14. Historical results retired](#14-historical-results-retired)
 
 <!-- toc:end -->
 
@@ -322,9 +321,3 @@ OpenBrowser daemon socket path stays below the macOS `AF_UNIX` limit.
   `finally` block. The runner also terminates any process whose command line
   contains the run's unique temp path.
 - No AWS, cloud browser, paid API, or model provider is called.
-
-## 14. Historical results retired
-
-The 2026-11-23 and 2026-11-24 runs are superseded by the current lanes in section 2 and the resource lane in section 3. Their files are retired from the working tree. Paths, SHA256 digests, and sizes are recorded in [RETIRED_RESULTS.md](../RETIRED_RESULTS.md), and the files remain available in git history before this cleanup commit.
-
-Current evidence remains in section 2 and section 3. No historical table is current-version evidence.

@@ -11,7 +11,7 @@
   - [2.4. skills.sh](#24-skillssh)
   - [2.5. Standalone MCP server (without plugin)](#25-standalone-mcp-server-without-plugin)
 - [3. Available Tools](#3-available-tools)
-- [4. Benchmark: Token Efficiency](#4-benchmark-token-efficiency)
+- [4. Benchmark: Native Local Lanes](#4-benchmark-native-local-lanes)
 - [5. Native web search](#5-native-web-search)
 - [6. CLI Execute Mode](#6-cli-execute-mode)
 - [7. Configuration](#7-configuration)
@@ -137,11 +137,9 @@ Prefer indexed actions whenever an element index exists. Coordinate actions use 
 
 **Available only if installed**: `matplotlib`, `BeautifulSoup`, `PdfReader` (requires `pip install openbrowser-ai[pdf]`), `tabulate`
 
-## 4. Benchmark: Token Efficiency
+## 4. Benchmark: Native Local Lanes
 
 Current native evidence lives in [Benchmark Comparison](https://docs.openbrowser.me/comparison). The 2026-11-25 cold and warm lanes both put OpenBrowser MCP and CLI at the lowest p50 on every task against every competitor. The interactive resource lane has the lowest child footprint, tree RSS, and CPU on every eligible pair. The sequential scraping lane won 50 of 50 pairs against Firecrawl Local, and the full arm won 49 of 50 with one static sample 0.13 ms slower.
-
-Historical 2026-03-15 CLI and 2026-02-21 MCP comparisons are retired from this README. Their paths, SHA256 digests, and sizes are in [RETIRED_RESULTS.md](../benchmarks/RETIRED_RESULTS.md).
 
 ## 5. Native web search
 
@@ -238,12 +236,16 @@ Each skill file (`SKILL.md`) contains YAML frontmatter with trigger conditions a
 ```bash
 # E2E test the MCP server against the published PyPI package
 uv run python benchmarks/e2e_published_test.py
-
-# Run MCP benchmarks (5-step Wikipedia workflow)
-uv run python benchmarks/openbrowser_benchmark.py
-uv run python benchmarks/playwright_benchmark.py
-uv run python benchmarks/cdp_benchmark.py
 ```
+
+Run the current native harnesses from the package repository:
+
+```bash
+uv run --locked python -m benchmarks.interactive.run_benchmark --help
+uv run --locked python benchmarks/scraping/scrape_compare.py --help
+```
+
+See the [interactive](../benchmarks/interactive/README.md) and [scraping](../benchmarks/scraping/README.md) benchmark guides.
 
 ## 10. Troubleshooting
 

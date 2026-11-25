@@ -134,6 +134,10 @@
     {
       "source": "/customize/integrations/docs-mcp",
       "destination": "/customize/integrations/mcp-server"
+    },
+    {
+      "source": "/cli-comparison",
+      "destination": "/comparison"
     }
   ],
   "navigation": {
@@ -145,7 +149,6 @@
           "quickstart",
           "quickstart_llm",
           "supported-models",
-          "cli-comparison",
           "comparison",
           "production"
         ]

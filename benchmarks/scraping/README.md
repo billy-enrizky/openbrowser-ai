@@ -19,7 +19,6 @@
   - [7.3. Correctness oracles](#73-correctness-oracles)
   - [7.4. Limits for this lane](#74-limits-for-this-lane)
 - [8. Limits](#8-limits)
-- [9. Historical results retired](#9-historical-results-retired)
 
 <!-- toc:end -->
 
@@ -188,7 +187,7 @@ bytes, and output bytes for a sequential HTTP loop and for `scrape_pages`.
 
 ## 7. Firecrawl lane reference procedure
 
-*This section keeps the install, fairness, and oracle rules for the Firecrawl Local lane. Current results are in section 2.2 and section 2.3. Historical result files are retired.*
+*This section keeps the install, fairness, and oracle rules for the Firecrawl Local lane. Current results are in section 2.2 and section 2.3.*
 
 Compare Firecrawl Local 0.1.1 with OpenBrowser on the same fixtures, browser
 binary, correctness oracles, samples, and warmups. Firecrawl Cloud is not used.
@@ -314,9 +313,3 @@ The oracle is exact for every task and runs before latency counts.
 - The latency lanes do not measure peak RSS or CPU. Use the resource lane and
   the 2026-11-25 MCP memory lane for memory results, and state their process
   boundaries before comparing them.
-
-## 9. Historical results retired
-
-The 2026-11-23 and 2026-11-24 runs are superseded by the current lanes in section 2. Their files are retired from the working tree. Paths, SHA256 digests, and sizes are recorded in [RETIRED_RESULTS.md](../RETIRED_RESULTS.md), and the files remain available in git history before this cleanup commit.
-
-No historical table is current-version evidence.
