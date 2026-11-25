@@ -63,6 +63,11 @@ if _src_dir not in sys.path:
 
 # Import and configure logging to use stderr before other imports
 from openbrowser.logging_config import setup_logging
+from openbrowser.mcp.protocol import (
+	LEGACY_PROTOCOL_VERSIONS,
+	MODERN_PROTOCOL_VERSION,
+	ProtocolRpcError,
+)
 
 
 def _configure_mcp_server_logging():
@@ -186,8 +191,6 @@ _MCP_WORKSPACE_DIR = (
 )
 _CDP_HEALTH_CHECK_TIMEOUT_SECONDS = 2.0
 
-MODERN_PROTOCOL_VERSION = '2026-07-28'
-LEGACY_PROTOCOL_VERSIONS = frozenset({'2024-11-05', '2025-03-26', '2025-06-18', '2025-11-25'})
 _DEFAULT_MAX_CONTEXTS = 16
 
 
@@ -246,8 +249,10 @@ def _process_output_lock() -> asyncio.Lock:
 	return lock
 
 
-def _tool_catalog(description: str, *, modern: bool) -> tuple[types.Tool, ...]:
+def _tool_catalog(description: str, *, modern: bool) -> tuple[Any, ...]:
 	"""Build the exact legacy or modern catalog from one source."""
+	import mcp.types as types
+
 	context_property = {
 		'type': 'string',
 		'description': (
@@ -401,6 +406,42 @@ def _tool_catalog(description: str, *, modern: bool) -> tuple[types.Tool, ...]:
 			idempotent_hint=False,
 		),
 	)
+	scrape = types.Tool(
+		name='scrape_web',
+		description=(
+			'Fetch one HTTP(S) URL without starting a browser and without a context_id. '
+			'This is the no-Blink, no-V8 mode: it does not run JavaScript, take screenshots, '
+			'use browser cookies, or fall back to a browser. Use it for server-rendered pages. '
+			'Returns JSON with url, title, format, content, stats, and engine_used=http. '
+			'If the page needs JavaScript, use execute_code with a browser context.'
+		),
+		input_schema={
+			'type': 'object',
+			'properties': {
+				'url': {'type': 'string', 'minLength': 1, 'maxLength': 8192},
+				'format': {
+					'type': 'string',
+					'enum': ['markdown', 'text', 'html', 'links', 'json'],
+					'default': 'markdown',
+				},
+				'selector': {'type': 'string', 'minLength': 1},
+				'timeout_ms': {'type': 'integer', 'minimum': 1, 'maximum': 120_000},
+				'max_chars': {'type': 'integer', 'minimum': 0},
+				'extract_links': {'type': 'boolean', 'default': False},
+				'only_main_content': {'type': 'boolean', 'default': False},
+				'include_tags': {'type': 'array', 'items': {'type': 'string'}, 'minItems': 1},
+				'exclude_tags': {'type': 'array', 'items': {'type': 'string'}, 'minItems': 1},
+			},
+			'required': ['url'],
+			'additionalProperties': False,
+		},
+		annotations=types.ToolAnnotations(
+			read_only_hint=True,
+			destructive_hint=False,
+			open_world_hint=True,
+			idempotent_hint=True,
+		),
+	)
 	if not modern:
 		return (execute, status, reset, search)
 
@@ -457,7 +498,7 @@ def _tool_catalog(description: str, *, modern: bool) -> tuple[types.Tool, ...]:
 			idempotent_hint=True,
 		),
 	)
-	return (create, execute, status, reset, close, search)
+	return (create, execute, status, reset, close, search, scrape)
 
 
 def _ensure_all_loggers_use_stderr():
@@ -485,24 +526,29 @@ def _ensure_all_loggers_use_stderr():
 _ensure_all_loggers_use_stderr()
 
 
-# Try to import MCP SDK
-try:
-	import mcp.server.stdio
-	import mcp.types as types
-	from mcp import MCPError
-	from mcp.server import CacheHint, Server, ServerRequestContext
+# Detect the SDK without importing it. The lean stdio transport imports this
+# module for the application runtime, then answers discovery from the static
+# catalog without paying for mcp, pydantic protocol models, or jsonschema
+# startup costs.
+MCP_AVAILABLE = importlib.util.find_spec('mcp') is not None
 
-	MCP_AVAILABLE = True
 
-	mcp_logger = logging.getLogger('mcp')
-	mcp_logger.handlers = []
-	mcp_logger.addHandler(logging.root.handlers[0] if logging.root.handlers else logging.StreamHandler(sys.stderr))
-	mcp_logger.setLevel(logging.ERROR)
-	mcp_logger.propagate = False
-except ImportError:
-	MCP_AVAILABLE = False
-	logger.error('MCP SDK not installed. Install with: pip install mcp')
-	sys.exit(1)
+def __getattr__(name: str):
+	"""Resolve SDK-only names for compatibility with existing embedders."""
+	if name in {'types', 'MCPError', 'CacheHint', 'Server', 'ServerRequestContext'}:
+		if name == 'types':
+			import mcp.types as value
+		elif name == 'MCPError':
+			from mcp import MCPError as value
+		else:
+			from mcp.server import CacheHint as cache_hint
+			from mcp.server import Server as server_class
+			from mcp.server import ServerRequestContext as request_context
+
+			value = {'CacheHint': cache_hint, 'Server': server_class, 'ServerRequestContext': request_context}[name]
+		globals()[name] = value
+		return value
+	raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
 
 try:
 	from openbrowser.telemetry import MCPServerTelemetryEvent, ProductTelemetry
@@ -552,6 +598,7 @@ from openbrowser.code_use.namespace_transfer import (
 	NamespaceTransfer,
 	transfer_namespace,
 )
+from openbrowser.mcp.catalog import load_tool_definitions
 
 
 class _BrowserOwner:
@@ -837,10 +884,12 @@ class _BrowserOwner:
 
 	def _get_managed_profile_dir(self) -> Path:
 		"""Return the stable isolated profile directory for this MCP instance."""
-		if self._managed_profile_dir is None:
-			self._managed_profile_dir = CONFIG.OPENBROWSER_PROFILES_DIR / f'mcp-{self.owner_id}'
-		self._managed_profile_dir.mkdir(parents=True, exist_ok=True)
-		return self._managed_profile_dir
+		managed_dir = self._managed_profile_dir
+		if managed_dir is None:
+			managed_dir = CONFIG.OPENBROWSER_PROFILES_DIR / f'mcp-{self.owner_id}'
+			self._managed_profile_dir = managed_dir
+		managed_dir.mkdir(parents=True, exist_ok=True)
+		return managed_dir
 
 	def _seed_managed_storage_state(self, destination: Path, source: str | Path | None = None) -> None:
 		"""Copy configured or default state once into this instance's profile."""
@@ -1646,6 +1695,20 @@ class CloseResult:
 			raise ValueError(f'Unknown close status: {self.status}')
 
 
+@dataclass(frozen=True)
+class ToolCallOutcome:
+	"""Transport-neutral result of one validated MCP tool call."""
+
+	content: tuple[dict[str, str], ...]
+	is_error: bool = False
+	structured_content: dict[str, Any] | None = None
+
+	@classmethod
+	def text(cls, text: str, *, is_error: bool = False) -> ToolCallOutcome:
+		"""Build a text-only outcome."""
+		return cls(content=({'type': 'text', 'text': text},), is_error=is_error)
+
+
 class ContextUnavailable(RuntimeError):
 	"""A stable error code for a context that cannot be used."""
 
@@ -1881,7 +1944,7 @@ class ContextRegistry:
 class OpenBrowserServer(_BrowserOwner):
 	"""MCP adapter and registry, plus the exact legacy no-handle owner."""
 
-	def __init__(self, session_timeout_minutes: int = 10):
+	def __init__(self, session_timeout_minutes: int = 10, *, install_sdk: bool = True):
 		_ensure_all_loggers_use_stderr()
 
 		self._startup_config_result = CONFIG.load_result()
@@ -1900,7 +1963,27 @@ class OpenBrowserServer(_BrowserOwner):
 			adapter=None,
 		)
 		self._contexts = ContextRegistry(self)
-		self._setup_handlers()
+		compact = os.environ.get('OPENBROWSER_COMPACT_DESCRIPTION', '').lower() in ('1', 'true', 'yes')
+		self._legacy_defs_by_name = {
+			tool['name']: tool for tool in load_tool_definitions(modern=False, compact=compact)
+		}
+		self._modern_defs_by_name = {
+			tool['name']: tool for tool in load_tool_definitions(modern=True, compact=compact)
+		}
+		self._legacy_validators = {
+			name: Draft202012Validator(tool['inputSchema']) for name, tool in self._legacy_defs_by_name.items()
+		}
+		self._modern_validators = {
+			name: Draft202012Validator(tool['inputSchema']) for name, tool in self._modern_defs_by_name.items()
+		}
+		for tool in (*self._legacy_defs_by_name.values(), *self._modern_defs_by_name.values()):
+			Draft202012Validator.check_schema(tool['inputSchema'])
+			output_schema = tool.get('outputSchema')
+			if output_schema is not None:
+				Draft202012Validator.check_schema(output_schema)
+		self.server: Any = None
+		if install_sdk:
+			self._setup_handlers()
 
 	def _protocol_era(self, version: str | None) -> str:
 		if version is None:
@@ -1909,10 +1992,19 @@ class OpenBrowserServer(_BrowserOwner):
 			return 'modern'
 		if version in LEGACY_PROTOCOL_VERSIONS:
 			return 'legacy'
-		raise MCPError(code=-32602, message=f'Unsupported protocol version: {version}')
+		raise ProtocolRpcError(code=-32602, message=f'Unsupported protocol version: {version}')
 
 	def _setup_handlers(self):
 		"""Configure SDK callbacks from explicit legacy and modern catalogs."""
+		import mcp.types as types
+		from mcp import MCPError
+		from mcp.server import CacheHint, Server, ServerRequestContext
+
+		mcp_logger = logging.getLogger('mcp')
+		mcp_logger.handlers = []
+		mcp_logger.addHandler(logging.root.handlers[0] if logging.root.handlers else logging.StreamHandler(sys.stderr))
+		mcp_logger.setLevel(logging.ERROR)
+		mcp_logger.propagate = False
 
 		description = _EXECUTE_CODE_DESCRIPTION
 		if os.environ.get('OPENBROWSER_COMPACT_DESCRIPTION', '').lower() in ('1', 'true', 'yes'):
@@ -1921,17 +2013,14 @@ class OpenBrowserServer(_BrowserOwner):
 		self._modern_tools = _tool_catalog(description, modern=True)
 		self._legacy_by_name = {tool.name: tool for tool in self._legacy_tools}
 		self._modern_by_name = {tool.name: tool for tool in self._modern_tools}
-		self._legacy_validators = {tool.name: Draft202012Validator(tool.input_schema) for tool in self._legacy_tools}
-		self._modern_validators = {tool.name: Draft202012Validator(tool.input_schema) for tool in self._modern_tools}
-		for tool in (*self._legacy_tools, *self._modern_tools):
-			Draft202012Validator.check_schema(tool.input_schema)
-			if tool.output_schema is not None:
-				Draft202012Validator.check_schema(tool.output_schema)
 
 		async def handle_list_tools(
 			ctx: ServerRequestContext, params: types.PaginatedRequestParams | None
 		) -> types.ListToolsResult:
-			era = self._protocol_era(getattr(ctx, 'protocol_version', None))
+			try:
+				era = self._protocol_era(getattr(ctx, 'protocol_version', None))
+			except ProtocolRpcError as error:
+				raise MCPError(code=error.code, message=str(error)) from None
 			catalog = self._modern_tools if era == 'modern' else self._legacy_tools
 			return types.ListToolsResult(tools=[tool.model_copy(deep=True) for tool in catalog])
 
@@ -1953,176 +2042,23 @@ class OpenBrowserServer(_BrowserOwner):
 		async def handle_call_tool(
 			ctx: ServerRequestContext, params: types.CallToolRequestParams
 		) -> types.CallToolResult:
-			start_time = time.time()
-			error_msg = None
-			telemetry_error = None
-			telemetry_tool_name = 'unknown_tool'
 			try:
-				era = self._protocol_era(getattr(ctx, 'protocol_version', None))
-				catalog = self._modern_tools if era == 'modern' else self._legacy_tools
-				by_name = self._modern_by_name if era == 'modern' else self._legacy_by_name
-				validators = self._modern_validators if era == 'modern' else self._legacy_validators
-				if params.name not in by_name:
-					telemetry_error = 'unknown_tool'
-					raise MCPError(code=-32602, message=f'Unknown tool: {params.name}')
-				telemetry_tool_name = params.name
-				arguments = dict(params.arguments or {})
-				validation_error = next(validators[params.name].iter_errors(arguments), None)
-				if validation_error is not None:
-					location = (
-						f' at {validation_error.json_path}'
-						if validation_error.json_path and validation_error.json_path != '$'
-						else ''
-					)
-					error_msg = f'Invalid arguments{location}: {validation_error.message}'
-					# The validator message can contain a repr of user data.
-					# Keep it client-facing, never in outbound telemetry.
-					telemetry_error = 'invalid_tool_arguments'
-					return types.CallToolResult(content=[types.TextContent(type='text', text=error_msg)], is_error=True)
-				if params.name == 'execute_code' and not arguments['code'].strip():
-					telemetry_error = 'empty_code'
-					error_msg = 'Error: No code provided'
-					return types.CallToolResult(content=[types.TextContent(type='text', text=error_msg)], is_error=True)
-				if params.name == 'search_web':
-					from openbrowser.search import SearchError, asearch
-
-					try:
-						results = await asearch(
-							arguments['query'],
-							max_results=arguments.get('max_results', 5),
-							backend=arguments.get('backend', 'auto'),
-							region=arguments.get('region', 'us-en'),
-							safe_search=arguments.get('safe_search', 'moderate'),
-							timelimit=arguments.get('timelimit'),
-						)
-						txt = json.dumps([result.as_dict() for result in results], ensure_ascii=False)
-					except SearchError as error:
-						telemetry_error = 'search_failed'
-						error_msg = 'search_failed'
-						txt = json.dumps({'error': 'search_failed', 'message': str(error)}, ensure_ascii=False)
-						return types.CallToolResult(
-							content=[types.TextContent(type='text', text=txt)], is_error=True
-						)
-					except (TypeError, ValueError) as error:
-						telemetry_error = 'invalid_search_arguments'
-						error_msg = 'invalid_search_arguments'
-						txt = json.dumps(
-							{'error': 'invalid_search_arguments', 'message': str(error)}, ensure_ascii=False
-						)
-						return types.CallToolResult(
-							content=[types.TextContent(type='text', text=txt)], is_error=True
-						)
-					return types.CallToolResult(content=[types.TextContent(type='text', text=txt)])
-
-				if era == 'modern':
-					if params.name == 'create_context':
-						try:
-							return await self._create_context_result()
-						except ContextUnavailable as error:
-							telemetry_error = error.code
-							error_msg = f'Error: {error.code}: {error}'
-							return types.CallToolResult(
-								content=[types.TextContent(type='text', text=error_msg)], is_error=True
-							)
-					if params.name == 'close_context':
-						try:
-							return await self._close_context_result(arguments['context_id'])
-						except ContextUnavailable as error:
-							telemetry_error = error.code
-							error_msg = f'Error: {error.code}: {error}'
-							return types.CallToolResult(
-								content=[types.TextContent(type='text', text=error_msg)], is_error=True
-							)
-					context_id = arguments.pop('context_id')
-					try:
-						lease = await self._contexts.acquire(context_id)
-					except ContextUnavailable as error:
-						telemetry_error = error.code
-						error_msg = f'Error: {error.code}: {error}'
-						return types.CallToolResult(
-							content=[types.TextContent(type='text', text=error_msg)], is_error=True
-						)
-					try:
-						text, is_error = await self._run_owned_tool(lease.owner, params.name, arguments)
-					finally:
-						self._contexts.release(lease.entry)
-				else:
-					if params.name in ('create_context', 'close_context'):
-						telemetry_error = 'unknown_tool'
-						raise MCPError(code=-32602, message=f'Unknown tool: {params.name}')
-					try:
-						lease = await self._contexts.acquire_legacy()
-					except ContextUnavailable as error:
-						telemetry_error = error.code
-						error_msg = f'Error: {error.code}: {error}'
-						return types.CallToolResult(
-							content=[types.TextContent(type='text', text=error_msg)], is_error=True
-						)
-					try:
-						text, is_error = await self._run_owned_tool(self, params.name, arguments)
-					finally:
-						self._contexts.release(lease.entry)
-				return types.CallToolResult(content=[types.TextContent(type='text', text=text)], is_error=is_error)
-			except asyncio.CancelledError as error:
-				telemetry_error = 'cancelled'
-				error_msg = f'{type(error).__name__}: {error}'
-				raise
-			except MCPError as error:
-				if telemetry_error is None:
-					telemetry_error = 'mcp_error'
-				error_msg = str(error)
-				raise
-			except ConfigStartupError as error:
-				from openbrowser.browser.cdp_connection import MAX_ERROR_CHARS, sanitize_error_detail
-
-				telemetry_error = error.code
-				output_limit = output_limit_for_executor(self._executor)
-				safe_detail = sanitize_error_detail(
-					error.detail, max_chars=output_limit, preserve_lines=True
+				outcome = await self.dispatch_tool(
+					params.name,
+					dict(params.arguments or {}),
+					getattr(ctx, 'protocol_version', None),
 				)
-				safe_path = sanitize_error_detail(str(error.path), max_chars=MAX_ERROR_CHARS) or str(error.path)
-				raw_hint = error.hint or error.code
-				if _PARTIAL_RUN_WARNING in raw_hint:
-					base_hint = raw_hint.replace(_PARTIAL_RUN_WARNING, '').strip()
-					base_budget = MAX_ERROR_CHARS - len(_PARTIAL_RUN_WARNING) - 1
-					safe_base = sanitize_error_detail(base_hint, max_chars=base_budget) or error.code
-					safe_hint = f'{safe_base} {_PARTIAL_RUN_WARNING}'
-				else:
-					safe_hint = sanitize_error_detail(raw_hint, max_chars=MAX_ERROR_CHARS) or error.code
-				message = f'{error.code}: {safe_path}. {safe_hint}'
-				error_msg = f'Error: {safe_detail}\n{message}' if safe_detail else f'Error: {message}'
-				logger.error('Tool execution blocked by config: %s', error, exc_info=True)
-				return types.CallToolResult(
-					content=[types.TextContent(type='text', text=error_msg)], is_error=True
-				)
-			except Exception as error:
-				from openbrowser.browser.cdp_connection import sanitize_error_detail
-
-				telemetry_error = 'tool_error'
-				error_msg = sanitize_error_detail(error) or type(error).__name__
-				logger.error('Tool execution failed: %s', error, exc_info=True)
-				return types.CallToolResult(
-					content=[types.TextContent(type='text', text=f'Error: {error_msg}')], is_error=True
-				)
-			except BaseException as error:
-				telemetry_error = 'internal_error'
-				error_msg = f'{type(error).__name__}: {error}'
-				raise
-			finally:
-				if self._telemetry and TELEMETRY_AVAILABLE:
-					self._telemetry.capture(
-						MCPServerTelemetryEvent(
-							version=get_openbrowser_version(),
-							action='tool_call',
-							tool_name=telemetry_tool_name,
-							duration_seconds=time.time() - start_time,
-							error_message=telemetry_error if telemetry_error is not None else error_msg,
-						)
-					)
+			except ProtocolRpcError as error:
+				raise MCPError(code=error.code, message=str(error)) from None
+			return types.CallToolResult(
+				content=[types.TextContent(type='text', text=item['text']) for item in outcome.content],
+				is_error=outcome.is_error,
+				structured_content=outcome.structured_content,
+			)
 
 		def get_tool_input_schema(name: str) -> dict[str, Any] | None:
-			tool = self._modern_by_name.get(name) or self._legacy_by_name.get(name)
-			return deepcopy(tool.input_schema) if tool is not None else None
+			tool = self._modern_defs_by_name.get(name) or self._legacy_defs_by_name.get(name)
+			return deepcopy(tool['inputSchema']) if tool is not None else None
 
 		self.server = Server(
 			'openbrowser',
@@ -2138,6 +2074,174 @@ class OpenBrowserServer(_BrowserOwner):
 				for method in ('tools/list', 'resources/list', 'resources/templates/list', 'prompts/list')
 			},
 		)
+
+	async def dispatch_tool(
+		self,
+		name: str,
+		arguments: dict[str, Any],
+		protocol_version: str | None,
+	) -> ToolCallOutcome:
+		"""Validate and run one tool call without depending on the MCP SDK."""
+		start_time = time.time()
+		error_msg = None
+		telemetry_error = None
+		telemetry_tool_name = 'unknown_tool'
+		try:
+			era = self._protocol_era(protocol_version)
+			by_name = self._modern_defs_by_name if era == 'modern' else self._legacy_defs_by_name
+			validators = self._modern_validators if era == 'modern' else self._legacy_validators
+			if name not in by_name:
+				telemetry_error = 'unknown_tool'
+				raise ProtocolRpcError(code=-32602, message=f'Unknown tool: {name}')
+			telemetry_tool_name = name
+			call_arguments = dict(arguments or {})
+			validation_error = next(validators[name].iter_errors(call_arguments), None)
+			if validation_error is not None:
+				location = (
+					f' at {validation_error.json_path}'
+					if validation_error.json_path and validation_error.json_path != '$'
+					else ''
+				)
+				error_msg = f'Invalid arguments{location}: {validation_error.message}'
+				# The validator message can contain a repr of user data.
+				# Keep it client-facing, never in outbound telemetry.
+				telemetry_error = 'invalid_tool_arguments'
+				return ToolCallOutcome.text(error_msg, is_error=True)
+			if name == 'execute_code' and not call_arguments['code'].strip():
+				telemetry_error = 'empty_code'
+				error_msg = 'Error: No code provided'
+				return ToolCallOutcome.text(error_msg, is_error=True)
+			if name == 'search_web':
+				from openbrowser.search import SearchError, asearch
+
+				try:
+					results = await asearch(
+						call_arguments['query'],
+						max_results=call_arguments.get('max_results', 5),
+						backend=call_arguments.get('backend', 'auto'),
+						region=call_arguments.get('region', 'us-en'),
+						safe_search=call_arguments.get('safe_search', 'moderate'),
+						timelimit=call_arguments.get('timelimit'),
+					)
+					txt = json.dumps([result.as_dict() for result in results], ensure_ascii=False)
+				except SearchError as error:
+					telemetry_error = 'search_failed'
+					error_msg = 'search_failed'
+					txt = json.dumps({'error': 'search_failed', 'message': str(error)}, ensure_ascii=False)
+					return ToolCallOutcome.text(txt, is_error=True)
+				except (TypeError, ValueError) as error:
+					telemetry_error = 'invalid_search_arguments'
+					error_msg = 'invalid_search_arguments'
+					txt = json.dumps(
+						{'error': 'invalid_search_arguments', 'message': str(error)}, ensure_ascii=False
+					)
+					return ToolCallOutcome.text(txt, is_error=True)
+				return ToolCallOutcome.text(txt)
+
+			if name == 'scrape_web':
+				from openbrowser.mcp.stateless import execute_stateless_tool
+
+				try:
+					txt, is_error = await execute_stateless_tool(name, call_arguments)
+				except ValueError as error:
+					telemetry_error = 'invalid_scrape_arguments'
+					error_msg = f'Invalid scrape arguments: {error}'
+					return ToolCallOutcome.text(f'Error: {error}', is_error=True)
+				if is_error:
+					telemetry_error = 'scrape_failed'
+				return ToolCallOutcome.text(txt, is_error=is_error)
+
+			if era == 'modern':
+				if name == 'create_context':
+					try:
+						return await self._create_context_result()
+					except ContextUnavailable as error:
+						telemetry_error = error.code
+						error_msg = f'Error: {error.code}: {error}'
+						return ToolCallOutcome.text(error_msg, is_error=True)
+				if name == 'close_context':
+					try:
+						return await self._close_context_result(call_arguments['context_id'])
+					except ContextUnavailable as error:
+						telemetry_error = error.code
+						error_msg = f'Error: {error.code}: {error}'
+						return ToolCallOutcome.text(error_msg, is_error=True)
+				context_id = call_arguments.pop('context_id')
+				try:
+					lease = await self._contexts.acquire(context_id)
+				except ContextUnavailable as error:
+					telemetry_error = error.code
+					error_msg = f'Error: {error.code}: {error}'
+					return ToolCallOutcome.text(error_msg, is_error=True)
+				try:
+					text, is_error = await self._run_owned_tool(lease.owner, name, call_arguments)
+				finally:
+					self._contexts.release(lease.entry)
+			else:
+				if name in ('create_context', 'close_context'):
+					telemetry_error = 'unknown_tool'
+					raise ProtocolRpcError(code=-32602, message=f'Unknown tool: {name}')
+				try:
+					lease = await self._contexts.acquire_legacy()
+				except ContextUnavailable as error:
+					telemetry_error = error.code
+					error_msg = f'Error: {error.code}: {error}'
+					return ToolCallOutcome.text(error_msg, is_error=True)
+				try:
+					text, is_error = await self._run_owned_tool(self, name, call_arguments)
+				finally:
+					self._contexts.release(lease.entry)
+			return ToolCallOutcome.text(text, is_error=is_error)
+		except asyncio.CancelledError as error:
+			telemetry_error = 'cancelled'
+			error_msg = f'{type(error).__name__}: {error}'
+			raise
+		except ProtocolRpcError as error:
+			if telemetry_error is None:
+				telemetry_error = 'protocol_error'
+			error_msg = str(error)
+			raise
+		except ConfigStartupError as error:
+			from openbrowser.browser.cdp_connection import MAX_ERROR_CHARS, sanitize_error_detail
+
+			telemetry_error = error.code
+			output_limit = output_limit_for_executor(self._executor)
+			safe_detail = sanitize_error_detail(error.detail, max_chars=output_limit, preserve_lines=True)
+			safe_path = sanitize_error_detail(str(error.path), max_chars=MAX_ERROR_CHARS) or str(error.path)
+			raw_hint = error.hint or error.code
+			if _PARTIAL_RUN_WARNING in raw_hint:
+				base_hint = raw_hint.replace(_PARTIAL_RUN_WARNING, '').strip()
+				base_budget = MAX_ERROR_CHARS - len(_PARTIAL_RUN_WARNING) - 1
+				safe_base = sanitize_error_detail(base_hint, max_chars=base_budget) or error.code
+				safe_hint = f'{safe_base} {_PARTIAL_RUN_WARNING}'
+			else:
+				safe_hint = sanitize_error_detail(raw_hint, max_chars=MAX_ERROR_CHARS) or error.code
+			message = f'{error.code}: {safe_path}. {safe_hint}'
+			error_msg = f'Error: {safe_detail}\n{message}' if safe_detail else f'Error: {message}'
+			logger.error('Tool execution blocked by config: %s', error, exc_info=True)
+			return ToolCallOutcome.text(error_msg, is_error=True)
+		except Exception as error:
+			from openbrowser.browser.cdp_connection import sanitize_error_detail
+
+			telemetry_error = 'tool_error'
+			error_msg = sanitize_error_detail(error) or type(error).__name__
+			logger.error('Tool execution failed: %s', error, exc_info=True)
+			return ToolCallOutcome.text(f'Error: {error_msg}', is_error=True)
+		except BaseException as error:
+			telemetry_error = 'internal_error'
+			error_msg = f'{type(error).__name__}: {error}'
+			raise
+		finally:
+			if self._telemetry and TELEMETRY_AVAILABLE:
+				self._telemetry.capture(
+					MCPServerTelemetryEvent(
+						version=get_openbrowser_version(),
+						action='tool_call',
+						tool_name=telemetry_tool_name,
+						duration_seconds=time.time() - start_time,
+						error_message=telemetry_error if telemetry_error is not None else error_msg,
+					)
+				)
 
 	async def _run_owned_tool(self, owner: Any, name: str, arguments: dict[str, Any]) -> tuple[str, bool]:
 		"""Run one validated application call as an owned, drained task."""
@@ -2162,15 +2266,15 @@ class OpenBrowserServer(_BrowserOwner):
 			raise result
 		return result, False
 
-	async def _create_context_result(self) -> types.CallToolResult:
+	async def _create_context_result(self) -> ToolCallOutcome:
 		context_id = await self._contexts.create()
 		payload = {'context_id': context_id}
-		return types.CallToolResult(
-			content=[types.TextContent(type='text', text=json.dumps(payload))],
+		return ToolCallOutcome(
+			content=({'type': 'text', 'text': json.dumps(payload)},),
 			structured_content=payload,
 		)
 
-	async def _close_context_result(self, context_id: str) -> types.CallToolResult:
+	async def _close_context_result(self, context_id: str) -> ToolCallOutcome:
 		result = await self._contexts.close(context_id)
 		payload = {
 			'context_id': result.context_id,
@@ -2178,8 +2282,8 @@ class OpenBrowserServer(_BrowserOwner):
 			'error_code': result.error_code,
 			'retryable': result.retryable,
 		}
-		return types.CallToolResult(
-			content=[types.TextContent(type='text', text=json.dumps(payload))],
+		return ToolCallOutcome(
+			content=({'type': 'text', 'text': json.dumps(payload)},),
 			structured_content=payload,
 			is_error=result.status != 'closed',
 		)
@@ -2261,6 +2365,8 @@ class OpenBrowserServer(_BrowserOwner):
 
 	async def run(self):
 		"""Run the MCP server and clean up before the transport context exits."""
+		import mcp.server.stdio
+
 		self._lifecycle.transition(LifecyclePhase.STARTING, reason='mcp server starting')
 		shutdown_attempted = False
 		try:

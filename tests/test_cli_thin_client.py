@@ -196,12 +196,27 @@ def test_cli_entry_executes_warm_code_without_loading_full_cli(socket_path):
     assert server.request.get("code") == 'print("thin-path")'
 
 
-def test_execute_code_fast_path_falls_back_without_daemon(monkeypatch):
+def test_execute_code_fast_path_starts_a_cold_daemon_without_loading_the_cli(monkeypatch):
+    from types import SimpleNamespace
+
     from openbrowser import cli_entry
+    from openbrowser.daemon import client as daemon_client
     from openbrowser.daemon import thin_client
 
     monkeypatch.setattr(thin_client, "execute_code_sync", lambda _code: None)
-    assert cli_entry._execute_code_fast_path(["openbrowser-ai", "-c", "print(1)"]) is False
+
+    async def fake_execute(code: str):
+        assert code == "print(1)"
+        return SimpleNamespace(
+            success=True,
+            output="cold-path",
+            error=None,
+            error_code=None,
+            hint=None,
+        )
+
+    monkeypatch.setattr(daemon_client, "execute_code_via_daemon", fake_execute)
+    assert cli_entry._execute_code_fast_path(["openbrowser-ai", "-c", "print(1)"]) is True
 
 
 def test_cli_entry_runs_the_full_cli_when_the_fast_path_declines(monkeypatch):

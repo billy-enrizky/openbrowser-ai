@@ -749,14 +749,18 @@ class DaemonServer:
             os.environ['OPENBROWSER_SETUP_LOGGING'] = 'false'
             logging.getLogger('openbrowser').setLevel(logging.ERROR)
 
-            from openbrowser.browser import BrowserSession
-            from openbrowser.code_use.executor import DEFAULT_MAX_OUTPUT_CHARS, CodeExecutor
             from openbrowser.code_use.prewarm import join_namespace_import, start_namespace_import
-            from openbrowser.tools.service import CodeAgentTools
 
-            namespace_import = start_namespace_import()
+            # Import the browser classes first, then start the namespace and
+            # tools import on a worker thread. Both imports share the Python
+            # import lock, so starting the worker before the browser import
+            # makes the main thread wait behind it. In this order the worker
+            # overlaps with Chrome startup instead.
             CONFIG.require_browser_start_allowed(self._startup_config_result)
             profile = self._build_browser_profile()
+            from openbrowser.browser import BrowserSession
+            namespace_import = start_namespace_import()
+
             session = BrowserSession(browser_profile=profile)
             try:
                 init_timeout = getattr(self, '_init_timeout', _init_timeout())
@@ -768,9 +772,12 @@ class DaemonServer:
                 if inspect.isawaitable(seeded):
                     await seeded
 
-                tools = CodeAgentTools()
                 join_namespace_import(namespace_import)
+                from openbrowser.code_use.executor import DEFAULT_MAX_OUTPUT_CHARS, CodeExecutor
                 from openbrowser.code_use.namespace import create_namespace
+                from openbrowser.tools.service import CodeAgentTools
+
+                tools = CodeAgentTools()
 
                 namespace = create_namespace(browser_session=session, tools=tools)
 
@@ -1276,6 +1283,15 @@ class DaemonServer:
                 'id': req_id,
                 'success': True,
                 'output': json.dumps(self._status_payload()),
+                'error': None,
+                'state': self._lifecycle.phase.value,
+            }
+
+        elif action == 'ping':
+            return {
+                'id': req_id,
+                'success': True,
+                'output': '',
                 'error': None,
                 'state': self._lifecycle.phase.value,
             }

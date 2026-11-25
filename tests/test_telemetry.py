@@ -6,6 +6,8 @@ MCPClientTelemetryEvent, MCPServerTelemetryEvent, CLITelemetryEvent.
 
 import logging
 import os
+import subprocess
+import sys
 import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -22,6 +24,27 @@ from openbrowser.telemetry.views import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def test_disabled_telemetry_does_not_import_posthog(tmp_path):
+    """A cold disabled-telemetry process must not pay the posthog import cost."""
+    env = dict(os.environ)
+    env["ANONYMIZED_TELEMETRY"] = "false"
+    env["OPENBROWSER_CONFIG_DIR"] = str(tmp_path)
+    env.pop("PYTHONPATH", None)
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; import openbrowser.telemetry.service; print('posthog' in sys.modules)",
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout.strip() == "False"
 
 
 # ---------------------------------------------------------------------------
