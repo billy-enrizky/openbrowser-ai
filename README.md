@@ -678,7 +678,7 @@ Warm interactive, paired N=10, OpenBrowser MCP:
 | `tabs` | 140.130 ms | browser-use | 220.321 ms | 10/10 | 75.767 ms |
 | `download` | 393.629 ms | agent-browser | 482.813 ms | 10/10 | 89.421 ms |
 
-The cold lane, N=3, starts a fresh server and browser per task. The MCP arm beats chrome-devtools-mcp on all five tasks, agent-browser on four, and browser-use on modal and auth, and is within 2 percent of browser-use on wizard. Browser-use still wins download and tabs. Cold p50 in ms: MCP 1387 wizard, 1506 modal, 1668 download, 1394 tabs, 2407 auth. See [the charted comparison](https://docs.openbrowser.me/comparison).
+The cold lane, N=5, starts a fresh server and browser per task. The MCP arm beats agent-browser on all five tasks, chrome-devtools-mcp on four, and browser-use on modal and auth, with wizard inside 3 ms of a tie. Browser-use still wins download and tabs. Cold p50 in ms: MCP 1405 wizard, 1555 modal, 1698 download, 1442 tabs, 2416 auth. See [the charted comparison](https://docs.openbrowser.me/comparison).
 
 ### 13.2. CLI Benchmark: 4-Way Comparison (6 Tasks, N=3 runs)
 
