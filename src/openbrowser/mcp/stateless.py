@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import json
 from functools import lru_cache
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .catalog import load_tool_definitions
-from .schema import CompiledSchema, compile_schema, iter_errors
+
+if TYPE_CHECKING:
+    from .schema import CompiledSchema
 
 STATELESS_TOOL_NAMES = frozenset({"search_web", "scrape_web"})
 
@@ -15,6 +17,8 @@ STATELESS_TOOL_NAMES = frozenset({"search_web", "scrape_web"})
 @lru_cache(maxsize=2)
 def _compiled_schema(name: str) -> CompiledSchema:
     """Compile the advertised schema once without importing jsonschema."""
+    from .schema import compile_schema
+
     for tool in load_tool_definitions(modern=True):
         if tool["name"] == name:
             return compile_schema(tool["inputSchema"])
@@ -23,6 +27,8 @@ def _compiled_schema(name: str) -> CompiledSchema:
 
 def validate_stateless_arguments(name: str, arguments: dict[str, Any]) -> None:
     """Apply the advertised input schema before any network call."""
+    from .schema import iter_errors
+
     error = next(iter_errors(arguments, _compiled_schema(name)), None)
     if error is None:
         return

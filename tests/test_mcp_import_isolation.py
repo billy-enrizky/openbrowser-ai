@@ -45,3 +45,30 @@ def test_mcp_server_still_exposes_the_server_class():
     )
     assert result.returncode == 0, result.stderr
     assert "has_server True" in result.stdout
+
+
+def test_lean_import_does_not_load_the_schema_validator():
+    result = _run(
+        "import sys\n"
+        "import openbrowser.mcp.lean\n"
+        "print('schema', 'openbrowser.mcp.schema' in sys.modules)\n"
+        "print('jsonschema', 'jsonschema' in sys.modules)\n"
+    )
+    assert result.returncode == 0, result.stderr
+    assert "schema False" in result.stdout, result.stdout
+    assert "jsonschema False" in result.stdout, result.stdout
+
+
+def test_stateless_validation_loads_the_schema_on_demand():
+    result = _run(
+        "import sys\n"
+        "from openbrowser.mcp.stateless import validate_stateless_arguments\n"
+        "print('before', 'openbrowser.mcp.schema' in sys.modules)\n"
+        "validate_stateless_arguments('scrape_web', {'url': 'https://example.com/'})\n"
+        "print('after', 'openbrowser.mcp.schema' in sys.modules)\n"
+        "print('jsonschema', 'jsonschema' in sys.modules)\n"
+    )
+    assert result.returncode == 0, result.stderr
+    assert "before False" in result.stdout, result.stdout
+    assert "after True" in result.stdout, result.stdout
+    assert "jsonschema False" in result.stdout, result.stdout
