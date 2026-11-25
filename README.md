@@ -673,16 +673,30 @@ Memory depends on the surface. Values are process-tree RSS on a local fixture:
 
 The `scrape` browser fallback uses the Playwright headless shell by default. `OPENBROWSER_USE_HEADLESS_SHELL=0` restores full Chrome.
 
-Warm interactive, paired N=10, OpenBrowser MCP:
+Warm interactive, N=5, rotated arm order, lower is better:
 
-| Task | OpenBrowser MCP p50 | Closest competitor | Competitor p50 | Pairs won | Delta |
-| --- | ---: | --- | ---: | ---: | ---: |
-| `wizard` | 121.966 ms | browser-use | 446.056 ms | 10/10 | 330.459 ms |
-| `modal` | 267.286 ms | browser-use | 806.803 ms | 10/10 | 519.428 ms |
-| `tabs` | 140.130 ms | browser-use | 220.321 ms | 10/10 | 75.767 ms |
-| `download` | 393.629 ms | agent-browser | 482.813 ms | 10/10 | 89.421 ms |
+| Task | OpenBrowser MCP p50 | OpenBrowser CLI p50 | chrome-devtools-mcp p50 | agent-browser p50 | browser-use p50 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `wizard` | **57 ms** | 122 ms | 3481 ms | 524 ms | 486 ms |
+| `modal` | **218 ms** | 282 ms | 2734 ms | 1126 ms | 625 ms |
+| `download` | **350 ms** | 398 ms | 777 ms | 440 ms | 578 ms |
+| `tabs` | **72 ms** | 130 ms | 1485 ms | 382 ms | 184 ms |
 
-The cold lane, N=5, starts a fresh server and browser per task. The MCP arm beats agent-browser on all five tasks, chrome-devtools-mcp on four, and browser-use on modal and auth, with wizard inside 3 ms of a tie. Browser-use still wins download and tabs. Cold p50 in ms: MCP 1405 wizard, 1555 modal, 1698 download, 1442 tabs, 2416 auth. See [the charted comparison](https://docs.openbrowser.me/comparison).
+Both OpenBrowser arms have the lowest p50 on all four warm tasks, and both won 5 of 5 pairs on every task against every competitor. All 100 runs passed.
+
+Cold interactive, N=5, rotated arm order, lower is better. The timer measures time to result. Final adapter cleanup runs once outside the timed interval for every arm.
+
+| Task | OpenBrowser MCP p50 | OpenBrowser CLI p50 | chrome-devtools-mcp p50 | agent-browser p50 | browser-use p50 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `wizard` | **531 ms** | 612 ms | 4244 ms | 1306 ms | 1031 ms |
+| `modal` | **706 ms** | 772 ms | 3433 ms | 2151 ms | 1706 ms |
+| `download` | **857 ms** | 908 ms | 1453 ms | 1329 ms | 1103 ms |
+| `tabs` | **560 ms** | 632 ms | 2160 ms | 1271 ms | 697 ms |
+| `auth` | **1255 ms** | 1454 ms | 3565 ms | 2205 ms | 2336 ms |
+
+Both OpenBrowser arms have the lowest p50 on all five cold tasks, and both won 5 of 5 pairs on every task against every competitor. Browser-use does not win download or tabs in the current lane. All 125 runs passed the exact oracle and keychain check.
+
+Interactive resource lane, N=5: both OpenBrowser arms have the lowest median child footprint, process-tree RSS, and CPU on all five tasks. Footprint and RSS won all 145 eligible pairs per metric. CPU won 143 of 145. Two cold `auth` cells are N=4 after one fatal read error each, retained and excluded from the medians. See [the charted comparison](https://docs.openbrowser.me/comparison).
 
 ### 13.2. CLI Benchmark: 4-Way Comparison (6 Tasks, N=3 runs)
 
