@@ -10,7 +10,7 @@
   "plugins": [
     {
       "name": "openbrowser",
-      "version": "0.1.59",
+      "version": "0.1.60",
       "description": "Browser automation MCP server with explicit application contexts and progressive disclosure: uses 3.2x fewer tokens than Playwright MCP across 6 tasks. Modern clients create isolated contexts, then run async Python with browser functions; get_status and reset_browser expose recovery state. Includes persisted login sessions, CLI daemon workflows, and compact description mode.",
       "source": "./plugin",
       "skills": [
