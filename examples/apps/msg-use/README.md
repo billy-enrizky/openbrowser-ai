@@ -1,7 +1,7 @@
 # Msg-Use
 
 <!-- toc:start -->
-## Table of Contents
+## Contents
 
 - [1. Features](#1-features)
 - [2. Setup](#2-setup)

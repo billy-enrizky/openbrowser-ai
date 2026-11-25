@@ -1,7 +1,7 @@
 # OpenBrowser - Claude Code Plugin
 
 <!-- toc:start -->
-## Table of Contents
+## Contents
 
 - [1. Prerequisites](#1-prerequisites)
 - [2. Installation](#2-installation)

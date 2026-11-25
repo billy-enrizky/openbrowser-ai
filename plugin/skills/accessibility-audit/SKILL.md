@@ -11,7 +11,7 @@ allowed-tools: Bash(openbrowser-ai:*) Bash(curl:*) Bash(uv:*) Bash(irm:*) Read W
 # Accessibility Audit
 
 <!-- toc:start -->
-## Table of Contents
+## Contents
 
 - [1. Setup](#1-setup)
 - [2. Workflow](#2-workflow)

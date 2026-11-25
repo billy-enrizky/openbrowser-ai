@@ -1,7 +1,7 @@
 # OpenBrowser Stress Tests
 
 <!-- toc:start -->
-## Table of Contents
+## Contents
 
 - [1. Included Form Libraries](#1-included-form-libraries)
 - [2. Features](#2-features)

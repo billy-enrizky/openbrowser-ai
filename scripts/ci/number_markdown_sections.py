@@ -20,7 +20,7 @@ TOC_START = "<!-- toc:start -->"
 TOC_END = "<!-- toc:end -->"
 TOC_START_MDX = "{/* toc:start */}"
 TOC_END_MDX = "{/* toc:end */}"
-TOC_TITLE = "## Table of Contents"
+TOC_TITLE = "## Contents"
 HEADING = re.compile(r"^(#{2,4})\s+(.*\S)\s*$")
 NUMBERED = re.compile(r"^\d+(\.\d+)*\.\s")
 LINK = re.compile(r"\]\(#([^)]+)\)")
@@ -152,7 +152,7 @@ def _strip_generated_toc(lines: list[str]) -> tuple[list[str], int | None]:
 
 
 def _find_manual_toc(lines: list[str]) -> tuple[int, int] | None:
-    """Return the (start, end) range of a manual "Table of Contents" section."""
+    """Return the (start, end) range of a manual "Contents" or "Table of Contents" section."""
     in_fence = False
     for index, line in enumerate(lines):
         if FENCE.match(line):

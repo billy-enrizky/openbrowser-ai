@@ -1,7 +1,7 @@
 # Installing OpenBrowser for OpenCode
 
 <!-- toc:start -->
-## Table of Contents
+## Contents
 
 - [1. Prerequisites](#1-prerequisites)
 - [2. Quick install with skills.sh](#2-quick-install-with-skillssh)

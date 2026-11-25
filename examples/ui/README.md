@@ -1,7 +1,7 @@
 # **User Interfaces of OpenBrowser**
 
 <!-- toc:start -->
-## Table of Contents
+## Contents
 
 - [1. Setup](#1-setup)
 - [2. Available interfaces](#2-available-interfaces)

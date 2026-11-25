@@ -1,7 +1,7 @@
 # Interactive browser benchmark
 
 <!-- toc:start -->
-## Table of Contents
+## Contents
 
 - [1. How to read these numbers](#1-how-to-read-these-numbers)
 - [2. Current results, 2026-11-25, rotated N=5](#2-current-results-2026-11-25-rotated-n5)

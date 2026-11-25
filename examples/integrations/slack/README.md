@@ -1,7 +1,7 @@
 # Slack Integration
 
 <!-- toc:start -->
-## Table of Contents
+## Contents
 
 - [1. Installing and Starting ngrok](#1-installing-and-starting-ngrok)
 - [2. Updating the Request URL in Bot's Settings](#2-updating-the-request-url-in-bots-settings)
