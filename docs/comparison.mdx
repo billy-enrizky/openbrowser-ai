@@ -83,8 +83,8 @@ The 2026-11-25 lanes are current. The 2026-11-24 scraping lanes are retained at 
 | [Firecrawl Local batch](#firecrawl-batch) | 2026-11-24 | Five-page batch, N=10 | Retained |
 | [Render asset policy](#render-policy) | 2026-11-24 | Requests, bytes, and scrape time by asset policy, N=10 | Retained |
 | [Lightpanda no-render latency](#lightpanda) | 2026-11-24 | Five tasks, N=10, interleaved | Retained |
-| [Historical cold-lane work](#historical-cold-lane) | 2026-11-24 | Five changes that reduced cold start | Historical |
-| [Historical paired MCP comparison](#historical-paired) | 2026-11-24 | Four tasks, N=10, 40 pairs | Historical |
+| [Historical cold-lane work](#historical-cold-lane) | 2026-11-24 | Five startup changes and a self before/after, not a competitor run | Historical |
+| [Historical paired MCP comparison](#historical-paired) | 2026-11-24 | Four tasks, selected competitors, N=10, 40 pairs | Historical |
 | [CLI Benchmark](/cli-comparison) | 2026-03-15 | Four CLI tools, six live tasks, N=3 | Historical |
 | [MCP Server Comparison](#mcp-benchmark) | 2026-02-21 | Three MCP servers, token and response size, N=5 | Historical |
 
@@ -416,17 +416,9 @@ These limits apply to the current native lanes. The historical sections state th
 
 ## 9. Historical cold-lane work, 2026-11-24
 
-The 2026-11-25 rotated cold lane supersedes the 2026-11-24 cold table. The earlier per-task table is not reproduced here. The raw file is retained for provenance.
+The 2026-11-25 rotated cold lane in 3.1 supersedes this run. The earlier table is not reproduced. The work covered five startup changes: namespace import on a worker thread, lazy namespace libraries, a `server/discover` path without the code-use stack, 20 ms readiness polls with no fixed redirect sleep, and automatic headless-shell selection for an extension-free profile.
 
-Five changes were part of the cold-start work:
-
-1. The code-use namespace import runs on a worker thread while Chrome starts.
-2. Optional namespace libraries resolve lazily. numpy, pandas, bs4, pypdf, reportlab, and the video recorder no longer load unless a cell uses them.
-3. The MCP server answers `server/discover` without the code-use stack.
-4. Readiness polls are 20 ms, and a fixed 50 ms redirect sleep is gone.
-5. A headless profile with no extensions now uses the Playwright headless shell automatically, which removes the browser UI renderers from startup.
-
-The before and after numbers below describe the historical run. They are not a controlled attribution to each individual change. Cold `openbrowser-ai -c pass` measured 1337.6 ms p50 before this work and 968.7 ms p50 after. A paired N=12 run measured 1234.8 ms to 1019.4 ms, with 11 of 12 pairs faster. These are historical numbers from the 2026-11-24 run, not current-version claims.
+This was a self before/after run, not a competitor comparison. Cold `openbrowser-ai -c pass` measured 1337.6 ms p50 before and 968.7 ms p50 after. A paired N=12 run measured 1234.8 ms to 1019.4 ms, with 11 of 12 pairs faster. These are historical numbers, not current-version claims.
 
 Raw data: [results-cold-six-arm-quiet-2026-11-24-n5.jsonl](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-cold-six-arm-quiet-2026-11-24-n5.jsonl).
 
@@ -434,29 +426,11 @@ Raw data: [results-cold-six-arm-quiet-2026-11-24-n5.jsonl](https://github.com/bi
 
 ## 10. Historical paired MCP comparison, 2026-11-24
 
-Task time (ms) ↓ **Lower is better**.
+The 2026-11-25 warm lane in 3.2 supersedes this run. It paired selected tasks only: browser-use for `wizard`, `modal`, and `tabs`, and agent-browser for `download`. OpenBrowser MCP won all 40 pairs. The p50 deltas were 330.459 ms on `wizard`, 519.428 ms on `modal`, 75.767 ms on `tabs`, and 89.421 ms on `download`. The download fixture holds the response for 300 ms, so 89.421 ms is the control-plane margin above that fixed delay.
 
-Both arms warm once, then alternate order for every sample. Each run gets a fresh fixture server and an exact oracle check. N=10 per arm and task. The four files contain 40 pairs and 80 observations. All 80 observations passed.
+This run did not pair every task against every competitor. The current warm lane does, with 5 of 5 paired wins for both OpenBrowser arms.
 
-Task time (ms) ↓ **Lower is better**.
-
-| Task | OpenBrowser MCP p50 ms | Opponent | Opponent p50 ms | Pairs won | Paired delta p50 ms |
-| --- | ---: | --- | ---: | ---: | ---: |
-| `wizard` | 121.966 | browser-use | 446.056 | 10/10 | 330.459 |
-| `modal` | 267.286 | browser-use | 806.803 | 10/10 | 519.428 |
-| `tabs` | 140.130 | browser-use | 220.321 | 10/10 | 75.767 |
-| `download` | 393.629 | agent-browser | 482.813 | 10/10 | 89.421 |
-
-This historical run used selected opponents: browser-use for `wizard`, `modal`, and `tabs`, and agent-browser for `download`. It did not pair every task against every competitor. The current 2026-11-25 warm lane does pair every task against every competitor, and it reports 5 of 5 for both OpenBrowser arms.
-
-The download fixture holds the response for 300 ms, so the 89.421 ms difference is the control-plane margin above that fixed delay.
-
-Raw data:
-
-- [results-paired-wizard-mcp-vs-browseruse-final2-2026-11-24-n10.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-paired-wizard-mcp-vs-browseruse-final2-2026-11-24-n10.json)
-- [results-paired-modal-mcp-vs-browseruse-final2-2026-11-24-n10.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-paired-modal-mcp-vs-browseruse-final2-2026-11-24-n10.json)
-- [results-paired-tabs-mcp-vs-browseruse-final2-2026-11-24-n10.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-paired-tabs-mcp-vs-browseruse-final2-2026-11-24-n10.json)
-- [results-paired-download-mcp-vs-agentbrowser-final2-2026-11-24-n10.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-paired-download-mcp-vs-agentbrowser-final2-2026-11-24-n10.json)
+Raw data: [wizard](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-paired-wizard-mcp-vs-browseruse-final2-2026-11-24-n10.json), [modal](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-paired-modal-mcp-vs-browseruse-final2-2026-11-24-n10.json), [tabs](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-paired-tabs-mcp-vs-browseruse-final2-2026-11-24-n10.json), [download](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-paired-download-mcp-vs-agentbrowser-final2-2026-11-24-n10.json).
 
 <a id="cli-benchmark"></a>
 
