@@ -118,35 +118,35 @@ This is a harness change, not a product speedup. The cold table above is the cur
 
 Memory and CPU: **Lower is better** ↓.
 
-The lane runs 125 observations, five tasks by five arms by five samples. All 125 passed the exact oracle, keychain check, and cleanup. 123 are resource-eligible. One cold `auth` sample from OpenBrowser CLI and one from browser-use hit a fatal `AccessDenied` read error, so those two cells report N=4. The failed samples are retained and excluded from the medians.
+The lane runs 125 observations, five tasks by five arms by five samples. All 125 passed the exact oracle, keychain check, resource gate, and cleanup, so every cell is N=5.
 
 | Task | OpenBrowser MCP footprint MiB | OpenBrowser CLI footprint MiB | chrome-devtools-mcp footprint MiB | agent-browser footprint MiB | browser-use footprint MiB |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| wizard | 137.6 | 148.7 | 481.0 | 496.9 | 561.4 |
-| modal | 136.7 | 151.8 | 478.8 | 488.9 | 560.3 |
-| download | 128.8 | 142.9 | 455.4 | 479.8 | 439.9 |
-| tabs | 133.1 | 148.2 | 469.8 | 485.6 | 457.2 |
-| auth | 135.9 (N=5) | 140.9 (N=4) | 468.6 | 479.9 | 550.9 (N=4) |
+| wizard | 132.9 | 140.4 | 475.5 | 495.7 | 553.6 |
+| modal | 134.2 | 150.7 | 472.6 | 481.2 | 553.0 |
+| download | 126.7 | 142.8 | 455.9 | 477.2 | 433.9 |
+| tabs | 129.6 | 145.8 | 463.2 | 477.5 | 433.4 |
+| auth | 133.9 | 141.4 | 460.6 | 479.8 | 544.5 |
 
 | Task | OpenBrowser MCP tree RSS MiB | OpenBrowser CLI tree RSS MiB | chrome-devtools-mcp tree RSS MiB | agent-browser tree RSS MiB | browser-use tree RSS MiB |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| wizard | 407.1 | 426.2 | 786.2 | 1202.5 | 1205.1 |
-| modal | 408.1 | 432.1 | 791.8 | 1203.6 | 1202.2 |
-| download | 393.8 | 416.5 | 758.0 | 1187.1 | 979.3 |
-| tabs | 406.7 | 429.3 | 773.3 | 1193.6 | 1014.0 |
-| auth | 411.2 (N=5) | 412.7 (N=4) | 776.5 | 1187.3 | 1194.5 (N=4) |
+| wizard | 402.7 | 406.9 | 786.0 | 1205.0 | 1201.5 |
+| modal | 408.5 | 433.3 | 800.6 | 1202.2 | 1199.7 |
+| download | 395.5 | 417.7 | 767.6 | 1188.8 | 977.4 |
+| tabs | 407.0 | 431.3 | 773.4 | 1188.7 | 978.3 |
+| auth | 411.3 | 416.6 | 772.5 | 1202.6 | 1192.3 |
 
 | Task | OpenBrowser MCP CPU s | OpenBrowser CLI CPU s | chrome-devtools-mcp CPU s | agent-browser CPU s | browser-use CPU s |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| wizard | 1.0 | 1.2 | 2.1 | 1.8 | 1.8 |
-| modal | 1.0 | 1.1 | 2.0 | 1.6 | 1.7 |
-| download | 1.0 | 1.1 | 1.8 | 1.6 | 1.5 |
-| tabs | 1.0 | 1.1 | 1.9 | 1.7 | 1.5 |
-| auth | 1.3 (N=5) | 1.8 (N=4) | 2.9 | 2.9 | 2.8 (N=4) |
+| wizard | 0.78 | 1.03 | 2.22 | 1.81 | 1.91 |
+| modal | 0.78 | 0.93 | 2.03 | 1.65 | 1.81 |
+| download | 0.76 | 0.95 | 1.83 | 1.65 | 1.53 |
+| tabs | 0.79 | 0.95 | 2.08 | 1.74 | 1.45 |
+| auth | 1.11 | 1.71 | 3.04 | 2.94 | 2.84 |
 
-Both OpenBrowser arms have the lowest median on every task for all three metrics. Across the 150 planned OpenBrowser-to-competitor pairs per metric, 145 are eligible. Both arms won all 145 eligible footprint pairs and all 145 eligible RSS pairs. CPU won 143 of 145 eligible pairs. The two losses are the same CLI `modal` sample against agent-browser and browser-use. That sample is a valid outlier and remains included.
+Both OpenBrowser arms have the lowest median on every task for all three metrics. Across 150 planned OpenBrowser-to-competitor pairs per metric, both arms won all 150 footprint pairs, all 150 RSS pairs, and all 150 CPU pairs.
 
-Raw data: [results-interactive-resources-2026-11-25-n5.jsonl](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-interactive-resources-2026-11-25-n5.jsonl).
+Raw data: [results-interactive-resources-2026-11-25-n5-final.jsonl](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-interactive-resources-2026-11-25-n5-final.jsonl).
 
 ## 4. Arms
 

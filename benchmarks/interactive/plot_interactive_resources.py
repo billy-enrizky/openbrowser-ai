@@ -16,7 +16,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 HERE = Path(__file__).resolve().parent
-DEFAULT_INPUT = HERE / "results" / "results-interactive-resources-2026-11-25-n5.summary.json"
+DEFAULT_INPUT = HERE / "results" / "results-interactive-resources-2026-11-25-n5-final.summary.json"
 DEFAULT_OUTPUT = HERE.parents[1] / "docs" / "images" / "native-interactive-resources.png"
 TASKS = ("wizard", "modal", "download", "tabs", "auth")
 ARMS = (
@@ -104,7 +104,7 @@ def main() -> int:
     fig.text(
         0.06,
         0.93,
-        "N=5 per arm and task. Auth is N=4 for OpenBrowser CLI and browser-use after one fatal read error each. Invalid rows are excluded. CPU is a sampled lower bound.",
+        "N=5 per arm and task. All 125 observations are resource-eligible. CPU is a sampled lower bound.",
         fontsize=9.5,
         color=MUTED,
         ha="left",
