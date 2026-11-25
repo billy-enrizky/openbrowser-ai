@@ -16,9 +16,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 HERE = Path(__file__).resolve().parent
-DEFAULT_INPUT = (
-    HERE / "results" / "results-warm-five-arm-lean-2026-11-25-n5-final4.summary.json"
-)
+DEFAULT_INPUT = HERE / "results" / "results-warm-five-arm-readiness-v2-2026-11-25-n5.summary.json"
 DEFAULT_OUTPUT = HERE.parents[1] / "docs" / "images" / "native-interactive-warm-current-p50.png"
 TASKS = ("wizard", "modal", "download", "tabs")
 ARMS = (
@@ -41,11 +39,7 @@ def main() -> int:
 
     report = json.loads(args.input.read_text(encoding="utf-8"))
     rows = {(row["task"], row["arm"]): row for row in report["rows"]}
-    arms = tuple(
-        arm
-        for arm in ARMS
-        if all((task, arm[0]) in rows for task in TASKS)
-    )
+    arms = tuple(arm for arm in ARMS if all((task, arm[0]) in rows for task in TASKS))
     if not arms:
         raise SystemExit("No complete arm is present in the summary")
     samples = report["environment"]["samples"]
@@ -76,7 +70,7 @@ def main() -> int:
             ax.text(
                 value + 30,
                 bar.get_y() + bar.get_height() / 2,
-                f"{value:.0f}",
+                f"{value:.3f}",
                 va="center",
                 ha="left",
                 fontsize=10.5,
@@ -95,7 +89,7 @@ def main() -> int:
     ax.tick_params(axis="x", length=0, pad=8)
 
     fig.suptitle(
-        "Interactive browsing, warm p50 \u2193 Lower is better",
+        "Interactive browsing, warm v2 p50 \u2193 Lower is better",
         x=0.06,
         y=0.99,
         ha="left",
@@ -107,12 +101,23 @@ def main() -> int:
     fig.text(
         0.06,
         0.94,
-        f"N={samples} per arm and task. Each arm starts once and uses a fresh fixture per task. Rotated arm order on a shared host.",
+        f"N={samples} per arm and task. Each arm starts once and uses a fresh fixture per task. "
+        "Rotated arm order on a shared host.",
         ha="left",
         va="top",
         fontsize=12.5,
         color=MUTED,
     )
+    environment = report["environment"]
+    method = (
+        environment.get("adapter_version")
+        or (environment.get("arms", {}).get("browser-use", {}).get("warmup_payload", {}).get("adapter_version"))
+        or "not recorded"
+    )
+    app = environment.get("application_digest")
+    app_label = app[:8] if isinstance(app, str) else "not recorded"
+    fig.text(0.06, 0.90, f"Method: {method} | OpenBrowser app: {app_label}", fontsize=11, color=MUTED)
+    ax.set_xlim(0, max(row["warm_p50_ms"] for row in rows.values()) * 1.20)
     ax.legend(
         loc="upper center",
         bbox_to_anchor=(0.5, 1.05),

@@ -33,12 +33,12 @@ icon: "scale-balanced"
 
 ## 1. Benchmark index
 
-The 2026-11-25 lanes are the current release baseline. Retained scraping lanes keep their original dates: Firecrawl sequential and Lightpanda are 2026-11-25, while the batch and render policy lanes are 2026-11-24.
+Cold interactive and resource tables use the release baseline. Warm interactive uses method `browser-use-native-readiness-v2` and OpenBrowser app `5a88fb97`. These are separate method scopes, not a cold-to-warm speedup comparison. Scraping dates remain specific to each lane.
 
 | Run | Date | Scope | Status |
 | --- | --- | --- | --- |
 | [Cold interactive](#interactive-cold) | 2026-11-25 | Five tasks, five arms, N=5, rotated order | Release baseline |
-| [Warm interactive](#interactive-warm) | 2026-11-25 | Four tasks, five arms, N=5, rotated order | Release baseline |
+| [Warm interactive](#interactive-warm) | 2026-11-25 | Four tasks, five arms, N=5, rotated order | Validated v2 |
 | [Interactive resource lane](#interactive-resources) | 2026-11-25 | Five tasks, five arms, N=5, memory and CPU | Release baseline |
 | [OpenBrowser no-browser memory](#no-browser-memory) | 2026-11-25 | `scrape_web` RSS for one call and 25 concurrent calls | Release baseline |
 | [Firecrawl Local sequential scraping](#scraping-latency) | 2026-11-25 | Five tasks, N=10, interleaved | Retained |
@@ -96,20 +96,20 @@ Raw data: [results-cold-five-arm-lean-2026-11-25-n5-final4.jsonl](https://github
 
 ### 3.2. Warm interactive
 
-The warm lane starts each arm once and runs every task against a fresh fixture server. 100 of 100 runs passed.
+Warm v2 uses `browser-use-native-readiness-v2` with OpenBrowser app `5a88fb97`. Each arm starts once and every task gets a fresh fixture server. All 100 observations passed the adapter, exact oracle, and keychain checks.
 
-<img src="/images/native-interactive-warm-current-p50.png" alt="Warm interactive p50 latency for OpenBrowser MCP and CLI, chrome-devtools-mcp, agent-browser, and browser-use across four tasks. Lower is better." />
+<img src="/images/native-interactive-warm-current-p50.png" alt="Warm v2 p50 latency in milliseconds for OpenBrowser MCP and CLI, chrome-devtools-mcp, agent-browser, and browser-use across four tasks. Lower is better." />
 
-Task time (ms) ↓ **Lower is better**.
+Task time (ms) ↓ **Lower is better**. Warm tables show milliseconds to three decimal places. The raw file keeps full precision.
 
 | Task | OpenBrowser MCP p50 ms | OpenBrowser CLI p50 ms | chrome-devtools-mcp p50 ms | agent-browser p50 ms | browser-use p50 ms |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `wizard` | 56 | 120 | 3482 | 494 | 519 |
-| `modal` | 211 | 268 | 2760 | 1147 | 811 |
-| `download` | 348 | 395 | 772 | 438 | 573 |
-| `tabs` | 72 | 131 | 1485 | 397 | 232 |
+| `wizard` | 43.555 | 88.456 | 3441.495 | 451.787 | 471.800 |
+| `modal` | 199.144 | 244.149 | 2716.979 | 1095.635 | 912.795 |
+| `download` | 332.502 | 384.810 | 767.921 | 414.847 | 558.928 |
+| `tabs` | 62.077 | 113.553 | 1453.474 | 359.101 | 194.579 |
 
-Both OpenBrowser arms have the lowest warm p50 on all four tasks. Both won 5 of 5 pairs on every task against every competitor. The `auth` task is cold only because it restarts the browser.
+Both OpenBrowser arms have the lowest warm p50 on all four tasks. Each arm won all 60 eligible pairs, for 120 of 120 total. The `auth` task is cold only because it restarts the browser.
 
 #### 3.2.1. Paired results, 5 of 5
 
@@ -131,11 +131,15 @@ Pairs won: **Higher is better** ↑. For the underlying task time, **Lower is be
 | `download` | 5/5 | 5/5 | 5/5 |
 | `tabs` | 5/5 | 5/5 | 5/5 |
 
-Raw data: [results-warm-five-arm-lean-2026-11-25-n5-final4.jsonl](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-warm-five-arm-lean-2026-11-25-n5-final4.jsonl).
+Raw data and method provenance:
+
+- [results-warm-five-arm-readiness-v2-2026-11-25-n5.jsonl](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-warm-five-arm-readiness-v2-2026-11-25-n5.jsonl)
+- [results-warm-five-arm-readiness-v2-2026-11-25-n5.summary.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-warm-five-arm-readiness-v2-2026-11-25-n5.summary.json)
+- [results-warm-five-arm-readiness-v2-2026-11-25-n5.provenance.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-warm-five-arm-readiness-v2-2026-11-25-n5.provenance.json)
 
 #### 3.2.2. Why the MCP surface
 
-In both current lanes, OpenBrowser MCP has the lower p50 on every measured task. It keeps one server process and one context open across tasks, which matches the warm workflow. Use the CLI for a one-off command when you do not want to manage a server. This page does not claim that the CLI starts faster than a full server. The cold lane measures the whole task, not server startup alone.
+In the displayed cold release baseline and warm v2 lane, OpenBrowser MCP has the lower p50 on every measured task. It keeps one server process and one context open across tasks, which matches the warm workflow. Use the CLI for a one-off command when you do not want to manage a server. This page does not claim that the CLI starts faster than a full server. The cold lane measures the whole task, not server startup alone.
 
 <a id="interactive-resources"></a>
 

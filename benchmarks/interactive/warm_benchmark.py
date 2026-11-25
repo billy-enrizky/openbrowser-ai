@@ -14,7 +14,6 @@ import hashlib
 import json
 import platform
 import shutil
-import statistics
 import subprocess
 import sys
 import threading
@@ -22,17 +21,18 @@ import time
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from .adapters.base import RunContext
 from .adapters.openbrowser import _write_config
 from .fixtures.server import FixtureServer
 from .run_benchmark import _loads, make_arm
-from .tasks import ORACLES, TASKS
+from .tasks import ORACLES
 
 HERE = Path(__file__).resolve().parent
 DEFAULT_OUTPUT = HERE / "results" / "results-warm.jsonl"
 DEFAULT_WORKDIR = Path("/tmp/obib-warm-runs")
-DEFAULT_COLD_RESULTS = HERE / "results" / "results-cold-five-arm-lean-2026-11-25-n5-final4.jsonl"
+DEFAULT_COLD_RESULTS = None
 WARM_TASKS = ("wizard", "modal", "download", "tabs")
 DEFAULT_ARMS = (
     "openbrowser",
@@ -49,7 +49,7 @@ def percentile(values: list[float], fraction: float) -> float | None:
     if not values:
         return None
     ordered = sorted(values)
-    index = max(0, min(len(ordered) - 1, int(round(fraction * (len(ordered) - 1)))))
+    index = max(0, min(len(ordered) - 1, round(fraction * (len(ordered) - 1))))
     return ordered[index]
 
 
@@ -107,25 +107,25 @@ def summarize(records: list[dict], cold: dict[tuple[str, str], float | None]) ->
             latencies = [item["latency_ms"] for item in successes]
             warm_p50 = percentile(latencies, 0.50)
             cold_p50 = cold.get((task, arm))
-            rows.append(
-                {
-                    "task": task,
-                    "arm": arm,
-                    "runs": len(items),
-                    "ok": len(successes),
-                    "warm_p50_ms": warm_p50,
-                    "warm_p95_ms": percentile(latencies, 0.95),
-                    "cold_p50_ms": cold_p50,
-                    "speedup": (cold_p50 / warm_p50) if cold_p50 and warm_p50 else None,
-                    "errors": sorted({item["error"] for item in items if item["error"]})[:3],
-                }
-            )
+            row = {
+                "task": task,
+                "arm": arm,
+                "runs": len(items),
+                "ok": len(successes),
+                "warm_p50_ms": warm_p50,
+                "warm_p95_ms": percentile(latencies, 0.95),
+                "errors": sorted({item["error"] for item in items if item["error"]})[:3],
+            }
+            if (task, arm) in cold:
+                row["cold_p50_ms"] = cold_p50
+                row["speedup"] = (cold_p50 / warm_p50) if cold_p50 and warm_p50 else None
+            rows.append(row)
     return rows
 
 
-def cold_p50(path: Path) -> dict[tuple[str, str], float | None]:
+def cold_p50(path: Path | None) -> dict[tuple[str, str], float | None]:
     result: dict[tuple[str, str], list[float]] = {}
-    if not path.exists():
+    if path is None or not path.exists():
         return {}
     for line in path.read_text(encoding="utf-8").splitlines():
         if not line.strip():
@@ -146,10 +146,10 @@ def print_table(rows: list[dict]) -> None:
     print(header)
     print("-" * len(header))
     for row in rows:
-        cold = f"{row['cold_p50_ms']:.0f}" if row["cold_p50_ms"] else "n/a"
+        cold = f"{row['cold_p50_ms']:.0f}" if row.get("cold_p50_ms") else "n/a"
         warm = f"{row['warm_p50_ms']:.0f}" if row["warm_p50_ms"] else "n/a"
         p95 = f"{row['warm_p95_ms']:.0f}" if row["warm_p95_ms"] else "n/a"
-        speedup = f"{row['speedup']:.2f}x" if row["speedup"] else "n/a"
+        speedup = f"{row['speedup']:.2f}x" if row.get("speedup") else "n/a"
         print(
             f"{row['task']:<10} {row['arm']:<20} {row['ok']:>2}/{row['runs']:<2} "
             f"{cold:>10} {warm:>10} {p95:>10} {speedup:>8}"
@@ -293,7 +293,7 @@ def main() -> int:
                 if record["error"]:
                     print(f"    error: {record['error'][:200]}", flush=True)
 
-    for arm_name, (root_ctx, arm, _payload, _ms) in prepared.items():
+    for _arm_name, (root_ctx, arm, _payload, _ms) in prepared.items():
         arm.cleanup(root_ctx)
         if not args.keep_runs:
             shutil.rmtree(root_ctx.root, ignore_errors=True)
@@ -308,7 +308,7 @@ def main() -> int:
         json.dumps(
             {
                 "environment": {
-                    "cold_results": str(args.cold_results),
+                    "cold_results": str(args.cold_results) if args.cold_results is not None else None,
                     "tasks": args.tasks,
                     "samples": args.samples,
                     "rotate_arms": args.rotate_arms,
