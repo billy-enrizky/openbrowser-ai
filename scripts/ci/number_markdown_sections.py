@@ -18,6 +18,8 @@ from pathlib import Path
 
 TOC_START = "<!-- toc:start -->"
 TOC_END = "<!-- toc:end -->"
+TOC_START_MDX = "{/* toc:start */}"
+TOC_END_MDX = "{/* toc:end */}"
 TOC_TITLE = "## Table of Contents"
 HEADING = re.compile(r"^(#{2,4})\s+(.*\S)\s*$")
 NUMBERED = re.compile(r"^\d+(\.\d+)*\.\s")
@@ -118,12 +120,14 @@ def _display_title(title: str) -> str:
     return title.replace("`", "").strip()
 
 
-def build_toc(toc: list[tuple[int, str, str]]) -> list[str]:
-    lines = [TOC_START, TOC_TITLE, ""]
+def build_toc(toc: list[tuple[int, str, str]], *, mdx: bool = False) -> list[str]:
+    start = TOC_START_MDX if mdx else TOC_START
+    end = TOC_END_MDX if mdx else TOC_END
+    lines = [start, TOC_TITLE, ""]
     for level, title, anchor in toc:
         indent = "  " * (level - 2)
         lines.append(f"{indent}- [{_display_title(title)}](#{anchor})")
-    lines.extend(["", TOC_END])
+    lines.extend(["", end])
     return lines
 
 
@@ -136,11 +140,15 @@ def rewrite_links(body: list[str], link_map: dict[str, str]) -> list[str]:
 
 
 def _strip_generated_toc(lines: list[str]) -> tuple[list[str], int | None]:
-    if TOC_START not in lines:
-        return lines, None
-    start = lines.index(TOC_START)
-    end = lines.index(TOC_END) if TOC_END in lines else start
-    return lines[:start] + lines[end + 1 :], start
+    for start_marker, end_marker in (
+        (TOC_START, TOC_END),
+        (TOC_START_MDX, TOC_END_MDX),
+    ):
+        if start_marker in lines:
+            start = lines.index(start_marker)
+            end = lines.index(end_marker) if end_marker in lines else start
+            return lines[:start] + lines[end + 1 :], start
+    return lines, None
 
 
 def _find_manual_toc(lines: list[str]) -> tuple[int, int] | None:
@@ -190,7 +198,7 @@ def process(path: Path) -> str:
 
     numbered, toc, link_map = number_sections(rest)
     numbered = rewrite_links(numbered, link_map)
-    toc_block = build_toc(toc) if toc else []
+    toc_block = build_toc(toc, mdx=path.suffix.lower() == ".mdx") if toc else []
     if toc_block:
         prefix = numbered[:insert_at]
         suffix = numbered[insert_at:]
