@@ -281,7 +281,11 @@ class TestDaemonClientRecoveryDiscovery:
 
     @pytest.mark.asyncio
     async def test_kill_recorded_browser_terminates_only_the_verified_process(self, tmp_path):
+        import asyncio
+
         import psutil
+
+        from openbrowser.browser.watchdogs.profile_lease import ProfileLease
 
         profile_dir = tmp_path / 'profile'
         profile_dir.mkdir()
@@ -291,15 +295,28 @@ class TestDaemonClientRecoveryDiscovery:
             [
                 sys.executable,
                 '-c',
-                'import time; time.sleep(60)',
+                'import time; print("OPENBROWSER_TEST_CHILD_READY", flush=True); time.sleep(60)',
                 f'--user-data-dir={profile_dir}',
                 marker,
             ],
-            stdout=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
+            text=True,
         )
         try:
+            assert process.stdout is not None
+            ready = await asyncio.wait_for(asyncio.to_thread(process.stdout.readline), timeout=5)
+            assert ready == 'OPENBROWSER_TEST_CHILD_READY\n'
             observed = psutil.Process(process.pid)
+            browser_record = {
+                'pid': process.pid,
+                'start_time': observed.create_time(),
+                'profile_dir': str(profile_dir.resolve()),
+                'instance_id': instance_id,
+                'ownership_marker': marker,
+                'executable': sys.executable,
+                'cdp_port': 1,
+            }
             (profile_dir / '.openbrowser-profile.json').write_text(
                 json.dumps(
                     {
@@ -308,19 +325,19 @@ class TestDaemonClientRecoveryDiscovery:
                         'instance_id': instance_id,
                         'owner_pid': 999999,
                         'owner_start_time': 1.0,
-                        'browser': {
-                            'pid': process.pid,
-                            'start_time': observed.create_time(),
-                            'profile_dir': str(profile_dir.resolve()),
-                            'instance_id': instance_id,
-                            'ownership_marker': marker,
-                            'executable': sys.executable,
-                            'cdp_port': 1,
-                        },
+                        'browser': browser_record,
                     }
                 )
             )
 
+            identity_check = psutil.Process(process.pid)
+            assert ProfileLease.process_matches_browser(identity_check, browser_record), {
+                'expected_pid': browser_record['pid'],
+                'observed_pid': identity_check.pid,
+                'expected_start_time': browser_record['start_time'],
+                'observed_start_time': identity_check.create_time(),
+                'cmdline': identity_check.cmdline(),
+            }
             ok, error = await DaemonClient()._kill_recorded_browser(str(profile_dir), timeout=5)
 
             assert ok is True
@@ -331,6 +348,8 @@ class TestDaemonClientRecoveryDiscovery:
             if process.poll() is None:
                 process.kill()
                 process.wait(timeout=3)
+            if process.stdout is not None:
+                process.stdout.close()
 
 
     @pytest.mark.asyncio
