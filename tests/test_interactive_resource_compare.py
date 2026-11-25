@@ -1,0 +1,806 @@
+"""Browser-free accounting tests for the interactive resource lane."""
+
+from __future__ import annotations
+
+import importlib
+import json
+from collections.abc import Callable
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+
+def resource_module():
+    try:
+        return importlib.import_module("benchmarks.interactive.resource_compare")
+    except ModuleNotFoundError as error:
+        if error.name == "benchmarks.interactive.resource_compare":
+            pytest.fail("The standalone interactive resource lane has not been implemented")
+        raise
+
+
+def test_accounting_keeps_simultaneous_peaks_and_exited_child_cpu():
+    module = resource_module()
+    ledger = module.ResourceLedger((10, 1.0), footprint_supported=True)
+    ledger.observe(
+        [
+            module.ProcessReading(10, 1.0, 100, 0.1, 90),
+            module.ProcessReading(20, 2.0, 50, 0.4, 30),
+        ]
+    )
+    ledger.observe([module.ProcessReading(10, 1.0, 120, 0.3, 95)])
+
+    result = ledger.result()
+
+    assert result["peak_tree_rss_bytes"] == 150
+    assert result["peak_worker_rss_bytes"] == 120
+    assert result["peak_child_tree_rss_bytes"] == 50
+    assert result["peak_child_footprint_bytes"] == 30
+    assert result["observed_tree_cpu_seconds"] == pytest.approx(0.7)
+    assert result["observed_child_cpu_seconds"] == pytest.approx(0.4)
+    assert result["observed_processes"] == 2
+    assert result["cpu_accounting"] == "sampled_lower_bound"
+
+
+def test_unknown_footprint_is_not_zero_or_a_complete_peak():
+    module = resource_module()
+    ledger = module.ResourceLedger((10, 1.0), footprint_supported=True)
+    ledger.observe(
+        [
+            module.ProcessReading(10, 1.0, 100, 0.1, 90),
+            module.ProcessReading(20, 2.0, 50, 0.4, None),
+        ]
+    )
+
+    result = ledger.result()
+
+    assert result["peak_child_footprint_bytes"] is None
+    assert result["footprint_status"] == "unavailable"
+    assert result["peak_child_tree_rss_bytes"] == 50
+
+
+def test_empty_sampling_does_not_report_a_zero_cost_win():
+    module = resource_module()
+    ledger = module.ResourceLedger((10, 1.0), footprint_supported=False)
+    ledger.observe([])
+
+    result = ledger.result()
+
+    assert result["peak_tree_rss_bytes"] is None
+    assert result["peak_child_tree_rss_bytes"] is None
+    assert result["observed_tree_cpu_seconds"] is None
+    assert result["peak_child_footprint_bytes"] is None
+    assert result["footprint_status"] == "unsupported"
+
+
+def test_duplicate_process_readings_are_not_double_counted():
+    module = resource_module()
+    ledger = module.ResourceLedger((10, 1.0), footprint_supported=True)
+    reading = module.ProcessReading(10, 1.0, 100, 0.1, 90)
+    ledger.observe([reading, reading])
+
+    assert ledger.result()["peak_tree_rss_bytes"] == 100
+    assert ledger.result()["observed_processes"] == 1
+
+
+class FakeProcess:
+    def __init__(self, pid, created_at, rss=100, cpu=0.1):
+        self.pid = pid
+        self.created_at = created_at
+        self.rss = rss
+        self.cpu = cpu
+        self.descendants = []
+        self.state = "running"
+        self.executable = "python"
+        self.terminate: Callable[[], object] = lambda: pytest.fail("Unexpected fake terminate")
+        self.kill: Callable[[], object] = lambda: pytest.fail("Unexpected fake kill")
+
+    def create_time(self):
+        return self.created_at
+
+    def is_running(self):
+        return True
+
+    def status(self):
+        return self.state
+
+    def name(self):
+        return self.executable
+
+    def cmdline(self):
+        return [self.executable]
+
+    def children(self, recursive=True):
+        assert recursive
+        return self.descendants
+
+    def memory_info(self):
+        return SimpleNamespace(rss=self.rss)
+
+    def cpu_times(self):
+        return SimpleNamespace(user=self.cpu, system=0.0)
+
+
+def fake_sampler(module, processes, root=10, marker=None):
+    def lookup(pid):
+        if pid not in processes:
+            raise module.psutil.NoSuchProcess(pid)
+        return processes[pid]
+
+    return module.ProcessTreeSampler(
+        root,
+        process_factory=lookup,
+        footprint_reader=lambda pid: processes[pid].rss // 2,
+        footprint_supported=True,
+        ownership_marker=marker,
+    )
+
+
+def test_sampler_keeps_reparented_children_and_discovers_their_new_children():
+    module = resource_module()
+    root = FakeProcess(10, 1.0)
+    child = FakeProcess(20, 2.0, rss=50, cpu=0.2)
+    processes = {10: root, 20: child}
+    root.descendants = [child]
+    sampler = fake_sampler(module, processes)
+    sampler.sample()
+
+    grandchild = FakeProcess(30, 3.0, rss=80, cpu=0.3)
+    processes.pop(10)
+    processes[30] = grandchild
+    child.cpu = 0.4
+    child.descendants = [grandchild]
+    sampler.sample()
+
+    result = sampler.result()
+    assert result["peak_tree_rss_bytes"] == 150
+    assert result["peak_child_tree_rss_bytes"] == 130
+    assert result["observed_tree_cpu_seconds"] == pytest.approx(0.8)
+    assert result["observed_processes"] == 3
+
+
+def test_sampler_does_not_attribute_an_unrelated_reused_pid():
+    module = resource_module()
+    root = FakeProcess(10, 1.0)
+    child = FakeProcess(20, 2.0, rss=50, cpu=0.2)
+    processes = {10: root, 20: child}
+    root.descendants = [child]
+    sampler = fake_sampler(module, processes)
+    sampler.sample()
+
+    root.descendants = []
+    processes[20] = FakeProcess(20, 99.0, rss=999999, cpu=99.0)
+    sampler.sample()
+
+    result = sampler.result()
+    assert result["peak_tree_rss_bytes"] == 150
+    assert result["observed_tree_cpu_seconds"] == pytest.approx(0.3)
+    assert result["observed_processes"] == 2
+
+
+def test_sampler_reports_access_denied_instead_of_zero_memory():
+    module = resource_module()
+    root = FakeProcess(10, 1.0)
+    processes = {10: root}
+    sampler = fake_sampler(module, processes)
+
+    def denied():
+        raise module.psutil.AccessDenied(10)
+
+    root.memory_info = denied
+    sampler.sample()
+
+    result = sampler.result()
+    assert result["peak_tree_rss_bytes"] is None
+    assert result["read_errors"] > 0
+    assert result["fatal_read_errors"] > 0
+    assert result["read_error_types"]["AccessDenied"] > 0
+
+
+def test_footprint_reader_is_explicitly_unsupported_off_macos():
+    module = resource_module()
+    assert module.make_footprint_reader(platform_name="linux") is None
+
+
+def test_macos_footprint_uses_the_documented_v0_structure(monkeypatch):
+    module = resource_module()
+    calls = []
+
+    def pid_rusage(pid, flavor, buffer):
+        calls.append((pid, flavor))
+        view = module.ctypes.cast(buffer, module.ctypes.POINTER(module.RUsageInfoV0)).contents
+        view.ri_phys_footprint = 4096
+        return 0
+
+    monkeypatch.setattr(module.ctypes, "CDLL", lambda *args, **kwargs: SimpleNamespace(proc_pid_rusage=pid_rusage))
+    reader = module.make_footprint_reader(platform_name="darwin")
+
+    assert module.ctypes.sizeof(module.RUsageInfoV0) == 96
+    assert reader(42) == 4096
+    assert calls == [(42, 0)]
+
+
+def test_plan_rotates_every_arm_through_each_position():
+    module = resource_module()
+    plan = list(module.sample_plan(["a", "b", "c"], ["tabs"], 3))
+
+    assert [(item[0], item[2]) for item in plan] == [
+        (0, "a"),
+        (0, "b"),
+        (0, "c"),
+        (1, "b"),
+        (1, "c"),
+        (1, "a"),
+        (2, "c"),
+        (2, "a"),
+        (2, "b"),
+    ]
+    assert [item[3] for item in plan] == [0, 1, 2] * 3
+
+
+def test_summary_keeps_failures_and_unavailable_resource_metrics():
+    module = resource_module()
+    records = [
+        {
+            "task": "tabs",
+            "arm": "a",
+            "ok": True,
+            "resources": {
+                "peak_tree_rss_bytes": 100,
+                "observed_tree_cpu_seconds": 0.1,
+                "peak_child_footprint_bytes": None,
+            },
+        },
+        {
+            "task": "tabs",
+            "arm": "a",
+            "ok": False,
+            "error": "oracle failed",
+            "resources": {
+                "peak_tree_rss_bytes": 900,
+                "observed_tree_cpu_seconds": 0.9,
+                "peak_child_footprint_bytes": None,
+            },
+        },
+    ]
+
+    result = module.summarize_resources(records, provenance_verified=True)[0]
+
+    assert result["runs"] == 2
+    assert result["successes"] == 1
+    assert result["failures"] == 1
+    assert result["all_correct"] is False
+    assert result["metrics"]["peak_tree_rss_bytes"]["median"] == 100
+    assert result["metrics"]["peak_child_footprint_bytes"] == {"count": 0, "median": None, "max": None}
+
+
+def test_worker_uses_the_existing_native_runner_without_changing_its_result(monkeypatch, tmp_path):
+    module = resource_module()
+    from benchmarks.interactive import run_benchmark
+
+    calls = []
+    native = {"task": "tabs", "arm": "browser-use", "ok": False, "oracle_ok": False, "error": "wrong title"}
+
+    def run_one(*args, **kwargs):
+        calls.append((args, kwargs))
+        return native
+
+    monkeypatch.setattr(run_benchmark, "run_one", run_one)
+    destination = tmp_path / "worker.json"
+
+    module.run_worker("tabs", "browser-use", 2, tmp_path / "runs", destination)
+
+    assert json.loads(destination.read_text()) == native
+    assert calls == [(("tabs", "browser-use", 2, tmp_path / "runs", False), {})]
+
+
+def test_lane_writes_every_attempt_and_never_overwrites_evidence(monkeypatch, tmp_path):
+    module = resource_module()
+    output = tmp_path / "results.jsonl"
+    calls = []
+
+    def run_sample(task, arm, sample, **kwargs):
+        calls.append((task, arm, sample))
+        return {"task": task, "arm": arm, "sample": sample, "ok": arm == "a", "resources": {}}
+
+    metadata = {"source_commit": "abc", "source_digest": "def"}
+    monkeypatch.setattr(module, "source_manifest", lambda: metadata)
+    monkeypatch.setattr(module, "run_sample", run_sample)
+    module.run_lane(["a", "b"], ["tabs"], 2, output, workdir=tmp_path / "runs", interval=0.02, worker_timeout=10)
+    records = [json.loads(line) for line in output.read_text().splitlines()]
+
+    assert records[0]["record_type"] == "run"
+    assert records[0]["source_digest"] == "def"
+    assert records[-1]["record_type"] == "end"
+    assert records[-1]["observations"] == 4
+    assert records[-1]["failures"] == 2
+    assert records[-1]["provenance_verified"] is True
+    assert calls == [("tabs", "a", 0), ("tabs", "b", 0), ("tabs", "b", 1), ("tabs", "a", 1)]
+    assert len([item for item in records if item.get("record_type") == "sample"]) == 4
+
+    before = output.read_bytes()
+    with pytest.raises(FileExistsError):
+        module.run_lane(["a"], ["tabs"], 1, output, workdir=tmp_path / "runs", interval=0.02, worker_timeout=10)
+    assert output.read_bytes() == before
+
+
+@pytest.mark.parametrize("native_ok, child_count, browser_count", [(False, 1, 1), (True, 0, 0), (True, 1, 0)])
+def test_parent_preserves_oracles_and_rejects_unobserved_product_work(
+    monkeypatch, tmp_path, native_ok, child_count, browser_count
+):
+    module = resource_module()
+
+    class Worker:
+        pid = 123
+        returncode = 0
+
+        def __init__(self, command, **kwargs):
+            destination = Path(command[command.index("--worker-output") + 1])
+            destination.write_text(
+                json.dumps(
+                    {
+                        "task": "tabs",
+                        "arm": "a",
+                        "ok": native_ok,
+                        "oracle_ok": native_ok,
+                        "error": "wrong title" if not native_ok else "",
+                    }
+                )
+            )
+
+        def poll(self):
+            return 0
+
+        def wait(self, timeout=None):
+            return 0
+
+    class Sampler:
+        def __init__(self, pid, *, ownership_marker=None):
+            assert pid == 123
+
+        def sample(self, *, phase="native_run"):
+            return None
+
+        def live_processes(self):
+            return {}
+
+        def discover_orphans(self):
+            return None
+
+        def result(self):
+            return {
+                "peak_tree_rss_bytes": 100,
+                "observed_processes": 1 + child_count,
+                "observed_child_processes": child_count,
+                "observed_browser_processes": browser_count,
+                "observed_browser_during_native_run": browser_count,
+                "read_errors": 0,
+                "fatal_read_errors": 0,
+            }
+
+    monkeypatch.setattr(module.subprocess, "Popen", Worker)
+    monkeypatch.setattr(module, "ProcessTreeSampler", Sampler)
+
+    result = module.run_sample("tabs", "a", 0, workdir=tmp_path, interval=0.02, worker_timeout=10)
+
+    assert result["ok"] is native_ok
+    assert result["oracle_ok"] is native_ok
+    assert result["resource_ok"] is bool(browser_count)
+    assert result["resources"]["peak_tree_rss_bytes"] == 100
+
+
+def test_zombie_is_not_a_live_product_or_a_cleanup_leak():
+    module = resource_module()
+    root = FakeProcess(10, 1.0)
+    child = FakeProcess(20, 2.0, rss=999)
+    child.state = module.psutil.STATUS_ZOMBIE
+    root.descendants = [child]
+    sampler = fake_sampler(module, {10: root, 20: child})
+
+    sampler.sample()
+
+    assert sampler.result()["peak_tree_rss_bytes"] == 100
+    assert sampler.result()["observed_child_processes"] == 0
+
+
+@pytest.mark.parametrize("interval, timeout", [(0.02, 0.1), (10.0, 1.0)])
+def test_worker_deadline_is_a_failed_observation_and_kills_only_its_worker(monkeypatch, tmp_path, interval, timeout):
+    module = resource_module()
+    workers = []
+
+    class Worker:
+        pid = 123
+        returncode = None
+
+        def __init__(self, *args, **kwargs):
+            self.killed = False
+            workers.append(self)
+
+        def poll(self):
+            return self.returncode
+
+        def kill(self):
+            self.killed = True
+            self.returncode = -9
+
+        def wait(self, timeout=None):
+            assert timeout == 5
+            return self.returncode
+
+    class Sampler:
+        def __init__(self, pid, *, ownership_marker=None):
+            assert pid == 123
+
+        def sample(self, *, phase="native_run"):
+            return None
+
+        def live_processes(self):
+            return {}
+
+        def discover_orphans(self):
+            return None
+
+        def result(self):
+            return {
+                "peak_tree_rss_bytes": None,
+                "read_errors": 0,
+                "fatal_read_errors": 0,
+                "observed_child_processes": 0,
+            }
+
+    clock = [0.0]
+    sleeps = []
+
+    def sleep(seconds):
+        sleeps.append(seconds)
+        clock[0] += seconds
+
+    monkeypatch.setattr(module.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(module.time, "sleep", sleep)
+    monkeypatch.setattr(module.subprocess, "Popen", Worker)
+    monkeypatch.setattr(module, "ProcessTreeSampler", Sampler)
+
+    record = module.run_sample("tabs", "a", 0, workdir=tmp_path, interval=interval, worker_timeout=timeout)
+
+    assert record["ok"] is False
+    assert record["worker_timed_out"] is True
+    assert record["resource_ok"] is False
+    assert record["error"] == "Worker exceeded its deadline"
+    assert workers[0].killed is True
+    assert sum(sleeps) == pytest.approx(timeout)
+
+
+def test_identity_evidence_distinguishes_browser_work_from_an_incidental_helper():
+    module = resource_module()
+    ledger = module.ResourceLedger((10, 1.0), footprint_supported=True)
+    ledger.observe(
+        [
+            module.ProcessReading(10, 1.0, 100, 0.1, 90, name="python"),
+            module.ProcessReading(20, 2.0, 50, 0.4, 30, name="ps"),
+        ]
+    )
+
+    result = ledger.result()
+
+    assert result["observed_browser_processes"] == 0
+    assert result["processes"][1]["pid"] == 20
+    assert result["processes"][1]["created_at"] == 2.0
+    assert result["processes"][1]["name"] == "ps"
+    assert result["processes"][1]["observed_cpu_seconds"] == 0.4
+
+
+def test_sampler_records_a_main_browser_but_does_not_mislabel_crashpad():
+    module = resource_module()
+    root = FakeProcess(10, 1.0)
+    browser = FakeProcess(20, 2.0)
+    browser.executable = "Google Chrome"
+    crashpad = FakeProcess(30, 3.0)
+    crashpad.executable = "chrome_crashpad_handler"
+    root.descendants = [browser, crashpad]
+    sampler = fake_sampler(module, {10: root, 20: browser, 30: crashpad})
+
+    sampler.sample()
+
+    assert sampler.result()["observed_browser_processes"] == 1
+
+
+@pytest.mark.parametrize("option,value", [("--interval", "nan"), ("--worker-timeout", "inf"), ("--interval", "-inf")])
+def test_cli_rejects_nonfinite_limits_before_starting_any_worker(monkeypatch, tmp_path, capsys, option, value):
+    module = resource_module()
+    monkeypatch.setattr(
+        module.sys,
+        "argv",
+        ["resources", "--arms", "browser-use", "--output", str(tmp_path / "raw.jsonl"), option + "=" + value],
+    )
+    monkeypatch.setattr(
+        module, "run_lane", lambda *args, **kwargs: pytest.fail("Invalid limits reached the worker lane")
+    )
+
+    with pytest.raises(SystemExit) as error:
+        module.main()
+
+    assert error.value.code == 2
+    assert "finite" in capsys.readouterr().err
+
+
+def fake_clock(monkeypatch, module):
+    clock = [0.0]
+    monkeypatch.setattr(module.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(module.time, "sleep", lambda seconds: clock.__setitem__(0, clock[0] + seconds))
+    return clock
+
+
+def test_cleanup_reports_a_child_that_survives_term_and_kill(monkeypatch):
+    module = resource_module()
+    root = FakeProcess(10, 1.0)
+    child = FakeProcess(20, 2.0)
+    root.descendants = [child]
+    processes = {10: root, 20: child}
+    sampler = fake_sampler(module, processes)
+    sampler.sample()
+    processes.pop(10)
+    signals = []
+    child.terminate = lambda: signals.append("term")
+    child.kill = lambda: signals.append("kill")
+    fake_clock(monkeypatch, module)
+
+    result = module.cleanup_owned(sampler, interval=0.1, timeout=1.0)
+
+    assert result["verified"] is False
+    assert result["remaining"] == [{"pid": 20, "created_at": 2.0}]
+    assert signals == ["term", "kill"]
+
+
+def test_cleanup_samples_termination_work_and_new_descendants(monkeypatch):
+    module = resource_module()
+    root = FakeProcess(10, 1.0)
+    child = FakeProcess(20, 2.0, rss=50, cpu=0.1)
+    root.descendants = [child]
+    processes = {10: root, 20: child}
+    sampler = fake_sampler(module, processes)
+    sampler.sample()
+    processes.pop(10)
+    grandchild = FakeProcess(30, 3.0, rss=200, cpu=0.2)
+
+    def terminate():
+        child.rss = 300
+        child.cpu = 0.9
+        child.descendants = [grandchild]
+        processes[30] = grandchild
+
+    child.terminate = terminate
+    child.kill = lambda: processes.pop(20, None)
+    grandchild.terminate = lambda: None
+    grandchild.kill = lambda: processes.pop(30, None)
+    fake_clock(monkeypatch, module)
+
+    result = module.cleanup_owned(sampler, interval=0.1, timeout=1.0)
+
+    assert result["verified"] is True
+    assert result["remaining"] == []
+    assert sampler.result()["peak_child_tree_rss_bytes"] == 500
+    assert sampler.result()["observed_child_cpu_seconds"] == pytest.approx(1.1)
+    assert all(
+        item["observed_during_native_run"] is False for item in sampler.result()["processes"] if item["pid"] == 30
+    )
+
+
+def test_lane_persists_a_parent_failure_and_stops_if_cleanup_is_unverified(monkeypatch, tmp_path):
+    module = resource_module()
+    output = tmp_path / "failed.jsonl"
+    calls = []
+
+    def crash(task, arm, sample, **kwargs):
+        calls.append(arm)
+        raise RuntimeError("supervision failed")
+
+    monkeypatch.setattr(module, "source_manifest", lambda: {})
+    monkeypatch.setattr(module, "arm_versions", lambda arms: {})
+    monkeypatch.setattr(module, "run_sample", crash)
+
+    records = module.run_lane(
+        ["a", "b"], ["tabs"], 1, output, workdir=tmp_path / "runs", interval=0.02, worker_timeout=1
+    )
+    raw = [json.loads(line) for line in output.read_text().splitlines()]
+
+    assert calls == ["a"]
+    assert records[0]["ok"] is False
+    assert records[0]["cleanup"]["verified"] is False
+    assert "RuntimeError" in records[0]["error"]
+    assert raw[-1]["record_type"] == "end"
+    assert raw[-1]["aborted"] is True
+    assert raw[-1]["abort_reason"] == "cleanup_unverified"
+
+
+def test_spawn_failure_is_a_durable_failed_attempt_without_live_measurements(monkeypatch, tmp_path):
+    module = resource_module()
+
+    def cannot_spawn(*args, **kwargs):
+        raise FileNotFoundError("worker interpreter missing")
+
+    monkeypatch.setattr(module.subprocess, "Popen", cannot_spawn)
+
+    record = module.run_sample("tabs", "a", 0, workdir=tmp_path, interval=0.02, worker_timeout=1)
+
+    assert record["ok"] is False
+    assert record["cleanup"]["verified"] is True
+    assert record["resource_ok"] is False
+    assert "FileNotFoundError" in record["error"]
+
+
+def test_unverified_provenance_cannot_produce_a_comparative_summary():
+    module = resource_module()
+    records = [{"task": "tabs", "arm": "a", "ok": True, "resource_ok": True, "resources": {"peak_tree_rss_bytes": 100}}]
+
+    result = module.summarize_resources(records)[0]
+
+    assert result["successes"] == 1
+    assert result["resource_eligible"] == 0
+    assert result["provenance_verified"] is False
+    assert result["metrics"]["peak_tree_rss_bytes"]["count"] == 0
+
+
+def test_lane_rechecks_actual_binary_binding_and_excludes_changed_source(monkeypatch, tmp_path):
+    module = resource_module()
+    output = tmp_path / "changed.jsonl"
+    bindings = iter(
+        [
+            {"verified": True, "entry_sha256": "entry", "actual_app_digest": "before"},
+            {"verified": True, "entry_sha256": "entry", "actual_app_digest": "after"},
+        ]
+    )
+    monkeypatch.setattr(module, "source_manifest", lambda: {"source_digest": "stable"})
+    monkeypatch.setattr(module, "binding_snapshot", lambda arms: next(bindings))
+    monkeypatch.setattr(module, "arm_versions", lambda arms: {})
+    monkeypatch.setattr(
+        module,
+        "run_sample",
+        lambda task, arm, sample, **kw: {
+            "task": task,
+            "arm": arm,
+            "ok": True,
+            "resource_ok": True,
+            "cleanup": {"verified": True},
+            "resources": {"peak_tree_rss_bytes": 100},
+        },
+    )
+
+    records = module.run_lane(["a"], ["tabs"], 1, output, workdir=tmp_path / "runs", interval=0.02, worker_timeout=1)
+    raw = [json.loads(line) for line in output.read_text().splitlines()]
+
+    assert records[0]["ok"] is True
+    assert records[0]["provenance_verified"] is False
+    assert raw[1]["provisional"] is True
+    assert raw[-1]["provenance_verified"] is False
+    assert raw[-1]["binding_unchanged"] is False
+
+
+def test_binding_uses_the_adapter_environment_without_starting_application(monkeypatch, tmp_path):
+    module = resource_module()
+    from benchmarks.interactive import resource_provenance
+
+    observed = []
+
+    def bind(binary, expected_package, *, env, cwd):
+        observed.append((binary, expected_package, env, cwd))
+        return {"verified": True}
+
+    monkeypatch.setenv("OPENBROWSER_BIN", "/fake/openbrowser-ai")
+    monkeypatch.setenv("PYTHONPATH", "/unrelated/source")
+    monkeypatch.setattr(resource_provenance, "bind_openbrowser", bind)
+
+    assert module.binding_snapshot(["openbrowser-fast"])["verified"] is True
+    assert observed[0][0] == "/fake/openbrowser-ai"
+    assert observed[0][1] == module.ROOT / "src" / "openbrowser"
+    assert "PYTHONPATH" not in observed[0][2]
+    assert observed[0][2]["HOME"] != str(Path.home())
+
+
+def test_source_manifest_separates_harness_and_application_content(monkeypatch, tmp_path):
+    module = resource_module()
+    package = tmp_path / "src" / "openbrowser"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("value = 1\n")
+    harness = tmp_path / "benchmarks" / "interactive"
+    harness.mkdir(parents=True)
+    (harness / "runner.py").write_text("oracle = 1\n")
+    monkeypatch.setattr(module, "ROOT", tmp_path)
+    monkeypatch.setattr(module.platform, "platform", lambda: "test-platform")
+    monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: SimpleNamespace(returncode=0, stdout="commit"))
+    first = module.source_manifest()
+    (package / "__init__.py").write_text("value = 2\n")
+    second = module.source_manifest()
+
+    assert first["harness_digest"] == second["harness_digest"]
+    assert first["expected_app_digest"] != second["expected_app_digest"]
+    assert first["source_digest"] != second["source_digest"]
+
+
+def test_cleanup_finds_a_marked_orphan_created_as_its_parent_exits(monkeypatch):
+    module = resource_module()
+    marker = "/tmp/resource-owned-abcdef/runs"
+    root = FakeProcess(10, 1.0)
+    child = FakeProcess(20, 2.0)
+    orphan = FakeProcess(30, 3.0)
+    orphan.executable = "Google Chrome"
+    unrelated = FakeProcess(40, 4.0)
+    root.descendants = [child]
+    processes = {10: root, 20: child, 40: unrelated}
+    sampler = fake_sampler(module, processes, marker=marker)
+    sampler.sample()
+    processes.pop(10)
+
+    def terminate():
+        processes.pop(20)
+        processes[30] = orphan
+
+    child.terminate = terminate
+    orphan.terminate = lambda: None
+    orphan.kill = lambda: processes.pop(30, None)
+    monkeypatch.setattr(
+        module.psutil,
+        "process_iter",
+        lambda attrs: [
+            SimpleNamespace(
+                pid=pid,
+                info={
+                    "create_time": process.created_at,
+                    "cmdline": [process.executable, "--user-data-dir=" + (marker if pid == 30 else "/other")],
+                },
+            )
+            for pid, process in processes.items()
+        ],
+    )
+    fake_clock(monkeypatch, module)
+
+    result = module.cleanup_owned(sampler, interval=0.1, timeout=1.0)
+
+    assert result["verified"] is True
+    assert set(processes) == {40}
+    evidence = next(item for item in sampler.result()["processes"] if item["pid"] == 30)
+    assert evidence["observed_during_native_run"] is False
+
+
+@pytest.mark.parametrize("exception_name", ["NoSuchProcess", "ZombieProcess"])
+def test_expected_process_exit_race_is_visible_but_not_a_fatal_access_error(exception_name):
+    module = resource_module()
+    root = FakeProcess(10, 1.0)
+    child = FakeProcess(20, 2.0, rss=200, cpu=0.2)
+    child.executable = "Google Chrome"
+    root.descendants = [child]
+    sampler = fake_sampler(module, {10: root, 20: child})
+    sampler.sample()
+
+    def exited():
+        raise getattr(module.psutil, exception_name)(20)
+
+    child.memory_info = exited
+    sampler.sample()
+    result = sampler.result()
+
+    assert result["read_errors"] == 1
+    assert result["expected_exit_races"] == 1
+    assert result["fatal_read_errors"] == 0
+    assert result["read_error_types"] == {exception_name: 1}
+    assert result["peak_tree_rss_bytes"] == 300
+    assert result["observed_browser_during_native_run"] == 1
+    assert result["cpu_accounting"] == "sampled_lower_bound"
+
+
+def test_short_worker_layout_stays_inside_macos_socket_budget_for_all_pilot_tasks():
+    module = resource_module()
+    assert (Path("/tmp") if module.os.name != "nt" else Path(module.tempfile.gettempdir())) == module.DEFAULT_WORKDIR
+    root = Path("/private/tmp") / (module.SAMPLE_PREFIX + "abcdefgh")
+    for task in ("wizard", "modal", "download", "tabs", "auth"):
+        for arm in ("openbrowser-fast", "browser-use"):
+            command = module.worker_command(root, task, arm, 0)
+            workdir = Path(command[command.index("--workdir") + 1])
+            assert workdir == root
+            context_root = workdir / "20261125T055841Z" / f"{task}-{arm}-s0"
+            socket = (
+                context_root / "bu-runtime" / "bu-default.sock"
+                if arm == "browser-use"
+                else (context_root / "home" / ".openbrowser" / "daemon.sock")
+            )
+            assert len(str(socket).encode()) <= 103, (task, arm, socket)

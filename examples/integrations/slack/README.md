@@ -1,5 +1,14 @@
 # Slack Integration
 
+<!-- toc:start -->
+## Table of Contents
+
+- [1. Installing and Starting ngrok](#1-installing-and-starting-ngrok)
+- [2. Updating the Request URL in Bot's Settings](#2-updating-the-request-url-in-bots-settings)
+- [3. Installing Required Packages](#3-installing-required-packages)
+
+<!-- toc:end -->
+
 Steps to create and configure a Slack bot:
 
 1. Create a Slack App:
@@ -13,8 +22,8 @@ Steps to create and configure a Slack bot:
 3. Enable Event Subscriptions:
     *   Navigate to the "Event Subscriptions" tab.
     *   Enable events and add the necessary bot events (add these "message.channels", "message.im").
-    *   Add your request URL (you can use ngrok to expose your local server if needed). [See how to set up ngrok](#installing-and-starting-ngrok).
-    *   **Note:** The URL provided by ngrok is ephemeral and will change each time ngrok is started. You will need to update the request URL in the bot's settings each time you restart ngrok. [See how to update the request URL](#updating-the-request-url-in-bots-settings).
+    *   Add your request URL (you can use ngrok to expose your local server if needed). [See how to set up ngrok](#1-installing-and-starting-ngrok).
+    *   **Note:** The URL provided by ngrok is ephemeral and will change each time ngrok is started. You will need to update the request URL in the bot's settings each time you restart ngrok. [See how to update the request URL](#2-updating-the-request-url-in-bots-settings).
 4. Add the bot to your Slack workspace:
     *   Navigate to the "OAuth & Permissions" tab.
     *   Under "OAuth Tokens for Your Workspace", click on "Install App to Workspace".
@@ -49,7 +58,7 @@ Steps to create and configure a Slack bot:
    ```
 8. Write e.g. "$bu what's the weather in Tokyo?" to start a openbrowser task and get a response inside the Slack channel.
 
-## Installing and Starting ngrok
+## 1. Installing and Starting ngrok
 
 To expose your local server to the internet, you can use ngrok. Follow these steps to install and start ngrok:
 
@@ -61,7 +70,7 @@ To expose your local server to the internet, you can use ngrok. Follow these ste
     ```
     Replace `3000` with the port number your local server is running on.
 
-## Updating the Request URL in Bot's Settings
+## 2. Updating the Request URL in Bot's Settings
 
 If you need to update the request URL (e.g., when the ngrok URL changes), follow these steps:
 
@@ -71,7 +80,7 @@ If you need to update the request URL (e.g., when the ngrok URL changes), follow
 4. Update the "Request URL" field with the new ngrok URL. The URL should be something like: `https://<ngrok-id>.ngrok-free.app/slack/events`
 5. Save the changes.
 
-## Installing Required Packages
+## 3. Installing Required Packages
 
 To run this example, you need:
 

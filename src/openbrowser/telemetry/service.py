@@ -11,7 +11,6 @@ import logging
 import os
 
 from dotenv import load_dotenv
-from posthog import Posthog
 from uuid_extensions import uuid7str
 
 from openbrowser.telemetry.views import BaseTelemetryEvent
@@ -58,6 +57,10 @@ class ProductTelemetry:
 			self._posthog_client = None
 		else:
 			logger.info('Using anonymized telemetry, see https://github.com/billy-enrizky/openbrowser-ai for details.')
+			# Imported lazily so a disabled-telemetry process never pays the
+			# posthog import cost in its startup path.
+			from posthog import Posthog
+
 			self._posthog_client = Posthog(
 				project_api_key=self.PROJECT_API_KEY,
 				host=self.HOST,

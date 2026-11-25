@@ -5,16 +5,29 @@ icon: "list"
 mode: "wide"
 ---
 
+<!-- toc:start -->
+## Table of Contents
 
+- [1. Navigation & Browser Control](#1-navigation-browser-control)
+- [2. Page Interaction](#2-page-interaction)
+- [3. JavaScript Execution](#3-javascript-execution)
+- [4. Tab Management](#4-tab-management)
+- [5. Content Extraction](#5-content-extraction)
+- [6. Visual Analysis](#6-visual-analysis)
+- [7. Form Controls](#7-form-controls)
+- [8. File Operations](#8-file-operations)
+- [9. Task Completion](#9-task-completion)
+- [10. CodeAgent and MCP execution helpers](#10-codeagent-and-mcp-execution-helpers)
 
+<!-- toc:end -->
 
-### Navigation & Browser Control
+## 1. Navigation & Browser Control
 - **`search`** - Agent-only browser navigation to DuckDuckGo, Google, or Bing. For CodeAgent and MCP, use the stateless `search_web` helper instead.
 - **`navigate`** - Navigate to URLs
 - **`go_back`** - Go back in browser history
 - **`wait`** - Wait for specified seconds
 
-### Page Interaction
+## 2. Page Interaction
 - **`click`** - Click elements by their index
 - **`click_xy`** - Click no-index canvas, PDF, embedded, or native-rendered targets using CSS viewport coordinates
 - **`hover_xy`** - Move the pointer over no-index canvas, PDF, embedded, or native-rendered targets using CSS viewport coordinates
@@ -27,32 +40,32 @@ mode: "wide"
 
 Prefer indexed actions whenever an element index exists. If converting screenshot coordinates, divide by `window.devicePixelRatio` before using an `*_xy` tool.
 
-### JavaScript Execution
+## 3. JavaScript Execution
 - **`evaluate`** - Execute custom JavaScript code on the page (for advanced interactions, shadow DOM, custom selectors, data extraction)
 
-### Tab Management
+## 4. Tab Management
 - **`switch`** - Switch between browser tabs
 - **`close`** - Close browser tabs
 
-### Content Extraction
+## 5. Content Extraction
 - **`extract`** - Extract data from webpages using LLM
 
-### Visual Analysis
+## 6. Visual Analysis
 - **`screenshot`** - Request a screenshot in your next browser state for visual confirmation
 
-### Form Controls
+## 7. Form Controls
 - **`dropdown_options`** - Get dropdown option values
 - **`select_dropdown`** - Select dropdown options
 
-### File Operations
+## 8. File Operations
 - **`write_file`** - Write content to files
 - **`read_file`** - Read file contents
 - **`replace_file`** - Replace text in files
 
-### Task Completion
+## 9. Task Completion
 - **`done`** - Complete the task (always available)
 
-### CodeAgent and MCP execution helpers
+## 10. CodeAgent and MCP execution helpers
 
 The CodeAgent and MCP execution namespaces expose additional Python helpers beyond the Agent action registry:
 

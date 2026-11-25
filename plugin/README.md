@@ -101,9 +101,11 @@ Add to your project's `.mcp.json`:
 }
 ```
 
+The default stdio transport is the lean JSON-RPC loop. Set `OPENBROWSER_MCP_TRANSPORT=sdk` to use the MCP SDK transport instead. Invalid values exit with code 2.
+
 ## 3. Available Tools
 
-A 2026-07-28 MCP client sees six tools. Older supported clients see four. Both catalogs include the stateless `search_web` tool. It needs no `context_id` and does not start a browser. Its snippets do not count as evidence. Scrape and read source pages before you cite them.
+A `2026-07-28` MCP client sees seven tools: `create_context`, `execute_code`, `get_status`, `reset_browser`, `close_context`, `search_web`, and `scrape_web`. The legacy handshakes `2024-11-05`, `2025-03-26`, `2025-06-18`, and `2025-11-25` see four tools: `execute_code`, `get_status`, `reset_browser`, and `search_web`. Both catalogs include stateless `search_web`, which uses the package-native DDGS client. The modern catalog also includes `scrape_web`, which fetches one HTTP(S) page in OpenBrowser no-browser mode: it starts no Chrome, Blink, or V8 process and cannot run JavaScript, take screenshots, or use browser cookies. Neither stateless tool needs a `context_id` or starts a browser. Search snippets do not count as evidence. Scrape and read source pages before you cite them.
 
 For stateful calls, call `create_context` first and keep the returned `context_id`. Pass that handle to `execute_code`, `get_status`, and `reset_browser`, then call `close_context` when finished. `execute_code` runs Python code in a persistent per-context namespace with browser automation functions. `get_status` is a read-only lifecycle and tab snapshot. `reset_browser` closes a stuck browser while preserving scalar and scalar-only container variables by default. Inspect `namespace_transfer.dropped` for names that could not be carried. `close_context` releases the context and its browser profile.
 
@@ -144,7 +146,7 @@ Prefer indexed actions whenever an element index exists. Coordinate actions use 
 
 Current local deterministic fixtures show OpenBrowser winning all five sequential scraping tasks against Firecrawl Local, 50 of 50 paired samples. Pagination measured 3.02 ms against 4.42 ms, and static article measured 0.94 ms against 1.54 ms. On the native batch surface, OpenBrowser HTTP batch measured 2.834 ms p50 against Firecrawl Local batch at 13.448 ms, a 4.75x win in 10 of 10 pairs. No browser started for the OpenBrowser batch.
 
-The one-shot static path is the low-memory path: 148.6 ms and 47.7 MB peak RSS for a static page. The scrape browser fallback uses the Playwright headless shell, at 355 to 382 MB for a JavaScript page against 742 to 755 MB for full Chrome.
+OpenBrowser no-browser mode measured 142.7 ms and 47.6 MiB process-tree RSS on a local fixture for a static page. The scrape browser fallback uses the Playwright headless shell by default, measured at 355.4 to 382.1 MiB process-tree RSS on the same fixture, against 742.4 to 754.8 MiB for full Chrome.
 
 The warm interactive lane uses the OpenBrowser MCP arm. Paired runs won 10 of 10 against the closest competitor on every task: wizard 121.966 ms vs browser-use 446.056 ms, modal 267.286 ms vs 806.803 ms, tabs 140.130 ms vs 220.321 ms, and download 393.629 ms vs agent-browser 482.813 ms. The cold lane beats chrome-devtools-mcp on all five tasks and browser-use on two, and still trails browser-use on download and tabs. See the [charted comparison](https://docs.openbrowser.me/comparison) and the raw artifacts under [`benchmarks/`](../benchmarks/).
 
@@ -184,17 +186,19 @@ openbrowser-ai uses **2.1-2.6x fewer tokens** than all competitors via Python co
 | Claude Sonnet 4.6 ($3/$15 per M) | $0.50 | $0.92 | **$0.18** |
 | Claude Opus 4.6 ($5/$25 per M) | $0.83 | $1.53 | **$0.30** |
 
-The OpenBrowser MCP entry used the legacy one-tool catalog at benchmark time. Current 2026-07-28 clients see six tools. [Full MCP comparison with methodology](https://docs.openbrowser.me/comparison)
+The OpenBrowser MCP entry used the legacy one-tool catalog at benchmark time. Current `2026-07-28` clients see seven tools. [Full MCP comparison with methodology](https://docs.openbrowser.me/comparison)
 
 ## 5. Native web search
 
-Use `openbrowser-ai search "your query"` to search without starting a browser. Use `--json` for a JSON array or `--urls-only` for one URL per line. Search snippets are not evidence. Scrape and read source pages before you cite them.
+Use `openbrowser-ai search "your query"` to search with the package-native DDGS client without starting a browser. The command calls `openbrowser.search` directly and does not shell out to a `ddgs` CLI. Use `--json` for a JSON array or `--urls-only` for one URL per line. Search snippets are not evidence. Scrape and read source pages before you cite them.
 
 ```bash
 openbrowser-ai search "OpenBrowser MCP docs" --json --output search-results.json
 openbrowser-ai search "OpenBrowser MCP docs" --urls-only --output search-urls.txt
-openbrowser-ai scrape --urls-file search-urls.txt --output scraped-pages.jsonl --output-format jsonl
+openbrowser-ai scrape --urls-file search-urls.txt --no-browser --output scraped-pages.jsonl --output-format jsonl
 ```
+
+`--no-browser` uses OpenBrowser no-browser mode. It starts no Chrome, Blink, or V8 process and cannot run JavaScript, take screenshots, or use browser cookies. Use the default `auto` engine when a page needs JavaScript.
 
 ## 6. CLI Execute Mode
 
@@ -211,13 +215,13 @@ openbrowser-ai daemon start|ensure|stop|force-stop|status|reset|restart|list|rea
 
 Variables persist across `-c` calls while the daemon is running. The daemon starts automatically on first use and shuts down after 10 minutes of inactivity. A warm `-c` call uses a standard-library thin client, so it does not import the full CLI or agent stack. A cold call falls back to the full client and starts the daemon.
 
-For static pages, `openbrowser-ai scrape URL1 URL2 --engine http --jsonl` uses a light console entry. It does not import the browser or configuration stack and starts no browser. Use this path for batch HTML extraction; use the default `auto` or `browser` engine when a page needs JavaScript.
+For static pages, `openbrowser-ai scrape URL1 URL2 --no-browser --jsonl` uses OpenBrowser no-browser mode. It uses a light console entry, does not import the browser or configuration stack, and starts no Chrome, Blink, or V8 process. It never falls back to a browser and cannot run JavaScript, take screenshots, or use browser cookies. Use this path for batch HTML extraction; use the default `auto` or explicit `browser` engine when a page needs JavaScript.
 
 `openbrowser-ai scrape URL --only-main-content` drops navigation, headers, footers, cookie banners, and ad blocks before extraction. `--include-tag` keeps the first matching selector and `--exclude-tag` removes matches.
 
 `openbrowser-ai map URL` lists the URLs a site exposes from the page and its sitemap. `openbrowser-ai crawl URL` follows same-origin links with `--max-pages` and `--max-depth` limits. Neither starts a browser.
 
-Use `--text-only` on `scrape` to block external CSS, images, fonts, media, and text tracks while keeping scripts and screenshots, or `--no-css`, `--no-images`, `--no-fonts`, `--no-media`, and `--no-scripts` for one group each. The scrape browser fallback uses the Playwright headless shell by default; set `OPENBROWSER_USE_HEADLESS_SHELL=0` to force full Chrome.
+Use `--text-only` on `scrape` to block external CSS, images, fonts, media, and text tracks while keeping scripts and screenshots, or `--no-css`, `--no-images`, `--no-fonts`, `--no-media`, and `--render-mode` for browser-fallback control. `--no-scripts` is available on the one-shot prompt interface, not on `scrape`. The scrape browser fallback uses the Playwright headless shell by default; set `OPENBROWSER_USE_HEADLESS_SHELL=0` to force full Chrome.
 
 The CLI daemon uses `~/.config/openbrowser/profiles/daemon` as its default browser profile, so saved logins survive daemon restarts through Chrome's user-data directory. An explicit `storage_state` path is read and written by the storage-state watchdog at the configured path; that is separate from the MCP one-time seed behavior. Downloads default to `~/Downloads/openbrowser-daemon` and survive `daemon stop`. Daemon timeout, socket, and profile variables are listed in the CLI daemon guide. Custom sockets share the default profile unless `OPENBROWSER_DAEMON_PROFILE_ISOLATION=true` or `OPENBROWSER_DAEMON_PROFILE_DIR` is set. `OPENBROWSER_USER_DATA_DIR` takes precedence over both and always selects that explicit profile.
 
@@ -227,6 +231,7 @@ Optional environment variables:
 
 | Variable | Description |
 |----------|-------------|
+| `OPENBROWSER_MCP_TRANSPORT` | Stdio implementation: `lean` or `sdk` (default: `lean`) |
 | `OPENBROWSER_HEADLESS` | Set to `true` to run browser without GUI |
 | `OPENBROWSER_ALLOWED_DOMAINS` | Comma-separated domain whitelist |
 | `OPENBROWSER_USER_DATA_DIR` | Optional explicit Chrome profile directory. Omit it for one managed profile per context; concurrent owners are rejected |

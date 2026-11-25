@@ -5,11 +5,31 @@ icon: "list"
 mode: "wide"
 ---
 
-## Browser (BrowserSession)
+<!-- toc:start -->
+## Table of Contents
+
+- [1. Browser (BrowserSession)](#1-browser-browsersession)
+  - [1.1. Key Methods](#11-key-methods)
+  - [1.2. Constructor Parameters](#12-constructor-parameters)
+- [2. Page](#2-page)
+  - [2.1. Navigation](#21-navigation)
+  - [2.2. Element Finding](#22-element-finding)
+  - [2.3. JavaScript & Controls](#23-javascript-controls)
+  - [2.4. Information](#24-information)
+  - [2.5. AI Features](#25-ai-features)
+- [3. Element](#3-element)
+  - [3.1. Interactions](#31-interactions)
+  - [3.2. Properties](#32-properties)
+- [4. Mouse](#4-mouse)
+  - [4.1. Operations](#41-operations)
+
+<!-- toc:end -->
+
+## 1. Browser (BrowserSession)
 
 Main browser session manager.
 
-### Key Methods
+### 1.1. Key Methods
 
 ```python
 from openbrowser import Browser
@@ -27,42 +47,42 @@ await browser.close_page(page)
 await browser.stop()
 ```
 
-### Constructor Parameters
+### 1.2. Constructor Parameters
 
 See [Browser Parameters](../browser/all-parameters) for complete configuration options.
 
-## Page
+## 2. Page
 
 Browser tab/iframe for page-level operations.
 
-### Navigation
+### 2.1. Navigation
 - `goto(url: str)` - Navigate to URL
 - `go_back()`, `go_forward()`, `reload()` - History navigation
 
-### Element Finding
+### 2.2. Element Finding
 - `get_elements_by_css_selector(selector: str) -> list[Element]` - CSS selector
 - `get_element(backend_node_id: int) -> Element` - By CDP node ID
 - `get_element_by_prompt(prompt: str, llm) -> Element | None` - AI-powered
 - `must_get_element_by_prompt(prompt: str, llm) -> Element` - AI (raises if not found)
 
-### JavaScript & Controls
+### 2.3. JavaScript & Controls
 - `evaluate(page_function: str, *args) -> str` - Execute JS (arrow function format)
 - `press(key: str)` - Send keyboard input ("Enter", "Control+A")
 - `set_viewport_size(width: int, height: int)` - Set viewport
 - `screenshot(format='jpeg', quality=None) -> str` - Take screenshot
 
-### Information
+### 2.4. Information
 - `get_url() -> str`, `get_title() -> str` - Page info
 - `mouse -> Mouse` - Get mouse interface
 
-### AI Features
+### 2.5. AI Features
 - `extract_content(prompt: str, structured_output: type[T], llm) -> T` - Extract data
 
-## Element
+## 3. Element
 
 Individual DOM element interactions.
 
-### Interactions
+### 3.1. Interactions
 - `click(button='left', click_count=1, modifiers=None)` - Click element
 - `fill(text: str, clear=True)` - Fill input
 - `hover()`, `focus()` - Mouse/focus actions
@@ -70,17 +90,17 @@ Individual DOM element interactions.
 - `select_option(values: str | list[str])` - Select dropdown options
 - `drag_to(target: Element | Position)` - Drag and drop
 
-### Properties
+### 3.2. Properties
 - `get_attribute(name: str) -> str | None` - Get attribute
 - `get_bounding_box() -> BoundingBox | None` - Position/size
 - `get_basic_info() -> ElementInfo` - Complete element info
 - `screenshot(format='jpeg') -> str` - Element screenshot
 
-## Mouse
+## 4. Mouse
 
 Coordinate-based mouse operations.
 
-### Operations
+### 4.1. Operations
 - `click(x: int, y: int, button='left', click_count=1)` - Click at coordinates
 - `move(x: int, y: int, steps=1)` - Move mouse
 - `down(button='left')`, `up(button='left')` - Press/release buttons

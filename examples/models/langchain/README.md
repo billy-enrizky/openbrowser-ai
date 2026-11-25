@@ -1,8 +1,15 @@
 # Langchain Models (legacy)
 
+<!-- toc:start -->
+## Table of Contents
+
+- [1. How to use](#1-how-to-use)
+
+<!-- toc:end -->
+
 This directory contains an example of how to use Langchain models with the OpenBrowser chat model interface.
 
-## How to use
+## 1. How to use
 
 Run the working example from the repository root:
 

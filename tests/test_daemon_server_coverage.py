@@ -313,6 +313,15 @@ class TestDaemonServerHandleRequest:
         assert payload["tools"]["phase"] == "not_initialized"
 
     @pytest.mark.asyncio
+    async def test_ping_does_not_build_the_status_payload(self, daemon_server):
+        """Readiness probes return before profile and tool status work."""
+        with patch.object(daemon_server, "_status_payload", side_effect=AssertionError("status built")):
+            result = await daemon_server._handle_request({"action": "ping", "id": 2})
+        assert result["id"] == 2
+        assert result["success"] is True
+        assert result["output"] == ""
+
+    @pytest.mark.asyncio
     @pytest.mark.parametrize(
         "detail,secret",
         [

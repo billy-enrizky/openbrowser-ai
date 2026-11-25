@@ -1,79 +1,315 @@
 ---
 title: "Benchmark Comparison"
-description: "Benchmark comparison of OpenBrowser vs Playwright vs Chrome DevTools vs browser-use vs agent-browser"
+description: "Benchmark comparison of OpenBrowser against browser automation and scraping tools, with current local fixture lanes and historical live-site runs"
 icon: "scale-balanced"
 ---
 
 # Browser Automation Comparison
 
-## Benchmark index
+<!-- toc:start -->
+## Table of Contents
 
-The latest run is first. The other runs are historical and retained for provenance.
+- [1. Benchmark index](#1-benchmark-index)
+- [2. How to read this page](#2-how-to-read-this-page)
+- [3. Current interactive lanes, 2026-11-25](#3-current-interactive-lanes-2026-11-25)
+  - [3.1. Cold interactive](#31-cold-interactive)
+  - [3.2. Warm interactive](#32-warm-interactive)
+    - [3.2.1. Paired results, 5 of 5](#321-paired-results-5-of-5)
+    - [3.2.2. Why the MCP surface](#322-why-the-mcp-surface)
+  - [3.3. Interactive resource pilot](#33-interactive-resource-pilot)
+- [4. OpenBrowser no-browser memory, 2026-11-25](#4-openbrowser-no-browser-memory-2026-11-25)
+  - [4.1. Non-comparable context](#41-non-comparable-context)
+- [5. Other native local lanes, 2026-11-24](#5-other-native-local-lanes-2026-11-24)
+  - [5.1. Scraping latency against Firecrawl Local](#51-scraping-latency-against-firecrawl-local)
+  - [5.2. Firecrawl Local batch](#52-firecrawl-local-batch)
+  - [5.3. Render asset policy](#53-render-asset-policy)
+  - [5.4. Lightpanda no-render latency](#54-lightpanda-no-render-latency)
+  - [5.5. Discovery: map and crawl](#55-discovery-map-and-crawl)
+- [6. How to choose a surface](#6-how-to-choose-a-surface)
+- [7. What these lanes show](#7-what-these-lanes-show)
+- [8. What this page does not measure](#8-what-this-page-does-not-measure)
+- [9. Historical cold-lane work, 2026-11-24](#9-historical-cold-lane-work-2026-11-24)
+- [10. Historical paired MCP comparison, 2026-11-24](#10-historical-paired-mcp-comparison-2026-11-24)
+- [11. Historical CLI Benchmark, 2026-03-15](#11-historical-cli-benchmark-2026-03-15)
+- [12. Historical MCP Server Comparison, 2026-02-21](#12-historical-mcp-server-comparison-2026-02-21)
+  - [12.1. Overview](#121-overview)
+  - [12.2. Token Usage Benchmark](#122-token-usage-benchmark)
+    - [12.2.1. Methodology](#1221-methodology)
+    - [12.2.2. Results: 5-Step Workflow on Wikipedia (Complex Page)](#1222-results-5-step-workflow-on-wikipedia-complex-page)
+    - [12.2.3. Results: Small Page (httpbin.org/forms/post)](#1223-results-small-page-httpbinorgformspost)
+    - [12.2.4. Per-Operation Token Breakdown (Wikipedia)](#1224-per-operation-token-breakdown-wikipedia)
+  - [12.3. Why the Difference](#123-why-the-difference)
+  - [12.4. What Each Server Returns (Verbatim)](#124-what-each-server-returns-verbatim)
+    - [12.4.1. Navigate](#1241-navigate)
+    - [12.4.2. Get Page State / Snapshot](#1242-get-page-state-snapshot)
+    - [12.4.3. Click / Type / Go Back](#1243-click-type-go-back)
+    - [12.4.4. Targeted Extraction (OpenBrowser only)](#1244-targeted-extraction-openbrowser-only)
+  - [12.5. Cost Comparison](#125-cost-comparison)
+  - [12.6. E2E LLM Benchmark](#126-e2e-llm-benchmark)
+    - [12.6.1. Methodology](#1261-methodology)
+    - [12.6.2. Results: Task Success](#1262-results-task-success)
+    - [12.6.3. Results: Tool Calls and Duration](#1263-results-tool-calls-and-duration)
+    - [12.6.4. Per-Task Duration](#1264-per-task-duration)
+    - [12.6.5. Per-Task Tool Calls](#1265-per-task-tool-calls)
+    - [12.6.6. Results: Token Efficiency](#1266-results-token-efficiency)
+    - [12.6.7. Per-Task MCP Response Size](#1267-per-task-mcp-response-size)
+    - [12.6.8. Per-Task Input Token Usage](#1268-per-task-input-token-usage)
+    - [12.6.9. Results: Cost Per Benchmark Run (6 Tasks)](#1269-results-cost-per-benchmark-run-6-tasks)
+    - [12.6.10. Why OpenBrowser Uses More Tool Calls but Fewer Tokens](#12610-why-openbrowser-uses-more-tool-calls-but-fewer-tokens)
+  - [12.7. Tool Surface Comparison](#127-tool-surface-comparison)
+    - [12.7.1. Playwright MCP (22 core tools, 34 total)](#1271-playwright-mcp-22-core-tools-34-total)
+    - [12.7.2. Chrome DevTools MCP (26 tools)](#1272-chrome-devtools-mcp-26-tools)
+    - [12.7.3. OpenBrowser MCP (CodeAgent, execute_code in v0.1.26)](#1273-openbrowser-mcp-codeagent-execute_code-in-v0126)
+  - [12.8. OpenBrowser features in v0.1.26](#128-openbrowser-features-in-v0126)
+  - [12.9. Gaps vs Competitors](#129-gaps-vs-competitors)
+  - [12.10. Provenance and limits](#1210-provenance-and-limits)
+  - [12.11. Benchmark Methodology Notes](#1211-benchmark-methodology-notes)
+    - [12.11.1. Token Usage Benchmark (5-step workflow)](#12111-token-usage-benchmark-5-step-workflow)
+    - [12.11.2. E2E LLM Benchmark (6 real-world tasks, N=5 runs)](#12112-e2e-llm-benchmark-6-real-world-tasks-n5-runs)
+
+<!-- toc:end -->
+
+## 1. Benchmark index
+
+The 2026-11-25 lanes are current. The 2026-11-24 scraping lanes are retained at their original date. The 2026-03-15 CLI benchmark and the 2026-02-21 MCP benchmark are historical.
 
 | Run | Date | Scope | Status |
 | --- | --- | --- | --- |
-| [Native local benchmark lanes](#native-local-lanes) | 2026-11-24 | Sequential scraping, CLI static scraping, render asset policy, Firecrawl batch, Lightpanda no-render, cold and warm interactive lanes, and paired MCP comparisons | Current |
-| [CLI Benchmark](/cli-comparison) | 2026-03-15 | 4-way CLI comparison driven by an LLM through one Bash tool | Historical |
-| [MCP Server Comparison](#mcp-benchmark) | 2026-02-21 | 3-way MCP server comparison | Historical |
+| [Cold interactive](#interactive-cold) | 2026-11-25 | Five tasks, five arms, N=5, rotated order | Current |
+| [Warm interactive](#interactive-warm) | 2026-11-25 | Four tasks, five arms, N=5, rotated order | Current |
+| [Interactive resource pilot](#interactive-resources) | 2026-11-25 | Five tasks, five arms, N=1, memory and CPU | Pilot |
+| [OpenBrowser no-browser memory](#no-browser-memory) | 2026-11-25 | `scrape_web` RSS for one call and 25 concurrent calls | Current |
+| [Firecrawl Local sequential scraping](#scraping-latency) | 2026-11-24 | Five tasks, N=10, interleaved | Retained |
+| [Firecrawl Local batch](#firecrawl-batch) | 2026-11-24 | Five-page batch, N=10 | Retained |
+| [Render asset policy](#render-policy) | 2026-11-24 | Requests, bytes, and scrape time by asset policy, N=10 | Retained |
+| [Lightpanda no-render latency](#lightpanda) | 2026-11-24 | Five tasks, N=10, interleaved | Retained |
+| [Historical cold-lane work](#historical-cold-lane) | 2026-11-24 | Five changes that reduced cold start | Historical |
+| [Historical paired MCP comparison](#historical-paired) | 2026-11-24 | Four tasks, N=10, 40 pairs | Historical |
+| [CLI Benchmark](/cli-comparison) | 2026-03-15 | Four CLI tools, six live tasks, N=3 | Historical |
+| [MCP Server Comparison](#mcp-benchmark) | 2026-02-21 | Three MCP servers, token and response size, N=5 | Historical |
 
-## The question this page answers
+## 2. How to read this page
 
-A coding agent that needs a browser has to pick one. The choice is usually made on latency alone, but latency is three different things:
+A fixture is a local test page with a deterministic expected result. The current native lanes use fixtures. The historical MCP and CLI sections below use live websites and are labeled separately. A run passes only when the product returns the required result, so every latency number has a correctness check behind it.
 
-1. How fast one page is scraped.
-2. How fast one interactive task finishes once a browser is ready.
-3. How long a cold start takes before any work begins.
+| Term | Meaning |
+| --- | --- |
+| p50 (median) | The middle sample. Half the runs were faster and half were slower. |
+| Cold start | Every task starts a fresh process tree, including the daemon or server and the browser. |
+| Warm | The browser is already open. Each task gets a fresh fixture page, not a fresh browser. |
+| No-browser | No Chromium, Blink, or V8 process. The tool fetches over HTTP and parses the response. JavaScript does not run. |
+| RSS | Resident set size: physical memory held by the process tree at the sample time. Shared pages can be counted more than once. |
+| Pair | One sample from each arm on the same task and sample index. A 5 of 5 result means OpenBrowser was faster in all five pairs. |
+| N | The number of samples per arm and task. |
 
-Memory is a fourth axis, and it decides how many agents fit on one machine. This page measures all four on deterministic local fixtures, with exact oracles, so every number has a correctness check behind it.
-
-The short version:
-
-- OpenBrowser wins every sequential scraping task against Firecrawl Local, and 50 of 50 paired samples.
-- OpenBrowser wins every warm interactive task against every competitor, 10 of 10 pairs each.
-- The cold lane wins two of five tasks outright against browser-use, ties a third, and beats every other competitor on four of five. Browser-use still wins click-triggered download and multi-tab work.
-- A one-shot static scrape costs 148.6 ms and 47.7 MB of peak memory. A browser scrape costs 355 to 382 MB with the headless shell, against 742 to 755 MB with full Chrome.
+For task time and memory, lower is better. Charts and tables that measure them carry a down arrow and the label **Lower is better**. If a chart shows a metric where higher is better, it says **Higher is better** with an up arrow.
 
 <a id="native-local-lanes"></a>
 
-## Native local benchmark lanes, 2026-11-24
+## 3. Current interactive lanes, 2026-11-25
 
-These local fixture runs use no LLM, cloud browser, or AWS. They measure different workloads, so they do not produce one product ranking. The raw data and methods live in [scraping README](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/scraping/README.md) and [interactive README](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/README.md).
+These lanes use five arms: OpenBrowser MCP, OpenBrowser CLI, chrome-devtools-mcp, agent-browser, and browser-use. Each task runs against a local fixture with an exact oracle. Both lanes use N=5 per arm and task and rotate the arm order.
 
-The build under test is OpenBrowser `0.1.59.dev28+gbbc8b52f5`.
+<a id="interactive-cold"></a>
+
+### 3.1. Cold interactive
+
+The cold lane starts a fresh process tree, daemon or server, and browser for every task. 125 of 125 runs passed the exact oracle and the mock-keychain check. Host load was 6.486, 5.743, 5.360 before and 8.189, 6.929, 5.971 after on 18 logical CPUs. The MCP transport was the lean variant. The host Playwright cache was exposed to every arm.
+
+<img src="/images/native-interactive-cold-p50.png" alt="Cold interactive p50 latency for OpenBrowser MCP and CLI, chrome-devtools-mcp, agent-browser, and browser-use across five tasks. Lower is better." />
+
+Task time (ms) ↓ **Lower is better**.
+
+| Task | OpenBrowser MCP p50 ms | OpenBrowser CLI p50 ms | chrome-devtools-mcp p50 ms | agent-browser p50 ms | browser-use p50 ms |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `wizard` | 715 | 999 | 4335 | 1599 | 1277 |
+| `modal` | 811 | 1206 | 3639 | 2262 | 1571 |
+| `download` | 954 | 1344 | 1633 | 1554 | 1368 |
+| `tabs` | 658 | 1010 | 2426 | 1511 | 940 |
+| `auth` | 1390 | 1915 | 3707 | 2529 | 2585 |
+
+OpenBrowser MCP has the lowest p50 on all five cold tasks against all three competitors. It won every pair, 5 of 5, on every task against every competitor.
+
+OpenBrowser CLI has a lower p50 on every cold task against every competitor except `tabs` against browser-use. CLI `tabs` p50 was 1010 ms against 940 ms, and the CLI won 1 of 5 pairs there. The other CLI cold results are p50 wins, not a claim that every CLI pair was a win. The cold lane is not an every-arm win.
+
+Raw data: [results-cold-five-arm-lean-2026-11-25-n5-final2.jsonl](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-cold-five-arm-lean-2026-11-25-n5-final2.jsonl).
+
+<a id="interactive-warm"></a>
+
+### 3.2. Warm interactive
+
+The warm lane starts each arm once and runs every task against a fresh fixture server. 100 of 100 runs passed.
+
+<img src="/images/native-interactive-warm-current-p50.png" alt="Warm interactive p50 latency for OpenBrowser MCP and CLI, chrome-devtools-mcp, agent-browser, and browser-use across four tasks. Lower is better." />
+
+Task time (ms) ↓ **Lower is better**.
+
+| Task | OpenBrowser MCP p50 ms | OpenBrowser CLI p50 ms | chrome-devtools-mcp p50 ms | agent-browser p50 ms | browser-use p50 ms |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `wizard` | 57 | 122 | 3481 | 524 | 486 |
+| `modal` | 218 | 282 | 2734 | 1126 | 625 |
+| `download` | 350 | 398 | 777 | 440 | 578 |
+| `tabs` | 72 | 130 | 1485 | 382 | 184 |
+
+Both OpenBrowser arms have the lowest warm p50 on all four tasks. Both won 5 of 5 pairs on every task against every competitor. The `auth` task is cold only because it restarts the browser.
+
+#### 3.2.1. Paired results, 5 of 5
+
+Pairs won: **Higher is better** ↑. For the underlying task time, **Lower is better** ↓.
+
+| Task | OpenBrowser MCP vs chrome-devtools-mcp | OpenBrowser MCP vs agent-browser | OpenBrowser MCP vs browser-use |
+| --- | ---: | ---: | ---: |
+| `wizard` | 5/5 | 5/5 | 5/5 |
+| `modal` | 5/5 | 5/5 | 5/5 |
+| `download` | 5/5 | 5/5 | 5/5 |
+| `tabs` | 5/5 | 5/5 | 5/5 |
+
+Pairs won: **Higher is better** ↑. For the underlying task time, **Lower is better** ↓.
+
+| Task | OpenBrowser CLI vs chrome-devtools-mcp | OpenBrowser CLI vs agent-browser | OpenBrowser CLI vs browser-use |
+| --- | ---: | ---: | ---: |
+| `wizard` | 5/5 | 5/5 | 5/5 |
+| `modal` | 5/5 | 5/5 | 5/5 |
+| `download` | 5/5 | 5/5 | 5/5 |
+| `tabs` | 5/5 | 5/5 | 5/5 |
+
+Raw data: [results-warm-five-arm-lean-2026-11-25-n5-final2.jsonl](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-warm-five-arm-lean-2026-11-25-n5-final2.jsonl).
+
+#### 3.2.2. Why the MCP surface
+
+In both current lanes, OpenBrowser MCP has the lower p50 on every measured task. It keeps one server process and one context open across tasks, which matches the warm workflow. Use the CLI for a one-off command when you do not want to manage a server. This page does not claim that the CLI starts faster than a full server. The cold lane measures the whole task, not server startup alone.
+
+<a id="interactive-resources"></a>
+
+### 3.3. Interactive resource pilot
+
+Memory: **Lower is better** ↓.
+
+<img src="/images/native-interactive-resources-pilot.png" alt="Two panels of memory in MiB for OpenBrowser MCP and CLI, chrome-devtools-mcp, agent-browser, and browser-use across five tasks. Lower is better." />
+
+This pilot measures each arm on one sample per task. It is descriptive, not a significance claim. All 25 observations passed the exact oracle, the keychain check, the resource gate, and cleanup. The launcher binding was unchanged before and after each run.
+
+Browser child physical footprint (MiB) ↓ **Lower is better**.
+
+| Task | OpenBrowser MCP | OpenBrowser CLI | chrome-devtools-mcp | agent-browser | browser-use |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `wizard` | 136.2 | 146.5 | 480.5 | 494.2 | 554.7 |
+| `modal` | 133.5 | 149.6 | 473.2 | 480.3 | 550.4 |
+| `download` | 124.9 | 141.7 | 447.2 | 485.3 | 433.4 |
+| `tabs` | 132.0 | 144.2 | 461.7 | 472.9 | 438.7 |
+| `auth` | 132.8 | 144.6 | 455.1 | 475.0 | 547.1 |
+
+Process-tree RSS (MiB) ↓ **Lower is better**.
+
+| Task | OpenBrowser MCP | OpenBrowser CLI | chrome-devtools-mcp | agent-browser | browser-use |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `wizard` | 408.9 | 428.2 | 761.9 | 1205.7 | 1201.1 |
+| `modal` | 409.4 | 433.8 | 805.8 | 1204.4 | 1198.2 |
+| `download` | 390.9 | 418.6 | 762.0 | 1179.9 | 960.2 |
+| `tabs` | 408.2 | 431.3 | 763.2 | 1193.4 | 980.9 |
+| `auth` | 411.2 | 419.5 | 731.6 | 1188.3 | 1196.0 |
+
+Both OpenBrowser arms have the lowest child footprint and the lowest process-tree RSS on all five tasks. The child footprint is about 3.2 to 4.1 times lower than the next competitor.
+
+Observed process-tree CPU: OpenBrowser MCP is lowest on all five tasks, 1.1 to 1.5 seconds against 1.8 to 3.5 seconds for the competitors. OpenBrowser CLI is lowest on four tasks. The one descriptive CPU gap is cold `auth`: CLI 3.13 seconds against agent-browser 3.06 seconds. CPU is a sampled lower bound, and it includes native driver subprocesses.
+
+Limits: N=1 per arm and task. Physical footprint uses the macOS rusage-info ABI and is null on hosts that do not support it. The arms use different scripts and adapters, so this is a resource comparison of the configured surfaces, not an engine benchmark.
+
+Raw data: [results-interactive-resources-pilot-2026-11-25-n1.jsonl](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-interactive-resources-pilot-2026-11-25-n1.jsonl).
+
+<a id="no-browser-memory"></a>
+
+## 4. OpenBrowser no-browser memory, 2026-11-25
+
+Peak process-tree RSS (MiB) ↓ **Lower is better**.
+
+<img src="/images/native-mcp-http-memory.png" alt="Bar chart of peak process-tree RSS in MiB for one scrape_web call and 25 concurrent scrape_web calls. Both use no browser process." />
+
+The `scrape_web` MCP tool runs without Chromium, Blink, or V8. It performs an HTTP fetch and parses the response. It does not run JavaScript, take screenshots, or use browser cookies. It never falls back to a browser. This is not the same scope as a browser engine. A page that needs JavaScript must use `execute_code` with a browser.
+
+Peak process-tree RSS (MiB) ↓ **Lower is better**.
+
+| Mode | Peak process-tree RSS | Browser processes | Correct results |
+| --- | ---: | ---: | ---: |
+| One `scrape_web` call | 48.1 MiB median (47.55 to 50.17, N=5) | 0 | 5 of 5 |
+| 25 concurrent `scrape_web` calls | 62.4 MiB median (62.31 to 64.30, N=3) | 0 | 25 of 25 in 3 of 3 runs |
+
+Sequential latency was 77 to 90 ms per call after discovery. The 25 concurrent calls completed in 155 to 169 ms. These timings are for one local static fixture and are not a general throughput claim.
+
+### 4.1. Non-comparable context
+
+The following published or earlier figures use different measurement methods and workloads. They are context, not points on the chart, and they are not a direct memory ranking. For memory values, **Lower is better** ↓, but the scopes below are not comparable.
+
+| Reference | Value | Scope | Why it is not comparable |
+| --- | ---: | --- | --- |
+| Lightpanda, one automation page | 21.2 MB | Published by Lightpanda | Uses its own measurement method, not process-tree RSS on this fixture. |
+| Lightpanda, 25 parallel crawler processes | 123 MB | PSS for 25 processes crawling 933 pages on Ubuntu AWS m5.xlarge | PSS on a different host and workload. Our 25-call number is one server process. |
+| Firecrawl Local static, earlier local measurement | about 155 MiB | Included the benchmark controller | Our number is process-tree RSS without a controller. |
+
+Our values are process-tree RSS in MiB, divided by 1048576. RSS can count shared pages more than once. Our 25-call number is one server process that handles 25 concurrent calls. Lightpanda's 123 MB is PSS for 25 separate processes. RSS and PSS are not directly comparable.
+
+A single-call comparison with Lightpanda's 21.2 MB is not supported by this lane. No direct memory win against Lightpanda or Firecrawl follows from these numbers.
+
+Raw data: [results-mcp-scrape-web-resource-2026-11-25-n5.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/scraping/results/results-mcp-scrape-web-resource-2026-11-25-n5.json).
+
+## 5. Other native local lanes, 2026-11-24
+
+These runs use local fixtures and exact oracles. They answer narrower questions about scraping, batch scraping, render policy, and Lightpanda latency. They are retained at their original date and are not combined into one product ranking.
 
 <a id="scraping-latency"></a>
 
-### Scraping latency: all five tasks
+### 5.1. Scraping latency against Firecrawl Local
+
+Task time (ms) ↓ **Lower is better**.
 
 <img src="/images/native-scraping-current-p50.png" alt="Log-scale chart of p50 scraping latency in milliseconds for OpenBrowser full and lightweight and Firecrawl Local across five local tasks." />
 
-N=10 per arm and task, 1 warmup, interleaved arm order. Host load `5.40, 5.36, 5.11` on 18 logical CPUs. All 30 runs per task passed the exact oracle.
+N=10 per arm and task, 1 warmup, interleaved arm order. Host load was 5.40, 5.36, 5.11 on 18 logical CPUs. All 30 runs per task passed the exact oracle.
 
-| Task | OpenBrowser full, p50 ms | OpenBrowser lightweight, p50 ms | Firecrawl Local, p50 ms | Lightweight result | Pairs won |
-| --- | ---: | ---: | ---: | --- | ---: |
-| `static_article` | 0.92 | 0.94 | 1.54 | 1.64x faster | 10/10 |
-| `pagination` | 2.93 | 3.02 | 4.42 | 1.46x faster | 10/10 |
-| `table` | 0.86 | 0.88 | 2.70 | 3.07x faster | 10/10 |
-| `js_list` | 18.00 | 18.33 | 557.65 | 30.4x faster | 10/10 |
-| `asset_heavy` | 43.46 | 21.66 | 575.66 | 26.6x faster | 10/10 |
+Task time (ms) ↓ **Lower is better**.
 
-OpenBrowser won 50 of 50 paired samples. This is a clean win on every task, including the two that were parity or a loss in the previous run.
+| Task | OpenBrowser full p50 ms | OpenBrowser lightweight p50 ms | Firecrawl Local p50 ms | Pairs won |
+| --- | ---: | ---: | ---: | ---: |
+| `static_article` | 0.92 | 0.94 | 1.54 | 10/10 |
+| `pagination` | 2.93 | 3.02 | 4.42 | 10/10 |
+| `table` | 0.86 | 0.88 | 2.70 | 10/10 |
+| `js_list` | 18.00 | 18.33 | 557.65 | 10/10 |
+| `asset_heavy` | 43.46 | 21.66 | 575.66 | 10/10 |
 
-Three changes moved pagination and static article from parity to a win:
-
-1. The owned scrape client wraps one synchronous `httpx.Client` and runs each request in a worker thread. The async transport built an anyio stream per request, which cost 0.762 ms against 0.390 ms for the sync transport.
-2. `only_main_content`, `include_tags`, and `exclude_tags` remove boilerplate before extraction, so a filtered page parses less.
-3. The JavaScript tasks now run in the Playwright headless shell, which removes browser UI renderers from the critical path.
+OpenBrowser won 50 of 50 paired samples across the five tasks. Both OpenBrowser arms have a lower p50 on every task than Firecrawl Local. Firecrawl Local is the official local offering, not Firecrawl Cloud or the full self-hosted service.
 
 Raw data: [results-firecrawl-final2-2026-11-24-n10-interleaved.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/scraping/results/results-firecrawl-final2-2026-11-24-n10-interleaved.json).
 
+<a id="firecrawl-batch"></a>
+
+### 5.2. Firecrawl Local batch
+
+Task time (ms) ↓ **Lower is better**.
+
+Firecrawl Local exposes a native `/v2/batch/scrape` job API. The comparison sends the same five pagination URLs to both products and checks that each returns the same 100 ordered names. The OpenBrowser arm uses the no-browser path (`scrape_pages`, concurrency 5) and never starts a browser. The Firecrawl arm submits one batch job, polls it every 10 ms, and downloads the results. All 20 measured runs passed.
+
+Task time (ms) ↓ **Lower is better**.
+
+| Arm | Samples | p50 ms | Pairs won |
+| --- | ---: | ---: | ---: |
+| OpenBrowser no-browser batch | 10 | 2.834 | 10/10 |
+| Firecrawl Local batch | 10 | 13.448 | 0/10 |
+
+OpenBrowser was 4.75 times faster at p50. The arms return different artifacts: OpenBrowser returns selected row dictionaries, and Firecrawl returns markdown pages. Both satisfy the 100-name oracle. The Firecrawl job poll interval contributes to its latency.
+
+Raw data: [results-batch-firecrawl-final-2026-11-24-n10.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/scraping/results/results-batch-firecrawl-final-2026-11-24-n10.json).
+
 <a id="render-policy"></a>
 
-### Render asset policy
+### 5.3. Render asset policy
+
+Requests, bytes, and scrape time: **Lower is better** ↓. Screenshots are a capability, not a score.
 
 The render mode is a capability preset. The asset flags change only which resource types reach the network, so a caller can keep screenshots and still skip external CSS.
 
 This table comes from a local page with two stylesheets, one web font, 20 images, and 20 JavaScript-rendered headlines. N=10, interleaved. The request and byte columns are exact server observations.
+
+Requests, bytes, and scrape time: **Lower is better** ↓. Screenshots are a capability, not a score.
 
 | Arm | Blocked types | Requests | Bytes | Scrape p50 | Screenshots |
 | --- | --- | ---: | ---: | ---: | --- |
@@ -81,11 +317,10 @@ This table comes from a local page with two stylesheets, one web font, 20 images
 | lightweight | images, fonts, media, text tracks | 4 | 1336 | 44.6 ms | yes |
 | no-render | the four above plus stylesheets | 2 | 1174 | 31.3 ms | no |
 | `--text-only` | the same five | 2 | 1174 | 31.6 ms | yes |
-| HTTP-only | no browser | 1 | 1165 | 198.7 ms wall | no |
 
 Blocking CSS is the scrape-time lever on this fixture: 44.6 ms falls to 31.3 ms. Blocking images alone does not move scrape time because the images are tiny and load in parallel.
 
-Two limits matter. First, blocking external CSS exposes content that the page hides with `display:none` or `visibility:hidden`, which is why Lightpanda's own agent modes keep CSS on. Second, these flags reduce requests and bytes, not Chromium process memory. Use the HTTP path for static pages.
+Two limits matter. First, blocking external CSS exposes content that the page hides with `display:none` or `visibility:hidden`, which is why Lightpanda's own agent modes keep CSS on. Second, these flags reduce requests and bytes, not Chromium process memory. Use the OpenBrowser no-browser path (`--no-browser` or `scrape_web`) for static pages.
 
 ```bash
 openbrowser-ai scrape https://example.com --text-only --only-main-content
@@ -94,79 +329,88 @@ openbrowser-ai --render-mode full --no-css --no-images -c "await navigate('https
 
 <a id="lightpanda"></a>
 
-### Lightweight no-render vs Lightpanda
+### 5.4. Lightpanda no-render latency
+
+Task time (ms) ↓ **Lower is better**.
 
 <img src="/images/native-lightpanda-current-p50.png" alt="Log-scale chart of p50 latency in milliseconds for OpenBrowser no-render and Lightpanda across five local tasks." />
 
 N=10 per arm and task, 1 warmup, interleaved. Lightpanda `1.0.5`. All 100 measured runs passed.
 
-| Task | OpenBrowser no-render, p50 ms | Lightpanda, p50 ms | Result |
-| --- | ---: | ---: | --- |
-| `static_article` | 1.8 | 425.8 | OpenBrowser 236x faster |
-| `pagination` | 4.5 | 2197.7 | OpenBrowser 488x faster |
-| `table` | 2.1 | 479.4 | OpenBrowser 228x faster |
-| `js_list` | 19.5 | 479.3 | OpenBrowser 24.6x faster |
-| `asset_heavy` | 23.1 | 503.8 | OpenBrowser 21.8x faster |
+Task time (ms) ↓ **Lower is better**.
 
-Lightpanda starts one process per sample, so its startup dominates the static tasks. A prior interleaved run measured it between 160 and 837 ms. Use the ordering, not the absolute Lightpanda value.
+| Task | OpenBrowser no-render p50 ms | Lightpanda p50 ms |
+| --- | ---: | ---: |
+| `static_article` | 1.8 | 425.8 |
+| `pagination` | 4.5 | 2197.7 |
+| `table` | 2.1 | 479.4 |
+| `js_list` | 19.5 | 479.3 |
+| `asset_heavy` | 23.1 | 503.8 |
 
-Memory is a different story. Lightpanda's published figure is 123 MB peak at 25 parallel crawler processes and 21.2 MB for one automation page. OpenBrowser's one-shot HTTP path is 47.7 MB, but it cannot run JavaScript. The JavaScript path is 355 to 382 MB with the headless shell, which is above Lightpanda and below full Chrome.
+Lightpanda starts one process per sample, so its startup dominates the static tasks. Use the ordering, not the absolute Lightpanda value. OpenBrowser no-render keeps Blink and V8 and blocks CSS, images, fonts, and media. It is not the same engine as Lightpanda. This lane measures latency only. It does not establish a memory ranking.
 
 Raw data: [results-lightpanda-final-2026-11-24-n10-interleaved.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/scraping/results/results-lightpanda-final-2026-11-24-n10-interleaved.json).
 
-<a id="scraping-resources"></a>
+<a id="discovery"></a>
 
-### Memory: one-shot CLI scrape
+### 5.5. Discovery: map and crawl
 
-<img src="/images/native-scraping-resources.png" alt="Two-panel chart of peak process-tree RSS in megabytes and live process-tree CPU in milliseconds for OpenBrowser lightweight, Firecrawl Local, and Lightpanda." />
+Firecrawl users build site pipelines on `map` and `crawl`. OpenBrowser has both, and neither starts a browser.
 
-A scrape does not have to pay for a browser UI. The `scrape` browser fallback now uses the installed Playwright headless shell, which keeps Blink and V8 and drops the browser UI renderers and extension surface.
+```bash
+openbrowser-ai map https://docs.example.com --max-urls 50 --exclude '\.pdf$'
+openbrowser-ai crawl https://docs.example.com --max-pages 20 --max-depth 2
+```
 
-N=6 per arm, order alternated per sample, peak process-tree RSS every 20 ms.
+`map_urls` reads the page, `/sitemap.xml`, and one sitemap index level, then normalizes, deduplicates, and filters by origin, include, and exclude patterns. `crawl_site` follows same-origin links breadth first, fetches each page once, parses it once, and returns page content plus a per-page link count.
 
-| Task | Headless shell | Full Chrome | Saved |
-| --- | ---: | ---: | ---: |
-| `js_list` | 940.1 ms, 355.4 MB | 1296.0 ms, 742.4 MB | 387.0 MB, 27 percent faster |
-| `asset_heavy` | 974.7 ms, 381.6 MB | 1274.3 ms, 754.8 MB | 373.1 MB, 24 percent faster |
+Limits: both use the OpenBrowser no-browser path. A JavaScript shell page is reported as a failed or skipped page, not rendered. This section is a functional check, not a timed comparison.
 
-A separate judge measured -471 MB RSS and -344 MB physical footprint across five scrape tasks and -467 MB RSS across four interactive tasks, with every exact oracle passing, including the download SHA-256, popup opener, and tabs status.
+## 6. How to choose a surface
 
-The one-shot static path is measured separately, one process per sample, peak child RSS every 5 ms, identical 1169-byte output.
+| Need | Use | Why |
+| --- | --- | --- |
+| One static page, no browser | `openbrowser-ai scrape URL --no-browser` or MCP `scrape_web` | No Blink or V8. JavaScript does not run. See the no-browser memory section. |
+| Many known URLs | `openbrowser-ai scrape --no-browser --jsonl` | Concurrent no-browser fetches. |
+| Site discovery | `openbrowser-ai map URL` | Page links plus sitemap. No browser. |
+| Site-wide text | `openbrowser-ai crawl URL` | Bounded breadth-first crawl. No browser. |
+| JavaScript page, one shot | `openbrowser-ai scrape --engine browser` | Headless shell, not the no-browser path. |
+| Long interactive session | MCP `create_context` plus `execute_code` | Lowest measured warm p50 on every task. |
+| One-off interactive command | `openbrowser-ai -c` | No server to manage. |
+| Visual work | `--render-mode full` | Screenshots and real paint. |
 
-| Command | p50 latency | p50 peak RSS |
-| --- | ---: | ---: |
-| `openbrowser-ai scrape URL` (default engine) | 148.6 ms | 47.7 MB |
-| `openbrowser-ai scrape URL --engine http` | 142.7 ms | 47.6 MB |
+## 7. What these lanes show
 
-Read the resource lane with one caveat. `resource_compare.py` starts a browser for every arm before it runs any task, so its OpenBrowser static rows describe a persistent browser session, not a static scrape. Use the table above for static memory.
+Task time and memory: **Lower is better** ↓. Pair counts: **Higher is better** ↑.
 
-Raw data:
+| Question | Result | Limit |
+| --- | --- | --- |
+| Cold interactive p50 | OpenBrowser MCP is lowest on all five tasks against all three competitors. It won 5 of 5 pairs on every task against every competitor. | OpenBrowser CLI has the only cold p50 loss, on `tabs` against browser-use, 1010 ms against 940 ms, and won 1 of 5 pairs. |
+| Warm interactive p50 | Both OpenBrowser arms are lowest on all four tasks against all three competitors. Both won 5 of 5 pairs on every task against every competitor. | `auth` is cold only because it restarts the browser. |
+| No-browser memory | One `scrape_web` call: 48.1 MiB median. 25 concurrent calls: 62.4 MiB median. Zero browser processes. | Process-tree RSS on one local fixture. Not comparable to Lightpanda PSS or the Firecrawl controller-inclusive figure. |
+| Interactive memory | Both OpenBrowser arms have the lowest child footprint and process-tree RSS on all five tasks in the N=1 resource pilot. | N=1 per arm and task. Descriptive, not a significance claim. |
+| Sequential scraping vs Firecrawl Local | 50 of 50 pairs. Lower p50 on all five tasks for both OpenBrowser arms. | Firecrawl Local only. Different output artifacts. |
+| Batch vs Firecrawl Local | 10 of 10 pairs. 2.834 ms against 13.448 ms p50. 4.75 times faster. | Firecrawl poll interval contributes. Different artifacts. |
+| Lightpanda no-render latency | OpenBrowser no-render has a lower p50 on all five tasks. | Lightpanda starts a process per sample. Not a matched startup or engine test. |
 
-- [results-headless-shell-final2-2026-11-24-n6.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/scraping/results/results-headless-shell-final2-2026-11-24-n6.json)
-- [results-cli-static-final2-2026-11-24-n5.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/scraping/results/results-cli-static-final2-2026-11-24-n5.json)
-- [results-resources-2026-11-24-n3.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/scraping/results-resources-2026-11-24-n3.json)
+## 8. What this page does not measure
 
-<a id="interactive-cold"></a>
+These limits apply to the current native lanes. The historical sections state their own limits.
 
-### Interactive browsing, cold lane
+- Multi-sample interactive resource significance. The interactive resource pilot has N=1 per arm and task, so it is descriptive.
+- Model-driven Agent and CodeAgent comparisons in the current lanes. The current interactive lanes use fixed task adapters, not a model choosing actions.
+- Matched cold and warm Lightpanda lanes. The Lightpanda lane starts one process per sample, and OpenBrowser starts before timing. Use its ordering, not its absolute values.
+- Live-site anti-bot behavior, CAPTCHA, login providers, PDFs, uploads, iframes, screenshot fidelity, long sessions, and concurrent browser contexts.
+- Every CLI or MCP surface of each product. The current interactive lanes use the selected native surfaces listed in the tables.
+- Statistical significance. The current native lanes report observed samples and pair counts, not confidence intervals.
 
-<img src="/images/native-interactive-cold-p50.png" alt="Cold interactive p50 latency for the OpenBrowser MCP and CLI arms, chrome-devtools-mcp, agent-browser, and browser-use across five tasks." />
+<a id="historical-cold-lane"></a>
 
-The cold lane starts a fresh process tree, daemon or server, and browser for every task. N=5 per arm and task, run when host load fell to 3.92 before the first sample. All 125 runs passed their oracle.
+## 9. Historical cold-lane work, 2026-11-24
 
-| Task | OpenBrowser MCP, p50 ms | OpenBrowser CLI, p50 ms | chrome-devtools-mcp, p50 ms | agent-browser, p50 ms | browser-use, p50 ms |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| `wizard` | 1405 | 1493 | 4403 | 1692 | 1408 |
-| `modal` | 1555 | 1585 | 3672 | 2365 | 1723 |
-| `download` | 1698 | 1737 | 1681 | 1731 | 1424 |
-| `tabs` | 1442 | 1449 | 2383 | 1670 | 1035 |
-| `auth` | 2416 | 2636 | 3758 | 2760 | 2856 |
+The 2026-11-25 rotated cold lane supersedes the 2026-11-24 cold table. The earlier per-task table is not reproduced here. The raw file is retained for provenance.
 
-The MCP arm beats agent-browser on all five cold tasks. It beats chrome-devtools-mcp on four of five, losing download to a 17 ms difference that is inside run noise. Against browser-use it wins modal and auth, ties wizard, and loses download and tabs. Browser-use remains the cold-lane leader on the two click-and-wait tasks.
-
-#### What changed in the cold lane
-
-A cold start is one browser launch plus one server startup. On this host a `BrowserSession.start()` takes about 550 ms, and Chrome accounts for most of it. Four changes removed about 400 ms from the OpenBrowser side:
+Five changes were part of the cold-start work:
 
 1. The code-use namespace import runs on a worker thread while Chrome starts.
 2. Optional namespace libraries resolve lazily. numpy, pandas, bs4, pypdf, reportlab, and the video recorder no longer load unless a cell uses them.
@@ -174,37 +418,28 @@ A cold start is one browser launch plus one server startup. On this host a `Brow
 4. Readiness polls are 20 ms, and a fixed 50 ms redirect sleep is gone.
 5. A headless profile with no extensions now uses the Playwright headless shell automatically, which removes the browser UI renderers from startup.
 
-Cold `openbrowser-ai -c pass` measured 1337.6 ms p50 before this work and 968.7 ms after. A paired N=12 run measured 1234.8 ms to 1019.4 ms with 11 of 12 pairs faster.
+The before and after numbers below describe the historical run. They are not a controlled attribution to each individual change. Cold `openbrowser-ai -c pass` measured 1337.6 ms p50 before this work and 968.7 ms p50 after. A paired N=12 run measured 1234.8 ms to 1019.4 ms, with 11 of 12 pairs faster. These are historical numbers from the 2026-11-24 run, not current-version claims.
 
 Raw data: [results-cold-six-arm-quiet-2026-11-24-n5.jsonl](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-cold-six-arm-quiet-2026-11-24-n5.jsonl).
 
-<a id="interactive-warm"></a>
+<a id="historical-paired"></a>
 
-### Interactive browsing, warm lane
+## 10. Historical paired MCP comparison, 2026-11-24
 
-<img src="/images/native-interactive-warm-current-p50.png" alt="Warm interactive p50 latency for the OpenBrowser MCP and CLI arms, chrome-devtools-mcp, agent-browser, and browser-use across four tasks." />
+Task time (ms) ↓ **Lower is better**.
 
-The warm lane starts each arm once and runs every task against a fresh fixture server. N=5 per arm and task. All 100 runs passed.
+Both arms warm once, then alternate order for every sample. Each run gets a fresh fixture server and an exact oracle check. N=10 per arm and task. The four files contain 40 pairs and 80 observations. All 80 observations passed.
 
-| Task | OpenBrowser MCP, p50 ms | OpenBrowser CLI, p50 ms | chrome-devtools-mcp, p50 ms | agent-browser, p50 ms | browser-use, p50 ms |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| `wizard` | 117 | 160 | 3510 | 573 | 464 |
-| `modal` | 255 | 302 | 2776 | 1198 | 1164 |
-| `download` | 397 | 443 | 784 | 498 | 551 |
-| `tabs` | 130 | 189 | 1494 | 417 | 174 |
+Task time (ms) ↓ **Lower is better**.
 
-<a id="paired-interactive"></a>
-
-#### Paired current comparisons
-
-Both arms warm once, then alternate order for every sample. Each run gets a fresh fixture server and an exact oracle check. All 40 runs passed.
-
-| Task | OpenBrowser MCP, p50 ms | Closest competitor | Competitor p50 ms | Pairs won | Paired delta p50 ms |
+| Task | OpenBrowser MCP p50 ms | Opponent | Opponent p50 ms | Pairs won | Paired delta p50 ms |
 | --- | ---: | --- | ---: | ---: | ---: |
 | `wizard` | 121.966 | browser-use | 446.056 | 10/10 | 330.459 |
 | `modal` | 267.286 | browser-use | 806.803 | 10/10 | 519.428 |
 | `tabs` | 140.130 | browser-use | 220.321 | 10/10 | 75.767 |
 | `download` | 393.629 | agent-browser | 482.813 | 10/10 | 89.421 |
+
+This historical run used selected opponents: browser-use for `wizard`, `modal`, and `tabs`, and agent-browser for `download`. It did not pair every task against every competitor. The current 2026-11-25 warm lane does pair every task against every competitor, and it reports 5 of 5 for both OpenBrowser arms.
 
 The download fixture holds the response for 300 ms, so the 89.421 ms difference is the control-plane margin above that fixed delay.
 
@@ -215,135 +450,58 @@ Raw data:
 - [results-paired-tabs-mcp-vs-browseruse-final2-2026-11-24-n10.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-paired-tabs-mcp-vs-browseruse-final2-2026-11-24-n10.json)
 - [results-paired-download-mcp-vs-agentbrowser-final2-2026-11-24-n10.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-paired-download-mcp-vs-agentbrowser-final2-2026-11-24-n10.json)
 
-<a id="mcp-surface"></a>
+<a id="cli-benchmark"></a>
 
-#### Why the MCP surface is the one to use
+## 11. Historical CLI Benchmark, 2026-03-15
 
-The MCP arm speaks the stateless `2026-07-28` protocol: one `server/discover` probe, then `create_context`, `execute_code`, and `close_context`. Each context owns a browser, a namespace, a profile, and a download path. A coding agent that opens one context and keeps it open gets the warm numbers above.
+The full CLI benchmark is a separate page: [CLI Benchmark: 4-Way Comparison](/cli-comparison).
 
-The MCP arm is faster than the CLI arm on every task because there is no per-call process start and no per-call daemon handshake. The CLI still starts faster than a full server for a one-off command.
+It compares `openbrowser-ai`, browser-use, playwright-cli, and agent-browser CLIs. Each tool gets one generic Bash tool, and Claude Sonnet 4.6 on AWS Bedrock drives six live tasks. N=3 runs per approach. The retained artifact does not record the CLI tool versions or a fixed random seed, so the run is not exactly reproducible and is not a current-version ranking.
 
-<a id="firecrawl-batch"></a>
-
-### Firecrawl batch scraping
-
-Firecrawl Local exposes a native `/v2/batch/scrape` job API. The comparison sends the same five pagination URLs to both products and checks that each returns the same 100 ordered names. The OpenBrowser arm uses `scrape_pages(engine="http", concurrency=5)` and never starts a browser. The Firecrawl arm submits one batch job, polls it every 10 ms, and downloads the results. All 20 measured runs passed.
-
-| Arm | Samples | p50 ms | p95 ms | Range ms | Requests |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| OpenBrowser HTTP batch | 10 | 2.834 | 3.389 | 2.503 to 3.389 | 5 |
-| Firecrawl Local batch | 10 | 13.448 | 14.013 | 11.961 to 14.013 | 5 |
-
-OpenBrowser was faster in 10 of 10 pairs. The median paired difference was `10.625` ms, and OpenBrowser was 4.75 times faster at p50. No browser started for any OpenBrowser batch. The arms return different artifacts: OpenBrowser returns selected row dictionaries, while Firecrawl returns markdown pages. Both satisfy the 100-name oracle.
-
-Raw data: [results-batch-firecrawl-final-2026-11-24-n10.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/scraping/results/results-batch-firecrawl-final-2026-11-24-n10.json).
-
-<a id="discovery"></a>
-
-### Discovery: map and crawl
-
-Firecrawl users build site pipelines on `map` and `crawl`. OpenBrowser now has both, and neither starts a browser.
-
-```bash
-openbrowser-ai map https://docs.example.com --max-urls 50 --exclude '\.pdf$'
-openbrowser-ai crawl https://docs.example.com --max-pages 20 --max-depth 2
-```
-
-`map_urls` reads the page, `/sitemap.xml`, and one sitemap index level, then normalizes, deduplicates, and filters by origin, include, and exclude patterns. `crawl_site` follows same-origin links breadth first, fetches each page once, parses it once, and returns page content plus a per-page link count.
-
-Limits: both are HTTP-only. A JavaScript shell page is reported as a failed or skipped page, not rendered.
-
-<a id="cli-batch"></a>
-
-### CLI static scraping, one process per page
-
-The console entry answers a static page before it loads the Click command tree, the browser modules, or the configuration stack. That is why the default engine and the explicit HTTP engine now cost the same.
-
-| Path | p50 latency | p50 peak RSS | Output bytes |
-| --- | ---: | ---: | ---: |
-| Default engine, static page | 148.6 ms | 47.7 MB | 1169 |
-| Explicit `--engine http`, static page | 142.7 ms | 47.6 MB | 1169 |
-
-A page that needs JavaScript falls back to the browser with the headless shell.
-
-Raw data: [results-cli-static-final2-2026-11-24-n5.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/scraping/results/results-cli-static-final2-2026-11-24-n5.json).
-
-<a id="scorecard"></a>
-
-### Head-to-head scorecard
-
-This table counts task-level results on the local fixtures. It does not score features, stability, or live-site coverage.
-
-| Workload | OpenBrowser arm | Opponent | OpenBrowser wins | Opponent wins | Detail |
-| --- | --- | --- | ---: | ---: | --- |
-| Scraping, 5 sequential tasks | full or lightweight | Firecrawl Local | 5 | 0 | 50/50 paired samples. Pagination 3.02 ms against 4.42 ms. |
-| Scraping batch, 5 pages | HTTP batch | Firecrawl Local batch | 1 | 0 | 4.75x faster at p50, 10/10 pairs. |
-| No-render, 5 tasks | no-render | Lightpanda `1.0.5` | 5 | 0 | Latency only. Lightpanda uses less memory for JavaScript pages. |
-| Static CLI, 1 page | HTTP fast entry | Firecrawl Local | n/a | n/a | Different surfaces. The HTTP path is 148.6 ms and 47.7 MB. |
-| Warm interactive, 4 tasks | MCP | chrome-devtools-mcp | 4 | 0 | Arm-major run. |
-| Warm interactive, 4 tasks | MCP | agent-browser | 4 | 0 | Arm-major run plus the paired download result. |
-| Warm interactive, 4 tasks | MCP | browser-use | 4 | 0 | Paired, 10/10 on every task. |
-| Cold interactive, 5 tasks | MCP | chrome-devtools-mcp | 5 | 0 | Fresh server and browser per task. |
-| Cold interactive, 5 tasks | MCP | agent-browser | 4 | 1 | Agent-browser wins download. |
-| Cold interactive, 5 tasks | MCP | browser-use | 2 | 2 | MCP wins modal and auth; browser-use wins download and tabs; wizard is within 2 percent. |
-
-### How to choose a surface
-
-| Need | Use | Why |
+| Tool | Interface | Engine |
 | --- | --- | --- |
-| One static page, lowest memory | `openbrowser-ai scrape URL` | 148.6 ms and 47.7 MB, no browser |
-| Many known URLs | `scrape --engine http --jsonl` | Concurrent HTTP, no browser |
-| Site discovery | `openbrowser-ai map URL` | Page links plus sitemap, no browser |
-| Site-wide text | `openbrowser-ai crawl URL` | Bounded breadth-first crawl, no browser |
-| JavaScript page, one shot | `scrape --engine browser` | Headless shell, 355 to 382 MB |
-| Long interactive session | MCP `create_context` plus `execute_code` | Warm numbers above |
-| One-off interactive command | `openbrowser-ai -c` | No server to manage |
-| Visual work | `--render-mode full` | Screenshots and real paint |
+| `openbrowser-ai` | `openbrowser-ai -c 'code'` | Raw CDP |
+| browser-use | `uvx browser-use <cmd>` | Playwright |
+| playwright-cli | `playwright-cli <cmd>` | Playwright |
+| agent-browser | `agent-browser <cmd>` | Playwright |
 
-### What these lanes show
-
-OpenBrowser is faster than Firecrawl Local on every sequential scraping task, and 4.75 times faster on the native batch surface. It also ships the discovery primitives, main-content filtering, and asset flags that Firecrawl users rely on.
-
-OpenBrowser is faster than every competitor on every warm interactive task in the paired runs. The MCP arm won 10 of 10 pairs on wizard, modal, tabs, and download, with p50 deltas of 330.5 ms, 519.4 ms, 75.8 ms, and 89.4 ms.
-
-Cold starts are no longer a blanket loss. The MCP arm beats agent-browser on all five cold tasks, chrome-devtools-mcp on four, and browser-use on two with a tie on a third. Download and tabs still belong to browser-use.
-
-Memory depends on the surface, not the brand. The same product costs 47.7 MB for a static page, 355 to 382 MB for a JavaScript page in the headless shell, and 742 to 755 MB in full Chrome.
-
-The fixtures do not test live-site anti-bot behavior, CAPTCHA, or login providers. The resource lane measures RSS and CPU, not GPU memory, disk I/O, or energy. Lightpanda and Chromium use different engines and do not have identical layout, paint, extension, or screenshot behavior. Local fixture results do not establish a ranking for live websites.
-
-> **Historical benchmark, not a current-version ranking.** The MCP runs below were recorded on the dates shown. The 6-task LLM run installed Playwright MCP and Chrome DevTools MCP from `@latest` at run time, but their resolved versions were not written to the retained artifacts. The 5-step run's install method was not retained. The 5-step token benchmark's raw per-response files are also not retained in this repository. Treat these numbers as historical observations for the versions installed on the run date, not as a comparison against today's releases. No universal winner follows from them. See [Provenance and limits](#provenance-and-limits).
+These are historical observations, not a current head-to-head result.
 
 <a id="mcp-benchmark"></a>
 
-## MCP Server Comparison
+## 12. Historical MCP Server Comparison, 2026-02-21
 
 Benchmark date: 2026-02-21 | OpenBrowser MCP v0.1.26 (CodeAgent, 1 tool) | Playwright MCP (resolved version not recorded) | Chrome DevTools MCP (resolved version not recorded)
 
-### Overview
+> **Historical benchmark, not a current-version ranking.** These runs were recorded on 2026-02-21 with OpenBrowser MCP v0.1.26. Playwright MCP and Chrome DevTools MCP were installed from `@latest` at run time, but their resolved versions were not recorded. The 5-step token benchmark's raw per-response files are not retained in this repository. Treat these numbers as historical observations for the versions installed on the run date, not as a comparison against today's releases. No universal winner follows from them. See [Provenance and limits](#1210-provenance-and-limits).
+
+Direction: task success uses **Higher is better** ↑. Duration, token usage, response size, and cost use **Lower is better** ↓. Tool-call counts are descriptive, not a score.
+
+### 12.1. Overview
 
 Three approaches to browser automation via MCP, measured on identical tasks.
 
 | | Playwright MCP | Chrome DevTools MCP | OpenBrowser MCP |
 |---|---|---|---|
 | **Maintainer** | Microsoft | Chrome DevTools team (Google) | OpenBrowser |
-| **GitHub Stars** | 27,400+ | 26,200+ | -- |
 | **Engine** | Playwright (Chromium/Firefox/WebKit) | Puppeteer (CDP) | Raw CDP (direct) |
 | **Tools** | 22 core (34 total) | 26 | 1 at benchmark (`execute_code`); `get_status` and `reset_browser` were added after v0.1.26 |
-| **Approach** | A11y snapshot with every action | A11y snapshot on demand | CodeAgent -- Python code execution with browser namespace |
+| **Approach** | A11y snapshot with every action | A11y snapshot on demand | CodeAgent: Python code execution with browser namespace |
 | **Element IDs** | `ref` from snapshot (`[ref=e25]`) | `uid` from snapshot (`uid=1_2`) | Numeric index from state |
 | **Transport** | stdio | stdio | stdio |
 | **Language** | TypeScript (Node.js) | TypeScript (Node.js) | Python |
 
-### Token Usage Benchmark
+### 12.2. Token Usage Benchmark
 
-#### Methodology
+#### 12.2.1. Methodology
 
 All three MCP servers were started as subprocesses and tested via JSON-RPC stdio transport. Same 5-step workflow, same pages, same measurement method. All numbers are real measurements, not estimates.
 
-**Workflow**: Navigate to Wikipedia Python page -> get page state -> click link -> go back -> get state again.
+**Workflow**: Navigate to the Wikipedia Python page, get page state, click a link, go back, and get state again.
 
-#### Results: 5-Step Workflow on Wikipedia (Complex Page)
+#### 12.2.2. Results: 5-Step Workflow on Wikipedia (Complex Page)
+
+Response characters and estimated tokens: **Lower is better** ↓.
 
 | Metric | Playwright MCP | Chrome DevTools MCP | OpenBrowser MCP |
 |--------|---------------:|--------------------:|----------------:|
@@ -352,7 +510,9 @@ All three MCP servers were started as subprocesses and tested via JSON-RPC stdio
 | **Est. response tokens** | **248,016** | **134,802** | **283** |
 | **Token ratio vs OpenBrowser** | 877x more | 476x more | 1x (baseline) |
 
-#### Results: Small Page (httpbin.org/forms/post)
+#### 12.2.3. Results: Small Page (httpbin.org/forms/post)
+
+Response characters: **Lower is better** ↓.
 
 | Operation | Playwright MCP | Chrome DevTools MCP | OpenBrowser MCP |
 |-----------|---------------:|--------------------:|----------------:|
@@ -361,7 +521,9 @@ All three MCP servers were started as subprocesses and tested via JSON-RPC stdio
 | Type/fill | 526 chars | 95 chars | 92 chars |
 | List tabs/pages | 367 chars | 120 chars | 195 chars |
 
-#### Per-Operation Token Breakdown (Wikipedia)
+#### 12.2.4. Per-Operation Token Breakdown (Wikipedia)
+
+Response characters and estimated tokens: **Lower is better** ↓.
 
 | Operation | Playwright MCP | Chrome DevTools MCP | OpenBrowser MCP |
 |-----------|---------------:|--------------------:|----------------:|
@@ -371,7 +533,7 @@ All three MCP servers were started as subprocesses and tested via JSON-RPC stdio
 | Go back | 198 chars (~50 tokens) | 149 chars (~37 tokens) | 75 chars (~19 tokens) |
 | Get state (2nd) | 139 chars (~35 tokens) | 135 chars (~34 tokens) | 421 chars (~105 tokens) |
 
-### Why the Difference
+### 12.3. Why the Difference
 
 | Design Decision | Playwright MCP | Chrome DevTools MCP | OpenBrowser MCP |
 |----------------|---------------:|--------------------:|----------------:|
@@ -386,15 +548,15 @@ All three MCP servers were started as subprocesses and tested via JSON-RPC stdio
 
 **Chrome DevTools MCP**: Returns minimal confirmations for navigation. The agent must explicitly call `take_snapshot` to see the page (~135K tokens for Wikipedia). One snapshot is comparable in size to Playwright's, but actions don't auto-return snapshots.
 
-**OpenBrowser MCP**: Actions return minimal confirmations. The agent explicitly requests the level of detail it needs -- from 105 tokens (compact state) to 3,981 tokens (targeted search) to 25,164 tokens (full page text). More tool calls, dramatically fewer tokens.
+**OpenBrowser MCP**: Actions return minimal confirmations. The agent explicitly requests the level of detail it needs: from 105 tokens (compact state) to 3,981 tokens (targeted search) to 25,164 tokens (full page text). More tool calls, fewer tokens.
 
-### What Each Server Returns (Verbatim)
+### 12.4. What Each Server Returns (Verbatim)
 
 All responses below are real output captured from each MCP server on the httpbin.org/forms/post page.
 
-#### Navigate
+#### 12.4.1. Navigate
 
-**Playwright MCP** -- returns full a11y snapshot with every navigation (~2,150 chars on httpbin, ~496K chars on Wikipedia):
+**Playwright MCP** returns full a11y snapshot with every navigation (~2,150 chars on httpbin, ~496K chars on Wikipedia):
 
 ```yaml
 ### Ran Playwright code
@@ -415,7 +577,7 @@ await page.goto('https://httpbin.org/forms/post');
   ... (entire page tree continues)
 ```
 
-**Chrome DevTools MCP** -- returns URL confirmation only (~136 chars):
+**Chrome DevTools MCP** returns URL confirmation only (~136 chars):
 
 ```
 # navigate_page response
@@ -424,15 +586,15 @@ Successfully navigated to https://httpbin.org/forms/post.
 1: https://httpbin.org/forms/post [selected]
 ```
 
-**OpenBrowser MCP** -- returns URL confirmation only (~105 chars):
+**OpenBrowser MCP** returns URL confirmation only (~105 chars):
 
 ```
 Navigated to: https://httpbin.org/forms/post
 ```
 
-#### Get Page State / Snapshot
+#### 12.4.2. Get Page State / Snapshot
 
-**Playwright MCP** `browser_snapshot` -- full a11y tree again (~1,896 chars on httpbin, ~495K chars on Wikipedia):
+**Playwright MCP** `browser_snapshot` returns the full a11y tree again (~1,896 chars on httpbin, ~495K chars on Wikipedia):
 
 ```yaml
 - generic [ref=e2]:
@@ -443,7 +605,7 @@ Navigated to: https://httpbin.org/forms/post
   ... (entire page tree)
 ```
 
-**Chrome DevTools MCP** `take_snapshot` -- full a11y tree (~1,214 chars on httpbin, ~538K chars on Wikipedia):
+**Chrome DevTools MCP** `take_snapshot` returns the full a11y tree (~1,214 chars on httpbin, ~538K chars on Wikipedia):
 
 ```
 uid=1_0 RootWebArea url="https://httpbin.org/forms/post"
@@ -456,7 +618,7 @@ uid=1_0 RootWebArea url="https://httpbin.org/forms/post"
   ... (entire page tree)
 ```
 
-**OpenBrowser MCP** -- the LLM writes Python code to query exactly what it needs:
+**OpenBrowser MCP**: the LLM writes Python code to query exactly what it needs:
 
 ```python
 # Get page metadata
@@ -468,11 +630,13 @@ print(json.dumps({"url": state.url, "title": state.title}))
 {"url": "https://httpbin.org/forms/post", "title": "httpbin.org/forms/post"}
 ```
 
-The agent requests only the data it needs via Python code -- page title, specific element attributes, or targeted JS evaluation. No full-page dumps.
+The agent requests only the data it needs via Python code: page title, specific element attributes, or targeted JS evaluation. No full-page dumps.
 
-#### Click / Type / Go Back
+#### 12.4.3. Click / Type / Go Back
 
 All three servers return short confirmations for actions:
+
+Response size: **Lower is better** ↓.
 
 | Operation | Playwright MCP | Chrome DevTools MCP | OpenBrowser MCP |
 |-----------|---------------|---------------------|-----------------|
@@ -480,11 +644,11 @@ All three servers return short confirmations for actions:
 | Type | Updated snapshot (~526 chars) | `Filled element uid=1_2` | `Typed 'John Doe' into element 4` |
 | Go back | ~198 chars | ~149 chars | `Navigated back` |
 
-#### Targeted Extraction (OpenBrowser only)
+#### 12.4.4. Targeted Extraction (OpenBrowser only)
 
-No equivalent in Playwright or Chrome DevTools MCP -- both require dumping the full snapshot or running JavaScript from the client side.
+No equivalent in Playwright or Chrome DevTools MCP: both require dumping the full snapshot or running JavaScript from the client side.
 
-**Element search** -- the LLM writes Python to find specific elements:
+**Element search**: the LLM writes Python to find specific elements:
 
 ```python
 state = await browser.get_browser_state_summary()
@@ -493,7 +657,7 @@ for idx, el in state.dom_state.selector_map.items():
         print(f"Found submit button at index {idx}")
 ```
 
-**Data extraction** -- extract specific data via JS evaluation, not full-page dumps:
+**Data extraction**: extract specific data via JS evaluation, not full-page dumps:
 
 ```python
 # Extract only what's needed from a 97K-char Wikipedia page
@@ -503,13 +667,17 @@ print(data)  # ~900 chars instead of ~97K
 
 **Comparison for finding "Guido van Rossum" on Wikipedia:**
 
+Response size: **Lower is better** ↓.
+
 | Server | Method | Response Size |
 |--------|--------|-------------:|
 | Playwright MCP | `browser_snapshot` (dump full tree, search client-side) | ~495K chars |
 | Chrome DevTools MCP | `take_snapshot` (dump full tree, search client-side) | ~538K chars |
 | OpenBrowser MCP | `evaluate()` + Python string matching | ~900 chars |
 
-### Cost Comparison
+### 12.5. Cost Comparison
+
+Cost: **Lower is better** ↓.
 
 MCP tool response costs per 5-step workflow on a complex page (Wikipedia). These tokens are added to the LLM's context window, charged at input token rates. All numbers based on real measurements.
 
@@ -521,21 +689,25 @@ MCP tool response costs per 5-step workflow on a complex page (Wikipedia). These
 
 **Per 1,000 workflows:**
 
+Cost: **Lower is better** ↓.
+
 | Model | Playwright MCP | Chrome DevTools MCP | OpenBrowser MCP |
 |-------|---------------:|--------------------:|----------------:|
 | Claude Sonnet 4.6 | $744 | $404 | **$0.85** |
 | Claude Opus 4.6 | $1,240 | $674 | **$1.42** |
 | GPT-5.2 | $434 | $236 | **$0.50** |
 
-### E2E LLM Benchmark
+### 12.6. E2E LLM Benchmark
 
-#### Methodology
+#### 12.6.1. Methodology
 
 Six real-world browser tasks run through Claude Sonnet 4.6 on AWS Bedrock (Converse API). Each task uses a single MCP server as tool provider. The LLM decides which tools to call and when the task is complete. All tasks run against live websites.
 
 **Tasks**: Wikipedia fact lookup, httpbin form fill, Hacker News data extraction, Wikipedia search + navigation, GitHub release lookup, example.com content analysis.
 
-#### Results: Task Success
+#### 12.6.2. Results: Task Success
+
+Task success: **Higher is better** ↑.
 
 All three servers pass all 6 tasks.
 
@@ -549,7 +721,9 @@ All three servers pass all 6 tasks.
 | content_analysis | PASS | PASS | PASS |
 | **Total** | **6/6** | **6/6** | **6/6** |
 
-#### Results: Tool Calls and Duration
+#### 12.6.3. Results: Tool Calls and Duration
+
+Duration: **Lower is better** ↓. Tool-call counts are descriptive, not a score.
 
 | Metric | Playwright MCP | Chrome DevTools MCP | OpenBrowser MCP |
 |--------|---------------:|--------------------:|----------------:|
@@ -557,19 +731,27 @@ All three servers pass all 6 tasks.
 | **Avg tool calls/task** | 1.6 | 3.2 | 2.3 |
 | **Total duration (mean +/- std)** | 62.7 +/- 4.8s | 103.4 +/- 2.7s | 77.0 +/- 6.7s |
 
-Playwright completes most tasks in 1 tool call because every navigation returns the full accessibility snapshot -- the LLM sees the entire page immediately and can answer without follow-up queries. OpenBrowser takes more turns because the LLM writes code to navigate, extract, and verify data step by step.
+Playwright completes most tasks in 1 tool call because every navigation returns the full accessibility snapshot, so the LLM sees the entire page immediately and can answer without follow-up queries. OpenBrowser takes more turns because the LLM writes code to navigate, extract, and verify data step by step.
+
+Duration and token usage: **Lower is better** ↓.
 
 <img src="/images/benchmark_comparison.png" alt="MCP Server Benchmark: Duration vs Token Usage" />
 
-#### Per-Task Duration
+#### 12.6.4. Per-Task Duration
+
+Duration: **Lower is better** ↓.
 
 <img src="/images/benchmark_per_task_duration.png" alt="Per-Task Duration by MCP Server" />
 
-#### Per-Task Tool Calls
+#### 12.6.5. Per-Task Tool Calls
+
+Tool-call counts are descriptive, not a score.
 
 <img src="/images/benchmark_tool_calls.png" alt="Tool Calls Per Task by MCP Server" />
 
-#### Results: Token Efficiency
+#### 12.6.6. Results: Token Efficiency
+
+Token usage and response size: **Lower is better** ↓.
 
 Bedrock API token usage measured from the Converse API `usage` field (mean across 5 runs, 10,000-sample bootstrap CIs).
 
@@ -580,9 +762,13 @@ Bedrock API token usage measured from the Converse API `usage` field (mean acros
 | **API Token ratio vs OpenBrowser** | **3.2x more** | **6.0x more** | **1x (baseline)** |
 | **Response char ratio vs OpenBrowser** | **144x more** | **146x more** | **1x (baseline)** |
 
+Token usage: **Lower is better** ↓.
+
 <img src="/images/benchmark_token_breakdown.png" alt="Total Bedrock API Token Usage (Input vs Output)" />
 
-#### Per-Task MCP Response Size
+#### 12.6.7. Per-Task MCP Response Size
+
+Response size: **Lower is better** ↓.
 
 | Task | Playwright MCP | Chrome DevTools MCP | OpenBrowser MCP |
 |------|---------------:|--------------------:|----------------:|
@@ -593,15 +779,21 @@ Bedrock API token usage measured from the Converse API `usage` field (mean acros
 | deep_navigation | 14,875 chars | 195 chars | 113 chars |
 | content_analysis | 485 chars | 501 chars | 499 chars |
 
-The pattern: any task involving a complex page (Wikipedia, GitHub releases) produces massive response payloads for Playwright and Chrome DevTools because they dump the full accessibility snapshot. OpenBrowser returns only the data the code explicitly extracts.
+Any task involving a complex page (Wikipedia, GitHub releases) produces large response payloads for Playwright and Chrome DevTools because they dump the full accessibility snapshot. OpenBrowser returns only the data the code explicitly extracts.
+
+Response size: **Lower is better** ↓.
 
 <img src="/images/benchmark_response_size.png" alt="MCP Response Size: Full Page Dumps vs Server-Side Processing" />
 
-#### Per-Task Input Token Usage
+#### 12.6.8. Per-Task Input Token Usage
+
+Token usage: **Lower is better** ↓.
 
 <img src="/images/benchmark_per_task_tokens.png" alt="Per-Task Input Token Usage by MCP Server" />
 
-#### Results: Cost Per Benchmark Run (6 Tasks)
+#### 12.6.9. Results: Cost Per Benchmark Run (6 Tasks)
+
+Cost: **Lower is better** ↓.
 
 Cost per benchmark run based on Bedrock API token usage (input + output tokens at respective rates).
 
@@ -610,25 +802,27 @@ Cost per benchmark run based on Bedrock API token usage (input + output tokens a
 | Claude Sonnet 4.6 ($3/$15 per M) | $0.50 | $0.92 | **$0.18** |
 | Claude Opus 4.6 ($5/$25 per M) | $0.83 | $1.53 | **$0.30** |
 
+Cost: **Lower is better** ↓.
+
 <img src="/images/benchmark_cost.png" alt="Cost Per Benchmark Run by Model" />
 
-#### Why OpenBrowser Uses More Tool Calls but Fewer Tokens
+#### 12.6.10. Why OpenBrowser Uses More Tool Calls but Fewer Tokens
 
-Playwright sends the full page with every response, so the LLM gets the answer immediately but pays for ~120K tokens per Wikipedia page load. OpenBrowser returns compact results (~30-800 chars per call), so the LLM needs more round-trips to navigate and extract but pays far fewer tokens overall.
+Playwright sends the full page with every response, so the LLM gets the answer immediately but pays for ~120K tokens per Wikipedia page load. OpenBrowser returns compact results (~30 to 800 chars per call), so the LLM needs more round-trips to navigate and extract but pays fewer tokens overall.
 
 For a single simple task, Playwright's approach is fast. In the 2026-02-21 six-task run, the ratio of mean total MCP response characters per six-task run, averaged over five runs per server, was 144x. Complex pages drove most of the difference. That ratio is a historical observation, not a current-version guarantee.
 
-### Tool Surface Comparison
+### 12.7. Tool Surface Comparison
 
-#### Playwright MCP (22 core tools, 34 total)
+#### 12.7.1. Playwright MCP (22 core tools, 34 total)
 
 Navigation, interaction, form filling, file upload, drag and drop, hover, key press, select option, screenshots, snapshots, console messages, dialog handling, network requests, tab management, code execution, PDF export, wait conditions, resize, vision-mode coordinate tools, test assertions.
 
-#### Chrome DevTools MCP (26 tools)
+#### 12.7.2. Chrome DevTools MCP (26 tools)
 
 Input automation (click, drag, fill, fill_form, hover, press_key, handle_dialog, upload_file), navigation (navigate_page, new_page, close_page, list_pages, select_page, wait_for), emulation (emulate, resize_page), performance tracing (start/stop/analyze), network debugging (list/get requests), JS execution, console messages, screenshots, DOM snapshots.
 
-#### OpenBrowser MCP (CodeAgent, execute_code in v0.1.26)
+#### 12.7.3. OpenBrowser MCP (CodeAgent, execute_code in v0.1.26)
 
 The benchmark run used v0.1.26 with `execute_code`. `get_status` and `reset_browser` were added after v0.1.26 and were not part of the benchmarked server.
 
@@ -638,22 +832,21 @@ The benchmark run used v0.1.26 with `execute_code`. `get_status` and `reset_brow
 | `get_status` | Read-only server, browser, profile, and tab state. Does not start a browser. |
 | `reset_browser` | Close a stuck browser and release its profile while preserving scalar and scalar-only container variables by default. |
 
-### Unique to OpenBrowser
+### 12.8. OpenBrowser features in v0.1.26
 
 This section describes the benchmarked OpenBrowser v0.1.26 server. The benchmark itself used `execute_code` only. The `get_status` and `reset_browser` lifecycle tools were added after v0.1.26 and were not part of the comparison. The feature bullets below describe the v0.1.26 server. The run measured response size and tool counts; it did not benchmark each feature:
 
-- **CodeAgent architecture** -- the core `execute_code` tool runs Python in a persistent namespace. The LLM writes code to navigate, extract, and process data rather than calling individual tools. Variables and state persist between calls.
-- **144x smaller mean total MCP response characters per six-task run in 2026-02-21** -- returns only the data the code explicitly extracts, not full page dumps
-- **JS evaluation with Python processing** -- `await evaluate("JS expression")` returns Python objects directly (dicts, lists, strings), enabling pandas/regex/json processing in the same code block
-- **Built-in libraries** -- json, pandas, numpy, matplotlib, csv, re, datetime, requests, BeautifulSoup available in the execution namespace
-- **File system access** -- `file_system` object for reading/writing local files from browser automation code
-- **Dropdown support** -- `select_dropdown()` and `dropdown_options()` for native `<select>` elements
-- **Task completion signal** -- `done(text, success)` to explicitly mark task completion with a result
+- **CodeAgent architecture**: the core `execute_code` tool runs Python in a persistent namespace. The LLM writes code to navigate, extract, and process data rather than calling individual tools. Variables and state persist between calls.
+- **144x smaller mean total MCP response characters per six-task run in 2026-02-21**: returns only the data the code explicitly extracts, not full page dumps
+- **JS evaluation with Python processing**: `await evaluate("JS expression")` returns Python objects directly (dicts, lists, strings), enabling pandas/regex/json processing in the same code block
+- **Built-in libraries**: json, pandas, numpy, matplotlib, csv, re, datetime, requests, BeautifulSoup available in the execution namespace
+- **File system access**: `file_system` object for reading/writing local files from browser automation code
+- **Dropdown support**: `select_dropdown()` and `dropdown_options()` for native `<select>` elements
+- **Task completion signal**: `done(text, success)` to explicitly mark task completion with a result
 
-### Gaps vs Competitors
+### 12.9. Gaps vs Competitors
 
 Feature lists below are from the versions tested on 2026-02-21. Competitor resolved versions were not recorded. Check current documentation before relying on a gap.
-
 
 | Capability | Playwright MCP | Chrome DevTools MCP | OpenBrowser MCP |
 |-----------|:-:|:-:|:-:|
@@ -675,7 +868,9 @@ Feature lists below are from the versions tested on 2026-02-21. Competitor resol
 | Progressive disclosure | No | No | Yes (code extracts only what's needed) |
 | Session reuse | No | Puppeteer-managed | Yes (existing Chrome) |
 
-### Provenance and limits
+<a id="provenance-and-limits"></a>
+
+### 12.10. Provenance and limits
 
 - The 5-step token benchmark was recorded on 2026-02-21 with OpenBrowser MCP v0.1.26. The Playwright MCP and Chrome DevTools MCP resolved versions were not recorded.
 - The 6-task LLM benchmark was recorded on the same date with Claude Sonnet 4.6 on AWS Bedrock, 5 runs per server, and a 10,000-sample bootstrap. The retained aggregate is [e2e_llm_stats_results.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/e2e_llm_stats_results.json). It records the model, run count, and server aggregates, but not the competitor tool versions or a timestamp. The page date is a page record, not an artifact field.
@@ -683,16 +878,16 @@ Feature lists below are from the versions tested on 2026-02-21. Competitor resol
 - Token volume is not task success, latency, or cost for every workload. The six tasks are a fixed local sample against public sites. Treat differences in tool count and response shape as design tradeoffs, not a universal winner.
 - Do not compare these numbers with a later release without a new pinned run. The native navigation harness is a separate lane and is not a source for this page.
 
-### Benchmark Methodology Notes
+### 12.11. Benchmark Methodology Notes
 
-#### Token Usage Benchmark (5-step workflow)
-- All three servers benchmarked via JSON-RPC stdio subprocess -- no estimates
+#### 12.11.1. Token Usage Benchmark (5-step workflow)
+- All three servers benchmarked via JSON-RPC stdio subprocess, with no estimates
 - Response sizes measured as total JSON-RPC response character count
 - Estimated tokens = characters / 4 (standard approximation for mixed English/JSON)
 - 5-step workflow uses matched operations: navigate, get state/snapshot, click, go back, get state/snapshot
 - Raw per-response data for the 5-step run: not retained in this repository. The numbers above are the retained summary.
 
-#### E2E LLM Benchmark (6 real-world tasks, N=5 runs)
+#### 12.11.2. E2E LLM Benchmark (6 real-world tasks, N=5 runs)
 - Model: Claude Sonnet 4.6 on AWS Bedrock (Converse API)
 - Each task uses a single MCP server as tool provider via JSON-RPC stdio
 - The LLM autonomously decides which tools to call and when the task is complete

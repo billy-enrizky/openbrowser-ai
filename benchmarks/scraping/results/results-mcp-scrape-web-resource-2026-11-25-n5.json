@@ -1,0 +1,92 @@
+{
+  "lane": "mcp-scrape-web-resource",
+  "generated_at": "2026-11-25T05:50:36Z",
+  "surface": "stateless scrape_web over MCP stdio",
+  "browser_started": false,
+  "valid": true,
+  "sequential": [
+    {
+      "calls": 1,
+      "latency_ms": 83.889,
+      "peak_rss_mib": 48.688,
+      "max_children": 0,
+      "browser_processes_observed": false,
+      "children_at_end": 0,
+      "ok": 1
+    },
+    {
+      "calls": 1,
+      "latency_ms": 89.727,
+      "peak_rss_mib": 50.172,
+      "max_children": 0,
+      "browser_processes_observed": false,
+      "children_at_end": 0,
+      "ok": 1
+    },
+    {
+      "calls": 1,
+      "latency_ms": 79.344,
+      "peak_rss_mib": 47.547,
+      "max_children": 0,
+      "browser_processes_observed": false,
+      "children_at_end": 0,
+      "ok": 1
+    },
+    {
+      "calls": 1,
+      "latency_ms": 77.219,
+      "peak_rss_mib": 47.938,
+      "max_children": 0,
+      "browser_processes_observed": false,
+      "children_at_end": 0,
+      "ok": 1
+    },
+    {
+      "calls": 1,
+      "latency_ms": 87.043,
+      "peak_rss_mib": 48.109,
+      "max_children": 0,
+      "browser_processes_observed": false,
+      "children_at_end": 0,
+      "ok": 1
+    }
+  ],
+  "concurrent": [
+    {
+      "calls": 25,
+      "latency_ms": 158.124,
+      "peak_rss_mib": 62.359,
+      "max_children": 0,
+      "browser_processes_observed": false,
+      "children_at_end": 0,
+      "ok": 25
+    },
+    {
+      "calls": 25,
+      "latency_ms": 155.096,
+      "peak_rss_mib": 62.312,
+      "max_children": 0,
+      "browser_processes_observed": false,
+      "children_at_end": 0,
+      "ok": 25
+    },
+    {
+      "calls": 25,
+      "latency_ms": 168.775,
+      "peak_rss_mib": 64.297,
+      "max_children": 0,
+      "browser_processes_observed": false,
+      "children_at_end": 0,
+      "ok": 25
+    }
+  ],
+  "concurrency": 25,
+  "limits": [
+    "One local static fixture, not the live web.",
+    "Peak RSS is process-tree resident set size in MiB and can count shared pages more than once.",
+    "The Python MCP server process and any observed descendants are included.",
+    "The no-browser mode cannot execute JavaScript, take screenshots, or use browser cookies.",
+    "Each concurrent row is one observation unless concurrency-samples is raised.",
+    "Do not compare this RSS total to a PSS or per-process figure without stating the scope."
+  ]
+}

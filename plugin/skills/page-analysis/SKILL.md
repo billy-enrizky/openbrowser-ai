@@ -29,6 +29,8 @@ allowed-tools: Bash(openbrowser-ai:*) Bash(curl:*) Bash(uv:*) Bash(irm:*) Read W
 
 Analyze and understand web page content, structure, and interactive elements using Python code execution. Produces a comprehensive breakdown of what is on the page and how it is organized.
 
+Some page analysis can start from server-rendered HTML. `openbrowser-ai scrape <url> --no-browser --format text` fetches the page in OpenBrowser no-browser mode and starts no Chrome, Blink, or V8 process, but it cannot run JavaScript, take screenshots, or use browser cookies. The rendered DOM and JavaScript checks below need the browser workflow.
+
 All code runs via `openbrowser-ai -c`. The daemon starts automatically and persists variables across calls. Run `openbrowser-ai warm` once before a multi-call workflow to start the daemon and browser before the workflow begins. Most browser functions are async, use `await`. `list_downloads()`, `download_outcomes()`, and `download_failures()` are synchronous.
 
 The CLI daemon persists cookies and login state in the Chrome user-data directory at `~/.config/openbrowser/profiles/daemon`, so authenticated sessions can be reused across later runs. No `storage_state.json` file is written unless you configure one explicitly.

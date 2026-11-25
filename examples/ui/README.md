@@ -1,10 +1,22 @@
 # **User Interfaces of OpenBrowser**
 
+<!-- toc:start -->
+## Table of Contents
+
+- [1. Setup](#1-setup)
+- [2. Available interfaces](#2-available-interfaces)
+
+<!-- toc:end -->
+
+## 1. Setup
+
 Install the optional UI dependencies first:
 
 ```bash
 pip install gradio streamlit
 ```
+
+## 2. Available interfaces
 
 | **File Name**          | **User Interface** | **Description**                           | **Example Usage**                         |
 |------------------------|-------------------|-------------------------------------------|-------------------------------------------|

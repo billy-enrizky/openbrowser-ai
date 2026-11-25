@@ -5,9 +5,22 @@ icon: "sliders"
 mode: "wide"
 ---
 
-## CodeAgent Parameters
+<!-- toc:start -->
+## Table of Contents
 
-### Core Settings
+- [1. CodeAgent Parameters](#1-codeagent-parameters)
+  - [1.1. Core Settings](#11-core-settings)
+  - [1.2. Vision and Extraction](#12-vision-and-extraction)
+  - [1.3. Files and Data](#13-files-and-data)
+  - [1.4. Callbacks and Cost](#14-callbacks-and-cost)
+- [2. Run Lifecycle](#2-run-lifecycle)
+- [3. Browser Ownership](#3-browser-ownership)
+
+<!-- toc:end -->
+
+## 1. CodeAgent Parameters
+
+### 1.1. Core Settings
 
 - `task`: Task description string that defines what the agent should accomplish
 - `llm`: Optional LLM instance for code generation. When omitted, CodeAgent tries `ChatBrowserUse` and then `ChatGoogle(model="gemini-2.5-flash")`. Pass `ChatOpenAI`, `ChatAnthropic`, `ChatGoogle`, or another supported chat model to choose explicitly.
@@ -17,23 +30,23 @@ mode: "wide"
 - `max_failures` (default: `8`): Maximum consecutive errors before termination
 - `max_validations` (default: `0`): Maximum number of times to run the validator agent
 
-### Vision and Extraction
+### 1.2. Vision and Extraction
 
 - `use_vision` (default: `True`): Include screenshots in LLM messages
 - `page_extraction_llm`: Optional separate LLM for page content extraction. A smaller, faster model is enough because it only extracts page text. CodeAgent does not apply a fallback model when this is omitted.
 
-### Files and Data
+### 1.3. Files and Data
 
 - `file_system`: Optional `FileSystem`. When omitted, every CodeAgent gets a unique temporary directory under the system temp directory. Pass `FileSystem(base_dir=...)` when a stable path is required. Constructing `FileSystem` clears `<base_dir>/openbrowser_agent_data`; keep that subdirectory disposable or use a fresh base directory per run.
 - `available_file_paths`: List of file paths the agent can access
 - `sensitive_data`: Dictionary of sensitive values to handle carefully
 
-### Callbacks and Cost
+### 1.4. Callbacks and Cost
 
 - `register_new_step_callback`: Optional callback after each execution step. It receives `step_number`, `total_steps`, `code`, `output`, `error`, `thinking`, `screenshot_base64`, and `is_done`.
 - `calculate_cost` (default: `False`): Calculate and track API costs
 
-## Run Lifecycle
+## 2. Run Lifecycle
 
 `code_agent.status` returns a `CodeAgentRunStatus` snapshot. Read it instead of inferring state from logs:
 
@@ -47,7 +60,7 @@ One CodeAgent instance handles one run. A second `run()` raises `CodeAgentStateE
 
 A caller cancellation does not prove that the worker stopped. Inspect `status` after cancellation and run any required cleanup before starting another agent.
 
-## Browser Ownership
+## 3. Browser Ownership
 
 CodeAgent does not rebuild a caller-provided `BrowserSession` and does not transfer its Python namespace. If the browser fails, inspect `status`, rebuild the browser, and create a new CodeAgent. Namespace transfer with scalar-only preservation applies to MCP context recovery, not to a local CodeAgent run.
 

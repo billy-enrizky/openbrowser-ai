@@ -5,7 +5,15 @@ icon: "arrow-right-to-bracket"
 mode: "wide"
 ---
 
-## Agent History
+<!-- toc:start -->
+## Table of Contents
+
+- [1. Agent History](#1-agent-history)
+- [2. Structured Output](#2-structured-output)
+
+<!-- toc:end -->
+
+## 1. Agent History
 
 The `run()` method returns an `AgentHistoryList` object with the complete execution history:
 
@@ -40,6 +48,6 @@ history.structured_output         # Property that returns parsed structured outp
 
 See all helper methods in the [AgentHistoryList source code](https://github.com/billy-enrizky/openbrowser-ai/blob/main/src/openbrowser/agent/views.py#L301).
 
-## Structured Output
+## 2. Structured Output
 
 For structured output, use the `output_model_schema` parameter with a Pydantic model. [Example](https://github.com/billy-enrizky/openbrowser-ai/blob/main/examples/features/custom_output.py).

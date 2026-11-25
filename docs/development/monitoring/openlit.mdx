@@ -5,13 +5,22 @@ icon: "chart-line"
 mode: "wide"
 ---
 
-## Overview
+<!-- toc:start -->
+## Table of Contents
+
+- [1. Overview](#1-overview)
+- [2. Setup](#2-setup)
+- [3. Usage](#3-usage)
+
+<!-- toc:end -->
+
+## 1. Overview
 
 OpenLIT is an open-source OpenTelemetry-native observability tool. OpenBrowser does not ship a native OpenLIT integration and does not create spans for individual browser actions. OpenLIT can instrument the LLM SDK calls that run in the same process, such as OpenAI or Anthropic chat calls.
 
 Read more in the [OpenLIT docs](https://docs.openlit.io).
 
-## Setup
+## 2. Setup
 
 Install OpenLIT alongside the OpenBrowser package:
 
@@ -19,7 +28,7 @@ Install OpenLIT alongside the OpenBrowser package:
 pip install openlit openbrowser-ai
 ```
 
-## Usage
+## 3. Usage
 
 Initialize OpenLIT before creating the agent:
 

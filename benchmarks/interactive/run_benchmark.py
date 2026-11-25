@@ -15,8 +15,10 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import shutil
 import statistics
+import subprocess
 import sys
 import threading
 import time
@@ -24,7 +26,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from .adapters.agent_browser import AgentBrowserArm
-from .adapters.base import RunContext, terminate_matching
+from .adapters.base import RunContext, host_playwright_cache, terminate_matching
 from .adapters.browser_use import BrowserUseArm
 from .adapters.chrome_devtools import ChromeDevToolsArm
 from .adapters.openbrowser import OpenBrowserArm
@@ -35,6 +37,36 @@ from .tasks import ORACLES, TASKS
 HERE = Path(__file__).resolve().parent
 DEFAULT_OUTPUT = HERE / "results" / "results-smoke.jsonl"
 DEFAULT_WORKDIR = Path("/tmp/obib-runs")
+_VERSION_CACHE: dict[str, str] = {}
+
+
+def _loads() -> list[float]:
+    getloadavg = getattr(os, "getloadavg", None)
+    if getloadavg is None:
+        return []
+    try:
+        return [round(value, 3) for value in getloadavg()]
+    except OSError:
+        return []
+
+
+def _binary_version(binary: str) -> str:
+    """Return a cached product version for one arm binary."""
+    if binary in _VERSION_CACHE:
+        return _VERSION_CACHE[binary]
+    try:
+        completed = subprocess.run(
+            [binary, "--version"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+        value = completed.stdout.strip() or completed.stderr.strip()
+    except (OSError, subprocess.TimeoutExpired):
+        value = ""
+    _VERSION_CACHE[binary] = value
+    return value
 
 
 def make_arm(name: str, *, openbrowser_extensions: bool = False):
@@ -156,6 +188,7 @@ def run_one(
             "keychain_flag": "--use-mock-keychain",
             "keychain_verified": None,
             "openbrowser_extensions": openbrowser_extensions if arm_name == "openbrowser" else None,
+            "binary_version": "",
         }
     else:
         oracle = ORACLES[task](state, result.reported, ctx.downloads)
@@ -183,6 +216,7 @@ def run_one(
             "keychain_flag": "--use-mock-keychain",
             "keychain_verified": result.keychain_verified,
             "openbrowser_extensions": openbrowser_extensions if arm_name == "openbrowser" else None,
+            "binary_version": _binary_version(getattr(arm, "binary", "")) if arm is not None else "",
         }
     if not keep:
         shutil.rmtree(ctx.root, ignore_errors=True)
@@ -208,9 +242,7 @@ def summarize(records: list[dict]) -> list[dict]:
                 "median_tool_calls": statistics.median([item["tool_calls"] for item in successes])
                 if successes
                 else None,
-                "median_process_starts": statistics.median(
-                    [item["process_starts"] for item in successes]
-                )
+                "median_process_starts": statistics.median([item["process_starts"] for item in successes])
                 if successes
                 else None,
                 "median_output_bytes": statistics.median([item["output_bytes"] for item in successes])
@@ -223,22 +255,15 @@ def summarize(records: list[dict]) -> list[dict]:
 
 
 def print_table(rows: list[dict]) -> None:
-    header = (
-        f"{'task':<10} {'arm':<20} {'ok':>5} {'p50 ms':>8} {'p95 ms':>8} "
-        f"{'calls':>6} {'proc':>5} {'bytes':>8}"
-    )
+    header = f"{'task':<10} {'arm':<20} {'ok':>5} {'p50 ms':>8} {'p95 ms':>8} {'calls':>6} {'proc':>5} {'bytes':>8}"
     print(header)
     print("-" * len(header))
     for row in rows:
         p50 = f"{row['p50_ms']:.0f}" if row["p50_ms"] is not None else "n/a"
         p95 = f"{row['p95_ms']:.0f}" if row["p95_ms"] is not None else "n/a"
         calls = f"{row['median_tool_calls']:.0f}" if row["median_tool_calls"] is not None else "n/a"
-        procs = (
-            f"{row['median_process_starts']:.0f}" if row["median_process_starts"] is not None else "n/a"
-        )
-        out = (
-            f"{row['median_output_bytes']:.0f}" if row["median_output_bytes"] is not None else "n/a"
-        )
+        procs = f"{row['median_process_starts']:.0f}" if row["median_process_starts"] is not None else "n/a"
+        out = f"{row['median_output_bytes']:.0f}" if row["median_output_bytes"] is not None else "n/a"
         print(
             f"{row['task']:<10} {row['arm']:<20} {row['ok']:>2}/{row['runs']:<2} "
             f"{p50:>8} {p95:>8} {calls:>6} {procs:>5} {out:>8}"
@@ -257,6 +282,11 @@ def main() -> int:
     parser.add_argument("--tasks", nargs="+", default=list(TASKS))
     parser.add_argument("--samples", type=int, default=1)
     parser.add_argument("--warmups", type=int, default=0)
+    parser.add_argument(
+        "--rotate-arms",
+        action="store_true",
+        help="Rotate the arm order for each sample so host-load drift is balanced across arms.",
+    )
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--workdir", type=Path, default=DEFAULT_WORKDIR)
     parser.add_argument("--keep-runs", action="store_true")
@@ -274,31 +304,7 @@ def main() -> int:
     args.workdir.mkdir(parents=True, exist_ok=True)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     records: list[dict] = []
-    total = len(args.tasks) * len(args.arms) * args.samples
-    counter = 0
-    for sample in range(args.samples):
-        for task in args.tasks:
-            for arm in args.arms:
-                counter += 1
-                print(f"[{counter}/{total}] {task} {arm} sample {sample}", flush=True)
-                record = run_one(
-                    task,
-                    arm,
-                    sample,
-                    args.workdir,
-                    args.keep_runs,
-                    openbrowser_extensions=args.openbrowser_extensions,
-                )
-                records.append(record)
-                status = "ok" if record["ok"] else ("unavailable" if record["unavailable"] else "fail")
-                print(
-                    f"    {status} latency={record['latency_ms']:.0f}ms "
-                    f"calls={record['tool_calls']} procs={record['process_starts']} "
-                    f"bytes={record['output_bytes']}"
-                )
-                if record["error"]:
-                    print(f"    error: {record['error'][:220]}")
-
+    load_before = _loads()
     for warmup in range(args.warmups):
         for task in args.tasks:
             for arm in args.arms:
@@ -312,17 +318,68 @@ def main() -> int:
                     openbrowser_extensions=args.openbrowser_extensions,
                 )
 
+    total = len(args.tasks) * len(args.arms) * args.samples
+    counter = 0
+    for sample in range(args.samples):
+        for task in args.tasks:
+            arm_order = list(args.arms)
+            if args.rotate_arms and arm_order:
+                shift = sample % len(arm_order)
+                arm_order = arm_order[shift:] + arm_order[:shift]
+            for order_index, arm in enumerate(arm_order):
+                counter += 1
+                print(f"[{counter}/{total}] {task} {arm} sample {sample}", flush=True)
+                record = run_one(
+                    task,
+                    arm,
+                    sample,
+                    args.workdir,
+                    args.keep_runs,
+                    openbrowser_extensions=args.openbrowser_extensions,
+                )
+                record["arm_order"] = arm_order
+                record["order"] = order_index
+                records.append(record)
+                status = "ok" if record["ok"] else ("unavailable" if record["unavailable"] else "fail")
+                print(
+                    f"    {status} latency={record['latency_ms']:.0f}ms "
+                    f"calls={record['tool_calls']} procs={record['process_starts']} "
+                    f"bytes={record['output_bytes']}"
+                )
+                if record["error"]:
+                    print(f"    error: {record['error'][:220]}")
+
     with args.output.open("w", encoding="utf-8") as handle:
         for record in records:
             handle.write(json.dumps(record, ensure_ascii=False) + "\n")
     rows = summarize(records)
     summary_path = args.output.with_suffix(".summary.json")
     summary_path.write_text(json.dumps(rows, indent=2) + "\n")
+    meta_path = args.output.with_suffix(".meta.json")
+    meta_path.write_text(
+        json.dumps(
+            {
+                "generated_at": datetime.now(UTC).isoformat(),
+                "arms": args.arms,
+                "tasks": args.tasks,
+                "samples": args.samples,
+                "warmups": args.warmups,
+                "rotate_arms": args.rotate_arms,
+                "load_before": load_before,
+                "load_after": _loads(),
+                "mcp_transport": os.environ.get("OPENBROWSER_MCP_TRANSPORT", "lean"),
+                "playwright_browsers_path_available": host_playwright_cache() is not None,
+            },
+            indent=2,
+        )
+        + "\n"
+    )
     print()
     print_table(rows)
     print()
     print(f"jsonl: {args.output}")
     print(f"summary: {summary_path}")
+    print(f"meta: {meta_path}")
     return 0
 
 

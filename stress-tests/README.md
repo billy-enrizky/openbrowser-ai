@@ -1,12 +1,22 @@
 # OpenBrowser Stress Tests
 
+<!-- toc:start -->
+## Table of Contents
+
+- [1. Included Form Libraries](#1-included-form-libraries)
+- [2. Features](#2-features)
+- [3. Usage](#3-usage)
+- [4. License](#4-license)
+
+<!-- toc:end -->
+
 A collection of particularly difficult test scenarios for evaluating browser automation agents.
 
 > - Guided Evaluation Challenge: https://billy-enrizky.github.io/openbrowser-ai/challenge.html
 > - All the Form Libraries: https://billy-enrizky.github.io/openbrowser-ai/index.html
 > - Challenges Index: https://billy-enrizky.github.io/openbrowser-ai/challenges-index.html
 
-## Included Form Libraries
+## 1. Included Form Libraries
 
 1. **Vanilla HTML + JS** - Basic HTML5 form elements with JavaScript validation
 2. **jQuery + Bootstrap + Select2** - Classic form stack with enhanced select inputs
@@ -34,7 +44,7 @@ A collection of particularly difficult test scenarios for evaluating browser aut
 24. **Animated Form** - Form with CSS animations and transitions
 25. **Internationalized Form** - Form with internationalization support
 
-## Features
+## 2. Features
 
 Each form includes:
 
@@ -46,7 +56,7 @@ Each form includes:
 - Submit buttons
 - Success message: `the secret is: dumbledore`
 
-## Usage
+## 3. Usage
 
 Visit https://billy-enrizky.github.io/openbrowser-ai/ or serve the directory locally so relative iframe and asset paths work:
 
@@ -57,6 +67,6 @@ python -m http.server 8000
 
 Then open http://127.0.0.1:8000/.
 
-## License
+## 4. License
 
 MIT

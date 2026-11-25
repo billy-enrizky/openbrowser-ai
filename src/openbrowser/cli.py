@@ -58,6 +58,17 @@ if _mode is CliMode.MCP:
 	os.environ['OPENBROWSER_LOGGING_LEVEL'] = 'critical'
 	os.environ['OPENBROWSER_SETUP_LOGGING'] = 'false'
 
+	transport = os.environ.get('OPENBROWSER_MCP_TRANSPORT', 'lean').strip().lower()
+	if transport not in {'lean', 'sdk'}:
+		sys.stderr.write("ERROR: OPENBROWSER_MCP_TRANSPORT must be 'lean' or 'sdk'\n")
+		sys.exit(2)
+	if transport == 'lean':
+		from openbrowser.mcp.lean import main as lean_mcp_main
+
+		logging.disable(logging.CRITICAL)
+		asyncio.run(lean_mcp_main())
+		sys.exit(0)
+
 	# Early exit: run MCP server directly without loading heavy CLI dependencies
 	# (anthropic, openai, etc. are not needed for MCP server mode)
 	try:
@@ -1031,6 +1042,15 @@ def run_main_interface(ctx: click.Context, debug: bool = False, **kwargs):
 
 	# Check if MCP server mode is activated
 	if kwargs.get('mcp'):
+		transport = os.environ.get('OPENBROWSER_MCP_TRANSPORT', 'lean').strip().lower()
+		if transport not in {'lean', 'sdk'}:
+			print("ERROR: OPENBROWSER_MCP_TRANSPORT must be 'lean' or 'sdk'", file=sys.stderr)
+			sys.exit(2)
+		if transport == 'lean':
+			from openbrowser.mcp.lean import main as lean_mcp_main
+
+			asyncio.run(lean_mcp_main())
+			return
 		# Capture telemetry for MCP server mode via CLI (suppress any logging from this)
 		try:
 			telemetry = ProductTelemetry()
@@ -1245,6 +1265,11 @@ def source_discovery_command(
 	show_default=True,
 	help='Fetch with HTTP first, always use HTTP, or always use the browser.',
 )
+@click.option(
+	'--no-browser',
+	is_flag=True,
+	help='Fetch over HTTP only. Does not load Blink or V8 and never falls back to a browser.',
+)
 @click.option('--wait-for', type=str, help='CSS selector to wait for before scraping.')
 @click.option(
 	'--wait-until',
@@ -1302,6 +1327,7 @@ def scrape(
 	output_format: str,
 	selector: str | None,
 	engine: str,
+	no_browser: bool,
 	wait_for: str | None,
 	wait_until: str,
 	timeout_ms: int | None,
@@ -1351,6 +1377,10 @@ def scrape(
 			raise click.ClickException(str(error)) from error
 	if not url_list:
 		raise click.UsageError('Provide at least one URL or --urls-file.')
+	if no_browser:
+		if engine == 'browser':
+			raise click.UsageError('--no-browser cannot be combined with --engine browser.')
+		engine = 'http'
 	batch_mode = len(url_list) > 1 or urls_file is not None
 
 	if engine == 'http':

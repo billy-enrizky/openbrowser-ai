@@ -5,7 +5,32 @@ icon: "list-check"
 mode: "wide"
 ---
 
-## Overview
+<!-- toc:start -->
+## Table of Contents
+
+- [1. Overview](#1-overview)
+- [2. Features](#2-features)
+- [3. Quick Start](#3-quick-start)
+  - [3.1. Create Instructions CSV](#31-create-instructions-csv)
+  - [3.2. Create Specifications CSV (Optional)](#32-create-specifications-csv-optional)
+  - [3.3. Run the App](#33-run-the-app)
+- [4. Instruction Format](#4-instruction-format)
+  - [4.1. Template Structure](#41-template-structure)
+  - [4.2. Placeholder Naming](#42-placeholder-naming)
+- [5. Example Instructions](#5-example-instructions)
+  - [5.1. Flight Booking Flow](#51-flight-booking-flow)
+  - [5.2. Product Configurator](#52-product-configurator)
+- [6. Code](#6-code)
+- [7. Specification Files](#7-specification-files)
+  - [7.1. Flight Booking Specs](#71-flight-booking-specs)
+  - [7.2. Product Configurator Specs](#72-product-configurator-specs)
+  - [7.3. Vanilla Form Specs](#73-vanilla-form-specs)
+- [8. Usage Tips](#8-usage-tips)
+- [9. Source Code](#9-source-code)
+
+<!-- toc:end -->
+
+## 1. Overview
 
 The Instruction App is a Chainlit-based web interface for executing browser automation workflows. It reads instructions from a CSV file and allows users to:
 
@@ -13,7 +38,7 @@ The Instruction App is a Chainlit-based web interface for executing browser auto
 2. Fill in specification values (manually or via CSV upload)
 3. Execute browser automation with visual feedback
 
-## Features
+## 2. Features
 
 - **CSV-based instructions**: Define reusable automation templates
 - **Placeholder variables**: Use `$VARIABLE$` syntax for dynamic values
@@ -21,9 +46,9 @@ The Instruction App is a Chainlit-based web interface for executing browser auto
 - **Real-time execution**: Watch the browser automation in action
 - **Full-screen browser**: Non-headless mode for visibility
 
-## Quick Start
+## 3. Quick Start
 
-### 1. Create Instructions CSV
+### 3.1. Create Instructions CSV
 
 Create `openbrowser_instructions.csv` with your automation templates:
 
@@ -36,7 +61,7 @@ Fill date: $DEPARTURE_DATE$
 Click Search"
 ```
 
-### 2. Create Specifications CSV (Optional)
+### 3.2. Create Specifications CSV (Optional)
 
 Create a specs file for each instruction type:
 
@@ -45,15 +70,15 @@ FROM_CITY,TO_CITY,DEPARTURE_DATE
 New York (NYC),London (LON),2026-02-15
 ```
 
-### 3. Run the App
+### 3.3. Run the App
 
 ```bash
 uv run --with chainlit chainlit run examples/ui/instruction_app.py
 ```
 
-## Instruction Format
+## 4. Instruction Format
 
-### Template Structure
+### 4.1. Template Structure
 
 Instructions use `$PLACEHOLDER$` syntax for dynamic values:
 
@@ -79,15 +104,15 @@ Instructions use `$PLACEHOLDER$` syntax for dynamic values:
    * **STOP:** Complete when you see confirmation
 ```
 
-### Placeholder Naming
+### 4.2. Placeholder Naming
 
 - Use UPPERCASE with underscores: `$FIRST_NAME$`, `$DEPARTURE_DATE$`
 - Keep names descriptive and consistent
 - The app auto-generates input prompts from placeholder names
 
-## Example Instructions
+## 5. Example Instructions
 
-### Flight Booking Flow
+### 5.1. Flight Booking Flow
 
 ```csv
 instruction_name,general_instruction
@@ -125,7 +150,7 @@ Flight Booking Flow,"### **Work Instruction: Complete Flight Booking Flow**
 **STOP:** Complete when you see Booking Confirmed!"
 ```
 
-### Product Configurator
+### 5.2. Product Configurator
 
 ```csv
 instruction_name,general_instruction
@@ -156,7 +181,7 @@ Product Configurator,"### **Work Instruction: Configure Product**
 **STOP:** Complete when you see success message"
 ```
 
-## Code
+## 6. Code
 
 The complete implementation lives in [`examples/ui/instruction_app.py`](https://github.com/billy-enrizky/openbrowser-ai/blob/main/examples/ui/instruction_app.py). It includes the CSV loaders, spec interpolation, the orchestration loop, the `on_message` handler, and the `ask_to_execute` confirmation flow.
 
@@ -168,36 +193,36 @@ uv run --with chainlit chainlit run examples/ui/instruction_app.py
 
 `chainlit` is an example-only dependency, which is why the command uses `uv run --with chainlit`.
 
-## Specification Files
+## 7. Specification Files
 
-### Flight Booking Specs
+### 7.1. Flight Booking Specs
 
 ```csv
 FROM_CITY,TO_CITY,DEPARTURE_DATE,RETURN_DATE,PASSENGERS,CLASS,FLIGHT_OPTION,FIRST_NAME,LAST_NAME,DOB,PASSPORT,PAYMENT_METHOD,CARD_NUMBER,EXPIRY,CVV,CARDHOLDER_NAME
 New York (NYC),London (LON),2026-02-15,2026-02-22,2 Adults,Economy,2,John,Smith,1985-03-15,AB1234567,Credit Card,4111111111111111,12/28,123,John Smith
 ```
 
-### Product Configurator Specs
+### 7.2. Product Configurator Specs
 
 ```csv
 PRODUCT_TYPE,COLOR,STORAGE,RAM,ADD_CASE,ADD_STAND,ADD_KEYBOARD,ADD_MOUSE,ENGRAVING_TEXT
 MacBook Pro,Space Gray,1TB,32GB,no,yes,yes,no,My MacBook 2026
 ```
 
-### Vanilla Form Specs
+### 7.3. Vanilla Form Specs
 
 ```csv
 FIRST_NAME,LAST_NAME,EMAIL,PHONE,ADDRESS,CITY,STATE,POSTAL_CODE,COUNTRY
 Alice,Johnson,alice.johnson@example.com,+1-555-123-4567,123 Main Street,San Francisco,California,94102,United States
 ```
 
-## Usage Tips
+## 8. Usage Tips
 
 1. **Test instructions manually first** before adding to CSV
 2. **Use descriptive placeholder names** for better auto-generated prompts
 3. **Include STOP conditions** to tell the agent when to finish
 4. **Add safety instructions** to handle unexpected popups
 
-## Source Code
+## 9. Source Code
 
 Full implementation: [examples/ui/instruction_app.py](https://github.com/billy-enrizky/openbrowser-ai/blob/main/examples/ui/instruction_app.py)

@@ -209,7 +209,7 @@ class DaemonClient:
             payload = await self._exchange(
                 reader,
                 writer,
-                {'id': 1, 'action': 'status'},
+                {'id': 1, 'action': 'ping'},
                 timeout,
             )
         except Exception:
@@ -217,7 +217,7 @@ class DaemonClient:
         return bool(payload.get('success'))
 
     async def _probe_within(self, deadline: float) -> bool:
-        """Probe status without exceeding the remaining startup budget."""
+        """Probe readiness without exceeding the remaining startup budget."""
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             return False

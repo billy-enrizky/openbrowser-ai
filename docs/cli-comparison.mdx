@@ -6,9 +6,34 @@ icon: "terminal"
 
 # CLI Benchmark: 4-Way Comparison
 
+<!-- toc:start -->
+## Table of Contents
+
+- [1. Overview](#1-overview)
+- [2. Methodology](#2-methodology)
+  - [2.1. Tasks](#21-tasks)
+  - [2.2. Fairness Design](#22-fairness-design)
+  - [2.3. Provenance and limits](#23-provenance-and-limits)
+- [3. Results: Overall](#3-results-overall)
+- [4. Results: Per-Task Token Usage](#4-results-per-task-token-usage)
+- [5. Results: Cost Per Benchmark Run (6 Tasks)](#5-results-cost-per-benchmark-run-6-tasks)
+- [6. Why openbrowser-ai Wins](#6-why-openbrowser-ai-wins)
+  - [6.1. Python Code Batching](#61-python-code-batching)
+  - [6.2. Compact DOM Representation](#62-compact-dom-representation)
+  - [6.3. Server-Side Processing](#63-server-side-processing)
+  - [6.4. Variable Persistence](#64-variable-persistence)
+- [7. Variance Analysis](#7-variance-analysis)
+- [8. How Each CLI Works](#8-how-each-cli-works)
+  - [8.1. openbrowser-ai](#81-openbrowser-ai)
+  - [8.2. browser-use](#82-browser-use)
+  - [8.3. playwright-cli](#83-playwright-cli)
+  - [8.4. agent-browser](#84-agent-browser)
+
+<!-- toc:end -->
+
 Benchmark date: 2026-03-15 | Claude Sonnet 4.6 on AWS Bedrock | N=3 runs | 6 tasks | Single Bash tool
 
-## Overview
+## 1. Overview
 
 Four CLI browser automation tools compared head-to-head. Each tool gets a single generic Bash tool (identical overhead) with an optimized system prompt. The LLM drives each tool autonomously to complete 6 real-world browser tasks.
 
@@ -22,7 +47,7 @@ Four CLI browser automation tools compared head-to-head. Each tool gets a single
 | **Page state size** | ~450 chars | ~880 chars | ~1,420 chars | ~590 chars (with `-i`) |
 | **Variable persistence** | Yes (daemon) | Yes (daemon) | Yes (background process) | Yes (background process) |
 
-## Methodology
+## 2. Methodology
 
 - **Model**: Claude Sonnet 4.6 on AWS Bedrock (Converse API), us-west-1
 - **Tool**: Single generic Bash tool for all 4 approaches (identical tool-definition overhead)
@@ -34,9 +59,9 @@ Four CLI browser automation tools compared head-to-head. Each tool gets a single
 - **Benchmark script**: [e2e_4way_cli_benchmark.py](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/e2e_4way_cli_benchmark.py)
 - **Results data**: [e2e_4way_cli_results.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/e2e_4way_cli_results.json)
 
-> **Historical benchmark, not a current-version ranking.** Recorded 2026-03-15 with Claude Sonnet 4.6 on AWS Bedrock, N=3 runs per approach. The retained artifact records the model, region, sample counts, headless mode, and timestamp, but it does not record the CLI tool versions, and it sets no fixed random seed or records the random state. The run is not exactly reproducible and is not a comparison against today's releases. No universal winner follows from it. See [Provenance and limits](#provenance-and-limits).
+> **Historical benchmark, not a current-version ranking.** Recorded 2026-03-15 with Claude Sonnet 4.6 on AWS Bedrock, N=3 runs per approach. The retained artifact records the model, region, sample counts, headless mode, and timestamp, but it does not record the CLI tool versions, and it sets no fixed random seed or records the random state. The run is not exactly reproducible and is not a comparison against today's releases. No universal winner follows from it. See [Provenance and limits](#23-provenance-and-limits).
 
-### Tasks
+### 2.1. Tasks
 
 | # | Task | Description | Target Site |
 |:-:|------|-------------|-------------|
@@ -47,7 +72,7 @@ Four CLI browser automation tools compared head-to-head. Each tool gets a single
 | 5 | **deep_navigation** | Navigate to a GitHub repo and find the latest release version number | github.com |
 | 6 | **content_analysis** | Analyze page structure: count headings, links, and paragraphs | example.com |
 
-### Fairness Design
+### 2.2. Fairness Design
 
 Unlike MCP benchmarks where each server defines its own tools (different counts, different schemas, different token overhead), this CLI benchmark uses a **single Bash tool** for all 4 approaches. This eliminates the tool-definition advantage -- the only difference is the system prompt telling the LLM how to use each tool.
 
@@ -58,7 +83,7 @@ Additional fairness measures:
 - **Browser cleanup**: Stale browser processes killed between approaches
 - **Headless mode**: Eliminates rendering overhead differences
 
-### Provenance and limits
+### 2.3. Provenance and limits
 
 - Retained artifact: [e2e_4way_cli_results.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/e2e_4way_cli_results.json). It records the model, region, N=3 runs, 10,000-sample bootstrap, headless mode, timestamp, and per-approach raw runs.
 - The artifact does not record the openbrowser-ai, browser-use, playwright-cli, or agent-browser versions. It also sets no fixed random seed and does not record the random state used for approach and task order. The exact run cannot be replayed from the repository.
@@ -66,7 +91,7 @@ Additional fairness measures:
 - The six tasks are a fixed sample. Token volume and duration are not a universal measure of task success or product quality.
 - Do not compare these numbers with a later release. This script has no pinned-run mode, and the native navigation harness is a separate lane that is not a source for this page.
 
-## Results: Overall
+## 3. Results: Overall
 
 All 4 tools achieve **100% accuracy** (18/18 task executions across 3 runs).
 
@@ -82,7 +107,7 @@ All 4 tools achieve **100% accuracy** (18/18 task executions across 3 runs).
 
 <img src="/images/cli_benchmark_overview.png" alt="CLI Benchmark: 4-Way Comparison Overview" />
 
-## Results: Per-Task Token Usage
+## 4. Results: Per-Task Token Usage
 
 | Task | openbrowser-ai | browser-use | playwright-cli | agent-browser |
 |------|---------------:|------------:|---------------:|--------------:|
@@ -97,7 +122,7 @@ openbrowser-ai wins 5 of 6 tasks on tokens. The advantage is largest on complex 
 
 <img src="/images/cli_benchmark_per_task.png" alt="CLI Benchmark: Per-Task Token Usage" />
 
-## Results: Cost Per Benchmark Run (6 Tasks)
+## 5. Results: Cost Per Benchmark Run (6 Tasks)
 
 Based on Bedrock API token usage (input + output tokens at respective rates).
 
@@ -106,9 +131,9 @@ Based on Bedrock API token usage (input + output tokens at respective rates).
 | Claude Sonnet 4.6 ($3/$15 per M) | **$0.12** | $0.24 | $0.29 | $0.27 |
 | Claude Opus 4.6 ($5/$25 per M) | **$0.24** | $0.45 | $0.56 | $0.51 |
 
-## Why openbrowser-ai Wins
+## 6. Why openbrowser-ai Wins
 
-### 1. Python Code Batching
+### 6.1. Python Code Batching
 
 Multiple browser operations in a single `openbrowser-ai -c '...'` call:
 
@@ -122,7 +147,7 @@ print(info)
 
 One tool invocation does what competitors need 3-5 tool calls for. Each tool call incurs LLM inference overhead (reading full conversation history), so fewer calls = fewer tokens.
 
-### 2. Compact DOM Representation
+### 6.2. Compact DOM Representation
 
 Page state uses DOM with `[i_N]` indices at ~450 chars:
 
@@ -134,11 +159,11 @@ Page state uses DOM with `[i_N]` indices at ~450 chars:
 
 vs ~880 chars (browser-use DOM), ~590 chars (agent-browser a11y tree with `-i`), or ~1,420 chars (playwright-cli a11y tree in `.yml` file).
 
-### 3. Server-Side Processing
+### 6.3. Server-Side Processing
 
 The LLM writes Python code that processes data server-side and returns only extracted results via `print()`. Competitors return full page state that the LLM must parse in its context window.
 
-### 4. Variable Persistence
+### 6.4. Variable Persistence
 
 The daemon maintains a Python namespace across `-c` calls. Intermediate results (selectors, extracted data, computed values) persist without re-extracting:
 
@@ -147,7 +172,7 @@ openbrowser-ai -c 'await navigate("https://example.com"); title = await evaluate
 openbrowser-ai -c 'print(f"Title was: {title}")'  # title still available
 ```
 
-## Variance Analysis
+## 7. Variance Analysis
 
 | CLI Tool | Token std / mean | Duration std / mean |
 |----------|:----------------:|:-------------------:|
@@ -161,9 +186,9 @@ openbrowser-ai -c 'print(f"Title was: {title}")'  # title still available
 - **playwright-cli**: High token variance (38%) driven by form_fill where accessibility tree snapshots vary in size
 - **agent-browser**: Lowest token variance (4%) but at 2.5x the absolute token cost
 
-## How Each CLI Works
+## 8. How Each CLI Works
 
-### openbrowser-ai
+### 8.1. openbrowser-ai
 
 ```bash
 # Python code batching -- multiple operations per call
@@ -175,7 +200,7 @@ openbrowser-ai -c 'await navigate("url"); data = await evaluate("js"); print(dat
 - All browser functions available: `navigate()`, `click()`, `input_text()`, `evaluate()`, `scroll()`, etc.
 - Variables persist across calls
 
-### browser-use
+### 8.2. browser-use
 
 ```bash
 # Individual CLI commands
@@ -189,7 +214,7 @@ uvx --from "browser-use[cli]" browser-use input 5 "text"
 - DOM with `[N]` indices
 - `uvx` isolation due to dependency conflicts
 
-### playwright-cli
+### 8.3. playwright-cli
 
 ```bash
 # JS batching via run-code
@@ -202,7 +227,7 @@ playwright-cli snapshot && cat .playwright-cli/page-*.yml
 - Snapshots save to `.yml` files, requiring extra `cat` to read
 - Accessibility tree format (~1,420 chars per page)
 
-### agent-browser
+### 8.4. agent-browser
 
 ```bash
 # Individual commands with && chaining

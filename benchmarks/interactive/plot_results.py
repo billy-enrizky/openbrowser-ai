@@ -86,7 +86,7 @@ def main() -> int:
 
     ax.set_yticks(positions, [task.capitalize() for task in TASKS], fontsize=14)
     ax.invert_yaxis()
-    ax.set_xlabel("p50 wall-clock latency (ms)", labelpad=12)
+    ax.set_xlabel("p50 wall-clock latency (ms) \u2193 Lower is better", labelpad=12)
     ax.grid(axis="x", color=GRID, linewidth=1, zorder=0)
     ax.set_axisbelow(True)
     for side in ("top", "right", "left"):
@@ -95,7 +95,7 @@ def main() -> int:
     ax.tick_params(axis="x", length=0, pad=8)
 
     fig.suptitle(
-        "Interactive browsing, warm p50 with the selector fast path",
+        "Interactive browsing, warm p50 \u2193 Lower is better",
         x=0.06,
         y=0.99,
         ha="left",
@@ -107,7 +107,7 @@ def main() -> int:
     fig.text(
         0.06,
         0.94,
-        f"N={samples} per arm and task. Each arm starts once and uses a fresh fixture per task. Arm-major run on a shared host.",
+        f"N={samples} per arm and task. Each arm starts once and uses a fresh fixture per task. Rotated arm order on a shared host.",
         ha="left",
         va="top",
         fontsize=12.5,

@@ -107,6 +107,27 @@ def test_browser_engine_falls_back_to_click():
     assert entry._execute_scrape_fast_path(["scrape", "https://a.example", "--engine", "browser"]) is False
 
 
+def test_no_browser_flag_forces_http_without_click(monkeypatch, capsys):
+    import openbrowser.cli_entry as entry
+
+    seen: dict = {}
+
+    def fake_run(urls, **kwargs):
+        seen.update(kwargs)
+        return {"url": urls[0], "content": "http-only", "format": "markdown", "engine_used": "http"}
+
+    monkeypatch.setattr(entry, "run_http_scrape_sync", fake_run)
+    monkeypatch.setattr(entry.runpy, "run_module", lambda *a, **k: pytest.fail("fell back to Click"))
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["openbrowser-ai", "scrape", "https://a.example", "--no-browser"],
+    )
+    entry.cli()
+    assert capsys.readouterr().out.strip() == "http-only"
+    assert seen["engine"] == "http"
+
+
 def test_auto_engine_batch_falls_back_to_click():
     import openbrowser.cli_entry as entry
 

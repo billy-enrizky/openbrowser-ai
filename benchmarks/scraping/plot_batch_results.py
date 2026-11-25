@@ -120,11 +120,11 @@ def main() -> int:
         [cli_rows['new']['peak_rss_p50_mb'], cli_rows['old']['peak_rss_p50_mb'], lightpanda_mb],
         ['#0f6270', '#9ca3af', '#4f7f5b'],
         'CLI batch peak RSS p50',
-        'megabytes',
+        'MiB \u2193 Lower is better',
         fmt='{:.0f}',
     )
     fig.suptitle(
-        'Five-page batch scraping: 5 URLs, 100 rows',
+        'Five-page batch scraping: 5 URLs, 100 rows \u2193 Lower is better',
         fontsize=18,
         color=TEXT,
         x=0.06,

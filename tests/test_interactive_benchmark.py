@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from benchmarks.interactive.adapters.base import RunContext
+from benchmarks.interactive.adapters.base import RunContext, host_playwright_cache
 from benchmarks.interactive.adapters.openbrowser import _env, _write_config
 
 
@@ -45,3 +45,15 @@ def test_openbrowser_benchmark_pins_the_daemon_socket(tmp_path: Path) -> None:
     assert env["HOME"] == str(ctx.home)
     assert env["OPENBROWSER_CONFIG_DIR"] == str(ctx.config)
     assert env["OPENBROWSER_SOCKET"] == str(ctx.home / ".openbrowser" / "daemon.sock")
+
+
+def test_benchmark_environment_exposes_the_host_browser_cache(tmp_path: Path) -> None:
+    ctx = _context(tmp_path)
+    cache = host_playwright_cache()
+
+    env = ctx.env
+
+    if cache is None:
+        assert "PLAYWRIGHT_BROWSERS_PATH" not in env
+    else:
+        assert env["PLAYWRIGHT_BROWSERS_PATH"] == str(cache)

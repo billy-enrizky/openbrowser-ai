@@ -4,6 +4,16 @@ description: "Run multiple agents in parallel with separate browser instances"
 icon: "copy"
 ---
 
+<!-- toc:start -->
+## Table of Contents
+
+- [1. Example](#1-example)
+- [2. Caveats](#2-caveats)
+
+<!-- toc:end -->
+
+## 1. Example
+
 ```python
 import asyncio
 from openbrowser import Agent, Browser, ChatOpenAI
@@ -41,7 +51,9 @@ async def main():
 	tasks = [agent.run() for agent in agents]
 	results = await asyncio.gather(*tasks, return_exceptions=True)
 
-	print('🎉 All agents completed!')
+	print('All agents completed!')
 ```
+
+## 2. Caveats
 
 > **Note:** This is experimental, and agents might conflict each other.

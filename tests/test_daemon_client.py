@@ -39,6 +39,22 @@ class TestDaemonClientMethods:
         return mock_reader, mock_writer
 
     @pytest.mark.asyncio
+    async def test_readiness_probe_uses_lightweight_ping(self):
+        """The startup probe must not build the full status payload."""
+        client = DaemonClient()
+        reader, writer = self._make_mock_transport({"id": 1, "success": True})
+        with (
+            patch.object(client, "_connect", AsyncMock(return_value=(reader, writer))),
+            patch.object(
+                client,
+                "_exchange",
+                AsyncMock(return_value={"success": True}),
+            ) as exchange,
+        ):
+            assert await client._probe() is True
+        assert exchange.await_args.args[2] == {"id": 1, "action": "ping"}
+
+    @pytest.mark.asyncio
     async def test_status_success(self):
         """status() returns parsed response on success."""
         reader, writer = self._make_mock_transport(

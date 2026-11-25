@@ -4,9 +4,19 @@ description: "Collect thousands of products and save to CSV"
 icon: "database"
 ---
 
+<!-- toc:start -->
+## Table of Contents
+
+- [1. Use Case](#1-use-case)
+- [2. Code](#2-code)
+- [3. How It Works](#3-how-it-works)
+- [4. Key Benefits](#4-key-benefits)
+
+<!-- toc:end -->
+
 This example shows how to extract large amounts of product data from an e-commerce site and save it to files.
 
-## Use Case
+## 1. Use Case
 
 Extract 1000s of products from multiple categories with:
 - Product URLs
@@ -16,7 +26,7 @@ Extract 1000s of products from multiple categories with:
 
 Save everything to a CSV file for further analysis.
 
-## Code
+## 2. Code
 
 ```python
 import asyncio
@@ -40,7 +50,7 @@ async def main():
 asyncio.run(main())
 ```
 
-## How It Works
+## 3. How It Works
 
 1. **Agent navigates** to the e-commerce site
 2. **Writes JavaScript** to extract product data from each page
@@ -49,7 +59,7 @@ asyncio.run(main())
 5. **Saves to CSV** using pandas or csv module
 6. **Returns deterministic code** you can modify and rerun
 
-## Key Benefits
+## 4. Key Benefits
 
 - **Function reuse:** Extraction code is written once, used many times
 - **Scale:** Easily collect 100s or 1000s of items

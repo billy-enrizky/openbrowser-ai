@@ -5,7 +5,15 @@ icon: "link"
 mode: "wide"
 ---
 
-## Chain Agent Tasks
+<!-- toc:start -->
+## Table of Contents
+
+- [1. Chain Agent Tasks](#1-chain-agent-tasks)
+- [2. How It Works](#2-how-it-works)
+
+<!-- toc:end -->
+
+## 1. Chain Agent Tasks
 
 Keep your browser session alive and chain multiple tasks together. Perfect for conversational workflows or multi-step processes.
 
@@ -35,7 +43,7 @@ async def main():
 asyncio.run(main())
 ```
 
-## How It Works
+## 2. How It Works
 
 1. **Persistent Browser**: `BrowserProfile(keep_alive=True)` prevents browser from closing between tasks
 2. **Task Chaining**: Use `agent.add_new_task()` to add follow-up tasks

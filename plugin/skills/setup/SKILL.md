@@ -88,7 +88,7 @@ curl -fsSL https://raw.githubusercontent.com/billy-enrizky/openbrowser-ai/main/i
 irm https://raw.githubusercontent.com/billy-enrizky/openbrowser-ai/main/install.ps1 | iex
 ```
 
-Pass `--no-browser` to either installer to skip Chromium installation. If `install.sh` falls back to pip, pass `--local` to request a user install.
+Pass `--no-browser` to either installer to skip Chromium installation. This installer flag is separate from the `scrape --no-browser` mode. If `install.sh` falls back to pip, pass `--local` to request a user install.
 
 Install or repair Chromium:
 
@@ -100,29 +100,31 @@ openbrowser-ai install
 
 ### 3.1. Native web search
 
-The base OpenBrowser package includes DDGS. Do not install DDGS separately. The `search` command does not start a browser.
+The base OpenBrowser package includes the DDGS client at `openbrowser.search`. Do not install DDGS separately and do not shell out to a `ddgs` CLI. The `search` command does not start a browser.
 
 ```bash
 openbrowser-ai search "OpenBrowser MCP docs"
 openbrowser-ai search "OpenBrowser MCP docs" --json --output search-results.json
 openbrowser-ai search "OpenBrowser MCP docs" --urls-only --output search-urls.txt
-openbrowser-ai scrape --urls-file search-urls.txt --output scraped-pages.jsonl --output-format jsonl
+openbrowser-ai scrape --urls-file search-urls.txt --no-browser --output scraped-pages.jsonl --output-format jsonl
 ```
 
 Search snippets do not count as evidence. Scrape and read the source page before citing it. The package caps `max_results` at 20.
+
+`--no-browser` is OpenBrowser no-browser mode. It starts no Chrome, Blink, or V8 process, never falls back to a browser, and cannot run JavaScript, take screenshots, or use browser cookies. Use the default `auto` engine or `--engine browser` when a page needs JavaScript.
 
 ### 3.2. Fast CLI paths
 
 A warm `openbrowser-ai -c` call uses a standard-library thin client against the daemon. It does not import the full CLI or agent stack. A cold call falls back to the full client and starts the daemon. No extra setup is required.
 
-For static pages, `openbrowser-ai scrape --engine http` uses a light console entry that does not import the browser or configuration stack. Multi-URL batches use bounded concurrency and start no browser:
+For static pages, `openbrowser-ai scrape --no-browser` uses OpenBrowser no-browser mode. It uses a light console entry that does not import the browser or configuration stack, starts no Chrome, Blink, or V8 process, and never falls back to a browser. Multi-URL batches use bounded concurrency:
 
 ```bash
-openbrowser-ai scrape https://example.com --engine http --format text
-openbrowser-ai scrape https://a.example https://b.example --engine http --jsonl --concurrency 8
+openbrowser-ai scrape https://example.com --no-browser --format text
+openbrowser-ai scrape https://a.example https://b.example --no-browser --jsonl --concurrency 8
 ```
 
-Use the default `auto` or explicit `browser` engine when a page needs JavaScript.
+It cannot run JavaScript, take screenshots, or use browser cookies. Use the default `auto` engine or `--engine browser` when a page needs JavaScript.
 
 ## 4. Step 3 -- Inspect and repair config
 
@@ -142,7 +144,7 @@ MCP and `openbrowser-ai -c` do not need an LLM key. Do not print the value.
 
 ## 5. Step 4 -- Configure MCP
 
-The installed server command is `openbrowser-ai --mcp`. The zero-install form is `uvx openbrowser-ai --mcp`. OpenBrowser uses MCP SDK 2.3 and negotiates protocol version `2026-07-28` with modern clients. Those clients see six tools. Older supported clients see four tools. Both catalogs include stateless `search_web`, which needs no `context_id` and does not start a browser. Use the handle returned by `create_context` for stateful calls.
+The installed server command is `openbrowser-ai --mcp`. The zero-install form is `uvx openbrowser-ai --mcp`. The default stdio transport is a lean JSON-RPC loop that answers discovery and `tools/list` before it imports the MCP SDK. Set `OPENBROWSER_MCP_TRANSPORT=sdk` to use the MCP SDK 2.3 escape hatch. Invalid values exit with code 2. Modern `2026-07-28` clients see seven tools: `create_context`, `execute_code`, `get_status`, `reset_browser`, `close_context`, `search_web`, and `scrape_web`. The legacy handshakes `2024-11-05`, `2025-03-26`, `2025-06-18`, and `2025-11-25` see four tools: `execute_code`, `get_status`, `reset_browser`, and `search_web`. Both catalogs include stateless `search_web`. The modern catalog adds stateless `scrape_web`, which fetches one HTTP(S) page in OpenBrowser no-browser mode: it starts no Chrome, Blink, or V8 process and cannot run JavaScript, take screenshots, or use browser cookies. Neither stateless tool needs a `context_id` or starts a browser. Use the handle returned by `create_context` for stateful calls.
 
 Add it to the agent's native MCP configuration.
 
@@ -190,6 +192,7 @@ Useful MCP environment variables:
 
 | Variable | Use | Default |
 |---|---|---|
+| `OPENBROWSER_MCP_TRANSPORT` | Stdio implementation: `lean` or `sdk`. Invalid values exit with code 2 | `lean` |
 | `OPENBROWSER_HEADLESS` | Run without a visible window | `true` |
 | `OPENBROWSER_ALLOWED_DOMAINS` | Comma-separated domain whitelist | none |
 | `OPENBROWSER_RENDER_MODE` | Asset policy for new contexts: `full`, `lightweight`, or `no-render` | `full` |
@@ -285,6 +288,8 @@ openbrowser-ai warm
 This starts the daemon and browser and prints `{"ok": true, "elapsed_ms": ..., "url": ...}`. Later `openbrowser-ai -c` calls reuse the same process. The command does not change the browser profile or navigate to an external site.
 
 Optional MCP smoke test:
+
+This test exercises the default lean transport. To test the SDK transport, set `OPENBROWSER_MCP_TRANSPORT=sdk` in the child environment.
 
 ```python
 import asyncio

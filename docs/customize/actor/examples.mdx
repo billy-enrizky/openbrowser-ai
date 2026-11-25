@@ -5,7 +5,19 @@ icon: "code-simple"
 mode: "wide"
 ---
 
-## Page Management
+<!-- toc:start -->
+## Table of Contents
+
+- [1. Page Management](#1-page-management)
+- [2. Element Finding & Interactions](#2-element-finding-interactions)
+- [3. LLM-Powered Features](#3-llm-powered-features)
+- [4. JavaScript Execution](#4-javascript-execution)
+- [5. Mouse Operations](#5-mouse-operations)
+- [6. Best Practices](#6-best-practices)
+
+<!-- toc:end -->
+
+## 1. Page Management
 
 ```python
 from openbrowser import Browser
@@ -26,7 +38,7 @@ await browser.close_page(page)
 await browser.stop()
 ```
 
-## Element Finding & Interactions
+## 2. Element Finding & Interactions
 
 ```python
 page = await browser.new_page('https://github.com')
@@ -45,7 +57,7 @@ await page.press("Enter")
 screenshot = await page.screenshot()
 ```
 
-## LLM-Powered Features
+## 3. LLM-Powered Features
 
 ```python
 from openbrowser.llm.openai import ChatOpenAI
@@ -69,7 +81,7 @@ product = await page.extract_content(
 )
 ```
 
-## JavaScript Execution
+## 4. JavaScript Execution
 
 ```python
 # Simple JavaScript evaluation
@@ -85,7 +97,7 @@ stats = await page.evaluate('''() => ({
 })''')
 ```
 
-## Mouse Operations
+## 5. Mouse Operations
 
 ```python
 mouse = await page.mouse
@@ -102,7 +114,7 @@ await mouse.up()
 await mouse.scroll(x=0, y=100, delta_y=-500)
 ```
 
-## Best Practices
+## 6. Best Practices
 
 - Use `asyncio.sleep()` after actions that trigger navigation
 - Check URL/title changes to verify state transitions

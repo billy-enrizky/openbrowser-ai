@@ -1,5 +1,17 @@
 # News-Use
 
+<!-- toc:start -->
+## Table of Contents
+
+- [1. Features](#1-features)
+- [2. Setup](#2-setup)
+- [3. Usage](#3-usage)
+- [4. Output Format](#4-output-format)
+- [5. Programmatic Usage](#5-programmatic-usage)
+- [6. License](#6-license)
+
+<!-- toc:end -->
+
 Automatically monitor news websites and extract the latest articles with sentiment analysis using browser agents and Google Gemini.
 
 > [!IMPORTANT]
@@ -7,7 +19,7 @@ Automatically monitor news websites and extract the latest articles with sentime
 
 https://github.com/user-attachments/assets/698757ca-8827-41f3-98e5-c235d6eef69f
 
-## Features
+## 1. Features
 
 1. Agent visits any news website
 2. Finds and clicks the most recent headline article
@@ -15,7 +27,7 @@ https://github.com/user-attachments/assets/698757ca-8827-41f3-98e5-c235d6eef69f
 4. Generates short/long summaries with sentiment analysis
 5. Persistent deduplication across restarts
 
-## Setup
+## 2. Setup
 
 Make sure the newest version of openbrowser is installed:
 ```bash
@@ -33,7 +45,7 @@ git clone https://github.com/billy-enrizky/openbrowser-ai.git
 cd openbrowser-ai/examples/apps/news-use
 ```
 
-## Usage
+## 3. Usage
 
 ```bash
 # One-time extraction - Get the latest article and exit
@@ -52,7 +64,7 @@ python news_monitor.py --url https://techcrunch.com
 python news_monitor.py --once --debug
 ```
 
-## Output Format
+## 4. Output Format
 
 Articles are displayed with timestamp, sentiment emoji, and summary:
 ```
@@ -64,7 +76,7 @@ Sentiment indicators:
 - 🟡 Neutral  
 - 🔴 Negative
 
-## Programmatic Usage
+## 5. Programmatic Usage
 
 ```python
 import asyncio
@@ -82,6 +94,6 @@ async def main():
 asyncio.run(main())
 ```
 
-## License
+## 6. License
 
 MIT

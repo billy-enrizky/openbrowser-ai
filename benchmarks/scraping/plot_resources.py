@@ -60,8 +60,8 @@ def main() -> int:
     offsets = [index - (len(ARMS) - 1) / 2 for index in range(len(ARMS))]
     positions = list(range(len(TASKS)))
     for panel, axis, field, title, xlabel in (
-        (0, axes[0], 'peak_rss_mb_p50', 'Peak process-tree RSS', 'MB'),
-        (1, axes[1], 'live_tree_cpu_ms_p50', 'Live process-tree CPU', 'ms'),
+        (0, axes[0], 'peak_rss_mb_p50', 'Peak process-tree RSS', 'MiB \u2193 Lower is better'),
+        (1, axes[1], 'live_tree_cpu_ms_p50', 'Live process-tree CPU', 'ms \u2193 Lower is better'),
     ):
         for offset, (arm, label, color) in zip(offsets, ARMS, strict=True):
             values = []
@@ -102,7 +102,7 @@ def main() -> int:
         frameon=False,
         fontsize=10.5,
     )
-    fig.suptitle('Scraping process-tree resources, p50', fontsize=19, color=TEXT, x=0.06, ha='left', y=0.98)
+    fig.suptitle('Scraping process-tree resources, p50 \u2193 Lower is better', fontsize=19, color=TEXT, x=0.06, ha='left', y=0.98)
     fig.text(
         0.06,
         0.93,

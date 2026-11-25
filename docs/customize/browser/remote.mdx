@@ -5,7 +5,18 @@ icon: "server"
 mode: "wide"
 ---
 
-### Connect via CDP URL
+<!-- toc:start -->
+## Table of Contents
+
+- [1. Connect via CDP URL](#1-connect-via-cdp-url)
+- [2. Start Chrome with Remote Debugging](#2-start-chrome-with-remote-debugging)
+- [3. Third-Party Cloud Browsers](#3-third-party-cloud-browsers)
+- [4. Proxy Connection](#4-proxy-connection)
+- [5. Docker Setup](#5-docker-setup)
+
+<!-- toc:end -->
+
+## 1. Connect via CDP URL
 
 Connect to any remote browser using Chrome DevTools Protocol (CDP). Remote launch settings such as `headless`, `proxy.server`, and `proxy.bypass` do not affect an already-running remote browser.
 
@@ -24,7 +35,7 @@ agent = Agent(
 )
 ```
 
-### Start Chrome with Remote Debugging
+## 2. Start Chrome with Remote Debugging
 
 To enable CDP on a local or remote Chrome instance:
 
@@ -39,7 +50,7 @@ google-chrome --remote-debugging-port=9222
 chrome.exe --remote-debugging-port=9222
 ```
 
-### Third-Party Cloud Browsers
+## 3. Third-Party Cloud Browsers
 
 You can use any cloud browser service that provides a CDP URL:
 
@@ -48,7 +59,7 @@ You can use any cloud browser service that provides a CDP URL:
 - **LambdaTest** - Connect via their CDP endpoint
 - **Any Docker-based Chrome** - Run headless Chrome in a container
 
-### Proxy Connection
+## 4. Proxy Connection
 
 The remote Chrome instance must be started with the proxy server. `proxy.server` and `proxy.bypass` are local launch settings and do not affect an already-running remote browser. Only the username and password are used for CDP proxy-auth challenges.
 
@@ -72,7 +83,7 @@ agent = Agent(
 )
 ```
 
-### Docker Setup
+## 5. Docker Setup
 
 Run Chrome in a Docker container:
 

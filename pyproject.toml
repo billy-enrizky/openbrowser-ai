@@ -97,6 +97,7 @@ packages = ["src/openbrowser"]
 "src/openbrowser/agent/system_prompt_flash.md" = "openbrowser/agent/system_prompt_flash.md"
 "src/openbrowser/agent/system_prompt_no_thinking.md" = "openbrowser/agent/system_prompt_no_thinking.md"
 "src/openbrowser/code_use/system_prompt.md" = "openbrowser/code_use/system_prompt.md"
+"src/openbrowser/mcp/tool_catalog.json" = "openbrowser/mcp/tool_catalog.json"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

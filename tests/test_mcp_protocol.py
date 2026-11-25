@@ -45,6 +45,7 @@ def child_env(home: Path) -> dict[str, str]:
         "PYTHONPATH": str(ROOT / "src"),
         "OPENBROWSER_ANONYMIZED_TELEMETRY": "false",
         "ANONYMIZED_TELEMETRY": "false",
+        "OPENBROWSER_MCP_TRANSPORT": "sdk",
     }
 
 
@@ -162,6 +163,7 @@ async def test_real_entrypoint_modern_first_catalog_and_status_without_handshake
             "reset_browser",
             "close_context",
             "search_web",
+            "scrape_web",
         ]
         identity = catalog["_meta"]["io.modelcontextprotocol/serverInfo"]
         assert identity == {
@@ -189,7 +191,7 @@ async def test_latest_sdk_real_stdio_discovery_and_direct_calls(tmp_path, mode):
     async with Client(params, mode=mode) as client:
         assert client.protocol_version == "2026-07-28"
         catalog = await client.list_tools()
-        assert len(catalog.tools) == 6
+        assert len(catalog.tools) == 7
         created = await client.call_tool("create_context", {})
         assert not created.is_error
         context_id = created.structured_content["context_id"]
@@ -722,8 +724,9 @@ async def test_exact_catalog_input_contracts_and_annotations(monkeypatch):
         "reset_browser",
         "close_context",
         "search_web",
+        "scrape_web",
     ]
-    create, execute, status, reset, close, search_tool = catalog.tools
+    create, execute, status, reset, close, search_tool, scrape_tool = catalog.tools
     context_property = {
         "type": "string",
         "description": (
@@ -759,6 +762,10 @@ async def test_exact_catalog_input_contracts_and_annotations(monkeypatch):
         "required": ["context_id"],
         "additionalProperties": False,
     }
+    assert scrape_tool.name == "scrape_web"
+    assert scrape_tool.input_schema["required"] == ["url"]
+    assert "no-Blink" in scrape_tool.description
+    assert "no-V8" in scrape_tool.description
     legacy_status = server._legacy_by_name["get_status"]
     for status_tool in (status, legacy_status):
         assert "does not start a browser or probe CDP health" in status_tool.description
@@ -879,6 +886,12 @@ async def test_exact_catalog_input_contracts_and_annotations(monkeypatch):
             "openWorldHint": True,
             "idempotentHint": False,
         },
+            {
+                "readOnlyHint": True,
+                "destructiveHint": False,
+                "openWorldHint": True,
+                "idempotentHint": True,
+            },
     ]
 
     legacy = await server.server.get_request_handler("tools/list").handler(None, None)

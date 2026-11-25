@@ -1,5 +1,12 @@
 # OpenBrowser LLMs
 
+<!-- toc:start -->
+## Table of Contents
+
+- [1. Migrating from LangChain](#1-migrating-from-langchain)
+
+<!-- toc:end -->
+
 We officially support the following LLMs:
 
 - OpenAI (`ChatOpenAI`)
@@ -15,7 +22,7 @@ We officially support the following LLMs:
 - Oracle Cloud Infrastructure (`ChatOCIRaw`)
 - Browser-Use (`ChatBrowserUse`)
 
-## Migrating from LangChain
+## 1. Migrating from LangChain
 
 Because of how we implemented the LLMs, we can technically support anything. If you want to use a LangChain model, you can use the `ChatLangchain` (NOT OFFICIALLY SUPPORTED) class.
 

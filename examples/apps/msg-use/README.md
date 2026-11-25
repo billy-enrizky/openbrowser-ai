@@ -1,11 +1,24 @@
 # Msg-Use
 
+<!-- toc:start -->
+## Table of Contents
+
+- [1. Features](#1-features)
+- [2. Setup](#2-setup)
+- [3. Initial Login](#3-initial-login)
+- [4. Normal Usage](#4-normal-usage)
+- [5. Output](#5-output)
+- [6. Files](#6-files)
+- [7. License](#7-license)
+
+<!-- toc:end -->
+
 AI-powered message scheduler using browser agents and Gemini. Schedule personalized messages in natural language and let AI compose them intelligently.
 
 > [!WARNING]
 > This demo requires openbrowser v0.1.57+.
 
-## Features
+## 1. Features
 
 1. Agent logs into WhatsApp Web automatically
 2. Parses natural language scheduling instructions
@@ -13,7 +26,7 @@ AI-powered message scheduler using browser agents and Gemini. Schedule personali
 4. Schedules messages for future delivery or sends immediately
 5. Reuses the saved browser profile when WhatsApp keeps the session valid
 
-## Setup
+## 2. Setup
 
 Make sure the newest version of openbrowser is installed:
 ```bash
@@ -31,7 +44,7 @@ git clone https://github.com/billy-enrizky/openbrowser-ai.git
 cd openbrowser-ai/examples/apps/msg-use
 ```
 
-## Initial Login
+## 3. Initial Login
 
 WhatsApp Web may require a QR scan on first use or when the saved session expires:
 ```bash
@@ -40,7 +53,7 @@ python login.py
 - Scan the QR code when the browser opens
 - The browser profile is reused on later runs when WhatsApp keeps the session valid
 
-## Normal Usage
+## 4. Normal Usage
 
 1. **Create `messages.txt`** in the app directory:
 ```bash
@@ -67,7 +80,7 @@ python scheduler.py --debug
 python scheduler.py --auto
 ```
 
-## Output
+## 5. Output
 
 Example scheduling output:
 ```json
@@ -87,12 +100,12 @@ Example scheduling output:
 ]
 ```
 
-## Files
+## 6. Files
 
 - `scheduler.py` - Main scheduler script
 - `login.py` - One-time login setup  
 - `messages.txt` - Your message schedule in natural language
 
-## License
+## 7. License
 
 MIT

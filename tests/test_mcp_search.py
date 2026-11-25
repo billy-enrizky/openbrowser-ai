@@ -98,3 +98,32 @@ def test_packaged_mcp_manifest_lists_stateless_search_tool():
 
     search_tool = next(tool for tool in manifest["tools"] if tool["name"] == "search_web")
     assert "without starting a browser" in search_tool["description"]
+    scrape_tool = next(tool for tool in manifest["tools"] if tool["name"] == "scrape_web")
+    assert "no-Blink" in scrape_tool["description"]
+    assert "no-V8" in scrape_tool["description"]
+
+
+@pytest.mark.asyncio
+async def test_scrape_web_dispatch_is_stateless(monkeypatch):
+    monkeypatch.setattr(mcp_module, "TELEMETRY_AVAILABLE", False)
+    server = mcp_module.OpenBrowserServer()
+    monkeypatch.setattr(
+        "openbrowser.mcp.stateless.execute_stateless_tool",
+        AsyncMock(return_value=('{"ok": true, "engine_used": "http"}', False)),
+    )
+    monkeypatch.setattr(
+        server._contexts,
+        "acquire",
+        AsyncMock(side_effect=AssertionError("stateless scrape acquired a context")),
+    )
+    handler = server.server._request_handlers["tools/call"].handler
+    result = await handler(
+        SimpleNamespace(protocol_version="2026-07-28"),
+        mcp_module.types.CallToolRequestParams(
+            name="scrape_web",
+            arguments={"url": "https://example.com/", "format": "text"},
+        ),
+    )
+    assert result.is_error is False
+    assert json.loads(result.content[0].text)["engine_used"] == "http"
+    assert server.browser_session is None

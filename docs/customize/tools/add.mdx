@@ -5,6 +5,16 @@ icon: "plus"
 mode: "wide"
 ---
 
+<!-- toc:start -->
+## Table of Contents
+
+- [1. Available Objects](#1-available-objects)
+- [2. Browser Interaction Examples](#2-browser-interaction-examples)
+- [3. Pydantic Input](#3-pydantic-input)
+- [4. Domain Restrictions](#4-domain-restrictions)
+- [5. Advanced Example](#5-advanced-example)
+
+<!-- toc:end -->
 
 Examples:
 - deterministic clicks
@@ -41,7 +51,7 @@ agent = Agent(task='...', llm=llm, tools=tools)
 The Agent fills your function parameters based on their names, type hints, & defaults.
 
 
-## Available Objects
+## 1. Available Objects
 
 Your function has access to these objects:
 
@@ -53,7 +63,7 @@ Your function has access to these objects:
 - **`has_sensitive_data: bool`** - True only for the built-in `input` action when sensitive data is configured
 
 
-## Browser Interaction Examples
+## 2. Browser Interaction Examples
 
 You can use `browser_session` to directly interact with page elements using CSS selectors:
 
@@ -92,7 +102,7 @@ Available methods on `Element`:
 - `evaluate(page_function: str, *args)` - Read text or other values with an arrow function
 - See `openbrowser/actor/element.py` for more methods
 
-## Pydantic Input
+## 3. Pydantic Input
 
 You can use Pydantic for the tool parameters:
 
@@ -115,7 +125,7 @@ def save_cars(cars: list[Cars]) -> str:
 
 task = "find cars and save them to file"
 ```
-## Domain Restrictions
+## 4. Domain Restrictions
 
 Limit tools to specific domains:
 
@@ -129,7 +139,7 @@ def fill_bank_form(account_number: str) -> str:
     return f'Filled form for account {account_number}'
 ```
 
-## Advanced Example
+## 5. Advanced Example
 
 For a comprehensive example of custom tools with Playwright integration, see:
 **[Playwright Integration Example](https://github.com/billy-enrizky/openbrowser-ai/blob/main/examples/browser/playwright_integration.py)**

@@ -6,10 +6,36 @@ import os
 import signal
 import socket
 import subprocess
+import sys
 import time
 import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
+
+import psutil
+
+_HOST_HOME = Path.home()
+
+
+def host_playwright_cache() -> Path | None:
+    """Return the host Playwright browser cache without consulting a child HOME.
+
+    Benchmark runs isolate HOME so profiles and downloads cannot escape the run
+    directory. The installed browser binary is not run state. Exposing its
+    cache lets OpenBrowser use the automatic extension-free headless shell that
+    it selects for normal users instead of silently falling back to full Chrome.
+    """
+    configured = os.environ.get("PLAYWRIGHT_BROWSERS_PATH")
+    if configured:
+        path = Path(configured).expanduser()
+        return path if path.is_dir() else None
+    if os.name == "nt":
+        candidate = Path(os.environ.get("LOCALAPPDATA", _HOST_HOME)) / "ms-playwright"
+    elif sys.platform == "darwin":
+        candidate = _HOST_HOME / "Library" / "Caches" / "ms-playwright"
+    else:
+        candidate = _HOST_HOME / ".cache" / "ms-playwright"
+    return candidate if candidate.is_dir() else None
 
 
 @dataclass
@@ -54,6 +80,11 @@ class RunContext:
                 "BROWSER_USE_NO_UPDATE_CHECK": "1",
             }
         )
+        browser_cache = host_playwright_cache()
+        if browser_cache is not None:
+            env["PLAYWRIGHT_BROWSERS_PATH"] = str(browser_cache)
+        else:
+            env.pop("PLAYWRIGHT_BROWSERS_PATH", None)
         env.pop("PYTHONPATH", None)
         return env
 
@@ -119,22 +150,14 @@ def wait_for_http(url: str, timeout: float = 20.0) -> None:
 
 
 def _process_table() -> list[tuple[int, str]]:
-    completed = subprocess.run(
-        ["ps", "-axo", "pid=,command="],
-        capture_output=True,
-        text=True,
-        timeout=10,
-    )
     rows: list[tuple[int, str]] = []
-    for line in completed.stdout.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        pid_text, _, command = line.partition(" ")
+    for process in psutil.process_iter(["pid", "cmdline"]):
         try:
-            rows.append((int(pid_text), command.strip()))
-        except ValueError:
+            command = " ".join(process.info.get("cmdline") or [])
+        except (OSError, psutil.AccessDenied, psutil.NoSuchProcess, psutil.ZombieProcess):
             continue
+        if command:
+            rows.append((int(process.pid), command))
     return rows
 
 
