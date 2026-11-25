@@ -7,23 +7,23 @@ from functools import lru_cache
 from typing import Any
 
 from .catalog import load_tool_definitions
+from .schema import CompiledSchema, compile_schema, iter_errors
 
 STATELESS_TOOL_NAMES = frozenset({"search_web", "scrape_web"})
 
 
 @lru_cache(maxsize=2)
-def _validator(name: str):
-    from jsonschema import Draft202012Validator
-
+def _compiled_schema(name: str) -> CompiledSchema:
+    """Compile the advertised schema once without importing jsonschema."""
     for tool in load_tool_definitions(modern=True):
         if tool["name"] == name:
-            return Draft202012Validator(tool["inputSchema"])
+            return compile_schema(tool["inputSchema"])
     raise ValueError(f"Unknown stateless tool: {name}")
 
 
 def validate_stateless_arguments(name: str, arguments: dict[str, Any]) -> None:
     """Apply the advertised input schema before any network call."""
-    error = next(_validator(name).iter_errors(arguments), None)
+    error = next(iter_errors(arguments, _compiled_schema(name)), None)
     if error is None:
         return
     location = f" at {error.json_path}" if error.json_path and error.json_path != "$" else ""
