@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from benchmarks.scraping.scrape_compare import (
     EXPECTED_JS_SKUS,
     EXPECTED_PAGINATION_IDS,
@@ -9,6 +11,7 @@ from benchmarks.scraping.scrape_compare import (
     exact_js_list,
     exact_pagination,
     exact_table,
+    BrowserArm,
 )
 
 
@@ -53,3 +56,44 @@ def test_table_rejects_reordered_rows():
 
 def test_table_rejects_a_missing_row():
     assert exact_table(EXPECTED_TABLE_ROWS[:-1]) is False
+
+
+@pytest.mark.asyncio
+async def test_prepare_starts_a_forced_browser(monkeypatch):
+    arm = BrowserArm("browser", "full", engine="browser")
+    calls = []
+
+    async def fake_start():
+        calls.append("start")
+        arm._started = True
+
+    monkeypatch.setattr(arm, "_ensure_started", fake_start)
+    await arm.prepare("static_article")
+    assert calls == ["start"]
+
+
+@pytest.mark.asyncio
+async def test_prepare_starts_a_browser_task_in_auto_mode(monkeypatch):
+    arm = BrowserArm("auto-js", "full", engine="auto")
+    calls = []
+
+    async def fake_start():
+        calls.append("start")
+        arm._started = True
+
+    monkeypatch.setattr(arm, "_ensure_started", fake_start)
+    await arm.prepare("js_list")
+    assert calls == ["start"]
+
+
+@pytest.mark.asyncio
+async def test_prepare_does_not_start_for_an_auto_http_task(monkeypatch):
+    arm = BrowserArm("auto-http", "full", engine="auto")
+    calls = []
+
+    async def fake_start():
+        calls.append("start")
+
+    monkeypatch.setattr(arm, "_ensure_started", fake_start)
+    await arm.prepare("pagination")
+    assert calls == []

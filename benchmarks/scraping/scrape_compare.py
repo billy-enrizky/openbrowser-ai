@@ -328,6 +328,11 @@ class BrowserArm:
             await self.session.start()
             self._started = True
 
+    async def prepare(self, task_name: str) -> None:
+        """Start the browser before timing when the task or engine needs it."""
+        if self.engine == "browser" or task_name in {"js_list", "asset_heavy"}:
+            await self._ensure_started()
+
     async def stop(self) -> None:
         if self.session is not None:
             with contextlib.suppress(Exception):
@@ -722,6 +727,12 @@ TASKS = {
 }
 
 
+async def _prepare(arm, task_name: str) -> None:
+    prepare = getattr(arm, "prepare", None)
+    if prepare is not None:
+        await prepare(task_name)
+
+
 async def _measure(arm, task_name: str, method: str, base: str, state: FixtureState):
     before_requests, before_bytes = state.snapshot()
     started = time.perf_counter_ns()
@@ -912,6 +923,8 @@ async def main() -> int:
                 await arm.start()
             for task_name in args.tasks:
                 method = TASKS[task_name]
+                for arm in arms:
+                    await _prepare(arm, task_name)
                 for warmup_index in range(args.warmups):
                     order = arms if warmup_index % 2 == 0 else list(reversed(arms))
                     for arm in order:
@@ -934,6 +947,7 @@ async def main() -> int:
                 await arm.start()
                 for task_name in args.tasks:
                     method = TASKS[task_name]
+                    await _prepare(arm, task_name)
                     for _ in range(args.warmups):
                         await _measure(arm, task_name, method, base, server.state)
                     for sample_index in range(args.samples):
