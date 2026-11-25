@@ -12,9 +12,6 @@
   - [2.5. Standalone MCP server (without plugin)](#25-standalone-mcp-server-without-plugin)
 - [3. Available Tools](#3-available-tools)
 - [4. Benchmark: Token Efficiency](#4-benchmark-token-efficiency)
-  - [4.1. Native Local Benchmark (2026-11-24)](#41-native-local-benchmark-2026-11-24)
-  - [4.2. CLI Benchmark: 4-Way Comparison (6 Tasks, N=3 runs)](#42-cli-benchmark-4-way-comparison-6-tasks-n3-runs)
-  - [4.3. E2E LLM Benchmark: MCP Server Comparison (6 Tasks, N=5 runs)](#43-e2e-llm-benchmark-mcp-server-comparison-6-tasks-n5-runs)
 - [5. Native web search](#5-native-web-search)
 - [6. CLI Execute Mode](#6-cli-execute-mode)
 - [7. Configuration](#7-configuration)
@@ -142,51 +139,9 @@ Prefer indexed actions whenever an element index exists. Coordinate actions use 
 
 ## 4. Benchmark: Token Efficiency
 
-### 4.1. Native Local Benchmark (2026-11-24)
+Current native evidence lives in [Benchmark Comparison](https://docs.openbrowser.me/comparison). The 2026-11-25 cold and warm lanes both put OpenBrowser MCP and CLI at the lowest p50 on every task against every competitor. The interactive resource lane has the lowest child footprint, tree RSS, and CPU on every eligible pair. The sequential scraping lane won 50 of 50 pairs against Firecrawl Local, and the full arm won 49 of 50 with one static sample 0.13 ms slower.
 
-Current local deterministic fixtures show OpenBrowser winning all five sequential scraping tasks against Firecrawl Local, 50 of 50 paired samples. Pagination measured 3.02 ms against 4.42 ms, and static article measured 0.94 ms against 1.54 ms. On the native batch surface, OpenBrowser HTTP batch measured 2.834 ms p50 against Firecrawl Local batch at 13.448 ms, a 4.75x win in 10 of 10 pairs. No browser started for the OpenBrowser batch.
-
-OpenBrowser no-browser mode measured 142.7 ms and 47.6 MiB process-tree RSS on a local fixture for a static page. The scrape browser fallback uses the Playwright headless shell by default, measured at 355.4 to 382.1 MiB process-tree RSS on the same fixture, against 742.4 to 754.8 MiB for full Chrome.
-
-The warm interactive lane uses the OpenBrowser MCP arm. Paired runs won 10 of 10 against the closest competitor on every task: wizard 121.966 ms vs browser-use 446.056 ms, modal 267.286 ms vs 806.803 ms, tabs 140.130 ms vs 220.321 ms, and download 393.629 ms vs agent-browser 482.813 ms. The cold lane beats chrome-devtools-mcp on all five tasks and browser-use on two, and still trails browser-use on download and tabs. See the [charted comparison](https://docs.openbrowser.me/comparison) and the raw artifacts under [`benchmarks/`](../benchmarks/).
-
-### 4.2. CLI Benchmark: 4-Way Comparison (6 Tasks, N=3 runs)
-
-Four CLI tools compared with a single Bash tool each. Claude Sonnet 4.6 on Bedrock. Randomized order. All achieve 100% accuracy.
-
-<p align="center">
-  <img src="../benchmarks/cli_benchmark_scatter.png" alt="CLI Benchmark: Token Usage vs Duration" width="700" />
-</p>
-
-| CLI Tool | Duration | Tool Calls | Bedrock API Tokens |
-|----------|----------|-----------|-------------------|
-| **openbrowser-ai** | **84.8 +/- 10.9s** | **15.3 +/- 2.3** | **36,010 +/- 6,063** |
-| browser-use | 106.0 +/- 9.5s | 20.7 +/- 6.4 | 77,123 +/- 33,354 |
-| agent-browser | 99.0 +/- 6.8s | 25.0 +/- 4.0 | 90,107 +/- 3,698 |
-| playwright-cli | 118.3 +/- 21.4s | 25.7 +/- 8.1 | 94,130 +/- 35,982 |
-
-openbrowser-ai uses **2.1-2.6x fewer tokens** than all competitors via Python code batching and compact DOM representation. Raw data: [`benchmarks/e2e_4way_cli_results.json`](../benchmarks/e2e_4way_cli_results.json).
-
-<p align="center">
-  <img src="../benchmarks/cli_benchmark_per_task.png" alt="CLI Benchmark: Per-Task Token Usage" width="700" />
-</p>
-
-[Full 4-way comparison](https://docs.openbrowser.me/cli-comparison)
-
-### 4.3. E2E LLM Benchmark: MCP Server Comparison (6 Tasks, N=5 runs)
-
-| MCP Server | Tools | Bedrock API Tokens | Tool Calls (mean) | vs OpenBrowser |
-|------------|------:|-------------------:|-----------:|---------------:|
-| **Playwright MCP** | 22 | 158,787 | 9.4 | **3.2x more tokens** |
-| **Chrome DevTools MCP** (Google) | 26 | 299,486 | 19.4 | **6.0x more tokens** |
-| **OpenBrowser MCP** | 1 (legacy catalog at benchmark time) | **50,195** | 13.8 | baseline |
-
-| Model | Playwright MCP | Chrome DevTools MCP | OpenBrowser MCP |
-|-------|---------------:|--------------------:|----------------:|
-| Claude Sonnet 4.6 ($3/$15 per M) | $0.50 | $0.92 | **$0.18** |
-| Claude Opus 4.6 ($5/$25 per M) | $0.83 | $1.53 | **$0.30** |
-
-The OpenBrowser MCP entry used the legacy one-tool catalog at benchmark time. Current `2026-07-28` clients see seven tools. [Full MCP comparison with methodology](https://docs.openbrowser.me/comparison)
+Historical 2026-03-15 CLI and 2026-02-21 MCP comparisons are retired from this README. Their paths, SHA256 digests, and sizes are in [RETIRED_RESULTS.md](../benchmarks/RETIRED_RESULTS.md).
 
 ## 5. Native web search
 

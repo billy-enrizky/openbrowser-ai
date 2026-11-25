@@ -16,7 +16,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 HERE = Path(__file__).resolve().parent
-DEFAULT_INPUT = HERE / 'results' / 'results-cold-six-arm-quiet-2026-11-24-n5.summary.json'
+DEFAULT_INPUT = HERE / 'results' / 'results-cold-five-arm-lean-2026-11-25-n5-final4.summary.json'
 DEFAULT_OUTPUT = HERE.parents[1] / 'docs' / 'images' / 'native-interactive-cold-p50.png'
 TASKS = ('wizard', 'modal', 'download', 'tabs', 'auth')
 ARMS = (

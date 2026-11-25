@@ -11,10 +11,6 @@ mode: "wide"
 - [1. Overview](#1-overview)
 - [2. Quick Comparison](#2-quick-comparison)
 - [3. Benchmark Results](#3-benchmark-results)
-  - [3.1. Task Performance Summary](#31-task-performance-summary)
-  - [3.2. Detailed Results by Model](#32-detailed-results-by-model)
-    - [3.2.1. Gemini 3 Flash Preview](#321-gemini-3-flash-preview)
-    - [3.2.2. Gemini 2.5 Flash](#322-gemini-25-flash)
 - [4. Running Benchmarks](#4-running-benchmarks)
   - [4.1. Basic Comparison Script](#41-basic-comparison-script)
   - [4.2. Comprehensive Benchmark](#42-comprehensive-benchmark)
@@ -41,38 +37,13 @@ This page documents benchmark results comparing both approaches across various t
 | Feature | Agent | CodeAgent |
 |---------|-------|-----------|
 | **Best For** | One-off tasks, complex navigation | Data extraction, repetitive tasks |
-| **Speed** | Fast for simple tasks | Faster for bulk operations |
+| **Best fit** | Simple one-off tasks | Bulk and repeatable tasks |
 | **Output** | Action history | Reusable Python code |
 | **File Operations** | Via FileSystem tool | Direct file access |
 
 ## 3. Benchmark Results
 
-### 3.1. Task Performance Summary
-
-| Task | Agent Time | CodeAgent Time | Winner |
-|------|------------|----------------|--------|
-| Product Configurator | 11.22s | 15.67s | Agent (1.4x faster) |
-| Flight Booking Flow | 74.07s | 108.33s | Agent (completed vs failed) |
-| HN Data Extraction + CSV | 18.84s | 10.72s | CodeAgent (1.8x faster) |
-| Google Search (with CAPTCHA) | 146.67s | 35.59s | CodeAgent (4.1x faster) |
-
-### 3.2. Detailed Results by Model
-
-#### 3.2.1. Gemini 3 Flash Preview
-
-| Task | Agent | CodeAgent | Notes |
-|------|-------|-----------|-------|
-| Product Configurator | 16.50s (3 steps) | 40.64s (6 steps) | Agent batched 5 clicks in 1 step |
-| Flight Booking Flow | 149.19s (19 steps) | 46.87s (8 steps) | CodeAgent 3.2x faster with JS |
-| HN Data Extraction | 48.10s (5 steps) | 14.72s (3 steps) | CodeAgent 3.3x faster |
-
-#### 3.2.2. Gemini 2.5 Flash
-
-| Task | Agent | CodeAgent | Notes |
-|------|-------|-----------|-------|
-| Product Configurator | 11.22s (5 steps) | 15.67s (3 steps) | Agent faster |
-| Flight Booking Flow | 74.07s (21 steps) | Failed (49 steps) | CodeAgent stuck on seat selection |
-| HN Data Extraction | 18.84s (5 steps) | 10.72s (3 steps) | CodeAgent faster |
+The previous Agent versus CodeAgent timing tables were unsupported historical runs. They are retired and are not current-version evidence. For current native competitor lanes, see [Benchmark Comparison](/comparison). The qualitative guidance on this page remains separate from those measurements.
 
 ## 4. Running Benchmarks
 
@@ -206,15 +177,15 @@ asyncio.run(run_benchmark())
 ### 5.1. When to Use Agent
 
 - **Form filling**: Agent excels at multi-step forms with validation
-- **Complex navigation**: Better at handling unexpected popups and dialogs
-- **One-off tasks**: Lower overhead for single executions
+- **Complex navigation**: Handles unexpected popups and dialogs
+- **One-off tasks**: No generated code to keep for single executions
 
 ### 5.2. When to Use CodeAgent
 
-- **Data extraction**: 2-4x faster for extracting multiple items
+- **Data extraction**: direct parsing and file output for multiple items
 - **File operations**: Direct CSV/JSON file creation
 - **Repetitive tasks**: Generated code can be reused
-- **Bulk operations**: JavaScript evaluation is faster than individual clicks
+- **Bulk operations**: JavaScript evaluation can replace repeated clicks
 
 ### 5.3. Performance Tips
 

@@ -77,10 +77,7 @@ OpenBrowser is a framework for intelligent browser automation. It combines direc
   - [12.3. Configuration](#123-configuration)
 - [13. Benchmark: Token Efficiency](#13-benchmark-token-efficiency)
   - [13.1. Native Local Benchmarks (2026-11-25)](#131-native-local-benchmarks-2026-11-25)
-  - [13.2. CLI Benchmark: 4-Way Comparison (6 Tasks, N=3 runs)](#132-cli-benchmark-4-way-comparison-6-tasks-n3-runs)
-    - [13.2.1. Per-Task Token Usage](#1321-per-task-token-usage)
-    - [13.2.2. Cost per Benchmark Run (6 Tasks)](#1322-cost-per-benchmark-run-6-tasks)
-  - [13.3. E2E LLM Benchmark: MCP Server Comparison (6 Tasks, N=5 runs)](#133-e2e-llm-benchmark-mcp-server-comparison-6-tasks-n5-runs)
+  - [13.2. Historical CLI and MCP comparisons retired](#132-historical-cli-and-mcp-comparisons-retired)
 - [14. CLI Usage](#14-cli-usage)
 - [15. Project Structure](#15-project-structure)
 - [16. Testing](#16-testing)
@@ -645,11 +642,11 @@ Prefer indexed actions whenever an element index exists. Coordinate actions use 
 
 ## 13. Benchmark: Token Efficiency
 
-The figures below are historical model-driven benchmark results, not a comparison of current tool releases or navigation latency. For a local, no-LLM comparison with pinned runtimes and verified page work, use the [navigation comparison verifier](benchmarks/navigation_compare_README.md), its [counterbalanced policy-fix results](benchmarks/navigation_results_2026-11-15_policy_v2.json), and the retained [earlier results](benchmarks/navigation_results_2026-11-15.json). These report engine, IPC, wait-policy, failure, and cleanup differences rather than declaring a universal winner. They are not MCP or CLI agent-comparison numbers.
+Section 13.1 reports the last clean tracked native local run. Historical model-driven CLI and MCP comparisons are retired; their paths and hashes are in [RETIRED_RESULTS.md](benchmarks/RETIRED_RESULTS.md). For a local, no-LLM comparison with pinned runtimes and verified page work, use the [navigation comparison verifier](benchmarks/navigation_compare_README.md), its [counterbalanced policy-fix results](benchmarks/navigation_results_2026-11-15_policy_v2.json), and the retained [earlier results](benchmarks/navigation_results_2026-11-15.json). These report engine, IPC, wait-policy, failure, and cleanup differences rather than declaring a universal winner. They are not MCP or CLI agent-comparison numbers.
 
 ### 13.1. Native Local Benchmarks (2026-11-25)
 
-Local deterministic fixtures, no LLM, and interleaved samples with exact oracles. The full method, raw JSONL, and host-load caveats are in [benchmarks/scraping/README.md](benchmarks/scraping/README.md) and [benchmarks/interactive/README.md](benchmarks/interactive/README.md). Build under test: `0.1.59.dev47+gbedbbee6b.d20261125`.
+Local deterministic fixtures, no LLM, and interleaved samples with exact oracles. The full method, raw JSONL, and host-load caveats are in [benchmarks/scraping/README.md](benchmarks/scraping/README.md) and [benchmarks/interactive/README.md](benchmarks/interactive/README.md). Build and host are recorded in each raw artifact. The figures below are the last clean tracked N=5 run.
 
 Sequential scraping, N=10, OpenBrowser lightweight against Firecrawl Local `0.1.1`:
 
@@ -698,69 +695,11 @@ Both OpenBrowser arms have the lowest p50 on all five cold tasks, and both won 5
 
 Interactive resource lane, N=5: both OpenBrowser arms have the lowest median child footprint, process-tree RSS, and CPU on all five tasks. Both arms won all 150 eligible pairs per metric. Every cell is N=5 and all 125 observations passed. See [the charted comparison](https://docs.openbrowser.me/comparison).
 
-### 13.2. CLI Benchmark: 4-Way Comparison (6 Tasks, N=3 runs)
+### 13.2. Historical CLI and MCP comparisons retired
 
-Four CLI tools compared with a single Bash tool each. Claude Sonnet 4.6 on Bedrock. Randomized order. All achieve 100% accuracy.
+The 2026-03-15 CLI comparison and the 2026-02-21 MCP server comparison are historical and retired from this README. Their paths, SHA256 digests, and sizes are recorded in [RETIRED_RESULTS.md](benchmarks/RETIRED_RESULTS.md), and the files remain available in git history before this cleanup commit. The separate [CLI comparison](https://docs.openbrowser.me/cli-comparison) page is retained as historical material.
 
-<p align="center">
-  <img src="benchmarks/cli_benchmark_scatter.png" alt="CLI Benchmark: Token Usage vs Duration" width="800" />
-</p>
-
-| CLI Tool | Duration (mean +/- std) | Tool Calls | Bedrock API Tokens | Response Chars |
-|----------|------------------------:|-----------:|-------------------:|---------------:|
-| **openbrowser-ai** | **84.8 +/- 10.9s** | **15.3 +/- 2.3** | **36,010 +/- 6,063** | **9,452 +/- 472** |
-| browser-use | 106.0 +/- 9.5s | 20.7 +/- 6.4 | 77,123 +/- 33,354 | 36,241 +/- 12,940 |
-| agent-browser | 99.0 +/- 6.8s | 25.0 +/- 4.0 | 90,107 +/- 3,698 | 56,009 +/- 39,733 |
-| playwright-cli | 118.3 +/- 21.4s | 25.7 +/- 8.1 | 94,130 +/- 35,982 | 84,065 +/- 49,713 |
-
-openbrowser-ai uses **2.1-2.6x fewer tokens** than all competitors via Python code batching and compact DOM representation.
-
-<p align="center">
-  <img src="benchmarks/cli_benchmark_overview.png" alt="CLI Benchmark: Overview" width="800" />
-</p>
-
-#### 13.2.1. Per-Task Token Usage
-
-<p align="center">
-  <img src="benchmarks/cli_benchmark_per_task.png" alt="CLI Benchmark: Per-Task Token Usage" width="800" />
-</p>
-
-| Task | openbrowser-ai | browser-use | playwright-cli | agent-browser |
-|------|---------------:|------------:|---------------:|--------------:|
-| fact_lookup | **2,504** | 4,710 | 16,857 | 9,676 |
-| form_fill | **7,887** | 15,811 | 31,757 | 19,226 |
-| multi_page_extract | **2,354** | 2,405 | 8,886 | 8,117 |
-| search_navigate | **16,539** | 47,936 | 27,779 | 44,367 |
-| deep_navigation | **2,178** | 3,747 | 4,705 | 5,534 |
-| content_analysis | 4,548 | **2,515** | 4,147 | 3,189 |
-
-openbrowser-ai wins 5 of 6 tasks. The advantage is largest on complex pages (search_navigate: 2.9x fewer tokens than browser-use) where code batching avoids repeated page state dumps.
-
-#### 13.2.2. Cost per Benchmark Run (6 Tasks)
-
-| Model | openbrowser-ai | browser-use | playwright-cli | agent-browser |
-|-------|---------------:|------------:|---------------:|--------------:|
-| Claude Sonnet 4.6 ($3/$15 per M) | **$0.12** | $0.24 | $0.29 | $0.27 |
-| Claude Opus 4.6 ($5/$25 per M) | **$0.24** | $0.45 | $0.56 | $0.51 |
-
-Raw results are in [`benchmarks/e2e_4way_cli_results.json`](benchmarks/e2e_4way_cli_results.json). [Full 4-way comparison with methodology](https://docs.openbrowser.me/cli-comparison).
-
-### 13.3. E2E LLM Benchmark: MCP Server Comparison (6 Tasks, N=5 runs)
-
-<p align="center">
-  <img src="benchmarks/benchmark_comparison.png" alt="E2E LLM Benchmark: MCP Server Comparison" width="800" />
-</p>
-
-| MCP Server | Pass Rate | Duration (mean +/- std) | Tool Calls | Bedrock API Tokens |
-|------------|:---------:|------------------------:|-----------:|-------------------:|
-| **Playwright MCP** (Microsoft) | 100% | 62.7 +/- 4.8s | 9.4 +/- 0.9 | 158,787 |
-| **Chrome DevTools MCP** (Google) | 100% | 103.4 +/- 2.7s | 19.4 +/- 0.5 | 299,486 |
-| **OpenBrowser MCP** | 100% | 77.0 +/- 6.7s | 13.8 +/- 2.0 | **50,195** |
-
-OpenBrowser uses **3.2x fewer tokens** than Playwright and **6.0x fewer** than Chrome DevTools. MCP response sizes: Playwright 1,132,173 chars, Chrome DevTools 1,147,244 chars, OpenBrowser 7,853 chars -- a **144x difference**.
-
-[Full MCP comparison with methodology](https://docs.openbrowser.me/comparison)
-
+A newer build refresh has three retained CLI cold tail losses and one browser-use warm adapter failure. Those results are not published here until the warm harness is fixed.
 ## 14. CLI Usage
 
 ```bash
@@ -872,7 +811,7 @@ uv run python benchmarks/playwright_benchmark.py     # Playwright MCP
 uv run python benchmarks/cdp_benchmark.py            # Chrome DevTools MCP
 ```
 
-Raw results are in [`benchmarks/e2e_4way_cli_results.json`](benchmarks/e2e_4way_cli_results.json). See [full comparison](https://docs.openbrowser.me/comparison) for methodology.
+Historical benchmark result files are retired. See [RETIRED_RESULTS.md](benchmarks/RETIRED_RESULTS.md) for recovery paths and hashes. Current native evidence is on [Benchmark Comparison](https://docs.openbrowser.me/comparison).
 
 ## 17. Backend and Frontend Deployment
 

@@ -17,8 +17,8 @@ import matplotlib.pyplot as plt
 from matplotlib.ticker import FuncFormatter
 
 HERE = Path(__file__).resolve().parent
-DEFAULT_FIRECRAWL = HERE / "results-firecrawl-all-2026-11-24-n10-interleaved.json"
-DEFAULT_LIGHTPANDA = HERE / "results-lightpanda-after-n10-interleaved.json"
+DEFAULT_FIRECRAWL = HERE / "results" / "results-firecrawl-final6-2026-11-25-n10-interleaved.json"
+DEFAULT_LIGHTPANDA = HERE / "results" / "results-lightpanda-final6-2026-11-25-n10-interleaved.json"
 DEFAULT_OUTPUT = HERE.parents[1] / "docs" / "images"
 TASKS = ("static_article", "pagination", "table", "js_list", "asset_heavy")
 TASK_LABELS = {

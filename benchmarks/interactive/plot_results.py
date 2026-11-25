@@ -17,7 +17,7 @@ import matplotlib.pyplot as plt
 
 HERE = Path(__file__).resolve().parent
 DEFAULT_INPUT = (
-    HERE / "results" / "results-warm-five-arm-final2-2026-11-24-n5.summary.json"
+    HERE / "results" / "results-warm-five-arm-lean-2026-11-25-n5-final4.summary.json"
 )
 DEFAULT_OUTPUT = HERE.parents[1] / "docs" / "images" / "native-interactive-warm-current-p50.png"
 TASKS = ("wizard", "modal", "download", "tabs")

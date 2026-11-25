@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 
 HERE = Path(__file__).resolve().parent
 DEFAULT_INPUT = HERE / "results" / "results-mcp-scrape-web-resource-2026-11-25-n5.json"
-DEFAULT_OUTPUT = HERE.parents[1] / "docs" / "images" / "native-mcp-http-memory.png"
+DEFAULT_OUTPUT = HERE.parents[1] / "docs" / "images" / "native-mcp-http-memory-2026-11-25.png"
 
 
 def main() -> int:
