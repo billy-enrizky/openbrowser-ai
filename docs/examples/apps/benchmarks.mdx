@@ -1,6 +1,6 @@
 ---
-title: "Benchmarks"
-description: "Compare Agent vs CodeAgent performance on browser automation tasks"
+title: "Benchmark Guide"
+description: "How to run Agent and CodeAgent benchmarks and interpret current evidence"
 icon: "chart-bar"
 mode: "wide"
 ---
@@ -10,16 +10,15 @@ mode: "wide"
 
 - [1. Overview](#1-overview)
 - [2. Quick Comparison](#2-quick-comparison)
-- [3. Benchmark Results](#3-benchmark-results)
-- [4. Running Benchmarks](#4-running-benchmarks)
-  - [4.1. Basic Comparison Script](#41-basic-comparison-script)
-  - [4.2. Comprehensive Benchmark](#42-comprehensive-benchmark)
-- [5. Key Findings](#5-key-findings)
-  - [5.1. When to Use Agent](#51-when-to-use-agent)
-  - [5.2. When to Use CodeAgent](#52-when-to-use-codeagent)
-  - [5.3. Performance Tips](#53-performance-tips)
-- [6. Test Tasks](#6-test-tasks)
-- [7. Source Code](#7-source-code)
+- [3. Running Benchmarks](#3-running-benchmarks)
+  - [3.1. Basic Comparison Script](#31-basic-comparison-script)
+  - [3.2. Comprehensive Benchmark](#32-comprehensive-benchmark)
+- [4. Key Findings](#4-key-findings)
+  - [4.1. When to Use Agent](#41-when-to-use-agent)
+  - [4.2. When to Use CodeAgent](#42-when-to-use-codeagent)
+  - [4.3. Performance Tips](#43-performance-tips)
+- [5. Test Tasks](#5-test-tasks)
+- [6. Source Code](#6-source-code)
 
 {/* toc:end */}
 
@@ -30,7 +29,7 @@ OpenBrowser provides two agent types for browser automation:
 - **Agent**: Standard browser automation using action-based interactions
 - **CodeAgent**: Code-first approach that writes and executes Python/JavaScript
 
-This page documents benchmark results comparing both approaches across various tasks.
+This page explains how to run Agent and CodeAgent benchmarks and how to interpret current evidence. Current native competitor results are on [Benchmark Comparison](/comparison).
 
 ## 2. Quick Comparison
 
@@ -41,13 +40,9 @@ This page documents benchmark results comparing both approaches across various t
 | **Output** | Action history | Reusable Python code |
 | **File Operations** | Via FileSystem tool | Direct file access |
 
-## 3. Benchmark Results
+## 3. Running Benchmarks
 
-The previous Agent versus CodeAgent timing tables were unsupported historical runs. They are retired and are not current-version evidence. For current native competitor lanes, see [Benchmark Comparison](/comparison). The qualitative guidance on this page remains separate from those measurements.
-
-## 4. Running Benchmarks
-
-### 4.1. Basic Comparison Script
+### 3.1. Basic Comparison Script
 
 ```python
 import asyncio
@@ -111,7 +106,7 @@ async def main():
 asyncio.run(main())
 ```
 
-### 4.2. Comprehensive Benchmark
+### 3.2. Comprehensive Benchmark
 
 For a full benchmark suite with multiple tasks and CSV output:
 
@@ -172,29 +167,29 @@ async def run_benchmark():
 asyncio.run(run_benchmark())
 ```
 
-## 5. Key Findings
+## 4. Key Findings
 
-### 5.1. When to Use Agent
+### 4.1. When to Use Agent
 
 - **Form filling**: Agent excels at multi-step forms with validation
 - **Complex navigation**: Handles unexpected popups and dialogs
 - **One-off tasks**: No generated code to keep for single executions
 
-### 5.2. When to Use CodeAgent
+### 4.2. When to Use CodeAgent
 
 - **Data extraction**: direct parsing and file output for multiple items
 - **File operations**: Direct CSV/JSON file creation
 - **Repetitive tasks**: Generated code can be reused
 - **Bulk operations**: JavaScript evaluation can replace repeated clicks
 
-### 5.3. Performance Tips
+### 4.3. Performance Tips
 
 1. **Use headless mode** for benchmarks to reduce rendering overhead
 2. **Set appropriate timeouts** - CodeAgent may need more steps for complex flows
 3. **Match the model** - Results vary significantly between model versions
 4. **Consider task type** - Choose the right agent for your use case
 
-## 6. Test Tasks
+## 5. Test Tasks
 
 The benchmarks use the [OpenBrowser Stress Tests](/examples/apps/stress-tests):
 
@@ -203,7 +198,7 @@ The benchmarks use the [OpenBrowser Stress Tests](/examples/apps/stress-tests):
 - **Flight Booking Flow**: Multi-step wizard with seat selection
 - **Progressive Form**: Form with conditional field revelation
 
-## 7. Source Code
+## 6. Source Code
 
 Full benchmark implementations:
 
