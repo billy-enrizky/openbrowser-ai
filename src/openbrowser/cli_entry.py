@@ -81,6 +81,16 @@ _FORMATS = {"markdown", "text", "html", "links", "json"}
 _OUTPUT_FORMATS = {"json", "jsonl"}
 
 
+def _version_fast_path(argv: list[str]) -> bool:
+    """Print the package version without importing the Click tree."""
+    if len(argv) != 2 or argv[1] != "--version":
+        return False
+    from importlib.metadata import version
+
+    print(version("openbrowser-ai"))
+    return True
+
+
 def _daemon_stop_fast_path(argv: list[str]) -> bool:
     """Stop or force-stop the daemon without importing the Click tree."""
     if select_cli_mode(argv[1:]) is not CliMode.DAEMON:
@@ -287,6 +297,8 @@ def _execute_scrape_fast_path(argv: list[str]) -> bool:
 
 
 def cli() -> None:
+    if _version_fast_path(sys.argv):
+        return
     if _daemon_stop_fast_path(sys.argv):
         return
     if _execute_code_fast_path(sys.argv):

@@ -271,3 +271,31 @@ def test_daemon_fast_path_skips_other_subcommands():
     from openbrowser import cli_entry
 
     assert cli_entry._daemon_stop_fast_path(["openbrowser-ai", "daemon", "status"]) is False
+
+
+def test_cli_entry_version_fast_path():
+    from importlib.metadata import version
+
+    completed = subprocess.run(
+        [sys.executable, "-m", "openbrowser.cli_entry", "--version"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout.strip() == version("openbrowser-ai")
+    assert "Usage:" not in completed.stdout
+
+
+def test_cli_version_path_skips_click(monkeypatch, capsys):
+    from importlib.metadata import version
+
+    from openbrowser import cli_entry
+
+    def fail_run_module(*args, **kwargs):
+        raise AssertionError("the Click tree must not load for --version")
+
+    monkeypatch.setattr(sys, "argv", ["openbrowser-ai", "--version"])
+    monkeypatch.setattr(cli_entry.runpy, "run_module", fail_run_module)
+    cli_entry.cli()
+    assert capsys.readouterr().out.strip() == version("openbrowser-ai")
