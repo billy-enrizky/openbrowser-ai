@@ -272,21 +272,21 @@ Task time (ms) ↓ **Lower is better**.
 
 <img src="/images/native-scraping-current-p50.png" alt="Log-scale chart of p50 scraping latency in milliseconds for OpenBrowser full and lightweight and Firecrawl Local across five local tasks." />
 
-N=10 per arm and task, 1 warmup, interleaved arm order. Host load was 5.40, 5.36, 5.11 on 18 logical CPUs. All 30 runs per task passed the exact oracle.
+N=10 per arm and task, 1 warmup, interleaved arm order. All 150 measured runs passed the complete ordered oracle. HTTP-only tasks do not start a browser. Browser tasks start their browser before the timed sample.
 
 Task time (ms) ↓ **Lower is better**.
 
 | Task | OpenBrowser full p50 ms | OpenBrowser lightweight p50 ms | Firecrawl Local p50 ms | Pairs won |
 | --- | ---: | ---: | ---: | ---: |
-| `static_article` | 0.92 | 0.94 | 1.54 | 10/10 |
-| `pagination` | 2.93 | 3.02 | 4.42 | 10/10 |
-| `table` | 0.86 | 0.88 | 2.70 | 10/10 |
-| `js_list` | 18.00 | 18.33 | 557.65 | 10/10 |
-| `asset_heavy` | 43.46 | 21.66 | 575.66 | 10/10 |
+| `static_article` | 0.7 | 0.7 | 1.2 | 10/10 |
+| `pagination` | 2.8 | 2.8 | 4.3 | 10/10 |
+| `table` | 1.1 | 1.1 | 2.9 | 10/10 |
+| `js_list` | 13.8 | 15.6 | 552.2 | 10/10 |
+| `asset_heavy` | 50.2 | 16.5 | 564.0 | 10/10 |
 
-OpenBrowser won 50 of 50 paired samples across the five tasks. Both OpenBrowser arms have a lower p50 on every task than Firecrawl Local. Firecrawl Local is the official local offering, not Firecrawl Cloud or the full self-hosted service.
+OpenBrowser won 50 of 50 paired samples across the five tasks. Both OpenBrowser arms have a lower p50 on every task than Firecrawl Local. A zero-warmup run passed all correctness checks but can lose one first static pair per arm to HTTP client setup, so the published lane keeps one warmup. Firecrawl Local is the official local offering, not Firecrawl Cloud or the full self-hosted service.
 
-Raw data: [results-firecrawl-final2-2026-11-24-n10-interleaved.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/scraping/results/results-firecrawl-final2-2026-11-24-n10-interleaved.json).
+Raw data: [results-firecrawl-final4-2026-11-25-n10-interleaved.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/scraping/results/results-firecrawl-final4-2026-11-25-n10-interleaved.json).
 
 <a id="firecrawl-batch"></a>
 
@@ -349,15 +349,15 @@ Task time (ms) ↓ **Lower is better**.
 
 | Task | OpenBrowser no-render p50 ms | Lightpanda p50 ms |
 | --- | ---: | ---: |
-| `static_article` | 1.8 | 425.8 |
-| `pagination` | 4.5 | 2197.7 |
-| `table` | 2.1 | 479.4 |
-| `js_list` | 19.5 | 479.3 |
-| `asset_heavy` | 23.1 | 503.8 |
+| `static_article` | 1.6 | 269.8 |
+| `pagination` | 4.0 | 1378.6 |
+| `table` | 2.0 | 446.1 |
+| `js_list` | 15.9 | 272.9 |
+| `asset_heavy` | 16.3 | 236.7 |
 
 Lightpanda starts one process per sample, so its startup dominates the static tasks. Use the ordering, not the absolute Lightpanda value. OpenBrowser no-render keeps Blink and V8 and blocks CSS, images, fonts, and media. It is not the same engine as Lightpanda. This lane measures latency only. It does not establish a memory ranking.
 
-Raw data: [results-lightpanda-final-2026-11-24-n10-interleaved.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/scraping/results/results-lightpanda-final-2026-11-24-n10-interleaved.json).
+Raw data: [results-lightpanda-final4-2026-11-25-n10-interleaved.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/scraping/results/results-lightpanda-final4-2026-11-25-n10-interleaved.json).
 
 <a id="discovery"></a>
 

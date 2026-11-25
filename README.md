@@ -647,19 +647,19 @@ Prefer indexed actions whenever an element index exists. Coordinate actions use 
 
 The figures below are historical model-driven benchmark results, not a comparison of current tool releases or navigation latency. For a local, no-LLM comparison with pinned runtimes and verified page work, use the [navigation comparison verifier](benchmarks/navigation_compare_README.md), its [counterbalanced policy-fix results](benchmarks/navigation_results_2026-11-15_policy_v2.json), and the retained [earlier results](benchmarks/navigation_results_2026-11-15.json). These report engine, IPC, wait-policy, failure, and cleanup differences rather than declaring a universal winner. They are not MCP or CLI agent-comparison numbers.
 
-### 13.1. Native Local Benchmarks (2026-11-24)
+### 13.1. Native Local Benchmarks (2026-11-25)
 
-Local deterministic fixtures, no LLM, and interleaved samples with exact oracles. The full method, raw JSONL, and host-load caveats are in [benchmarks/scraping/README.md](benchmarks/scraping/README.md) and [benchmarks/interactive/README.md](benchmarks/interactive/README.md). Build under test: `0.1.59.dev28+gbbc8b52f5`.
+Local deterministic fixtures, no LLM, and interleaved samples with exact oracles. The full method, raw JSONL, and host-load caveats are in [benchmarks/scraping/README.md](benchmarks/scraping/README.md) and [benchmarks/interactive/README.md](benchmarks/interactive/README.md). Build under test: `0.1.59.dev47+gbedbbee6b.d20261125`.
 
 Sequential scraping, N=10, OpenBrowser lightweight against Firecrawl Local `0.1.1`:
 
 | Task | OpenBrowser p50 | Firecrawl Local p50 | Result | Pairs won |
 | --- | ---: | ---: | --- | ---: |
-| `static_article` | 0.94 ms | 1.54 ms | OpenBrowser 1.64x | 10/10 |
-| `pagination` | 3.02 ms | 4.42 ms | OpenBrowser 1.46x | 10/10 |
-| `table` | 0.88 ms | 2.70 ms | OpenBrowser 3.07x | 10/10 |
-| `js_list` | 18.33 ms | 557.65 ms | OpenBrowser 30.4x | 10/10 |
-| `asset_heavy` | 21.66 ms | 575.66 ms | OpenBrowser 26.6x | 10/10 |
+| `static_article` | 0.7 ms | 1.2 ms | OpenBrowser 1.7x | 10/10 |
+| `pagination` | 2.8 ms | 4.3 ms | OpenBrowser 1.5x | 10/10 |
+| `table` | 1.1 ms | 2.9 ms | OpenBrowser 2.6x | 10/10 |
+| `js_list` | 15.6 ms | 552.2 ms | OpenBrowser 35.4x | 10/10 |
+| `asset_heavy` | 16.5 ms | 564.0 ms | OpenBrowser 34.2x | 10/10 |
 
 OpenBrowser won 50 of 50 paired samples. The batch surface measured 2.834 ms against Firecrawl Local batch at 13.448 ms, a 4.75x win in 10 of 10 pairs, with no browser started.
 
